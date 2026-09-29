@@ -183,17 +183,94 @@ defmodule Troupe.Worker.DrainTest do
     assert PlaneSessions.on_worker(gone.id) == []
   end
 
-  test "scaling down drains the highest ordinals first", context do
-    for ordinal <- 0..2, ordinal > 0, do: enrol_row("troupe-w-dev-#{ordinal}", ordinal)
+  test "a pod stopped by anything but the plane puts its sessions to sleep first", context do
+    link = start_link!(context, "troupe-w-dev-1")
+    eventually(fn -> Link.connected?(link) end)
+    one = eventually(fn -> Fleet.list_workers("dev") |> Enum.find(&(&1.ordinal == 1)) end)
 
-    assert {:ok, reports} = Drain.scale_down("dev", 1, timeout_ms: 500, settle_ms: 2_000)
+    {:ok, _} =
+      PlaneSessions.create(%{
+        id: context.session_id,
+        owner_subject: "ada@example.test",
+        profile: "dev",
+        epoch: 1,
+        state: "active",
+        worker_id: one.id
+      })
 
-    assert Enum.map(reports, & &1.pod) == ["troupe-w-dev-2", "troupe-w-dev-1"]
-    assert Fleet.placeable("dev") |> Enum.map(& &1.ordinal) == [0]
-    assert context.zero.ordinal == 0
+    fake =
+      start_supervised!(
+        {Fake,
+         steps: [{:text, "finished as the pod stopped"}], default: {:text, "done"}, delay_ms: 900}
+      )
+
+    assert {:ok, _} = activate(context, fake: fake, report: Link.reporter(link))
+    File.write!(Path.join(context.workspace, "work.md"), "written since the last archive")
+
+    Troupe.subscribe(context.session_id)
+    Troupe.send_input(context.session_id, "start something slow")
+    eventually(fn -> busy?(context.session_id) end)
+
+    # A pod, where the worker's tree is the pod's, stopped the way a SIGTERM stops a
+    # release: nobody drained it first.
+    in_a_pod(drain_timeout_seconds: 10)
+    assert Troupe.Worker.Application.prep_stop(:state) == :state
+
+    # The turn finished rather than dying with the pod, the session is asleep in object
+    # storage, and the plane was told rather than left to find out a lease later.
+    sealed = sealed_events(context)
+    assert Enum.any?(sealed, &(&1["type"] == "llm_response"))
+    refute Enum.any?(sealed, &(&1["type"] == "cancelled"))
+    assert Sessions.whereis(context.session_id) == nil
+    eventually(fn -> PlaneSessions.get(context.session_id).state == "dormant" end)
+
+    # And the files written since the last archive are in the one it made on the way out.
+    File.rm_rf!(context.base)
+
+    elsewhere =
+      Path.join(System.tmp_dir!(), "troupe-ordinal-0-#{System.unique_integer([:positive])}")
+
+    on_exit(fn -> File.rm_rf!(elsewhere) end)
+
+    assert {:ok, _} =
+             activate(context,
+               workspace: Path.join(elsewhere, "workspace"),
+               state_dir: Path.join(elsewhere, "state"),
+               epoch: 2
+             )
+
+    assert File.read!(Path.join([elsewhere, "workspace", "work.md"])) ==
+             "written since the last archive"
+  end
+
+  test "a pod holding nothing stops at once, and a laptop's stop drains nothing", context do
+    # Nothing awake: nothing to wait for, and the pod is not marked draining on its way out.
+    assert Troupe.Worker.Drain.on_stop() == nil
+    refute Troupe.Worker.Drain.draining?()
+
+    # The laptop binary is the same release with an empty tree, and a session there is
+    # somebody's own: stopping it is not a pod leaving a plane.
+    fake = start_supervised!({Fake, steps: [], default: {:text, "done"}})
+    assert {:ok, _} = activate(context, fake: fake)
+
+    assert Troupe.Worker.Application.prep_stop(:state) == :state
+    refute Troupe.Worker.Drain.draining?()
+    assert Sessions.whereis(context.session_id)
   end
 
   # -- helpers ----------------------------------------------------------------
+
+  # The application environment a pod's release has, for this test only.
+  defp in_a_pod(env) do
+    for {key, value} <- [{:autostart, true} | env] do
+      previous = Application.fetch_env(:troupe_worker, key)
+      Application.put_env(:troupe_worker, key, value)
+      on_exit(fn -> restore_env(key, previous) end)
+    end
+  end
+
+  defp restore_env(key, {:ok, value}), do: Application.put_env(:troupe_worker, key, value)
+  defp restore_env(key, :error), do: Application.delete_env(:troupe_worker, key)
 
   defp busy?(session_id) do
     session_id

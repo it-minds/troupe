@@ -212,13 +212,17 @@ export class FakeDaemon {
       : { subject: `local:${this.osUser}`, display_name: this.osUser, kind: "user" };
   }
 
-  async start(): Promise<string> {
+  /**
+   * Listen. `port` starts it again where it was after a `stop`, with its sessions: a
+   * daemon that went away and came back, as far as a client already holding its port and
+   * token can tell.
+   */
+  async start(port = 0): Promise<string> {
     this.server = createServer();
     this.wss = new WebSocketServer({ server: this.server, path: "/v1/socket" });
     this.wss.on("connection", (ws) => this.onConnection(ws));
-    await new Promise<void>((resolve) => this.server!.listen(0, "127.0.0.1", resolve));
-    const { port } = this.server!.address() as AddressInfo;
-    return String(port);
+    await new Promise<void>((resolve) => this.server!.listen(port, "127.0.0.1", resolve));
+    return String(this.port);
   }
 
   async stop(): Promise<void> {
@@ -232,9 +236,9 @@ export class FakeDaemon {
     return (this.server!.address() as AddressInfo).port;
   }
 
-  /** Seed a session, as one started before the client connected. */
+  /** Seed a session, as one started before the client connected. `opts.id` names it. */
   seed(workspace: string, opts: Partial<Session> = {}): Session {
-    const id = `s-${this.nextId++}`;
+    const id = opts.id ?? `s-${this.nextId++}`;
     const now = new Date().toISOString();
     const session: Session = {
       id,

@@ -135,8 +135,8 @@ defmodule Troupe.MCP.Stdio do
         {:ok, %{state | port: port}, {:continue, :initialize}}
 
       {:error, reason} ->
-        Logger.warning("troupe: MCP server #{name} could not start: #{inspect(reason)}")
-        {:ok, %{state | state: :error, error: "could not start: #{inspect(reason)}"}}
+        Logger.warning("troupe: MCP server #{name} could not start: #{Reaper.explain(reason)}")
+        {:ok, %{state | state: :error, error: "could not start: #{Reaper.explain(reason)}"}}
     end
   end
 

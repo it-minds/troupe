@@ -536,14 +536,14 @@ defmodule Troupe.UI.TUI.View do
   @doc false
   @spec needs_you?(Client.summary()) :: boolean()
   def needs_you?(%{status: "waiting"}), do: true
-  def needs_you?(entry), do: Enum.any?(live_branches(entry), &(&1.state == :needs_input))
+  def needs_you?(entry), do: Enum.any?(branches(entry), &(&1.state == :needs_input))
 
   defp session_marker(%{id: sid}, %{session_id: sid}), do: "●"
   defp session_marker(%{state: :active}, _state), do: "○"
   defp session_marker(_entry, _state), do: " "
 
   defp branch_count(entry) do
-    case length(live_branches(entry)) do
+    case length(branches(entry)) do
       1 -> "1 branch"
       n -> "#{n} branches"
     end
@@ -551,10 +551,8 @@ defmodule Troupe.UI.TUI.View do
 
   # A remote summary has no branches to count: it says where it lives instead,
   # which is the thing a mixed list needs to make plain.
-  defp live_branches(%{branches: branches}) when is_list(branches),
-    do: Enum.reject(branches, &(&1.state == :dismissed))
-
-  defp live_branches(_entry), do: []
+  defp branches(%{branches: branches}) when is_list(branches), do: branches
+  defp branches(_entry), do: []
 
   @doc false
   @spec origin_label(Client.origin() | nil) :: String.t()
@@ -569,14 +567,17 @@ defmodule Troupe.UI.TUI.View do
     end
   end
 
-  @branch_order [:needs_input, :running, :failed_unread, :done_unread]
+  @branch_order [:needs_input, :interrupted, :done]
 
   defp branch_states(%{origin: {:remote, _plane}} = entry),
     do: String.trim("#{entry.state} #{entry.status || ""}")
 
+  # What the daemon says of the branches (`Troupe.Client.Daemon`): those asking you
+  # something, and those asleep with how they stopped. A live one it says nothing about.
   defp branch_states(entry) do
     entry
-    |> live_branches()
+    |> branches()
+    |> Enum.reject(&is_nil(&1.state))
     |> Enum.frequencies_by(& &1.state)
     |> Enum.sort_by(fn {state, _n} -> Enum.find_index(@branch_order, &(&1 == state)) || 9 end)
     |> Enum.map_join(" · ", &state_count/1)
@@ -584,9 +585,6 @@ defmodule Troupe.UI.TUI.View do
 
   defp state_count({:needs_input, 1}), do: "1 needs you"
   defp state_count({:needs_input, n}), do: "#{n} need you"
-  defp state_count({:running, n}), do: "#{n} running"
-  defp state_count({:done_unread, n}), do: "#{n} done"
-  defp state_count({:failed_unread, n}), do: "#{n} failed"
   defp state_count({state, n}), do: "#{n} #{state}"
 
   # "just now", "12m ago", "3h ago", "2d ago" — a picker row is read at a glance.
@@ -612,11 +610,11 @@ defmodule Troupe.UI.TUI.View do
   defp session_detail(nil, _state, _width),
     do:
       "No sessions in this directory yet.\n\n" <>
-        "Dispatch a branch and this session shows up here; " <>
+        "Say something, or dispatch a branch, and this session shows up here; " <>
         "`troupe` in another directory keeps its own list."
 
   defp session_detail(entry, state, width) do
-    branches = live_branches(entry)
+    branches = branches(entry)
 
     ([
        "#{entry.id}  (#{where(entry, state)})",
@@ -626,7 +624,7 @@ defmodule Troupe.UI.TUI.View do
        field("last event", "#{age(entry.updated_at, state.now)} · #{stamp(entry.updated_at)}"),
        field("owner", entry.owner || "you"),
        field("profile", entry.profile || "—"),
-       field("branches", "#{length(branches)}#{dismissed_note(entry, branches)}")
+       field("branches", "#{length(branches)}")
      ] ++ branch_block(branches, width))
     |> Enum.join("\n")
   end
@@ -636,26 +634,26 @@ defmodule Troupe.UI.TUI.View do
   defp where(%{state: :active}, _state), do: "running in this VM"
   defp where(_entry, _state), do: "on disk — Enter replays it"
 
-  defp dismissed_note(entry, branches) do
-    case length(List.wrap(entry.branches)) - length(branches) do
-      0 -> ""
-      n -> " (#{n} dismissed)"
-    end
-  end
-
   defp branch_block([], _width), do: ["", "No branches yet."]
 
+  # Each branch as the daemon lists it: its session, its agent, what it says of it, and
+  # the git branch of its worktree when it has one.
   defp branch_block(branches, width) do
     ["", "branches"] ++
       Enum.map(branches, fn b ->
         head =
           "  " <>
-            String.pad_trailing(b.path, 12) <>
-            String.pad_trailing(b.name, 10) <> String.pad_trailing(to_string(b.state), 13)
+            String.pad_trailing(b.id, 12) <>
+            String.pad_trailing(b.profile || "—", 10) <>
+            String.pad_trailing(branch_word(b.state), 13)
 
-        head <> clip(Model.one_line(b.prompt), max(width - Model.cell_width(head), 12))
+        head <> clip(b.git_branch || "", max(width - Model.cell_width(head), 12))
       end)
   end
+
+  defp branch_word(nil), do: "open"
+  defp branch_word(:needs_input), do: "needs you"
+  defp branch_word(state), do: to_string(state)
 
   defp stamp(nil), do: "unknown"
 
@@ -1251,30 +1249,21 @@ defmodule Troupe.UI.TUI.View do
       |> Model.tile_lines(state.tick, state.now, inner_h > 3)
       |> Model.tail_rows(inner_w, inner_h)
 
-    shown = shown_state(w)
-
     tile = %Paragraph{
       text: styled(rows),
       wrap: false,
       style: text_style(w),
       block: %Block{
-        title: tile_title(shown, n, state, inner_w),
-        title_style: title_style(shown),
+        title: tile_title(w, n, state, inner_w),
+        title_style: title_style(w),
         borders: [:all],
         border_type: if(focused?, do: :double, else: :rounded),
-        border_style: border_style(shown, state)
+        border_style: border_style(w, state)
       }
     }
 
     [{tile, rect} | lockup(w, rect, length(rows), state)]
   end
-
-  # Whether a window waits on you: something is pending in it. The window's own state
-  # says `needs_input` only when a `branch_state` said so, which no daemon sends, so the
-  # strip, the status line and the colour read the pending list the pane draws from.
-  defp waits_on_you?(w), do: w.state == :needs_input or w.pending != []
-
-  defp shown_state(w), do: if(waits_on_you?(w), do: %{w | state: :needs_input}, else: w)
 
   defp tile_title(w, n, state, inner_w) do
     badge = if w.badge, do: " ●", else: ""
@@ -1637,7 +1626,7 @@ defmodule Troupe.UI.TUI.View do
     notice = List.first(state.model.notices)
 
     hint =
-      case Enum.find_index(Model.windows(state.model), &waits_on_you?/1) do
+      case Enum.find_index(Model.windows(state.model), &(&1.state == :needs_input)) do
         nil -> ""
         i -> " · press #{i + 1} (or Enter, or click the window) to answer"
       end
@@ -1667,21 +1656,12 @@ defmodule Troupe.UI.TUI.View do
         else: text <> " · /help lists the commands · /settings · /quit or Ctrl-C twice exits"
 
     # The count of windows that need you, and how to answer, are the needs-you status:
-    # in the reserved colour, on a line that is otherwise muted. Counted here from what
-    # is pending, as the strip counts it; the model's summary gives the rest.
-    waiting = Enum.count(Model.windows(state.model), &waits_on_you?/1)
-
-    parts =
-      state.model
-      |> Model.attention_summary()
-      |> String.split(", ")
-      |> Enum.reject(&(String.ends_with?(&1, "need input") or &1 == "idle"))
-
+    # in the reserved colour, on a line that is otherwise muted.
     {needs, others} =
-      case {waiting, parts} do
-        {0, []} -> {"", "idle"}
-        {0, parts} -> {"", Enum.join(parts, ", ")}
-        {n, parts} -> {"#{n} need input", Enum.map_join(parts, &(", " <> &1))}
+      case Model.attention(state.model) do
+        [] -> {"", "idle"}
+        [{:needs_input, needs} | rest] -> {needs, Enum.map_join(rest, &(", " <> elem(&1, 1)))}
+        parts -> {"", Enum.map_join(parts, ", ", &elem(&1, 1))}
       end
 
     line =

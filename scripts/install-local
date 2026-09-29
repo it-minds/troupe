@@ -165,6 +165,16 @@ if [ "$with_tui" = 1 ]; then
   export ZIG_GLOBAL_CACHE_DIR="${ZIG_GLOBAL_CACHE_DIR:-$zig_cache/global}"
   export ZIG_LOCAL_CACHE_DIR="${ZIG_LOCAL_CACHE_DIR:-$zig_cache/local}"
 
+  # A Linux binary runs Burrito's musl ERTS, so it carries ex_ratatui's musl NIF, as CI and
+  # clients/tui/scripts/build-local build it; the release refuses a glibc one. The NIF is
+  # picked when ex_ratatui compiles, so an earlier build's is compiled again.
+  case "$TARGET" in
+    linux_*)
+      export TARGET_ABI=musl
+      rm -rf "$ROOT/clients/tui/_build/prod/lib/ex_ratatui"
+      ;;
+  esac
+
   (cd "$ROOT/clients/tui" && BURRITO_TARGET="$TARGET" mix deps.get && BURRITO_TARGET="$TARGET" mix release --overwrite) \
     || die "the TUI release failed"
   TUI_BUILT="$ROOT/clients/tui/burrito_out/troupe_$TARGET"

@@ -44,8 +44,29 @@ services:
       timeout: 3s
       retries: 30
 
+  # The plane signs session tokens through transit rather than holding a private key, so
+  # the engine and the key have to exist before it can mint one. Dev mode keeps them in
+  # memory, so every start is an empty OpenBao, a restart included: the container writes
+  # them itself each time it starts, as the repository's `dev/docker-compose.yml` does,
+  # and is healthy only once the key is there.
   openbao:
     image: openbao/openbao:2.4.1
+    # The image's own entrypoint, with the seeding started beside it: it waits for the
+    # server, then writes the engine and the key. Started from a subshell that exits at
+    # once, so it is dumb-init's to reap and not the server's. `sh` is only `$0`.
+    entrypoint:
+      - /usr/bin/dumb-init
+      - /bin/sh
+      - -c
+      - |
+        ( (
+          export BAO_ADDR=http://127.0.0.1:8200 BAO_TOKEN=troupe-e2e-root
+          until bao status >/dev/null 2>&1; do sleep 1; done
+          bao secrets enable -path=transit transit
+          bao write -f transit/keys/troupe-session-tokens type=ecdsa-p256
+        ) & )
+        exec /bin/sh /usr/local/bin/docker-entrypoint.sh "$$@"
+      - sh
     command: server -dev -dev-root-token-id=troupe-e2e-root -dev-listen-address=0.0.0.0:8200
     environment:
       BAO_DEV_ROOT_TOKEN_ID: troupe-e2e-root
@@ -53,26 +74,10 @@ services:
     ports: ["58300:8200"]
     cap_add: [IPC_LOCK]
     healthcheck:
-      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
+      test: ["CMD-SHELL", "BAO_TOKEN=troupe-e2e-root bao read -address=http://127.0.0.1:8200 -field=name transit/keys/troupe-session-tokens"]
       interval: 2s
       timeout: 3s
       retries: 30
-
-  # The plane signs session tokens through transit rather than holding a private key, so
-  # the engine and the key have to exist before it can mint one.
-  openbao-setup:
-    image: openbao/openbao:2.4.1
-    depends_on:
-      openbao: {condition: service_healthy}
-    environment:
-      BAO_ADDR: http://openbao:8200
-      BAO_TOKEN: troupe-e2e-root
-    entrypoint: >
-      /bin/sh -c "
-      bao secrets enable -path=transit transit 2>/dev/null || true;
-      bao write -f transit/keys/troupe-session-tokens type=ecdsa-p256 2>/dev/null || true;
-      echo 'transit ready'
-      "
 
   # The identity provider the device grant runs against — never the plane itself.
   #
@@ -106,7 +111,7 @@ services:
     <<: *plane-image
     depends_on:
       postgres: {condition: service_healthy}
-      openbao-setup: {condition: service_completed_successfully}
+      openbao: {condition: service_healthy}
       dex: {condition: service_healthy}
       plane-migrate: {condition: service_completed_successfully}
     # So the plane resolves the issuer to the same place the host does.

@@ -26,6 +26,18 @@ defmodule Troupe.UnitTest do
     assert decoded == event
   end
 
+  # The binary's own log went to `~/.local/state/troupe` on every platform, which is
+  # `%USERPROFILE%\.local\state\troupe` on Windows, and read a `TROUPE_STATE_DIR` nothing
+  # else sets. It goes beside the daemon's `daemon.log` now, found the way the daemon finds
+  # its state directory (`TROUPE_STATE_HOME` here, which test_helper.exs sets).
+  test "the release logs to troupe.log in the daemon's state directory" do
+    config = Config.Reader.read!("config/runtime.exs", env: :prod, target: :host)
+    file = get_in(config, [:logger, :default_handler, :config, :file])
+
+    assert file == to_charlist(Path.join(Troupe.Paths.state_dir(), "troupe.log"))
+    assert Troupe.Paths.state_dir() == System.fetch_env!("TROUPE_STATE_HOME")
+  end
+
   test "message blocks: the text of a message and its tool uses" do
     blocks = [
       Troupe.Client.Message.text_block("one"),

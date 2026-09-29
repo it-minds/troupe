@@ -8,7 +8,11 @@ defmodule Troupe.Plane.Fleet.Worker do
   plane stops placing on it the moment it goes quiet.
 
   `namespace` and `pod_name` together are the identity: a pod that comes back after a
-  restart is the same pod, with the same ordinal and the same PVC.
+  restart is the same pod, with the same ordinal and the same PVC. `pod_uid` tells one
+  incarnation of it from the next, which only an upgrade has to (Decision 726), and
+  `upgrade_pending` is whether the operator last said this one runs an older revision.
+  `retiring` is whether it drains because the scaler is removing it (Decision 731), and
+  only a draining pod is.
   """
 
   use Ecto.Schema
@@ -22,6 +26,7 @@ defmodule Troupe.Plane.Fleet.Worker do
     field :profile, :string
     field :ordinal, :integer
     field :pod_name, :string
+    field :pod_uid, :string
     field :namespace, :string
     field :endpoint, :string
     field :node_name, :string
@@ -30,6 +35,8 @@ defmodule Troupe.Plane.Fleet.Worker do
     field :last_heartbeat_at, :utc_datetime_usec
     field :healthy, :boolean, default: false
     field :draining, :boolean, default: false
+    field :retiring, :boolean, default: false
+    field :upgrade_pending, :boolean, default: false
     field :capacity, :integer, default: 0
     field :active_sessions, :integer, default: 0
     field :disk_used_bytes, :integer, default: 0
@@ -46,6 +53,7 @@ defmodule Troupe.Plane.Fleet.Worker do
     :profile,
     :ordinal,
     :pod_name,
+    :pod_uid,
     :namespace,
     :endpoint,
     :node_name,
@@ -53,6 +61,8 @@ defmodule Troupe.Plane.Fleet.Worker do
     :last_heartbeat_at,
     :healthy,
     :draining,
+    :retiring,
+    :upgrade_pending,
     :capacity,
     :active_sessions,
     :disk_used_bytes,
@@ -67,6 +77,15 @@ defmodule Troupe.Plane.Fleet.Worker do
     |> cast(attrs, @fields)
     |> validate_required([:profile, :ordinal, :pod_name, :namespace])
     |> unique_constraint([:namespace, :pod_name])
+    |> retiring_only_while_draining()
+  end
+
+  # A pod retires by draining. One that is not draining, because it restarted and enrolled
+  # again or was put back into service, is not being removed either.
+  defp retiring_only_while_draining(changeset) do
+    if get_field(changeset, :draining),
+      do: changeset,
+      else: put_change(changeset, :retiring, false)
   end
 
   @doc """

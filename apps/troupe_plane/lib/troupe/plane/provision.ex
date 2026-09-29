@@ -514,6 +514,49 @@ defmodule Troupe.Plane.Provision do
     end
   end
 
+  @doc """
+  Where a profile's upgrade stands, as the cluster holds it: the pods the operator reports
+  on an older revision (`status.podsBehind`), and the drains the plane has recorded as
+  finished (the `troupe.dev/drained` annotation). Decision 726.
+  """
+  @spec upgrade(Profile.t()) ::
+          {:ok, %{behind: [map()], drained: %{String.t() => String.t()}}} | {:error, term()}
+  def upgrade(%Profile{} = profile) do
+    with {:ok, resource} <- live_resource(profile) do
+      {:ok, %{behind: WorkerProfile.pods_behind(resource), drained: WorkerProfile.drained(resource)}}
+    end
+  end
+
+  @doc """
+  Record which of a profile's pods have finished draining, with the revision each ran,
+  replacing what was recorded before. The operator deletes such a pod and the StatefulSet
+  makes it again on the new revision.
+
+  Its own field manager, so the annotation is this record's alone: `apply/2` writes the
+  resource as the plane's `troupe-plane` and would otherwise take it away again on every
+  write, and an empty record takes it away here. An annotation and not the status,
+  because the status is the operator's and the plane's grant is on the resource.
+  """
+  @spec record_drained(Profile.t(), %{String.t() => String.t()}) :: :ok | {:error, term()}
+  def record_drained(%Profile{} = profile, drained) do
+    annotations =
+      if drained == %{},
+        do: %{},
+        else: %{WorkerProfile.drained_annotation() => WorkerProfile.encode_drained(drained)}
+
+    patch = %{
+      "apiVersion" => "troupe.dev/v1alpha1",
+      "kind" => "WorkerProfile",
+      "metadata" => %{"name" => profile.name, "namespace" => namespace(), "annotations" => annotations}
+    }
+
+    with {:ok, conn} <- connection(),
+         {:ok, _applied} <-
+           K8s.Client.run(conn, K8s.Client.apply(patch, field_manager: "troupe-plane-upgrade", force: true)) do
+      :ok
+    end
+  end
+
   # An exit is an answer too. The client calls processes of its own, and one that is not
   # there exits in whoever asked, which is the Workers page once a second: caught here, it
   # is a cluster that did not answer rather than a page that goes down.

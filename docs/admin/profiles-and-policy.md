@@ -25,7 +25,8 @@ writing, and the console's profile editor shows both before its one apply button
 from the size class and from what is running, and **refuses** a request that sends them
 rather than dropping them. Replicas are recomputed every fifteen seconds as
 `ceil((active + pending) / sessionsPerPod) + warm_workers`, clamped to `max_sessions`; a
-profile idle for two minutes goes to its warm count.
+profile idle for two minutes goes to its warm count. A lower count drains the pods it
+removes first ([§3](#3-upgrades-and-drains)).
 
 **`"image": "release"`** means the worker image of the release the plane runs
 (`worker.image.*` in the chart). The row keeps the word; the plane resolves it whenever it
@@ -78,7 +79,7 @@ objects that are no longer desired. Deleting a `WorkerProfile` deletes its names
 | `Ready` | every manifest applied; `False` with `PolicyViolation`, `NoPolicy` or `ApplyFailed` |
 | `PolicyViolation` | the profile exceeds the policy, or no policy could be read; **nothing is created** |
 | `SecretMissing` | a referenced Secret was not found in the worker namespace. The operator has no RBAC on Secrets, so do not rely on it |
-| `UpgradePending` | the StatefulSet has a newer revision than the named pods run; each keeps its revision until it is drained and deleted ([§3](#3-upgrades-and-drains)) |
+| `UpgradePending` | the StatefulSet has a newer revision than the named pods run; each keeps its revision until the plane has drained it and the operator replaced it, and the message says how far each has got ([§3](#3-upgrades-and-drains)) |
 | `EgressByHostname` | the `CiliumNetworkPolicy` was written and applied, so a worker reaches its allowlist and the installation's own OpenBao and object store by name, and nothing else outside the cluster; `False` with `NoCilium` or `CiliumPolicyNotApplied` ([egress](#4-troupepolicy)) |
 
 `SecretMissing`, `UpgradePending` and `EgressByHostname` do not affect `Ready`. `kubectl -n troupe-system get
@@ -87,13 +88,52 @@ wp` shows `Replicas`, `Ready`, `Violation`, `Age`.
 ## 3. Upgrades and drains
 
 The StatefulSet is `OnDelete` because a pod holds live sessions, so a new image, env or
-volume produces a new revision and `UpgradePending` and nothing else. `admin.pod.drain`
-marks the pod draining, stops placing on it, and waits until every session on it is
-dormant in object storage, highest ordinal first. **Nothing then restarts or removes a
-drained pod** that scaling did not take away: its readiness answers 503 and the plane lists
-it as `draining` and places nothing on it until it is deleted. So drain, then
-`kubectl -n troupe-w-<p> delete pod troupe-w-<p>-<ordinal>`; the StatefulSet recreates it on
-the new revision with the same volume, and it enrols as not draining.
+volume produces a new revision and `UpgradePending`, and the pods are replaced one at a
+time as they empty (Decision 726):
+
+1. The operator lists the pods on an older revision in the profile's `status.podsBehind`,
+   each with its uid and revision.
+2. The plane places new sessions on a pod on the current revision while one has room.
+   Once a pod behind holds no active session, the plane drains it, one pod per profile at
+   a time and the highest ordinal first. A pod whose sessions stay busy is left alone;
+   they go dormant in their own time (ten minutes idle, unless somebody is reading).
+3. When the pod is draining and holds nothing, the plane records it in the profile's
+   `troupe.dev/drained` annotation, with the revision it ran.
+4. The operator deletes a pod that is behind, recorded at the revision it still runs, and
+   no longer Ready, one at a time and never while another is terminating or missing. The
+   StatefulSet recreates it on the new revision with the same volume, and it enrols as
+   not draining.
+
+The `UpgradePending` message names each pod and its stage: `waits to be drained` (it still
+holds a session, or waits its turn), `is draining`, `is drained and waits its turn`, `is
+being replaced`. A profile with one pod keeps giving that pod new sessions, having nowhere
+else to put them, and it rolls the first time they are all dormant; for the half-minute its
+replacement takes to start, a session opened on the profile waits, as on a cold profile.
+To roll a busy pod sooner, `admin.pod.drain` it: its sessions go dormant and the rest
+follows. The plane needs the pod's uid from its enrolment token, so a pod that enrolled
+with a plane older than 0.6.3 is drained only after it next connects.
+
+`admin.pod.drain` on a pod that is not behind marks it draining, stops placing on it, and
+waits until every session on it is dormant in object storage. **Nothing then restarts or
+removes it** unless scaling takes it away: its readiness answers 503 and the plane lists it
+as `draining` and places nothing on it until it is deleted. So drain, then
+`kubectl -n troupe-w-<p> delete pod troupe-w-<p>-<ordinal>`.
+
+**A scale-down drains first** (Decision 731). Once a profile has wanted fewer pods for two
+minutes, the plane drains the pods above the new count, the highest ordinals, since those
+are the ones a StatefulSet removes. They take no new session, a running turn gets up to five
+minutes to finish (after that it is cancelled, with everything up to it sealed), and every
+session is put to sleep in object storage. The count comes down past a pod only once the
+plane counts no active session on it. If sessions come back meanwhile, the drained pod
+still goes and the next tick asks for a fresh one, because a drained pod takes no session
+until it restarts. A pod you drained yourself is left to you unless it is above the count
+the profile wants.
+
+**A pod stopped by anything else** (`kubectl delete pod`, a node drain, an eviction) drains
+itself as it stops: running turns get 150 s, half the worker's drain timeout, and then its
+sessions are put to sleep and reported, inside the pod's grace period
+(`operator.drainTimeoutSeconds`). Keep that at 300 s or more; below it, the kill can come
+before the sessions are asleep, as every stop did before 0.6.3.
 
 ## 4. TroupePolicy
 
@@ -142,7 +182,16 @@ whether Cilium is there:
   connect.
 - **Without Cilium** the external ones are one wide rule, public addresses on 443 and 80,
   and the policy is a check at admission and reconcile, not on the wire. Troupe writes no
-  address list in its place: the allowlist holds names, not addresses.
+  address list in its place: the allowlist holds names, not addresses. The installation's
+  own OpenBao and object store, when they are outside the cluster, are admitted on the
+  port they name as well: one given as an IP address, private or public, as that one
+  address (an `ipBlock` of `/32` or `/128`), and one given by name on a port other than
+  443 and 80 as public addresses on that port, so a worker then reaches any public host
+  on that port. A NetworkPolicy cannot name a host, so a name that resolves to a private
+  address is not reached. For such an endpoint, give its address instead (over TLS its
+  certificate then has to name the address), add a NetworkPolicy of your own to each
+  worker namespace that admits it (policies add up, and the operator removes only
+  objects it labelled), or use Cilium.
 
 `ciliumAvailable: true` on a cluster without Cilium fails closed: a worker reaches nothing
 outside the cluster, and the profile is `Ready: False` with `ApplyFailed` naming the

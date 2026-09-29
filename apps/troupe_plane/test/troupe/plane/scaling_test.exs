@@ -23,6 +23,8 @@ defmodule Troupe.Plane.ScalingTest do
 
   @moduletag timeout: 60_000
 
+  @now ~U[2026-09-16 12:00:00.000000Z]
+
   setup do
     start_supervised!({Registry, keys: :duplicate, name: Troupe.Plane.Control.Registry})
     start_supervised!(Connections)
@@ -140,6 +142,112 @@ defmodule Troupe.Plane.ScalingTest do
       now = ~U[2026-09-16 12:00:00.000000Z]
       Scaler.tick(now)
       assert [%{want: 1}] = Scaler.tick(DateTime.add(now, 600, :second))
+    end
+  end
+
+  describe "a profile that wants fewer workers" do
+    # Two pods, as a StatefulSet has them, a session on the one it removes first and one on
+    # the pod that stays: two sessions, one worker's worth.
+    setup context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard", replicas: 2})
+      zero = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0", capacity: 4)
+      one = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-1", capacity: 4)
+
+      on_pod(context, zero.worker_id)
+      %{zero: zero, one: one, session: on_pod(context, one.worker_id)}
+    end
+
+    test "drains the pod it will remove before it removes it", context do
+      # One worker's worth, for longer than the grace period.
+      Scaler.tick(@now)
+      assert [%{want: 1, scale_down: %{retiring: ["troupe-w-dev-1"]}}] = Scaler.tick(later(180))
+
+      # The pod is told to drain, and nothing is placed on it any more. Until its session
+      # is dormant in object storage the count stays where it was: lowered now, the
+      # StatefulSet would take the pod with the session and its unarchived files on it.
+      assert_receive {:pushed, "drain", _}, 5_000
+      assert Fleet.get_worker(context.one.worker_id).retiring
+      assert Enum.map(Fleet.placeable("dev"), & &1.pod_name) == ["troupe-w-dev-0"]
+      assert Fleet.get_profile("dev").replicas == 2
+      assert Sessions.get(context.session.id).state == "active"
+
+      # The pod puts the session to sleep and says so, which is the end of its drain.
+      {:ok, _} = Sessions.dormant(context.session.id)
+
+      assert [%{scale_down: %{removed: ["troupe-w-dev-1"]}}] = Scaler.tick(later(195))
+      assert Fleet.get_profile("dev").replicas == 1
+
+      # Gone, so no longer retiring: a pod that comes back at that ordinal is a new one.
+      # The pod below the count was never touched.
+      refute Fleet.get_worker(context.one.worker_id).retiring
+      refute Fleet.get_worker(context.zero.worker_id).draining
+
+      drains_finished()
+    end
+
+    test "keeps a pod whose session is still running, and tells it once", context do
+      Scaler.tick(@now)
+      Scaler.tick(later(180))
+      assert_receive {:pushed, "drain", _}, 5_000
+
+      # The pod is letting a turn finish, up to its drain timeout. However many ticks pass,
+      # the count waits for it, and the pod is not asked again.
+      for seconds <- [195, 210, 480] do
+        assert [%{scale_down: %{retiring: [], removed: []}}] = Scaler.tick(later(seconds))
+        assert Fleet.get_profile("dev").replicas == 2
+      end
+
+      refute_receive {:pushed, "drain", _}, 200
+
+      {:ok, _} = Sessions.dormant(context.session.id)
+      Scaler.tick(later(495))
+      assert Fleet.get_profile("dev").replicas == 1
+
+      drains_finished()
+    end
+
+    test "finishes a scale-down it started when the sessions come back", context do
+      Scaler.tick(@now)
+      Scaler.tick(later(180))
+      assert_receive {:pushed, "drain", _}, 5_000
+
+      # Three more on the pod that stays, while the drained pod's session is still going
+      # to sleep: five sessions want two workers again, and the count stays.
+      for _ <- 1..3, do: on_pod(context, context.zero.worker_id)
+      assert [%{want: 2, scale_down: %{removed: []}}] = Scaler.tick(later(195))
+      assert Fleet.get_profile("dev").replicas == 2
+
+      # Asleep, and somebody opens another; the pod that stays is full, so it waits.
+      {:ok, _} = Sessions.dormant(context.session.id)
+      waiting(context)
+
+      # The drained pod takes no session until it restarts, so kept it would be counted as
+      # room it cannot give, and that session would wait for it. It goes, and the next tick
+      # asks for the pod again, which the StatefulSet starts fresh.
+      assert [%{want: 2, scale_down: %{removed: ["troupe-w-dev-1"]}}] = Scaler.tick(later(210))
+      assert Fleet.get_profile("dev").replicas == 1
+
+      assert [%{want: 2}] = Scaler.tick(later(225))
+      assert Fleet.get_profile("dev").replicas == 2
+
+      drains_finished()
+    end
+
+    test "leaves a pod an administrator drained, while the profile wants it", context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", warm_workers: 1})
+      {:ok, _} = Sessions.dormant(context.session.id)
+      {:ok, _} = Fleet.drain(Fleet.get_worker(context.one.worker_id))
+
+      # Drained and empty, but not by the scaler: it waits for the person who drained it,
+      # as it always has, and is not taken for a scale-down's.
+      for seconds <- [0, 180, 600] do
+        assert [%{want: 2, scale_down: %{retiring: [], removed: []}}] =
+                 Scaler.tick(later(seconds))
+      end
+
+      assert Fleet.get_profile("dev").replicas == 2
+      refute Fleet.get_worker(context.one.worker_id).retiring
+      refute_receive {:pushed, "drain", _}, 200
     end
   end
 
@@ -290,6 +398,50 @@ defmodule Troupe.Plane.ScalingTest do
   # -- helpers ----------------------------------------------------------------
 
   defp plan(_context), do: Scaler.plan(Fleet.get_profile("dev"))
+
+  defp later(seconds), do: DateTime.add(@now, seconds, :second)
+
+  # A session waiting for room, as a create on a full profile leaves it.
+  defp waiting(context) do
+    {:ok, session} =
+      Sessions.create(%{
+        id: "s-#{System.unique_integer([:positive])}",
+        owner_id: context.ada.id,
+        owner_subject: context.ada.subject,
+        team_id: context.team.id,
+        profile: "dev",
+        state: "pending",
+        epoch: 1
+      })
+
+    session
+  end
+
+  # A session running on a pod, as placement leaves it.
+  defp on_pod(context, worker_id) do
+    {:ok, session} = Sessions.place(waiting(context).id, Fleet.get_worker(worker_id))
+    session
+  end
+
+  # A drain the scaler starts runs in the background until the plane's index has the pod
+  # empty, which each test makes it. Waited for before the test ends, so that it does not
+  # outlive the database it reads: found by its label and whom it was started for.
+  defp drains_finished do
+    test = self()
+
+    for pid <- Process.list(),
+        {:dictionary, dictionary} <- [Process.info(pid, :dictionary)],
+        test in Keyword.get(dictionary, :"$callers", []),
+        match?("troupe drain " <> _pod, Keyword.get(dictionary, :"$process_label")) do
+      reference = Process.monitor(pid)
+
+      receive do
+        {:DOWN, ^reference, :process, _pid, _reason} -> :ok
+      after
+        5_000 -> flunk("a drain the scaler started did not finish")
+      end
+    end
+  end
 
   # Every worker of the profile, last heard from a minute ago. The lease is fifteen
   # seconds, so this is a pod the plane has every reason to presume lost.

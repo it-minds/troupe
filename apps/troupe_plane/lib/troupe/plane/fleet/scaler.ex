@@ -30,11 +30,13 @@ defmodule Troupe.Plane.Fleet.Scaler do
   and that is most of what this is for; scaling *up* is the part that reads like
   autoscaling and the part that matters least.
 
-  Scale-down already drains, seals and strands nothing, so going to zero costs nothing
-  but a cold start on the way back — roughly half a minute, which is the same wait the
-  client already describes honestly when it wakes a dormant session, with the same
-  indeterminate bar and no invented percentage. Somebody about to spend half an hour in
-  a session will wait thirty seconds. What they will not forgive is a refusal.
+  Scale-down drains first and strands nothing: the count comes down past a pod only once
+  every session on it is dormant in object storage (`Troupe.Plane.Fleet.ScaleDown`,
+  Decision 731). So going to zero costs nothing but a cold start on the way back —
+  roughly half a minute, which is the same wait the client already describes honestly
+  when it wakes a dormant session, with the same indeterminate bar and no invented
+  percentage. Somebody about to spend half an hour in a session will wait thirty
+  seconds. What they will not forgive is a refusal.
 
   ## Deliberately boring
 
@@ -64,7 +66,7 @@ defmodule Troupe.Plane.Fleet.Scaler do
   use GenServer
 
   alias Troupe.Plane.{ClusterPolicy, Fleet, Harness, Sessions, Singleton}
-  alias Troupe.Plane.Fleet.{Profile, Provisioner, SizeClass}
+  alias Troupe.Plane.Fleet.{Profile, Provisioner, ScaleDown, SizeClass, Upgrade}
 
   require Logger
 
@@ -162,13 +164,35 @@ defmodule Troupe.Plane.Fleet.Scaler do
   defp scale(%Profile{} = profile, now) do
     plan = plan(profile, now)
     mark_smaller(profile, plan, now)
-    changed = plan.want != plan.have and write(profile, plan)
+
+    # Down only past pods that have been drained and hold nothing (Decision 731).
+    scale_down = ScaleDown.step(profile, plan)
+    count = count(plan, scale_down)
+    changed = count != plan.have and write(profile, plan, count)
+
+    # Before admitting, so placement already knows which pods are behind on an upgrade
+    # and puts a waiting session on a current one (Decision 726).
+    upgrade = Upgrade.step(profile)
 
     # Before the scaling and after it: a worker that came up two ticks ago has room now,
     # and a session that has been waiting for it should not wait another fifteen seconds
     # because this tick happened to change nothing.
-    Map.merge(plan, %{changed: changed, admitted: admit(profile)})
+    Map.merge(plan, %{
+      changed: changed,
+      scale_down: scale_down,
+      upgrade: upgrade,
+      admitted: admit(profile)
+    })
   end
+
+  # The count the profile may have now. Where a lower count removes no machine it is what
+  # the plan says. On Kubernetes it comes down only as far as the pods above it have
+  # emptied, and one that is to grow grows at once, unless a pod a scale-down drained is
+  # still at the top: that one goes first, and the next tick grows past it with a pod
+  # that starts fresh.
+  defp count(plan, :skipped), do: plan.want
+  defp count(%{have: have}, %{count: count}) when count < have, do: count
+  defp count(%{want: want, have: have}, _scale_down), do: max(want, have)
 
   # Oldest first, one at a time, stopping at the first refusal. Placement is the only
   # thing that knows whether there is room, so this asks rather than deciding — and a
@@ -191,16 +215,20 @@ defmodule Troupe.Plane.Fleet.Scaler do
   # Written to the row first and to the cluster from the row, so the number the plane
   # believes and the number it asked for cannot differ: a write that failed leaves a row
   # the next tick will try again from.
-  defp write(profile, plan) do
-    case Fleet.put_profile(%{name: profile.name, replicas: plan.want}) do
+  defp write(profile, plan, count) do
+    case Fleet.put_profile(%{name: profile.name, replicas: count}) do
       {:ok, updated} ->
+        # The pods above the count are the ones it removes, and retire no more: one that
+        # comes back at such an ordinal is a new pod.
+        if count < plan.have, do: Fleet.retired(profile.name, count)
+
         # Through the provisioner rather than straight to Kubernetes. What makes a worker
         # exist is the substrate's business; how many are wanted is this module's, and the
         # two were the same function until a profile could be provisioned another way.
         case Provisioner.for(updated).ensure(updated, actor: scaler()) do
           {:ok, _applied} ->
             Logger.info(
-              "troupe plane: #{profile.name} #{plan.have} -> #{plan.want} worker(s) for " <>
+              "troupe plane: #{profile.name} #{plan.have} -> #{count} worker(s) for " <>
                 "#{plan.active} active and #{plan.pending} waiting"
             )
 
@@ -211,7 +239,7 @@ defmodule Troupe.Plane.Fleet.Scaler do
             # up, and asks again — which is the right shape for a controller and is why
             # this does not retry here.
             Logger.warning(
-              "troupe plane: could not scale #{profile.name} to #{plan.want}: #{inspect(reason)}"
+              "troupe plane: could not scale #{profile.name} to #{count}: #{inspect(reason)}"
             )
 
             false

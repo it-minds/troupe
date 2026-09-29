@@ -12,6 +12,18 @@
 
 version: 2
 
+# Tauri's crates and its npm packages, in one pull request. The Tauri CLI refuses a build
+# whose `tauri` crate and `@tauri-apps/api`, or a plugin's crate and its package, differ in
+# their minor (Decision 717). In two groups, one per ecosystem, a pull request could move
+# one half alone, and #120 did. The npm and cargo entries further down ignore these, so
+# this group's pull request is the only one that moves them (Decision 729).
+multi-ecosystem-groups:
+  tauri:
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: deps
+
 updates:
   # The one that actually broke. An action pinned to a major whose Node runtime is
   # removed stops working on a schedule GitHub chooses, not one we do.
@@ -35,18 +47,35 @@ updates:
       frontend:
         patterns: ["react*", "@types/react*", "vite", "@vitejs/*"]
       tooling:
-        patterns: ["typescript", "tsx", "@types/node", "@tauri-apps/*"]
+        patterns: ["typescript", "tsx", "@types/node"]
+    ignore:
+      # Moved by the `tauri` group, at the top.
+      - dependency-name: "@tauri-apps/*"
+      # The types of the Node the tools run on, which is `.tool-versions`' major, not the
+      # newest: 26's describe what 24 does not have. The major moves by hand, with that
+      # line (Decision 729).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: deps
+
+  - package-ecosystem: npm
+    directory: /clients/gui
+    patterns: ["@tauri-apps/*"]
+    multi-ecosystem-group: tauri
+
+  - package-ecosystem: cargo
+    directory: /clients/gui/apps/desktop/src-tauri
+    patterns: ["tauri*"]
+    multi-ecosystem-group: tauri
 
   - package-ecosystem: cargo
     directory: /clients/gui/apps/desktop/src-tauri
     schedule:
       interval: monthly
-    groups:
-      tauri:
-        patterns: ["tauri*"]
     ignore:
+      # Moved by the `tauri` group, at the top.
+      - dependency-name: "tauri*"
       # `glib` 0.18 arrives through gtk3 and webkit2gtk, which is the stack Tauri 2 uses
       # on Linux. There is no 0.18.x that answers the advisory and no 0.19 that Tauri
       # will accept, so Dependabot cannot produce an update and errors out every time it

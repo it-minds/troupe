@@ -84,7 +84,7 @@ defmodule Troupe.MixProject do
         steps: [
           :assemble,
           &Troupe.Release.licences/1,
-          &ExRatatui.Burrito.verify_linux_nif/1,
+          &verify_linux_nif/1,
           &Burrito.wrap/1
         ],
         burrito: [
@@ -98,6 +98,27 @@ defmodule Troupe.MixProject do
         ]
       ]
     ]
+  end
+
+  # A Linux binary runs Burrito's musl ERTS, so it must carry the musl NIF, and ex_ratatui's
+  # step fails a build that bundled the glibc one. It checks only when `BURRITO_TARGET` is
+  # `linux`, the one Linux target its generator writes; ours are `linux_x86_64` and
+  # `linux_aarch64`, so for either it is handed that name for the length of the check. The
+  # rebuild its failure suggests says `BURRITO_TARGET=linux`: here, one of those two.
+  defp verify_linux_nif(release) do
+    case System.get_env("BURRITO_TARGET") do
+      "linux_" <> _ = target ->
+        System.put_env("BURRITO_TARGET", "linux")
+
+        try do
+          ExRatatui.Burrito.verify_linux_nif(release)
+        after
+          System.put_env("BURRITO_TARGET", target)
+        end
+
+      _ ->
+        release
+    end
   end
 
   # An ERTS already on this machine, instead of the one Burrito downloads for the target.

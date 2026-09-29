@@ -261,8 +261,10 @@ defmodule Troupe.Protocol.Schema do
       },
       # The agent's turn is over and it waits for input: the durable twin of `agent_state`
       # reaching `idle`, for a client that was not listening when it happened (issue #127).
-      # `reason` only when the harness ended it: `tool_failures` (Decision 687).
-      "turn_ended" => %{"reason" => optional(:string)},
+      # `reason` only when the harness ended it: `tool_failures` (Decision 687), or
+      # `agent_failed`, the root crashing as often as its Node allows, with `detail` saying
+      # what it raised; its session stops after it (Decision 727).
+      "turn_ended" => %{"reason" => optional(:string), "detail" => optional(:string)},
       # Input that arrived after an agent finished. Recorded rather than dropped: it is
       # the difference between "the user said nothing" and "the user said something and
       # nobody was listening".
