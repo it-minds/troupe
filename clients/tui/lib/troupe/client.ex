@@ -29,7 +29,8 @@ defmodule Troupe.Client do
   One session as a picker or HQ row shows it, whichever side it lives on.
   `state` is the remote vocabulary (`:active`, `:dormant`, `:read_only`,
   `:erased`); a local session is `:active` while it runs and `:dormant` once it
-  is only on disk.
+  is only on disk. A local row lists its `branches` (`%{id, state}`, what the daemon
+  says of each) and names its `parent` when it is one.
   """
   @type summary :: %{
           id: session_id(),
@@ -43,7 +44,8 @@ defmodule Troupe.Client do
           cost: number() | nil,
           updated_at: integer() | nil,
           origin: origin(),
-          branches: list(),
+          branches: [%{id: session_id(), state: atom() | nil}],
+          parent: session_id() | nil,
           workspace: String.t() | nil
         }
 

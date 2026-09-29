@@ -80,6 +80,38 @@ defmodule Troupe.MemoryClientTest do
     assert no_librarian(sid2) == []
   end
 
+  # A screen opened after the librarian started is rebuilt from the journal, and its window
+  # starts where the librarian's session did. Its first lines are stamped before the
+  # client records the window, and a rebuilt screen dropped them.
+  test "a screen opened after the librarian started draws the librarian's first lines" do
+    {sid, _, _ws} =
+      start_session!(
+        workspace: git_init!(tmp_workspace()),
+        script: [@overview, {:text, "recorded"}, {:finish, "ok"}],
+        config: %{memory_auto_refresh: true}
+      )
+
+    eventually(
+      fn ->
+        Enum.any?(
+          events_of(sid, "librarian-1", :remote_note),
+          &(&1.data.text == "session created as librarian")
+        )
+      end,
+      10_000
+    )
+
+    {pid, session} = start_tui(sid)
+    eventually(fn -> Map.has_key?(user_state(pid).model.windows, "librarian-1") end)
+
+    assert {:system, "session created as librarian"} in user_state(pid).model.windows[
+             "librarian-1"
+           ].agents["librarian-1"].transcript
+
+    press(pid, "2")
+    eventually(fn -> screen_text(pid, session) =~ "session created as librarian" end)
+  end
+
   # A librarian that got nowhere is a try all the same: the next session on the workspace
   # starts none, where it used to start another in every session until one got through
   # (Decision 127).
