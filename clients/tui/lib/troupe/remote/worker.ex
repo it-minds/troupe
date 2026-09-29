@@ -131,6 +131,14 @@ defmodule Troupe.Remote.Worker do
   @spec rpc(String.t(), String.t(), map()) :: {:ok, term()} | :ok | {:error, term()}
   def rpc(session_id, method, params), do: call(session_id, {:rpc, method, params})
 
+  @doc """
+  A line of this client's own in the session's window, drawn as the transcript's other
+  notes are and kept in the journal with them. Until the session's first event has
+  opened the window it waits, so it lands after that event.
+  """
+  @spec note(String.t(), String.t()) :: :ok | {:error, term()}
+  def note(session_id, text), do: call(session_id, {:note, text})
+
   @spec blob(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, term()} | {:error, term()}
   def blob(session_id, blob, offset \\ 0, length \\ 1_000_000),
@@ -219,6 +227,8 @@ defmodule Troupe.Remote.Worker do
       team: Keyword.get(opts, :team),
       title: Keyword.get(opts, :title),
       agent: nil,
+      # Lines of this client's own waiting for the window to open (`note/2`).
+      notes: [],
       deltas: %{},
       delta_bytes: 0,
       flush_ref: nil,
@@ -348,6 +358,9 @@ defmodule Troupe.Remote.Worker do
   end
 
   def handle_call({:rpc, method, params}, from, state), do: command(state, from, method, params)
+
+  def handle_call({:note, text}, _from, state),
+    do: {:reply, :ok, write_notes(%{state | notes: state.notes ++ [text]})}
 
   ## Messages
 
@@ -796,23 +809,48 @@ defmodule Troupe.Remote.Worker do
     {events, memory} = Translate.durable(state.session_id, params, state.memory)
     state = %{state | memory: memory, agent: state.agent || Translate.root_of(params)}
 
-    case Journal.append(state.session_id, events) do
-      [] ->
-        state
+    state =
+      case Journal.append(state.session_id, events) do
+        [] ->
+          state
 
-      kept ->
-        # Anything still buffered belongs before this event on screen. The durable copy
-        # of a line typed here is published too: the window knows the line it drew by its
-        # command id, and a worker restarted since the send would not.
-        state = flush_deltas(state)
+        kept ->
+          # Anything still buffered belongs before this event on screen. The durable copy
+          # of a line typed here is published too: the window knows the line it drew by its
+          # command id, and a worker restarted since the send would not.
+          state = flush_deltas(state)
 
-        for event <- kept, do: publish(state, event)
+          for event <- kept, do: publish(state, event)
 
-        %{state | cursor: max(state.cursor, Translate.seq(params) || state.cursor)}
-    end
+          %{state | cursor: max(state.cursor, Translate.seq(params) || state.cursor)}
+      end
+
+    write_notes(state)
   end
 
   defp durable(state, _params), do: state
+
+  # The client's own lines go into the window once there is one, stamped after whatever
+  # opened it: written earlier, they would sort ahead of the session's first events, which
+  # a window rebuilt from the journal has no window yet to draw.
+  defp write_notes(%{notes: []} = state), do: state
+  defp write_notes(%{agent: nil} = state), do: state
+
+  defp write_notes(state) do
+    events =
+      for text <- state.notes do
+        %Troupe.Event{
+          session_id: state.session_id,
+          agent_path: state.agent,
+          type: :remote_note,
+          ts: System.system_time(:millisecond),
+          data: %{text: text}
+        }
+      end
+
+    for event <- Journal.append(state.session_id, events), do: publish(state, event)
+    %{state | notes: []}
+  end
 
   defp ephemeral(state, %{"type" => type} = params) when type in ["llm.delta", "llm_delta"] do
     agent = Translate.agent_of(params) || state.agent || "session"

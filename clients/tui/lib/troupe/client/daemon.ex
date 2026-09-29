@@ -39,6 +39,8 @@ defmodule Troupe.Client.Daemon do
   alias Troupe.{Config, Settings}
   alias Troupe.Remote.{Branch, Capability, Journal, Worker}
 
+  require Logger
+
   @scopes ["observe", "control", "admin"]
   @refresh_prompt "The project brief is out of date. Revise it against the repository as it is now."
   @first_prompt "There is no project brief yet. Survey this repository and write one."
@@ -947,27 +949,80 @@ defmodule Troupe.Client.Daemon do
   # the daemon says the refresh is due: a librarian that tried lately and built nothing
   # is not tried again in every session (Decision 127); a daemon too old to say leaves
   # it to the status.
+  #
+  # When none starts, the log says why, and so does a line in the session's window when
+  # it is something a person can act on or would otherwise wonder about: no model to ask,
+  # a daemon that did not answer or refused the branch, a try that is being waited out
+  # (Decision 131). Memory turned off, a directory git does not know and a fresh brief
+  # are the ordinary cases and say nothing on screen.
   defp refresh_brief_if_asked(sid, workspace) do
-    config = config(workspace)
+    case refresh_brief(sid, workspace) do
+      :started ->
+        :ok
 
-    if config.memory != false and config.memory_auto_refresh != false and repository?(workspace) and
-         Config.key_problem(config) == nil do
-      case Link.call("memory.get", %{workspace: workspace}) do
-        {:ok, %{"refresh_due" => false}} ->
-          :ok
+      {:quiet, why} ->
+        Logger.info("no librarian for #{workspace}: #{why}")
 
-        {:ok, %{"status" => status}} when status in ["absent", "stale"] ->
-          prompt = if status == "absent", do: @first_prompt, else: @refresh_prompt
-          _ = dispatch(sid, "librarian", prompt)
-          :ok
-
-        _ ->
-          :ok
-      end
-    else
-      :ok
+      {:say, why} ->
+        Logger.warning("no librarian for #{workspace}: #{why}")
+        _ = Worker.note(sid, "no librarian for the project brief: " <> why)
+        :ok
     end
   end
+
+  defp refresh_brief(sid, workspace) do
+    config = config(workspace)
+
+    cond do
+      config.memory == false -> {:quiet, "memory is off"}
+      config.memory_auto_refresh == false -> {:quiet, "memory_auto_refresh is off"}
+      not repository?(workspace) -> {:quiet, "not a git repository"}
+      problem = Config.key_problem(config) -> {:say, no_model(problem)}
+      true -> refresh_if_due(sid, workspace)
+    end
+  end
+
+  defp refresh_if_due(sid, workspace) do
+    case Link.call("memory.get", %{workspace: workspace}) do
+      {:ok, %{"refresh_due" => false, "status" => status} = brief}
+      when status in ["absent", "stale"] ->
+        {:say, held_off(brief["refresh_held_until"])}
+
+      {:ok, %{"refresh_due" => false, "status" => status}} ->
+        {:quiet, "the brief is #{status}"}
+
+      {:ok, %{"status" => status}} when status in ["absent", "stale"] ->
+        prompt = if status == "absent", do: @first_prompt, else: @refresh_prompt
+
+        case dispatch(sid, "librarian", prompt) do
+          {:ok, _window} -> :started
+          {:error, reason} -> {:say, "the daemon did not start it: #{message(reason)}"}
+        end
+
+      {:ok, %{"status" => status}} ->
+        {:quiet, "the brief is #{status}"}
+
+      {:ok, other} ->
+        {:say, "unexpected memory.get answer: #{inspect(other)}"}
+
+      {:error, reason} ->
+        {:say, "the daemon did not say whether one is due: #{message(reason)}"}
+    end
+  end
+
+  defp no_model({:no_key, name}),
+    do: "#{name} has no key, so no model can be asked; `troupe config` sets one up"
+
+  defp no_model({:refused, why}), do: why
+
+  # A daemon from before the date leaves it out.
+  defp held_off(until) when is_binary(until) do
+    "the last one built none, so the next waits until #{String.slice(until, 0, 10)}; " <>
+      "/memory refresh starts one now"
+  end
+
+  defp held_off(_until),
+    do: "the last one built none, so the next waits a while; /memory refresh starts one now"
 
   # In a git work tree: a `.git` directory, or the `.git` file a worktree has, here or in
   # a directory above.

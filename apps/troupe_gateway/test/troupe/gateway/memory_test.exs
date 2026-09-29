@@ -67,13 +67,18 @@ defmodule Troupe.Gateway.MemoryTest do
   # A client that refreshes the brief by itself asks whether to, and a librarian's try that
   # built nothing holds that off (Decision 713) until the brief is forgotten.
   test "refresh_due says whether a librarian should start", %{workspace: ws, client: client} do
-    assert {:ok, %{"status" => "absent", "refresh_due" => true}} =
+    assert {:ok, %{"status" => "absent", "refresh_due" => true, "refresh_held_until" => nil}} =
              Client.call(client, "memory.get", %{"workspace" => ws})
 
-    :ok = Memory.attempted(ws, nil)
+    tried = DateTime.utc_now()
+    :ok = Memory.attempted(ws, nil, tried)
 
-    assert {:ok, %{"status" => "absent", "refresh_due" => false}} =
+    # Held off until the age a brief may reach, seven days by default, counted from the try.
+    assert {:ok, %{"status" => "absent", "refresh_due" => false, "refresh_held_until" => until}} =
              Client.call(client, "memory.get", %{"workspace" => ws})
+
+    assert {:ok, until, 0} = DateTime.from_iso8601(until)
+    assert until == DateTime.add(tried, 7 * 86_400, :second)
 
     assert {:ok, %{"forgotten" => true}} =
              Client.call(client, "memory.forget", %{
@@ -81,7 +86,7 @@ defmodule Troupe.Gateway.MemoryTest do
                "workspace" => ws
              })
 
-    assert {:ok, %{"refresh_due" => true}} =
+    assert {:ok, %{"refresh_due" => true, "refresh_held_until" => nil}} =
              Client.call(client, "memory.get", %{"workspace" => ws})
 
     :ok = Memory.put_section(ws, "overview", "A project.")

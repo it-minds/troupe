@@ -8,6 +8,7 @@ defmodule Troupe.MemoryClientTest do
   use ExUnit.Case, async: false
 
   import Troupe.TestHelpers
+  import Troupe.TUIHelpers
 
   alias Troupe.Client
 
@@ -73,6 +74,10 @@ defmodule Troupe.MemoryClientTest do
     spawned = for %{type: :branch_spawned} = event <- Client.events(sid2), do: event.data.name
     refute "librarian" in spawned
     refute Enum.any?(Client.events(sid2), &(&1.agent_path == "librarian-1"))
+
+    # A fresh brief is the ordinary case: nothing on screen says why no librarian started.
+    assert no_librarian(sid) == []
+    assert no_librarian(sid2) == []
   end
 
   # A librarian that got nowhere is a try all the same: the next session on the workspace
@@ -100,6 +105,39 @@ defmodule Troupe.MemoryClientTest do
     spawned = for %{type: :branch_spawned} = event <- Client.events(sid2), do: event.data.name
     refute "librarian" in spawned
     refute Enum.any?(Client.events(sid2), &(&1.agent_path == "librarian-1"))
+
+    # And it says so, once, in the session's own window, with the day the hold ends: a
+    # brief still missing and no librarian at work is otherwise a librarian that no longer
+    # starts (Decision 131).
+    until = DateTime.utc_now() |> DateTime.add(7 * 86_400, :second) |> Date.to_iso8601()
+
+    assert [
+             "no librarian for the project brief: the last one built none, so the next waits until " <>
+               ^until <> "; /memory refresh starts one now"
+           ] = no_librarian(sid2)
+
+    assert no_librarian(sid) == []
+  end
+
+  # No model to ask is something a person can act on, and was said nowhere: the session
+  # opened without a librarian and without a word. The line is in the journal, so a screen
+  # opened after it draws it in the session's window like the session's own notes.
+  test "a session with no model to ask says why no librarian starts" do
+    {sid, _, _ws} =
+      start_session!(
+        workspace: git_init!(tmp_workspace()),
+        config: %{memory_auto_refresh: true, provider: "anthropic"}
+      )
+
+    assert [
+             "no librarian for the project brief: anthropic has no key, so no model can be asked; " <>
+               "`troupe config` sets one up"
+           ] = no_librarian(sid)
+
+    refute Enum.any?(Client.events(sid), &(&1.agent_path == "librarian-1"))
+
+    {pid, session} = start_tui(sid)
+    eventually(fn -> screen_text(pid, session) =~ "no librarian for the project brief" end)
   end
 
   # What a brief describes is a repository: `troupe` opened in a home directory, or any
@@ -120,7 +158,22 @@ defmodule Troupe.MemoryClientTest do
     for sid <- [outside, headless] do
       assert {:ok, "no project brief yet; " <> _} = Client.memory(sid, "")
       refute Enum.any?(Client.events(sid), &(&1.agent_path == "librarian-1"))
+      # Neither is worth a line on screen.
+      assert no_librarian(sid) == []
     end
+  end
+
+  # The lines this client wrote into a session's window about its librarian, once the
+  # window is open. A line waits for the session's first event, which opens the window,
+  # and is written in the same step: once that event is in the journal and the worker has
+  # finished the step, any line is there too.
+  defp no_librarian(sid) do
+    eventually(fn -> Enum.any?(Client.events(sid), &(&1.type == :remote_note)) end)
+    _ = :sys.get_state(Troupe.Remote.Worker.whereis(sid))
+
+    for %{type: :remote_note, agent_path: "root", data: %{text: "no librarian" <> _ = text}} <-
+          Client.events(sid),
+        do: text
   end
 
   defp workspace_of(sid) do

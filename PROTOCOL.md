@@ -812,7 +812,7 @@ it can and shows the rest greyed with the reason. Reading the table wakes nothin
 ```
 → `{"status": "fresh", "path": "/home/me/project/.troupe/memory.md",
 "built_at": "2026-09-20T10:00:00Z", "sections": ["Overview", "Layout", "Commands",
-"Conventions", "Notes"], "text": "...", "refresh_due": false}`
+"Conventions", "Notes"], "text": "...", "refresh_due": false, "refresh_held_until": null}`
 
 The **project brief**: what earlier agents learned about the repository, read into
 every agent's system prompt and written by the `remember` tool and the `librarian`
@@ -825,7 +825,8 @@ a client should start a `librarian` session on the workspace now, which is what
 `memory_auto_refresh` asks of it: the brief is `absent` or `stale`, and no librarian has
 started on it in the last `memory_max_age_days` without its being built since. A
 librarian's run that failed, was cancelled or wrote nothing is tried again that much
-later, not in every new session. `memory.forget` forgets that try with the brief.
+later, not in every new session; `refresh_held_until` is when (or `null`), for a
+client to say why it started none. `memory.forget` forgets that try with the brief.
 
 #### `memory.forget` → `{"command_id", "workspace"}` deletes the brief. `admin`.
 

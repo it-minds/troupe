@@ -241,7 +241,9 @@ the config, which `--auto-approve`, `--watch` and `--full-send` beat only when g
 headless run starts no librarian: the project brief is refreshed automatically only for
 a session a person opens, in a git repository, with a model to ask
 (`memory_auto_refresh`), and not again within `memory_max_age_days` of a librarian that
-built nothing. The exit code says how the run ended, for scripts and CI:
+built nothing. When such a session starts none for want of a model, because the daemon
+did not start it, or while a try is waited out, its window says so in one line. The exit
+code says how the run ended, for scripts and CI:
 
 | code | the run |
 |---|---|

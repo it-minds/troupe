@@ -132,9 +132,15 @@ defmodule Troupe.Tools.RememberTest do
     # No brief, and a try eight days ago with the default of seven: due again.
     :ok = Memory.attempted(context.workspace, context.state_dir, days_ago.(8))
     assert Memory.refresh_due?(context.workspace, config)
+    assert Memory.held_until(context.workspace, config) == nil
 
-    :ok = Memory.attempted(context.workspace, context.state_dir, days_ago.(1))
+    # A day ago: held off for six more, which is what a client says of it.
+    tried = days_ago.(1)
+    :ok = Memory.attempted(context.workspace, context.state_dir, tried)
     refute Memory.refresh_due?(context.workspace, config)
+
+    assert Memory.held_until(context.workspace, config) ==
+             DateTime.add(tried, 7 * 86_400, :second)
 
     # Built after that try and stale since, because the repository is not the one it
     # counted: the try did not leave it stale, so it holds nothing off.
@@ -156,6 +162,7 @@ defmodule Troupe.Tools.RememberTest do
     :ok = Memory.forget(context.workspace, context.state_dir)
     assert Memory.status(context.workspace, config) == :absent
     assert Memory.refresh_due?(context.workspace, config)
+    assert Memory.held_until(context.workspace, config) == nil
   end
 
   test "stamping a brief as checked changes no word of it, and makes none", context do
