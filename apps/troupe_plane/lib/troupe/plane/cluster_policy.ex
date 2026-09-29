@@ -15,10 +15,15 @@ defmodule Troupe.Plane.ClusterPolicy do
   against; it allows every host and says so once, because a check that silently
   refused everything would make a development plane unable to publish anything.
 
+  In GitOps mode there is one answer and it is the resource (Decision 736): the
+  repository holds the policy as it holds the profiles, and a document in the plane's
+  configuration would be a second one nobody reviewed.
+
   This is fast feedback, not enforcement. The operator applies the same policy to the
   `WorkerProfile` the plane writes, and Cilium applies it to the packets.
   """
 
+  alias Troupe.Plane.{Gitops, Provision}
   alias Troupe.Policy
 
   require Logger
@@ -26,15 +31,59 @@ defmodule Troupe.Plane.ClusterPolicy do
   @doc """
   The policy, or `nil` when none can be read.
 
-  `:policy` in the application environment wins, because it is how a test or a plane
-  without a cluster says what the policy is; otherwise the named `TroupePolicy` is read
-  from the cluster.
+  `:policy` in the application environment wins in direct mode, because it is how a test
+  or a plane without a cluster says what the policy is; otherwise, and always in GitOps
+  mode, the named `TroupePolicy` is read from the cluster.
   """
   @spec current() :: Policy.t() | nil
   def current do
-    case Application.get_env(:troupe_plane, :policy) do
-      nil -> from_cluster()
+    case resource() do
+      nil -> nil
       resource -> Policy.from_resource(resource)
+    end
+  end
+
+  @doc """
+  The policy document itself, from wherever `current/0` reads it, or `nil`: what the
+  export turns into a manifest.
+  """
+  @spec resource() :: map() | nil
+  def resource do
+    case {Provision.mode(), Application.get_env(:troupe_plane, :policy)} do
+      {:gitops, _configured} -> from_cluster()
+      {_direct, nil} -> from_cluster()
+      {_direct, resource} -> resource
+    end
+  end
+
+  @doc """
+  The policy as a repository would hold it, or `nil` where this plane can read none: a
+  `TroupePolicy` with nothing in it the cluster or Helm keeps (`Gitops.strip/1`).
+
+  For a repository that holds the policy as a manifest, which is a chart installed with
+  `policy.install: false`. One installed by the chart's own template holds it in the
+  chart's values instead, and those are already the repository's.
+  """
+  @spec export() :: map() | nil
+  def export do
+    case resource() do
+      nil ->
+        nil
+
+      resource ->
+        manifest =
+          resource
+          |> Map.put("apiVersion", "troupe.dev/v1alpha1")
+          |> Map.put("kind", "TroupePolicy")
+          |> Map.update(
+            "metadata",
+            %{"name" => policy_name()},
+            &Map.put_new(&1, "name", policy_name())
+          )
+          |> Gitops.strip()
+
+        name = manifest["metadata"]["name"]
+        %{name: name, path: "policy/#{name}.yaml", notes: [], yaml: Gitops.yaml(manifest, [])}
     end
   end
 
@@ -76,7 +125,7 @@ defmodule Troupe.Plane.ClusterPolicy do
 
     case K8s.Client.run(conn, operation) do
       {:ok, resource} ->
-        Policy.from_resource(resource)
+        resource
 
       {:error, reason} ->
         Logger.warning(

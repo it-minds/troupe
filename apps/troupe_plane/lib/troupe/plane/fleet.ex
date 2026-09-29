@@ -34,6 +34,17 @@ defmodule Troupe.Plane.Fleet do
     |> Repo.insert_or_update()
   end
 
+  @doc """
+  Record a profile as the cluster holds it, with the generation it was read at: GitOps
+  mode's write, where the resource comes first and the row follows (Decision 736).
+  """
+  @spec follow_profile(map()) :: {:ok, Profile.t()} | {:error, Ecto.Changeset.t()}
+  def follow_profile(attrs) do
+    (Repo.get(Profile, attrs.name) || %Profile{})
+    |> Profile.cluster_changeset(attrs)
+    |> Repo.insert_or_update()
+  end
+
   @doc "One profile, or `nil`."
   @spec get_profile(String.t()) :: Profile.t() | nil
   def get_profile(name), do: Repo.get(Profile, name)

@@ -10,7 +10,9 @@ a `WorkerProfile` custom resource in `troupe-system` (what the operator reconcil
 
 `admin.profile.put` takes the whole profile; read it with `admin.profile.get` and send it
 back changed. `admin.profile.preview` returns the policy verdict and the diff without
-writing, and the console's profile editor shows both before its one apply button.
+writing, and the console's profile editor shows both before its one apply button. On a
+plane in gitops mode a repository holds the profiles instead, and the same fields are a
+manifest's ([§6](#6-provisioning-direct-or-from-a-repository)).
 
 | Field | Meaning |
 |---|---|
@@ -33,6 +35,8 @@ removes first ([§3](#3-upgrades-and-drains)).
 renders the resource, and at start rewrites every such profile whose resource carries a
 different image, audited as `profile.put` by `system:release`. Pods move only when they are
 recreated (§3). `policy.allowedImageRepositories` must allow `worker.image.repository`.
+Direct mode only: in gitops mode a manifest names its image, and a release reaches the
+workers with a commit.
 
 Other `spec` fields:
 
@@ -138,7 +142,10 @@ before the sessions are asleep, as every stop did before 0.6.3.
 ## 4. TroupePolicy
 
 Cluster-scoped (`tpol`), owned by a cluster admin; the plane may only read it. The chart
-installs one named `policy.name` (keep it `default`: nothing sets `TROUPE_POLICY_NAME`).
+installs one named `policy.name` (keep it `default`: nothing sets `TROUPE_POLICY_NAME`), or
+none with `policy.install: false`, for a repository that holds it as a manifest
+([§6](#6-provisioning-direct-or-from-a-repository)). A plane in gitops mode checks against
+this resource and nothing else.
 
 | Field | Meaning | Operator default when absent |
 |---|---|---|
@@ -209,25 +216,179 @@ a profile without `allow_unenforced_workers`, which is for substrates outside Ku
 Namespaced (`tvol`): `team` and `size` required, optional `storageClassName`, `nfsPath`,
 `nfsServer`. The operator only writes `status.claimName = team-<team>` and `Ready`; the
 claims themselves are created by the profile reconcile from `spec.teams`. `rw` needs a
-`ReadWriteMany` class (`scw-sfs` on Scaleway, not block storage).
+`ReadWriteMany` class (a file-storage class, not block storage).
 
 Team volumes are mounted on pods but not yet into sessions: a session's mount table on a
 pod is `session:/` and `skills:/`, so `publish` and `import` have nowhere to go there.
 
-## 6. Provisioning: how the row becomes a resource
+## 6. Provisioning: direct, or from a repository
 
-The plane renders the `WorkerProfile` from its row — name in `troupe-system`, label
-`troupe.dev/managed-by: plane`, the stored spec merged with the image, the plane-written
-fields and the `teams` projection — and re-applies it on every `admin.profile.put`, grant,
-revoke and bundle publish or retire. The `provisioning_mode` setting decides how:
+`plane.provisioningMode` (`TROUPE_PROVISIONING_MODE`) decides who writes a profile's
+`WorkerProfile`. It is the deployment's: the console's Policy page shows it and cannot
+change it, and a value stored there before 0.7.0 is not read.
 
-| Mode | What happens | Reported |
-|---|---|---|
-| `direct` | server-side apply as field manager `troupe-plane` | `applied` with the generation |
-| `gitops` | `profiles/<name>.yaml` committed as `troupe-plane <subject>` and pushed | `pending` with the commit until the resource catches up |
+| Mode | The profiles are | The plane writes | Reported |
+|---|---|---|---|
+| `direct` (default) | the plane's rows, edited in the console and the admin API | the whole resource, server-side applied as field manager `troupe-plane` | `applied` with the generation |
+| `gitops` | the `WorkerProfile` resources a repository holds and something else applies | `spec.replicas`, `spec.teams`, `spec.mcpServers` and nothing else | `projected`, or `unchanged` where the resource already says it |
 
-A plane with no Kubernetes connection saves the row and reports `not_applied`,
-`no_cluster`; the console then shows no conditions.
+**Direct.** The plane renders the `WorkerProfile` from its row — name in `troupe-system`,
+label `troupe.dev/managed-by: plane`, the stored spec merged with the image, the
+plane-written fields and the `teams` projection — and re-applies it on every
+`admin.profile.put`, grant, revoke, bundle publish or retire, and scale. A plane with no
+Kubernetes connection saves the row and reports `not_applied`, `no_cluster`; the console
+then shows no conditions.
+
+**Gitops** (Decision 736). A repository holds the manifests; Flux, Argo CD or a pipeline
+running `kubectl apply --server-side` applies them; the plane never writes git and holds
+no credential for it. Every fifteen seconds it lists the `WorkerProfile` resources in its
+namespace and makes its rows follow them. A new resource becomes a profile, a change
+changes it, and a resource that goes takes its profile with it, its sessions becoming
+read-only as with a delete; each is audited as `profile.put` or `profile.delete` by
+`system:gitops`. The scaler's count is the plane's: a row takes `spec.replicas` from the
+resource when it is made, and the scaler's number from then on.
+
+A resource is used only if the plane could have saved it itself: its annotations parse,
+`spec.image` names a repository, `spec.sessionsPerPod` is a size class's (4 is `standard`,
+2 is `heavy`), the cluster's `TroupePolicy` allows it, and it does not set a field the
+plane writes. One that fails is **refused**: a new one gets no profile, and a changed one
+leaves the profile as the last version that passed, so a mistake in the repository does
+not take down a profile that was running. The reasons are in the log once, in
+`admin.profiles.list` (each profile carries `gitops`: the source, the generation it was
+read at, and a `problem` of `refused`, `missing`, `plane_only` or `unwritten` with
+`reasons`; a refused resource with no profile is listed with nothing running), and on the
+console's Workers page and the profile's own.
+
+In this mode the console shows every profile read-only, marked **Locked to gitops** with
+`plane.gitops.source`, and `admin.profile.put` and `admin.profile.delete` are refused as
+`managed_by_gitops` and audited with `outcome: refused`. The plane writes its three fields
+onto a resource only where they differ from what it says, and only onto one something
+else holds, and its Role has no `create` or `delete` on `WorkerProfile`. A `release` image
+is not followed: the manifest names its image.
+
+What a profile takes from its resource:
+
+| Profile | Resource |
+|---|---|
+| `image` | `spec.image`, as `repository:tag`, or `repository@digest` where it has one |
+| `size_class` | `spec.sessionsPerPod`: 4 (the CRD's default) is `standard`, 2 is `heavy` |
+| `max_sessions` | annotation `troupe.dev/max-sessions`; absent is no ceiling |
+| `warm_workers` | annotation `troupe.dev/warm-workers`, 0 to 10; absent is 0 |
+| `provisioner` | annotation `troupe.dev/provisioner`; absent is `kubernetes` |
+| channel | `spec.configBundleChannel`; absent is `stable` |
+| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount` |
+
+CPU, memory and disk are the manifest's to size, within the policy; the class the plane
+places and scales by is read off `sessionsPerPod`.
+
+### A profile in a repository
+
+`admin.profiles.export` (the console's Workers page, **Manifests for a repository**) gives
+every profile in this shape, and the policy. This one is written by hand:
+
+```yaml
+# profiles/standard.yaml
+apiVersion: troupe.dev/v1alpha1
+kind: WorkerProfile
+metadata:
+  name: standard
+  namespace: troupe-system
+  annotations:
+    troupe.dev/max-sessions: "16"
+    troupe.dev/warm-workers: "1"
+spec:
+  image:
+    repository: registry.example.com/troupe/troupe-worker
+    tag: "0.7.0"
+  sessionsPerPod: 4
+  resources:
+    requests: {cpu: 250m, memory: 1Gi}
+    limits: {cpu: "2", memory: 4Gi}
+  storage:
+    size: 20Gi
+    storageClassName: standard
+  llm:
+    endpoint: https://gateway.example.com/v1
+    provider: openai
+    model: example-large
+    smallModel: example-small
+    secretRef: {name: troupe-llm, key: api-key}
+  egress:
+    fqdns: [gateway.example.com]
+  configBundleChannel: stable
+```
+
+Applied by Flux from a `GitRepository` named `fleet`:
+
+```yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: troupe-profiles
+  namespace: flux-system
+spec:
+  interval: 5m
+  sourceRef:
+    kind: GitRepository
+    name: fleet
+  path: ./profiles
+  prune: true
+```
+
+With `prune: true`, a manifest removed from the repository deletes its resource and the
+plane then removes the profile; without it the resource stays, and so does the profile.
+
+A manifest never holds what the plane or the cluster writes: `spec.replicas` (the
+scaler's), `spec.teams` (the grants', which stay in the plane's database) and
+`spec.mcpServers` (the channel's bundle's), `status`, or the annotation
+`troupe.dev/drained`. The applier would put its value back at every reconcile, over the
+plane's; a resource that sets one of the three is refused and names who sets it. Copied
+from `kubectl get -o yaml`, a resource also carries `metadata.managedFields`,
+`resourceVersion`, `uid`, `generation` and `creationTimestamp`; the export leaves those
+out too.
+
+The policy is the chart's `policy.*` values, which are then the repository's already, or
+a `TroupePolicy` manifest in the repository with `policy.install: false`; the export gives
+one.
+
+### The record of finished drains, under an applier
+
+The plane records a finished drain (§3) in the annotation `troupe.dev/drained`, written
+server-side under a field manager of its own, `troupe-plane-upgrade`. Flux's
+kustomize-controller also applies server-side, as `kustomize-controller`, and owns only
+the fields its manifest names: an annotation the manifest leaves out is nobody's but the
+plane's, and every reconcile, drift correction included, leaves it where it is. The same
+goes for the plane's three fields under `troupe-plane`. Two things would break that: a
+manifest that names the annotation, which makes the applier its co-owner, and listing the
+plane's field managers in kustomize-controller's `--override-manager`, which hands their
+fields to Flux. `Troupe.Plane.GitopsTest` holds the plane to it against a model of
+server-side apply's field ownership.
+
+### Switching a running plane
+
+**Direct to gitops.** Export the manifests, commit them, and let the applier apply them
+while the plane is still in direct mode: it takes the fields over, and the workers do not
+notice. Then redeploy the plane with `plane.provisioningMode: gitops` and
+`plane.gitops.source`. At its first pass the plane adopts every resource as it is:
+
+- One only the plane has ever written — nothing applies it from a repository yet — is
+  used as it is and reported `plane_only`, and the plane writes none of its fields until
+  something else holds it: with nobody else owning the rest, a write of three fields would
+  take them away.
+- A profile the cluster has no resource for is reported `missing` and kept. Commit its
+  manifest, or `admin.profile.delete` it, which in gitops mode deletes such a row and
+  nothing else.
+- At its first write to a resource after that, the plane gives up every field it wrote in
+  direct mode but its three, so from then on a field the repository drops leaves the
+  cluster.
+
+**Gitops to direct.** Stop the applier reconciling the profiles first — suspend the
+Kustomization, or take them out of it — or it puts back the repository's version at its
+next interval. Redeploy with `direct`. The profiles are what the plane last read; the
+editor writes again, and each profile's first write applies the whole resource as
+`troupe-plane`, taking its fields back. The `troupe.dev/max-sessions`,
+`troupe.dev/warm-workers` and `troupe.dev/provisioner` annotations stay on the resources,
+unread.
 
 ## 7. Sizing
 

@@ -34,7 +34,11 @@ defmodule Troupe.Protocol.Error do
     consent_required: -32_013,
     # A team's budget has nothing left to reserve for a new session. Distinct from
     # `capacity`, which is about pods: one is money, the other is room.
-    budget_exhausted: -32_014
+    budget_exhausted: -32_014,
+    # An admin write to something a repository holds: in GitOps mode a profile is changed
+    # by a commit to the repository its resources are applied from, never by the plane.
+    # `data.source` says where that repository is, when the deployment says.
+    managed_by_gitops: -32_015
   }
 
   @doc "Every error token and its code, for documentation and schema generation."

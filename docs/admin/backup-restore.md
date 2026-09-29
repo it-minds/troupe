@@ -11,8 +11,8 @@ back, and what it does not.
 | **PostgreSQL** | the session index, ACLs, tombstones; the ledger; the audit trail; the identity mirror (people, groups, teams, grants, team admins); profiles and workers; bundles; principals, triggers, runs, settings | the session index yes, from manifests. **Everything else exists only here** |
 | **OpenBao** | per-session data keys (KV v2); the transit signing key | no. Losing the KV keys makes every sealed segment unreadable forever; losing the transit key invalidates every outstanding token |
 | **Worker volumes** `/var/lib/troupe` | working copies of live sessions, caches, materialised bundles, the unsealed tail of the log — at most 60 s or one root turn | yes, except that tail |
-| **Kubernetes** | `WorkerProfile`, `TeamVolume`, `TroupePolicy`, worker namespaces | profiles from the plane's rows (re-apply); the policy from your values; the rest by reconcile |
-| **Git** (GitOps mode) | `profiles/<name>.yaml` | from the plane's rows |
+| **Kubernetes** | `WorkerProfile`, `TeamVolume`, `TroupePolicy`, worker namespaces | in direct mode, profiles from the plane's rows (re-apply); the policy from your values; the rest by reconcile |
+| **A repository** (gitops mode) | the `WorkerProfile` manifests, and the `TroupePolicy` or the values that make it | the primary copy: the applier puts them back in the cluster, and the plane reads its profiles from there at its first pass ([profiles-and-policy.md §6](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository)). Grants, teams and the rest of the plane's rows are still only in PostgreSQL |
 
 So a restored database plus object storage is a complete plane for sessions, and the
 database backup is the only copy of triggers, principals, settings and the audit trail.

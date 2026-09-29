@@ -75,27 +75,26 @@ helm upgrade --install troupe charts/troupe \
 
 It needs PostgreSQL, an S3-compatible bucket with versioning, OpenBao and an OIDC
 provider. `values.small.yaml` is one plane, one operator, the GUI and a handful of workers;
-`values.scaleway.yaml` is the same on Kapsule. [docs/admin/installing.md](docs/admin/installing.md)
-starts from an empty cluster, [docs/deploying-on-scaleway.md](docs/deploying-on-scaleway.md)
-walks Scaleway, and [docs/admin/](docs/admin/README.md) is the operator's tree. A team with
-its own client sets `gui.enabled: false` and points `plane.appUrl` at it.
+`values.example.yaml` is a worked example on a managed cluster, with every value you must
+change marked. [docs/admin/installing.md](docs/admin/installing.md) starts from an empty
+cluster, and [docs/admin/](docs/admin/README.md) is the operator's tree. A team with its
+own client sets `gui.enabled: false` and points `plane.appUrl` at it.
 
-## Releasing and deploying
+## Releasing
 
-A release is a merged change to `VERSION`, and it deploys itself (Decision 669):
+A release is a merged change to `VERSION` (Decision 669):
 
 ```sh
 scripts/release 0.3.1        # opens the pull request that changes VERSION
 ```
 
-Merging it runs the full suite on that commit, builds the images at `0.3.1`, tags
-`v0.3.1`, publishes the chart and the daemon, TUI and desktop builds, and rolls the release
-onto the `production` environment with [`scripts/deploy`](scripts/deploy), which checks
-that `/.well-known/troupe` then reports the new version and commit. A release candidate
-(`0.4.0-rc.1`) does all of it and deploys as a dry run; the `deploy` workflow rolls back to
-or renders a named release; a **pre-release** of any commit, untested, is a button in
-Actions. Nothing is deployed from a laptop. [`.github/CI.md`](.github/CI.md) has the whole
-picture.
+Merging it runs the full suite on that commit, builds the images at `0.3.1` and pushes
+them to `ghcr.io`, tags `v0.3.1`, and publishes the chart and the daemon, TUI and desktop
+builds. It deploys nothing: a deployment, the maintainers' own included, rolls a release
+onto its cluster from a repository of its own
+([docs/admin/routine-tasks.md](docs/admin/routine-tasks.md#upgrade)). A **pre-release**
+of any commit, untested, is a button in Actions.
+[`.github/CI.md`](.github/CI.md) has the whole picture.
 
 ## The front door and the console
 

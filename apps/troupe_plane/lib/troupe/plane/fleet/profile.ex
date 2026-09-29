@@ -1,10 +1,11 @@
 defmodule Troupe.Plane.Fleet.Profile do
   @moduledoc """
-  What the plane remembers about a `WorkerProfile` it wrote.
+  What the plane remembers about a `WorkerProfile` it wrote, or in GitOps mode read.
 
   A cache of desired state so placement can answer "how many sessions fit" without
   asking Kubernetes on every create. The custom resource is the source of truth and the
-  operator reads only that; this row is written whenever the plane writes the resource.
+  operator reads only that; this row is written whenever the plane writes the resource,
+  and in GitOps mode whenever the plane reads a new version of it (Decision 736).
 
   Three of these fields are an administrator's and the rest are derived. `size_class`
   says how demanding a session is here, `max_sessions` how far this may grow — in
@@ -44,36 +45,65 @@ defmodule Troupe.Plane.Fleet.Profile do
     field :image, :string
     field :workers_domain, :string
     field :spec, :map, default: %{}
+    # In GitOps mode, the generation of the `WorkerProfile` this row was last read from,
+    # and `nil` for a row no resource has been read into (Decision 736). A row with one
+    # goes when its resource does; a row without one is reported and kept.
+    field :resource_generation, :integer
 
     timestamps(type: :utc_datetime_usec)
   end
 
   @type t :: %__MODULE__{}
 
+  # The one list of casts both changesets share, so a field added to the row cannot be
+  # writable by an administrator and silently dropped when the row is read from a resource.
+  @fields [
+    :name,
+    :replicas,
+    :sessions_per_pod,
+    :size_class,
+    :max_sessions,
+    :warm_workers,
+    :idle_since,
+    :provisioner,
+    :config_bundle_channel,
+    :image,
+    :workers_domain,
+    :spec
+  ]
+
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
   def changeset(profile, attrs) do
     profile
-    |> cast(attrs, [
-      :name,
-      :replicas,
-      :sessions_per_pod,
-      :size_class,
-      :max_sessions,
-      :warm_workers,
-      :idle_since,
-      :provisioner,
-      :config_bundle_channel,
-      :image,
-      :workers_domain,
-      :spec
-    ])
+    |> cast(attrs, @fields)
+    |> validate()
+    |> derive_from_class()
+  end
+
+  @doc """
+  A row as a `WorkerProfile` in the cluster says it is, in GitOps mode (Decision 736).
+
+  `changeset/2` and the generation it was read at, which only this may write: a caller of
+  the admin API that sent one would be marking a row as following a resource it never
+  came from. The class is read off the resource's own `sessionsPerPod`, which a resource
+  may only give as a class's number, so deriving the number from it again changes nothing.
+  """
+  @spec cluster_changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
+  def cluster_changeset(profile, attrs) do
+    profile
+    |> cast(attrs, [:resource_generation | @fields])
+    |> validate()
+    |> derive_from_class()
+  end
+
+  defp validate(changeset) do
+    changeset
     |> validate_required([:name])
     |> validate_number(:sessions_per_pod, greater_than: 0)
     |> validate_inclusion(:size_class, SizeClass.names())
     |> validate_inclusion(:provisioner, Provisioner.names())
     |> validate_number(:max_sessions, greater_than: 0)
     |> validate_number(:warm_workers, greater_than_or_equal_to: 0, less_than_or_equal_to: 10)
-    |> derive_from_class()
     |> check_constraint(:provisioner, name: :profiles_provisioner)
   end
 

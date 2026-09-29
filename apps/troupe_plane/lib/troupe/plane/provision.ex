@@ -1,20 +1,21 @@
 defmodule Troupe.Plane.Provision do
   @moduledoc """
-  Turning a profile into a `WorkerProfile`, one of two ways.
+  Turning a profile into a `WorkerProfile`, or reading one, depending on who holds it.
 
-  **Direct.** The plane writes the custom resource itself. Its ServiceAccount may create,
-  update and delete `WorkerProfile` and `TeamVolume` in `troupe-system` and read
-  `TroupePolicy` — and nothing else, which is a thing to confirm with `kubectl auth can-i`
-  rather than to read off an RBAC file and believe.
+  **Direct.** The plane writes the custom resource itself, from its row. Its
+  ServiceAccount may create, update and delete `WorkerProfile` and `TeamVolume` in
+  `troupe-system` and read `TroupePolicy` — and nothing else, which is a thing to confirm
+  with `kubectl auth can-i` rather than to read off an RBAC file and believe.
 
-  **GitOps.** The plane commits the same manifest to a repository and Flux applies it.
-  The state is `Pending` until the CR's `observedGeneration` catches up with the
-  generation that was committed, because a commit is not a deployment: showing it as one
-  would make a failed apply invisible, which is the failure mode GitOps is supposed to
-  remove rather than add.
-
-  Both modes render the same manifest from the same profile and write the same audit
-  record. What differs is where it goes.
+  **GitOps.** A repository holds the resources and something else — Flux — applies them;
+  the plane never writes git (Decision 736). Its rows follow the cluster
+  (`Troupe.Plane.Gitops.Profiles`), and it writes only the three fields that are
+  projections of its own state and that no repository could know: `spec.replicas` (the
+  scaler), `spec.teams` (the grants) and `spec.mcpServers` (the channel's bundle). It
+  writes them with server-side apply as the same field manager direct mode uses, so the
+  first such write gives up every other field the plane once wrote, and the repository's
+  applier is left the only owner of the rest. A repository manifest leaves the three out;
+  `repository_manifest/1` is what one looks like.
 
   ## Policy is checked here for speed, not for safety
 
@@ -30,16 +31,23 @@ defmodule Troupe.Plane.Provision do
   word and the manifest gets the image, resolved here and nowhere else — so every write
   after an upgrade carries the upgrade's image, and the policy checks the image a pod will
   actually run rather than the word. `Troupe.Plane.Fleet.ReleaseImage` is what makes an
-  upgraded plane write those profiles again when nothing else would.
+  upgraded plane write those profiles again when nothing else would. Direct mode only: a
+  repository pins its images, and a release reaches its workers by a commit.
   """
 
-  alias Troupe.Plane.{ClusterPolicy, Fleet, Identity, Settings}
+  alias Troupe.Plane.{Bundles, ClusterPolicy, Fleet, Gitops, Identity, Settings}
   alias Troupe.Plane.Fleet.{Profile, SizeClass}
   alias Troupe.Policy
   alias Troupe.Protocol.Error
   alias Troupe.WorkerProfile
 
   @release "release"
+
+  # Who the plane is to the API server when it writes a profile: the whole resource in
+  # direct mode, its three fields in GitOps mode. One name for both, so the first GitOps
+  # write gives up what direct mode took (Decision 736).
+  @manager "troupe-plane"
+  @upgrade_manager "troupe-plane-upgrade"
 
   @doc "Which way this plane provisions."
   @spec mode() :: :direct | :gitops
@@ -98,7 +106,16 @@ defmodule Troupe.Plane.Provision do
   # looking at two different documents.
   defp policy, do: ClusterPolicy.current()
 
-  defp spec_of(%Profile{} = profile), do: Map.merge(profile.spec || %{}, base_spec(profile))
+  # A row read from a resource in GitOps mode already carries the resource's numbers, and
+  # a class merged over them would be the plane's opinion of a document it does not own:
+  # the verdict would judge sizes the cluster is not running. So there the class decides
+  # nothing and the spec is the resource's, with the image and the scaler's count.
+  defp spec_of(%Profile{} = profile) do
+    case mode() do
+      :gitops -> Map.merge(profile.spec || %{}, own_spec(profile))
+      :direct -> Map.merge(profile.spec || %{}, base_spec(profile))
+    end
+  end
 
   defp spec_of(%{} = attrs),
     do: attrs |> Map.get(:spec, Map.get(attrs, "spec", %{})) |> Map.merge(base_spec(attrs))
@@ -108,9 +125,14 @@ defmodule Troupe.Plane.Provision do
   # answer, and a hand-written `sessionsPerPod` kept beside it would be a profile with two
   # opinions about the same number.
   defp base_spec(source) do
-    %{"image" => image_spec(get(source, :image)), "replicas" => get(source, :replicas)}
+    source
+    |> own_spec()
     |> Map.merge(SizeClass.spec(get(source, :size_class)))
     |> Map.put("storage", storage_spec(source))
+  end
+
+  defp own_spec(source) do
+    %{"image" => image_spec(get(source, :image)), "replicas" => get(source, :replicas)}
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
 
@@ -193,41 +215,17 @@ defmodule Troupe.Plane.Provision do
   @doc """
   The image a profile's `WorkerProfile` carries now, or `nil` where there is none yet.
 
-  Direct mode asks the cluster, because the resource there is what the plane wrote. GitOps
-  mode reads the manifest the plane last committed: the resource in the cluster lags the
-  commit by however long Flux takes, and comparing against it would commit the same image
-  again every time the plane restarted before Flux caught up.
+  Asked of the cluster, because the resource there is what the plane wrote. Only direct
+  mode asks: in GitOps mode the repository names the image and the plane moves nothing.
   """
   @spec current_image(Profile.t()) :: {:ok, String.t() | nil} | {:error, term()}
   def current_image(%Profile{} = profile) do
-    case mode() do
-      :direct -> live_image(profile)
-      :gitops -> committed_image(profile)
-    end
-  end
-
-  defp live_image(profile) do
     case live_resource(profile) do
       {:ok, resource} -> {:ok, image_of(resource)}
       # Never written, which is as different from any image as a resource can be.
       {:error, %K8s.Client.APIError{reason: "NotFound"}} -> {:ok, nil}
       {:error, reason} -> {:error, reason}
     end
-  end
-
-  defp committed_image(profile) do
-    with {:ok, repo} <- repository() do
-      repo.path |> Path.join(manifest_path(profile)) |> File.read() |> committed()
-    end
-  end
-
-  # Never committed is no image at all, which is as different from any image as a
-  # manifest can be.
-  defp committed({:error, :enoent}), do: {:ok, nil}
-  defp committed({:error, reason}), do: {:error, reason}
-
-  defp committed({:ok, yaml}) do
-    with {:ok, resource} <- YamlElixir.read_from_string(yaml), do: {:ok, image_of(resource)}
   end
 
   # Read back with the operator's own parser, so "the same image" means what the operator
@@ -242,35 +240,39 @@ defmodule Troupe.Plane.Provision do
   @doc """
   Put a profile into the cluster, whichever way this plane does that.
 
-  Returns the state to show: `:applied` when the plane wrote the resource itself,
-  `{:pending, generation}` when it was committed and is waiting for Flux.
+  Direct mode applies the whole resource and answers `:applied`. GitOps mode writes the
+  plane's three fields onto the resource the repository put there and answers
+  `:projected`, or `:unchanged` where the resource already says what the plane would
+  write; it never makes a resource, so a profile with none is `{:error, :no_resource}`.
   """
   @spec apply(Profile.t(), map()) :: {:ok, map()} | {:error, term()}
   def apply(%Profile{} = profile, actor) do
     with :ok <- resolvable(profile) do
       case mode() do
         :direct -> direct_apply(profile, actor)
-        :gitops -> gitops_commit(profile, actor)
+        :gitops -> gitops_project(profile)
       end
     end
   end
 
   # `spec.image` is the one field the resource cannot be without, and a profile following
   # a release this plane cannot name would render without it. Refused here, by name, rather
-  # than left for the API server to refuse as a schema error — or, in GitOps mode, for
-  # Flux to refuse long after the commit said it had worked.
+  # than left for the API server to refuse as a schema error.
   defp resolvable(profile) do
     if follows_release?(profile) and is_nil(release_image()),
       do: {:error, :no_worker_image},
       else: :ok
   end
 
-  @doc "Take one out again."
+  @doc """
+  Take one out again. Direct mode only: in GitOps mode a profile goes when its manifest
+  leaves the repository, and the plane deletes nothing a repository put in the cluster.
+  """
   @spec remove(Profile.t(), map()) :: {:ok, map()} | {:error, term()}
   def remove(%Profile{} = profile, actor) do
     case mode() do
       :direct -> direct_delete(profile, actor)
-      :gitops -> gitops_remove(profile, actor)
+      :gitops -> {:error, :managed_by_gitops}
     end
   end
 
@@ -289,7 +291,7 @@ defmodule Troupe.Plane.Provision do
     end
   end
 
-  @doc "The manifest a profile becomes, in either mode."
+  @doc "The manifest a profile becomes in direct mode: the whole resource, from the row."
   @spec manifest(Profile.t()) :: map()
   def manifest(%Profile{} = profile) do
     %{
@@ -355,11 +357,95 @@ defmodule Troupe.Plane.Provision do
 
   defp volume_name(team), do: "troupe-team-#{team}"
 
+  # -- what a repository holds ------------------------------------------------
+
+  # The fields that are projections of the plane's own state: how many workers the
+  # sessions need, which teams' volumes the grants give, and the MCP servers the channel's
+  # bundle names. No repository could know them, so in GitOps mode they are the plane's
+  # to write and a manifest leaves them out.
+  @projected ~w(replicas teams mcpServers)
+
+  # The plane's answers that the resource has no field for, carried as annotations so a
+  # repository can give them. The operator reads none of them.
+  @max_sessions "troupe.dev/max-sessions"
+  @warm_workers "troupe.dev/warm-workers"
+  @provisioner "troupe.dev/provisioner"
+
+  @doc "The spec fields the plane writes in GitOps mode, and a repository leaves out."
+  @spec projected_fields() :: [String.t()]
+  def projected_fields, do: @projected
+
+  @doc "The annotations a repository gives the plane's own answers in: ceiling, warm, substrate."
+  @spec answer_annotations() :: %{atom() => String.t()}
+  def answer_annotations,
+    do: %{max_sessions: @max_sessions, warm_workers: @warm_workers, provisioner: @provisioner}
+
+  @doc """
+  The three projected fields as the plane would write them now.
+
+  `mcpServers` from the channel's current bundle rather than from the row: the bundle is
+  their one source (Decision 736 keeps it so), and reading it here means a profile a
+  repository has only just added gets its servers without waiting for the next publish.
+  """
+  @spec projection(Profile.t()) :: map()
+  def projection(%Profile{} = profile) do
+    %{
+      "replicas" => profile.replicas,
+      "teams" => teams_of(profile),
+      "mcpServers" => Bundles.mcp_servers(profile.config_bundle_channel)
+    }
+  end
+
+  @doc """
+  The manifest a repository would hold for a profile: what bootstrapping one from a
+  running plane commits (`admin.profiles.export`).
+
+  The resource without anything the plane writes or the cluster keeps — no `replicas`,
+  `teams` or `mcpServers`, no status, no labels of the plane's — and with the plane's own
+  answers as annotations. An image of `release` is written as the image it resolves to,
+  because a repository pins what it runs and moves it by a commit.
+  """
+  @spec repository_manifest(Profile.t()) :: map()
+  def repository_manifest(%Profile{} = profile) do
+    spec =
+      profile
+      |> spec_of()
+      |> Map.drop(@projected)
+      |> Map.put_new("configBundleChannel", profile.config_bundle_channel)
+
+    metadata =
+      %{"name" => profile.name, "namespace" => namespace()}
+      |> then(fn metadata ->
+        case answers(profile) do
+          empty when empty == %{} -> metadata
+          annotations -> Map.put(metadata, "annotations", annotations)
+        end
+      end)
+
+    %{
+      "apiVersion" => "troupe.dev/v1alpha1",
+      "kind" => "WorkerProfile",
+      "metadata" => metadata,
+      "spec" => spec
+    }
+  end
+
+  # Only the ones that say something: no ceiling, none kept warm and the Kubernetes
+  # provisioner are what a profile with no annotation already is.
+  defp answers(profile) do
+    %{
+      @max_sessions => profile.max_sessions && to_string(profile.max_sessions),
+      @warm_workers => if((profile.warm_workers || 0) > 0, do: to_string(profile.warm_workers)),
+      @provisioner => if(profile.provisioner not in [nil, "kubernetes"], do: profile.provisioner)
+    }
+    |> Map.reject(fn {_key, value} -> is_nil(value) end)
+  end
+
   # -- direct -----------------------------------------------------------------
 
   defp direct_apply(profile, _actor) do
     with {:ok, conn} <- connection() do
-      operation = K8s.Client.apply(manifest(profile), field_manager: "troupe-plane", force: true)
+      operation = K8s.Client.apply(manifest(profile), field_manager: @manager, force: true)
 
       case K8s.Client.run(conn, operation) do
         {:ok, applied} ->
@@ -395,9 +481,14 @@ defmodule Troupe.Plane.Provision do
 
   defp generation(resource), do: get_in(resource, ["metadata", "generation"])
 
-  # A plane with no cluster is a plane under test or a plane whose panel is being used to
-  # draft profiles. Saying so beats pretending it wrote something.
-  defp connection do
+  @doc """
+  How the plane reaches the API server, or `{:error, :no_cluster}`.
+
+  A plane with no cluster is a plane under test or a plane whose panel is being used to
+  draft profiles. Saying so beats pretending it wrote something.
+  """
+  @spec connection() :: {:ok, K8s.Conn.t()} | {:error, term()}
+  def connection do
     case Application.get_env(:troupe_plane, :k8s_conn) do
       nil -> {:error, :no_cluster}
       {module, function, args} -> Kernel.apply(module, function, args)
@@ -405,94 +496,100 @@ defmodule Troupe.Plane.Provision do
     end
   end
 
-  defp namespace, do: Application.get_env(:troupe_plane, :namespace, "troupe-system")
+  @doc "The namespace the plane's `WorkerProfile` resources live in."
+  @spec namespace() :: String.t()
+  def namespace, do: Application.get_env(:troupe_plane, :namespace, "troupe-system")
 
   # -- gitops -----------------------------------------------------------------
 
-  defp gitops_commit(profile, actor) do
-    with {:ok, repo} <- repository() do
-      path = Path.join(repo.path, manifest_path(profile))
-      File.mkdir_p!(Path.dirname(path))
-      File.write!(path, Ymlr.document!(manifest(profile)))
-
-      message = "troupe: #{profile.name} updated by #{actor.subject}"
-
-      with {:ok, sha} <- commit(repo, path, message, actor) do
-        {:ok, %{mode: :gitops, state: :pending, commit: sha, path: manifest_path(profile)}}
-      end
-    end
-  end
-
-  defp gitops_remove(profile, actor) do
-    with {:ok, repo} <- repository() do
-      path = Path.join(repo.path, manifest_path(profile))
-      File.rm(path)
-
-      with {:ok, sha} <-
-             commit(repo, path, "troupe: #{profile.name} removed by #{actor.subject}", actor) do
-        {:ok, %{mode: :gitops, state: :pending, commit: sha}}
-      end
-    end
-  end
-
-  defp manifest_path(profile), do: Path.join(["profiles", "#{profile.name}.yaml"])
-
-  defp commit(repo, path, message, actor) do
-    relative = Path.relative_to(path, repo.path)
-
-    with {_output, 0} <- git(repo, ["add", "--all", relative]),
-         {_output, 0} <-
-           git(repo, [
-             "-c",
-             "user.name=troupe-plane",
-             "-c",
-             "user.email=#{actor.subject}",
-             "commit",
-             "--allow-empty",
-             "-m",
-             message
-           ]),
-         {sha, 0} <- git(repo, ["rev-parse", "HEAD"]) do
-      push(repo)
-      {:ok, String.trim(sha)}
-    else
-      {output, status} -> {:error, {:git_failed, status, String.trim(output)}}
-    end
-  end
-
-  # A repository with no remote is a fixture, which is what a test uses.
-  defp push(repo) do
-    case git(repo, ["remote"]) do
-      {"", 0} -> :ok
-      {_remote, 0} -> git(repo, ["push", "origin", "HEAD"])
-      _other -> :ok
-    end
-  end
-
-  defp git(repo, args), do: System.cmd("git", ["-C", repo.path | args], stderr_to_stdout: true)
-
-  defp repository do
-    case Application.get_env(:troupe_plane, :gitops) do
-      nil -> {:error, :no_repository_configured}
-      config -> {:ok, %{path: config[:path]}}
+  defp gitops_project(profile) do
+    case live_resource(profile) do
+      {:ok, resource} -> project(profile, resource)
+      {:error, %K8s.Client.APIError{reason: "NotFound"}} -> {:error, :no_resource}
+      {:error, reason} -> {:error, reason}
     end
   end
 
   @doc """
-  Whether a committed profile has actually been applied yet.
+  Write the plane's three fields onto a profile's resource, where they are not what it
+  already says.
 
-  `observedGeneration` is the operator saying it has seen this version. Comparing it with
-  the generation the commit produced is what turns "we pushed it" into "it is running".
+  Only onto a resource something else holds, and only where nothing else writes those
+  three (`ownership/1`): the first is what keeps a write of three fields from taking the
+  rest away, and the second is what keeps the plane and a repository from putting back
+  each other's number at every apply.
   """
-  @spec pending?(Profile.t()) :: boolean()
-  def pending?(%Profile{} = profile) do
-    case live_resource(profile) do
-      {:ok, resource} ->
-        observed = get_in(resource, ["status", "observedGeneration"])
-        observed != generation(resource)
+  @spec project(Profile.t(), map()) :: {:ok, map()} | {:error, term()}
+  def project(%Profile{} = profile, resource) do
+    wanted = projection(profile)
 
-      {:error, _reason} ->
-        mode() == :gitops
+    with :ok <- writable(resource) do
+      if projected?(resource, wanted),
+        do: {:ok, %{mode: :gitops, state: :unchanged, generation: generation(resource)}},
+        else: write_projection(profile, wanted)
+    end
+  end
+
+  defp write_projection(profile, wanted) do
+    patch = %{
+      "apiVersion" => "troupe.dev/v1alpha1",
+      "kind" => "WorkerProfile",
+      "metadata" => %{"name" => profile.name, "namespace" => namespace()},
+      "spec" => wanted
+    }
+
+    with {:ok, conn} <- connection(),
+         {:ok, applied} <-
+           K8s.Client.run(conn, K8s.Client.apply(patch, field_manager: @manager, force: true)) do
+      {:ok, %{mode: :gitops, state: :projected, generation: generation(applied)}}
+    end
+  end
+
+  defp writable(resource) do
+    case ownership(resource) do
+      :held -> :ok
+      :plane_only -> {:error, :not_held_by_repository}
+      {:foreign, fields} -> {:error, {:written_elsewhere, fields}}
+    end
+  end
+
+  # Compared as the operator reads them, so a default the API server filled in — a team's
+  # `mode`, a server's `credentialMode` — is not a difference, and the plane does not write
+  # the same three fields on every pass for ever.
+  defp projected?(resource, wanted), do: parsed(resource["spec"] || %{}) == parsed(wanted)
+
+  defp parsed(spec) do
+    profile = WorkerProfile.from_resource(%{"spec" => Map.take(spec, @projected)})
+    {profile.replicas, profile.teams, profile.mcp_servers}
+  end
+
+  @doc """
+  Who holds a profile's resource, as far as a write of the plane's three fields cares.
+
+    * `:held` — something other than the plane owns its image: the repository's applier,
+      or a person with `kubectl`. A write of three fields leaves the rest to them.
+    * `:plane_only` — only the plane ever wrote it: a resource from direct mode that no
+      repository has taken over yet. Writing three fields would give up the rest, and with
+      nobody else owning them the API server would take them away — which for `image` is
+      a write it refuses, and for anything optional is a field that silently goes.
+    * `{:foreign, fields}` — something else writes one of the plane's three, and would put
+      its own value back at every apply, and the plane its own after.
+
+  Read from `metadata.managedFields`. A resource that carries none is not what an API
+  server answers, and is taken as held.
+  """
+  @spec ownership(map()) :: :held | :plane_only | {:foreign, [String.t()]}
+  def ownership(resource) do
+    foreign =
+      for field <- @projected,
+          Enum.any?(Gitops.managers(resource, ["spec", field]), &(not Gitops.plane?(&1))),
+          do: "spec." <> field
+
+    cond do
+      foreign != [] -> {:foreign, foreign}
+      not Gitops.tracked?(resource) -> :held
+      Enum.any?(Gitops.managers(resource, ["spec", "image"]), &(not Gitops.plane?(&1))) -> :held
+      true -> :plane_only
     end
   end
 
@@ -536,6 +633,13 @@ defmodule Troupe.Plane.Provision do
   resource as the plane's `troupe-plane` and would otherwise take it away again on every
   write, and an empty record takes it away here. An annotation and not the status,
   because the status is the operator's and the plane's grant is on the resource.
+
+  The same holds when a repository's applier holds the resource (Decision 736). Flux
+  applies server-side as its own field manager and owns only the fields its manifest
+  names, so an annotation the manifest leaves out is nobody's but this record's and
+  survives every apply. A manifest that names it would make Flux its co-owner and put the
+  committed value back at every reconcile, which is why `repository_manifest/1` and the
+  export never carry it.
   """
   @spec record_drained(Profile.t(), %{String.t() => String.t()}) :: :ok | {:error, term()}
   def record_drained(%Profile{} = profile, drained) do
@@ -552,7 +656,7 @@ defmodule Troupe.Plane.Provision do
 
     with {:ok, conn} <- connection(),
          {:ok, _applied} <-
-           K8s.Client.run(conn, K8s.Client.apply(patch, field_manager: "troupe-plane-upgrade", force: true)) do
+           K8s.Client.run(conn, K8s.Client.apply(patch, field_manager: @upgrade_manager, force: true)) do
       :ok
     end
   end

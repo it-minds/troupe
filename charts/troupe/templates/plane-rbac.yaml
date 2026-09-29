@@ -1,6 +1,12 @@
 # The plane is internet-facing, so its cluster access is exactly two resources: the
-# ones it is the writer of. It cannot read a TroupePolicy, let alone write one, and it
-# cannot touch a pod, a secret or a namespace.
+# ones it is the writer of. It may read the TroupePolicy and not write it, and it cannot
+# touch a pod's spec, a secret or a namespace.
+#
+# In gitops mode a repository holds the WorkerProfiles and something else applies them:
+# the plane lists and watches them, and patches only the fields it still writes
+# (replicas, teams, mcpServers and its record of finished drains). It cannot create or
+# delete one, so a plane that tried would be refused by the cluster and not only by its
+# own code (Decision 736).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -15,9 +21,18 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels: {{- include "troupe.labels" . | nindent 4 }}
 rules:
+  {{- if eq .Values.plane.provisioningMode "gitops" }}
+  - apiGroups: ["troupe.dev"]
+    resources: ["workerprofiles"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["troupe.dev"]
+    resources: ["teamvolumes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  {{- else }}
   - apiGroups: ["troupe.dev"]
     resources: ["workerprofiles", "teamvolumes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  {{- end }}
   # Its own replicas, for libcluster's Kubernetes DNS strategy.
   - apiGroups: [""]
     resources: ["endpoints", "pods"]

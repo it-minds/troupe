@@ -10,11 +10,10 @@
 ├── VERSION                  the one version of everything released (Decision 668)
 ├── .github/                 workflows and CI.md
 ├── apps/                    the umbrella: eight Mix projects (architecture.md §1)
-├── charts/troupe/           the Helm chart (platform and GUI), its CRDs, values.small/scaleway
+├── charts/troupe/           the Helm chart (platform and GUI), its CRDs, values.small/example
 ├── clients/tui/             the terminal client: its own Mix project, the harness by path
 ├── clients/gui/             the graphical client: a pnpm workspace (client, bench, desktop)
 ├── config/                  config.exs (compile time) and runtime.exs (prod only)
-├── deploy/                  ci-deployer.yaml (the account CI deploys as); scaleway/ values
 ├── dev/                     docker-compose.yml, kind/ (dependencies, values), toolbox/
 ├── docker/Dockerfile        the four server images
 ├── docs/                    the admin, developer and user tracks, design/, plans/
@@ -22,12 +21,12 @@
 ├── install.sh, install.ps1  install troupe and troupe-daemon from a release
 ├── mix.exs, mix.lock        the umbrella: the check alias, four releases, credo
 ├── protocol/schema/v1/      GENERATED JSON Schema (commands/, events/, index.json)
-├── scripts/                 dev-up, toolbox, remote-up, build-images, release, deploy, pitr-drill, version.exs, locks-agree.exs, doc-links.exs, …
+├── scripts/                 dev-up, toolbox, remote-up, build-images, release, pitr-drill, version.exs, locks-agree.exs, doc-links.exs, check-neutral.exs, …
 └── test/fixtures/logs/      recorded log fixtures, one directory per released version
 ```
 
-Gitignored and local: `.local/` (a real deployment's kubeconfig and values, read by
-`scripts/deploy`), `/.worktrees/`, `apps/troupe_core/priv/reaper/`.
+Gitignored and local: `.local/` (a person's own kubeconfigs and values, never committed),
+`/.worktrees/`, `apps/troupe_core/priv/reaper/`.
 
 ## Apps
 

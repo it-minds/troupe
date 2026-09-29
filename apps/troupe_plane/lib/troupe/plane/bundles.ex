@@ -473,7 +473,7 @@ defmodule Troupe.Plane.Bundles do
   """
   @spec project_mcp_servers(String.t(), map()) :: projection()
   def project_mcp_servers(channel, actor) do
-    servers = channel |> current() |> mcp_servers_spec()
+    servers = mcp_servers(channel)
 
     for name <- profiles_on(channel), profile = Fleet.get_profile(name), into: %{} do
       {name, project_profile(profile, servers, actor)}
@@ -492,6 +492,18 @@ defmodule Troupe.Plane.Bundles do
         %{state: :not_applied, reason: inspect(reason)}
     end
   end
+
+  @doc """
+  The `mcpServers` a profile following `channel` should carry now, from the channel's
+  current bundle, in the resource's own shape. Empty where nothing is published.
+
+  What the projection above writes, and what a GitOps plane writes onto a profile a
+  repository holds (Decision 736): there the bundle is still the servers' one source, and
+  a repository's manifest does not name them.
+  """
+  @spec mcp_servers(String.t() | nil) :: [map()]
+  def mcp_servers(nil), do: []
+  def mcp_servers(channel), do: channel |> current() |> mcp_servers_spec()
 
   # The spec entries the operator reads (`Troupe.WorkerProfile.MCPServer`). A server
   # with no credential has no `secretRef` and no `credentialRef` — it is still listed,

@@ -49,18 +49,17 @@ defmodule Troupe.Plane.MixProject do
       # between them is confined to plane pods by NetworkPolicy.
       {:libcluster, "~> 3.5"},
       {:oidcc, "~> 3.9"},
-      # For TokenReview at enrolment, and for writing the two custom resources the
-      # plane is allowed to write. Its RBAC is those two resources and its own
-      # endpoints; it cannot read a TroupePolicy, let alone write one.
+      # For TokenReview at enrolment, for writing the two custom resources the plane is
+      # allowed to write, and in GitOps mode for reading them. Its RBAC is those two
+      # resources and its own endpoints, and it may read a TroupePolicy and not write it.
       {:k8s, "~> 2.8"},
       # JWTs are signed by OpenBao's transit engine, but the header and payload are
       # assembled here and clients verify against the published JWKS.
       {:jose, "~> 1.11"},
-      # GitOps mode commits the same manifest the direct mode applies, and a manifest in
-      # a repository is YAML because that is what Flux reads.
+      # The export writes the manifests a repository holds for GitOps mode, and a
+      # manifest in a repository is YAML because that is what Flux reads.
       {:ymlr, "~> 5.1"},
-      # And reads back what it committed, to tell whether a profile following the
-      # release already carries the release's image.
+      # And reads YAML back, which is how a test proves an export is a manifest.
       {:yaml_elixir, "~> 2.12"},
       {:req, "~> 0.7"},
       {:jason, "~> 1.4"}]

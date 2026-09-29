@@ -127,7 +127,7 @@ export interface BeginRedirectOptions {
    * Which kind of account to offer. Left unset, this is inferred: an issuer that names
    * one Microsoft tenant can only ever admit that tenant's work accounts, so the picker
    * is told `organizations` and stops offering the personal Microsoft accounts the
-   * browser happens to be signed in to. Pass a domain (`itminds.dk`) to skip the picker
+   * browser happens to be signed in to. Pass a domain (`example.com`) to skip the picker
    * entirely, or `null` to send no hint at all.
    */
   domainHint?: string | null;

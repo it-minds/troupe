@@ -42,22 +42,42 @@ defmodule Troupe.Plane.SettingsTest do
     end
 
     test "the stored value, once somebody has" do
-      assert {:ok, _} = Settings.put("provisioning_mode", "gitops", "root@example.test")
+      assert {:ok, _} = Settings.put("groups_claim", "roles", "root@example.test")
 
-      assert Settings.get("provisioning_mode") == :gitops
+      assert Settings.get("groups_claim") == "roles"
 
-      setting = Enum.find(Settings.all(), &(&1.key == "provisioning_mode"))
+      setting = Enum.find(Settings.all(), &(&1.key == "groups_claim"))
       assert setting.source == :stored
     end
 
     test "resetting goes back to the deployment, not to this release's default" do
-      assert {:ok, _} = Settings.put("provisioning_mode", "gitops", "root@example.test")
-      assert {:ok, _} = Settings.reset("provisioning_mode", "root@example.test")
+      on_exit(fn -> Application.delete_env(:troupe_plane, :groups_claim) end)
+      assert {:ok, _} = Settings.put("groups_claim", "roles", "root@example.test")
+      assert {:ok, _} = Settings.reset("groups_claim", "root@example.test")
 
-      # The deployment said `:direct`; the fallback in the code says `:direct` too, so the
-      # distinction is proved by changing the deployment and resetting again.
-      Application.put_env(:troupe_plane, :provisioning_mode, :gitops)
-      assert Settings.get("provisioning_mode") == :gitops
+      # The deployment said nothing and the fallback in the code says `groups`, so the
+      # distinction is proved by changing the deployment after the reset.
+      Application.put_env(:troupe_plane, :groups_claim, "memberOf")
+      assert Settings.get("groups_claim") == "memberOf"
+    end
+
+    test "a setting the deployment owns reads no stored value, even one already there" do
+      # `provisioning_mode` was editable until Decision 736, so a plane may have a row for
+      # it from then. Read, it would override the deployment with nothing able to reset it.
+      Repo.insert!(%Settings.Stored{
+        key: "provisioning_mode",
+        value: "gitops",
+        updated_by: "root"
+      })
+
+      Settings.invalidate()
+
+      assert Settings.get("provisioning_mode") == :direct
+      assert Settings.stored_value("provisioning_mode") == nil
+
+      setting = Enum.find(Settings.all(), &(&1.key == "provisioning_mode"))
+      assert setting.source == :deployed
+      refute setting.editable
     end
 
     test "a stored value that no longer parses falls back rather than crashing" do
@@ -92,14 +112,15 @@ defmodule Troupe.Plane.SettingsTest do
       assert {:error, {:invalid, message}} = Settings.put("default_budget_micros", "lots", "root")
       assert message =~ "whole number"
 
-      assert {:error, {:invalid, _}} = Settings.put("provisioning_mode", "sideways", "root")
+      assert {:error, {:invalid, _}} = Settings.put("client_auth", "sideways", "root")
     end
 
     test "every declared choice is accepted" do
       # `daily`, a choice here once, appeared nowhere else in the codebase, so converting
       # the string to an atom raised rather than accepting a value the setting itself
       # declared. Matched against the declared atoms now, never converted.
-      for %{type: :enum, key: key, values: values} <- Settings.definitions(), value <- values do
+      for %{type: :enum, key: key, values: values, editable: true} <- Settings.definitions(),
+          value <- values do
         assert {:ok, %{value: ^value}} = Settings.put(key, to_string(value), "root")
         assert Settings.get(key) == value
       end
@@ -129,9 +150,15 @@ defmodule Troupe.Plane.SettingsTest do
   end
 
   describe "the settings actually decide something" do
-    test "provisioning mode is read through settings, not the environment" do
+    test "provisioning mode is the deployment's, and the console cannot change it" do
       assert Provision.mode() == :direct
-      assert {:ok, _} = Settings.put("provisioning_mode", "gitops", "root@example.test")
+
+      assert {:error, :not_editable} =
+               Settings.put("provisioning_mode", "gitops", "root@example.test")
+
+      assert Provision.mode() == :direct
+
+      Application.put_env(:troupe_plane, :provisioning_mode, :gitops)
       assert Provision.mode() == :gitops
     end
 

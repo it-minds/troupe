@@ -46,12 +46,12 @@ the commands, in development shape, in `dev/kind/dependencies.yaml`. A plane wit
 a static token nor a readable projected token logs one error naming both and answers
 `/.well-known/jwks.json` with 503.
 
-`deploy/scaleway/openbao.values.yaml` runs **one replica** with Raft and a **Shamir seal
-with a single share kept in a Kubernetes Secret and unsealed by a sidecar**, because
-Scaleway Key Manager speaks none of OpenBao's seal APIs; the file says what that protects
-(a stolen volume) and what not (a cluster admin). Live sessions survive an OpenBao restart
-because a worker holds its key in memory; nothing can be *opened* until it is back. There
-are no Raft snapshots ([backup-restore.md](backup-restore.md)).
+**One replica** with Raft is enough. Without a KMS that OpenBao's seal can use, the seal
+is **Shamir** and something unseals it after a restart; a share kept in a Secret protects
+a stolen volume and not against a cluster admin
+([installing.md §6](installing.md#6-a-worked-example-on-managed-services)). Live sessions
+survive an OpenBao restart because a worker holds its key in memory; nothing can be
+*opened* until it is back. There are no Raft snapshots ([backup-restore.md](backup-restore.md)).
 
 ## 3. PostgreSQL
 
@@ -104,9 +104,9 @@ endpoint, and, for models that endpoint does not price, `llm.prices`.
 | CNI | one that enforces NetworkPolicy (kind's does not, silently); Cilium for egress by hostname |
 | Version | ≥ 1.30 for `ValidatingAdmissionPolicy`; `admission.install: false` leaves the operator's check alone. CI validates the chart against 1.31 |
 | CRDs | installed by Helm once and never upgraded: apply `charts/troupe/crds/` on every upgrade |
-| ingress-nginx | `deploy/scaleway/ingress-nginx.values.yaml`; then label its namespace `troupe.dev/ingress=true` |
-| cert-manager | `deploy/scaleway/cluster-issuer.yaml`: ClusterIssuer `letsencrypt`, HTTP-01, one certificate per pod hostname, no wildcard |
-| Storage classes | on Scaleway `scw-bssd` (block) for pod disks, `scw-sfs` (RWX) for team volumes, `sbs-default` for OpenBao; the policy lists what profiles may name |
+| ingress-nginx | 3600 s proxy timeouts and a 16m body ([installing.md §6](installing.md#6-a-worked-example-on-managed-services)); then label its namespace `troupe.dev/ingress=true` |
+| cert-manager | a ClusterIssuer, `letsencrypt` in the example: HTTP-01, one certificate per pod hostname, no wildcard |
+| Storage classes | a block class (`ReadWriteOnce`) for pod disks, a file-storage class (`ReadWriteMany`) for team volumes, and one for OpenBao's Raft volume; the policy lists what profiles may name |
 
 ## 7. MCP
 

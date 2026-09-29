@@ -3,7 +3,7 @@
 # local kind cluster or push them to a registry.
 #
 #   scripts/build-images                                   # kind
-#   TROUPE_REGISTRY=rg.fr-par.scw.cloud/troupe \
+#   TROUPE_REGISTRY=registry.example.com/troupe \
 #     TROUPE_IMAGE_TAG=0.2.0 TROUPE_PUSH=true scripts/build-images
 #
 # `TROUPE_PUSH=true` pushes instead of loading, which is what a real cluster needs; log

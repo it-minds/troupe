@@ -42,6 +42,7 @@ defmodule Troupe.Plane.Admin do
     Drain,
     Erasure,
     Fleet,
+    Gitops,
     Identity,
     Ledger
   }
@@ -202,13 +203,64 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
-  @doc "Every profile, with its pods, conditions and load."
+  @doc """
+  Every profile, with its pods, conditions and load.
+
+  In GitOps mode each says where it comes from and what the last pass made of it
+  (`gitops`), and a resource the plane refused and has no row for is listed too, so that
+  a manifest that never became a profile is somewhere a person will see it. Those are a
+  platform admin's: a team admin sees the profiles their teams are granted, and a refused
+  resource is granted to nobody.
+  """
   @spec profiles_list(actor()) :: result()
   def profiles_list(actor) do
     with :ok <- require_admin(actor) do
-      {:ok, Enum.map(profiles_for(actor), &profile_summary/1)}
+      reports = gitops_reports()
+      profiles = profiles_for(actor)
+
+      {:ok,
+       Enum.map(profiles, &(&1 |> profile_summary() |> Map.put(:gitops, gitops_state(&1, reports)))) ++
+         refused_only(actor, profiles, reports)}
     end
   end
+
+  # What a pass reported, by name, in GitOps mode, and nothing in direct mode: a report
+  # left from when this plane read a repository says nothing about what it runs now.
+  defp gitops_reports do
+    if Gitops.enabled?(),
+      do: Map.new(Gitops.reports("WorkerProfile"), &{&1.name, &1}),
+      else: nil
+  end
+
+  defp gitops_state(_profile, nil), do: nil
+
+  defp gitops_state(profile, reports) do
+    report = Map.get(reports, profile.name)
+
+    %{
+      locked: true,
+      source: Gitops.source(),
+      # The version of the resource the row was read from; `nil` for a row that never was.
+      generation: profile.resource_generation,
+      problem: report && report.problem,
+      problem_generation: report && report.generation,
+      reasons: (report && report.reasons) || []
+    }
+  end
+
+  # A refused resource with no row has nothing behind it but its name: no pods, no count,
+  # no capacity. Listed with those as nothing rather than left out.
+  defp refused_only(%{role: :platform_admin}, profiles, reports) when is_map(reports) do
+    known = MapSet.new(profiles, & &1.name)
+
+    for {name, %{problem: "refused"}} <- reports, not MapSet.member?(known, name) do
+      %Fleet.Profile{name: name, replicas: 0, sessions_per_pod: 0}
+      |> profile_summary()
+      |> Map.put(:gitops, gitops_state(%Fleet.Profile{name: name}, reports))
+    end
+  end
+
+  defp refused_only(_actor, _profiles, _reports), do: []
 
   @doc """
   One profile in full: what was asked for, what policy makes of it, and what is running.
@@ -226,16 +278,25 @@ defmodule Troupe.Plane.Admin do
          profile: profile_summary(profile),
          spec: profile.spec,
          policy: Provision.verdict(profile),
-         bundle: bundle_state(profile)
+         bundle: bundle_state(profile),
+         gitops: gitops_state(profile, gitops_reports())
        }}
     end
   end
 
-  @doc "Create or update a profile, returning the diff that was applied."
+  @doc """
+  Create or update a profile, returning the diff that was applied.
+
+  Refused in GitOps mode as `managed_by_gitops` (Decision 736): the profile is a resource a
+  repository holds, and a change to it is a commit there. The attempt is in the audit
+  trail, as a refused break-glass login is, because somebody trying to change what a
+  repository holds is worth being able to find.
+  """
   @spec profile_put(actor(), map()) :: result()
   def profile_put(actor, attrs) do
     with :ok <- require_platform_admin(actor),
          {:ok, name} <- require_name(attrs),
+         :ok <- not_held_by_repository(actor, "profile.put", name),
          {:ok, attrs} <- without_derived(attrs),
          :ok <- release_named(attrs),
          :ok <- Provision.check(attrs) do
@@ -333,16 +394,70 @@ defmodule Troupe.Plane.Admin do
     end)
   end
 
-  @doc "Remove a profile. Its sessions become read-only rather than being erased."
+  @doc """
+  Remove a profile. Its sessions become read-only rather than being erased.
+
+  In GitOps mode a profile goes when its manifest leaves the repository, and this is
+  refused as `managed_by_gitops` — with one exception: a row the cluster has no resource
+  for (reported `missing`), which the plane had before it read the cluster. Deleting that
+  deletes only the row, since nothing in the repository or the cluster holds it.
+  """
   @spec profile_delete(actor(), String.t()) :: result()
   def profile_delete(actor, name) do
     with :ok <- require_platform_admin(actor),
-         {:ok, profile} <- fetch_profile(name) do
+         {:ok, profile} <- fetch_profile(name),
+         {:ok, removal} <- removal(actor, profile) do
       {:ok, _} = Audit.record(actor.subject, "profile.delete", name, comparable(profile))
-      removal = unprovision(profile, actor)
+      removal = removal.(profile)
       Fleet.delete_profile(name)
 
       {:ok, %{profile: name, deleted: true, provisioning: removal}}
+    end
+  end
+
+  # How a profile leaves: through the cluster in direct mode; in GitOps mode only as a row
+  # nothing holds, and otherwise not at all.
+  defp removal(actor, profile) do
+    cond do
+      not Gitops.enabled?() ->
+        {:ok, &unprovision(&1, actor)}
+
+      match?(%{problem: "missing"}, Gitops.report("WorkerProfile", profile.name)) ->
+        {:ok,
+         fn profile ->
+           :ok = Gitops.forget("WorkerProfile", profile.name)
+           %{mode: :gitops, state: :row_deleted}
+         end}
+
+      true ->
+        with :ok <- not_held_by_repository(actor, "profile.delete", profile.name) do
+          {:ok, &unprovision(&1, actor)}
+        end
+    end
+  end
+
+  # The refusal every write to what a repository holds gets, recorded like the refused
+  # break-glass login: the attempt is an event, and "somebody tried to change a profile
+  # the repository holds" is one an administrator reading the trail should be able to
+  # find next to the commits that did change it. By kind, for whatever else a repository
+  # comes to hold.
+  defp not_held_by_repository(actor, action, name, kind \\ "WorkerProfile") do
+    if Gitops.enabled?() do
+      source = Gitops.source()
+      detail = %{"outcome" => "refused", "reason" => "managed_by_gitops"}
+      {:ok, _} = Audit.record(actor.subject, action, name, detail)
+
+      {:error,
+       Error.new(:managed_by_gitops, %{
+         kind: kind,
+         name: name,
+         source: source,
+         reason:
+           "this plane is in gitops mode: a #{kind} is a resource a repository holds" <>
+             "#{if source, do: " (#{source})", else: ""}, and a change to one is a commit there"
+       })}
+    else
+      :ok
     end
   end
 
@@ -1156,15 +1271,30 @@ defmodule Troupe.Plane.Admin do
   # -- provisioning -----------------------------------------------------------
 
   @doc """
-  How this plane puts profiles into the cluster: `:direct` or `:gitops`.
+  How this plane gets profiles into the cluster: `:direct` or `:gitops`.
 
-  A panel shows it because the two mean different things when a change does not appear:
-  in direct mode that is a failure, and in GitOps mode it is the normal state until Flux
-  catches up.
+  A panel shows it because the two mean different things. In direct mode the console
+  writes a profile; in GitOps mode a repository holds them, the console shows them
+  locked, and a write is refused as `managed_by_gitops` (Decision 736).
   """
   @spec provisioning_mode(actor()) :: result()
   def provisioning_mode(actor) do
     with :ok <- require_admin(actor), do: {:ok, Provision.mode()}
+  end
+
+  @doc """
+  Every profile and the cluster policy as a repository would hold them: what bootstrapping
+  a repository from a running plane commits, before the plane is switched to GitOps mode.
+
+  Each is a path and the YAML to put there, with notes where something needs deciding
+  first — a profile whose image is `release` is pinned to the image it resolves to. Left
+  out of every manifest is what the plane or the cluster writes (`left_out`): a
+  repository that held `spec.replicas` would put back its number over the scaler's at
+  every apply, and one that held the plane's record of finished drains would undo it.
+  """
+  @spec profiles_export(actor()) :: result()
+  def profiles_export(actor) do
+    with :ok <- require_platform_admin(actor), do: {:ok, Gitops.export()}
   end
 
   @doc """
@@ -2496,8 +2626,7 @@ defmodule Troupe.Plane.Admin do
   # stale for as long as it takes the operator's next resync, which is the right cost —
   # failing the grant would make the plane's own state depend on the cluster being up.
   # What happened in the cluster, reported rather than swallowed: a profile that was
-  # saved but not applied is a state a person needs to see, and it is the normal state in
-  # GitOps mode until Flux catches up.
+  # saved but not applied is a state a person needs to see.
   defp provision(profile, actor) do
     case Provision.apply(profile, actor) do
       {:ok, state} -> state

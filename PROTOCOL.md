@@ -1453,10 +1453,11 @@ that team.
 | method | role | answers |
 | --- | --- | --- |
 | `admin.overview` | either | fleet health, active sessions, spend per team |
-| `admin.profiles.list` | either | profiles with conditions, pods, load and versions |
-| `admin.profile.get` | platform | the CR spec, the policy verdict, published vs reported bundle hash |
-| `admin.profile.put` | platform | creates or updates a `WorkerProfile`, returning the diff that was applied |
-| `admin.profile.delete` | platform | removes one |
+| `admin.profiles.list` | either | profiles with conditions, pods, load and versions; in gitops mode each carries `gitops` (`source`, `generation`, and a `problem` — `refused`, `missing`, `plane_only`, `unwritten` — with `reasons`), and a refused resource with no profile is listed too |
+| `admin.profiles.export` | platform | `{profiles, policy, left_out}`: every profile and the `TroupePolicy` as a repository would hold them, each `{name, path, yaml, notes}`, without what the plane or the cluster writes (`left_out`) |
+| `admin.profile.get` | platform | the CR spec, the policy verdict, published vs reported bundle hash, and `gitops` as in the list |
+| `admin.profile.put` | platform | creates or updates a `WorkerProfile`, returning the diff that was applied; `managed_by_gitops` in gitops mode |
+| `admin.profile.delete` | platform | removes one; `managed_by_gitops` in gitops mode, except for a profile the cluster has no resource for, whose row alone it deletes |
 | `admin.pod.drain` | platform | drains a pod, returning what it held |
 | `admin.teams.list` | either | teams, with grants, budgets, volumes and retention |
 | `admin.team.enable` | platform | makes an IdP group a team |
@@ -1470,7 +1471,7 @@ that team.
 | `admin.bundle.publish` / `admin.bundle.retire` | platform | publish a version — refused as `invalid_params` with `data.errors`, one sentence per problem, when the document is malformed or names an MCP host outside `allowedEgress` — or retire one |
 | `admin.mcp.check` | either | `{host, allowed}`: whether the cluster policy lets a pod reach an MCP server's host |
 | `admin.audit.list` | either | who changed what, with diffs, each change keyed by its path (`spec.llm.model`) |
-| `admin.provisioning.mode` | either | `direct` or `gitops`: whether a profile write changes the cluster or commits for review |
+| `admin.provisioning.mode` | either | `direct` or `gitops`: whether the plane writes profiles to the cluster, or reads them from resources a repository holds and refuses to write them |
 | `admin.settings.list` | either | every platform setting with its value, where that value came from (`stored`, `deployed`, `unset`), what changing it does and when it takes effect; a secret is reported as set and never returned |
 | `admin.setting.put` | platform | `{key, value}` — parsed against the setting's declared type and refused if it does not fit, or if the deployment owns it |
 | `admin.setting.reset` | platform | `{key}` — drops the stored value, so the setting goes back to what the plane was deployed with |
@@ -1613,6 +1614,12 @@ and `profiles` claims.
 `not_found` for a team a `team_admin` may not see — because whether a team exists is
 itself something a person who cannot see it should not learn.
 
+`managed_by_gitops` with `data.kind` (`WorkerProfile`), `data.name`, `data.source` (the
+repository the deployment names, or `null`) and `data.reason` when a write reaches
+something a repository holds: on a plane in gitops mode, `admin.profile.put` and
+`admin.profile.delete`. The change is a commit to that repository. The attempt is in the
+audit trail with `outcome: refused`.
+
 ---
 
 ## 10. Errors
@@ -1644,6 +1651,7 @@ itself something a person who cannot see it should not learn.
 | -32012 | `payload_too_large` | `data.limit` |
 | -32013 | `consent_required` | `data.challenge`, `data.prompt`, `data.tools` |
 | -32014 | `budget_exhausted` | the team has nothing left to reserve; `data.team`, `data.reason` |
+| -32015 | `managed_by_gitops` | an admin write to what a repository holds (§9); `data.source` |
 
 Transport-level framing faults close the connection after a best-effort error.
 

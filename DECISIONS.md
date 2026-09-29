@@ -896,8 +896,8 @@ citation keeps meaning what it meant.
      `OnDelete`, so the resource says `UpgradePending` until the pods are drained and
      replaced — the routine-tasks page says so — and `profile.get` still reports
      `release` rather than what it resolves to; the console shows the resolution.
-     `values.small.yaml` and `values.scaleway.yaml` name the worker and GUI images in
-     the same registry as the rest, so the policy they carry admits `release`. Proof:
+     The policy in `values.yaml`, `values.small.yaml` and `values.example.yaml` allows
+     the chart's own worker image, so it admits `release`. Proof:
      `Troupe.Plane.ReleaseImageTest`.
 
 673. **The clients in this repository get no private door, and four checks say so.**
@@ -2744,6 +2744,44 @@ citation keeps meaning what it meant.
      chunk's tip with the config key alone; `doctor_test.exs`; and the installed build
      with its helper swapped for a file that is not a program.
 
+734. **This repository names no deployment of Troupe, and a check in CI keeps it so.**
+     Issue #186. The repository is the product: the chart, the images, the clients and
+     how to build them. The deployment its maintainers run lives in a repository of its
+     own, which consumes the published chart and images as any adopter's would, so its
+     cloud, cluster, domain, registry, identity tenant and deploy account are not named
+     here. A reader used to learn one cluster's topology from this repository, and an
+     adopter had to guess which parts of an example were somebody's own.
+
+     *What stays.* `values.example.yaml` is the one worked example: a managed cluster,
+     PostgreSQL and object store, ingress-nginx, cert-manager, OpenBao in the cluster,
+     the chart's own images (735), and every value that has to be the reader's marked
+     `CHANGE ME`. `values.small.yaml` is the same shape turned down. What the provider
+     walkthrough knew that holds anywhere — the two DNS names, the ingress settings, the
+     HTTP-01 issuer, how to run OpenBao, sizing — is in `docs/admin/installing.md` §6.
+     `authentik.md` is a guide to any Authentik instance.
+
+     *What went.* The provider's own values and cluster extras, the deploy account's
+     manifest and the script that made it a kubeconfig, and `scripts/deploy`, whose
+     only callers left with the deploy (735). An upgrade is the steps in
+     `routine-tasks.md`, which now say what the script knew: CRDs server-side, a
+     rollback on failure, the version at `/.well-known/troupe`, and the digests actually
+     running. `scripts/remote-up` has no default model gateway: a placeholder under
+     `example.test` that resolves nowhere, with the host of `TROUPE_GATEWAY_URL` put
+     first in the kind policy's egress list (`--set` on that index keeps the rest), and
+     the key in `TROUPE_GATEWAY_KEY`. CI's cluster job names a public host, so the
+     egress suite still has a model endpoint a pod can dial.
+
+     *The check.* `scripts/check-neutral.exs`, in the `versions` job, reads every file
+     git knows and fails on a line that names one. The names are kept as SHA-256 digests
+     of their lowercase spelling, so the file that keeps them out does not name them;
+     each run of letters, digits, dots and hyphens is checked whole, by label, by word
+     and by dotted suffix, which catches a host under any subdomain. A file that must
+     keep a name for a while is allowed with the reason, and an allowed file that names
+     nothing fails too, so the list only shrinks; it is empty. Git history keeps every
+     old name, and nothing here rewrites it. Proof: the check names 161 lines in 39
+     files at 0.6.3-beta and none here, and CI lints and renders the chart with both
+     remaining values files, one of them with a pull secret.
+
 735. **A release publishes its images and its chart to `ghcr.io`, public, and deploys
      nothing.** Issue #186. The images went to whichever registry four repository
      secrets named, which was our own cloud's, and `release.yml` ended by rolling our
@@ -2771,3 +2809,51 @@ citation keeps meaning what it meant.
      loop (`scripts/build-images`, `scripts/remote-up`, `dev/kind/values.yaml`, the
      cluster suite) builds and runs under the same names, so a kind cluster runs the
      chart's own defaults. Supersedes the deploying half of 669.
+
+736. **In gitops mode a repository holds the profiles and the policy, and the plane reads
+     them from the cluster and never writes git.** Issue #186. `provisioning_mode: gitops`
+     made a profile save a commit to a checkout configured only by `:gitops[:path]`,
+     which nothing set in a real plane, whose image has no `git` and no push credential:
+     the mode worked in tests. Now the `WorkerProfile` and `TroupePolicy` resources a
+     repository holds, applied by Flux or anything like it, are what a gitops plane runs
+     on. A cluster singleton (`Troupe.Plane.Gitops`) lists the profiles in the plane's
+     namespace every fifteen seconds and makes its rows follow them, making, changing and
+     deleting them, audited as `system:gitops`: a tick and not a watch, because a list
+     sees what is not there without a watch's bookmarks and relists, a plane that was
+     down is right at its first tick, and the change it waits for arrives after the
+     applier's own interval. A resource is used only if the plane could have saved it
+     itself (its annotations parse, it has an image, its `sessionsPerPod` is a class's,
+     the cluster policy allows it, nobody else sets the plane's fields); otherwise it is
+     reported in `gitops_reports`, the log once, `admin.profiles.list` and the console,
+     and not used: a new one gets no row, and a changed one leaves the last version that
+     passed. The plane still writes the three fields that are projections of its own
+     state, `spec.replicas`, `spec.teams` and `spec.mcpServers`, server-side as
+     `troupe-plane`, where they differ and only onto a resource something else holds. One
+     only the plane has written is reported `plane_only` and not written to, because three
+     fields applied by the only owner of the rest would give the rest up. It is the
+     manager name direct mode uses, so the first write after adoption releases what
+     direct mode took and a field the repository drops then leaves the cluster. The
+     `troupe.dev/drained` record (726) keeps its own manager and survives the applier,
+     which owns only what its manifest names. The plane's answers the CRD has no field
+     for are annotations (`troupe.dev/max-sessions`, `warm-workers`, `provisioner`), the
+     class is read off `sessionsPerPod`, and `release` is not followed: a manifest pins
+     its image, and 672's comparison against the last commit goes with the commit.
+     `admin.profile.put` and `admin.profile.delete` refuse as `managed_by_gitops`
+     (-32015), audited with `outcome: refused` as a refused break-glass login is; the
+     exception is deleting a row the cluster has no resource for, reported `missing`
+     after a switch and never deleted by the plane itself. There is no policy write to
+     refuse, the plane's grant on `TroupePolicy` being read-only already, and in gitops
+     mode its `:policy` configuration is not read. The console shows profiles locked, with
+     `gitops_source`, a display-only setting; `admin.profiles.export` gives every profile
+     and the policy as a repository would hold them, without runtime fields, the plane's
+     three or its drained record. `provisioning_mode` becomes the deployment's: a console
+     that could switch it back would be a lock with the key hanging beside it, and a
+     profile made then would be one the repository never saw and its applier never
+     prunes. A value stored before is ignored, and the chart's Role drops create and
+     delete on `WorkerProfile` in gitops mode. The plane migrates
+     (`profiles.resource_generation`, `gitops_reports`); another kind of resource joins
+     by implementing `Troupe.Plane.Gitops`'s behaviour. Proof: `gitops_test.exs`, against
+     a model of server-side apply's field ownership (made, changed, removed, refused, the
+     plane's fields, the drained record under Flux, the refusals over the API and MCP, the
+     export and its round trip, both switches), `gitops_console_test.exs`, and the
+     updated `provision_test.exs`, `release_image_test.exs` and `settings_test.exs`.

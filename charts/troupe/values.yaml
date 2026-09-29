@@ -124,9 +124,17 @@ plane:
   distPort: 9100
   # `+Q`, the BEAM's port table size. See `operator.maxPorts`.
   maxPorts: 65536
-  # `direct` writes WorkerProfile straight to the API server; `gitops` writes a commit
-  # and waits for something else to apply it.
+  # `direct`: the console writes WorkerProfile resources to the API server. `gitops`: a
+  # repository holds them (and the TroupePolicy), something else such as Flux applies
+  # them, and the plane reads them from the cluster, shows them locked and refuses to
+  # change them; it writes only spec.replicas, spec.teams and spec.mcpServers, and its
+  # Role loses create and delete on WorkerProfile. Never written by the plane to git.
+  # docs/admin/profiles-and-policy.md, "Provisioning".
   provisioningMode: direct
+  gitops:
+    # Where the profiles come from, as a person should read it: a repository URL and a
+    # path, shown beside "Locked to gitops". Display only; the plane never reads it.
+    source: ""
   # The identity provider group whose members administer the platform. Membership is
   # the provider's business and is never edited in Troupe.
   platformAdminGroup: troupe-platform-admins
@@ -296,7 +304,7 @@ policy:
   # `Troupe.EgressTest` checks this list against `Troupe.Egress` for exactly that.
   #
   # A deployment that uses neither narrows this to its own gateway, as `values.small.yaml`
-  # and `values.scaleway.yaml` do. Narrowing is the operator's decision; shipping a default
+  # and `values.example.yaml` do. Narrowing is the operator's decision; shipping a default
   # the shipped code cannot work under is not.
   allowedEgress:
     - "*.anthropic.com"

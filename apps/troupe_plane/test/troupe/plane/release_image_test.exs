@@ -9,15 +9,16 @@ defmodule Troupe.Plane.ReleaseImageTest do
   the same provisioning an edit goes through, audited as the plane and not as a person —
   without waiting for a cluster that is not answering yet.
 
-  GitOps mode carries most of it, because a commit is a write the test can read back
-  without a cluster; direct mode is where "the cluster did not answer" lives.
+  A cluster in memory carries most of it, because an apply is a write the test can read
+  back; with none at all is where "the cluster did not answer" lives. In GitOps mode none
+  of it happens: a repository names every image (Decision 736).
   """
 
   use Troupe.Plane.DataCase, async: false
 
   import ExUnit.CaptureLog
 
-  alias Troupe.Plane.{Admin, Audit, Fleet, Identity, Provision}
+  alias Troupe.Plane.{Admin, Audit, FakeCluster, Fleet, Identity, Provision}
   alias Troupe.Plane.Fleet.ReleaseImage
   alias Troupe.WorkerProfile
 
@@ -33,7 +34,7 @@ defmodule Troupe.Plane.ReleaseImageTest do
     root = person("root@example.test", ["platform"])
 
     on_exit(fn ->
-      for key <- ~w(platform_admin_group worker_image provisioning_mode gitops policy)a do
+      for key <- ~w(platform_admin_group worker_image provisioning_mode policy)a do
         Application.delete_env(:troupe_plane, key)
       end
     end)
@@ -87,23 +88,24 @@ defmodule Troupe.Plane.ReleaseImageTest do
     end
   end
 
-  describe "following the release, GitOps" do
-    setup :gitops
+  describe "following the release, against a cluster" do
+    setup do
+      Application.put_env(:troupe_plane, :provisioning_mode, :direct)
+      FakeCluster.start()
+      :ok
+    end
 
     test "an upgrade writes the new image, as the plane rather than a person", context do
       Application.put_env(:troupe_plane, :worker_image, @old)
       {:ok, _} = Admin.profile_put(context.actor, %{name: "dev", image: "release"})
-      assert committed(context, "dev") == @old
+      assert image_in_cluster("dev") == @old
 
       # The plane restarts on the next release.
       Application.put_env(:troupe_plane, :worker_image, @new)
 
       assert [%{profile: "dev", state: :written, from: @old, to: @new}] = ReleaseImage.follow()
-      assert committed(context, "dev") == @new
+      assert image_in_cluster("dev") == @new
       assert Fleet.get_profile("dev").image == "release"
-
-      {log, 0} = System.cmd("git", ["-C", context.repo, "log", "--oneline"])
-      assert log =~ "dev updated by system:release"
 
       assert [event] = Audit.list(actor: "system:release")
       assert event.action == "profile.put"
@@ -114,11 +116,11 @@ defmodule Troupe.Plane.ReleaseImageTest do
     test "a profile that already carries the release's image is left alone", context do
       Application.put_env(:troupe_plane, :worker_image, @new)
       {:ok, _} = Admin.profile_put(context.actor, %{name: "dev", image: "release"})
-      commits = commits(context)
+      writes = FakeCluster.writes()
 
       # A second replica starting a minute after the first, which is the ordinary case.
       assert [%{profile: "dev", state: :current}] = ReleaseImage.follow()
-      assert commits(context) == commits
+      assert FakeCluster.writes() == writes
       assert Audit.list(actor: "system:release") == []
     end
 
@@ -128,27 +130,45 @@ defmodule Troupe.Plane.ReleaseImageTest do
       {:ok, _} = Fleet.put_profile(%{name: "dev", image: "release"})
 
       assert [%{profile: "dev", state: :written}] = ReleaseImage.follow()
-      assert committed(context, "pinned") == @old
+      assert image_in_cluster("pinned") == @old
     end
 
-    test "a release image outside the policy is not written", context do
+    test "a release image outside the policy is not written" do
       Application.put_env(:troupe_plane, :policy, policy())
       Application.put_env(:troupe_plane, :worker_image, "docker.io/someone/worker:1")
       {:ok, _} = Fleet.put_profile(%{name: "dev", image: "release"})
 
       assert [%{profile: "dev", state: :refused, violations: [_ | _]}] = ReleaseImage.follow()
-      refute File.exists?(Path.join([context.repo, "profiles", "dev.yaml"]))
+      assert FakeCluster.get("WorkerProfile", "dev") == nil
       assert Audit.list(actor: "system:release") == []
     end
 
-    test "with no worker image nothing is written, and the log says so", context do
+    test "with no worker image nothing is written, and the log says so" do
       {:ok, _} = Fleet.put_profile(%{name: "dev", image: "release"})
 
       log =
         capture_log(fn -> assert [%{profile: "dev", state: :unnamed}] = ReleaseImage.follow() end)
 
       assert log =~ "deployed without a worker image"
-      refute File.exists?(Path.join([context.repo, "profiles", "dev.yaml"]))
+      assert FakeCluster.get("WorkerProfile", "dev") == nil
+    end
+  end
+
+  describe "following the release, GitOps (Decision 736)" do
+    test "writes nothing: the repository names every image" do
+      FakeCluster.start()
+      Application.put_env(:troupe_plane, :provisioning_mode, :gitops)
+      Application.put_env(:troupe_plane, :worker_image, @new)
+      {:ok, _} = Fleet.put_profile(%{name: "dev", image: "release"})
+
+      log =
+        capture_log(fn ->
+          assert [%{profile: "dev", state: :repository}] = ReleaseImage.follow()
+        end)
+
+      assert log =~ "the repository names their image"
+      assert FakeCluster.writes() == []
+      assert Audit.list(actor: "system:release") == []
     end
   end
 
@@ -214,30 +234,12 @@ defmodule Troupe.Plane.ReleaseImageTest do
     end
   end
 
-  defp gitops(_context) do
-    repo = Path.join(System.tmp_dir!(), "troupe-release-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(repo)
-    {_output, 0} = System.cmd("git", ["-C", repo, "init", "--quiet", "--initial-branch=main"])
-    on_exit(fn -> File.rm_rf!(repo) end)
-
-    Application.put_env(:troupe_plane, :provisioning_mode, :gitops)
-    Application.put_env(:troupe_plane, :gitops, path: repo)
-
-    %{repo: repo}
-  end
-
-  # What the committed manifest carries, read the way the operator will read it.
-  defp committed(context, name) do
-    [context.repo, "profiles", "#{name}.yaml"]
-    |> Path.join()
-    |> YamlElixir.read_from_file!()
+  # What the cluster's resource carries, read the way the operator will read it.
+  defp image_in_cluster(name) do
+    "WorkerProfile"
+    |> FakeCluster.get(name)
     |> WorkerProfile.from_resource()
     |> Map.fetch!(:image)
-  end
-
-  defp commits(context) do
-    {count, 0} = System.cmd("git", ["-C", context.repo, "rev-list", "--count", "HEAD"])
-    String.trim(count)
   end
 
   defp policy do
