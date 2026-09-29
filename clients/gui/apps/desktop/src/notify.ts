@@ -23,11 +23,12 @@
 // itself. The preference beside the appearance settings turns it off.
 //
 // A notification leads to its session. A browser says when one is clicked, and the click
-// brings the window forward and opens the session. The shell's cannot: the notification
-// plugin reports a click only on a phone, since on a desktop it shows the toast and lets
-// go of the handle that would hear it. So there the window coming to the front shortly
-// after a notification, however it got there, is taken as the answer to it, and opens the
-// session the last one was about.
+// brings the window forward and opens the session. So does the shell on Windows, which
+// shows its toasts itself to hear their clicks. Elsewhere the shell's cannot: the
+// notification plugin reports a click only on a phone, since on a desktop it shows the
+// toast and lets go of the handle that would hear it. So there, and wherever a click goes
+// unheard, the window coming to the front shortly after a notification, however it got
+// there, is taken as the answer to it, and opens the session the last one was about.
 
 import { useEffect, useState } from "react";
 import { describeUnseen } from "@troupe/client";
@@ -49,7 +50,7 @@ function backend(): Backend | null {
     return {
       permission: () => s.permission(),
       request: () => s.request(),
-      send: (title, body) => void s.send(title, body).catch(() => undefined),
+      send: (title, body, tag) => void s.send(title, body, tag).catch(() => undefined),
     };
   }
   const N = (globalThis as { Notification?: typeof Notification }).Notification;
@@ -215,9 +216,11 @@ export function useNotifications(rows: FleetRow[], onScreen: string | null, open
   useEffect(() => {
     opener = open;
     globalThis.addEventListener?.("focus", cameBack);
+    const stop = shell()?.notifications?.onOpen?.(answered);
     return () => {
       if (opener === open) opener = null;
       globalThis.removeEventListener?.("focus", cameBack);
+      stop?.();
     };
   }, [open]);
 }

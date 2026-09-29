@@ -144,8 +144,41 @@ defmodule Troupe.E2E.Plane do
     team = team!(group, profile)
     bundle = publish!(channel, Keyword.get(opts, :bundle, default_bundle()))
     reclaim(profile)
+    settled(profile)
 
     %{profile: profile, team: team["name"] || group, channel: channel, bundle: bundle}
+  end
+
+  # A profile whose pods are behind on an upgrade is replacing them, one at a time, once
+  # they hold no session (Decision 726) — and `reclaim/1` has just made sure they hold
+  # none. A test that started then could find the profile with no pod for the half-minute
+  # a replacement takes, which is a fixture problem wearing a product problem's clothes,
+  # so a world is ready once that is over and its pods are Ready. A profile with no pods
+  # yet has nothing to wait for.
+  defp settled(profile) do
+    namespace = World.worker_namespace(profile)
+    pending = ~s|jsonpath={.status.conditions[?(@.type=="UpgradePending")].status}|
+    ready = ~s|jsonpath={.items[*].status.conditions[?(@.type=="Ready")].status}|
+
+    # Standard output only: "No resources found" is what a profile with no pods says, on
+    # standard error.
+    World.eventually(
+      fn ->
+        {upgrade, _status} =
+          World.kubectl(["get", "workerprofile", profile, "-n", World.namespace(), "-o", pending], stderr: false)
+
+        {pods, _status} =
+          World.kubectl(
+            ["get", "pods", "-n", namespace, "-l", "app.kubernetes.io/name=troupe-worker", "-o", ready],
+            stderr: false
+          )
+
+        String.trim(upgrade) != "True" and Enum.all?(String.split(pods, " ", trim: true), &(&1 == "True"))
+      end,
+      timeout: 300_000,
+      every: 5_000,
+      what: "#{profile} to finish replacing its pods"
+    )
   end
 
   @doc """

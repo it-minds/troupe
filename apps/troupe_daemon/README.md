@@ -89,7 +89,7 @@ caches windows and prices in `models.json`.
 | `TROUPE_DAEMON_IDLE_MINUTES` | exit after this long with nothing running; `0` never (default 10) |
 | `TROUPE_SESSION_IDLE_MINUTES`, `TROUPE_SESSION_DETACHED_MINUTES` | when a session goes to sleep, watched and unwatched ([below](#how-long-it-stays-up)) |
 | `TROUPE_CLIENT_TOOL_GRACE_SECONDS` | how long a call to a client's own tool waits for that client to come back ([below](#how-long-it-stays-up)) |
-| `TROUPE_DAEMON_LOG` | `file` (default: `daemon.log` in the state directory) or `stderr` |
+| `TROUPE_DAEMON_LOG` | `file` (default: `daemon.log` in the state directory, beside the TUI's `troupe.log`) or `stderr` |
 | `TROUPE_LOG_LEVEL` | `debug`, `info`, `warning`, `error` |
 | `TROUPE_STATE_HOME`, `TROUPE_CONFIG_HOME` | where sessions and config live |
 | `TROUPE_ALLOWED_ORIGINS` | origins admitted at the loopback WebSocket, beyond localhost and the desktop shell |

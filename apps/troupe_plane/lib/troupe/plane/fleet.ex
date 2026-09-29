@@ -225,6 +225,32 @@ defmodule Troupe.Plane.Fleet do
     worker |> Worker.changeset(%{draining: draining?}) |> Repo.update()
   end
 
+  @doc """
+  Record which of a profile's pods run an older revision, by worker id; every other pod
+  of the profile does not.
+
+  What placement reads to put a new session on a pod that is current while one has room
+  (Decision 726). Written where it changes and nowhere else, since it is asked every tick.
+  """
+  @spec mark_upgrade_pending(String.t(), [Ecto.UUID.t()]) :: :ok
+  def mark_upgrade_pending(profile, worker_ids) do
+    Repo.update_all(
+      from(w in Worker,
+        where: w.profile == ^profile and w.id in ^worker_ids and not w.upgrade_pending
+      ),
+      set: [upgrade_pending: true, updated_at: DateTime.utc_now()]
+    )
+
+    Repo.update_all(
+      from(w in Worker,
+        where: w.profile == ^profile and w.id not in ^worker_ids and w.upgrade_pending
+      ),
+      set: [upgrade_pending: false, updated_at: DateTime.utc_now()]
+    )
+
+    :ok
+  end
+
   @doc "Placement skips a pod above this fraction of its disk."
   @spec high_watermark() :: float()
   def high_watermark, do: Application.get_env(:troupe_plane, :disk_high_watermark, 0.80)

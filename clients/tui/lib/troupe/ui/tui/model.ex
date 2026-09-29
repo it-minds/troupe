@@ -232,9 +232,9 @@ defmodule Troupe.UI.TUI.Model do
   # word that it works, live or not. The end is unread (`badge`) until the window is
   # opened; a subagent's own end is its parent's business, not its window's.
   defp turn(%{path: path} = w, %Event{type: :agent_state, agent_path: path, data: d} = e) do
-    case {activity(d.to), e.transient?} do
+    case {d.to, e.transient?} do
       {to, false} when to in [:idle, :done] ->
-        failure = failure(w, to, reason(d))
+        failure = failure(w, to, d[:reason])
         outcome = if failure, do: :failed, else: :done
         %{w | outcome: outcome, message: failure, badge: true, ended_at: e.ts}
 
@@ -268,17 +268,7 @@ defmodule Troupe.UI.TUI.Model do
     end
   end
 
-  # A journal read back gives the state as the string it wrote and the reason as an atom
-  # (`Codec` restores only its enum keys, and `reason` is one of them, `to` not).
-  defp activity(to) when is_binary(to), do: String.to_atom(to)
-  defp activity(to), do: to
-
-  defp reason(%{reason: reason}) when is_atom(reason) and not is_nil(reason),
-    do: Atom.to_string(reason)
-
-  defp reason(d), do: d[:reason]
-
-  defp apply_to_window(w, %Event{type: type, agent_path: path, data: d, ts: ts}) do
+  defp apply_to_window(w, %Event{type: type, agent_path: path, data: d, ts: ts} = e) do
     case type do
       # A loop's iteration starts the agent's turn like any input, but nobody typed it: the
       # transcript says which iteration it is (`:loop_iteration`) rather than printing the
@@ -325,16 +315,23 @@ defmodule Troupe.UI.TUI.Model do
           end
         end)
 
+      # An agent has ended when the log says it is done (`agent_done`): a subagent that
+      # finished, or one a restart closed, says nothing more and shows no spinner.
       :agent_state ->
-        to = activity(d.to)
         errors = Map.get(w, :model_errors, %{})
-        errors = if to in [nil, :idle], do: errors, else: Map.delete(errors, path)
+        errors = if d.to in [nil, :idle], do: errors, else: Map.delete(errors, path)
 
-        Map.merge(w, %{
-          activity: Map.put(w.activity, path, to),
+        w
+        |> Map.merge(%{
+          activity: Map.put(w.activity, path, d.to),
           activity_since: ts,
           model_errors: errors
         })
+        |> then(fn w ->
+          if d.to == :done and not e.transient?,
+            do: w |> ensure_agent(path) |> update_agent(path, &%{&1 | ended_at: ts}),
+            else: w
+        end)
 
       :assistant_message ->
         text = Message.text(d.content)
@@ -430,27 +427,14 @@ defmodule Troupe.UI.TUI.Model do
       t when t in [:approval_answered, :question_answered] ->
         %{w | pending: Enum.reject(w.pending, &(&1.call_id == d.call_id))}
 
-      :finished ->
-        w = ensure_agent(w, path)
-        summary = sanitize(to_string(d.summary))
-        stat = if d[:diff_stat] in [nil, ""], do: "", else: "\n#{d.diff_stat}"
-
-        # A branch that ends with plain text finishes with that text as its summary;
-        # printing it again under the message it came from is pure duplication.
-        rendered = {:assistant, markdown(summary)}
-
-        head =
-          if List.last(w.agents[path].transcript) == rendered,
-            do: "finished (#{d.reason})",
-            else: "finished (#{d.reason}): #{summary}"
-
-        w
-        |> push(path, {:system, head <> stat})
-        |> update_agent(path, fn a -> %{a | ended_at: ts} end)
-        |> Map.put(:diff_stat, d[:diff_stat])
-
+      # A cancel stops the agent's subagents with it, and they say nothing more: what each
+      # was last doing goes, and it ended here.
       :cancelled ->
-        w |> ensure_agent(path) |> push(path, {:system, "cancelled"}) |> drop_pending(path)
+        w
+        |> ensure_agent(path)
+        |> push(path, {:system, "cancelled"})
+        |> drop_pending(path)
+        |> end_under(path, ts)
 
       # With the next step under it where there is one: on a first run with no key, the
       # first turn is where a person learns that `troupe config` sets a provider up.
@@ -463,17 +447,6 @@ defmodule Troupe.UI.TUI.Model do
 
       :todo_updated ->
         update_agent(ensure_agent(w, path), path, fn a -> %{a | todos: d.items} end)
-
-      :delegation_started ->
-        w
-        |> ensure_agent(d.child_path, %{name: d.agent, started_at: ts})
-        |> push(path, {:system, "delegated to #{d.child_path} (#{d.agent}) — →/← views it"})
-
-      :delegation_completed ->
-        w
-        |> ensure_agent(d.child_path)
-        |> update_agent(d.child_path, fn a -> %{a | ended_at: ts} end)
-        |> drop_pending(d.child_path)
 
       :profile_switched ->
         w |> push(path, {:system, "profile switched to #{d.name}"}) |> Map.put(:profile, d.name)
@@ -620,6 +593,20 @@ defmodule Troupe.UI.TUI.Model do
             p.agent_path == path or String.starts_with?(p.agent_path, prefix)
           end)
     }
+  end
+
+  # The agents under `path`, stopped with it: none of them is doing anything any more, and
+  # the ones still going when it happened ended then.
+  defp end_under(w, path, ts) do
+    under? = &String.starts_with?(&1, path <> "/")
+
+    agents =
+      Map.new(w.agents, fn
+        {p, %{ended_at: nil} = a} -> if under?.(p), do: {p, %{a | ended_at: ts}}, else: {p, a}
+        other -> other
+      end)
+
+    %{w | agents: agents, activity: Map.reject(w.activity, fn {p, _to} -> under?.(p) end)}
   end
 
   defp new_tool(id, name, input) do
@@ -888,25 +875,29 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   @doc """
-  What the status line says about the windows: how many need you, and how many ended,
-  done or failed, since they were last opened.
+  What the status line says about the windows, part by part and in this order: how many
+  need you, and how many ended, done or failed, since they were last opened. Empty when
+  none does.
   """
-  @spec attention_summary(t()) :: String.t()
-  def attention_summary(%__MODULE__{} = m) do
+  @spec attention(t()) :: [{:needs_input | :done_unread | :failed_unread, String.t()}]
+  def attention(%__MODULE__{} = m) do
     ws = windows(m)
-    needs = Enum.count(ws, &(&1.state == :needs_input))
-    done = Enum.count(ws, &(&1.state == :done_unread and &1.badge))
-    failed = Enum.count(ws, &(&1.state == :failed_unread and &1.badge))
 
     [
-      needs > 0 && "#{needs} need input",
-      done > 0 && "#{done} done",
-      failed > 0 && "#{failed} failed"
+      needs_input: {Enum.count(ws, &(&1.state == :needs_input)), "need input"},
+      done_unread: {Enum.count(ws, &(&1.state == :done_unread and &1.badge)), "done"},
+      failed_unread: {Enum.count(ws, &(&1.state == :failed_unread and &1.badge)), "failed"}
     ]
-    |> Enum.filter(& &1)
-    |> case do
+    |> Enum.filter(fn {_state, {n, _word}} -> n > 0 end)
+    |> Enum.map(fn {state, {n, word}} -> {state, "#{n} #{word}"} end)
+  end
+
+  @doc ~S|`attention/1` as one line: `"1 need input, 2 done"`, or `"idle"`.|
+  @spec attention_summary(t()) :: String.t()
+  def attention_summary(%__MODULE__{} = m) do
+    case attention(m) do
       [] -> "idle"
-      parts -> Enum.join(parts, ", ")
+      parts -> Enum.map_join(parts, ", ", &elem(&1, 1))
     end
   end
 

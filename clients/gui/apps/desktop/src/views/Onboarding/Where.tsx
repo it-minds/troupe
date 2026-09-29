@@ -1,15 +1,21 @@
 // Step 1: this machine, or an organisation's plane. A plane is signed in to on the
 // sign-in screen; here the choice is recorded and the address, if known, kept.
+//
+// The address is known from the answer given before, the plane the daemon is linked to,
+// or the one this app last signed in to (the sign-in screen's own starting point).
 
 import { useState } from "react";
 import type { JSX } from "react";
+import { likelyPlaneUrl, prefs } from "../../shell";
 import { Actions, StepFrame } from "./Step";
 import type { StepProps } from "./Step";
 
 export function Where({ flow, busy, error, onAnswer, onBack }: StepProps): JSX.Element {
   const earlier = flow.answers.where;
   const [choice, setChoice] = useState<"local" | "plane">(earlier?.["choice"] === "plane" ? "plane" : "local");
-  const [planeUrl, setPlaneUrl] = useState<string>((earlier?.["plane_url"] as string | null) ?? flow.detected.plane.url ?? "");
+  const [planeUrl, setPlaneUrl] = useState<string>(
+    () => (earlier?.["plane_url"] as string | null) ?? flow.detected.plane.url ?? prefs.get("planeUrl", likelyPlaneUrl()),
+  );
 
   return (
     <StepFrame

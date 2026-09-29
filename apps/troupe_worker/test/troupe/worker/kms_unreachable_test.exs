@@ -7,7 +7,8 @@ defmodule Troupe.Worker.KmsUnreachableTest do
   the bare transport error, in the pod's log and in what the plane relayed: the same
   nothing #249 found for an object store, which says neither which host nor that it was
   the key manager. These pin the name, the address beside it, and that it is a failure the
-  plane retries rather than one that parks the session.
+  plane retries rather than one that parks the session; and that a read or a fork says it
+  the same way.
   """
 
   use Troupe.Worker.SessionCase, async: false
@@ -59,6 +60,37 @@ defmodule Troupe.Worker.KmsUnreachableTest do
     # an outage would be the wrong answer (Decision 661).
     reason = {:kms_unreachable, @address, :econnrefused}
     assert Manager.unrestorable_report(context.session_id, reason) == nil
+  end
+
+  test "a read and a fork whose key manager does not answer are refused the same way", context do
+    context = requires_tier(context)
+
+    Application.put_env(
+      :troupe_worker,
+      :session_defaults,
+      activation(context) ++ [kms_options: [address: @address]]
+    )
+
+    on_exit(fn -> Application.delete_env(:troupe_worker, :session_defaults) end)
+
+    params = %{"session_id" => context.session_id, "team" => context.team, "epoch" => 1}
+    named = %{reason: "kms_unreachable", address: @address, detail: ":econnrefused"}
+
+    log =
+      capture_log(fn ->
+        assert {:error, read} = Commands.handle("session.read", params)
+        assert read.message == "unavailable"
+        assert read.data == named
+
+        fork = Map.put(params, "fork", %{"parent" => Troupe.Session.generate_id()})
+        assert {:error, forked} = Commands.handle("session.activate", fork)
+        assert forked.message == "unavailable"
+        assert forked.data == named
+      end)
+
+    assert log =~ "could not read #{context.session_id}"
+    assert log =~ "could not fork into #{context.session_id}"
+    assert log =~ @address
   end
 
   test "a key manager that answers and refuses is not named unreachable", context do

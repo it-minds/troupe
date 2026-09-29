@@ -127,10 +127,12 @@ defmodule Troupe.Worker.Session.Reader do
     end
   end
 
+  # A key manager or an object store the pod cannot reach is named as an activation names
+  # it (`Restore.open_context/2`, `Restore.unreachable/2`).
   defp context(opts) do
     case Keyword.fetch(opts, :context) do
       {:ok, %Context{} = context} -> {:ok, context}
-      :error -> Context.open(Keyword.fetch!(opts, :session_id), opts)
+      :error -> Restore.open_context(Keyword.fetch!(opts, :session_id), opts)
     end
   end
 

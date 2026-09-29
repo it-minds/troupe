@@ -255,7 +255,17 @@ export class DaemonClient {
     )
       .then((conn) => {
         this.conn = conn;
-        for (const view of this.views.values()) view.bind(conn);
+        // A view here was open when the last socket dropped, and its subscription went with
+        // that socket. It carries on from its cursor, so the daemon replays what it missed
+        // with no gap and no duplicate; one that fails waits for the next socket, and one
+        // closed meanwhile is let go again.
+        for (const view of this.views.values()) {
+          view.bind(conn);
+          void view
+            .resubscribe()
+            .then(() => (this.views.get(view.sessionId) === view ? undefined : view.unsubscribe()))
+            .catch(() => undefined);
+        }
         return conn;
       })
       .finally(() => {
@@ -282,15 +292,26 @@ export class DaemonClient {
    * resolves, and a caller that listened only once it had the view would miss the whole
    * history. It is given back to `close`. A caller that joins a view already open hears
    * from then on.
+   *
+   * An open that fails, refused or cut off, fails for everybody who joined it, and leaves
+   * nothing behind: no view for the next `open` to find unsubscribed, and no holder who
+   * owes a `close`.
    */
   async open(sessionId: string, hooks: ConstructorParameters<typeof SessionView>[2] = {}, listener?: Listener): Promise<SessionView> {
     this.holders.set(sessionId, (this.holders.get(sessionId) ?? 0) + 1);
     const existing = this.views.get(sessionId);
     if (listener) this.listenersOf(sessionId).set(listener, existing ? existing.listen(listener) : null);
-    if (existing) return existing;
+    // Joined while it is still subscribing, rather than handed a view that may never be.
     const pending = this.openingViews.get(sessionId);
-    if (pending) return pending;
+    try {
+      return await (pending ?? existing ?? this.subscribeView(sessionId, hooks));
+    } catch (e) {
+      await this.close(sessionId, listener);
+      throw e;
+    }
+  }
 
+  private subscribeView(sessionId: string, hooks: ConstructorParameters<typeof SessionView>[2]): Promise<SessionView> {
     const opening = (async () => {
       const conn = await this.connection();
       const view = new SessionView(conn, sessionId, hooks);
@@ -298,7 +319,12 @@ export class DaemonClient {
       const listeners = this.listenersOf(sessionId);
       for (const [l, stop] of listeners) if (!stop) listeners.set(l, view.listen(l));
       this.views.set(sessionId, view);
-      await view.subscribe(0);
+      try {
+        await view.subscribe(0);
+      } catch (e) {
+        if (this.views.get(sessionId) === view) this.views.delete(sessionId);
+        throw e;
+      }
       return view;
     })().finally(() => this.openingViews.delete(sessionId));
 

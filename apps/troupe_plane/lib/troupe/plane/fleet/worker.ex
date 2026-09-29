@@ -8,7 +8,9 @@ defmodule Troupe.Plane.Fleet.Worker do
   plane stops placing on it the moment it goes quiet.
 
   `namespace` and `pod_name` together are the identity: a pod that comes back after a
-  restart is the same pod, with the same ordinal and the same PVC.
+  restart is the same pod, with the same ordinal and the same PVC. `pod_uid` tells one
+  incarnation of it from the next, which only an upgrade has to (Decision 726), and
+  `upgrade_pending` is whether the operator last said this one runs an older revision.
   """
 
   use Ecto.Schema
@@ -22,6 +24,7 @@ defmodule Troupe.Plane.Fleet.Worker do
     field :profile, :string
     field :ordinal, :integer
     field :pod_name, :string
+    field :pod_uid, :string
     field :namespace, :string
     field :endpoint, :string
     field :node_name, :string
@@ -30,6 +33,7 @@ defmodule Troupe.Plane.Fleet.Worker do
     field :last_heartbeat_at, :utc_datetime_usec
     field :healthy, :boolean, default: false
     field :draining, :boolean, default: false
+    field :upgrade_pending, :boolean, default: false
     field :capacity, :integer, default: 0
     field :active_sessions, :integer, default: 0
     field :disk_used_bytes, :integer, default: 0
@@ -46,6 +50,7 @@ defmodule Troupe.Plane.Fleet.Worker do
     :profile,
     :ordinal,
     :pod_name,
+    :pod_uid,
     :namespace,
     :endpoint,
     :node_name,
@@ -53,6 +58,7 @@ defmodule Troupe.Plane.Fleet.Worker do
     :last_heartbeat_at,
     :healthy,
     :draining,
+    :upgrade_pending,
     :capacity,
     :active_sessions,
     :disk_used_bytes,
