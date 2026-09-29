@@ -16,7 +16,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-registry="${TROUPE_REGISTRY:-ghcr.io/objective-mj}"
+registry="${TROUPE_REGISTRY:-ghcr.io/it-minds}"
 tag="${TROUPE_IMAGE_TAG:-dev}"
 cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
 push="${TROUPE_PUSH:-false}"

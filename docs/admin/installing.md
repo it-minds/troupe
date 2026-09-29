@@ -43,10 +43,20 @@ Create the Secrets the chart expects before installing ([configuration.md Part D
 ## 2. CRDs, then the chart
 
 ```bash
-kubectl apply -f charts/troupe/crds/
-helm upgrade --install troupe charts/troupe \
+version=0.7.0     # a release: https://github.com/it-minds/troupe/releases
+chart=oci://ghcr.io/it-minds/charts/troupe
+helm show crds "$chart" --version "$version" | kubectl apply --server-side -f -
+helm upgrade --install troupe "$chart" --version "$version" \
   --namespace troupe-system --create-namespace --values my-values.yaml
 ```
+
+Every release publishes the chart twice, as `oci://ghcr.io/it-minds/charts/troupe` and as
+`troupe-<version>.tgz` on its release page, and either works as `$chart`; so does
+`charts/troupe` in a checkout of the release's tag. The chart's image tags default to its
+version, and the images it names are public on `ghcr.io/it-minds` (`troupe-plane`,
+`troupe-operator`, `troupe-worker`, `troupe-a2a`, `troupe-gui`), so nothing needs a pull
+secret. A cluster that pulls through a registry of its own copies them there and sets
+each `*.image.repository`, `policy.allowedImageRepositories` and `imagePullSecrets`.
 
 `WorkerProfile`, `TroupePolicy` and `TeamVolume` go first because Helm does not upgrade CRDs
 it installed. Start from `values.small.yaml` or `values.example.yaml`; what you cannot

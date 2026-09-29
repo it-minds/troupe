@@ -843,36 +843,18 @@ citation keeps meaning what it meant.
      another in a pod is the drift this was meant to end, so `scripts/locks-agree.exs`
      fails when any of them differ and CI runs it.
 
-669. **A release is a merged change to `VERSION`, and it deploys itself.** Four
-     repositories delivered four ways, nothing had ever been tagged, and the plane was
-     deployed by hand from one laptop. Issue #37 asked whether deploying should stay
-     manual, and the team's answer is no (Martin, 2026-09-21: "I want a deployment on
-     releases too").
+669. **A release is a merged change to `VERSION`.** Four repositories delivered four
+     ways, nothing had ever been tagged, and the plane was deployed by hand from one
+     laptop. Issue #37 asked whether deploying should stay manual, and the team's answer
+     is no (Martin, 2026-09-21: "I want a deployment on releases too").
 
      *Cutting one.* `scripts/release <version>` opens a pull request whose only change is
      `VERSION` and its copies (`scripts/version.exs set`), and merging it is the release;
      674 says exactly when a push cuts one. A tag pushed by hand is not a release.
      `.github/CI.md` has what a release runs and publishes.
 
-     *Deploying it.* `scripts/deploy` against the `production` environment: the chart's
-     CRDs server-side (Helm never upgrades them), `helm upgrade --wait` rolling back on
-     failure, `rollout status`, and then `/.well-known/troupe` must report the release's
-     version and commit. Pushing an image and changing production are still two
-     decisions; the second is a reviewed merge instead of a laptop session. A release
-     candidate (`-rc.N`) runs everything and deploys as a server-side dry run.
-     `deploy.yml` is for what the automatic path does not do: roll an earlier release
-     back, or render one, through the same script. The environment's deployments are the
-     record of what ran where and when, from which merge.
-
-     *Credentials.* `production` holds `KUBECONFIG` and `DEPLOY_VALUES` and the variable
-     `PLANE_URL`, and should allow `main` alone. The kubeconfig is the `troupe-deployer`
-     service account's (`deploy/ci-deployer.yaml`, `scripts/ci-kubeconfig`), not a
-     person's `scw` login. It is not a one-namespace Role: the chart creates CRDs,
-     ClusterRoles and an admission policy, and granting a ClusterRole takes `escalate`
-     and `bind`, which is cluster-admin in principle. That is said in the manifest
-     rather than hidden, and the rules list what the chart touches so the account's
-     everyday reach is a deploy's. A required reviewer on the environment is left to the
-     team: the bump pull request's review is the approval this design assumes.
+     *Deploying it* is not this repository's: a release publishes its images and chart
+     and ends, and a deployment follows the release from somewhere of its own (735).
 
      *Worker images* are the part a chart cannot roll, because each profile names its
      own; a profile whose image is `release` follows the chart's worker image (672).
@@ -2803,3 +2785,31 @@ citation keeps meaning what it meant.
      the check names 149 lines in 34 files on the chunk's tip and passes here, and CI
      lints and renders the chart with both remaining values files, one of them with a
      pull secret.
+
+735. **A release publishes its images and its chart to `ghcr.io`, public, and deploys
+     nothing.** Issue #186. The images went to whichever registry four repository
+     secrets named, which was our own cloud's, and `release.yml` ended by rolling our
+     cluster with a kubeconfig from its `production` environment, as `deploy.yml` did by
+     hand: the product's repository held a credential for one deployment's
+     infrastructure and knew which cluster was ours. Now `images.yml` pushes the five
+     images to `ghcr.io/<owner>/troupe-<name>` with the workflow's own `GITHUB_TOKEN`
+     (`packages: write`), tagged as before (`sha-<short>`, and the version for a release
+     or a pre-release), labelled with this repository as their source. There is no
+     registry to configure and no override for one: a secret naming a registry is a door
+     into somebody's infrastructure, and a deployment that wants a mirror copies from
+     `ghcr.io`. The packages are public, so a cluster pulls them with no credential;
+     GitHub creates a package private, and an organisation owner makes each one public
+     once, which no workflow can do. A release also pushes its chart as
+     `oci://ghcr.io/<owner>/charts/troupe` at its version, beside the `.tgz` on the
+     release page (322), in the job that publishes the release and just before it does,
+     so a chart version in the registry is a release that finished; the release's notes
+     show both. A pre-release pushes its chart too, when it built its images, since a
+     chart whose images were never pushed installs nothing that runs; Helm takes a
+     pre-release version only when it is named. `release.yml` ends at the published
+     release and `deploy.yml` is gone: a deployment pins a version, holds its own values
+     and credentials, and takes the published chart and images from a repository of its
+     own, which nothing here names, dispatches to or waits for. `charts/troupe/values.yaml`
+     names the `ghcr.io` images and its policy allows the worker's, and the development
+     loop (`scripts/build-images`, `scripts/remote-up`, `dev/kind/values.yaml`, the
+     cluster suite) builds and runs under the same names, so a kind cluster runs the
+     chart's own defaults. Supersedes the deploying half of 669.

@@ -8,16 +8,16 @@
 #     daemon change tests the daemon, and a change to `troupe_core` tests core and every
 #     app that depends on it. The filters are on jobs and not on the workflow because a
 #     workflow skipped by `paths:` leaves a required check pending forever, while a job
-#     skipped by `if:` reports success. A push to `main` also publishes the five images as
-#     `sha-<short>` once what it changed has passed.
+#     skipped by `if:` reports success. A push to `main` also publishes the five images to
+#     ghcr.io as `sha-<short>` once what it changed has passed.
 #
 #   * **Full** — called by `nightly.yml` and `release.yml` with `full: true`: every job,
 #     whatever changed, plus the soak (`soak` more runs of each app's suite) and the
 #     cluster suite when asked. That is what a release has passed.
 #
 # Releases are not cut here: `release.yml` (a merged change to VERSION: the full suite,
-# then tag, publish and deploy) and `prerelease.yml` (by hand: an untested build of any
-# commit, published as a pre-release) do that.
+# then tag and publish) and `prerelease.yml` (by hand: an untested build of any commit,
+# published as a pre-release) do that. Nothing in this repository deploys.
 #
 # GitHub Actions syntax, which Forgejo Actions also runs. Nothing here depends on
 # github.com specifically except the marketplace actions, which Forgejo resolves from
@@ -735,4 +735,3 @@ jobs:
     permissions:
       contents: read
       packages: write
-    secrets: inherit
