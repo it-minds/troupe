@@ -579,9 +579,17 @@ resumes from, so reattaching costs no replay and shows no line twice.
 
 The directory decides what you can come back to: sessions are keyed by a hash
 of the workspace path, so `/resume` inside the TUI (or `troupe resume` with no
-id) lists what *this* directory has — when each session was last touched, its
-branches and how they came to rest, and the first prompt as a title — and Enter
-replays the one you pick into the window you are already looking at.
+id) lists what *this* directory has — each session that said something to a
+model or started a branch, when it was last touched, its branches and which of
+them need you or have stopped — and Enter replays the one you pick into the
+window you are already looking at.
+
+`troupe`'s own log is `troupe.log` in the same state directory, beside the
+daemon's `daemon.log`: `~/.local/state/troupe/troupe.log` (`$XDG_STATE_HOME/troupe`
+when that is set) on Linux and macOS, `%LOCALAPPDATA%\troupe\troupe.log` on
+Windows, and under `TROUPE_STATE_HOME` when that is set. `troupe daemon status`
+prints the directory as `state`. A daemon `troupe` starts inside itself, when none
+is running, logs there too.
 
 ## Development
 

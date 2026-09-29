@@ -234,6 +234,53 @@ describe("answering a notification", () => {
     expect(focus).toHaveBeenCalled();
   });
 
+  it("where the shell hears a click, it opens the session that notification was about", async () => {
+    // The desktop shell on Windows: its own toasts, and the click on one reported with
+    // the session it was shown for.
+    vi.spyOn(window, "focus").mockImplementation(() => undefined);
+    const shown: Array<{ body: string; sessionId: string }> = [];
+    let clicked: ((sessionId: string) => void) | null = null;
+    window.troupe = {
+      name: "Test shell",
+      version: "0",
+      notifications: {
+        permission: async () => "granted",
+        request: async () => "granted",
+        send: async (_title, body, sessionId) => void shown.push({ body, sessionId }),
+        onOpen: (listener) => {
+          clicked = listener;
+          return () => {
+            clicked = null;
+          };
+        },
+      },
+    };
+    const first = daemon.seed("/home/ada/first");
+    daemon.markSeen(first.id);
+    const other = await awayFromTheList("/home/ada/kunder");
+    await waitFor(() => clicked, "the app listening for the shell");
+
+    // Two notifications while the window is not in front; the person clicks the older.
+    focused = false;
+    first.log.append("turn_ended", {});
+    await waitFor(() => shown.length === 1, "the first notification");
+    other.log.append("turn_ended", {});
+    await waitFor(() => shown.length === 2, "the second notification");
+    expect(shown.map((s) => s.sessionId)).toEqual([first.id, other.id]);
+
+    clicked!(first.id);
+    focused = true;
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(sessionOnScreen, "the session the click was on");
+    await sleep(200);
+    expect(document.querySelector("h1.title")?.textContent).toBe("/home/ada/first");
+
+    // Gone with the app: nothing is left listening.
+    unmount!();
+    unmount = null;
+    expect(clicked).toBeNull();
+  });
+
   it("where the notification says nothing of a click, the window coming back shortly after opens its session", async () => {
     // The desktop shell's notifications: shown by the OS, and no click reported.
     const shown: Array<{ title: string; body: string }> = [];

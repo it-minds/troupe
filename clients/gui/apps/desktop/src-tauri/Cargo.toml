@@ -37,9 +37,18 @@ tauri-plugin-dialog = "2"
 # the host answers for it, and wry answers only the clipboard's. `~2.4` because 2.5 wants
 # tauri 2.12, and tauri moves with the rest of its group, not behind a plugin.
 tauri-plugin-notification = "~2.4"
+# One copy of the app: a second launch, from the Start menu or from a click on a
+# notification, hands its arguments to the one running and exits. `~2.4` because 2.5
+# wants tauri 2.12 (Decision 717); it has no JavaScript half.
+tauri-plugin-single-instance = "~2.4"
 # Windows Credential Manager / macOS Keychain / Secret Service. The refresh token lives
 # here and nowhere else; see src/secrets.rs.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+# The toast the notification plugin shows underneath, shown by the shell itself so that a
+# click on it is heard (src/notify.rs). Already in the lock through notify-rust.
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.8"
 
 [profile.release]
 codegen-units = 1

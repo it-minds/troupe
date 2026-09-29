@@ -88,8 +88,8 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 | `permission denied` logging into OpenBao | no reviewer JWT on the Kubernetes auth mount |
 | A worker Ingress answers 503 | the ingress namespace lacks `troupe.dev/ingress=true`, or the pod is drained and was never deleted |
 | `the pod did not accept the session`, a signer crash on `nil` | object-store credentials missing from the **worker** namespace |
-| `the pod did not accept the session` with `object_store_unreachable`, or `this pod cannot use its object store` in a worker's log when it enrols | the pod cannot reach `objectStore.endpoint`: check its egress. With Cilium, the `troupe-egress` CiliumNetworkPolicy in `troupe-w-<profile>` names the host when it is outside the cluster |
-| `the pod did not accept the session` with `kms_unreachable` | the pod cannot reach `bao.address`: check its egress, as for the object store above |
+| `the pod did not accept the session` with `object_store_unreachable`; in a worker's log, `could not read` with it, or `this pod cannot use its object store` when it enrols | the pod cannot reach `objectStore.endpoint`: check its egress. With Cilium, the `troupe-egress` CiliumNetworkPolicy in `troupe-w-<profile>` names the host when it is outside the cluster |
+| `the pod did not accept the session` with `kms_unreachable`, or `could not read` with it in a worker's log | the pod cannot reach `bao.address`: check its egress, as for the object store above |
 | Workers enrol, then go quiet | the worker namespace lacks `troupe.dev/workers=true` |
 | `429` from the plane behind one office address | `plane.ingress.rateLimit` is per client IP; raise `connections` first |
 | `unauthorized` pulling an image in a worker namespace | the pull secret exists in `troupe-system` only |

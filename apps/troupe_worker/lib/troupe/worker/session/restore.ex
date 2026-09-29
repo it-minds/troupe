@@ -13,6 +13,7 @@ defmodule Troupe.Worker.Session.Restore do
   history.
   """
 
+  alias Troupe.KMS.OpenBao
   alias Troupe.ObjectStore
   alias Troupe.Paths
   alias Troupe.Protocol.Event
@@ -104,6 +105,26 @@ defmodule Troupe.Worker.Session.Restore do
 
   defp endpoint(%ObjectStore{endpoint: endpoint}), do: endpoint
   defp endpoint(_signed), do: nil
+
+  @doc """
+  Open a session's context, naming a key manager the pod cannot reach.
+
+  Opening a context asks the key manager for the session's key, and one the pod cannot
+  reach is `{:kms_unreachable, address, reason}`, as `unreachable/2` names an object store:
+  the transport error alone said neither which host nor that it was the key manager.
+  Activating, reading and forking all open one here, so all three say it the same way. A
+  key manager that answered and refused is left as it said.
+  """
+  @spec open_context(String.t(), keyword()) :: {:ok, Context.t()} | {:error, term()}
+  def open_context(session_id, opts) do
+    case Context.open(session_id, opts) do
+      {:error, %Req.TransportError{reason: reason}} ->
+        {:error, {:kms_unreachable, OpenBao.address(Keyword.get(opts, :kms_options, [])), reason}}
+
+      result ->
+        result
+    end
+  end
 
   defp read_all(context, segments) do
     Enum.reduce_while(segments, {:ok, []}, fn segment, {:ok, acc} ->

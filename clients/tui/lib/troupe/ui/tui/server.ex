@@ -1102,18 +1102,21 @@ defmodule Troupe.UI.TUI.Server do
 
   ## Session picker
 
-  # Sessions this window offers to switch to: the ones on disk for the directory the
-  # TUI was opened in that got as far as a branch, plus the session on screen (which
-  # may still be empty) so the list always says where you are.
+  # Sessions this window offers to switch to: the ones the daemon has for the directory
+  # the TUI was opened in that did something, spoke to a model or started a branch, plus
+  # the session on screen (which may still be empty) so the list always says where you
+  # are. A branch is not one of them: it is a window of its parent's, counted on its row.
   defp pickable_sessions(state) do
     case Client.sessions({:local, state.workspace}) do
       {:ok, sessions} ->
-        Enum.filter(sessions, &(&1.branches != [] or &1.id == state.session_id))
+        Enum.filter(sessions, &(&1.id == state.session_id or (&1.parent == nil and worked?(&1))))
 
       {:error, _reason} ->
         []
     end
   end
+
+  defp worked?(entry), do: entry.branches != [] or (entry.tokens || 0) > 0
 
   defp open_sessions(state) do
     entries = pickable_sessions(state)
@@ -1231,8 +1234,8 @@ defmodule Troupe.UI.TUI.Server do
     :ok
   end
 
-  # A session with no branches is the scratch session `troupe` opens before you have
-  # dispatched anything: nothing in its log will be read again, and leaving it running
+  # A session nobody has typed into is the scratch session `troupe` opens before you have
+  # said anything: nothing in its log will be read again, and leaving it running
   # would keep a watcher and a memory refresher alive behind the session you switched to.
   # One that did something keeps running, so its agents finish and you can switch back.
   defp retire(sid) do
