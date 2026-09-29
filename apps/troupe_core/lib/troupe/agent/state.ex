@@ -117,7 +117,10 @@ defmodule Troupe.Agent.State do
     # because `gen_statem` re-delivers a postponed event on *every* state change, and
     # `thinking -> acting` is a state change: without this, one queued input would be
     # announced once per transition until the agent finally took it.
-    queued: MapSet.new()
+    queued: MapSet.new(),
+    # How often this agent may start again within how many milliseconds before its Node
+    # gives up (Decision 727), for a crash to tell whether it is the one that ends it.
+    restart_limit: {3, 6_000}
   ]
 
   @type t :: %__MODULE__{
@@ -164,7 +167,8 @@ defmodule Troupe.Agent.State do
           compact_resume: :idle | :thinking,
           finish_summary: String.t() | nil,
           fake: pid() | atom() | nil,
-          queued: MapSet.t(String.t())
+          queued: MapSet.t(String.t()),
+          restart_limit: {pos_integer(), pos_integer()}
         }
 
   @doc "This agent's name for logs and labels: `root` or `root/explore#1`."

@@ -23,7 +23,8 @@ machine and you see the same transcript; two people can open the same session at
 With no model set up, plain `troupe` asks the same questions first, and whatever needs a
 model says to run `troupe config` rather than failing without a reason. `troupe doctor`
 checks the setup — the config files, the provider and its key (with a real request), the
-daemon, the two programs on the PATH and any plane you are signed in to — one line each,
+helper every command runs under, the daemon, the two programs on the PATH and any plane
+you are signed in to — one line each,
 and exits 1 when one fails.
 
 **The desktop app** asks the same questions on its first run, as screens: where the work

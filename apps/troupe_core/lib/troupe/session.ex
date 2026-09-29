@@ -50,7 +50,11 @@ defmodule Troupe.Session do
       task: Keyword.get(opts, :task),
       bundle: Keyword.get(opts, :bundle),
       fake: fake_server(session_id, config, opts),
-      restart: :permanent
+      # A root that keeps crashing is not started again here (Decision 727): its Node has
+      # already restarted it as often as it allows, and each time again would be as many
+      # more. Its giving up ends the session, which comes back dormant from its log.
+      restart: :transient,
+      significant: true
     ]
 
     children =
@@ -110,7 +114,12 @@ defmodule Troupe.Session do
           {Troupe.Session.Summary, session_id: session_id}
         ]
 
-    Supervisor.init(children, strategy: :rest_for_one, max_restarts: 3, max_seconds: 10)
+    Supervisor.init(children,
+      strategy: :rest_for_one,
+      max_restarts: 3,
+      max_seconds: 10,
+      auto_shutdown: :any_significant
+    )
   end
 
   # A caller that passed its own scripted model (the test suite) keeps it. Otherwise

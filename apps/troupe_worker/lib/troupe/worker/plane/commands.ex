@@ -16,7 +16,6 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.SessionId
   alias Troupe.Session.Log
-  alias Troupe.Sessions.Context
   alias Troupe.Sessions.Fork
   alias Troupe.Sessions.Sealer
   alias Troupe.Sessions.Storage
@@ -25,7 +24,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.Worker.Drain
   alias Troupe.Worker.MCP
   alias Troupe.Worker.Plane.Link
-  alias Troupe.Worker.Session.{Manager, Reader, Workspace}
+  alias Troupe.Worker.Session.{Manager, Reader, Restore, Workspace}
   alias Troupe.Worker.Sessions
 
   require Logger
@@ -117,8 +116,13 @@ defmodule Troupe.Worker.Plane.Commands do
            "agents" => info.agents
          }}
 
+      # Said in the pod's log as well: the plane hands the client an endpoint whatever
+      # this answers, so the log is where an operator finds it.
       {:error, reason} ->
-        {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+        Logger.error("troupe worker: could not read #{params["session_id"]}: #{inspect(reason)}")
+
+        {:error,
+         unreachable_error(reason) || Error.new(:internal_error, %{reason: inspect(reason)})}
     end
   end
 
@@ -306,9 +310,10 @@ defmodule Troupe.Worker.Plane.Commands do
   # parent again, possibly after it has been erased.
   defp forked(%{"fork" => %{"parent" => parent_id} = fork} = params) when is_binary(parent_id) do
     child_id = params["session_id"]
+    opts = Keyword.merge(defaults(), child_opts(params))
 
-    with {:ok, child} <- Context.open(child_id, Keyword.merge(defaults(), child_opts(params))),
-         {:ok, existing} <- Storage.list_segments(child.store, child_id) do
+    with {:ok, child} <- Restore.open_context(child_id, opts),
+         {:ok, existing} <- segments(child) do
       if existing == [] do
         copy_from_parent(child, fork, params)
       else
@@ -316,11 +321,18 @@ defmodule Troupe.Worker.Plane.Commands do
         {:ok, nil}
       end
     else
-      {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+      {:error, reason} -> {:error, fork_error(child_id, reason, inspect(reason))}
     end
   end
 
   defp forked(_params), do: {:ok, nil}
+
+  defp segments(child) do
+    case Storage.list_segments(child.store, child.session_id) do
+      {:error, reason} -> {:error, Restore.unreachable(child.store, reason)}
+      listed -> listed
+    end
+  end
 
   defp copy_from_parent(child, fork, params) do
     parent_id = fork["parent"]
@@ -328,7 +340,7 @@ defmodule Troupe.Worker.Plane.Commands do
     parent_opts =
       Keyword.merge(defaults(), team: fork["parent_team"] || params["team"], session_id: parent_id)
 
-    with {:ok, parent} <- Context.open(parent_id, parent_opts),
+    with {:ok, parent} <- Restore.open_context(parent_id, parent_opts),
          {:ok, result} <-
            Fork.copy(parent, child,
              seq: fork["seq"],
@@ -343,8 +355,17 @@ defmodule Troupe.Worker.Plane.Commands do
       {:ok, result.entitlements}
     else
       {:error, reason} ->
-        {:error, Error.new(:internal_error, %{reason: "fork failed: #{inspect(reason)}"})}
+        reason = Restore.unreachable(child.store, reason)
+        {:error, fork_error(child.session_id, reason, "fork failed: #{inspect(reason)}")}
     end
+  end
+
+  # A fork is the first half of an activation, and a store or a key manager it cannot
+  # reach is named as the activation would name it, in the pod's log and in the answer
+  # the plane relays. Anything else keeps its wording.
+  defp fork_error(session_id, reason, wording) do
+    Logger.error("troupe worker: could not fork into #{session_id}: #{inspect(reason)}")
+    unreachable_error(reason) || Error.new(:internal_error, %{reason: wording})
   end
 
   # The rule itself is `Troupe.Sessions.Fork.narrow/2`, beside the fork it is about. This is
@@ -537,19 +558,28 @@ defmodule Troupe.Worker.Plane.Commands do
 
   # A tree that cannot be put back because the directory the session was recorded in is
   # gone is named as such, so the plane can park the session rather than retry it
-  # (Decision 661). An object store the pod cannot reach is named, with its endpoint,
-  # because the transport error alone said neither which host nor that it was storage; it
-  # stays a failure the plane may retry. So is a key manager, with its address. An
-  # exception — a `Troupe.Config.Error` from a profile's config — is its message, which
-  # says what to fix, where its inspected struct said nothing a person reads. Anything
-  # else is the opaque failure it always was.
+  # (Decision 661). An object store or a key manager the pod cannot reach is named by
+  # `unreachable_error/1`. An exception — a `Troupe.Config.Error` from a profile's config —
+  # is its message, which says what to fix, where its inspected struct said nothing a
+  # person reads. Anything else is the opaque failure it always was.
   @doc false
   @spec activation_error(term()) :: Error.t()
   def activation_error({:not_a_directory, path}) do
     Error.new(:not_found, %{reason: "workspace_gone", detail: to_string(path)})
   end
 
-  def activation_error({:object_store_unreachable, endpoint, reason}) do
+  def activation_error(%{__exception__: true} = error),
+    do: Error.new(:internal_error, %{reason: Exception.message(error)})
+
+  def activation_error(reason),
+    do: unreachable_error(reason) || Error.new(:internal_error, %{reason: inspect(reason)})
+
+  # An object store the pod cannot reach is named, with its endpoint, because the
+  # transport error alone said neither which host nor that it was storage; so is a key
+  # manager, with its address. Both stay failures the plane may retry, and both are said
+  # the same way whatever the pod was doing when it met them: activating a session,
+  # forking one, reading one. `nil` for anything else, which each caller words as before.
+  defp unreachable_error({:object_store_unreachable, endpoint, reason}) do
     Error.new(:unavailable, %{
       reason: "object_store_unreachable",
       endpoint: endpoint,
@@ -557,7 +587,7 @@ defmodule Troupe.Worker.Plane.Commands do
     })
   end
 
-  def activation_error({:kms_unreachable, address, reason}) do
+  defp unreachable_error({:kms_unreachable, address, reason}) do
     Error.new(:unavailable, %{
       reason: "kms_unreachable",
       address: address,
@@ -565,10 +595,7 @@ defmodule Troupe.Worker.Plane.Commands do
     })
   end
 
-  def activation_error(%{__exception__: true} = error),
-    do: Error.new(:internal_error, %{reason: Exception.message(error)})
-
-  def activation_error(reason), do: Error.new(:internal_error, %{reason: inspect(reason)})
+  defp unreachable_error(_reason), do: nil
 
   # The session's terms, as config overrides. Seconds on the wire because that is how
   # a person writes a schedule; milliseconds inside because that is what the budget

@@ -12,7 +12,9 @@ defmodule Troupe.Agent.Node do
   Restart intensity is deliberately tight: a deterministically crashing agent should
   fail fast so its parent can report an error for that delegation and carry on, rather
   than looping. Exceeding it takes this Node down; the parent sees `:DOWN` on its
-  delegation monitor.
+  delegation monitor. The root has no parent, so its Node is a significant child of the
+  session, and exceeding it takes the session down, after the root has ended its turn
+  with `agent_failed` (Decision 727).
   """
 
   use Supervisor
@@ -40,8 +42,19 @@ defmodule Troupe.Agent.Node do
       start: {__MODULE__, :start_link, [opts]},
       type: :supervisor,
       restart: Keyword.get(opts, :restart, :temporary),
+      significant: Keyword.get(opts, :significant, false),
       shutdown: 10_000
     }
+  end
+
+  @doc """
+  How often the agent may start again, and over how many seconds, before this Node gives
+  up: `{max_restarts, max_seconds}`. The agent reads it too, to know which start is the
+  last one it will get (Decision 727).
+  """
+  @spec intensity(keyword()) :: {pos_integer(), pos_integer()}
+  def intensity(opts) do
+    {Keyword.get(opts, :max_restarts, 3), Keyword.get(opts, :max_seconds, 5)}
   end
 
   @impl Supervisor
@@ -58,10 +71,12 @@ defmodule Troupe.Agent.Node do
       {Troupe.Agent.Server, opts}
     ]
 
+    {max_restarts, max_seconds} = intensity(opts)
+
     Supervisor.init(children,
       strategy: :one_for_all,
-      max_restarts: Keyword.get(opts, :max_restarts, 3),
-      max_seconds: Keyword.get(opts, :max_seconds, 5)
+      max_restarts: max_restarts,
+      max_seconds: max_seconds
     )
   end
 

@@ -87,12 +87,11 @@ Found by the chunk 4, 5 and 7 fixers, 2026-09-26/27.
 - The desktop app starts the daemon with the app's install directory as its working
   directory (`spawn_any` in `src-tauri/src/daemon.rs`), so the uninstaller probably can't
   remove that directory while the daemon runs (unconfirmed).
-- An A2A task stays `working` after the failure guard stops its turn (`turn_ended`
-  reason `tool_failures`).
-- `troupe run --headless` exits at the first rest, so the reply to a line another client
-  queued mid-turn is never printed.
+- Fixed in PR #262: `troupe run --headless` exited at the first rest, so the reply to a
+  line another client queued mid-turn was never printed.
 
-Found by the chunk 5 fixers, 2026-09-26.
+The A2A task that stayed `working` after the failure guard stopped its turn was fixed in
+PR #266. Found by the chunk 5 fixers, 2026-09-26.
 
 ### D30 - Two sources for the brand's assets (low)
 
@@ -114,61 +113,33 @@ fixers (PRs #210, #211), 2026-09-26.
 The rest of this entry was fixed in PRs #234 and #237. Found by the chunk 6 fixers,
 2026-09-26/27.
 
-### D35 - Clicking a desktop notification on Windows doesn't open its session (medium)
-
-`tauri-plugin-notification` can't report a click on desktop (its `show()` drops the
-handle; `onAction` is fed only by the phone plugins). Since PR #238 the app opens the
-session when its window comes to the front within 15 s of a notification, which a click
-usually causes. A real click handler needs the shell to show its own toast through
-`tauri-winrt-notification`'s `on_activated` (already in `Cargo.lock`), and single-instance
-handling beside it, because a click may start a second copy from the Start-menu shortcut
-(unconfirmed). Found by the fixer of PR #238, 2026-09-27.
-
 ### D36 - TUI leftovers after the attention fix (low)
 
-- `clients/tui/lib/troupe/ui/headless/printer.ex` still reads the dead
-  `:branch_state`/`:branch_failed`.
-- `view.ex`'s `waits_on_you?/1` and its status-line recount (from PR #239) are redundant
-  since PR #241 derives the window state in the model; so is its comment that no daemon
-  sends `branch_state`.
-- `model.ex`'s `:finished`, `:delegation_started` and `:delegation_completed` clauses are
-  dead (`Translate` never emits them), so a finished subagent's `ended_at` is never set,
-  and after a cancel a killed subagent's last activity stays on its window.
-- The session picker's `branch_states` column reads `Client.summary` branches, and
-  `Troupe.Client.Daemon` always returns `branches: []`, so it is always empty.
 - An idle screen stops ticking, so the sessions page's and HQ's ages are only as fresh
   as the last tick.
 - A question for the design rather than a defect: chatting from the command line, the
   session's own window shows `done ●`, dimmed, and "1 done" after every reply until you
   open it (PR #241).
-- `Troupe.Codec.decode_event` restores only its `@enum_keys` as atoms, so on a rebuild
-  from the journal `agent_state` comes back with `to: "idle"` (a string) but
-  `reason: :cancelled` (an atom); readers comparing `to` with atoms break on a reopened
-  screen.
 - `model.ex` highlights code with syntect's dark-only `base16_ocean_dark`, so code keeps
   dark-theme colours on a light terminal.
 
+The rest of this entry (the printer's and the model's dead clauses, the view's recount,
+the picker's empty branches column, `Troupe.Codec`'s `to`/`reason`) was fixed in PR #262.
 Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
 
 ### D37 - Small leftovers from the 0.6.1 work (low)
 
-- `Troupe.Tools.Output.cap/2` computes "N more bytes" before cutting back to the last
-  newline, so it under-reports what was dropped.
 - The settings help's "Where things live" says `~/.config/troupe/config.yaml`; on
   Windows the file is under `%APPDATA%\troupe`.
-- An agent that crashes in `init` restarts in a tight loop with no backoff (dozens of
-  `agent_restarted` a second when the reaper can't spawn).
 - `troupe --watch` still walks the whole workspace for `.gitignore` rules at start (PR
   #240 moved that walk out of every other session start).
-- The desktop client: after the daemon socket drops, `DaemonClient.connection()` rebinds
-  open views but never resubscribes them, so a session screen open across a daemon
-  restart may stop receiving events (unconfirmed); `DaemonClient.open` leaves a view
-  registered when `subscribe` fails, and later opens reuse it.
-- The desktop first run's Where step pre-fills the plane address from the daemon's link
-  only, not from the app's own `planeUrl` preference.
-- The comment above `handle("memory.get")` in `dispatch.ex` belongs to `agents.list`.
 
-Found by the chunk 7 fixers, 2026-09-27.
+Found by the chunk 7 fixers, 2026-09-27. The restart loop of an agent that crashes as it
+starts, `Output.cap/2`'s count and the stray comment in `dispatch.ex` were fixed in PR
+#266. The desktop client's three items (a view not resubscribed after a dropped daemon
+socket, a failed `open` leaving its view behind, and the Where step ignoring the app's
+`planeUrl`) were fixed in PR #263; `plane-stack.yml`'s OpenBao and the split Dependabot
+groups in PR #265.
 
 ## Taken
 
@@ -217,6 +188,7 @@ Found by the chunk 7 fixers, 2026-09-27.
 | `troupe` on Windows died at boot in a large directory and broke the console (every session start walked the workspace for `.gitignore`) | #231, PR #240 |
 | D34 - On a pod, a deleted file is never reported to clients | #252, PR #254 |
 | D38 - `UpgradePending` says every pod is current while one runs the old image (confirmed) | #251, PR #253 |
+| D35 - Clicking a desktop notification on Windows doesn't open its session | PR #263 |
 | D6 - Plane mode opens a just-created local session as a team session (confirmed) | PR #265 |
 | D9 - The admin docs describe a `subject_claim` setting the plane does not have (confirmed: no code in this repository has it; the plane keys on `sub`) | PR #265 |
 

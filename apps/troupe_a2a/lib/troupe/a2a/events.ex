@@ -17,6 +17,7 @@ defmodule Troupe.A2A.Events do
   | `llm_response` (root) | an `agent` message; `completed` when the turn ends with it |
   | `agent_done` | `completed` with the summary, or `failed` |
   | `llm_error`, `budget_exhausted` | `failed` |
+  | `turn_ended` with a `reason` (root) | `failed`: the harness stopped the turn, and the message says why |
   | `cancelled` (root) | `canceled`; a subagent's ends only the approvals it and those under it asked for |
   | `published` | an artifact with one `file` part, the hash as its id |
   | a blob reference | an artifact with one `file` part served from `blob.get` |
@@ -178,6 +179,16 @@ defmodule Troupe.A2A.Events do
     finish(acc, event, "failed", text_message(acc, "The budget ran out: #{data["limit"]}."))
   end
 
+  # The harness ended the root's turn rather than the model: a tool kept failing and the
+  # answer was to stop (Decision 687), or the agent kept crashing (Decision 727). A turn
+  # the model ended has no reason, and its answer has completed the task already.
+  defp fold(acc, %Event{type: "turn_ended", data: %{"reason" => reason} = data} = event)
+       when is_binary(reason) do
+    if root?(event),
+      do: finish(acc, event, "failed", text_message(acc, stopped(reason, data["detail"]))),
+      else: {acc, []}
+  end
+
   # The session's cancel is the root's, and ends the task. One that reached only a
   # subagent ends what that agent and those under it were asking, and nothing else: the
   # root is still at work, and so is the task.
@@ -244,6 +255,18 @@ defmodule Troupe.A2A.Events do
   defp mid_turn(acc, event, text) do
     {acc, [status_update(acc, event, text_message(acc, text), false)]}
   end
+
+  # What a failed task says about a turn the harness stopped.
+  defp stopped("tool_failures", _detail),
+    do: "A tool kept failing, and the harness stopped the turn."
+
+  defp stopped("agent_failed", detail) when is_binary(detail),
+    do: "The agent kept crashing, and its session was stopped: #{detail}"
+
+  defp stopped("agent_failed", _detail),
+    do: "The agent kept crashing, and its session was stopped."
+
+  defp stopped(reason, _detail), do: "The harness stopped the turn: #{reason}."
 
   # A second ending changes nothing: `budget_exhausted` follows the `agent_done` that
   # already said so, and a task does not fail twice.

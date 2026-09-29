@@ -90,9 +90,9 @@ defmodule Troupe.Tools.Grep do
       {:ok, output, _status} ->
         {:error, "ripgrep failed: #{String.trim(output)}"}
 
-      # No reaper for this platform means no subprocess — but the built-in scanner
-      # needs none, so search still works.
-      {:error, :reaper_missing} ->
+      # No reaper for this platform, or one that will not start, means no subprocess —
+      # but the built-in scanner needs none, so search still works.
+      {:error, _reason} ->
         builtin_search(root, pattern, opts, ctx)
     end
   end

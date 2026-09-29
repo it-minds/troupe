@@ -224,4 +224,50 @@ defmodule Troupe.WorkerProfile do
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
   end
+
+  # -- finishing an upgrade (Decision 726) --------------------------------------
+  #
+  # A pod rolls `OnDelete`, and the two halves of replacing one belong to two writers. The
+  # operator knows which pods run an older revision and says so in the status, which is
+  # its own. The plane knows when a pod's drain has finished and says so in an annotation,
+  # because its grant is on the resource and not on the status. Both are parsed here so
+  # the two cannot come to spell them differently.
+
+  @drained "troupe.dev/drained"
+
+  @doc "The annotation the plane records finished drains in."
+  @spec drained_annotation() :: String.t()
+  def drained_annotation, do: @drained
+
+  @doc """
+  The pods the plane has finished draining, by name, with the revision each ran.
+
+  A JSON object in `metadata.annotations["troupe.dev/drained"]`, such as
+  `{"troupe-w-dev-1":"troupe-w-dev-7c9f"}`. Missing or unreadable is nothing drained.
+  """
+  @spec drained(map()) :: %{String.t() => String.t()}
+  def drained(resource) do
+    with json when is_binary(json) <- get_in(resource, ["metadata", "annotations", @drained]),
+         {:ok, %{} = drained} <- Jason.decode(json) do
+      for {pod, revision} <- drained, is_binary(revision), into: %{}, do: {pod, revision}
+    else
+      _unrecorded -> %{}
+    end
+  end
+
+  @doc "The annotation's value for these finished drains."
+  @spec encode_drained(%{String.t() => String.t()}) :: String.t()
+  def encode_drained(drained), do: Jason.encode!(drained)
+
+  @doc """
+  The pods the operator reports on an older revision, as it wrote them in
+  `status.podsBehind`: each one's name, uid and revision. A pod already being replaced is
+  not among them.
+  """
+  @spec pods_behind(map()) :: [%{pod: String.t(), uid: String.t() | nil, revision: String.t() | nil}]
+  def pods_behind(resource) do
+    for %{"pod" => pod} = entry <- get_in(resource, ["status", "podsBehind"]) || [], is_binary(pod) do
+      %{pod: pod, uid: entry["uid"], revision: entry["revision"]}
+    end
+  end
 end

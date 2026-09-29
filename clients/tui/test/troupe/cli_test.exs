@@ -290,6 +290,75 @@ defmodule Troupe.CLITest do
     end
   end
 
+  # D26: a line another client sends while the agent works is queued, and the agent takes
+  # it as its next turn the moment this one ends. The run exited at that first rest, and
+  # the reply to the line was never printed; it waits for that turn now.
+  test "headless printer waits for a line queued mid-turn, and prints its reply" do
+    script = [
+      {:tool, "shell", %{"command" => "sleep 2"}},
+      {:text_and_tools, "Slept.", []},
+      {:text_and_tools, "And that too.", []}
+    ]
+
+    {sid, _, _} = start_session!(script: script)
+    {io, _} = printer!(sid)
+
+    say!(sid, "go")
+    await_event("root", :tool_started, 10_000)
+    say!(sid, "and then this")
+
+    assert_receive {:rest, 0}, 20_000
+    out = contents(io)
+    assert out =~ "root> Slept."
+    assert out =~ "root> < and then this"
+    assert out =~ "root> And that too."
+    refute_receive {:rest, _}, 200
+  end
+
+  # An agent that ended short takes no more input: the harness drops a queued line
+  # (`input_after_done`), so there is no turn to wait for.
+  test "headless printer does not wait for a queued line an agent that ended short drops" do
+    script = [
+      {:tool, "shell", %{"command" => "sleep 2"}},
+      %{"stop" => "refusal", "text" => "I will not."}
+    ]
+
+    {sid, _, _} = start_session!(script: script)
+    {io, _} = printer!(sid)
+
+    say!(sid, "go")
+    await_event("root", :tool_started, 10_000)
+    say!(sid, "and then this")
+
+    assert_receive {:rest, 1}, 20_000
+    assert contents(io) =~ "root> exit 1: the agent ended refused"
+  end
+
+  # A queued line can be lost (an agent that crashes takes its mailbox with it), and a run
+  # must not wait for ever on a turn that is not coming.
+  test "headless printer ends the run when a queued line is not taken in time" do
+    {sid, _, _} = start_session!(script: [])
+    {:ok, io} = StringIO.open("")
+    me = self()
+
+    {:ok, pid} =
+      Printer.start_link(
+        session_id: sid,
+        target: "root",
+        io: io,
+        queued_ms: 1_000,
+        on_rest: fn code -> send(me, {:rest, code}) end
+      )
+
+    queued = %{content: "later", source: :user, command_id: "c-lost", actor: "a", queued: true}
+    send(pid, {:troupe_event, durable(sid, 1_000_001, :input, queued)})
+    send(pid, {:troupe_event, durable(sid, 1_000_002, :agent_state, %{to: :idle})})
+
+    refute_receive {:rest, _}, 500
+    assert_receive {:rest, 0}, 5_000
+    assert contents(io) =~ "root> a line sent while the agent worked was not taken within 1 s"
+  end
+
   # Nobody can press a key in headless mode: an approval the printer cannot answer is
   # denied, and the run still rests — with 3, because what the agent was refused may be
   # what the task needed.
@@ -502,6 +571,11 @@ defmodule Troupe.CLITest do
   defp contents(io) do
     {_, out} = StringIO.contents(io)
     out
+  end
+
+  # An event of the session's log as the printer receives it, with a `seq` of its own.
+  defp durable(sid, seq, type, data) do
+    %Troupe.Event{session_id: sid, agent_path: "root", type: type, seq: seq, ts: 1, data: data}
   end
 
   # What the session's worker publishes when its connection goes down or comes back.

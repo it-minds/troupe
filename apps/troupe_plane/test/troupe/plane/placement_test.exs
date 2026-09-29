@@ -154,6 +154,25 @@ defmodule Troupe.Plane.PlacementTest do
     end
   end
 
+  test "a pod behind on an upgrade takes a session only once no current pod has room" do
+    # The emptier pod is the one behind, and it would win on room alone. Each session put
+    # on it is one more it has to wait for before it can be replaced (Decision 726).
+    [current, behind] = profile("dev", 2, per_pod: 2)
+    :ok = Fleet.mark_upgrade_pending("dev", [behind.id])
+
+    for n <- 1..2 do
+      session("s-#{n}", "dev")
+      assert {:ok, %{worker: worker}} = Placement.reserve("dev", "s-#{n}")
+      assert worker.id == current.id, "a pod behind was placed on while a current one had room"
+    end
+
+    # And with the current pod full, rather than a session waiting for a pod that is not
+    # there yet.
+    session("s-3", "dev")
+    assert {:ok, %{worker: worker}} = Placement.reserve("dev", "s-3")
+    assert worker.id == behind.id
+  end
+
   test "a draining pod is not a reader either: it is out of its Service's endpoints" do
     [first, second] = profile("dev", 2, per_pod: 4)
     {:ok, _} = Fleet.drain(second)
