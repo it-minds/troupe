@@ -274,7 +274,8 @@ limits above. A2A: buffering off, 3600 s timeouts, 2m bodies. Worker (nginx only
 timeouts, `limit-connections: 50`. The controller of the worked example
 ([installing.md §6](installing.md#6-a-worked-example-on-managed-services)) adds
 `proxy-body-size: 16m`, so an oversized `input.send` is refused by the worker rather than
-the proxy, and PROXY protocol where the load balancer sends it. The plane's JSON parser takes 4 MiB, control frames 8 MiB, worker frames 16 MiB.
+the proxy, and PROXY protocol where the load balancer sends it. The plane's JSON parser
+takes 4 MiB, control frames 8 MiB, worker frames 16 MiB.
 
 ---
 

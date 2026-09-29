@@ -2,33 +2,25 @@
 # it — a managed PostgreSQL, an S3-compatible object store, a load balancer in front of
 # ingress-nginx — plus cert-manager and OpenBao run in the cluster.
 #
-# Copy it, replace every value marked CHANGE ME, and install:
-#
-#     kubectl apply -f charts/troupe/crds/
-#     helm upgrade --install troupe charts/troupe \
-#       --namespace troupe-system --create-namespace \
-#       --values my-values.yaml
+# Copy it, replace every value marked CHANGE ME, and install it as
+# `docs/admin/installing.md` section 2 says; section 6 there walks this shape.
 #
 # Every host, name and size here is a placeholder or a reasoned default, not anybody's
 # deployment. Troupe creates no secrets: the ones this file names must exist in
 # `troupe-system` before the install, and the object-store and pull secrets in every
-# worker namespace as well. `docs/admin/installing.md` walks the same shape from an empty
-# cluster, with the commands that create them.
+# worker namespace as well.
 
 namespace: troupe-system
 
-# The images are public on ghcr.io and need no credential. A cluster that pulls through a
-# registry of its own — a mirror, or images built with `scripts/build-images` — names that
-# registry in the four `image.repository` values below and in
-# `policy.allowedImageRepositories`, and its pull secret here. The secret must exist in
-# `troupe-system` and in every worker namespace.
+# No image is set here: the chart's defaults are the images of its own release, public on
+# `ghcr.io/it-minds` and needing no credential, with tags that follow the chart's version.
+# A cluster that pulls through a registry of its own — a mirror, or images built with
+# `scripts/build-images` — sets each `*.image.repository` and
+# `policy.allowedImageRepositories` to it, and names its pull secret here. The secret
+# must exist in `troupe-system` and in every worker namespace.
 imagePullSecrets: []
 
-# No `tag` on any image: each defaults to the chart's appVersion, so the chart and the
-# images it runs are one version.
 operator:
-  image:
-    repository: ghcr.io/it-minds/troupe-operator
   replicas: 1
   resources:
     requests: {cpu: 100m, memory: 128Mi}
@@ -54,8 +46,6 @@ operator:
 
 plane:
   enabled: true
-  image:
-    repository: ghcr.io/it-minds/troupe-plane
   # Two, and `distribution: name` with them. The cluster-unique actors are registered
   # with `:global`, so replicas that do not form an Erlang cluster are not two replicas
   # of one plane but two planes, each placing sessions as if it were alone.
@@ -119,16 +109,6 @@ plane:
   scim:
     enabled: false
 
-# The GUI and the worker image of this release, from the same registry as the rest. A
-# profile whose image is `release` runs the worker named here, which the policy below
-# has to allow.
-gui:
-  image:
-    repository: ghcr.io/it-minds/troupe-gui
-worker:
-  image:
-    repository: ghcr.io/it-minds/troupe-worker
-
 # OpenBao, in the cluster. Not a managed service, and deliberately: Troupe uses KV v2 for
 # per-session data keys and the transit engine to sign plane tokens, and a cloud's key
 # manager is rarely either of those APIs. `docs/admin/installing.md` says how to run it.
@@ -155,6 +135,8 @@ objectStore:
 policy:
   install: true
   name: default
+  # The chart's own worker image, which a profile whose image is `release` runs, has to
+  # be allowed here; so does a mirror's, if the cluster pulls through one.
   allowedImageRepositories:
     - ghcr.io/it-minds/troupe-worker
   maxReplicas: 8

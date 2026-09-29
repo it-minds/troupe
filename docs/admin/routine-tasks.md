@@ -10,15 +10,17 @@ Arguments and their meanings are in the method table
 
 ## Upgrade
 
-1. `kubectl apply --server-side --force-conflicts -f charts/troupe/crds/` — Helm never
-   upgrades CRDs, and a new field is invisible without it. Server-side, because a CRD's
-   last-applied annotation outgrows the limit a client-side apply has.
+1. `helm show crds "$chart" --version "$version" | kubectl apply --server-side
+   --force-conflicts -f -`, with `$chart` and `$version` as in
+   [installing.md §2](installing.md#2-crds-then-the-chart) — Helm never upgrades CRDs,
+   and a new field is invisible without it. Server-side, because a CRD's last-applied
+   annotation outgrows the limit a client-side apply has.
 2. Set the image tags in your values (empty means the chart's `appVersion`) and
-   `helm upgrade troupe charts/troupe -n troupe-system --values my-values.yaml --wait
-   --timeout 10m --rollback-on-failure` (`--atomic` on Helm 3). The `pre-upgrade` hook
-   migrates first; `kubectl -n troupe-system logs job/troupe-plane-migrate` if it fails. A
-   single plane replica rolls by `Recreate`: seconds without a plane, live sessions
-   unaffected.
+   `helm upgrade troupe "$chart" --version "$version" -n troupe-system --values
+   my-values.yaml --wait --timeout 10m --rollback-on-failure` (`--atomic` on Helm 3).
+   The `pre-upgrade` hook migrates first; `kubectl -n troupe-system logs
+   job/troupe-plane-migrate` if it fails. A single plane replica rolls by `Recreate`:
+   seconds without a plane, live sessions unaffected.
 3. `kubectl -n troupe-system rollout status deployment/troupe-plane`, then
    `curl -sS https://<plane host>/.well-known/troupe | jq .plane.build`: the version and
    commit must be the ones you rolled, or the rollout has not finished or a tag did not

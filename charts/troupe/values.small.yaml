@@ -4,28 +4,22 @@
 # The same shape as `values.example.yaml` — a managed Kubernetes, PostgreSQL and object
 # store, ingress-nginx and cert-manager, OpenBao in-cluster — with every number turned
 # down and the reason for each written next to it. Copy this, fill in the placeholders
-# marked CHANGE ME, and install:
-#
-#     helm upgrade --install troupe charts/troupe \
-#       --namespace troupe-system --create-namespace \
-#       --values my-values.yaml
+# marked CHANGE ME, and install it as `docs/admin/installing.md` section 2 says.
 #
 # What it gives up is written here: a plane restart is a short outage rather than a
 # failover, and three worker pods is the ceiling.
 
 namespace: troupe-system
 
-# The published images need no credential. A registry of your own that does names its
-# pull secrets here; they must exist in `troupe-system` and in every worker namespace.
+# No image is set here: the chart's defaults are its own release's, public and needing
+# no credential. A registry of your own that does names its pull secrets here; they must
+# exist in `troupe-system` and in every worker namespace.
 imagePullSecrets: []
 
 networkPolicy:
   enabled: true
 
-# No `tag` on any image: each defaults to the chart's appVersion.
 operator:
-  image:
-    repository: ghcr.io/it-minds/troupe-operator
   replicas: 1
   # The operator idles at a few tens of MiB and works in bursts when a profile changes.
   # 96Mi is comfortable for a BEAM with `+Q` set; 256Mi is the ceiling for a resync of
@@ -48,8 +42,6 @@ operator:
 
 plane:
   enabled: true
-  image:
-    repository: ghcr.io/it-minds/troupe-plane
   # One replica, and distribution off with it. This is the whole of the saving on the
   # plane: half the memory, no Erlang cluster to form, and no second node to keep the
   # first one honest. What it costs is availability during an upgrade — the Deployment
@@ -120,16 +112,6 @@ plane:
   scim:
     enabled: false
 
-# The GUI and the worker image of this release, from the same registry as the rest. A
-# profile whose image is `release` runs the worker named here, which the policy below
-# has to allow.
-gui:
-  image:
-    repository: ghcr.io/it-minds/troupe-gui
-worker:
-  image:
-    repository: ghcr.io/it-minds/troupe-worker
-
 bao:
   address: http://openbao.troupe-system.svc:8200
   authPath: kubernetes
@@ -145,6 +127,7 @@ objectStore:
 policy:
   install: true
   name: default
+  # The chart's own worker image, which a profile whose image is `release` runs.
   allowedImageRepositories:
     - ghcr.io/it-minds/troupe-worker
   # The ceiling is the node pool. Two small nodes hold the plane, the operator, OpenBao,

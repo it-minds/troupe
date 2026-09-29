@@ -75,10 +75,10 @@ helm upgrade --install troupe charts/troupe \
 
 It needs PostgreSQL, an S3-compatible bucket with versioning, OpenBao and an OIDC
 provider. `values.small.yaml` is one plane, one operator, the GUI and a handful of workers;
-`values.example.yaml` is a worked example on a managed cluster, every value of its own
-marked as one to change. [docs/admin/installing.md](docs/admin/installing.md) starts from
-an empty cluster, and [docs/admin/](docs/admin/README.md) is the operator's tree. A team with
-its own client sets `gui.enabled: false` and points `plane.appUrl` at it.
+`values.example.yaml` is a worked example on a managed cluster, with every value you must
+change marked. [docs/admin/installing.md](docs/admin/installing.md) starts from an empty
+cluster, and [docs/admin/](docs/admin/README.md) is the operator's tree. A team with its
+own client sets `gui.enabled: false` and points `plane.appUrl` at it.
 
 ## Releasing
 
@@ -88,11 +88,12 @@ A release is a merged change to `VERSION` (Decision 669):
 scripts/release 0.3.1        # opens the pull request that changes VERSION
 ```
 
-Merging it runs the full suite on that commit, builds the images at `0.3.1`, tags
-`v0.3.1`, and publishes the chart and the daemon, TUI and desktop builds. It deploys
-nothing: a deployment, the maintainers' own included, rolls a release onto its cluster
-from its own repository ([docs/admin/routine-tasks.md](docs/admin/routine-tasks.md#upgrade)).
-A **pre-release** of any commit, untested, is a button in Actions.
+Merging it runs the full suite on that commit, builds the images at `0.3.1` and pushes
+them to `ghcr.io`, tags `v0.3.1`, and publishes the chart and the daemon, TUI and desktop
+builds. It deploys nothing: a deployment, the maintainers' own included, rolls a release
+onto its cluster from a repository of its own
+([docs/admin/routine-tasks.md](docs/admin/routine-tasks.md#upgrade)). A **pre-release**
+of any commit, untested, is a button in Actions.
 [`.github/CI.md`](.github/CI.md) has the whole picture.
 
 ## The front door and the console

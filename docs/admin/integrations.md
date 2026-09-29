@@ -46,8 +46,8 @@ the commands, in development shape, in `dev/kind/dependencies.yaml`. A plane wit
 a static token nor a readable projected token logs one error naming both and answers
 `/.well-known/jwks.json` with 503.
 
-**One replica** with Raft is enough, and without a KMS that OpenBao's seal speaks, a
-**Shamir seal** that something unseals after a restart; a share kept in a Secret protects
+**One replica** with Raft is enough. Without a KMS that OpenBao's seal can use, the seal
+is **Shamir** and something unseals it after a restart; a share kept in a Secret protects
 a stolen volume and not against a cluster admin
 ([installing.md §6](installing.md#6-a-worked-example-on-managed-services)). Live sessions
 survive an OpenBao restart because a worker holds its key in memory; nothing can be

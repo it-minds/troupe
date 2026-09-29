@@ -50,17 +50,8 @@ defmodule CheckNeutral do
       "a deployment's app registration"
   }
 
-  # Each until the release stops deploying and pushes to ghcr.io (#186): the deploy job,
-  # the workflow beside it and CI.md name the account they deploy as and the values file
-  # they deploy with, `images.yml` the registry it pushed to, and Decision 669 the deploy
-  # it describes, whose paragraphs go as superseded when that does.
-  @allowed %{
-    "DECISIONS.md" => "Decision 669's deploying paragraphs",
-    ".github/workflows/release.yml" => "the deploy job",
-    ".github/workflows/deploy.yml" => "the deploy workflow",
-    ".github/workflows/images.yml" => "the registry it pushed to",
-    ".github/CI.md" => "the deploy's secrets"
-  }
+  # path => why it keeps a name for now, and what ends that. Empty, and best left so.
+  @allowed %{}
 
   def main(["--digest", name]) do
     IO.puts(~s|    "#{digest(String.downcase(name))}" => "<what it is>",|)
