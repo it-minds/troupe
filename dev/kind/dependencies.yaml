@@ -47,7 +47,7 @@ metadata:
   name: llm-credentials
   namespace: troupe-system
 stringData:
-  # Replaced by `scripts/remote-up` with the value of ITM_LLM_GW_KEY, so the real key
+  # Replaced by `scripts/remote-up` with the value of TROUPE_GATEWAY_KEY, so the real key
   # is never written to a file in this repository.
   api-key: replace-me
 ---

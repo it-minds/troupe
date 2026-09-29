@@ -7,9 +7,8 @@
 | [developer/](developer/README.md) | change the code: architecture, setup, testing, build, deployment, conventions |
 | [../PROTOCOL.md](../PROTOCOL.md) | write a client |
 
-Also here: [deploying-on-scaleway.md](deploying-on-scaleway.md), the A2A facade
-([a2a.md](a2a.md)), what the product dials ([egress-allowlist.md](egress-allowlist.md),
-generated), what it depends on and under which licences
+Also here: the A2A facade ([a2a.md](a2a.md)), what the product dials
+([egress-allowlist.md](egress-allowlist.md), generated), what it depends on and under which licences
 ([third-party-licences.md](third-party-licences.md), generated), the console's design ([design/admin/DESIGN.md](design/admin/DESIGN.md)), and
 two plans open issues build on: [plans/admin-surface.md](plans/admin-surface.md) and
 [program/control-panel.md](program/control-panel.md).

@@ -110,7 +110,7 @@ it and commit the result after changing a key. `TROUPE_PROVIDER=fake` and
 
 | Variable | Read by | Effect |
 |---|---|---|
-| `TROUPE_SKIP_BUILD`, `TROUPE_PROFILE_NAME`, `TROUPE_GATEWAY_URL`, `TROUPE_GATEWAY_MODEL`, `TROUPE_GATEWAY_SMALL_MODEL`, `ITM_LLM_GW_KEY` | `scripts/remote-up` | skip the image build; the dev profile's name (`dev`), model endpoint, models, and the key written into its `llm-credentials` Secret (never into a file here) |
+| `TROUPE_SKIP_BUILD`, `TROUPE_PROFILE_NAME`, `TROUPE_GATEWAY_URL`, `TROUPE_GATEWAY_MODEL`, `TROUPE_GATEWAY_SMALL_MODEL`, `TROUPE_GATEWAY_KEY` | `scripts/remote-up` | skip the image build; the dev profile's name (`dev`), model endpoint (unset, a placeholder that resolves nowhere; its host is added to the policy either way), models, and the key written into its `llm-credentials` Secret (never into a file here) |
 | `TROUPE_KIND_CLUSTER`, `TROUPE_REGISTRY`, `TROUPE_IMAGE_TAG`, `TROUPE_PUSH` | kind scripts, `scripts/build-images` | cluster name (`troupe-dev`), image prefix, tag (`dev`), push instead of `kind load` |
 | `TROUPE_PG_CONTAINER`, `TROUPE_PITR_DB` | `scripts/pitr-drill` | the compose container and database |
 | `TROUPE_REAPER_TARGETS` | `mix compile.reaper` | triples to build, or `all` |

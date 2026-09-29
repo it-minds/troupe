@@ -23,7 +23,7 @@ defmodule Troupe.Plane.MCPAuthTest do
   alias Troupe.Plane.Web.Router
 
   @issuer "https://login.example.test/9c5b/v2.0"
-  @client "b18faeb7-ad28-4e80-bcd7-ec540c9b8c8e"
+  @client "11111111-2222-4333-8444-555555555555"
 
   setup do
     previous = Application.get_env(:troupe_plane, :oidc)

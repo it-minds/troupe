@@ -1,32 +1,31 @@
-# Troupe on Scaleway, as small as it can honestly be run: one plane, one operator, a
-# handful of worker pods, on a node pool of two small instances.
+# Troupe as small as it can honestly be run: one plane, one operator, a handful of worker
+# pods, on a node pool of two small nodes (about 3 vCPU and 4 GB each).
 #
-# The same shape as `values.scaleway.yaml` — Kapsule, Managed PostgreSQL, Object Storage,
-# ingress-nginx and cert-manager, OpenBao in-cluster — with every number turned down and
-# the reason for each written next to it. Copy this, fill in the placeholders marked
-# CHANGE ME, and install:
+# The same shape as `values.example.yaml` — a managed Kubernetes, PostgreSQL and object
+# store, ingress-nginx and cert-manager, OpenBao in-cluster — with every number turned
+# down and the reason for each written next to it. Copy this, fill in the placeholders
+# marked CHANGE ME, and install:
 #
 #     helm upgrade --install troupe charts/troupe \
 #       --namespace troupe-system --create-namespace \
-#       --values charts/troupe/values.small.yaml
+#       --values my-values.yaml
 #
-# What "small" costs, roughly, is in `docs/deploying-on-scaleway.md` under "The small
-# release". What it gives up is written here: a plane restart is a short outage rather
-# than a failover, and three worker pods is the ceiling.
+# What it gives up is written here: a plane restart is a short outage rather than a
+# failover, and three worker pods is the ceiling.
 
 namespace: troupe-system
 
-# A registry that needs a credential to pull from names its secrets here; Scaleway's
-# does. The names must exist in `troupe-system` and in every worker namespace.
+# The published images need no credential. A registry of your own that does names its
+# pull secrets here; they must exist in `troupe-system` and in every worker namespace.
 imagePullSecrets: []
 
 networkPolicy:
   enabled: true
 
+# No `tag` on any image: each defaults to the chart's appVersion.
 operator:
   image:
-    repository: rg.fr-par.scw.cloud/troupe/troupe-operator   # CHANGE ME: your registry
-    tag: "0.2.0"
+    repository: ghcr.io/it-minds/troupe-operator
   replicas: 1
   # The operator idles at a few tens of MiB and works in bursts when a profile changes.
   # 96Mi is comfortable for a BEAM with `+Q` set; 256Mi is the ceiling for a resync of
@@ -34,7 +33,7 @@ operator:
   resources:
     requests: {cpu: 50m, memory: 96Mi}
     limits: {cpu: 300m, memory: 256Mi}
-  ciliumAvailable: true
+  ciliumAvailable: true                                      # CHANGE ME: false without Cilium
   ingressClassName: nginx
   workersScheme: wss
   workersPort: ""
@@ -50,8 +49,7 @@ operator:
 plane:
   enabled: true
   image:
-    repository: rg.fr-par.scw.cloud/troupe/troupe-plane      # CHANGE ME: your registry
-    tag: "0.2.0"
+    repository: ghcr.io/it-minds/troupe-plane
   # One replica, and distribution off with it. This is the whole of the saving on the
   # plane: half the memory, no Erlang cluster to form, and no second node to keep the
   # first one honest. What it costs is availability during an upgrade — the Deployment
@@ -89,7 +87,7 @@ plane:
   distPort: 9100
   maxPorts: 65536
   provisioningMode: direct
-  platformAdminGroup: troupe-platform-admins
+  platformAdminGroup: troupe-platform-admins                 # CHANGE ME: the group's id
   groupsClaim: groups
   database:
     secretName: troupe-plane-database
@@ -97,12 +95,14 @@ plane:
   secretKeyBase:
     secretName: troupe-plane-secret-key-base
     secretKey: value
+  # The endpoints are the provider's discovery document's; `values.example.yaml` says
+  # which.
   oidc:
     issuer: https://login.example.com                        # CHANGE ME
-    clientId: troupe
-    authorizeUrl: https://login.example.com/oauth2/v2.0/authorize
-    deviceUrl: https://login.example.com/oauth2/v2.0/devicecode
-    tokenUrl: https://login.example.com/oauth2/v2.0/token
+    clientId: troupe                                         # CHANGE ME
+    authorizeUrl: https://login.example.com/authorize        # CHANGE ME
+    deviceUrl: https://login.example.com/device              # CHANGE ME
+    tokenUrl: https://login.example.com/token                # CHANGE ME
     secretName: ""
   # A way into the panel when the identity provider cannot let you in — a misconfigured
   # client, an expired signing key, or the first five minutes of an installation before
@@ -125,10 +125,10 @@ plane:
 # has to allow.
 gui:
   image:
-    repository: rg.fr-par.scw.cloud/troupe/troupe-gui        # CHANGE ME: your registry
+    repository: ghcr.io/it-minds/troupe-gui
 worker:
   image:
-    repository: rg.fr-par.scw.cloud/troupe/troupe-worker     # CHANGE ME: your registry
+    repository: ghcr.io/it-minds/troupe-worker
 
 bao:
   address: http://openbao.troupe-system.svc:8200
@@ -137,16 +137,16 @@ bao:
   tokenSecretName: ""
 
 objectStore:
-  endpoint: https://s3.fr-par.scw.cloud
+  endpoint: https://s3.example.com                           # CHANGE ME: your provider's S3 endpoint
   bucket: troupe-sessions                                    # CHANGE ME if you like
-  region: fr-par
+  region: region-1                                           # CHANGE ME: the bucket's region
   secretName: troupe-object-store
 
 policy:
   install: true
   name: default
   allowedImageRepositories:
-    - rg.fr-par.scw.cloud/troupe/troupe-worker               # CHANGE ME: your registry
+    - ghcr.io/it-minds/troupe-worker
   # The ceiling is the node pool. Two small nodes hold the plane, the operator, OpenBao,
   # the ingress controller and cert-manager with room for about three worker pods at
   # the limits below — and a worker pod that cannot be scheduled is a profile that
@@ -157,23 +157,23 @@ policy:
   # pod's own disk; four of them share 4Gi comfortably, eight would not. Dormant
   # sessions cost nothing, so this bounds concurrent work rather than accounts.
   maxSessionsPerPod: 4
-  # The largest pod a profile may ask for. Two vCPUs and 4Gi is what one DEV1-M-class
+  # The largest pod a profile may ask for. Two vCPUs and 4Gi is what one 3 vCPU, 4 GB
   # node can give a single pod after the system and the plane have taken theirs; a
   # profile asking for more would be admitted and never scheduled.
   maxResources:
     cpu: "2"
     memory: 4Gi
   allowedEgress:
-    - llm-gw.itmindsinternal.dk
+    - llm-gw.example.com                                     # CHANGE ME: your model gateway, or the providers' hosts
     - github.com
     - "*.github.com"
-  # `scw-bssd` for a worker's own disk — 20GiB per pod unless the profile says
-  # otherwise, at about €2 a month each — and `scw-sfs` for team volumes, which cost
-  # €4 a month each at the 25GB floor. On a small release, grant team volumes
+  # A block class for a worker's own disk — 20GiB per pod unless the profile says
+  # otherwise — and a file-storage class for team volumes, which managed file services
+  # tend to bill from a minimum size upward. On a small release, grant team volumes
   # deliberately.
   allowedStorageClasses:
-    - scw-bssd
-    - scw-sfs
+    - block-storage                                          # CHANGE ME: ReadWriteOnce
+    - file-storage                                           # CHANGE ME: ReadWriteMany
   orgVolume: {}
   namespacePrefix: troupe-w-
   workersDomain: workers.example.com                         # CHANGE ME: your wildcard

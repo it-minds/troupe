@@ -26,7 +26,7 @@ migrations run as a release eval before it serves.
 ```sh
 docker compose -f dev/plane-stack.yml up -d --wait --wait-timeout 600 --build
 # or a published build, instead of this checkout's:
-TROUPE_PLANE_IMAGE=rg.fr-par.scw.cloud/troupe/troupe-plane:0.2.14 \
+TROUPE_PLANE_IMAGE=ghcr.io/it-minds/troupe-plane:<version> \
   docker compose -f dev/plane-stack.yml up -d --wait --no-build
 
 cd packages/client

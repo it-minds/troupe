@@ -94,7 +94,7 @@ spec:
             - name: TROUPE_OBJECT_BUCKET
               value: {{ .Values.objectStore.bucket | quote }}
             # Passed on to every worker pod. SigV4 signs the region string, so a pod
-            # signing `us-east-1` against a bucket in `fr-par` is refused by a provider
+            # signing `us-east-1` against a bucket in `eu-west-1` is refused by a provider
             # that checks — and the pods write most of a session's log.
             - name: TROUPE_OBJECT_REGION
               value: {{ .Values.objectStore.region | quote }}

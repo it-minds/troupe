@@ -21,7 +21,7 @@ defmodule Troupe.Operator.ResourcesTest do
     policy = Policy.from_resource(policy())
     # A region that is not the default, so an assertion about it is an assertion that the
     # value travelled rather than that two constants happen to match.
-    settings = %Settings{tls_secret_name: "workers-tls", object_store_region: "fr-par"}
+    settings = %Settings{tls_secret_name: "workers-tls", object_store_region: "eu-west-1"}
 
     %{
       resources: Resources.for_profile(profile, policy, settings),
@@ -383,7 +383,7 @@ defmodule Troupe.Operator.ResourcesTest do
       # SigV4 signs the region string, so a pod left on the default signs `us-east-1` at
       # a bucket that is not there. The plane was always told; the pods, which write most
       # of a session's log, were not.
-      assert env["TROUPE_OBJECT_REGION"] == "fr-par"
+      assert env["TROUPE_OBJECT_REGION"] == "eu-west-1"
       assert env["TROUPE_SESSIONS_PER_POD"] == "4"
     end
 

@@ -211,13 +211,12 @@ points `plane.appUrl` at it.
 CI is the root [`ci.yml`](../../.github/workflows/ci.yml): its `gui` job typechecks, tests
 and builds this workspace, `gui-e2e` runs the client against a plane built from the same
 commit, and `images` builds and pushes `troupe-gui` beside the server images on every
-push to `main`, tagged `sha-<short>`. **A release deploys itself** (root Decision 669):
-`scripts/release <version>` opens a pull request that changes `VERSION`, and merging it
-promotes the images — this one included — to that version, attaches the desktop
-installers the root [`release.yml`](../../.github/workflows/release.yml) builds, and rolls
-the whole chart onto production with the root [`scripts/deploy`](../../scripts/deploy).
-A push to `main` that does not change `VERSION` deploys nothing. See the root README's
-[Releasing and deploying](../../README.md#releasing-and-deploying).
+push to `main`, tagged `sha-<short>`. **A release is a merged change to `VERSION`** (root
+Decision 669): `scripts/release <version>` opens that pull request, and merging it
+promotes the images — this one included — to that version and attaches the desktop
+installers the root [`release.yml`](../../.github/workflows/release.yml) builds. Rolling a
+release onto a cluster is the deployment's own business. See the root README's
+[Releasing](../../README.md#releasing).
 
 ### Where it is mounted
 
@@ -239,8 +238,9 @@ chart refuses `gui.basePath: /`, because the root of that host is the plane's.
 A tag that already exists in the registry plus `imagePullPolicy: IfNotPresent` means the
 node keeps the image it has — and since the Deployment's spec did not change, no pod is
 restarted. `helm upgrade` reports success and the old code carries on serving. This is
-not hypothetical; it happened on this cluster. The root `scripts/deploy` prints every
-pod's running digest for that reason, and CI never publishes a floating tag.
+not hypothetical; it happened on a real cluster. Read every pod's running digest after
+an upgrade for that reason ([routine-tasks.md](../../docs/admin/routine-tasks.md#upgrade)),
+and CI never publishes a floating tag.
 
 ## Design
 

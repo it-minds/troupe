@@ -109,6 +109,6 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 | MCP OAuth fails after consent, `AADSTS9010010` | the advertised scope and the client's `resource` name different resources; expose `<base_url>/mcp/admin` or set `plane.oidc.mcpScope` |
 | Console redirect URI is `http://localhost:4000/admin/callback` | `TROUPE_BASE_URL` unset in a hand-written manifest |
 | `troupe.ledger.reconcile` says `:no_gateway_configured` | `:troupe_plane, :gateway` is set by nothing here |
-| Workers cannot write to object storage on Scaleway, the plane can | the plane signs for `fr-par`, workers for `us-east-1` |
+| Workers cannot write to a bucket outside `us-east-1`, the plane can | the worker pods have no `TROUPE_OBJECT_REGION` and sign for `us-east-1`: an operator from before it passed `objectStore.region` on to them |
 | Plane replicas do not cluster during a rolling image upgrade | the Erlang cookie is baked into each image build |
 | Team volumes never appear inside sessions | they are mounted on the pod, not into a session's mount table |

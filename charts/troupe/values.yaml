@@ -295,7 +295,7 @@ policy:
   # `Troupe.EgressTest` checks this list against `Troupe.Egress` for exactly that.
   #
   # A deployment that uses neither narrows this to its own gateway, as `values.small.yaml`
-  # and `values.scaleway.yaml` do. Narrowing is the operator's decision; shipping a default
+  # and `values.example.yaml` do. Narrowing is the operator's decision; shipping a default
   # the shipped code cannot work under is not.
   allowedEgress:
     - "*.anthropic.com"

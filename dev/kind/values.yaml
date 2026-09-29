@@ -94,7 +94,10 @@ policy:
   # Named, not starred: a bare `*` is not a pattern the policy accepts, and it should
   # not be — a profile that could name any endpoint could send a team's code anywhere.
   allowedEgress:
-    - llm-gw.itmindsinternal.dk
+    # The model gateway the dev profile calls. `scripts/remote-up` puts the host of
+    # `TROUPE_GATEWAY_URL` here, by its place in the list, so it stays first; this
+    # placeholder is what it is without one, and resolves nowhere.
+    - llm-gw.example.test
     - github.com
     - "*.github.com"
     # The operator's cluster suite runs against whatever cluster is there and its

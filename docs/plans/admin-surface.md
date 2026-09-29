@@ -86,8 +86,7 @@ find its way in without being configured by hand.
 
 The identity provider has to cooperate: the app registration needs an App ID URI, one
 delegated scope, access tokens at version 2 so their issuer matches, the `groups` claim on
-access tokens as well as id tokens, and the client's loopback redirect. For the IT Minds
-tenant that is `.local/scaleway/entra-expose-mcp-api.sh`.
+access tokens as well as id tokens, and the client's loopback redirect.
 
 **1e. `troupe mcp` bridges it over stdio.** A plane token lasts fifteen minutes and is
 minted from a refresh token the CLI already holds, so wiring a model to a plane without

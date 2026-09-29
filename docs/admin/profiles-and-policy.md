@@ -209,7 +209,7 @@ a profile without `allow_unenforced_workers`, which is for substrates outside Ku
 Namespaced (`tvol`): `team` and `size` required, optional `storageClassName`, `nfsPath`,
 `nfsServer`. The operator only writes `status.claimName = team-<team>` and `Ready`; the
 claims themselves are created by the profile reconcile from `spec.teams`. `rw` needs a
-`ReadWriteMany` class (`scw-sfs` on Scaleway, not block storage).
+`ReadWriteMany` class (a file-storage class, not block storage).
 
 Team volumes are mounted on pods but not yet into sessions: a session's mount table on a
 pod is `session:/` and `skills:/`, so `publish` and `import` have nowhere to go there.

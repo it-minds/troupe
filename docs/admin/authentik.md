@@ -1,14 +1,14 @@
 # Authentik: sign-in, and provisioning
 
-Connecting this plane to Authentik at `https://auth.it-minds.dk`, replacing Microsoft
-Entra ID. Authentik is a conformant OIDC provider, so nothing here is Authentik-specific
-on the plane's side: it is the plane's ordinary identity-provider configuration, filled
-in with Authentik's values.
+Connecting a plane to Authentik, for sign-in and for SCIM provisioning. Authentik is a
+conformant OIDC provider, so nothing here is Authentik-specific on the plane's side: it is
+the plane's ordinary identity-provider configuration, filled in with Authentik's values.
+The examples put Authentik at `https://auth.example.com` and the plane at
+`https://troupe.example.com`.
 
 This is written as a checklist for a person with access to Authentik. Nothing in this
-repository can create those objects, and nobody should let it: Authentik is shared
-production infrastructure for the whole organisation, and this plane is one application
-on it.
+repository can create those objects, and nobody should let it: Authentik is usually shared
+infrastructure for a whole organisation, and a plane is one application on it.
 
 The failure this document exists to prevent is not "it does not work". It is locking
 everybody out, or holding every person twice. Section 0 is the half of that which cannot
@@ -16,24 +16,24 @@ be repaired afterwards, and section 3 is the other half.
 
 ---
 
-## The decisions, recorded
+## Settle these first
 
-Asked and answered before any of this was configured. Nobody will be able to infer these
-later, which is why they are written down rather than implied by the settings.
+Nobody will be able to infer them later from the settings, so write the answers down
+where the people running the plane will find them.
 
-| Question | Decision | Decided |
-|---|---|---|
-| Who may create objects in Authentik | Nobody automated. This document is the checklist; a person creates them | Martin, 2026-09-20 |
-| What happens to the people who already exist here | **Fresh start.** Everyone arrives as a new person. Their old sessions stay in the index and stop being openable by them. Accepted because the live plane holds test-era data | Martin, 2026-09-20 |
-| What leaving means | **Deactivate. The row stays.** Sign-in refused, every request refused, sponsored principals stop firing, history and audit survive. Nothing is destroyed and nothing is erased on a leave | Martin, 2026-09-20 |
-| Which groups SCIM pushes | **Users, and only named groups.** An explicit list, not the whole directory | Martin, 2026-09-20 |
-| Existing rows SCIM never pushes | Left alone. They are the pre-cutover people, already unreachable, and deleting them would take the audit trail with them | follows from the fresh start |
-| Break-glass | Kept, and required. It is the only way in while `platform_admin_group` still names an Entra group nobody carries | `breakglass.ex` |
+| Question | What follows |
+|---|---|
+| Who may create objects in Authentik | Nothing automated. This document is the checklist; a person creates them |
+| What happens to the people the plane already knows, when it moves from another provider | A new provider is a new subject for everyone, so they arrive as new people. Their old sessions stay in the index and stop being openable by them: cheap on a plane of test-era data, expensive on one people rely on |
+| Which groups SCIM pushes | Name them. An explicit list, not the whole directory |
+| Break-glass | Required for a move: it is the only way in while `platform_admin_group` still names a group of the old provider that nobody carries (`breakglass.ex`) |
 
-The deprovisioning decision is the consequential one. "Deactivate" is what the code does
-today and it is not reversible by re-running a sync: a person deactivated by a push is
-not reactivated by signing in (`login.ex`, `upsert/2`). Turning that into a delete would
-be new work and would take the audit trail with it. It was not asked for and is not here.
+Leaving has one meaning here, whatever is decided: **deactivate, and the row stays**.
+Sign-in is refused, every request is refused, sponsored principals stop firing, and
+history and audit survive. It is not reversed by re-running a sync: a person deactivated
+by a push is not reactivated by signing in (`login.ex`, `upsert/2`). Rows SCIM never
+pushes, such as the people from before a move, are left alone, because deleting them would
+take the audit trail with them. Turning deactivation into a delete would be new work.
 
 ---
 
@@ -54,7 +54,7 @@ provisioning is turned on for, so it is worth ten minutes now.
 
 Authentik's OIDC provider has a **subject mode** and its default is a hashed user id,
 which is salted per provider and is not a value SCIM sends. So the default is wrong here,
-in the same way Entra's pairwise `sub` was wrong.
+in the same way Entra ID's pairwise `sub` is.
 
 **Set both sides to the user's UUID.** Subject mode `Based on the User's UUID`, and a SCIM
 user property mapping whose `externalId` is that same UUID. They then agree by
@@ -62,10 +62,10 @@ construction rather than by luck. A UUID also survives a rename, which an email 
 username does not.
 
 > **Verify, do not assume.** Whether Authentik's *default* SCIM user mapping sets
-> `externalId`, and to what, is the one thing in this document nobody has read. Check it
-> before the first sync, and add a mapping of your own if it is absent or is something
-> else. A single push into a plane that has people on it, with the wrong answer here, is
-> how a directory of duplicates is made.
+> `externalId`, and to what, is something to read on your instance before the first sync,
+> and to replace with a mapping of your own if it is absent or is something else. A single
+> push into a plane that has people on it, with the wrong answer here, is how a directory
+> of duplicates is made.
 
 ### Groups are the same problem again
 
@@ -74,7 +74,7 @@ whichever path saw the group first: the `groups` claim at login (`login.ex`,
 `sync_groups/2`) or a SCIM group push. **Use the group's UUID on both sides**, for the
 same reason.
 
-`platform_admin_group` is then a UUID too, exactly as it was an object id under Entra.
+`platform_admin_group` is then a UUID too, as it is an object id under Entra ID.
 
 ---
 
@@ -86,8 +86,8 @@ silently. Create new objects beside them instead.
 
 ### 1a. A scope mapping that emits groups
 
-Groups are a **claim**, not a scope, at every provider. Under Entra, asking for `groups`
-as a scope refused every sign-in before a password was typed. Under Authentik the
+Groups are a **claim**, not a scope, at every provider. Under Entra ID, asking for
+`groups` as a scope refuses every sign-in before a password is typed. Under Authentik the
 arrangement is the opposite and worth reading twice: a custom claim is carried by a scope
 mapping, and the client must *request that scope by name* for its claim to appear.
 
@@ -113,7 +113,7 @@ use names on both sides.
 | Client ID | generated, copy it |
 | Client secret | generated, copy it |
 | **Grant types** | `authorization_code`, `urn:ietf:params:oauth:grant-type:device_code`, `refresh_token` |
-| Redirect URIs | `https://troupe.itmindsinternal.dk/admin/callback` |
+| Redirect URIs | `https://troupe.example.com/admin/callback` |
 | **Signing key** | any certificate. Not optional |
 | Subject mode | Based on the User's UUID |
 | Issuer mode | Per provider |
@@ -131,7 +131,7 @@ Five of those are load-bearing and each fails in its own way:
   and it fails completely.
 - **Issuer mode must be per provider.** In global mode the issuer is the Authentik root,
   and this plane derives the discovery URL from the issuer. There is no discovery
-  document at the root: `https://auth.it-minds.dk/.well-known/openid-configuration`
+  document at the root: `https://auth.example.com/.well-known/openid-configuration`
   answers 404.
 - **Redirect URIs are matched exactly.** The value above is `base_url` plus
   `/admin/callback` and nothing else (`web/admin_auth.ex`, `redirect_uri/0`).
@@ -149,7 +149,7 @@ Five of those are load-bearing and each fails in its own way:
 | Name | `Troupe` |
 | Slug | `troupe`, and it appears in the issuer, so choose it once |
 | Provider | the provider from 1b |
-| Launch URL | `https://troupe.itmindsinternal.dk/admin` |
+| Launch URL | `https://troupe.example.com/admin` |
 
 **Access is decided here, not on the provider.** Bind the group that may use Troupe to
 the *application*. A provider with no application binding lets in whoever can reach the
@@ -163,27 +163,27 @@ authorize endpoint.
 ### 1d. The device flow
 
 The CLI and the TUI use the device code grant, and this plane refuses to start without a
-device authorization endpoint (`config/runtime.exs`). The endpoint is routed on this
-instance, confirmed by a `405` on a `GET` where an unrouted path answers `404`. Whether
-it is *usable* depends on a device code flow being set on the brand. Verify it before
-cutover, because nothing in the console exercises it.
+device authorization endpoint (`config/runtime.exs`). Authentik routes the endpoint — a
+`GET` on it answers `405` where an unrouted path answers `404` — but it is *usable* only
+once a device code flow is set on the brand. Verify it before cutover, because nothing in
+the console exercises it.
 
 ---
 
 ## 2. The plane's side
 
-Once #33 is deployed this is the **Identity provider** screen, and no rollout is needed.
-The save runs a check against the provider first and is refused if it does not stand
-behind the values.
+This is the console's **Identity provider** screen, and no rollout is needed. The save
+runs a check against the provider first and is refused if it does not stand behind the
+values.
 
 | Setting | Value |
 |---|---|
-| `issuer` | `https://auth.it-minds.dk/application/o/troupe/` |
+| `issuer` | `https://auth.example.com/application/o/troupe/` |
 | `client_id` | from 1b |
 | `client_secret` | from 1b |
-| `authorization_endpoint` | `https://auth.it-minds.dk/application/o/authorize/` |
-| `device_authorization_endpoint` | `https://auth.it-minds.dk/application/o/device/` |
-| `token_endpoint` | `https://auth.it-minds.dk/application/o/token/` |
+| `authorization_endpoint` | `https://auth.example.com/application/o/authorize/` |
+| `device_authorization_endpoint` | `https://auth.example.com/application/o/device/` |
+| `token_endpoint` | `https://auth.example.com/application/o/token/` |
 | `scopes` | `openid profile email offline_access groups` |
 | `mcp_scope` | blank, unless the registration exposes the MCP scope under another name |
 | `groups_claim` | `groups` |
@@ -201,16 +201,17 @@ token. The discovery URL is trimmed separately, in code, because Django resolves
 
 ---
 
-## 3. Cutover, in this order
+## 3. Cutover from another provider, in this order
 
-The order is forced by a chicken and egg. `platform_admin_group` still names an Entra
-group, nobody arriving from Authentik carries it, and the console's save for that setting
-is gated on a check that counts the people this plane has *seen* carrying the candidate
-group. Nobody has been seen yet.
+The order is forced by a chicken and egg. `platform_admin_group` still names a group of
+the old provider, nobody arriving from Authentik carries it, and the console's save for
+that setting is gated on a check that counts the people this plane has *seen* carrying
+the candidate group. Nobody has been seen yet. A new plane with no provider before
+Authentik starts at step 2, and needs break-glass all the same.
 
-1. **Confirm the break-glass token is set** on the live plane. Without it, step 4 has no
-   way in and the repair is a database write. `/admin/breakglass` answering 404 means it
-   is not set.
+1. **Confirm the break-glass token is set** on the plane. Without it, step 4 has no way in
+   and the repair is a database write. `/admin/breakglass` answering 404 means it is not
+   set.
 2. **Create the Authentik objects.** SSO only. No SCIM provider yet.
 3. **Point the plane at Authentik.** The Provider card, or `plane.oidc.*` and a rollout.
    Everyone signed in at this moment keeps their console session until it expires and
@@ -242,10 +243,10 @@ without it.
 
    | Field | Value |
    |---|---|
-   | URL | `https://troupe.itmindsinternal.dk/scim/v2` |
+   | URL | `https://troupe.example.com/scim/v2` |
    | Token | the token from step 1 |
    | `exclude_users_service_account` | on, and leave it on |
-   | `group_filters` | `<the named groups, from the decision above>` |
+   | `group_filters` | `<the named groups, from the table at the top>` |
    | `dry_run` | **on, for now** |
    | `property_mappings` | the user mapping from section 0 |
    | `property_mappings_group` | the group mapping from section 0 |
@@ -305,19 +306,16 @@ Each of these is a thing somebody watched happen, not a thing that ought to work
 
 ---
 
-## 6. What has not been verified
+## 6. What nothing in this repository tests
 
-Stated plainly, because the rest of this document reads like it has been.
+Read from the plane's source and from Authentik's documentation and public endpoints, and
+worth checking on your own instance, because they vary by version and configuration:
 
-- **No login has been performed against Authentik, and no sync has been run.** Everything
-  above is read from this plane's source and from Authentik's public endpoints.
-- **Authentik's default SCIM property mappings have not been read.** Section 0 depends on
-  what they set `externalId` to. This is the highest-value unknown here.
+- **Authentik's default SCIM property mappings.** Section 0 depends on what they set
+  `externalId` to. This is the highest-value unknown here.
 - **Whether Authentik's SCIM client needs pagination or `/Schemas`** against a first sync
-  of this size.
+  of your directory's size.
 - **Whether the device code flow is usable**, as opposed to routed.
-- **The GUI's own redirect URI** is not in section 1b. The desktop and browser clients
-  sign in for themselves, and whichever redirect they use has to be registered too.
-- **How many real people exist on the live plane today**, which is what makes the fresh
-  start cheap or expensive. The decision was taken on the understanding that it is
-  test-era data.
+- **The GUI's own redirect URI**, which is not in section 1b. The desktop and browser
+  clients sign in for themselves, and whichever redirect they use has to be registered
+  too.
