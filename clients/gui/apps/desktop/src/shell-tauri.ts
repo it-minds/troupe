@@ -22,7 +22,8 @@
 //   pickDirectory a workspace is a directory, and a browser build can only take a path
 //                 somebody typed
 //   notifications the page's own `Notification` is refused in WebView2, so the OS's are
-//                 reached through the notification plugin
+//                 reached through the notification plugin, and on Windows through the
+//                 shell's own toast, whose click is heard
 
 import type { DaemonEndpoint, TokenStore } from "@troupe/client";
 import type { NotifyPermission, ShellNotifications, TroupeShell } from "./shell";
@@ -79,6 +80,10 @@ async function pickDirectory(): Promise<string | null> {
  * The OS's notifications. On a desktop the plugin grants without asking, since the OS
  * has its own switch for each app; the question is still asked the same way, so a shell
  * that one day must ask is answered by the same code.
+ *
+ * On Windows the shell shows the toast itself (`notify_show`), so that a click on it is
+ * heard and opens its session; elsewhere, and if that fails, the plugin shows it and no
+ * click is heard. A second launch of the app that names a session asks the same way.
  */
 function notifications(): ShellNotifications {
   const plugin = () => import("@tauri-apps/plugin-notification");
@@ -95,8 +100,25 @@ function notifications(): ShellNotifications {
     async request() {
       return state(await (await plugin()).requestPermission());
     },
-    async send(title, body) {
-      (await plugin()).sendNotification({ title, body });
+    async send(title, body, sessionId) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const shown = await invoke<boolean>("notify_show", { title, body, session: sessionId }).catch(() => false);
+      if (!shown) (await plugin()).sendNotification({ title, body });
+    },
+    onOpen(listener) {
+      let stop: (() => void) | null = null;
+      let stopped = false;
+      void import("@tauri-apps/api/event")
+        .then(({ listen }) => listen<string>("troupe://open-session", (e) => listener(e.payload)))
+        .then((unlisten) => {
+          if (stopped) unlisten();
+          else stop = unlisten;
+        })
+        .catch(() => undefined);
+      return () => {
+        stopped = true;
+        stop?.();
+      };
     },
   };
 }

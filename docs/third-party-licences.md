@@ -204,7 +204,7 @@ depends on the machine.
 
 ## The desktop app (Cargo)
 
-486 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
+487 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
 platform, build dependencies included.
 
 | package | licence |
@@ -570,6 +570,7 @@ platform, build dependencies included.
 | `tauri-plugin-http` | Apache-2.0 OR MIT |
 | `tauri-plugin-notification` | Apache-2.0 OR MIT |
 | `tauri-plugin-opener` | Apache-2.0 OR MIT |
+| `tauri-plugin-single-instance` | Apache-2.0 OR MIT |
 | `tauri-runtime` | Apache-2.0 OR MIT |
 | `tauri-runtime-wry` | Apache-2.0 OR MIT |
 | `tauri-utils` | Apache-2.0 OR MIT |

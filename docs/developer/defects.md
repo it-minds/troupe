@@ -124,16 +124,6 @@ fixers (PRs #210, #211), 2026-09-26.
 The rest of this entry was fixed in PRs #234 and #237. Found by the chunk 6 fixers,
 2026-09-26/27.
 
-### D35 - Clicking a desktop notification on Windows doesn't open its session (medium)
-
-`tauri-plugin-notification` can't report a click on desktop (its `show()` drops the
-handle; `onAction` is fed only by the phone plugins). Since PR #238 the app opens the
-session when its window comes to the front within 15 s of a notification, which a click
-usually causes. A real click handler needs the shell to show its own toast through
-`tauri-winrt-notification`'s `on_activated` (already in `Cargo.lock`), and single-instance
-handling beside it, because a click may start a second copy from the Start-menu shortcut
-(unconfirmed). Found by the fixer of PR #238, 2026-09-27.
-
 ### D36 - TUI leftovers after the attention fix (low)
 
 - An idle screen stops ticking, so the sessions page's and HQ's ages are only as fresh
@@ -158,12 +148,6 @@ Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
   `agent_restarted` a second when the reaper can't spawn).
 - `troupe --watch` still walks the whole workspace for `.gitignore` rules at start (PR
   #240 moved that walk out of every other session start).
-- The desktop client: after the daemon socket drops, `DaemonClient.connection()` rebinds
-  open views but never resubscribes them, so a session screen open across a daemon
-  restart may stop receiving events (unconfirmed); `DaemonClient.open` leaves a view
-  registered when `subscribe` fails, and later opens reuse it.
-- The desktop first run's Where step pre-fills the plane address from the daemon's link
-  only, not from the app's own `planeUrl` preference.
 - `clients/gui/dev/plane-stack.yml` has its own in-memory OpenBao and one-shot setup, so
   a restart there loses the key as D31 did.
 - Dependabot puts Tauri's crates (cargo `tauri` group) and its npm packages (npm
@@ -171,7 +155,9 @@ Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
   fail Tauri's version check, as #120 did. `@types/node` is 26 while the runtime is 24.
 - The comment above `handle("memory.get")` in `dispatch.ex` belongs to `agents.list`.
 
-Found by the chunk 7 fixers, 2026-09-27.
+Found by the chunk 7 fixers, 2026-09-27. The desktop client's three items (a view not
+resubscribed after a dropped daemon socket, a failed `open` leaving its view behind, and
+the Where step ignoring the app's `planeUrl`) were fixed in PR #263.
 
 ## Taken
 
@@ -220,6 +206,7 @@ Found by the chunk 7 fixers, 2026-09-27.
 | `troupe` on Windows died at boot in a large directory and broke the console (every session start walked the workspace for `.gitignore`) | #231, PR #240 |
 | D34 - On a pod, a deleted file is never reported to clients | #252, PR #254 |
 | D38 - `UpgradePending` says every pod is current while one runs the old image (confirmed) | #251, PR #253 |
+| D35 - Clicking a desktop notification on Windows doesn't open its session | PR #263 |
 
 ## Checked and not a defect
 
