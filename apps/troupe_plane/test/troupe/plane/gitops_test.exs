@@ -12,7 +12,7 @@ defmodule Troupe.Plane.GitopsTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Audit, FakeCluster, Fleet, Gitops, Identity, Provision}
+  alias Troupe.Plane.{Admin, Audit, FakeCluster, Fleet, Gitops, Identity, Provision, Settings}
   alias Troupe.Plane.Admin.{API, MCP}
   alias Troupe.Plane.Gitops.Profiles
   alias Troupe.WorkerProfile
@@ -673,13 +673,13 @@ defmodule Troupe.Plane.GitopsTest do
       assert Provision.mode() == :gitops
 
       # Nor does a value stored while it could: the deployment's is the only one read.
-      Repo.insert!(%Troupe.Plane.Settings.Stored{
+      Repo.insert!(%Settings.Stored{
         key: "provisioning_mode",
         value: "direct",
         updated_by: "root"
       })
 
-      Troupe.Plane.Settings.invalidate()
+      Settings.invalidate()
       assert Provision.mode() == :gitops
     end
   end

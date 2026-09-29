@@ -90,7 +90,8 @@ defmodule Troupe.Remote.RPC do
     -32_011 => :rate_limited,
     -32_012 => :payload_too_large,
     -32_013 => :consent_required,
-    -32_014 => :budget_exhausted
+    -32_014 => :budget_exhausted,
+    -32_015 => :managed_by_gitops
   }
 
   @doc "The contract's error table (PROTOCOL.md §10): each code and its token."

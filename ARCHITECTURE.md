@@ -374,8 +374,14 @@ authorization server.
 because a role Troupe could grant would be a way to escalate inside it. `team_admin` is
 assigned per team. Neither can read session content: no admin method returns events.
 Break-glass is a separate, audited console login for a lock-out, with no more access.
-Profiles are applied **directly** (server-side apply) or **by GitOps** (a commit; shown as
-pending until the resource's generation catches up). **Settings** override the deployment
+Profiles are applied **directly** (server-side apply of the whole resource) or held **by
+GitOps**: a repository holds the `WorkerProfile` and `TroupePolicy` resources and something
+else applies them, the plane never writes git, and a cluster singleton lists the profiles
+every fifteen seconds and makes the plane's rows follow them — a resource that fails the
+plane's own checks reported rather than used, admin writes refused as `managed_by_gitops`,
+the console locked. The plane then writes only what no repository could know: a profile's
+`replicas`, `teams` and `mcpServers`, under its own field manager (Decision 736).
+**Settings** override the deployment
 and never replace it: a stored row wins, reset deletes it, and a `platform_admin_group`
 cannot be saved until a check passes for the value in the field. **Audit** is a row per
 change with the actor and a diff keyed by path (`spec.llm.model`), computed by the same

@@ -69,8 +69,11 @@ defmodule Troupe.Plane.Web.Live.Workers do
   # somebody reads once, and this page reloads every second.
   def handle_event("export", _params, socket) do
     case Admin.profiles_export(socket.assigns.actor) do
-      {:ok, export} -> {:noreply, assign(socket, export: export)}
-      {:error, error} -> {:noreply, assign(socket, flash_message: "could not export: #{error.message}")}
+      {:ok, export} ->
+        {:noreply, assign(socket, export: export)}
+
+      {:error, error} ->
+        {:noreply, assign(socket, flash_message: "could not export: #{error.message}")}
     end
   end
 

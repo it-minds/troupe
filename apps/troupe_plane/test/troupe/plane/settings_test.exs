@@ -64,7 +64,12 @@ defmodule Troupe.Plane.SettingsTest do
     test "a setting the deployment owns reads no stored value, even one already there" do
       # `provisioning_mode` was editable until Decision 736, so a plane may have a row for
       # it from then. Read, it would override the deployment with nothing able to reset it.
-      Repo.insert!(%Settings.Stored{key: "provisioning_mode", value: "gitops", updated_by: "root"})
+      Repo.insert!(%Settings.Stored{
+        key: "provisioning_mode",
+        value: "gitops",
+        updated_by: "root"
+      })
+
       Settings.invalidate()
 
       assert Settings.get("provisioning_mode") == :direct
@@ -147,7 +152,10 @@ defmodule Troupe.Plane.SettingsTest do
   describe "the settings actually decide something" do
     test "provisioning mode is the deployment's, and the console cannot change it" do
       assert Provision.mode() == :direct
-      assert {:error, :not_editable} = Settings.put("provisioning_mode", "gitops", "root@example.test")
+
+      assert {:error, :not_editable} =
+               Settings.put("provisioning_mode", "gitops", "root@example.test")
+
       assert Provision.mode() == :direct
 
       Application.put_env(:troupe_plane, :provisioning_mode, :gitops)

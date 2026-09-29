@@ -379,7 +379,8 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       {:ok, %{settings: settings}} ->
         Enum.find_value(settings, &(&1.key == "gitops_source" && &1[:value]))
 
-      {:error, _error} -> nil
+      {:error, _error} ->
+        nil
     end
   end
 

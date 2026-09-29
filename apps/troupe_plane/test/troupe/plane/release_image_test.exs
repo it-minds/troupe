@@ -162,7 +162,9 @@ defmodule Troupe.Plane.ReleaseImageTest do
       {:ok, _} = Fleet.put_profile(%{name: "dev", image: "release"})
 
       log =
-        capture_log(fn -> assert [%{profile: "dev", state: :repository}] = ReleaseImage.follow() end)
+        capture_log(fn ->
+          assert [%{profile: "dev", state: :repository}] = ReleaseImage.follow()
+        end)
 
       assert log =~ "the repository names their image"
       assert FakeCluster.writes() == []
@@ -234,7 +236,10 @@ defmodule Troupe.Plane.ReleaseImageTest do
 
   # What the cluster's resource carries, read the way the operator will read it.
   defp image_in_cluster(name) do
-    "WorkerProfile" |> FakeCluster.get(name) |> WorkerProfile.from_resource() |> Map.fetch!(:image)
+    "WorkerProfile"
+    |> FakeCluster.get(name)
+    |> WorkerProfile.from_resource()
+    |> Map.fetch!(:image)
   end
 
   defp policy do

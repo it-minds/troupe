@@ -439,8 +439,9 @@ defmodule Troupe.Plane.Admin do
   # The refusal every write to what a repository holds gets, recorded like the refused
   # break-glass login: the attempt is an event, and "somebody tried to change a profile
   # the repository holds" is one an administrator reading the trail should be able to
-  # find next to the commits that did change it.
-  defp not_held_by_repository(actor, action, name) do
+  # find next to the commits that did change it. By kind, for whatever else a repository
+  # comes to hold.
+  defp not_held_by_repository(actor, action, name, kind \\ "WorkerProfile") do
     if Gitops.enabled?() do
       source = Gitops.source()
       detail = %{"outcome" => "refused", "reason" => "managed_by_gitops"}
@@ -448,11 +449,12 @@ defmodule Troupe.Plane.Admin do
 
       {:error,
        Error.new(:managed_by_gitops, %{
-         profile: name,
+         kind: kind,
+         name: name,
          source: source,
          reason:
-           "this plane is in gitops mode: profiles are the WorkerProfile resources a repository " <>
-             "holds#{if source, do: " (#{source})", else: ""}, and a change to one is a commit there"
+           "this plane is in gitops mode: a #{kind} is a resource a repository holds" <>
+             "#{if source, do: " (#{source})", else: ""}, and a change to one is a commit there"
        })}
     else
       :ok

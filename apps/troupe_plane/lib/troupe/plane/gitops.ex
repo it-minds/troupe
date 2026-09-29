@@ -134,6 +134,9 @@ defmodule Troupe.Plane.Gitops do
     end
   end
 
+  # One resource at a time, and one that raises is that resource's problem: reported like
+  # a refusal, with the row as it was, and the rest of the pass goes on. A pass that one
+  # bad manifest could stop would be every profile frozen by one typo.
   defp take(source, resource, row, context) do
     name = name_of(resource)
     generation = get_in(resource, ["metadata", "generation"])
@@ -146,6 +149,9 @@ defmodule Troupe.Plane.Gitops do
       {:error, reasons} ->
         outcome(name, :refused, generation, {"refused", reasons})
     end
+  rescue
+    exception ->
+      failed(source, name_of(resource), get_in(resource, ["metadata", "generation"]), exception)
   end
 
   defp gone(source, name, row) do
@@ -153,6 +159,21 @@ defmodule Troupe.Plane.Gitops do
       :removed -> outcome(name, :removed, nil, nil)
       {:missing, reasons} -> outcome(name, :missing, nil, {"missing", reasons})
     end
+  rescue
+    exception -> failed(source, name, nil, exception)
+  end
+
+  defp failed(source, name, generation, exception) do
+    Logger.error(
+      "troupe plane: gitops: reading #{source.kind()} #{name} failed: #{Exception.message(exception)}"
+    )
+
+    outcome(
+      name,
+      :refused,
+      generation,
+      {"refused", ["the plane failed reading it: #{Exception.message(exception)}"]}
+    )
   end
 
   defp outcome(name, state, generation, nil),

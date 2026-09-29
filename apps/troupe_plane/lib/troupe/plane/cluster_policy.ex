@@ -75,13 +75,18 @@ defmodule Troupe.Plane.ClusterPolicy do
           resource
           |> Map.put("apiVersion", "troupe.dev/v1alpha1")
           |> Map.put("kind", "TroupePolicy")
-          |> Map.update("metadata", %{"name" => policy_name()}, &Map.put_new(&1, "name", policy_name()))
+          |> Map.update(
+            "metadata",
+            %{"name" => policy_name()},
+            &Map.put_new(&1, "name", policy_name())
+          )
           |> Gitops.strip()
 
         name = manifest["metadata"]["name"]
         %{name: name, path: "policy/#{name}.yaml", notes: [], yaml: Gitops.yaml(manifest, [])}
     end
   end
+
   @doc """
   Whether the policy lets a pod reach `host`.
 

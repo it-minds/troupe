@@ -99,7 +99,9 @@ defmodule Troupe.Plane.Gitops.Profiles do
         sessions_per_pod: per_pod,
         size_class: SizeClass.of_sessions_per_pod(per_pod),
         config_bundle_channel: spec["configBundleChannel"] || "stable",
-        spec: Map.drop(spec, ["image" | Provision.projected_fields()]),
+        # The image and the count have columns of their own and `teams` is the grants';
+        # `mcpServers` stays, as what the resource carries, for a reader of the profile.
+        spec: Map.drop(spec, ~w(image replicas teams)),
         resource_generation: get_in(resource, ["metadata", "generation"])
       })
 
