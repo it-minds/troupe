@@ -438,6 +438,7 @@ defmodule Troupe.Settings do
        [
          "settings         the project's .troupe/config.yaml, else ~/.config/troupe/config.yaml",
          "sessions         the daemon's state directory; `troupe daemon status` says where",
+         "logs             troupe.log and daemon.log, in that same directory",
          "models           `troupe models` lists what this machine can address"
        ]}
     ]

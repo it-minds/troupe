@@ -474,6 +474,7 @@ defmodule Troupe.Client.Remote do
       updated_at: nil,
       origin: origin,
       branches: [],
+      parent: nil,
       workspace: nil
     }
   end
@@ -612,6 +613,7 @@ defmodule Troupe.Client.Remote do
       updated_at: updated_at(session["updated_at"] || session["last_active_at"]),
       origin: origin,
       branches: [],
+      parent: nil,
       workspace: nil
     }
   end

@@ -2506,6 +2506,51 @@ citation keeps meaning what it meant.
      changes. Proof: `resources_test.exs` (the platform's endpoints as IPv4 and IPv6
      literals; a profile's own addresses beside its names).
 
+724. **Without Cilium, the operator admits the installation's own OpenBao and object store
+     outside the cluster on the port they name: an address as that one address, a name on
+     another port as the public rule's addresses on that port.** Issue #257, the half of
+     #249 that Decisions 721 and 723 left. Without Cilium the worker NetworkPolicy reaches
+     outside the cluster through one rule, public addresses on 443 and 80, so an object
+     store on 9000, or an OpenBao at a private address, was admitted by nothing and no
+     session activated. For `bao.address` and `objectStore.endpoint` that are not `*.svc`
+     hosts, `Resources.platform_rules/1` now adds a rule on the endpoint's own port: an IP
+     address, private or public, as an `ipBlock` of that one address (`/32`, `/128`), and
+     a name on a port other than 443 and 80 as the public rule's ranges on that port. The
+     public rule itself stays 443 and 80: opening it to the private ranges or to more ports
+     would widen it for every destination, to admit two that the installation chose. The
+     cost is that a name on 9000 opens 9000 to every public address, which is as much as a
+     NetworkPolicy can say about a name. About a name that resolves to a private address it
+     can say nothing, and nothing here tries: such an endpoint is given as its address, or
+     admitted by a NetworkPolicy the installation adds to the worker namespace (policies
+     add up, and the operator prunes only what carries its label), or Cilium is used. With
+     Cilium nothing changes. Proof: `resources_test.exs` (a name on another port, a name on
+     443 and 80, a private and a public address, `*.svc` endpoints, and the Cilium path).
+
+725. **An activation that fails takes away the log and the workspace it put on the pod,
+     and leaves what it found there; a read and a fork name an unreachable store or key
+     manager as an activation does.** Issue #259. An activation restores the session's
+     log into the pod's state directory, then its workspace, then starts the sealer and
+     the actor tree. A failure after the log was written (storage that stopped answering
+     at the workspace listing, which Decision 722 made a failure; a config the session
+     would not start with; a raise on the way) left the log and the workspace until the
+     session was next activated on that pod or went dormant there, which for a session
+     that goes on to run on another pod is never. `Manager.put_back/3` now removes them on
+     any such failure, returned or raised. It removes only what the activation added. A
+     log that was there before it started is a reader's, restored for `session.read` and
+     perhaps still served, and a workspace with anything in it is one a pod that stopped
+     without putting the session to sleep left, which may hold files no archive has: both
+     stay, and a failure before the events step touches nothing. The pod's cache is
+     sealed bytes the activation only read and stays too, with 722's rule that it is
+     used only once storage has answered unchanged. `session.read` and the fork step of
+     `session.activate` opened their contexts and read storage without the names
+     Decisions 721 and 722 gave an activation, and answered `internal_error` with the
+     inspected transport error. They now go through `Restore.open_context/2` and
+     `Restore.unreachable/2`, answer `unavailable` with `object_store_unreachable` or
+     `kms_unreachable` and the endpoint or address, and say so in the pod's log, which
+     for a read is the only place: the plane hands the client an endpoint whatever the
+     pod answered. Proof: `failed_activation_test.exs`, and the read and fork cases in
+     `object_store_unreachable_test.exs` and `kms_unreachable_test.exs`.
+     
 730. **On Windows the desktop app shows its notifications itself, so that a click on one
      opens its session, and it runs as one copy.** Defect D35, following 714 and 708.
      - **The toast is the one the plugin shows underneath.** `tauri-plugin-notification`
