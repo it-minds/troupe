@@ -27,6 +27,9 @@ defmodule Troupe.Operator.Resources do
   @dns_namespace "kube-system"
   @dns_app "kube-dns"
 
+  # The ports the NetworkPolicy opens to every public address where there is no Cilium.
+  @public_ports [443, 80]
+
   @doc "Every object a profile implies, in dependency order."
   @spec for_profile(Profile.t(), Policy.t(), Settings.t()) :: [map()]
   def for_profile(%Profile{} = profile, %Policy{} = policy, %Settings{} = settings) do
@@ -328,7 +331,8 @@ defmodule Troupe.Operator.Resources do
   # the FQDN rules could not take it back.
   #
   # Without Cilium there is nothing to write a hostname in, so the external destinations
-  # stay one wide rule and the gap is written down rather than hidden: a policy that
+  # stay one wide rule, with the installation's own OpenBao and object storage beside it
+  # on their own ports, and the gap is written down rather than hidden: a policy that
   # silently allows more than it says is worse than one that admits what it cannot do.
   defp network_policy(namespace, profile, policy, settings) do
     %{
@@ -378,7 +382,7 @@ defmodule Troupe.Operator.Resources do
         ],
         "ports" => [%{"protocol" => "TCP", "port" => settings.plane_control_port}]
       }
-    ] ++ public_rule(settings) ++ in_cluster_rules(profile, settings)
+    ] ++ public_rule(settings) ++ platform_rules(settings) ++ in_cluster_rules(profile, settings)
   end
 
   # Everything outside the cluster — the LLM endpoint, the MCP servers, the git hosts,
@@ -390,17 +394,54 @@ defmodule Troupe.Operator.Resources do
   defp public_rule(_settings) do
     [
       %{
-        "to" => [
-          %{
-            "ipBlock" => %{
-              "cidr" => "0.0.0.0/0",
-              "except" => ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
-            }
-          }
-        ],
-        "ports" => [%{"protocol" => "TCP", "port" => 443}, %{"protocol" => "TCP", "port" => 80}]
+        "to" => public_addresses(),
+        "ports" => Enum.map(@public_ports, &%{"protocol" => "TCP", "port" => &1})
       }
     ]
+  end
+
+  defp public_addresses do
+    [
+      %{
+        "ipBlock" => %{
+          "cidr" => "0.0.0.0/0",
+          "except" => ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
+        }
+      }
+    ]
+  end
+
+  # And without Cilium, OpenBao and object storage when they are outside the cluster but
+  # not where the public rule reaches: a hosted S3 service on 9000, a key manager at an
+  # address on the office network. A worker that reaches neither activates no session, so
+  # each gets a rule of its own on the port it names, and the public rule stays 443 and 80
+  # for every other destination.
+  #
+  # An address, private or public, is that one address. A name on another port is the
+  # public rule's addresses on that port, since a NetworkPolicy cannot name a host; so a
+  # name that resolves to a private address is admitted by nothing here, and such an
+  # endpoint has to be given by its address, or admitted by a NetworkPolicy of the
+  # installation's own in the worker namespace. A name on 443 or 80 needs nothing more.
+  defp platform_rules(%Settings{cilium_available: true}), do: []
+
+  defp platform_rules(%Settings{} = settings) do
+    for url <- [settings.bao_address, settings.object_store_endpoint],
+        host <- external_host(url),
+        rule <- platform_rule(host, URI.parse(url).port),
+        uniq: true,
+        do: rule
+  end
+
+  defp platform_rule(_host, nil), do: []
+
+  defp platform_rule(host, port) do
+    ports = [%{"protocol" => "TCP", "port" => port}]
+
+    case address_block(host) do
+      nil when port in @public_ports -> []
+      nil -> [%{"to" => public_addresses(), "ports" => ports}]
+      block -> [%{"to" => [%{"ipBlock" => %{"cidr" => block}}], "ports" => ports}]
+    end
   end
 
   # And when they are *not* external. A worker fetches its session key from the key
@@ -436,7 +477,8 @@ defmodule Troupe.Operator.Resources do
 
   # `openbao.troupe-system.svc` and `openbao.troupe-system.svc.cluster.local` both name
   # a Service in `troupe-system`. Anything else is a name this cluster does not serve,
-  # and the FQDN rule covers it — or, without Cilium, the public one.
+  # and the FQDN rule covers it — or, without Cilium, the public one and
+  # `platform_rules/1`.
   defp cluster_namespace(host) do
     case String.split(host, ".") do
       [_service, namespace, "svc" | _rest] -> namespace
