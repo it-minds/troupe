@@ -27,7 +27,16 @@ defmodule Troupe.Session.Log do
   require Logger
 
   @enforce_keys [:session_id, :path, :device]
-  defstruct [:session_id, :path, :device, seq: 0, last: nil, started: MapSet.new()]
+  defstruct [
+    :session_id,
+    :path,
+    :device,
+    seq: 0,
+    last: nil,
+    started: MapSet.new(),
+    # When each agent started again lately, newest first, by path: what `started/3` counts.
+    restarts: %{}
+  ]
 
   @type event_type :: atom()
 
@@ -91,6 +100,24 @@ defmodule Troupe.Session.Log do
   @spec cold_start?(String.t(), [String.t()]) :: boolean()
   def cold_start?(session_id, agent_path) do
     GenServer.call(Troupe.Registry.log(session_id), {:cold_start, agent_path})
+  end
+
+  @doc """
+  `cold_start?/2` for an agent, counting as well: `:cold` the first time it starts under
+  this tree, and after that `{:warm, n}`, `n` being how often it has started again in the
+  last `within_ms`, this start included. The same record `cold_start?/2` reads, so an
+  agent asks one or the other. It is how an agent knows its Node's restart limit is
+  reached and this start is the last one it gets (Decision 727).
+  """
+  @spec started(String.t(), [String.t()], pos_integer()) :: :cold | {:warm, pos_integer()}
+  def started(session_id, agent_path, within_ms) do
+    GenServer.call(Troupe.Registry.log(session_id), {:started, agent_path, within_ms})
+  end
+
+  @doc "How often an agent has started again in the last `within_ms`, recording nothing."
+  @spec restarts(String.t(), [String.t()], pos_integer()) :: non_neg_integer()
+  def restarts(session_id, agent_path, within_ms) do
+    GenServer.call(Troupe.Registry.log(session_id), {:restarts, agent_path, within_ms})
   end
 
   @doc """
@@ -267,9 +294,29 @@ defmodule Troupe.Session.Log do
      %{state | started: MapSet.put(state.started, agent_path)}}
   end
 
+  def handle_call({:started, agent_path, within_ms}, _from, state) do
+    if MapSet.member?(state.started, agent_path) do
+      now = System.monotonic_time(:millisecond)
+      times = [now | recent_restarts(state, agent_path, within_ms, now)]
+      restarts = Map.put(state.restarts, agent_path, times)
+      {:reply, {:warm, length(times)}, %{state | restarts: restarts}}
+    else
+      {:reply, :cold, %{state | started: MapSet.put(state.started, agent_path)}}
+    end
+  end
+
+  def handle_call({:restarts, agent_path, within_ms}, _from, state) do
+    now = System.monotonic_time(:millisecond)
+    {:reply, length(recent_restarts(state, agent_path, within_ms, now)), state}
+  end
+
   def handle_call(:path, _from, state), do: {:reply, state.path, state}
 
   def handle_call({:first, key}, _from, state), do: {:reply, Troupe.Registry.first?(key), state}
+
+  defp recent_restarts(state, agent_path, within_ms, now) do
+    state.restarts |> Map.get(agent_path, []) |> Enum.take_while(&(now - &1 < within_ms))
+  end
 
   defp decode_lines(contents) do
     contents
