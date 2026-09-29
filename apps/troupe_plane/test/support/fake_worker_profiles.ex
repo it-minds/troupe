@@ -15,6 +15,11 @@ defmodule Troupe.Plane.FakeWorkerProfiles do
   Each read of a profile is sent to the test that started it, as `{FakeWorkerProfiles,
   :read, name}`, for the tests that count them. A status of `:exit` is a client that
   exits rather than answering, which is what a call to a process that is not there does.
+
+  A profile's annotations are the ones it was started with, and an apply to it replaces
+  them with the applied ones and is sent to the test as `{FakeWorkerProfiles, :applied,
+  name, resource, query}`: the plane's record of finished drains is the one thing it
+  applies here, under a field manager of its own, so what the next read sees is that.
   """
 
   @behaviour K8s.Client.Provider
@@ -22,18 +27,24 @@ defmodule Troupe.Plane.FakeWorkerProfiles do
   alias K8s.Client.APIError
 
   @group_version "troupe.dev/v1alpha1"
+  @annotations :fake_worker_profiles_annotations
 
-  @doc "Answer for these profiles' statuses, by name, for the rest of the test."
-  @spec start(%{String.t() => map() | :exit}) :: K8s.Conn.t()
-  def start(statuses) do
+  @doc """
+  Answer for these profiles' statuses, by name, for the rest of the test, and with these
+  annotations on them.
+  """
+  @spec start(%{String.t() => map() | :exit}, %{String.t() => map()}) :: K8s.Conn.t()
+  def start(statuses, annotations \\ %{}) do
     conn = %K8s.Conn{url: "https://kubernetes.example.test", http_provider: __MODULE__}
 
     previous = Application.get_env(:troupe_plane, :k8s_conn)
     Application.put_env(:troupe_plane, :k8s_conn, conn)
     Application.put_env(:troupe_plane, __MODULE__, {self(), statuses})
+    Application.put_env(:troupe_plane, @annotations, annotations)
 
     ExUnit.Callbacks.on_exit(fn ->
       Application.delete_env(:troupe_plane, __MODULE__)
+      Application.delete_env(:troupe_plane, @annotations)
 
       if previous,
         do: Application.put_env(:troupe_plane, :k8s_conn, previous),
@@ -87,21 +98,48 @@ defmodule Troupe.Plane.FakeWorkerProfiles do
     end
   end
 
+  def request(:patch, %URI{path: path, query: query}, body, _headers, _opts) do
+    case String.split(path, "/") do
+      ["", "apis", "troupe.dev", "v1alpha1", "namespaces", namespace, "workerprofiles", name] ->
+        {test, statuses} = Application.get_env(:troupe_plane, __MODULE__, {nil, %{}})
+        applied = Jason.decode!(body)
+        annotations = get_in(applied, ["metadata", "annotations"]) || %{}
+
+        Application.put_env(
+          :troupe_plane,
+          @annotations,
+          Map.put(annotations(), name, annotations)
+        )
+
+        if test, do: send(test, {__MODULE__, :applied, name, applied, URI.decode_query(query || "")})
+        profile(namespace, name, Map.get(statuses, name))
+
+      _other ->
+        not_found()
+    end
+  end
+
   def request(_method, _uri, _body, _headers, _opts), do: not_found()
 
   defp profile(_namespace, _name, nil), do: not_found()
   defp profile(_namespace, _name, :exit), do: exit(:noproc)
 
   defp profile(namespace, name, status) do
+    metadata =
+      %{"name" => name, "namespace" => namespace, "generation" => 1}
+      |> then(&if(annotations()[name], do: Map.put(&1, "annotations", annotations()[name]), else: &1))
+
     {:ok,
      %{
        "apiVersion" => @group_version,
        "kind" => "WorkerProfile",
-       "metadata" => %{"name" => name, "namespace" => namespace, "generation" => 1},
+       "metadata" => metadata,
        "spec" => %{},
        "status" => status
      }}
   end
+
+  defp annotations, do: Application.get_env(:troupe_plane, @annotations, %{})
 
   @impl K8s.Client.Provider
   def stream(_method, _uri, _body, _headers, _opts), do: not_found()

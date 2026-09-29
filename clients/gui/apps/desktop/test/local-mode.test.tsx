@@ -229,3 +229,42 @@ describe("a plane that does not answer", () => {
     expect(says("The platform is not answering")).toBe(false);
   });
 });
+
+describe("a session started on this computer while signed in to a plane", () => {
+  it("opens on the daemon at once, and the plane never hears of it", async () => {
+    harness = await startHarness();
+    const plane = harness.plane;
+    // Its own id: both fakes count from s-1, and the one list joins rows that share one.
+    plane.seed("alice@example.com", { id: "team-1", title: "Rewrite the placement loop", profile: "dev" });
+    await harness.signIn({ store: webTokenStore() });
+    localStorage.setItem("troupe.pref.planeUrl", plane.baseUrl);
+    localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");
+    startOnTheList();
+
+    // What the plane is asked, by method: the page's requests all go to /rpc.
+    const asked: string[] = [];
+    const fake = plane as unknown as { rpc: (...args: [string, string, string, Record<string, unknown>]) => unknown };
+    const rpc = fake.rpc.bind(plane);
+    fake.rpc = (subject, name, method, params) => {
+      asked.push(`${method} ${String(params["session_id"] ?? "")}`.trim());
+      return rpc(subject, name, method, params);
+    };
+
+    unmount = render(<App />).unmount;
+    await waitFor(() => says("Rewrite the placement loop") && says("/home/ada/notes"), "both halves of the list");
+
+    button("Start a session")!.click();
+    const start = await waitFor(() => document.querySelector<HTMLElement>(".start"), "the start screen");
+    button("Local", start)!.click();
+    const directory = await waitFor(() => start.querySelector<HTMLInputElement>('input[aria-label="Which directory"]'), "the local half");
+    type(directory, "/home/ada/project");
+    button("Start", start)!.click();
+    await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
+    const created = [...daemon.sessions.values()].find((s) => s.workspace === "/home/ada/project")!;
+    await waitFor(() => daemon.calls.some((c) => c.method === "presence.set" && c.params["session_id"] === created.id), "the daemon's view of it");
+
+    // Before the list has caught up, the screen opened it where it was made. It used to
+    // default to a team session and ask the plane to open an id the plane never issued.
+    expect(asked.filter((a) => a.startsWith("session.open") || a.startsWith("token.mint"))).toEqual([]);
+  });
+});

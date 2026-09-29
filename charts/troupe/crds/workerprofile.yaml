@@ -175,6 +175,19 @@ spec:
                 observedGeneration: {type: integer}
                 readyReplicas: {type: integer}
                 namespace: {type: string}
+                podsBehind:
+                  type: array
+                  description: >-
+                    Pods on an older revision than the StatefulSet's, which the plane drains
+                    once they hold no active session. The plane records a finished drain in
+                    the troupe.dev/drained annotation, and the operator then replaces the pod.
+                  items:
+                    type: object
+                    required: [pod]
+                    properties:
+                      pod: {type: string}
+                      uid: {type: string}
+                      revision: {type: string}
                 conditions:
                   type: array
                   items:

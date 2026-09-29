@@ -111,7 +111,7 @@ defmodule Troupe.Tools.GitRead do
       {:ok, "", 0} -> {:ok, "(no output)"}
       {:ok, out, 0} -> {:ok, Output.cap(String.replace(out, "\r\n", "\n"), cap(ctx), ctx)}
       {:ok, out, code} -> {:error, "git exited #{code}: #{String.trim(out)}"}
-      {:error, reason} -> {:error, "git failed: #{inspect(reason)}"}
+      {:error, reason} -> {:error, "git could not run: #{Reaper.explain(reason)}"}
     end
   end
 

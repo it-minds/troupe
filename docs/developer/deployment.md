@@ -50,7 +50,10 @@ Before the first automated deploy the `production` environment needs `KUBECONFIG
   cookie is baked into each image build, so two builds may not cluster during a rolling
   update.
 - **Workers** are `OnDelete` StatefulSets: a new image is `UpgradePending` until each pod
-  is drained and deleted ([../admin/profiles-and-policy.md §3](../admin/profiles-and-policy.md#3-upgrades-and-drains)).
+  has been drained by the plane, once it holds no active session, and replaced by the
+  operator, one at a time ([../admin/profiles-and-policy.md §3](../admin/profiles-and-policy.md#3-upgrades-and-drains)).
+  A cluster whose `WorkerProfile` CRD predates `status.podsBehind` drops it, and the roll
+  stays manual until the CRDs are applied.
   Profiles whose image is `release` are rewritten by the upgraded plane.
 - A namespace made by an older operator gets its `troupe.dev/workers=true` label at the
   next reconcile; until then its pods cannot reach the control port.

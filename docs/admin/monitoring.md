@@ -97,7 +97,7 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 | `SecretMissing: True` with the Secrets present | the operator has no RBAC on Secrets; ignore the condition |
 | A profile is saved but no `WorkerProfile` appears; `not_applied`, `no_cluster` | the plane has no Kubernetes connection (`TROUPE_KUBECONFIG`, or the in-pod ServiceAccount) |
 | `PolicyViolation: NoPolicy` on every profile | `policy.name` is not `default`, and nothing sets `TROUPE_POLICY_NAME` |
-| Pods stay on the old image, `UpgradePending: True` | `OnDelete`: drain, then delete the pod ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)) |
+| Pods stay on the old image, `UpgradePending: True` | a pod is replaced once it holds no active session, one at a time; the message says which pod waits and for what. `waits to be drained` for long: its sessions are still in use, so `admin.pod.drain` it to roll it now. A pod the plane recorded in `troupe.dev/drained` that is still Ready: drain it again ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)) |
 | Console sign-in lands on `/admin/denied`, listing the groups carried | the admin group is not among them, or `groups_claim` names the wrong claim |
 | "token endpoint answered 200 without an id_token" | `openid` not in scope, or the registration cannot issue id tokens |
 | Every sign-in fails before a password, `AADSTS650053` | `groups` asked for as a scope; take it out of `plane.oidc.scopes` |

@@ -85,6 +85,43 @@ defmodule Troupe.A2A.EventsTest do
     assert acc.state == "canceled"
   end
 
+  test "a turn the harness stopped fails the task, saying why" do
+    {acc, updates} =
+      fold([
+        durable(1, "user_input", %{"source" => "user", "text" => "go"}),
+        durable(2, "llm_response", assistant("trying again", "tool_use")),
+        durable(3, "tool_failures_ask_answered", %{"call_id" => "failures-1", "decision" => "stop"}),
+        durable(4, "user_input", %{"source" => "harness", "text" => "The harness stopped this turn."}),
+        durable(5, "turn_ended", %{"reason" => "tool_failures"})
+      ])
+
+    assert acc.state == "failed"
+    assert [%{"text" => text}] = acc.message["parts"]
+    assert text =~ "kept failing"
+    assert %{"final" => true, "status" => %{"state" => "failed"}} = List.last(updates)
+
+    {acc, _updates} =
+      fold([
+        durable(1, "user_input", %{"source" => "user", "text" => "go"}),
+        durable(2, "turn_ended", %{"reason" => "agent_failed", "detail" => "** (RuntimeError) boom"})
+      ])
+
+    assert acc.state == "failed"
+    assert [%{"text" => text}] = acc.message["parts"]
+    assert text =~ "kept crashing"
+    assert text =~ "(RuntimeError) boom"
+
+    # A turn the model ended has no reason: its answer completed the task already.
+    {acc, updates} =
+      fold([
+        durable(1, "llm_response", assistant("Here.", "end_turn")),
+        durable(2, "turn_ended", %{})
+      ])
+
+    assert acc.state == "completed"
+    assert length(updates) == 1
+  end
+
   test "an approval is input-required until it is decided" do
     requested = %{"call_id" => "c1", "tool" => "shell", "args" => %{"command" => "ls"}}
     {acc, updates} = fold([durable(1, "approval_requested", requested)])

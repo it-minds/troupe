@@ -8,18 +8,33 @@ defmodule Troupe.Reaper do
   closes, reaper reads EOF on its stdin, and it kills the command's whole process
   tree. No cleanup code runs on the Elixir side because none can be relied on when
   the VM is killed outright.
+
+  A helper that is missing, or there and will not start, is an error the caller gets
+  back, never a raise (Decision 733): the agent asks `git` where its repository is before
+  every model call, and a helper that cannot run must not take the agent down with it.
   """
+
+  require Logger
+
+  @typedoc """
+  Why no command ran: no helper built for this host, a helper that will not start (the
+  OS's reason), or a working directory that is not there.
+  """
+  @type error :: :reaper_missing | {:reaper_unstartable, term()} | {:no_directory, Path.t()}
 
   @doc """
   Path to the reaper binary for this host, or `{:error, :reaper_missing}`.
 
   `priv/reaper/<triple>/reaper` is populated by `mix compile.reaper` and packed into
   the release, so a worker image carries the reaper for the architecture its pods run
-  on and never builds anything at runtime.
+  on and never builds anything at runtime. `config :troupe_core, :reaper` names a helper
+  somewhere else, which is how the suite gives the harness one that will not start.
   """
   @spec path() :: {:ok, Path.t()} | {:error, :reaper_missing}
   def path do
-    candidate = Path.join([:code.priv_dir(:troupe_core), "reaper", triple(), exe_name()])
+    candidate =
+      Application.get_env(:troupe_core, :reaper) ||
+        Path.join([:code.priv_dir(:troupe_core), "reaper", triple(), exe_name()])
 
     if File.regular?(candidate), do: {:ok, candidate}, else: {:error, :reaper_missing}
   end
@@ -28,25 +43,23 @@ defmodule Troupe.Reaper do
   Open a Port running `command` under reaper, owned by the calling process.
 
   Returns the Port. The caller reads `{port, {:data, _}}` and `{port, {:exit_status, _}}`
-  as usual; closing the port, or dying, reaps the tree.
+  as usual; closing the port, or dying, reaps the tree. A helper that will not start is
+  `{:error, {:reaper_unstartable, reason}}`, logged once.
   """
-  @spec open(Path.t(), [String.t()], keyword()) :: {:ok, port()} | {:error, term()}
+  @spec open(Path.t(), [String.t()], keyword()) :: {:ok, port()} | {:error, error()}
   def open(cwd, argv, opts \\ []) do
     with {:ok, reaper} <- path() do
-      port =
-        Port.open({:spawn_executable, String.to_charlist(reaper)}, [
-          :binary,
-          :exit_status,
-          :hide,
-          :stderr_to_stdout,
-          {:args, argv},
-          {:cd, String.to_charlist(cwd)},
-          {:env, env(opts)},
-          # A packet-less stream: we want bytes as they arrive, not framed messages.
-          {:line, 65_536}
-        ])
-
-      {:ok, port}
+      start_reaper(reaper, cwd, [
+        :binary,
+        :exit_status,
+        :hide,
+        :stderr_to_stdout,
+        {:args, argv},
+        {:cd, String.to_charlist(cwd)},
+        {:env, env(opts)},
+        # A packet-less stream: we want bytes as they arrive, not framed messages.
+        {:line, 65_536}
+      ])
     end
   end
 
@@ -74,14 +87,9 @@ defmodule Troupe.Reaper do
     ]
 
     case {:os.type(), path()} do
-      {{:win32, _}, _} ->
-        {:ok, Port.open({:spawn_executable, String.to_charlist(exe)}, [{:args, tl(argv)} | common])}
-
-      {_, {:ok, reaper}} ->
-        {:ok, Port.open({:spawn_executable, String.to_charlist(reaper)}, [{:args, argv} | common])}
-
-      {_, {:error, reason}} ->
-        {:error, reason}
+      {{:win32, _}, _} -> start(exe, cwd, [{:args, tl(argv)} | common])
+      {_, {:ok, reaper}} -> start_reaper(reaper, cwd, [{:args, argv} | common])
+      {_, {:error, reason}} -> {:error, reason}
     end
   end
 
@@ -94,10 +102,11 @@ defmodule Troupe.Reaper do
   huge tree is exactly as cancellable as a shell command, because it is one.
 
   Returns `{:error, :reaper_missing}` when the helper was not built for this platform,
-  so callers can fall back to something that needs no process at all.
+  and `{:error, {:reaper_unstartable, reason}}` when it will not start, so callers can
+  fall back to something that needs no process at all.
   """
   @spec run(Path.t(), [String.t()], keyword()) ::
-          {:ok, String.t(), integer()} | {:error, term()}
+          {:ok, String.t(), integer() | :timeout} | {:error, error()}
   def run(cwd, argv, opts \\ []) do
     timeout = Keyword.get(opts, :timeout_ms, 120_000)
 
@@ -105,6 +114,71 @@ defmodule Troupe.Reaper do
       collect(port, System.monotonic_time(:millisecond) + timeout, [])
     end
   end
+
+  @doc """
+  Why no command ran, as a clause for a tool's answer to the model or a line of
+  `troupe doctor`: no capital, no full stop.
+  """
+  @spec explain(term()) :: String.t()
+  def explain(:reaper_missing),
+    do: "the reaper helper for #{triple()} was not built into this install"
+
+  def explain({:reaper_unstartable, reason}) do
+    case path() do
+      {:ok, reaper} ->
+        "the reaper helper #{Troupe.Paths.display(reaper)} will not start (#{describe(reason)})"
+
+      {:error, _} ->
+        "the reaper helper will not start (#{describe(reason)})"
+    end
+  end
+
+  def explain({:no_directory, cwd}), do: "the directory #{Troupe.Paths.display(cwd)} is not there"
+  def explain(other), do: inspect(other)
+
+  # `Port.open/2` raises when the program is there and will not start: not executable, a
+  # mount that forbids running it, a file an antivirus holds. On Windows it raises as well
+  # when the directory the program is to start in has gone, which is not the program's
+  # fault. Either way it is an answer for the caller, not a crash of whoever asked.
+  defp start(executable, cwd, options) do
+    {:ok, Port.open({:spawn_executable, String.to_charlist(executable)}, options)}
+  rescue
+    error ->
+      if File.dir?(cwd),
+        do: {:error, spawn_reason(error)},
+        else: {:error, {:no_directory, cwd}}
+  end
+
+  defp start_reaper(reaper, cwd, options) do
+    case start(reaper, cwd, options) do
+      {:ok, port} -> {:ok, port}
+      {:error, {:no_directory, _cwd}} = error -> error
+      {:error, reason} -> unstartable(reaper, reason)
+    end
+  end
+
+  defp spawn_reason(%ErlangError{original: reason}), do: reason
+  defp spawn_reason(error), do: Exception.message(error)
+
+  # Logged once for each helper and reason, not at every call: the brief's `git` call
+  # alone asks before every model call.
+  defp unstartable(reaper, reason) do
+    if :persistent_term.get({__MODULE__, :unstartable}, nil) != {reaper, reason} do
+      :persistent_term.put({__MODULE__, :unstartable}, {reaper, reason})
+
+      Logger.warning(
+        "reaper: #{Troupe.Paths.display(reaper)} will not start (#{describe(reason)}), so no " <>
+          "command can run: not the shell tool, not git, not an MCP server; `troupe doctor` " <>
+          "checks it"
+      )
+    end
+
+    {:error, {:reaper_unstartable, reason}}
+  end
+
+  defp describe(reason) when is_atom(reason), do: "#{reason}: #{:file.format_error(reason)}"
+  defp describe(reason) when is_binary(reason), do: reason
+  defp describe(reason), do: inspect(reason)
 
   defp collect(port, deadline, acc) do
     remaining = deadline - System.monotonic_time(:millisecond)

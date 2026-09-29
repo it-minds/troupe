@@ -124,8 +124,8 @@ defmodule Troupe.WindowAttentionTest do
       assert [%{state: :running}] = Model.windows(model)
     end
 
-    # What a screen opened again folds: the journal's copy, which `Codec` reads back with
-    # the agent state as the string it wrote.
+    # What a screen opened again folds: the journal's copy, which `Codec` reads back as it
+    # was published.
     test "the journal read back says the same" do
       for {ending, state} <- [
             {[wire("root", "turn_ended")], :done_unread},
@@ -144,6 +144,68 @@ defmodule Troupe.WindowAttentionTest do
                  "model error: down"
                ]
       end
+    end
+
+    # D36: `Codec` gave an agent state back with `to` as the string it wrote and `reason` as
+    # an atom, the other way round from what was published, so every reader of either had
+    # to know which copy it held.
+    test "an event read back from the journal is the event that was published" do
+      wires =
+        turn() ++
+          [
+            wire("root", "turn_ended", %{"reason" => "tool_failures"}),
+            wire("root", "cancelled"),
+            wire("root", "agent_done", %{"reason" => "budget_exhausted", "limit" => "turns"}),
+            wire("root", "loop_stopped", %{"reason" => "max_iterations", "iterations" => 3}),
+            wire("root", "budget_warning", %{
+              "dimension" => "context",
+              "used" => 160_000,
+              "limit" => 200_000,
+              "fraction" => 0.8
+            })
+          ]
+
+      {events, _memory} = translate("s-1", wires)
+
+      for event <- events, do: assert(journaled(event) == event)
+    end
+
+    # D36: a subagent's end arrives as its own `agent_done`, which nothing read, so a
+    # finished one was never marked ended and said `done` with a spinner for ever.
+    test "a subagent that finished has ended, and says nothing more" do
+      model = fold(delegated() ++ [wire(@child, "agent_done", %{"reason" => "finished"})])
+      [w] = Model.windows(model)
+
+      assert is_integer(w.agents[@child].ended_at)
+      assert Model.activity_line(w, @child, 0, 10) == nil
+
+      assert Model.agent_state(%{window: w, path: @child, agent: w.agents[@child], root?: false}) ==
+               :done
+    end
+
+    # D36: a cancel stops the subagents with it and none of them says so, so what one was
+    # last doing stayed on the window and came back beside the next turn's spinner.
+    test "a cancel stops a subagent where it was" do
+      {events, memory} = translate("s-1", delegated())
+
+      {live, memory} =
+        Translate.ephemeral(
+          "s-1",
+          %{
+            "type" => "agent_state",
+            "agent" => String.split(@child, "/"),
+            "data" => %{"state" => "thinking"}
+          },
+          memory
+        )
+
+      {cancel, _memory} = translate("s-1", [wire("root", "cancelled")] ++ turn(), memory)
+      [w] = Model.windows(Model.rebuild("s-1", "/w", events ++ live ++ cancel))
+
+      assert w.state == :running
+      refute Map.has_key?(w.activity, @child)
+      assert is_integer(w.agents[@child].ended_at)
+      refute Model.activity_line(w, "root", 0, 10) =~ "general#1"
     end
 
     # A window at rest has no spinner, but a model that failed still says why.
@@ -166,11 +228,14 @@ defmodule Troupe.WindowAttentionTest do
       %{sid: sid, pid: pid, session: session}
     end
 
-    test "Enter on the command line opens the window a subagent waits in", %{sid: sid, pid: pid} do
+    test "Enter on the command line opens the window a subagent waits in",
+         %{sid: sid, pid: pid, session: session} do
       inject(pid, sid, turn("explore-1"))
       inject(pid, sid, delegated("build-1") ++ [approval_asked("build-1/general#1", "call_8")])
 
       refute hd(Model.windows(user_state(pid).model)).path == "build-1"
+      # The status line reads the window states the model derives.
+      assert screen_text(pid, session) =~ ~r/1 need input · press \d \(or Enter/
 
       press(pid, "enter")
       assert user_state(pid).focus == {:window, "build-1"}

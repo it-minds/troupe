@@ -45,7 +45,7 @@ paths produce it and they must produce the same one:
 
 | Path | Where the string comes from |
 |---|---|
-| Sign-in | the `sub` claim, or whatever `subject_claim` names |
+| Sign-in | the `sub` claim, always (`login.ex`, `fetch_subject/1`) |
 | SCIM | `externalId`, falling back to `userName` (`scim.ex`, `subject_of/1`) |
 
 If those disagree, the person SCIM created and the person who signs in are **two rows**,
