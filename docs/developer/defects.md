@@ -53,6 +53,10 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
   the real sequence.
 - Under full load, core `WatcherTest` "poll backend a gitignored file's marker is ignored"
   and `ReadBranchTest` (an `Index` call timeout) fail now and then; both pass alone.
+- On the 0.6.3 tip under full load, core `BlobsTest` and `CutShortTest` (an `Index` call
+  timeout), the worker's `ReaderLogTest` "a log an activation has taken over" and the
+  gateway's `RestartTest` (once with a `FunctionClauseError` in `Troupe.LLM.Fake.render/2`)
+  each failed once; all pass alone.
 - The gateway suite prints `erl_child_setup: failed with error 32 on line 284` a few
   times, with or without failures (probably a port child writing to a closed pipe).
 - `apps/troupe_gateway/test/troupe/gateway/restart_test.exs` `create/2` never stops the
@@ -122,6 +126,10 @@ The rest of this entry was fixed in PRs #234 and #237. Found by the chunk 6 fixe
   open it (PR #241).
 - `model.ex` highlights code with syntect's dark-only `base16_ocean_dark`, so code keeps
   dark-theme colours on a light terminal.
+- Dead since the daemon move: `model.ex`'s `:truncated`, `:compaction`,
+  `:compaction_started`, `:profile_switched` and `:watch_trigger` clauses, the printer's
+  `:truncated` and `:compaction_started` clauses, and a window's `summary` and
+  `diff_stat` fields, which nothing feeds.
 
 The rest of this entry (the printer's and the model's dead clauses, the view's recount,
 the picker's empty branches column, `Troupe.Codec`'s `to`/`reason`) was fixed in PR #262.
@@ -140,6 +148,96 @@ starts, `Output.cap/2`'s count and the stray comment in `dispatch.ex` were fixed
 socket, a failed `open` leaving its view behind, and the Where step ignoring the app's
 `planeUrl`) were fixed in PR #263; `plane-stack.yml`'s OpenBao and the split Dependabot
 groups in PR #265.
+
+### D39 - A `session.read` and an activation of the same session on one pod (medium, unconfirmed)
+
+- `Reader.open` (`apps/troupe_worker/lib/troupe/worker/session/reader.ex`) checks
+  `Sessions.whereis` before it starts, but the Link runs pushed commands concurrently, so
+  a `session.read` racing a `session.activate` can have the reader's `Restore.events`
+  write storage's copy of the log over the live session's, and the events not sealed yet
+  are lost. The reader's write should check for a registered manager inside
+  `Restore.with_log/2`.
+- `Manager.put_back/3`'s `forget` removes the log directory without `with_log` or a check
+  for a reader.
+- A reader still alive when a manager's dormancy erases the log answers a later
+  `Reader.open` from what it had, until its next idle tick (up to 30 s), and then
+  `not_found`.
+
+Found by the #269 fixer (PR #271), 2026-09-29.
+
+### D40 - The plane's scaler and drains (medium)
+
+- `Scaler.write` (`apps/troupe_plane/lib/troupe/plane/fleet/scaler.ex`, `write/3`,
+  `scale/2`) writes the row before the cluster. If the cluster write fails, the next tick
+  sees the count it wants and never sends it again, and nothing applies a profile again
+  on a timer: the cluster stays at the old count and waiting sessions can stall.
+- A worker's `session.activate` doesn't refuse on a pod that is draining, so a session
+  placed in the few seconds after SIGTERM isn't in the shutdown drain's list.
+- `Drain.pod` waits for its push for the drain's timeout plus 30 s, while the pod makes
+  sessions dormant one after another (up to 120 s each): several busy sessions can outlast
+  it, and the plane gives up on them while the pod is still archiving (unconfirmed).
+- Bonny's `SkipObservedGenerations` skips metadata-only modify events, so the operator
+  acts on the plane's `troupe.dev/drained` annotation at the next resync (about 30 s);
+  the `touched/1` comment in `admin_cluster_test.exs` says sooner.
+
+Found by the #258 and #273 fixers (PRs #264, #274), 2026-09-29.
+
+### D41 - The desktop app after the daemon restarts (medium)
+
+- A daemon that restarts publishes a new port and token (`loopback.ex`: a port the kernel
+  picks, a random token), and `DaemonClient` keeps redialling the old endpoint: the app
+  says "Not answering" until Find is pressed under This computer. PR #263's resubscribe
+  covers a dropped socket to the same endpoint only. Redialling should read `daemon.json`
+  again.
+- `useDaemon`'s `onClose` (`clients/gui/apps/desktop/src/hooks.ts`) sets the status to
+  "error", and nothing sets it back after a redial that works.
+- Unconfirmed: whether Windows raises `Activated` in the running app for a click in the
+  notification centre or starts a second copy. `tauri-winrt-notification` 0.8 can't set a
+  toast's `launch` argument, so a copy Windows starts can't tell which session was
+  clicked; it brings the window forward.
+
+Found by the chunk 9 fixer of slot G (PR #263), 2026-09-29.
+
+### D42 - The clients drop what a stopped turn says (medium)
+
+- The headless printer never prints `:remote_note`, so since the daemon move a headless
+  run shows no `done: <summary>`, "context compacted", "budget exhausted", cut-short or
+  empty replies, or the harness's notes.
+- The TUI, headless runs and the desktop app treat a `turn_ended` with reason
+  `agent_failed` (PR #266) as an ordinary rest; a headless run exits 0 on it
+  (`printer.ex` `outcome/2`, `model.ex` `failure/3`).
+- A2A's `state_of_row/1` maps an idle plane row whose turn the harness stopped to
+  `completed` (the row carries no reason).
+
+Found by the chunk 9 fixers of slots D and E (PRs #262, #266), 2026-09-29.
+
+### D43 - Small leftovers from the 0.6.3 work (low)
+
+- `clients/tui/lib/troupe/os/process.ex` still opens the reaper with `Port.open` directly
+  and raises when it is missing or won't start; `acp_agent.ex` `open_port/2` does the same
+  for a bundle command that exists but won't start (the agent is `:temporary`, so it
+  doesn't loop).
+- The TUI's `troupe doctor` under a scratch `APPDATA` fails in the Burrito launcher with
+  "error: FileNotFound" (with the real `APPDATA` it works).
+- Subagents get no `started_at` or name in the TUI (`delegation_started` isn't read), so
+  the observer measures their time from the window's start.
+- `budget_ask_answered` and `tool_failures_ask_answered` carry `decision` as a string
+  live and an atom when `Troupe.Codec` reads them back (nothing reads it yet).
+- The TUI picker: every local row's title is the workspace path (the daemon's
+  `session.list` has no title; Decision 65 promised the first prompt); a daemon session's
+  detail says "running in this VM"; `troupe resume` with no id opens the newest row, which
+  may be a branch or an empty scratch session.
+- `troupe.log` never rotates (`daemon.log` rotates at 5 MB, three files), and the TUI
+  release ignores `TROUPE_LOG_LEVEL` (fixed at warning).
+- `Session.Summary.fold/2` crashes on a `todo_updated` whose items aren't a list (only a
+  malformed log has one; unconfirmed).
+- `scripts/install-local` demands 7-Zip before any TUI build, though only the Windows ERTS
+  needs it; `scripts/toolbox` builds `troupe-toolbox` only when it is missing, so an image
+  older than PR #208 keeps forwarding the old dev ports until it is rebuilt.
+- Without Cilium, the `NoCilium` message on `EgressByHostname` doesn't mention the extra
+  port a platform endpoint on a port other than 443 opens (the docs do).
+
+Found by the chunk 9 fixers, 2026-09-29.
 
 ## Taken
 
@@ -191,6 +289,14 @@ groups in PR #265.
 | D35 - Clicking a desktop notification on Windows doesn't open its session | PR #263 |
 | D6 - Plane mode opens a just-created local session as a team session (confirmed) | PR #265 |
 | D9 - The admin docs describe a `subject_claim` setting the plane does not have (confirmed: no code in this repository has it; the plane keys on `sub`) | PR #265 |
+| Without Cilium, the worker's policy admitted an external object store or OpenBao only on 443 or 80 at a public address (found by the #251 fixer) | #257, PR #260 |
+| A failed activation left the restored event log on the pod; a fork and `session.read` answered `internal_error` when storage was unreachable (found by the #252 fixer) | #259, PR #261 |
+| A roll never finished by itself: pods on an old revision waited to be deleted by hand (found by the #251 fixer) | #258, PR #264 |
+| `session.read` left the log it restored on the pod; a fork read a failed listing as "no archives" (found by the #259 fixer) | #269, PR #271 |
+| `Troupe.Reaper.open/3` raised when the helper couldn't start, which crashed the agent on every model call (found by the chunk 9 fixer of slot D) | #270, PR #272 |
+| The plane's scale-down removed pods without draining them (found by the #258 fixer) | #273, PR #274 |
+| With Entra and SCIM, the plane keys a person on `sub` only (found by the chunk 9 fixer of slot F) | #267 |
+| Without Cilium, a profile's own endpoints on other ports or at private addresses are unreachable (found by the #257 fixer) | #268 |
 
 ## Checked and not a defect
 
