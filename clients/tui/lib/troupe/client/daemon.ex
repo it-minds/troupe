@@ -56,21 +56,37 @@ defmodule Troupe.Client.Daemon do
   def unsubscribe(sid), do: Events.unsubscribe(sid)
 
   # This session's transcript and its branches', the latter under their window names,
-  # in the order they happened.
+  # in the order they happened. A branch's window opens with the `branch_spawned` this
+  # client records once `session.create` has answered, and the daemon stamped the branch's
+  # first events (`session created as …`, its prompt) before that: sorted by time alone,
+  # they came ahead of the window they belong to, and a screen rebuilt from here dropped
+  # them. So nothing of a branch sorts ahead of its window's opening.
   @impl true
   def events(sid) do
+    own = Journal.all(sid)
+
+    opened =
+      for %{type: :branch_spawned, agent_path: window, ts: ts} <- own, into: %{}, do: {window, ts}
+
     branches =
-      Enum.flat_map(branches(sid), fn branch ->
+      Enum.flat_map(branches(own), fn branch ->
+        from = Map.get(opened, branch.window, 0)
+
         branch.session_id
         |> Journal.all()
         # This journal's own `branch_spawned` opened the window, with the right name.
         |> Enum.reject(&(&1.type == :branch_spawned))
         |> Enum.map(fn event ->
-          %{event | session_id: sid, agent_path: Branch.rewrite(event.agent_path, branch.window)}
+          {max(event.ts, from),
+           %{event | session_id: sid, agent_path: Branch.rewrite(event.agent_path, branch.window)}}
         end)
       end)
 
-    Enum.sort_by(Journal.all(sid) ++ branches, & &1.ts)
+    # Stable, and this session's own events first: at an equal time the window opens
+    # before anything is drawn in it.
+    (Enum.map(own, &{&1.ts, &1}) ++ branches)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.map(&elem(&1, 1))
   end
 
   # The agents a slash command may start a branch on, plus `/worktree`: the default
@@ -550,11 +566,18 @@ defmodule Troupe.Client.Daemon do
 
   @impl true
   def sessions({:local, workspace} = origin, _filter) do
-    case Link.call("session.list", %{filter: %{workspace: workspace}}) do
+    # Every session the daemon has, and this workspace's picked out here: a branch is a
+    # session of its own with `parent` set (decision 7.3 b), and one in a worktree of its
+    # own is listed under that worktree, not under the workspace its parent is in. Each
+    # row carries the branches made from it.
+    case Link.call("session.list", %{filter: %{}}) do
       {:ok, %{"sessions" => sessions}} ->
+        branches = Enum.group_by(sessions, & &1["parent"], &branch_entry/1)
+
         rows =
           sessions
-          |> Enum.map(&summary(&1, origin))
+          |> Enum.filter(&(&1["workspace"] == workspace))
+          |> Enum.map(&summary(&1, origin, Map.get(branches, &1["id"], [])))
           |> Enum.sort_by(&(&1.updated_at || 0), :desc)
 
         {:ok, rows}
@@ -740,9 +763,10 @@ defmodule Troupe.Client.Daemon do
   # What this session's journal says its windows are: every branch opened here and not
   # dismissed, with the session it is. The journal is the record because the daemon's
   # listing knows the parent of a session but not what its parent's screen called it.
-  defp branches(sid) do
-    sid
-    |> Journal.all()
+  defp branches(sid) when is_binary(sid), do: sid |> Journal.all() |> branches()
+
+  defp branches(events) when is_list(events) do
+    events
     |> Enum.reduce(%{}, fn
       %{type: :branch_spawned, agent_path: window, data: %{session_id: child} = data}, acc
       when is_binary(child) ->
@@ -1086,7 +1110,7 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
-  defp summary(row, origin) do
+  defp summary(row, origin, branches) do
     %{
       id: row["id"],
       title: row["title"] || row["workspace"] || row["id"],
@@ -1099,10 +1123,29 @@ defmodule Troupe.Client.Daemon do
       cost: row["cost"],
       updated_at: to_ms(row["last_active_at"] || row["created_at"]),
       origin: origin,
-      branches: [],
+      branches: branches,
+      parent: row["parent"],
       workspace: row["workspace"]
     }
   end
+
+  # A branch as its parent's row counts it, with what the daemon's listing says of it:
+  # `waiting` while it asks something of a person, and its log's last word once it sleeps
+  # (`done`, `interrupted`). Anything else says nothing about it: a live session is `idle`
+  # there whatever its agent is doing.
+  defp branch_entry(row) do
+    %{
+      id: row["id"],
+      profile: row["profile"],
+      state: branch_state(row["status"]),
+      git_branch: row["branch"]
+    }
+  end
+
+  defp branch_state("waiting"), do: :needs_input
+  defp branch_state("done"), do: :done
+  defp branch_state("interrupted"), do: :interrupted
+  defp branch_state(_status), do: nil
 
   defp entry(%{} = e) do
     %{

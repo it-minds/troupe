@@ -17,14 +17,19 @@ Troupe is a plain relying party. Of the provider it needs:
 | For MCP: `<base_url>/mcp` as an identifier URI beside `api://<client_id>`, the delegated scope `<base_url>/mcp/admin` (or `plane.oidc.mcpScope`), groups on access tokens | an MCP client sends `https://<plane>/mcp` as RFC 8707's `resource`, and Entra refused the older `api://<client-id>/admin` pairing (`AADSTS9010010`) |
 
 Default scopes are `openid profile email offline_access`; `offline_access` is what gets a
-client a refresh token. `subject_claim` names the claim that is the person (`sub`; `oid` for
-Entra with SCIM, whose `sub` is pairwise). `admin.identity.check` runs four timed checks —
-discovery names the same issuer, the JWKS has keys, the configured endpoints match
-discovery, and how many known people carry the admin group (and whether you do) — and
-prints the redirect URI to compare with the registration by eye. With a group argument it
-tests a candidate before you save it. The console's **Identity provider** card configures
-all of this at runtime, behind the same check. Authentik specifically:
-[authentik.md](authentik.md).
+client a refresh token. The person is the token's `sub`, and no setting names another claim.
+So SCIM does not work with Entra: its `sub` is pairwise, a different string in every app
+registration and not one SCIM can push, and the person SCIM creates and the person who
+signs in would be two rows
+([authentik.md §0](authentik.md#0-one-string-is-the-person-and-it-cannot-be-fixed-afterwards)).
+On Entra, people and groups come from sign-in alone.
+
+`admin.identity.check` runs four timed checks — discovery names the same issuer, the JWKS
+has keys, the configured endpoints match discovery, and how many known people carry the
+admin group (and whether you do) — and prints the redirect URI to compare with the
+registration by eye. With a group argument it tests a candidate before you save it. The
+console's **Identity provider** card configures all of this at runtime, behind the same
+check. Authentik specifically: [authentik.md](authentik.md).
 
 ## 2. OpenBao
 
@@ -129,7 +134,7 @@ the RFC 9728 document at `/.well-known/oauth-protected-resource`. Destructive to
 | Endpoints | `/scim/v2/Users[/:id]` and `/scim/v2/Groups[/:id]`: create, list with a filter, replace, patch, delete |
 | Token | minted on the console's Identity provider card (`admin.scim.rotate`, shown once, kept as a salted hash), or the deployment's `TROUPE_SCIM_TOKEN`. Either opens the door; neither, and every request is 401 |
 | Status | `admin.scim.get`: the last authorised request; `teams_from_groups` (off by default) makes a pushed group a team |
-| Semantics | the subject is `externalId`, else `userName`, and must match what sign-in uses; membership is replaced per push; deleting a user deactivates it, deleting a group empties it; one `<attribute> eq "<value>"` filter, anything else refused; no pagination, bulk or `/Schemas` |
+| Semantics | the subject is `externalId`, else `userName`, and must match the token's `sub` (Entra's cannot, [§1](#1-identity-provider-oidc)); membership is replaced per push; deleting a user deactivates it, deleting a group empties it; one `<attribute> eq "<value>"` filter, anything else refused; no pagination, bulk or `/Schemas` |
 | Without SCIM | sign-in builds the same rows from the group claim; a person who has left is only noticed at their next sign-in |
 
 ## 9. The GUI

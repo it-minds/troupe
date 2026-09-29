@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { awaitingApproval, awaitingYou, DaemonClient, DaemonSource, FleetStore, filterRows, rowFromDaemon } from "../src/index.js";
+import { awaitingApproval, awaitingYou, DaemonClient, DaemonSource, FleetStore, filterRows, isDurable, rowFromDaemon } from "../src/index.js";
 import type { DaemonEndpoint, FleetRow, FleetSource, TroupeEvent } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 
@@ -275,6 +275,77 @@ describe("stage 2: several sessions on one socket", () => {
     assert.equal(client.connected, true, "the socket is still up for the others");
   });
 });
+
+describe("stage 2: a daemon that goes away and comes back", () => {
+  let daemon: FakeDaemon;
+  let client: DaemonClient;
+  let closed: string[];
+
+  before(async () => {
+    daemon = new FakeDaemon();
+    await daemon.start();
+    closed = [];
+    client = new DaemonClient(endpointOf(daemon), { onClose: (reason) => void closed.push(reason) });
+  });
+
+  after(async () => {
+    client.disconnect();
+    await daemon.stop();
+  });
+
+  it("a view open across the restart is subscribed again from its cursor, and misses nothing", async () => {
+    const session = daemon.seed("/home/ada/across");
+    const heard: number[] = [];
+    const view = await client.open(session.id, {}, (e) => {
+      if (isDurable(e)) heard.push(e.seq);
+    });
+    daemon.say(session.id, "before");
+    await view.waitFor((e) => "seq" in e && e.seq === 2, 5_000, "the event before the restart");
+
+    // The daemon goes away. The view is told nothing and keeps its cursor.
+    const port = daemon.port;
+    await daemon.stop();
+    await waitUntil(() => closed.length === 1, "the socket closing");
+    assert.equal(client.connected, false);
+
+    // Something is said while nobody is connected, and the daemon comes back where it was.
+    daemon.say(session.id, "while it was down");
+    await daemon.start(port);
+
+    // The next call dials again, as the list's poll does, and the view follows the socket.
+    await client.listSessions();
+    daemon.say(session.id, "after");
+    await view.waitFor((e) => "seq" in e && e.seq === 4, 5_000, "the event after the restart");
+    assert.deepEqual(heard, [1, 2, 3, 4], "each event once, with none lost in between");
+    await client.close(session.id);
+  });
+
+  it("an open whose subscription is refused leaves nothing behind, so the next one subscribes", async () => {
+    // Opened before it exists: the daemon answers `not_found`.
+    await assert.rejects(client.open("s-late"), /not_found/);
+    assert.equal(client.holdersOf("s-late"), 0, "a refused open is not a holder");
+
+    // Now it exists, and opening it again is a subscription rather than the dead view.
+    daemon.seed("/home/ada/late", { id: "s-late" });
+    const subscribes = daemon.calls.filter((c) => c.method === "subscribe").length;
+    const view = await client.open("s-late");
+    assert.equal(daemon.calls.filter((c) => c.method === "subscribe").length, subscribes + 1);
+    assert.ok(view.subscriptionId, "subscribed");
+    const said = daemon.say("s-late", "heard");
+    await view.waitFor((e) => "seq" in e && e.seq === said.seq, 5_000, "the late session's event");
+    await client.close("s-late");
+    assert.equal(client.holdersOf("s-late"), 0);
+  });
+});
+
+/** Poll until `done`, for what the socket reports in its own time. */
+async function waitUntil(done: () => boolean, what: string, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!done()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await settle(20);
+  }
+}
 
 describe("stage 2, done item 3: who the daemon records", () => {
   let daemon: FakeDaemon;

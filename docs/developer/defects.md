@@ -16,20 +16,22 @@ Stale docs and style nits are not defects and do not belong here.
 
 ## Open
 
-### D5 - A long refresh token may not fit the Windows keychain (unconfirmed, medium)
+### D5 - On Windows a refresh token over 1280 characters can't be stored, and the desktop sign-in fails (medium)
 
-The Tauri build keeps the refresh token in Windows Credential Manager, which caps a secret
-at 2560 bytes (about 1280 UTF-16 characters). A long Entra refresh token could exceed
-that, and then nothing is stored. Authentik's tokens are 128 characters, so this only
-matters for Entra. To confirm, sign in with Entra in the desktop app and
-restart it. Found by the #53 fixer (PR #84), 2026-09-22.
-
-### D6 - Plane mode opens a just-created local session as a team session (low)
-
-In plane mode, a local session opened before the fleet list has caught up defaults its
-kind to `team`, and the GUI briefly tries the plane's `session.open`. PR #88 fixed the
-default for local mode only (`clients/gui/apps/desktop/src/views/Session.tsx`). Found by
-the #85 fixer (PR #88), 2026-09-22.
+`secret_set` (`clients/gui/apps/desktop/src-tauri/src/secrets.rs`) stores the refresh
+token with keyring 3.6.3's `Entry::set_password`, which writes it to Windows Credential
+Manager as UTF-16 and refuses more than 1280 UTF-16 units (the 2560-byte
+`CRED_MAX_CREDENTIAL_BLOB_SIZE`) before writing anything: "Attribute 'password encoded
+as UTF-16' is longer than platform limit of 2560 chars" (`validate_attributes` in the
+crate's `windows.rs`). It is worse than a token left unsaved: `AuthSession.adopt`
+(`clients/gui/packages/client/src/auth.ts`) writes the token before the exchange and
+does not catch, so that sign-in fails, and so does a refresh that rotates to such a
+token. Authentik's are 128 characters. Entra's are opaque and vary; other projects
+report them over 1280 in tenants with many claims, which is still unmeasured here (no
+Entra tenant). `set_secret` with UTF-8 would hold 2560 and needs a read path for entries
+written as UTF-16; splitting the token across entries has no limit. Either wants a
+renamed desktop build to test. Found by the #53 fixer (PR #84), 2026-09-22; the limit
+and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
 
 ### D8 - Test hygiene (low)
 
@@ -56,23 +58,11 @@ the #85 fixer (PR #88), 2026-09-22.
 - `apps/troupe_gateway/test/troupe/gateway/restart_test.exs` `create/2` never stops the
   sessions it creates. They live in a second daemon OS process, so they probably don't
   leak into the test VM the way the two fixed in chunk 6 did (unconfirmed).
-- Gateway `PrivateTest` (`@moduletag :object_store`) has no reachability check: without
-  MinIO it fails with `econnrefused` rather than a SKIPPED block naming `scripts/dev-up`.
 - The desktop app's tests time out now and then when the machine is busy (goal-loop,
   local-mode, onboarding, command-palette); local-mode sends before its session is
   attached ("not attached").
 
 Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23) and in chunks 3 to 7.
-
-### D9 - The admin docs describe a `subject_claim` setting the plane does not have (unconfirmed, medium)
-
-`docs/admin/integrations.md`, `authentik.md` and `roles-and-permissions.md` say
-`subject_claim` names the claim that is the person (`oid` for Entra with SCIM, whose `sub`
-is pairwise). No code in this repository's history has it; `Troupe.Plane.OIDC` goes
-through `Login.from_claims/1`. If a plane needs it, Entra with SCIM would match a sign-in to
-the wrong person, or to none. To confirm: find whether the setting lives in the archived
-`troupe-remote` or the live plane's image; otherwise the docs are wrong. Found by the #54
-fixer (PR #101), 2026-09-23.
 
 ### D23 - Small leftovers (low)
 
@@ -97,12 +87,11 @@ Found by the chunk 4, 5 and 7 fixers, 2026-09-26/27.
 - The desktop app starts the daemon with the app's install directory as its working
   directory (`spawn_any` in `src-tauri/src/daemon.rs`), so the uninstaller probably can't
   remove that directory while the daemon runs (unconfirmed).
-- An A2A task stays `working` after the failure guard stops its turn (`turn_ended`
-  reason `tool_failures`).
-- `troupe run --headless` exits at the first rest, so the reply to a line another client
-  queued mid-turn is never printed.
+- Fixed in PR #262: `troupe run --headless` exited at the first rest, so the reply to a
+  line another client queued mid-turn was never printed.
 
-Found by the chunk 5 fixers, 2026-09-26.
+The A2A task that stayed `working` after the failure guard stopped its turn was fixed in
+PR #266. Found by the chunk 5 fixers, 2026-09-26.
 
 ### D30 - Two sources for the brand's assets (low)
 
@@ -124,66 +113,33 @@ fixers (PRs #210, #211), 2026-09-26.
 The rest of this entry was fixed in PRs #234 and #237. Found by the chunk 6 fixers,
 2026-09-26/27.
 
-### D35 - Clicking a desktop notification on Windows doesn't open its session (medium)
-
-`tauri-plugin-notification` can't report a click on desktop (its `show()` drops the
-handle; `onAction` is fed only by the phone plugins). Since PR #238 the app opens the
-session when its window comes to the front within 15 s of a notification, which a click
-usually causes. A real click handler needs the shell to show its own toast through
-`tauri-winrt-notification`'s `on_activated` (already in `Cargo.lock`), and single-instance
-handling beside it, because a click may start a second copy from the Start-menu shortcut
-(unconfirmed). Found by the fixer of PR #238, 2026-09-27.
-
 ### D36 - TUI leftovers after the attention fix (low)
 
-- `clients/tui/lib/troupe/ui/headless/printer.ex` still reads the dead
-  `:branch_state`/`:branch_failed`.
-- `view.ex`'s `waits_on_you?/1` and its status-line recount (from PR #239) are redundant
-  since PR #241 derives the window state in the model; so is its comment that no daemon
-  sends `branch_state`.
-- `model.ex`'s `:finished`, `:delegation_started` and `:delegation_completed` clauses are
-  dead (`Translate` never emits them), so a finished subagent's `ended_at` is never set,
-  and after a cancel a killed subagent's last activity stays on its window.
-- The session picker's `branch_states` column reads `Client.summary` branches, and
-  `Troupe.Client.Daemon` always returns `branches: []`, so it is always empty.
 - An idle screen stops ticking, so the sessions page's and HQ's ages are only as fresh
   as the last tick.
 - A question for the design rather than a defect: chatting from the command line, the
   session's own window shows `done ●`, dimmed, and "1 done" after every reply until you
   open it (PR #241).
-- `Troupe.Codec.decode_event` restores only its `@enum_keys` as atoms, so on a rebuild
-  from the journal `agent_state` comes back with `to: "idle"` (a string) but
-  `reason: :cancelled` (an atom); readers comparing `to` with atoms break on a reopened
-  screen.
 - `model.ex` highlights code with syntect's dark-only `base16_ocean_dark`, so code keeps
   dark-theme colours on a light terminal.
 
+The rest of this entry (the printer's and the model's dead clauses, the view's recount,
+the picker's empty branches column, `Troupe.Codec`'s `to`/`reason`) was fixed in PR #262.
 Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
 
 ### D37 - Small leftovers from the 0.6.1 work (low)
 
-- `Troupe.Tools.Output.cap/2` computes "N more bytes" before cutting back to the last
-  newline, so it under-reports what was dropped.
 - The settings help's "Where things live" says `~/.config/troupe/config.yaml`; on
   Windows the file is under `%APPDATA%\troupe`.
-- An agent that crashes in `init` restarts in a tight loop with no backoff (dozens of
-  `agent_restarted` a second when the reaper can't spawn).
 - `troupe --watch` still walks the whole workspace for `.gitignore` rules at start (PR
   #240 moved that walk out of every other session start).
-- The desktop client: after the daemon socket drops, `DaemonClient.connection()` rebinds
-  open views but never resubscribes them, so a session screen open across a daemon
-  restart may stop receiving events (unconfirmed); `DaemonClient.open` leaves a view
-  registered when `subscribe` fails, and later opens reuse it.
-- The desktop first run's Where step pre-fills the plane address from the daemon's link
-  only, not from the app's own `planeUrl` preference.
-- `clients/gui/dev/plane-stack.yml` has its own in-memory OpenBao and one-shot setup, so
-  a restart there loses the key as D31 did.
-- Dependabot puts Tauri's crates (cargo `tauri` group) and its npm packages (npm
-  `tooling` group) in different groups, so one pull request can move one half alone and
-  fail Tauri's version check, as #120 did. `@types/node` is 26 while the runtime is 24.
-- The comment above `handle("memory.get")` in `dispatch.ex` belongs to `agents.list`.
 
-Found by the chunk 7 fixers, 2026-09-27.
+Found by the chunk 7 fixers, 2026-09-27. The restart loop of an agent that crashes as it
+starts, `Output.cap/2`'s count and the stray comment in `dispatch.ex` were fixed in PR
+#266. The desktop client's three items (a view not resubscribed after a dropped daemon
+socket, a failed `open` leaving its view behind, and the Where step ignoring the app's
+`planeUrl`) were fixed in PR #263; `plane-stack.yml`'s OpenBao and the split Dependabot
+groups in PR #265.
 
 ## Taken
 
@@ -232,6 +188,9 @@ Found by the chunk 7 fixers, 2026-09-27.
 | `troupe` on Windows died at boot in a large directory and broke the console (every session start walked the workspace for `.gitignore`) | #231, PR #240 |
 | D34 - On a pod, a deleted file is never reported to clients | #252, PR #254 |
 | D38 - `UpgradePending` says every pod is current while one runs the old image (confirmed) | #251, PR #253 |
+| D35 - Clicking a desktop notification on Windows doesn't open its session | PR #263 |
+| D6 - Plane mode opens a just-created local session as a team session (confirmed) | PR #265 |
+| D9 - The admin docs describe a `subject_claim` setting the plane does not have (confirmed: no code in this repository has it; the plane keys on `sub`) | PR #265 |
 
 ## Checked and not a defect
 

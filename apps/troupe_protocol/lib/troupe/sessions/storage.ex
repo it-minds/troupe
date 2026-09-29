@@ -267,12 +267,16 @@ defmodule Troupe.Sessions.Storage do
   replays the events after it over the top. Listing rather than guessing, because the
   interval is a policy and reconstructing it from one is how a restore ends up reaching
   for a key that was never written.
+
+  A listing that failed is its error, not a session with no archives: read as none, a
+  fork that met storage going away at this one request made a child with its parent's
+  history and without its tree, and the child, having segments, was never forked again.
   """
-  @spec workspace_archives(ObjectStore.t(), String.t()) :: [{non_neg_integer(), String.t()}]
+  @spec workspace_archives(ObjectStore.t(), String.t()) ::
+          {:ok, [{non_neg_integer(), String.t()}]} | {:error, term()}
   def workspace_archives(store, session_id) do
-    case ObjectStore.list(store, prefix(session_id) <> "workspace/") do
-      {:ok, keys} -> keys |> Enum.flat_map(&parse_workspace_key/1) |> Enum.sort()
-      _unreadable -> []
+    with {:ok, keys} <- ObjectStore.list(store, prefix(session_id) <> "workspace/") do
+      {:ok, keys |> Enum.flat_map(&parse_workspace_key/1) |> Enum.sort()}
     end
   end
 
@@ -288,18 +292,20 @@ defmodule Troupe.Sessions.Storage do
   end
 
   @doc """
-  The newest workspace archive at or before `seq`, or `nil`.
+  The newest workspace archive at or before `seq`, or `nil` when there is none.
 
   `nil` for `seq` means the newest there is, which is what forking at a session's head
-  asks for.
+  asks for. A listing that failed is `{:error, reason}`, as `workspace_archives/2` says.
   """
   @spec workspace_at(ObjectStore.t(), String.t(), non_neg_integer() | nil) ::
-          {non_neg_integer(), String.t()} | nil
+          {:ok, {non_neg_integer(), String.t()} | nil} | {:error, term()}
   def workspace_at(store, session_id, seq) do
-    store
-    |> workspace_archives(session_id)
-    |> Enum.filter(fn {at, _extension} -> is_nil(seq) or at <= seq end)
-    |> List.last()
+    with {:ok, archives} <- workspace_archives(store, session_id) do
+      {:ok,
+       archives
+       |> Enum.filter(fn {at, _extension} -> is_nil(seq) or at <= seq end)
+       |> List.last()}
+    end
   end
 
   @doc "Upload a workspace archive."

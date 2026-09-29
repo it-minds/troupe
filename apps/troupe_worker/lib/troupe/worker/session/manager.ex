@@ -35,7 +35,6 @@ defmodule Troupe.Worker.Session.Manager do
 
   use GenServer, restart: :temporary
 
-  alias Troupe.KMS.OpenBao
   alias Troupe.ObjectStore
   alias Troupe.Protocol.Event
   alias Troupe.Session.Log
@@ -286,10 +285,7 @@ defmodule Troupe.Worker.Session.Manager do
     with {:ok, context} <- context(opts),
          :ok <- check_epoch(context),
          root = Restore.workspace_root(context, opts),
-         {:ok, log} <- Restore.events(context, root),
-         {:ok, _tree} <- Restore.workspace(context, root),
-         {:ok, sealer} <- start_sealer(state, context, log),
-         {:ok, session} <- Restore.start(context, root, opts) do
+         {:ok, log, sealer, session} <- put_back(state, context, root) do
       # The session records that it came back. A reader who was subscribed the whole
       # time sees a gap in wall-clock time and nothing else without this.
       Log.append(context.session_id, ["root"], :session_activated, %{
@@ -311,6 +307,53 @@ defmodule Troupe.Worker.Session.Manager do
            activated_at: System.system_time(:millisecond)
        }}
     end
+  end
+
+  # The part of an activation that writes to the pod: the log, then the workspace, then
+  # the sealer and the actor tree over them. The log and the workspace are plaintext, and
+  # when a later step failed they stayed until the session was next activated here or
+  # went dormant here, which for a session that goes on to run on another pod is never.
+  # So a failure from here on, returned or raised, takes away what this activation put
+  # there. What it found is left: a log a reader restored and may still be serving, or a
+  # workspace a pod that stopped without putting the session to sleep left behind, which
+  # may hold files no archive has. The pod's cache is sealed bytes the activation only
+  # read, and stays (Decision 725).
+  defp put_back(state, context, root) do
+    found = found(context, root)
+
+    try do
+      with {:ok, log} <- Restore.events(context, root),
+           {:ok, _tree} <- Restore.workspace(context, root),
+           {:ok, sealer} <- start_sealer(state, context, log),
+           {:ok, session} <- Restore.start(context, root, state.opts) do
+        {:ok, log, sealer, session}
+      end
+    else
+      {:ok, _log, _sealer, _session} = restored ->
+        restored
+
+      failed ->
+        forget(context, root, found)
+        failed
+    catch
+      kind, reason ->
+        forget(context, root, found)
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    end
+  end
+
+  # An empty directory holds nothing to keep.
+  defp found(context, root) do
+    %{
+      log: File.exists?(log_dir(context, root)),
+      workspace: File.exists?(root) and File.ls(root) != {:ok, []}
+    }
+  end
+
+  defp forget(context, root, found) do
+    unless found.log, do: File.rm_rf(log_dir(context, root))
+    unless found.workspace, do: Workspace.erase(root)
+    :ok
   end
 
   # Only when the version it was pinned to has been retired. A session whose bundle did
@@ -357,25 +400,13 @@ defmodule Troupe.Worker.Session.Manager do
     )
   end
 
+  # A key manager the pod cannot reach is named with its address
+  # (`Restore.open_context/2`), and is still a failure the plane retries, not one that
+  # parks the session.
   defp context(opts) do
     case Keyword.fetch(opts, :context) do
       {:ok, %Context{} = context} -> {:ok, context}
-      :error -> open_context(opts)
-    end
-  end
-
-  # Opening a context asks the key manager for the session's key, and a key manager the
-  # pod cannot reach is named with its address, as an object store is
-  # (`Restore.unreachable/2`): the transport error alone said neither which host nor that
-  # it was the key manager. Still a failure the plane retries, not one that parks the
-  # session. A key manager that answered and refused is left as it said.
-  defp open_context(opts) do
-    case Context.open(Keyword.fetch!(opts, :session_id), opts) do
-      {:error, %Req.TransportError{reason: reason}} ->
-        {:error, {:kms_unreachable, OpenBao.address(Keyword.get(opts, :kms_options, [])), reason}}
-
-      result ->
-        result
+      :error -> Restore.open_context(Keyword.fetch!(opts, :session_id), opts)
     end
   end
 
@@ -485,13 +516,13 @@ defmodule Troupe.Worker.Session.Manager do
   # the same PVC, and the durable copy of it is encrypted in object storage.
   defp erase_local(state) do
     workspace = Workspace.erase(state.workspace)
-
-    log_dir =
-      Path.dirname(Restore.log_path(state.session_id, state.workspace, state.context.state_dir))
-
+    log_dir = log_dir(state.context, state.workspace)
     File.rm_rf(log_dir)
     %{workspace: workspace, log: not File.exists?(log_dir)}
   end
+
+  defp log_dir(context, root),
+    do: Path.dirname(Restore.log_path(context.session_id, root, context.state_dir))
 
   # A fenced pod uploads nothing: its events belong to an epoch the session has moved
   # past, and its workspace is a copy of a tree somebody else now owns. It throws them

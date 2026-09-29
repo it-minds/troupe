@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
 import { awaitingYou } from "@troupe/client";
-import type { AuthSession } from "@troupe/client";
+import type { AuthSession, SessionKind } from "@troupe/client";
 import { useAdmin, useDaemon, useFleet } from "./hooks";
 import { chooseLocalOnly, storedLocalOnly } from "./mode";
 import type { AppMode } from "./mode";
@@ -42,7 +42,7 @@ type Where =
   | { screen: "local" }
   | { screen: "appearance" }
   | { screen: "setup" }
-  | { screen: "session"; id: string };
+  | { screen: "session"; id: string; kind?: SessionKind };
 
 /** How often an app working offline asks whether the plane is back. */
 const OFFLINE_RETRY_MS = 15_000;
@@ -327,9 +327,9 @@ export function App(): JSX.Element {
             daemon={daemon.client}
             linked={Boolean(daemon.identity?.linked)}
             onClose={() => setWhere({ screen: "sessions" })}
-            onCreated={(id) => {
+            onCreated={(id, kind) => {
               refresh();
-              setWhere({ screen: "session", id });
+              setWhere({ screen: "session", id, kind });
             }}
           />
         )}
@@ -370,6 +370,7 @@ export function App(): JSX.Element {
             machineUser={daemon.user?.subject ?? null}
             row={row}
             sessionId={where.id}
+            created={where.kind}
             onBack={() => setWhere({ screen: "sessions" })}
             onGo={(screen) => setWhere({ screen })}
           />

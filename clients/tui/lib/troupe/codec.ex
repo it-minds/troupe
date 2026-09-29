@@ -5,12 +5,17 @@ defmodule Troupe.Codec do
   Encoding is plain `Jason`. Decoding restores the shape the live system uses:
   map keys become atoms except inside opaque model-supplied maps (tool
   `input`, watch `markers`), and a fixed set of enum fields become atoms.
+
+  An event read back is the event as it was published, so a screen rebuilt from a
+  journal reads it as the live screen did: an `agent_state`'s `to` is the atom the
+  translation gave it (`:idle`), and its `reason` the harness's own word, a string
+  (`"cancelled"`), as a `loop_stopped`'s is. A budget's `dimension` is an atom.
   """
 
   alias Troupe.Event
 
   @opaque_keys ~w(input markers)
-  @enum_keys ~w(state source reason decision stop_reason role type status isolation kind provider)
+  @enum_keys ~w(state to source decision stop_reason role type status isolation kind provider dimension)
 
   @spec encode_event(Event.t()) :: iodata()
   def encode_event(%Event{} = e) do

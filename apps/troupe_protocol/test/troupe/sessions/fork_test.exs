@@ -311,7 +311,7 @@ defmodule Troupe.Sessions.ForkTest do
 
       assert {:ok, result} = Fork.copy(parent, child, seq: 3)
       assert is_nil(result.workspace)
-      assert Storage.workspace_archives(child.store, child.session_id) == []
+      assert Storage.workspace_archives(child.store, child.session_id) == {:ok, []}
     end
   end
 

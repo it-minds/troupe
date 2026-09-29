@@ -22,6 +22,25 @@ defmodule Troupe.Gateway.PrivateTest do
 
   @moduletag :object_store
 
+  # The sealing tests write to the real MinIO and take their key from the real OpenBao.
+  # Without one of them this says so, and each of those tests fails pointing back here, as
+  # the other storage suites do; the rest need neither and run anyway.
+  setup_all do
+    case services() do
+      :ok ->
+        {:ok, services: :up}
+
+      {:error, missing} ->
+        IO.puts(:stderr, """
+
+        SKIPPED: #{missing}; the sealing tests of #{inspect(__MODULE__)} fail without it.
+        Bring it up with `scripts/dev-up`.
+        """)
+
+        :ok
+    end
+  end
+
   setup do
     plane = FakePlane.serve()
     name = :"plane-#{System.unique_integer([:positive])}"
@@ -65,7 +84,8 @@ defmodule Troupe.Gateway.PrivateTest do
 
   describe "sealing" do
     # The daemon starts these; here there is no daemon, only the parts under test.
-    setup do
+    setup context do
+      requires_services(context)
       start_supervised!(Private.Sealers)
       :ok
     end
@@ -244,6 +264,39 @@ defmodule Troupe.Gateway.PrivateTest do
   end
 
   # -- helpers ----------------------------------------------------------------
+
+  defp services do
+    store = ObjectStore.from_env()
+
+    cond do
+      not match?({:ok, _}, ObjectStore.list(store, "reachability-probe/")) ->
+        {:error, "no object storage (#{store.endpoint})"}
+
+      not bao_reachable?() ->
+        {:error, "no OpenBao (#{bao_address()})"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp bao_reachable? do
+    match?(
+      {:ok, %{status: 200}},
+      Req.request(method: :get, url: bao_address() <> "/v1/sys/health", retry: false)
+    )
+  rescue
+    _ -> false
+  end
+
+  defp bao_address do
+    Application.get_env(:troupe_worker, :kms, [])[:address] || "http://localhost:28200"
+  end
+
+  defp requires_services(%{services: :up}), do: :ok
+
+  defp requires_services(_),
+    do: flunk("no object storage or OpenBao; see the message from setup_all")
 
   defp start_private(session_id, ctx) do
     result =

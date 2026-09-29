@@ -200,12 +200,18 @@ defmodule Troupe.Sessions.Fork do
   # Read under the parent's key, written under the child's. Not a server-side copy, and it
   # could not be: the archive is sealed to a key and a session id, so the same bytes in the
   # child's prefix would be bytes nothing could open.
+  #
+  # Before the child's history is sealed, and a listing that failed fails the fork: a
+  # child sealed without the tree is one no retry forks again.
   defp copy_workspace(parent, child, at, opts) do
-    with true <- Keyword.get(opts, :workspace, true),
-         {seq, extension} <- Storage.workspace_at(parent.store, parent.session_id, at) do
-      move_workspace(parent, child, seq, extension)
+    if Keyword.get(opts, :workspace, true) do
+      case Storage.workspace_at(parent.store, parent.session_id, at) do
+        {:ok, {seq, extension}} -> move_workspace(parent, child, seq, extension)
+        {:ok, nil} -> {:ok, nil}
+        {:error, reason} -> {:error, reason}
+      end
     else
-      _nothing_to_copy -> {:ok, nil}
+      {:ok, nil}
     end
   end
 

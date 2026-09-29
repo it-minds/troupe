@@ -12,6 +12,7 @@ defmodule Troupe.BranchClientTest do
   import Troupe.TUIHelpers
 
   alias Troupe.Client
+  alias Troupe.Remote.Journal
 
   # A branch reads the workspace's `.troupe/config.yaml` from its own worktree, so the
   # fake's configuration has to be committed for the branch to see it.
@@ -22,6 +23,9 @@ defmodule Troupe.BranchClientTest do
     run_git!(ws, ["commit", "-q", "-m", "fake model"])
     {sid, ws}
   end
+
+  defp event(sid, path, type, ts, seq, data),
+    do: %Troupe.Event{session_id: sid, agent_path: path, type: type, ts: ts, seq: seq, data: data}
 
   test "a slash command opens a branch as a window of this session, in its own worktree" do
     script = [
@@ -121,6 +125,99 @@ defmodule Troupe.BranchClientTest do
              Client.events(sid),
              &(&1.agent_path == "build-1" and &1.type == :branch_spawned)
            )
+  end
+
+  # A branch's window opens with the `branch_spawned` this client records once
+  # `session.create` has answered, and the daemon stamped the branch's first events before
+  # that. Read back in time order alone, they came ahead of their window, and a screen
+  # rebuilt from the journal had nowhere to draw them: a librarian's window opened on its
+  # last lines, without `session created as librarian` or its prompt.
+  test "a branch's first events are read back inside its window" do
+    parent = "s-order-#{System.unique_integer([:positive])}"
+    child = parent <> "-branch"
+
+    for sid <- [parent, child],
+        do: start_supervised!({Journal, session_id: sid, plane_url: "daemon"})
+
+    Journal.append(parent, [
+      event(parent, "root", :branch_spawned, 1_000, nil, %{
+        name: "build",
+        isolation: :shared,
+        prompt: ""
+      }),
+      event(parent, "librarian-1", :branch_spawned, 2_000, nil, %{
+        name: "librarian",
+        isolation: :shared,
+        prompt: "write the brief",
+        session_id: child
+      })
+    ])
+
+    Journal.append(child, [
+      event(child, "root", :branch_spawned, 1_500, nil, %{
+        name: "librarian",
+        isolation: :shared,
+        prompt: ""
+      }),
+      event(child, "root", :remote_note, 1_500, 1, %{text: "session created as librarian"}),
+      event(child, "root", :input, 1_600, 2, %{
+        content: "write the brief",
+        source: :user,
+        command_id: "c-1",
+        actor: "you",
+        queued: false
+      }),
+      event(child, "root", :remote_note, 2_500, 3, %{text: "done: wrote it"})
+    ])
+
+    events = Client.events(parent)
+
+    opened =
+      Enum.find_index(events, &(&1.agent_path == "librarian-1" and &1.type == :branch_spawned))
+
+    assert opened <
+             Enum.find_index(
+               events,
+               &(&1.agent_path == "librarian-1" and &1.type != :branch_spawned)
+             )
+
+    model = Troupe.UI.TUI.Model.rebuild(parent, "/w", events)
+
+    assert [
+             {:system, "session created as librarian"},
+             {:user, "write the brief"},
+             {:system, "done: wrote it"}
+           ] = model.windows["librarian-1"].agents["librarian-1"].transcript
+  end
+
+  # The session picker lists what the daemon has for this directory: a session that said
+  # something, one that started a branch, with the branch counted on its row, and the one
+  # on screen; never the branch itself. It read branches the daemon client always left
+  # empty, so it listed the session on screen and nothing else.
+  test "the session picker lists the sessions that did something, with their branches" do
+    {chat, ws} = repo_with_fake!([{:text_and_tools, "hello back", []}])
+    say!(chat, "hello")
+    await_event("root", :assistant_message, 10_000)
+
+    {parent, _, ^ws} = start_session!(workspace: ws)
+    assert {:ok, "build-1"} = Client.dispatch(parent, "build", "say hello")
+    child = await_event("build-1", :branch_spawned).data.session_id
+    await_event("build-1", :assistant_message, 10_000)
+
+    {scratch, _, ^ws} = start_session!(workspace: ws)
+
+    {:ok, rows} = Client.sessions({:local, ws})
+    assert %{branches: [%{id: ^child, profile: "build"}]} = Enum.find(rows, &(&1.id == parent))
+    refute Enum.any?(rows, &(&1.id == child))
+
+    {pid, session} = start_tui(scratch)
+    type(pid, "/resume")
+    press(pid, "enter")
+    eventually(fn -> user_state(pid).focus == :sessions end)
+
+    listed = Enum.map(user_state(pid).sessions.entries, & &1.id)
+    assert Enum.sort(listed) == Enum.sort([chat, parent, scratch])
+    assert screen_text(pid, session) =~ "1 branch "
   end
 
   test "the TUI opens the branch's window from the command line" do

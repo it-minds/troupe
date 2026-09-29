@@ -5,7 +5,7 @@ Who a caller is, what each role may do, and how each surface decides.
 ## 1. Identity comes from the provider
 
 The plane is a plain OIDC relying party and authenticates nobody itself. From a verified
-token it reads the subject (`sub`, or the claim `subject_claim` names), `email`, `name`
+token it reads the subject (`sub`, always), `email`, `name`
 (else `preferred_username`), and the groups claim named by `groups_claim` (a list, or a
 comma- or space-separated string). Every group named in a token is created on sight and the
 person's memberships are **replaced** with the token's list. A token with no groups claim
