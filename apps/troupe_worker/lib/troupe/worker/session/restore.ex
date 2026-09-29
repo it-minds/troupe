@@ -21,6 +21,8 @@ defmodule Troupe.Worker.Session.Restore do
   alias Troupe.Worker.Cache
   alias Troupe.Worker.Session.Workspace
 
+  require Logger
+
   @doc """
   Write a session's durable log to disk, ready for `Troupe.resume/2` to replay.
 
@@ -48,8 +50,60 @@ defmodule Troupe.Worker.Session.Restore do
          last_seq: events |> List.last() |> seq_of(),
          head_hash: head_hash(path)
        }}
+    else
+      {:error, reason} -> {:error, unreachable(context.store, reason)}
     end
   end
+
+  @doc """
+  An object-store failure that is the network's, named as one.
+
+  A pod that cannot reach object storage restores nothing, and the transport error said
+  as it is — `%Req.TransportError{reason: :timeout}`, some seconds later — names neither
+  the store nor that it was the store. Behind an egress policy that dropped the
+  connection, that was all a person and an operator were told. So a transport failure is
+  `{:object_store_unreachable, endpoint, reason}`, and anything else — a refusal, a
+  segment that will not decrypt — is left as it was.
+
+  Not a report that parks the session (Decision 661): storage that does not answer is the
+  plane's to retry, and the session is fine where it is.
+  """
+  @spec unreachable(ObjectStore.store(), term()) :: term()
+  def unreachable(store, %Req.TransportError{reason: reason}),
+    do: {:object_store_unreachable, endpoint(store), reason}
+
+  def unreachable(store, {:unreadable_segment, _key, %Req.TransportError{} = error}),
+    do: unreachable(store, error)
+
+  def unreachable(_store, reason), do: reason
+
+  @doc """
+  Whether this pod can reach its object store, said in the log when it cannot.
+
+  Asked once when the pod enrols, so that a store the pod cannot reach is a line in its
+  log before it is the first person's session that will not start. One listing and no
+  retry: the next enrolment asks again, and every activation says it anyway.
+  """
+  @spec check_reachable(ObjectStore.store()) :: :ok | {:error, term()}
+  def check_reachable(store) do
+    case ObjectStore.list(store, "reachability-probe/") do
+      {:ok, _keys} ->
+        :ok
+
+      {:error, reason} ->
+        reason = unreachable(store, reason)
+
+        Logger.error(
+          "troupe worker: this pod cannot use its object store, so no session can be " <>
+            "restored or sealed here: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  defp endpoint(%ObjectStore{endpoint: endpoint}), do: endpoint
+  defp endpoint(_signed), do: nil
 
   defp read_all(context, segments) do
     Enum.reduce_while(segments, {:ok, []}, fn segment, {:ok, acc} ->
@@ -99,7 +153,7 @@ defmodule Troupe.Worker.Session.Restore do
         end
 
       {:error, reason} ->
-        {:error, reason}
+        {:error, unreachable(context.store, reason)}
     end
   end
 

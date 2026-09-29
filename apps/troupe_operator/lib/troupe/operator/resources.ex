@@ -93,7 +93,8 @@ defmodule Troupe.Operator.Resources do
 
       true ->
         {true, "CiliumFQDN",
-         "a worker reaches the hosts its profile names and nothing else outside the cluster"}
+         "a worker reaches the hosts its profile names, the installation's own OpenBao and " <>
+           "object storage, and nothing else outside the cluster"}
     end
   end
 
@@ -456,9 +457,10 @@ defmodule Troupe.Operator.Resources do
 
   defp cilium_network_policy(_namespace, _profile, %Settings{cilium_available: false}), do: []
 
-  # The allowlist, by name: every host the profile declares and nothing else outside the
-  # cluster, since the NetworkPolicy beside it no longer reaches past the cluster at all.
-  defp cilium_network_policy(namespace, profile, _settings) do
+  # The allowlist, by name: every host the profile declares, the platform's own OpenBao
+  # and object storage where they are outside the cluster, and nothing else outside it,
+  # since the NetworkPolicy beside it no longer reaches past the cluster at all.
+  defp cilium_network_policy(namespace, profile, settings) do
     [
       %{
         "apiVersion" => "cilium.io/v2",
@@ -466,7 +468,7 @@ defmodule Troupe.Operator.Resources do
         "metadata" => metadata("troupe-egress", namespace, profile),
         "spec" => %{
           "endpointSelector" => %{"matchLabels" => Names.labels(profile.name)},
-          "egress" => [cilium_dns_rule() | fqdn_rules(profile)]
+          "egress" => [cilium_dns_rule() | fqdn_rules(profile, settings)]
         }
       }
     ]
@@ -502,12 +504,35 @@ defmodule Troupe.Operator.Resources do
 
   # No rule at all for a profile that names no host, rather than a `toFQDNs` that is
   # empty and means whatever the Cilium version at hand takes an empty list to mean.
-  defp fqdn_rules(profile) do
-    case Profile.egress_destinations(profile) do
+  defp fqdn_rules(profile, settings) do
+    case Enum.uniq(Profile.egress_destinations(profile) ++ platform_hosts(settings)) do
       [] -> []
       hosts -> [%{"toFQDNs" => Enum.map(hosts, &fqdn_selector/1)}]
     end
   end
+
+  # OpenBao and object storage when they are *not* in the cluster: a hosted S3 service, a
+  # key manager run somewhere else. They are the installation's, not the profile's, so
+  # they are added here rather than to the profile's allowlist, which is what the plane
+  # shows and admission checks. With Cilium nothing else admits them — the public rule is
+  # gone and `in_cluster_rules/2` covers only a `.svc` host — and a worker that reaches
+  # neither activates no session at all. An FQDN rule with no ports admits every port, so
+  # an endpoint's own port needs nothing more.
+  defp platform_hosts(%Settings{} = settings) do
+    Enum.flat_map([settings.bao_address, settings.object_store_endpoint], &external_host/1)
+  end
+
+  defp external_host(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) and host != "" ->
+        if cluster_namespace(host), do: [], else: [host]
+
+      _other ->
+        []
+    end
+  end
+
+  defp external_host(_nil), do: []
 
   # `matchName` is an exact hostname and nothing else: a `*` in it is a literal star,
   # which no DNS answer ever carries, so a wildcard the policy admitted became a rule

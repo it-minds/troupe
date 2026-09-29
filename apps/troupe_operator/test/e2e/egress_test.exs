@@ -8,10 +8,12 @@ defmodule Troupe.E2E.EgressTest do
   can reach anything on the internet. The object existing is not the enforcement; the
   enforcement is a connection that does not open.
 
-  So every assertion here is a TCP connection attempted by the pod itself. Perl is used
-  because it is already in the image: adding a tool to prove a network restriction would
-  change the thing being measured, and a pod with a debugging toolchain in it is not the
-  pod that runs in production.
+  So every assertion about what a pod reaches is a TCP connection attempted by the pod
+  itself. Perl is used because it is already in the image: adding a tool to prove a network
+  restriction would change the thing being measured, and a pod with a debugging toolchain
+  in it is not the pod that runs in production. And one asks the plane for a session,
+  because a policy is for the product working through it, and a session that activates
+  and seals is the product.
 
   ## The precondition, and why it is a failure rather than a skip
 
@@ -74,18 +76,43 @@ defmodule Troupe.E2E.EgressTest do
     """
   end
 
-  test "a worker can still reach the plane and the object store", context do
+  test "a worker can still reach the plane, its object store and OpenBao", context do
     pod = pod(context.profile)
     namespace = World.worker_namespace(context.profile)
 
     # The other half, and the reason the first one is not satisfied by a pod with no
     # network: a policy that refused everything would pass the test above and break the
-    # product. These two are what a worker cannot run without.
+    # product. These are what a worker cannot run without.
     assert connects?(namespace, pod, {"troupe-plane-control.troupe-system.svc", 4001}),
            "a worker cannot reach the plane's control channel"
 
-    assert connects?(namespace, pod, {"minio.troupe-system.svc", 9000}),
-           "a worker cannot reach object storage"
+    # The object store and OpenBao the pod was given, not the ones `remote-up` happens to
+    # install: one outside the cluster is admitted by a different rule from one inside it,
+    # and a hosted object store was once admitted by neither.
+    for variable <- ["TROUPE_OBJECT_ENDPOINT", "TROUPE_BAO_ADDR"] do
+      {host, port} = endpoint = pod_endpoint(namespace, pod, variable)
+
+      assert connects?(namespace, pod, endpoint),
+             "a worker cannot reach #{host}:#{port}, its #{variable}"
+    end
+  end
+
+  test "a session activates, and seals into object storage, through the policy", context do
+    # What a person meets, which a connection test does not show: every activation once
+    # timed out restoring from an object store outside the cluster, and the error said only
+    # `timeout`. So the plane is asked for a session, the pod has to restore it, and the
+    # log has to reach object storage through whatever the policy admits.
+    created = Plane.call!("session.create", %{"profile" => context.profile})
+    id = created["session_id"]
+    on_exit(fn -> Plane.call("session.erase", %{"session_id" => id}) end)
+
+    assert created["endpoint"], "the session did not activate: #{inspect(created)}"
+    assert Plane.call!("session.get", %{"session_id" => id})["state"] == "active"
+
+    World.eventually(fn -> sealed?(id) end,
+      timeout: 180_000,
+      what: "#{id} to seal into object storage"
+    )
   end
 
   test "a worker can reach the model endpoint its profile names", context do
@@ -133,6 +160,30 @@ defmodule Troupe.E2E.EgressTest do
 
   defp pod(profile) do
     World.pod(World.worker_namespace(profile), "app.kubernetes.io/name=troupe-worker")
+  end
+
+  # From the pod, because that is what the operator rendered and what the worker dials.
+  defp pod_endpoint(namespace, pod, variable) do
+    url =
+      World.kubectl!([
+        "get",
+        "pod",
+        pod,
+        "-n",
+        namespace,
+        "-o",
+        ~s|jsonpath={.spec.containers[0].env[?(@.name=="#{variable}")].value}|
+      ])
+
+    %URI{host: host, port: port} = URI.parse(url)
+    {host, port}
+  end
+
+  defp sealed?(id) do
+    case Plane.call("session.get", %{"session_id" => id}) do
+      {:ok, %{"head_hash" => hash, "last_seq" => seq}} when is_binary(hash) and seq > 0 -> true
+      _ -> false
+    end
   end
 
   # From the profile as the cluster holds it, not from what `remote-up` was told: the
