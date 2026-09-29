@@ -138,6 +138,12 @@ defmodule Troupe.Worker.Session.Restore do
 
   A session with no archive is not an error: one that went dormant before it wrote
   anything, or one restored purely to be read, has an empty tree and a full history.
+
+  A listing that failed is not a session with no archive. Read as one, storage that went
+  away between the events and the tree brought the session back with an empty tree, or
+  with an older one from this pod's cache, under a history that had moved past it — and
+  the next archive sealed that over the real one. So it fails the activation, named by
+  `unreachable/2` when it was the network's, and the plane tries again.
   """
   @spec workspace(Context.t(), Path.t()) :: {:ok, map()} | {:error, term()}
   def workspace(%Context{} = context, root) do
@@ -157,25 +163,28 @@ defmodule Troupe.Worker.Session.Restore do
     end
   end
 
-  # The pod's own cache first. It holds the same sealed bytes that went to object
-  # storage, so using it is a local read instead of a download and is not a different
-  # answer — and a cache that is behind what storage has is ignored rather than trusted.
+  # The pod's own cache where it will do. It holds the same sealed bytes that went to
+  # object storage, so using it is a local read instead of a download and is not a
+  # different answer — and a cache that is behind what storage has is ignored rather than
+  # trusted, which is why storage is asked first and the cache used only once it has
+  # answered.
   defp fetch_archive(context) do
-    remote = newest_archive(context)
-    cached = Cache.get_workspace(context.session_id, context.state_dir)
+    with {:ok, remote} <- newest_archive(context) do
+      cached = Cache.get_workspace(context.session_id, context.state_dir)
 
-    case {remote, cached} do
-      {nil, :miss} ->
-        :none
+      case {remote, cached} do
+        {nil, :miss} ->
+          :none
 
-      {nil, {:ok, seq, sealed}} ->
-        {:ok, :cache, seq, sealed}
+        {nil, {:ok, seq, sealed}} ->
+          {:ok, :cache, seq, sealed}
 
-      {{seq, _extension}, {:ok, seq, sealed}} ->
-        {:ok, :cache, seq, sealed}
+        {{seq, _extension}, {:ok, seq, sealed}} ->
+          {:ok, :cache, seq, sealed}
 
-      {{seq, extension}, _stale_or_missing} ->
-        download(context, seq, extension)
+        {{seq, extension}, _stale_or_missing} ->
+          download(context, seq, extension)
+      end
     end
   end
 
@@ -189,12 +198,10 @@ defmodule Troupe.Worker.Session.Restore do
   end
 
   defp newest_archive(context) do
-    case ObjectStore.list(context.store, Storage.prefix(context.session_id) <> "workspace/") do
-      {:ok, keys} ->
-        keys |> Enum.flat_map(&parse_archive_key/1) |> Enum.max_by(&elem(&1, 0), fn -> nil end)
-
-      _ ->
-        nil
+    with {:ok, keys} <-
+           ObjectStore.list(context.store, Storage.prefix(context.session_id) <> "workspace/") do
+      {:ok,
+       keys |> Enum.flat_map(&parse_archive_key/1) |> Enum.max_by(&elem(&1, 0), fn -> nil end)}
     end
   end
 

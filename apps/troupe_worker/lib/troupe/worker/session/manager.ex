@@ -35,6 +35,7 @@ defmodule Troupe.Worker.Session.Manager do
 
   use GenServer, restart: :temporary
 
+  alias Troupe.KMS.OpenBao
   alias Troupe.ObjectStore
   alias Troupe.Protocol.Event
   alias Troupe.Session.Log
@@ -129,8 +130,8 @@ defmodule Troupe.Worker.Session.Manager do
   A tree that cannot be put back because the directory the session was recorded in is
   gone is not a storage blip: said once, so the plane parks the session read-only rather
   than every client that opens it meeting the same failure. Every other failure — a
-  stale epoch, storage that did not answer — is the plane's to retry or refuse as it
-  already does, and gets no report.
+  stale epoch, storage or a key manager that did not answer — is the plane's to retry or
+  refuse as it already does, and gets no report.
   """
   @spec unrestorable_report(String.t(), term()) :: map() | nil
   def unrestorable_report(session_id, {:not_a_directory, path}) do
@@ -359,7 +360,22 @@ defmodule Troupe.Worker.Session.Manager do
   defp context(opts) do
     case Keyword.fetch(opts, :context) do
       {:ok, %Context{} = context} -> {:ok, context}
-      :error -> Context.open(Keyword.fetch!(opts, :session_id), opts)
+      :error -> open_context(opts)
+    end
+  end
+
+  # Opening a context asks the key manager for the session's key, and a key manager the
+  # pod cannot reach is named with its address, as an object store is
+  # (`Restore.unreachable/2`): the transport error alone said neither which host nor that
+  # it was the key manager. Still a failure the plane retries, not one that parks the
+  # session. A key manager that answered and refused is left as it said.
+  defp open_context(opts) do
+    case Context.open(Keyword.fetch!(opts, :session_id), opts) do
+      {:error, %Req.TransportError{reason: reason}} ->
+        {:error, {:kms_unreachable, OpenBao.address(Keyword.get(opts, :kms_options, [])), reason}}
+
+      result ->
+        result
     end
   end
 

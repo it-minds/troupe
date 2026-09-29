@@ -18,9 +18,11 @@ that are committed.
   `:reaper_missing`, a failure that only ever shows in a pod.
 - **runtime**, on Debian slim: uid/gid 1000 (what the operator's pod spec asks for), the
   release, and `ENTRYPOINT exec /app/bin/${RELEASE_NAME} start` so a SIGTERM becomes a
-  graceful stop. `git` and `bubblewrap` are installed for the worker image only: a sandbox
-  helper and a network client are the last things to want in the internet-facing plane or
-  the operator that holds cluster privileges. Ports and probes are the chart's business.
+  graceful stop. `git`, `bubblewrap` and `inotify-tools` are installed for the worker
+  image only: a sandbox helper and a network client are the last things to want in the
+  internet-facing plane or the operator that holds cluster privileges, and `inotifywait`
+  is what lets a pod report a deleted file at all (the polling fallback never does). Ports
+  and probes are the chart's business.
 
 `.dockerignore` keeps out `clients/`, `docs/`, tests, `_build`, `deps` and a laptop's
 `priv/reaper` (the wrong architecture with the right name). The fifth image, `troupe-gui`,

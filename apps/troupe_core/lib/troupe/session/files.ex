@@ -42,6 +42,7 @@ defmodule Troupe.Session.Files do
     :timer,
     :ignore,
     agent_path: ["root"],
+    backend_opts: [],
     debounce_ms: @debounce_ms,
     pending: MapSet.new(),
     seen: %{}
@@ -88,20 +89,42 @@ defmodule Troupe.Session.Files do
   # for a session that has none: reading them walks the workspace, which in a home
   # directory is minutes spent inside `session.create` (#231).
   defp start_backend(state, opts) do
-    state = %{state | ignore: Gitignore.load(state.workspace.root_real)}
+    state = %{
+      state
+      | ignore: Gitignore.load(state.workspace.root_real),
+        backend_opts: Keyword.take(opts, [:interval_ms])
+    }
 
     module =
       Keyword.get(opts, :backend) ||
         if FileSystemBackend.available?(state.workspace.root_real), do: FileSystemBackend, else: PollBackend
 
-    case module.start_link(state.workspace.root_real, self(), Keyword.take(opts, [:interval_ms])) do
-      {:ok, pid} ->
-        %{state | backend: pid, backend_module: module}
+    run_backend(state, module)
+  end
 
-      {:error, reason} ->
-        Logger.warning("troupe: no filesystem events for #{state.session_id}: #{inspect(reason)}")
-        state
+  defp run_backend(state, module) do
+    case module.start_link(state.workspace.root_real, self(), state.backend_opts) do
+      {:ok, pid} -> %{state | backend: pid, backend_module: module}
+      {:error, reason} -> fall_back(state, module, reason)
     end
+  end
+
+  # `inotifywait` can be installed and still not run: a node whose inotify instances or
+  # watches are used up refuses it at start, or stops it later. Polling is late and never
+  # reports a deletion, and that is still better than clients that hear of no change at
+  # all, which is what a native watcher that stopped left. The session watcher falls back
+  # the same way.
+  defp fall_back(state, PollBackend, reason) do
+    Logger.warning("troupe: no filesystem events for #{state.session_id}: #{inspect(reason)}")
+    %{state | backend: nil}
+  end
+
+  defp fall_back(state, _native, reason) do
+    Logger.warning(
+      "troupe: the native watcher for #{state.session_id} stopped (#{inspect(reason)}), polling instead"
+    )
+
+    run_backend(%{state | backend: nil}, PollBackend)
   end
 
   @impl GenServer
@@ -129,8 +152,7 @@ defmodule Troupe.Session.Files do
   def handle_info(:debounced, state), do: {:noreply, emit(%{state | timer: nil})}
 
   def handle_info({:EXIT, pid, reason}, %{backend: pid} = state) do
-    Logger.warning("troupe: filesystem backend for #{state.session_id} exited: #{inspect(reason)}")
-    {:noreply, %{state | backend: nil}}
+    {:noreply, fall_back(state, state.backend_module, reason)}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
