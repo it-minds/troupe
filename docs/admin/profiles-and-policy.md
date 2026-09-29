@@ -182,7 +182,16 @@ whether Cilium is there:
   connect.
 - **Without Cilium** the external ones are one wide rule, public addresses on 443 and 80,
   and the policy is a check at admission and reconcile, not on the wire. Troupe writes no
-  address list in its place: the allowlist holds names, not addresses.
+  address list in its place: the allowlist holds names, not addresses. The installation's
+  own OpenBao and object store, when they are outside the cluster, are admitted on the
+  port they name as well: one given as an IP address, private or public, as that one
+  address (an `ipBlock` of `/32` or `/128`), and one given by name on a port other than
+  443 and 80 as public addresses on that port, so a worker then reaches any public host
+  on that port. A NetworkPolicy cannot name a host, so a name that resolves to a private
+  address is not reached. For such an endpoint, give its address instead (over TLS its
+  certificate then has to name the address), add a NetworkPolicy of your own to each
+  worker namespace that admits it (policies add up, and the operator removes only
+  objects it labelled), or use Cilium.
 
 `ciliumAvailable: true` on a cluster without Cilium fails closed: a worker reaches nothing
 outside the cluster, and the profile is `Ready: False` with `ApplyFailed` naming the
