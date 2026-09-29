@@ -97,12 +97,11 @@ Found by the chunk 4, 5 and 7 fixers, 2026-09-26/27.
 - The desktop app starts the daemon with the app's install directory as its working
   directory (`spawn_any` in `src-tauri/src/daemon.rs`), so the uninstaller probably can't
   remove that directory while the daemon runs (unconfirmed).
-- An A2A task stays `working` after the failure guard stops its turn (`turn_ended`
-  reason `tool_failures`).
 - `troupe run --headless` exits at the first rest, so the reply to a line another client
   queued mid-turn is never printed.
 
-Found by the chunk 5 fixers, 2026-09-26.
+The A2A task that stayed `working` after the failure guard stopped its turn was fixed in
+PR #266. Found by the chunk 5 fixers, 2026-09-26.
 
 ### D30 - Two sources for the brand's assets (low)
 
@@ -162,12 +161,8 @@ Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
 
 ### D37 - Small leftovers from the 0.6.1 work (low)
 
-- `Troupe.Tools.Output.cap/2` computes "N more bytes" before cutting back to the last
-  newline, so it under-reports what was dropped.
 - The settings help's "Where things live" says `~/.config/troupe/config.yaml`; on
   Windows the file is under `%APPDATA%\troupe`.
-- An agent that crashes in `init` restarts in a tight loop with no backoff (dozens of
-  `agent_restarted` a second when the reaper can't spawn).
 - `troupe --watch` still walks the whole workspace for `.gitignore` rules at start (PR
   #240 moved that walk out of every other session start).
 - The desktop client: after the daemon socket drops, `DaemonClient.connection()` rebinds
@@ -181,9 +176,10 @@ Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
 - Dependabot puts Tauri's crates (cargo `tauri` group) and its npm packages (npm
   `tooling` group) in different groups, so one pull request can move one half alone and
   fail Tauri's version check, as #120 did. `@types/node` is 26 while the runtime is 24.
-- The comment above `handle("memory.get")` in `dispatch.ex` belongs to `agents.list`.
 
-Found by the chunk 7 fixers, 2026-09-27.
+The restart loop of an agent that crashes as it starts, `Output.cap/2`'s count and the
+stray comment in `dispatch.ex` were fixed in PR #266. Found by the chunk 7 fixers,
+2026-09-27.
 
 ## Taken
 
