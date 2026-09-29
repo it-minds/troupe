@@ -12,10 +12,21 @@ defmodule Troupe.Worker.Application do
 
   use Application
 
+  alias Troupe.Worker.Drain
+
   @impl Application
   def start(_type, _args) do
     children = if autostart?(), do: children(), else: []
     Supervisor.start_link(children, strategy: :one_for_one, name: Troupe.Worker.Supervisor)
+  end
+
+  # Before any child goes down: a pod stopped by anything but the plane puts its sessions
+  # to sleep first (`Drain.on_stop/1`). Only where the tree is a pod's; a laptop binary
+  # and a test run hold no session of a plane's.
+  @impl Application
+  def prep_stop(state) do
+    if autostart?(), do: Drain.on_stop()
+    state
   end
 
   defp autostart?, do: Application.get_env(:troupe_worker, :autostart, false)

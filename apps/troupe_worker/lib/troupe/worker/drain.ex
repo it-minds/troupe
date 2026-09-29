@@ -79,6 +79,36 @@ defmodule Troupe.Worker.Drain do
     }
   end
 
+  @doc """
+  The drain a pod runs as it stops, for when something other than the plane stopped it.
+
+  Kubernetes sends SIGTERM and kills the pod `terminationGracePeriodSeconds` later; the
+  release turns the signal into an orderly stop, which calls this before any process of
+  the worker's goes down (`Troupe.Worker.Application.prep_stop/1`). A pod the plane
+  removes or replaces has been drained before that (Decision 731) and holds nothing, so
+  this returns at once. The rest are pods somebody deleted, or whose node was drained:
+  their sessions went down in the middle of a turn, the files since the last archive went
+  with them, and their clients saw them vanish until the plane marked them dormant a lease
+  later.
+
+  Running turns get half the drain timeout rather than all of it, because the grace
+  period is set from the same number and everything still has to be put to sleep inside
+  it: with the defaults, 150 seconds to finish a turn and 150 to seal and upload. A grace
+  period set shorter than the pod's drain timeout ends the wait with the pod, which is
+  what every stop did before.
+  """
+  @spec on_stop(keyword()) :: map() | nil
+  def on_stop(opts \\ []) do
+    case Sessions.active_ids() do
+      [] ->
+        nil
+
+      ids ->
+        Logger.info("troupe worker: stopping with #{length(ids)} session(s), draining first")
+        run(Keyword.put_new(opts, :timeout_ms, div(default_timeout_ms(), 2)))
+    end
+  end
+
   # Waits for every session to come to rest, and cancels whatever has not by the
   # deadline. Polled rather than subscribed because a drain watches a set of sessions
   # rather than one, and a subscription per session would be a tree of processes built

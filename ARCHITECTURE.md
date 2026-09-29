@@ -317,7 +317,9 @@ then erase the local copy. **Epochs** are minted by the plane alone; a pod whose
 passed refuses to activate (checked against the plaintext manifest before decrypting), and
 a fenced running session stops and discards its cache. **Draining** — scale-down, a new
 image, an admin's drain — stops placement in the database, waits for running turns up to
-the grace period, and the plane checks its own index before agreeing the pod is empty.
+the grace period, and the plane checks its own index before agreeing the pod is empty. A
+scale-down lowers the count only past pods drained that way, and a pod stopped by anything
+else drains itself on SIGTERM.
 **Disk pressure** evicts caches, least recently used, never an active workspace. **Erasure**
 is driven by the plane and done by a pod, since only a pod holds the key and storage
 credentials: the key is destroyed **first**, so nothing under the prefix decrypts — not
