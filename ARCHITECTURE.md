@@ -341,7 +341,8 @@ without a cluster, and the reconciler only applies and compares — level-trigge
 idempotent, pruning by label (owner references cannot cross namespaces), led by a `Lease`.
 A pod gets a *projected* token with audience `troupe-plane`, never the ServiceAccount's own,
 so it cannot be replayed against the API server. StatefulSets are `OnDelete` because a pod
-holds live sessions. **Egress** is default-deny: DNS, the plane's control port, OpenBao,
+holds live sessions; the operator replaces a pod on an older revision once the plane, which
+alone knows when a pod holds nothing, has drained it and recorded that on the profile. **Egress** is default-deny: DNS, the plane's control port, OpenBao,
 object storage, the model, the profile's MCP servers and git hosts. Plain NetworkPolicy
 cannot name a host, so without Cilium the external ones are a wide rule, recorded rather
 than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for,

@@ -6,7 +6,8 @@ defmodule Troupe.Operator.ReconcilerTest do
   profile no longer implies. The kinds it lists are checked against what `Resources`
   renders; the pass itself runs against `FakeCluster`, an API server in memory, so what
   it deletes and what it leaves alone can be seen without a cluster. So can the pods it
-  reports behind on the StatefulSet's revision, which it never deletes.
+  reports behind on the StatefulSet's revision, and the one of them it deletes once the
+  plane has recorded it drained.
   """
 
   # The settings are application environment and the fake API server is one process by
@@ -154,7 +155,13 @@ defmodule Troupe.Operator.ReconcilerTest do
       assert %{"status" => "True", "reason" => "WaitingForIdle", "message" => message} =
                condition("UpgradePending")
 
-      assert message == "1 pod(s) run an older revision until drained and deleted: troupe-w-dev-0"
+      assert message == "1 pod(s) run an older revision: troupe-w-dev-0 waits to be drained"
+
+      # And the same, for the plane, with the uid that tells this pod from the one that
+      # will replace it under the same name.
+      assert status()["podsBehind"] == [
+               %{"pod" => "troupe-w-dev-0", "uid" => "uid-troupe-w-dev-0", "revision" => "troupe-w-dev-a"}
+             ]
     end
 
     test "is false once every pod runs the revision the StatefulSet wants" do
@@ -169,6 +176,7 @@ defmodule Troupe.Operator.ReconcilerTest do
 
       assert {:ok, _result} = reconcile(conn, cilium: false)
       assert %{"status" => "False", "reason" => "UpToDate"} = condition("UpgradePending")
+      assert status()["podsBehind"] == []
     end
 
     test "trusts the pods over currentRevision, which OnDelete never moves" do
@@ -187,7 +195,157 @@ defmodule Troupe.Operator.ReconcilerTest do
 
       assert %{"status" => "True", "message" => message} = condition("UpgradePending")
       assert message =~ "2 pod(s)"
-      assert message =~ "troupe-w-dev-0, troupe-w-dev-1"
+      assert message =~ "troupe-w-dev-0 waits to be drained, troupe-w-dev-1 waits to be drained"
+    end
+  end
+
+  describe "finishing an upgrade" do
+    # The plane records a pod once its drain has finished, with the revision it ran, and
+    # the pod stops being Ready as its drain starts. The operator deletes a pod only when
+    # all three say so, and the StatefulSet makes it again on the new revision.
+
+    test "deletes a pod that is behind and that the plane has drained" do
+      conn =
+        FakeCluster.start([
+          policy(),
+          drained_profile(%{"troupe-w-dev-1" => "troupe-w-dev-a"}),
+          stateful_set(update: "troupe-w-dev-b", current: "troupe-w-dev-a", replicas: 2),
+          pod("troupe-w-dev-0", "troupe-w-dev-b"),
+          pod("troupe-w-dev-1", "troupe-w-dev-a", ready: false)
+        ])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+
+      assert FakeCluster.deleted() == [{"v1", "Pod", "troupe-w-dev", "troupe-w-dev-1"}]
+
+      assert condition("UpgradePending")["message"] ==
+               "1 pod(s) run an older revision: troupe-w-dev-1 is being replaced"
+
+      # Being replaced is the operator's business now, not a pod for the plane to drain.
+      assert status()["podsBehind"] == []
+    end
+
+    test "keeps a pod that is behind and that the plane has not drained" do
+      # Not Ready, so a drain has started, and its sessions may still be being sealed.
+      conn =
+        FakeCluster.start([
+          policy(),
+          profile(),
+          stateful_set(update: "troupe-w-dev-b", current: "troupe-w-dev-a", replicas: 2),
+          pod("troupe-w-dev-0", "troupe-w-dev-a"),
+          pod("troupe-w-dev-1", "troupe-w-dev-a", ready: false)
+        ])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+
+      assert FakeCluster.deleted() == []
+
+      assert condition("UpgradePending")["message"] ==
+               "2 pod(s) run an older revision: troupe-w-dev-0 waits to be drained, troupe-w-dev-1 is draining"
+    end
+
+    test "keeps a drained pod that is Ready again, or was drained on another revision" do
+      # Ordinal 1 restarted after its drain was recorded, so it is taking work again.
+      # Ordinal 0 was recorded on a revision it no longer runs.
+      conn =
+        FakeCluster.start([
+          policy(),
+          drained_profile(%{"troupe-w-dev-0" => "troupe-w-dev-z", "troupe-w-dev-1" => "troupe-w-dev-a"}),
+          stateful_set(update: "troupe-w-dev-b", current: "troupe-w-dev-a", replicas: 2),
+          pod("troupe-w-dev-0", "troupe-w-dev-a", ready: false),
+          pod("troupe-w-dev-1", "troupe-w-dev-a")
+        ])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+      assert FakeCluster.deleted() == []
+    end
+
+    test "replaces one pod at a time, the highest ordinal first" do
+      conn =
+        FakeCluster.start([
+          policy(),
+          drained_profile(%{
+            "troupe-w-dev-0" => "troupe-w-dev-a",
+            "troupe-w-dev-1" => "troupe-w-dev-a",
+            "troupe-w-dev-2" => "troupe-w-dev-a"
+          }),
+          stateful_set(update: "troupe-w-dev-b", current: "troupe-w-dev-a", replicas: 3),
+          pod("troupe-w-dev-0", "troupe-w-dev-a", ready: false),
+          pod("troupe-w-dev-1", "troupe-w-dev-a", ready: false),
+          pod("troupe-w-dev-2", "troupe-w-dev-a", ready: false)
+        ])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+
+      assert FakeCluster.deleted() == [{"v1", "Pod", "troupe-w-dev", "troupe-w-dev-2"}]
+
+      assert condition("UpgradePending")["message"] ==
+               "3 pod(s) run an older revision: troupe-w-dev-0 is drained and waits its turn, " <>
+                 "troupe-w-dev-1 is drained and waits its turn, troupe-w-dev-2 is being replaced"
+    end
+
+    test "replaces none while another pod is going or has not come back" do
+      drained = %{"troupe-w-dev-0" => "troupe-w-dev-a"}
+
+      terminating =
+        FakeCluster.start([
+          policy(),
+          drained_profile(drained),
+          stateful_set(update: "troupe-w-dev-b", current: "troupe-w-dev-a", replicas: 2),
+          pod("troupe-w-dev-0", "troupe-w-dev-a", ready: false),
+          pod("troupe-w-dev-1", "troupe-w-dev-a", ready: false, terminating: true)
+        ])
+
+      assert {:ok, _result} = reconcile(terminating, cilium: false)
+      assert FakeCluster.deleted() == []
+
+      assert condition("UpgradePending")["message"] ==
+               "2 pod(s) run an older revision: troupe-w-dev-0 is drained and waits its turn, " <>
+                 "troupe-w-dev-1 is being replaced"
+
+      stop_supervised!(FakeCluster)
+
+      # Ordinal 1 is gone and the StatefulSet has not made it again yet.
+      missing =
+        FakeCluster.start([
+          policy(),
+          drained_profile(drained),
+          stateful_set(update: "troupe-w-dev-b", current: "troupe-w-dev-a", replicas: 2),
+          pod("troupe-w-dev-0", "troupe-w-dev-a", ready: false)
+        ])
+
+      assert {:ok, _result} = reconcile(missing, cilium: false)
+      assert FakeCluster.deleted() == []
+    end
+
+    test "never deletes a pod on the current revision, whatever the plane recorded" do
+      conn =
+        FakeCluster.start([
+          policy(),
+          drained_profile(%{"troupe-w-dev-0" => "troupe-w-dev-b", "troupe-w-dev-1" => "troupe-w-dev-b"}),
+          stateful_set(update: "troupe-w-dev-b", current: "troupe-w-dev-a", replicas: 2),
+          pod("troupe-w-dev-0", "troupe-w-dev-b", ready: false),
+          pod("troupe-w-dev-1", "troupe-w-dev-b", ready: false)
+        ])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+
+      assert FakeCluster.deleted() == []
+      assert %{"status" => "False"} = condition("UpgradePending")
+    end
+
+    test "deletes nothing for a profile outside the policy" do
+      conn =
+        FakeCluster.start([
+          policy(maxReplicas: 1),
+          drained_profile(%{"troupe-w-dev-1" => "troupe-w-dev-a"}),
+          stateful_set(update: "troupe-w-dev-b", current: "troupe-w-dev-a", replicas: 2),
+          pod("troupe-w-dev-0", "troupe-w-dev-b"),
+          pod("troupe-w-dev-1", "troupe-w-dev-a", ready: false)
+        ])
+
+      assert {:error, {:policy_violation, _}} = reconcile(conn, cilium: false)
+      assert FakeCluster.deleted() == []
     end
   end
 
@@ -203,10 +361,22 @@ defmodule Troupe.Operator.ReconcilerTest do
   end
 
   defp condition(type) do
+    status()
+    |> Map.get("conditions")
+    |> Enum.find(&(&1["type"] == type))
+  end
+
+  defp status do
     {"troupe.dev/v1alpha1", "WorkerProfile", "troupe-system", "dev"}
     |> get()
-    |> get_in(["status", "conditions"])
-    |> Enum.find(&(&1["type"] == type))
+    |> Map.get("status")
+  end
+
+  # The profile with the plane's record of the drains it has finished.
+  defp drained_profile(drained) do
+    put_in(profile(), ["metadata", "annotations"], %{
+      Profile.drained_annotation() => Profile.encode_drained(drained)
+    })
   end
 
   defp get({api_version, kind, namespace, name}),
@@ -223,19 +393,24 @@ defmodule Troupe.Operator.ReconcilerTest do
 
   # The profile's StatefulSet as the cluster reports it, with the selector the operator
   # gave it and the two revisions its controller keeps.
-  defp stateful_set(update: update, current: current) do
+  defp stateful_set(opts) do
+    spec =
+      %{"selector" => %{"matchLabels" => Names.labels("dev")}}
+      |> then(&if(opts[:replicas], do: Map.put(&1, "replicas", opts[:replicas]), else: &1))
+
     %{
       "apiVersion" => "apps/v1",
       "kind" => "StatefulSet",
       "metadata" => %{"name" => "troupe-w-dev", "namespace" => "troupe-w-dev"},
-      "spec" => %{"selector" => %{"matchLabels" => Names.labels("dev")}},
-      "status" => %{"updateRevision" => update, "currentRevision" => current}
+      "spec" => spec,
+      "status" => %{"updateRevision" => opts[:update], "currentRevision" => opts[:current]}
     }
   end
 
   # A pod the StatefulSet made: its template's labels, which are not the operator's
-  # marker, and the revision it was made from.
-  defp pod(name, revision) do
+  # marker, the revision it was made from, and whether it is Ready — which a worker is
+  # not once its drain has started — or already going.
+  defp pod(name, revision, opts \\ []) do
     labels =
       "dev"
       |> Names.labels()
@@ -244,10 +419,17 @@ defmodule Troupe.Operator.ReconcilerTest do
         "statefulset.kubernetes.io/pod-name" => name
       })
 
+    metadata =
+      %{"name" => name, "namespace" => "troupe-w-dev", "uid" => "uid-" <> name, "labels" => labels}
+      |> then(&if(opts[:terminating], do: Map.put(&1, "deletionTimestamp", "2026-09-29T10:00:00Z"), else: &1))
+
+    ready = if Keyword.get(opts, :ready, true), do: "True", else: "False"
+
     %{
       "apiVersion" => "v1",
       "kind" => "Pod",
-      "metadata" => %{"name" => name, "namespace" => "troupe-w-dev", "labels" => labels}
+      "metadata" => metadata,
+      "status" => %{"conditions" => [%{"type" => "Ready", "status" => ready}]}
     }
   end
 
