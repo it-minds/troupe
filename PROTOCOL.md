@@ -1454,7 +1454,7 @@ that team.
 | --- | --- | --- |
 | `admin.overview` | either | fleet health, active sessions, spend per team |
 | `admin.profiles.list` | either | profiles with conditions, pods, load and versions; in gitops mode each carries `gitops` (`source`, `generation`, and a `problem` — `refused`, `missing`, `plane_only`, `unwritten` — with `reasons`), and a refused resource with no profile is listed too |
-| `admin.profiles.export` | platform | `{profiles, policy, left_out}`: every profile and the `TroupePolicy` as a repository would hold them, each `{name, path, yaml, notes}`, without what the plane or the cluster writes (`left_out`) |
+| `admin.profiles.export` | platform | `{profiles, policy, triggers, left_out}`: every profile, the `TroupePolicy` and every `Trigger` as a repository would hold them, each `{name, path, yaml, notes}` (a trigger's also `team`), without what the plane or the cluster writes (`left_out`, of a profile) or keeps (a trigger's key, runs and revisions) |
 | `admin.profile.get` | platform | the CR spec, the policy verdict, published vs reported bundle hash, and `gitops` as in the list |
 | `admin.profile.put` | platform | creates or updates a `WorkerProfile`, returning the diff that was applied; `managed_by_gitops` in gitops mode |
 | `admin.profile.delete` | platform | removes one; `managed_by_gitops` in gitops mode, except for a profile the cluster has no resource for, whose row alone it deletes |
@@ -1471,7 +1471,7 @@ that team.
 | `admin.bundle.publish` / `admin.bundle.retire` | platform | publish a version — refused as `invalid_params` with `data.errors`, one sentence per problem, when the document is malformed or names an MCP host outside `allowedEgress` — or retire one |
 | `admin.mcp.check` | either | `{host, allowed}`: whether the cluster policy lets a pod reach an MCP server's host |
 | `admin.audit.list` | either | who changed what, with diffs, each change keyed by its path (`spec.llm.model`) |
-| `admin.provisioning.mode` | either | `direct` or `gitops`: whether the plane writes profiles to the cluster, or reads them from resources a repository holds and refuses to write them |
+| `admin.provisioning.mode` | either | `direct` or `gitops`: whether the plane writes profiles to the cluster, or reads them and the triggers from resources a repository holds and refuses to write them |
 | `admin.settings.list` | either | every platform setting with its value, where that value came from (`stored`, `deployed`, `unset`), what changing it does and when it takes effect; a secret is reported as set and never returned |
 | `admin.setting.put` | platform | `{key, value}` — parsed against the setting's declared type and refused if it does not fit, or if the deployment owns it |
 | `admin.setting.reset` | platform | `{key}` — drops the stored value, so the setting goes back to what the plane was deployed with |
@@ -1479,10 +1479,11 @@ that team.
 | `admin.principals.list` | either | a team's service principals: subject, profiles, last use, whether enabled — never a secret or its hash |
 | `admin.principal.create` | either | `{team, name, description, profiles}` → the principal, with `secret` exactly once; `profiles` must be within the team's grants |
 | `admin.principal.rotate` / `admin.principal.disable` | either | `{subject}`: a new secret shown once, or the end of the credential; a disabled principal is `unauthenticated` at its next call |
-| `admin.triggers.list` | either | `{team}` → a team's trigger definitions, each with the `revision` its next firing would use |
-| `admin.trigger.put` | either | upsert by `team` and `name`; partial on update, so `{team, name, enabled: false}` is a switch-off; returns the trigger, the diff and the `revision` the document now hashes to |
-| `admin.trigger.delete` | either | `{team, name}`; the runs go with it, the sessions they made do not |
-| `admin.trigger.run` | either | `{team, name}`: fire it now, with a manual idempotency key naming the caller and the minute |
+| `admin.triggers.list` | either | `{team}` → a team's trigger definitions, each with the `revision` its next firing would use; in gitops mode each carries `gitops` (`resource`, `source`, `generation`, and a `problem` — `refused`, `missing` — with `reasons`), a refused resource of the team with no trigger is listed as `{name, team, gitops}`, and a platform admin also gets those naming no team here, with `team` null |
+| `admin.trigger.put` | either | upsert by `team` and `name`; partial on update, so `{team, name, enabled: false}` is a switch-off; returns the trigger, the diff and the `revision` the document now hashes to; `managed_by_gitops` in gitops mode, the switch-off included |
+| `admin.trigger.delete` | either | `{team, name}`; the runs go with it, the sessions they made do not; `managed_by_gitops` in gitops mode, except for a trigger the cluster has no resource for |
+| `admin.trigger.run` | either | `{team, name}`: fire it now, with a manual idempotency key naming the caller and the minute; in either mode |
+| `admin.trigger.key.rotate` | either | `{team, name}` → `{team, name, url, key, rotated_at}`: the trigger's own key, shown once, the old one dead at once; in either mode, since the key is never in a resource |
 | `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status, and the `revision` and `revision_hash` it actually ran |
 | `admin.trigger.revisions` | either | `{team, name}` → every revision of a trigger, newest first: the number, the hash, who made it and when, and whether it was reconstructed by the migration that introduced them |
 
@@ -1614,10 +1615,11 @@ and `profiles` claims.
 `not_found` for a team a `team_admin` may not see — because whether a team exists is
 itself something a person who cannot see it should not learn.
 
-`managed_by_gitops` with `data.kind` (`WorkerProfile`), `data.name`, `data.source` (the
-repository the deployment names, or `null`) and `data.reason` when a write reaches
-something a repository holds: on a plane in gitops mode, `admin.profile.put` and
-`admin.profile.delete`. The change is a commit to that repository. The attempt is in the
+`managed_by_gitops` with `data.kind` (`WorkerProfile` or `Trigger`), `data.name` (a
+trigger's as `team/name`), `data.source` (the repository the deployment names, or `null`)
+and `data.reason` when a write reaches something a repository holds: on a plane in gitops
+mode, `admin.profile.put`, `admin.profile.delete`, `admin.trigger.put` and
+`admin.trigger.delete`. The change is a commit to that repository. The attempt is in the
 audit trail with `outcome: refused`.
 
 ---

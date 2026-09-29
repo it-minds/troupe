@@ -472,7 +472,17 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       <p :if={@notice} class="banner" role="status">{@notice}</p>
       <p :if={@error} class="banner banner--breakglass" role="alert">{@error}</p>
 
-      <.locked :if={@locked} source={@source} gitops={@gitops} current={@current} />
+      <.locked :if={@locked} kind="WorkerProfile" things="profiles" source={@source}>
+        <p class="lede">Nothing on this page writes.</p>
+        <p :if={is_nil(@current)} class="hint">
+          A new profile is a new manifest in that repository. The plane lists it here once it
+          is in the cluster.
+        </p>
+        <p :if={@gitops && @gitops.generation} class="micro">
+          What is below is what the plane read, at generation {@gitops.generation}.
+        </p>
+        <.gitops_problems gitops={@gitops} />
+      </.locked>
 
       <form :if={not @locked or @current} id="profile-editor" phx-change="change" phx-submit="apply">
         <fieldset disabled={@locked}>
@@ -717,47 +727,6 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
   defp deletable?(false, _gitops), do: true
   defp deletable?(true, %{problem: "missing"}), do: true
   defp deletable?(true, _gitops), do: false
-
-  attr(:source, :string, default: nil)
-  attr(:gitops, :map, default: nil)
-  attr(:current, :any, default: nil)
-
-  # The marker: what is locked, by what, and where to go instead. First on the page and in
-  # words, because a form whose fields will not take a keystroke and says nothing about why
-  # reads as a broken console rather than a deliberate one.
-  defp locked(assigns) do
-    ~H"""
-    <section class="panel" id="locked-to-gitops">
-      <h2>Locked to gitops</h2>
-      <p class="lede">
-        This plane's profiles are the WorkerProfile resources a repository holds, applied to
-        the cluster {if @source, do: "from #{@source}", else: "by something other than this plane"}.
-        Change one there, with a commit; the plane reads it from the cluster within a
-        quarter of a minute of it being applied. Nothing on this page writes.
-      </p>
-      <p :if={is_nil(@current)} class="hint">
-        A new profile is a new manifest in that repository. The plane lists it here once it
-        is in the cluster.
-      </p>
-      <p :if={@gitops && @gitops.generation} class="micro">
-        What is below is what the plane read, at generation {@gitops.generation}.
-      </p>
-      <ul :if={@gitops && @gitops.problem} class="checks">
-        <li :for={reason <- @gitops.reasons} class="checks__bad">
-          <span class="checks__name">{problem_name(@gitops)}</span>
-          <span class="checks__detail">{reason}</span>
-        </li>
-      </ul>
-    </section>
-    """
-  end
-
-  defp problem_name(%{problem: "refused", problem_generation: generation}),
-    do: "generation #{generation} is not used"
-
-  defp problem_name(%{problem: "missing"}), do: "no resource"
-  defp problem_name(%{problem: "plane_only"}), do: "not applied from a repository"
-  defp problem_name(%{problem: problem}), do: problem
 
   # The word alone does not say which image the pods will be given, and a plane deployed
   # without one has nothing to follow — which is better read here than in the refusal

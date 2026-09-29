@@ -92,7 +92,7 @@ defmodule Troupe.Plane.Settings do
       fallback: :direct,
       summary: "Whether this plane writes profiles to the cluster, or reads them from resources a repository puts there.",
       consequence:
-        "In direct the console's profile editor changes the cluster when you apply. In gitops the profiles and the cluster policy are the resources a repository holds and Flux (or anything like it) applies: the console shows them locked, the admin API refuses to change them, and the plane writes only what no repository could know — workers wanted, teams' volumes, MCP servers. Deployment only.",
+        "In direct the console's profile editor changes the cluster when you apply. In gitops the profiles, the cluster policy and the triggers are the resources a repository holds and Flux (or anything like it) applies: the console shows them locked, the admin API refuses to change them, and the plane writes only what no repository could know — workers wanted, teams' volumes, MCP servers. Running a trigger by hand and minting its key still work. Deployment only.",
       effect: :restart
     },
     %Setting{
@@ -101,9 +101,10 @@ defmodule Troupe.Plane.Settings do
       type: :string,
       app_key: :gitops_source,
       editable: false,
-      summary: "Where the profiles come from in gitops mode, as a person should read it: a repository and a path.",
+      summary:
+        "Where the profiles and triggers come from in gitops mode, as a person should read it: a repository and a path.",
       consequence:
-        "Shown beside Locked to gitops, so whoever wants to change a profile knows where to go. Display only: the plane neither reads nor writes that repository. Deployment only.",
+        "Shown beside Locked to gitops, so whoever wants to change a profile or a trigger knows where to go. Display only: the plane neither reads nor writes that repository. Deployment only.",
       effect: :restart
     },
     %Setting{

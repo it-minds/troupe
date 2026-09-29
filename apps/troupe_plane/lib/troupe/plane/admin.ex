@@ -48,6 +48,7 @@ defmodule Troupe.Plane.Admin do
   }
 
   alias Troupe.Plane.Fleet.{Bundle, Provisioner, SizeClass, Worker}
+  alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
@@ -1283,14 +1284,17 @@ defmodule Troupe.Plane.Admin do
   end
 
   @doc """
-  Every profile and the cluster policy as a repository would hold them: what bootstrapping
-  a repository from a running plane commits, before the plane is switched to GitOps mode.
+  Every profile, the cluster policy and every trigger as a repository would hold them:
+  what bootstrapping a repository from a running plane commits, before the plane is
+  switched to GitOps mode.
 
   Each is a path and the YAML to put there, with notes where something needs deciding
   first — a profile whose image is `release` is pinned to the image it resolves to. Left
-  out of every manifest is what the plane or the cluster writes (`left_out`): a
+  out of every profile's manifest is what the plane or the cluster writes (`left_out`): a
   repository that held `spec.replicas` would put back its number over the scaler's at
-  every apply, and one that held the plane's record of finished drains would undo it.
+  every apply, and one that held the plane's record of finished drains would undo it. A
+  trigger's manifest is its document and nothing else: its key, its runs and its
+  revisions stay with the plane (Decision 737).
   """
   @spec profiles_export(actor()) :: result()
   def profiles_export(actor) do
@@ -2209,11 +2213,86 @@ defmodule Troupe.Plane.Admin do
 
   # -- triggers ---------------------------------------------------------------
 
-  @doc "A team's triggers."
+  @doc """
+  A team's triggers.
+
+  In GitOps mode (Decision 737) each says which resource it comes from and what the last
+  pass made of it (`gitops`), and a `Trigger` resource of the team that the plane refused
+  and has no row for is listed too, with its name and why, so that a manifest that never
+  became a trigger is somewhere its team will see it. A platform admin is also shown the
+  resources that name no team this plane has, with `team` null: there is no other team's
+  list they would be on.
+  """
   @spec triggers_list(actor(), String.t()) :: result()
   def triggers_list(actor, team_name) do
     with {:ok, team} <- fetch_team(actor, team_name) do
-      {:ok, team |> Triggers.list() |> Enum.map(&Triggers.trigger_json/1)}
+      reports = trigger_reports()
+      triggers = Triggers.list(team)
+
+      {:ok,
+       Enum.map(triggers, &(&1 |> Triggers.trigger_json() |> with_gitops(team, &1, reports))) ++
+         refused_triggers(actor, team, triggers, reports)}
+    end
+  end
+
+  # What a pass reported of the triggers, by resource name, in GitOps mode, and nothing in
+  # direct mode, whose answer is what it always was.
+  defp trigger_reports do
+    if Gitops.enabled?(),
+      do: Map.new(Gitops.reports(GitopsTriggers.kind()), &{&1.name, &1}),
+      else: nil
+  end
+
+  defp with_gitops(json, _team, _trigger, nil), do: json
+
+  defp with_gitops(json, team, trigger, reports) do
+    resource = GitopsTriggers.resource_name(team.name, trigger.name)
+    Map.put(json, "gitops", trigger_gitops(resource, trigger.resource_generation, reports))
+  end
+
+  defp trigger_gitops(resource, generation, reports) do
+    report = Map.get(reports, resource)
+
+    %{
+      "locked" => true,
+      "source" => Gitops.source(),
+      "resource" => resource,
+      # The version of the resource the row was read from; `nil` for a row that never was.
+      "generation" => generation,
+      "problem" => report && report.problem,
+      "problem_generation" => report && report.generation,
+      "reasons" => (report && report.reasons) || []
+    }
+  end
+
+  # A refused resource with no row has nothing behind it but its name and its reasons.
+  defp refused_triggers(actor, team, triggers, reports) when is_map(reports) do
+    known = MapSet.new(triggers, &GitopsTriggers.resource_name(team.name, &1.name))
+    teams = if actor.role == :platform_admin, do: MapSet.new(Identity.list_teams(), & &1.name)
+
+    for {resource, %{problem: "refused"}} <- reports,
+        not MapSet.member?(known, resource),
+        placed <- List.wrap(refused_in(resource, team, teams)) do
+      Map.put(placed, "gitops", trigger_gitops(resource, nil, reports))
+    end
+  end
+
+  defp refused_triggers(_actor, _team, _triggers, _reports), do: []
+
+  # This team's, by the name's first part; or, for a platform admin, one no team has.
+  defp refused_in(resource, team, teams) do
+    case GitopsTriggers.split(resource) do
+      {:ok, name, trigger} when name == team.name ->
+        %{"name" => trigger, "team" => team.name}
+
+      {:ok, name, _trigger} when not is_nil(teams) ->
+        if not MapSet.member?(teams, name), do: %{"name" => resource, "team" => nil}
+
+      :error when not is_nil(teams) ->
+        %{"name" => resource, "team" => nil}
+
+      _elsewhere ->
+        nil
     end
   end
 
@@ -2228,13 +2307,24 @@ defmodule Troupe.Plane.Admin do
   the revision point at each other: a run says which revision it ran, and this says who
   made that revision and what moved. A put that changes nothing names the revision that
   was already there, which is the honest answer and not a new one.
+
+  Refused in GitOps mode as `managed_by_gitops` (Decision 737), switching one on or off
+  included: the trigger is a `Trigger` resource a repository holds, and a change to it is
+  a commit there. The attempt is in the audit trail, as a refused profile write is.
   """
   @spec trigger_put(actor(), map()) :: result()
   def trigger_put(actor, attrs) do
     attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
 
     with {:ok, team} <- fetch_team(actor, attrs["team"]),
-         {:ok, name} <- require_name(attrs) do
+         {:ok, name} <- require_name(attrs),
+         :ok <-
+           not_held_by_repository(
+             actor,
+             "trigger.put",
+             "#{team.name}/#{name}",
+             GitopsTriggers.kind()
+           ) do
       before = Triggers.get(team, name)
 
       case Triggers.put(team, attrs, actor.subject) do
@@ -2273,6 +2363,10 @@ defmodule Troupe.Plane.Admin do
   The old key stops working immediately. A rotation is usually somebody reacting to a
   leak, and an overlap window would mean the leaked key went on firing for as long as
   the window lasted.
+
+  The same in GitOps mode (Decision 737). The key is not part of what a trigger is: it
+  is a credential the plane holds as a hash, never in a resource, and a rotation after a
+  leak cannot wait for a review and an applier's interval.
   """
   @spec trigger_key_rotate(actor(), String.t(), String.t()) :: result()
   def trigger_key_rotate(actor, team_name, name) do
@@ -2364,15 +2458,47 @@ defmodule Troupe.Plane.Admin do
     }
   end
 
-  @doc "Remove a trigger. Its runs go with it; the sessions they created do not."
+  @doc """
+  Remove a trigger. Its runs go with it; the sessions they created do not.
+
+  In GitOps mode a trigger goes when its manifest leaves the repository, and this is
+  refused as `managed_by_gitops` (Decision 737) — except for a trigger the cluster has no
+  resource for (reported `missing`), which the plane had before it read the cluster and
+  which nothing in the repository or the cluster holds.
+  """
   @spec trigger_delete(actor(), String.t(), String.t()) :: result()
   def trigger_delete(actor, team_name, name) do
     with {:ok, team} <- fetch_team(actor, team_name),
-         {:ok, trigger} <- fetch_trigger(team, name) do
+         {:ok, trigger} <- fetch_trigger(team, name),
+         :ok <- trigger_removal(actor, team, trigger) do
       detail = comparable(trigger)
       {:ok, _} = Audit.record(actor.subject, "trigger.delete", "#{team.name}/#{name}", detail)
       :ok = Triggers.delete(trigger)
+
+      if Gitops.enabled?(),
+        do: Gitops.forget(GitopsTriggers.kind(), GitopsTriggers.resource_name(team.name, name))
+
       {:ok, %{team: team.name, name: name, deleted: true}}
+    end
+  end
+
+  defp trigger_removal(actor, team, trigger) do
+    resource = GitopsTriggers.resource_name(team.name, trigger.name)
+
+    cond do
+      not Gitops.enabled?() ->
+        :ok
+
+      match?(%{problem: "missing"}, Gitops.report(GitopsTriggers.kind(), resource)) ->
+        :ok
+
+      true ->
+        not_held_by_repository(
+          actor,
+          "trigger.delete",
+          "#{team.name}/#{trigger.name}",
+          GitopsTriggers.kind()
+        )
     end
   end
 
@@ -2409,6 +2535,10 @@ defmodule Troupe.Plane.Admin do
 
   The source is `manual` and the console is the only door that may say so: a person's
   hand is the one thing about a run that cannot be inferred afterwards.
+
+  The same in GitOps mode (Decision 737): firing a trigger is something done with it, not
+  a change to what it is, and the run it makes names the revision the repository's
+  version hashes to.
   """
   @spec trigger_run(actor(), String.t(), String.t()) :: result()
   def trigger_run(actor, team_name, name) do

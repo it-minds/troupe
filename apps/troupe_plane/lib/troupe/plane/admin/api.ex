@@ -231,7 +231,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profiles.export",
       function: :profiles_export,
       summary:
-        "Every profile and the cluster policy as a repository would hold them, to bootstrap one before switching a plane to gitops mode: a path and the YAML for each, and notes where something needs deciding first. Left out of every manifest is what the plane or the cluster writes (spec.replicas, spec.teams, spec.mcpServers, the troupe.dev/drained annotation, status), listed in left_out: a repository must not hold them.",
+        "Every profile, the cluster policy and every trigger as a repository would hold them, to bootstrap one before switching a plane to gitops mode: a path and the YAML for each, and notes where something needs deciding first. Left out of every profile's manifest is what the plane or the cluster writes (spec.replicas, spec.teams, spec.mcpServers, the troupe.dev/drained annotation, status), listed in left_out: a repository must not hold them. A trigger's manifest has no key, runs or revisions, which stay with the plane.",
       risk: :read
     },
     %Method{
@@ -919,7 +919,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.provisioning.mode",
       function: :provisioning_mode,
       summary:
-        "Whether this plane writes profiles to the cluster itself (direct) or reads them from resources a repository holds (gitops), where a write is refused. Worth knowing before writing one.",
+        "Whether this plane writes profiles to the cluster itself (direct) or reads them and the triggers from resources a repository holds (gitops), where a write to either is refused. Worth knowing before writing one.",
       risk: :read
     },
     %Method{
@@ -1099,7 +1099,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.triggers.list",
       function: :triggers_list,
-      summary: "A team's triggers: what fires them, what they run, and whether they are enabled.",
+      summary:
+        "A team's triggers: what fires them, what they run, and whether they are enabled. On a gitops plane each carries `gitops`: the Trigger resource it comes from, the generation it was read at, and any problem the last pass reported (`refused` with the reasons, or `missing`). A refused resource of the team with no trigger behind it is listed too, and a platform admin also sees those that name no team here, with team null.",
       risk: :read,
       arguments: [
         %Argument{name: "team", type: :string, required: true, description: "The team's name."}
@@ -1108,7 +1109,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.trigger.put",
       function: :trigger_put,
-      summary: "Create or update a trigger.",
+      summary:
+        "Create or update a trigger. Refused on a gitops plane as managed_by_gitops, switching one on or off included: there a repository holds the triggers, and a change is a commit to it.",
       risk: :write,
       arguments: [
         %Argument{
@@ -1123,7 +1125,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.trigger.delete",
       function: :trigger_delete,
-      summary: "Remove a trigger. Its runs go with it; the sessions they created do not.",
+      summary:
+        "Remove a trigger. Its runs go with it; the sessions they created do not. Refused on a gitops plane as managed_by_gitops, except for a trigger the cluster has no resource for (reported missing).",
       risk: :destructive,
       confirm: "name",
       arguments: [
@@ -1155,7 +1158,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.trigger.run",
       function: :trigger_run,
-      summary: "Fire a trigger now, by hand. It starts a real session and spends real money.",
+      summary:
+        "Fire a trigger now, by hand. It starts a real session and spends real money. Works on a gitops plane too.",
       risk: :write,
       arguments: [
         %Argument{name: "team", type: :string, required: true, description: "The team's name."},
@@ -1171,7 +1175,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.trigger.key.rotate",
       function: :trigger_key_rotate,
       summary:
-        "Mint the trigger's own webhook key, replacing whatever it had. Returned once and never readable again; the old key stops working immediately.",
+        "Mint the trigger's own webhook key, replacing whatever it had. Returned once and never readable again; the old key stops working immediately. Works on a gitops plane too: the key is the plane's and never in a resource.",
       risk: :write,
       arguments: [
         %Argument{name: "team", type: :string, required: true, description: "The team's name."},

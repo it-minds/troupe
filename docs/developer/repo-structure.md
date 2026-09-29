@@ -47,7 +47,7 @@ and `priv/` where it ships data, and shares the root's `_build`, `deps`, `mix.lo
 | `apps/troupe_operator/lib/mix/tasks/troupe.e2e.ex` | the cluster suite |
 | `apps/troupe_gateway/test/conformance/` | the Python conformance client, a test fixture |
 | `apps/troupe_daemon/` | its own `config/runtime.exs`, README and DECISIONS |
-| `charts/troupe/crds/` | `WorkerProfile`, `TeamVolume`, `TroupePolicy`, hand-written; the admission policy is a template |
+| `charts/troupe/crds/` | `WorkerProfile`, `TeamVolume`, `TroupePolicy`, `Trigger`, hand-written; the admission policy is a template |
 | `docs/design/admin/tokens.json` | the console's design tokens |
 | `clients/gui/docs/design/themes/*.tokens.json` | the four themes: the GUI's, the front page's (Signal) and the TUI's (Afterglow), one copy |
 

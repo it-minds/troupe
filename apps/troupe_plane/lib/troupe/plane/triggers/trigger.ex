@@ -63,6 +63,11 @@ defmodule Troupe.Plane.Triggers.Trigger do
     field(:key_rotated_at, :utc_datetime_usec)
     field(:key_rotated_by, :string)
 
+    # In GitOps mode, the generation of the `Trigger` resource this row was last read from
+    # (Decision 737), and `nil` for a row no resource was ever read into. Not in `@fields`
+    # either: the pass that reads the cluster writes it and nothing else does.
+    field(:resource_generation, :integer)
+
     timestamps(type: :utc_datetime_usec)
   end
 
@@ -95,6 +100,12 @@ defmodule Troupe.Plane.Triggers.Trigger do
   @spec key_changeset(t(), map()) :: Ecto.Changeset.t()
   def key_changeset(trigger, attrs) do
     cast(trigger, attrs, [:key_hash, :key_salt, :key_rotated_at, :key_rotated_by])
+  end
+
+  @doc "Record the generation of the resource a row was read from, in GitOps mode."
+  @spec generation_changeset(t() | Ecto.Changeset.t(), integer() | nil) :: Ecto.Changeset.t()
+  def generation_changeset(trigger, generation) do
+    cast(trigger, %{resource_generation: generation}, [:resource_generation])
   end
 
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
