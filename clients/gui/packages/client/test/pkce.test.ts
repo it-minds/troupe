@@ -178,7 +178,7 @@ describe("the redirect", () => {
     // so a personal account fails *after* the password. The hint says so beforehand.
     const entra: Discovery = {
       ...discovery,
-      issuer: "https://login.microsoftonline.com/9c5bd6eb-62ce-4a2d-97c6-0acc1ccfec55/v2.0",
+      issuer: "https://login.microsoftonline.com/11111111-2222-4333-8444-555555555555/v2.0",
     };
     const http = fakeIdpFetch();
     const { url } = await beginRedirect({ discovery: entra, redirectUri: "http://localhost:5173", planeUrl: "https://p", fetchImpl: http });
@@ -199,9 +199,9 @@ describe("the redirect", () => {
       redirectUri: "http://localhost:5173",
       planeUrl: "https://p",
       fetchImpl: http,
-      domainHint: "itminds.dk",
+      domainHint: "example.com",
     });
-    assert.equal(new URL(hinted.url).searchParams.get("domain_hint"), "itminds.dk");
+    assert.equal(new URL(hinted.url).searchParams.get("domain_hint"), "example.com");
   });
 
   it("redeems one code once, however many callers ask at once", async () => {

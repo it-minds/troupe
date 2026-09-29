@@ -31,7 +31,7 @@ is built from `clients/gui` as its own context.
 ```bash
 scripts/build-images                          # all five, tagged dev, loaded into kind if troupe-dev exists
 scripts/build-images troupe_worker            # a subset
-TROUPE_REGISTRY=rg.fr-par.scw.cloud/troupe TROUPE_IMAGE_TAG=0.3.3 TROUPE_PUSH=true scripts/build-images
+TROUPE_REGISTRY=registry.example.com/troupe TROUPE_IMAGE_TAG=0.3.3 TROUPE_PUSH=true scripts/build-images
 ```
 
 Images are `linux/amd64` explicitly, so a non-amd64 laptop does not build one the node

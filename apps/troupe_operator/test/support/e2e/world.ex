@@ -287,7 +287,9 @@ defmodule Troupe.E2E.World do
   """
   @spec secrets!(String.t()) :: :ok
   def secrets!(namespace) do
-    secret!(namespace, "llm-credentials", [{"api-key", System.get_env("ITM_LLM_GW_KEY") || ""}])
+    secret!(namespace, "llm-credentials", [
+      {"api-key", System.get_env("TROUPE_GATEWAY_KEY") || ""}
+    ])
 
     secret!(namespace, "troupe-object-store", [
       {"access-key-id", "troupe"},
