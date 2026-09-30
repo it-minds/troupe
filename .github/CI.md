@@ -8,7 +8,7 @@ Three speeds, one set of jobs (Decision 676):
 | **Pre-release** — [`prerelease.yml`](workflows/prerelease.yml) | by hand, any branch or commit | builds only, **no test suite** | a GitHub pre-release `v<VERSION>-pre.<n>`: images, chart, `troupe`, `troupe-daemon`, desktop installers |
 | **Release** — [`release.yml`](workflows/release.yml) | merging a VERSION change (`scripts/release 0.3.2`) | **the full suite**: every job, nine soak runs, the cluster suite | the GitHub release `v<VERSION>`, images and chart at that version |
 
-Plus [`nightly.yml`](workflows/nightly.yml) — the full suite, the native builds and the harness against a real model on `main` every night, publishing nothing.
+Plus [`nightly.yml`](workflows/nightly.yml) — the full suite, the native builds and the harness against a real model on `main` every night, publishing nothing — and [`quick-start.yml`](workflows/quick-start.yml), which runs [the quick start](../docs/quick-start.md)'s commands every night against the latest release, on Linux and Windows, as a reader would.
 
 **Nothing here deploys** (Decision 735). A release publishes and ends: a deployment takes the published chart and images and rolls them from somewhere of its own, and no workflow in this repository knows where that is or holds a credential for it.
 
@@ -137,6 +137,7 @@ A failure is a harness regression until shown otherwise: the step prints the run
 | `release.yml` | full suite → images → tag → publish | a VERSION change on `main`; by hand to retry |
 | `nightly.yml` | full suite + native builds + the live check; `only: live` for the last alone | schedule; by hand |
 | `live.yml` | three headless runs against the real gateway | `nightly.yml` |
+| `quick-start.yml` | the blocks `docs/quick-start.md` marks, from the latest release's installers, on Ubuntu (`sh`) and Windows (PowerShell), with the scripted model; that the README's quick start is the page's and its protocol badge PROTOCOL.md's version | schedule; pull requests that change the page, the README, PROTOCOL.md or it; by hand, with a release to install |
 
 ## Secrets and variables
 
