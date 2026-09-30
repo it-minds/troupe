@@ -94,7 +94,7 @@ builds. It deploys nothing: a deployment, the maintainers' own included, rolls a
 onto its cluster from a repository of its own
 ([docs/admin/routine-tasks.md](docs/admin/routine-tasks.md#upgrade)). A **pre-release**
 of any commit, untested, is a button in Actions.
-[`.github/CI.md`](.github/CI.md) has the whole picture.
+[`docs/developer/ci.md`](docs/developer/ci.md) has the whole picture.
 
 ## The front door and the console
 
