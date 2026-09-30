@@ -213,7 +213,8 @@ Nothing brings a session back from `read_only` or `erased`:
 ```mermaid
 stateDiagram-v2
   direction LR
-  state "a session that can run" as live {
+  live: a session that can run
+  state live {
     [*] --> active: session.create
     [*] --> pending: on a full profile
     pending --> active: a worker has room
