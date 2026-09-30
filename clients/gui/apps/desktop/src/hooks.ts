@@ -276,6 +276,9 @@ export interface SessionHandle {
  * optimistically the instant it is typed and reconciled when the server's
  * `input_accepted` names the command id it was sent with.
  */
+/** How long a send made before the session's view has attached waits for it. */
+const ATTACH_WAIT_MS = 15_000;
+
 export function useSessionView(
   auth: AuthSession | null,
   sessionId: string | null,
@@ -287,6 +290,18 @@ export function useSessionView(
   const [detail, setDetail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<SessionView | null>(null);
+  // Sends made before the view has attached: they wait for it rather than fail, as the
+  // composer says ("held, and goes when the connection comes back"), for as long as
+  // `ATTACH_WAIT_MS`; a view that fails to open, or a screen that goes first, refuses them.
+  const waiting = useRef<{ resolve: (v: SessionView) => void; reject: (e: Error) => void }[]>([]);
+  const settle = useCallback((v: SessionView | null, why = "not attached") => {
+    const them = waiting.current;
+    waiting.current = [];
+    for (const w of them) {
+      if (v) w.resolve(v);
+      else w.reject(new Error(why));
+    }
+  }, []);
   // Held separately because closing is different: an attachment owns a socket and must
   // be told to let it go; a daemon's view is one of several on a socket that stays.
   const attachment = useRef<SessionAttachment | null>(null);
@@ -331,6 +346,7 @@ export function useSessionView(
             held = true;
             ref.current = v;
             setView(v);
+            settle(v);
             setStatus("live");
             void v.setPresence("viewing").catch(() => undefined);
             return undefined;
@@ -359,14 +375,20 @@ export function useSessionView(
           attachment.current = a;
           ref.current = a.view;
           setView(a.view);
+          settle(a.view);
           void a.view.setPresence("viewing").catch(() => undefined);
           return undefined;
         });
 
-    void opened.catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
+    void opened.catch((e: unknown) => {
+      const why = e instanceof Error ? e.message : String(e);
+      settle(null, why);
+      if (live) setError(why);
+    });
 
     return () => {
       live = false;
+      settle(null);
       const a = attachment.current;
       attachment.current = null;
       ref.current = null;
@@ -374,7 +396,29 @@ export function useSessionView(
       if (a) void a.close();
       else if (local && daemon && held) void daemon.close(sessionId, listener);
     };
-  }, [auth, daemon, sessionId, mode, local]);
+  }, [auth, daemon, sessionId, mode, local, settle]);
+
+  const attached = useCallback((): Promise<SessionView> => {
+    const v = ref.current;
+    if (v) return Promise.resolve(v);
+    return new Promise<SessionView>((resolve, reject) => {
+      const w = {
+        resolve: (view: SessionView) => {
+          clearTimeout(timer);
+          resolve(view);
+        },
+        reject: (e: Error) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      };
+      const timer = setTimeout(() => {
+        waiting.current = waiting.current.filter((x) => x !== w);
+        reject(new Error("not attached"));
+      }, ATTACH_WAIT_MS);
+      waiting.current.push(w);
+    });
+  }, []);
 
   // A team session's command that its pod refuses because the session has moved goes
   // after it through the plane and runs once more (PROTOCOL.md §6, "A session that
@@ -385,8 +429,7 @@ export function useSessionView(
   }, []);
 
   const send = useCallback(async (text: string) => {
-    const v = ref.current;
-    if (!v) throw new Error("not attached");
+    const v = await attached();
     const commandId = v.conn.nextCommandId();
     setState((s) => addPending(s, commandId, text));
     try {

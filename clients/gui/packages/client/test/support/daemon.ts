@@ -183,6 +183,8 @@ export class FakeDaemon {
   setup: FakeSetupFlow = freshSetup();
   /** Directories the workspace step accepts; anything else "is not a directory". */
   directories: string[] = ["/home/ada/project", "/home/ada/notes", "/home/ada/repo"];
+  /** How long `subscribe` takes to answer: a busy machine, where a screen is up before its view is. */
+  subscribeDelayMs = 0;
 
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -422,6 +424,11 @@ export class FakeDaemon {
       }
 
       case "subscribe": {
+        if (this.subscribeDelayMs > 0 && !params["__delayed"]) {
+          const later = { ...params, __delayed: true };
+          setTimeout(() => this.handle(client, id, method, later), this.subscribeDelayMs);
+          return;
+        }
         const topic = String(params["topic"] ?? "");
         const from = Number(params["from_seq"] ?? 0);
         const target = this.sessions.get(topic.replace(/^session:/, ""));

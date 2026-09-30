@@ -32,10 +32,18 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
     {:ok, jwks} = Tokens.jwks()
     auth = start_supervised!({Auth, name: nil, worker_id: @pod, jwks: jwks})
 
-    http_port = free_port()
-    socket_port = free_port()
+    {http_port, socket_port} = start_harness(auth)
 
-    start_supervised!(
+    Map.merge(context, %{auth: auth, http_port: http_port, socket_port: socket_port})
+  end
+
+  # Two ports nothing listens on, picked together so they are never the same one; a start
+  # that still loses a port to another test between picking and listening (`:eaddrinuse`,
+  # seen once in a nightly soak) picks again.
+  defp start_harness(auth, attempts \\ 3) do
+    [http_port, socket_port] = free_ports(2)
+
+    spec =
       {Harness,
        name: :"harness-#{http_port}",
        listener_name: :"harness-listener-#{http_port}",
@@ -43,9 +51,12 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
        auth: auth,
        port: socket_port,
        http_port: http_port}
-    )
 
-    Map.merge(context, %{auth: auth, http_port: http_port, socket_port: socket_port})
+    case start_supervised(spec) do
+      {:ok, _pid} -> {http_port, socket_port}
+      {:error, _reason} when attempts > 1 -> start_harness(auth, attempts - 1)
+      {:error, reason} -> flunk("the harness would not start: #{inspect(reason)}")
+    end
   end
 
   describe "probes" do
@@ -227,11 +238,22 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
     |> Map.fetch!(:active)
   end
 
-  defp free_port do
-    {:ok, socket} = :gen_tcp.listen(0, [:binary, active: false])
-    {:ok, port} = :inet.port(socket)
-    :gen_tcp.close(socket)
-    port
+  # Every socket is held open until all the ports are read, so no two are the same.
+  defp free_ports(n) do
+    sockets =
+      for _ <- 1..n do
+        {:ok, socket} = :gen_tcp.listen(0, [:binary, active: false])
+        socket
+      end
+
+    ports =
+      Enum.map(sockets, fn socket ->
+        {:ok, port} = :inet.port(socket)
+        port
+      end)
+
+    Enum.each(sockets, &:gen_tcp.close/1)
+    ports
   end
 
   defp token(context, opts) do
