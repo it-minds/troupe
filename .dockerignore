@@ -27,6 +27,9 @@ charts
 dev
 scripts
 *.md
+# Bar PROTOCOL.md, whose error table the GUI's image build tests its client against; it
+# reads this directory as its `licences` context, and no server image copies it.
+!PROTOCOL.md
 
 # The clients are built on their own: the TUI and the desktop app natively for each
 # platform, the GUI's image with `clients/gui` as its own context. No server image needs
