@@ -98,4 +98,24 @@ describe("while you were away", () => {
     button("Send")!.click();
     await waitFor(() => document.querySelector(".banner.away") === null, "the line gone once answered");
   });
+
+  // On a busy machine the screen is up before its view has attached. What is sent then
+  // waits for the view, as the composer says, instead of failing "not attached" and
+  // leaving the line up (the flake the release's suite hit).
+  it("goes when the person answers before the view has attached", async () => {
+    const away = daemon.seed("/home/ada/kunder");
+    daemon.markSeen(away.id);
+    away.log.append("turn_ended", {});
+    daemon.subscribeDelayMs = 1_500;
+
+    unmount = render(<App />).unmount;
+    (await waitFor(() => marker("/home/ada/kunder") && row("/home/ada/kunder"), "the marked row")).click();
+    const composer = await waitFor(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]'), "the composer");
+    type(composer, "thanks, carry on");
+    button("Send")!.click();
+
+    await waitFor(() => daemon.calls.some((c) => c.method === "input.send"), "the line sent once the view is there", 10_000);
+    await waitFor(() => document.querySelector(".banner.away") === null, "the line gone once answered");
+    expect(says("not attached")).toBeFalsy();
+  });
 });
