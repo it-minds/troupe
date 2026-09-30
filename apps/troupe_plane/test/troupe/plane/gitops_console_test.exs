@@ -135,6 +135,13 @@ defmodule Troupe.Plane.GitopsConsoleTest do
       assert html =~ "kind: WorkerProfile"
       assert html =~ "spec.replicas, spec.teams, spec.mcpServers"
     end
+
+    test "leads to each profile as the plane read it, and offers no new one", context do
+      {:ok, view, _html} = context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
+
+      assert has_element?(view, "a[href='/admin/profile/dev']", "view")
+      refute has_element?(view, "a[href='/admin/profile/new']")
+    end
   end
 
   describe "direct mode" do

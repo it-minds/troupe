@@ -9,9 +9,27 @@
  */
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { TroupeRpcError } from "../src/index.js";
+import { ErrorCodes, TroupeRpcError } from "../src/index.js";
+
+// The table is PROTOCOL.md's own, read from the page, as the TUI's contract test reads it:
+// a code added there and not here fails, and so does one this client spells differently.
+// -32014 and -32015 were added there and this table went on without them.
+describe("the error codes are the contract's", () => {
+  it("has every code in PROTOCOL.md §10, under the token the contract gives it, and no other", () => {
+    const protocol = readFileSync(new URL("../../../../../PROTOCOL.md", import.meta.url), "utf8");
+    const section = protocol.split("\n## 10. Errors\n")[1]?.split("\n## ")[0] ?? "";
+    const contract: Record<string, number> = {};
+    for (const [, code, token] of section.matchAll(/^\| (-\d+) \| `([a-z_]+)` \|/gm)) {
+      if (code && token) contract[token] = Number(code);
+    }
+
+    assert.equal(contract["conflict"], -32006, "the table was not found in PROTOCOL.md");
+    assert.deepEqual({ ...ErrorCodes }, contract);
+  });
+});
 
 describe("a JSON-RPC error says why, not just what kind", () => {
   it("puts the server's reason in the message", () => {

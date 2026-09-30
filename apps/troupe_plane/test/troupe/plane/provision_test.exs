@@ -222,6 +222,17 @@ defmodule Troupe.Plane.ProvisionTest do
       # No commit, no file, no git: the only place a GitOps plane writes is the resource.
       assert {:error, :no_cluster} = Provision.apply(context.profile, context.actor)
     end
+
+    # A repository holds an `ssh` profile as a resource like any other, and the operator
+    # makes a StatefulSet of whatever `spec.replicas` says. Its workers are machines, so
+    # the count the plane writes there is none; the row keeps the number of machines.
+    test "a profile whose workers are machines is written no pods" do
+      {:ok, laptops} = Fleet.put_profile(%{name: "laptops", replicas: 3, provisioner: "ssh"})
+
+      assert Provision.projection(laptops)["replicas"] == 0
+      assert Provision.projection(%{laptops | provisioner: "kubernetes"})["replicas"] == 3
+      assert Fleet.get_profile("laptops").replicas == 3
+    end
   end
 
   describe "direct mode" do

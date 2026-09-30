@@ -83,14 +83,15 @@ repository holds the triggers' definitions as well ([below](#triggers-from-a-rep
 |---|---|---|
 | `team`, `name` | owner, and `^[a-z0-9][a-z0-9-]{0,62}$` unique per team | required |
 | `principal` | a principal of the same team, which the session runs as | required |
-| `profile`, `agent` | where it starts (one of the principal's profiles) and which primary agent | profile required |
+| `profile`, `agent` | where it starts (a profile the plane has, one of the principal's) and which primary agent | profile required |
 | `enabled` | a disabled trigger refuses to fire | `true` |
-| `source` | `{"kind": "schedule", "cron": "…", "tz": "UTC"}` or `{"kind": "webhook"}` | required |
+| `source` | `{"kind": "schedule", "cron": "…", "tz": "UTC"}`, `{"kind": "webhook", "provider": "…"}` or `{"kind": "manual"}`; a `tz` other than UTC is refused | required |
 | `prompt_template` | ≤ 64 KiB, with `{{event.issue.key}}`, `{{trigger.name}}`, `{{run.fired_at}}` placeholders; a missing path renders empty, nothing is escaped | `""` |
 | `terms` | §3 | `{}` |
 | `visibility` | `private` or `team` | `team` |
 | `review` | `required` or `none` | `required` |
 | `notify` | subjects granted `collaborator` on every run's session | `[]` |
+| `notify_url` | an absolute `http` or `https` URL posted the run's outcome when it ends, never its content; not loopback or link-local, and a host the policy's egress allows, checked when saved and again at send | none |
 | `concurrency` | cap on live runs, 1–100; a firing over it records a `skipped` run | 1 |
 
 **Cron** is five fields (`*`, `*/n`, `n`, `a,b`, `a-b`, `a-b/n`; day-of-week 0–7), **UTC
@@ -104,9 +105,20 @@ minute is within the last 120 s.
 `/rpc`, by the trigger's principal or an admin of its team, writes the run row first, so
 two callers racing on one key get the same run: skipped stays skipped, failed is retried, a
 run with a session is handed it and a fresh token. `event` is capped at 16 KiB.
-`admin.trigger.run` fires one by hand. **There is no webhook endpoint here**:
-`source.kind: webhook` expects an external executor to receive the webhook and call
-`trigger.fire`.
+`admin.trigger.run` fires one by hand.
+
+**A trigger's own URL.** A trigger with a key is fired by `POST /trigger/<id>` with
+`Authorization: Bearer <key>` and a JSON object as the body, which becomes the run's
+`event`. `admin.trigger.key.rotate` mints the key, shows it once with the URL and keeps a
+salted hash; rotating again replaces it at once. The key fires that one trigger and does
+nothing else, which makes it the credential to give a CI job or a provider's webhook, and
+a wrong key and an unknown id get the same `401`. An `Idempotency-Key` header names the
+run; without one, a retry in the same minute against the same revision gets the run it
+already made. The answer is `202` with the run and where its session is, as from
+`trigger.fire`; a disabled trigger is `403`, an event over 16 KiB `413` and a team with no
+budget left `402`. `source.kind: webhook` says a trigger is meant to be fired from
+outside, this way or by an executor that calls `trigger.fire`; any trigger with a key can
+be.
 
 **Runs** store only what the plane decided — `created`, `skipped`, `failed` — and read the
 rest from the session: `running`, `waiting` (on an approval), `done`, `failed`.

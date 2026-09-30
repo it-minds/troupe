@@ -168,11 +168,13 @@ defmodule Troupe.Plane.Web.Live.Triggers do
   end
 
   # The two sources a form can express. A webhook needs no field of its own — its URL and
-  # key are minted when it is made — and anything else is a document somebody writes.
+  # key are minted when it is made — and anything else is a document somebody writes. The
+  # zone is `tz`, as everywhere else a trigger is written down: saved as `timezone` it was
+  # read by nothing, and the trigger fired in UTC whatever the field said.
   defp source_from(%{"kind" => "webhook"}), do: %{"kind" => "webhook"}
 
   defp source_from(params),
-    do: %{"kind" => "schedule", "cron" => params["cron"], "timezone" => params["timezone"]}
+    do: %{"kind" => "schedule", "cron" => params["cron"], "tz" => params["timezone"]}
 
   defp put_present(attrs, _key, value) when value in [nil, ""], do: attrs
   defp put_present(attrs, key, value), do: Map.put(attrs, key, value)
@@ -319,12 +321,15 @@ defmodule Troupe.Plane.Web.Live.Triggers do
           <label for="new-trigger-cron">Schedule</label>
           <input id="new-trigger-cron" name="cron" placeholder="0 3 * * 1-5" autocomplete="off" />
           <p class="field-help">
-            Five fields, in UTC unless a timezone is given. Ignored for a webhook, whose URL
-            and key are minted when it is made and shown once.
+            Five fields, in UTC. Ignored for a webhook, whose URL and key are minted when it
+            is made and shown once.
           </p>
 
           <label for="new-trigger-timezone">Timezone</label>
           <input id="new-trigger-timezone" name="timezone" placeholder="UTC" autocomplete="off" />
+          <p class="field-help">
+            UTC is the only one this plane keeps, so another is refused rather than ignored.
+          </p>
 
           <label for="new-trigger-prompt">What the session is asked to do</label>
           <textarea id="new-trigger-prompt" name="prompt_template" rows="3"></textarea>
@@ -509,6 +514,13 @@ defmodule Troupe.Plane.Web.Live.Triggers do
 
   defp document_of(%{"document" => document}) when is_binary(document), do: document
   defp document_of(_revision), do: ""
+
+  # A zone other than UTC's is on a row saved before the zone was checked, and the
+  # scheduler does not fire it; the page says so rather than showing a schedule that
+  # looks as if it runs.
+  defp source(%{"kind" => "schedule", "tz" => zone} = source)
+       when zone not in [nil, "UTC", "Etc/UTC"],
+       do: "cron #{source["cron"]} (#{zone}, which this plane does not keep: it does not fire)"
 
   defp source(%{"kind" => "schedule"} = source),
     do: "cron #{source["cron"]} (#{source["tz"] || "UTC"})"

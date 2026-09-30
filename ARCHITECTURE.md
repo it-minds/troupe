@@ -461,8 +461,9 @@ a budget slice, `max_turns`, `wall_clock_seconds` and `approvals: wait | deny`, 
 an administrator's versioned act); and an `origin`. A **trigger** is a row the plane stores
 and something fires: `trigger.fire` renders the template and creates the session *as the
 trigger's principal* through the same call a person's client makes; the same idempotency
-key returns the same run. Cron triggers fire from a `:global` scheduler in the plane;
-webhooks terminate at an external executor, so the plane has no public trigger surface.
+key returns the same run. Cron triggers fire from a `:global` scheduler in the plane; from
+outside, a trigger is fired at `POST /trigger/<id>` with a key of its own, which fires that
+trigger and nothing else, or by an executor that calls `trigger.fire`.
 
 **The A2A facade** maps the A2A protocol onto sessions: a task is a session, a message is
 `input.send`, a stream is a subscription, `input-required` is an approval answered by a

@@ -23,6 +23,14 @@ defmodule Troupe.Plane.Principals do
 
   # -- lifecycle --------------------------------------------------------------
 
+  # What `create/3` reads of what it is given. `admin.principal.create`'s schema declares
+  # these, and a test holds the two together.
+  @create_keys ~w(name description profiles sponsor)
+
+  @doc "The attributes `create/3` reads."
+  @spec create_keys() :: [String.t()]
+  def create_keys, do: @create_keys
+
   @doc """
   Create a principal for a team, returning it with the secret that is shown once.
 
@@ -37,11 +45,17 @@ defmodule Troupe.Plane.Principals do
   @spec create(Team.t(), map(), String.t()) ::
           {:ok, ServicePrincipal.t(), String.t()} | {:error, Ecto.Changeset.t() | term()}
   def create(%Team{} = team, attrs, by) do
-    name = attrs[:name] || attrs["name"]
-    profiles = List.wrap(attrs[:profiles] || attrs["profiles"])
+    attrs =
+      for {key, value} <- attrs,
+          to_string(key) in @create_keys,
+          into: %{},
+          do: {to_string(key), value}
+
+    name = attrs["name"]
+    profiles = List.wrap(attrs["profiles"])
 
     with :ok <- check_profiles(team, profiles),
-         {:ok, sponsor} <- check_sponsor(team, attrs[:sponsor] || attrs["sponsor"]) do
+         {:ok, sponsor} <- check_sponsor(team, attrs["sponsor"]) do
       {secret, hash, salt} = mint_secret()
 
       %ServicePrincipal{}
@@ -49,7 +63,7 @@ defmodule Troupe.Plane.Principals do
         subject: ServicePrincipal.subject(team.name, to_string(name)),
         team_id: team.id,
         name: name,
-        description: attrs[:description] || attrs["description"],
+        description: attrs["description"],
         profiles: profiles,
         secret_hash: hash,
         secret_salt: salt,
