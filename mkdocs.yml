@@ -76,7 +76,7 @@ validation:
     not_found: warn
     absolute_links: info
     unrecognized_links: info
-    anchors: info
+    anchors: warn
 
 # By reader, each section in the order to read it (docs/README.md says the same in prose).
 # A path outside docs/ is from the repository root.

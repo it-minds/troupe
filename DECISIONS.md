@@ -2918,13 +2918,16 @@ citation keeps meaning what it meant.
      the root builds a site with MkDocs Material, which #51 names, and
      `.github/workflows/pages.yml` builds it on every pull request and publishes it from
      `main` to GitHub Pages, at `it-minds.github.io/troupe` until the product site (#189)
-     gives it a domain. The build is strict: a link to a page that is not there, a nav
-     entry to a missing file, or a page left out of the nav fails it. Heading anchors are
-     spelt as GitHub spells them, so one `#fragment` works in both places. The nav is by
+     gives it a domain. The build is strict: a link to a page that is not there, a
+     `#fragment` naming no heading of it, a nav entry to a missing file, or a page left
+     out of the nav fails it. Heading anchors are spelt as GitHub spells them, so one
+     `#fragment` works in both places. The nav is by
      reader — using Troupe, running a deployment, contributing, writing a client — each in
      the order to read it, and `docs/README.md` says the same in prose for whoever reads
      the repository on GitHub. MkDocs and its theme are pinned in `docs/requirements.txt`
-     and Dependabot moves them monthly.
+     and Dependabot moves them monthly, but not MkDocs to 2: that drops the plugin and
+     theme systems the site is built on, and Material requires 1, so leaving MkDocs 1 is a
+     choice for the product site (#189) to make, not a bump.
 
      *Where documents live.* MkDocs builds one directory, and several documents a reader
      needs are read where they are by something else: the TUI's tests read
