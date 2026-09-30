@@ -8,7 +8,7 @@
 #   * a delegation: one `explore` subagent, whose result reaches the root (#130);
 #   * a tool that can only fail, which the failure guard stops, and not a budget (#117).
 #
-# `scripts/live-check` runs each and says what it found; `.github/CI.md` says what a
+# `scripts/live-check` runs each and says what it found; `docs/developer/ci.md` says what a
 # failure means. Called by `nightly.yml`, which runs on a schedule and by hand and never
 # for a pull request, so the gateway's key never reaches a fork's code; the `if:` on the
 # job that holds it keeps it that way should anything else ever call this.

@@ -4,7 +4,7 @@
 # One definition for the three callers that need images: `ci.yml` on every push to `main`
 # (so every merged commit is pullable by a name that can only mean one build),
 # `prerelease.yml` (a version like `0.3.1-pre.7`, untested), and `release.yml` (the
-# version, after the full suite). See `.github/CI.md`.
+# version, after the full suite). See `docs/developer/ci.md`.
 #
 # The workflow's own token pushes them, and nothing else can: no registry is configured
 # and no credential is held (Decision 735). A deployment that wants its own registry

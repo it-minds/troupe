@@ -22,7 +22,7 @@ the release (Decisions 669, 676). `release.yml` runs the full suite, builds the 
 that version and pushes them to `ghcr.io`, tags `v<version>`, publishes the chart there
 and on the release page, and attaches the native builds (735). A deployment picks the
 release up from what was published. Nothing is released by pushing a tag. The workflows
-are in [../../.github/CI.md](../../.github/CI.md).
+are in [ci.md](ci.md).
 
 Rolling a release, by whatever does it, is: the chart's CRDs applied server-side (Helm
 never upgrades them), `helm upgrade --wait` rolling back on failure, the rollouts waited

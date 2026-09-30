@@ -16,18 +16,27 @@ Three packages in one pnpm workspace:
 
 ## The path a client takes
 
-```
-GUI ── GET  /.well-known/troupe ──────────► plane          discovery, no auth
-GUI ── POST device_authorization_endpoint ► identity provider
-GUI ── POST token_endpoint (poll) ────────► identity provider   → id_token, refresh_token
-GUI ── POST /auth/exchange {id_token} ────► plane          → plane token (≤ 15 min)
-GUI ── POST /rpc  session.create ─────────► plane          → {endpoint, token(aud = pod), session_id}
-GUI ── WS   wss://<pod>/v1/socket ────────► worker         initialize → subscribe → input.send → events
+```mermaid
+sequenceDiagram
+  participant G as GUI
+  participant IdP as Identity provider
+  participant P as Plane
+  participant W as Worker
+  G->>P: GET /.well-known/troupe (discovery, no auth)
+  G->>IdP: POST device_authorization_endpoint
+  G->>IdP: POST token_endpoint (poll)
+  IdP-->>G: id_token, refresh_token
+  G->>P: POST /auth/exchange {id_token}
+  P-->>G: plane token (≤ 15 min)
+  G->>P: POST /rpc session.create
+  P-->>G: endpoint, token (aud = the pod), session_id
+  G->>W: WebSocket to the pod's /v1/socket
+  Note over G,W: initialize → subscribe → input.send → events
 ```
 
 The plane is never in the data path of a live session. Only the last hop is a socket;
-everything before it is ordinary HTTP. `PlaneClient` covers the first five lines and
-`TroupeConnection` + `SessionView` the last.
+everything before it is ordinary HTTP. `PlaneClient` covers every step up to the socket,
+and `TroupeConnection` + `SessionView` the socket.
 
 Things the client library knows that the protocol document does not say loudly:
 
