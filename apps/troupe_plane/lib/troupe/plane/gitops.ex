@@ -25,7 +25,7 @@ defmodule Troupe.Plane.Gitops do
 
   Each resource is read with the plane's own checks before anything is written, and one
   that fails them is reported — in `gitops_reports`, in the log once, in
-  `admin.profiles.list` and on the console — instead of used. A new one gets no row; a
+  `admin.profiles.list` or `admin.triggers.list` and on the console — instead of used. A new one gets no row; a
   changed one leaves the row as the last version that passed, so a typo in a repository
   does not take down a profile that was running. A row the cluster has no resource for is
   reported too, unless it followed one that has since gone, in which case it goes with it.
@@ -34,7 +34,9 @@ defmodule Troupe.Plane.Gitops do
 
   A kind joins by implementing this behaviour and being listed in `sources/0`. The
   engine lists, reads, reports and removes; the source knows what a row is, what its
-  checks are and what writing one means. `Troupe.Plane.Gitops.Profiles` is the first.
+  checks are and what writing one means. `Troupe.Plane.Gitops.Profiles` is the first and
+  `Troupe.Plane.Gitops.Triggers` the second (Decision 737), in that order, so that a pass
+  reads a trigger after the profile it names.
   """
 
   use GenServer
@@ -42,7 +44,7 @@ defmodule Troupe.Plane.Gitops do
   import Ecto.Query
 
   alias Troupe.Plane.{ClusterPolicy, Provision, Repo, Settings, Singleton}
-  alias Troupe.Plane.Gitops.{Profiles, Report}
+  alias Troupe.Plane.Gitops.{Profiles, Report, Triggers}
 
   require Logger
 
@@ -92,7 +94,7 @@ defmodule Troupe.Plane.Gitops do
 
   @doc "Every kind a pass reads."
   @spec sources() :: [module()]
-  def sources, do: [Profiles]
+  def sources, do: [Profiles, Triggers]
 
   @doc """
   Where the resources come from, as a person should read it: the repository and path the
@@ -311,8 +313,8 @@ defmodule Troupe.Plane.Gitops do
   # -- bootstrapping a repository ----------------------------------------------
 
   @doc """
-  The manifests a repository would hold, as they would be committed: every profile and
-  the cluster policy (`admin.profiles.export`).
+  The manifests a repository would hold, as they would be committed: every profile, the
+  cluster policy and every trigger (`admin.profiles.export`).
 
   Built from the plane's rows, which in direct mode are the truth and in GitOps mode are
   what the plane last read, and with nothing in them the plane or the cluster writes.
@@ -322,6 +324,7 @@ defmodule Troupe.Plane.Gitops do
     %{
       profiles: Profiles.export(),
       policy: ClusterPolicy.export(),
+      triggers: Triggers.export(),
       left_out: Profiles.left_out()
     }
   end

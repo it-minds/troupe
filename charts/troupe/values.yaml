@@ -125,15 +125,16 @@ plane:
   # `+Q`, the BEAM's port table size. See `operator.maxPorts`.
   maxPorts: 65536
   # `direct`: the console writes WorkerProfile resources to the API server. `gitops`: a
-  # repository holds them (and the TroupePolicy), something else such as Flux applies
-  # them, and the plane reads them from the cluster, shows them locked and refuses to
-  # change them; it writes only spec.replicas, spec.teams and spec.mcpServers, and its
-  # Role loses create and delete on WorkerProfile. Never written by the plane to git.
-  # docs/admin/profiles-and-policy.md, "Provisioning".
+  # repository holds them (and the TroupePolicy and the Triggers), something else such as
+  # Flux applies them, and the plane reads them from the cluster, shows them locked and
+  # refuses to change them; it writes only spec.replicas, spec.teams and spec.mcpServers,
+  # and its Role loses create and delete on WorkerProfile and gets read on Trigger. Never
+  # written by the plane to git. docs/admin/profiles-and-policy.md, "Provisioning".
   provisioningMode: direct
   gitops:
-    # Where the profiles come from, as a person should read it: a repository URL and a
-    # path, shown beside "Locked to gitops". Display only; the plane never reads it.
+    # Where the profiles and triggers come from, as a person should read it: a repository
+    # URL and a path, shown beside "Locked to gitops". Display only; the plane never
+    # reads it.
     source: ""
   # The identity provider group whose members administer the platform. Membership is
   # the provider's business and is never edited in Troupe.

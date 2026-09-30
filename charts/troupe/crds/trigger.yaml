@@ -1,0 +1,125 @@
+# Work nobody starts by hand, as a repository holds it. Read by the plane in gitops mode
+# (Decision 737), which makes its trigger rows follow these; in direct mode the plane keeps
+# triggers in its database and nothing reads this kind.
+#
+# One per trigger, in the plane's namespace, named `<team>.<trigger>`. Nothing here is a
+# secret: a trigger's key stays with the plane, which holds it as a salted hash and mints
+# it with `admin.trigger.key.rotate`. The spec keeps what it is not told about, so that a
+# misspelt field reaches the plane and is reported instead of being dropped on the way.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: triggers.troupe.dev
+  labels:
+    app.kubernetes.io/name: troupe
+spec:
+  group: troupe.dev
+  scope: Namespaced
+  names:
+    kind: Trigger
+    plural: triggers
+    singular: trigger
+    shortNames: [trg]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [principal, profile, source]
+              x-kubernetes-preserve-unknown-fields: true
+              properties:
+                principal:
+                  type: string
+                  description: >-
+                    The service principal the sessions run as, by subject:
+                    svc:<team>/<name>, of the trigger's own team.
+                profile:
+                  type: string
+                  description: The profile its sessions start on. One of the principal's.
+                agent:
+                  type: string
+                  description: The primary agent. Absent means the profile's default.
+                enabled:
+                  type: boolean
+                  default: true
+                  description: A disabled trigger refuses to fire, by schedule or by hand.
+                source:
+                  type: object
+                  required: [kind]
+                  x-kubernetes-preserve-unknown-fields: true
+                  description: >-
+                    What is expected to fire it. A schedule has a five-field cron in UTC; a
+                    webhook names its provider and is otherwise its executor's business.
+                  properties:
+                    kind:
+                      type: string
+                      enum: [schedule, webhook, manual]
+                    cron: {type: string}
+                    tz:
+                      type: string
+                      description: UTC is the only one this release keeps.
+                    provider: {type: string}
+                promptTemplate:
+                  type: string
+                  maxLength: 65536
+                  description: >-
+                    What the session is asked to do, with {{event.*}}, {{trigger.*}} and
+                    {{run.*}} placeholders. A missing path renders empty.
+                terms:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                  description: >-
+                    What an unattended session may spend: the terms of session.create,
+                    spelt as fields are here.
+                  properties:
+                    budgetMicros: {type: integer, minimum: 1}
+                    maxTurns: {type: integer, minimum: 1, maximum: 500}
+                    wallClockSeconds: {type: integer, minimum: 60, maximum: 86400}
+                    approvals:
+                      type: string
+                      enum: [wait, deny]
+                visibility:
+                  type: string
+                  enum: [private, team]
+                  default: team
+                review:
+                  type: string
+                  enum: [required, none]
+                  default: required
+                notify:
+                  type: array
+                  description: Subjects granted collaborator on every run's session.
+                  items: {type: string}
+                notifyUrl:
+                  type: string
+                  description: >-
+                    Told when a run ends. Absolute http or https, not loopback, and a host
+                    the TroupePolicy's egress allows.
+                concurrency:
+                  type: integer
+                  minimum: 1
+                  maximum: 100
+                  default: 1
+                  description: The cap on live runs; a firing over it is recorded as skipped.
+      additionalPrinterColumns:
+        - name: Principal
+          type: string
+          jsonPath: .spec.principal
+        - name: Profile
+          type: string
+          jsonPath: .spec.profile
+        - name: Source
+          type: string
+          jsonPath: .spec.source.kind
+        - name: Enabled
+          type: boolean
+          jsonPath: .spec.enabled
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

@@ -72,8 +72,8 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_DEPLOYMENT_BUDGET_MICROS` | `0` (no ceiling) | the deployment's monthly ceiling on everything the plane spends, in millionths; the console's `platform_budget_micros` may narrow it, never raise it | `plane.deploymentBudgetMicros` |
 | `TROUPE_SCIM_TOKEN` | unset | the deployment's SCIM bearer; the console can mint its own | `plane.scim.*` |
 | `TROUPE_PLANE_AUDIENCE` | `troupe-plane-api` | `aud` of plane tokens | none |
-| `TROUPE_PROVISIONING_MODE` | `direct` | `direct`: the console writes profiles to the cluster. `gitops`: a repository holds the `WorkerProfile` and `TroupePolicy` resources and something else applies them; the plane reads them, shows them locked, refuses `admin.profile.put` and `.delete` as `managed_by_gitops`, and writes only `spec.replicas`, `spec.teams` and `spec.mcpServers` ([profiles-and-policy.md §6](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository)). Deployment only; the chart's Role drops `create` and `delete` on `WorkerProfile` in `gitops` | `plane.provisioningMode` |
-| `TROUPE_GITOPS_SOURCE` | unset | where the profiles come from in `gitops` mode, as the console shows it beside "Locked to gitops": a repository and a path. Display only; the plane never reads it | `plane.gitops.source` |
+| `TROUPE_PROVISIONING_MODE` | `direct` | `direct`: the console writes profiles to the cluster. `gitops`: a repository holds the `WorkerProfile`, `TroupePolicy` and `Trigger` resources and something else applies them; the plane reads them, shows them locked, refuses `admin.profile.put`, `admin.trigger.put` and their `.delete` as `managed_by_gitops`, and writes only `spec.replicas`, `spec.teams` and `spec.mcpServers` ([profiles-and-policy.md §6](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository), [bundles-and-triggers.md §2](bundles-and-triggers.md#triggers-from-a-repository)). Deployment only; the chart's Role drops `create` and `delete` on `WorkerProfile` and reads `Trigger` in `gitops` | `plane.provisioningMode` |
+| `TROUPE_GITOPS_SOURCE` | unset | where the profiles and triggers come from in `gitops` mode, as the console shows it beside "Locked to gitops": a repository and a path. Display only; the plane never reads it | `plane.gitops.source` |
 | `TROUPE_KUBECONFIG` | unset | how the plane reaches Kubernetes to apply profiles and read the policy; unset, the in-pod ServiceAccount; with neither, profiles are saved and reported `not_applied` | none |
 | `TROUPE_WORKER_IMAGE` | unset | the image a profile whose image is `release` runs | `worker.image.*`, tag default `appVersion` |
 | `TROUPE_OIDC_ISSUER`, `TROUPE_OIDC_CLIENT_ID` | none | the identity provider and app registration (required) | `plane.oidc.issuer`, `clientId` |
@@ -196,8 +196,8 @@ back as set or unset, never as values.
 
 The groups: **administration** (`platform_admin_group`, `groups_claim`, the platform
 budget), **provisioning** (`provisioning_mode` and `gitops_source`, shown and not
-editable: whether a repository holds the profiles is the deployment's, and a stored value
-from before 0.7.0 is not read), **team defaults** that seed a team when it
+editable: whether a repository holds the profiles and triggers is the deployment's, and a
+stored value from before 0.7.0 is not read), **team defaults** that seed a team when it
 is enabled (budgets, idle timeout, cache eviction, erase-after, pins, whether members may
 control sessions), **sessions** (managed permission rules and MCP servers only, the default
 bundle channel), **sign in** (issuer, client, endpoints, scopes — the console's **Identity

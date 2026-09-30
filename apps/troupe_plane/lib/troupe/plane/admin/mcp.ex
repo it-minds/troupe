@@ -67,9 +67,10 @@ defmodule Troupe.Plane.Admin.MCP do
     where, what state and what it cost.
   * Tools marked destructive take a `confirm` argument that must repeat the identifier
     exactly. That is the only guard on them.
-  * On a gitops plane a repository holds the profiles, and writing or deleting one is
-    refused as `managed_by_gitops`: the change is a commit to that repository, which the
-    refusal names where the deployment says. Check `admin_provisioning_mode` first.
+  * On a gitops plane a repository holds the profiles and the triggers, and writing or
+    deleting one is refused as `managed_by_gitops`: the change is a commit to that
+    repository, which the refusal names where the deployment says. Running a trigger and
+    rotating its key still work. Check `admin_provisioning_mode` first.
   * What you may do depends on who the token belongs to. A refusal names the role it
     wanted; it is not a bug to be worked around.
   """

@@ -1,7 +1,7 @@
 defmodule Troupe.Plane.FakeCluster do
   @moduledoc """
-  An API server in memory that knows `WorkerProfile` and `TroupePolicy`, and who wrote
-  which field of them.
+  An API server in memory that knows `WorkerProfile`, `TroupePolicy` and `Trigger`, and
+  who wrote which field of them.
 
   For the GitOps tests (Decision 736), where the subject is two writers sharing one
   resource: a repository's applier and the plane. The plane talks to it through its own
@@ -122,7 +122,8 @@ defmodule Troupe.Plane.FakeCluster do
        "groupVersion" => @group_version,
        "resources" => [
          %{"name" => "workerprofiles", "kind" => "WorkerProfile", "namespaced" => true},
-         %{"name" => "troupepolicies", "kind" => "TroupePolicy", "namespaced" => false}
+         %{"name" => "troupepolicies", "kind" => "TroupePolicy", "namespaced" => false},
+         %{"name" => "triggers", "kind" => "Trigger", "namespaced" => true}
        ]
      }}
   end
@@ -158,6 +159,12 @@ defmodule Troupe.Plane.FakeCluster do
 
       ["apis", "troupe.dev", "v1alpha1", "troupepolicies", name] ->
         {:one, "TroupePolicy", name}
+
+      ["apis", "troupe.dev", "v1alpha1", "namespaces", _ns, "triggers"] ->
+        {:list, "Trigger"}
+
+      ["apis", "troupe.dev", "v1alpha1", "namespaces", _ns, "triggers", name] ->
+        {:one, "Trigger", name}
 
       _other ->
         :unknown
@@ -348,7 +355,7 @@ defmodule Troupe.Plane.FakeCluster do
       )
     )
     |> then(fn resource ->
-      if resource["kind"] == "WorkerProfile",
+      if resource["kind"] in ["WorkerProfile", "Trigger"],
         do: update_in(resource, ["metadata"], &Map.put_new(&1, "namespace", @namespace)),
         else: resource
     end)

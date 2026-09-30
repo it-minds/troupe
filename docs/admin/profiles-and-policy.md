@@ -266,6 +266,12 @@ onto a resource only where they differ from what it says, and only onto one some
 else holds, and its Role has no `create` or `delete` on `WorkerProfile`. A `release` image
 is not followed: the manifest names its image.
 
+The same pass reads the triggers, after the profiles: in this mode a repository holds them
+as `Trigger` resources named `<team>.<trigger>`, the console's Triggers page is locked too,
+and running one by hand and minting its key still work (Decision 737,
+[bundles-and-triggers.md §2](bundles-and-triggers.md#triggers-from-a-repository)). Teams,
+their grants and service principals stay in the plane's database.
+
 What a profile takes from its resource:
 
 | Profile | Resource |
@@ -381,6 +387,10 @@ notice. Then redeploy the plane with `plane.provisioningMode: gitops` and
 - At its first write to a resource after that, the plane gives up every field it wrote in
   direct mode but its three, so from then on a field the repository drops leaves the
   cluster.
+- The export has the triggers too. A trigger whose resource is there is read into the row
+  it came from, key and runs included; one the cluster has no resource for is reported
+  `missing`, kept and still firing, until its manifest is committed or
+  `admin.trigger.delete` deletes it.
 
 **Gitops to direct.** Stop the applier reconciling the profiles first — suspend the
 Kustomization, or take them out of it — or it puts back the repository's version at its
@@ -388,7 +398,8 @@ next interval. Redeploy with `direct`. The profiles are what the plane last read
 editor writes again, and each profile's first write applies the whole resource as
 `troupe-plane`, taking its fields back. The `troupe.dev/max-sessions`,
 `troupe.dev/warm-workers` and `troupe.dev/provisioner` annotations stay on the resources,
-unread.
+unread. So do the `Trigger` resources: the triggers are what the plane last read, and the
+console and `admin.trigger.put` change them again.
 
 ## 7. Sizing
 

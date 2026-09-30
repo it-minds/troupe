@@ -6,7 +6,8 @@
 # the plane lists and watches them, and patches only the fields it still writes
 # (replicas, teams, mcpServers and its record of finished drains). It cannot create or
 # delete one, so a plane that tried would be refused by the cluster and not only by its
-# own code (Decision 736).
+# own code (Decision 736). It reads the Triggers the repository holds and writes nothing
+# of them (Decision 737); in direct mode its triggers are rows and it has no grant on them.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -25,6 +26,9 @@ rules:
   - apiGroups: ["troupe.dev"]
     resources: ["workerprofiles"]
     verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["troupe.dev"]
+    resources: ["triggers"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["troupe.dev"]
     resources: ["teamvolumes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
