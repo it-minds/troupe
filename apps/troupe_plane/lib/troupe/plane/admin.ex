@@ -340,7 +340,7 @@ defmodule Troupe.Plane.Admin do
   defp without_derived(attrs) do
     attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
     spec = Map.get(attrs, "spec") || %{}
-    sent = Enum.filter(@derived, &(Map.has_key?(attrs, &1) or Map.has_key?(spec, &1)))
+    sent = Enum.filter(@derived, &(Map.has_key?(attrs, &1) or derived_in?(spec, &1)))
 
     cond do
       sent != [] ->
@@ -393,6 +393,20 @@ defmodule Troupe.Plane.Admin do
       :ok
     end
   end
+
+  # A spec's `storage` holds two answers, as `Provision` writes it: its size is the size
+  # class's, and which storage class the disk comes from is a fact about the cluster, which
+  # the profile editor asks for. So it is the plane's only where it holds more than
+  # `storageClassName`; refusing all of it left the editor unable to save a storage class.
+  defp derived_in?(spec, "storage") do
+    case Map.get(spec, "storage") do
+      nil -> false
+      %{} = storage -> Map.keys(storage) -- ["storageClassName"] != []
+      _other -> true
+    end
+  end
+
+  defp derived_in?(spec, key), do: Map.has_key?(spec, key)
 
   @doc """
   The image a profile whose image is `release` runs on this plane, or `nil` if it names none.
@@ -513,6 +527,15 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # What `host_register/3` takes of a machine, and what `admin.host.register`'s schema
+  # declares. The rest of the row — its id, its place in the profile, its secret, who
+  # registered it, whether and when it enrolled — is the plane's to write.
+  @host_keys ~w(name address)
+
+  @doc "The fields of a machine `admin.host.register` takes, as its schema declares them."
+  @spec host_keys() :: [String.t()]
+  def host_keys, do: @host_keys
+
   @doc """
   Register a machine against a profile, and mint the secret it enrols with.
 
@@ -527,7 +550,7 @@ defmodule Troupe.Plane.Admin do
   """
   @spec host_register(actor(), String.t(), map()) :: result()
   def host_register(actor, profile, attrs) do
-    attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+    attrs = settable(attrs, @host_keys)
 
     with :ok <- require_platform_admin(actor),
          {:ok, _profile} <- fetch_profile(profile) do
@@ -650,6 +673,29 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # What `team_update/3` sets, and what `admin.team.update`'s schema declares: the team's
+  # own settings. The team's changeset casts its whole row, which also holds its name, the
+  # group it was enabled from, and when and by whom; an update takes the settings and
+  # leaves the rest of what it is sent, as the other admin methods leave a key they do not
+  # declare. Either admin sets these for a team they administer, within the ladder, except
+  # `allow_unenforced_workers`, which is a platform admin's (`may_set_unenforced/2`).
+  @team_keys ~w(budget_micros budget_period idle_timeout_seconds cache_eviction_days) ++
+               ~w(erase_after_days members_may_control pins_allowed volume_size) ++
+               ~w(volume_storage_class allow_unenforced_workers)
+
+  @doc "The fields of a team `admin.team.update` sets, as its schema declares them."
+  @spec team_keys() :: [String.t()]
+  def team_keys, do: @team_keys
+
+  # The entries of `attrs` whose keys are among `keys`, keyed by string whether they came
+  # as atoms from a form or as strings from JSON. What a handler that writes a row takes of
+  # what it is sent, rather than handing all of it to a changeset that casts the whole row.
+  defp settable(attrs, keys) when is_map(attrs) do
+    for {key, value} <- attrs, to_string(key) in keys, into: %{}, do: {to_string(key), value}
+  end
+
+  defp settable(_attrs, _keys), do: %{}
+
   @doc """
   Make an identity-provider group a team.
 
@@ -661,9 +707,11 @@ defmodule Troupe.Plane.Admin do
   def team_enable(actor, group_id, attrs \\ %{}) do
     with :ok <- require_platform_admin(actor),
          %Identity.Group{} = group <- Identity.get_group(group_id) do
+      # Its name and its settings. The group it is enabled from, and when and by whom, are
+      # the record of this call, written by it.
       attrs =
         team_defaults()
-        |> Map.merge(Map.new(attrs, fn {key, value} -> {to_string(key), value} end))
+        |> Map.merge(settable(attrs, ["name" | @team_keys]))
         |> Map.put("enabled_by", actor.subject)
 
       case Identity.enable_team(group, attrs) do
@@ -721,7 +769,7 @@ defmodule Troupe.Plane.Admin do
 
   # What a team starts with, from the platform's settings rather than from the schema's
   # defaults. The schema still has defaults — a team created by a migration or a test has
-  # to be some shape — but a platform that has decided every new team gets a 500 kr ceiling
+  # to be some shape — but a platform that has decided every new team gets a $500 ceiling
   # should not have to remember to set it on each one. In `Settings` because the SCIM
   # connector enables teams too, and a team should start the same way whoever made it.
   defp team_defaults, do: Settings.team_defaults()
@@ -729,6 +777,8 @@ defmodule Troupe.Plane.Admin do
   @doc "Change a team's budget, retention or default visibility."
   @spec team_update(actor(), String.t(), map()) :: result()
   def team_update(actor, name, attrs) do
+    attrs = settable(attrs, @team_keys)
+
     with {:ok, team} <- fetch_team(actor, name),
          :ok <- may_set_unenforced(actor, attrs),
          :ok <- still_allowed(team, attrs),
@@ -1005,10 +1055,15 @@ defmodule Troupe.Plane.Admin do
     }
   end
 
+  # A grant's options. The team and the profile are this function's own arguments, which
+  # the checks below are asked of, so a key naming either is left out with the rest of the
+  # grant's row.
+  @grant_keys ~w(volume_mode entitlements)
+
   @doc "Give a team access to a profile."
   @spec team_grant(actor(), String.t(), String.t(), map()) :: result()
   def team_grant(actor, name, profile, attrs \\ %{}) do
-    attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+    attrs = settable(attrs, @grant_keys)
 
     with :ok <- require_platform_admin(actor),
          {:ok, team} <- fetch_team(actor, name),

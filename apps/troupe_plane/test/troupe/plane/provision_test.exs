@@ -103,6 +103,33 @@ defmodule Troupe.Plane.ProvisionTest do
       :ok = Identity.revoke(engineering, "dev")
       assert Provision.manifest(context.profile)["spec"]["teams"] |> Enum.map(& &1["name"]) == ["design"]
     end
+
+    # `storage` holds two answers: its size is the size class's, and which storage class
+    # the disk comes from is the cluster's, which the profile editor asks for. A put that
+    # sent the second was refused as if it were the first, so the editor could not save one.
+    test "carries the storage class a profile names, beside the size its class gives", context do
+      assert {:ok, _} =
+               Admin.profile_put(context.actor, %{
+                 "name" => "dev",
+                 "image" => "ghcr.io/troupe/worker:1.2.3",
+                 "size_class" => "heavy",
+                 "spec" => %{"storage" => %{"storageClassName" => "fast-local"}}
+               })
+
+      storage = Provision.manifest(Fleet.get_profile("dev"))["spec"]["storage"]
+      assert storage == %{"storageClassName" => "fast-local", "size" => "100Gi"}
+
+      # The size is still the class's, and sending one is still refused.
+      assert {:error, error} =
+               Admin.profile_put(context.actor, %{
+                 "name" => "dev",
+                 "image" => "ghcr.io/troupe/worker:1.2.3",
+                 "spec" => %{"storage" => %{"storageClassName" => "fast-local", "size" => "1Ti"}}
+               })
+
+      assert error.message == "invalid_params"
+      assert error.data.not_yours == ["storage"]
+    end
   end
 
   describe "policy, checked for feedback" do

@@ -21,9 +21,9 @@ manifest's ([§6](#6-provisioning-direct-or-from-a-repository)).
 | `size_class` | `standard` (several sessions share a worker) or `heavy` (fewer, with more CPU, memory and disk each). A resource question, not a safety one: sessions cannot see each other's files either way |
 | `max_sessions` | how far it may grow, in sessions at once. Absent is no ceiling, bounded by the team's budget |
 | `warm_workers` | workers kept up when nothing runs. `0` scales to zero, and the next session waits about half a minute |
-| `spec` | the rest of the resource in its own camelCase: `llm`, `egress`, `mcpServers`, `configBundleChannel`, `orgMount` |
+| `spec` | the rest of the resource in its own camelCase: `llm`, `egress`, `mcpServers`, `configBundleChannel`, `orgMount`, and `storage.storageClassName`, the class a worker's disk comes from (one `allowedStorageClasses` names; absent is the cluster's default) |
 
-`replicas`, `sessionsPerPod`, `resources` and `storage` are the plane's: it writes them
+`replicas`, `sessionsPerPod`, `resources` and `storage.size` are the plane's: it writes them
 from the size class and from what is running, and **refuses** a request that sends them
 rather than dropping them. Replicas are recomputed every fifteen seconds as
 `ceil((active + pending) / sessionsPerPod) + warm_workers`, clamped to `max_sessions`; a

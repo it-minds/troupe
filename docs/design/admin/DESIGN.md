@@ -115,7 +115,7 @@ Readable in greyscale, and by anyone whose red and green are the same colour:
 | `metric` | **Mono** 600 | 22px / 1.15 | The four numbers on Overview. Nowhere else |
 
 - Column headers are `micro`, **sentence case**. No all-caps tracking anywhere.
-- All numerals that can be compared down a column are mono with `font-variant-numeric: tabular-nums` and right-aligned. Amounts carry `kr` in muted text so the figure stays the figure.
+- All numerals that can be compared down a column are mono with `font-variant-numeric: tabular-nums` and right-aligned. Amounts carry their unit, `$`, in muted text so the figure stays the figure: a budget is millionths of a dollar, which is what the gateways report cost in.
 - Timestamps are ISO-ish and UTC: `2026-09-13 11:52:14`, with the column header saying `Time (UTC)` once instead of repeating a suffix on every row. Relative time ("53 h ago") appears only as a *second* line next to the absolute one, never instead of it.
 - Identifiers are never truncated in the middle without a title attribute; long values wrap with `overflow-wrap: anywhere` in title blocks and ellipsis in table cells.
 

@@ -22,8 +22,6 @@ defmodule Troupe.Plane.AdminParityTest do
   alias Troupe.Plane.Admin.API
   alias Troupe.Plane.Admin.API.{Argument, Method}
   alias Troupe.Plane.Admin.MCP
-  alias Troupe.Plane.Fleet.Host
-  alias Troupe.Plane.Identity.Team
 
   # Not administrative actions: these work out *who is asking* rather than doing anything
   # on their behalf. Listed one by one rather than filtered by a naming rule, because a
@@ -136,17 +134,13 @@ defmodule Troupe.Plane.AdminParityTest do
         declared = Enum.map(argument.properties, & &1.name)
 
         case Map.fetch(reads, {name, argument.name}) do
-          {:ok, {:exactly, keys}} ->
+          {:ok, keys} ->
             assert Enum.sort(declared) == Enum.sort(keys), """
             #{name}'s #{argument.name} and its handler have come apart:
 
               declared and not read: #{inspect(declared -- keys)}
               read and not declared: #{inspect(keys -- declared)}
             """
-
-          {:ok, {:within, keys}} ->
-            assert declared -- keys == [],
-                   "#{name}'s #{argument.name} declares #{inspect(declared -- keys)}, which its handler does not read"
 
           :error ->
             flunk("""
@@ -165,23 +159,20 @@ defmodule Troupe.Plane.AdminParityTest do
     end
   end
 
-  # What each handler reads. A list where the handler keeps one; the fields of the row it
-  # writes where it casts the row whole, which is a bound rather than a list.
+  # What each handler reads, asked of the handler. Each keeps the list of keys it takes;
+  # the team and host handlers used to hand what they were sent to a changeset that casts
+  # the whole row, which was a bound rather than a list.
   defp reads do
-    team = fields(Team)
-
     %{
-      {"admin.trigger.put", "trigger"} => {:exactly, ["team" | Triggers.put_keys()]},
-      {"admin.profile.put", "profile"} => {:exactly, Admin.profile_keys()},
-      {"admin.profile.preview", "profile"} => {:exactly, Admin.profile_keys()},
-      {"admin.principal.create", "principal"} => {:exactly, Principals.create_keys()},
-      {"admin.team.update", "attrs"} => {:within, team},
-      {"admin.team.enable", "attrs"} => {:within, team},
-      {"admin.host.register", "host"} => {:within, fields(Host)}
+      {"admin.trigger.put", "trigger"} => ["team" | Triggers.put_keys()],
+      {"admin.profile.put", "profile"} => Admin.profile_keys(),
+      {"admin.profile.preview", "profile"} => Admin.profile_keys(),
+      {"admin.principal.create", "principal"} => Principals.create_keys(),
+      {"admin.team.update", "attrs"} => Admin.team_keys(),
+      {"admin.team.enable", "attrs"} => ["name" | Admin.team_keys()],
+      {"admin.host.register", "host"} => Admin.host_keys()
     }
   end
-
-  defp fields(schema), do: Enum.map(schema.__schema__(:fields), &to_string/1)
 
   describe "what the context will not do" do
     test "nothing returns session content" do

@@ -346,6 +346,81 @@ defmodule Troupe.Plane.AdminTest do
     end
   end
 
+  describe "what a team update takes" do
+    # `admin.team.update` declares a team's settings, and the team's changeset casts the
+    # whole row: its name, the group it was enabled from, when and by whom. The method
+    # takes the settings it declares and leaves the rest of the row as it was, for either
+    # role, the way every admin method leaves a key it does not declare.
+    test "the settings it declares, and nothing else of the row", context do
+      before = Identity.get_team("engineering")
+
+      for actor <- [context.lead, context.root] do
+        assert {:ok, %{team: team}} =
+                 Admin.team_update(actor, "engineering", %{
+                   "budget_micros" => 3_000_000,
+                   "name" => "renamed",
+                   "group_id" => context.design.group_id,
+                   "enabled_at" => ~U[2020-01-01 00:00:00.000000Z],
+                   "enabled_by" => "someone-else@example.test"
+                 })
+
+        assert team.name == "engineering"
+        assert team.budget_micros == 3_000_000
+      end
+
+      after_update = Identity.get_team("engineering")
+      assert after_update.group_id == before.group_id
+      assert after_update.enabled_at == before.enabled_at
+      assert after_update.enabled_by == before.enabled_by
+      assert Identity.get_team("renamed") == nil
+    end
+
+    test "and the same by atom keys, as the console sends them", context do
+      assert {:ok, %{team: team}} =
+               Admin.team_update(context.lead, "engineering", %{
+                 pins_allowed: false,
+                 name: "renamed"
+               })
+
+      assert team.name == "engineering"
+      refute team.pins_allowed
+      assert Identity.get_team("renamed") == nil
+    end
+
+    test "which are the ones its schema declares" do
+      alias Troupe.Plane.Admin.API
+
+      declared =
+        for argument <- API.method("admin.team.update").arguments,
+            argument.name == "attrs",
+            property <- argument.properties,
+            do: property.name
+
+      assert declared -- Admin.team_keys() == []
+      refute Enum.any?(~w(name group_id enabled_at enabled_by), &(&1 in Admin.team_keys()))
+    end
+
+    test "and enabling one sets its name and settings, not its record", context do
+      {:ok, group} = Identity.upsert_group(%{external_id: "research", display_name: "research"})
+
+      assert {:ok, team} =
+               Admin.team_enable(context.root, "research", %{
+                 "name" => "research",
+                 "budget_micros" => 7_000_000,
+                 "group_id" => context.design.group_id,
+                 "enabled_at" => ~U[2020-01-01 00:00:00.000000Z]
+               })
+
+      assert team.name == "research"
+      assert team.budget_micros == 7_000_000
+
+      row = Identity.get_team("research")
+      assert row.group_id == group.id
+      assert DateTime.compare(row.enabled_at, ~U[2020-01-01 00:00:00.000000Z]) == :gt
+      assert row.enabled_by == context.root.subject
+    end
+  end
+
   describe "what no administrator can do" do
     test "read what a session said", context do
       session = session!("s-private", context.engineering, "dev")

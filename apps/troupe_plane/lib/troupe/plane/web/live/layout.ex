@@ -287,10 +287,10 @@ defmodule Troupe.Plane.Web.Live.Layout do
   @doc """
   Micros, as money.
 
-  Two decimal places and no unit: the unit is `kr` and it belongs in muted text beside
-  the figure so the figure stays the figure, which is what `amount/1` renders. A caller
-  that only needs the number — a table cell already in a column headed with the unit —
-  uses this.
+  Two decimal places and no unit: the unit is the dollar, and it belongs in muted text
+  beside the figure so the figure stays the figure, which is what `amount/1` renders. A
+  caller that only needs the number — a table cell already in a column headed with the
+  unit — uses this.
   """
   @spec money(integer() | nil) :: String.t()
   def money(nil), do: "—"
@@ -316,13 +316,17 @@ defmodule Troupe.Plane.Web.Live.Layout do
   and none of them renders a ceiling — a team that had spent nothing was being reported as
   having spent "unlimited" on Overview, on Teams and on Budgets, which is the one word that
   should never appear in a spend column.
+
+  The unit is the dollar, written `$` before the figure as the desktop client and the
+  daemon write it. A budget is millionths of one: the gateways report cost in dollars and
+  a profile's prices are dollars per million tokens. The console once said `kr` here.
   """
   attr(:micros, :integer, default: nil)
 
   def amount(assigns) do
     ~H"""
     <span class="mono" style="font-variant-numeric: tabular-nums">
-      {figure(@micros)}<span :if={is_integer(@micros) and @micros > 0} class="muted">&nbsp;kr</span>
+      <span :if={is_integer(@micros) and @micros > 0} class="muted">$</span>{figure(@micros)}
     </span>
     """
   end
