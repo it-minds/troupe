@@ -31,7 +31,7 @@ is built from `clients/gui` as its own context.
 ```bash
 scripts/build-images                          # all five, tagged dev, loaded into kind if troupe-dev exists
 scripts/build-images troupe_worker            # a subset
-TROUPE_REGISTRY=rg.fr-par.scw.cloud/troupe TROUPE_IMAGE_TAG=0.3.3 TROUPE_PUSH=true scripts/build-images
+TROUPE_REGISTRY=registry.example.com/troupe TROUPE_IMAGE_TAG=0.3.3 TROUPE_PUSH=true scripts/build-images
 ```
 
 Images are `linux/amd64` explicitly, so a non-amd64 laptop does not build one the node
@@ -40,7 +40,7 @@ pool cannot run. A rebuilt image under an unchanged tag changes nothing in a pod
 
 ## 2. The machines' builds
 
-All on native runners in `.github/workflows/native.yml` ([CI](../../.github/CI.md)):
+All on native runners in `.github/workflows/native.yml` ([CI](ci.md)):
 
 - **`troupe-daemon`**: `MIX_ENV=prod mix release troupe_daemon` in `apps/troupe_daemon`,
   a tarball per target, with the host's `reaper` inside.

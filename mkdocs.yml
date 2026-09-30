@@ -1,0 +1,146 @@
+# The documentation site: `docs/`, plus the documents elsewhere in the repository the nav
+# names by their path from the root (docs/overrides/hooks.py puts those on the site).
+# Built on every pull request and published from `main` to GitHub Pages by
+# .github/workflows/pages.yml; `strict` makes a broken link or a nav entry to a missing
+# page a failed build. Locally: `pip install -r docs/requirements.txt`, `mkdocs serve`.
+site_name: Troupe
+site_description: A coding-agent harness that runs on Kubernetes and on your own machine.
+site_url: https://it-minds.github.io/troupe/
+repo_url: https://github.com/it-minds/troupe
+repo_name: it-minds/troupe
+edit_uri: ""
+
+docs_dir: docs
+strict: true
+exclude_docs: |
+  /overrides/
+  /requirements.txt
+
+theme:
+  name: material
+  custom_dir: docs/overrides
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Dark
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Light
+
+hooks:
+  - docs/overrides/hooks.py
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  # Heading anchors spelt as GitHub spells them, so a `#fragment` works in both places.
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.highlight
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: info
+  links:
+    not_found: warn
+    absolute_links: info
+    unrecognized_links: info
+    anchors: warn
+
+# By reader, each section in the order to read it (docs/README.md says the same in prose).
+# A path outside docs/ is from the repository root.
+nav:
+  - Home: README.md
+  - Using Troupe:
+      - user/README.md
+      - Quick start: quick-start.md
+      - Why Troupe: why-troupe.md
+      - The terminal client: clients/tui/README.md
+      - The daemon: apps/troupe_daemon/README.md
+      - Configuration: user/configuration.md
+      - The desktop app, unsigned: clients/gui/docs/install.md
+      - Glossary: glossary.md
+  - Running a deployment:
+      - admin/README.md
+      - Installing: admin/installing.md
+      - Configuration: admin/configuration.md
+      - Roles and permissions: admin/roles-and-permissions.md
+      - Profiles and policy: admin/profiles-and-policy.md
+      - Bundles, triggers, budgets: admin/bundles-and-triggers.md
+      - Integrations: admin/integrations.md
+      - Authentik: admin/authentik.md
+      - A worker on your own machine: admin/single-machine.md
+      - Backup and restore: admin/backup-restore.md
+      - Monitoring: admin/monitoring.md
+      - Routine tasks: admin/routine-tasks.md
+      - The A2A facade: a2a.md
+      - What Troupe dials: egress-allowlist.md
+  - Contributing:
+      - developer/README.md
+      - A tour: developer/tour.md
+      - How to contribute: CONTRIBUTING.md
+      - Architecture: ARCHITECTURE.md
+      - Architecture in the code: developer/architecture.md
+      - Repository structure: developer/repo-structure.md
+      - Local setup: developer/local-setup.md
+      - Testing: developer/testing.md
+      - Conventions: developer/conventions.md
+      - Build: developer/build.md
+      - CI and releases: developer/ci.md
+      - Deployment: developer/deployment.md
+      - Tech stack: developer/tech-stack.md
+      - Fixing issues: developer/fixing-issues.md
+      - Known defects: developer/defects.md
+      - Decisions:
+          - The repository's: DECISIONS.md
+          - The TUI's: clients/tui/DECISIONS.md
+          - The daemon's: apps/troupe_daemon/DECISIONS.md
+      - The GUI:
+          - The graphical client: clients/gui/README.md
+          - End to end: clients/gui/docs/e2e.md
+          - Throughput: clients/gui/docs/bench.md
+          - Design: clients/gui/docs/design/DESIGN.md
+          - Themes: clients/gui/docs/design/themes/THEMES.md
+      - The console's design: design/admin/DESIGN.md
+      - Plans:
+          - The admin surface: plans/admin-surface.md
+          - The console: program/control-panel.md
+  - Writing a client:
+      - The protocol: PROTOCOL.md
+      - The JSON Schema: https://github.com/it-minds/troupe/tree/main/protocol/schema/v1
+      - The conformance client: https://github.com/it-minds/troupe/tree/main/apps/troupe_gateway/test/conformance
+  - Project:
+      - Security: SECURITY.md
+      - Code of conduct: CODE_OF_CONDUCT.md
+      - Third-party licences: third-party-licences.md

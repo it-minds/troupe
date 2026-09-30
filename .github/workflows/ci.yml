@@ -1,5 +1,5 @@
 # Continuous integration for the whole repository — the platform, the daemon, and the two
-# clients. `.github/CI.md` has the picture; this is the detail.
+# clients. `docs/developer/ci.md` has the picture; this is the detail.
 #
 # One workflow and one required check, `ci-ok`, in two modes:
 #
@@ -8,16 +8,16 @@
 #     daemon change tests the daemon, and a change to `troupe_core` tests core and every
 #     app that depends on it. The filters are on jobs and not on the workflow because a
 #     workflow skipped by `paths:` leaves a required check pending forever, while a job
-#     skipped by `if:` reports success. A push to `main` also publishes the five images as
-#     `sha-<short>` once what it changed has passed.
+#     skipped by `if:` reports success. A push to `main` also publishes the five images to
+#     ghcr.io as `sha-<short>` once what it changed has passed.
 #
 #   * **Full** — called by `nightly.yml` and `release.yml` with `full: true`: every job,
 #     whatever changed, plus the soak (`soak` more runs of each app's suite) and the
 #     cluster suite when asked. That is what a release has passed.
 #
 # Releases are not cut here: `release.yml` (a merged change to VERSION: the full suite,
-# then tag, publish and deploy) and `prerelease.yml` (by hand: an untested build of any
-# commit, published as a pre-release) do that.
+# then tag and publish) and `prerelease.yml` (by hand: an untested build of any commit,
+# published as a pre-release) do that. Nothing in this repository deploys.
 #
 # GitHub Actions syntax, which Forgejo Actions also runs. Nothing here depends on
 # github.com specifically except the marketplace actions, which Forgejo resolves from
@@ -124,7 +124,6 @@ jobs:
             chart:
               - charts/**
               - docker/**
-              - deploy/**
               - dev/kind/**
               - scripts/remote-up
               - scripts/build-images
@@ -378,7 +377,7 @@ jobs:
         run: |
           helm lint charts/troupe
           helm lint charts/troupe --values charts/troupe/values.small.yaml
-          helm lint charts/troupe --values charts/troupe/values.scaleway.yaml
+          helm lint charts/troupe --values charts/troupe/values.example.yaml
           helm lint charts/troupe --set gui.enabled=false --set plane.appUrl=https://gui.example.test
 
       # The one combination the chart refuses on purpose — replicas that do not form an
@@ -404,7 +403,7 @@ jobs:
       # is published for are skipped rather than failed.
       - name: Render and validate
         run: |
-          for values in values.small.yaml values.scaleway.yaml; do
+          for values in values.small.yaml values.example.yaml; do
             echo "=== $values"
             helm template troupe charts/troupe \
               --namespace troupe-system --include-crds \
@@ -416,6 +415,15 @@ jobs:
           helm template troupe charts/troupe \
             --namespace troupe-system --include-crds \
             --values charts/troupe/values.small.yaml --set gui.enabled=false \
+            | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 \
+                -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
+          # Neither values file names a pull secret, since the published images need none.
+          # A registry of one's own does, and the API server's shape for one is checked
+          # here: the GUI's was wrong for a release and nothing saw it.
+          echo "=== values.example.yaml, with a pull secret"
+          helm template troupe charts/troupe \
+            --namespace troupe-system --include-crds \
+            --values charts/troupe/values.example.yaml --set "imagePullSecrets[0]=registry-pull" \
             | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 \
                 -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
 
@@ -606,9 +614,10 @@ jobs:
   # The chart, the GUI's packages and the desktop app repeat VERSION because they cannot
   # read it; a copy nobody checks is how four numbers came to have no relation. And a
   # Markdown link goes dead when any file moves, whatever the change was, so it is checked
-  # here too. Both cheap, so this runs whatever the change touched.
+  # here too, as is a deployment's own name finding its way back into the product
+  # (Decision 734). All cheap, so this runs whatever the change touched.
   versions:
-    name: every copy of the version agrees, every doc link resolves
+    name: every copy of the version agrees, every doc link resolves, no deployment is named
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -618,6 +627,7 @@ jobs:
           otp-version: ${{ env.OTP_VERSION }}
       - run: elixir scripts/version.exs check
       - run: elixir scripts/doc-links.exs
+      - run: elixir scripts/check-neutral.exs
 
   # Without macOS: a macOS runner costs about ten Linux ones, and the nightly and every
   # release build both macOS targets anyway.
@@ -662,7 +672,13 @@ jobs:
       # The same script a developer runs, so that a cluster failure here is reproducible
       # by one command on a laptop. It builds the five images and `kind load`s them,
       # which is why nothing is pushed for this job.
+      #
+      # The gateway is a public host a runner can reach, and no key: the egress suite dials
+      # the dev profile's model endpoint from inside a pod, which needs a host that answers
+      # and nothing more. Without one it says it could not test that, and passes.
       - name: Bring up a Troupe
+        env:
+          TROUPE_GATEWAY_URL: https://api.openai.com/v1
         run: scripts/remote-up
 
       - run: mix deps.get
@@ -719,4 +735,3 @@ jobs:
     permissions:
       contents: read
       packages: write
-    secrets: inherit

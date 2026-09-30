@@ -1,0 +1,165 @@
+# A worked example: Troupe on a managed Kubernetes cluster, with what a cloud sells beside
+# it — a managed PostgreSQL, an S3-compatible object store, a load balancer in front of
+# ingress-nginx — plus cert-manager and OpenBao run in the cluster.
+#
+# Copy it, replace every value marked CHANGE ME, and install it as
+# `docs/admin/installing.md` section 2 says; section 6 there walks this shape.
+#
+# Every host, name and size here is a placeholder or a reasoned default, not anybody's
+# deployment. Troupe creates no secrets: the ones this file names must exist in
+# `troupe-system` before the install, and the object-store and pull secrets in every
+# worker namespace as well.
+
+namespace: troupe-system
+
+# No image is set here: the chart's defaults are the images of its own release, public on
+# `ghcr.io/it-minds` and needing no credential, with tags that follow the chart's version.
+# A cluster that pulls through a registry of its own — a mirror, or images built with
+# `scripts/build-images` — sets each `*.image.repository` and
+# `policy.allowedImageRepositories` to it, and names its pull secret here. The secret
+# must exist in `troupe-system` and in every worker namespace.
+imagePullSecrets: []
+
+operator:
+  replicas: 1
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  # Cilium as the CNI, which many managed clusters run or offer. With it the operator
+  # writes real FQDN egress rules per profile; without it, egress to a named host is a
+  # wide CIDR rule and a documented gap, and `true` on a cluster without Cilium fails
+  # closed.
+  ciliumAvailable: true                                      # CHANGE ME: false without Cilium
+  ingressClassName: nginx
+  # Workers are reached at `wss://<ordinal>-<profile>.workers.<domain>` on 443, which is
+  # the default, so no port here.
+  workersScheme: wss
+  workersPort: ""
+  # A cert-manager ClusterIssuer: one certificate per pod hostname over HTTP-01, which
+  # needs no DNS API token and so works on any DNS host. Leave it empty and set
+  # `tlsSecretName` instead to share one wildcard certificate for `*.workers.<domain>`,
+  # which only DNS-01 can issue.
+  certIssuer: letsencrypt
+  tlsSecretName: ""
+  drainTimeoutSeconds: 300
+  maxPorts: 65536
+
+plane:
+  enabled: true
+  # Two, and `distribution: name` with them. The cluster-unique actors are registered
+  # with `:global`, so replicas that do not form an Erlang cluster are not two replicas
+  # of one plane but two planes, each placing sessions as if it were alone.
+  replicas: 2
+  distribution: name
+  host: troupe.example.com                                   # CHANGE ME: your plane host
+  baseUrl: https://troupe.example.com                        # CHANGE ME: the same, with scheme
+  ingressClassName: nginx
+  # The same ClusterIssuer, for the plane's own hostname: cert-manager writes the
+  # certificate into `tlsSecretName`, which the GUI on the same host shares. Leave it
+  # empty and `troupe-plane-tls` must be a certificate somebody else put there.
+  certIssuer: letsencrypt
+  tlsSecretName: troupe-plane-tls
+  ingress:
+    enabled: true
+  resources:
+    requests: {cpu: 200m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  controlPort: 4001
+  httpPort: 4000
+  maxPorts: 65536
+  provisioningMode: direct
+  # The identity-provider group whose members administer the platform. Membership is the
+  # provider's business: it is never edited in Troupe.
+  platformAdminGroup: troupe-platform-admins                 # CHANGE ME: the group's id
+  groupsClaim: groups
+  database:
+    secretName: troupe-plane-database
+    secretKey: url
+  secretKeyBase:
+    secretName: troupe-plane-secret-key-base
+    secretKey: value
+  # Your own identity provider. Troupe is a plain relying party and needs four things
+  # from it: a discovery document, a JWKS, the **device authorization grant**, and a
+  # `groups` claim. The device grant is not optional — `troupe login` runs in a terminal
+  # and has no redirect URI to come back to. The three endpoints are the provider's
+  # discovery document's (`<issuer>/.well-known/openid-configuration`):
+  # `authorization_endpoint`, `device_authorization_endpoint` and `token_endpoint`.
+  oidc:
+    issuer: https://login.example.com                        # CHANGE ME
+    clientId: troupe                                         # CHANGE ME
+    authorizeUrl: https://login.example.com/authorize        # CHANGE ME
+    deviceUrl: https://login.example.com/device              # CHANGE ME
+    tokenUrl: https://login.example.com/token                # CHANGE ME
+    # A public client running the device grant has no secret. Leave empty unless your
+    # provider insists on one.
+    secretName: ""
+  # A way into the panel when the identity provider cannot let you in — a misconfigured
+  # client, an expired signing key, or the first five minutes of an installation before
+  # any group exists to be a platform admin of. Leave `secretName` empty and there is no
+  # door at all: the routes answer 404.
+  #
+  # A break-glass session is a platform admin and nothing more, lasts `lifetimeSeconds`,
+  # is written to the audit log both when it succeeds and when it is refused, and says so
+  # on every page while it is open.
+  breakglass:
+    secretName: ""
+    secretKey: token
+    subject: breakglass
+    lifetimeSeconds: 3600
+  scim:
+    enabled: false
+
+# OpenBao, in the cluster. Not a managed service, and deliberately: Troupe uses KV v2 for
+# per-session data keys and the transit engine to sign plane tokens, and a cloud's key
+# manager is rarely either of those APIs. `docs/admin/installing.md` says how to run it.
+bao:
+  address: http://openbao.troupe-system.svc:8200
+  authPath: kubernetes
+  planeRole: troupe-plane
+  # Empty: the plane and the workers authenticate as their ServiceAccounts. A static
+  # token belongs in a development cluster and nowhere else.
+  tokenSecretName: ""
+
+# Any S3-compatible object store.
+#
+# **Turn bucket versioning on.** Erasure removes every version of an object, and a bucket
+# without versioning makes that promise vacuous rather than false — which is worse.
+objectStore:
+  endpoint: https://s3.example.com                           # CHANGE ME: your provider's S3 endpoint
+  bucket: troupe-sessions                                    # CHANGE ME if you like
+  # SigV4 signs the region, so a signature naming the wrong one is refused by a provider
+  # that checks.
+  region: region-1                                           # CHANGE ME: the bucket's region
+  secretName: troupe-object-store
+
+policy:
+  install: true
+  name: default
+  # The chart's own worker image, which a profile whose image is `release` runs, has to
+  # be allowed here; so does a mirror's, if the cluster pulls through one.
+  allowedImageRepositories:
+    - ghcr.io/it-minds/troupe-worker
+  maxReplicas: 8
+  maxSessionsPerPod: 8
+  maxResources:
+    cpu: "4"
+    memory: 8Gi
+  # Every host a profile may reach, as exact names or one-label wildcards. A bare `*` is
+  # not a pattern this accepts, and should not be: a profile that could name any endpoint
+  # could send a team's code anywhere.
+  allowedEgress:
+    - llm-gw.example.com                                     # CHANGE ME: your model gateway, or the providers' hosts
+    - github.com
+    - "*.github.com"
+  # The cluster's own classes (`kubectl get storageclass`). A worker's own disk is a
+  # ReadWriteOnce block volume; a *team* volume is ReadWriteMany and needs a file-storage
+  # class — a managed file service, or NFS. Listing both is what lets a profile ask for
+  # either; listing only block storage would refuse every team volume.
+  allowedStorageClasses:
+    - block-storage                                          # CHANGE ME: ReadWriteOnce
+    - file-storage                                           # CHANGE ME: ReadWriteMany
+  orgVolume: {}
+  namespacePrefix: troupe-w-
+  workersDomain: workers.example.com                         # CHANGE ME: your wildcard
+admission:
+  install: true

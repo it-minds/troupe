@@ -1,0 +1,31 @@
+#!/bin/sh
+# The commands a page marks for CI, as one script: every fenced block right after a
+# `<!-- quick-start -->` line (both shells), a `<!-- quick-start: sh -->` line or a
+# `<!-- quick-start: powershell -->` line, in the page's order, a blank line after each.
+#
+#   sh scripts/quick-start-blocks docs/quick-start.md sh           > quick-start.sh
+#   sh scripts/quick-start-blocks docs/quick-start.md powershell   > quick-start.ps1
+#
+# `.github/workflows/quick-start.yml` runs what this prints, so a command in a marked
+# block is one CI has run, and the page and the job cannot drift apart. A marker must be
+# the line just above its block's opening fence; anything else between them unmarks it.
+set -eu
+
+[ $# -eq 2 ] || { echo "usage: quick-start-blocks FILE sh|powershell" >&2; exit 2; }
+case "$2" in sh | powershell) ;; *) echo "quick-start-blocks: no shell called $2" >&2; exit 2 ;; esac
+[ -f "$1" ] || { echo "quick-start-blocks: no file $1" >&2; exit 2; }
+
+awk -v want="$2" '
+  { sub(/\r$/, "") }
+  /^<!-- quick-start(: *(sh|powershell))? -->$/ {
+    shell = $0
+    sub(/^<!-- quick-start:? */, "", shell)
+    sub(/ *-->$/, "", shell)
+    marked = (shell == "" || shell == want)
+    next
+  }
+  marked && !inside && /^```/ { inside = 1; next }
+  inside && /^```/ { inside = 0; marked = 0; print ""; next }
+  inside { print; next }
+  { marked = 0 }
+' "$1"

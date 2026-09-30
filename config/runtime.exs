@@ -382,6 +382,10 @@ if config_env() == :prod do
              raise ArgumentError,
                    "TROUPE_PROVISIONING_MODE must be direct or gitops, got #{inspect(other)}"
          end),
+      # Where the profiles and triggers come from in gitops mode, as the console shows it
+      # beside "Locked to gitops": a repository and a path. Display only; the plane never
+      # reads it.
+      gitops_source: presence.(System.get_env("TROUPE_GITOPS_SOURCE")),
       oidc: [
         issuer: oidc_required.("TROUPE_OIDC_ISSUER"),
         client_id: oidc_required.("TROUPE_OIDC_CLIENT_ID"),

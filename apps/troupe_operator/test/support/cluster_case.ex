@@ -210,7 +210,7 @@ defmodule Troupe.Operator.ClusterCase do
   def profile_resource(name, overrides \\ []) do
     spec =
       %{
-        "image" => %{"repository" => "ghcr.io/objective-mj/troupe-worker", "tag" => "0.2.0"},
+        "image" => %{"repository" => "ghcr.io/it-minds/troupe-worker", "tag" => "0.2.0"},
         "replicas" => 2,
         "sessionsPerPod" => 4,
         "resources" => %{

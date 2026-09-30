@@ -26,10 +26,17 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
   form promised and what the trail says cannot differ. Policy is checked as the form
   changes, with the same check admission will make.
 
-  The apply control is one button and not the design's two, deliberately: which of the two
-  happens is not the operator's choice, it is `provisioning_mode`. The button is named for
-  what will actually happen and the consequence is written above it. Two buttons where one
-  of them is a lie would be worse than one.
+  The apply control is one button and not the design's two, deliberately: whether the
+  console may write at all is not the operator's choice, it is `provisioning_mode`.
+
+  ## Locked to gitops
+
+  In GitOps mode a repository holds the profiles and the plane only reads them (Decision
+  736), so this page shows what it read and offers nothing that writes: every field is
+  disabled, and there is no apply, no preview and no delete. It says so first, and where
+  the profiles come from, because a disabled form with no reason given reads as a broken
+  one. The one control left is deleting a row the cluster has no resource for, which the
+  admin API still does.
 
   ## Deleting one
 
@@ -88,7 +95,12 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
      |> load(params["profile"])}
   end
 
+  # A locked page has nothing to preview: the fields are disabled, and a change event that
+  # arrived anyway is not somebody editing a profile the repository holds.
   @impl Phoenix.LiveView
+  def handle_event("change", _params, %{assigns: %{locked: true}} = socket),
+    do: {:noreply, socket}
+
   def handle_event("change", params, socket) do
     {:noreply,
      socket
@@ -330,7 +342,8 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
 
   defp load(socket, nil) do
     socket
-    |> assign(current: nil, verdict: nil, mode: mode(socket), preview: nil)
+    |> assign(current: nil, verdict: nil, preview: nil, gitops: nil)
+    |> with_mode()
     |> assign(fields: %{"orgMount" => false}, servers: [])
   end
 
@@ -340,16 +353,38 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
         spec = detail.spec || %{}
 
         socket
-        |> assign(current: detail, verdict: detail.policy, mode: mode(socket), preview: nil)
+        |> assign(current: detail, verdict: detail.policy, preview: nil)
+        |> assign(gitops: Map.get(detail, :gitops))
+        |> with_mode()
         |> assign(fields: fields_from(name, detail, spec), servers: servers_of(spec))
 
       {:error, error} ->
         socket
-        |> assign(current: nil, verdict: nil, mode: mode(socket), preview: nil)
+        |> assign(current: nil, verdict: nil, preview: nil, gitops: nil)
+        |> with_mode()
         |> assign(fields: %{"name" => name, "orgMount" => false}, servers: [])
         |> assign(error: error.message)
     end
   end
+
+  defp with_mode(socket) do
+    mode = mode(socket)
+    assign(socket, mode: mode, locked: mode == :gitops, source: source(socket, mode))
+  end
+
+  # Where the profiles come from, for the marker, from the setting that says: the answer
+  # the Policy page shows, rather than a second way of asking.
+  defp source(socket, :gitops) do
+    case Admin.settings_list(socket.assigns.actor) do
+      {:ok, %{settings: settings}} ->
+        Enum.find_value(settings, &(&1.key == "gitops_source" && &1[:value]))
+
+      {:error, _error} ->
+        nil
+    end
+  end
+
+  defp source(_socket, _mode), do: nil
 
   defp fields_from(name, detail, spec) do
     %{
@@ -392,11 +427,6 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
   end
 
   defp applied_message(%{changes: changes}) when changes == %{}, do: "Nothing changed."
-
-  defp applied_message(%{changes: changes, provisioning: %{state: :pending, commit: commit}}) do
-    "#{count(changes)} committed as #{String.slice(commit, 0, 8)}. Nothing has changed in the cluster yet."
-  end
-
   defp applied_message(%{changes: changes}), do: "#{count(changes)} applied."
 
   defp count(changes) do
@@ -442,154 +472,174 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       <p :if={@notice} class="banner" role="status">{@notice}</p>
       <p :if={@error} class="banner banner--breakglass" role="alert">{@error}</p>
 
-      <form id="profile-editor" phx-change="change" phx-submit="apply">
-        <section class="panel">
-          <h2>What runs</h2>
+      <.locked :if={@locked} kind="WorkerProfile" things="profiles" source={@source}>
+        <p class="lede">Nothing on this page writes.</p>
+        <p :if={is_nil(@current)} class="hint">
+          A new profile is a new manifest in that repository. The plane lists it here once it
+          is in the cluster.
+        </p>
+        <p :if={@gitops && @gitops.generation} class="micro">
+          What is below is what the plane read, at generation {@gitops.generation}.
+        </p>
+        <.gitops_problems gitops={@gitops} />
+      </.locked>
 
-          <.field form={@fields} name="name" label="name">
-            The profile's name, and the name of its WorkerProfile in the cluster. A
-            different name is a different profile, not a rename.
-          </.field>
-          <.field form={@fields} name="image" label="image">
-            repository:tag, or repository@sha256:… A digest pins the image; a tag does not,
-            and a pod that restarts on a moved tag comes back running something else. Or
-            release, for the worker image of the release this plane runs, which the plane
-            writes again after every upgrade.
-          </.field>
-          <p :if={@fields["image"] == "release"} class="micro">{release_note(@release_image)}</p>
+      <form :if={not @locked or @current} id="profile-editor" phx-change="change" phx-submit="apply">
+        <fieldset disabled={@locked}>
+          <section class="panel">
+            <h2>What runs</h2>
+
+            <.field form={@fields} name="name" label="name">
+              The profile's name, and the name of its WorkerProfile in the cluster. A
+              different name is a different profile, not a rename.
+            </.field>
+            <.field form={@fields} name="image" label="image">
+              repository:tag, or repository@sha256:… A digest pins the image; a tag does not,
+              and a pod that restarts on a moved tag comes back running something else. Or
+              release, for the worker image of the release this plane runs, which the plane
+              writes again after every upgrade.
+            </.field>
+            <p :if={@fields["image"] == "release"} class="micro">{release_note(@release_image)}</p>
+          </section>
+
+          <section class="panel">
+            <h2>Capacity</h2>
+            <p class="lede">
+              Three questions, and the plane answers the rest. How many workers run, how many
+              sessions each carries, and how much CPU, memory and disk they get all follow
+              from the size class and from what is actually running — written by the plane,
+              the way it already writes which teams may use this.
+            </p>
+            <p class="lede">
+              Every session gets its own workspace. Sessions cannot see each other's files,
+              even on the same worker and even for the same person. Files in the team folder
+              are shared, as a shared folder is.
+            </p>
+
+            <.choice form={@fields} name="sizeClass" label="how demanding" options={@size_classes}>
+              Standard puts several sessions on a worker and is right for most work. Heavy
+              gives each one more CPU, memory and disk, for large repositories, builds and
+              long runs. This is a question about resources, not about safety.
+            </.choice>
+
+            <.field form={@fields} name="maxSessions" label="most sessions at once" type="number">
+              How far this may grow, in sessions rather than workers. Empty is no ceiling,
+              bounded by the team's budget. Somebody refused here is shown this number, so it
+              is worth it being one you would stand behind.
+            </.field>
+
+            <.field form={@fields} name="warmWorkers" label="workers kept warm" type="number">
+              How many to keep up when nothing is running. 0 costs the next session a cold
+              start of roughly half a minute — the same wait as waking a dormant session, and
+              described the same way.
+            </.field>
+          </section>
+
+          <section class="panel">
+            <h2>The model</h2>
+            <p class="lede">
+              Where a session's model calls go. Usually a gateway rather than a provider,
+              which is what makes the cost of a call knowable.
+            </p>
+
+            <.field form={@fields} name="llm.endpoint" label="endpoint">
+              The base URL. Egress has to allow its host, or every call times out.
+            </.field>
+
+            <.choice form={@fields} name="llm.provider" label="provider" options={@providers}>
+              Which adapter speaks to it. openai is plain Chat Completions, which is what a
+              gateway serves; anthropic is the Messages API; fake answers without a network.
+            </.choice>
+
+            <.field form={@fields} name="llm.model" label="model">
+              What a session uses for its work.
+            </.field>
+            <.field form={@fields} name="llm.smallModel" label="small model">
+              Used only to summarise a long conversation, where a cheaper model is enough.
+            </.field>
+            <.field form={@fields} name="llm.secretRef.name" label="credential: secret name">
+              The name of a Secret in the worker's namespace. A reference, read at call time
+              by the pod: neither the plane nor this page ever holds the value, and there is
+              nothing here that could show it to you.
+            </.field>
+            <.field form={@fields} name="llm.secretRef.key" label="credential: key">
+              The key inside that Secret. Empty means api-key.
+            </.field>
+          </section>
+
+          <section class="panel">
+            <h2>What the pods may reach</h2>
+            <p class="lede">
+              Enforced by the cluster's network policy and not by the worker. A host that is
+              not here is not reachable from a session, whatever the session tries.
+            </p>
+
+            <.text_lines form={@fields} name="egress.fqdns" label="allowed hosts">
+              One per line. The model endpoint, and anything a skill calls.
+            </.text_lines>
+            <.text_lines form={@fields} name="egress.gitHosts" label="git hosts">
+              One per line. Where a session may clone from and push to.
+            </.text_lines>
+          </section>
+
+          <section class="panel">
+            <h2>Where a worker's disk comes from</h2>
+            <p class="lede">
+              How much disk is the size class's answer. Which storage it comes from is a fact
+              about this cluster, so it is still asked here — and it is fixed once the pods
+              exist, because a StatefulSet's volume claim cannot be resized in place.
+            </p>
+
+            <.field form={@fields} name="storage.storageClassName" label="storage class">
+              Must be one the cluster policy allows. Empty means the cluster's default.
+            </.field>
+          </section>
+
+          <section class="panel">
+            <h2>MCP servers</h2>
+            <p class="lede">
+              Offered to every session on this profile. The credential is the name of an
+              environment variable the pod finds a token in; the token is a Secret the
+              operator mounts, and nothing here holds it.
+            </p>
+
+            <.server
+              :for={{server, index} <- Enum.with_index(@servers)}
+              server={server}
+              index={index}
+              checked={@checked}
+            />
+
+            <p :if={@servers == []} class="empty">
+              None. Sessions on this profile get whatever the configuration bundle gives them
+              and nothing else.
+            </p>
+
+            <button :if={not @locked} type="button" phx-click="add-server">add a server</button>
+          </section>
+
+          <section class="panel">
+            <h2>Configuration</h2>
+
+            <.field form={@fields} name="configBundleChannel" label="bundle channel">
+              Which channel's agents, skills and servers the pods follow. Publishing to it
+              pushes to every pod on this profile.
+            </.field>
+
+            <.toggle form={@fields} name="orgMount" label="mount the org volume">
+              Read-only, always. The volume the cluster policy names, for material every team
+              may read.
+            </.toggle>
+          </section>
+
+        </fieldset>
+
+        <section :if={@locked} class="panel">
+          <h2>What policy makes of it</h2>
+          <.policy verdict={@decision} />
         </section>
 
-        <section class="panel">
-          <h2>Capacity</h2>
-          <p class="lede">
-            Three questions, and the plane answers the rest. How many workers run, how many
-            sessions each carries, and how much CPU, memory and disk they get all follow
-            from the size class and from what is actually running — written by the plane,
-            the way it already writes which teams may use this.
-          </p>
-          <p class="lede">
-            Every session gets its own workspace. Sessions cannot see each other's files,
-            even on the same worker and even for the same person. Files in the team folder
-            are shared, as a shared folder is.
-          </p>
-
-          <.choice form={@fields} name="sizeClass" label="how demanding" options={@size_classes}>
-            Standard puts several sessions on a worker and is right for most work. Heavy
-            gives each one more CPU, memory and disk, for large repositories, builds and
-            long runs. This is a question about resources, not about safety.
-          </.choice>
-
-          <.field form={@fields} name="maxSessions" label="most sessions at once" type="number">
-            How far this may grow, in sessions rather than workers. Empty is no ceiling,
-            bounded by the team's budget. Somebody refused here is shown this number, so it
-            is worth it being one you would stand behind.
-          </.field>
-
-          <.field form={@fields} name="warmWorkers" label="workers kept warm" type="number">
-            How many to keep up when nothing is running. 0 costs the next session a cold
-            start of roughly half a minute — the same wait as waking a dormant session, and
-            described the same way.
-          </.field>
-        </section>
-
-        <section class="panel">
-          <h2>The model</h2>
-          <p class="lede">
-            Where a session's model calls go. Usually a gateway rather than a provider,
-            which is what makes the cost of a call knowable.
-          </p>
-
-          <.field form={@fields} name="llm.endpoint" label="endpoint">
-            The base URL. Egress has to allow its host, or every call times out.
-          </.field>
-
-          <.choice form={@fields} name="llm.provider" label="provider" options={@providers}>
-            Which adapter speaks to it. openai is plain Chat Completions, which is what a
-            gateway serves; anthropic is the Messages API; fake answers without a network.
-          </.choice>
-
-          <.field form={@fields} name="llm.model" label="model">
-            What a session uses for its work.
-          </.field>
-          <.field form={@fields} name="llm.smallModel" label="small model">
-            Used only to summarise a long conversation, where a cheaper model is enough.
-          </.field>
-          <.field form={@fields} name="llm.secretRef.name" label="credential: secret name">
-            The name of a Secret in the worker's namespace. A reference, read at call time
-            by the pod: neither the plane nor this page ever holds the value, and there is
-            nothing here that could show it to you.
-          </.field>
-          <.field form={@fields} name="llm.secretRef.key" label="credential: key">
-            The key inside that Secret. Empty means api-key.
-          </.field>
-        </section>
-
-        <section class="panel">
-          <h2>What the pods may reach</h2>
-          <p class="lede">
-            Enforced by the cluster's network policy and not by the worker. A host that is
-            not here is not reachable from a session, whatever the session tries.
-          </p>
-
-          <.text_lines form={@fields} name="egress.fqdns" label="allowed hosts">
-            One per line. The model endpoint, and anything a skill calls.
-          </.text_lines>
-          <.text_lines form={@fields} name="egress.gitHosts" label="git hosts">
-            One per line. Where a session may clone from and push to.
-          </.text_lines>
-        </section>
-
-        <section class="panel">
-          <h2>Where a worker's disk comes from</h2>
-          <p class="lede">
-            How much disk is the size class's answer. Which storage it comes from is a fact
-            about this cluster, so it is still asked here — and it is fixed once the pods
-            exist, because a StatefulSet's volume claim cannot be resized in place.
-          </p>
-
-          <.field form={@fields} name="storage.storageClassName" label="storage class">
-            Must be one the cluster policy allows. Empty means the cluster's default.
-          </.field>
-        </section>
-
-        <section class="panel">
-          <h2>MCP servers</h2>
-          <p class="lede">
-            Offered to every session on this profile. The credential is the name of an
-            environment variable the pod finds a token in; the token is a Secret the
-            operator mounts, and nothing here holds it.
-          </p>
-
-          <.server
-            :for={{server, index} <- Enum.with_index(@servers)}
-            server={server}
-            index={index}
-            checked={@checked}
-          />
-
-          <p :if={@servers == []} class="empty">
-            None. Sessions on this profile get whatever the configuration bundle gives them
-            and nothing else.
-          </p>
-
-          <button type="button" phx-click="add-server">add a server</button>
-        </section>
-
-        <section class="panel">
-          <h2>Configuration</h2>
-
-          <.field form={@fields} name="configBundleChannel" label="bundle channel">
-            Which channel's agents, skills and servers the pods follow. Publishing to it
-            pushes to every pod on this profile.
-          </.field>
-
-          <.toggle form={@fields} name="orgMount" label="mount the org volume">
-            Read-only, always. The volume the cluster policy names, for material every team
-            may read.
-          </.toggle>
-        </section>
-
-        <section class="panel">
+        <section :if={not @locked} class="panel">
           <h2>What will happen</h2>
 
           <.policy verdict={@decision} />
@@ -597,13 +647,13 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
 
           <p><strong>{consequence(@mode)}</strong></p>
 
-          <button type="submit" disabled={not allowed?(@decision)}>{apply_label(@mode)}</button>
+          <button type="submit" disabled={not allowed?(@decision)}>apply now</button>
 
           <p :if={@applied} class="micro">{state_of(@applied)}</p>
         </section>
       </form>
 
-      <section :if={@current} class="panel">
+      <section :if={@current && deletable?(@locked, @gitops)} class="panel">
         <h2>Delete {@fields["name"]}</h2>
 
         <p class="hint">
@@ -627,7 +677,11 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
             <span class="checks__name">its sessions become read-only</span>
             <span class="checks__detail">
               Not erased. History is history, and a profile going away is not a reason to
-              hide what was done on it. The pods go the way {consequence(@mode)}
+              hide what was done on it.
+              {if @locked,
+                do:
+                  "The cluster has no WorkerProfile for it, so this deletes the plane's row and nothing else.",
+                else: "The pods go the way #{consequence(@mode)}"}
             </span>
           </li>
         </ul>
@@ -662,18 +716,17 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
     """
   end
 
-  defp consequence(:gitops),
-    do:
-      "Applying writes a commit for review. Nothing changes in the cluster until somebody applies it."
-
   defp consequence(:direct),
     do: "Applying changes the cluster now. Running sessions keep the pods they are on."
 
   defp consequence(_unknown),
     do: "This plane could not say how it provisions. Applying may or may not reach the cluster."
 
-  defp apply_label(:gitops), do: "commit for review"
-  defp apply_label(_direct), do: "apply now"
+  # Locked, only a row the cluster has no resource for may go from here: anything the
+  # repository holds goes when its manifest leaves the repository.
+  defp deletable?(false, _gitops), do: true
+  defp deletable?(true, %{problem: "missing"}), do: true
+  defp deletable?(true, _gitops), do: false
 
   # The word alone does not say which image the pods will be given, and a plane deployed
   # without one has nothing to follow — which is better read here than in the refusal

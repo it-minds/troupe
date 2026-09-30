@@ -1,4 +1,4 @@
-# Troupe
+# troupe, the terminal client
 
 `troupe` is the terminal client of the Troupe harness. Every session runs in the troupe
 daemon — the `troupe-daemon` on this machine, or, when none is running, the same daemon
@@ -619,10 +619,10 @@ whole process tree when its owner dies. `TROUPE_PROVIDER=fake` and `TROUPE_FAKE_
 give a deterministic model; so do `provider: fake` and `fake_script:` in a workspace's
 `.troupe/config.yaml`, once the workspace is trusted, which is how the test suite does it.
 
-See `ARCHITECTURE.md` §9 for the client boundary and the remote client — its §1–8
-describe the harness as it was before the daemon, and the root
-[ARCHITECTURE.md](../../ARCHITECTURE.md) describes it as it is — and `DECISIONS.md` for
-every deviation from the original specification.
+The harness is the root [ARCHITECTURE.md](../../ARCHITECTURE.md); this client's boundary,
+its supervision tree and its remote client are
+[architecture.md §6](../../docs/developer/architecture.md#6-the-tui-clientstui); and
+[DECISIONS.md](DECISIONS.md) here has every deviation from the original specification.
 
 ## Out of scope (for now)
 

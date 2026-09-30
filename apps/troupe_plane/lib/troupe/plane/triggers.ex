@@ -39,9 +39,24 @@ defmodule Troupe.Plane.Triggers do
 
   @term_keys ~w(budget_micros max_turns wall_clock_seconds approvals)
 
+  # What `put/3` reads of what it is given: the document's fields, and the principal by
+  # subject. `admin.trigger.put`'s schema declares these and the team, and a test holds
+  # the two together, because a schema that named other things (it once said `kind`,
+  # `schedule` and `prompt`) is a tool a model follows into a trigger that does nothing.
+  @put_keys ~w(name principal profile agent enabled source prompt_template terms) ++
+              ~w(visibility review notify notify_url concurrency)
+
   @doc "How large a run's event may be, encoded."
   @spec max_event_bytes() :: pos_integer()
   def max_event_bytes, do: @max_event_bytes
+
+  @doc "The keys a trigger's `terms` may have, which `session.create` will check again."
+  @spec term_keys() :: [String.t()]
+  def term_keys, do: @term_keys
+
+  @doc "The attributes `put/3` reads."
+  @spec put_keys() :: [String.t()]
+  def put_keys, do: @put_keys
 
   # -- definitions ------------------------------------------------------------
 
@@ -49,6 +64,21 @@ defmodule Troupe.Plane.Triggers do
   @spec list(Team.t()) :: [Trigger.t()]
   def list(%Team{} = team) do
     Repo.all(from(t in Trigger, where: t.team_id == ^team.id, order_by: t.name))
+  end
+
+  @doc """
+  Every team's triggers, each with its team, by team and name: what the GitOps pass
+  compares the cluster against, and what bootstrapping a repository exports.
+  """
+  @spec list_all() :: [Trigger.t()]
+  def list_all do
+    Repo.all(
+      from(t in Trigger,
+        join: team in assoc(t, :team),
+        order_by: [team.name, t.name],
+        preload: [team: team]
+      )
+    )
   end
 
   @doc "One trigger of a team, by name."
@@ -80,9 +110,7 @@ defmodule Troupe.Plane.Triggers do
 
     with {:ok, principal_id} <- principal_id(team, attrs, existing),
          :ok <- check_terms(attrs["terms"]) do
-      fields =
-        ~w(name profile agent enabled source prompt_template terms visibility) ++
-          ~w(review notify notify_url concurrency)
+      fields = @put_keys -- ["principal"]
 
       (existing || %Trigger{team_id: team.id, created_by: by})
       |> Trigger.changeset(attrs |> Map.take(fields) |> Map.put("principal_id", principal_id))
@@ -99,6 +127,36 @@ defmodule Troupe.Plane.Triggers do
         {:error, changeset} ->
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
       end
+    end
+  end
+
+  @doc """
+  Make a team's trigger say what its `Trigger` resource says, in GitOps mode (Decision
+  737), and revise it as `put/3` does, so its runs, its history and the audit trail work
+  as they did when an administrator wrote it.
+
+  Whole rather than partial: a resource is the whole document, so `attrs` carry every
+  field, with the principal already resolved to its id. The row is updated in place, which
+  is what keeps its id, and so its URL and its key, through every change the repository
+  makes; the key, the last firing and who first made the row are the plane's and are left
+  alone. Checked by the caller first: this only writes.
+  """
+  @spec follow(Team.t(), map(), String.t()) ::
+          {:ok, Trigger.t(), Revision.t()} | {:error, Ecto.Changeset.t()}
+  def follow(%Team{} = team, attrs, by) do
+    {generation, attrs} = Map.pop(attrs, :resource_generation)
+
+    (get(team, attrs.name) || %Trigger{team_id: team.id, created_by: by})
+    |> Trigger.changeset(attrs)
+    |> Trigger.generation_changeset(generation)
+    |> Repo.insert_or_update()
+    |> case do
+      {:ok, trigger} ->
+        {:ok, revision} = revise(trigger, by)
+        {:ok, trigger, revision}
+
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 

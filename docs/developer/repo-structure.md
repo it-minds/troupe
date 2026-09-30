@@ -8,26 +8,32 @@
 ├── PROTOCOL.md              the normative wire document for client authors
 ├── README.md                the front door
 ├── VERSION                  the one version of everything released (Decision 668)
-├── .github/                 workflows and CI.md
+├── mkdocs.yml               the documentation site: docs/ and the documents its nav names (Decision 739)
+├── .github/                 the workflows (ci.md) and Dependabot
 ├── apps/                    the umbrella: eight Mix projects (architecture.md §1)
-├── charts/troupe/           the Helm chart (platform and GUI), its CRDs, values.small/scaleway
+├── charts/troupe/           the Helm chart (platform and GUI), its CRDs, values.small/example
 ├── clients/tui/             the terminal client: its own Mix project, the harness by path
 ├── clients/gui/             the graphical client: a pnpm workspace (client, bench, desktop)
 ├── config/                  config.exs (compile time) and runtime.exs (prod only)
-├── deploy/                  ci-deployer.yaml (the account CI deploys as); scaleway/ values
 ├── dev/                     docker-compose.yml, kind/ (dependencies, values), toolbox/
 ├── docker/Dockerfile        the four server images
-├── docs/                    the admin, developer and user tracks, design/, plans/
+├── docs/                    the user, admin and developer tracks, design/, plans/; overrides/ is the site's theme and hooks
 ├── fixtures/sample_repo/    a small Mix project the core's workspace tests read
 ├── install.sh, install.ps1  install troupe and troupe-daemon from a release
 ├── mix.exs, mix.lock        the umbrella: the check alias, four releases, credo
 ├── protocol/schema/v1/      GENERATED JSON Schema (commands/, events/, index.json)
-├── scripts/                 dev-up, toolbox, remote-up, build-images, release, deploy, pitr-drill, version.exs, locks-agree.exs, doc-links.exs, …
+├── scripts/                 dev-up, toolbox, remote-up, build-images, release, pitr-drill, version.exs, locks-agree.exs, doc-links.exs, check-neutral.exs, console-rig.exs, …
 └── test/fixtures/logs/      recorded log fixtures, one directory per released version
 ```
 
-Gitignored and local: `.local/` (a real deployment's kubeconfig and values, read by
-`scripts/deploy`), `/.worktrees/`, `apps/troupe_core/priv/reaper/`.
+Gitignored and local: `.local/` (a person's own kubeconfigs and values, never committed),
+`/.worktrees/`, `apps/troupe_core/priv/reaper/`, and `site/`, what `mkdocs build` writes.
+
+The root holds what somebody arriving at the repository needs, and what a tool reads from
+there; everything else is under a directory (Decision 739). Documents that code, CI or
+GitHub read where they are stay where they are, and the site shows them from there: the
+nav of `mkdocs.yml` names them by their path from the root, and
+`docs/overrides/hooks.py` puts them on the site and points their links at it.
 
 ## Apps
 
@@ -48,7 +54,7 @@ and `priv/` where it ships data, and shares the root's `_build`, `deps`, `mix.lo
 | `apps/troupe_operator/lib/mix/tasks/troupe.e2e.ex` | the cluster suite |
 | `apps/troupe_gateway/test/conformance/` | the Python conformance client, a test fixture |
 | `apps/troupe_daemon/` | its own `config/runtime.exs`, README and DECISIONS |
-| `charts/troupe/crds/` | `WorkerProfile`, `TeamVolume`, `TroupePolicy`, hand-written; the admission policy is a template |
+| `charts/troupe/crds/` | `WorkerProfile`, `TeamVolume`, `TroupePolicy`, `Trigger`, hand-written; the admission policy is a template |
 | `docs/design/admin/tokens.json` | the console's design tokens |
 | `clients/gui/docs/design/themes/*.tokens.json` | the four themes: the GUI's, the front page's (Signal) and the TUI's (Afterglow), one copy |
 

@@ -16,18 +16,27 @@ Three packages in one pnpm workspace:
 
 ## The path a client takes
 
-```
-GUI ── GET  /.well-known/troupe ──────────► plane          discovery, no auth
-GUI ── POST device_authorization_endpoint ► identity provider
-GUI ── POST token_endpoint (poll) ────────► identity provider   → id_token, refresh_token
-GUI ── POST /auth/exchange {id_token} ────► plane          → plane token (≤ 15 min)
-GUI ── POST /rpc  session.create ─────────► plane          → {endpoint, token(aud = pod), session_id}
-GUI ── WS   wss://<pod>/v1/socket ────────► worker         initialize → subscribe → input.send → events
+```mermaid
+sequenceDiagram
+  participant G as GUI
+  participant IdP as Identity provider
+  participant P as Plane
+  participant W as Worker
+  G->>P: GET /.well-known/troupe (discovery, no auth)
+  G->>IdP: POST device_authorization_endpoint
+  G->>IdP: POST token_endpoint (poll)
+  IdP-->>G: id_token, refresh_token
+  G->>P: POST /auth/exchange {id_token}
+  P-->>G: plane token (≤ 15 min)
+  G->>P: POST /rpc session.create
+  P-->>G: endpoint, token (aud = the pod), session_id
+  G->>W: WebSocket to the pod's /v1/socket
+  Note over G,W: initialize → subscribe → input.send → events
 ```
 
 The plane is never in the data path of a live session. Only the last hop is a socket;
-everything before it is ordinary HTTP. `PlaneClient` covers the first five lines and
-`TroupeConnection` + `SessionView` the last.
+everything before it is ordinary HTTP. `PlaneClient` covers every step up to the socket,
+and `TroupeConnection` + `SessionView` the socket.
 
 Things the client library knows that the protocol document does not say loudly:
 
@@ -211,13 +220,12 @@ points `plane.appUrl` at it.
 CI is the root [`ci.yml`](../../.github/workflows/ci.yml): its `gui` job typechecks, tests
 and builds this workspace, `gui-e2e` runs the client against a plane built from the same
 commit, and `images` builds and pushes `troupe-gui` beside the server images on every
-push to `main`, tagged `sha-<short>`. **A release deploys itself** (root Decision 669):
-`scripts/release <version>` opens a pull request that changes `VERSION`, and merging it
-promotes the images — this one included — to that version, attaches the desktop
-installers the root [`release.yml`](../../.github/workflows/release.yml) builds, and rolls
-the whole chart onto production with the root [`scripts/deploy`](../../scripts/deploy).
-A push to `main` that does not change `VERSION` deploys nothing. See the root README's
-[Releasing and deploying](../../README.md#releasing-and-deploying).
+push to `main`, tagged `sha-<short>`. **A release is a merged change to `VERSION`** (root
+Decision 669): `scripts/release <version>` opens that pull request, and merging it
+promotes the images — this one included — to that version and attaches the desktop
+installers the root [`release.yml`](../../.github/workflows/release.yml) builds. Rolling a
+release onto a cluster is the deployment's own business. See
+[docs/developer/ci.md](../../docs/developer/ci.md#release-the-full-suite-then-everything).
 
 ### Where it is mounted
 
@@ -239,8 +247,9 @@ chart refuses `gui.basePath: /`, because the root of that host is the plane's.
 A tag that already exists in the registry plus `imagePullPolicy: IfNotPresent` means the
 node keeps the image it has — and since the Deployment's spec did not change, no pod is
 restarted. `helm upgrade` reports success and the old code carries on serving. This is
-not hypothetical; it happened on this cluster. The root `scripts/deploy` prints every
-pod's running digest for that reason, and CI never publishes a floating tag.
+not hypothetical; it happened on a real cluster. Read every pod's running digest after
+an upgrade for that reason ([routine-tasks.md](../../docs/admin/routine-tasks.md#upgrade)),
+and CI never publishes a floating tag.
 
 ## Design
 
@@ -289,7 +298,7 @@ docker run -d --name troupe-bench-worker -p 4000:4000 \
   -e TROUPE_JWKS_PATH=/etc/troupe/jwks.json -e TROUPE_PROVIDER=fake -e TROUPE_MODEL=fake \
   -e TROUPE_FAKE_SCRIPT=/etc/troupe/fake.json -e TROUPE_STATE_HOME=/workspace/.state \
   -e TROUPE_SESSIONS_PER_POD=64 -e RELEASE_DISTRIBUTION=none -e ERL_FLAGS="+Q 65536" \
-  ghcr.io/objective-mj/troupe-worker:dev
+  ghcr.io/it-minds/troupe-worker:dev
 
 BENCH_SIGNING_KEY=keys/signing-key.json BENCH_POD_ID=bench-0 \
 BENCH_CLIENTS=20 BENCH_PROMPTS=10 pnpm bench

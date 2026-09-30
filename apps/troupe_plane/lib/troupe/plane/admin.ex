@@ -42,11 +42,13 @@ defmodule Troupe.Plane.Admin do
     Drain,
     Erasure,
     Fleet,
+    Gitops,
     Identity,
     Ledger
   }
 
   alias Troupe.Plane.Fleet.{Bundle, Provisioner, SizeClass, Worker}
+  alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
@@ -202,13 +204,64 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
-  @doc "Every profile, with its pods, conditions and load."
+  @doc """
+  Every profile, with its pods, conditions and load.
+
+  In GitOps mode each says where it comes from and what the last pass made of it
+  (`gitops`), and a resource the plane refused and has no row for is listed too, so that
+  a manifest that never became a profile is somewhere a person will see it. Those are a
+  platform admin's: a team admin sees the profiles their teams are granted, and a refused
+  resource is granted to nobody.
+  """
   @spec profiles_list(actor()) :: result()
   def profiles_list(actor) do
     with :ok <- require_admin(actor) do
-      {:ok, Enum.map(profiles_for(actor), &profile_summary/1)}
+      reports = gitops_reports()
+      profiles = profiles_for(actor)
+
+      {:ok,
+       Enum.map(profiles, &(&1 |> profile_summary() |> Map.put(:gitops, gitops_state(&1, reports)))) ++
+         refused_only(actor, profiles, reports)}
     end
   end
+
+  # What a pass reported, by name, in GitOps mode, and nothing in direct mode: a report
+  # left from when this plane read a repository says nothing about what it runs now.
+  defp gitops_reports do
+    if Gitops.enabled?(),
+      do: Map.new(Gitops.reports("WorkerProfile"), &{&1.name, &1}),
+      else: nil
+  end
+
+  defp gitops_state(_profile, nil), do: nil
+
+  defp gitops_state(profile, reports) do
+    report = Map.get(reports, profile.name)
+
+    %{
+      locked: true,
+      source: Gitops.source(),
+      # The version of the resource the row was read from; `nil` for a row that never was.
+      generation: profile.resource_generation,
+      problem: report && report.problem,
+      problem_generation: report && report.generation,
+      reasons: (report && report.reasons) || []
+    }
+  end
+
+  # A refused resource with no row has nothing behind it but its name: no pods, no count,
+  # no capacity. Listed with those as nothing rather than left out.
+  defp refused_only(%{role: :platform_admin}, profiles, reports) when is_map(reports) do
+    known = MapSet.new(profiles, & &1.name)
+
+    for {name, %{problem: "refused"}} <- reports, not MapSet.member?(known, name) do
+      %Fleet.Profile{name: name, replicas: 0, sessions_per_pod: 0}
+      |> profile_summary()
+      |> Map.put(:gitops, gitops_state(%Fleet.Profile{name: name}, reports))
+    end
+  end
+
+  defp refused_only(_actor, _profiles, _reports), do: []
 
   @doc """
   One profile in full: what was asked for, what policy makes of it, and what is running.
@@ -226,16 +279,25 @@ defmodule Troupe.Plane.Admin do
          profile: profile_summary(profile),
          spec: profile.spec,
          policy: Provision.verdict(profile),
-         bundle: bundle_state(profile)
+         bundle: bundle_state(profile),
+         gitops: gitops_state(profile, gitops_reports())
        }}
     end
   end
 
-  @doc "Create or update a profile, returning the diff that was applied."
+  @doc """
+  Create or update a profile, returning the diff that was applied.
+
+  Refused in GitOps mode as `managed_by_gitops` (Decision 736): the profile is a resource a
+  repository holds, and a change to it is a commit there. The attempt is in the audit
+  trail, as a refused break-glass login is, because somebody trying to change what a
+  repository holds is worth being able to find.
+  """
   @spec profile_put(actor(), map()) :: result()
   def profile_put(actor, attrs) do
     with :ok <- require_platform_admin(actor),
          {:ok, name} <- require_name(attrs),
+         :ok <- not_held_by_repository(actor, "profile.put", name),
          {:ok, attrs} <- without_derived(attrs),
          :ok <- release_named(attrs),
          :ok <- Provision.check(attrs) do
@@ -259,6 +321,15 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # What `profile_put/2` reads of a profile: an administrator's answers and the rest of
+  # the resource's spec. `admin.profile.put`'s schema declares exactly these, and a test
+  # holds the two together.
+  @profile_keys ~w(name image size_class max_sessions warm_workers provisioner spec)
+
+  @doc "The fields of a profile `admin.profile.put` takes, as its schema declares them."
+  @spec profile_keys() :: [String.t()]
+  def profile_keys, do: @profile_keys
+
   # Seven fields left the admin surface and the plane writes them now: `replicas` from
   # what is running, and the rest from the size class. A caller that sends one is refused
   # rather than having it dropped — silently ignoring a field somebody typed is how a
@@ -269,18 +340,41 @@ defmodule Troupe.Plane.Admin do
   defp without_derived(attrs) do
     attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
     spec = Map.get(attrs, "spec") || %{}
-    sent = Enum.filter(@derived, &(Map.has_key?(attrs, &1) or Map.has_key?(spec, &1)))
+    sent = Enum.filter(@derived, &(Map.has_key?(attrs, &1) or derived_in?(spec, &1)))
 
-    if sent == [] do
-      {:ok, attrs}
-    else
-      {:error,
-       Error.new(:invalid_params, %{
-         reason: "the plane writes these; set size_class, max_sessions and warm_workers instead",
-         not_yours: sent
-       })}
+    cond do
+      sent != [] ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason:
+             "the plane writes these; set size_class, max_sessions and warm_workers instead",
+           not_yours: sent
+         })}
+
+      # The row's column, set here, would be a channel the pods are never told about:
+      # the operator hands them `spec.configBundleChannel`.
+      Map.has_key?(attrs, "config_bundle_channel") ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason:
+             "a profile's bundle channel is spec.configBundleChannel, which its pods follow",
+           not_yours: ["config_bundle_channel"]
+         })}
+
+      true ->
+        {:ok, attrs |> Map.take(@profile_keys) |> with_channel()}
     end
   end
+
+  # The channel has one home, `spec.configBundleChannel`, which the operator gives the
+  # pods, and the row's column, which bundles, adoption and a profile's servers follow, is
+  # written from it: set in the editor, it reached the pods and never the row. A spec that
+  # names none follows `stable`, the resource's default; a put with no spec leaves both.
+  defp with_channel(%{"spec" => %{} = spec} = attrs) do
+    Map.put(attrs, "config_bundle_channel", presence(spec["configBundleChannel"]) || "stable")
+  end
+
+  defp with_channel(attrs), do: attrs
 
   # `release` stands for the worker image this plane's release names, and a plane deployed
   # without one has nothing for it to stand for. Refused rather than saved: saved, it would
@@ -299,6 +393,20 @@ defmodule Troupe.Plane.Admin do
       :ok
     end
   end
+
+  # A spec's `storage` holds two answers, as `Provision` writes it: its size is the size
+  # class's, and which storage class the disk comes from is a fact about the cluster, which
+  # the profile editor asks for. So it is the plane's only where it holds more than
+  # `storageClassName`; refusing all of it left the editor unable to save a storage class.
+  defp derived_in?(spec, "storage") do
+    case Map.get(spec, "storage") do
+      nil -> false
+      %{} = storage -> Map.keys(storage) -- ["storageClassName"] != []
+      _other -> true
+    end
+  end
+
+  defp derived_in?(spec, key), do: Map.has_key?(spec, key)
 
   @doc """
   The image a profile whose image is `release` runs on this plane, or `nil` if it names none.
@@ -333,16 +441,70 @@ defmodule Troupe.Plane.Admin do
     end)
   end
 
-  @doc "Remove a profile. Its sessions become read-only rather than being erased."
+  @doc """
+  Remove a profile. Its sessions become read-only rather than being erased.
+
+  In GitOps mode a profile goes when its manifest leaves the repository, and this is
+  refused as `managed_by_gitops` — with one exception: a row the cluster has no resource
+  for (reported `missing`), which the plane had before it read the cluster. Deleting that
+  deletes only the row, since nothing in the repository or the cluster holds it.
+  """
   @spec profile_delete(actor(), String.t()) :: result()
   def profile_delete(actor, name) do
     with :ok <- require_platform_admin(actor),
-         {:ok, profile} <- fetch_profile(name) do
+         {:ok, profile} <- fetch_profile(name),
+         {:ok, removal} <- removal(actor, profile) do
       {:ok, _} = Audit.record(actor.subject, "profile.delete", name, comparable(profile))
-      removal = unprovision(profile, actor)
+      removal = removal.(profile)
       Fleet.delete_profile(name)
 
       {:ok, %{profile: name, deleted: true, provisioning: removal}}
+    end
+  end
+
+  # How a profile leaves: through the cluster in direct mode; in GitOps mode only as a row
+  # nothing holds, and otherwise not at all.
+  defp removal(actor, profile) do
+    cond do
+      not Gitops.enabled?() ->
+        {:ok, &unprovision(&1, actor)}
+
+      match?(%{problem: "missing"}, Gitops.report("WorkerProfile", profile.name)) ->
+        {:ok,
+         fn profile ->
+           :ok = Gitops.forget("WorkerProfile", profile.name)
+           %{mode: :gitops, state: :row_deleted}
+         end}
+
+      true ->
+        with :ok <- not_held_by_repository(actor, "profile.delete", profile.name) do
+          {:ok, &unprovision(&1, actor)}
+        end
+    end
+  end
+
+  # The refusal every write to what a repository holds gets, recorded like the refused
+  # break-glass login: the attempt is an event, and "somebody tried to change a profile
+  # the repository holds" is one an administrator reading the trail should be able to
+  # find next to the commits that did change it. By kind, for whatever else a repository
+  # comes to hold.
+  defp not_held_by_repository(actor, action, name, kind \\ "WorkerProfile") do
+    if Gitops.enabled?() do
+      source = Gitops.source()
+      detail = %{"outcome" => "refused", "reason" => "managed_by_gitops"}
+      {:ok, _} = Audit.record(actor.subject, action, name, detail)
+
+      {:error,
+       Error.new(:managed_by_gitops, %{
+         kind: kind,
+         name: name,
+         source: source,
+         reason:
+           "this plane is in gitops mode: a #{kind} is a resource a repository holds" <>
+             "#{if source, do: " (#{source})", else: ""}, and a change to one is a commit there"
+       })}
+    else
+      :ok
     end
   end
 
@@ -365,6 +527,15 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # What `host_register/3` takes of a machine, and what `admin.host.register`'s schema
+  # declares. The rest of the row — its id, its place in the profile, its secret, who
+  # registered it, whether and when it enrolled — is the plane's to write.
+  @host_keys ~w(name address)
+
+  @doc "The fields of a machine `admin.host.register` takes, as its schema declares them."
+  @spec host_keys() :: [String.t()]
+  def host_keys, do: @host_keys
+
   @doc """
   Register a machine against a profile, and mint the secret it enrols with.
 
@@ -379,7 +550,7 @@ defmodule Troupe.Plane.Admin do
   """
   @spec host_register(actor(), String.t(), map()) :: result()
   def host_register(actor, profile, attrs) do
-    attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+    attrs = settable(attrs, @host_keys)
 
     with :ok <- require_platform_admin(actor),
          {:ok, _profile} <- fetch_profile(profile) do
@@ -502,6 +673,29 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # What `team_update/3` sets, and what `admin.team.update`'s schema declares: the team's
+  # own settings. The team's changeset casts its whole row, which also holds its name, the
+  # group it was enabled from, and when and by whom; an update takes the settings and
+  # leaves the rest of what it is sent, as the other admin methods leave a key they do not
+  # declare. Either admin sets these for a team they administer, within the ladder, except
+  # `allow_unenforced_workers`, which is a platform admin's (`may_set_unenforced/2`).
+  @team_keys ~w(budget_micros budget_period idle_timeout_seconds cache_eviction_days) ++
+               ~w(erase_after_days members_may_control pins_allowed volume_size) ++
+               ~w(volume_storage_class allow_unenforced_workers)
+
+  @doc "The fields of a team `admin.team.update` sets, as its schema declares them."
+  @spec team_keys() :: [String.t()]
+  def team_keys, do: @team_keys
+
+  # The entries of `attrs` whose keys are among `keys`, keyed by string whether they came
+  # as atoms from a form or as strings from JSON. What a handler that writes a row takes of
+  # what it is sent, rather than handing all of it to a changeset that casts the whole row.
+  defp settable(attrs, keys) when is_map(attrs) do
+    for {key, value} <- attrs, to_string(key) in keys, into: %{}, do: {to_string(key), value}
+  end
+
+  defp settable(_attrs, _keys), do: %{}
+
   @doc """
   Make an identity-provider group a team.
 
@@ -513,9 +707,11 @@ defmodule Troupe.Plane.Admin do
   def team_enable(actor, group_id, attrs \\ %{}) do
     with :ok <- require_platform_admin(actor),
          %Identity.Group{} = group <- Identity.get_group(group_id) do
+      # Its name and its settings. The group it is enabled from, and when and by whom, are
+      # the record of this call, written by it.
       attrs =
         team_defaults()
-        |> Map.merge(Map.new(attrs, fn {key, value} -> {to_string(key), value} end))
+        |> Map.merge(settable(attrs, ["name" | @team_keys]))
         |> Map.put("enabled_by", actor.subject)
 
       case Identity.enable_team(group, attrs) do
@@ -573,7 +769,7 @@ defmodule Troupe.Plane.Admin do
 
   # What a team starts with, from the platform's settings rather than from the schema's
   # defaults. The schema still has defaults — a team created by a migration or a test has
-  # to be some shape — but a platform that has decided every new team gets a 500 kr ceiling
+  # to be some shape — but a platform that has decided every new team gets a $500 ceiling
   # should not have to remember to set it on each one. In `Settings` because the SCIM
   # connector enables teams too, and a team should start the same way whoever made it.
   defp team_defaults, do: Settings.team_defaults()
@@ -581,6 +777,8 @@ defmodule Troupe.Plane.Admin do
   @doc "Change a team's budget, retention or default visibility."
   @spec team_update(actor(), String.t(), map()) :: result()
   def team_update(actor, name, attrs) do
+    attrs = settable(attrs, @team_keys)
+
     with {:ok, team} <- fetch_team(actor, name),
          :ok <- may_set_unenforced(actor, attrs),
          :ok <- still_allowed(team, attrs),
@@ -857,10 +1055,15 @@ defmodule Troupe.Plane.Admin do
     }
   end
 
+  # A grant's options. The team and the profile are this function's own arguments, which
+  # the checks below are asked of, so a key naming either is left out with the rest of the
+  # grant's row.
+  @grant_keys ~w(volume_mode entitlements)
+
   @doc "Give a team access to a profile."
   @spec team_grant(actor(), String.t(), String.t(), map()) :: result()
   def team_grant(actor, name, profile, attrs \\ %{}) do
-    attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+    attrs = settable(attrs, @grant_keys)
 
     with :ok <- require_platform_admin(actor),
          {:ok, team} <- fetch_team(actor, name),
@@ -1156,15 +1359,33 @@ defmodule Troupe.Plane.Admin do
   # -- provisioning -----------------------------------------------------------
 
   @doc """
-  How this plane puts profiles into the cluster: `:direct` or `:gitops`.
+  How this plane gets profiles into the cluster: `:direct` or `:gitops`.
 
-  A panel shows it because the two mean different things when a change does not appear:
-  in direct mode that is a failure, and in GitOps mode it is the normal state until Flux
-  catches up.
+  A panel shows it because the two mean different things. In direct mode the console
+  writes a profile; in GitOps mode a repository holds them, the console shows them
+  locked, and a write is refused as `managed_by_gitops` (Decision 736).
   """
   @spec provisioning_mode(actor()) :: result()
   def provisioning_mode(actor) do
     with :ok <- require_admin(actor), do: {:ok, Provision.mode()}
+  end
+
+  @doc """
+  Every profile, the cluster policy and every trigger as a repository would hold them:
+  what bootstrapping a repository from a running plane commits, before the plane is
+  switched to GitOps mode.
+
+  Each is a path and the YAML to put there, with notes where something needs deciding
+  first — a profile whose image is `release` is pinned to the image it resolves to. Left
+  out of every profile's manifest is what the plane or the cluster writes (`left_out`): a
+  repository that held `spec.replicas` would put back its number over the scaler's at
+  every apply, and one that held the plane's record of finished drains would undo it. A
+  trigger's manifest is its document and nothing else: its key, its runs and its
+  revisions stay with the plane (Decision 737).
+  """
+  @spec profiles_export(actor()) :: result()
+  def profiles_export(actor) do
+    with :ok <- require_platform_admin(actor), do: {:ok, Gitops.export()}
   end
 
   @doc """
@@ -1183,7 +1404,7 @@ defmodule Troupe.Plane.Admin do
       {:ok,
        %{
          policy: Provision.verdict(attrs),
-         changes: Audit.diff(comparable(current), comparable_attrs(attrs)),
+         changes: Audit.diff(comparable(current), attrs |> comparable_attrs() |> with_channel()),
          mode: Provision.mode()
        }}
     end
@@ -2079,11 +2300,86 @@ defmodule Troupe.Plane.Admin do
 
   # -- triggers ---------------------------------------------------------------
 
-  @doc "A team's triggers."
+  @doc """
+  A team's triggers.
+
+  In GitOps mode (Decision 737) each says which resource it comes from and what the last
+  pass made of it (`gitops`), and a `Trigger` resource of the team that the plane refused
+  and has no row for is listed too, with its name and why, so that a manifest that never
+  became a trigger is somewhere its team will see it. A platform admin is also shown the
+  resources that name no team this plane has, with `team` null: there is no other team's
+  list they would be on.
+  """
   @spec triggers_list(actor(), String.t()) :: result()
   def triggers_list(actor, team_name) do
     with {:ok, team} <- fetch_team(actor, team_name) do
-      {:ok, team |> Triggers.list() |> Enum.map(&Triggers.trigger_json/1)}
+      reports = trigger_reports()
+      triggers = Triggers.list(team)
+
+      {:ok,
+       Enum.map(triggers, &(&1 |> Triggers.trigger_json() |> with_gitops(team, &1, reports))) ++
+         refused_triggers(actor, team, triggers, reports)}
+    end
+  end
+
+  # What a pass reported of the triggers, by resource name, in GitOps mode, and nothing in
+  # direct mode, whose answer is what it always was.
+  defp trigger_reports do
+    if Gitops.enabled?(),
+      do: Map.new(Gitops.reports(GitopsTriggers.kind()), &{&1.name, &1}),
+      else: nil
+  end
+
+  defp with_gitops(json, _team, _trigger, nil), do: json
+
+  defp with_gitops(json, team, trigger, reports) do
+    resource = GitopsTriggers.resource_name(team.name, trigger.name)
+    Map.put(json, "gitops", trigger_gitops(resource, trigger.resource_generation, reports))
+  end
+
+  defp trigger_gitops(resource, generation, reports) do
+    report = Map.get(reports, resource)
+
+    %{
+      "locked" => true,
+      "source" => Gitops.source(),
+      "resource" => resource,
+      # The version of the resource the row was read from; `nil` for a row that never was.
+      "generation" => generation,
+      "problem" => report && report.problem,
+      "problem_generation" => report && report.generation,
+      "reasons" => (report && report.reasons) || []
+    }
+  end
+
+  # A refused resource with no row has nothing behind it but its name and its reasons.
+  defp refused_triggers(actor, team, triggers, reports) when is_map(reports) do
+    known = MapSet.new(triggers, &GitopsTriggers.resource_name(team.name, &1.name))
+    teams = if actor.role == :platform_admin, do: MapSet.new(Identity.list_teams(), & &1.name)
+
+    for {resource, %{problem: "refused"}} <- reports,
+        not MapSet.member?(known, resource),
+        placed <- List.wrap(refused_in(resource, team, teams)) do
+      Map.put(placed, "gitops", trigger_gitops(resource, nil, reports))
+    end
+  end
+
+  defp refused_triggers(_actor, _team, _triggers, _reports), do: []
+
+  # This team's, by the name's first part; or, for a platform admin, one no team has.
+  defp refused_in(resource, team, teams) do
+    case GitopsTriggers.split(resource) do
+      {:ok, name, trigger} when name == team.name ->
+        %{"name" => trigger, "team" => team.name}
+
+      {:ok, name, _trigger} when not is_nil(teams) ->
+        if not MapSet.member?(teams, name), do: %{"name" => resource, "team" => nil}
+
+      :error when not is_nil(teams) ->
+        %{"name" => resource, "team" => nil}
+
+      _elsewhere ->
+        nil
     end
   end
 
@@ -2098,13 +2394,25 @@ defmodule Troupe.Plane.Admin do
   the revision point at each other: a run says which revision it ran, and this says who
   made that revision and what moved. A put that changes nothing names the revision that
   was already there, which is the honest answer and not a new one.
+
+  Refused in GitOps mode as `managed_by_gitops` (Decision 737), switching one on or off
+  included: the trigger is a `Trigger` resource a repository holds, and a change to it is
+  a commit there. The attempt is in the audit trail, as a refused profile write is.
   """
   @spec trigger_put(actor(), map()) :: result()
   def trigger_put(actor, attrs) do
     attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
 
     with {:ok, team} <- fetch_team(actor, attrs["team"]),
-         {:ok, name} <- require_name(attrs) do
+         {:ok, name} <- require_name(attrs),
+         :ok <-
+           not_held_by_repository(
+             actor,
+             "trigger.put",
+             "#{team.name}/#{name}",
+             GitopsTriggers.kind()
+           ),
+         :ok <- known_profile(attrs) do
       before = Triggers.get(team, name)
 
       case Triggers.put(team, attrs, actor.subject) do
@@ -2133,6 +2441,22 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # `put` takes any name, and a trigger on a profile the plane has not got fails at every
+  # firing; the GitOps pass refuses one the same way. Asked only of a put that names one:
+  # switching a trigger off is not a question about its profile.
+  defp known_profile(%{"profile" => name}) when is_binary(name) do
+    if Fleet.get_profile(name),
+      do: :ok,
+      else:
+        {:error,
+         Error.new(:invalid_params, %{
+           profile: name,
+           reason: "#{name} is not a profile this plane has"
+         })}
+  end
+
+  defp known_profile(_attrs), do: :ok
+
   @doc """
   Mint a key for a trigger, replacing whatever it had, and return it once.
 
@@ -2143,6 +2467,10 @@ defmodule Troupe.Plane.Admin do
   The old key stops working immediately. A rotation is usually somebody reacting to a
   leak, and an overlap window would mean the leaked key went on firing for as long as
   the window lasted.
+
+  The same in GitOps mode (Decision 737). The key is not part of what a trigger is: it
+  is a credential the plane holds as a hash, never in a resource, and a rotation after a
+  leak cannot wait for a review and an applier's interval.
   """
   @spec trigger_key_rotate(actor(), String.t(), String.t()) :: result()
   def trigger_key_rotate(actor, team_name, name) do
@@ -2234,15 +2562,47 @@ defmodule Troupe.Plane.Admin do
     }
   end
 
-  @doc "Remove a trigger. Its runs go with it; the sessions they created do not."
+  @doc """
+  Remove a trigger. Its runs go with it; the sessions they created do not.
+
+  In GitOps mode a trigger goes when its manifest leaves the repository, and this is
+  refused as `managed_by_gitops` (Decision 737) — except for a trigger the cluster has no
+  resource for (reported `missing`), which the plane had before it read the cluster and
+  which nothing in the repository or the cluster holds.
+  """
   @spec trigger_delete(actor(), String.t(), String.t()) :: result()
   def trigger_delete(actor, team_name, name) do
     with {:ok, team} <- fetch_team(actor, team_name),
-         {:ok, trigger} <- fetch_trigger(team, name) do
+         {:ok, trigger} <- fetch_trigger(team, name),
+         :ok <- trigger_removal(actor, team, trigger) do
       detail = comparable(trigger)
       {:ok, _} = Audit.record(actor.subject, "trigger.delete", "#{team.name}/#{name}", detail)
       :ok = Triggers.delete(trigger)
+
+      if Gitops.enabled?(),
+        do: Gitops.forget(GitopsTriggers.kind(), GitopsTriggers.resource_name(team.name, name))
+
       {:ok, %{team: team.name, name: name, deleted: true}}
+    end
+  end
+
+  defp trigger_removal(actor, team, trigger) do
+    resource = GitopsTriggers.resource_name(team.name, trigger.name)
+
+    cond do
+      not Gitops.enabled?() ->
+        :ok
+
+      match?(%{problem: "missing"}, Gitops.report(GitopsTriggers.kind(), resource)) ->
+        :ok
+
+      true ->
+        not_held_by_repository(
+          actor,
+          "trigger.delete",
+          "#{team.name}/#{trigger.name}",
+          GitopsTriggers.kind()
+        )
     end
   end
 
@@ -2279,6 +2639,10 @@ defmodule Troupe.Plane.Admin do
 
   The source is `manual` and the console is the only door that may say so: a person's
   hand is the one thing about a run that cannot be inferred afterwards.
+
+  The same in GitOps mode (Decision 737): firing a trigger is something done with it, not
+  a change to what it is, and the run it makes names the revision the repository's
+  version hashes to.
   """
   @spec trigger_run(actor(), String.t(), String.t()) :: result()
   def trigger_run(actor, team_name, name) do
@@ -2496,8 +2860,7 @@ defmodule Troupe.Plane.Admin do
   # stale for as long as it takes the operator's next resync, which is the right cost —
   # failing the grant would make the plane's own state depend on the cluster being up.
   # What happened in the cluster, reported rather than swallowed: a profile that was
-  # saved but not applied is a state a person needs to see, and it is the normal state in
-  # GitOps mode until Flux catches up.
+  # saved but not applied is a state a person needs to see.
   defp provision(profile, actor) do
     case Provision.apply(profile, actor) do
       {:ok, state} -> state
@@ -2887,6 +3250,10 @@ defmodule Troupe.Plane.Admin do
 
   defp comparable(%Fleet.Profile{} = profile) do
     Map.take(profile, [
+      :size_class,
+      :max_sessions,
+      :warm_workers,
+      :provisioner,
       :replicas,
       :sessions_per_pod,
       :config_bundle_channel,
@@ -2922,6 +3289,7 @@ defmodule Troupe.Plane.Admin do
       :visibility,
       :review,
       :notify,
+      :notify_url,
       :concurrency
     ])
   end

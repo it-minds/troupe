@@ -155,6 +155,24 @@ defmodule Troupe.Plane.PanelTest do
     end
   end
 
+  describe "the overview" do
+    test "an attention item's status has room for its word", context do
+      # The status is a glyph and a word, and it had the glyph column's 16px: the word ran
+      # over the sentence beside it, seen in a browser at 1280px. A LiveView test lays
+      # nothing out, so the markup is checked here and the room in the stylesheet.
+      {:ok, _view, html} = context.conn |> sign_in(context.root.subject) |> live("/admin")
+
+      # The setup's `dev` asked for two pods and has one.
+      assert html =~ ~r{<li class="attention__item[^"]*"><span class="status status--degraded"}
+
+      css = File.read!(Application.app_dir(:troupe_plane, "priv/static/console.css"))
+      [item] = Regex.run(~r/\.attention__item\s*\{([^}]*)\}/, css, capture: :all_but_first)
+
+      refute item =~ "--size-glyph-column", "the status is squeezed into the glyph column"
+      assert css =~ ~r/\.attention__item > \.status\s*\{[^}]*flex:\s*0 0 170px/
+    end
+  end
+
   describe "the workers page" do
     test "lists profiles, pods, conditions and load", context do
       {:ok, _view, html} = context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
@@ -216,6 +234,52 @@ defmodule Troupe.Plane.PanelTest do
         context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
 
       assert root_html =~ "drain"
+    end
+
+    # The editor was reachable by typing its address and by nothing on any page.
+    test "a platform admin reaches the profile editor from here, for a new profile and each one",
+         context do
+      {:ok, view, _html} = context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
+
+      assert has_element?(view, "a[href='/admin/profile/new']")
+      assert has_element?(view, "a[href='/admin/profile/dev']", "edit")
+      assert has_element?(view, "a[href='/admin/profile/ux']", "edit")
+
+      # The editor is a platform admin's, so a team admin is not sent to a page that
+      # would turn them away.
+      {:ok, view, _html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/workers")
+
+      refute has_element?(view, "a[href='/admin/profile/new']")
+      refute has_element?(view, "a[href='/admin/profile/dev']")
+    end
+
+    # The panel is the way into gitops mode from a running plane, and it showed the
+    # profiles and the policy and not the triggers, which `admin.profiles.export` has: a
+    # repository bootstrapped from here would have lost them at the switch.
+    test "the manifests for a repository include every trigger", context do
+      {:ok, principal, _secret} =
+        principal!(context.engineering, %{name: "bot", profiles: ["dev"]})
+
+      {:ok, _} =
+        Triggers.put(
+          context.engineering,
+          %{
+            "name" => "nightly-deps",
+            "principal" => principal.subject,
+            "profile" => "dev",
+            "source" => %{"kind" => "schedule", "cron" => "0 3 * * 1-5"},
+            "prompt_template" => "Update every dependency."
+          },
+          "root"
+        )
+
+      {:ok, view, _html} = context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
+      html = view |> element("button", "show the manifests") |> render_click()
+
+      assert html =~ "profiles/dev.yaml"
+      assert html =~ "triggers/engineering/nightly-deps.yaml"
+      assert html =~ "kind: Trigger"
+      assert html =~ "name: engineering.nightly-deps"
     end
   end
 
@@ -294,6 +358,40 @@ defmodule Troupe.Plane.PanelTest do
         context.conn |> sign_in(context.root.subject) |> live("/admin/triggers/design")
 
       refute design_html =~ "nightly-deps"
+    end
+
+    # The form saved the zone where nothing read it, and the trigger fired in UTC.
+    test "the zone typed in the form is the one the trigger keeps, and one it cannot keep is refused",
+         context do
+      {:ok, principal, _secret} =
+        principal!(context.engineering, %{name: "bot", profiles: ["dev"]})
+
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.lead.subject) |> live("/admin/triggers")
+
+      fields = %{
+        "name" => "nightly",
+        "principal" => principal.subject,
+        "profile" => "dev",
+        "cron" => "0 3 * * 1-5",
+        "prompt_template" => "Update every dependency."
+      }
+
+      html =
+        view
+        |> form("#new-trigger", Map.put(fields, "timezone", "Europe/Copenhagen"))
+        |> render_submit()
+
+      assert html =~ "UTC"
+      assert Triggers.get(context.engineering, "nightly") == nil
+
+      view |> form("#new-trigger", Map.put(fields, "timezone", "UTC")) |> render_submit()
+
+      assert Triggers.get(context.engineering, "nightly").source == %{
+               "kind" => "schedule",
+               "cron" => "0 3 * * 1-5",
+               "tz" => "UTC"
+             }
     end
   end
 
@@ -495,6 +593,30 @@ defmodule Troupe.Plane.PanelTest do
           ) do
         refute html =~ ~s(name="#{gone}"), "the editor still asks for #{gone}"
       end
+    end
+
+    test "saves the storage class it asks for", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      view
+      |> element("form")
+      |> render_change(%{
+        "name" => "dev",
+        "image" => "ghcr.io/troupe/worker:1",
+        "storage.storageClassName" => "fast-local"
+      })
+
+      html = view |> element("#profile-editor") |> render_submit()
+
+      refute html =~ "the plane writes these"
+      assert Fleet.get_profile("dev").spec["storage"] == %{"storageClassName" => "fast-local"}
+
+      # And it is the one read back into the field, so the next save keeps it.
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      assert html =~ ~s(value="fast-local")
     end
 
     test "says what an image of release resolves to on this plane", context do
@@ -1348,7 +1470,7 @@ You build."}
 
         spends =
           Regex.scan(
-            ~r{<span class="mono" style="font-variant-numeric: tabular-nums">\s*([^<]*)},
+            ~r{<span class="mono" style="font-variant-numeric: tabular-nums">\s*(?:<span class="muted">\$</span>)?([^<]*)},
             html
           )
           |> Enum.map(&(&1 |> List.last() |> String.trim()))
@@ -1357,6 +1479,47 @@ You build."}
 
         refute "unlimited" in spends,
                "#{path} renders a spend as a ceiling: #{inspect(Enum.uniq(spends))}"
+      end
+    end
+
+    test "a bar's fill is a box, so the width it is given is the width it draws", context do
+      # The fill is a `<span>` with its width in a style attribute, and a span is inline
+      # unless the stylesheet says otherwise: an inline box takes no width and no height, so
+      # every bar on Budgets, Teams and Overview was an empty track whatever was spent.
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/budgets")
+
+      assert html =~ ~r{<span class="budget__fill" style="width: \d+%"}
+
+      css = File.read!(Application.app_dir(:troupe_plane, "priv/static/console.css"))
+      [rule] = Regex.run(~r/\.budget__fill\s*\{([^}]*)\}/, css, capture: :all_but_first)
+
+      assert rule =~ ~r/display:\s*(block|inline-block|flex)\b/,
+             ".budget__fill is inline, so its width and height do not apply: #{rule}"
+    end
+
+    test "an amount is in the unit the rest of the product counts in", context do
+      # A budget is millionths of a dollar: the gateways report cost in dollars, a
+      # profile's prices are dollars per million tokens, and the desktop client and the
+      # daemon's budget question both say `$1.20`. The console said `kr`.
+      {:ok, _} =
+        Ledger.record(%{
+          session_id: "spent-some",
+          team_id: context.engineering.id,
+          owner_subject: context.lead.subject,
+          model: "fake-model",
+          cost_micros: 250_000,
+          gateway_request_id: "spent-some-1"
+        })
+
+      Ledger.Cache.invalidate(context.engineering.id)
+      conn = sign_in(context.conn, context.root.subject)
+
+      for path <- ["/admin", "/admin/teams", "/admin/budgets"] do
+        {:ok, _view, html} = live(conn, path)
+
+        refute html =~ ~r/\bkr\b/, "#{path} still renders an amount in kr"
+        assert html =~ ~r{<span class="muted">\$</span>0\.25}, "#{path} renders no $0.25"
       end
     end
 

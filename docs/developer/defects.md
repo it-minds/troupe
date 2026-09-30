@@ -57,6 +57,8 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
   timeout), the worker's `ReaderLogTest` "a log an activation has taken over" and the
   gateway's `RestartTest` (once with a `FunctionClauseError` in `Troupe.LLM.Fake.render/2`)
   each failed once; all pass alone.
+- Under full load, the TUI's `ClipboardTest` and `TUISelectionTest` (Ctrl-Y copy) fail
+  now and then; both pass alone.
 - The gateway suite prints `erl_child_setup: failed with error 32 on line 284` a few
   times, with or without failures (probably a port child writing to a closed pipe).
 - `apps/troupe_gateway/test/troupe/gateway/restart_test.exs` `create/2` never stops the
@@ -170,7 +172,9 @@ Found by the #269 fixer (PR #271), 2026-09-29.
 - `Scaler.write` (`apps/troupe_plane/lib/troupe/plane/fleet/scaler.ex`, `write/3`,
   `scale/2`) writes the row before the cluster. If the cluster write fails, the next tick
   sees the count it wants and never sends it again, and nothing applies a profile again
-  on a timer: the cluster stays at the old count and waiting sessions can stall.
+  on a timer: the cluster stays at the old count and waiting sessions can stall. In
+  `gitops` mode the plane's pass writes the count again every 15 s (PR #285), so this
+  holds for `direct` mode only.
 - A worker's `session.activate` doesn't refuse on a pod that is draining, so a session
   placed in the few seconds after SIGTERM isn't in the shutdown drain's list.
 - `Drain.pod` waits for its push for the drain's timeout plus 30 s, while the pod makes
@@ -239,6 +243,52 @@ Found by the chunk 9 fixers of slots D and E (PRs #262, #266), 2026-09-29.
 
 Found by the chunk 9 fixers, 2026-09-29.
 
+### D44 - Uninstalling the chart deletes its namespace and everything in it (medium)
+
+`charts/troupe/templates/namespace.yaml` renders the release's namespace without
+`helm.sh/resource-policy: keep`, so `helm uninstall troupe`, or a reinstall, deletes the
+namespace with everything else installed in it (for example an OpenBao put beside the
+plane, as older install guides suggested). Found by the chunk 10 fixer of the deployment
+repository, 2026-09-30.
+
+### D45 - Small leftovers from the 0.7.0 work (low)
+
+- `admin.team.grant` never writes `Grant.granted_by`, so grants carry no attribution;
+  `admin.team.enable` doesn't run the ladder check `admin.team.update` does on the
+  settings it is given (platform administrators only).
+- Changing a profile's storage class or size class after its pods exist is refused by
+  the API server (a volume claim template can't change); the plane has no guard beyond
+  the editor's hint.
+- The profile editor has no provisioner field, though `single-machine.md` step 1 says to
+  set it under Profiles; only the API and MCP can.
+- In `gitops` mode an ssh profile's resource keeps the CRD's default of one replica until
+  the plane's first pass sets 0, so the operator may run one pod briefly (Decision 738).
+- The Workers page links a gitops resource the plane refused (no row) to the editor,
+  which then answers `not_found`.
+- Only `amount/1` shows the currency; the budget bars' figures, the Overview's "Spent" and
+  the Teams cap note show bare numbers, and the admin API calls `budget_micros`
+  "millionths of a currency unit" where the rest of the product says dollars.
+- The GUI client's `Trigger` type has drifted from `trigger_json` (`review` is a string,
+  `notify` a list of strings; `notify_url`, `has_key` and `revision` are missing), and the
+  admin MCP projection doesn't emit `required` for nested object properties.
+- `POST /trigger/<id>` means to refuse a body that isn't an object, but `Plug.Parsers`
+  wraps a JSON array as `{"_json": [...]}` (unconfirmed).
+- The plane's object store Secret is marked optional in the chart, so a missing Secret
+  doesn't stop the plane from starting.
+- Pre-release images and charts pile up on ghcr.io: the pre-release cleanup deletes
+  releases and tags, not package versions.
+- `scripts/check-neutral.exs` runs only on pull requests into `main` (`ci.yml`), so a
+  name slips into a chunk and is caught only at the chunk's pull request.
+- Unit-test fixtures and the desktop app's identifier still use an old personal namespace
+  (`ghcr.io/objective-mj/...`, `com.objective-mj.troupe`).
+- `Session.Log`'s moduledoc cites `troupe ctl verify`, which no client has; the TUI's
+  tile headline reads `needs_input ▶ needs input`.
+- `docs/mask.png` (2 MB, the source of the brand mask) is referenced by nothing and is
+  published with the site; MkDocs is held at 1.x because Material warns that 2.0 breaks
+  its plugins (the generator's future belongs to #189).
+
+Found by the chunk 10 fixers, 2026-09-30.
+
 ## Taken
 
 | Defect | Taken by |
@@ -297,6 +347,9 @@ Found by the chunk 9 fixers, 2026-09-29.
 | The plane's scale-down removed pods without draining them (found by the #258 fixer) | #273, PR #274 |
 | With Entra and SCIM, the plane keys a person on `sub` only (found by the chunk 9 fixer of slot F) | #267 |
 | Without Cilium, a profile's own endpoints on other ports or at private addresses are unreachable (found by the #257 fixer) | #268 |
+| The plane's `gitops` mode worked only in tests: no `git` in its image, no repository setting, no push credential (found while planning #186) | #186, PR #285 |
+| A trigger's timezone typed in the console was ignored; the MCP schema of `admin.trigger.put` didn't match its handler; a profile's bundle channel never reached its row; an ssh profile got a StatefulSet (found by the #186 fixers) | #290, PR #291 |
+| Team and host admin methods accepted fields they don't document; the profile editor couldn't save a storage class; the console's budget bars drew no fill and showed the wrong currency (found by the #290 and #188 fixers) | PR #292 |
 
 ## Checked and not a defect
 

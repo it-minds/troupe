@@ -202,6 +202,73 @@ defmodule Troupe.Plane.Web.Live.Layout do
   defp condition_class(_condition), do: "neutral"
 
   @doc """
+  The marker a page shows over what a repository holds, in GitOps mode (Decisions 736 and
+  737): what is locked, by what, and where to go instead.
+
+  First on the page and in words, because a form whose fields will not take a keystroke
+  and says nothing about why reads as a broken console rather than a deliberate one. Here
+  rather than on one page because the profiles and the triggers are locked the same way,
+  and two spellings of the lock would come to disagree about what it means. The slot is
+  what the page adds: what is left to do there, and what the last pass could not use.
+  """
+  attr(:kind, :string, required: true, doc: "the resource's kind: `WorkerProfile`")
+  attr(:things, :string, required: true, doc: "what the page shows, plural: `profiles`")
+  attr(:source, :string, default: nil)
+  slot(:inner_block)
+
+  def locked(assigns) do
+    ~H"""
+    <section class="panel" id="locked-to-gitops">
+      <h2>Locked to gitops</h2>
+      <p class="lede">
+        This plane's {@things} are the {@kind} resources a repository holds, applied to
+        the cluster {if @source, do: "from #{@source}", else: "by something other than this plane"}.
+        Change one there, with a commit; the plane reads it from the cluster within a
+        quarter of a minute of it being applied.
+      </p>
+      {render_slot(@inner_block)}
+    </section>
+    """
+  end
+
+  @doc """
+  What the last GitOps pass could not use or could not find, one line per reason. Nothing
+  where there is no problem.
+  """
+  attr(:gitops, :map, default: nil, doc: "the `gitops` a listing carries, atom or string keys")
+
+  def gitops_problems(assigns) do
+    assigns =
+      assign(assigns,
+        problem: gitops_field(assigns.gitops, :problem),
+        reasons: gitops_field(assigns.gitops, :reasons) || [],
+        name: problem_name(assigns.gitops)
+      )
+
+    ~H"""
+    <ul :if={@problem} class="checks">
+      <li :for={reason <- @reasons} class="checks__bad">
+        <span class="checks__name">{@name}</span>
+        <span class="checks__detail">{reason}</span>
+      </li>
+    </ul>
+    """
+  end
+
+  defp problem_name(gitops) do
+    case gitops_field(gitops, :problem) do
+      "refused" -> "generation #{gitops_field(gitops, :problem_generation)} is not used"
+      "missing" -> "no resource in the cluster"
+      "plane_only" -> "not applied from a repository"
+      problem -> problem
+    end
+  end
+
+  # The profiles' listing keys by atom and the triggers' by string, as each listing does.
+  defp gitops_field(nil, _key), do: nil
+  defp gitops_field(gitops, key), do: Map.get(gitops, key, Map.get(gitops, to_string(key)))
+
+  @doc """
   Bytes, for a person.
 
   Binary units, because what is being measured is a volume and a disk, and a reader
@@ -220,10 +287,10 @@ defmodule Troupe.Plane.Web.Live.Layout do
   @doc """
   Micros, as money.
 
-  Two decimal places and no unit: the unit is `kr` and it belongs in muted text beside
-  the figure so the figure stays the figure, which is what `amount/1` renders. A caller
-  that only needs the number — a table cell already in a column headed with the unit —
-  uses this.
+  Two decimal places and no unit: the unit is the dollar, and it belongs in muted text
+  beside the figure so the figure stays the figure, which is what `amount/1` renders. A
+  caller that only needs the number — a table cell already in a column headed with the
+  unit — uses this.
   """
   @spec money(integer() | nil) :: String.t()
   def money(nil), do: "—"
@@ -249,13 +316,17 @@ defmodule Troupe.Plane.Web.Live.Layout do
   and none of them renders a ceiling — a team that had spent nothing was being reported as
   having spent "unlimited" on Overview, on Teams and on Budgets, which is the one word that
   should never appear in a spend column.
+
+  The unit is the dollar, written `$` before the figure as the desktop client and the
+  daemon write it. A budget is millionths of one: the gateways report cost in dollars and
+  a profile's prices are dollars per million tokens. The console once said `kr` here.
   """
   attr(:micros, :integer, default: nil)
 
   def amount(assigns) do
     ~H"""
     <span class="mono" style="font-variant-numeric: tabular-nums">
-      {figure(@micros)}<span :if={is_integer(@micros) and @micros > 0} class="muted">&nbsp;kr</span>
+      <span :if={is_integer(@micros) and @micros > 0} class="muted">$</span>{figure(@micros)}
     </span>
     """
   end

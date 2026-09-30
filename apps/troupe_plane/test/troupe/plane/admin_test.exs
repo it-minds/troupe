@@ -9,7 +9,17 @@ defmodule Troupe.Plane.AdminTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Audit, Bundles, Fleet, Identity, Ledger, Sessions}
+  alias Troupe.Plane.{
+    Admin,
+    Audit,
+    Bundles,
+    FakeWorkerProfiles,
+    Fleet,
+    Identity,
+    Ledger,
+    Sessions,
+    Triggers
+  }
 
   @moduletag timeout: 60_000
 
@@ -336,6 +346,81 @@ defmodule Troupe.Plane.AdminTest do
     end
   end
 
+  describe "what a team update takes" do
+    # `admin.team.update` declares a team's settings, and the team's changeset casts the
+    # whole row: its name, the group it was enabled from, when and by whom. The method
+    # takes the settings it declares and leaves the rest of the row as it was, for either
+    # role, the way every admin method leaves a key it does not declare.
+    test "the settings it declares, and nothing else of the row", context do
+      before = Identity.get_team("engineering")
+
+      for actor <- [context.lead, context.root] do
+        assert {:ok, %{team: team}} =
+                 Admin.team_update(actor, "engineering", %{
+                   "budget_micros" => 3_000_000,
+                   "name" => "renamed",
+                   "group_id" => context.design.group_id,
+                   "enabled_at" => ~U[2020-01-01 00:00:00.000000Z],
+                   "enabled_by" => "someone-else@example.test"
+                 })
+
+        assert team.name == "engineering"
+        assert team.budget_micros == 3_000_000
+      end
+
+      after_update = Identity.get_team("engineering")
+      assert after_update.group_id == before.group_id
+      assert after_update.enabled_at == before.enabled_at
+      assert after_update.enabled_by == before.enabled_by
+      assert Identity.get_team("renamed") == nil
+    end
+
+    test "and the same by atom keys, as the console sends them", context do
+      assert {:ok, %{team: team}} =
+               Admin.team_update(context.lead, "engineering", %{
+                 pins_allowed: false,
+                 name: "renamed"
+               })
+
+      assert team.name == "engineering"
+      refute team.pins_allowed
+      assert Identity.get_team("renamed") == nil
+    end
+
+    test "which are the ones its schema declares" do
+      alias Troupe.Plane.Admin.API
+
+      declared =
+        for argument <- API.method("admin.team.update").arguments,
+            argument.name == "attrs",
+            property <- argument.properties,
+            do: property.name
+
+      assert declared -- Admin.team_keys() == []
+      refute Enum.any?(~w(name group_id enabled_at enabled_by), &(&1 in Admin.team_keys()))
+    end
+
+    test "and enabling one sets its name and settings, not its record", context do
+      {:ok, group} = Identity.upsert_group(%{external_id: "research", display_name: "research"})
+
+      assert {:ok, team} =
+               Admin.team_enable(context.root, "research", %{
+                 "name" => "research",
+                 "budget_micros" => 7_000_000,
+                 "group_id" => context.design.group_id,
+                 "enabled_at" => ~U[2020-01-01 00:00:00.000000Z]
+               })
+
+      assert team.name == "research"
+      assert team.budget_micros == 7_000_000
+
+      row = Identity.get_team("research")
+      assert row.group_id == group.id
+      assert DateTime.compare(row.enabled_at, ~U[2020-01-01 00:00:00.000000Z]) == :gt
+      assert row.enabled_by == context.root.subject
+    end
+  end
+
   describe "what no administrator can do" do
     test "read what a session said", context do
       session = session!("s-private", context.engineering, "dev")
@@ -550,6 +635,134 @@ defmodule Troupe.Plane.AdminTest do
 
       assert {:error, error} = Admin.mcp_check(context.root, "not a url")
       assert error.message == "invalid_params"
+    end
+  end
+
+  describe "a profile as it is written" do
+    # The pods follow `spec.configBundleChannel`; bundles, adoption and the servers a
+    # profile carries follow the row. A channel set in the editor reached the first only.
+    test "its bundle channel is the one in its spec, for the row as for the pods", context do
+      beta = %{
+        "name" => "beta-dev",
+        "image" => "ghcr.io/troupe/worker:1",
+        "spec" => %{"configBundleChannel" => "beta"}
+      }
+
+      assert {:ok, %{profile: summary}} = Admin.profile_put(context.root, beta)
+      assert summary.channel == "beta"
+      assert Fleet.get_profile("beta-dev").config_bundle_channel == "beta"
+      assert "beta-dev" in Fleet.profiles_on_channel("beta")
+
+      # A spec that names none follows `stable`, which is what the pods are given then.
+      assert {:ok, %{profile: summary, changes: changes}} =
+               Admin.profile_put(context.root, Map.put(beta, "spec", %{}))
+
+      assert summary.channel == "stable"
+      assert changes["config_bundle_channel"] == %{"from" => "beta", "to" => "stable"}
+
+      # And the row's own field is not a second place to say it, which the pods would not
+      # hear about.
+      assert {:error, error} =
+               Admin.profile_put(context.root, Map.put(beta, "config_bundle_channel", "beta"))
+
+      assert error.message == "invalid_params"
+      assert error.data.reason =~ "spec.configBundleChannel"
+    end
+
+    # Its workers are machines somebody registers; a `WorkerProfile` would have the
+    # operator run pods for it as well.
+    test "one whose workers are machines is not written to the cluster", context do
+      FakeWorkerProfiles.start(%{})
+
+      image = "ghcr.io/troupe/worker:1"
+      laptops = %{"name" => "laptops", "image" => image, "provisioner" => "ssh"}
+
+      assert {:ok, %{provisioning: provisioning}} = Admin.profile_put(context.root, laptops)
+      assert provisioning.state == :not_in_cluster
+      refute_received {FakeWorkerProfiles, :applied, "laptops", _resource, _query}
+
+      # A profile on Kubernetes still is, which is what makes the refutation mean something.
+      assert {:ok, _} = Admin.profile_put(context.root, %{"name" => "pods", "image" => image})
+      assert_received {FakeWorkerProfiles, :applied, "pods", _resource, _query}
+    end
+
+    test "its audit row says what an administrator changed", context do
+      {:ok, _} =
+        Admin.profile_put(context.root, %{
+          "name" => "dev",
+          "size_class" => "heavy",
+          "max_sessions" => 6,
+          "warm_workers" => 1,
+          "provisioner" => "ssh"
+        })
+
+      [event | _] = Audit.list(kind: "profile")
+      assert event.action == "profile.put"
+      assert event.detail["size_class"] == %{"from" => "standard", "to" => "heavy"}
+      assert event.detail["max_sessions"] == %{"from" => nil, "to" => 6}
+      assert event.detail["warm_workers"] == %{"from" => 0, "to" => 1}
+      assert event.detail["provisioner"] == %{"from" => "kubernetes", "to" => "ssh"}
+    end
+  end
+
+  describe "a trigger as it is written" do
+    setup context do
+      {:ok, principal} =
+        Admin.principal_create(context.lead, "engineering", %{
+          "name" => "bot",
+          "profiles" => ["dev"],
+          "sponsor" => "lead@example.test"
+        })
+
+      definition = %{
+        "team" => "engineering",
+        "name" => "nightly",
+        "principal" => principal.subject,
+        "profile" => "dev",
+        "source" => %{"kind" => "schedule", "cron" => "0 3 * * 1-5"}
+      }
+
+      %{definition: definition}
+    end
+
+    # A trigger on a profile the plane has not got fails at every firing, and nothing
+    # said so when it was saved. The GitOps pass refused it already.
+    test "names a profile the plane has", context do
+      assert {:error, error} =
+               Admin.trigger_put(context.lead, Map.put(context.definition, "profile", "nowhere"))
+
+      assert error.message == "invalid_params"
+      assert error.data.reason =~ "nowhere is not a profile this plane has"
+      assert Triggers.get(context.engineering, "nightly") == nil
+
+      assert {:ok, _} = Admin.trigger_put(context.lead, context.definition)
+
+      # Switching it off names no profile and is not asked about one.
+      assert {:ok, _} =
+               Admin.trigger_put(context.lead, %{
+                 "team" => "engineering",
+                 "name" => "nightly",
+                 "enabled" => false
+               })
+    end
+
+    test "its audit row says where its outcome goes", context do
+      {:ok, _} = Admin.trigger_put(context.lead, context.definition)
+
+      {:ok, _} =
+        Admin.trigger_put(context.lead, %{
+          "team" => "engineering",
+          "name" => "nightly",
+          "notify_url" => "https://hooks.example.com/troupe"
+        })
+
+      [event | _] = Audit.list(kind: "trigger")
+      assert event.action == "trigger.put"
+
+      assert event.detail["notify_url"] == %{
+               "from" => nil,
+               "to" => "https://hooks.example.com/troupe"
+             }
     end
   end
 

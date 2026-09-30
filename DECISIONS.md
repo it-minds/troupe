@@ -843,36 +843,18 @@ citation keeps meaning what it meant.
      another in a pod is the drift this was meant to end, so `scripts/locks-agree.exs`
      fails when any of them differ and CI runs it.
 
-669. **A release is a merged change to `VERSION`, and it deploys itself.** Four
-     repositories delivered four ways, nothing had ever been tagged, and the plane was
-     deployed by hand from one laptop. Issue #37 asked whether deploying should stay
-     manual, and the team's answer is no (Martin, 2026-09-21: "I want a deployment on
-     releases too").
+669. **A release is a merged change to `VERSION`.** Four repositories delivered four
+     ways, nothing had ever been tagged, and the plane was deployed by hand from one
+     laptop. Issue #37 asked whether deploying should stay manual, and the team's answer
+     is no (Martin, 2026-09-21: "I want a deployment on releases too").
 
      *Cutting one.* `scripts/release <version>` opens a pull request whose only change is
      `VERSION` and its copies (`scripts/version.exs set`), and merging it is the release;
      674 says exactly when a push cuts one. A tag pushed by hand is not a release.
-     `.github/CI.md` has what a release runs and publishes.
+     `docs/developer/ci.md` has what a release runs and publishes.
 
-     *Deploying it.* `scripts/deploy` against the `production` environment: the chart's
-     CRDs server-side (Helm never upgrades them), `helm upgrade --wait` rolling back on
-     failure, `rollout status`, and then `/.well-known/troupe` must report the release's
-     version and commit. Pushing an image and changing production are still two
-     decisions; the second is a reviewed merge instead of a laptop session. A release
-     candidate (`-rc.N`) runs everything and deploys as a server-side dry run.
-     `deploy.yml` is for what the automatic path does not do: roll an earlier release
-     back, or render one, through the same script. The environment's deployments are the
-     record of what ran where and when, from which merge.
-
-     *Credentials.* `production` holds `KUBECONFIG` and `DEPLOY_VALUES` and the variable
-     `PLANE_URL`, and should allow `main` alone. The kubeconfig is the `troupe-deployer`
-     service account's (`deploy/ci-deployer.yaml`, `scripts/ci-kubeconfig`), not a
-     person's `scw` login. It is not a one-namespace Role: the chart creates CRDs,
-     ClusterRoles and an admission policy, and granting a ClusterRole takes `escalate`
-     and `bind`, which is cluster-admin in principle. That is said in the manifest
-     rather than hidden, and the rules list what the chart touches so the account's
-     everyday reach is a deploy's. A required reviewer on the environment is left to the
-     team: the bump pull request's review is the approval this design assumes.
+     *Deploying it* is not this repository's: a release publishes its images and chart
+     and ends, and a deployment follows the release from somewhere of its own (735).
 
      *Worker images* are the part a chart cannot roll, because each profile names its
      own; a profile whose image is `release` follows the chart's worker image (672).
@@ -914,8 +896,8 @@ citation keeps meaning what it meant.
      `OnDelete`, so the resource says `UpgradePending` until the pods are drained and
      replaced — the routine-tasks page says so — and `profile.get` still reports
      `release` rather than what it resolves to; the console shows the resolution.
-     `values.small.yaml` and `values.scaleway.yaml` name the worker and GUI images in
-     the same registry as the rest, so the policy they carry admits `release`. Proof:
+     The policy in `values.yaml`, `values.small.yaml` and `values.example.yaml` allows
+     the chart's own worker image, so it admits `release`. Proof:
      `Troupe.Plane.ReleaseImageTest`.
 
 673. **The clients in this repository get no private door, and four checks say so.**
@@ -977,7 +959,7 @@ citation keeps meaning what it meant.
      `images.yml` is the one definition of the five images for all three. `release.yml`
      can be started by hand to retry a version whose run failed after its VERSION change
      merged, which 674 alone would leave with no way out but a new version.
-     `.github/CI.md` has the picture.
+     `docs/developer/ci.md` has the picture.
 
 677. **A token with no groups claim says nothing about groups.** Every provider token
      the plane accepts — a login's id token, an MCP client's access token — goes through
@@ -2761,3 +2743,303 @@ citation keeps meaning what it meant.
      an MCP server, a directory that has gone), nine of whose eleven tests fail on the
      chunk's tip with the config key alone; `doctor_test.exs`; and the installed build
      with its helper swapped for a file that is not a program.
+
+734. **This repository names no deployment of Troupe, and a check in CI keeps it so.**
+     Issue #186. The repository is the product: the chart, the images, the clients and
+     how to build them. The deployment its maintainers run lives in a repository of its
+     own, which consumes the published chart and images as any adopter's would, so its
+     cloud, cluster, domain, registry, identity tenant and deploy account are not named
+     here. A reader used to learn one cluster's topology from this repository, and an
+     adopter had to guess which parts of an example were somebody's own.
+
+     *What stays.* `values.example.yaml` is the one worked example: a managed cluster,
+     PostgreSQL and object store, ingress-nginx, cert-manager, OpenBao in the cluster,
+     the chart's own images (735), and every value that has to be the reader's marked
+     `CHANGE ME`. `values.small.yaml` is the same shape turned down. What the provider
+     walkthrough knew that holds anywhere — the two DNS names, the ingress settings, the
+     HTTP-01 issuer, how to run OpenBao, sizing — is in `docs/admin/installing.md` §6.
+     `authentik.md` is a guide to any Authentik instance.
+
+     *What went.* The provider's own values and cluster extras, the deploy account's
+     manifest and the script that made it a kubeconfig, and `scripts/deploy`, whose
+     only callers left with the deploy (735). An upgrade is the steps in
+     `routine-tasks.md`, which now say what the script knew: CRDs server-side, a
+     rollback on failure, the version at `/.well-known/troupe`, and the digests actually
+     running. `scripts/remote-up` has no default model gateway: a placeholder under
+     `example.test` that resolves nowhere, with the host of `TROUPE_GATEWAY_URL` put
+     first in the kind policy's egress list (`--set` on that index keeps the rest), and
+     the key in `TROUPE_GATEWAY_KEY`. CI's cluster job names a public host, so the
+     egress suite still has a model endpoint a pod can dial.
+
+     *The check.* `scripts/check-neutral.exs`, in the `versions` job, reads every file
+     git knows and fails on a line that names one. The names are kept as SHA-256 digests
+     of their lowercase spelling, so the file that keeps them out does not name them;
+     each run of letters, digits, dots and hyphens is checked whole, by label, by word
+     and by dotted suffix, which catches a host under any subdomain. A file that must
+     keep a name for a while is allowed with the reason, and an allowed file that names
+     nothing fails too, so the list only shrinks; it is empty. Git history keeps every
+     old name, and nothing here rewrites it. Proof: the check names 161 lines in 39
+     files at 0.6.3-beta and none here, and CI lints and renders the chart with both
+     remaining values files, one of them with a pull secret.
+
+735. **A release publishes its images and its chart to `ghcr.io`, public, and deploys
+     nothing.** Issue #186. The images went to whichever registry four repository
+     secrets named, which was our own cloud's, and `release.yml` ended by rolling our
+     cluster with a kubeconfig from its `production` environment, as `deploy.yml` did by
+     hand: the product's repository held a credential for one deployment's
+     infrastructure and knew which cluster was ours. Now `images.yml` pushes the five
+     images to `ghcr.io/<owner>/troupe-<name>` with the workflow's own `GITHUB_TOKEN`
+     (`packages: write`), tagged as before (`sha-<short>`, and the version for a release
+     or a pre-release), labelled with this repository as their source. There is no
+     registry to configure and no override for one: a secret naming a registry is a door
+     into somebody's infrastructure, and a deployment that wants a mirror copies from
+     `ghcr.io`. The packages are public, so a cluster pulls them with no credential;
+     GitHub creates a package private, and an organisation owner makes each one public
+     once, which no workflow can do. A release also pushes its chart as
+     `oci://ghcr.io/<owner>/charts/troupe` at its version, beside the `.tgz` on the
+     release page (322), in the job that publishes the release and just before it does,
+     so a chart version in the registry is a release that finished; the release's notes
+     show both. A pre-release pushes its chart too, when it built its images, since a
+     chart whose images were never pushed installs nothing that runs; Helm takes a
+     pre-release version only when it is named. `release.yml` ends at the published
+     release and `deploy.yml` is gone: a deployment pins a version, holds its own values
+     and credentials, and takes the published chart and images from a repository of its
+     own, which nothing here names, dispatches to or waits for. `charts/troupe/values.yaml`
+     names the `ghcr.io` images and its policy allows the worker's, and the development
+     loop (`scripts/build-images`, `scripts/remote-up`, `dev/kind/values.yaml`, the
+     cluster suite) builds and runs under the same names, so a kind cluster runs the
+     chart's own defaults. Supersedes the deploying half of 669.
+
+736. **In gitops mode a repository holds the profiles and the policy, and the plane reads
+     them from the cluster and never writes git.** Issue #186. `provisioning_mode: gitops`
+     made a profile save a commit to a checkout configured only by `:gitops[:path]`,
+     which nothing set in a real plane, whose image has no `git` and no push credential:
+     the mode worked in tests. Now the `WorkerProfile` and `TroupePolicy` resources a
+     repository holds, applied by Flux or anything like it, are what a gitops plane runs
+     on. A cluster singleton (`Troupe.Plane.Gitops`) lists the profiles in the plane's
+     namespace every fifteen seconds and makes its rows follow them, making, changing and
+     deleting them, audited as `system:gitops`: a tick and not a watch, because a list
+     sees what is not there without a watch's bookmarks and relists, a plane that was
+     down is right at its first tick, and the change it waits for arrives after the
+     applier's own interval. A resource is used only if the plane could have saved it
+     itself (its annotations parse, it has an image, its `sessionsPerPod` is a class's,
+     the cluster policy allows it, nobody else sets the plane's fields); otherwise it is
+     reported in `gitops_reports`, the log once, `admin.profiles.list` and the console,
+     and not used: a new one gets no row, and a changed one leaves the last version that
+     passed. The plane still writes the three fields that are projections of its own
+     state, `spec.replicas`, `spec.teams` and `spec.mcpServers`, server-side as
+     `troupe-plane`, where they differ and only onto a resource something else holds. One
+     only the plane has written is reported `plane_only` and not written to, because three
+     fields applied by the only owner of the rest would give the rest up. It is the
+     manager name direct mode uses, so the first write after adoption releases what
+     direct mode took and a field the repository drops then leaves the cluster. The
+     `troupe.dev/drained` record (726) keeps its own manager and survives the applier,
+     which owns only what its manifest names. The plane's answers the CRD has no field
+     for are annotations (`troupe.dev/max-sessions`, `warm-workers`, `provisioner`), the
+     class is read off `sessionsPerPod`, and `release` is not followed: a manifest pins
+     its image, and 672's comparison against the last commit goes with the commit.
+     `admin.profile.put` and `admin.profile.delete` refuse as `managed_by_gitops`
+     (-32015), audited with `outcome: refused` as a refused break-glass login is; the
+     exception is deleting a row the cluster has no resource for, reported `missing`
+     after a switch and never deleted by the plane itself. There is no policy write to
+     refuse, the plane's grant on `TroupePolicy` being read-only already, and in gitops
+     mode its `:policy` configuration is not read. The console shows profiles locked, with
+     `gitops_source`, a display-only setting; `admin.profiles.export` gives every profile
+     and the policy as a repository would hold them, without runtime fields, the plane's
+     three or its drained record. `provisioning_mode` becomes the deployment's: a console
+     that could switch it back would be a lock with the key hanging beside it, and a
+     profile made then would be one the repository never saw and its applier never
+     prunes. A value stored before is ignored, and the chart's Role drops create and
+     delete on `WorkerProfile` in gitops mode. The plane migrates
+     (`profiles.resource_generation`, `gitops_reports`); another kind of resource joins
+     by implementing `Troupe.Plane.Gitops`'s behaviour. Proof: `gitops_test.exs`, against
+     a model of server-side apply's field ownership (made, changed, removed, refused, the
+     plane's fields, the drained record under Flux, the refusals over the API and MCP, the
+     export and its round trip, both switches), `gitops_console_test.exs`, and the
+     updated `provision_test.exs`, `release_image_test.exs` and `settings_test.exs`.
+
+737. **In gitops mode a repository holds the triggers too, as `Trigger` resources the
+     plane reads; a trigger's key, runs and revisions stay the plane's.** Issue #186. A
+     gitops plane's profiles were reviewed files and its triggers were rows somebody typed
+     into a console, so what fires unattended, as whom and with what prompt was the one
+     part of the fleet no repository could restore. Now a `Trigger` CRD, one resource per
+     trigger in the plane's namespace, is the second source of 736's pass, read after the
+     profiles so a trigger and the profile it names can land in one commit. Its name is
+     `<team>.<trigger>`: a trigger's name is unique in its team and a resource's in its
+     namespace, a dot is in neither, and a team said once has no second field to disagree
+     with. Its spec is the trigger's document in the CRD's spelling (`promptTemplate`,
+     `notifyUrl`, and `budgetMicros`, `maxTurns`, `wallClockSeconds` in `terms`), the
+     principal by subject; a field left out is its default, not what the row said. A
+     resource is used only if `admin.trigger.put` would have saved it and what it names is
+     here — the team, a service principal of that team, and a profile, which `put` never
+     checked and which a trigger fails on at every firing without. A spec key a `Trigger`
+     has not got is refused too, and the CRD keeps unknown fields so that a misspelt
+     `promptTemplate` reaches the plane instead of being pruned into a trigger that asks for
+     nothing. Otherwise 736 holds: reported and not used, a changed one left at the last
+     version that passed and still firing, a removed one deleted with its runs as
+     `admin.trigger.delete` did, each audited as `system:gitops` with the revision it made,
+     a row the cluster never had kept as `missing`. The row is changed in place, so its id,
+     URL and key survive every commit, and a row from direct mode is adopted by the
+     resource of its name. `admin.trigger.put` (enabling and disabling included) and
+     `admin.trigger.delete` refuse as `managed_by_gitops`, audited, the delete again except
+     for a `missing` row; switching a trigger off is a commit, or in a hurry a patch while
+     the applier is suspended, or disabling its principal. `admin.trigger.run` and
+     `admin.trigger.key.rotate` keep working: firing is something done with a trigger, not
+     what it is, and a key is not configuration. The key stays plane-held rather than a
+     Secret reference because the plane mints it and keeps only a salted hash, so a
+     resource has nothing to carry; a reference would give an internet-facing plane a
+     grant on Secrets its Role deliberately lacks, to hash a value it could mint; and a
+     rotation answers a leak, which cannot wait for a review and an applier's interval.
+     Teams, their grants and service principals stay the plane's database's, and a
+     trigger names them. Taking them into a repository later would need a `Team` resource
+     (the group it maps, its budget, retention and grants, with enabling and disabling
+     following it, and a prune that disables a team a decision rather than an accident)
+     and a `ServicePrincipal` resource without its secret, which would stay plane-minted
+     as a trigger's key does, applied before the profiles and triggers that name them.
+     `admin.triggers.list` carries `gitops` per trigger and lists a refused resource of the
+     team by name, and one naming no team here to a platform admin; the Triggers page is
+     locked with `Layout.locked/1`, which the profile editor now shares, and keeps run,
+     key and revisions. `admin.profiles.export` gives every trigger as
+     `triggers/<team>/<trigger>.yaml`, without the plane's own fields. The chart's gitops
+     Role gets `get`, `list`, `watch` on `triggers` and nothing else; the plane migrates
+     (`triggers.resource_generation`). Proof: `gitops_triggers_test.exs` (made, changed,
+     switched off, defaults, unchanged, removed, a failed list, a profile and a trigger in
+     one pass; refused for a team, a principal, a profile, a name, `put`'s checks and an
+     unknown key; a failed change still firing; the refusals over the API and MCP; a key
+     that survives a change; a run by hand; a `missing` row kept and deleted; the export
+     and its round trip keeping the id, revision and key; the CRD against the plane's
+     fields; direct mode) and `gitops_triggers_console_test.exs`.
+
+738. **A profile whose workers are machines has nothing in the cluster: no `WorkerProfile`
+     in direct mode, and a count of none on the one a repository holds.** Issue #290. An
+     `ssh` profile's workers are machines somebody registers, and the worker on each dials
+     the plane; but `admin.profile.put`, a grant, a bundle's projection and a release all
+     wrote it a `WorkerProfile`, and the operator, which reads no provisioner, made a
+     StatefulSet of pods for it. `Provision.apply/2` now asks `in_cluster?/1`, which is
+     the Kubernetes provisioner and nothing else. In direct mode a profile that is not in
+     the cluster is written nothing, and a resource left from before (a profile that was
+     Kubernetes's, or one saved before this was asked) is deleted, so the row stays the
+     whole of what is wanted; the answer is `:not_in_cluster`. In gitops mode a repository
+     holds every profile as a `WorkerProfile`, so the resource is there, and the plane
+     writes `spec.replicas: 0` onto it rather than the scaler's count, which for such a
+     profile is a number of machines. Between Flux's apply and the plane's first write the
+     CRD's default of one replica still stands; teaching the operator the
+     `troupe.dev/provisioner` annotation would close that, and would make it read an
+     annotation it deliberately reads none of. `ReleaseImage` passes such a profile by:
+     whoever installs the worker on a machine installs the release. Proof: `admin_test.exs`,
+     `provision_test.exs`, `release_image_test.exs`.
+
+739. **The documentation is one site, built from `docs/` and the documents its nav names
+     elsewhere, and each document stays where whatever reads it looks for it.** Issues #51
+     and #188. The docs were thorough and had no front page a reader could navigate:
+     nothing was published, and a reader browsing the repository met the tracks, the root
+     documents and the clients' own READMEs as three unrelated heaps. Now `mkdocs.yml` at
+     the root builds a site with MkDocs Material, which #51 names, and
+     `.github/workflows/pages.yml` builds it on every pull request and publishes it from
+     `main` to GitHub Pages, at `it-minds.github.io/troupe` until the product site (#189)
+     gives it a domain. The build is strict: a link to a page that is not there, a
+     `#fragment` naming no heading of it, a nav entry to a missing file, or a page left
+     out of the nav fails it. Heading anchors are spelt as GitHub spells them, so one
+     `#fragment` works in both places. The nav is by
+     reader — using Troupe, running a deployment, contributing, writing a client — each in
+     the order to read it, and `docs/README.md` says the same in prose for whoever reads
+     the repository on GitHub. MkDocs and its theme are pinned in `docs/requirements.txt`
+     and Dependabot moves them monthly, but not MkDocs to 2: that drops the plugin and
+     theme systems the site is built on, and Material requires 1, so leaving MkDocs 1 is a
+     choice for the product site (#189) to make, not a bump.
+
+     *Where documents live.* MkDocs builds one directory, and several documents a reader
+     needs are read where they are by something else: the TUI's tests read
+     `PROTOCOL.md`'s error table, the core's config test reads the YAML in the TUI's and
+     the daemon's READMEs, GitHub finds `CONTRIBUTING.md`, `SECURITY.md` and
+     `CODE_OF_CONDUCT.md` at the root, and code cites `ARCHITECTURE.md`, `PROTOCOL.md` and
+     decisions by number. So none of them moved. A nav entry that names no file in `docs/`
+     names one by its path from the root, and `docs/overrides/hooks.py` puts that file on
+     the site at the same path. Links stay written for GitHub, relative to their file, and
+     `scripts/doc-links.exs` keeps checking them; the hook rewrites each one for the site,
+     to the page where the site has it and otherwise to the file on GitHub at `main`, and
+     one that names nothing in the repository fails the build. A copy in `docs/` would be
+     a second version to drift, a symlink fails on a Windows checkout, and a plugin for it
+     would be a dependency doing what a page of Python does. The hook also reads `VERSION`
+     into the banner every page carries, so the site says which release it describes.
+
+     *The root.* It holds what somebody arriving at the repository needs, and what a tool
+     reads there. `.github/CI.md` is contributor documentation and moved to
+     `docs/developer/ci.md`; `.console-rig.exs`, a screenshot rig, moved to `scripts/`.
+     No reports, audits or programme briefs remained after #54. The three `DECISIONS.md`
+     files stay where they are: append-only records that changes add to while others are
+     in flight, cited by number, and a reader gains nothing from their moving. The two
+     plans under `docs/plans/` and `docs/program/` stay too, because #56, open, names them
+     by path. The clients' READMEs stay as each directory's front page, and are the
+     user's and the contributor's pages for their client on the site.
+
+     *Diagrams are Mermaid in the source.* The topology and the order of a sign-in and a
+     session (`ARCHITECTURE.md` §6), the session lifecycle (§4), the daemon on a person's
+     machine (`docs/user/README.md`), the sign-in alone (`docs/admin/roles-and-permissions.md`
+     §1), the supervision trees of a session and of the TUI's remote client
+     (`docs/developer/architecture.md` §3 and §6, which were drawn in text), and a turn
+     through the log (`docs/developer/tour.md`). The GUI README's path of a client, drawn
+     in box characters, is a sequence diagram. No diagram is a checked-in image;
+     `repo-structure.md`'s annotated tree is a listing and stays text. Contributors get a
+     tour of their own, `docs/developer/tour.md` — where things live, running the suite,
+     adding a tool, how the event log works — so neither they nor an operator reads the
+     other's track. Proof: `mkdocs build --strict` in `pages.yml` on this change, and
+     `doc-links.exs` and `check-neutral.exs` passing over the moved files.
+
+740. **The README is a front door, the quick start it points to is run by CI, and the
+     product is shown with example data.** Issue #188. A stranger landing here met the
+     umbrella's layout, five images, a deploy command and the release process before
+     anything said what Troupe is for, with no picture of it, no page that set it beside
+     the agent CLIs a reader already runs, and six of its own words in the first paragraph
+     with nowhere to look them up.
+
+     *The README* is one screen: what Troupe is in two sentences, one Mermaid diagram of the
+     machine and the cluster, what it is not, the install from the release installers for
+     Linux, macOS and Windows, where to go next, and the licence with the name's terms. The
+     rest moved to where it was already said: the images and the deploy to
+     `docs/admin/installing.md`, which now also lists the plane's front-page paths;
+     releasing to `docs/developer/ci.md` and `docs/developer/deployment.md`; building from source
+     to `docs/developer/`; writing a client to PROTOCOL.md. Five badges, each something a
+     reader can act on: CI on `main`, the quick start's own run, the latest release, the
+     protocol's version and the licence. The protocol badge is static, so the quick start's
+     job fails when it stops naming PROTOCOL.md's version.
+
+     *The quick start* (`docs/quick-start.md`) is install, a key, a first session, what it
+     cost, a cap, and what a plane adds, in that order, because the budget is the part a
+     newcomer would not guess exists. The first session is `troupe run plan … --headless`,
+     which reads and never writes, so nothing in it waits on an approval; the fix is made
+     next in the TUI, where an approval is a key. What it cost is read from the session's
+     log with `jq`, because Troupe keeps no price table and the log is where the answer is:
+     a figure from the nightly live check for scale, prices marked as an example, and
+     `models.prices` for a provider that reports tokens only. The cap is three keys in
+     `config.yaml`, shown in force with `--explain`.
+
+     *Run by CI.* A block the page marks `<!-- quick-start -->`, `<!-- quick-start: sh -->`
+     or `<!-- quick-start: powershell -->` is one `quick-start.yml` runs:
+     `scripts/quick-start-blocks` takes them out in order, and the job runs them as one
+     script, in `sh -e` on Ubuntu and in PowerShell with native exit codes fatal on Windows,
+     from the installers a reader downloads, with `TROUPE_PROVIDER=fake` answering from a
+     file. Then it checks that a session's log holds the reply and that the cap is in
+     force, and that the README's install blocks are the page's word for word. It runs on a
+     pull request that changes the page, the README, PROTOCOL.md or itself, and nightly,
+     because what breaks it with no change here is a release; by hand it installs a named
+     release. It cannot run a real model, the TUI, macOS or a plane, and the page says so.
+     Markers rather than a script of its own, because a script beside a page is a second
+     copy of it and the page is what a reader follows.
+
+     *Why Troupe* (`docs/why-troupe.md`) says who it is for, how it compares with an agent
+     CLI on a laptop without a claim about one it could not show, what a plane buys and
+     what it asks, and when you do not need it, each claim linked to the page or code
+     behind it. *The glossary* (`docs/glossary.md`) defines each word once, and a page links
+     to it the first time it uses one.
+
+     *Pictures*, under `docs/assets/`, made with a headless Chromium from made-up data only:
+     no real person, host or key. The desktop app is its web build against `pnpm fake`,
+     signed in as that deployment's Alice. The console is its teams page from the plane's
+     own endpoint, rendered in its test environment against the development PostgreSQL
+     from made-up teams, people and spend, as the page is before its script runs. The TUI is
+     `View.render/2` drawn into a headless `CellSession` from made-up events, as its suite
+     draws it, then cell by cell into HTML. A recording of a live terminal session needs a
+     recorder this project does not use yet; the capture stands in for one. Proof: the
+     quick start's job on both platforms, `scripts/doc-links.exs` and
+     `scripts/check-neutral.exs`.

@@ -1,19 +1,26 @@
 # Developer track
 
+For whoever changes Troupe itself. Start with [CONTRIBUTING.md](../../CONTRIBUTING.md) and
+[the tour](tour.md), then [ARCHITECTURE.md](../../ARCHITECTURE.md); the rest is here to be
+looked things up in.
+
 | File | What it covers |
 |---|---|
+| [tour.md](tour.md) | Where things live, running the suite, adding a tool, how the event log works |
 | [architecture.md](architecture.md) | The apps and releases, the enforced boundaries, supervision trees, transports, where state lives, the TUI and GUI internals |
 | [repo-structure.md](repo-structure.md) | The tree, where things live, what the image build sees |
 | [tech-stack.md](tech-stack.md) | Every runtime, library and binary, and why |
 | [local-setup.md](local-setup.md) | Prerequisites, the toolbox, development services, a plane on kind, development variables |
 | [testing.md](testing.md) | Running the suites, what each needs, fixtures, the checks that are tests in all but name |
 | [build.md](build.md) | The images, the native builds, the reaper, generated files, `VERSION` |
-| [deployment.md](deployment.md) | How a release deploys itself, what a roll does, rolling back |
+| [ci.md](ci.md) | CI, pre-releases, releases, the nightly, and the documentation site |
+| [deployment.md](deployment.md) | What a release publishes, what a roll does, rolling back |
 | [conventions.md](conventions.md) | The gate, boundaries, the formatter's blind spot, commit style, naming, recipes |
 | [fixing-issues.md](fixing-issues.md) | Working through GitHub issues in chunks: triage, fix, install locally, verify, pull request |
 | [defects.md](defects.md) | Defects found in passing and not fixed yet |
 
-CI and releases: [../../.github/CI.md](../../.github/CI.md). The design:
-[../../ARCHITECTURE.md](../../ARCHITECTURE.md), [../../DECISIONS.md](../../DECISIONS.md),
-[../../PROTOCOL.md](../../PROTOCOL.md). The clients: [clients/tui](../../clients/tui/README.md)
-and [clients/gui](../../clients/gui/README.md).
+The design: [../../ARCHITECTURE.md](../../ARCHITECTURE.md),
+[../../DECISIONS.md](../../DECISIONS.md), [../../PROTOCOL.md](../../PROTOCOL.md). The
+clients: [clients/tui](../../clients/tui/README.md) (and its
+[decisions](../../clients/tui/DECISIONS.md)), [clients/gui](../../clients/gui/README.md),
+and the daemon's [decisions](../../apps/troupe_daemon/DECISIONS.md).

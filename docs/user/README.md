@@ -9,7 +9,7 @@ machine and you see the same transcript; two people can open the same session at
 ## First run
 
 1. Install `troupe` and `troupe-daemon` with the latest release's `install.sh` or
-   `install.ps1` ([README](../../README.md#what-it-ships)), saying yes to the TUI.
+   `install.ps1` ([quick start](../quick-start.md#1-install)), saying yes to the TUI.
 2. `troupe config` sets up a model. Enter at every question is Anthropic with the key read
    from `ANTHROPIC_API_KEY`; the other choices are OpenAI, a gateway such as LiteLLM, or
    your organisation's plane.
@@ -48,6 +48,38 @@ api_key: "{env:ANTHROPIC_API_KEY}"
 
 ## Ways in
 
+On your own machine every way in is a client of one daemon, `troupe-daemon`, which runs
+your sessions and outlives the windows you look at them through. Whichever client needs
+it first starts it (the terminal client runs one inside itself when none is running), and
+it stops on its own a while after the last client leaves
+([troupe-daemon](../../apps/troupe_daemon/README.md#how-long-it-stays-up)):
+
+```mermaid
+flowchart LR
+  subgraph machine["Your machine"]
+    tui["troupe"]
+    app["the desktop app"]
+    own["your own program"]
+    daemon["troupe-daemon<br/>one per user"]
+    sessions["your sessions<br/>a process tree each"]
+    dir["the directory<br/>you gave it"]
+    state["the state directory<br/>each session's log"]
+  end
+  model["the model provider"]
+  plane["your team's plane<br/>only when signed in"]
+  store[("object storage")]
+
+  tui -- "a Unix socket or loopback TCP,<br/>and a loopback WebSocket" --> daemon
+  app -- "a loopback WebSocket" --> daemon
+  own -- "any of the three" --> daemon
+  daemon --> sessions
+  sessions -- "reads, edits, commands" --> dir
+  sessions -- "one events.jsonl each" --> state
+  sessions -- "HTTPS, your key" --> model
+  daemon -. "a private session's row,<br/>and URLs to store it" .-> plane
+  daemon -. "its sealed copy" .-> store
+```
+
 | Way in | What it is | Its documentation |
 |---|---|---|
 | `troupe` | the terminal UI, on the daemon on your machine; `troupe --remote` for your team's plane | [clients/tui](../../clients/tui/README.md) |
@@ -60,6 +92,8 @@ from the latest release. `troupe login <plane URL>` signs you in with a code you
 your browser; you sign in where you always do, and Troupe never has a password of its own.
 
 ## Words you will meet
+
+The ones below come up first; the [glossary](../glossary.md) has the rest.
 
 **Plane.** The server your team signs in to. It knows who you are, which teams you are in,
 which profiles they may use and where every remote session runs. Never what one said.

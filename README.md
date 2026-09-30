@@ -1,155 +1,100 @@
 # Troupe
 
-A coding-agent harness that runs on Kubernetes and on your own machine. Teams' agents run
-on pods a cluster schedules; a control plane hands out the sessions, endpoints and tokens
-to reach them, and an admin console runs the whole fleet from a browser. The same harness
-runs on a laptop as the local daemon.
+[![ci](https://github.com/it-minds/troupe/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/it-minds/troupe/actions/workflows/ci.yml?query=branch%3Amain)
+[![quick start](https://github.com/it-minds/troupe/actions/workflows/quick-start.yml/badge.svg)](https://github.com/it-minds/troupe/actions/workflows/quick-start.yml)
+[![release](https://img.shields.io/github/v/release/it-minds/troupe?label=release)](https://github.com/it-minds/troupe/releases/latest)
+[![protocol](https://img.shields.io/badge/protocol-v1-blue)](PROTOCOL.md)
+[![licence](https://img.shields.io/github/license/it-minds/troupe?label=licence)](LICENSE)
 
-**This repository is all of it** (Decision 666): the platform, the daemon, and the two
-clients that are its defaults — the terminal UI and the graphical app. One `VERSION`
-versions everything, and one release ships it: five container images and a Helm chart
-for a cluster, and `troupe`, `troupe-daemon` and the desktop app for a machine. The
-clients get no private access for living here: everything they do goes over
-[PROTOCOL.md](PROTOCOL.md), and a client somebody else writes against that document is
-as supported as ours.
+Troupe runs coding agents for you and your team: give one a task in a directory, and it
+reads the code, changes it and runs commands there, asking you first before each change
+and each command. The work is a [session](docs/glossary.md#session) that lives in a daemon
+on your machine or on a pod in your team's Kubernetes cluster, not in the window you
+started it from, and every client, ours or yours, reaches it over
+[one documented protocol](PROTOCOL.md).
 
-| directory | what it is |
-|---|---|
-| [`apps/`](apps/) | The Elixir umbrella: the harness (`troupe_core`, `troupe_gateway`, `troupe_protocol`), the worker, the plane, the operator, the A2A facade, and the daemon (`troupe_daemon`). |
-| [`clients/tui`](clients/tui/README.md) | `troupe`, the terminal client. Its own Mix project, built against the harness in `apps/` by path; it embeds the daemon when none is running. |
-| [`clients/gui`](clients/gui/README.md) | The graphical client: `@troupe/client` (the protocol in TypeScript), the web app the chart serves at `/app`, and the desktop app that wraps it. |
-| [`charts/troupe`](charts/troupe) | The Helm chart for the platform and the GUI. |
-| [`docs/`](docs/README.md) | The administrator's, developer's and user's documentation. |
+```mermaid
+flowchart LR
+  subgraph machine["Your machine"]
+    clients["clients<br/>troupe (terminal UI), desktop app, your program"]
+    daemon["troupe-daemon<br/>sessions, agents, tools, log"]
+  end
+  subgraph cluster["Your cluster, if you run one"]
+    plane["plane<br/>sign-in, teams, budgets, audit, console"]
+    pods["worker pods<br/>the same harness"]
+  end
+  llm[("your model provider<br/>or gateway")]
+  clients -->|PROTOCOL.md| daemon
+  clients -->|PROTOCOL.md| pods
+  clients -.->|sign in| plane
+  plane -->|places sessions| pods
+  daemon --> llm
+  pods --> llm
+```
 
-Sessions live on a **pod** or in the **daemon**, not in whatever window you happened to
-open. Close the client and the work carries on; open it again, or a second one, or a
-script, and you are looking at the same session. Every agent, model request, tool run and
-subagent is a process, failure is handled by supervision, and the session's hash-chained
-log *is* the session: every view, restart and audit is a fold over it.
-[ARCHITECTURE.md](ARCHITECTURE.md) is the design; [PROTOCOL.md](PROTOCOL.md) is the client
-author's document and needs no checkout of this repository.
+![The desktop app: a team's session on a plane, stopped to ask before it runs a command, with what it has cost so far](docs/assets/desktop-app.png)
 
-## What it ships
+What it is not:
 
-| Image | What it is |
-|---|---|
-| `troupe-plane` | The control plane: the client and admin API as JSON-RPC and MCP, the OIDC relying party, the front page at `/`, `/docs`, and the admin console at `/admin`. |
-| `troupe-operator` | Turns a `WorkerProfile` into a namespace of pods, and a `TroupePolicy` into what those pods may do. |
-| `troupe-worker` | The agent harness itself, in one of those pods, reached over a WebSocket through its own Ingress. |
-| `troupe-a2a` | The A2A facade: every profile as an agent other agents can call ([docs/a2a.md](docs/a2a.md)). |
-| `troupe-gui` | The graphical client, served at `/app` on the plane's host. |
+- **A model.** It calls the provider you configure, Anthropic, OpenAI or any
+  OpenAI-compatible gateway, with your key, and counts what each call used.
+- **A hosted service.** There is nothing to sign up for. It runs on your machine and, if
+  you want one, on your cluster.
+- **A sandbox on your laptop.** There, commands run as you, once you approve them; on a pod
+  they run under bubblewrap, behind a network policy.
+- **An editor.** It works beside yours, from a terminal, a desktop app, a browser or your
+  own program.
+- **1.0.** Releases are betas. [When you do not need it](docs/why-troupe.md#when-you-do-not-need-it)
+  has a section of its own.
 
-Plus [`charts/troupe`](charts/troupe), which deploys the lot.
+## Quick start
 
-On a machine, from the same release: `troupe` (the TUI) and `troupe-daemon` for Linux,
-macOS and Windows, and the desktop app's installers. Each release attaches `install.sh`
-and `install.ps1`, which install that release: the daemon always, and they ask about the
-TUI and the desktop app. Download one, read it if you like, run it:
+On Linux or macOS:
 
+<!-- quick-start: sh -->
 ```sh
 curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh
-sh install.sh
+sh install.sh --tui
 ```
 
+On Windows, in PowerShell:
+
+<!-- quick-start: powershell -->
 ```powershell
 irm https://github.com/it-minds/troupe/releases/latest/download/install.ps1 -OutFile install.ps1
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Tui
 ```
 
-No questions: `--tui --gui -y` (`-Tui -Gui -Yes`). Start over: `--clean-install`
-(`-CleanInstall`). Remove: `--uninstall [--purge]` (`-Uninstall [-Purge]`).
+Then, in a new terminal and with your key in `ANTHROPIC_API_KEY` (or none, and it asks),
+`troupe config` shows the model it will use and `troupe` in a project directory opens a
+session. `--gui` (`-Gui`) adds the desktop app. The [quick start](docs/quick-start.md) is
+the ten-minute version: a first session, what it cost, how to cap the next one, and what a
+plane adds. CI runs its commands against the latest release every night.
 
-Then `troupe config` sets up a model and `troupe` opens a session: the
-[first run](docs/user/README.md#first-run), in five steps. Without the TUI, the desktop
-app sets the model up on **This computer**, under **Models**.
+## Where next
 
-## Deploy
+| | |
+|---|---|
+| [Quick start](docs/quick-start.md) | install, a first session, its cost and a cap, in ten minutes |
+| [Why Troupe](docs/why-troupe.md) | who it is for, how it compares with an agent CLI on your laptop, what a plane buys, when you do not need it |
+| [Glossary](docs/glossary.md) | session, workspace, profile, bundle, plane, worker, daemon, agent, skill, trigger, principal |
+| [Using it](docs/user/README.md) | the clients, every setting, what Troupe never does |
+| [Running a plane](docs/admin/installing.md) | from an empty Kubernetes cluster to a first team, then [the rest of it](docs/admin/README.md) |
+| [Changing it](docs/developer/README.md) | architecture, local setup, tests, builds, releases; [CONTRIBUTING.md](CONTRIBUTING.md) |
+| [Writing a client](PROTOCOL.md) | the protocol, complete on its own, with JSON Schema for every message |
 
-```sh
-kubectl apply -f charts/troupe/crds/
-helm upgrade --install troupe charts/troupe \
-  --namespace troupe-system --create-namespace \
-  --values charts/troupe/values.small.yaml \
-  --values my-values.yaml
-```
-
-It needs PostgreSQL, an S3-compatible bucket with versioning, OpenBao and an OIDC
-provider. `values.small.yaml` is one plane, one operator, the GUI and a handful of workers;
-`values.scaleway.yaml` is the same on Kapsule. [docs/admin/installing.md](docs/admin/installing.md)
-starts from an empty cluster, [docs/deploying-on-scaleway.md](docs/deploying-on-scaleway.md)
-walks Scaleway, and [docs/admin/](docs/admin/README.md) is the operator's tree. A team with
-its own client sets `gui.enabled: false` and points `plane.appUrl` at it.
-
-## Releasing and deploying
-
-A release is a merged change to `VERSION`, and it deploys itself (Decision 669):
-
-```sh
-scripts/release 0.3.1        # opens the pull request that changes VERSION
-```
-
-Merging it runs the full suite on that commit, builds the images at `0.3.1`, tags
-`v0.3.1`, publishes the chart and the daemon, TUI and desktop builds, and rolls the release
-onto the `production` environment with [`scripts/deploy`](scripts/deploy), which checks
-that `/.well-known/troupe` then reports the new version and commit. A release candidate
-(`0.4.0-rc.1`) does all of it and deploys as a dry run; the `deploy` workflow rolls back to
-or renders a named release; a **pre-release** of any commit, untested, is a button in
-Actions. Nothing is deployed from a laptop. [`.github/CI.md`](.github/CI.md) has the whole
-picture.
-
-## The front door and the console
-
-`/` is the page a person gets when they are handed the URL: what this host is and the
-ways in. `/docs` explains the concepts, `/admin` is the console, `/healthz` is for
-Kubernetes, and the rest is API. `plane.appUrl` says where the graphical client is (the
-chart's own at `/app` by default) and `plane.cliUrl` where the terminal client is published
-(empty: the page says to ask an administrator).
-
-The console — fleet, teams, budgets, worker profiles, policy, bundles, triggers,
-principals, audit — has no private access either: it is a client of
-`Troupe.Plane.Admin`, the same context behind the `admin.*` JSON-RPC methods and the MCP
-tools at `/mcp`, and a test enumerates them so a button cannot exist without the method
-under it.
-
-## Building from source
-
-Needs Elixir 1.20.4 on OTP 28.5.0.5, Zig 0.16.0 (for `reaper`, the helper every shell
-command runs under) and, for the GUI, Node 24 — see `.tool-versions`.
-
-```sh
-mix deps.get
-mix check                    # compile --warnings-as-errors, format, credo, boundaries, test
-scripts/build-images         # the five images, into kind or a registry
-
-(cd clients/tui && mix deps.get && mix check)                  # the TUI
-(cd clients/gui && pnpm install && pnpm build && pnpm test)    # the GUI
-(cd apps/troupe_daemon && MIX_ENV=prod mix release)            # the daemon, for this machine
-```
-
-On Windows, `scripts/setup-windows-toolchain.ps1` and `scripts/install-local.ps1`. The
-`fake` provider replays a JSON script (`{"steps": [{"text": "Done."}]}`) and records every
-request, which is how the suite exercises the whole harness with no model behind it.
-[docs/developer/](docs/developer/README.md) is the developer's tree.
-
-## Writing a client
-
-[PROTOCOL.md](PROTOCOL.md) is the whole surface, and JSON Schema for every message and
-event is committed under [`protocol/schema/v1/`](protocol/schema/v1/); `mix
-troupe.schema.diff` fails the build on a change an older client could not survive.
-`apps/troupe_gateway/test/conformance/` holds a client in the Python standard library that
-CI runs against a real daemon — initialize, list, replay from `seq` 0, send input, answer
-an approval, verify the hash chain. It is a test fixture, not a package, and the check that
-the protocol alone is enough to be a client.
+This repository is all of it: the platform, the daemon and both clients, with one
+`VERSION` and one release ([docs/developer/ci.md](docs/developer/ci.md)). [ARCHITECTURE.md](ARCHITECTURE.md)
+is the design and [DECISIONS.md](DECISIONS.md) why it is that way.
 
 ## Licence
 
 Apache-2.0: [LICENSE](LICENSE) and [NOTICE](NOTICE). The packages Troupe depends on, and
 their licences, are in [docs/third-party-licences.md](docs/third-party-licences.md), and
 their licence texts in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt), which every
-download and image carries with LICENSE and NOTICE.
-[CONTRIBUTING.md](CONTRIBUTING.md) says how to contribute (every commit signed off, under
-the DCO), [SECURITY.md](SECURITY.md) how to report a vulnerability privately, and
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) how we treat each other.
+download and image carries with LICENSE and NOTICE. [SECURITY.md](SECURITY.md) says how to
+report a vulnerability privately, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) how we
+treat each other.
 
 **The name.** The licence grants no rights to the name "Troupe" or to its logo, the mask
 (section 6). Use the name to say truthfully what your work is: that it is built on

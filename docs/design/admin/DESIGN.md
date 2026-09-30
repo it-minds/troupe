@@ -115,7 +115,7 @@ Readable in greyscale, and by anyone whose red and green are the same colour:
 | `metric` | **Mono** 600 | 22px / 1.15 | The four numbers on Overview. Nowhere else |
 
 - Column headers are `micro`, **sentence case**. No all-caps tracking anywhere.
-- All numerals that can be compared down a column are mono with `font-variant-numeric: tabular-nums` and right-aligned. Amounts carry `kr` in muted text so the figure stays the figure.
+- All numerals that can be compared down a column are mono with `font-variant-numeric: tabular-nums` and right-aligned. Amounts carry their unit, `$`, in muted text so the figure stays the figure: a budget is millionths of a dollar, which is what the gateways report cost in.
 - Timestamps are ISO-ish and UTC: `2026-09-13 11:52:14`, with the column header saying `Time (UTC)` once instead of repeating a suffix on every row. Relative time ("53 h ago") appears only as a *second* line next to the absolute one, never instead of it.
 - Identifiers are never truncated in the middle without a title attribute; long values wrap with `overflow-wrap: anywhere` in title blocks and ellipsis in table cells.
 
@@ -172,7 +172,7 @@ No media-query-switched layouts. Every region declares a flex basis or an auto-f
 
 **Diff** — hunk header, `+`/`−` glyph, coloured left marker, coloured background. Used identically for config revisions, bundle versions and audit entries. Never a coloured blob.
 
-**Apply control** — Apply now / Commit for review, with the consequence written between them. Result states: applied, pending, waiting, rejected by policy.
+**Apply control** — Apply now, with the consequence written beside it, where the plane writes the cluster (`direct`). Where a repository holds what the cluster runs (`gitops`) there is none: the page is **Locked to gitops**, says where the resources come from, and a change is a commit there. Result states: applied, pending, waiting, rejected by policy.
 
 **Budget bar** — track plus fill, under/near/over, always with the figures beside it in text.
 
@@ -205,7 +205,7 @@ Friction proportional to blast radius, and the friction is **understanding**, no
 |---|---|
 | Drain a machine | One click. Reversible, named "Stop draining". |
 | Grant or revoke a profile for a team | One click, effective next session. |
-| Apply a profile change | Two named buttons with the consequence spelled out between them. |
+| Apply a profile change | One named button with the consequence spelled out beside it, after the diff has been read. None in `gitops` mode, where the change is a commit. |
 | Publish or roll back a bundle | One click; rollback republishes as a new revision so history is never rewritten, and the copy says so. |
 | Change identity configuration | Cannot be saved until a test passes. Four checks, each named. |
 | Erase a session | Typed confirmation of the exact identifier. |
@@ -222,7 +222,7 @@ The erase dialog is the model for everything irreversible. It states what is del
 
 **Secrets are references.** Credentials render as a vault path with `reference only · never shown` beneath. There is no reveal, no masked value, no copy button. `credential missing` is a first-class status with its own colour and glyph.
 
-**The console proposes, the cluster disposes.** Every write offers Apply now or Commit for review. Committed changes sit in `pending` with the commit sha and the elapsed time, and the pending copy is explicit that nothing has changed in the cluster yet. When intent and reality disagree — a worker reporting a bundle that was never published — that is `drift`, shown as its own panel naming both values, not as an error.
+**The console proposes, the cluster disposes.** In `direct` mode a write is applied now and the cluster reconciles it; in `gitops` mode the console writes nothing a repository holds — profiles, the policy, triggers — and shows each as the plane last read it, locked, with the generation it was read at and anything the last pass refused. The plane never writes git: a change there is a commit somebody reviews. When intent and reality disagree — a worker reporting a bundle that was never published — that is `drift`, shown as its own panel naming both values, not as an error.
 
 **Changes to running things wait.** `waiting` gets its own colour, its own glyph, and its own panel: which machines already took the new revision, which still carry sessions, and when the oldest session started. The copy ends with the sentence an operator actually needs: *"Nothing is wrong; nothing needs doing."*
 

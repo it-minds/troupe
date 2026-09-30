@@ -16,6 +16,7 @@ defmodule Troupe.Plane.ProvisionerTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.{Admin, Enrolment, FakeWorkerProfiles, Fleet, Identity}
+  alias Troupe.Plane.Admin.API
   alias Troupe.Plane.Fleet.{Host, Hosts, Provisioner}
 
   @moduletag timeout: 60_000
@@ -193,6 +194,23 @@ defmodule Troupe.Plane.ProvisionerTest do
       assert "dev" in Enum.map(Identity.grants_for_team(context.team), & &1.profile)
     end
 
+    test "and a grant's options name neither the team nor the profile", context do
+      # Those are the method's own arguments, and the checks above are asked of them. The
+      # options are the volume mode and the entitlements.
+      {:ok, other_group} = Identity.upsert_group(%{external_id: "other", display_name: "other"})
+      {:ok, other} = Identity.enable_team(other_group, %{name: "other"})
+
+      assert {:ok, _team} =
+               Admin.team_grant(context.actor, "delivery", "dev", %{
+                 "profile" => "laptops",
+                 "team_id" => other.id,
+                 "volume_mode" => "rw"
+               })
+
+      assert [%{profile: "dev", volume_mode: "rw"}] = Identity.grants_for_team(context.team)
+      assert Identity.grants_for_team(other) == []
+    end
+
     test "and is granted once a platform admin has allowed this team", context do
       assert {:ok, _} =
                Admin.team_update(context.actor, "delivery", %{allow_unenforced_workers: true})
@@ -273,6 +291,29 @@ defmodule Troupe.Plane.ProvisionerTest do
       assert {:ok, [listed]} = Admin.hosts_list(context.actor, "laptops")
       refute Map.has_key?(listed, :secret)
       refute Hosts.by_name("laptops", "build-box").secret_hash == host.secret
+    end
+
+    test "takes a name and an address, and the rest of the row is the plane's", context do
+      assert {:ok, host} =
+               Admin.host_register(context.actor, "laptops", %{
+                 "name" => "build-box",
+                 "address" => "10.0.0.9",
+                 "last_enrolled_at" => ~U[2020-01-01 00:00:00.000000Z],
+                 "enabled" => false,
+                 "secret_rotated_by" => "someone-else@example.test"
+               })
+
+      assert host.state == :never_seen
+      assert host.enabled
+
+      row = Hosts.by_name("laptops", "build-box")
+      assert row.last_enrolled_at == nil
+      assert row.secret_rotated_by == nil
+      assert row.registered_by == "root@example.test"
+
+      # Which is what `admin.host.register` declares of a machine.
+      [_profile, machine] = API.method("admin.host.register").arguments
+      assert Enum.map(machine.properties, & &1.name) == Admin.host_keys()
     end
 
     test "and the secret it minted is the one enrolment accepts", context do

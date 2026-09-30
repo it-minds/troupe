@@ -12,6 +12,30 @@ person's memberships are **replaced** with the token's list. A token with no gro
 says nothing about groups and leaves memberships alone. A group is not access: access is a
 *team*, which a platform admin enables from a group, plus grants on top.
 
+A person signs in at the provider, never at the plane, and the plane turns what comes back
+into a token of its own:
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant IdP as Identity provider
+  participant P as Plane
+  participant B as OpenBao
+  C->>P: GET /.well-known/troupe
+  P-->>C: the issuer, the client id, the endpoints, the scopes
+  C->>IdP: device grant (a terminal), or code and PKCE (a browser)
+  IdP-->>C: id_token, refresh_token
+  C->>P: POST /auth/exchange {id_token}
+  Note over P: verify against the provider's keys, read<br/>sub, email, name and the groups claim,<br/>replace the person's memberships
+  P->>B: transit sign
+  P-->>C: plane token: 15 minutes, the person's teams and scopes
+  C->>P: POST /rpc, Bearer plane token
+  Note over C: before it runs out: refresh at the provider,<br/>and exchange the new id_token again
+```
+
+The provider's refresh token stays on the client's machine; the plane keeps no credential
+of the person's. A session's pod gets a token of its own, minted per pod (§5).
+
 SCIM (`/scim/v2/Users`, `/scim/v2/Groups`) writes the same rows, keyed on `externalId`
 (else `userName`), which must be what later appears as the subject. Group pushes replace
 membership; deletes are soft. Membership is never edited in Troupe.
@@ -27,6 +51,12 @@ membership; deletes are soft. Membership is never edited in Troupe.
 Asking about a team you may not see is `not_found`, not `forbidden`, so existence is not
 leaked; a refusal on role carries `data.required_role`. No role can read session content:
 no admin method returns events.
+
+A team admin changes their team's settings with `admin.team.update`: budget and period,
+retention, default visibility and volume, within the platform's ceilings. Whether a team may
+be granted a profile nothing enforces (`allow_unenforced_workers`) is a platform admin's.
+Neither role renames a team or changes the group it was enabled from: the method takes the
+settings it declares and leaves anything else it is sent.
 
 ## 3. Service principals
 

@@ -38,7 +38,9 @@ defmodule Troupe.Plane.Admin.API do
 
   alias Troupe.Plane.Admin
   alias Troupe.Plane.Admin.API.{Argument, Method}
+  alias Troupe.Plane.Fleet.Provisioner
   alias Troupe.Plane.Identity.Team
+  alias Troupe.Plane.Triggers.Trigger
   alias Troupe.Protocol.Error
 
   # -- the shapes that appear in more than one method -------------------------
@@ -77,10 +79,17 @@ defmodule Troupe.Plane.Admin.API do
         "How many workers to keep up when nothing is running. 0 scales to zero, which costs the next session a cold start of roughly half a minute."
     },
     %Argument{
+      name: "provisioner",
+      type: :string,
+      values: Provisioner.names(),
+      description:
+        "What makes the workers exist: kubernetes (the default; the operator runs pods) or ssh (machines registered with admin.host.register, which dial the plane; nothing is written to the cluster). A profile on ssh gives none of the cluster's guarantees, and a team may be granted it only once a platform admin has allowed that team unenforced workers."
+    },
+    %Argument{
       name: "spec",
       type: :object,
       description:
-        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. Replicas, sessionsPerPod, resources and storage are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
+        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, storage.storageClassName. configBundleChannel is the bundle channel the profile follows, stable where absent. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
     }
   ]
 
@@ -156,7 +165,24 @@ defmodule Troupe.Plane.Admin.API do
       name: "volume_storage_class",
       type: :string,
       description: "The storage class the team volume is provisioned from."
+    },
+    %Argument{
+      name: "allow_unenforced_workers",
+      type: :boolean,
+      description:
+        "Whether this team may be granted a profile whose workers run where nothing is enforced (machines rather than a cluster). A platform admin's to set; refused from a team admin, and refused as false while the team holds such a grant."
     }
+  ]
+
+  # Enabling a team takes its name as well, which updating one does not.
+  @team_enable_properties [
+    %Argument{
+      name: "name",
+      type: :string,
+      description:
+        "The team's name, which grants, sessions and principals are addressed by. Absent, it is made from the group's."
+    }
+    | @team_properties
   ]
 
   @principal_properties [
@@ -165,6 +191,11 @@ defmodule Troupe.Plane.Admin.API do
       type: :string,
       required: true,
       description: "What this principal is for."
+    },
+    %Argument{
+      name: "description",
+      type: :string,
+      description: "A sentence about what it does, for whoever finds it in a listing later."
     },
     %Argument{
       name: "sponsor",
@@ -193,22 +224,120 @@ defmodule Troupe.Plane.Admin.API do
       name: "name",
       type: :string,
       required: true,
-      description: "The trigger's name, unique within the team."
+      description:
+        "The trigger's name, unique within the team: lowercase letters, digits and dashes."
     },
-    %Argument{name: "kind", type: :string, description: "schedule, webhook or manual."},
     %Argument{
-      name: "schedule",
+      name: "principal",
       type: :string,
-      description: "A cron expression, for a schedule trigger."
+      description:
+        "The service principal its sessions run as, by subject: svc:<team>/<name>, of this team. Needed to create one."
     },
-    %Argument{name: "profile", type: :string, description: "The profile its sessions start on."},
-    %Argument{name: "prompt", type: :string, description: "What the session is asked to do."},
-    %Argument{name: "enabled", type: :boolean, description: "Whether it fires at all."},
+    %Argument{
+      name: "profile",
+      type: :string,
+      description:
+        "The profile its sessions start on: one this plane has and the principal may use. Needed to create one."
+    },
+    %Argument{
+      name: "agent",
+      type: :string,
+      description: "The primary agent. Absent is the profile's default."
+    },
+    %Argument{
+      name: "enabled",
+      type: :boolean,
+      description: "Whether it fires at all, by schedule or by hand. true where absent."
+    },
+    %Argument{
+      name: "source",
+      type: :object,
+      description: "What is expected to fire it. Needed to create one.",
+      properties: [
+        %Argument{
+          name: "kind",
+          type: :string,
+          values: Trigger.source_kinds(),
+          required: true,
+          description:
+            "schedule (fired by cron), webhook (fired at POST /trigger/<id> with its own key, or by an executor outside the plane) or manual (fired only by hand)."
+        },
+        %Argument{
+          name: "cron",
+          type: :string,
+          description:
+            "For a schedule: five fields, minute hour day-of-month month day-of-week, in UTC."
+        },
+        %Argument{
+          name: "tz",
+          type: :string,
+          description:
+            "For a schedule: UTC, the only zone this plane keeps. Another is refused rather than ignored."
+        },
+        %Argument{
+          name: "provider",
+          type: :string,
+          description: "For a webhook: who sends it, for the executor that receives it."
+        }
+      ]
+    },
+    %Argument{
+      name: "prompt_template",
+      type: :string,
+      description:
+        "What each session is asked to do, with {{event.*}}, {{trigger.*}} and {{run.*}} placeholders. A missing path renders empty; nothing is escaped."
+    },
+    %Argument{
+      name: "terms",
+      type: :object,
+      description:
+        "What an unattended session may spend, as session.create checks it. Absent are the defaults.",
+      properties: [
+        %Argument{
+          name: "budget_micros",
+          type: :integer,
+          description:
+            "Reserved at each activation, in millionths of a currency unit; capped to what the team has left."
+        },
+        %Argument{name: "max_turns", type: :integer, description: "1 to 500."},
+        %Argument{name: "wall_clock_seconds", type: :integer, description: "60 to 86400."},
+        %Argument{
+          name: "approvals",
+          type: :string,
+          values: ~w(wait deny),
+          description: "wait leaves an approval for a person; deny answers no. There is no auto."
+        }
+      ]
+    },
+    %Argument{
+      name: "visibility",
+      type: :string,
+      values: ~w(private team),
+      description: "Who may see its sessions. team where absent."
+    },
+    %Argument{
+      name: "review",
+      type: :string,
+      values: ~w(required none),
+      description:
+        "Whether a person is expected to look at each run (admin.run.review). required where absent."
+    },
+    %Argument{
+      name: "notify",
+      type: :array,
+      description: "Subjects granted collaborator on every run's session."
+    },
     %Argument{
       name: "notify_url",
       type: :string,
       description:
         "An absolute http or https URL told when a run ends. Loopback and link-local are refused, and the host must be one this deployment's egress policy allows."
+    },
+    %Argument{
+      name: "concurrency",
+      type: :integer,
+      description:
+        "The cap on live runs, 1 to 100; a firing over it is recorded as skipped. 1 where absent."
     }
   ]
 
@@ -223,7 +352,15 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.profiles.list",
       function: :profiles_list,
-      summary: "Every profile, with its pods, conditions and load.",
+      summary:
+        "Every profile, with its pods, conditions and load. On a gitops plane each carries `gitops`: the repository it comes from, the resource generation it was read at, and any problem the last pass reported — `refused` (the resource fails the plane's checks and is not used, with the reasons), `missing` (a row the cluster has no resource for), `plane_only` (nothing applies it from a repository yet) or `unwritten`. A refused resource with no row is listed too.",
+      risk: :read
+    },
+    %Method{
+      name: "admin.profiles.export",
+      function: :profiles_export,
+      summary:
+        "Every profile, the cluster policy and every trigger as a repository would hold them, to bootstrap one before switching a plane to gitops mode: a path and the YAML for each, and notes where something needs deciding first. Left out of every profile's manifest is what the plane or the cluster writes (spec.replicas, spec.teams, spec.mcpServers, the troupe.dev/drained annotation, status), listed in left_out: a repository must not hold them. A trigger's manifest has no key, runs or revisions, which stay with the plane.",
       risk: :read
     },
     %Method{
@@ -342,7 +479,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.put",
       function: :profile_put,
       summary:
-        "Create or update a profile, returning the diff that was applied. On a GitOps plane this commits for review rather than changing the cluster.",
+        "Create or update a profile, returning the diff that was applied. Refused on a gitops plane as managed_by_gitops: there a repository holds the profiles, and a change is a commit to it.",
       risk: :write,
       arguments: [
         %Argument{
@@ -375,7 +512,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.delete",
       function: :profile_delete,
       summary:
-        "Remove a profile. Sessions on it become read-only rather than being erased, and its pods go away.",
+        "Remove a profile. Sessions on it become read-only rather than being erased, and its pods go away. Refused on a gitops plane as managed_by_gitops, except for a row the cluster has no resource for (reported missing), which it deletes and nothing else.",
       risk: :destructive,
       confirm: "name",
       arguments: [
@@ -425,8 +562,9 @@ defmodule Troupe.Plane.Admin.API do
         %Argument{
           name: "attrs",
           type: :object,
-          description: "Anything to set at the same time, as in admin.team.update.",
-          properties: @team_properties
+          description:
+            "The team's name, and anything to set at the same time, as in admin.team.update.",
+          properties: @team_enable_properties
         }
       ]
     },
@@ -441,7 +579,8 @@ defmodule Troupe.Plane.Admin.API do
           name: "attrs",
           type: :object,
           required: true,
-          description: "The fields to change. Anything not named is left alone.",
+          description:
+            "The fields to change, of those below. Anything not named is left alone, and a key that is not one of them is ignored: a team's name and the group it was enabled from are not changed here.",
           properties: @team_properties
         }
       ]
@@ -911,7 +1050,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.provisioning.mode",
       function: :provisioning_mode,
       summary:
-        "Whether this plane applies profiles to the cluster directly or commits them for review. Worth knowing before writing one.",
+        "Whether this plane writes profiles to the cluster itself (direct) or reads them and the triggers from resources a repository holds (gitops), where a write to either is refused. Worth knowing before writing one.",
       risk: :read
     },
     %Method{
@@ -1091,7 +1230,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.triggers.list",
       function: :triggers_list,
-      summary: "A team's triggers: what fires them, what they run, and whether they are enabled.",
+      summary:
+        "A team's triggers: what fires them, what they run, and whether they are enabled. On a gitops plane each carries `gitops`: the Trigger resource it comes from, the generation it was read at, and any problem the last pass reported (`refused` with the reasons, or `missing`). A refused resource of the team with no trigger behind it is listed too, and a platform admin also sees those that name no team here, with team null.",
       risk: :read,
       arguments: [
         %Argument{name: "team", type: :string, required: true, description: "The team's name."}
@@ -1100,14 +1240,16 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.trigger.put",
       function: :trigger_put,
-      summary: "Create or update a trigger.",
+      summary:
+        "Create or update a trigger. Refused on a gitops plane as managed_by_gitops, switching one on or off included: there a repository holds the triggers, and a change is a commit to it.",
       risk: :write,
       arguments: [
         %Argument{
           name: "trigger",
           type: :object,
           required: true,
-          description: "The trigger, whole.",
+          description:
+            "The trigger. Creating one needs principal, profile and source; putting one that exists changes only the fields sent.",
           properties: @trigger_properties
         }
       ]
@@ -1115,7 +1257,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.trigger.delete",
       function: :trigger_delete,
-      summary: "Remove a trigger. Its runs go with it; the sessions they created do not.",
+      summary:
+        "Remove a trigger. Its runs go with it; the sessions they created do not. Refused on a gitops plane as managed_by_gitops, except for a trigger the cluster has no resource for (reported missing).",
       risk: :destructive,
       confirm: "name",
       arguments: [
@@ -1147,7 +1290,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.trigger.run",
       function: :trigger_run,
-      summary: "Fire a trigger now, by hand. It starts a real session and spends real money.",
+      summary:
+        "Fire a trigger now, by hand. It starts a real session and spends real money. Works on a gitops plane too.",
       risk: :write,
       arguments: [
         %Argument{name: "team", type: :string, required: true, description: "The team's name."},
@@ -1163,7 +1307,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.trigger.key.rotate",
       function: :trigger_key_rotate,
       summary:
-        "Mint the trigger's own webhook key, replacing whatever it had. Returned once and never readable again; the old key stops working immediately.",
+        "Mint the trigger's own webhook key, replacing whatever it had. Returned once and never readable again; the old key stops working immediately. Works on a gitops plane too: the key is the plane's and never in a resource.",
       risk: :write,
       arguments: [
         %Argument{name: "team", type: :string, required: true, description: "The team's name."},
@@ -1267,8 +1411,8 @@ defmodule Troupe.Plane.Admin.API do
   defp argument("content", params), do: params["content"] || %{}
   defp argument(name, params), do: params[name]
 
-  @known_options ~w(limit actor kind subject_id profile state team channel) ++
-                   ~w(trigger status origin needs_review)
+  # The filter's own declaration, so that the schema and what is read cannot differ.
+  @known_options Enum.map(@filter_properties, & &1.name)
 
   defp options(params) when is_map(params) do
     for {key, value} <- params, key in @known_options, do: {String.to_existing_atom(key), value}

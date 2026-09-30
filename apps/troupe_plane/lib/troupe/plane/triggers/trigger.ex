@@ -24,7 +24,7 @@ defmodule Troupe.Plane.Triggers.Trigger do
 
   import Ecto.Changeset
 
-  alias Troupe.Plane.Triggers.{Cron, Notify}
+  alias Troupe.Plane.Triggers.{Cron, Notify, Source}
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -37,6 +37,9 @@ defmodule Troupe.Plane.Triggers.Trigger do
   @visibilities ~w(private team)
   @reviews ~w(required none)
 
+  # The zones a schedule may name, which are UTC's names and none at all.
+  @utc [nil, "UTC", "Etc/UTC"]
+
   schema "triggers" do
     belongs_to(:team, Troupe.Plane.Identity.Team)
     field(:name, :string)
@@ -44,7 +47,7 @@ defmodule Troupe.Plane.Triggers.Trigger do
     field(:profile, :string)
     field(:agent, :string)
     field(:enabled, :boolean, default: true)
-    field(:source, :map, default: %{})
+    field(:source, Source, default: %{})
     field(:prompt_template, :string, default: "")
     field(:terms, :map, default: %{})
     field(:visibility, :string, default: "team")
@@ -62,6 +65,11 @@ defmodule Troupe.Plane.Triggers.Trigger do
     field(:key_salt, :string)
     field(:key_rotated_at, :utc_datetime_usec)
     field(:key_rotated_by, :string)
+
+    # In GitOps mode, the generation of the `Trigger` resource this row was last read from
+    # (Decision 737), and `nil` for a row no resource was ever read into. Not in `@fields`
+    # either: the pass that reads the cluster writes it and nothing else does.
+    field(:resource_generation, :integer)
 
     timestamps(type: :utc_datetime_usec)
   end
@@ -91,10 +99,26 @@ defmodule Troupe.Plane.Triggers.Trigger do
   @spec source_kinds() :: [String.t()]
   def source_kinds, do: @source_kinds
 
+  @doc """
+  Whether a source's zone is one this plane keeps: UTC, or none, which is UTC.
+
+  Only a row saved before the zone was checked has another, and the scheduler does not
+  fire it: at three in UTC it would run at the wrong hour, and there is no time zone
+  database here to say when three in its zone is.
+  """
+  @spec utc?(map()) :: boolean()
+  def utc?(source), do: source["tz"] in @utc
+
   @doc "Set or replace the trigger's own key. Separate from `changeset/2` on purpose."
   @spec key_changeset(t(), map()) :: Ecto.Changeset.t()
   def key_changeset(trigger, attrs) do
     cast(trigger, attrs, [:key_hash, :key_salt, :key_rotated_at, :key_rotated_by])
+  end
+
+  @doc "Record the generation of the resource a row was read from, in GitOps mode."
+  @spec generation_changeset(t() | Ecto.Changeset.t(), integer() | nil) :: Ecto.Changeset.t()
+  def generation_changeset(trigger, generation) do
+    cast(trigger, %{resource_generation: generation}, [:resource_generation])
   end
 
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
@@ -149,7 +173,7 @@ defmodule Troupe.Plane.Triggers.Trigger do
     end
   end
 
-  defp validate_tz(changeset, tz) when tz in [nil, "UTC", "Etc/UTC"], do: changeset
+  defp validate_tz(changeset, tz) when tz in @utc, do: changeset
 
   defp validate_tz(changeset, tz) do
     add_error(changeset, :source, "tz #{inspect(tz)} is not supported; this plane keeps UTC")

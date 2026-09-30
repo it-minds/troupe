@@ -2,40 +2,35 @@
 
 How a build reaches a cluster. Installing and operating one is the admin track:
 [../admin/installing.md](../admin/installing.md), [../admin/configuration.md](../admin/configuration.md),
-[../deploying-on-scaleway.md](../deploying-on-scaleway.md).
+[../admin/routine-tasks.md](../admin/routine-tasks.md#upgrade).
 
 ## 1. Environments
 
-There is no staging. Production is the repository's `production` environment, rolled by
-a release.
+This repository deploys nothing and holds no credential for any cluster. It has one
+environment of its own, for development; a real deployment lives in a repository of its
+own, which pins a release and keeps its values (Decision 734).
 
 | Name | What | Values | Brought up by |
 |---|---|---|---|
 | dev | kind on one machine: single replicas on `emptyDir`, Dex, a static OpenBao token | `dev/kind/values.yaml`, `dev/kind/dependencies.yaml` | `scripts/remote-up` ([local-setup.md §4](local-setup.md#4-a-plane-and-a-worker-on-kind)) |
-| production | the chart with a values file of the deployment's own (from `values.small.yaml` or `values.scaleway.yaml`) | the `DEPLOY_VALUES` secret | a first install by hand; then every release |
+| a deployment | the published chart and images at one release, with values of its own (from `values.small.yaml` or `values.example.yaml`) | its own repository | whatever that repository runs, or [routine-tasks.md](../admin/routine-tasks.md#upgrade) by hand |
 
-## 2. A release deploys itself
+## 2. A release publishes, and stops there
 
 `scripts/release <version>` opens the pull request that changes `VERSION`; merging it is
 the release (Decisions 669, 676). `release.yml` runs the full suite, builds the images at
-that version, tags `v<version>`, packages the chart, attaches the native builds, and runs
-`scripts/deploy` in the `production` environment. A release candidate (`0.4.0-rc.1`) is
-published and deployed as a dry run. Nothing is released by pushing a tag, and nothing is
-deployed from a laptop. The workflows are in [../../.github/CI.md](../../.github/CI.md).
+that version and pushes them to `ghcr.io`, tags `v<version>`, publishes the chart there
+and on the release page, and attaches the native builds (735). A deployment picks the
+release up from what was published. Nothing is released by pushing a tag. The workflows
+are in [ci.md](ci.md).
 
-`scripts/deploy <chart .tgz or directory> [--dry-run]` is the one implementation of
-deploying: CI runs it, `deploy.yml` runs it to roll back to or render a published release,
-and a person with the same credentials can run it by hand. It applies the chart's CRDs
-server-side, `helm upgrade --wait` (rolling back on failure), waits for the rollouts, and,
-with `PLANE_URL` set, checks that `/.well-known/troupe` reports the chart's `appVersion`
-(and `EXPECT_COMMIT`). It also prints every pod's running digest: a tag that already
-exists with `imagePullPolicy: IfNotPresent` leaves the old image serving while Helm reports
-success, so CI never publishes a floating tag. Its inputs: `KUBECONFIG_FILE`, `VALUES`,
-`NAMESPACE`, `RELEASE`, `PLANE_URL`, `EXPECT_COMMIT`.
-
-Before the first automated deploy the `production` environment needs `KUBECONFIG` (the
-`troupe-deployer` account from `deploy/ci-deployer.yaml`, turned into a kubeconfig by
-`scripts/ci-kubeconfig`), `DEPLOY_VALUES` and `PLANE_URL`.
+Rolling a release, by whatever does it, is: the chart's CRDs applied server-side (Helm
+never upgrades them), `helm upgrade --wait` rolling back on failure, the rollouts waited
+for, and `/.well-known/troupe` checked for the release's version and commit. Every pod's
+running digest is worth reading too: a tag that already exists with `imagePullPolicy:
+IfNotPresent` leaves the old image serving while Helm reports success, so CI never
+publishes a floating tag. The commands are in
+[routine-tasks.md](../admin/routine-tasks.md#upgrade).
 
 ## 3. What a roll does
 
@@ -62,7 +57,7 @@ Before the first automated deploy the `production` environment needs `KUBECONFIG
 
 | Option | What it does |
 |---|---|
-| `deploy.yml` with an earlier version | rolls that release's chart through `scripts/deploy`; `dry_run` renders it first |
+| the deployment pinned to an earlier release | rolls that release's chart the same way as a new one |
 | `helm rollback troupe <revision>` | reverts the release; the hook migrates up again and undoes no migration |
 | `Troupe.Plane.Release.rollback(repo, version)` | migrations down to a version; by hand, from a one-off pod shaped like the migrate Job ([../admin/backup-restore.md](../admin/backup-restore.md#a-bad-migration)) |
 | the database | the managed provider's PITR, then `mix troupe.index.rebuild` |
