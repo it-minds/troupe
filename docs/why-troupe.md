@@ -73,7 +73,7 @@ adds, and where each part is described:
   it cost, and no administrative method returns what a session said
   ([what Troupe never does](user/README.md#what-troupe-never-does)).
 
-![The admin console's teams page, with example teams, their budgets and what they have spent](assets/admin-console.png)
+![The admin console's teams page: example teams, the identity-provider groups they draw their members from, and the profiles each may run](assets/admin-console.png)
 
 ## What a plane asks of you
 

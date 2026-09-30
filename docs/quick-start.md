@@ -207,7 +207,7 @@ runs on its Kubernetes cluster, and it adds:
   has been altered.
 - **A [console](glossary.md#console)** at `/admin` for all of it.
 
-![The admin console's teams page, with example teams, their budgets and what they have spent](assets/admin-console.png)
+![The admin console's teams page: example teams, the identity-provider groups they draw their members from, and the profiles each may run](assets/admin-console.png)
 
 With a plane's address from whoever runs it:
 

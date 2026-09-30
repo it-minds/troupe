@@ -16,9 +16,7 @@ started it from, and every client, ours or yours, reaches it over
 ```mermaid
 flowchart LR
   subgraph machine["Your machine"]
-    tui["troupe<br/>terminal UI"]
-    app["desktop app"]
-    own["your program"]
+    clients["clients<br/>troupe (terminal UI), desktop app, your program"]
     daemon["troupe-daemon<br/>sessions, agents, tools, log"]
   end
   subgraph cluster["Your cluster, if you run one"]
@@ -26,14 +24,15 @@ flowchart LR
     pods["worker pods<br/>the same harness"]
   end
   llm[("your model provider<br/>or gateway")]
-  tui & app & own -->|PROTOCOL.md| daemon
-  tui & app & own -->|PROTOCOL.md| pods
-  tui & app -.->|sign in| plane
+  clients -->|PROTOCOL.md| daemon
+  clients -->|PROTOCOL.md| pods
+  clients -.->|sign in| plane
   plane -->|places sessions| pods
-  daemon & pods --> llm
+  daemon --> llm
+  pods --> llm
 ```
 
-![The desktop app: sessions in one list, one of them stopped on an approval](docs/assets/desktop-app.png)
+![The desktop app: a team's session on a plane, stopped to ask before it runs a command, with what it has cost so far](docs/assets/desktop-app.png)
 
 What it is not:
 
