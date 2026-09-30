@@ -224,8 +224,8 @@ push to `main`, tagged `sha-<short>`. **A release is a merged change to `VERSION
 Decision 669): `scripts/release <version>` opens that pull request, and merging it
 promotes the images — this one included — to that version and attaches the desktop
 installers the root [`release.yml`](../../.github/workflows/release.yml) builds. Rolling a
-release onto a cluster is the deployment's own business. See the root README's
-[Releasing](../../README.md#releasing).
+release onto a cluster is the deployment's own business. See
+[docs/developer/ci.md](../../docs/developer/ci.md#release-the-full-suite-then-everything).
 
 ### Where it is mounted
 

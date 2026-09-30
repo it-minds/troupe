@@ -99,6 +99,13 @@ curl -sS https://troupe.example.com/.well-known/troupe | jq .plane.build
 The build names the commit, time and version; if it is not what you deployed, the rollout
 has not finished or the tag did not move.
 
+Besides the API, the plane's host serves `/`, the page a person gets when they are handed
+the URL, which says what this host is and the ways in; `/docs`, the concepts; `/admin`, the
+console; and `/healthz`, for Kubernetes. `plane.appUrl` says where the graphical client is
+(the chart's own at `/app` by default; a team with its own client sets `gui.enabled: false`
+and points it there), and `plane.cliUrl` where the terminal client is published (empty,
+the page says to ask an administrator).
+
 ## 4. The first administrator
 
 Sign in at `https://troupe.example.com/admin`. You are a platform admin because you are in

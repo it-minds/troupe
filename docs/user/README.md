@@ -9,7 +9,7 @@ machine and you see the same transcript; two people can open the same session at
 ## First run
 
 1. Install `troupe` and `troupe-daemon` with the latest release's `install.sh` or
-   `install.ps1` ([README](../../README.md#what-it-ships)), saying yes to the TUI.
+   `install.ps1` ([quick start](../quick-start.md#1-install)), saying yes to the TUI.
 2. `troupe config` sets up a model. Enter at every question is Anthropic with the key read
    from `ANTHROPIC_API_KEY`; the other choices are OpenAI, a gateway such as LiteLLM, or
    your organisation's plane.
@@ -92,6 +92,8 @@ from the latest release. `troupe login <plane URL>` signs you in with a code you
 your browser; you sign in where you always do, and Troupe never has a password of its own.
 
 ## Words you will meet
+
+The ones below come up first; the [glossary](../glossary.md) has the rest.
 
 **Plane.** The server your team signs in to. It knows who you are, which teams you are in,
 which profiles they may use and where every remote session runs. Never what one said.

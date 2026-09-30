@@ -5,6 +5,10 @@ tracks do not lean on each other: an operator never needs the contributor's page
 client author needs nothing but the protocol. The same pages are published as a site at
 <https://it-minds.github.io/troupe/>, built from this directory by `mkdocs.yml`.
 
+New here: the [quick start](quick-start.md) goes from nothing to a first session, what it
+cost and a cap on the next one in ten minutes; [why Troupe](why-troupe.md) says who it is
+for and when you do not need it; the [glossary](glossary.md) has every word Troupe uses.
+
 ## Using Troupe
 
 You run agents, on your own machine or on your team's plane.

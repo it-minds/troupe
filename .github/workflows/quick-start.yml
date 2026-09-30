@@ -1,0 +1,151 @@
+# The quick start, run the way a reader runs it (docs/quick-start.md, Decision 740): every
+# block the page marks with `<!-- quick-start -->`, `<!-- quick-start: sh -->` or
+# `<!-- quick-start: powershell -->`, in order, as one script, from the installers a reader
+# downloads from the latest release. The `sh` blocks run in `sh` on Ubuntu, the
+# `powershell` ones in PowerShell on Windows. `scripts/quick-start-blocks` pulls them out
+# of the page, so a command the page marks is a command this has run.
+#
+# What it cannot run, the page says too: a real model (`TROUPE_PROVIDER=fake` answers from
+# a script, so every command runs and only the model's reply is canned), the terminal UI
+# (it needs a person at a terminal), macOS (`native.yml` smoke-tests those builds), and a
+# plane. It also checks that the README's quick start is the page's, word for word, and
+# that the README's protocol badge names PROTOCOL.md's version.
+#
+# A pull request that changes the page, the README or this file runs it; so does every
+# night, because what can break it without a change here is a release. By hand, `version`
+# installs another release instead of the latest, a pre-release included.
+name: quick-start
+
+on:
+  pull_request:
+    paths:
+      - README.md
+      - PROTOCOL.md
+      - docs/quick-start.md
+      - scripts/quick-start-blocks
+      - .github/workflows/quick-start.yml
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: A release to install instead of the latest, such as 0.6.3-beta
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quick-start-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The installers read it; empty is the latest release.
+  TROUPE_VERSION: ${{ inputs.version }}
+  # The model: a script, not a key. The environment beats every settings file, as it would
+  # for a reader who set a provider there.
+  TROUPE_PROVIDER: fake
+  TROUPE_MODEL: fake-model
+
+jobs:
+  linux:
+    name: the quick start on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: The README's quick start is the page's, and its protocol badge is PROTOCOL.md's
+        run: |
+          for shell in sh powershell; do
+            page=$(sh scripts/quick-start-blocks docs/quick-start.md "$shell")
+            readme=$(sh scripts/quick-start-blocks README.md "$shell")
+            if [ -z "$page" ] || [ -z "$readme" ]; then
+              echo "::error::docs/quick-start.md and README.md must each mark a block for $shell"; exit 1
+            fi
+            case "$page" in
+              *"$readme"*) ;;
+              *) echo "::error file=README.md::the README's $shell block is not the quick start's, word for word"; exit 1 ;;
+            esac
+          done
+          version=$(sed -n '1s/^# The Troupe protocol, version \([0-9][0-9]*\)$/\1/p' PROTOCOL.md)
+          if [ -z "$version" ] || ! grep -qF "badge/protocol-v$version-" README.md; then
+            echo "::error file=README.md::the protocol badge does not say v$version, PROTOCOL.md's version"; exit 1
+          fi
+
+      # What a reader does between the blocks: opens a new terminal, whose PATH has the
+      # installer's directory in it. And the model's one reply.
+      - name: Set up
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          reply='add.py subtracts b from a, so add(2, 3) is -1; it should return a + b.'
+          printf '{"steps": [{"text": "%s"}], "routes": {"root": [{"text": "%s"}]}}\n' "$reply" "$reply" \
+            > "$RUNNER_TEMP/model.json"
+          echo "TROUPE_FAKE_SCRIPT=$RUNNER_TEMP/model.json" >> "$GITHUB_ENV"
+          echo "REPLY=$reply" >> "$GITHUB_ENV"
+          sh scripts/quick-start-blocks docs/quick-start.md sh > "$RUNNER_TEMP/quick-start.sh"
+          cat "$RUNNER_TEMP/quick-start.sh"
+
+      - name: The quick start
+        working-directory: ${{ runner.temp }}
+        run: sh -eux quick-start.sh
+
+      # The session's log holds the model's reply, and the settings the page wrote hold.
+      - name: It did what the page says
+        working-directory: ${{ runner.temp }}
+        run: |
+          grep -qF "$REPLY" ~/.local/state/troupe/sessions/*/*/events.jsonl \
+            || { echo "::error::no session's log holds the model's reply"; exit 1; }
+          troupe config validate
+          troupe config --explain max_input_tokens | grep -q 200000 \
+            || { echo "::error::the cap the page writes is not in force"; exit 1; }
+
+  windows:
+    name: the quick start on Windows
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up
+        shell: bash
+        run: |
+          echo "$LOCALAPPDATA\\Programs\\troupe" >> "$GITHUB_PATH"
+          sh scripts/quick-start-blocks docs/quick-start.md powershell > quick-start.ps1
+          cat quick-start.ps1
+
+      - name: The model's reply
+        shell: pwsh
+        run: |
+          $reply = 'add.py subtracts b from a, so add(2, 3) is -1; it should return a + b.'
+          $model = Join-Path $env:RUNNER_TEMP model.json
+          @{ steps = @(@{ text = $reply }); routes = @{ root = @(@{ text = $reply }) } } |
+            ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8NoBOM $model
+          "TROUPE_FAKE_SCRIPT=$model" >> $env:GITHUB_ENV
+          "REPLY=$reply" >> $env:GITHUB_ENV
+
+      # Every command's exit status counts, a native program's included, as `sh -e` does.
+      - name: The quick start
+        shell: pwsh
+        working-directory: ${{ runner.temp }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          Set-PSDebug -Trace 1
+          . (Join-Path $env:GITHUB_WORKSPACE quick-start.ps1)
+
+      - name: It did what the page says
+        shell: pwsh
+        working-directory: ${{ runner.temp }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $PSNativeCommandUseErrorActionPreference = $true
+          $logs = Get-ChildItem (Join-Path $env:LOCALAPPDATA "troupe\sessions") -Recurse -Filter events.jsonl
+          if (-not ($logs | Select-String -SimpleMatch -Quiet -Pattern $env:REPLY)) {
+            throw "no session's log holds the model's reply"
+          }
+          troupe config validate
+          if (-not ((troupe config --explain max_input_tokens) -match "200000")) {
+            throw "the cap the page writes is not in force"
+          }

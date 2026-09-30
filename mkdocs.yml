@@ -84,10 +84,13 @@ nav:
   - Home: README.md
   - Using Troupe:
       - user/README.md
+      - Quick start: quick-start.md
+      - Why Troupe: why-troupe.md
       - The terminal client: clients/tui/README.md
       - The daemon: apps/troupe_daemon/README.md
       - Configuration: user/configuration.md
       - The desktop app, unsigned: clients/gui/docs/install.md
+      - Glossary: glossary.md
   - Running a deployment:
       - admin/README.md
       - Installing: admin/installing.md
