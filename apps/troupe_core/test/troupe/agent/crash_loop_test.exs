@@ -36,8 +36,10 @@ defmodule Troupe.Agent.CrashLoopTest do
     assert detail =~ "Protocol.UndefinedError"
     assert Enum.count(events, &(&1["data"]["reason"] == "agent_failed")) == 1
 
-    # Nothing starts it again: the session stays down until something activates it.
-    refute Registry.whereis({:session, sid})
+    # Nothing starts it again: the session stays down until something activates it. The
+    # registry lets go of a name when it hears of the exit, which can be after the `:DOWN`
+    # reached this test, so wait for that; a session started again would stay registered.
+    unregistered(sid)
     refute Registry.whereis({:node, sid, ["root"]})
   end
 
@@ -120,4 +122,17 @@ defmodule Troupe.Agent.CrashLoopTest do
   defp read(path) do
     path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
   end
+
+  defp unregistered(sid, timeout \\ 5_000),
+    do: poll(fn -> is_nil(Registry.whereis({:session, sid})) end, now() + timeout)
+
+  defp poll(fun, deadline) do
+    cond do
+      fun.() -> :ok
+      now() > deadline -> flunk("the session is still registered")
+      true -> Process.sleep(20) && poll(fun, deadline)
+    end
+  end
+
+  defp now, do: System.monotonic_time(:millisecond)
 end

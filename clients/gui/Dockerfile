@@ -20,8 +20,10 @@
 # `--build-context licences=<the repository's root>` is the one thing read from outside
 # this directory: LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt, which go into the image
 # because Apache-2.0 and the licences of the packages in the bundle ask that they go with
-# every copy. Only those three are sent. Without it the stage below stays empty, and the
-# build stops at the COPY that reads it: `lstat /LICENSE: no such file or directory`.
+# every copy; and PROTOCOL.md, whose error table the client's tests hold the client's own
+# to (`packages/client/test/errors.test.ts`). Only those four are sent. Without it the
+# stages below stop at the first COPY that reads it: `lstat /PROTOCOL.md: no such file or
+# directory`.
 
 FROM scratch AS licences
 
@@ -42,6 +44,9 @@ COPY apps/desktop/package.json apps/desktop/
 RUN pnpm install --frozen-lockfile
 
 COPY . .
+# Where that test looks for it from `packages/client/test`: the repository's root, which
+# is `/` here.
+COPY --from=licences PROTOCOL.md /PROTOCOL.md
 
 ARG TROUPE_GUI_BASE=/
 ENV TROUPE_GUI_BASE=${TROUPE_GUI_BASE}

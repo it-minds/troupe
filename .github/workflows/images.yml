@@ -42,8 +42,9 @@ jobs:
           - {image: troupe-worker, release: troupe_worker, context: ., file: docker/Dockerfile}
           - {image: troupe-a2a, release: troupe_a2a, context: ., file: docker/Dockerfile}
           # The GUI is built from its own directory, which is also the proof that nothing
-          # in it reaches into the rest of the repository - bar LICENSE, NOTICE and
-          # THIRD-PARTY-NOTICES.txt at the root, which it reads as the `licences` context.
+          # in it reaches into the rest of the repository - bar LICENSE, NOTICE,
+          # THIRD-PARTY-NOTICES.txt and PROTOCOL.md at the root, which it reads as the
+          # `licences` context.
           - {image: troupe-gui, release: "", context: clients/gui, file: clients/gui/Dockerfile, contexts: licences=.}
     steps:
       - uses: actions/checkout@v7
