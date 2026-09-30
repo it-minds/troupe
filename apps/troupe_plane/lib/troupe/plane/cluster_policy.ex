@@ -125,18 +125,47 @@ defmodule Troupe.Plane.ClusterPolicy do
 
     case K8s.Client.run(conn, operation) do
       {:ok, resource} ->
+        readable()
         resource
 
       {:error, reason} ->
-        Logger.warning(
-          "troupe plane: no TroupePolicy #{policy_name()} could be read: #{inspect(reason)}"
-        )
-
+        unreadable(reason)
         nil
     end
   end
 
   defp read({:error, _reason}), do: nil
+
+  # Said when it changes, not at every read. A GitOps plane reads the policy at every
+  # pass, every fifteen seconds, and a warning each time buried the first — the one that
+  # said something — under four a minute saying it again. A read that fails for another
+  # reason than the last one did is a change too.
+  @read {__MODULE__, :read}
+
+  defp readable do
+    if :persistent_term.get(@read, :readable) != :readable do
+      :persistent_term.put(@read, :readable)
+      Logger.info("troupe plane: the TroupePolicy #{policy_name()} can be read again")
+    end
+  end
+
+  defp unreadable(reason) do
+    state = {:unreadable, kind_of(reason)}
+
+    if :persistent_term.get(@read, :readable) != state do
+      :persistent_term.put(@read, state)
+
+      Logger.warning(
+        "troupe plane: no TroupePolicy #{policy_name()} could be read: #{inspect(reason)}"
+      )
+    end
+  end
+
+  # What kind of failure, rather than all of it, so that a reason carrying one request's
+  # own details is not a new state at every read.
+  defp kind_of(%K8s.Client.APIError{reason: reason}), do: reason
+  defp kind_of(%{__struct__: module}), do: module
+  defp kind_of(reason), do: reason
 
   # The same name the operator reads, from the same variable, so the plane and the
   # operator cannot be checking against two different documents.

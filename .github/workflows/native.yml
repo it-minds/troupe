@@ -8,7 +8,7 @@
 # (called from `ci.yml`, under `ci-ok`, without the macOS targets, which cost about ten
 # Linux runners each), nightly (`nightly.yml`), for a pre-release (`prerelease.yml`)
 # and for a release (`release.yml`) — those two with a tag, and then it attaches
-# everything to that draft release. See `.github/CI.md`.
+# everything to that draft release. See `docs/developer/ci.md`.
 #
 # `workflow_dispatch` runs it by hand, attaching nothing.
 name: native builds

@@ -131,7 +131,7 @@ cat ~/.local/state/troupe/sessions/*/*/events.jsonl | jq -s '
 A task this small is a couple of model calls and some thousands of input tokens, most of
 them the agent's instructions and tool definitions. The nightly CI runs a task like it
 against a real model and lists what each run used
-([.github/CI.md](../.github/CI.md#the-live-check)); a recent one took two calls, about
+([developer/ci.md](developer/ci.md#the-live-check)); a recent one took two calls, about
 7,500 input tokens and 50 output tokens. Your model and your task will differ. At $3 per
 million input tokens and $15 per million output tokens, figures for the example and not
 anybody's price list, that run cost about two cents.

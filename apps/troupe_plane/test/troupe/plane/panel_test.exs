@@ -217,6 +217,52 @@ defmodule Troupe.Plane.PanelTest do
 
       assert root_html =~ "drain"
     end
+
+    # The editor was reachable by typing its address and by nothing on any page.
+    test "a platform admin reaches the profile editor from here, for a new profile and each one",
+         context do
+      {:ok, view, _html} = context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
+
+      assert has_element?(view, "a[href='/admin/profile/new']")
+      assert has_element?(view, "a[href='/admin/profile/dev']", "edit")
+      assert has_element?(view, "a[href='/admin/profile/ux']", "edit")
+
+      # The editor is a platform admin's, so a team admin is not sent to a page that
+      # would turn them away.
+      {:ok, view, _html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/workers")
+
+      refute has_element?(view, "a[href='/admin/profile/new']")
+      refute has_element?(view, "a[href='/admin/profile/dev']")
+    end
+
+    # The panel is the way into gitops mode from a running plane, and it showed the
+    # profiles and the policy and not the triggers, which `admin.profiles.export` has: a
+    # repository bootstrapped from here would have lost them at the switch.
+    test "the manifests for a repository include every trigger", context do
+      {:ok, principal, _secret} =
+        principal!(context.engineering, %{name: "bot", profiles: ["dev"]})
+
+      {:ok, _} =
+        Triggers.put(
+          context.engineering,
+          %{
+            "name" => "nightly-deps",
+            "principal" => principal.subject,
+            "profile" => "dev",
+            "source" => %{"kind" => "schedule", "cron" => "0 3 * * 1-5"},
+            "prompt_template" => "Update every dependency."
+          },
+          "root"
+        )
+
+      {:ok, view, _html} = context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
+      html = view |> element("button", "show the manifests") |> render_click()
+
+      assert html =~ "profiles/dev.yaml"
+      assert html =~ "triggers/engineering/nightly-deps.yaml"
+      assert html =~ "kind: Trigger"
+      assert html =~ "name: engineering.nightly-deps"
+    end
   end
 
   describe "the sessions page" do
@@ -294,6 +340,40 @@ defmodule Troupe.Plane.PanelTest do
         context.conn |> sign_in(context.root.subject) |> live("/admin/triggers/design")
 
       refute design_html =~ "nightly-deps"
+    end
+
+    # The form saved the zone where nothing read it, and the trigger fired in UTC.
+    test "the zone typed in the form is the one the trigger keeps, and one it cannot keep is refused",
+         context do
+      {:ok, principal, _secret} =
+        principal!(context.engineering, %{name: "bot", profiles: ["dev"]})
+
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.lead.subject) |> live("/admin/triggers")
+
+      fields = %{
+        "name" => "nightly",
+        "principal" => principal.subject,
+        "profile" => "dev",
+        "cron" => "0 3 * * 1-5",
+        "prompt_template" => "Update every dependency."
+      }
+
+      html =
+        view
+        |> form("#new-trigger", Map.put(fields, "timezone", "Europe/Copenhagen"))
+        |> render_submit()
+
+      assert html =~ "UTC"
+      assert Triggers.get(context.engineering, "nightly") == nil
+
+      view |> form("#new-trigger", Map.put(fields, "timezone", "UTC")) |> render_submit()
+
+      assert Triggers.get(context.engineering, "nightly").source == %{
+               "kind" => "schedule",
+               "cron" => "0 3 * * 1-5",
+               "tz" => "UTC"
+             }
     end
   end
 

@@ -36,7 +36,7 @@ defmodule Troupe.Plane.Provision do
   """
 
   alias Troupe.Plane.{Bundles, ClusterPolicy, Fleet, Gitops, Identity, Settings}
-  alias Troupe.Plane.Fleet.{Profile, SizeClass}
+  alias Troupe.Plane.Fleet.{Profile, Provisioner, SizeClass}
   alias Troupe.Policy
   alias Troupe.Protocol.Error
   alias Troupe.WorkerProfile
@@ -238,20 +238,40 @@ defmodule Troupe.Plane.Provision do
   end
 
   @doc """
+  Whether a profile's workers are pods, which a `WorkerProfile` in the cluster makes.
+
+  A profile whose workers are machines (`ssh`) needs nothing there: they are registered,
+  and the worker on each dials the plane. A resource for it would have the operator run
+  pods for it as well, on a profile whose workers are meant to be elsewhere.
+  """
+  @spec in_cluster?(Profile.t()) :: boolean()
+  def in_cluster?(%Profile{} = profile), do: Provisioner.for(profile) == Provisioner.Kubernetes
+
+  @doc """
   Put a profile into the cluster, whichever way this plane does that.
 
   Direct mode applies the whole resource and answers `:applied`. GitOps mode writes the
   plane's three fields onto the resource the repository put there and answers
   `:projected`, or `:unchanged` where the resource already says what the plane would
   write; it never makes a resource, so a profile with none is `{:error, :no_resource}`.
+
+  A profile whose workers are not pods (`in_cluster?/1`) has no resource in direct mode:
+  one left from before it was a machine's, or from before this was asked, is taken away,
+  and the answer is `:not_in_cluster`. In GitOps mode the repository holds its resource like
+  any other's, and the count the plane writes onto it is none (`projection/1`). Decision
+  738.
   """
   @spec apply(Profile.t(), map()) :: {:ok, map()} | {:error, term()}
   def apply(%Profile{} = profile, actor) do
-    with :ok <- resolvable(profile) do
-      case mode() do
-        :direct -> direct_apply(profile, actor)
-        :gitops -> gitops_project(profile)
-      end
+    case {mode(), in_cluster?(profile)} do
+      {:direct, false} ->
+        direct_elsewhere(profile, actor)
+
+      {:direct, true} ->
+        with :ok <- resolvable(profile), do: direct_apply(profile, actor)
+
+      {:gitops, _pods} ->
+        with :ok <- resolvable(profile), do: gitops_project(profile)
     end
   end
 
@@ -386,11 +406,14 @@ defmodule Troupe.Plane.Provision do
   `mcpServers` from the channel's current bundle rather than from the row: the bundle is
   their one source (Decision 736 keeps it so), and reading it here means a profile a
   repository has only just added gets its servers without waiting for the next publish.
+
+  `replicas` is none for a profile whose workers are machines: the operator makes a
+  StatefulSet of whatever the resource says, and the row's count is of machines.
   """
   @spec projection(Profile.t()) :: map()
   def projection(%Profile{} = profile) do
     %{
-      "replicas" => profile.replicas,
+      "replicas" => if(in_cluster?(profile), do: profile.replicas, else: 0),
       "teams" => teams_of(profile),
       "mcpServers" => Bundles.mcp_servers(profile.config_bundle_channel)
     }
@@ -454,6 +477,16 @@ defmodule Troupe.Plane.Provision do
         {:error, reason} ->
           {:error, reason}
       end
+    end
+  end
+
+  # Nothing to write, and nothing to leave behind: a plane with no cluster has none to
+  # take away either.
+  defp direct_elsewhere(profile, actor) do
+    case direct_delete(profile, actor) do
+      {:ok, _deleted} -> {:ok, %{mode: :direct, state: :not_in_cluster}}
+      {:error, :no_cluster} -> {:ok, %{mode: :direct, state: :not_in_cluster}}
+      {:error, reason} -> {:error, reason}
     end
   end
 

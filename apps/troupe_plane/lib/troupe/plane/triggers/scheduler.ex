@@ -27,7 +27,7 @@ defmodule Troupe.Plane.Triggers.Scheduler do
 
   alias Troupe.Plane.Singleton
   alias Troupe.Plane.Triggers
-  alias Troupe.Plane.Triggers.Cron
+  alias Troupe.Plane.Triggers.{Cron, Trigger}
 
   require Logger
 
@@ -57,6 +57,9 @@ defmodule Troupe.Plane.Triggers.Scheduler do
         ]
   def tick(now \\ DateTime.utc_now()) do
     for trigger <- Triggers.scheduled(),
+        # A zone this plane does not keep is one it cannot fire at the right hour, which
+        # `put` refuses; only a row saved before it did can name one.
+        Trigger.utc?(trigger.source),
         {:ok, cron} <- [Cron.parse(trigger.source["cron"])],
         due = Cron.previous(cron, now),
         due?(trigger, due, now),

@@ -206,6 +206,27 @@ administers — are checked once per method.
 | `read_only` | stopped | as dormant; activating commands are refused |
 | `erased` | gone | `not_found` |
 
+A remote session also has `pending`, created on a profile that is full but may still grow,
+with no endpoint until a worker has room ([PROTOCOL.md](PROTOCOL.md#session-states-dormancy-and-activation)).
+Nothing brings a session back from `read_only` or `erased`:
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  live: a session that can run
+  state live {
+    [*] --> active: session.create
+    [*] --> pending: on a full profile
+    pending --> active: a worker has room
+    active --> dormant: idle, archived, restarted, drained
+    dormant --> active: an activating command
+  }
+  live --> read_only: grant or profile gone, tree not restorable
+  live --> erased: session.erase
+  read_only --> erased: session.erase
+  erased --> [*]
+```
+
 A session goes dormant after its idle timeout — waiting on a person counts as idle, the
 timeout is minutes rather than half an hour once no client is watching it, and a session
 a client is subscribed to by name is not put to sleep at all
@@ -241,6 +262,37 @@ result, and every registration durably **taints** the session so the other parti
 know something runs on somebody's machine.
 
 ## 6. Remote
+
+What talks to what. A client reaches the plane over HTTPS and a session's pod over a
+WebSocket of its own, pods reach the plane over the control channel, and the plane is in
+the path of neither a session's events nor its storage:
+
+```mermaid
+flowchart TB
+  client["troupe, the desktop app,<br/>or a browser at /app"]
+  idp["Identity provider"]
+  plane["troupe-plane<br/>/rpc · /auth/exchange · /mcp · /admin"]
+  op["troupe-operator"]
+  pod["worker pods, troupe-w-&lt;profile&gt;<br/>/v1/socket"]
+  pg[("PostgreSQL")]
+  bao[("OpenBao")]
+  s3[("Object storage")]
+  model["Model provider<br/>or gateway"]
+
+  client -- "sign-in" --> idp
+  client -- "HTTPS: exchange, /rpc" --> plane
+  client -- "WebSocket, a token for that pod" --> pod
+  pod -- "control channel, TCP 4001" --> plane
+  plane -- "WorkerProfile, through the Kubernetes API" --> op
+  op -- "a namespace of pods per profile" --> pod
+  plane -- "index, identity, ledger, audit" --> pg
+  plane -- "transit: sign tokens" --> bao
+  pod -- "session keys" --> bao
+  pod -- "sealed segments" --> s3
+  pod -- "model calls" --> model
+```
+
+And the order a client does it in, from sign-in to a live session:
 
 ```mermaid
 sequenceDiagram
@@ -409,8 +461,9 @@ a budget slice, `max_turns`, `wall_clock_seconds` and `approvals: wait | deny`, 
 an administrator's versioned act); and an `origin`. A **trigger** is a row the plane stores
 and something fires: `trigger.fire` renders the template and creates the session *as the
 trigger's principal* through the same call a person's client makes; the same idempotency
-key returns the same run. Cron triggers fire from a `:global` scheduler in the plane;
-webhooks terminate at an external executor, so the plane has no public trigger surface.
+key returns the same run. Cron triggers fire from a `:global` scheduler in the plane; from
+outside, a trigger is fired at `POST /trigger/<id>` with a key of its own, which fires that
+trigger and nothing else, or by an executor that calls `trigger.fire`.
 
 **The A2A facade** maps the A2A protocol onto sessions: a task is a session, a message is
 `input.send`, a stream is a subscription, `input-required` is an approval answered by a

@@ -1,7 +1,7 @@
 # A release: the full suite, then the version's images, the chart, the native builds and
 # a published GitHub release (Decisions 669, 674, 676). It publishes and it ends there:
 # nothing here deploys, or knows where the release will run (Decision 735).
-# `.github/CI.md` has the picture.
+# `docs/developer/ci.md` has the picture.
 #
 # Started by a push to `main` that changes VERSION — which is to say, by merging the pull
 # request `scripts/release <version>` opens — and cut only when that version has no tag

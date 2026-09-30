@@ -4,11 +4,11 @@ Three speeds, one set of jobs (Decision 676):
 
 | | when | runs | publishes |
 |---|---|---|---|
-| **Focused CI** — [`ci.yml`](workflows/ci.yml) | every pull request, every push to `main` | only what the change can have broken | `main`: the five images as `sha-<short>` |
-| **Pre-release** — [`prerelease.yml`](workflows/prerelease.yml) | by hand, any branch or commit | builds only, **no test suite** | a GitHub pre-release `v<VERSION>-pre.<n>`: images, chart, `troupe`, `troupe-daemon`, desktop installers |
-| **Release** — [`release.yml`](workflows/release.yml) | merging a VERSION change (`scripts/release 0.3.2`) | **the full suite**: every job, nine soak runs, the cluster suite | the GitHub release `v<VERSION>`, images and chart at that version |
+| **Focused CI** — [`ci.yml`](../../.github/workflows/ci.yml) | every pull request, every push to `main` | only what the change can have broken | `main`: the five images as `sha-<short>` |
+| **Pre-release** — [`prerelease.yml`](../../.github/workflows/prerelease.yml) | by hand, any branch or commit | builds only, **no test suite** | a GitHub pre-release `v<VERSION>-pre.<n>`: images, chart, `troupe`, `troupe-daemon`, desktop installers |
+| **Release** — [`release.yml`](../../.github/workflows/release.yml) | merging a VERSION change (`scripts/release 0.3.2`) | **the full suite**: every job, nine soak runs, the cluster suite | the GitHub release `v<VERSION>`, images and chart at that version |
 
-Plus [`nightly.yml`](workflows/nightly.yml) — the full suite, the native builds and the harness against a real model on `main` every night, publishing nothing — and [`quick-start.yml`](workflows/quick-start.yml), which runs [the quick start](../docs/quick-start.md)'s commands every night against the latest release, on Linux and Windows, as a reader would.
+Plus [`nightly.yml`](../../.github/workflows/nightly.yml) — the full suite, the native builds and the harness against a real model on `main` every night, publishing nothing — [`pages.yml`](../../.github/workflows/pages.yml), which builds the documentation site on every pull request and publishes it from `main` (Decision 739), and [`quick-start.yml`](../../.github/workflows/quick-start.yml), which runs [the quick start](../quick-start.md)'s commands every night against the latest release, on Linux and Windows, as a reader would (Decision 740).
 
 **Nothing here deploys** (Decision 735). A release publishes and ends: a deployment takes the published chart and images and rolls them from somewhere of its own, and no workflow in this repository knows where that is or holds a credential for it.
 
@@ -109,7 +109,7 @@ The full suite and the native builds on `main` at 02:17 UTC, publishing nothing 
 
 ### The live check
 
-[`live.yml`](workflows/live.yml), in the same run: the harness against a real model, through the LiteLLM gateway. Everything else here uses the scripted `fake` model, which does as it is told; the sessions that ran away with real money did so on a real one. `scripts/install-local --tui` builds `troupe-daemon` and `troupe` from the commit, as a person building from source would, and [`scripts/live-check`](../scripts/live-check) makes three `troupe run build … --headless` runs, each in an empty workspace with its own daemon, its own config and a five-minute timeout:
+[`live.yml`](../../.github/workflows/live.yml), in the same run: the harness against a real model, through the LiteLLM gateway. Everything else here uses the scripted `fake` model, which does as it is told; the sessions that ran away with real money did so on a real one. `scripts/install-local --tui` builds `troupe-daemon` and `troupe` from the commit, as a person building from source would, and [`scripts/live-check`](../../scripts/live-check) makes three `troupe run build … --headless` runs, each in an empty workspace with its own daemon, its own config and a five-minute timeout:
 
 | run | passes when | a failure means |
 |---|---|---|
@@ -128,9 +128,10 @@ A failure is a harness regression until shown otherwise: the step prints the run
 | workflow | what | called by |
 |---|---|---|
 | `ci.yml` | every check; focused or full | pull requests into `main`, pushes to `main`, `nightly.yml`, `release.yml` |
-| `dev-check.yml` | compile, credo, schema, client builds; no tests | every other pull request: into a `development-*` chunk ([fixing-issues.md](../docs/developer/fixing-issues.md)), or stacked on another branch |
+| `dev-check.yml` | compile, credo, schema, client builds; no tests | every other pull request: into a `development-*` chunk ([fixing-issues.md](fixing-issues.md)), or stacked on another branch |
 | `licences.yml` | every locked package's licence against the policy in `scripts/licences.exs`, and `docs/third-party-licences.md`, `THIRD-PARTY-NOTICES.txt` and the chart's LICENSE and NOTICE current | every pull request |
-| `dco.yml` | every commit authored from 2026-09-27 has its author's `Signed-off-by:` ([CONTRIBUTING.md](../CONTRIBUTING.md)) | pull requests into `main` and `development-*` |
+| `pages.yml` | the documentation site (`mkdocs.yml`), strict: a broken link, a nav entry to a missing page or a page left out of the nav fails it; on `main`, published to GitHub Pages | every pull request, pushes to `main` |
+| `dco.yml` | every commit authored from 2026-09-27 has its author's `Signed-off-by:` ([CONTRIBUTING.md](../../CONTRIBUTING.md)) | pull requests into `main` and `development-*` |
 | `images.yml` | the five images to ghcr.io, `sha-<short>` and an optional version | `ci.yml` (main), `prerelease.yml`, `release.yml` |
 | `native.yml` | `troupe-daemon` ×5, `troupe` ×5, desktop ×3; optionally attached to a release | `ci.yml` (PRs that touch them, without macOS), `nightly.yml`, `prerelease.yml`, `release.yml` |
 | `prerelease.yml` | an untested pre-release of any commit | by hand |
@@ -146,7 +147,7 @@ The images and the chart need none: the workflow's own token pushes them.
 | Name | Kind | Used by |
 |---|---|---|
 | `GUI_BASE` | repository variable | `images.yml`: the GUI's mount path baked into its assets, default `app` |
-| `APPLE_*`, `AZURE_*` | repository secrets | `native.yml`: sign the desktop installers; absent, they are unsigned ([install.md](../clients/gui/docs/install.md)) |
+| `APPLE_*`, `AZURE_*` | repository secrets | `native.yml`: sign the desktop installers; absent, they are unsigned ([install.md](../../clients/gui/docs/install.md)) |
 | `TROUPE_NIGHTLY_BASE_URL`, `TROUPE_NIGHTLY_API_KEY` | repository secrets | `nightly.yml` → `live.yml`: the LiteLLM gateway (OpenAI-compatible, with `/v1` or without) and a key for it, capped there at about $2 a day. Without both the live check fails and says so |
 | `TROUPE_NIGHTLY_MODEL` | repository variable | the model the live check runs, by the gateway's name for it; default `qwen3-235b`, the model the runaway sessions were on |
 | `TROUPE_NIGHTLY_MODEL_PRICES` | repository variable | `nightly.yml` → `live.yml` → the runs' `TROUPE_MODEL_PRICES`: what the gateway charges for the model, in dollars per million tokens, as `{"qwen3-235b": {"input": <in>, "output": <out>}}` with the rates from the gateway's own model configuration. Unset, the summary's cost column says *not reported*; nothing else changes |

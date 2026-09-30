@@ -1,5 +1,5 @@
 # A pre-release: any commit, built and published as `<VERSION>-pre.<run>` without the
-# test suite (Decision 676). `.github/CI.md` has the picture.
+# test suite (Decision 676). `docs/developer/ci.md` has the picture.
 #
 # For trying a build before it is a release — on a laptop with the installers, or on a
 # cluster by pulling its images — at the cost of the twenty-odd minutes of builds and

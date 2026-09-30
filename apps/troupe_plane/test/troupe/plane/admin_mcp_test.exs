@@ -14,7 +14,7 @@ defmodule Troupe.Plane.AdminMCPTest do
 
   alias Troupe.Plane.Admin
   alias Troupe.Plane.Admin.MCP
-  alias Troupe.Plane.{Fleet, Identity}
+  alias Troupe.Plane.{Fleet, Identity, Triggers}
 
   setup do
     Application.put_env(:troupe_plane, :platform_admin_group, "platform")
@@ -138,6 +138,47 @@ defmodule Troupe.Plane.AdminMCPTest do
 
       assert {:reply, %{"error" => error}} = MCP.handle(request, context.root)
       assert error["code"] == -32_602
+    end
+
+    # The schema said `kind`, `schedule` and `prompt`, and the handler reads `source`,
+    # `prompt_template` and `principal`: a model that did as it was told made nothing.
+    test "a trigger written from its tool's schema alone is one that works", context do
+      team = Identity.get_team("engineering")
+      {:ok, principal, _secret} = principal!(team, %{name: "nightly", profiles: ["dev"]})
+
+      trigger = %{
+        "team" => "engineering",
+        "name" => "nightly",
+        "principal" => principal.subject,
+        "profile" => "dev",
+        "source" => %{"kind" => "schedule", "cron" => "0 3 * * 1-5", "tz" => "UTC"},
+        "prompt_template" => "Summarise what changed yesterday.",
+        "terms" => %{"max_turns" => 10, "approvals" => "deny"},
+        "notify" => ["lead@example.test"]
+      }
+
+      tool = Enum.find(MCP.tools(), &(&1["name"] == "admin_trigger_put"))
+      declared = tool["inputSchema"]["properties"]["trigger"]["properties"]
+
+      for {key, value} <- trigger do
+        assert Map.has_key?(declared, key), "the schema has no #{key}"
+
+        for {inner, _value} <- if(is_map(value), do: value, else: %{}) do
+          assert Map.has_key?(declared[key]["properties"], inner),
+                 "the schema has no #{key}.#{inner}"
+        end
+      end
+
+      assert declared["source"]["properties"]["kind"]["enum"] == ~w(schedule webhook manual)
+
+      result = call(context.lead, "admin_trigger_put", %{"trigger" => trigger})
+      refute result["isError"], inspect(result["content"])
+
+      saved = Triggers.get(team, "nightly")
+      assert saved.principal_id == principal.id
+      assert saved.source == trigger["source"]
+      assert saved.prompt_template == trigger["prompt_template"]
+      assert saved.terms == trigger["terms"]
     end
   end
 
