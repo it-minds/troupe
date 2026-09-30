@@ -109,7 +109,9 @@ describe("a fresh machine's first run", () => {
     // prompt as its first input.
     await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the first session");
     expect(document.querySelector(".launcher")).toBeNull();
-    expect(says("/home/ada/project")).toBe(true);
+    // The header names the workspace from the session list, which can come a moment after
+    // the composer: wait for it rather than read it at once.
+    await waitFor(() => says("/home/ada/project"), "the session's workspace in its header");
     const created = [...fake.sessions.values()].find((s) => s.workspace === "/home/ada/project");
     expect(created).toBeDefined();
     expect(created!.log.from(0).map((e) => [e.type, e.data["text"]])).toEqual([
