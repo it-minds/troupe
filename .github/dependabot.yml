@@ -1,6 +1,6 @@
 # Keeping the ecosystems this repository actually has from rotting: the workflows' actions,
 # the GUI's npm packages and the desktop app's crates (from the GUI's own configuration,
-# which came with it), and the two Mix projects.
+# which came with it), the two Mix projects, and what builds the documentation site.
 #
 # The GUI had no configuration at first, so only GitHub's default security updates ran —
 # and those produced one thing: a weekly failure on a `glib` advisory with no version that
@@ -106,5 +106,22 @@ updates:
     groups:
       hex:
         patterns: ["*"]
+    commit-message:
+      prefix: deps
+
+  # MkDocs and its theme, pinned in docs/requirements.txt; .github/workflows/pages.yml
+  # builds the site with them on every pull request, so a bump that breaks it says so.
+  - package-ecosystem: pip
+    directory: /docs
+    schedule:
+      interval: monthly
+    groups:
+      docs:
+        patterns: ["*"]
+    ignore:
+      # MkDocs 2 drops the plugin and theme systems the site is built on, and Material
+      # requires MkDocs 1 (Decision 739). Moving off it is a decision, not a bump.
+      - dependency-name: mkdocs
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: deps

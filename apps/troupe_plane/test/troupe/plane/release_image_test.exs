@@ -133,6 +133,17 @@ defmodule Troupe.Plane.ReleaseImageTest do
       assert image_in_cluster("pinned") == @old
     end
 
+    # Its workers are machines somebody installs the worker on, so there is no resource
+    # to move, and a pass that thought there was would audit a move at every start.
+    test "a profile whose workers are machines is not followed" do
+      Application.put_env(:troupe_plane, :worker_image, @new)
+      {:ok, _} = Fleet.put_profile(%{name: "laptops", image: "release", provisioner: "ssh"})
+
+      assert ReleaseImage.follow() == []
+      assert FakeCluster.get("WorkerProfile", "laptops") == nil
+      assert Audit.list(actor: "system:release") == []
+    end
+
     test "a release image outside the policy is not written" do
       Application.put_env(:troupe_plane, :policy, policy())
       Application.put_env(:troupe_plane, :worker_image, "docker.io/someone/worker:1")

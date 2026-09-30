@@ -82,7 +82,13 @@ defmodule Troupe.Plane.Fleet.ReleaseImage do
   """
   @spec follow(keyword()) :: [map()]
   def follow(opts \\ []) do
-    following = Enum.filter(Fleet.list_profiles(), &Provision.follows_release?/1)
+    # A profile whose workers are machines has no resource to move: whoever installs the
+    # worker on each machine installs the release too.
+    following =
+      Enum.filter(
+        Fleet.list_profiles(),
+        &(Provision.follows_release?(&1) and Provision.in_cluster?(&1))
+      )
 
     cond do
       Provision.mode() == :gitops -> pinned(following)

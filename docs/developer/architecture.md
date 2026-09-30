@@ -59,21 +59,37 @@ the two cannot share a function across the boundary, and both say so.
 **Core** (`Troupe.Application`, `one_for_one`): `Troupe.Registry`, `Troupe.Events`
 (internal pub/sub), `Troupe.Sessions.Index`, and `Troupe.Sessions`, a `DynamicSupervisor`
 of `:transient` sessions. One session (`Troupe.Session`, `rest_for_one`, 3 restarts in
-10 s), in dependency order:
+10 s) starts its children in dependency order, top to bottom, so a crash restarts the
+child and everything below it and nothing above:
 
+```mermaid
+flowchart LR
+  app["Troupe.Application<br/>one_for_one"] --> registry["Troupe.Registry"]
+  app --> events["Troupe.Events<br/>internal pub/sub"]
+  app --> index["Sessions.Index"]
+  app --> sessions["Troupe.Sessions<br/>DynamicSupervisor"]
+  sessions --> session["Troupe.Session<br/>rest_for_one<br/>3 restarts in 10 s"]
+  session --> log["1 · Session.Log<br/>the log and hash chain; everything persists through it"]
+  session --> approvals["2 · Session.Approvals<br/>the permission gate"]
+  session --> questions["3 · Session.Questions<br/>what the agent asks a person"]
+  session --> clienttools["4 · Session.ClientTools<br/>tools a connected client offered"]
+  session --> mcp["5 · Session.MCP<br/>the person's and the workspace's MCP servers"]
+  session -.-> fake["6 · LLM.Fake<br/>only for provider: fake"]
+  session --> node["7 · Agent.Node<br/>the root agent, one_for_all"]
+  session --> watcher["8 · Session.Watcher<br/>watch mode"]
+  session --> files["9 · Session.Files<br/>fs_changed events"]
+  session --> loop["10 · Session.Loop<br/>/loop, one root turn per iteration"]
+  session --> summary["11 · Session.Summary<br/>the summary projection, last on purpose"]
+  node --> tasks["Agent.Tasks<br/>Task.Supervisor: tool calls, the model stream"]
+  node --> children["Agent.Children<br/>DynamicSupervisor: each subagent's own Agent.Node"]
+  node --> server["Agent.Server<br/>the gen_statem"]
 ```
-Session.Log          the log and hash chain; everything persists through it
-Session.Approvals    the permission gate
-Session.Questions    what the agent asks a person
-Session.ClientTools  tools a connected client offered
-Session.MCP          the person's and the workspace's own MCP servers, and the workspace's trust question
-[LLM.Fake]           only for provider: fake
-Agent.Node           the root agent: Agent.Tasks, Agent.Children, Agent.Server (one_for_all)
-Session.Watcher      watch mode; after the agent, so its crash restarts nothing above
-Session.Files        fs_changed events
-Session.Loop         /loop: one root turn per iteration, loop_* events (Decision 681)
-Session.Summary      the summary projection, last on purpose
-```
+
+The approvals, questions and client tools sit above the agent so that a restarted agent
+finds the same answers and registrations; the watchers, the loop (Decision 681) and the
+projection sit below it so that none of them can restart it. The root `Agent.Node` is
+`significant`: when it gives up, past its own restart limit, the session ends and comes
+back dormant from its log (Decision 727).
 
 **Daemon** (`Troupe.Gateway.Daemon`, `rest_for_one`, started only under
 `TROUPE_DAEMON_AUTOSTART`): `Commands` (idempotency ledger), `Plane` (where the plane is,
@@ -139,11 +155,14 @@ the TUI embeds when none answers, reached over its loopback WebSocket) and
 `Troupe.Remote.Worker`, so a local session and a pod's look identical on screen. Fleet
 calls take an origin, `{:local, workspace}` or `{:remote, plane_url}`.
 
-```
-Troupe.Remote.Supervisor (one_for_one)
-├── Remote.Tokens        refresh, plane and session tokens
-├── Remote.Connections   one Remote.Plane per plane
-└── Remote.Sessions      a Remote.Journal (JSONL + cursor) and a Remote.Worker (the WebSocket) per attached session
+```mermaid
+flowchart LR
+  sup["Troupe.Remote.Supervisor<br/>one_for_one"] --> tokens["Remote.Tokens<br/>refresh, plane and session tokens"]
+  sup --> connections["Remote.Connections<br/>DynamicSupervisor"]
+  sup --> sessions["Remote.Sessions<br/>DynamicSupervisor"]
+  connections --> plane["Remote.Plane<br/>one per plane"]
+  sessions --> journal["Remote.Journal<br/>JSONL + cursor, one per attached session"]
+  sessions --> worker["Remote.Worker<br/>the WebSocket, one per attached session"]
 ```
 
 `one_for_one` is the degraded mode: an unreachable plane does not touch attached sessions.

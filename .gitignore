@@ -2,6 +2,9 @@
 /cover/
 /deps/
 /doc/
+# What `mkdocs build` writes (mkdocs.yml), and Python's cache of its hooks.
+/site/
+__pycache__/
 erl_crash.dump
 *.ez
 /apps/*/priv/reaper/

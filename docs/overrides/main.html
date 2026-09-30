@@ -1,0 +1,8 @@
+{#- Every page says which release it describes: the version in VERSION, read by hooks.py. -#}
+{% extends "base.html" %}
+
+{% block announce %}
+  These pages describe Troupe
+  <a href="{{ config.repo_url }}/releases/tag/v{{ config.extra.troupe_version }}">{{ config.extra.troupe_version }}</a>
+  and whatever has merged into <code>main</code> since.
+{% endblock %}

@@ -2,7 +2,7 @@
 # cluster suite — the native builds, and the harness against a real model through the
 # gateway, so a race, a cluster regression, a broken Windows build or a model the harness
 # no longer stops is found the next morning rather than by the next release. Nothing is
-# published. `.github/CI.md` has the picture.
+# published. `docs/developer/ci.md` has the picture.
 name: nightly
 
 on:

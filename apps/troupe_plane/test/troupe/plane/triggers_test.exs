@@ -370,6 +370,55 @@ defmodule Troupe.Plane.TriggersTest do
 
       assert {:ok, _} = put.(%{"source" => %{"kind" => "webhook", "provider" => "github"}})
     end
+
+    # The console saved the zone as `timezone`, which nothing read: the trigger fired in
+    # UTC under a form that said otherwise, and a zone the plane refuses was saved.
+    test "a zone is `tz`, whichever key a caller used, and is checked either way" do
+      team = team_with_grant("design", "ux", name: "design")
+      {:ok, _principal, _} = principal!(team, %{name: "bot", profiles: ["ux"]})
+
+      put = fn name, source ->
+        attrs = %{"name" => name, "principal" => "svc:design/bot", "profile" => "ux"}
+        Triggers.put(team, Map.put(attrs, "source", source), "root")
+      end
+
+      schedule = %{"kind" => "schedule", "cron" => "0 3 * * *"}
+
+      assert {:error, error} = put.("away", Map.put(schedule, "timezone", "Europe/Copenhagen"))
+      assert error.data.reason =~ "UTC"
+
+      assert {:ok, utc} = put.("utc", Map.put(schedule, "timezone", "UTC"))
+      assert utc.source == Map.put(schedule, "tz", "UTC")
+
+      # A blank zone is no zone, which is UTC.
+      assert {:ok, blank} = put.("blank", Map.put(schedule, "timezone", ""))
+      assert blank.source == schedule
+    end
+
+    test "a row saved under the other key reads as `tz`, and a zone this plane does not keep does not fire",
+         context do
+      nightly =
+        trigger!(context, %{
+          "name" => "nightly",
+          "source" => %{"kind" => "schedule", "cron" => "0 3 * * *"}
+        })
+
+      # As the console wrote it, past the changeset.
+      away = %{"kind" => "schedule", "cron" => "0 3 * * *", "timezone" => "Europe/Copenhagen"}
+      row = from(t in Triggers.Trigger, where: t.id == ^nightly.id)
+      Repo.update_all(row, set: [source: away])
+
+      assert Triggers.fetch(nightly.id).source == %{
+               "kind" => "schedule",
+               "cron" => "0 3 * * *",
+               "tz" => "Europe/Copenhagen"
+             }
+
+      # Not at three UTC, which is not what it asks for, and the plane cannot say when
+      # three in Copenhagen is.
+      assert Scheduler.tick(~U[2026-09-14 03:00:05Z]) == []
+      assert is_nil(Triggers.fetch(nightly.id).last_fired_at)
+    end
   end
 
   describe "revisions" do

@@ -851,7 +851,7 @@ citation keeps meaning what it meant.
      *Cutting one.* `scripts/release <version>` opens a pull request whose only change is
      `VERSION` and its copies (`scripts/version.exs set`), and merging it is the release;
      674 says exactly when a push cuts one. A tag pushed by hand is not a release.
-     `.github/CI.md` has what a release runs and publishes.
+     `docs/developer/ci.md` has what a release runs and publishes.
 
      *Deploying it* is not this repository's: a release publishes its images and chart
      and ends, and a deployment follows the release from somewhere of its own (735).
@@ -959,7 +959,7 @@ citation keeps meaning what it meant.
      `images.yml` is the one definition of the five images for all three. `release.yml`
      can be started by hand to retry a version whose run failed after its VERSION change
      merged, which 674 alone would leave with no way out but a new version.
-     `.github/CI.md` has the picture.
+     `docs/developer/ci.md` has the picture.
 
 677. **A token with no groups claim says nothing about groups.** Every provider token
      the plane accepts — a login's id token, an MCP client's access token — goes through
@@ -2909,3 +2909,79 @@ citation keeps meaning what it meant.
      that survives a change; a run by hand; a `missing` row kept and deleted; the export
      and its round trip keeping the id, revision and key; the CRD against the plane's
      fields; direct mode) and `gitops_triggers_console_test.exs`.
+
+738. **A profile whose workers are machines has nothing in the cluster: no `WorkerProfile`
+     in direct mode, and a count of none on the one a repository holds.** Issue #290. An
+     `ssh` profile's workers are machines somebody registers, and the worker on each dials
+     the plane; but `admin.profile.put`, a grant, a bundle's projection and a release all
+     wrote it a `WorkerProfile`, and the operator, which reads no provisioner, made a
+     StatefulSet of pods for it. `Provision.apply/2` now asks `in_cluster?/1`, which is
+     the Kubernetes provisioner and nothing else. In direct mode a profile that is not in
+     the cluster is written nothing, and a resource left from before (a profile that was
+     Kubernetes's, or one saved before this was asked) is deleted, so the row stays the
+     whole of what is wanted; the answer is `:not_in_cluster`. In gitops mode a repository
+     holds every profile as a `WorkerProfile`, so the resource is there, and the plane
+     writes `spec.replicas: 0` onto it rather than the scaler's count, which for such a
+     profile is a number of machines. Between Flux's apply and the plane's first write the
+     CRD's default of one replica still stands; teaching the operator the
+     `troupe.dev/provisioner` annotation would close that, and would make it read an
+     annotation it deliberately reads none of. `ReleaseImage` passes such a profile by:
+     whoever installs the worker on a machine installs the release. Proof: `admin_test.exs`,
+     `provision_test.exs`, `release_image_test.exs`.
+
+739. **The documentation is one site, built from `docs/` and the documents its nav names
+     elsewhere, and each document stays where whatever reads it looks for it.** Issues #51
+     and #188. The docs were thorough and had no front page a reader could navigate:
+     nothing was published, and a reader browsing the repository met the tracks, the root
+     documents and the clients' own READMEs as three unrelated heaps. Now `mkdocs.yml` at
+     the root builds a site with MkDocs Material, which #51 names, and
+     `.github/workflows/pages.yml` builds it on every pull request and publishes it from
+     `main` to GitHub Pages, at `it-minds.github.io/troupe` until the product site (#189)
+     gives it a domain. The build is strict: a link to a page that is not there, a
+     `#fragment` naming no heading of it, a nav entry to a missing file, or a page left
+     out of the nav fails it. Heading anchors are spelt as GitHub spells them, so one
+     `#fragment` works in both places. The nav is by
+     reader — using Troupe, running a deployment, contributing, writing a client — each in
+     the order to read it, and `docs/README.md` says the same in prose for whoever reads
+     the repository on GitHub. MkDocs and its theme are pinned in `docs/requirements.txt`
+     and Dependabot moves them monthly, but not MkDocs to 2: that drops the plugin and
+     theme systems the site is built on, and Material requires 1, so leaving MkDocs 1 is a
+     choice for the product site (#189) to make, not a bump.
+
+     *Where documents live.* MkDocs builds one directory, and several documents a reader
+     needs are read where they are by something else: the TUI's tests read
+     `PROTOCOL.md`'s error table, the core's config test reads the YAML in the TUI's and
+     the daemon's READMEs, GitHub finds `CONTRIBUTING.md`, `SECURITY.md` and
+     `CODE_OF_CONDUCT.md` at the root, and code cites `ARCHITECTURE.md`, `PROTOCOL.md` and
+     decisions by number. So none of them moved. A nav entry that names no file in `docs/`
+     names one by its path from the root, and `docs/overrides/hooks.py` puts that file on
+     the site at the same path. Links stay written for GitHub, relative to their file, and
+     `scripts/doc-links.exs` keeps checking them; the hook rewrites each one for the site,
+     to the page where the site has it and otherwise to the file on GitHub at `main`, and
+     one that names nothing in the repository fails the build. A copy in `docs/` would be
+     a second version to drift, a symlink fails on a Windows checkout, and a plugin for it
+     would be a dependency doing what a page of Python does. The hook also reads `VERSION`
+     into the banner every page carries, so the site says which release it describes.
+
+     *The root.* It holds what somebody arriving at the repository needs, and what a tool
+     reads there. `.github/CI.md` is contributor documentation and moved to
+     `docs/developer/ci.md`; `.console-rig.exs`, a screenshot rig, moved to `scripts/`.
+     No reports, audits or programme briefs remained after #54. The three `DECISIONS.md`
+     files stay where they are: append-only records that changes add to while others are
+     in flight, cited by number, and a reader gains nothing from their moving. The two
+     plans under `docs/plans/` and `docs/program/` stay too, because #56, open, names them
+     by path. The clients' READMEs stay as each directory's front page, and are the
+     user's and the contributor's pages for their client on the site.
+
+     *Diagrams are Mermaid in the source.* The topology and the order of a sign-in and a
+     session (`ARCHITECTURE.md` §6), the session lifecycle (§4), the daemon on a person's
+     machine (`docs/user/README.md`), the sign-in alone (`docs/admin/roles-and-permissions.md`
+     §1), the supervision trees of a session and of the TUI's remote client
+     (`docs/developer/architecture.md` §3 and §6, which were drawn in text), and a turn
+     through the log (`docs/developer/tour.md`). The GUI README's path of a client, drawn
+     in box characters, is a sequence diagram. No diagram is a checked-in image;
+     `repo-structure.md`'s annotated tree is a listing and stays text. Contributors get a
+     tour of their own, `docs/developer/tour.md` — where things live, running the suite,
+     adding a tool, how the event log works — so neither they nor an operator reads the
+     other's track. Proof: `mkdocs build --strict` in `pages.yml` on this change, and
+     `doc-links.exs` and `check-neutral.exs` passing over the moved files.

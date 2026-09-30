@@ -1,0 +1,54 @@
+# The documentation site: mkdocs.yml, built from `docs/` and the documents the nav names
+# elsewhere in the repository.
+#
+# Every pull request builds it, whatever it touched and with no path filter: moving any
+# Markdown file can break a link on the site, and a check skipped by `paths:` stays
+# pending. The build is strict, so a broken link, a nav entry to a missing page or a page
+# left out of the nav fails it. A push to `main` builds it again and publishes it to
+# GitHub Pages, at https://it-minds.github.io/troupe/ (Pages' source: GitHub Actions).
+name: pages
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: the documentation site builds
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+      - run: pip install -r docs/requirements.txt
+      - run: mkdocs build --strict
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    name: publish to GitHub Pages
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5
