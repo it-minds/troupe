@@ -330,10 +330,15 @@ td.changed { animation: settle var(--motion-duration-settle) ease-out 1; }
 
 .attention { list-style: none; margin: 0 0 var(--space-6); padding: 0; }
 
+/* A status, a sentence and an action. The status is a glyph and a word, so it gets the
+   design's 170px and every sentence starts at the same place down the list; it had the
+   glyph column's 16px, and the word ran over the sentence beside it. Wrapping rather than
+   fixed columns, so a narrow screen gives the sentence a line of its own instead of
+   squeezing it beside a status that will not give way. */
 .attention__item {
-  display: grid;
-  grid-template-columns: var(--size-glyph-column) 1fr auto;
-  gap: var(--space-4);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
   align-items: baseline;
   padding: var(--space-4) var(--space-5);
   border: var(--border-hairline) solid var(--color-border-hairline);
@@ -350,7 +355,9 @@ td.changed { animation: settle var(--motion-duration-settle) ease-out 1; }
 .attention__item--pending { border-left-color: var(--color-status-pending-fg); }
 .attention__item--waiting { border-left-color: var(--color-status-waiting-fg); }
 .attention__item--unknown { border-left-color: var(--color-status-unknown-fg); }
-.attention__what { font: var(--typography-role-body); color: var(--color-text-primary); }
+.attention__item > .status { flex: 0 0 170px; }
+.attention__item > .button { margin-left: auto; }
+.attention__what { flex: 1 1 18rem; font: var(--typography-role-body); color: var(--color-text-primary); }
 
 /* ---------- banners ---------- */
 
@@ -440,7 +447,8 @@ pre {
 
 .budget { display: flex; align-items: center; gap: var(--space-4); }
 .budget__track { flex: 1 1 8rem; height: var(--space-2); border-radius: var(--radius-pill); background: var(--color-budget-track-bg); overflow: hidden; }
-.budget__fill { height: 100%; }
+/* A block, because the fill is a <span> and an inline box takes no width or height. */
+.budget__fill { display: block; height: 100%; }
 .budget--under .budget__fill { background: var(--color-budget-under); }
 .budget--near .budget__fill { background: var(--color-budget-near); }
 .budget--over .budget__fill { background: var(--color-budget-over); }

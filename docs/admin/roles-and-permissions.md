@@ -28,6 +28,12 @@ Asking about a team you may not see is `not_found`, not `forbidden`, so existenc
 leaked; a refusal on role carries `data.required_role`. No role can read session content:
 no admin method returns events.
 
+A team admin changes their team's settings with `admin.team.update`: budget and period,
+retention, default visibility and volume, within the platform's ceilings. Whether a team may
+be granted a profile nothing enforces (`allow_unenforced_workers`) is a platform admin's.
+Neither role renames a team or changes the group it was enabled from: the method takes the
+settings it declares and leaves anything else it is sent.
+
 ## 3. Service principals
 
 A credential a team owns, subject `svc:<team>/<name>`, for work nobody starts by hand.

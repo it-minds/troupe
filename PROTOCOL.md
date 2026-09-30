@@ -1461,7 +1461,7 @@ that team.
 | `admin.pod.drain` | platform | drains a pod, returning what it held |
 | `admin.teams.list` | either | teams, with grants, budgets, volumes and retention |
 | `admin.team.enable` | platform | makes an IdP group a team |
-| `admin.team.update` | either | budget, retention, default visibility |
+| `admin.team.update` | either | budget, retention, default visibility, volume; `allow_unenforced_workers` a platform admin's; keys it does not declare, a team's name and group among them, are left alone |
 | `admin.team.grant` / `admin.team.revoke` | platform | a team's access to a profile |
 | `admin.sessions.list` | either | session *metadata*, never content |
 | `admin.session.erase` | either | erases one, for authorised roles |

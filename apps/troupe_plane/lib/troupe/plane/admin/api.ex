@@ -80,7 +80,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "spec",
       type: :object,
       description:
-        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. Replicas, sessionsPerPod, resources and storage are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
+        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, storage.storageClassName. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
     }
   ]
 
@@ -449,7 +449,8 @@ defmodule Troupe.Plane.Admin.API do
           name: "attrs",
           type: :object,
           required: true,
-          description: "The fields to change. Anything not named is left alone.",
+          description:
+            "The fields to change, of those below. Anything not named is left alone, and a key that is not one of them is ignored: a team's name and the group it was enabled from are not changed here.",
           properties: @team_properties
         }
       ]
