@@ -13,8 +13,8 @@ defmodule Troupe.Plane.Web.Live.Workers do
 
   In GitOps mode the page says the profiles are locked and where they come from, and
   under each one what the last pass could not use (Decision 736). Its last panel is the
-  way into GitOps mode from the other side: every profile and the policy as a repository
-  would hold them, to commit before the plane is switched.
+  way into GitOps mode from the other side: every profile, the policy and every trigger
+  as a repository would hold them (Decision 737), to commit before the plane is switched.
 
   It is also the way to the profile editor, for a platform admin: each profile links to
   it, and in direct mode so does a new one. The editor was reachable by its address and
@@ -196,10 +196,10 @@ defmodule Troupe.Plane.Web.Live.Workers do
       <section :if={@actor.role == :platform_admin} id="manifests" class="panel">
         <h2>Manifests for a repository</h2>
         <p class="lede">
-          Every profile and the cluster policy as a repository would hold them: what to
-          commit before this plane is switched to gitops mode, so that the resources it
-          reads are the ones it runs now. Nothing the plane or the cluster writes is in
-          them.
+          Every profile, the cluster policy and every trigger as a repository would hold
+          them: what to commit before this plane is switched to gitops mode, so that the
+          resources it reads are the ones it runs now. Nothing the plane or the cluster
+          writes is in them, and no trigger's key: that stays with the plane.
         </p>
 
         <button :if={is_nil(@export)} type="button" phx-click="export">show the manifests</button>
@@ -226,8 +226,10 @@ defmodule Troupe.Plane.Web.Live.Workers do
   # GitOps mode it shows what the plane read, locked, and a new profile is a manifest.
   defp editor?(actor), do: actor.role == :platform_admin
 
-  defp manifests(%{profiles: profiles, policy: nil}), do: profiles
-  defp manifests(%{profiles: profiles, policy: policy}), do: profiles ++ [policy]
+  # Everything the export has, the triggers included: a repository bootstrapped from this
+  # panel without them would lose every trigger at the switch.
+  defp manifests(%{profiles: profiles, policy: policy, triggers: triggers}),
+    do: profiles ++ List.wrap(policy) ++ triggers
 
   defp problem?(%{gitops: %{problem: problem}}), do: not is_nil(problem)
   defp problem?(_profile), do: false

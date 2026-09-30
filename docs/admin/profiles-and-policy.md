@@ -293,7 +293,7 @@ places and scales by is read off `sessionsPerPod`.
 ### A profile in a repository
 
 `admin.profiles.export` (the console's Workers page, **Manifests for a repository**) gives
-every profile in this shape, and the policy. This one is written by hand:
+every profile in this shape, the policy and every trigger. This one is written by hand:
 
 ```yaml
 # profiles/standard.yaml
@@ -377,7 +377,12 @@ server-side apply's field ownership.
 
 **Direct to gitops.** Export the manifests, commit them, and let the applier apply them
 while the plane is still in direct mode: it takes the fields over, and the workers do not
-notice. Then redeploy the plane with `plane.provisioningMode: gitops` and
+notice. Export them with `admin.profiles.export` or the Workers page, not
+`kubectl get workerprofiles`: a resource the plane wrote in direct mode has no field for a
+profile's ceiling, its warm count or its provisioner, which the export gives as the
+`troupe.dev/max-sessions`, `troupe.dev/warm-workers` and `troupe.dev/provisioner`
+annotations (Decision 736), so a repository copied from the cluster resets all three at the
+switch, and has no triggers. Then redeploy the plane with `plane.provisioningMode: gitops` and
 `plane.gitops.source`. At its first pass the plane adopts every resource as it is:
 
 - One only the plane has ever written — nothing applies it from a repository yet — is
