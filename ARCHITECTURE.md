@@ -213,18 +213,16 @@ Nothing brings a session back from `read_only` or `erased`:
 ```mermaid
 stateDiagram-v2
   direction LR
-  [*] --> active: session.create
-  [*] --> pending: session.create, profile full
-  pending --> active: a worker has room
-  active --> dormant: idle, archived, restarted, drained
-  dormant --> active: an activating command
-  pending --> read_only: grant or profile gone
-  active --> read_only: grant or profile gone
-  dormant --> read_only: grant or profile gone, tree not restorable
-  pending --> erased: erase
-  active --> erased: erase
-  dormant --> erased: erase
-  read_only --> erased: erase
+  state "a session that can run" as live {
+    [*] --> active: session.create
+    [*] --> pending: on a full profile
+    pending --> active: a worker has room
+    active --> dormant: idle, archived, restarted, drained
+    dormant --> active: an activating command
+  }
+  live --> read_only: grant or profile gone, tree not restorable
+  live --> erased: session.erase
+  read_only --> erased: session.erase
   erased --> [*]
 ```
 
@@ -269,21 +267,12 @@ WebSocket of its own, pods reach the plane over the control channel, and the pla
 the path of neither a session's events nor its storage:
 
 ```mermaid
-flowchart LR
-  subgraph machine["A person's machine"]
-    client["troupe · the desktop app<br/>or a browser at /app"]
-  end
+flowchart TB
+  client["troupe, the desktop app,<br/>or a browser at /app"]
   idp["Identity provider"]
-  subgraph cluster["Kubernetes"]
-    subgraph system["troupe-system"]
-      plane["troupe-plane<br/>/rpc · /auth/exchange · /mcp · /admin"]
-      op["troupe-operator"]
-    end
-    api["Kubernetes API"]
-    subgraph workers["troupe-w-&lt;profile&gt;, one per profile"]
-      pod["worker pod<br/>/v1/socket"]
-    end
-  end
+  plane["troupe-plane<br/>/rpc · /auth/exchange · /mcp · /admin"]
+  op["troupe-operator"]
+  pod["worker pods, troupe-w-&lt;profile&gt;<br/>/v1/socket"]
   pg[("PostgreSQL")]
   bao[("OpenBao")]
   s3[("Object storage")]
@@ -293,9 +282,8 @@ flowchart LR
   client -- "HTTPS: exchange, /rpc" --> plane
   client -- "WebSocket, a token for that pod" --> pod
   pod -- "control channel, TCP 4001" --> plane
-  plane -- "WorkerProfile, TokenReview" --> api
-  api -- "watch" --> op
-  op -- "namespace, pods, Ingress" --> workers
+  plane -- "WorkerProfile, through the Kubernetes API" --> op
+  op -- "a namespace of pods per profile" --> pod
   plane -- "index, identity, ledger, audit" --> pg
   plane -- "transit: sign tokens" --> bao
   pod -- "session keys" --> bao
