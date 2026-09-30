@@ -18,10 +18,12 @@ defmodule Troupe.Plane.AdminParityTest do
 
   use ExUnit.Case, async: true
 
-  alias Troupe.Plane.Admin
+  alias Troupe.Plane.{Admin, Principals, Triggers}
   alias Troupe.Plane.Admin.API
-  alias Troupe.Plane.Admin.API.Method
+  alias Troupe.Plane.Admin.API.{Argument, Method}
   alias Troupe.Plane.Admin.MCP
+  alias Troupe.Plane.Fleet.Host
+  alias Troupe.Plane.Identity.Team
 
   # Not administrative actions: these work out *who is asking* rather than doing anything
   # on their behalf. Listed one by one rather than filtered by a naming rule, because a
@@ -117,6 +119,69 @@ defmodule Troupe.Plane.AdminParityTest do
       assert schema["properties"]["attrs"]["properties"]["budget_micros"]
     end
   end
+
+  describe "each schema is what its handler reads" do
+    # The schema is the whole of what a model knows, and it drifted from the handlers with
+    # nothing noticing: `admin.trigger.put` declared `kind`, `schedule` and `prompt` while
+    # `put` read `source`, `prompt_template` and `principal`, so a model that did as it was
+    # told made nothing that worked. Each object a method takes is held to the keys its
+    # handler reads, asked of the handler.
+    test "every object a method takes declares what its handler reads" do
+      reads = reads()
+
+      for {name, %Method{} = method} <- API.methods(),
+          %Argument{type: :object, properties: [_ | _]} = argument <- method.arguments,
+          # Read by `API` itself, from this same declaration.
+          argument.name != "filter" do
+        declared = Enum.map(argument.properties, & &1.name)
+
+        case Map.fetch(reads, {name, argument.name}) do
+          {:ok, {:exactly, keys}} ->
+            assert Enum.sort(declared) == Enum.sort(keys), """
+            #{name}'s #{argument.name} and its handler have come apart:
+
+              declared and not read: #{inspect(declared -- keys)}
+              read and not declared: #{inspect(keys -- declared)}
+            """
+
+          {:ok, {:within, keys}} ->
+            assert declared -- keys == [],
+                   "#{name}'s #{argument.name} declares #{inspect(declared -- keys)}, which its handler does not read"
+
+          :error ->
+            flunk("""
+            #{name}'s #{argument.name} declares properties, and this test does not know
+            what its handler reads: add it to reads/0.
+            """)
+        end
+      end
+    end
+
+    test "a trigger's terms are the ones session.create checks" do
+      [%Argument{properties: properties}] = API.method("admin.trigger.put").arguments
+      terms = Enum.find(properties, &(&1.name == "terms"))
+
+      assert Enum.sort(Enum.map(terms.properties, & &1.name)) == Enum.sort(Triggers.term_keys())
+    end
+  end
+
+  # What each handler reads. A list where the handler keeps one; the fields of the row it
+  # writes where it casts the row whole, which is a bound rather than a list.
+  defp reads do
+    team = fields(Team)
+
+    %{
+      {"admin.trigger.put", "trigger"} => {:exactly, ["team" | Triggers.put_keys()]},
+      {"admin.profile.put", "profile"} => {:exactly, Admin.profile_keys()},
+      {"admin.profile.preview", "profile"} => {:exactly, Admin.profile_keys()},
+      {"admin.principal.create", "principal"} => {:exactly, Principals.create_keys()},
+      {"admin.team.update", "attrs"} => {:within, team},
+      {"admin.team.enable", "attrs"} => {:within, team},
+      {"admin.host.register", "host"} => {:within, fields(Host)}
+    }
+  end
+
+  defp fields(schema), do: Enum.map(schema.__schema__(:fields), &to_string/1)
 
   describe "what the context will not do" do
     test "nothing returns session content" do

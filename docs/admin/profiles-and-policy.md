@@ -52,6 +52,9 @@ Other `spec` fields:
 
 A profile's `provisioner` decides who makes its workers exist: `kubernetes` (the default,
 the operator) or `ssh`, machines that register themselves ([single-machine.md](single-machine.md)).
+An `ssh` profile has no pods: in `direct` mode the plane writes it no `WorkerProfile` and
+takes away one left from before, and in `gitops` mode, where the repository holds it as a
+`WorkerProfile` like any other, the plane writes `spec.replicas: 0` onto it.
 
 ## 2. What the operator creates
 

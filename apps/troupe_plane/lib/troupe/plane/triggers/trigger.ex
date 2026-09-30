@@ -24,7 +24,7 @@ defmodule Troupe.Plane.Triggers.Trigger do
 
   import Ecto.Changeset
 
-  alias Troupe.Plane.Triggers.{Cron, Notify}
+  alias Troupe.Plane.Triggers.{Cron, Notify, Source}
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
@@ -37,6 +37,9 @@ defmodule Troupe.Plane.Triggers.Trigger do
   @visibilities ~w(private team)
   @reviews ~w(required none)
 
+  # The zones a schedule may name, which are UTC's names and none at all.
+  @utc [nil, "UTC", "Etc/UTC"]
+
   schema "triggers" do
     belongs_to(:team, Troupe.Plane.Identity.Team)
     field(:name, :string)
@@ -44,7 +47,7 @@ defmodule Troupe.Plane.Triggers.Trigger do
     field(:profile, :string)
     field(:agent, :string)
     field(:enabled, :boolean, default: true)
-    field(:source, :map, default: %{})
+    field(:source, Source, default: %{})
     field(:prompt_template, :string, default: "")
     field(:terms, :map, default: %{})
     field(:visibility, :string, default: "team")
@@ -95,6 +98,16 @@ defmodule Troupe.Plane.Triggers.Trigger do
   @doc "Every kind of thing a trigger's document says is expected to fire it."
   @spec source_kinds() :: [String.t()]
   def source_kinds, do: @source_kinds
+
+  @doc """
+  Whether a source's zone is one this plane keeps: UTC, or none, which is UTC.
+
+  Only a row saved before the zone was checked has another, and the scheduler does not
+  fire it: at three in UTC it would run at the wrong hour, and there is no time zone
+  database here to say when three in its zone is.
+  """
+  @spec utc?(map()) :: boolean()
+  def utc?(source), do: source["tz"] in @utc
 
   @doc "Set or replace the trigger's own key. Separate from `changeset/2` on purpose."
   @spec key_changeset(t(), map()) :: Ecto.Changeset.t()
@@ -160,7 +173,7 @@ defmodule Troupe.Plane.Triggers.Trigger do
     end
   end
 
-  defp validate_tz(changeset, tz) when tz in [nil, "UTC", "Etc/UTC"], do: changeset
+  defp validate_tz(changeset, tz) when tz in @utc, do: changeset
 
   defp validate_tz(changeset, tz) do
     add_error(changeset, :source, "tz #{inspect(tz)} is not supported; this plane keeps UTC")

@@ -321,6 +321,15 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # What `profile_put/2` reads of a profile: an administrator's answers and the rest of
+  # the resource's spec. `admin.profile.put`'s schema declares exactly these, and a test
+  # holds the two together.
+  @profile_keys ~w(name image size_class max_sessions warm_workers provisioner spec)
+
+  @doc "The fields of a profile `admin.profile.put` takes, as its schema declares them."
+  @spec profile_keys() :: [String.t()]
+  def profile_keys, do: @profile_keys
+
   # Seven fields left the admin surface and the plane writes them now: `replicas` from
   # what is running, and the rest from the size class. A caller that sends one is refused
   # rather than having it dropped — silently ignoring a field somebody typed is how a
@@ -333,16 +342,39 @@ defmodule Troupe.Plane.Admin do
     spec = Map.get(attrs, "spec") || %{}
     sent = Enum.filter(@derived, &(Map.has_key?(attrs, &1) or Map.has_key?(spec, &1)))
 
-    if sent == [] do
-      {:ok, attrs}
-    else
-      {:error,
-       Error.new(:invalid_params, %{
-         reason: "the plane writes these; set size_class, max_sessions and warm_workers instead",
-         not_yours: sent
-       })}
+    cond do
+      sent != [] ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason:
+             "the plane writes these; set size_class, max_sessions and warm_workers instead",
+           not_yours: sent
+         })}
+
+      # The row's column, set here, would be a channel the pods are never told about:
+      # the operator hands them `spec.configBundleChannel`.
+      Map.has_key?(attrs, "config_bundle_channel") ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason:
+             "a profile's bundle channel is spec.configBundleChannel, which its pods follow",
+           not_yours: ["config_bundle_channel"]
+         })}
+
+      true ->
+        {:ok, attrs |> Map.take(@profile_keys) |> with_channel()}
     end
   end
+
+  # The channel has one home, `spec.configBundleChannel`, which the operator gives the
+  # pods, and the row's column, which bundles, adoption and a profile's servers follow, is
+  # written from it: set in the editor, it reached the pods and never the row. A spec that
+  # names none follows `stable`, the resource's default; a put with no spec leaves both.
+  defp with_channel(%{"spec" => %{} = spec} = attrs) do
+    Map.put(attrs, "config_bundle_channel", presence(spec["configBundleChannel"]) || "stable")
+  end
+
+  defp with_channel(attrs), do: attrs
 
   # `release` stands for the worker image this plane's release names, and a plane deployed
   # without one has nothing for it to stand for. Refused rather than saved: saved, it would
@@ -1317,7 +1349,7 @@ defmodule Troupe.Plane.Admin do
       {:ok,
        %{
          policy: Provision.verdict(attrs),
-         changes: Audit.diff(comparable(current), comparable_attrs(attrs)),
+         changes: Audit.diff(comparable(current), attrs |> comparable_attrs() |> with_channel()),
          mode: Provision.mode()
        }}
     end
@@ -2324,7 +2356,8 @@ defmodule Troupe.Plane.Admin do
              "trigger.put",
              "#{team.name}/#{name}",
              GitopsTriggers.kind()
-           ) do
+           ),
+         :ok <- known_profile(attrs) do
       before = Triggers.get(team, name)
 
       case Triggers.put(team, attrs, actor.subject) do
@@ -2352,6 +2385,22 @@ defmodule Troupe.Plane.Admin do
       end
     end
   end
+
+  # `put` takes any name, and a trigger on a profile the plane has not got fails at every
+  # firing; the GitOps pass refuses one the same way. Asked only of a put that names one:
+  # switching a trigger off is not a question about its profile.
+  defp known_profile(%{"profile" => name}) when is_binary(name) do
+    if Fleet.get_profile(name),
+      do: :ok,
+      else:
+        {:error,
+         Error.new(:invalid_params, %{
+           profile: name,
+           reason: "#{name} is not a profile this plane has"
+         })}
+  end
+
+  defp known_profile(_attrs), do: :ok
 
   @doc """
   Mint a key for a trigger, replacing whatever it had, and return it once.
@@ -3146,6 +3195,10 @@ defmodule Troupe.Plane.Admin do
 
   defp comparable(%Fleet.Profile{} = profile) do
     Map.take(profile, [
+      :size_class,
+      :max_sessions,
+      :warm_workers,
+      :provisioner,
       :replicas,
       :sessions_per_pod,
       :config_bundle_channel,
@@ -3181,6 +3234,7 @@ defmodule Troupe.Plane.Admin do
       :visibility,
       :review,
       :notify,
+      :notify_url,
       :concurrency
     ])
   end

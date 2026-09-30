@@ -51,6 +51,8 @@ export const ErrorCodes = {
   rate_limited: -32011,
   payload_too_large: -32012,
   consent_required: -32013,
+  budget_exhausted: -32014,
+  managed_by_gitops: -32015,
 } as const;
 
 export type Scope = "observe" | "control" | "admin";

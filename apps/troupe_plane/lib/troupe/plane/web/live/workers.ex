@@ -15,6 +15,10 @@ defmodule Troupe.Plane.Web.Live.Workers do
   under each one what the last pass could not use (Decision 736). Its last panel is the
   way into GitOps mode from the other side: every profile and the policy as a repository
   would hold them, to commit before the plane is switched.
+
+  It is also the way to the profile editor, for a platform admin: each profile links to
+  it, and in direct mode so does a new one. The editor was reachable by its address and
+  from nowhere else.
   """
 
   use Phoenix.LiveView, layout: false
@@ -111,10 +115,17 @@ defmodule Troupe.Plane.Web.Live.Workers do
         which teams' volumes it mounts and its MCP servers.
       </p>
 
+      <p :if={editor?(@actor) and @mode != :gitops}>
+        <a href="/admin/profile/new">New profile</a>
+      </p>
+
       <div :for={profile <- @profiles} class="profile">
         <h2>
           <a href={"/admin/workers/#{profile.name}"}>{profile.name}</a>
           <small>{profile.image} · channel {profile.channel}</small>
+          <a :if={editor?(@actor)} href={"/admin/profile/#{profile.name}"}>
+            {if @mode == :gitops, do: "view", else: "edit"}
+          </a>
         </h2>
 
         <ul :if={problem?(profile)} class="checks">
@@ -210,6 +221,10 @@ defmodule Troupe.Plane.Web.Live.Workers do
     </.shell>
     """
   end
+
+  # The editor is a platform admin's page, and only a platform admin is sent to it. In
+  # GitOps mode it shows what the plane read, locked, and a new profile is a manifest.
+  defp editor?(actor), do: actor.role == :platform_admin
 
   defp manifests(%{profiles: profiles, policy: nil}), do: profiles
   defp manifests(%{profiles: profiles, policy: policy}), do: profiles ++ [policy]
