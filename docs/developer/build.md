@@ -40,7 +40,7 @@ pool cannot run. A rebuilt image under an unchanged tag changes nothing in a pod
 
 ## 2. The machines' builds
 
-All on native runners in `.github/workflows/native.yml` ([CI](../../.github/CI.md)):
+All on native runners in `.github/workflows/native.yml` ([CI](ci.md)):
 
 - **`troupe-daemon`**: `MIX_ENV=prod mix release troupe_daemon` in `apps/troupe_daemon`,
   a tarball per target, with the host's `reaper` inside.

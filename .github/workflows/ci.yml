@@ -1,5 +1,5 @@
 # Continuous integration for the whole repository — the platform, the daemon, and the two
-# clients. `.github/CI.md` has the picture; this is the detail.
+# clients. `docs/developer/ci.md` has the picture; this is the detail.
 #
 # One workflow and one required check, `ci-ok`, in two modes:
 #

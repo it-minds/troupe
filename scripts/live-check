@@ -6,7 +6,7 @@
 #   scripts/live-check loop       a read that can only fail, which the failure guard has to stop
 #
 # The nightly's `live` job runs all three against the LiteLLM gateway
-# (.github/workflows/live.yml; .github/CI.md says what a failure means). The model is the
+# (.github/workflows/live.yml; docs/developer/ci.md says what a failure means). The model is the
 # environment's - TROUPE_PROVIDER, TROUPE_BASE_URL, TROUPE_API_KEY, TROUPE_MODEL, and
 # TROUPE_MODEL_PRICES for a model the gateway does not price - and nothing here prints
 # them. With TROUPE_PROVIDER=fake and a TROUPE_FAKE_SCRIPT it runs
