@@ -414,6 +414,33 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.equal(needsYou(fold(state, ephemeral("agent_state", { state: "waiting" }))), true);
     assert.equal(isBusy(fold(state, ephemeral("agent_state", { state: "waiting" }))), false);
   });
+
+  it("ends a turn the root failed as a failure, with what it raised, until the next turn starts (Decision 727)", () => {
+    seq = 0;
+    const raised = "** (Protocol.UndefinedError) protocol Enumerable not implemented for \"not a list\"";
+    const failed = foldAll([
+      durable("user_input", { text: "carry on", source: "user" }),
+      ephemeral("agent_state", { state: "thinking" }),
+      durable("agent_restarted", { replayed_events: 3 }),
+      durable("turn_ended", { reason: "agent_failed", detail: raised }),
+    ]);
+    assert.deepEqual(failed.failed, { reason: "agent_failed", detail: raised });
+    const last = failed.entries.at(-1) as Extract<Entry, { kind: "system" }>;
+    assert.equal(last.type, "agent_failed");
+    assert.equal(last.text, `the agent kept crashing and the session stopped: ${raised}`);
+    // It wrote no word of being at rest before it went: the end of the turn is that word.
+    assert.equal(isBusy(failed), false);
+
+    // An ordinary end of a turn is a rest and says nothing, and neither does a subagent's.
+    const rest = foldAll([durable("user_input", { text: "hi", source: "user" }), durable("turn_ended", {})]);
+    assert.equal(rest.failed, undefined);
+    assert.equal(rest.entries.length, 1);
+    const child = foldAll([durable("turn_ended", { reason: "agent_failed", detail: "x" }, ["root", "child#1"])]);
+    assert.equal(child.failed, undefined);
+
+    // The next input starts a turn, and the failure is behind it.
+    assert.equal(fold(failed, durable("user_input", { text: "again", source: "user" })).failed, undefined);
+  });
 });
 
 describe("the goal and its loop (issue #59)", () => {

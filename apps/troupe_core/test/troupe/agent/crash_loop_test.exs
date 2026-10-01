@@ -14,6 +14,7 @@ defmodule Troupe.Agent.CrashLoopTest do
 
   alias Troupe.Agent.Server, as: AgentServer
   alias Troupe.Session.Log
+  alias Troupe.Sessions.Index
 
   # `Agent.Node`'s own limit: three starts again in five seconds.
   @max_restarts 3
@@ -103,6 +104,42 @@ defmodule Troupe.Agent.CrashLoopTest do
     refute "llm_request" in since
   end
 
+  test "a listing says how the root's last turn failed, until another turn starts", context do
+    %{sid: sid, session: ref, fake: fake} = settled_session(context)
+    index = listing(context)
+
+    Log.append(sid, ["root"], :goal_set, %{"text" => %{"not" => "text"}})
+    Log.append(sid, ["root"], :user_input, %{"source" => "user", "text" => "carry on"})
+    Process.exit(Registry.agent_pid(sid, ["root"]), :kill)
+    assert_receive {:DOWN, ^ref, :process, _pid, :shutdown}, 5_000
+    unregistered(sid)
+
+    # A client that was not watching learns it from the listing, with what was raised.
+    assert %{state: :dormant, failed: %{"reason" => "agent_failed", "detail" => detail}} =
+             GenServer.call(index, {:get, sid})
+
+    assert detail =~ "String.Chars"
+    assert [%{id: ^sid, failed: %{"detail" => ^detail}}] = GenServer.call(index, {:list, %{}})
+
+    # Back, with the goal it could not read cleared, and a turn that starts as it should.
+    {:ok, _} =
+      Troupe.resume(sid,
+        workspace: context.workspace,
+        fake: fake,
+        config_overrides: [
+          provider: "fake",
+          auto_approve: true,
+          model: "fake-model",
+          state_dir: context.state_dir
+        ]
+      )
+
+    on_exit(fn -> Troupe.stop_session(sid) end)
+    Troupe.clear_goal(sid)
+    Troupe.send_input(sid, "again")
+    until(fn -> match?(%{failed: nil}, GenServer.call(index, {:get, sid})) end, "the next turn")
+  end
+
   # A session that has answered one turn, subscribed and monitored.
   defp settled_session(context) do
     %{session: session, fake: fake} = start_session(context, steps: [{:text, "hello"}])
@@ -123,14 +160,22 @@ defmodule Troupe.Agent.CrashLoopTest do
     path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
   end
 
-  defp unregistered(sid, timeout \\ 5_000),
-    do: poll(fn -> is_nil(Registry.whereis({:session, sid})) end, now() + timeout)
+  # An index that only lists, over this test's state directory (as `UnseenTest`'s does).
+  defp listing(context) do
+    opts = [state_dir: context.state_dir, session_idle_ms: :infinity, detached_idle_ms: :infinity]
+    start_supervised!(%{id: {Index, make_ref()}, start: {GenServer, :start_link, [Index, opts]}})
+  end
 
-  defp poll(fun, deadline) do
+  defp unregistered(sid, timeout \\ 5_000),
+    do: until(fn -> is_nil(Registry.whereis({:session, sid})) end, "the session to go", timeout)
+
+  defp until(fun, what, timeout \\ 5_000), do: poll(fun, what, now() + timeout)
+
+  defp poll(fun, what, deadline) do
     cond do
       fun.() -> :ok
-      now() > deadline -> flunk("the session is still registered")
-      true -> Process.sleep(20) && poll(fun, deadline)
+      now() > deadline -> flunk("timed out waiting for #{what}")
+      true -> Process.sleep(20) && poll(fun, what, deadline)
     end
   end
 

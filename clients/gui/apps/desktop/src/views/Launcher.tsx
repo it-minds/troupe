@@ -14,7 +14,7 @@ import { awaitingYou } from "@troupe/client";
 import type { AuthSession, FleetRow } from "@troupe/client";
 import { capabilities, prefs } from "../shell";
 import { Mask } from "./brand";
-import { relative, statusOf, Unread } from "./bits";
+import { failedTitle, relative, statusOf, Unread } from "./bits";
 import type { DaemonState } from "./Local";
 
 /** The one word for where a row runs, as the list's pill says it. */
@@ -151,7 +151,7 @@ export function Launcher({
               <ul>
                 {recent.map((r) => (
                   <li key={r.id}>
-                    <button type="button" className={`is-${statusOf(r)}`} onClick={() => onOpen(r.id)}>
+                    <button type="button" className={`is-${statusOf(r)}`} title={failedTitle(r)} onClick={() => onOpen(r.id)}>
                       <span className="bar" aria-hidden="true" />
                       <span className="title">{r.title ?? r.id}</span>
                       <Unread row={r} />

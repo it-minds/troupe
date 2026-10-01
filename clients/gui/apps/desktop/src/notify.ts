@@ -146,7 +146,9 @@ export function noticeRows(rows: FleetRow[], onScreen: string | null): void {
       questions: Math.max(0, now.questions - (fresh ? 0 : before.questions)),
     };
     if (news.turns + news.approvals + news.questions === 0) continue;
-    say(row.id, `${row.id}:${now.since}:${now.turns}:${now.approvals}:${now.questions}`, describeUnseen(news, row));
+    // A turn that failed is the news, whatever else came with it: the session stopped on it.
+    const body = news.turns > 0 && row.failed ? turnFailed(row.failed.detail) : describeUnseen(news, row);
+    say(row.id, `${row.id}:${now.since}:${now.turns}:${now.approvals}:${now.questions}`, body);
   }
 }
 
@@ -163,7 +165,14 @@ export function noticeEvent(sessionId: string, e: TroupeEvent, live: boolean): v
   const callId = typeof d.data["call_id"] === "string" ? d.data["call_id"] : String(d.seq);
   switch (d.type) {
     case "turn_ended":
-      if (d.agent.length === 1 && !looping.has(sessionId)) say(sessionId, `${sessionId}:${d.seq}`, "1 turn finished");
+      if (d.agent.length !== 1) return;
+      // A root that kept crashing ends its turn so, and its session stops (Decision 727):
+      // news in a loop too, since the loop stops with it and says nothing more.
+      if (d.data["reason"] === "agent_failed") {
+        say(sessionId, `${sessionId}:${d.seq}`, turnFailed(typeof d.data["detail"] === "string" ? d.data["detail"] : null));
+      } else if (!looping.has(sessionId)) {
+        say(sessionId, `${sessionId}:${d.seq}`, "1 turn finished");
+      }
       return;
     case "loop_stopped":
       say(sessionId, `${sessionId}:${d.seq}`, d.data["reason"] === "goal_complete" ? "The loop is done: the goal is met" : "The loop stopped");
@@ -177,6 +186,11 @@ export function noticeEvent(sessionId: string, e: TroupeEvent, live: boolean): v
     default:
       return;
   }
+}
+
+/** What a notification says of a turn the root failed, with what it raised. */
+function turnFailed(detail: string | null | undefined): string {
+  return `The turn failed${detail ? `: ${detail}` : ""}`;
 }
 
 // -- asking ---------------------------------------------------------------------------

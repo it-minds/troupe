@@ -46,6 +46,12 @@ export interface FleetRow {
    * daemon since #119; a plane's rows and an older daemon's say nothing.
    */
   unseen?: Unseen | null;
+  /**
+   * How the root agent's last turn failed, where the source says: `agent_failed`, a root
+   * that kept crashing, with what it raised, and the session stopped on it (Decision 727).
+   * A daemon's rows say it; a plane's and an older daemon's say nothing.
+   */
+  failed?: { reason: string; detail: string | null } | null;
   /** The source's own row, for anything a view needs that this shape does not carry. */
   raw: unknown;
 }
@@ -301,10 +307,10 @@ const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? "" : 
  */
 export function describeUnseen(
   counts: Pick<Unseen, "turns" | "approvals" | "questions">,
-  open: Pick<FleetRow, "pendingApprovals" | "pendingQuestions"> = { pendingApprovals: 0, pendingQuestions: 0 },
+  open: Pick<FleetRow, "pendingApprovals" | "pendingQuestions" | "failed"> = { pendingApprovals: 0, pendingQuestions: 0 },
 ): string {
   return [
-    counts.turns > 0 ? `${plural(counts.turns, "turn")} finished` : null,
+    counts.turns > 0 ? turnsEnded(counts.turns, Boolean(open.failed)) : null,
     counts.approvals > 0 ? `${plural(counts.approvals, "approval")} ${open.pendingApprovals > 0 ? "waiting" : "asked"}` : null,
     counts.questions > 0 ? `${plural(counts.questions, "question")} ${open.pendingQuestions > 0 ? "waiting" : "asked"}` : null,
   ]
@@ -312,12 +318,18 @@ export function describeUnseen(
     .join(", ");
 }
 
+/** The turns that ended, the last of them a failure when the row says the session stopped on one. */
+function turnsEnded(turns: number, failed: boolean): string {
+  if (!failed) return `${plural(turns, "turn")} finished`;
+  return turns === 1 ? "1 turn failed" : `${plural(turns, "turn")} ended, the last one failed`;
+}
+
 /**
  * "2 turns finished, 1 question waiting since 14:02": a row's `unseen`, for the line a
  * person reads on coming back. The clock is the local one, with the day in front when it
  * was not today. Null with nothing to say.
  */
-export function unseenSummary(row: Pick<FleetRow, "unseen" | "pendingApprovals" | "pendingQuestions">, now: Date = new Date()): string | null {
+export function unseenSummary(row: Pick<FleetRow, "unseen" | "pendingApprovals" | "pendingQuestions" | "failed">, now: Date = new Date()): string | null {
   const unseen = row.unseen;
   if (!hasUnseen(unseen)) return null;
   const said = describeUnseen(unseen, row);

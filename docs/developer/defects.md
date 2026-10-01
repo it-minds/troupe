@@ -188,13 +188,6 @@ Found by the #258 and #273 fixers (PRs #264, #274), 2026-09-29.
 
 ### D41 - The desktop app after the daemon restarts (medium)
 
-- A daemon that restarts publishes a new port and token (`loopback.ex`: a port the kernel
-  picks, a random token), and `DaemonClient` keeps redialling the old endpoint: the app
-  says "Not answering" until Find is pressed under This computer. PR #263's resubscribe
-  covers a dropped socket to the same endpoint only. Redialling should read `daemon.json`
-  again.
-- `useDaemon`'s `onClose` (`clients/gui/apps/desktop/src/hooks.ts`) sets the status to
-  "error", and nothing sets it back after a redial that works.
 - Unconfirmed: whether Windows raises `Activated` in the running app for a click in the
   notification centre or starts a second copy. `tauri-winrt-notification` 0.8 can't set a
   toast's `launch` argument, so a copy Windows starts can't tell which session was
@@ -207,7 +200,7 @@ Found by the chunk 9 fixer of slot G (PR #263), 2026-09-29.
 - The headless printer never prints `:remote_note`, so since the daemon move a headless
   run shows no `done: <summary>`, "context compacted", "budget exhausted", cut-short or
   empty replies, or the harness's notes.
-- The TUI, headless runs and the desktop app treat a `turn_ended` with reason
+- The TUI and headless runs treat a `turn_ended` with reason
   `agent_failed` (PR #266) as an ordinary rest; a headless run exits 0 on it
   (`printer.ex` `outcome/2`, `model.ex` `failure/3`).
 - A2A's `state_of_row/1` maps an idle plane row whose turn the harness stopped to

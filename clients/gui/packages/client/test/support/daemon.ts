@@ -158,7 +158,8 @@ function notify(ws: WebSocket, method: string, params: unknown): void {
 }
 
 export class FakeDaemon {
-  readonly token: string;
+  /** The token it serves with now; a `restart` draws a new one, as a daemon does. */
+  token: string;
   readonly sessions = new Map<string, Session>();
   readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   /** Who the daemon says its user is. `null` until somebody links an identity. */
@@ -196,6 +197,7 @@ export class FakeDaemon {
   private readonly env: Record<string, string>;
   private readonly opencode: { providers: string[]; default: string | null };
   private nextId = 1;
+  private restarts = 0;
 
   constructor(opts: FakeDaemonOptions = {}) {
     this.token = opts.token ?? "daemon-token";
@@ -232,6 +234,23 @@ export class FakeDaemon {
     this.clients.clear();
     await new Promise<void>((resolve) => this.wss?.close(() => resolve()));
     await new Promise<void>((resolve) => this.server?.close(() => resolve()));
+  }
+
+  /**
+   * Go away and come back as a daemon that restarted does (`loopback.ex`): on a port the
+   * kernel picks and with a new random token, its sessions kept. A client still holding
+   * the old port and token reaches nothing; what the daemon publishes now is `published`.
+   */
+  async restart(): Promise<void> {
+    await this.stop();
+    this.restarts += 1;
+    this.token = `daemon-token-${this.restarts}`;
+    await this.start();
+  }
+
+  /** What `daemon.json` says while it runs: the port and token a client finds it by. */
+  get published(): { transport: "ws"; port: number; token: string } {
+    return { transport: "ws", port: this.port, token: this.token };
   }
 
   get port(): number {
@@ -278,6 +297,29 @@ export class FakeDaemon {
   say(sessionId: string, text: string): LoggedEvent {
     const session = this.sessions.get(sessionId)!;
     return session.log.append("llm_response", { message: { role: "assistant", content: [{ type: "text", text }] } });
+  }
+
+  /**
+   * As a root agent that kept crashing ends its turn (Decision 727): `turn_ended` with
+   * `agent_failed` and what it raised, and the session stops, to be listed dormant.
+   */
+  fail(sessionId: string, detail: string): LoggedEvent {
+    const session = this.sessions.get(sessionId)!;
+    const ended = session.log.append("turn_ended", { reason: "agent_failed", detail });
+    session.state = "dormant";
+    session.status = "idle";
+    return ended;
+  }
+
+  /**
+   * How the root agent's last turn failed, as the daemon's row says it for a dormant
+   * session: its last `turn_ended` ended `agent_failed`, and no turn has started since.
+   */
+  failedOf(s: Session): { reason: string; detail: string | null } | null {
+    if (s.state !== "dormant") return null;
+    const last = s.log.events.filter((e) => e.agent.length === 1 && ["turn_ended", "user_input", "cancelled", "agent_done"].includes(e.type)).at(-1);
+    if (last?.type !== "turn_ended" || last.data["reason"] !== "agent_failed") return null;
+    return { reason: "agent_failed", detail: typeof last.data["detail"] === "string" ? last.data["detail"] : null };
   }
 
   /** As if a client had read the session up to now and left: what follows is `unseen`. */
@@ -994,6 +1036,7 @@ export class FakeDaemon {
       pending_approvals: s.pendingApprovals,
       pending_questions: s.pendingQuestions,
       unseen: this.unseenOf(s),
+      failed: this.failedOf(s),
       config: { watch: s.watch },
     };
   }

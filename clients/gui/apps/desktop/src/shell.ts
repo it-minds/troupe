@@ -47,6 +47,12 @@ export interface TroupeShell {
   readonly signInFlow?: "redirect" | "device";
   /** Stage 2: find the daemon this machine is running, starting it if it is not. */
   findDaemon?: () => Promise<DaemonEndpoint | null>;
+  /**
+   * Where the daemon says it is now, starting nothing: what a dial after a dropped socket
+   * reads, since a daemon that restarted serves a new port with a new token. Starting one
+   * is `findDaemon`'s, which a person asks for; a daemon somebody stopped stays stopped.
+   */
+  readDaemon?: () => Promise<DaemonEndpoint | null>;
   /** Stage 2: pick a workspace directory. */
   pickDirectory?: () => Promise<string | null>;
   /**
