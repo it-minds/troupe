@@ -50,6 +50,10 @@ defmodule Troupe.Registry do
   def session_mcp_holders,
     do: Registry.select(@registry, [{{{:session_mcp, :_}, :"$1", :_}, [], [:"$1"]}])
 
+  @doc "The MCP sessions a session's URL servers issued it (Decision 746)."
+  @spec mcp_sessions(String.t()) :: GenServer.name()
+  def mcp_sessions(session_id), do: via({:mcp_sessions, session_id})
+
   @doc "One local MCP server on its standard streams."
   @spec mcp_server(String.t(), String.t()) :: GenServer.name()
   def mcp_server(session_id, name), do: via({:mcp_server, session_id, name})

@@ -143,6 +143,11 @@ in place. `${VAR}` in an imported file becomes `{env:VAR}`, read as the rest of 
 configuration reads it. A `skills.json` beside a `skills/` directory does the same for
 directories of skills: `{"include": ["~/.claude/skills"]}`.
 
+A `url` server is spoken to as the MCP specification's streamable HTTP transport has it:
+`initialize` before the first call, and the session the server hands back, if it keeps
+one, carried on every call after, opened again once if the server has forgotten it, and
+ended when the Troupe session ends.
+
 The layers stack the way the config files do: the workspace's file over yours over
 `config.yaml`'s `mcp:`, an entry of the same name merged key by key, so a workspace can
 say `{"fs": {"disabled": true}}` and no more. The TUI's `/mcp` page and the desktop
