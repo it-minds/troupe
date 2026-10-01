@@ -223,6 +223,22 @@ defmodule Troupe.A2A.TasksTest do
       assert text =~ "overloaded"
     end
 
+    # D42: the row is idle and carries no reason; the log says the agent kept crashing.
+    test "a task whose agent kept crashing is failed, saying what it raised", context do
+      StubPlane.put_row(context.plane, "s-7b", %{"status" => "idle", "last_seq" => 4})
+
+      ended = %{"reason" => "agent_failed", "detail" => "** (RuntimeError) boom"}
+      FakeWorker.script(context.worker, "s-7b", opening("Go.") ++ [event(4, "turn_ended", ended)])
+
+      assert {200, %{"result" => %{"status" => status}}} =
+               rpc(context, "tasks/get", %{"id" => "s-7b"})
+
+      assert status["state"] == "failed"
+      assert [%{"text" => text}] = status["message"]["parts"]
+      assert text =~ "kept crashing"
+      assert text =~ "(RuntimeError) boom"
+    end
+
     test "a waiting task names the tool and its arguments", context do
       StubPlane.put_row(context.plane, "s-8", %{
         "status" => "waiting",

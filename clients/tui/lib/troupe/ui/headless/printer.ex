@@ -22,8 +22,9 @@ defmodule Troupe.UI.Headless.Printer do
 
     * `0` — the turn ended, or the agent finished
     * `1` — the agent ended short (budget, refusal, a cut or empty reply, a tool that kept
-      failing), its last model request failed, or the turn was cancelled or stopped
-      because a tool kept failing
+      failing), its last model request failed, the turn was cancelled or stopped because
+      a tool kept failing, or the agent kept crashing and its session stopped (Decision
+      727; the last line says what it raised)
     * `3` — it asked for something only a person can allow, and nobody was there: an
       approval was refused (Decision 20)
 
@@ -218,6 +219,9 @@ defmodule Troupe.UI.Headless.Printer do
       data[:reason] == "tool_failures" ->
         {1, "a tool kept failing, and the harness stopped the turn"}
 
+      data[:reason] == "agent_failed" ->
+        {1, crashed(data[:detail])}
+
       state.failed ->
         {1, "the model request failed"}
 
@@ -232,9 +236,17 @@ defmodule Troupe.UI.Headless.Printer do
   defp refusals(1), do: "an approval was refused"
   defp refusals(n), do: "#{n} approvals were refused"
 
+  # One line, as the window says it: the first line of what the agent raised.
+  defp crashed(detail) when is_binary(detail) and detail != "",
+    do: "the agent kept crashing, and its session stopped: " <> hd(String.split(detail, "\n"))
+
+  defp crashed(_detail), do: "the agent kept crashing, and its session stopped"
+
   # A turn that ended, or was cancelled, leaves the target taking input, and so does a
-  # finish: the next line wakes it. One that ended short drops what it is sent.
+  # finish: the next line wakes it. One that ended short drops what it is sent, and a
+  # session whose agent kept crashing has stopped.
   defp takes_more?(%{to: :done} = data), do: data[:reason] in [nil, "finished"]
+  defp takes_more?(%{reason: "agent_failed"}), do: false
   defp takes_more?(_data), do: true
 
   # The rest waits on the queued lines: until the target takes them, or for `:queued_ms`.
@@ -361,20 +373,12 @@ defmodule Troupe.UI.Headless.Printer do
   defp print(%{type: :budget_warning, agent_path: p, data: d}, state),
     do: say(state, p, "warning: #{d[:detail] || d.dimension} used")
 
-  defp print(%{type: :truncated, agent_path: p, data: %{reason: :empty} = d}, state) do
-    tail = if d[:final], do: "; stopping", else: "; asking the model to continue"
-    say(state, p, "the reply had no text and no tool call" <> tail)
-  end
-
-  defp print(%{type: :truncated, agent_path: p, data: d}, state) do
-    tail = if d[:final], do: "; stopping", else: "; asking again in smaller steps"
-    say(state, p, "the reply hit the output token cap" <> tail)
-  end
-
-  defp print(%{type: :compaction_started, agent_path: p, data: d}, state),
-    do: say(state, p, "compacting the conversation (#{d[:reason] || :requested})")
-
   defp print(%{type: :notice, agent_path: p, data: d}, state), do: say(state, p, d.text)
+
+  # The harness's own word, as the window shows it: a finish's summary, a compaction, a
+  # budget, a reply cut or empty and the note the model was given about it, the session
+  # going dormant or coming back.
+  defp print(%{type: :remote_note, agent_path: p, data: d}, state), do: say(state, p, d.text)
 
   defp print(%{type: :branch_spawned, agent_path: p, data: d}, state),
     do: say(state, p, "spawned /#{d.name} (#{d.isolation})")
