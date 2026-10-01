@@ -201,9 +201,6 @@ defmodule Troupe.UI.TUI.Model do
       :fs_changed ->
         %{m | files_version: m.files_version + 1}
 
-      :watch_trigger ->
-        %{m | notices: Enum.take(["watch: #{e.data.kind} request from AI comments" | m.notices], 3)}
-
       _ ->
         update_window(m, root, fn w -> w |> apply_to_window(e) |> settle(e) end)
     end
@@ -234,7 +231,7 @@ defmodule Troupe.UI.TUI.Model do
   defp turn(%{path: path} = w, %Event{type: :agent_state, agent_path: path, data: d} = e) do
     case {d.to, e.transient?} do
       {to, false} when to in [:idle, :done] ->
-        failure = failure(w, to, d[:reason])
+        failure = failure(w, to, d[:reason], d[:detail])
         outcome = if failure, do: :failed, else: :done
         %{w | outcome: outcome, message: failure, badge: true, ended_at: e.ts}
 
@@ -253,20 +250,29 @@ defmodule Troupe.UI.TUI.Model do
   # Why a rest is a failure, in words, or nil when it is none: the line the headless
   # printer draws between a run that finished and one that ended short, save that a cancel
   # is the person's own doing and leaves the window done (Decision 7).
-  defp failure(_w, :done, reason) when reason not in [nil, "finished"],
+  defp failure(_w, :done, reason, _detail) when reason not in [nil, "finished"],
     do: "the agent ended #{reason}"
 
-  defp failure(_w, _to, "tool_failures"),
+  defp failure(_w, _to, "tool_failures", _detail),
     do: "a tool kept failing, and the harness stopped the turn"
 
-  defp failure(_w, _to, "cancelled"), do: nil
+  defp failure(_w, _to, "agent_failed", detail), do: crashed(detail)
 
-  defp failure(%{path: path} = w, _to, _reason) do
+  defp failure(_w, _to, "cancelled", _detail), do: nil
+
+  defp failure(%{path: path} = w, _to, _reason, _detail) do
     case Map.get(w, :model_errors, %{}) do
       %{^path => message} -> "the model request failed: #{message}"
       _ -> nil
     end
   end
+
+  # A root that crashed as often as it may be restarted, in one line with the first line
+  # of what it raised (Decision 727).
+  defp crashed(detail) when is_binary(detail) and detail != "",
+    do: "the agent kept crashing, and its session stopped: " <> one_line(detail)
+
+  defp crashed(_detail), do: "the agent kept crashing, and its session stopped"
 
   defp apply_to_window(w, %Event{type: type, agent_path: path, data: d, ts: ts} = e) do
     case type do
@@ -330,6 +336,13 @@ defmodule Troupe.UI.TUI.Model do
         |> then(fn w ->
           if d.to == :done and not e.transient?,
             do: w |> ensure_agent(path) |> update_agent(path, &%{&1 | ended_at: ts}),
+            else: w
+        end)
+        # The session stops after it, so the transcript is where it is read, as a model
+        # error is.
+        |> then(fn w ->
+          if d[:reason] == "agent_failed" and not e.transient?,
+            do: w |> ensure_agent(path) |> push(path, {:system, crashed(d[:detail])}),
             else: w
         end)
 
@@ -448,9 +461,6 @@ defmodule Troupe.UI.TUI.Model do
       :todo_updated ->
         update_agent(ensure_agent(w, path), path, fn a -> %{a | todos: d.items} end)
 
-      :profile_switched ->
-        w |> push(path, {:system, "profile switched to #{d.name}"}) |> Map.put(:profile, d.name)
-
       # Said once in the transcript, where it happened, and kept on the window for the
       # status line, which shows it for as long as it is set.
       :goal_set ->
@@ -514,12 +524,6 @@ defmodule Troupe.UI.TUI.Model do
           {:system, "worktree discarded"}
         )
 
-      :compaction ->
-        push(w, path, {:system, "context compacted (#{d.dropped_messages} messages summarized)"})
-
-      :compaction_started ->
-        push(w, path, {:system, compaction_reason(d[:reason])})
-
       # A warning is the one signal that arrives while there is still budget left
       # to spend, so it goes in the transcript *and* stays on the window, where the
       # tile and the token line can show the denominator the UI never had.
@@ -527,32 +531,10 @@ defmodule Troupe.UI.TUI.Model do
         %{w | warnings: Map.put(w.warnings, d.dimension, d)}
         |> push(path, {:system, "⚠ " <> (d[:detail] || to_string(d.dimension)) <> " used"})
 
-      :truncated ->
-        push(w, path, {:system, truncation_line(d)})
-
       _ ->
         w
     end
   end
-
-  defp compaction_reason(:context_overflow),
-    do: "the prompt no longer fit the context window — compacting and retrying the turn"
-
-  defp compaction_reason(_requested), do: "compacting the conversation"
-
-  defp truncation_line(%{reason: :empty, final: true}),
-    do: "the reply had no text and no tool call again — stopping rather than reporting success"
-
-  defp truncation_line(%{reason: :empty}),
-    do: "the reply had no text and no tool call — asking the model to continue"
-
-  defp truncation_line(%{final: true}),
-    do: "the reply hit the output token cap again — stopping rather than reporting success"
-
-  defp truncation_line(%{calls: n}) when is_integer(n) and n > 0,
-    do: "the reply hit the output token cap mid-tool-call"
-
-  defp truncation_line(_d), do: "the reply hit the output token cap — asking again in smaller steps"
 
   # Only the optimistic copy of an input carries a command id worth waiting on:
   # one that came off the wire is already confirmed by definition.

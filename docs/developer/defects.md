@@ -128,13 +128,12 @@ The rest of this entry was fixed in PRs #234 and #237. Found by the chunk 6 fixe
   open it (PR #241).
 - `model.ex` highlights code with syntect's dark-only `base16_ocean_dark`, so code keeps
   dark-theme colours on a light terminal.
-- Dead since the daemon move: `model.ex`'s `:truncated`, `:compaction`,
-  `:compaction_started`, `:profile_switched` and `:watch_trigger` clauses, the printer's
-  `:truncated` and `:compaction_started` clauses, and a window's `summary` and
-  `diff_stat` fields, which nothing feeds.
+- Dead since the daemon move: a window's `summary` and `diff_stat` fields, which nothing
+  feeds.
 
 The rest of this entry (the printer's and the model's dead clauses, the view's recount,
-the picker's empty branches column, `Troupe.Codec`'s `to`/`reason`) was fixed in PR #262.
+the picker's empty branches column, `Troupe.Codec`'s `to`/`reason`) was fixed in PR #262,
+and the dead `truncated`, `compaction` and other clauses left in both for issue #301.
 Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
 
 ### D37 - Small leftovers from the 0.6.1 work (low)
@@ -198,16 +197,12 @@ Found by the chunk 9 fixer of slot G (PR #263), 2026-09-29.
 
 ### D42 - The clients drop what a stopped turn says (medium)
 
-- The headless printer never prints `:remote_note`, so since the daemon move a headless
-  run shows no `done: <summary>`, "context compacted", "budget exhausted", cut-short or
-  empty replies, or the harness's notes.
-- The TUI, headless runs and the desktop app treat a `turn_ended` with reason
-  `agent_failed` (PR #266) as an ordinary rest; a headless run exits 0 on it
-  (`printer.ex` `outcome/2`, `model.ex` `failure/3`).
-- A2A's `state_of_row/1` maps an idle plane row whose turn the harness stopped to
-  `completed` (the row carries no reason).
+- The desktop app treats a `turn_ended` with reason `agent_failed` (PR #266) as an
+  ordinary rest.
 
-Found by the chunk 9 fixers of slots D and E (PRs #262, #266), 2026-09-29.
+Found by the chunk 9 fixers of slots D and E (PRs #262, #266), 2026-09-29. The TUI's,
+headless runs' and A2A's share (the printer's notes, `agent_failed` in the window and a
+headless run's exit code, A2A's answer at rest for an idle row) was fixed for issue #301.
 
 ### D43 - Small leftovers from the 0.6.3 work (low)
 

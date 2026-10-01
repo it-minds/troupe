@@ -78,7 +78,8 @@ defmodule Troupe.WindowAttentionTest do
       for ending <- [
             wire("root", "agent_done", %{"reason" => "interrupted"}),
             wire("root", "agent_done", %{"reason" => "budget_exhausted", "limit" => "turns"}),
-            wire("root", "turn_ended", %{"reason" => "tool_failures"})
+            wire("root", "turn_ended", %{"reason" => "tool_failures"}),
+            wire("root", "turn_ended", %{"reason" => "agent_failed"})
           ] do
         model = fold(turn() ++ [ending])
         assert Model.attention_summary(model) == "1 failed", inspect(ending)
@@ -86,6 +87,17 @@ defmodule Troupe.WindowAttentionTest do
 
       finished = fold(turn() ++ [wire("root", "agent_done", %{"reason" => "finished"})])
       assert Model.attention_summary(finished) == "1 done"
+    end
+
+    # D42: a root that kept crashing ends its turn with `agent_failed` and what it raised
+    # (Decision 727), and the window counted that as a turn done.
+    test "a turn a crashing agent ended is failed, and the window says what it raised" do
+      crashed = %{"reason" => "agent_failed", "detail" => "** (RuntimeError) boom"}
+      model = fold(turn() ++ [wire("root", "turn_ended", crashed)])
+      said = "the agent kept crashing, and its session stopped: ** (RuntimeError) boom"
+
+      assert [%{state: :failed_unread, badge: true, message: ^said} = w] = Model.windows(model)
+      assert {:system, said} in w.agents["root"].transcript
     end
 
     # Decision 7: a cancel is the person's own doing, and the window reads what happened.
@@ -132,6 +144,8 @@ defmodule Troupe.WindowAttentionTest do
             {[wire("root", "llm_error", %{"reason" => "down"}), wire("root", "turn_ended")],
              :failed_unread},
             {[wire("root", "turn_ended", %{"reason" => "tool_failures"})], :failed_unread},
+            {[wire("root", "turn_ended", %{"reason" => "agent_failed", "detail" => "boom"})],
+             :failed_unread},
             {[wire("root", "cancelled")], :done_unread}
           ] do
         {events, _memory} = translate("s-1", turn() ++ ending)
@@ -154,6 +168,7 @@ defmodule Troupe.WindowAttentionTest do
         turn() ++
           [
             wire("root", "turn_ended", %{"reason" => "tool_failures"}),
+            wire("root", "turn_ended", %{"reason" => "agent_failed", "detail" => "** (E) boom"}),
             wire("root", "cancelled"),
             wire("root", "agent_done", %{"reason" => "budget_exhausted", "limit" => "turns"}),
             wire("root", "loop_stopped", %{"reason" => "max_iterations", "iterations" => 3}),
