@@ -137,8 +137,12 @@ outside, this way or by an executor that calls `trigger.fire`; any trigger with 
 be.
 
 **Runs** store only what the plane decided — `created`, `skipped`, `failed` — and read the
-rest from the session: `running`, `waiting` (on an approval), `done`, `failed`.
-`admin.runs.list` and `admin.run.review` are the inbox.
+rest from the session: `running`, `waiting` (on an approval), `done`, `failed`. A turn the
+harness stopped is `failed` with its `failed_reason`: `tool_failures`, a tool that kept
+failing, or `agent_failed`, an agent that kept crashing. `admin.runs.list` and
+`admin.run.review` are the inbox. A `notify_url` is posted `{trigger, run, source,
+session_id, fired_at, state, done_reason, failed_reason}` when the run is `done` or
+`failed`, with `state` as the run listing gives it.
 
 ### Triggers from a repository
 

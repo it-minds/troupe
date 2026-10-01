@@ -137,7 +137,7 @@ defmodule Troupe.Plane.TriggerNotifyTest do
       assert is_nil(trigger.notify_url)
 
       # A run whose trigger names nowhere is not an error and not a request.
-      assert Triggers.announce("no-such-session", %{"state" => "done"}) == :ok
+      assert Triggers.announce("no-such-session") == :ok
     end
   end
 

@@ -509,7 +509,8 @@ defmodule Troupe.Plane.Triggers do
 
   # Live is created, running or waiting: a session still to start, one thinking or
   # acting, or one dormant with an approval pending — that last still counts, because
-  # a person has not finished with it and a second one would be a second question.
+  # a person has not finished with it and a second one would be a second question. A
+  # turn the harness stopped is a run that failed, and holds no place.
   defp live_runs(trigger, %Run{id: except}) do
     Repo.one(
       from(r in Run,
@@ -518,7 +519,8 @@ defmodule Troupe.Plane.Triggers do
         where:
           r.trigger_id == ^trigger.id and r.id != ^except and r.state == "created" and
             (is_nil(r.session_id) or s.status == "waiting" or
-               (s.state == "active" and s.status not in ["done", "interrupted"])),
+               (s.state == "active" and s.status not in ["done", "interrupted"] and
+                  is_nil(s.failed_reason))),
         select: count(r.id)
       )
     ) || 0
@@ -708,13 +710,16 @@ defmodule Troupe.Plane.Triggers do
   The row records only what the plane decided at firing; everything after is the
   session's status, which the worker keeps current. A session that finished by budget is
   `done` — a trigger with `max_turns: 3` is *meant* to end that way — and `failed` is
-  the session interrupted or ended for any other reason.
+  the session interrupted or ended for any other reason, or a turn the harness stopped:
+  the failure guard's (Decision 687) or a root that kept crashing (727), whose root is at
+  rest and would otherwise read as running, or as never started once it is asleep.
   """
   @spec state_of(Run.t(), Session.t() | nil) :: String.t()
   def state_of(%Run{state: "skipped"}, _session), do: "skipped"
   def state_of(%Run{state: "failed"}, _session), do: "failed"
   def state_of(%Run{session_id: nil}, _session), do: "created"
   def state_of(%Run{}, nil), do: "failed"
+  def state_of(%Run{}, %Session{failed_reason: reason}) when is_binary(reason), do: "failed"
 
   def state_of(%Run{}, %Session{} = session) do
     case session.status do
@@ -749,12 +754,22 @@ defmodule Troupe.Plane.Triggers do
   whom, under which terms — but a notification target is not a fact about the run. It is
   where somebody wants to be told today, and an administrator who moved their receiver
   because the old one is gone means the runs in flight too.
+
+  How it ended is read from the session's row, which the report that ended it has just
+  written: the run's state as a listing gives it (`done` or `failed`), and the reasons
+  the worker gave — why the session finished, or why the harness stopped its last turn.
   """
-  @spec announce(String.t(), map()) :: :ok | {:error, String.t()}
-  def announce(session_id, outcome) when is_binary(session_id) do
+  @spec announce(String.t()) :: :ok | {:error, String.t()}
+  def announce(session_id) when is_binary(session_id) do
     with %Run{} = run <- Repo.get_by(Run, session_id: session_id),
          %Trigger{} = trigger <- Repo.get(Trigger, run.trigger_id) do
-      Notify.deliver(trigger, run, outcome)
+      session = Sessions.get(session_id)
+
+      Notify.deliver(trigger, run, %{
+        "state" => state_of(run, session),
+        "done_reason" => session && session.done_reason,
+        "failed_reason" => session && session.failed_reason
+      })
     else
       nil -> :ok
     end
@@ -807,6 +822,7 @@ defmodule Troupe.Plane.Triggers do
       "state" => state_of(run, session),
       "status" => session && session.status,
       "done_reason" => session && session.done_reason,
+      "failed_reason" => session && session.failed_reason,
       "pending_approvals" => session && session.pending_approvals,
       "pending_questions" => session && session.pending_questions,
       "cost_micros" => session && session.cost_micros,

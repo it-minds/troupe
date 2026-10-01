@@ -598,6 +598,25 @@ defmodule Troupe.Plane.ControlTest do
       assert session.pending_questions == 0
     end
 
+    test "a turn the harness stopped stays on the row until a report says another started",
+         %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      {:ok, _} = Sessions.create(%{id: "s-1", owner_subject: "idp|alice", profile: "dev"})
+      stopped = %{"session_id" => "s-1", "epoch" => 1, "status" => "idle"}
+
+      failed = Map.put(stopped, "failed_reason", "agent_failed")
+      assert {:ok, _} = call(worker, "session.status", failed)
+      assert Sessions.get("s-1").failed_reason == "agent_failed"
+
+      # A pod from before the field says nothing about it, and the row keeps what it had.
+      assert {:ok, _} = call(worker, "session.status", stopped)
+      assert Sessions.get("s-1").failed_reason == "agent_failed"
+
+      started = Map.merge(stopped, %{"status" => "thinking", "failed_reason" => nil})
+      assert {:ok, _} = call(worker, "session.status", started)
+      assert is_nil(Sessions.get("s-1").failed_reason)
+    end
+
     test "going dormant applies the last status and gives the budget slice back", %{port: port} do
       team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 10_000_000)
       worker = enrolled(port, "dev-token", "troupe-w-dev-0")

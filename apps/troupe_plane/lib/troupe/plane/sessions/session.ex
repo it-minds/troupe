@@ -69,6 +69,10 @@ defmodule Troupe.Plane.Sessions.Session do
     # Lifecycle the worker reports, so a queue can be listed without reading a log.
     field(:status, :string, default: "idle")
     field(:done_reason, :string)
+    # Why the harness stopped the root's last turn, until another starts: `turn_ended`'s
+    # reason, `tool_failures` or `agent_failed`. The root is at rest after either, and
+    # `status` alone reads it as a turn that did its work (Decision 750).
+    field(:failed_reason, :string)
     field(:pending_approvals, :integer, default: 0)
     field(:pending_questions, :integer, default: 0)
     field(:cost_micros, :integer, default: 0)
@@ -146,6 +150,7 @@ defmodule Troupe.Plane.Sessions.Session do
     :workspace_bytes,
     :status,
     :done_reason,
+    :failed_reason,
     :pending_approvals,
     :pending_questions,
     :cost_micros,

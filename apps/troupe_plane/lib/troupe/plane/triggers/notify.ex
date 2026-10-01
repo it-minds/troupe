@@ -238,7 +238,8 @@ defmodule Troupe.Plane.Triggers.Notify do
       "session_id" => run.session_id,
       "fired_at" => DateTime.to_iso8601(run.fired_at),
       "state" => outcome["state"],
-      "done_reason" => outcome["done_reason"]
+      "done_reason" => outcome["done_reason"],
+      "failed_reason" => outcome["failed_reason"]
     }
   end
 

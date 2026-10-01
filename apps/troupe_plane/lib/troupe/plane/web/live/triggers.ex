@@ -440,7 +440,7 @@ defmodule Troupe.Plane.Web.Live.Triggers do
               <th>by</th>
               <th>state</th>
               <th>session</th>
-              <th>done</th>
+              <th>reason</th>
               <th>approvals</th>
               <th>cost</th>
               <th>reviewed</th>
@@ -453,7 +453,7 @@ defmodule Troupe.Plane.Web.Live.Triggers do
               <td>{run["fired_by"]}</td>
               <td>{run["state"]}</td>
               <td>{run["session_id"] || "—"}</td>
-              <td>{run["done_reason"] || "—"}</td>
+              <td>{run["failed_reason"] || run["done_reason"] || "—"}</td>
               <td>{run["pending_approvals"] || 0}</td>
               <td>{money(run["cost_micros"])}</td>
               <td>{run["reviewed_by"] || "—"}</td>
