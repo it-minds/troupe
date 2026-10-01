@@ -18,7 +18,7 @@ defmodule Troupe.Plane.ScalingTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.Control.{Connections, Listener}
-  alias Troupe.Plane.{Drain, FakePod, Fleet, Harness, Placement, Sessions}
+  alias Troupe.Plane.{Drain, FakeCluster, FakePod, Fleet, Harness, Placement, Provision, Sessions}
   alias Troupe.Plane.Fleet.{Scaler, SizeClass, Worker}
 
   @moduletag timeout: 60_000
@@ -251,6 +251,48 @@ defmodule Troupe.Plane.ScalingTest do
     end
   end
 
+  describe "a count the cluster did not take" do
+    # Direct mode, against an API server in memory that the plane writes the whole resource
+    # to. The row is written before the cluster, so a write the cluster refused leaves a
+    # row that already says the new count, and only the cluster can say it is not there.
+    setup do
+      FakeCluster.start()
+
+      {:ok, profile} =
+        Fleet.put_profile(%{
+          name: "dev",
+          size_class: "standard",
+          image: "ghcr.io/troupe/worker:1.2.3",
+          replicas: 1
+        })
+
+      {:ok, %{state: :applied}} =
+        Provision.apply(profile, %{subject: "system:test", role: :platform_admin})
+
+      :ok
+    end
+
+    test "is sent again on the next tick", context do
+      # Two workers' worth of sessions, and an API server that is restarting.
+      seed(context, active: 5)
+      FakeCluster.refuse_next_write()
+
+      assert [%{want: 2, changed: false}] = Scaler.tick(@now)
+      assert Fleet.get_profile("dev").replicas == 2
+      assert cluster_replicas() == 1
+
+      # Nothing about the sessions changed; the cluster is still at one, which the next
+      # tick reads and sends again.
+      assert [%{want: 2, changed: true}] = Scaler.tick(later(15))
+      assert cluster_replicas() == 2
+
+      # Once the cluster has it, a tick reads it back and writes nothing.
+      writes = FakeCluster.writes()
+      assert [%{want: 2, changed: false}] = Scaler.tick(later(30))
+      assert FakeCluster.writes() == writes
+    end
+  end
+
   describe "a pod that stops answering" do
     test "leaves its sessions dormant rather than active on a worker that is gone", context do
       {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard"})
@@ -400,6 +442,9 @@ defmodule Troupe.Plane.ScalingTest do
   defp plan(_context), do: Scaler.plan(Fleet.get_profile("dev"))
 
   defp later(seconds), do: DateTime.add(@now, seconds, :second)
+
+  defp cluster_replicas,
+    do: get_in(FakeCluster.get("WorkerProfile", "dev"), ["spec", "replicas"])
 
   # A session waiting for room, as a create on a full profile leaves it.
   defp waiting(context) do

@@ -645,6 +645,18 @@ defmodule Troupe.Plane.Provision do
   end
 
   @doc """
+  The count a profile's resource asks for, read as the operator reads it, or the error that
+  kept it from being read: none where the cluster has no such resource, or the plane no
+  cluster.
+  """
+  @spec replicas(Profile.t()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def replicas(%Profile{} = profile) do
+    with {:ok, resource} <- live_resource(profile) do
+      {:ok, WorkerProfile.from_resource(resource).replicas}
+    end
+  end
+
+  @doc """
   Where a profile's upgrade stands, as the cluster holds it: the pods the operator reports
   on an older revision (`status.podsBehind`), and the drains the plane has recorded as
   finished (the `troupe.dev/drained` annotation). Decision 726.
