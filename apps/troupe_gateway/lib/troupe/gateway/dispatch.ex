@@ -132,6 +132,10 @@ defmodule Troupe.Gateway.Dispatch do
     # where a server can use it, and signing out takes it away: both are the person's.
     "mcp.sign_in" => :admin,
     "mcp.sign_out" => :admin,
+    # One of those servers listed and called outside a session (Decision 748), for a client
+    # that offers its tools to a pod: each goes out with the person's sign-in.
+    "mcp.tools" => :admin,
+    "mcp.call" => :admin,
     "skills.list" => :observe,
     "skills.add" => :admin,
     "skills.remove" => :admin

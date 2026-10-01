@@ -124,6 +124,32 @@ export interface SignInStarted {
   expires_at: string;
 }
 
+/** One of your server's tools as `mcp.tools` lists it: what a session is given to call it by. */
+export interface ServerTool {
+  name: string;
+  description: string;
+  schema: Record<string, unknown>;
+}
+
+/**
+ * What `mcp.tools` answers (troupe Decision 748): the server asked for its tools with your
+ * sign-in, outside any session. `state` is `ready`, `sign_in` while it waits for yours, or
+ * `error`, as a check says it.
+ */
+export interface ServerTools {
+  server: string;
+  state: string;
+  error: string | null;
+  tools: ServerTool[];
+}
+
+/** What `mcp.call` answers: the tool's answer as a session's model reads it, never a token. */
+export interface ServerToolResult {
+  server: string;
+  tool: string;
+  content: string;
+}
+
 /** One skill as `skills.list` reports it. */
 export interface LocalSkill {
   name: string;
@@ -615,6 +641,24 @@ export class DaemonClient {
   /** Forget your sign-in to a server on this computer. */
   signOutServer(params: { name: string; workspace?: string; session_id?: string }): Promise<{ server: string; auth: ServerAuth | null }> {
     return this.command("mcp.sign_out", { ...params });
+  }
+
+  /**
+   * A server's tools, asked with your sign-in outside any session (troupe Decision 748):
+   * what a session on a pod is offered of it. `admin`, since the asking goes out as you.
+   */
+  serverTools(params: { name: string; workspace?: string }): Promise<ServerTools> {
+    return this.call<ServerTools>("mcp.tools", { ...params });
+  }
+
+  /**
+   * Call one of a server's tools with your sign-in, outside any session: how a pod's
+   * `tool.invoke` for a server you offered it is served. The daemon makes the call and the
+   * token stays there. `command_id` names the call, so one the pod sends again after a
+   * drop is answered from the first rather than made twice.
+   */
+  callServerTool(params: { name: string; tool: string; arguments: Record<string, unknown>; command_id: string }): Promise<ServerToolResult> {
+    return this.command<ServerToolResult>("mcp.call", { ...params });
   }
 
   listSkills(workspace?: string): Promise<{ skills: LocalSkill[] }> {

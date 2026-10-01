@@ -484,9 +484,13 @@ defmodule Troupe.Plane.Control.Connection do
   # unsupervised on purpose: a pod reporting that a session finished must not wait on
   # somebody else's HTTP server, and a notification lost because the node went down is a
   # better outcome than a status report that did not land because one was in flight.
-  defp announce(%{"session_id" => session_id, "status" => status})
-       when status in ["done", "interrupted"] and is_binary(session_id) do
-    Task.start(fn -> Triggers.announce(session_id, %{"state" => status}) end)
+  #
+  # Ended is done, interrupted, or a turn the harness stopped: the root is at rest after
+  # that, and nothing goes on until somebody says so (Decision 750).
+  defp announce(%{"session_id" => session_id} = params) when is_binary(session_id) do
+    if params["status"] in ["done", "interrupted"] or is_binary(params["failed_reason"]),
+      do: Task.start(fn -> Triggers.announce(session_id) end)
+
     :ok
   end
 

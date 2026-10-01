@@ -2364,6 +2364,7 @@ defmodule Troupe.Plane.Harness do
       # without replaying a log. Never what the session said.
       "status" => session.status,
       "done_reason" => session.done_reason,
+      "failed_reason" => session.failed_reason,
       "pending_approvals" => session.pending_approvals,
       "pending_questions" => session.pending_questions,
       "cost_micros" => session.cost_micros,

@@ -386,6 +386,14 @@ if config_env() == :prod do
       # beside "Locked to gitops": a repository and a path. Display only; the plane never
       # reads it.
       gitops_source: presence.(System.get_env("TROUPE_GITOPS_SOURCE")),
+      # Whether the cluster has Cilium, as the operator is told it: without it a profile
+      # whose own endpoint its pods cannot reach is refused (Decision 749). Unset is a plane
+      # nobody told, which refuses nothing and leaves it to the operator to report.
+      cilium_available:
+        (case presence.(System.get_env("TROUPE_CILIUM_AVAILABLE")) do
+           nil -> nil
+           value -> value == "true"
+         end),
       oidc: [
         issuer: oidc_required.("TROUPE_OIDC_ISSUER"),
         client_id: oidc_required.("TROUPE_OIDC_CLIENT_ID"),
@@ -458,6 +466,10 @@ if config_env() == :prod do
       # shape a bundle carries, so a pod knows its servers before its first bundle arrives
       # and a bundle that names the same server simply agrees with it.
       mcp_servers: Jason.decode!(System.get_env("TROUPE_MCP_SERVERS", "[]")),
+      # Who the profile is at the servers it calls with client credentials (Decision 747):
+      # a file the operator mounts from a ConfigMap, read again whenever a token is asked
+      # for, so a rotation reaches the pod without a restart.
+      mcp_identities_path: presence.(System.get_env("TROUPE_MCP_IDENTITIES_PATH")),
       drain_timeout_seconds:
         String.to_integer(System.get_env("TROUPE_DRAIN_TIMEOUT_SECONDS", "300")),
       worker_id: presence.(System.get_env("TROUPE_POD_ORDINAL")),

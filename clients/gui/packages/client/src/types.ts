@@ -181,12 +181,15 @@ export interface AuthExpiring {
   expires_at: number;
 }
 
-/** A server → client request the client must answer (client-hosted tools, §8). */
+/**
+ * A server → client request the client must answer (client-hosted tools, §8). `name` is
+ * the tool as the model called it, `client.` prefix and all.
+ */
 export interface ToolInvoke {
   call_id: string;
   session_id?: string;
   name: string;
-  args: Record<string, unknown>;
+  arguments: Record<string, unknown>;
   [k: string]: unknown;
 }
 

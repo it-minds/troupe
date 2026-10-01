@@ -23,6 +23,7 @@ defmodule Troupe.Operator.Reconciler do
   alias Troupe.Operator.{Names, Resources, Settings, Status}
   alias Troupe.Policy
   alias Troupe.WorkerProfile, as: Profile
+  alias Troupe.WorkerProfile.Reach
 
   require Logger
 
@@ -36,6 +37,7 @@ defmodule Troupe.Operator.Reconciler do
   @prunable [
     {"v1", "Service"},
     {"v1", "PersistentVolumeClaim"},
+    {"v1", "ConfigMap"},
     {"networking.k8s.io/v1", "Ingress"},
     {"networking.k8s.io/v1", "NetworkPolicy"},
     {"policy/v1", "PodDisruptionBudget"},
@@ -148,7 +150,9 @@ defmodule Troupe.Operator.Reconciler do
       |> status_for(desired, failures, pruned, namespace)
       |> egress_status(desired, failures, generation(resource))
       |> secret_status(missing, generation(resource))
+      |> identity_status(Profile.identity_problems(profile), generation(resource))
       |> upgrade_status(upgrade, generation(resource))
+      |> endpoint_status(profile, settings, generation(resource))
 
     write_status(conn, resource, status)
 
@@ -198,6 +202,31 @@ defmodule Troupe.Operator.Reconciler do
     Status.put(status, "EgressByHostname", holds?, reason, message, generation)
   end
 
+  # One of the profile's own endpoints that its workers cannot reach: without Cilium the
+  # NetworkPolicy reaches outside the cluster only public addresses on 443 and 80. Reported
+  # rather than refused, and beside `Ready`, as a missing secret is: the profile reconciled,
+  # and in gitops mode it was applied by something nothing here can refuse, so this is how
+  # it reads as broken rather than as a session's first call timing out (Decision 749).
+  defp endpoint_status(status, _profile, %Settings{cilium_available: true}, generation) do
+    message = "with Cilium a worker reaches each endpoint the profile names, by name or address"
+    Status.put(status, "EndpointUnreachable", false, "Cilium", message, generation)
+  end
+
+  defp endpoint_status(status, profile, _settings, generation) do
+    case Reach.unreachable(profile) do
+      [] ->
+        message =
+          "the worker's NetworkPolicy admits every endpoint the profile names, as far as " <>
+            "their URLs say"
+
+        Status.put(status, "EndpointUnreachable", false, "Reachable", message, generation)
+
+      found ->
+        message = Reach.explain(found)
+        Status.put(status, "EndpointUnreachable", true, "NoCilium", message, generation)
+    end
+  end
+
   # A secret the profile refers to and the cluster does not have. Reported rather than
   # refused: the reference may be right and the secret on its way, and a profile that
   # would not reconcile until every secret existed could not be created before them.
@@ -237,6 +266,32 @@ defmodule Troupe.Operator.Reconciler do
   defp secret_status(status, missing, generation) do
     message = "missing secret(s): #{Enum.join(missing, ", ")}"
     Status.put(status, "SecretMissing", true, "SecretsMissing", message, generation)
+  end
+
+  # A server the bundle marks `client_credentials` that the profile gives no usable
+  # identity (Decision 747). Reported beside `SecretMissing` and for the same reasons: the
+  # bundle and the profile are written separately and either may come first, and the pods
+  # run regardless, without that server's tools, until both are there.
+  defp identity_status(status, [], generation) do
+    Status.put(
+      status,
+      "MCPIdentityMissing",
+      false,
+      "IdentitiesPresent",
+      "every server called with client credentials has an identity",
+      generation
+    )
+  end
+
+  defp identity_status(status, problems, generation) do
+    Status.put(
+      status,
+      "MCPIdentityMissing",
+      true,
+      "IdentityMissing",
+      Enum.join(problems, "; "),
+      generation
+    )
   end
 
   # A pod takes an image, config or volume change only when it is deleted, and it should

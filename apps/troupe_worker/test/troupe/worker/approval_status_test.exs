@@ -84,6 +84,39 @@ defmodule Troupe.Worker.ApprovalStatusTest do
     assert %{"status" => "waiting", "pending_questions" => 0} = reported["parked"]
   end
 
+  # #320: the guard's question answered `stop` with nobody to ask (Decision 687) ends the
+  # turn `tool_failures`, and that is not a rest the plane may take for a finished turn.
+  # Nor is a root that crashed as often as it may be restarted (727): its session stops
+  # with no `agent_state` after the `turn_ended` to say the root is at rest.
+  test "a turn the harness stopped is reported with its reason, until the next turn starts" do
+    stopped = recorded("questions", "failures_unattended")
+
+    crashed = [
+      Event.ephemeral("agent_state", ["root"], %{"state" => "thinking"}),
+      %Event{
+        type: "turn_ended",
+        agent: ["root"],
+        data: %{"reason" => "agent_failed", "detail" => "boom"}
+      }
+    ]
+
+    again =
+      stopped ++
+        [
+          %Event{
+            type: "user_input",
+            agent: ["root"],
+            data: %{"source" => "user", "text" => "go on"}
+          }
+        ]
+
+    reported = replay_events(%{"stopped" => stopped, "crashed" => crashed, "again" => again})
+
+    assert %{"status" => "idle", "failed_reason" => "tool_failures"} = reported["stopped"]
+    assert %{"status" => "idle", "failed_reason" => "agent_failed"} = reported["crashed"]
+    assert %{"failed_reason" => nil} = reported["again"]
+  end
+
   # One manager per log, with no tree behind it and marked active so that it reports: the
   # lifecycle is a fold over the events a session publishes, and those are what each one
   # is sent here, in the order the session wrote them. The answer is the last report each

@@ -33,7 +33,7 @@ defmodule Troupe.Plane.Bundles do
 
   import Ecto.Query
 
-  alias Troupe.Plane.{ClusterPolicy, Fleet, Provision, Repo}
+  alias Troupe.Plane.{ClusterPolicy, Fleet, Provision, Reach, Repo}
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Fleet.Bundle
   alias Troupe.Plane.Identity.Entitlement
@@ -82,10 +82,14 @@ defmodule Troupe.Plane.Bundles do
   call one of them. Options: `:by`, the publisher; `:announce`, whether to tell the pods
   (default true); `:project`, whether to rewrite the profiles' `mcpServers` (default
   true).
+
+  Refused for what `validate/1` refuses, and, without Cilium, for an MCP server the pods
+  of a profile on the channel could not reach (`Troupe.Plane.Reach`, Decision 749).
   """
   @spec publish(String.t(), map(), keyword()) :: {:ok, Bundle.t()} | {:error, term()}
   def publish(channel, content, opts \\ []) do
-    with {:ok, parsed} <- validate(content) do
+    with {:ok, parsed} <- validate(content),
+         :ok <- Reach.bundle(channel, parsed) do
       version = next_version(channel)
 
       %Bundle{}
@@ -526,6 +530,12 @@ defmodule Troupe.Plane.Bundles do
         end)
     end
   end
+
+  # The profile's own identity (Decision 747): no Secret and no reference, only the mode,
+  # which tells the operator to say so when the profile has no identity for the server.
+  # Who the profile is there is its own `mcpIdentities`, never a projection of the plane's.
+  defp put_credential(entry, _name, "client_credentials", _ref),
+    do: Map.put(entry, "credentialMode", "client_credentials")
 
   defp put_credential(entry, _name, _mode, nil), do: entry
 

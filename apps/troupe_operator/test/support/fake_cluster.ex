@@ -27,6 +27,7 @@ defmodule Troupe.Operator.FakeCluster do
       {"serviceaccounts", "ServiceAccount", true},
       {"services", "Service", true},
       {"persistentvolumeclaims", "PersistentVolumeClaim", true},
+      {"configmaps", "ConfigMap", true},
       {"secrets", "Secret", true},
       {"pods", "Pod", true}
     ],

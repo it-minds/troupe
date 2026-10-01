@@ -10,7 +10,7 @@ defmodule Troupe.Plane.BundlesTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Bundles, Fleet, Harness, Identity, Sessions}
+  alias Troupe.Plane.{Bundles, Fleet, Harness, Identity, Provision, Sessions}
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.Fleet.Bundle
 
@@ -272,6 +272,43 @@ defmodule Troupe.Plane.BundlesTest do
 
       assert reason =~ "two credentials"
       assert reason =~ "which code path ran"
+    end
+
+    test "a server called as the profile's own identity is marked, with no Secret, and the profile says who it is" do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", spec: %{}})
+
+      content =
+        schema_1(
+          mcp_servers: [
+            %{
+              "name" => "jira",
+              "url" => "https://mcp.jira.example/mcp",
+              "credential_mode" => "client_credentials"
+            }
+          ]
+        )
+
+      assert {:ok, _} = Bundles.publish("stable", content, announce: false)
+      assert [entry] = Fleet.get_profile("dev").spec["mcpServers"]
+
+      assert entry["credentialMode"] == "client_credentials"
+      refute Map.has_key?(entry, "secretRef")
+      refute Map.has_key?(entry, "credentialRef")
+
+      # The profile has no identity for it yet, which is reported and not refused (Decision
+      # 747): the bundle and the profile are written by different people.
+      assert [problem] = Provision.identity_problems(Fleet.get_profile("dev"))
+      assert problem =~ "mcp server jira is called with client credentials"
+
+      identity = %{
+        "server" => "jira",
+        "clientId" => "client-dev",
+        "transitKey" => "troupe-w-dev.jira",
+        "certificateThumbprint" => String.duplicate("A", 43)
+      }
+
+      {:ok, _} = Fleet.put_profile(%{name: "dev", spec: %{"mcpIdentities" => [identity]}})
+      assert Provision.identity_problems(Fleet.get_profile("dev")) == []
     end
   end
 

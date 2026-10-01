@@ -66,7 +66,11 @@ defmodule Troupe.Protocol.Bundle do
   @default_header "authorization"
   @default_timeout_ms 30_000
   @permissions ~w(ask auto)
-  @credential_modes ~w(profile person)
+  @credential_modes %{
+    "profile" => :profile,
+    "person" => :person,
+    "client_credentials" => :client_credentials
+  }
   # A slot is a name a person's key manager path is built from, so it is deliberately
   # narrower than a secret name: lowercase, and nothing that could be a path segment
   # separator or a wildcard.
@@ -85,16 +89,22 @@ defmodule Troupe.Protocol.Bundle do
   * `:person` — `credential_ref` is not a variable name but a **slot**. The value lives
     in the key manager at `troupe/people/<subject>/mcp/<slot>`, and neither the plane nor
     the operator ever reads it. The slot defaults to the server's own name.
+  * `:client_credentials` — the profile's own identity, by OAuth client credentials with
+    an assertion signed through the key manager (Decision 747). The bundle only marks the
+    server; who the profile is there is the profile's `mcpIdentities`, because a channel
+    serves several profiles and each is somebody else at the server. There is no
+    `credential_ref`.
 
-  The two are exclusive per server, and `secret_ref` — the spelling that becomes a
-  `secretRef` on the `WorkerProfile` — is refused alongside `:person` at publish. A
-  server with two credentials is a server whose identity depends on which code path ran.
+  The modes are exclusive per server, and `secret_ref` — the spelling that becomes a
+  `secretRef` on the `WorkerProfile` — is refused alongside `:person` and
+  `:client_credentials` at publish. A server with two credentials is a server whose
+  identity depends on which code path ran.
   """
   @type mcp_server :: %{
           name: String.t(),
           url: String.t(),
           credential_ref: String.t() | nil,
-          credential_mode: :profile | :person,
+          credential_mode: :profile | :person | :client_credentials,
           header: String.t(),
           timeout_ms: pos_integer(),
           permission: :ask | :auto,
@@ -644,13 +654,16 @@ defmodule Troupe.Protocol.Bundle do
 
   defp credential_mode(_name, nil), do: {:ok, :profile}
 
-  defp credential_mode(_name, mode) when mode in @credential_modes,
-    do: {:ok, String.to_existing_atom(mode)}
-
   defp credential_mode(name, mode) do
-    {:error,
-     "mcp server #{name}: credential_mode #{inspect(mode)} is not " <>
-       Enum.join(@credential_modes, " or ")}
+    case Map.fetch(@credential_modes, mode) do
+      {:ok, atom} ->
+        {:ok, atom}
+
+      :error ->
+        {:error,
+         "mcp server #{name}: credential_mode #{inspect(mode)} is not profile, person or " <>
+           "client_credentials"}
+    end
   end
 
   # Refused at publish rather than resolved at run time. `secret_ref` is the spelling
@@ -669,6 +682,21 @@ defmodule Troupe.Protocol.Bundle do
     end
   end
 
+  # The profile's own identity is the credential, and the profile says what it is, so
+  # neither spelling of a reference has anything to name.
+  defp one_credential(name, :client_credentials, raw) do
+    case Enum.find(["secret_ref", "credential_ref"], &(not is_nil(raw[&1]))) do
+      nil ->
+        :ok
+
+      field ->
+        {:error,
+         "mcp server #{name}: credential_mode client_credentials and #{field} together — " <>
+           "the profile's own identity (its mcpIdentities) is the credential, and a server " <>
+           "with two credentials is a server whose identity depends on which code path ran"}
+    end
+  end
+
   # In profile mode the reference is an environment variable the operator injects. In
   # person mode it is a slot in the key manager, and it defaults to the server's own
   # name, because "connect Jira as yourself" should not need a second name invented for
@@ -676,6 +704,8 @@ defmodule Troupe.Protocol.Bundle do
   defp credential(name, :profile, raw) do
     credential_ref(name, raw["credential_ref"] || raw["secret_ref"])
   end
+
+  defp credential(_name, :client_credentials, _raw), do: {:ok, nil}
 
   defp credential(name, :person, raw) do
     case raw["credential_ref"] do

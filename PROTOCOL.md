@@ -1124,6 +1124,40 @@ not approved are `invalid_params`; a name the layers do not give is `not_found`.
 forgotten on this machine, and the server's sessions show `sign_in` again. The
 provider's own session in the browser is the provider's.
 
+#### `mcp.tools`, `mcp.call`
+
+One of the person's own servers outside any session (Decision 748), for a client that
+offers its tools to a session on a pod as tools it hosts (section 8). A pod's session
+reads none of the person's files and holds none of their sign-ins, so the client lists
+the server's tools here, registers them with the pod, and serves each `tool.invoke` by
+calling here: the call is made on the person's machine with their sign-in, and the pod
+sees names, schemas, arguments and what came back. **The daemon's only**, like the rest
+of this section, and `admin`, since each goes out as the person. A server with a `url`:
+one that runs a command, one that is refused or `disabled`, and a workspace's server the
+workspace's question has not approved are `invalid_params`; a name the layers do not
+give is `not_found`.
+
+```json
+{"name": "wiki"}
+```
+`mcp.tools` (`workspace` or `session_id` optional, as for `mcp.list`) → `{"server",
+"state", "error", "tools": [{"name", "description", "schema"}]}`: the server asked for
+its tools as a local session asks, with the person's sign-in, `state` and `error` as
+`mcp.check` reports them, so one that waits for a sign-in is `sign_in` with no tools.
+
+```json
+{"command_id": "c-20", "name": "wiki", "tool": "search", "arguments": {"q": "the plan"}}
+```
+`mcp.call` → `{"server", "tool", "content"}`: the call made with the person's sign-in,
+refreshed and made once more on a `401`, and `content` what a local session's model
+reads from the same tool — the server's text, anything else named — down to the
+`sign_in_required` note once the sign-in has run out, which `mcp.list`'s `auth` then
+shows as `expired`. A call the server could not take is `unavailable`, with
+`data.reason`. A client serving a pod's `tool.invoke` answers it with `{"content"}` as it
+came, and names the call in `command_id` by the session and the pod's `call_id`, so a
+call the pod sends again after a drop (section 8) is answered from the first rather than
+made twice.
+
 #### `workspace.recent` → `{"workspaces": [{"path", "last_used_at", "sessions"}]}`
 #### `workspace.search`
 ```json
@@ -1284,7 +1318,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `skills.add`, `skills.remove` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or
@@ -1447,7 +1481,9 @@ Without `consent`, the answer is an error carrying the challenge to show:
 With it: `{"registered": ["client.notes.search"], "taint": "personal_connector"}`.
 
 Registered tools appear as `client.<name>` under the same allowlists, permissions and
-approvals as everything else.
+approvals as everything else. A client offering one of the person's own servers this way
+(`mcp.tools`, `mcp.call`) names each tool `<server>.<tool>`, so the model sees
+`client.wiki.search`, which no profile's `mcp.wiki.search` can be.
 
 ### `tools.unregister` → `{"unregistered": [...]}`
 
@@ -1526,7 +1562,7 @@ that team.
 | `admin.trigger.delete` | either | `{team, name}`; the runs go with it, the sessions they made do not; `managed_by_gitops` in gitops mode, except for a trigger the cluster has no resource for |
 | `admin.trigger.run` | either | `{team, name}`: fire it now, with a manual idempotency key naming the caller and the minute; in either mode |
 | `admin.trigger.key.rotate` | either | `{team, name}` → `{team, name, url, key, rotated_at}`: the trigger's own key, shown once, the old one dead at once; in either mode, since the key is never in a resource |
-| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status, and the `revision` and `revision_hash` it actually ran |
+| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status, its `done_reason` and `failed_reason` (a turn the harness stopped, `tool_failures` or `agent_failed`, which makes the run `failed`), and the `revision` and `revision_hash` it actually ran |
 | `admin.trigger.revisions` | either | `{team, name}` → every revision of a trigger, newest first: the number, the hash, who made it and when, and whether it was reconstructed by the migration that introduced them |
 
 Membership is never editable: it comes from the identity provider, and a method to change

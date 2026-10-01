@@ -321,6 +321,10 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
       ])
     end
 
+    # A notification is accepted with no body, as the specification has a server do: the
+    # handshake sends one (Decision 746).
+    defp mcp(%{"method" => "notifications/" <> _}), do: respond(202, "text/plain", "", [])
+
     defp mcp(%{"id" => id, "method" => "tools/list"}) do
       rpc(id, %{
         "tools" => [

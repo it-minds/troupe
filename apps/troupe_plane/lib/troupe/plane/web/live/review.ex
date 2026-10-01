@@ -96,7 +96,8 @@ defmodule Troupe.Plane.Web.Live.Review do
 
   # A session that ended for a reason worth naming names it. `budget_exhausted` is not a
   # failure — a trigger with a turn ceiling is *meant* to end that way — and the run's own
-  # state has already accounted for that.
+  # state has already accounted for that. A turn the harness stopped names why.
+  defp reason(%{"failed_reason" => reason}) when is_binary(reason), do: " — #{reason}"
   defp reason(%{"done_reason" => reason}) when is_binary(reason), do: " — #{reason}"
   defp reason(_run), do: ""
 

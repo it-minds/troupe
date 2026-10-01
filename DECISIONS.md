@@ -3226,3 +3226,300 @@ citation keeps meaning what it meant.
        restarts on a new port with a new token and lists `failed` as the daemon does;
        `crash_loop_test.exs` (listed, and cleared by the next turn) and the gateway's
        `daemon_test.exs` (over the socket).
+
+746. **An MCP server is opened with the lifecycle's handshake, and the session it issues is
+     kept by whoever calls it, per server and credential, opened again once on a `404`,
+     and ended when the caller stops.** Issue #319. `Troupe.MCP.Client` sent `tools/list`
+     and `tools/call` as lone POSTs with no `initialize` before them and kept nothing a
+     server answered, so a server that keeps state per client, and refuses a request
+     without the `Mcp-Session-Id` its `initialize` issued, could not be used from a local
+     session or a pod at all. That is the handshake 741 left out.
+     - **The handshake, once.** Before the first request to a server: `initialize` with
+       the version Troupe speaks (`2025-06-18`), then `notifications/initialized`, whose
+       answer is waited for and not read. Every request after carries the session id the
+       server answered and, in `MCP-Protocol-Version`, the version it chose. A server that
+       answers with no session id keeps none, and is called without one, as before.
+     - **Where the session lives.** `Troupe.MCP.Sessions`, an ETS table owned by a small
+       process in the caller's supervision tree: one per local session, before
+       `Troupe.Session.MCP`, and one per pod, in the worker's application before
+       `Troupe.Worker.MCP`. A `Troupe.MCP.Server` carries the table as `sessions`, so the
+       tools built at discovery find it, and `client.ex` stays the only module that talks
+       to a server. Not one table for the node: `troupe_protocol` has no application to
+       own it, and a session's MCP sessions should end with it. Not the state of
+       `Troupe.Session.MCP`: the lookup is on every call's path, and a table is read
+       without queueing.
+     - **The key** is the server's URL and a hash of the headers the call carries, which
+       is the credential: a person's token and a profile's are two sessions, as a server
+       that binds a session to whoever opened it needs, and a refreshed token opens a new
+       one. Not keyed on whose credential it is, which the client does not see for every
+       caller and which would present one token's session with another.
+     - **A forgotten session.** A `404` to a request that carried a session id drops it,
+       opens one more and sends the request again, once. Two calls that open a session at
+       once both finish the handshake; `:ets.insert_new/2` keeps one and the other is ended.
+     - **Its end.** The holder traps exits, and when its supervisor stops it, after the
+       servers that use it, it sends each session a server issued a `DELETE`, a few seconds
+       at most, whatever the answer (`405` included). That needs the credential the
+       session was opened with, so it is kept beside it, except a person's on a pod, which
+       is held for as long as a call takes (`Troupe.MCP.person_credential/2`): that session
+       is left to the server's expiry. A call with no holder (`mcp.check` on a server not
+       in a session) opens a session for its one request and ends it after;
+       `Client.initialize/1`, the bare call sign-in discovery makes, ends any session it is
+       given.
+     - **Out of this slice.** A `400` to a request that carried a session id, which some
+       servers built from the SDKs' examples answer for a session they have forgotten, is
+       an error rather than a reason to open another. A session left behind by a refreshed
+       token is ended only when its holder stops. Streams the server opens (`GET`) and
+       resuming one.
+     - **Proof:** `Troupe.MCPHandshakeTest`, against `test/support/fake_mcp.exs`, which
+       refuses a request without its session id (`400`), with one it has forgotten (`404`)
+       or with another credential than the session's (`403`), answers an older protocol
+       version, and ends a session on `DELETE` or refuses it (`405`): an agent lists and
+       calls the tools in one session carrying the version the server chose, a forgotten
+       session is opened again once, the session ends when the local session stops and a
+       `405` is let be, two credentials are two sessions, a server that keeps none is
+       called without one, and a check's session lasts its one request; and
+       `Troupe.Worker.MCPTest`: discovery per server and credential, every session of a pod
+       in the profile's one, a person's in their own, a forgotten one opened again, and the
+       pod's stopping. The fakes in `Troupe.MCPTest` and `fake_oauth.exs` now answer the
+       `notifications/initialized` they had never been sent, with `202`.
+
+747. **A worker calls an MCP server as its profile's own identity, by OAuth client
+     credentials with an assertion signed through OpenBao transit; the profile says who it
+     is, and the bundle only that the server is called so.** Issue #315. A bundle server
+     was reached from a pod with one static token from a Secret, and servers that take
+     machine callers only by client credentials, want a private key JWT (RFC 7523) rather
+     than a shared secret, issue tokens for an hour and grant tools per client could not
+     be reached. Federated workload identity (the pod's own ServiceAccount token as the
+     assertion) needs a publicly discoverable issuer, which some managed clusters do not
+     allow, so the credential is a certificate whose key OpenBao keeps.
+     - **Where it is configured: a field on the `WorkerProfile`**, decided on the issue.
+       The bundle marks a server `credential_mode: client_credentials` and names no
+       reference (one beside it is refused at publish, as `secret_ref` beside `person` is);
+       a channel serves several profiles and each is its own client at the server. The
+       profile's `spec.mcpIdentities`, one entry per server keyed by `server`, has
+       `clientId`, `scope`, `tokenUrl` (absent: the authorization server's metadata, found
+       as 741's sign-in finds it), `transitKey`, `keyVersion` (absent: the latest),
+       `certificateThumbprint` (the `x5t#S256`, base64url, or as `openssl -fingerprint
+       -sha256` prints it) and `algorithm` (`RS256`, the default, or `PS256`). Nothing in it
+       is secret, so it is in git in gitops mode and in the row in direct mode, the owner's
+       to write in both; the plane projects only `credentialMode` onto `mcpServers`.
+       `tokenUrl`'s host is egress, in `egress_destinations/1` and the admission policy.
+     - **How the key is used: through transit, never read.** The worker builds the
+       assertion (`iss` = `sub` = the client, `aud` the token endpoint, `iat`, `nbf`, five
+       minutes to `exp`, a random `jti`; header `alg`, `typ`, `x5t#S256`), sends its
+       signing input to `transit/sign/<key>` with SHA-256 (`pkcs1v15` for RS256, `pss` with
+       a salt the length of the hash for PS256, which JWS requires and transit's default
+       is not) and the pinned version, and appends the signature. The key is imported with
+       `bao transit import` and is not exportable; not even the worker holds it.
+     - **One token per server in the worker, renewed before it runs out.**
+       `Troupe.Worker.ClientCredentials`, one process, so two sessions asking at once ask
+       the token endpoint once: a token is handed out until a minute before it expires (or
+       three quarters of its life when that is shorter), and the call after that gets a new
+       one; a token got as an identity the profile no longer describes is not handed out
+       again. `Troupe.MCP.authorized/2` puts it in `Authorization` through the server's
+       `credential` and, on a `401`, asks once for a token other than the refused one and
+       tries once more; a second `401` is the call's error. Discovery and calls both go
+       through it, and `troupe_core` reaches the token through a function the worker
+       installs (`:profile_tokens`), as it reaches a person's credential. The token is in
+       no log line, error or event; the event log records the call as the profile's, as
+       before.
+     - **Rotation without a restart.** The operator writes the identities into the
+       ConfigMap `troupe-mcp-identities` in the worker namespace and mounts it as a
+       directory, and the worker reads the file again whenever it asks for a token. A
+       variable in the pod template would have made every change a new revision and a
+       drained, replaced pod (726); the kubelet replaces a ConfigMap volume in place. To
+       rotate: register the new certificate beside the old, import the new key as the next
+       transit version (`bao transit import-version`), change `keyVersion` and the thumbprint
+       together, and remove the old certificate once the old tokens are out. The pinned
+       version is why there is no gap: transit's latest alone would sign with the new key
+       under the old thumbprint, or the other way round, until both halves had landed.
+       The operator's ClusterRole gains ConfigMaps, and a ConfigMap is pruned with the
+       identities.
+     - **Profiles kept apart at OpenBao.** `Troupe.KMS.Policy.mcp_identity/2` lets a pod
+       sign with `transit/sign/<its namespace>.*` and nothing else, templated on the
+       namespace Kubernetes auth vouched for, as the person policy is on the subject: one
+       policy on the one worker role, and a pod of one profile cannot sign as another, nor
+       with the plane's session-token key, whose name has no dot. Hence transit keys are
+       named `<worker namespace>.<anything>`. The dev cluster's job writes it; an
+       installation writes it once with its Kubernetes mount's accessor.
+     - **Reported, not refused.** A server marked `client_credentials` with no identity,
+       or an identity without its client or key or with a malformed field, is the
+       operator's `MCPIdentityMissing` condition and the plane's `identity_problems` in
+       `admin.profile.get` and `admin.profile.put`, from one function
+       (`WorkerProfile.identity_problems/1`), the plane reading the channel's current
+       bundle: the bundle and the profile are written by different people, and either may
+       be first. The pods start regardless, without that server's tools. A worker's errors
+       name the server and the cause: the token endpoint refused the client (with the
+       provider's `error` and description), the transit key is not in OpenBao, the pod may
+       not sign with it, or the server answered `403` to a tool the identity lacks.
+     - **Out of this decision.** Federated workload identity as a second credential kind;
+       the console's view of `mcpIdentities` (the integrations page says a server is the
+       profile's own identity, nothing more); an existing installation applies the new
+       `WorkerProfile` CRD (Helm does not upgrade CRDs), the chart's operator ClusterRole,
+       and the policy above.
+     - **Proof:** `Troupe.Worker.ClientCredentialsTest`, against the development OpenBao's
+       transit and a fake identity provider and MCP server (`FakeIdentityProvider`) that
+       verifies the assertion's signature against the registered certificate's key with
+       its algorithm, `aud`, `exp`, `jti`, `x5t#S256` and scope, and answers only its own
+       tokens: tools listed and called as the profile with one token, renewal before expiry
+       in the same processes, one new token after a `401` and none after the second, a
+       `403` for a tool the identity lacks, a second identity seeing only its tools, PS256,
+       the token endpoint from metadata, a rotation used from the next token, a pinned
+       version after a rotation, a refused client, a missing key and a missing identity
+       named, and a session's event log with the call's result and no token; failing on the
+       tip, where nothing could get such a token. `open_bao_test.exs` (signatures that
+       verify, a pinned version, a missing key, the policy against a real token),
+       `worker_profile_identity_test.exs`, `bundle_test.exs`, the operator's
+       `resources_test.exs` and `reconciler_test.exs`, the plane's `bundles_test.exs` and
+       `admin_test.exs`, and `mcp_test.exs` for the core's half.
+
+748. **A person's own signed-in servers are offered to a pod session they open in the
+     desktop app, as tools the app hosts, and the daemon makes every call with their
+     sign-in.** Issue #308, the first part, following 741. What was there: a server a
+     person signed in to served their local sessions only. A pod session reads none of the
+     person's files and holds none of their sign-ins, and the protocol's path for tools a
+     client hosts (section 8) had nothing in the app using it.
+     - **The daemon lists and calls a server outside any session.** `mcp.tools {name}`
+       answers the server's tools with their descriptions and schemas, asked as a local
+       session asks (`Troupe.Session.MCP.discover/1`), with `state` and `error` as
+       `mcp.check` reports them. `mcp.call {name, tool, arguments}` makes the call through
+       `Troupe.MCP.Tool.invoke/4`, the path a local session's tool takes, so a refresh and
+       one more try on a `401`, and the `sign_in_required` note once the sign-in has run
+       out, are the same, and `content` is what a local session's model would read. Both
+       are `admin` and the daemon's only, like the rest of `mcp.*`. A server with a `url`
+       only: one that runs a command is a process a local session keeps, and starting one
+       per call for somebody else's session is a question of its own. A refused, disabled
+       or unapproved workspace server is refused, as for a sign-in. `mcp.call` carries a
+       `command_id`, which the app makes from the session and the pod's `call_id`, so a
+       call the pod sends again after a drop is answered from the ledger rather than made
+       twice.
+     - **The desktop app offers them** (`ServerOffer` in `@troupe/client`). On a team
+       session opened on its own screen, with a daemon to make the calls and a token with
+       `control`, it lists the person's servers whose sign-in stands `signed_in`, asks the
+       daemon for each one's tools, and registers them with `tools.register`. The session's
+       challenge is shown in a panel where the approval and question panels sit, in the
+       session's words and naming the servers, and **Offer them** sends it back with the
+       person's subject as `confirmed_by`. Every signed-in server rather than a choice
+       among them: the prompt names every tool, the person can say no to the lot, and a
+       choice per server is a refinement the first slice does without. Names are
+       `<server>.<tool>`, so the pod sees `client.<server>.<tool>`, under the prefix no
+       built-in and no profile's `mcp.<server>.<tool>` carries, and two servers' tools
+       never meet. Their permission is the default `ask`: the consent is to offering the
+       tools, not to every call, and the entry's own `permission: auto` is about the
+       person's own sessions.
+     - **A `tool.invoke` goes to `mcp.call`**, and only `{content}` goes back to the pod. An
+       error from the daemon goes back as an error.
+     - **Again on every socket.** `SessionAttachment` takes `onToolInvoke`, and says
+       `tools` at `initialize` when given one, and `onLive`, called on each socket it
+       opens. A registration goes with its socket, so each new one is offered the tools
+       again; the session issues a fresh challenge per socket, and the app answers it with
+       the consent the person gave for the same tools in this attachment rather than asking
+       again, since a parked call has the call grace, a minute, and asking again for what
+       was just allowed teaches people to say yes without reading. A different set of
+       tools is asked about again, and **Not now** holds for the attachment. Leaving the
+       session's screen closes its socket, and the tools go with it.
+     - **No token reaches the pod or the plane.** The pod is sent the tools' names,
+       descriptions and schemas, the consent, and each answer's text. The daemon uses the
+       token on its call to the server, and no answer of `mcp.tools` or `mcp.call` has it.
+     - **Out of this slice.** The TUI's half (#308); offering again when the person signs
+       in to another server while attached; choosing servers; a stdio server; the reason
+       of a client's error reaching the pod's model (the pod's `ClientTool` reads only an
+       error's `message`); dynamic registration, step-up and revocation (#308); the session
+       handshake (#319).
+     - **Proof:** `Troupe.Gateway.MCPCallTest` (against `fake_oauth.exs`: listing and
+       calling with the sign-in, a refresh on a `401`, `sign_in_required` before a sign-in
+       and after a refused refresh, the refusals, and a session started as a pod's, whose
+       agent calls the person's server through the client that offered it, with no token in
+       its log), the client's `own-servers.test.ts` (a fake pod and daemon: the call made
+       by the daemon, no token in any frame the pod got, offered again on a new socket
+       without asking, a no kept, a reader offering nothing) and the desktop app's
+       `own-servers.test.tsx` (the panel, the line, and a call through the app).
+
+749. **Without Cilium, a profile's own endpoint its workers cannot reach is refused where it
+     is set up, and reported on the profile where nothing could refuse it.** Issue #268, its
+     smallest option; admitting such an endpoint without Cilium stays open there. Without
+     Cilium a worker's NetworkPolicy reaches outside the cluster through public IPv4
+     addresses on 443 and 80, and a `*.svc` host through its namespace; 724 added the
+     installation's own OpenBao and object store and nothing of a profile's. So an LLM
+     gateway on 8443, or an MCP server at an address on the office network, was saved,
+     applied and reconciled without a word, and a session found out at its first call.
+     `Troupe.WorkerProfile.Reach` now says, a sentence each, which of a profile's LLM
+     endpoint, MCP servers and `egress.fqdns` entries such a worker does not reach: a port
+     other than 443 and 80 in the URL (or the entry), or a host that is an address in a
+     range the public rule leaves out, loopback, or IPv6, which the rule has no block for.
+     The public rule's excepted ranges are read from it, so the two cannot drift. A name on
+     443 or 80 is taken at its word: a NetworkPolicy cannot name a host and what a name
+     resolves to is not known where it is typed, so one that resolves to a private address
+     is still not reached and still not said. The git hosts are not checked, as #268 does
+     not name them. In direct mode `admin.profile.put`, and so the
+     profile editor, refuses a profile whose workers are pods (`invalid_params`, the
+     sentences as `unreachable`, and with why and what to do as `reason`, which the editor
+     shows), counting the servers its channel's bundle hands its pods, and publishing a
+     bundle naming such a server to a channel a profile whose workers are pods follows is
+     refused (`invalid_bundle`, naming the profiles). A profile whose workers are machines
+     has no NetworkPolicy and is not checked (738). The operator reports it in either mode
+     as `EndpointUnreachable` (`True`, `NoCilium`, the same sentences), beside `Ready` as
+     `SecretMissing` is, since the profile reconciled; it is how a profile a repository
+     holds, applied where nothing could refuse it, reads as broken on the Workers page.
+     What to do is in the message: Cilium, a public address on 443 or 80, or for an
+     endpoint in the cluster its Service's name. With Cilium nothing is refused and the
+     condition is `False`. The plane learns which from the chart, which now gives it
+     `operator.ciliumAvailable` as `TROUPE_CILIUM_AVAILABLE`, as it gives the operator: that
+     setting decides which rules the operator writes, so it, and not the cluster's CNI, is
+     what a pod will reach. The operator's `EgressByHostname` condition says the same, but
+     only of a profile it has reconciled, which the one being written is not. A plane told
+     nothing, run without the chart, refuses nothing, and the operator still reports. Not
+     chosen: admitting a profile's endpoint on its port as 724 admits the platform's,
+     which would open that port to every public address for one profile's gateway; and
+     CIDRs a profile names, which needs a field and a policy for it. A NetworkPolicy an
+     installation adds to the worker namespace, 724's remedy for the platform's endpoints,
+     does not get a profile past the refusal. Proof: `reach_test.exs` in the protocol (the
+     sentences: ports, each range, IPv6, `*.svc`, names, entries) and in the plane (the
+     refusal and its message, a name on 443 and a Service saved, machines, a channel's
+     server, with Cilium, a plane told nothing, the bundle, the editor, the Workers page),
+     and `reconciler_test.exs` (the condition without Cilium, with it, and reachable); the
+     plane's refusals and the operator's three cases failed on the chunk tip.
+
+750. **On a plane, a turn the harness stopped is a failed turn: the row says why, the run
+     is failed and its target is told, and a pod whose session stopped under it puts it to
+     sleep then.** Issue #320, defect D47, following 687, 727 and the daemon's `failed`
+     (745).
+     - **The worker reports `failed_reason`.** `turn_ended`'s `reason`, `tool_failures`
+       (the failure guard's `stop`) or `agent_failed` (a root that crashed as often as it
+       may be restarted), goes into `session.status` and the dormancy report beside
+       `done_reason`, from that `turn_ended` until the root's next `user_input`; an
+       activation reads it back from the log as it reads `interrupted`. The words are the
+       event's. The turn's end also rests the root in the report, because a root that
+       crashed sends no `agent_state` after it. A field and not a new `status`, for 745's
+       reason.
+     - **Not 745's `failed`.** The daemon's `failed` is `{reason, detail}`, for
+       `agent_failed` only, and `detail`, the first line of what the agent raised, is
+       content, which a plane never holds. A string under its own name carries the reason
+       alone, for both stops, and no key a client reads changes shape between a daemon and
+       a plane.
+     - **The plane keeps it** on the session row, set whenever a report carries the key,
+       as `done_reason` is, and lists it in `sessions.list` and a run's listing. A run
+       whose session has one is `failed`, awake or asleep (it read `running`, then
+       `created`), and holds no place under its trigger's concurrency cap. The status page
+       calls the row broken even asleep, since a root that kept crashing is always asleep
+       after it; the review queue and the runs table name the reason.
+     - **`notify_url` is posted the outcome, read from the row.** A report with a reason
+       announces the run as `done` and `interrupted` do. The body's `state` is the run's
+       state as a listing gives it, `done` or `failed`; it was the worker's status, so an
+       `interrupted` run now says `failed`. `done_reason`, which the body named and was
+       never given, is filled, and `failed_reason` is beside it.
+     - **The manager watches its tree.** A tree that stops by itself (727) was noticed only
+       when the idle timer next looked, ten minutes on: the slot and the budget slice held,
+       and an activation answered `ok` for a session that was not there. The manager now
+       monitors the session it started and puts it to sleep when it stops, sending first a
+       report the debounce held, since that is the one that announces. The cost is folded
+       from the log left on the pod, because the projection that knew it went down with
+       the tree and the dormancy report said `0`.
+     - The desktop app's team rows don't read `failed_reason` yet.
+     - **Proof:** the worker's `stopped_turn_test.exs` (a tool that fails ten times with
+       nobody to ask; a root that keeps crashing, asleep within seconds with its cost; the
+       same session woken, saying so until a turn starts) and `approval_status_test.exs`
+       (the fold over a recorded log), and the plane's `triggers_test.exs` (a pod's report
+       makes the run failed, on the row and in the post, with no place under the cap; a
+       crashed session asleep is failed and broken, and told once). Each failed before
+       this change.

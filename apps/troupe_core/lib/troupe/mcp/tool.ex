@@ -70,19 +70,38 @@ defmodule Troupe.MCP.Tool do
     end
   end
 
-  # A person's own server that wants them signed in (Decision 741): the daemon's token,
-  # refreshed and tried again once on a `401`. A sign-in that has run out is, like an
-  # unconnected person-mode server, a fact the model can relay rather than a failure to
-  # retry: the person signs in again and the next call works.
-  defp call(%Server{oauth: %{}} = server, remote_name, args, ctx) do
-    case OAuth.authorized(server, &Client.call_tool(&1, remote_name, args, meta(ctx))) do
+  defp call(%Server{oauth: %{}} = server, remote_name, args, ctx),
+    do: invoke(server, remote_name, args, meta(ctx))
+
+  # The profile's own identity (Decision 747): its token, renewed before it runs out, and
+  # a new one tried once on a `401`.
+  defp call(%Server{credential_mode: :client_credentials} = server, remote_name, args, ctx) do
+    case MCP.authorized(server, &Client.call_tool(&1, remote_name, args, meta(ctx))) do
       {:ok, result} -> {:ok, render(result)}
-      {:error, :sign_in_required} -> {:ok, sign_in_required(server)}
       {:error, reason} -> {:error, describe(reason)}
     end
   end
 
   defp call(server, remote_name, args, ctx), do: dispatch(server, remote_name, args, ctx)
+
+  @doc """
+  Call one of a person's own servers' tools as a session's tool calls it, from outside a
+  session too: what `mcp.call` answers a client that offers the server to a session
+  somewhere else (Decision 748), with `meta` for the server's logs.
+
+  A server that wants the person signed in (Decision 741) gets the daemon's token,
+  refreshed and tried again once on a `401`. A sign-in that has run out is, like an
+  unconnected person-mode server, a fact the model can relay rather than a failure to
+  retry: the person signs in again and the next call works.
+  """
+  @spec invoke(Server.t(), String.t(), map(), map()) :: Troupe.Tool.result()
+  def invoke(%Server{credential_mode: :profile} = server, remote_name, args, meta) do
+    case OAuth.authorized(server, &Client.call_tool(&1, remote_name, args, meta)) do
+      {:ok, result} -> {:ok, render(result)}
+      {:error, :sign_in_required} -> {:ok, sign_in_required(server)}
+      {:error, reason} -> {:error, describe(reason)}
+    end
+  end
 
   defp dispatch(server, remote_name, args, ctx) do
     case Client.call_tool(server, remote_name, args, meta(ctx)) do
@@ -144,6 +163,10 @@ defmodule Troupe.MCP.Tool do
     do: "the MCP server answered 401: it wants a credential it was not given"
 
   defp describe(reason) when is_binary(reason), do: reason
+
+  defp describe({:unexpected_status, 403, _body}),
+    do: "the MCP server answered 403: the identity this call went out as may not use this tool"
+
   defp describe({:unexpected_status, status, _body}), do: "the MCP server answered #{status}"
   defp describe(reason), do: "the MCP server could not be reached: #{inspect(reason)}"
 end
