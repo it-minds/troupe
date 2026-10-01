@@ -153,6 +153,16 @@ defmodule Troupe.MCP.OAuth.SignIn do
   def handle_info(:expire, state), do: {:stop, :normal, state}
   def handle_info(_message, state), do: {:noreply, state}
 
+  # The name goes before the answer does: a GenServer runs `terminate/2` before it sends
+  # the reply of a `{:stop, _, reply, _}`, while the registry lets go of a name only once
+  # it hears of the exit. So a status read the moment the browser has its page sees the
+  # outcome this sign-in recorded, not a sign-in still going on beside it.
+  @impl GenServer
+  def terminate(_reason, state) do
+    Registry.unregister(Troupe.Registry, key(state.binding))
+    :ok
+  end
+
   defp redeem(state, code) do
     %{binding: binding, plan: plan} = state
 
