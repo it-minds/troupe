@@ -65,7 +65,7 @@ defmodule Troupe.Plane.Fleet.Scaler do
 
   use GenServer
 
-  alias Troupe.Plane.{ClusterPolicy, Fleet, Harness, Sessions, Singleton}
+  alias Troupe.Plane.{ClusterPolicy, Fleet, Harness, Provision, Sessions, Singleton}
   alias Troupe.Plane.Fleet.{Profile, Provisioner, ScaleDown, SizeClass, Upgrade}
 
   require Logger
@@ -168,7 +168,7 @@ defmodule Troupe.Plane.Fleet.Scaler do
     # Down only past pods that have been drained and hold nothing (Decision 731).
     scale_down = ScaleDown.step(profile, plan)
     count = count(plan, scale_down)
-    changed = count != plan.have and write(profile, plan, count)
+    changed = (count != plan.have or unsent?(profile, count)) and write(profile, plan, count)
 
     # Before admitting, so placement already knows which pods are behind on an upgrade
     # and puts a waiting session on a current one (Decision 726).
@@ -212,9 +212,20 @@ defmodule Troupe.Plane.Fleet.Scaler do
     |> Enum.reverse()
   end
 
+  # A count already on the row and not in the cluster: a write the cluster refused, here or
+  # where a read woke a profile. The row says what is wanted, so it alone cannot tell;
+  # direct mode reads the resource back, as gitops mode's pass already does every fifteen
+  # seconds (`Troupe.Plane.Gitops.Profiles`). A resource that is not there, or a cluster
+  # that does not answer, is not a count to send.
+  defp unsent?(profile, count) do
+    Provision.mode() == :direct and Provision.in_cluster?(profile) and
+      match?({:ok, replicas} when replicas != count, Provision.replicas(profile))
+  end
+
   # Written to the row first and to the cluster from the row, so the number the plane
-  # believes and the number it asked for cannot differ: a write that failed leaves a row
-  # the next tick will try again from.
+  # believes and the number it asked for cannot differ, and every other write from the row
+  # carries the same count: a write that failed leaves a row the next tick sends again
+  # (`unsent?/2`).
   defp write(profile, plan, count) do
     case Fleet.put_profile(%{name: profile.name, replicas: count}) do
       {:ok, updated} ->
@@ -226,6 +237,10 @@ defmodule Troupe.Plane.Fleet.Scaler do
         # exist is the substrate's business; how many are wanted is this module's, and the
         # two were the same function until a profile could be provisioned another way.
         case Provisioner.for(updated).ensure(updated, actor: scaler()) do
+          {:ok, _applied} when count == plan.have ->
+            Logger.info("troupe plane: #{profile.name} sent #{count} worker(s) again")
+            true
+
           {:ok, _applied} ->
             Logger.info(
               "troupe plane: #{profile.name} #{plan.have} -> #{count} worker(s) for " <>
@@ -235,9 +250,9 @@ defmodule Troupe.Plane.Fleet.Scaler do
             true
 
           {:error, reason} ->
-            # Left on the row. The next tick reads it, sees the cluster has not caught
-            # up, and asks again — which is the right shape for a controller and is why
-            # this does not retry here.
+            # Left on the row. The next tick finds the cluster has not caught up and asks
+            # again, which is the right shape for a controller and is why this does not
+            # retry here.
             Logger.warning(
               "troupe plane: could not scale #{profile.name} to #{count}: #{inspect(reason)}"
             )

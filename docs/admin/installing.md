@@ -58,6 +58,12 @@ version, and the images it names are public on `ghcr.io/it-minds` (`troupe-plane
 secret. A cluster that pulls through a registry of its own copies them there and sets
 each `*.image.repository`, `policy.allowedImageRepositories` and `imagePullSecrets`.
 
+The chart makes `troupe-system` itself unless `createNamespace: false`. Where the namespace
+is there before the chart (made for the Secrets of section 1, or for OpenBao), set it
+false: Helm does not take over a namespace it did not make, and the install stops, saying
+the namespace exists and is not the release's. Either way, uninstalling leaves the
+namespace and everything in it ([section 7](#7-uninstalling)).
+
 `WorkerProfile`, `TroupePolicy` and `TeamVolume` go first because Helm does not upgrade CRDs
 it installed. Start from `values.small.yaml` or `values.example.yaml`; what you cannot
 leave unset:
@@ -227,3 +233,24 @@ deserves a look before production. The PITR drill (`scripts/pitr-drill`) is a sc
 a schedule.
 
 After the first install, an upgrade is [routine-tasks.md](routine-tasks.md#upgrade).
+
+## 7. Uninstalling
+
+`helm uninstall troupe -n troupe-system` takes away the plane, the operator and the rest of
+what the chart rendered, and leaves on purpose:
+
+- **The namespace and everything else in it**: OpenBao, the Secrets, volume claims, the
+  `WorkerProfile` resources. The chart marks the namespace `helm.sh/resource-policy: keep`,
+  so neither an uninstall nor a GitOps controller's remediation that uninstalls takes the
+  rest with it; one made with `createNamespace: false` was never the chart's to delete.
+- **The CRDs**, which Helm never deletes, and the `TroupePolicy`, which is also marked keep.
+- **The workers**: their namespaces are the operator's, and with the operator gone nothing
+  removes them.
+
+To take everything away, [decommission each profile](routine-tasks.md#decommission-a-profile)
+while the operator still runs, which removes its namespace, then uninstall, look at what is
+left (`kubectl -n troupe-system get all,secrets,pvc`), and `kubectl delete namespace
+troupe-system`. The database and the bucket are yours and are not touched.
+
+The keep is in the chart from 0.7.1. An install from an older chart gets it at its first
+upgrade, and loses it again if rolled back to a revision from before.
