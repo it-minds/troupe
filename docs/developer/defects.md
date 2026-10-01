@@ -151,22 +151,6 @@ socket, a failed `open` leaving its view behind, and the Where step ignoring the
 `planeUrl`) were fixed in PR #263; `plane-stack.yml`'s OpenBao and the split Dependabot
 groups in PR #265.
 
-### D39 - A `session.read` and an activation of the same session on one pod (medium, unconfirmed)
-
-- `Reader.open` (`apps/troupe_worker/lib/troupe/worker/session/reader.ex`) checks
-  `Sessions.whereis` before it starts, but the Link runs pushed commands concurrently, so
-  a `session.read` racing a `session.activate` can have the reader's `Restore.events`
-  write storage's copy of the log over the live session's, and the events not sealed yet
-  are lost. The reader's write should check for a registered manager inside
-  `Restore.with_log/2`.
-- `Manager.put_back/3`'s `forget` removes the log directory without `with_log` or a check
-  for a reader.
-- A reader still alive when a manager's dormancy erases the log answers a later
-  `Reader.open` from what it had, until its next idle tick (up to 30 s), and then
-  `not_found`.
-
-Found by the #269 fixer (PR #271), 2026-09-29.
-
 ### D40 - The plane's scaler and drains (medium)
 
 - `Scaler.write` (`apps/troupe_plane/lib/troupe/plane/fleet/scaler.ex`, `write/3`,

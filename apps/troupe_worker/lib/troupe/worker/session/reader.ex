@@ -61,23 +61,41 @@ defmodule Troupe.Worker.Session.Reader do
   gateway reads it straight from the running `Session.Log`.
   """
   @spec open(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def open(session_id, opts \\ []) do
+  def open(session_id, opts \\ []), do: do_open(session_id, opts, true)
+
+  # A reader that finds an activation registered since the look here writes nothing and
+  # does not start (`init/1`), and the answer is the running session's. One already
+  # there whose log is no longer the one it restored, or that goes as it is asked, is not
+  # an answer either: it is gone, and this looks again, once.
+  defp do_open(session_id, opts, retry?) do
     if Sessions.whereis(session_id) do
-      {:ok, %{session_id: session_id, source: :active, agents: length(Troupe.agent_tree(session_id))}}
+      {:ok, active(session_id)}
     else
-      start_reader(session_id, opts)
+      case start_reader(Keyword.put(opts, :session_id, session_id)) do
+        :gone when retry? -> do_open(session_id, opts, false)
+        :gone -> {:error, :reader_gone}
+        answer -> answer
+      end
     end
   end
 
-  defp start_reader(session_id, opts) do
-    opts = Keyword.put(opts, :session_id, session_id)
-
+  defp start_reader(opts) do
     case DynamicSupervisor.start_child(supervisor(), {__MODULE__, opts}) do
-      {:ok, pid} -> GenServer.call(pid, :info, 120_000)
-      {:error, {:already_started, pid}} -> GenServer.call(pid, :info, 120_000)
+      {:ok, pid} -> ask(pid)
+      {:error, {:already_started, pid}} -> ask(pid)
+      :ignore -> {:ok, active(Keyword.fetch!(opts, :session_id))}
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp ask(pid) do
+    GenServer.call(pid, :info, 120_000)
+  catch
+    :exit, _gone -> :gone
+  end
+
+  defp active(session_id),
+    do: %{session_id: session_id, source: :active, agents: length(Troupe.agent_tree(session_id))}
 
   @doc """
   Follow a reader, so it stays up while this process cares about it.
@@ -122,21 +140,27 @@ defmodule Troupe.Worker.Session.Reader do
 
     with {:ok, context} <- context(opts),
          root = Restore.workspace_root(context, opts),
-         found = File.exists?(log_dir(context, root)),
-         {:ok, log} <- Restore.events(context, root) do
+         {:ok, log} <- Restore.events(context, root, unless_active: true) do
       Logger.debug("troupe worker: reading #{session_id} from #{log.segments} segment(s)")
 
       state = %__MODULE__{
         session_id: session_id,
         context: context,
         log: log,
-        found: found,
+        found: log.found,
         idle_ms: Keyword.get(opts, :idle_grace_ms, @idle_grace_ms)
       }
 
       {:ok, schedule_idle(state)}
     else
-      {:error, reason} -> {:stop, reason}
+      # An activation of the session has registered here since `open/2` looked: the log is
+      # its own, and the answer is the running session's.
+      {:error, :active} ->
+        leave(session_id)
+        :ignore
+
+      {:error, reason} ->
+        {:stop, reason}
     end
   end
 
@@ -150,7 +174,14 @@ defmodule Troupe.Worker.Session.Reader do
   end
 
   @impl GenServer
-  def handle_call(:info, _from, state), do: {:reply, {:ok, info(state)}, state}
+  # Not from a log that is no longer the one this reader restored: an activation has taken
+  # it over, or erased it when it put the session back to sleep, and what came since is in
+  # storage. The reader goes rather than answer from what it had, and `open/2` asks again.
+  def handle_call(:info, _from, state) do
+    if ours?(state),
+      do: {:reply, {:ok, info(state)}, state},
+      else: {:stop, :normal, :gone, state}
+  end
 
   def handle_call({:follow, subscriber}, _from, state) do
     reference = Process.monitor(subscriber)
@@ -173,8 +204,14 @@ defmodule Troupe.Worker.Session.Reader do
   @impl GenServer
   def terminate(_reason, state) do
     forget(state)
+    leave(state.session_id)
     :ok
   end
+
+  # The name given up here rather than left to the registry's monitor, so a caller this
+  # reader answered as it went can start another at once (`open/2`); and only once its log
+  # is gone, so the next one's log is never this one's to take away.
+  defp leave(session_id), do: Registry.unregister(registry(), {:reader, session_id})
 
   # Whether to go, once nobody follows the reader itself.
   #
@@ -222,9 +259,6 @@ defmodule Troupe.Worker.Session.Reader do
       {:error, _gone} -> false
     end
   end
-
-  defp log_dir(context, root),
-    do: Path.dirname(Restore.log_path(context.session_id, root, context.state_dir))
 
   defp drop(state, subscriber) do
     case Map.pop(state.subscribers, subscriber) do

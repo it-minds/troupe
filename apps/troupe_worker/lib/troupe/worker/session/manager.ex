@@ -319,7 +319,10 @@ defmodule Troupe.Worker.Session.Manager do
   # may hold files no archive has. The pod's cache is sealed bytes the activation only
   # read, and stays (Decision 725).
   defp put_back(state, context, root) do
-    found = found(context, root)
+    # Under the lock a reader writes its log under, and this manager holds the session's
+    # name by now: a reader that was writing the log as it registered has finished, and its
+    # log is found; one that looks after it finds the name taken and writes nothing.
+    found = Restore.with_log(context.session_id, fn -> found(context, root) end)
 
     try do
       with {:ok, log} <- Restore.events(context, root),
@@ -351,7 +354,10 @@ defmodule Troupe.Worker.Session.Manager do
   end
 
   defp forget(context, root, found) do
-    unless found.log, do: File.rm_rf(log_dir(context, root))
+    unless found.log do
+      Restore.with_log(context.session_id, fn -> File.rm_rf(log_dir(context, root)) end)
+    end
+
     unless found.workspace, do: Workspace.erase(root)
     :ok
   end
