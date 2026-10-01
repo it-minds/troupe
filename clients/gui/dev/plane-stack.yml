@@ -7,7 +7,9 @@
 # HTTP surface, not a cluster.
 #
 # Its own project name and its own ports, so a `scripts/dev-up` or a kind cluster on the
-# same machine does not notice this one.
+# same machine does not notice this one. The host ports stay below 32768, Linux's range for
+# outgoing connections, where a CI runner's own traffic can already hold a port (PR #208
+# moved the dev stack's ports for the same reason).
 #
 # What it does NOT give you: workers. The plane has nowhere to place a session, so
 # `session.create` fails with no capacity — by design, not by breakage. Everything before
@@ -37,7 +39,7 @@ services:
       POSTGRES_USER: troupe
       POSTGRES_PASSWORD: troupe
       POSTGRES_DB: troupe_plane_e2e
-    ports: ["55532:5432"]
+    ports: ["25532:5432"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U troupe -d troupe_plane_e2e"]
       interval: 2s
@@ -71,7 +73,7 @@ services:
     environment:
       BAO_DEV_ROOT_TOKEN_ID: troupe-e2e-root
       BAO_ADDR: http://0.0.0.0:8200
-    ports: ["58300:8200"]
+    ports: ["28300:8200"]
     cap_add: [IPC_LOCK]
     healthcheck:
       test: ["CMD-SHELL", "BAO_TOKEN=troupe-e2e-root bao read -address=http://127.0.0.1:8200 -field=name transit/keys/troupe-session-tokens"]
