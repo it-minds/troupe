@@ -35,12 +35,14 @@ defmodule Troupe.Worker.Application do
   # registry; the bundles before the link, because the link's enrolment claims the
   # bundle hash the pod already has. `Connections` before the registry, because a
   # person-mode server discovered at start-up is one whose credentials may be asked for
-  # on the first turn.
+  # on the first turn; `ClientCredentials` too, because discovering a server the profile
+  # calls as itself takes its token.
   defp children do
     [
       Troupe.Worker.Sessions,
       Troupe.Worker.Auth,
       Troupe.Worker.Connections,
+      Troupe.Worker.ClientCredentials,
       Troupe.Worker.MCP,
       Troupe.Worker.Bundles,
       Troupe.Worker.Usage,

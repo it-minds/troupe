@@ -15,12 +15,18 @@ defmodule Troupe.Operator.Resources do
   alias Troupe.Operator.{Names, Settings}
   alias Troupe.Policy
   alias Troupe.WorkerProfile, as: Profile
-  alias Troupe.WorkerProfile.MCPServer
+  alias Troupe.WorkerProfile.{MCPIdentity, MCPServer}
 
   # Where a worker keeps everything it can rebuild: sealed segments, materialised
   # bundles, restored workspaces. The mount and `TROUPE_STATE_HOME` have to name the same
   # directory, so they name the same constant.
   @state_dir "/var/lib/troupe"
+
+  # Where the profile's `mcpIdentities` are, in a pod that has any (Decision 747). The
+  # whole directory is the mount, not the file: the kubelet updates a ConfigMap volume by
+  # swapping a symlink, and a `subPath` mount is never updated at all.
+  @identities_dir "/etc/troupe/mcp-identities"
+  @identities_file "identities.json"
 
   # The cluster's resolver, as both network policies select it: CoreDNS keeps the
   # `k8s-app` label kube-dns had, in the namespace kube-dns ran in.
@@ -38,6 +44,7 @@ defmodule Troupe.Operator.Resources do
     List.flatten([
       namespace(namespace, profile),
       service_account(namespace, profile),
+      mcp_identities(namespace, profile),
       team_claims(namespace, profile),
       org_claim(namespace, profile, policy),
       headless_service(namespace, profile, policy),
@@ -127,6 +134,25 @@ defmodule Troupe.Operator.Resources do
       "kind" => "ServiceAccount",
       "metadata" => metadata(Names.service_account(), namespace, profile),
       "automountServiceAccountToken" => false
+    }
+  end
+
+  # Who the profile is at the servers it calls with client credentials (Decision 747), as
+  # the file its pods read. A ConfigMap and not an environment variable because a
+  # variable is in the pod template, and changing one (a rotation's new thumbprint and key
+  # version) would replace every pod; a ConfigMap volume is replaced in place, and the
+  # worker reads the file again whenever it asks for a token. Nothing in it is secret.
+  # None at all for a profile with no identities, which is every profile before this.
+  defp mcp_identities(_namespace, %Profile{mcp_identities: []}), do: []
+
+  defp mcp_identities(namespace, profile) do
+    entries = Enum.map(profile.mcp_identities, &MCPIdentity.to_spec/1)
+
+    %{
+      "apiVersion" => "v1",
+      "kind" => "ConfigMap",
+      "metadata" => metadata(Names.mcp_identities(), namespace, profile),
+      "data" => %{@identities_file => Jason.encode!(entries)}
     }
   end
 
@@ -788,7 +814,20 @@ defmodule Troupe.Operator.Resources do
     base ++
       workers_port_env(settings) ++
       allowed_origins_env(settings) ++
-      object_store_env(settings) ++ llm_env(profile) ++ mcp_env(profile)
+      object_store_env(settings) ++
+      llm_env(profile) ++ mcp_env(profile) ++ identities_env(profile)
+  end
+
+  # Where the file is, which never changes; what is in it may.
+  defp identities_env(%Profile{mcp_identities: []}), do: []
+
+  defp identities_env(_profile) do
+    [
+      %{
+        "name" => "TROUPE_MCP_IDENTITIES_PATH",
+        "value" => Path.join(@identities_dir, @identities_file)
+      }
+    ]
   end
 
   # Only when there is a list: a pod with the variable absent admits every origin, and
@@ -924,11 +963,16 @@ defmodule Troupe.Operator.Resources do
   # variable nothing sets would be a lie the worker then had to see through. The other
   # optional fields are left out when the spec is silent, so the worker's own defaults
   # apply rather than a `null` it has to be taught to ignore.
+  #
+  # The mode is written for a server the profile calls as itself and left out otherwise,
+  # so a profile that has none keeps the value it had and its pods are not replaced.
   defp mcp_server_config(%MCPServer{} = server) do
     %{
       "name" => server.name,
       "url" => server.url,
       "credential_ref" => if(server.secret_name, do: MCPServer.credential_env(server)),
+      "credential_mode" =>
+        if(server.credential_mode == "client_credentials", do: "client_credentials"),
       "header" => server.header,
       "timeout_ms" => server.timeout_ms
     }
@@ -987,14 +1031,31 @@ defmodule Troupe.Operator.Resources do
         []
       end
 
-    [token] ++ team_volumes ++ org
+    [token] ++ identities_volume(profile) ++ team_volumes ++ org
+  end
+
+  defp identities_volume(%Profile{mcp_identities: []}), do: []
+
+  defp identities_volume(_profile) do
+    [%{"name" => "mcp-identities", "configMap" => %{"name" => Names.mcp_identities()}}]
   end
 
   defp volume_mounts(profile) do
-    base = [
-      %{"name" => Names.data_volume(), "mountPath" => @state_dir},
-      %{"name" => "enrolment-token", "mountPath" => "/var/run/secrets/troupe", "readOnly" => true}
-    ]
+    base =
+      [
+        %{"name" => Names.data_volume(), "mountPath" => @state_dir},
+        %{
+          "name" => "enrolment-token",
+          "mountPath" => "/var/run/secrets/troupe",
+          "readOnly" => true
+        }
+      ] ++
+        if(profile.mcp_identities == [],
+          do: [],
+          else: [
+            %{"name" => "mcp-identities", "mountPath" => @identities_dir, "readOnly" => true}
+          ]
+        )
 
     teams =
       Enum.map(profile.teams, fn team ->

@@ -39,7 +39,8 @@ defmodule Troupe.Operator.ReconcilerTest do
     policy = Policy.from_resource(policy())
 
     everything =
-      profile()
+      [mcpIdentities: [identity()]]
+      |> profile()
       |> Profile.from_resource()
       |> Resources.for_profile(policy, %Settings{cilium_available: true})
 
@@ -128,6 +129,47 @@ defmodule Troupe.Operator.ReconcilerTest do
       assert FakeCluster.deleted() == [@cilium_policy]
       assert get({"cilium.io/v2", "CiliumNetworkPolicy", "troupe-w-dev", "allow-registry"})
       assert get({"cilium.io/v2", "CiliumNetworkPolicy", "troupe-w-ux", "troupe-egress"})
+    end
+  end
+
+  # A server the bundle calls as the profile's own identity (Decision 747).
+  describe "MCPIdentityMissing" do
+    @marked %{
+      "name" => "jira",
+      "url" => "https://mcp.internal.test/jira",
+      "credentialMode" => "client_credentials"
+    }
+
+    test "says which server has no identity, and the pods are made anyway" do
+      conn = FakeCluster.start([policy(), profile(mcpServers: [@marked])])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+
+      assert %{"status" => "True", "reason" => "IdentityMissing", "message" => message} =
+               condition("MCPIdentityMissing")
+
+      assert message =~ "mcp server jira is called with client credentials"
+      assert get({"apps/v1", "StatefulSet", "troupe-w-dev", "troupe-w-dev"})
+    end
+
+    test "is false with an identity, whose ConfigMap goes once the identity does" do
+      identities = {"v1", "ConfigMap", "troupe-w-dev", Names.mcp_identities()}
+
+      conn =
+        FakeCluster.start([policy(), profile(mcpServers: [@marked], mcpIdentities: [identity()])])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+      assert %{"status" => "False"} = condition("MCPIdentityMissing")
+      assert get(identities)
+
+      without =
+        {"troupe.dev/v1alpha1", "WorkerProfile", "troupe-system", "dev"}
+        |> get()
+        |> put_in(["spec", "mcpServers"], [])
+        |> put_in(["spec", "mcpIdentities"], [])
+
+      assert {:ok, %{pruned: 1}} = Reconcilers.reconcile(conn, without)
+      refute get(identities)
     end
   end
 
@@ -370,6 +412,15 @@ defmodule Troupe.Operator.ReconcilerTest do
     {"troupe.dev/v1alpha1", "WorkerProfile", "troupe-system", "dev"}
     |> get()
     |> Map.get("status")
+  end
+
+  defp identity do
+    %{
+      "server" => "jira",
+      "clientId" => "client-dev",
+      "transitKey" => "troupe-w-dev.jira",
+      "certificateThumbprint" => String.duplicate("A", 43)
+    }
   end
 
   # The profile with the plane's record of the drains it has finished.

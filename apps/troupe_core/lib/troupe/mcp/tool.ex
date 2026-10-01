@@ -82,6 +82,15 @@ defmodule Troupe.MCP.Tool do
     end
   end
 
+  # The profile's own identity (Decision 747): its token, renewed before it runs out, and
+  # a new one tried once on a `401`.
+  defp call(%Server{credential_mode: :client_credentials} = server, remote_name, args, ctx) do
+    case MCP.authorized(server, &Client.call_tool(&1, remote_name, args, meta(ctx))) do
+      {:ok, result} -> {:ok, render(result)}
+      {:error, reason} -> {:error, describe(reason)}
+    end
+  end
+
   defp call(server, remote_name, args, ctx), do: dispatch(server, remote_name, args, ctx)
 
   defp dispatch(server, remote_name, args, ctx) do
@@ -144,6 +153,10 @@ defmodule Troupe.MCP.Tool do
     do: "the MCP server answered 401: it wants a credential it was not given"
 
   defp describe(reason) when is_binary(reason), do: reason
+
+  defp describe({:unexpected_status, 403, _body}),
+    do: "the MCP server answered 403: the identity this call went out as may not use this tool"
+
   defp describe({:unexpected_status, status, _body}), do: "the MCP server answered #{status}"
   defp describe(reason), do: "the MCP server could not be reached: #{inspect(reason)}"
 end

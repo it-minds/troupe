@@ -105,7 +105,7 @@ spec:
                           TROUPE_MCP_<NAME>_TOKEN. Profile mode only.
                       credentialMode:
                         type: string
-                        enum: [profile, person]
+                        enum: [profile, person, client_credentials]
                         default: profile
                         description: >-
                           Whose credential goes out with a call. `profile` is the service
@@ -113,6 +113,9 @@ spec:
                           the session's owner, read from the key manager at
                           troupe/people/<subject>/mcp/<slot> by the pod alone — there is
                           no Secret and nothing here for the operator to mount.
+                          `client_credentials` is the profile's own identity, the entry of
+                          mcpIdentities for this server: a token got with an assertion
+                          signed through OpenBao transit, and no Secret either.
                       credentialSlot:
                         type: string
                         pattern: '^[a-z][a-z0-9-]*$'
@@ -123,6 +126,55 @@ spec:
                         type: string
                         description: The header the token is sent in. Absent means authorization.
                       timeoutMs: {type: integer, minimum: 1}
+                mcpIdentities:
+                  type: array
+                  description: >-
+                    Who this profile is at the MCP servers its bundle calls with client
+                    credentials, one entry per server: the client registered for it at the
+                    identity provider, and the OpenBao transit key that signs the client's
+                    assertion with the thumbprint of the certificate registered for that
+                    key. Nothing here is secret; the private key never leaves OpenBao. The
+                    owner's to write, never the plane's.
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys: [server]
+                  items:
+                    type: object
+                    required: [server, clientId, transitKey, certificateThumbprint]
+                    properties:
+                      server:
+                        type: string
+                        description: The bundle's name for the server.
+                      clientId: {type: string, minLength: 1}
+                      scope:
+                        type: string
+                        description: The scope a token is asked for, such as api://<app>/.default.
+                      tokenUrl:
+                        type: string
+                        description: >-
+                          The token endpoint. Absent means the one the server's authorization
+                          server publishes in its metadata, whose host egress.fqdns must then
+                          name.
+                      transitKey:
+                        type: string
+                        minLength: 1
+                        description: >-
+                          The transit key that signs, named <worker namespace>.<anything> so
+                          that the pods of this profile alone may sign with it.
+                      keyVersion:
+                        type: integer
+                        minimum: 1
+                        description: >-
+                          The key version to sign with. Absent means the latest; set it with
+                          the thumbprint, in one change, to rotate without a gap.
+                      certificateThumbprint:
+                        type: string
+                        description: >-
+                          The SHA-256 thumbprint of the certificate registered for the key, as
+                          the assertion's x5t#S256 carries it (base64url) or as 64 hex digits.
+                      algorithm:
+                        type: string
+                        enum: [RS256, PS256]
+                        default: RS256
                 egress:
                   type: object
                   properties:

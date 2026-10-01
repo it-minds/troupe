@@ -22,6 +22,11 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces", "serviceaccounts", "services", "persistentvolumeclaims", "persistentvolumes"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # A profile's mcpIdentities, as the file its pods read (Decision 747). ConfigMaps and
+  # not Secrets: nothing in them is secret, and the operator still has no verb on secrets.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch", "delete"]

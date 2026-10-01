@@ -273,6 +273,58 @@ defmodule Troupe.MCPTest do
     end
   end
 
+  # The pod's half, with a real token endpoint and transit, is the worker's
+  # `ClientCredentialsTest`; this is the contract `troupe_core` holds the host to.
+  describe "a server called as the profile's own identity (Decision 747)" do
+    setup context do
+      server = %{context.server | credential_mode: :client_credentials, credential: nil}
+      on_exit(fn -> Application.delete_env(:troupe_core, :profile_tokens) end)
+      %{identity: server}
+    end
+
+    test "is called with the token the host gives, and a 401 gets one other token, once",
+         context do
+      test = self()
+
+      Application.put_env(:troupe_core, :profile_tokens, fn _server, rejected ->
+        send(test, {:asked, rejected})
+        {:ok, if(rejected, do: "second", else: "first")}
+      end)
+
+      call = fn server ->
+        send(test, {:called, server.credential})
+        if server.credential == "first", do: {:error, {:unauthorized, nil}}, else: {:ok, :listed}
+      end
+
+      assert {:ok, :listed} = MCP.authorized(context.identity, call)
+      assert_received {:asked, nil}
+      assert_received {:called, "first"}
+      assert_received {:asked, "first"}
+      assert_received {:called, "second"}
+
+      # A server that refuses the new one too is not asked a third time.
+      refusing = fn server ->
+        send(test, {:called, server.credential})
+        {:error, {:unauthorized, nil}}
+      end
+
+      assert {:error, {:unauthorized, nil}} = MCP.authorized(context.identity, refusing)
+      assert_received {:called, "first"}
+      assert_received {:called, "second"}
+      refute_received {:called, _third}
+    end
+
+    test "with no host to ask, says so instead of calling without a credential", context do
+      assert {:error, sentence} =
+               MCP.authorized(context.identity, fn _server -> flunk("called") end)
+
+      assert sentence =~ "mcp server notes"
+      assert sentence =~ "client credentials"
+      assert MCP.tools(context.identity) == []
+      refute_received {:mcp_request, _}
+    end
+  end
+
   defp ctx do
     %Ctx{
       session_id: "s-1",

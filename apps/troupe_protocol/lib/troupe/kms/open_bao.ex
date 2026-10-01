@@ -109,6 +109,89 @@ defmodule Troupe.KMS.OpenBao do
     end
   end
 
+  # -- transit ----------------------------------------------------------------
+
+  @doc """
+  Sign `input` with a transit key, which never leaves OpenBao: what comes back is the
+  signature alone, as raw bytes, and the version of the key that made it.
+
+  For a profile's assertions at its MCP servers (Decision 747), with the pod's own
+  credential: SHA-256, and `pkcs1v15` for RS256 or `pss` with a salt as long as the hash
+  for PS256, which is what JWS asks of each. `:key_version` signs with that version
+  rather than the latest. `{:error, :key_not_found}` where there is no such key or
+  version, `{:error, :forbidden}` where this credential may not sign with it.
+  """
+  @spec sign(String.t(), binary(), keyword(), keyword()) ::
+          {:ok, %{signature: binary(), key_version: pos_integer() | nil}} | {:error, term()}
+  def sign(key, input, sign_opts, opts \\ []) do
+    :post
+    |> request(
+      "/v1/#{transit_mount(opts)}/sign/#{encode(key)}",
+      sign_body(input, sign_opts),
+      opts
+    )
+    |> signed()
+  end
+
+  defp sign_body(input, sign_opts) do
+    padding = Keyword.get(sign_opts, :padding, :pkcs1v15)
+
+    %{
+      "input" => Base.encode64(input),
+      "hash_algorithm" => "sha2-256",
+      "signature_algorithm" => Atom.to_string(padding)
+    }
+    |> then(&if(padding == :pss, do: Map.put(&1, "salt_length", "hash"), else: &1))
+    |> then(fn body ->
+      case Keyword.get(sign_opts, :key_version) do
+        nil -> body
+        version -> Map.put(body, "key_version", version)
+      end
+    end)
+  end
+
+  defp signed(answer) do
+    case answer do
+      {:ok, 200, %{"data" => %{"signature" => signature} = data}} ->
+        decode_signature(signature, data["key_version"])
+
+      {:ok, 200, _body} ->
+        {:error, :malformed}
+
+      {:ok, 403, _body} ->
+        {:error, :forbidden}
+
+      {:ok, status, body} when status in [400, 404] ->
+        if missing_key?(body),
+          do: {:error, :key_not_found},
+          else: {:error, {:refused, errors(body)}}
+
+      {:ok, status, body} ->
+        {:error, {:unexpected_status, status, errors(body)}}
+
+      error ->
+        error
+    end
+  end
+
+  # `vault:v<n>:<base64>`: the prefix says which version signed, the rest is the signature.
+  defp decode_signature(signature, version) do
+    with ["vault", "v" <> _n, encoded] <- String.split(signature, ":", parts: 3),
+         {:ok, raw} <- Base.decode64(encoded) do
+      {:ok, %{signature: raw, key_version: version}}
+    else
+      _ -> {:error, :malformed}
+    end
+  end
+
+  defp missing_key?(body),
+    do: Enum.any?(errors(body), &(&1 =~ ~r/not found|no such key|version/i))
+
+  defp errors(%{"errors" => errors}) when is_list(errors), do: Enum.filter(errors, &is_binary/1)
+  defp errors(_body), do: []
+
+  defp transit_mount(opts), do: config(opts)[:transit_mount] || "transit"
+
   # -- transport --------------------------------------------------------------
 
   defp request(method, path, body, opts) do

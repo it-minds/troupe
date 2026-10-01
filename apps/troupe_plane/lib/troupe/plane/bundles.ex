@@ -527,6 +527,12 @@ defmodule Troupe.Plane.Bundles do
     end
   end
 
+  # The profile's own identity (Decision 747): no Secret and no reference, only the mode,
+  # which tells the operator to say so when the profile has no identity for the server.
+  # Who the profile is there is its own `mcpIdentities`, never a projection of the plane's.
+  defp put_credential(entry, _name, "client_credentials", _ref),
+    do: Map.put(entry, "credentialMode", "client_credentials")
+
   defp put_credential(entry, _name, _mode, nil), do: entry
 
   # A person-mode server has no Secret and no environment variable: its value is in the

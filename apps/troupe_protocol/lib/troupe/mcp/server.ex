@@ -23,7 +23,9 @@ defmodule Troupe.MCP.Server do
     # Whose credential goes out with a call. `:profile` is the service account in
     # `credential`, resolved once at discovery and the same for every session.
     # `:person` is the session's owner, and there is nothing resolved here at all: the
-    # value is read per session, at call time, from the key manager.
+    # value is read per session, at call time, from the key manager. `:client_credentials`
+    # is the profile's own identity, a token the pod gets by signing an assertion through
+    # the key manager and puts in `credential` per call (Decision 747).
     credential_mode: :profile,
     header: "authorization",
     timeout_ms: 30_000,
@@ -70,8 +72,9 @@ defmodule Troupe.MCP.Server do
       credential_mode: mode,
       # Nothing is resolved for a person-mode server. There is no environment variable
       # to read and the value is not the pod's to hold: it belongs to whoever owns the
-      # session, and is fetched per call.
-      credential: if(mode == :person, do: nil, else: resolve(reference, config["credential"])),
+      # session, and is fetched per call. Nor for the profile's own identity, whose token
+      # runs out and is asked for per call too.
+      credential: if(mode == :profile, do: resolve(reference, config["credential"]), else: nil),
       header: config["header"] || "authorization",
       timeout_ms: config["timeout_ms"] || 30_000,
       permission: permission(config["permission"]),
@@ -83,6 +86,10 @@ defmodule Troupe.MCP.Server do
   # server reaching out as the service account it always did, never start sending
   # somebody's own credential somewhere.
   defp mode(value) when value in ["person", :person], do: :person
+
+  defp mode(value) when value in ["client_credentials", :client_credentials],
+    do: :client_credentials
+
   defp mode(_value), do: :profile
 
   @doc """
