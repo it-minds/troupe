@@ -63,6 +63,19 @@ interface Client {
   /** subscription_id → what it is on and how much of it to send. */
   subs: Map<string, { sessionId: string; level: "detail" | "summary"; off: () => void }>;
   expiryTimers: NodeJS.Timeout[];
+  /** Consent challenges issued to this socket: nonce → the tool names it covers, sorted. */
+  challenges: Map<string, string>;
+  /** Requests this pod sent the client (`tool.invoke`), waiting on its answer. */
+  waiting: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
+}
+
+/** A tool a client registered with a session (PROTOCOL.md §8), and the socket that serves it. */
+export interface RegisteredTool {
+  sessionId: string;
+  name: string;
+  description: string;
+  schema: unknown;
+  client: Client;
 }
 
 /**
@@ -86,6 +99,10 @@ export class FakeWorker {
   readonly workerId: string;
   /** Every method call the worker has answered, for the "never on load" assertions. */
   readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+  /** Every frame a client sent, as it arrived: what a pod holds of anything a client said. */
+  readonly frames: string[] = [];
+  /** Client-hosted tools by session and prefixed name, as `tools.register` left them. */
+  readonly tools = new Map<string, RegisteredTool>();
 
   private readonly clients = new Set<Client>();
   private readonly opts: Required<WorkerOptions>;
@@ -166,10 +183,19 @@ export class FakeWorker {
     let client: Client | null = null;
 
     ws.on("message", (raw) => {
-      let msg: { id?: number | string; method?: string; params?: Record<string, unknown> };
+      this.frames.push(String(raw));
+      let msg: { id?: number | string; method?: string; params?: Record<string, unknown>; result?: unknown; error?: { message?: string; data?: unknown } };
       try {
         msg = JSON.parse(String(raw));
       } catch {
+        return;
+      }
+      // An answer to something this pod asked the client: `tool.invoke`.
+      if (!msg.method && client && msg.id !== undefined) {
+        const waiter = client.waiting.get(String(msg.id));
+        client.waiting.delete(String(msg.id));
+        if (msg.error) waiter?.reject(new Error(`${msg.error.message ?? "error"} ${JSON.stringify(msg.error.data ?? {})}`));
+        else waiter?.resolve(msg.result);
         return;
       }
       if (!msg.method) return;
@@ -186,7 +212,7 @@ export class FakeWorker {
         if (token.exp * 1000 <= Date.now()) {
           return reply(ws, msg.id, null, { code: -32003, message: "unauthenticated", data: { reason: "expired" } });
         }
-        client = { ws, token, subs: new Map(), expiryTimers: [] };
+        client = { ws, token, subs: new Map(), expiryTimers: [], challenges: new Map(), waiting: new Map() };
         this.clients.add(client);
         this.armExpiry(client);
         return reply(ws, msg.id, {
@@ -213,7 +239,24 @@ export class FakeWorker {
       if (!client) return;
       for (const t of client.expiryTimers) clearTimeout(t);
       for (const s of client.subs.values()) s.off();
+      // A registrant that disconnects takes its tools with it.
+      for (const [key, tool] of this.tools) if (tool.client === client) this.tools.delete(key);
+      for (const w of client.waiting.values()) w.reject(new Error("the client left"));
       this.clients.delete(client);
+    });
+  }
+
+  /**
+   * The agent calls a client-hosted tool: a `tool.invoke` to the socket that registered
+   * it, answered with whatever the client answers. Rejects when nobody hosts it.
+   */
+  invokeTool(sessionId: string, name: string, args: Record<string, unknown>, callId = `call-${Math.random().toString(36).slice(2)}`): Promise<unknown> {
+    const tool = this.tools.get(`${sessionId}/${name}`);
+    if (!tool) return Promise.reject(new Error(`nobody hosts ${name} in ${sessionId}`));
+    const id = `srv-${++this.subCounter}`;
+    return new Promise((resolve, reject) => {
+      tool.client.waiting.set(id, { resolve, reject });
+      tool.client.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "tool.invoke", params: { call_id: callId, name, arguments: args } }));
     });
   }
 
@@ -355,6 +398,33 @@ export class FakeWorker {
 
       case "presence.set":
         return reply(ws, id, { ok: true });
+
+      // Client-hosted tools (PROTOCOL.md §8), as the gateway takes them: without consent,
+      // the challenge to show; with a challenge this socket was issued for exactly these
+      // tools, the registration, each name under `client.`.
+      case "tools.register": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        if (!client.token.scopes.includes("control")) {
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { required_scope: "control" } });
+        }
+        const specs = (params["tools"] as Array<{ name: string; description?: string; schema?: unknown }> | undefined) ?? [];
+        const names = specs.map((t) => t.name).sort();
+        const nonce = (params["consent"] as { challenge?: string } | undefined)?.challenge;
+        if (!nonce || client.challenges.get(nonce) !== names.join("\n")) {
+          const challenge = `ch-${++this.subCounter}`;
+          client.challenges.set(challenge, names.join("\n"));
+          const prompt = names.length === 1 ? `Let this session run ${names[0]} on your machine?` : `Let this session run ${names.length} tools on your machine: ${names.join(", ")}?`;
+          return reply(ws, id, null, { code: -32013, message: "consent_required", data: { challenge, prompt, tools: names, reason: "consent_required" } });
+        }
+        client.challenges.delete(nonce);
+        const registered = specs.map((t) => `client.${t.name}`).sort();
+        for (const t of specs) {
+          this.tools.set(`${session.id}/client.${t.name}`, { sessionId: session.id, name: `client.${t.name}`, description: t.description ?? "", schema: t.schema ?? {}, client });
+        }
+        session.log.append("tools_registered", { tools: registered }, { kind: "user", subject: client.token.sub });
+        session.log.append("session_tainted", { kind: "personal_connector", tools: registered, actor: client.token.sub }, { kind: "user", subject: client.token.sub });
+        return reply(ws, id, { registered, taint: "personal_connector" });
+      }
 
       case "blob.get": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });

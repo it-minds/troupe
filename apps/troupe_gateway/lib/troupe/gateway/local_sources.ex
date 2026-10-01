@@ -3,7 +3,9 @@ defmodule Troupe.Gateway.LocalSources do
   `mcp.list`, `mcp.add`, `mcp.remove`, `mcp.check` and `skills.list`, `skills.add`,
   `skills.remove`: the person's own MCP servers and skills, over the wire
   (Decision 700). `mcp.sign_in` and `mcp.sign_out`: their sign-in to a server that wants
-  them rather than a machine (Decision 741).
+  them rather than a machine (Decision 741). `mcp.tools` and `mcp.call`: one of their
+  servers listed and called outside any session, with their sign-in, for a client that
+  offers its tools to a session on a pod (Decision 748).
 
   The daemon's alone, as the model settings are. The files are the daemon's config
   directory and a workspace on this machine, a pod's servers are its bundle's, and so
@@ -17,7 +19,7 @@ defmodule Troupe.Gateway.LocalSources do
   prints it; the files themselves are read and written by the paths they had.
   """
 
-  alias Troupe.MCP.{Import, Local, OAuth, Trust}
+  alias Troupe.MCP.{Import, Local, OAuth, Tool, Trust}
   alias Troupe.Paths
   alias Troupe.Protocol.Error
   alias Troupe.Session.MCP, as: LocalMCP
@@ -25,7 +27,7 @@ defmodule Troupe.Gateway.LocalSources do
 
   @type outcome :: {:ok, map()} | {:error, Error.t()}
 
-  @doc "Dispatch one of the nine, with the daemon already known to be the server."
+  @doc "Dispatch one of the eleven, with the daemon already known to be the server."
   @spec call(String.t(), map()) :: outcome()
   def call("mcp.list", params), do: list_servers(params)
   def call("mcp.add", params), do: add_server(params)
@@ -33,6 +35,8 @@ defmodule Troupe.Gateway.LocalSources do
   def call("mcp.check", params), do: check_server(params)
   def call("mcp.sign_in", params), do: sign_in(params)
   def call("mcp.sign_out", params), do: sign_out(params)
+  def call("mcp.tools", params), do: server_tools(params)
+  def call("mcp.call", params), do: call_tool(params)
   def call("skills.list", params), do: list_skills(params)
   def call("skills.add", params), do: add_skill(params)
   def call("skills.remove", params), do: remove_skill(params)
@@ -223,6 +227,83 @@ defmodule Troupe.Gateway.LocalSources do
 
   defp sign_in_of(server),
     do: OAuth.binding(server.name, server.config.url, server.config.oauth, nil)
+
+  # One of the person's servers for a client that offers its tools to a session somewhere
+  # else, a pod's (Decision 748): its tools as a session is given them, and a call made
+  # here, with the person's sign-in, answered as that session's model reads it. The token
+  # stays where the sign-in put it; the session sees names, schemas, arguments and what
+  # came back. A server with a `url` only: one that runs a command is a process a local
+  # session keeps, and nothing here starts one for somebody else's session.
+  defp server_tools(params) do
+    with {:ok, server} <- callable(params) do
+      {status, tools} = LocalMCP.discover(server)
+
+      {:ok,
+       %{
+         "server" => server.name,
+         "state" => to_string(status.state),
+         "error" => status.error,
+         "tools" => Enum.map(tools, &tool_json/1)
+       }}
+    end
+  end
+
+  defp tool_json(tool),
+    do: %{"name" => tool.remote_name, "description" => tool.description, "schema" => tool.schema}
+
+  # What a session's own tool would answer: the text, or the `sign_in_required` note when
+  # the sign-in has run out. A call the server could not take is `unavailable`, saying why.
+  defp call_tool(params) do
+    with {:ok, server} <- callable(params),
+         {:ok, tool} <- fetch(params, "tool"),
+         {:ok, arguments} <- arguments_of(params) do
+      case server |> LocalMCP.server() |> Tool.invoke(tool, arguments, %{}) do
+        {:ok, content} ->
+          {:ok, %{"server" => server.name, "tool" => tool, "content" => content}}
+
+        {:error, why} ->
+          {:error, Error.new(:unavailable, %{server: server.name, reason: why})}
+      end
+    end
+  end
+
+  defp callable(%{"name" => name} = params) when is_binary(name) and name != "" do
+    with {:ok, workspace} <- workspace_of(params) do
+      {servers, _warnings} = resolve(workspace)
+
+      case Enum.find(servers, &(&1.name == name)) do
+        nil -> {:error, Error.new(:not_found, %{kind: "mcp_server", name: name})}
+        server -> may_call(server, trust_of(server, workspace))
+      end
+    end
+  end
+
+  defp callable(_params), do: invalid("give the name of the server")
+
+  defp may_call(%{config: %{refused: why}}, _trust) when is_binary(why), do: invalid(why)
+  defp may_call(%{name: name, disabled?: true}, _trust), do: invalid("#{name} is turned off")
+
+  defp may_call(%{name: name}, "pending"),
+    do:
+      invalid(
+        "#{name} is this workspace's, and its servers are not approved here yet; approve them first"
+      )
+
+  defp may_call(%{config: %{url: url}} = server, _trust) when is_binary(url), do: {:ok, server}
+
+  defp may_call(%{name: name}, _trust),
+    do:
+      invalid(
+        "#{name} runs a command on this computer; only a server with a url is called outside a session"
+      )
+
+  defp arguments_of(params) do
+    case Map.get(params, "arguments") do
+      nil -> {:ok, %{}}
+      arguments when is_map(arguments) -> {:ok, arguments}
+      _other -> invalid("arguments must be an object")
+    end
+  end
 
   # How the person's sign-in stands: never a token, only the state, whose account it is,
   # and why the last attempt failed.

@@ -16,6 +16,9 @@ defmodule Troupe.KMS.Policy do
   * **the operator** touches keys not at all. It writes the roles; it is not in the
     path of a session.
 
+  A pod also signs, with the transit key of its profile's identity at an MCP server
+  (`mcp_identity/2`), and with no other.
+
   Rendered here rather than written into a chart by hand so that the policy the tests
   prove and the policy a cluster installs are the same string.
   """
@@ -144,6 +147,46 @@ defmodule Troupe.KMS.Policy do
     }
     """
   end
+
+  @doc """
+  The policy for a profile's own identity at its MCP servers (Decision 747): sign with a
+  transit key named after the pod's own namespace, `<namespace>.<anything>`, and nothing
+  else.
+
+  Templated on the namespace Kubernetes auth vouched for, as `person/2` is on the subject:
+  one policy, on the one role every pod logs in with, and a pod in `troupe-w-ux` cannot
+  sign with `troupe-w-dev.jira` however it asks, because the name its policy evaluates to
+  is its own. `accessor` is the Kubernetes auth mount's.
+
+  Sign only. No `read` on the key, which a pod has no use for, and no reach to the plane's
+  session-token key, whose name has no dot in it: a pod that could sign session tokens
+  could open any session on any pod.
+  """
+  @spec mcp_identity(String.t(), String.t()) :: String.t()
+  def mcp_identity(mount \\ "transit", accessor) do
+    mcp_identity_for(
+      mount,
+      "{{identity.entity.aliases.#{accessor}.metadata.service_account_namespace}}"
+    )
+  end
+
+  @doc """
+  The same policy with a namespace already in it, as OpenBao evaluates `mcp_identity/2`
+  for a pod of that namespace; a test issues a token with this one, as `person_for/2`
+  is used.
+  """
+  @spec mcp_identity_for(String.t(), String.t()) :: String.t()
+  def mcp_identity_for(mount, namespace) do
+    """
+    path "#{mount}/sign/#{namespace}.*" {
+      capabilities = ["update"]
+    }
+    """
+  end
+
+  @doc "The name the MCP identity policy is installed under."
+  @spec mcp_identity_policy_name() :: String.t()
+  def mcp_identity_policy_name, do: "troupe-worker-mcp-identity"
 
   @doc "The name a profile's policy is installed under."
   @spec worker_policy_name(String.t()) :: String.t()

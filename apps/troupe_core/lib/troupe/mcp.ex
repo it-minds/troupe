@@ -48,6 +48,50 @@ defmodule Troupe.MCP do
   end
 
   @doc """
+  Run `call` as the profile's own identity, for a server it calls with client credentials
+  (Decision 747): with the profile's token, and once more with a new one when the server
+  answers `401`. Any other server is called as it is.
+
+  The token comes from a function the host installs, as a person's credential does,
+  because a pod gets one by signing an assertion through its key manager and that is not
+  `troupe_core`'s to know. It is asked `(server, nil)` for the token it holds and
+  `(server, rejected)` for one other than the token the server just refused. A host that
+  installs nothing has no identity to call as, and says so.
+  """
+  @spec authorized(Server.t(), (Server.t() -> {:ok, term()} | {:error, term()})) ::
+          {:ok, term()} | {:error, term()}
+  def authorized(%Server{credential_mode: :client_credentials} = server, call) do
+    with {:ok, token} <- profile_token(server, nil) do
+      case call.(%{server | credential: token}) do
+        {:error, {:unauthorized, _challenge}} -> once_more(server, token, call)
+        other -> other
+      end
+    end
+  end
+
+  def authorized(%Server{} = server, call), do: call.(server)
+
+  # Once, not in a loop: a second refusal of a token just issued is the identity lacking
+  # something, which another token would only repeat.
+  defp once_more(server, refused, call) do
+    with {:ok, fresh} <- profile_token(server, refused) do
+      call.(%{server | credential: fresh})
+    end
+  end
+
+  defp profile_token(server, rejected) do
+    case Application.get_env(:troupe_core, :profile_tokens) do
+      fun when is_function(fun, 2) ->
+        fun.(server, rejected)
+
+      _none ->
+        {:error,
+         "mcp server #{server.name}: is called with client credentials, and nothing here " <>
+           "holds an identity to call it as"}
+    end
+  end
+
+  @doc """
   Which identity a call to this server goes out as, for the log — both halves of it.
 
   `subject` is whose credential went out: the profile's service account, or a person's.
@@ -103,11 +147,17 @@ defmodule Troupe.MCP do
   """
   @spec tools(Server.t()) :: [Tool.t()]
   def tools(%Server{} = server) do
-    case Client.list_tools(server) do
+    case authorized(server, &Client.list_tools/1) do
       {:ok, listed} ->
         listed
         |> Enum.filter(&Server.offers?(server, &1["name"]))
         |> Enum.map(&Tool.new(server, &1))
+
+      # A sentence already names the server and the cause: the token endpoint refused the
+      # profile's client, the key is not in the key manager.
+      {:error, reason} when is_binary(reason) ->
+        Logger.warning("troupe: no tools from MCP server #{server.name}: #{reason}")
+        []
 
       {:error, reason} ->
         Logger.warning("troupe: MCP server #{server.name} is unreachable: #{inspect(reason)}")

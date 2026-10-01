@@ -108,6 +108,16 @@ export interface FakeServer {
   disabled?: boolean;
   /** A server that wants the person signed in (troupe-remote Decision 741). */
   oauth?: { client_id: string; scopes?: string[] };
+  /** What `mcp.tools` lists for it; one `search` tool when absent. */
+  tools?: Array<{ name: string; description: string; schema: Record<string, unknown> }>;
+}
+
+/** A call the fake made to one of the person's servers for `mcp.call`, with the credential it sent. */
+export interface FakeServerCall {
+  server: string;
+  tool: string;
+  arguments: Record<string, unknown>;
+  authorization: string | null;
 }
 
 /** How a person's sign-in to a server stands, as `mcp.list`'s `auth` says it. */
@@ -186,6 +196,12 @@ export class FakeDaemon {
   servers: FakeServer[] = [];
   /** Sign-ins by server name (troupe-remote Decision 741); a server with `oauth` and no entry is signed out. */
   signIns: Record<string, FakeAuth> = {};
+  /** The access token each sign-in left in the state directory, which no answer carries. */
+  readonly signInTokens: Record<string, string> = {};
+  /** Every call `mcp.call` made to a server, as the server would have received it (troupe Decision 748). */
+  readonly serverCalls: FakeServerCall[] = [];
+  /** `mcp.call`'s answers by command id: one asked again is answered from the first. */
+  private readonly answered = new Map<string, unknown>();
   skills: FakeSkill[] = [];
   /** What lies at a path a test names, for `mcp.add` and `skills.add` with `from`. */
   importable: Record<string, Importable> = {};
@@ -634,6 +650,8 @@ export class FakeDaemon {
       case "mcp.check":
       case "mcp.sign_in":
       case "mcp.sign_out":
+      case "mcp.tools":
+      case "mcp.call":
       case "skills.list":
       case "skills.add":
       case "skills.remove":
@@ -870,6 +888,7 @@ export class FakeDaemon {
   /** The person came back from the browser: a sign-in started with `mcp.sign_in` lands. */
   finishSignIn(name: string, account: string | null = "ada@example.test"): void {
     this.signIns[name] = { state: "signed_in", account, error: null };
+    this.signInTokens[name] = `at-${name}-${Math.random().toString(36).slice(2)}`;
   }
 
   /**
@@ -999,6 +1018,36 @@ export class FakeDaemon {
           redirect_uri: "http://127.0.0.1:53682/callback",
           expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
         });
+      }
+
+      // A server listed and called outside any session, with the person's sign-in (troupe
+      // Decision 748): the token goes to the server and into no answer.
+      case "mcp.tools":
+      case "mcp.call": {
+        const name = String(params["name"] ?? "");
+        const known = this.servers.find((s) => s.name === name);
+        if (!known) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "mcp_server", name } });
+        if (!known.url) return invalid(`${name} runs a command on this computer; only a server with a url is called outside a session`);
+        const live = liveOf(known);
+        const tools = known.tools ?? [{ name: "search", description: "Search my notes.", schema: { type: "object", properties: { topic: { type: "string" } } } }];
+        if (method === "mcp.tools") return reply(ws, id, { server: name, state: live.state, error: live.error, tools: live.state === "ready" ? tools : [] });
+
+        if (!params["command_id"]) return invalid("command_id is required");
+        const commandId = String(params["command_id"]);
+        if (this.answered.has(commandId)) return reply(ws, id, this.answered.get(commandId));
+        const tool = String(params["tool"] ?? "");
+        const args = (params["arguments"] as Record<string, unknown> | undefined) ?? {};
+        let content: string;
+        if (live.state === "ready") {
+          const token = this.signInTokens[name] ?? null;
+          this.serverCalls.push({ server: name, tool, arguments: args, authorization: token ? `Bearer ${token}` : null });
+          content = `${tool} on ${name} for ${this.signIns[name]?.account ?? "nobody"}: ${JSON.stringify(args)}`;
+        } else {
+          content = JSON.stringify({ error: "sign_in_required", server: name, hint: `sign in to ${name} on the desktop app's Servers and skills panel, then ask again` });
+        }
+        const answer = { server: name, tool, content };
+        this.answered.set(commandId, answer);
+        return reply(ws, id, answer);
       }
 
       case "skills.list":

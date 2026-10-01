@@ -458,6 +458,10 @@ if config_env() == :prod do
       # shape a bundle carries, so a pod knows its servers before its first bundle arrives
       # and a bundle that names the same server simply agrees with it.
       mcp_servers: Jason.decode!(System.get_env("TROUPE_MCP_SERVERS", "[]")),
+      # Who the profile is at the servers it calls with client credentials (Decision 747):
+      # a file the operator mounts from a ConfigMap, read again whenever a token is asked
+      # for, so a rotation reaches the pod without a restart.
+      mcp_identities_path: presence.(System.get_env("TROUPE_MCP_IDENTITIES_PATH")),
       drain_timeout_seconds:
         String.to_integer(System.get_env("TROUPE_DRAIN_TIMEOUT_SECONDS", "300")),
       worker_id: presence.(System.get_env("TROUPE_POD_ORDINAL")),

@@ -24,6 +24,8 @@ export { beginRedirect, completeRedirect, hasRedirectAnswer, scrubRedirect, idpM
 export type { BeginRedirectOptions, IdpMetadata, PkcePair, PendingRedirect, RedirectResult } from "./pkce.js";
 export { SessionAttachment, waitOn } from "./attach.js";
 export type { AttachOptions, AttachStatus } from "./attach.js";
+export { ServerOffer, offeredName } from "./offer.js";
+export type { OfferAsk, OfferOptions, OfferState } from "./offer.js";
 export {
   fold,
   addPending,
@@ -94,6 +96,9 @@ export type {
   RemoveResult,
   ScopedParams,
   ServerAuth,
+  ServerTool,
+  ServerToolResult,
+  ServerTools,
   SignInStarted,
   SourceLayer,
   SourceScope,

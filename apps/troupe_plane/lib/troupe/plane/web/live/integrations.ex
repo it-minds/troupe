@@ -68,6 +68,9 @@ defmodule Troupe.Plane.Web.Live.Integrations do
   defp credential(%{credential_mode: "person", credential_ref: slot}),
     do: "each person's own, in slot #{slot}"
 
+  defp credential(%{credential_mode: "client_credentials"}),
+    do: "each profile's own identity, by client credentials"
+
   defp credential(%{credential_ref: ref}) when is_binary(ref) and ref != "",
     do: "a Secret named #{ref}"
 

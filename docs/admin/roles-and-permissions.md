@@ -123,7 +123,7 @@ Nothing a pod says about itself is trusted for its identity.
 |---|---|
 | plane (Role in `troupe-system`) | `workerprofiles`, `teamvolumes`: all verbs; `endpoints`, `pods`: read (libcluster) |
 | plane (ClusterRoles) | `troupepolicies`: read; `system:auth-delegator` for `TokenReview` |
-| operator (ClusterRole) | `troupe.dev` resources read and status write; namespaces, service accounts, services, PVCs, PVs, StatefulSets, Ingresses, NetworkPolicies, PDBs, CiliumNetworkPolicies: CRUD; pods: read and delete; events; leases |
+| operator (ClusterRole) | `troupe.dev` resources read and status write; namespaces, service accounts, services, PVCs, PVs, ConfigMaps (a profile's `mcpIdentities`, none of it secret), StatefulSets, Ingresses, NetworkPolicies, PDBs, CiliumNetworkPolicies: CRUD; pods: read and delete; events; leases |
 | A2A | none; no token mounted |
 
 No subject has any verb on `secrets`: the plane never holds a secret value. The plane
@@ -139,12 +139,16 @@ Rendered by `Troupe.KMS.Policy`, so the tested string and the installed one are 
 | `troupe-worker-<profile>` | create, read, update on `<mount>/data/troupe/teams/<team>/sessions/*` and read, list on the metadata path, per granted team; never delete |
 | `troupe-plane` | delete, list, read on `<mount>/metadata/troupe/teams/+/sessions/*` and nothing on the data path: it can destroy a key (erasure) and read none |
 | signing | create, update on `transit/sign/troupe-session-tokens`, read on its key; not exportable |
+| `troupe-worker-mcp-identity` | update on `transit/sign/<the pod's namespace>.*`, templated on the namespace Kubernetes auth vouched for (`Policy.mcp_identity/2`, Decision 747): a pod signs its profile's MCP assertions with the keys named after its own namespace and with no other, never the session-token key |
 
 The Kubernetes-auth roles in `dev/kind/dependencies.yaml` (`troupe-worker` for the
 ServiceAccount of that name in any namespace, audience `troupe-kms`; `troupe-plane` in
 `troupe-system`) are the shape production needs. The dev manifest installs one wide worker
 policy; nothing here installs the per-profile ones in a cluster, and a production plane role
-needs the plane policy **and** the signing policy.
+needs the plane policy **and** the signing policy. A worker role whose profiles call an MCP
+server as themselves also needs `troupe-worker-mcp-identity`, written with the Kubernetes
+auth mount's accessor (`bao read -field=accessor sys/auth/kubernetes`), as the dev manifest
+writes it.
 
 ## 9. The admin methods
 

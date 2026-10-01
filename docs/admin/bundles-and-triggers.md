@@ -39,6 +39,7 @@ host must pass the policy's egress check.
 | `name` | server name; tools appear as `mcp.<server>.<tool>` | required |
 | `url` | streamable-HTTP endpoint | required |
 | `credential_ref` | the **environment variable** holding the token, `^[A-Z][A-Z0-9_]{1,63}$` — never a value | none |
+| `credential_mode` | whose credential goes out: `profile` (the token in `credential_ref`), `person` (the session owner's, `credential_ref` naming the slot), or `client_credentials` (the profile's own identity, below; no `credential_ref`) | `profile` |
 | `header` | where the token goes; `authorization` gets a `Bearer ` prefix | `authorization` |
 | `timeout_ms` | per call | 30000 |
 | `permission` | `ask` or `auto`; an agent definition may tighten it | `ask` |
@@ -49,6 +50,17 @@ On publish the plane projects each server onto the profile's resource with
 `credential_ref` variable from an optional `secretKeyRef`. So for every server with a
 credential, **create `troupe-mcp-<server>` with key `token` in every `troupe-w-<profile>`
 whose profile follows the channel**, and put its host in `allowedEgress`.
+
+**A server that takes machine callers by client credentials** — a token that lasts an
+hour, got with a signed assertion rather than a shared secret, with tools granted per
+client — is marked `"credential_mode": "client_credentials"` and given no `credential_ref`
+(a server with one beside it is refused). The bundle says only that: a channel serves
+several profiles, and each profile is its own client there, with its own certificate and
+granted tools, so who it is goes on the profile, in `spec.mcpIdentities`. Its key is kept in
+OpenBao transit and signs without leaving it; there is no Secret to create. Setting up the
+client, the certificate and the key, and rotating them, is in
+[profiles and policy](profiles-and-policy.md#calling-an-mcp-server-as-the-profile)
+(Decision 747).
 
 **Publish, adopt, retire.** `admin.bundle.publish {channel, content}` validates, assigns
 the channel's next version, stores the document under `sha256:<canonical JSON>`, pushes
@@ -83,9 +95,12 @@ the daemon on their machine keeps and refreshes the tokens, and nothing of them 
 pod or the plane (Decision 741). What you provide is the client: register one public
 client (no secret, PKCE, a loopback redirect such as `http://localhost`, with any port
 where the provider allows it) with the server's authorization server, grant it the
-server's scope, and give people its id. Today that serves their local sessions; offering
-those tools to a session on a pod, through `tools.register` from the person's client, is
-the next step.
+server's scope, and give people its id. That serves their local sessions, and the desktop
+app offers the same tools to a session on a pod they open, through `tools.register` once
+they agree (Decision 748): the pod's agent calls them, the daemon on their machine makes
+the call, and the pod sees the arguments and the answer, never the token. A platform with
+`managed_mcp_servers_only` takes none, as for any client-hosted tool. The TUI does not
+offer them yet.
 
 ## 2. Triggers
 
