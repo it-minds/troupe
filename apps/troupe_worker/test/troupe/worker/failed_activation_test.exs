@@ -103,6 +103,53 @@ defmodule Troupe.Worker.FailedActivationTest do
     assert_left_as_it_was(context, log, history, cached)
   end
 
+  test "a log a reader was writing as the activation started is found, and left", context do
+    context = requires_tier(context)
+    cached = a_dormant_session(context)
+    test = self()
+
+    # A reader that has looked for a manager under the lock and found none, and writes the
+    # log before it lets go.
+    reader =
+      spawn(fn ->
+        Restore.with_log(context.session_id, fn ->
+          send(test, :holding)
+
+          receive do
+            :write ->
+              File.mkdir_p!(log_dir(context))
+              File.write!(Path.join(log_dir(context), "events.jsonl"), "the reader's\n")
+          end
+        end)
+      end)
+
+    assert_receive :holding
+
+    # An activation registers meanwhile, and fails at the tree once it has put the events
+    # back.
+    proxy = start_supervised!(relay(context, drop: listing_of(context.session_id, "workspace/")))
+    options = activation(through(context, proxy), epoch: 2)
+    activating = Task.async(fn -> Sessions.activate(context.session_id, options) end)
+    manager = eventually(fn -> Sessions.whereis(context.session_id) end)
+    eventually(fn -> waiting_for_the_log?(manager) end)
+
+    send(reader, :write)
+
+    assert {:error, {:object_store_unreachable, _endpoint, _reason}} =
+             Task.await(activating, 60_000)
+
+    assert File.exists?(log_dir(context))
+    assert Cache.get_workspace(context.session_id, context.state_dir) == cached
+  end
+
+  # Waiting for `Restore.with_log/2`'s lock, which nobody holding it is.
+  defp waiting_for_the_log?(pid) do
+    case Process.info(pid, :current_stacktrace) do
+      {:current_stacktrace, stack} -> Enum.any?(stack, &match?({:global, :set_lock, _, _}, &1))
+      nil -> false
+    end
+  end
+
   defp assert_left_as_it_was(context, log, history, cached) do
     path = Restore.log_path(context.session_id, context.workspace, context.state_dir)
     assert File.read!(path) == log
