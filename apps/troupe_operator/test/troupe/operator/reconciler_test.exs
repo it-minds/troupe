@@ -39,7 +39,8 @@ defmodule Troupe.Operator.ReconcilerTest do
     policy = Policy.from_resource(policy())
 
     everything =
-      profile()
+      [mcpIdentities: [identity()]]
+      |> profile()
       |> Profile.from_resource()
       |> Resources.for_profile(policy, %Settings{cilium_available: true})
 
@@ -128,6 +129,87 @@ defmodule Troupe.Operator.ReconcilerTest do
       assert FakeCluster.deleted() == [@cilium_policy]
       assert get({"cilium.io/v2", "CiliumNetworkPolicy", "troupe-w-dev", "allow-registry"})
       assert get({"cilium.io/v2", "CiliumNetworkPolicy", "troupe-w-ux", "troupe-egress"})
+    end
+  end
+
+  describe "EndpointUnreachable (Decision 749)" do
+    # In gitops mode a profile is applied by something else, so nothing refuses it where
+    # it is written: the operator says on the profile what its workers will not reach, as
+    # it says a Secret is missing, and the console shows it.
+
+    test "without Cilium, names each endpoint a worker's NetworkPolicy cannot reach" do
+      conn = FakeCluster.start([unreachable_policy(), unreachable_profile()])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+
+      assert %{"status" => "True", "reason" => "NoCilium", "message" => message} =
+               condition("EndpointUnreachable")
+
+      assert message =~ "llm.endpoint https://llm.internal.test:8443/v1 is on port 8443"
+      assert message =~ "MCP server tickets at https://10.20.0.5/tickets is at 10.20.0.5"
+      assert message =~ "without Cilium"
+      assert message =~ "operator.ciliumAvailable"
+
+      # Beside `Ready`, as `SecretMissing` is: everything the profile implies was made.
+      assert condition("Ready")["status"] == "True"
+    end
+
+    test "with Cilium, the same profile reaches them" do
+      conn = FakeCluster.start([unreachable_policy(), unreachable_profile()])
+
+      assert {:ok, _result} = reconcile(conn, cilium: true)
+      assert %{"status" => "False", "reason" => "Cilium"} = condition("EndpointUnreachable")
+    end
+
+    test "without Cilium, public names on 443 and hosts in the cluster are reached" do
+      in_cluster = %{"name" => "tools", "url" => "http://tools.mcp.svc:8080/mcp"}
+      profile = update_in(profile(), ["spec", "mcpServers"], &(&1 ++ [in_cluster]))
+      allowed = policy()["spec"]["allowedEgress"] ++ ["tools.mcp.svc"]
+      conn = FakeCluster.start([policy(allowedEgress: allowed), profile])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+      assert %{"status" => "False", "reason" => "Reachable"} = condition("EndpointUnreachable")
+    end
+  end
+
+  # A server the bundle calls as the profile's own identity (Decision 747).
+  describe "MCPIdentityMissing" do
+    @marked %{
+      "name" => "jira",
+      "url" => "https://mcp.internal.test/jira",
+      "credentialMode" => "client_credentials"
+    }
+
+    test "says which server has no identity, and the pods are made anyway" do
+      conn = FakeCluster.start([policy(), profile(mcpServers: [@marked])])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+
+      assert %{"status" => "True", "reason" => "IdentityMissing", "message" => message} =
+               condition("MCPIdentityMissing")
+
+      assert message =~ "mcp server jira is called with client credentials"
+      assert get({"apps/v1", "StatefulSet", "troupe-w-dev", "troupe-w-dev"})
+    end
+
+    test "is false with an identity, whose ConfigMap goes once the identity does" do
+      identities = {"v1", "ConfigMap", "troupe-w-dev", Names.mcp_identities()}
+
+      conn =
+        FakeCluster.start([policy(), profile(mcpServers: [@marked], mcpIdentities: [identity()])])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+      assert %{"status" => "False"} = condition("MCPIdentityMissing")
+      assert get(identities)
+
+      without =
+        {"troupe.dev/v1alpha1", "WorkerProfile", "troupe-system", "dev"}
+        |> get()
+        |> put_in(["spec", "mcpServers"], [])
+        |> put_in(["spec", "mcpIdentities"], [])
+
+      assert {:ok, %{pruned: 1}} = Reconcilers.reconcile(conn, without)
+      refute get(identities)
     end
   end
 
@@ -370,6 +452,30 @@ defmodule Troupe.Operator.ReconcilerTest do
     {"troupe.dev/v1alpha1", "WorkerProfile", "troupe-system", "dev"}
     |> get()
     |> Map.get("status")
+  end
+
+  # A gateway on 8443 and an MCP server at an address on the office network, which the
+  # policy allows and a worker without Cilium does not reach.
+  defp unreachable_profile do
+    profile(
+      llm: %{
+        "endpoint" => "https://llm.internal.test:8443/v1",
+        "secretRef" => %{"name" => "llm-credentials", "key" => "api-key"}
+      },
+      mcpServers: [%{"name" => "tickets", "url" => "https://10.20.0.5/tickets"}]
+    )
+  end
+
+  defp unreachable_policy,
+    do: policy(allowedEgress: ["*.anthropic.com", "llm.internal.test", "github.com", "10.20.0.5"])
+
+  defp identity do
+    %{
+      "server" => "jira",
+      "clientId" => "client-dev",
+      "transitKey" => "troupe-w-dev.jira",
+      "certificateThumbprint" => String.duplicate("A", 43)
+    }
   end
 
   # The profile with the plane's record of the drains it has finished.

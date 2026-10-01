@@ -346,8 +346,8 @@ and `TeamBudget` are one `:global` actor per profile and per team, which is why 
 replicas must cluster. `session.open read` never activates — a session that woke because
 somebody looked would never stay dormant — and in `activate` mode a conditional epoch bump
 decides the one caller that places it. `sessions.list` carries the status columns a pod
-reports (`status`, `done_reason`, `pending_approvals`, `pending_questions`, `cost_micros`),
-so a review queue is a listing and not a replay. There is no plane push to clients: `/rpc` is request and
+reports (`status`, `done_reason`, `failed_reason`, `pending_approvals`, `pending_questions`,
+`cost_micros`), so a review queue is a listing and not a replay. There is no plane push to clients: `/rpc` is request and
 answer.
 
 **Tokens for pods.** `aud` is **the pod's worker id** — an audience naming the profile
@@ -403,7 +403,8 @@ alone knows when a pod holds nothing, has drained it and recorded that on the pr
 object storage, the model, the profile's MCP servers and git hosts. Plain NetworkPolicy
 cannot name a host, so without Cilium the external ones are a wide rule on 443 and 80,
 with the installation's own OpenBao and object storage beside it on the ports they name,
-recorded rather than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for,
+recorded rather than hidden, and a profile's own endpoint that rule does not reach is
+refused where it is set up and reported on the profile; with Cilium the operator writes the `toFQDNs` rule the profile asked for,
 with the installation's own OpenBao and object storage in it when they are outside the
 cluster (a `toCIDR` of one address for a host given as an address), a DNS rule through Cilium's proxy so it can learn addresses, and no wide rule
 beside it, since Cilium admits the union of every policy on a pod. Which of the two a

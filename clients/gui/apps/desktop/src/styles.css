@@ -429,6 +429,11 @@ label code {
   color: var(--running-fg);
   background: var(--running-bg);
 }
+/* Your own servers, offered to a session on a pod: this machine at work for it, the same cyan. */
+.banner.offered {
+  color: var(--running-fg);
+  background: var(--running-bg);
+}
 
 .empty {
   padding: var(--space-9) var(--space-6);

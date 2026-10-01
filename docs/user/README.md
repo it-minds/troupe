@@ -107,6 +107,9 @@ session is created on one; with only one, you never have to name it.
 
 **Session.** One agent working in one directory, with a durable log of everything that
 happened: `active`, `dormant` (stopped, log kept, can be woken), `read_only`, or `erased`.
+One with nothing running goes dormant on its own a while after you stop looking at it,
+even while it waits on your answer to an approval or a question, so it does not keep the
+daemon up; answering it later wakes it, and the turn carries on.
 
 **Agent.** The thing that talks to the model. A session starts with one — `build`, or
 `plan` for a proposal first — which may delegate to others. An agent is a markdown file;

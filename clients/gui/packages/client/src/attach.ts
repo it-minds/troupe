@@ -25,7 +25,7 @@ import { normalizeEndpoint } from "./plane.js";
 import type { Attachment } from "./plane.js";
 import { SessionView } from "./session.js";
 import type { SessionViewHooks } from "./session.js";
-import type { EventEnvelope, TroupeEvent } from "./types.js";
+import type { EventEnvelope, ToolInvoke, TroupeEvent } from "./types.js";
 
 export interface AttachOptions {
   sessionId: string;
@@ -41,6 +41,16 @@ export interface AttachOptions {
   /** Backoff between reconnection attempts, in milliseconds. */
   backoffMs?: number[];
   clientInfo?: { name: string; version: string };
+  /**
+   * Serve `tool.invoke` for the tools this client registers with the session (PROTOCOL.md
+   * §8). Given, the client says at `initialize` that it hosts tools.
+   */
+  onToolInvoke?: (invoke: ToolInvoke) => Promise<unknown>;
+  /**
+   * A socket is up and subscribed: the first, or one opened again. A client's tools go
+   * with the socket that registered them, so this is where they are offered again.
+   */
+  onLive?: (conn: TroupeConnection) => void;
 }
 
 export type AttachStatus = "connecting" | "live" | "refreshing" | "reconnecting" | "closed" | "failed";
@@ -146,6 +156,7 @@ export class SessionAttachment {
         token: attachment.token,
         clientInfo: this.opts.clientInfo ?? { name: "troupe-gui", version: "0.1.0" },
         WebSocketImpl: this.opts.WebSocketImpl,
+        ...(this.opts.onToolInvoke ? { capabilities: { tools: true } } : {}),
       },
       {
         onEvent: (env) => void this.view.handle(env),
@@ -155,6 +166,7 @@ export class SessionAttachment {
         onClose: (reason) => {
           if (this.conn === conn) void this.reconnect(reason);
         },
+        ...(this.opts.onToolInvoke ? { onToolInvoke: this.opts.onToolInvoke } : {}),
       },
     );
 
@@ -162,6 +174,7 @@ export class SessionAttachment {
     this.view.bind(conn);
     await this.view.subscribe();
     this.set("live");
+    this.opts.onLive?.(conn);
   }
 
   /** Mint a new pod token and hand it over without reconnecting. */

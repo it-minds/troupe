@@ -31,14 +31,17 @@ spec:
     - name: repository
       expression: variables.spec.image.repository
     # Every host the profile would reach: its declared FQDNs and git hosts, plus the
-    # LLM endpoint and every MCP server. A profile that could name any endpoint could
-    # send a team's code anywhere, so those count as egress too.
+    # LLM endpoint, every MCP server and every token endpoint its identities name. A
+    # profile that could name any endpoint could send a team's code anywhere, so those
+    # count as egress too.
     - name: endpoints
       expression: >-
         (has(variables.spec.llm) && has(variables.spec.llm.endpoint) && isURL(variables.spec.llm.endpoint)
           ? [url(variables.spec.llm.endpoint).getHostname()] : []) +
         (has(variables.spec.mcpServers)
-          ? variables.spec.mcpServers.filter(s, isURL(s.url)).map(s, url(s.url).getHostname()) : [])
+          ? variables.spec.mcpServers.filter(s, isURL(s.url)).map(s, url(s.url).getHostname()) : []) +
+        (has(variables.spec.mcpIdentities)
+          ? variables.spec.mcpIdentities.filter(i, has(i.tokenUrl) && isURL(i.tokenUrl)).map(i, url(i.tokenUrl).getHostname()) : [])
     - name: declared
       expression: >-
         (has(variables.spec.egress) && has(variables.spec.egress.fqdns) ? variables.spec.egress.fqdns : []) +

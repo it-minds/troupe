@@ -3,11 +3,12 @@ defmodule Troupe.Gateway.SleepTest do
   What a laptop's daemon does once its person has walked away (#119).
 
   A turn nobody is watching any more runs to completion. A session somebody is watching is
-  not put to sleep under them on the short clock. A session left waiting on an approval
-  goes to sleep, a daemon with nothing but sleeping sessions exits, and the next command
-  brings the session back with the approval still in front of whoever answers it. Before,
-  a session waiting on a person counted as busy for as long as nobody answered, and the
-  daemon, which stays up while any session is live, stayed up with it.
+  not put to sleep under them on the short clock. A session left waiting on an approval or
+  a question goes to sleep, a daemon with nothing but sleeping sessions exits, and the next
+  command brings the session back with what it asked still in front of whoever answers it,
+  and the answer finishes the turn. Before, a session waiting on a person counted as busy
+  for as long as nobody answered, and the daemon, which stays up while any session is live,
+  stayed up with it.
 
   The sleeping is a private `Troupe.Sessions.Index` with clocks short enough to test,
   sweeping the real session. The daemon's idle watch is the real one on short clocks, with
@@ -239,6 +240,62 @@ defmodule Troupe.Gateway.SleepTest do
 
     assert {:ok, %{"state" => "active"}} =
              Client.call(client, "session.get", %{"session_id" => sid})
+  end
+
+  test "a session left waiting on a question sleeps, the daemon then exits, and the answer wakes it and finishes the turn",
+       context do
+    %{session: session} =
+      start_session(context, [
+        {:tools, [{"ask_user", %{"question" => "Which colour?", "options" => ["red", "blue"]}}]}
+      ])
+
+    sid = session.id
+    client = connect(context)
+    {:ok, _} = Client.subscribe(client, "session:#{sid}")
+    {:ok, _} = Client.call(client, "input.send", input(sid, "pick a colour"))
+
+    %Event{data: %{"call_id" => call_id}} =
+      List.last(collect_until(&(&1.type == "question_asked")))
+
+    flush_idle()
+    Client.close(client)
+
+    sweep(session, detached_idle_ms: 1_000)
+    eventually(fn -> sid not in Troupe.session_ids() end, 5_000)
+    slept_at = System.monotonic_time(:millisecond)
+
+    refute_received {:daemon_would_exit, _}, "the daemon left while the session was still live"
+    assert_receive {:daemon_would_exit, at}, 5_000
+    assert at > slept_at
+
+    # Answering is what wakes it, through the method a client answers with.
+    client = connect(context)
+    {:ok, _} = Client.subscribe(client, "session:#{sid}")
+
+    assert {:ok, %{"state" => "dormant"}} =
+             Client.call(client, "session.get", %{"session_id" => sid})
+
+    {:ok, _} =
+      Client.call(client, "question.answer", %{
+        "command_id" => Client.command_id(),
+        "session_id" => sid,
+        "call_id" => call_id,
+        "text" => "blue"
+      })
+
+    collect_until(&(&1.type == "llm_response"))
+
+    # The call ran once, before and after the sleep together: one answer, one result.
+    events = Enum.filter(Troupe.events(sid), &(&1.data["call_id"] == call_id))
+
+    assert [%{data: %{"ok" => true} = completed}] =
+             Enum.filter(events, &(&1.type == "tool_call_completed"))
+
+    assert (completed["result"] || completed["content"]) =~ "blue"
+    assert [%{data: %{"text" => "blue"}}] = Enum.filter(events, &(&1.type == "question_answered"))
+
+    response = Troupe.events(sid) |> Enum.filter(&(&1.type == "llm_response")) |> List.last()
+    assert inspect(response.data) =~ "carried on after the answer"
   end
 
   # -- helpers ----------------------------------------------------------------

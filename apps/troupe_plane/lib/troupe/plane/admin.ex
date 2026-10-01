@@ -50,7 +50,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Fleet.{Bundle, Provisioner, SizeClass, Worker}
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
-  alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
+  alias Troupe.Plane.{OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision}
@@ -280,6 +280,9 @@ defmodule Troupe.Plane.Admin do
          spec: profile.spec,
          policy: Provision.verdict(profile),
          bundle: bundle_state(profile),
+         # A server the bundle calls as the profile's own identity that the profile gives
+         # none, or an incomplete one (Decision 747): reported, like a missing Secret.
+         identity_problems: Provision.identity_problems(profile),
          gitops: gitops_state(profile, gitops_reports())
        }}
     end
@@ -300,7 +303,8 @@ defmodule Troupe.Plane.Admin do
          :ok <- not_held_by_repository(actor, "profile.put", name),
          {:ok, attrs} <- without_derived(attrs),
          :ok <- release_named(attrs),
-         :ok <- Provision.check(attrs) do
+         :ok <- Provision.check(attrs),
+         :ok <- Reach.check(attrs) do
       before = Fleet.get_profile(name)
 
       case Fleet.put_profile(attrs) do
@@ -312,7 +316,8 @@ defmodule Troupe.Plane.Admin do
            %{
              profile: profile_summary(profile),
              changes: changes,
-             provisioning: provision(profile, actor)
+             provisioning: provision(profile, actor),
+             identity_problems: Provision.identity_problems(profile)
            }}
 
         {:error, changeset} ->

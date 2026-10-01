@@ -14,16 +14,21 @@ defmodule Troupe.Worker.MCP do
   `Troupe.MCP.Server.from_config/1` carries both, discovery drops the tools the
   allowlist does not name, and the permission becomes each tool's default. Nothing
   here has to know either exists.
+
+  The MCP sessions the servers issue are the pod's (Decision 746), kept in the
+  application's `Troupe.MCP.Sessions` under each server and credential: one for the
+  profile's, one for each person's on a person-mode server, reused by every session on
+  the pod and ended when the pod stops.
   """
 
   use GenServer
 
   alias Troupe.MCP
-  alias Troupe.MCP.Server
+  alias Troupe.MCP.{Server, Sessions}
 
   require Logger
 
-  defstruct servers: [], tools: [], discovered_at: nil
+  defstruct servers: [], tools: [], discovered_at: nil, sessions: __MODULE__.Sessions
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -48,7 +53,8 @@ defmodule Troupe.Worker.MCP do
   def init(opts) do
     Process.set_label("troupe mcp")
     servers = Keyword.get_lazy(opts, :servers, &configured/0)
-    {:ok, %__MODULE__{servers: servers}, {:continue, :discover}}
+    sessions = Keyword.get(opts, :sessions, __MODULE__.Sessions)
+    {:ok, %__MODULE__{servers: servers, sessions: sessions}, {:continue, :discover}}
   end
 
   @impl GenServer
@@ -68,6 +74,9 @@ defmodule Troupe.Worker.MCP do
   def handle_call(:tools, _from, state), do: {:reply, state.tools, state}
 
   defp discover(state) do
+    # Read at every discovery, so a holder that was restarted is found again.
+    table = Sessions.table(state.sessions)
+    state = %{state | servers: Enum.map(state.servers, &%{&1 | sessions: table})}
     tools = MCP.all_tools(state.servers)
 
     # Published as a list rather than a function, so the agent loop reads it without a

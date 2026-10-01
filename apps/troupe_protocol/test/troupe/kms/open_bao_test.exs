@@ -234,7 +234,111 @@ defmodule Troupe.KMS.OpenBaoTest do
     end
   end
 
+  describe "signing as a profile's own identity (Decision 747)" do
+    setup context do
+      if context[:skip] do
+        :ok
+      else
+        namespace = "troupe-w-test#{System.unique_integer([:positive])}"
+        key = "#{namespace}.jira"
+        {:ok, %{status: status}} = bao(:post, "/v1/transit/keys/#{key}", %{"type" => "rsa-2048"})
+        true = status in 200..299
+
+        on_exit(fn ->
+          bao(:post, "/v1/transit/keys/#{key}/config", %{"deletion_allowed" => true})
+          bao(:delete, "/v1/transit/keys/#{key}", nil)
+        end)
+
+        %{namespace: namespace, key: key}
+      end
+    end
+
+    test "gives back a signature that verifies, RS256 and PS256, and never the key", context do
+      %{key: key} = requires_bao(context)
+      input = "header.payload"
+      public = public_key(key, 1)
+
+      assert {:ok, %{signature: rs256, key_version: 1}} =
+               OpenBao.sign(key, input, [padding: :pkcs1v15], options())
+
+      assert :public_key.verify(input, :sha256, rs256, public)
+
+      assert {:ok, %{signature: ps256}} = OpenBao.sign(key, input, [padding: :pss], options())
+
+      # A salt as long as the hash, which is what PS256 is: a verifier that holds to the
+      # JWS definition would refuse transit's default, the longest salt that fits.
+      assert :public_key.verify(input, :sha256, ps256, public, [
+               {:rsa_padding, :rsa_pkcs1_pss_padding},
+               {:rsa_pss_saltlen, 32}
+             ])
+    end
+
+    test "signs with a pinned version after a rotation, and the latest otherwise", context do
+      %{key: key} = requires_bao(context)
+      {:ok, %{status: status}} = bao(:post, "/v1/transit/keys/#{key}/rotate", %{})
+      assert status in 200..299
+
+      assert {:ok, %{signature: old, key_version: 1}} =
+               OpenBao.sign(key, "x", [key_version: 1], options())
+
+      assert :public_key.verify("x", :sha256, old, public_key(key, 1))
+
+      assert {:ok, %{signature: new, key_version: 2}} = OpenBao.sign(key, "x", [], options())
+      assert :public_key.verify("x", :sha256, new, public_key(key, 2))
+    end
+
+    test "a key that is not there is :key_not_found", context do
+      %{namespace: namespace} = requires_bao(context)
+      assert {:error, :key_not_found} = OpenBao.sign("#{namespace}.gone", "x", [], options())
+    end
+
+    test "the policy lets a pod sign with its own namespace's keys and no other", context do
+      %{namespace: namespace, key: key} = requires_bao(context)
+      pod = token_for(Policy.mcp_identity_for("transit", namespace))
+
+      assert {:ok, _} = OpenBao.sign(key, "x", [], options(token: pod))
+
+      # Another profile's key, by a name that merely starts the same way, and the plane's
+      # session-token key: a pod that could sign those could be somebody else.
+      assert {:error, :forbidden} =
+               OpenBao.sign("#{namespace}x.jira", "x", [], options(token: pod))
+
+      assert {:error, :forbidden} =
+               OpenBao.sign("troupe-session-tokens", "x", [], options(token: pod))
+    end
+
+    test "the policy is one template, on the namespace Kubernetes auth vouched for" do
+      policy = Policy.mcp_identity("auth_kubernetes_1234")
+
+      assert policy =~
+               ~s(path "transit/sign/{{identity.entity.aliases.auth_kubernetes_1234.metadata.service_account_namespace}}.*")
+
+      assert policy =~ ~s(capabilities = ["update"])
+      refute policy =~ "read"
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
+
+  defp bao(method, path, body) do
+    [
+      method: method,
+      url: address() <> path,
+      headers: [{"x-vault-token", root_token()}],
+      retry: false
+    ]
+    |> then(fn request -> if body, do: Keyword.put(request, :json, body), else: request end)
+    |> Req.request()
+  end
+
+  defp public_key(key, version) do
+    {:ok, %{status: 200, body: body}} = bao(:get, "/v1/transit/keys/#{key}", nil)
+
+    [entry] =
+      :public_key.pem_decode(get_in(body, ["data", "keys", to_string(version), "public_key"]))
+
+    :public_key.pem_entry_decode(entry)
+  end
 
   defp requires_bao(%{team: _} = context), do: context
   defp requires_bao(_), do: flunk("no OpenBao; see the message from setup_all")

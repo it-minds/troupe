@@ -71,6 +71,13 @@ defmodule Troupe.Operator.Names do
   @spec org_claim() :: String.t()
   def org_claim, do: "org"
 
+  @doc """
+  The ConfigMap a profile's `mcpIdentities` reach its pods in (Decision 747): a file the
+  kubelet replaces in place, so a rotation needs no restart.
+  """
+  @spec mcp_identities() :: String.t()
+  def mcp_identities, do: "troupe-mcp-identities"
+
   @doc "The audience of the projected token a pod presents when it enrols."
   @spec enrolment_audience() :: String.t()
   def enrolment_audience, do: "troupe-plane"

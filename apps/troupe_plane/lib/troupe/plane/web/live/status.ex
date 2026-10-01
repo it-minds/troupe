@@ -176,9 +176,12 @@ defmodule Troupe.Plane.Web.Live.Status do
   What a session row's status is.
 
   A dormant session is not a degraded one — it costs nothing and that is the design — so
-  it has its own state and its own word, "Asleep".
+  it has its own state and its own word, "Asleep". A session whose last turn the harness
+  stopped is broken, asleep or not: a root that kept crashing is always asleep after it
+  (Decision 727), and "Asleep" would be the one word that hid it.
   """
   @spec from_session(map()) :: state()
+  def from_session(%{failed_reason: reason}) when is_binary(reason), do: :broken
   def from_session(%{state: "dormant"}), do: :dormant
   def from_session(%{status: "waiting"}), do: :waiting
   def from_session(%{done_reason: reason}) when reason not in [nil, "finished"], do: :broken

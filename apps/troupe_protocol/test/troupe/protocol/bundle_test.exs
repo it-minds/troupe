@@ -291,7 +291,7 @@ defmodule Troupe.Protocol.BundleTest do
       assert escaped =~ "is not a slot name"
     end
 
-    test "a mode that is neither is refused with both names" do
+    test "a mode that is none of them is refused with every name" do
       assert {:error, [reason]} =
                Bundle.validate(%{
                  "schema" => 1,
@@ -304,7 +304,47 @@ defmodule Troupe.Protocol.BundleTest do
                  ]
                })
 
-      assert reason =~ "is not profile or person"
+      assert reason =~ "is not profile, person or client_credentials"
+    end
+  end
+
+  describe "an MCP server called as the profile's own identity (Decision 747)" do
+    test "is marked and nothing more, and reaches the worker so" do
+      assert {:ok, parsed} =
+               Bundle.validate(%{
+                 "schema" => 1,
+                 "mcp_servers" => [
+                   %{
+                     "name" => "jira",
+                     "url" => "https://mcp.jira.example/mcp",
+                     "credential_mode" => "client_credentials"
+                   }
+                 ]
+               })
+
+      assert [%{credential_mode: :client_credentials, credential_ref: nil}] = parsed.mcp_servers
+
+      assert [%{"credential_mode" => "client_credentials", "credential_ref" => nil}] =
+               Bundle.mcp_server_configs(parsed)
+    end
+
+    test "with a reference beside it is refused: the profile's identity is the credential" do
+      for field <- ["credential_ref", "secret_ref"] do
+        assert {:error, [reason]} =
+                 Bundle.validate(%{
+                   "schema" => 1,
+                   "mcp_servers" => [
+                     %{
+                       "name" => "jira",
+                       "url" => "https://mcp.jira.example/mcp",
+                       "credential_mode" => "client_credentials",
+                       field => "JIRA_TOKEN"
+                     }
+                   ]
+                 })
+
+        assert reason =~ "client_credentials and #{field} together"
+      end
     end
   end
 end

@@ -89,7 +89,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "spec",
       type: :object,
       description:
-        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, storage.storageClassName. configBundleChannel is the bundle channel the profile follows, stable where absent. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
+        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, storage.storageClassName. configBundleChannel is the bundle channel the profile follows, stable where absent. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. mcpIdentities says who the profile is at each server its bundle calls with client credentials: {server, clientId, scope, tokenUrl, transitKey, keyVersion, certificateThumbprint, algorithm}, none of it secret; the answer's identity_problems lists a server the bundle marks client_credentials that has none, or an identity that is incomplete. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
     }
   ]
 
@@ -479,7 +479,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.put",
       function: :profile_put,
       summary:
-        "Create or update a profile, returning the diff that was applied. Refused on a gitops plane as managed_by_gitops: there a repository holds the profiles, and a change is a commit to it.",
+        "Create or update a profile, returning the diff that was applied. Refused on a gitops plane as managed_by_gitops: there a repository holds the profiles, and a change is a commit to it. Without Cilium, refused as invalid_params for a profile whose workers are pods and whose LLM endpoint, MCP servers (its own or its channel's) or egress.fqdns name a port other than 443 and 80 or a private address, which those pods do not reach: `unreachable` names each, `reason` says what to do.",
       risk: :write,
       arguments: [
         %Argument{
@@ -996,7 +996,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.bundle.publish",
       function: :bundle_publish,
       summary:
-        "Publish a new version of a channel, which pushes config.updated to every pod on it. History is append-only: a rollback is a new version carrying the old content.",
+        "Publish a new version of a channel, which pushes config.updated to every pod on it. History is append-only: a rollback is a new version carrying the old content. Without Cilium, refused for an MCP server on a port other than 443 and 80 or at a private address when a profile whose workers are pods follows the channel.",
       risk: :write,
       arguments: [
         %Argument{name: "channel", type: :string, required: true, description: "The channel."},

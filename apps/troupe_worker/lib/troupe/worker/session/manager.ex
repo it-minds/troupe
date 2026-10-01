@@ -23,10 +23,12 @@ defmodule Troupe.Worker.Session.Manager do
 
   ## What the plane is told while a session runs
 
-  Four facts that are lifecycle rather than content: `status` (`idle`, `thinking`,
+  Five facts that are lifecycle rather than content: `status` (`idle`, `thinking`,
   `acting`, `waiting` when an approval or a question is pending or the root has stopped
   to ask one, `done`, `interrupted`),
-  the `done_reason`, how many approvals and questions are pending, and the cost so far.
+  the `done_reason`, the `failed_reason` when the harness stopped the root's last turn
+  (`turn_ended`'s `reason`: `tool_failures`, `agent_failed`) until another one starts,
+  how many approvals and questions are pending, and the cost so far.
   They go out as `session.status` notifications on change, at most twice a second per
   session, and again in the dormancy report — which is what lets the plane list a review
   queue without ever reading a log. Nothing about *what* the agent is doing crosses: not
@@ -85,6 +87,7 @@ defmodule Troupe.Worker.Session.Manager do
     lifecycle: %{
       state: "idle",
       done_reason: nil,
+      failed_reason: nil,
       interrupted: false,
       approvals: %{},
       questions: %{}
@@ -256,6 +259,21 @@ defmodule Troupe.Worker.Session.Manager do
     {:noreply, %{state | sealer: nil}}
   end
 
+  # The tree stopped without being asked to: a root that crashed as often as its Node
+  # allows takes its session down, to come back dormant from its log (Decision 727). On a
+  # pod that is this going dormant, now rather than when the idle timer next looks, so the
+  # slot and the budget slice go back and nobody is told the session is up. A report the
+  # debounce still holds goes first: it says how the turn ended, and a trigger's target is
+  # told from a status report, not from the dormancy one.
+  def handle_info(
+        {:DOWN, _ref, :process, pid, _reason},
+        %__MODULE__{status: :active, session_pid: pid} = state
+      ) do
+    state = if state.status_dirty, do: flush_status(%{state | status_timer: nil}), else: state
+    dormancy(state)
+    {:stop, :normal, state}
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl GenServer
@@ -294,6 +312,9 @@ defmodule Troupe.Worker.Session.Manager do
       })
 
       record_upgrade(context.session_id, Keyword.get(opts, :bundle))
+
+      # Watched, because the tree can stop under this process as well as by its hand.
+      Process.monitor(session.pid)
 
       {:ok,
        %{
@@ -562,7 +583,7 @@ defmodule Troupe.Worker.Session.Manager do
     summary = Summary.snapshot(state.session_id)
     approvals = open_asks(summary, "approvals", "approval_agents")
     questions = open_asks(summary, "questions", "question_agents")
-    interrupted = interrupted_on_restore?(state.session_id)
+    root = root_events(state.session_id)
 
     %{
       state
@@ -570,7 +591,8 @@ defmodule Troupe.Worker.Session.Manager do
           lifecycle
           | approvals: approvals,
             questions: questions,
-            interrupted: interrupted
+            interrupted: interrupted_on_restore?(root),
+            failed_reason: failed_on_restore(root)
         }
     }
   end
@@ -583,23 +605,39 @@ defmodule Troupe.Worker.Session.Manager do
     Map.new(Map.get(summary, key, []), &{&1, Map.get(asked, &1, "root")})
   end
 
+  # The root agent's events, for the two facts below. Read from the log rather than
+  # remembered, because they were written before this process was listening.
+  defp root_events(session_id) do
+    session_id |> Troupe.replay_from(0) |> Enum.filter(&(&1.agent == ["root"]))
+  catch
+    :exit, _ -> []
+  end
+
   # The root's most recent restart, if it was interrupted and nothing has happened
-  # since. Read from the log rather than remembered, because the event was written
-  # before this process was listening.
-  defp interrupted_on_restore?(session_id) do
-    session_id
-    |> Troupe.replay_from(0)
-    |> Enum.filter(&(&1.agent == ["root"] and &1.type in ["agent_restarted", "user_input"]))
+  # since.
+  defp interrupted_on_restore?(events) do
+    events
+    |> Enum.filter(&(&1.type in ["agent_restarted", "user_input"]))
     |> List.last()
     |> case do
       %Event{type: "agent_restarted", data: %{"interrupted" => true}} -> true
       _ -> false
     end
-  catch
-    :exit, _ -> false
   end
 
-  # The fold that turns the session's events into the four lifecycle facts. Only the
+  # Why the harness stopped the root's last turn, if it did and no turn has started since:
+  # a session that went to sleep on a failed turn wakes saying so.
+  defp failed_on_restore(events) do
+    events
+    |> Enum.filter(&(&1.type in ["turn_ended", "user_input"]))
+    |> List.last()
+    |> case do
+      %Event{type: "turn_ended", data: %{"reason" => reason}} -> reason
+      _ -> nil
+    end
+  end
+
+  # The fold that turns the session's events into the five lifecycle facts. Only the
   # root agent's transitions count: a subagent thinking under an idle root is a root
   # that is acting, and the root's own state says so.
   defp observe(state, %Event{type: "agent_state", agent: ["root"], data: data}) do
@@ -617,8 +655,21 @@ defmodule Troupe.Worker.Session.Manager do
     status_changed(put_in(state.lifecycle.interrupted, data["interrupted"] == true))
   end
 
+  # Input starts a turn, so the last one's ending is no longer the session's news.
   defp observe(state, %Event{type: "user_input", agent: ["root"]}) do
-    status_changed(put_in(state.lifecycle.interrupted, false))
+    status_changed(%{
+      state
+      | lifecycle: %{state.lifecycle | interrupted: false, failed_reason: nil}
+    })
+  end
+
+  # The root's turn is over, and `reason` says whether the harness ended it: the failure
+  # guard's `tool_failures` (Decision 687), or `agent_failed`, a root that crashed as
+  # often as it may be restarted (727). That root says nothing more, no `agent_state` to
+  # say it is at rest, before its session stops, so the turn's end says it.
+  defp observe(state, %Event{type: "turn_ended", agent: ["root"], data: data}) do
+    lifecycle = %{state.lifecycle | state: "idle", failed_reason: data["reason"]}
+    status_changed(%{state | lifecycle: lifecycle})
   end
 
   defp observe(state, %Event{type: "approval_requested", agent: path, data: %{"call_id" => id}}) do
@@ -703,6 +754,7 @@ defmodule Troupe.Worker.Session.Manager do
     %{
       "status" => lifecycle_status(state.lifecycle),
       "done_reason" => state.lifecycle.done_reason,
+      "failed_reason" => state.lifecycle.failed_reason,
       "pending_approvals" => map_size(state.lifecycle.approvals),
       "pending_questions" => map_size(state.lifecycle.questions),
       "cost_micros" => cost_micros(state.session_id)
@@ -730,11 +782,20 @@ defmodule Troupe.Worker.Session.Manager do
   end
 
   # The summary's cost, in micro-units of the ledger's currency, or nothing when the
-  # projection is not answering — which is what a session mid-shutdown looks like.
+  # projection stops answering mid-call — which is what a session mid-shutdown looks like.
   # Micro-units are read from the projection's own integer; the whole-unit `cost` is a
   # fallback for a snapshot folded by an older build that had only the float.
+  #
+  # A tree that stopped by itself has no projection to ask (Decision 727), and its last
+  # reports said it cost nothing: the same fold is run over the log it left on the pod.
   defp cost_micros(session_id) do
-    case Summary.snapshot(session_id) do
+    summary =
+      if GenServer.whereis(Troupe.Registry.summary(session_id)),
+        do: Summary.snapshot(session_id),
+        else:
+          Enum.reduce(Troupe.replay_from(session_id, 0), Summary.empty(), &Summary.fold(&2, &1))
+
+    case summary do
       %{"cost_micros" => micros} when is_integer(micros) -> micros
       %{"cost" => cost} when is_number(cost) -> round(cost * 1_000_000)
       _ -> 0

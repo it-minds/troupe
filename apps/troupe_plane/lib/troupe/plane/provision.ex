@@ -75,6 +75,29 @@ defmodule Troupe.Plane.Provision do
     end
   end
 
+  @doc """
+  What keeps a profile from calling the servers its bundle marks `client_credentials` as
+  itself (Decision 747), one sentence each: such a server with no identity in the
+  profile's `mcpIdentities`, and an identity missing its client or key or otherwise broken.
+
+  Reported, as the operator's `MCPIdentityMissing` says it, and not refused: the bundle
+  and the profile are written by different people at different times, and either may be
+  first. The servers are the channel's current bundle's rather than the resource's, so the
+  answer is the same before the projection has been written. The plane holds nothing here
+  that is secret, because there is nothing secret in either.
+  """
+  @spec identity_problems(Profile.t() | map()) :: [String.t()]
+  def identity_problems(profile) do
+    spec = Map.put(spec_map(profile), "mcpServers", Bundles.mcp_servers(channel_of(profile)))
+    WorkerProfile.identity_problems(WorkerProfile.from_resource(%{"spec" => spec}))
+  end
+
+  defp channel_of(%Profile{config_bundle_channel: channel}), do: channel
+
+  defp channel_of(attrs) do
+    get(attrs, :config_bundle_channel) || spec_map(attrs)["configBundleChannel"] || "stable"
+  end
+
   @doc "What the policy makes of a profile, as the panel renders it."
   @spec verdict(Profile.t() | map()) :: map()
   def verdict(profile) do
