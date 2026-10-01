@@ -191,6 +191,9 @@ defmodule Troupe.UI.TUI.Server do
       files: nil,
       mcp_cursor: 0,
       mcp_page: nil,
+      # The sign-in URL the daemon last answered, `%{name, url}`, shown on the page in
+      # full for a person whose browser did not open (troupe-remote Decision 741).
+      mcp_sign_in: nil,
       hq: nil,
       quitting: false,
       size: initial_size(opts),
@@ -720,6 +723,7 @@ defmodule Troupe.UI.TUI.Server do
       :files -> toggle_files(state)
       :mcp -> open_mcp(state)
       {:mcp, text} -> state |> notice(text) |> open_mcp(state.mcp_cursor)
+      {:mcp_sign_in, _name, _url, _text} = signing -> signing_in(state, signing)
       {:hq, arg} -> open_hq(state, plane_arg(arg))
       :settings -> open_settings(state)
       :models -> open_models(state)
@@ -1335,10 +1339,10 @@ defmodule Troupe.UI.TUI.Server do
     %{state | mcp_cursor: min(cursor, max(length(View.mcp_entries(state)) - 1, 0))}
   end
 
-  # `/mcp import <path>`, `link <path>`, `unlink <path>`, `remove <name>` and
-  # `check <name>` manage the servers, `--workspace` on any of them writing the
-  # workspace's `.troupe/` file instead of the user's; `/skills` has the same verbs for
-  # skills, and either word alone opens the page.
+  # `/mcp import <path>`, `link <path>`, `unlink <path>`, `remove <name>`,
+  # `check <name>`, `sign-in <name>` and `sign-out <name>` manage the servers,
+  # `--workspace` on any of them writing the workspace's `.troupe/` file instead of the
+  # user's; `/skills` has the same verbs for skills, and either word alone opens the page.
   defp sources_command(_state, _kind, ""), do: :mcp
 
   defp sources_command(state, kind, args) do
@@ -1346,7 +1350,8 @@ defmodule Troupe.UI.TUI.Server do
 
     case String.split(rest, " ", parts: 2) do
       [verb, target]
-      when verb in ["import", "link", "unlink", "remove", "check"] and target != "" ->
+      when verb in ["import", "link", "unlink", "remove", "check", "sign-in", "sign-out"] and
+             target != "" ->
         manage_source(state, kind, verb, String.trim(target), scope)
 
       _ ->
@@ -1356,7 +1361,7 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  defp check_usage("mcp"), do: " | check <name>"
+  defp check_usage("mcp"), do: " | check|sign-in|sign-out <name>"
   defp check_usage(_kind), do: ""
 
   defp scope_flag(args) do
@@ -1378,9 +1383,14 @@ defmodule Troupe.UI.TUI.Server do
     do: remove_source(state, kind, %{name: name}, scope)
 
   defp manage_source(state, "mcp", "check", name, _scope), do: check_server(state, name)
+  defp manage_source(state, "mcp", "sign-in", name, _scope), do: sign_in_server(state, name)
+  defp manage_source(state, "mcp", "sign-out", name, _scope), do: sign_out_server(state, name)
 
   defp manage_source(_state, "skills", "check", _name, _scope),
     do: {:error, "a skill has nothing to check; the page shows where it is"}
+
+  defp manage_source(_state, "skills", verb, _name, _scope) when verb in ["sign-in", "sign-out"],
+    do: {:error, "a skill has no sign-in; a server that wants you has one"}
 
   defp add_source(state, kind, path, scope, link?) do
     params = %{scope: scope, from: Path.expand(path), link: link?}
@@ -1439,6 +1449,52 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # A server that wants the person signed in (troupe-remote Decision 741): the daemon
+  # starts the sign-in and listens for the browser on this machine; the TUI opens the
+  # URL it answers, and keeps it on the page for a person whose browser did not open.
+  # The page shows how it stands after `r`, and a session waiting for it carries on by
+  # itself once it lands.
+  defp sign_in_server(state, name) do
+    case Client.manage_sources(state.session_id, "mcp.sign_in", %{name: name}) do
+      {:ok, %{"url" => url}} ->
+        text =
+          case open_url(url) do
+            :ok ->
+              "#{name}: finish signing in in your browser, then r"
+
+            {:error, _why} ->
+              "#{name}: open the sign-in URL on the page in a browser on this machine, then r"
+          end
+
+        {:mcp_sign_in, name, url, text}
+
+      {:ok, _answer} ->
+        {:error, "#{name}: the daemon answered no sign-in URL"}
+
+      {:error, reason} ->
+        {:error, to_message(reason)}
+    end
+  end
+
+  defp sign_out_server(state, name) do
+    case Client.manage_sources(state.session_id, "mcp.sign_out", %{name: name}) do
+      {:ok, _answer} -> {:mcp, "#{name}: signed out on this machine"}
+      {:error, reason} -> {:error, to_message(reason)}
+    end
+  end
+
+  # The opener is configurable so the suite opens no browser: `:troupe, :open_url`.
+  defp open_url(url) do
+    opener = Application.get_env(:troupe, :open_url, &Troupe.UI.Browser.open/1)
+    opener.(url)
+  end
+
+  defp signing_in(state, {:mcp_sign_in, name, url, text}) do
+    %{state | mcp_sign_in: %{name: name, url: url}}
+    |> notice(text)
+    |> open_mcp(state.mcp_cursor)
+  end
+
   defp server_note(%{"error" => error}) when is_binary(error) and error != "", do: " — " <> error
   defp server_note(%{"tools" => [_ | _] = tools}), do: ", #{length(tools)} tools"
   defp server_note(_server), do: ""
@@ -1452,6 +1508,7 @@ defmodule Troupe.UI.TUI.Server do
   defp mcp_act(state, result) do
     case result do
       {:mcp, text} -> state |> notice(text) |> open_mcp(state.mcp_cursor)
+      {:mcp_sign_in, _name, _url, _text} = signing -> signing_in(state, signing)
       {:error, text} -> notice(state, text)
     end
   end
@@ -1459,6 +1516,27 @@ defmodule Troupe.UI.TUI.Server do
   defp mcp_check_selected(state) do
     case mcp_selected(state) do
       {:server, server} -> check_server(state, server.name)
+      _other -> nil
+    end
+  end
+
+  defp mcp_sign_in_selected(state) do
+    case mcp_selected(state) do
+      {:server, %{auth: %{}} = server} ->
+        sign_in_server(state, server.name)
+
+      {:server, server} ->
+        {:error, "#{server.name} takes no sign-in; give its entry an oauth.client_id"}
+
+      _other ->
+        nil
+    end
+  end
+
+  defp mcp_sign_out_selected(state) do
+    case mcp_selected(state) do
+      {:server, %{auth: %{}} = server} -> sign_out_server(state, server.name)
+      {:server, server} -> {:error, "#{server.name} takes no sign-in"}
       _other -> nil
     end
   end
@@ -1578,6 +1656,8 @@ defmodule Troupe.UI.TUI.Server do
   defp mcp_key(%Key{code: "c"}, state), do: mcp_act(state, mcp_check_selected(state))
   defp mcp_key(%Key{code: "d"}, state), do: mcp_act(state, mcp_toggle_selected(state))
   defp mcp_key(%Key{code: "x"}, state), do: mcp_act(state, mcp_remove_selected(state))
+  defp mcp_key(%Key{code: "s"}, state), do: mcp_act(state, mcp_sign_in_selected(state))
+  defp mcp_key(%Key{code: "o"}, state), do: mcp_act(state, mcp_sign_out_selected(state))
 
   defp mcp_key(_key, state), do: state
 

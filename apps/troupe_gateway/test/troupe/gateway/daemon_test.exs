@@ -11,6 +11,7 @@ defmodule Troupe.Gateway.DaemonTest do
 
   alias Troupe.Gateway.{Daemon, Session}
   alias Troupe.Protocol.{Client, Endpoint, Error, Event}
+  alias Troupe.Session.Log
 
   # A session id of the right shape that no session has. Any other shape is refused as
   # malformed before the daemon looks for it (`session_ids_test.exs`).
@@ -185,6 +186,33 @@ defmodule Troupe.Gateway.DaemonTest do
       assert {:ok, %{"sessions" => [listed]}} = Client.call(client, "session.list")
       assert listed["id"] == session.id
       assert listed["state"] == "active"
+    end
+
+    @tag :capture_log
+    test "session.list says how a root that kept crashing failed its last turn", context do
+      %{session: session} = start_session(context, [{:text, "hi"}])
+      sid = session.id
+      Troupe.subscribe(sid)
+      Troupe.send_input(sid, "hi")
+      assert_receive {:troupe_event, ^sid, %Event{type: "turn_ended"}}, 5_000
+
+      # Every start from here replays tool results that are not a list, and raises, until
+      # the root's Node gives up and the session stops on it (Decision 727).
+      down = Process.monitor(Troupe.Registry.whereis({:session, sid}))
+      Log.append(sid, ["root"], :tool_results, %{"results" => "not a list"})
+      Process.exit(Troupe.Registry.agent_pid(sid, ["root"]), :kill)
+      assert_receive {:DOWN, ^down, :process, _pid, _reason}, 5_000
+
+      client = connect(context)
+
+      listed =
+        eventually(fn ->
+          {:ok, %{"sessions" => [listed]}} = Client.call(client, "session.list")
+          listed["state"] == "dormant" && listed
+        end)
+
+      assert %{"reason" => "agent_failed", "detail" => detail} = listed["failed"]
+      assert detail =~ "Protocol.UndefinedError"
     end
 
     test "session.get reports the head sequence", context do
@@ -680,6 +708,22 @@ defmodule Troupe.Gateway.DaemonTest do
       _ -> flush()
     after
       0 -> :ok
+    end
+  end
+
+  # What `fun` answers once it answers something, for what the daemon notices in its own
+  # time: a session that went down is listed from its log once the index has heard.
+  defp eventually(fun, attempts \\ 200) do
+    case fun.() do
+      falsy when falsy in [nil, false] and attempts > 0 ->
+        Process.sleep(25)
+        eventually(fun, attempts - 1)
+
+      falsy when falsy in [nil, false] ->
+        flunk("never happened")
+
+      found ->
+        found
     end
   end
 

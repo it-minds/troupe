@@ -253,6 +253,12 @@ function Header({
       <div className="controls">
         {state.doneReason ? (
           <Pill status={state.doneReason === "budget_exhausted" ? "error" : "allowed"}>Finished</Pill>
+        ) : state.failed ? (
+          // The root kept crashing and the session stopped on it (Decision 727): a failure,
+          // with what it raised, and not a rest.
+          <Pill status="error" title={state.failed.detail}>
+            Failed
+          </Pill>
         ) : needsYou(state) ? (
           <Pill status="waiting">Needs you</Pill>
         ) : isBusy(state) ? (
@@ -520,7 +526,7 @@ function StreamEntry({
       const step = local && entry.type === "llm_error" ? modelErrorStep(entry.text) : null;
       return (
         <>
-          <p className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" ? "error" : ""}`}>{entry.text}</p>
+          <p className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" || entry.type === "agent_failed" ? "error" : ""}`}>{entry.text}</p>
           {step && (
             <p className="note">
               {step}

@@ -2,6 +2,16 @@
 # named from the policy's prefix, so they are not listed here.
 namespace: troupe-system
 
+# Whether the chart makes that namespace, as it always has. It is kept when the release is
+# uninstalled (`helm.sh/resource-policy: keep`), because more than the chart lives there.
+# Set false where the namespace is there before the chart: made for the Secrets the chart
+# expects or for an OpenBao beside the plane, or by whatever applies the chart. Helm
+# refuses to take over a namespace it did not make, and one it never made is never its to
+# delete. An install from a chart without the keep is upgraded once with this on before
+# it is turned off: an upgrade deletes what the chart stops rendering, unless the
+# namespace in the cluster already says keep.
+createNamespace: true
+
 # CRDs live under `charts/troupe/crds/`, which Helm installs before anything else and
 # never upgrades or deletes. That ordering is what lets the default TroupePolicy be an
 # ordinary template, and the not-deleting is a safety property: removing a CRD removes

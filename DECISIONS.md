@@ -3043,3 +3043,186 @@ citation keeps meaning what it meant.
      recorder this project does not use yet; the capture stands in for one. Proof: the
      quick start's job on both platforms, `scripts/doc-links.exs` and
      `scripts/check-neutral.exs`.
+
+741. **A person's own MCP server that wants them signed in, rather than a machine, is
+     signed in to by the daemon, with PKCE and a loopback redirect, and its tokens never
+     leave the person's machine.** Issue #300, the local slice. What was there: a bundle
+     server is called from the pod with one shared token from a Secret, which such a
+     server refuses; a person-mode bundle server reads a value the person pasted into the
+     key manager, not a sign-in that runs out every hour; and a `url` in the person's
+     `mcp.json` (700) was the one-shot HTTP client with no credential at all, `headers`
+     dropped on import. A server that publishes OAuth protected-resource metadata, answers
+     `401` with `WWW-Authenticate: Bearer resource_metadata="…"`, and has an authorization
+     server with no dynamic registration could not be used from Troupe.
+     - **What the person writes.** `oauth` on the entry, in `mcp.json` and in
+       `config.yaml`'s `mcp:`: `client_id`, required, a public client registered in
+       advance; `scopes`, `redirect_uri` (a loopback `http` URL, a fixed port when the
+       client was registered with one), `resource: false` and `issuer`, each optional.
+       Import reads `clientId`, `redirectUri` and `callbackPort` too. An `oauth` with no
+       `client_id`, one on a `command`, or a redirect that is not loopback refuses the
+       server, naming why. The fingerprint (700) takes the client and the issuer, so a
+       workspace's server whose `oauth` changed is asked about again.
+     - **Discovery, as the MCP authorization specification orders it.** The server's
+       `401` names its protected-resource metadata (RFC 9728), or the two well-known
+       places are tried; that names the authorization server, unless `issuer` does; its
+       metadata is tried at the three places for an issuer with a path (RFC 8414 and
+       OpenID Connect, inserted, then OpenID Connect appended) and the two without. Scopes
+       are the entry's, else the `401`'s, else the metadata's `scopes_supported`, and
+       `offline_access` is added when the authorization server offers it, since without a
+       refresh token a person signs in every hour. Every URL that carries a sign-in is
+       `https`, or `http` on loopback. Two deliberate departures, each with a switch: the
+       specification has a client refuse an authorization server whose metadata does not
+       list `code_challenge_methods_supported`, and OpenID Connect discovery does not
+       define the field, so one that says nothing is used with S256 anyway and only one
+       that lists other methods is refused; and the resource indicator (RFC 8707), sent
+       by default as the server's canonical URL in the authorization and token requests,
+       is left out with `resource: false` for an authorization server that refuses it,
+       where the scopes say which API a token is for.
+     - **The daemon runs the sign-in** (`Troupe.MCP.OAuth`, `Troupe.MCP.OAuth.SignIn`),
+       because it is the process that calls the server and runs the person's other
+       servers: the authorization code flow with PKCE (S256) and a `state`, and a
+       listener on the loopback address the redirect names, on any free port unless the
+       entry fixes one (RFC 8252 §7.3), for the one answer; anything else that arrives
+       there is turned away, and an answer with another `state` is not this sign-in's.
+       It waits five minutes; a second sign-in replaces the first. `mcp.sign_in` answers
+       the URL and the redirect, and the TUI (`/mcp sign-in`, `s` on the page) and the
+       desktop app (**Sign in** on "Servers and skills") open it and show the URL for a
+       browser that did not open; the browser must be on the daemon's machine. Signing in
+       to a workspace's server waits for the workspace's question (700), since its
+       `oauth` came with the repository and says where a token of the person's would go.
+     - **Where the tokens live.** `<state>/mcp-oauth.json` (`Troupe.MCP.OAuth.Store`),
+       restricted to its owner before anything is written into it, renamed into place,
+       never kept as a `.previous`. Not the OS keychain, because the daemon has none in
+       this build (the model key is in `config.yaml` for the same reason) and a keychain
+       only the desktop app could read would leave a terminal-only person with nothing;
+       not `mcp.json`, which people link, copy and commit; not the configuration
+       directory, which people keep in their dotfiles. Nothing of a token is in an answer,
+       an event or a log line: `mcp.list` carries `auth`, `{state, account, error}`, and
+       `account` is read from the ID token's claims for showing only.
+     - **Use, refresh, and the `401`.** One process (`Troupe.MCP.OAuth.Tokens`) hands out
+       tokens and is the store's only writer, because a public client's refresh tokens
+       rotate and two sessions refreshing at once would spend one twice. A token is
+       refreshed a minute before it runs out. A call that comes back `401` is refreshed,
+       or given the token another session just refreshed, and tried once more; a refused
+       refresh (`invalid_grant`) or a second `401` drops the tokens, keeps the account,
+       and marks the sign-in `expired`. The model then gets `sign_in_required` as a tool
+       result it can relay, like an unconnected person-mode server, and the session's
+       server shows `sign_in` in `mcp.status`, which both clients draw as "sign in again".
+       A refresh that could not be asked keeps the sign-in. When a sign-in lands, every
+       local session that waits for the server asks it for its tools
+       (`Troupe.Session.MCP.signed_in/1`). `mcp.sign_out` forgets it on this machine.
+     - **A pod session gets none of this yet, and never the token.** The path is there in
+       the protocol: a client offers tools it hosts through `tools.register` with a
+       consent round trip, and serves `tool.invoke` (section 8); the pod sees names,
+       schemas, arguments and results, and the call is made on the person's machine. What
+       is missing: a daemon method that lists a person's own servers' tools and calls one
+       outside a session, and a client that registers them with a pod session it attaches
+       to — the desktop app's library has `registerTools` and `onToolInvoke` and nothing
+       uses them, and the TUI's remote connection answers no `tool.invoke` — with the
+       consent shown to the person and the registration made again after a reconnect.
+       That is the next slice, issue #308. A server without `oauth` that answers `401` is
+       `error`, naming `oauth.client_id`, rather than unreachable.
+     - **Out of this slice.** Dynamic client registration and client ID metadata
+       documents, for a provider that offers them, so a person needs no client id; a
+       confidential client's secret; a step-up sign-in on `403 insufficient_scope`;
+       revoking the refresh token at the provider on sign-out; the session handshake a
+       stateful streamable-HTTP server wants (`initialize` and `Mcp-Session-Id`), which the
+       one-shot client from 654 still does not make.
+     - **Proof:** `Troupe.MCPOAuthTest` (against `test/support/fake_oauth.exs`, an
+       authorization server with a path issuer and no registration and a server that
+       wants a person: the session waiting, discovery in order, PKCE, `state`, the resource
+       indicator, the redirect, the tools with the token, one refresh for five askers, a
+       `401` refreshed, a refused refresh turned into `sign_in_required` and back, a
+       refusal kept, a forged answer turned away, the store's mode, no token in an event),
+       `Troupe.Gateway.MCPSignInTest` (`mcp.sign_in`, `auth`, `mcp.sign_out` over the
+       daemon's socket, and the refusals), the TUI's `Troupe.MCPPageTest` and the GUI's
+       `local-sources.test.ts` and `servers-panel.test.tsx`.
+
+742. **The chart keeps the namespace it makes and can be told not to make one, and a count
+     the cluster did not take is sent again.** Issue #303, D44 and D40 in
+     docs/developer/defects.md. `templates/namespace.yaml`
+     rendered the release's namespace as an ordinary resource, so `helm uninstall`, a
+     reinstall, or a GitOps controller's remediation that uninstalls deleted it with
+     everything else in it: an OpenBao beside the plane, the Secrets the chart expects, volume
+     claims, the `WorkerProfile` resources. It now carries `helm.sh/resource-policy: keep`, as
+     the default `TroupePolicy` already did; an upgrade puts the annotation on the live
+     namespace and in the release's manifest, which is what an uninstall reads.
+     `createNamespace` (true by default, so an upgrade changes nothing else) leaves the
+     namespace out where something else made it: Helm refuses to take over a namespace it did
+     not make, and the install guide's order, the Secrets first, makes one. Turning it off on
+     an install from an older chart is safe only after one upgrade with it on, because an
+     upgrade deletes what the chart stops rendering unless the live object says keep. Not
+     chosen: dropping the namespace from the chart, which would delete it at the next upgrade
+     of every install that has no keep yet.
+
+     In direct mode the scaler wrote the row and then the cluster, and judged the next tick by
+     the row, so a write the cluster refused was never sent again. On a tick that changes no
+     count it now reads the resource's `spec.replicas` back and sends the row's count where
+     they differ, the comparison gitops mode's pass already makes. Not chosen: writing the row
+     only after the cluster took it, which would let any other write from the row (an edit, a
+     grant, a release) put the old count back in between. Proof: `scaling_test.exs` ("a count
+     the cluster did not take") and the chart job's "The namespace outlives the chart".
+
+743. **A read writes nothing over a log an activation has, and a reader whose log has
+     gone does not answer from it.** Issue #302. Decision 732 put a reader's restore of the
+     log and its removal under one lock per session on the pod, and left three gaps where a
+     `session.read` meets a `session.activate` of the same session, which the pod's link
+     runs at the same time. `Reader.open` looked for a manager before it started the reader
+     and not again, so an activation that registered while the reader fetched the segments
+     had storage's copy written over its log, losing what it had logged since its last
+     seal. The reader now looks where it writes, under the lock (`Restore.events/3` with
+     `unless_active`), writes nothing if a manager holds the session's name, and the read
+     is answered as one of a running session. An activation looked for a log already on
+     the pod outside the lock, so a reader writing its log as the manager registered went
+     unseen and a failed activation removed it from under whoever read it; the activation
+     now looks under the lock, once it holds the session's name, so a reader has either
+     written and its log is found, or finds the name taken and writes nothing, and the log
+     the activation wrote is removed under the lock too. A reader whose log is no longer
+     the one it restored, taken over by an activation and erased when that one put the
+     session back to sleep, answered a later read from the history it had until its next
+     idle tick, with nothing on disk; asked now, it goes, giving up its name after it has
+     dealt with its log, and the read starts another over what storage has, once. The lock
+     is still the only one either side takes, and nothing done under it calls a manager or
+     a reader, so neither can hold it waiting for the other. Proof: the cases of a read
+     racing an activation in `reader_log_test.exs` and `failed_activation_test.exs`, each
+     failing before this change.
+
+745. **The desktop app shows a turn the root failed as a failure, and follows a daemon that
+     restarted to where it is now.** Defects D42 (the desktop app's part) and D41, following
+     727 and the redial of PR #263.
+     - **A failed turn is a failure wherever the app says how a session is.** `turn_ended`
+       with `agent_failed` folds into the transcript as a note in the error colour, "the
+       agent kept crashing and the session stopped: <detail>", and the session's status
+       reads Failed, the detail on hover, until the next input starts a turn. A turn that
+       ends any other way is still a rest and says nothing. A notification says "The turn
+       failed: <detail>", in a loop too, since the loop stops with the session. A turn
+       `tool_failures` ended is still shown only as the failure guard's question answered
+       `stop`.
+     - **The daemon's listing says it, read from the log.** A session stops on a failed
+       turn, so nothing live is left to report it, and an app that was not watching had a
+       dormant row like a sleeping session's. `session.list` rows carry `failed`: `{reason,
+       detail}` from the root's last `turn_ended` when that is `agent_failed` and no input
+       has come since, otherwise null, read from the log as `interrupted` is. A field and
+       not a new `status`, which every other reader of the status would meet unannounced.
+       The launcher's row and the list's say Failed, and the notification for a session
+       nobody is reading says the turn failed rather than that one finished. A plane's rows
+       carry no reason, so a team session's row is as it was.
+     - **A redial reads where the daemon is.** A daemon that restarts serves a new port with
+       a new token (`loopback.ex`), and the client dialled the old pair until a person
+       pressed Find. `DaemonClient` takes `locate`, which it asks before dialling after a
+       dropped socket or a failed dial, and dials what it answers; views open across it
+       subscribe again from their cursors, as #263 made them. The desktop shell's
+       `readDaemon` reads `daemon.json` with the command `findDaemon` reads it with, and
+       starts nothing: starting is Find's, which a person asks for, and a daemon somebody
+       stopped stays stopped. A browser build has nothing to read and dials where it was
+       told.
+     - **Connected again when a dial works.** `useDaemon` said "not answering" when the
+       socket closed and nothing said otherwise after; the client's `onOpen` does, with the
+       address it reached, which This computer shows.
+     - D41's last item, whether Windows raises `Activated` in the running app for a click
+       in the notification centre, is still unverified.
+     - **Proof:** the desktop app's `failed-turn` and `daemon-restart` tests and the
+       client's `stage2`, `transcript` and `fleet` tests, against the fake daemon, which now
+       restarts on a new port with a new token and lists `failed` as the daemon does;
+       `crash_loop_test.exs` (listed, and cleared by the next turn) and the gateway's
+       `daemon_test.exs` (over the socket).

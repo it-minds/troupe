@@ -21,6 +21,7 @@ defmodule Troupe.Worker.Session.Restore do
   alias Troupe.Sessions.{Cipher, Context, Snapshot, Storage}
   alias Troupe.Worker.Cache
   alias Troupe.Worker.Session.Workspace
+  alias Troupe.Worker.Sessions
 
   require Logger
 
@@ -33,24 +34,29 @@ defmodule Troupe.Worker.Session.Restore do
   history that never happened to anyone.
 
   Written under `with_log/2`, and `:bytes` is how much was written, which is how a reader
-  tells the log it restored from one somebody has since written to.
+  tells the log it restored from one somebody has since written to. `:found` says whether
+  the log's directory was there before, looked at under the same lock.
+
+  `unless_active: true` is a reader's: a manager registered for the session on this pod
+  when the lock is taken means the log is that activation's, starting or running, and
+  nothing is written (`{:error, :active}`). Looked at here rather than only before the
+  read began, because an activation can start and write to the log while the segments
+  download, and storage's copy written over that log would lose what the session has
+  logged since its last seal (Decision 743).
   """
-  @spec events(Context.t(), Path.t()) :: {:ok, map()} | {:error, term()}
-  def events(%Context{} = context, workspace_root) do
+  @spec events(Context.t(), Path.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def events(%Context{} = context, workspace_root, opts \\ []) do
+    path = log_path(context.session_id, workspace_root, context.state_dir)
+
     with {:ok, all} <- Storage.list_segments(context.store, context.session_id),
          live = Storage.live_segments(all),
-         {:ok, events} <- read_all(context, live) do
-      path = log_path(context.session_id, workspace_root, context.state_dir)
-      lines = Enum.map(events, &[Jason.encode_to_iodata!(&1), ?\n])
-
-      with_log(context.session_id, fn ->
-        File.mkdir_p!(Path.dirname(path))
-        File.write!(path, lines)
-      end)
-
+         {:ok, events} <- read_all(context, live),
+         lines = Enum.map(events, &[Jason.encode_to_iodata!(&1), ?\n]),
+         {:ok, found} <- write_log(context.session_id, path, lines, opts) do
       {:ok,
        %{
          path: path,
+         found: found,
          bytes: IO.iodata_length(lines),
          events: length(events),
          segments: length(live),
@@ -63,6 +69,19 @@ defmodule Troupe.Worker.Session.Restore do
     end
   end
 
+  defp write_log(session_id, path, lines, opts) do
+    with_log(session_id, fn ->
+      if Keyword.get(opts, :unless_active, false) and Sessions.whereis(session_id) do
+        {:error, :active}
+      else
+        found = File.exists?(Path.dirname(path))
+        File.mkdir_p!(Path.dirname(path))
+        File.write!(path, lines)
+        {:ok, found}
+      end
+    end)
+  end
+
   @doc """
   Run `fun` holding this pod's lock on one session's local log, and return what it returns.
 
@@ -71,6 +90,12 @@ defmodule Troupe.Worker.Session.Restore do
   reader leaves has either registered by the time the reader looks, and the reader leaves
   the log to it, or writes its own log after the reader's has gone — never before, which
   would have the reader remove the log a starting session is about to replay.
+
+  The other way round too: a reader's restore writes nothing once a manager has
+  registered (`events/3`), and an activation looks for a log already there, and removes
+  the one it wrote when it fails, under it (`Troupe.Worker.Session.Manager`). What is done
+  under it is file work and a registry lookup, never a call to a manager or a reader, and
+  it is the only lock either takes: neither can hold it waiting for the other.
   """
   @spec with_log(String.t(), (-> result)) :: result when result: term()
   def with_log(session_id, fun) do

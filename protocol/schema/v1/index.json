@@ -22,6 +22,8 @@
     "commands/mcp.check.json",
     "commands/mcp.list.json",
     "commands/mcp.remove.json",
+    "commands/mcp.sign_in.json",
+    "commands/mcp.sign_out.json",
     "commands/mcp.status.json",
     "commands/memory.forget.json",
     "commands/memory.get.json",

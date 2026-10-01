@@ -36,6 +36,7 @@ defmodule Troupe.Sessions.Index do
           profile: String.t(),
           state: :active | :dormant | :read_only | :erased,
           status: atom(),
+          failed: %{String.t() => String.t() | nil} | nil,
           pending_approvals: non_neg_integer(),
           pending_questions: non_neg_integer(),
           unseen: Unseen.t(),
@@ -384,7 +385,8 @@ defmodule Troupe.Sessions.Index do
   # plane from. Nothing here hears the session's events, so a count kept here would be one
   # more reader to get it wrong. What nobody has seen of it is read from its log the same
   # way: `listed` is the listing's own scan of that log, already done, and `get` reads it
-  # now, only when nobody is attached (`Unseen`).
+  # now, only when nobody is attached (`Unseen`). A turn that failed is the listing's scan
+  # alone to say: a session stops on one, so `get` finds it on disk.
   defp live(state, session_id, listed \\ nil) do
     case Map.fetch(state.live, session_id) do
       {:ok, entry} ->
@@ -392,6 +394,7 @@ defmodule Troupe.Sessions.Index do
         |> put_asked(Summary.snapshot(session_id))
         |> waiting()
         |> Map.put(:unseen, (listed && Map.get(listed, :unseen)) || unseen(session_id))
+        |> Map.put(:failed, listed && Map.get(listed, :failed))
 
       :error ->
         nil
@@ -422,12 +425,15 @@ defmodule Troupe.Sessions.Index do
   defp waiting(meta), do: meta
 
   # Live entries win: a session with a running tree knows more about itself than its
-  # log's first event does. What nobody has seen of it is the log's to say either way.
+  # log's first event does. What nobody has seen of it, and a turn that failed, are the
+  # log's to say either way.
   defp all(state) do
     disk = Map.new(scan_disk(state), &{&1.id, &1})
 
     disk
-    |> Map.merge(state.live, fn _id, from_disk, live -> Map.put(live, :unseen, from_disk.unseen) end)
+    |> Map.merge(state.live, fn _id, from_disk, live ->
+      Map.merge(live, Map.take(from_disk, [:unseen, :failed]))
+    end)
     |> Map.values()
     |> Enum.sort_by(& &1.last_active_at, :desc)
   end
@@ -495,6 +501,7 @@ defmodule Troupe.Sessions.Index do
           profile: get_data(created, "profile", "build"),
           state: :dormant,
           status: status_from_log(events),
+          failed: failed_from_log(events),
           unseen: Unseen.of(id, Path.dirname(path), fn -> events end),
           tokens: total_tokens(events),
           cost: total_cost(events),
@@ -539,6 +546,26 @@ defmodule Troupe.Sessions.Index do
       unanswered_request?(root) -> :interrupted
       MapSet.member?(asked, owed_gate_question(root)) -> :waiting
       true -> :idle
+    end
+  end
+
+  # How the root agent's last turn failed, when the harness ended it so: a root that kept
+  # crashing ends its turn `agent_failed`, with the first line of what it raised, and the
+  # session stops on it (Decision 727). Read from the log like the status, so a client
+  # that was not watching learns it from a listing; nil once another turn has started.
+  defp failed_from_log(events) do
+    events
+    |> Enum.filter(
+      &(&1.agent == Session.root_path() and
+          &1.type in ["user_input", "turn_ended", "cancelled", "agent_done"])
+    )
+    |> List.last()
+    |> case do
+      %Event{type: "turn_ended", data: %{"reason" => "agent_failed"} = data} ->
+        %{"reason" => "agent_failed", "detail" => Map.get(data, "detail")}
+
+      _ ->
+        nil
     end
   end
 

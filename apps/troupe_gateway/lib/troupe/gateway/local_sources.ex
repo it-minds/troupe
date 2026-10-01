@@ -2,7 +2,8 @@ defmodule Troupe.Gateway.LocalSources do
   @moduledoc """
   `mcp.list`, `mcp.add`, `mcp.remove`, `mcp.check` and `skills.list`, `skills.add`,
   `skills.remove`: the person's own MCP servers and skills, over the wire
-  (Decision 700).
+  (Decision 700). `mcp.sign_in` and `mcp.sign_out`: their sign-in to a server that wants
+  them rather than a machine (Decision 741).
 
   The daemon's alone, as the model settings are. The files are the daemon's config
   directory and a workspace on this machine, a pod's servers are its bundle's, and so
@@ -16,7 +17,7 @@ defmodule Troupe.Gateway.LocalSources do
   prints it; the files themselves are read and written by the paths they had.
   """
 
-  alias Troupe.MCP.{Import, Local, Trust}
+  alias Troupe.MCP.{Import, Local, OAuth, Trust}
   alias Troupe.Paths
   alias Troupe.Protocol.Error
   alias Troupe.Session.MCP, as: LocalMCP
@@ -24,12 +25,14 @@ defmodule Troupe.Gateway.LocalSources do
 
   @type outcome :: {:ok, map()} | {:error, Error.t()}
 
-  @doc "Dispatch one of the seven, with the daemon already known to be the server."
+  @doc "Dispatch one of the nine, with the daemon already known to be the server."
   @spec call(String.t(), map()) :: outcome()
   def call("mcp.list", params), do: list_servers(params)
   def call("mcp.add", params), do: add_server(params)
   def call("mcp.remove", params), do: remove_server(params)
   def call("mcp.check", params), do: check_server(params)
+  def call("mcp.sign_in", params), do: sign_in(params)
+  def call("mcp.sign_out", params), do: sign_out(params)
   def call("skills.list", params), do: list_skills(params)
   def call("skills.add", params), do: add_skill(params)
   def call("skills.remove", params), do: remove_skill(params)
@@ -158,6 +161,85 @@ defmodule Troupe.Gateway.LocalSources do
 
   defp check_server(_params), do: invalid("mcp.check needs a server's name")
 
+  # A person's sign-in to a server that wants them (Decision 741). The daemon runs it and
+  # listens for the browser; the client opens `url` and shows how it stands, from
+  # `mcp.list`'s `auth`. A workspace's server is signed in to only once the workspace's
+  # servers are trusted: its `oauth` is a cloned repository's, saying where a token of
+  # the person's would go.
+  defp sign_in(params) do
+    with {:ok, server} <- signable(params) do
+      case OAuth.sign_in(server.name, server.config.url, server.config.oauth) do
+        {:ok, started} ->
+          {:ok,
+           %{
+             "server" => server.name,
+             "url" => started.url,
+             "redirect_uri" => started.redirect_uri,
+             "expires_at" => started.expires_at
+           }}
+
+        {:error, why} ->
+          invalid(why)
+      end
+    end
+  end
+
+  defp sign_out(params) do
+    with {:ok, server} <- signable(params),
+         :ok <- server |> sign_in_of() |> OAuth.sign_out() do
+      {:ok, %{"server" => server.name, "auth" => auth_json(server)}}
+    else
+      {:error, %Error{} = error} -> {:error, error}
+      {:error, why} -> invalid(why)
+    end
+  end
+
+  defp signable(%{"name" => name} = params) when is_binary(name) and name != "" do
+    with {:ok, workspace} <- workspace_of(params) do
+      {servers, _warnings} = resolve(workspace)
+
+      case Enum.find(servers, &(&1.name == name)) do
+        nil -> {:error, Error.new(:not_found, %{kind: "mcp_server", name: name})}
+        server -> may_sign_in(server, trust_of(server, workspace))
+      end
+    end
+  end
+
+  defp signable(_params), do: invalid("give the name of the server to sign in to")
+
+  defp may_sign_in(%{config: %{refused: why}}, _trust) when is_binary(why), do: invalid(why)
+
+  defp may_sign_in(%{name: name, config: %{oauth: %{}}}, "pending"),
+    do:
+      invalid(
+        "#{name} is this workspace's, and its servers are not approved here yet; approve them first"
+      )
+
+  defp may_sign_in(%{config: %{oauth: %{}, url: url}} = server, _trust) when is_binary(url),
+    do: {:ok, server}
+
+  defp may_sign_in(%{name: name}, _trust),
+    do: invalid("#{name} takes no sign-in: give its entry an oauth.client_id to sign in to it")
+
+  defp sign_in_of(server),
+    do: OAuth.binding(server.name, server.config.url, server.config.oauth, nil)
+
+  # How the person's sign-in stands: never a token, only the state, whose account it is,
+  # and why the last attempt failed.
+  defp auth_json(%{config: %{oauth: %{}, url: url}} = server) when is_binary(url) do
+    status = server |> sign_in_of() |> OAuth.status()
+    %{"state" => to_string(status.state), "account" => status.account, "error" => status.error}
+  end
+
+  defp auth_json(_server), do: nil
+
+  defp oauth_json(%{oauth: %{} = oauth}) do
+    %{"client_id" => oauth.client_id, "scopes" => oauth.scopes, "issuer" => oauth.issuer}
+    |> Map.reject(fn {_key, value} -> is_nil(value) end)
+  end
+
+  defp oauth_json(_config), do: nil
+
   defp normalized(name, raw) do
     case Import.normalize(name, raw) do
       {:ok, entry, warnings} -> {:ok, entry, warnings}
@@ -209,7 +291,9 @@ defmodule Troupe.Gateway.LocalSources do
       "permission" => to_string(config[:permission] || :ask),
       "disabled" => server.disabled?,
       "refused" => config[:refused],
-      "trust" => trust_of(server, workspace)
+      "trust" => trust_of(server, workspace),
+      "oauth" => oauth_json(config),
+      "auth" => auth_json(server)
     }
     |> Map.merge(status_json(live))
   end

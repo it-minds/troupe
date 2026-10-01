@@ -200,4 +200,25 @@ describe("what happened while nobody was reading (issue #119)", () => {
     const day = since.toLocaleDateString(undefined, { day: "numeric", month: "short" });
     assert.equal(unseenSummary(row, new Date(2026, 8, 28, 9, 0)), `2 turns finished, 1 approval asked, 1 question waiting since ${day} 14:02`);
   });
+
+  it("reads a turn the root failed off a daemon's row, and says the last turn failed (Decision 727)", () => {
+    const failed = rowFromDaemon({
+      id: "s",
+      workspace: "/w",
+      branch: null,
+      profile: null,
+      state: "dormant",
+      status: "idle",
+      created_at: null,
+      last_active_at: null,
+      failed: { reason: "agent_failed", detail: "** (RuntimeError) boom" },
+    });
+    assert.deepEqual(failed.failed, { reason: "agent_failed", detail: "** (RuntimeError) boom" });
+    assert.equal(daemonRow().failed, null, "a daemon from before it says nothing failed");
+
+    const since = new Date(2026, 8, 27, 14, 2);
+    const row = { unseen: { turns: 1, approvals: 0, questions: 0, since: since.toISOString() }, pendingApprovals: 0, pendingQuestions: 0, failed: failed.failed };
+    assert.equal(unseenSummary(row, new Date(2026, 8, 27, 15, 0)), "1 turn failed since 14:02");
+    assert.equal(describeUnseen({ turns: 3, approvals: 0, questions: 0 }, row), "3 turns ended, the last one failed");
+  });
 });

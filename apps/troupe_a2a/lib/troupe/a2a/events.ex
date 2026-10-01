@@ -369,6 +369,15 @@ defmodule Troupe.A2A.Events do
     }
   end
 
+  @doc """
+  The state the plane's row says a task is in.
+
+  An idle row past its first events is `completed` as far as the row knows: a turn
+  ended. Who ended it the row does not say. A turn the harness stopped (a tool that kept
+  failing, Decision 687; an agent that kept crashing, Decision 727) is `failed`, and only
+  the log's `turn_ended` says so, so an answer at rest reads the log for such a row
+  (`known_from_row?/1`).
+  """
   @spec state_of_row(map()) :: String.t()
   def state_of_row(row) do
     case row["status"] do
@@ -379,6 +388,10 @@ defmodule Troupe.A2A.Events do
       _idle -> if (row["last_seq"] || 0) < 4, do: "submitted", else: "completed"
     end
   end
+
+  @doc "Whether the row alone says how the task stands, with no log to read."
+  @spec known_from_row?(map()) :: boolean()
+  def known_from_row?(row), do: state_of_row(row) != "completed" or row["status"] == "done"
 
   defp done_state("finished"), do: "completed"
   defp done_state(reason) when reason in ["cancelled", "canceled"], do: "canceled"

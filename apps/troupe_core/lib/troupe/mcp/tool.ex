@@ -14,7 +14,7 @@ defmodule Troupe.MCP.Tool do
   """
 
   alias Troupe.MCP
-  alias Troupe.MCP.{Client, Server}
+  alias Troupe.MCP.{Client, OAuth, Server}
 
   @enforce_keys [:name, :description, :schema, :run]
   defstruct [:name, :description, :schema, :run, :server, :remote_name, default_permission: :ask]
@@ -70,18 +70,43 @@ defmodule Troupe.MCP.Tool do
     end
   end
 
+  # A person's own server that wants them signed in (Decision 741): the daemon's token,
+  # refreshed and tried again once on a `401`. A sign-in that has run out is, like an
+  # unconnected person-mode server, a fact the model can relay rather than a failure to
+  # retry: the person signs in again and the next call works.
+  defp call(%Server{oauth: %{}} = server, remote_name, args, ctx) do
+    case OAuth.authorized(server, &Client.call_tool(&1, remote_name, args, meta(ctx))) do
+      {:ok, result} -> {:ok, render(result)}
+      {:error, :sign_in_required} -> {:ok, sign_in_required(server)}
+      {:error, reason} -> {:error, describe(reason)}
+    end
+  end
+
   defp call(server, remote_name, args, ctx), do: dispatch(server, remote_name, args, ctx)
 
   defp dispatch(server, remote_name, args, ctx) do
-    meta = %{
-      "troupe/session" => ctx.session_id,
-      "troupe/agent" => Enum.join(ctx.agent_path, "/")
-    }
-
-    case Client.call_tool(server, remote_name, args, meta) do
+    case Client.call_tool(server, remote_name, args, meta(ctx)) do
       {:ok, result} -> {:ok, render(result)}
       {:error, reason} -> {:error, describe(reason)}
     end
+  end
+
+  defp meta(ctx) do
+    %{
+      "troupe/session" => ctx.session_id,
+      "troupe/agent" => Enum.join(ctx.agent_path, "/")
+    }
+  end
+
+  defp sign_in_required(server) do
+    Jason.encode!(%{
+      "error" => "sign_in_required",
+      "server" => server.name,
+      "hint" =>
+        "#{server.name} acts as the person who runs this session, and their sign-in to it " <>
+          "has run out or was never made: they sign in with /mcp sign-in #{server.name} in " <>
+          "the terminal, or Sign in on the desktop app's Servers and skills panel, then ask again"
+    })
   end
 
   defp not_connected(server) do
@@ -114,6 +139,11 @@ defmodule Troupe.MCP.Tool do
   defp render(result), do: Jason.encode!(result)
 
   defp describe({:mcp_error, %{"message" => message}}), do: "the MCP server refused: #{message}"
+
+  defp describe({:unauthorized, _challenge}),
+    do: "the MCP server answered 401: it wants a credential it was not given"
+
+  defp describe(reason) when is_binary(reason), do: reason
   defp describe({:unexpected_status, status, _body}), do: "the MCP server answered #{status}"
   defp describe(reason), do: "the MCP server could not be reached: #{inspect(reason)}"
 end

@@ -1,3 +1,6 @@
+# The core suite's fake authorization server and protected MCP server (Decision 741).
+Code.require_file("../../../../apps/troupe_core/test/support/fake_oauth.exs", __DIR__)
+
 defmodule Troupe.MCPPageTest do
   @moduledoc """
   The `/mcp` page over the person's own servers and skills (troupe-remote Decision
@@ -75,6 +78,69 @@ defmodule Troupe.MCPPageTest do
     press(pid, "x")
     eventually(fn -> screen_text(pid, session) =~ "removed stub from the user mcp" end)
     refute screen_text(pid, session) =~ "stub  [user]"
+  end
+
+  # troupe-remote Decision 741: a server that wants the person signed in, against the
+  # core suite's fake authorization server and protected MCP server.
+  test "a server that wants a sign-in: s opens the browser, and the page says whose it is",
+       context do
+    fake = Troupe.Test.FakeOAuth.start(self())
+    test = self()
+
+    Application.put_env(:troupe, :open_url, fn url ->
+      send(test, {:opened, url})
+      :ok
+    end)
+
+    on_exit(fn ->
+      Application.delete_env(:troupe, :open_url)
+      Troupe.Test.FakeOAuth.stop(fake)
+    end)
+
+    File.write!(
+      Path.join(context.config_home, "mcp.json"),
+      Jason.encode!(%{
+        "mcpServers" => %{
+          "notes" => %{
+            "url" => fake.mcp_url,
+            "oauth" => %{"client_id" => Troupe.Test.FakeOAuth.client_id()}
+          }
+        }
+      })
+    )
+
+    {sid, _, _ws} = start_session!(script: [])
+    {pid, session} = start_tui(sid)
+
+    type(pid, "/mcp")
+    press(pid, "enter")
+    eventually(fn -> screen_text(pid, session) =~ "→ notes  [user]  sign in — s" end)
+    assert screen_text(pid, session) =~ "not signed in — s signs in"
+
+    press(pid, "s")
+    assert_receive {:opened, url}, 10_000
+    assert String.starts_with?(url, fake.issuer <> "/authorize?")
+    eventually(fn -> screen_text(pid, session) =~ "finish signing in in your browser" end)
+    eventually(fn -> screen_text(pid, session) =~ "waiting for the browser" end)
+
+    assert {200, _page} = Troupe.Test.FakeOAuth.browse(url)
+
+    # The session that waited asks for the tools by itself; `r` reads the page again.
+    eventually(
+      fn ->
+        press(pid, "r")
+        screen_text(pid, session) =~ "✓ notes  [user]  1 tools · ada@example.test"
+      end,
+      10_000,
+      250
+    )
+
+    assert screen_text(pid, session) =~ "signed in as ada@example.test"
+    assert [%{name: "notes", state: :ready, tools: 1}] = Client.mcp_status(sid)
+
+    press(pid, "o")
+    eventually(fn -> screen_text(pid, session) =~ "notes: signed out on this machine" end)
+    eventually(fn -> screen_text(pid, session) =~ "sign in — s" end)
   end
 
   test "a remote session's page says the servers are its profile's" do

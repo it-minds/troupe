@@ -128,6 +128,10 @@ defmodule Troupe.Gateway.Dispatch do
     "mcp.add" => :admin,
     "mcp.remove" => :admin,
     "mcp.check" => :admin,
+    # A sign-in to a server that wants the person (Decision 741) puts a token of theirs
+    # where a server can use it, and signing out takes it away: both are the person's.
+    "mcp.sign_in" => :admin,
+    "mcp.sign_out" => :admin,
     "skills.list" => :observe,
     "skills.add" => :admin,
     "skills.remove" => :admin
@@ -1327,6 +1331,9 @@ defmodule Troupe.Gateway.Dispatch do
       "profile" => Map.get(session, :profile),
       "state" => to_string(Map.get(session, :state, :active)),
       "status" => to_string(Map.get(session, :status, :idle)),
+      # How the root's last turn failed, when the harness ended it so (`agent_failed`), for
+      # a client that was not watching when it did; nil otherwise.
+      "failed" => Map.get(session, :failed),
       # The counts a plane's row carries too, so an inbox is a listing and not a replay.
       "pending_approvals" => Map.get(session, :pending_approvals, 0),
       "pending_questions" => Map.get(session, :pending_questions, 0),

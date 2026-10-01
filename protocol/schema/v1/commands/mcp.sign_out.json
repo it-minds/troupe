@@ -1,0 +1,25 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/mcp.sign_out.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "name"
+  ],
+  "title": "mcp.sign_out",
+  "type": "object"
+}

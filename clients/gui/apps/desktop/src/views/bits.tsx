@@ -49,13 +49,14 @@ export function Pill({ status, children, title }: { status: Status; children?: s
  * one state the whole colour scheme is built around, and it holds from the first second:
  * a session whose only open question is the workspace's trust question, asked before
  * the agent has done anything, is waiting on a person like any other — and a session
- * that stopped on an error outranks the fact that it is technically idle. What is left
- * is idle or stopped, which is not a state so much as the absence of one.
+ * that stopped on an error outranks the fact that it is technically idle, or asleep: one
+ * whose root kept crashing stopped on its failed turn (Decision 727). What is left is
+ * idle or stopped, which is not a state so much as the absence of one.
  */
-export function statusOf(row: Pick<FleetRow, "state" | "status" | "pendingApprovals" | "pendingQuestions" | "doneReason">): Status {
+export function statusOf(row: Pick<FleetRow, "state" | "status" | "pendingApprovals" | "pendingQuestions" | "doneReason" | "failed">): Status {
   if (row.pendingApprovals > 0 || row.pendingQuestions > 0 || row.status === "waiting") return "waiting";
   if (row.state === "read_only") return "readonly";
-  if (row.doneReason === "budget_exhausted" || row.doneReason === "llm_error" || row.status === "interrupted") return "error";
+  if (row.doneReason === "budget_exhausted" || row.doneReason === "llm_error" || row.status === "interrupted" || row.failed) return "error";
   if (row.status && ["thinking", "acting", "compacting"].includes(row.status)) return "running";
   if (row.state === "dormant") return "dormant";
   return "idle";
@@ -64,7 +65,13 @@ export function statusOf(row: Pick<FleetRow, "state" | "status" | "pendingApprov
 export function RowStatus({ row }: { row: FleetRow }): JSX.Element {
   const status = statusOf(row);
   const detail = row.doneReason ?? row.status ?? row.state;
-  return <Pill status={status} title={`${row.state}${row.status ? ` · ${row.status}` : ""}`}>{status === "idle" ? word(detail) : undefined}</Pill>;
+  return <Pill status={status} title={failedTitle(row) ?? `${row.state}${row.status ? ` · ${row.status}` : ""}`}>{status === "idle" ? word(detail) : undefined}</Pill>;
+}
+
+/** What a row whose last turn failed says on hover: what the agent raised. */
+export function failedTitle(row: Pick<FleetRow, "failed">): string | undefined {
+  if (!row.failed) return undefined;
+  return `The agent kept crashing and the session stopped${row.failed.detail ? `: ${row.failed.detail}` : ""}`;
 }
 
 function word(s: string): string {

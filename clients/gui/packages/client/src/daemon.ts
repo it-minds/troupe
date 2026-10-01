@@ -54,6 +54,8 @@ export interface DaemonSessionRow {
   pending_questions?: number;
   /** What happened while nobody was reading it (`Unseen`); absent from a daemon before #119. */
   unseen?: FleetRow["unseen"];
+  /** How the root's last turn failed (`agent_failed`, Decision 727); absent from a daemon before 0.7.1. */
+  failed?: { reason: string; detail?: string | null } | null;
   [k: string]: unknown;
 }
 
@@ -92,10 +94,34 @@ export interface LocalServer {
   refused?: string | null;
   /** For a workspace-level server: whether somebody has approved it there. */
   trust?: "trusted" | "pending" | null;
-  /** From the session named in the call, or from a check; null when nothing has run it. */
+  /** A server that wants you signed in (troupe-remote Decision 741): what its entry says about the sign-in. */
+  oauth?: { client_id: string; scopes?: string[] | null; issuer?: string } | null;
+  /** How your sign-in to it stands, never a token; null for a server that takes none. */
+  auth?: ServerAuth | null;
+  /** From the session named in the call, or from a check; null when nothing has run it. `sign_in` waits for yours. */
   state: string | null;
   tools: string[];
   error: string | null;
+}
+
+/**
+ * Your sign-in to a server that wants you (troupe-remote Decision 741). `signing_in`
+ * while a browser is out, `expired` when it ran out or was refused and you sign in
+ * again; `account` is whose it is, when the provider said; `error` why the last
+ * attempt failed.
+ */
+export interface ServerAuth {
+  state: "signed_out" | "signing_in" | "signed_in" | "expired";
+  account: string | null;
+  error: string | null;
+}
+
+/** What `mcp.sign_in` answers: the URL to open, where the browser comes back to, and when the daemon stops waiting. */
+export interface SignInStarted {
+  server: string;
+  url: string;
+  redirect_uri: string;
+  expires_at: string;
 }
 
 /** One skill as `skills.list` reports it. */
@@ -140,6 +166,21 @@ export interface CreateLocalParams {
 
 export interface DaemonHooks {
   onClose?: (reason: string) => void;
+  /**
+   * A socket is open: the first, or one dialled again after the last one dropped, at the
+   * endpoint it reached. Whatever said "not answering" when the socket closed hears here
+   * that the daemon answers again.
+   */
+  onOpen?: (endpoint: DaemonEndpoint) => void;
+  /**
+   * Where the daemon says it is now, read before dialling again after a socket dropped or
+   * a dial failed. A daemon that restarts publishes a new port and a new token — the
+   * kernel picks the one and the other is random — so the pair this client was made with
+   * names nothing once it has. Null, or a read that fails, keeps the pair it has. A desktop
+   * shell reads `daemon.json`; a browser was told by hand, has nothing to read, and dials
+   * where it was told.
+   */
+  locate?: () => Promise<DaemonEndpoint | null>;
   /** A tool the client is hosting. Registered per session through `tools.register`. */
   onToolInvoke?: (invoke: ToolInvoke) => Promise<unknown>;
 }
@@ -160,7 +201,10 @@ export function daemonUrl(endpoint: Pick<DaemonEndpoint, "port">): string {
  * worker socket; there is simply more than one candidate here.
  */
 export class DaemonClient {
-  readonly endpoint: DaemonEndpoint;
+  private at: DaemonEndpoint;
+  // Whether the next dial follows a socket that dropped or a dial that failed, and so
+  // reads where the daemon is before it goes.
+  private lost = false;
   private conn: TroupeConnection | null = null;
   private readonly views = new Map<string, SessionView>();
   // Sessions whose `open` is between dialling and subscribing. A second `open` for the
@@ -181,8 +225,13 @@ export class DaemonClient {
   private opening: Promise<TroupeConnection> | null = null;
 
   constructor(endpoint: DaemonEndpoint, hooks: DaemonHooks = {}) {
-    this.endpoint = endpoint;
+    this.at = endpoint;
     this.hooks = hooks;
+  }
+
+  /** Where the daemon is: where this client was told, or where `locate` last found it. */
+  get endpoint(): DaemonEndpoint {
+    return this.at;
   }
 
   get connected(): boolean {
@@ -234,27 +283,17 @@ export class DaemonClient {
       },
       onClose: (reason) => {
         this.conn = null;
+        this.lost = true;
         for (const view of this.views.values()) view.unbind();
         this.hooks.onClose?.(reason);
       },
       ...(this.hooks.onToolInvoke ? { onToolInvoke: this.hooks.onToolInvoke } : {}),
     };
 
-    this.opening = TroupeConnection.open(
-      {
-        url: daemonUrl(this.endpoint),
-        token: this.endpoint.token,
-        clientInfo: { name: "troupe-gui", version: "1" },
-        // Tools only when something is actually hosting them: a client that says it can
-        // serve `tool.invoke` and then answers `method_not_found` is worse than one that
-        // never offered.
-        capabilities: { blobs: true, ...(this.hooks.onToolInvoke ? { tools: true } : {}) },
-        ...opts,
-      },
-      hooks,
-    )
+    this.opening = this.dial(hooks, opts)
       .then((conn) => {
         this.conn = conn;
+        this.lost = false;
         // A view here was open when the last socket dropped, and its subscription went with
         // that socket. It carries on from its cursor, so the daemon replays what it missed
         // with no gap and no duplicate; one that fails waits for the next socket, and one
@@ -266,6 +305,7 @@ export class DaemonClient {
             .then(() => (this.views.get(view.sessionId) === view ? undefined : view.unsubscribe()))
             .catch(() => undefined);
         }
+        this.hooks.onOpen?.(this.at);
         return conn;
       })
       .finally(() => {
@@ -273,6 +313,35 @@ export class DaemonClient {
       });
 
     return this.opening;
+  }
+
+  /**
+   * Dial the daemon: where it was, or, after a socket that dropped or a dial that failed,
+   * where it says it is now. A dial that fails leaves the next one to read again.
+   */
+  private async dial(hooks: ConnectionHooks, opts: Partial<ConnectOptions>): Promise<TroupeConnection> {
+    if (this.lost && this.hooks.locate) {
+      const found = await this.hooks.locate().catch(() => null);
+      if (found) this.at = found;
+    }
+    try {
+      return await TroupeConnection.open(
+        {
+          url: daemonUrl(this.at),
+          token: this.at.token,
+          clientInfo: { name: "troupe-gui", version: "1" },
+          // Tools only when something is actually hosting them: a client that says it can
+          // serve `tool.invoke` and then answers `method_not_found` is worse than one that
+          // never offered.
+          capabilities: { blobs: true, ...(this.hooks.onToolInvoke ? { tools: true } : {}) },
+          ...opts,
+        },
+        hooks,
+      );
+    } catch (e) {
+      this.lost = true;
+      throw e;
+    }
   }
 
   private route(envelope: EventEnvelope): void {
@@ -533,6 +602,21 @@ export class DaemonClient {
     return this.call("mcp.check", { ...params });
   }
 
+  /**
+   * Sign in to a server that wants you (troupe-remote Decision 741). The daemon runs the
+   * sign-in and listens for the browser on its own machine; open `url` there, and read
+   * how it stands from `listServers`' `auth`. A session waiting for it carries on once
+   * it lands.
+   */
+  signInServer(params: { name: string; workspace?: string; session_id?: string }): Promise<SignInStarted> {
+    return this.command<SignInStarted>("mcp.sign_in", { ...params });
+  }
+
+  /** Forget your sign-in to a server on this computer. */
+  signOutServer(params: { name: string; workspace?: string; session_id?: string }): Promise<{ server: string; auth: ServerAuth | null }> {
+    return this.command("mcp.sign_out", { ...params });
+  }
+
   listSkills(workspace?: string): Promise<{ skills: LocalSkill[] }> {
     return this.call("skills.list", workspace ? { workspace } : {});
   }
@@ -597,6 +681,7 @@ export function rowFromDaemon(row: DaemonSessionRow, source = "daemon"): FleetRo
     reviewedBy: null,
     sync: kind === "private" ? ((row["sync"] as FleetRow["sync"]) ?? "this-device-only") : null,
     unseen: row.unseen ?? null,
+    failed: row.failed ? { reason: row.failed.reason, detail: row.failed.detail ?? null } : null,
     raw: row,
   };
 }

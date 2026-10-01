@@ -135,6 +135,41 @@ defmodule Troupe.A2A.StreamTest do
     refute_receive {:worker_command, _method, _params}
   end
 
+  # D42: an idle row says a turn ended, not who ended it. One the harness stopped (a tool
+  # that kept failing, Decision 687; an agent that kept crashing, Decision 727) was
+  # reported `completed` from the row; the log says `failed`, and why.
+  test "a task at rest whose turn the harness stopped is failed, saying why", context do
+    for {id, ended, says} <- [
+          {"s-4", %{"reason" => "agent_failed", "detail" => "** (RuntimeError) boom"},
+           "(RuntimeError) boom"},
+          {"s-5", %{"reason" => "tool_failures"}, "kept failing"}
+        ] do
+      StubPlane.put_row(context.plane, id, %{"status" => "idle", "last_seq" => 5})
+
+      FakeWorker.script(
+        context.worker,
+        id,
+        opening("Go.") ++ [response(4, "Trying.", "tool_use"), event(5, "turn_ended", ended)]
+      )
+
+      assert {200, [%{"result" => %{"final" => true, "status" => status}}]} =
+               stream(context, %{"id" => id}, method: "tasks/resubscribe")
+
+      assert status["state"] == "failed", id
+      assert [%{"text" => text}] = status["message"]["parts"]
+      assert text =~ says
+
+      # Read, never woken.
+      assert_receive {:worker_command, "subscribe", %{"topic" => "session:" <> ^id}}
+      refute_received {:worker_command, "input.send", _params}
+    end
+
+    refute Enum.any?(StubPlane.calls(context.plane), fn
+             {_who, "session.open", %{"mode" => "activate"}} -> true
+             _call -> false
+           end)
+  end
+
   test "an expiring token is refreshed on the open socket", context do
     FakeWorker.script(context.worker, :default, opening("Go.") ++ [response(4, "Done.")])
     FakeWorker.expire_soon(context.worker)

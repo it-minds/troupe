@@ -320,6 +320,66 @@ describe("stage 2: a daemon that goes away and comes back", () => {
     await client.close(session.id);
   });
 
+  it("a daemon that comes back on a new port with a new token is found where it now says it is, and a view open across it misses nothing", async () => {
+    // Its own daemon and client: the one above was told where the daemon is, once.
+    const moving = new FakeDaemon();
+    await moving.start();
+    const opened: number[] = [];
+    let closes = 0;
+    const found = new DaemonClient(endpointOf(moving), {
+      onClose: () => void (closes += 1),
+      onOpen: (at) => void opened.push(at.port),
+      // Where `daemon.json` says it is now, as the desktop shell reads it.
+      locate: async () => moving.published,
+    });
+    try {
+      const session = moving.seed("/home/ada/moving");
+      const heard: number[] = [];
+      const view = await found.open(session.id, {}, (e) => {
+        if (isDurable(e)) heard.push(e.seq);
+      });
+      moving.say(session.id, "before");
+      await view.waitFor((e) => "seq" in e && e.seq === 2, 5_000, "the event before the restart");
+      const before = found.endpoint;
+
+      // A restart: the kernel picks the port and the token is new, so the old pair names
+      // nothing. Something is said while nobody is connected.
+      await moving.restart();
+      await waitUntil(() => closes === 1, "the socket closing");
+      moving.say(session.id, "while it was down");
+
+      // The next call, as the list's poll makes it, reads the endpoint again and dials that.
+      await found.listSessions();
+      assert.notEqual(found.endpoint.token, before.token, "the new token");
+      assert.equal(found.endpoint.port, moving.port, "the port it publishes now");
+      assert.deepEqual(opened, [before.port, moving.port], "each socket said it was open");
+
+      moving.say(session.id, "after");
+      await view.waitFor((e) => "seq" in e && e.seq === 4, 5_000, "the event after the restart");
+      assert.deepEqual(heard, [1, 2, 3, 4], "each event once, with none lost in between");
+      await found.close(session.id);
+    } finally {
+      found.disconnect();
+      await moving.stop();
+    }
+  });
+
+  it("without a way to read where the daemon is, a redial goes where it was told", async () => {
+    const moving = new FakeDaemon();
+    await moving.start();
+    const told = new DaemonClient(endpointOf(moving));
+    try {
+      await told.listSessions();
+      await moving.restart();
+      await waitUntil(() => !told.connected, "the socket closing");
+      // A browser was told by hand and has nothing to read: the old pair, refused.
+      await assert.rejects(told.listSessions());
+    } finally {
+      told.disconnect();
+      await moving.stop();
+    }
+  });
+
   it("an open whose subscription is refused leaves nothing behind, so the next one subscribes", async () => {
     // Opened before it exists: the daemon answers `not_found`.
     await assert.rejects(client.open("s-late"), /not_found/);

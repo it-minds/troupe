@@ -243,6 +243,12 @@ defmodule Troupe.A2A.EventsTest do
         ] do
       assert Events.state_of_row(row) == expected, inspect(row)
     end
+
+    # An idle row says a turn ended, not whether the harness stopped it: the log says that.
+    refute Events.known_from_row?(%{"status" => "idle", "last_seq" => 12})
+    assert Events.known_from_row?(%{"status" => "done", "done_reason" => "finished"})
+    assert Events.known_from_row?(%{"status" => "idle", "last_seq" => 1})
+    assert Events.known_from_row?(%{"status" => "waiting"})
   end
 
   test "history is the last N messages, and none when not asked" do

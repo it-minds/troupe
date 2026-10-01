@@ -467,6 +467,94 @@ defmodule Troupe.CLITest do
     assert out =~ "root> exit 1: a tool kept failing, and the harness stopped the turn"
   end
 
+  # Decision 727: a root agent that crashes as often as its Node restarts it ends its turn
+  # with `agent_failed` and what it raised, and its session stops. A headless run took that
+  # for an ordinary rest and exited 0 (D42). The crash is the daemon's own, on the daemon
+  # this VM embeds: tool results only the agent folds, and cannot, so every start fails, as
+  # `crash_loop_test.exs` makes one.
+  test "headless printer exits 1 when the agent kept crashing, and says what it raised" do
+    {sid, _, _} = start_session!(script: [])
+    {io, _} = printer!(sid)
+
+    Troupe.Session.Log.append(sid, ["root"], :tool_results, %{"results" => "not a list"})
+    Process.exit(Troupe.Registry.agent_pid(sid, ["root"]), :kill)
+
+    assert_receive {:rest, 1}, 15_000
+
+    assert [[line]] =
+             Regex.scan(
+               ~r/^root> exit 1: the agent kept crashing, and its session stopped: .*$/m,
+               contents(io)
+             )
+
+    assert line =~ "(Protocol.UndefinedError)"
+  end
+
+  # D42: the harness's notes reach a client as `remote_note`, and the printer had no clause
+  # for one, so since the daemon move a headless run said nothing of a finish's summary, a
+  # compaction, a budget, a reply cut or empty, or what the harness told the model then.
+  # Printed before the run ends, which is where `troupe run` stops listening.
+  test "headless printer prints a finish's summary" do
+    {sid, _, _} = start_session!(script: [{:finish, "wrote and read"}])
+    {:ok, io} = StringIO.open("")
+    me = self()
+
+    {:ok, _} =
+      Printer.start_link(
+        session_id: sid,
+        target: "root",
+        io: io,
+        on_rest: fn code -> send(me, {:rest, code, contents(io)}) end
+      )
+
+    say!(sid, "go")
+    assert_receive {:rest, 0, out}, 15_000
+    assert out =~ "root> done: wrote and read"
+  end
+
+  test "headless printer prints a reply cut at the output cap, and the harness's note" do
+    script = [%{"stop" => "max_tokens", "text" => "Half a"}, {:text_and_tools, "The answer.", []}]
+    {sid, _, _} = start_session!(script: script)
+    {io, _} = printer!(sid)
+
+    say!(sid, "go")
+    assert_receive {:rest, 0}, 15_000
+    out = contents(io)
+    assert out =~ "root> the reply was cut at the output cap; asking again"
+    assert out =~ ~r/^root> harness: \S/m
+    assert out =~ "root> The answer."
+  end
+
+  test "headless printer prints an empty reply" do
+    {sid, _, _} = start_session!(script: [%{"text" => ""}, {:text_and_tools, "There.", []}])
+    {io, _} = printer!(sid)
+
+    say!(sid, "go")
+    assert_receive {:rest, 0}, 15_000
+    out = contents(io)
+    assert out =~ "root> the reply had no text and no tool call; asking again"
+    assert out =~ "root> There."
+  end
+
+  test "headless printer prints a compaction" do
+    script = [
+      {:tools, [{"todo_read", %{}}]},
+      {:tools, [{"todo_read", %{}}]},
+      {:tools, [{"todo_read", %{}}]},
+      {:text_and_tools, "a summary of the earlier turns", []},
+      {:text_and_tools, "Carrying on.", []}
+    ]
+
+    {sid, _, _} =
+      start_session!(script: script, config: %{"context_window" => 120, "compact_at" => 0.5})
+
+    {io, _} = printer!(sid)
+
+    say!(sid, "go")
+    assert_receive {:rest, 0}, 15_000
+    assert contents(io) =~ "root> context compacted"
+  end
+
   test "headless printer exits 1 when the agent ends short of finishing" do
     {sid, _, _} = start_session!(script: [%{"stop" => "refusal", "text" => "I will not."}])
     {io, _} = printer!(sid)
@@ -489,7 +577,8 @@ defmodule Troupe.CLITest do
     assert %{data: %{decision: "deny"}} = await_event("root", :budget_ask_answered, 5_000)
     out = contents(io)
     assert [_once] = Regex.scan(~r/budget exhausted.*; headless mode stops here/, out)
-    assert out =~ "root> exit 1: the agent ended budget_exhausted"
+    # The harness's own word on it, as the window shows it, before the run ends (D42).
+    assert out =~ "root> done (budget_exhausted)\nroot> exit 1: the agent ended budget_exhausted"
   end
 
   # A librarian on a repository with no brief is a branch of its own, window `librarian-1`,

@@ -103,8 +103,26 @@ defmodule Troupe.Config.Schema do
       spec("env", {:map, :string}, "Variables to set for it.", default: %{}, secret: true),
       spec("cd", :string, "The directory to run it in. Unset: the workspace."),
       spec("url", :string, "A server over HTTP: its URL."),
+      spec("oauth", {:object, oauth_entry()}, "A server over HTTP that wants you signed in: how to sign in."),
       spec("permission", {:enum, ~w(ask auto)}, "`auto` runs its tools without asking.", default: "ask"),
       spec("timeout_ms", {:integer, 1}, "How long one call may take.", default: 30_000)
+    ]
+  end
+
+  # Decision 741: what cannot be discovered about a person's sign-in, and the overrides.
+  defp oauth_entry do
+    [
+      spec("client_id", :string, "A client registered in advance with the server's authorization server."),
+      spec("scopes", {:list, :string}, "The scopes to ask for. Unset: what the server says it wants."),
+      spec(
+        "redirect_uri",
+        :string,
+        "Where the browser comes back: `http://` on 127.0.0.1, [::1] or localhost. Unset: 127.0.0.1, any free port."
+      ),
+      spec("resource", :boolean, "Send the resource indicator; `false` for an authorization server that refuses it.",
+        default: true
+      ),
+      spec("issuer", :string, "The authorization server, for a server that publishes no metadata naming one.")
     ]
   end
 

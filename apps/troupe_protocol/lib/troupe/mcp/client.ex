@@ -78,10 +78,20 @@ defmodule Troupe.MCP.Client do
       retry: false
     ]
 
+    # A `401` comes back with what the server wants instead, its `WWW-Authenticate`,
+    # which is where a person's sign-in starts (Decision 741).
     case Req.request(options) do
       {:ok, %{status: status} = response} when status in 200..299 -> decode(response)
+      {:ok, %{status: 401} = response} -> {:error, {:unauthorized, challenge(response)}}
       {:ok, %{status: status, body: body}} -> {:error, {:unexpected_status, status, body}}
       {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp challenge(response) do
+    case Req.Response.get_header(response, "www-authenticate") do
+      [] -> nil
+      values -> Enum.join(values, ", ")
     end
   end
 
