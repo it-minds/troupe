@@ -167,14 +167,8 @@ groups in PR #265.
 
 Found by the #269 fixer (PR #271), 2026-09-29.
 
-### D40 - The plane's scaler and drains (medium)
+### D40 - The plane's drains (medium)
 
-- `Scaler.write` (`apps/troupe_plane/lib/troupe/plane/fleet/scaler.ex`, `write/3`,
-  `scale/2`) writes the row before the cluster. If the cluster write fails, the next tick
-  sees the count it wants and never sends it again, and nothing applies a profile again
-  on a timer: the cluster stays at the old count and waiting sessions can stall. In
-  `gitops` mode the plane's pass writes the count again every 15 s (PR #285), so this
-  holds for `direct` mode only.
 - A worker's `session.activate` doesn't refuse on a pod that is draining, so a session
   placed in the few seconds after SIGTERM isn't in the shutdown drain's list.
 - `Drain.pod` waits for its push for the drain's timeout plus 30 s, while the pod makes
@@ -235,14 +229,6 @@ Found by the chunk 9 fixers of slots D and E (PRs #262, #266), 2026-09-29.
   port a platform endpoint on a port other than 443 opens (the docs do).
 
 Found by the chunk 9 fixers, 2026-09-29.
-
-### D44 - Uninstalling the chart deletes its namespace and everything in it (medium)
-
-`charts/troupe/templates/namespace.yaml` renders the release's namespace without
-`helm.sh/resource-policy: keep`, so `helm uninstall troupe`, or a reinstall, deletes the
-namespace with everything else installed in it (for example an OpenBao put beside the
-plane, as older install guides suggested). Found by the chunk 10 fixer of the deployment
-repository, 2026-09-30.
 
 ### D45 - Small leftovers from the 0.7.0 work (low)
 

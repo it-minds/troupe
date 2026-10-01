@@ -1,5 +1,13 @@
+{{- if .Values.createNamespace }}
+# Kept when the release goes: `helm uninstall`, a reinstall, or a GitOps controller's
+# remediation that uninstalls would otherwise delete the namespace and everything in it,
+# whoever put it there (an OpenBao beside the plane, the Secrets the chart expects, volume
+# claims). Removing it is a deliberate `kubectl delete namespace`.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: {{ .Values.namespace }}
   labels: {{- include "troupe.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+{{- end }}
