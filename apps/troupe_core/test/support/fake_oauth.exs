@@ -150,35 +150,10 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
 
     defp route(%{method: "GET", path: "/tenant/authorize", query: query}, agent) do
       params = URI.decode_query(query || "")
-      state = Agent.get(agent, & &1)
-      redirect = params["redirect_uri"]
 
-      cond do
-        params["client_id"] != @client_id ->
-          text(400, "unknown client")
-
-        params["response_type"] != "code" or params["code_challenge_method"] != "S256" or
-            params["code_challenge"] in [nil, ""] ->
-          text(400, "PKCE with S256 is required")
-
-        not String.starts_with?(redirect || "", "http://127.0.0.1:") and
-            not String.starts_with?(redirect || "", "http://localhost:") ->
-          text(400, "the redirect is not a loopback one")
-
-        state.require_resource and params["resource"] != state.base <> "/mcp" ->
-          text(400, "the resource is not this server")
-
-        state.deny ->
-          found(redirect, %{
-            "error" => "access_denied",
-            "error_description" => "the person said no",
-            "state" => params["state"]
-          })
-
-        true ->
-          code = "code-" <> Integer.to_string(System.unique_integer([:positive]))
-          Agent.update(agent, &put_in(&1, [:codes, code], params))
-          found(redirect, %{"code" => code, "state" => params["state"]})
+      case authorize_refusal(params, Agent.get(agent, & &1)) do
+        nil -> grant(params, agent)
+        refusal -> refusal
       end
     end
 
@@ -208,6 +183,43 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
 
     defp route(_request, _agent), do: text(404, "not here")
 
+    # Why the authorization endpoint turns a request away, or nil.
+    defp authorize_refusal(params, state) do
+      cond do
+        params["client_id"] != @client_id -> text(400, "unknown client")
+        not pkce?(params) -> text(400, "PKCE with S256 is required")
+        not loopback?(params["redirect_uri"]) -> text(400, "the redirect is not a loopback one")
+        not resource?(params, state) -> text(400, "the resource is not this server")
+        true -> nil
+      end
+    end
+
+    defp pkce?(params) do
+      params["response_type"] == "code" and params["code_challenge_method"] == "S256" and
+        params["code_challenge"] not in [nil, ""]
+    end
+
+    defp loopback?(redirect),
+      do: String.starts_with?(redirect || "", ["http://127.0.0.1:", "http://localhost:"])
+
+    defp resource?(params, state),
+      do: not state.require_resource or params["resource"] == state.base <> "/mcp"
+
+    # The person's answer, sent straight back to the redirect: a refusal, or a code.
+    defp grant(params, agent) do
+      if Agent.get(agent, & &1.deny) do
+        found(params["redirect_uri"], %{
+          "error" => "access_denied",
+          "error_description" => "the person said no",
+          "state" => params["state"]
+        })
+      else
+        code = "code-" <> Integer.to_string(System.unique_integer([:positive]))
+        Agent.update(agent, &put_in(&1, [:codes, code], params))
+        found(params["redirect_uri"], %{"code" => code, "state" => params["state"]})
+      end
+    end
+
     defp redeem(form, agent) do
       state = Agent.get(agent, & &1)
 
@@ -218,30 +230,37 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
         {issued, codes} ->
           Agent.update(agent, &%{&1 | codes: codes})
 
-          challenge =
-            :sha256
-            |> :crypto.hash(form["code_verifier"] || "")
-            |> Base.url_encode64(padding: false)
-
-          cond do
-            challenge != issued["code_challenge"] ->
-              json(400, %{
-                "error" => "invalid_grant",
-                "error_description" => "the verifier does not match"
-              })
-
-            form["redirect_uri"] != issued["redirect_uri"] or form["client_id"] != @client_id ->
-              json(400, %{
-                "error" => "invalid_grant",
-                "error_description" => "not the request it was issued for"
-              })
-
-            state.require_resource and form["resource"] != state.base <> "/mcp" ->
-              json(400, %{"error" => "invalid_target"})
-
-            true ->
-              json(200, issue(agent, id_token: true))
+          case redeem_refusal(form, issued, state) do
+            nil -> json(200, issue(agent, id_token: true))
+            refusal -> refusal
           end
+      end
+    end
+
+    # Why the token endpoint will not redeem a code, or nil: the verifier, the request it
+    # was issued for, and the resource are all checked.
+    defp redeem_refusal(form, issued, state) do
+      challenge =
+        :sha256 |> :crypto.hash(form["code_verifier"] || "") |> Base.url_encode64(padding: false)
+
+      cond do
+        challenge != issued["code_challenge"] ->
+          json(400, %{
+            "error" => "invalid_grant",
+            "error_description" => "the verifier does not match"
+          })
+
+        form["redirect_uri"] != issued["redirect_uri"] or form["client_id"] != @client_id ->
+          json(400, %{
+            "error" => "invalid_grant",
+            "error_description" => "not the request it was issued for"
+          })
+
+        not resource?(form, state) ->
+          json(400, %{"error" => "invalid_target"})
+
+        true ->
+          nil
       end
     end
 
