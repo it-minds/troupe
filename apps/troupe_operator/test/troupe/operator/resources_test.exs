@@ -963,6 +963,121 @@ defmodule Troupe.Operator.ResourcesTest do
     end
   end
 
+  # The profile's own identity at a server its bundle calls with client credentials
+  # (Decision 747): no Secret, and a file the kubelet replaces in place.
+  describe "MCP identities" do
+    setup %{policy: policy, settings: settings} do
+      identity = %{
+        "server" => "jira",
+        "clientId" => "client-dev",
+        "scope" => "api://jira/.default",
+        "tokenUrl" => "https://login.internal.test/token",
+        "transitKey" => "troupe-w-dev.jira",
+        "keyVersion" => 2,
+        "certificateThumbprint" => String.duplicate("A", 43)
+      }
+
+      server = %{
+        "name" => "jira",
+        "url" => "https://mcp.internal.test/jira",
+        "credentialMode" => "client_credentials"
+      }
+
+      resources =
+        [mcpServers: [server], mcpIdentities: [identity]]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, settings)
+
+      %{resources: resources, identity: identity}
+    end
+
+    test "reach the pod as a file from a ConfigMap, which holds nothing secret", context do
+      config_map = find(context.resources, "ConfigMap", Names.mcp_identities())
+
+      assert [entry] = Jason.decode!(config_map["data"]["identities.json"])
+      assert entry == Map.put(context.identity, "algorithm", "RS256")
+
+      pod = pod_spec(context.resources)
+      worker = container(context.resources)
+
+      volume = %{"name" => "mcp-identities", "configMap" => %{"name" => "troupe-mcp-identities"}}
+      assert volume in pod["volumes"]
+
+      # The directory, not the file: a `subPath` mount is never updated, and the point is
+      # that a rotation reaches a running pod.
+      mount = %{
+        "name" => "mcp-identities",
+        "mountPath" => "/etc/troupe/mcp-identities",
+        "readOnly" => true
+      }
+
+      assert mount in worker["volumeMounts"]
+      refute Enum.any?(worker["volumeMounts"], &Map.has_key?(&1, "subPath"))
+
+      path = %{
+        "name" => "TROUPE_MCP_IDENTITIES_PATH",
+        "value" => "/etc/troupe/mcp-identities/identities.json"
+      }
+
+      assert path in worker["env"]
+    end
+
+    test "the server is marked, and has no Secret and no variable", context do
+      env = container(context.resources)["env"]
+
+      assert [%{"name" => "jira", "credential_mode" => "client_credentials"} = server] =
+               Jason.decode!(Enum.find(env, &(&1["name"] == "TROUPE_MCP_SERVERS"))["value"])
+
+      refute Map.has_key?(server, "credential_ref")
+      refute Enum.find(env, &(&1["name"] == "TROUPE_MCP_JIRA_TOKEN"))
+    end
+
+    test "a change of identity changes the ConfigMap and not the pod template", context do
+      rotated =
+        [
+          mcpServers: [
+            %{
+              "name" => "jira",
+              "url" => "https://mcp.internal.test/jira",
+              "credentialMode" => "client_credentials"
+            }
+          ],
+          mcpIdentities: [
+            Map.merge(context.identity, %{
+              "keyVersion" => 3,
+              "certificateThumbprint" => String.duplicate("B", 43)
+            })
+          ]
+        ]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(context.policy, context.settings)
+
+      template = &get_in(find(&1, "StatefulSet", "troupe-w-dev"), ["spec", "template"])
+      config_map = &find(&1, "ConfigMap", Names.mcp_identities())
+
+      assert template.(rotated) == template.(context.resources)
+      refute config_map.(rotated) == config_map.(context.resources)
+    end
+
+    test "the token endpoint is egress", context do
+      profile = Profile.from_resource(profile(mcpIdentities: [context.identity]))
+      assert "login.internal.test" in Profile.egress_destinations(profile)
+    end
+
+    test "a profile without identities has no ConfigMap, volume or variable", context do
+      resources =
+        profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(context.policy, context.settings)
+
+      refute find(resources, "ConfigMap", Names.mcp_identities())
+      refute Enum.any?(pod_spec(resources)["volumes"], &(&1["name"] == "mcp-identities"))
+      refute Enum.find(container(resources)["env"], &(&1["name"] == "TROUPE_MCP_IDENTITIES_PATH"))
+    end
+  end
+
   # A gateway streaming a response says nothing of its cost, and a pod has no catalog, so
   # without these a profile's models cost nothing on the ledger (#160, Decision 689).
   describe "model prices" do

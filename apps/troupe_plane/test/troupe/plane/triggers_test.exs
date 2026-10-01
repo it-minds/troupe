@@ -14,6 +14,22 @@ defmodule Troupe.Plane.TriggersTest do
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.{FakePod, Harness, Identity, Repo, Sessions, Triggers}
   alias Troupe.Plane.Triggers.{Cron, Revision, Scheduler, Template}
+  alias Troupe.Plane.Web.Live.Status
+
+  defmodule Receiver do
+    @moduledoc false
+    @behaviour Plug
+
+    @impl Plug
+    def init(test), do: test
+
+    @impl Plug
+    def call(conn, test) do
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(test, {:notified, Jason.decode!(body)})
+      Plug.Conn.send_resp(conn, 200, "")
+    end
+  end
 
   @moduletag timeout: 60_000
 
@@ -575,9 +591,160 @@ defmodule Troupe.Plane.TriggersTest do
     end
   end
 
+  describe "a run whose turn the harness stopped" do
+    setup do
+      # Everything the deployment allows, so the notification is refused only for what its
+      # target is, and the target here is not loopback (Decision 460).
+      Application.put_env(:troupe_plane, :egress_allowed, fn _host -> true end)
+      on_exit(fn -> Application.delete_env(:troupe_plane, :egress_allowed) end)
+      %{url: receiver()}
+    end
+
+    # The failure guard stopped it (Decision 687): the root rests, which on its own read as
+    # a turn that had done its work, a run still `running` and a target told nothing.
+    test "is failed, says why on the session's row, is posted as failed, and holds no place under the cap",
+         context do
+      pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      lead = person("lead@example.test", ["engineering"])
+
+      trigger =
+        trigger!(context, %{
+          "name" => "nightly",
+          "concurrency" => 1,
+          "notify" => [lead.subject],
+          "notify_url" => context.url
+        })
+
+      assert {:ok, first} = Triggers.fire(trigger, "schedule", "cron:1", %{}, "scheduler")
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      session_id = first.session.id
+
+      report(pod, "session.status", %{
+        "session_id" => session_id,
+        "epoch" => first.session.epoch,
+        "status" => "idle",
+        "done_reason" => nil,
+        "failed_reason" => "tool_failures",
+        "pending_approvals" => 0,
+        "pending_questions" => 0,
+        "cost_micros" => 900
+      })
+
+      assert_receive {:notified, posted}, 5_000
+
+      assert %{
+               "state" => "failed",
+               "failed_reason" => "tool_failures",
+               "session_id" => ^session_id
+             } = posted
+
+      assert [{run, _trigger, session}] = Triggers.runs(context.team, trigger: "nightly")
+      assert Triggers.state_of(run, session) == "failed"
+
+      assert %{"state" => "failed", "failed_reason" => "tool_failures"} =
+               Triggers.run_json(run, session)
+
+      assert {:ok, %{"sessions" => [row]}} =
+               Harness.call("sessions.list", %{"trigger" => "nightly"}, context(lead))
+
+      assert %{"status" => "idle", "failed_reason" => "tool_failures"} = row
+
+      # Over, so the next firing is a session rather than a run skipped for the cap.
+      assert {:ok, second} = Triggers.fire(trigger, "schedule", "cron:2", %{}, "scheduler")
+      assert second.run.state == "created"
+      assert_receive {:pushed, "session.activate", _}, 5_000
+    end
+
+    # A root that kept crashing (Decision 727) ends its turn and its session: asleep, the
+    # run read `created`, as though it had never started.
+    test "is failed when the root kept crashing and the session went to sleep on it", context do
+      pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      trigger = trigger!(context, %{"name" => "nightly", "notify_url" => context.url})
+
+      assert {:ok, fired} = Triggers.fire(trigger, "schedule", "cron:1", %{}, "scheduler")
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      session_id = fired.session.id
+
+      lifecycle = %{
+        "session_id" => session_id,
+        "epoch" => fired.session.epoch,
+        "status" => "idle",
+        "done_reason" => nil,
+        "failed_reason" => "agent_failed",
+        "pending_approvals" => 0,
+        "pending_questions" => 0,
+        "cost_micros" => 300
+      }
+
+      report(pod, "session.status", lifecycle)
+      assert_receive {:notified, %{"state" => "failed", "failed_reason" => "agent_failed"}}, 5_000
+
+      report(
+        pod,
+        "session.dormant",
+        Map.merge(lifecycle, %{"last_seq" => 18, "reason" => "dormant"})
+      )
+
+      eventually(fn -> Sessions.get(session_id).state == "dormant" end)
+
+      assert [{run, _trigger, session}] = Triggers.runs(context.team, trigger: "nightly")
+      assert session.failed_reason == "agent_failed"
+      assert Triggers.state_of(run, session) == "failed"
+      assert Status.from_session(session) == :broken
+
+      # Told once: the dormancy report is the row's last word, not a second ending.
+      refute_receive {:notified, _}, 300
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp context(user), do: %{user: user, platform_admin?: false}
+
+  # What a pod says over its control connection: a notification on the fake pod's own
+  # socket, which is how a worker's report arrives.
+  defp report(pod, method, params) do
+    notification = %{"jsonrpc" => "2.0", "method" => method, "params" => params}
+    :ok = :gen_tcp.send(pod.socket, [Jason.encode!(notification), ?\n])
+  end
+
+  defp eventually(fun, tries \\ 100) do
+    cond do
+      fun.() -> :ok
+      tries == 0 -> flunk("the condition never held")
+      true -> Process.sleep(50) && eventually(fun, tries - 1)
+    end
+  end
+
+  # A trigger's target on an address of this machine's that is not loopback, which the
+  # plane will not post to.
+  defp receiver do
+    address = outward_address()
+
+    {:ok, server} =
+      start_supervised(
+        {Bandit,
+         plug: {Receiver, self()}, scheme: :http, ip: address, port: 0, startup_log: false}
+      )
+
+    {:ok, {_address, port}} = ThousandIsland.listener_info(server)
+    "http://#{:inet.ntoa(address)}:#{port}/runs"
+  end
+
+  defp outward_address do
+    {:ok, interfaces} = :inet.getifaddrs()
+
+    Enum.find_value(interfaces, fn {_name, options} ->
+      flags = Keyword.get(options, :flags, [])
+
+      if :up in flags and :loopback not in flags,
+        do:
+          Enum.find(
+            Keyword.get_values(options, :addr),
+            &match?({a, _b, _c, _d} when a != 169, &1)
+          )
+    end) || flunk("no address on this machine but loopback, which a notification may not reach")
+  end
 
   defp trigger!(context, attrs) do
     base = %{

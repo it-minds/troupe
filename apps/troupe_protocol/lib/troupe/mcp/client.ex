@@ -8,6 +8,18 @@ defmodule Troupe.MCP.Client do
   and tool calls are both one round trip, and the parts of MCP that stream are the parts
   Troupe does not use.
 
+  **Before the first request to a server, the handshake** (Decision 746). The MCP
+  lifecycle opens with `initialize` and `notifications/initialized`, and a server that
+  keeps state per client answers the first with an `Mcp-Session-Id` it then wants on every
+  request, refusing one without it. So the first call to a server sends both, and what the
+  server answered — its session id, if it gave one, and the protocol version it chose,
+  which every request after carries — is kept in the caller's `Troupe.MCP.Sessions`, under
+  the server and the credential that went out. A server that gives no session id keeps
+  none, and is called as before once the handshake is done. A `404` to a request that
+  carried a session id is the server having forgotten it: one new handshake, and the
+  request once more. A call with nowhere to keep a session (a server tried before it is
+  kept) opens one for that request and ends it after.
+
   Every request carries the server's service credential and nothing about the session
   except metadata for the server's own logs. That separation is the whole point of this
   module being the only place that talks to an MCP server.
@@ -17,7 +29,7 @@ defmodule Troupe.MCP.Client do
   credential it is and where the process runs, not what is sent.
   """
 
-  alias Troupe.MCP.Server
+  alias Troupe.MCP.{Server, Sessions}
 
   @protocol_version "2025-06-18"
 
@@ -45,48 +57,192 @@ defmodule Troupe.MCP.Client do
     request(server, "tools/call", params)
   end
 
-  @doc "The handshake, for a health check or a first connection."
+  @doc """
+  `initialize` alone, keeping nothing: what a server answers before any session, which
+  is where a sign-in's discovery starts (Decision 741). A session it issues anyway is
+  ended at once.
+  """
   @spec initialize(Server.t()) :: {:ok, map()} | {:error, term()}
   def initialize(%Server{} = server) do
-    request(server, "initialize", %{
+    headers = Server.headers(server)
+    response = post(server, headers, nil, message("initialize", hello()))
+
+    with {:ok, result} <- answer(response) do
+      end_session(%{opened(server, headers, response, result) | ends_with: headers})
+      {:ok, result}
+    end
+  end
+
+  @doc """
+  End a session at its server, with a `DELETE`. Best-effort: a server may refuse it
+  (`405`), and whatever it answers, the session is not used again.
+  """
+  @spec end_session(Sessions.session()) :: :ok
+  def end_session(%{id: id, url: url, version: version, ends_with: headers})
+      when is_binary(id) and is_list(headers) do
+    _ =
+      Req.request(
+        method: :delete,
+        url: url,
+        headers: [{"mcp-session-id", id}, {"mcp-protocol-version", version}] ++ headers,
+        receive_timeout: 3_000,
+        connect_options: [timeout: 3_000],
+        retry: false
+      )
+
+    :ok
+  end
+
+  def end_session(_session), do: :ok
+
+  # -- the session ------------------------------------------------------------
+
+  # The headers are read once per request, so the session it goes in and the request
+  # itself carry the same credential.
+  defp request(server, method, params) do
+    headers = Server.headers(server)
+    message = message(method, params)
+    key = Sessions.key(server.url, headers)
+
+    with {:ok, session, held} <- session(server, headers, key) do
+      case answer(post(server, headers, session, message)) do
+        {:error, {:unexpected_status, 404, _body}} when is_binary(session.id) ->
+          Sessions.forget(server.sessions, key, session)
+          again(server, headers, key, message)
+
+        answer ->
+          done(answer, session, held)
+      end
+    end
+  end
+
+  # Once, not in a loop: a server that forgets the session it has just issued will not
+  # keep the next one either.
+  defp again(server, headers, key, message) do
+    with {:ok, session, held} <- session(server, headers, key) do
+      server |> post(headers, session, message) |> answer() |> done(session, held)
+    end
+  end
+
+  # The session kept for this server and credential, or a new one: kept, or used for this
+  # one request when there is nowhere to keep it. Two calls that open one at once both
+  # finish the handshake; the one whose session was not kept ends it.
+  defp session(server, headers, key) do
+    case Sessions.lookup(server.sessions, key) do
+      %{} = session -> {:ok, session, :kept}
+      nil -> open(server, headers, key)
+    end
+  end
+
+  defp open(server, headers, key) do
+    with {:ok, session} <- handshake(server, headers) do
+      case Sessions.keep(server.sessions, key, session) do
+        :kept ->
+          {:ok, session, :kept}
+
+        {:taken, theirs} ->
+          end_session(%{session | ends_with: headers})
+          {:ok, theirs, :kept}
+
+        :not_kept ->
+          {:ok, %{session | ends_with: headers}, :once}
+      end
+    end
+  end
+
+  defp done(answer, session, :once) do
+    end_session(session)
+    answer
+  end
+
+  defp done(answer, _session, :kept), do: answer
+
+  defp handshake(server, headers) do
+    response = post(server, headers, nil, message("initialize", hello()))
+
+    with {:ok, result} <- answer(response) do
+      session = opened(server, headers, response, result)
+      # What it answers is not waited on for anything: a server that wants the session
+      # it issued refuses the next request if this did not count, and says so there.
+      initialized = %{"jsonrpc" => "2.0", "method" => "notifications/initialized"}
+      _ = post(server, headers, session, initialized)
+      {:ok, session}
+    end
+  end
+
+  defp opened(server, headers, {:ok, response}, result) do
+    %{
+      id: session_id(response),
+      version: negotiated(result),
+      url: server.url,
+      # A person's credential on a pod is held for as long as a call takes, and not kept
+      # here for a `DELETE` later (`Troupe.MCP.Sessions`).
+      ends_with: if(server.credential_mode == :person and headers != [], do: nil, else: headers)
+    }
+  end
+
+  defp session_id(response) do
+    case Req.Response.get_header(response, "mcp-session-id") do
+      [id | _] when id != "" -> id
+      _none -> nil
+    end
+  end
+
+  # The version the server chose is the one every request after carries; a server that
+  # names none is taken to speak the one asked for.
+  defp negotiated(%{"protocolVersion" => version}) when is_binary(version) and version != "",
+    do: version
+
+  defp negotiated(_result), do: @protocol_version
+
+  defp hello do
+    %{
       "protocolVersion" => @protocol_version,
       "capabilities" => %{},
       "clientInfo" => %{"name" => "troupe", "version" => version()}
-    })
+    }
   end
 
   # -- transport --------------------------------------------------------------
 
-  defp request(server, method, params) do
-    body = %{
+  defp message(method, params) do
+    %{
       "jsonrpc" => "2.0",
       "id" => System.unique_integer([:positive, :monotonic]),
       "method" => method,
       "params" => params
     }
+  end
 
-    options = [
+  defp post(server, headers, session, body) do
+    Req.request(
       method: :post,
       url: server.url,
       json: body,
       headers:
         [
           {"accept", "application/json, text/event-stream"},
-          {"mcp-protocol-version", @protocol_version}
-        ] ++ Server.headers(server),
+          {"mcp-protocol-version", if(session, do: session.version, else: @protocol_version)}
+        ] ++ session_header(session) ++ headers,
       receive_timeout: server.timeout_ms,
       retry: false
-    ]
-
-    # A `401` comes back with what the server wants instead, its `WWW-Authenticate`,
-    # which is where a person's sign-in starts (Decision 741).
-    case Req.request(options) do
-      {:ok, %{status: status} = response} when status in 200..299 -> decode(response)
-      {:ok, %{status: 401} = response} -> {:error, {:unauthorized, challenge(response)}}
-      {:ok, %{status: status, body: body}} -> {:error, {:unexpected_status, status, body}}
-      {:error, reason} -> {:error, reason}
-    end
+    )
   end
+
+  defp session_header(%{id: id}) when is_binary(id), do: [{"mcp-session-id", id}]
+  defp session_header(_none), do: []
+
+  # A `401` comes back with what the server wants instead, its `WWW-Authenticate`,
+  # which is where a person's sign-in starts (Decision 741).
+  defp answer({:ok, %{status: status} = response}) when status in 200..299, do: decode(response)
+
+  defp answer({:ok, %{status: 401} = response}),
+    do: {:error, {:unauthorized, challenge(response)}}
+
+  defp answer({:ok, %{status: status, body: body}}),
+    do: {:error, {:unexpected_status, status, body}}
+
+  defp answer({:error, reason}), do: {:error, reason}
 
   defp challenge(response) do
     case Req.Response.get_header(response, "www-authenticate") do

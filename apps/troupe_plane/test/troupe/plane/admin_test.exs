@@ -669,6 +669,52 @@ defmodule Troupe.Plane.AdminTest do
       assert error.data.reason =~ "spec.configBundleChannel"
     end
 
+    # Who the profile is at a server its bundle calls with client credentials (Decision
+    # 747): the owner's to write, and nothing in it secret, so the plane keeps it as it keeps
+    # the rest of the spec and says what is missing rather than refusing.
+    test "its identities are kept, and what they lack is said", context do
+      {:ok, _} =
+        Bundles.publish(
+          "stable",
+          %{
+            "schema" => 1,
+            "mcp_servers" => [
+              %{
+                "name" => "jira",
+                "url" => "https://mcp.jira.example/mcp",
+                "credential_mode" => "client_credentials"
+              }
+            ]
+          },
+          announce: false
+        )
+
+      incomplete = %{
+        "server" => "jira",
+        "clientId" => "client-dev",
+        "certificateThumbprint" => String.duplicate("A", 43)
+      }
+
+      dev = %{
+        "name" => "identity-dev",
+        "image" => "ghcr.io/troupe/worker:1",
+        "spec" => %{"mcpIdentities" => [incomplete]}
+      }
+
+      assert {:ok, %{identity_problems: [problem]}} = Admin.profile_put(context.root, dev)
+      assert problem =~ "mcp server jira: the identity has no transitKey"
+
+      complete = Map.put(incomplete, "transitKey", "troupe-w-identity-dev.jira")
+
+      assert {:ok, %{identity_problems: []}} =
+               Admin.profile_put(context.root, put_in(dev, ["spec", "mcpIdentities"], [complete]))
+
+      assert {:ok, %{spec: spec, identity_problems: []}} =
+               Admin.profile_get(context.root, "identity-dev")
+
+      assert spec["mcpIdentities"] == [complete]
+    end
+
     # Its workers are machines somebody registers; a `WorkerProfile` would have the
     # operator run pods for it as well.
     test "one whose workers are machines is not written to the cluster", context do

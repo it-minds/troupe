@@ -518,9 +518,11 @@ defmodule Troupe.Plane.Sessions do
 
   One conditional statement, fenced on the epoch: a report from a pod that was presumed
   lost and is still running an older epoch is dropped, because the session has moved on
-  and its status is whatever the new pod says. `done_reason` is the one field where a
-  reported nil is the answer — a session that starts a new turn has no done reason any
-  more — so it is set whenever the report carries the key, unlike the counters.
+  and its status is whatever the new pod says. `done_reason` and `failed_reason` are the
+  fields where a reported nil is the answer — a session that starts a new turn has no
+  done reason any more, and its last turn's failure is not its news — so they are set
+  whenever the report carries the key, unlike the counters. A pod from before
+  `failed_reason` never sends it, and the column keeps what it had.
   """
   @spec put_status(String.t(), map()) :: {:ok, non_neg_integer()} | {:error, :stale_epoch}
   def put_status(session_id, report) do
@@ -532,11 +534,8 @@ defmodule Troupe.Plane.Sessions do
       |> put_status_field(:pending_approvals, report["pending_approvals"])
       |> put_status_field(:pending_questions, report["pending_questions"])
       |> put_status_field(:cost_micros, report["cost_micros"])
-      |> then(fn set ->
-        if Map.has_key?(report, "done_reason"),
-          do: Keyword.put(set, :done_reason, report["done_reason"]),
-          else: set
-      end)
+      |> put_reason(:done_reason, report)
+      |> put_reason(:failed_reason, report)
 
     query = from(s in Session, where: s.id == ^session_id)
 
@@ -562,6 +561,14 @@ defmodule Troupe.Plane.Sessions do
   end
 
   defp put_status_field(set, _key, _value), do: set
+
+  # Whenever the report carries the key, nil included.
+  defp put_reason(set, key, report) do
+    case Map.fetch(report, Atom.to_string(key)) do
+      {:ok, reason} when is_binary(reason) or is_nil(reason) -> Keyword.put(set, key, reason)
+      _absent_or_odd -> set
+    end
+  end
 
   @doc """
   Move the ledger's cursor through a session's log, and say where it now is.

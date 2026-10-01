@@ -257,13 +257,23 @@ spec:
               }
               POLICY
 
+              # A profile's own identity at its MCP servers (Decision 747): a pod signs
+              # with the transit keys named after its own namespace, `<namespace>.<name>`,
+              # and no other. `Troupe.KMS.Policy.mcp_identity/2` renders the same string.
+              ACCESSOR=$(bao read -field=accessor sys/auth/kubernetes)
+              bao policy write troupe-worker-mcp-identity - <<POLICY
+              path "transit/sign/{{identity.entity.aliases.${ACCESSOR}.metadata.service_account_namespace}}.*" {
+                capabilities = ["update"]
+              }
+              POLICY
+
               # `audience` matches what the operator projects, so a token minted for the
               # plane is refused here and vice versa.
               bao write auth/kubernetes/role/troupe-worker \
                 bound_service_account_names=troupe-worker \
                 bound_service_account_namespaces='*' \
                 audience=troupe-kms \
-                policies=troupe-worker-dev \
+                policies=troupe-worker-dev,troupe-worker-mcp-identity \
                 ttl=1h
 
               bao write auth/kubernetes/role/troupe-plane \

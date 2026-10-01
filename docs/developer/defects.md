@@ -252,18 +252,6 @@ daemon restarts, and a headless run ends 1 after 60 s, though the printer says a
 that comes back within a minute costs a script nothing. Read in the code; the desktop app's
 half was fixed for #305. Found by the chunk 11 fixer of slot C1 (PR #306), 2026-10-01.
 
-### D47 - On a plane, a turn the harness stopped reads as a finished one (medium, unconfirmed)
-
-The worker's lifecycle (`apps/troupe_worker/lib/troupe/worker/session/manager.ex`,
-`observe/2`, `status_fields/1`) never carries `turn_ended`'s reason, so a turn stopped by
-the failure guard or ended `agent_failed` leaves the plane's row `idle` with no reason. The
-plane's own readers of the outcome see a plain completed turn: the status page
-(`web/live/status.ex`), a trigger run's outcome (`triggers.ex`), `notify_url` posts
-(`notify.ex`), the review queue, and team sessions' rows in the desktop app. The manager
-also may not notice the session tree stopping after `agent_failed`. A2A reads the log since
-PR #306 and is not affected. Found by the chunk 11 fixers of slots C1 and C2 (PRs #306,
-#309), 2026-10-01.
-
 ### D48 - A dormant session whose log its root can't replay can never be woken (medium)
 
 When the root's first start fails inside the session's own start (a log the replay can't

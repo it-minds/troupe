@@ -102,6 +102,7 @@ Worker pods are created by the operator, so the chart sets none of these.
 | `TROUPE_WORKERS_DOMAIN`, `_SCHEME`, `_PORT` | unset, `wss`, unset | the advertised endpoint `<scheme>://<ordinal>-<profile>.<domain>[:port]/v1/socket` | yes |
 | `TROUPE_SESSIONS_PER_POD` | `4` | capacity claimed at enrolment | yes |
 | `TROUPE_MCP_SERVERS` | `[]` | JSON list of the profile's MCP servers | yes |
+| `TROUPE_MCP_IDENTITIES_PATH` | none | the file holding the profile's `mcpIdentities`, read again whenever a token is asked for ([profiles](profiles-and-policy.md#calling-an-mcp-server-as-the-profile)) | yes, when there are any |
 | `TROUPE_KMS_TOKEN_PATH` | `/var/run/secrets/troupe/kms-token` | projected token (audience `troupe-kms`) for OpenBao | path matches |
 | `TROUPE_TOKEN_PATH`, `TROUPE_HOST_SECRET` | unset | a registered machine's enrolment secret, from a file or directly ([single-machine.md](single-machine.md)) | no |
 | `TROUPE_BAO_ADDR`, `TROUPE_BAO_TOKEN`, `TROUPE_BAO_MOUNT` | as the plane, unset, `secret` | KV v2 for session keys; without a token, Kubernetes auth as `troupe-worker` | address only |

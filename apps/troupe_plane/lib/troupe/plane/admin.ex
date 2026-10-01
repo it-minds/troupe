@@ -280,6 +280,9 @@ defmodule Troupe.Plane.Admin do
          spec: profile.spec,
          policy: Provision.verdict(profile),
          bundle: bundle_state(profile),
+         # A server the bundle calls as the profile's own identity that the profile gives
+         # none, or an incomplete one (Decision 747): reported, like a missing Secret.
+         identity_problems: Provision.identity_problems(profile),
          gitops: gitops_state(profile, gitops_reports())
        }}
     end
@@ -313,7 +316,8 @@ defmodule Troupe.Plane.Admin do
            %{
              profile: profile_summary(profile),
              changes: changes,
-             provisioning: provision(profile, actor)
+             provisioning: provision(profile, actor),
+             identity_problems: Provision.identity_problems(profile)
            }}
 
         {:error, changeset} ->

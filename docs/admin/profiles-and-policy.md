@@ -48,6 +48,7 @@ Other `spec` fields:
 | `egress.fqdns`, `egress.gitHosts` | extra hosts the pods may reach; each must match a policy pattern |
 | `configBundleChannel` | which bundle channel the profile follows (`stable`) |
 | `orgMount` | mount the policy's org volume at `/mnt/org`, always read-only |
+| `mcpIdentities` | who the profile is at each MCP server its bundle calls with client credentials ([below](#calling-an-mcp-server-as-the-profile)). Yours to write, in direct and gitops mode alike; nothing in it is secret |
 | `mcpServers`, `teams` | **written by the plane** from the channel's bundle and from grants; do not set them |
 
 A profile's `provisioner` decides who makes its workers exist: `kubernetes` (the default,
@@ -55,6 +56,101 @@ the operator) or `ssh`, machines that register themselves ([single-machine.md](s
 An `ssh` profile has no pods: in `direct` mode the plane writes it no `WorkerProfile` and
 takes away one left from before, and in `gitops` mode, where the repository holds it as a
 `WorkerProfile` like any other, the plane writes `spec.replicas: 0` onto it.
+
+### Calling an MCP server as the profile
+
+Some MCP servers take machine callers only through OAuth client credentials, want the
+client to prove itself with a signed assertion (a private key JWT, RFC 7523) rather than a
+shared secret, and grant tools per client. For those, each profile gets its **own system
+identity**: its own client at the identity provider, with its own certificate and its own
+granted tools, so two profiles never share permissions (Decision 747). The bundle marks the
+server `"credential_mode": "client_credentials"`
+([bundles](bundles-and-triggers.md#1-config-bundles)); the profile says who it is there.
+
+```yaml
+spec:
+  mcpIdentities:
+    - server: jira                         # the bundle's name for the server
+      clientId: 00000000-0000-0000-0000-000000000000
+      scope: api://example-jira/.default   # optional
+      tokenUrl: https://login.example.com/tenant/oauth2/v2.0/token   # optional
+      transitKey: troupe-w-dev.jira        # <worker namespace>.<anything>
+      keyVersion: 1                        # optional; absent is the key's latest
+      certificateThumbprint: qIAESDPaFvTg7nQnau6q6AzzzpMg6PElJvINleJ0N2s
+      algorithm: RS256                     # or PS256
+```
+
+A worker asks the token endpoint for a token with `grant_type=client_credentials`, the
+client id, the scope and an assertion whose `iss` and `sub` are the client, whose `aud` is
+the token endpoint, which lives five minutes and carries a unique `jti`, and whose header
+names the certificate in `x5t#S256`. The assertion is signed by **OpenBao transit**: the
+worker sends the signing input and gets the signature back, so the private key never
+leaves OpenBao, not even into the worker's memory. The token is kept in the worker, one per
+server, renewed a minute before it runs out (or at three quarters of its life, if that is
+shorter), asked for again once after a `401`, and sent as `Authorization: Bearer` on every
+call. It is never in a log, an error or the event log. Without `tokenUrl` the token
+endpoint is the one the server's authorization server publishes (its protected-resource
+metadata names the authorization server); `tokenUrl`'s host is egress the policy must
+allow, and one found in metadata must be in `egress.fqdns`.
+
+**Setting one up.**
+
+1. Make a key and a certificate for the profile's client (or have your PKI issue one), and
+   work out the thumbprint the profile names: base64url, without padding, of the SHA-256 of
+   the certificate in DER. The 64 hex digits `openssl x509 -fingerprint -sha256` prints are
+   taken too.
+
+   ```sh
+   openssl req -x509 -newkey rsa:2048 -nodes -keyout jira.key -out jira.crt \
+     -days 365 -subj "/CN=troupe-w-dev jira"
+   openssl x509 -in jira.crt -outform DER | openssl dgst -sha256 -binary \
+     | basenc --base64url | tr -d '='
+   ```
+
+2. Import the key into transit under a name that starts with the profile's worker
+   namespace and a dot, then delete every copy of `jira.key`. `bao transit import` wraps the
+   key for you; the key is not exportable from then on.
+
+   ```sh
+   openssl pkcs8 -topk8 -nocrypt -in jira.key -outform DER | base64 -w0 > jira.key.b64
+   bao transit import transit/keys/troupe-w-dev.jira @jira.key.b64 type=rsa-2048
+   shred -u jira.key jira.key.b64
+   ```
+
+3. Register `jira.crt` with the identity provider as the client's credential, and grant the
+   client the server's roles or scopes.
+
+4. Write the identity on the profile, with `keyVersion: 1` and the thumbprint. The pods
+   read it from a file (below) and use it from their next token; no restart.
+
+The pods need to be allowed to sign with the key. The policy `Troupe.KMS.Policy.mcp_identity/2`
+renders lets a pod sign with the keys named after its own namespace and with nothing else,
+the plane's session-token key included; attach it to the Kubernetes-auth role the pods log
+in with ([roles and permissions §8](roles-and-permissions.md#8-openbao-policies)).
+
+**Rotating.** Make the new key and certificate as in step 1, register the new certificate
+beside the old one, and import the key as the next version of the same transit key:
+
+```sh
+bao transit import-version transit/keys/troupe-w-dev.jira @jira-2.key.b64
+```
+
+Then change `keyVersion` and `certificateThumbprint` on the profile together, in one
+change. A worker signs with the pinned version until it reads the new pair, then gets its
+next token with the new key; there is no gap, because the identity provider holds both
+certificates. Remove the old certificate at the identity provider once the old tokens have
+run out, an hour later. With no `keyVersion` a worker signs with the latest version, so an
+import before the profile names the new thumbprint fails token requests in between.
+
+**What is reported.** A server the bundle marks `client_credentials` with no identity on
+the profile, or an identity without its `clientId` or `transitKey`, with a thumbprint that
+is not one, or with another algorithm, is reported rather than refused, as a missing Secret
+is: by the operator's `MCPIdentityMissing` condition and by the plane in
+`admin.profile.get` and `admin.profile.put`'s `identity_problems`. The pods start
+regardless and offer that server's tools once both halves are there. A worker that cannot
+get a token says which server and why: the token endpoint refused the client (with the
+provider's error), the transit key is not in OpenBao, the pod may not sign with it, or the
+server refused a tool the identity lacks.
 
 ## 2. What the operator creates
 
@@ -66,7 +162,10 @@ volume; a headless Service and one Service and Ingress per pod (host
 `<ordinal>-p.<workersDomain>`); a NetworkPolicy, and a `CiliumNetworkPolicy` when Cilium is
 available; a PodDisruptionBudget (`maxUnavailable: 1`); and a StatefulSet with
 `podManagementPolicy: Parallel`, `updateStrategy: OnDelete` and a `ReadWriteOnce` data
-volume per pod.
+volume per pod. A profile with `mcpIdentities` also gets the ConfigMap
+`troupe-mcp-identities`, mounted as a directory at `/etc/troupe/mcp-identities` and named
+in `TROUPE_MCP_IDENTITIES_PATH`: the kubelet replaces the file in place when the profile
+changes, so a new identity or a rotation reaches running pods without a new revision.
 
 The pod runs as non-root uid 1000 with seccomp `RuntimeDefault`, every capability dropped,
 `enableServiceLinks: false`, readiness `/health/ready` and liveness `/health/live`. A
@@ -86,12 +185,14 @@ objects that are no longer desired. Deleting a `WorkerProfile` deletes its names
 | `Ready` | every manifest applied; `False` with `PolicyViolation`, `NoPolicy` or `ApplyFailed` |
 | `PolicyViolation` | the profile exceeds the policy, or no policy could be read; **nothing is created** |
 | `SecretMissing` | a referenced Secret was not found in the worker namespace. The operator has no RBAC on Secrets, so do not rely on it |
+| `MCPIdentityMissing` | a server the bundle calls with client credentials has no identity in `mcpIdentities`, or its identity is incomplete; the message says which ([above](#calling-an-mcp-server-as-the-profile)) |
 | `UpgradePending` | the StatefulSet has a newer revision than the named pods run; each keeps its revision until the plane has drained it and the operator replaced it, and the message says how far each has got ([§3](#3-upgrades-and-drains)) |
 | `EgressByHostname` | the `CiliumNetworkPolicy` was written and applied, so a worker reaches its allowlist and the installation's own OpenBao and object store by name, and nothing else outside the cluster; `False` with `NoCilium` or `CiliumPolicyNotApplied` ([egress](#4-troupepolicy)) |
 | `EndpointUnreachable` | without Cilium, an endpoint the profile names is one its workers do not reach (`NoCilium`): the message names each and says what to do; `False` with `Reachable`, or `Cilium` where there is Cilium ([egress](#4-troupepolicy)) |
 
-`SecretMissing`, `UpgradePending`, `EgressByHostname` and `EndpointUnreachable` do not affect
-`Ready`. `kubectl -n troupe-system get wp` shows `Replicas`, `Ready`, `Violation`, `Age`.
+`SecretMissing`, `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname` and
+`EndpointUnreachable` do not affect `Ready`. `kubectl -n troupe-system get wp` shows
+`Replicas`, `Ready`, `Violation`, `Age`.
 
 ## 3. Upgrades and drains
 
@@ -371,7 +472,8 @@ scaler's), `spec.teams` (the grants', which stay in the plane's database) and
 plane's; a resource that sets one of the three is refused and names who sets it. Copied
 from `kubectl get -o yaml`, a resource also carries `metadata.managedFields`,
 `resourceVersion`, `uid`, `generation` and `creationTimestamp`; the export leaves those
-out too.
+out too. `spec.mcpIdentities` is the repository's like the rest of the spec, so git says
+which profile has which identity ([above](#calling-an-mcp-server-as-the-profile)).
 
 The policy is the chart's `policy.*` values, which are then the repository's already, or
 a `TroupePolicy` manifest in the repository with `policy.install: false`; the export gives
