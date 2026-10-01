@@ -52,6 +52,7 @@ defmodule Troupe.Config do
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
   alias Troupe.LLM.Endpoint
+  alias Troupe.MCP.OAuth
 
   require Logger
 
@@ -451,8 +452,17 @@ defmodule Troupe.Config do
         timeout_ms: entry["timeout_ms"] || 30_000
       }
 
-      {name, with_refusal(server, refused[name])}
+      {name, server |> with_oauth(name, entry["oauth"]) |> with_refusal(refused[name])}
     end)
+  end
+
+  # A server that wants the person signed in (Decision 741), read as `mcp.json`'s is.
+  defp with_oauth(server, name, oauth) do
+    case OAuth.config(oauth) do
+      nil -> server
+      {:ok, read} -> Map.put(server, :oauth, read)
+      {:error, why} -> Map.put(server, :refused, "#{name}: #{why}")
+    end
   end
 
   defp with_refusal(entry, nil), do: entry

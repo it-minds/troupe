@@ -782,13 +782,32 @@ defmodule Troupe.UI.TUI.View do
     }
 
     detail = %Paragraph{
-      text: mcp_detail(Enum.at(entries, state.mcp_cursor)),
+      text: mcp_detail(Enum.at(entries, state.mcp_cursor), Map.get(state, :mcp_sign_in)),
       wrap: true,
       block: %Block{title: mcp_detail_title(), borders: [:all]}
     }
 
     [{list, list_rect}, {detail, detail_rect}]
   end
+
+  defp sign_in_text(%{state: :signed_in, account: account}) when is_binary(account),
+    do: "signed in as #{account} — o signs out"
+
+  defp sign_in_text(%{state: :signed_in}), do: "signed in — o signs out"
+  defp sign_in_text(%{state: :signing_in}), do: "waiting for the browser"
+
+  defp sign_in_text(%{state: :expired, account: account}) when is_binary(account),
+    do: "run out for #{account} — s signs in again"
+
+  defp sign_in_text(%{state: :expired}), do: "run out — s signs in again"
+  defp sign_in_text(_signed_out), do: "not signed in — s signs in"
+
+  # The URL in full while the browser is out, for a person whose browser did not open:
+  # the daemon listens for the answer on this machine, so it is opened here.
+  defp sign_in_url(%{name: name}, %{state: :signing_in}, %{name: name, url: url}),
+    do: field("open", url)
+
+  defp sign_in_url(_server, _auth, _sign_in), do: nil
 
   defp mcp_warnings(%{mcp_page: %{warnings: [_ | _] = warnings}}),
     do: [""] ++ Enum.map(warnings, &("! " <> &1))
@@ -808,25 +827,42 @@ defmodule Troupe.UI.TUI.View do
   defp mcp_glyph(%{state: :stopped}), do: "○"
   defp mcp_glyph(%{state: :pending}), do: "?"
   defp mcp_glyph(%{state: :disabled}), do: "–"
+  defp mcp_glyph(%{state: :sign_in}), do: "→"
   defp mcp_glyph(_server), do: "·"
 
+  # A server that wants the person signed in (troupe-remote Decision 741) says so on
+  # its line, and what `s` does about it.
   defp mcp_summary(%{disabled?: true}), do: "disabled"
+  defp mcp_summary(%{auth: %{state: :signing_in}}), do: "signing in — finish in the browser, then r"
+  defp mcp_summary(%{state: :sign_in, auth: %{state: :expired}}), do: "sign in again — s"
+  defp mcp_summary(%{state: :sign_in}), do: "sign in — s"
   defp mcp_summary(%{state: nil}), do: "not in this session yet — c starts it"
+
+  defp mcp_summary(%{state: :ready, tools: tools, auth: %{state: :signed_in, account: account}})
+       when is_binary(account),
+       do: "#{length(tools)} tools · #{account}"
+
   defp mcp_summary(%{state: :ready, tools: tools}), do: "#{length(tools)} tools"
   defp mcp_summary(%{state: state}), do: to_string(state)
 
   defp mcp_detail_title,
-    do: " ↑↓ move · r reload · c check · d enable/disable · x remove · Esc back "
+    do:
+      " ↑↓ move · r reload · c check · s sign in · o sign out · d enable/disable · x remove · Esc back "
 
-  defp mcp_detail(nil), do: "Select a server or a skill to see where it comes from."
+  defp mcp_detail(nil, _sign_in), do: "Select a server or a skill to see where it comes from."
 
-  defp mcp_detail({:server, server}) do
+  defp mcp_detail({:server, server}, sign_in) do
+    auth = Map.get(server, :auth)
+
     [
       field("name", server.name),
       field("layer", server.layer),
       field("source", server.source || "(this session)"),
       transport_field(server),
       field("state", server.state || "not started in this session"),
+      if(auth, do: field("sign-in", sign_in_text(auth))),
+      if(auth && auth.error, do: field("last sign-in", auth.error)),
+      sign_in_url(server, auth, sign_in),
       field("tools", Enum.join(server.tools, ", ")),
       if(server.error, do: field("error", server.error)),
       if(server.trust, do: field("trust", server.trust)),
@@ -836,7 +872,7 @@ defmodule Troupe.UI.TUI.View do
     |> Enum.join("\n")
   end
 
-  defp mcp_detail({:skill, skill}) do
+  defp mcp_detail({:skill, skill}, _sign_in) do
     [
       field("name", skill.name),
       field("layer", skill.layer),

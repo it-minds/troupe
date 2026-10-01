@@ -78,11 +78,11 @@ defmodule Troupe.MCP.Import do
   One server's entry as Troupe stores it, or why it cannot be.
 
   `command` with `args`, `env` and a working directory (`cwd` as VS Code and Cursor
-  spell it, `cd` as Troupe does), or `url`; `disabled` as Cursor and Cline write it;
-  `permission` and `timeout_ms` as Troupe does. `type` and `headers` are read and
-  dropped: the transport follows from which of `command` and `url` is set, and a header
-  is a credential this slice does not carry. With `partial: true` an entry may name
-  neither, and one that names both is still refused.
+  spell it, `cd` as Troupe does), or `url`, with an `oauth` sign-in (Decision 741);
+  `disabled` as Cursor and Cline write it; `permission` and `timeout_ms` as Troupe does.
+  `type` and `headers` are read and dropped: the transport follows from which of
+  `command` and `url` is set, and a header is a credential Troupe does not carry. With
+  `partial: true` an entry may name neither, and one that names both is still refused.
   """
   @spec normalize(String.t(), term(), keyword()) ::
           {:ok, entry(), [String.t()]} | {:error, String.t()}
@@ -94,7 +94,8 @@ defmodule Troupe.MCP.Import do
          {:ok, url} <- string_or_nil(raw, "url"),
          :ok <- one_transport(command, url, Keyword.get(opts, :partial, false)),
          {:ok, args} <- strings(raw, "args"),
-         {:ok, env} <- env(raw) do
+         {:ok, env} <- env(raw),
+         {:ok, oauth} <- oauth(raw) do
       entry =
         %{
           "command" => command,
@@ -102,6 +103,7 @@ defmodule Troupe.MCP.Import do
           "env" => env,
           "cd" => first_string(raw, ["cd", "cwd"]),
           "url" => url,
+          "oauth" => oauth,
           "permission" => permission(raw),
           "timeout_ms" => timeout(raw),
           "disabled" => raw["disabled"] == true
@@ -235,6 +237,56 @@ defmodule Troupe.MCP.Import do
         _ -> nil
       end
     end)
+  end
+
+  # A server that wants the person signed in (Decision 741): the client id registered
+  # for it and the overrides, in Troupe's spelling — `clientId`, `redirectUri` and a
+  # `callbackPort` as some tools write them are read too. What is checked here is the
+  # shape; whether it is enough to sign in with is `Troupe.MCP.OAuth.config/1`'s, once
+  # the layers are merged.
+  defp oauth(%{"oauth" => nil}), do: {:ok, nil}
+
+  defp oauth(%{"oauth" => %{} = oauth}) do
+    with {:ok, scopes} <- scopes(oauth) do
+      {:ok,
+       %{
+         "client_id" => first_string(oauth, ["client_id", "clientId"]),
+         "scopes" => scopes,
+         "redirect_uri" =>
+           first_string(oauth, ["redirect_uri", "redirectUri"]) || callback(oauth),
+         "resource" => if(oauth["resource"] == false, do: false),
+         "issuer" => first_string(oauth, ["issuer"])
+       }
+       |> Map.reject(fn {_key, value} -> value in [nil, []] end)}
+    end
+  end
+
+  defp oauth(%{"oauth" => _other}), do: {:error, "oauth is not an object"}
+  defp oauth(_raw), do: {:ok, nil}
+
+  defp scopes(oauth) do
+    case oauth["scopes"] || oauth["scope"] do
+      nil ->
+        {:ok, nil}
+
+      text when is_binary(text) ->
+        {:ok, String.split(text)}
+
+      list when is_list(list) ->
+        if Enum.all?(list, &is_binary/1),
+          do: {:ok, list},
+          else: {:error, "oauth.scopes is not a list of strings"}
+
+      _other ->
+        {:error, "oauth.scopes is not a list of strings"}
+    end
+  end
+
+  defp callback(oauth) do
+    case oauth["callback_port"] || oauth["callbackPort"] do
+      port when is_integer(port) and port in 1..65_535 -> "http://localhost:#{port}/callback"
+      _none -> nil
+    end
   end
 
   defp permission(%{"permission" => "auto"}), do: "auto"

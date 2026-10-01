@@ -103,4 +103,35 @@ describe("your own servers and skills, over the daemon", () => {
     await assert.rejects(client.importSkills({ from: "/nowhere" }), /not a directory/);
     await assert.rejects(client.importSkills({ scope: "workspace", from: "/home/ada/.claude/skills" }), /needs a workspace/);
   });
+
+  // troupe-remote Decision 741: a server that wants you signed in, and how it stands.
+  it("signs in to a server that wants you, reads how it stands, and signs out, never seeing a token", async () => {
+    daemon.servers.push({ name: "notes", layer: "user", source: "/home/ada/.config/troupe/mcp.json", url: "https://mcp.example.test/mcp", oauth: { client_id: "troupe-test-client" } });
+    daemon.servers.push({ name: "plain", layer: "user", source: "/home/ada/.config/troupe/mcp.json", url: "https://other.example.test/mcp" });
+
+    const listed = (await client.listServers({ session_id: "s-1" })).servers;
+    const notes = listed.find((s) => s.name === "notes")!;
+    assert.deepEqual(notes.auth, { state: "signed_out", account: null, error: null });
+    assert.equal(notes.oauth?.client_id, "troupe-test-client");
+    assert.equal(notes.state, "sign_in", "a session waits for the sign-in");
+    assert.equal(listed.find((s) => s.name === "plain")!.auth, null, "a server that takes none has no sign-in");
+
+    const started = await client.signInServer({ name: "notes" });
+    assert.equal(started.server, "notes");
+    assert.match(started.url, /^https:\/\/login\.example\.test\/tenant\/authorize\?/);
+    assert.match(started.redirect_uri, /^http:\/\/127\.0\.0\.1:\d+\/callback$/);
+    const call = daemon.calls.find((c) => c.method === "mcp.sign_in");
+    assert.match(String(call?.params["command_id"]), /^c-/);
+    assert.equal((await client.listServers()).servers.find((s) => s.name === "notes")!.auth?.state, "signing_in");
+
+    daemon.finishSignIn("notes");
+    const after = (await client.listServers({ session_id: "s-1" })).servers.find((s) => s.name === "notes")!;
+    assert.deepEqual(after.auth, { state: "signed_in", account: "ada@example.test", error: null });
+    assert.equal(after.state, "ready");
+
+    const out = await client.signOutServer({ name: "notes" });
+    assert.equal(out.auth?.state, "signed_out");
+    await assert.rejects(client.signInServer({ name: "plain" }), /takes no sign-in/);
+    daemon.servers = daemon.servers.filter((s) => s.name !== "notes" && s.name !== "plain");
+  });
 });

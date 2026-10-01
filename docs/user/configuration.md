@@ -156,6 +156,52 @@ in Troupe's state directory and never in the repository, and asked again when a
 server's command changes. A workspace on `trusted_workspaces` is not asked. Your own
 skills are offered to every agent; a bundle's stay as its profiles list them.
 
+### A server that wants you to sign in
+
+Some servers act as *you*: they answer a call without a sign-in with `401`, name an
+authorization server (your organisation's identity provider, often), and then call what
+is behind them as you, or show you only what is yours. A key in `env` will not do for
+those. Give the entry an `oauth` with the id of a client registered for it with that
+authorization server — whoever runs the server says what it is, since a provider with
+no dynamic registration has no other way to know Troupe:
+
+```json
+{
+  "mcpServers": {
+    "wiki": {
+      "url": "https://mcp.example.com/mcp",
+      "oauth": {"client_id": "00000000-0000-0000-0000-000000000000"}
+    }
+  }
+}
+```
+
+The rest is found from the server: where to sign in (its protected-resource metadata
+and the authorization server's), and which scopes it wants. `oauth.scopes` overrides
+them; `offline_access` is added when the authorization server offers it, so the sign-in
+lasts beyond the hour. `oauth.redirect_uri` fixes where the browser comes back, for a
+client registered with one port (`http://localhost:33418/callback`); left out, it is
+`http://127.0.0.1/callback` on any free port, which a client registered with a loopback
+redirect accepts. `oauth.resource: false` leaves out the resource indicator for an
+authorization server that refuses it (Microsoft Entra ID's v2.0 endpoint is one; the
+scopes say which API the token is for there). `oauth.issuer` names the authorization
+server for a server that publishes no metadata of its own.
+
+Then sign in: `/mcp sign-in wiki` in the TUI, or `s` on the server's line of the `/mcp`
+page, or **Sign in** on the desktop app's "Servers and skills" panel. Your browser
+opens on the provider's page; when you are done it comes back to the daemon, which
+listens for it on this machine, so open the URL on the machine the daemon runs on. The
+page says "signed in as …", and a session waiting for the server gets its tools at once.
+The sign-in is kept in Troupe's state directory (`mcp-oauth.json`, readable by you
+alone), never in `mcp.json`, and refreshed when it runs out. When the provider stops
+taking it, the server's line says to sign in again, and a tool the model calls answers
+`sign_in_required` instead of failing. `/mcp sign-out wiki`, `o`, or **Sign out**
+forgets it. A workspace's server is signed in to only after the workspace's servers are
+allowed, since its `oauth` came with the repository.
+
+A session on your team's pod does not get these tools yet: the sign-in stays on your
+machine, and the path that offers your own tools to a pod session is the next step.
+
 ## Instruction files
 
 A repository that carries an `AGENTS.md` has told coding agents how to work in it, and
@@ -397,6 +443,12 @@ or the command line where one exists for it.
 | `mcp.<name>.env` | map of name to string |  | user; project if trusted | Variables to set for it. |
 | `mcp.<name>.cd` | string |  | user; project if trusted | The directory to run it in. Unset: the workspace. |
 | `mcp.<name>.url` | string |  | user; project if trusted | A server over HTTP: its URL. |
+| `mcp.<name>.oauth` | settings |  | user; project if trusted | A server over HTTP that wants you signed in: how to sign in. |
+| `mcp.<name>.oauth.client_id` | string |  | user; project if trusted | A client registered in advance with the server's authorization server. |
+| `mcp.<name>.oauth.scopes` | list of strings |  | user; project if trusted | The scopes to ask for. Unset: what the server says it wants. |
+| `mcp.<name>.oauth.redirect_uri` | string |  | user; project if trusted | Where the browser comes back: `http://` on 127.0.0.1, [::1] or localhost. Unset: 127.0.0.1, any free port. |
+| `mcp.<name>.oauth.resource` | boolean | `true` | user; project if trusted | Send the resource indicator; `false` for an authorization server that refuses it. |
+| `mcp.<name>.oauth.issuer` | string |  | user; project if trusted | The authorization server, for a server that publishes no metadata naming one. |
 | `mcp.<name>.permission` | `ask` \| `auto` | `ask` | user; project if trusted | `auto` runs its tools without asking. |
 | `mcp.<name>.timeout_ms` | integer ≥ 1 | `30000` | user; project if trusted | How long one call may take. |
 

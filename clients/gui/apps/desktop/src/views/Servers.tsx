@@ -9,11 +9,17 @@
 //
 // A server's environment never comes back: the daemon answers with the names of its
 // variables, and that is all this screen shows.
+//
+// A server that wants you signed in (troupe-remote Decision 741) has a Sign in button:
+// the daemon runs the sign-in and listens for the browser on this computer, this panel
+// opens the URL it answers and reads how the sign-in stands every two seconds while a
+// browser is out. No token ever reaches this screen.
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
-import type { DaemonClient, LocalServer, LocalSkill, ScopedParams, SourceScope } from "@troupe/client";
+import type { DaemonClient, LocalServer, LocalSkill, ScopedParams, ServerAuth, SourceScope } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
+import { shell } from "../shell";
 import { Failed, Loading, Pill, Table } from "./bits";
 import type { Status } from "./bits";
 
@@ -29,12 +35,35 @@ function ServerState({ server }: { server: LocalServer }): JSX.Element {
           ? ["error", "Failed"]
           : server.state === "pending"
             ? ["waiting", "Needs approval"]
-            : server.state === "connecting"
-              ? ["queued", "Connecting"]
-              : server.state === "stopped"
-                ? ["idle", "Stopped"]
-                : ["idle", "Not checked"];
+            : server.state === "sign_in"
+              ? ["waiting", server.auth?.state === "expired" ? "Sign in again" : "Needs sign-in"]
+              : server.state === "connecting"
+                ? ["queued", "Connecting"]
+                : server.state === "stopped"
+                  ? ["idle", "Stopped"]
+                  : ["idle", "Not checked"];
   return <Pill status={status}>{word}</Pill>;
+}
+
+/** How your sign-in stands, in words: whose it is, or what to do about it. */
+function signInWords(auth: ServerAuth): string {
+  switch (auth.state) {
+    case "signed_in":
+      return auth.account ? `Signed in as ${auth.account}` : "Signed in";
+    case "signing_in":
+      return "Waiting for the browser";
+    case "expired":
+      return auth.account ? `Sign-in ran out for ${auth.account}` : "Sign-in ran out";
+    default:
+      return "Not signed in";
+  }
+}
+
+/** The person's real browser where there is a shell; a webview does nothing useful with a new window. */
+async function openExternal(url: string): Promise<void> {
+  const open = shell()?.openExternal;
+  if (open) await open(url);
+  else globalThis.open?.(url, "_blank", "noopener,noreferrer");
 }
 
 function runs(server: LocalServer): string {
@@ -52,6 +81,8 @@ export function Servers({ client }: { client: DaemonClient }): JSX.Element {
   const [outcome, setOutcome] = useState<string | null>(null);
   // What a check answered, by server name: the live state rides on the row.
   const [checked, setChecked] = useState<Record<string, LocalServer>>({});
+  // The last sign-in URL the daemon answered, kept on screen for a browser that did not open.
+  const [signing, setSigning] = useState<{ name: string; url: string } | null>(null);
 
   const ws = workspace.trim();
   const load = useCallback(async () => {
@@ -59,6 +90,15 @@ export function Servers({ client }: { client: DaemonClient }): JSX.Element {
     return { servers: servers.servers, warnings: servers.warnings, skills: skills.skills };
   }, [client, ws]);
   const { data, loading, error: readError } = useAdminQuery(load, [load, round]);
+
+  // While a browser is out, read again every two seconds; the daemon stops waiting after
+  // five minutes, so this stops by itself too.
+  const waiting = data?.servers.some((s) => s.auth?.state === "signing_in") ?? false;
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = setTimeout(() => setRound((n) => n + 1), 2000);
+    return () => clearTimeout(timer);
+  }, [waiting, data]);
 
   const act = async (what: string, run: () => Promise<string>): Promise<void> => {
     setBusy(what);
@@ -95,6 +135,26 @@ export function Servers({ client }: { client: DaemonClient }): JSX.Element {
       const layer: SourceScope = server.layer === "workspace" ? "workspace" : "user";
       await client.writeServer({ scope: layer, ...(layer === "workspace" && ws ? { workspace: ws } : {}), name: server.name, server: { disabled: !server.disabled } });
       return `${server.name} ${server.disabled ? "enabled" : "disabled"}; a session reads the change when it starts, or on a check.`;
+    });
+
+  // A check's answer from before a sign-in or a sign-out says nothing about after it.
+  const forget = (name: string): void =>
+    setChecked((c) => Object.fromEntries(Object.entries(c).filter(([key]) => key !== name)));
+
+  const signIn = (server: LocalServer): Promise<void> =>
+    act(`sign-in:${server.name}`, async () => {
+      const started = await client.signInServer(ws ? { workspace: ws, name: server.name } : { name: server.name });
+      forget(server.name);
+      setSigning({ name: server.name, url: started.url });
+      await openExternal(started.url);
+      return `${server.name}: finish signing in in your browser. A session waiting for it carries on once you have.`;
+    });
+
+  const signOut = (server: LocalServer): Promise<void> =>
+    act(`sign-out:${server.name}`, async () => {
+      await client.signOutServer(ws ? { workspace: ws, name: server.name } : { name: server.name });
+      forget(server.name);
+      return `${server.name}: signed out on this computer.`;
     });
 
   const removeServer = (server: LocalServer): Promise<void> =>
@@ -153,6 +213,23 @@ export function Servers({ client }: { client: DaemonClient }): JSX.Element {
 
       <Failed error={readError ?? error} />
       {outcome && <p className="note">{outcome}</p>}
+      {signing && data?.servers.find((s) => s.name === signing.name)?.auth?.state === "signing_in" && (
+        <p className="note">
+          Your browser did not open?{" "}
+          <a
+            href={signing.url}
+            target="_blank"
+            rel="noreferrer noopener"
+            onClick={(e) => {
+              e.preventDefault();
+              void openExternal(signing.url);
+            }}
+          >
+            Open the sign-in page for {signing.name}
+          </a>{" "}
+          on this computer: the answer comes back to it.
+        </p>
+      )}
       {loading && !data && <Loading what="Reading your servers and skills…" />}
 
       {data && data.servers.length === 0 && !loading && <p className="note">No servers yet. Import a file above, or write mcp.json beside config.yaml by hand.</p>}
@@ -172,12 +249,28 @@ export function Servers({ client }: { client: DaemonClient }): JSX.Element {
                 <td>
                   <ServerState server={{ ...server, state: live.state, error: live.error }} />
                   {live.error ? <span className="micro"> {live.error}</span> : null}
+                  {server.auth ? <span className="micro"> {signInWords(server.auth)}.</span> : null}
+                  {server.auth?.error ? <span className="micro"> Last sign-in: {server.auth.error}</span> : null}
                 </td>
                 <td className="micro">{live.tools.join(", ")}</td>
                 <td>
                   <button onClick={() => void check(server)} disabled={busy !== null || Boolean(server.refused)}>
                     {busy === `check:${server.name}` ? "Checking…" : "Check"}
                   </button>{" "}
+                  {server.auth && server.auth.state !== "signed_in" && (
+                    <>
+                      <button className="primary" onClick={() => void signIn(server)} disabled={busy !== null || Boolean(server.refused)}>
+                        {server.auth.state === "expired" ? "Sign in again" : "Sign in"}
+                      </button>{" "}
+                    </>
+                  )}
+                  {server.auth?.state === "signed_in" && (
+                    <>
+                      <button onClick={() => void signOut(server)} disabled={busy !== null}>
+                        Sign out
+                      </button>{" "}
+                    </>
+                  )}
                   {editable && (
                     <>
                       <button onClick={() => void toggle(server)} disabled={busy !== null}>

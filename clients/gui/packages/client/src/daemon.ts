@@ -92,10 +92,34 @@ export interface LocalServer {
   refused?: string | null;
   /** For a workspace-level server: whether somebody has approved it there. */
   trust?: "trusted" | "pending" | null;
-  /** From the session named in the call, or from a check; null when nothing has run it. */
+  /** A server that wants you signed in (troupe-remote Decision 741): what its entry says about the sign-in. */
+  oauth?: { client_id: string; scopes?: string[] | null; issuer?: string } | null;
+  /** How your sign-in to it stands, never a token; null for a server that takes none. */
+  auth?: ServerAuth | null;
+  /** From the session named in the call, or from a check; null when nothing has run it. `sign_in` waits for yours. */
   state: string | null;
   tools: string[];
   error: string | null;
+}
+
+/**
+ * Your sign-in to a server that wants you (troupe-remote Decision 741). `signing_in`
+ * while a browser is out, `expired` when it ran out or was refused and you sign in
+ * again; `account` is whose it is, when the provider said; `error` why the last
+ * attempt failed.
+ */
+export interface ServerAuth {
+  state: "signed_out" | "signing_in" | "signed_in" | "expired";
+  account: string | null;
+  error: string | null;
+}
+
+/** What `mcp.sign_in` answers: the URL to open, where the browser comes back to, and when the daemon stops waiting. */
+export interface SignInStarted {
+  server: string;
+  url: string;
+  redirect_uri: string;
+  expires_at: string;
 }
 
 /** One skill as `skills.list` reports it. */
@@ -531,6 +555,21 @@ export class DaemonClient {
    */
   checkServer(params: { session_id?: string; workspace?: string; name: string; server?: Record<string, unknown> }): Promise<{ server: LocalServer }> {
     return this.call("mcp.check", { ...params });
+  }
+
+  /**
+   * Sign in to a server that wants you (troupe-remote Decision 741). The daemon runs the
+   * sign-in and listens for the browser on its own machine; open `url` there, and read
+   * how it stands from `listServers`' `auth`. A session waiting for it carries on once
+   * it lands.
+   */
+  signInServer(params: { name: string; workspace?: string; session_id?: string }): Promise<SignInStarted> {
+    return this.command<SignInStarted>("mcp.sign_in", { ...params });
+  }
+
+  /** Forget your sign-in to a server on this computer. */
+  signOutServer(params: { name: string; workspace?: string; session_id?: string }): Promise<{ server: string; auth: ServerAuth | null }> {
+    return this.command("mcp.sign_out", { ...params });
   }
 
   listSkills(workspace?: string): Promise<{ skills: LocalSkill[] }> {

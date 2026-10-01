@@ -71,6 +71,22 @@ A client assembling a bundle from a directory expects `agents/<name>.md`,
 Personal MCP servers a person offers from their own client are separate: they arrive with
 consent through `tools.register` and are never configured into a pod.
 
+**A server that accepts only a signed-in person** is not a bundle server. Some MCP
+servers publish OAuth protected-resource metadata, answer a call without a token with
+`401`, and act on what is behind them as the person who signed in, refusing a service
+account's token outright; a bundle server's one shared token from a Secret is exactly
+what they refuse, and a person-mode server's `credential_ref` slot holds a value the
+person pasted, not a sign-in that expires every hour and has to be refreshed. For such a
+server, each person adds it to their own `mcp.json` with an `oauth.client_id` and signs
+in from the TUI or the desktop app ([configuration](../user/configuration.md#a-server-that-wants-you-to-sign-in));
+the daemon on their machine keeps and refreshes the tokens, and nothing of them reaches a
+pod or the plane (Decision 741). What you provide is the client: register one public
+client (no secret, PKCE, a loopback redirect such as `http://localhost`, with any port
+where the provider allows it) with the server's authorization server, grant it the
+server's scope, and give people its id. Today that serves their local sessions; offering
+those tools to a session on a pod, through `tools.register` from the person's client, is
+the next step.
+
 ## 2. Triggers
 
 A trigger is a row the plane stores and something fires; firing creates a session **as

@@ -29,7 +29,7 @@ defmodule Troupe.MCP.Local do
   """
 
   alias Troupe.Config.{JSONC, Layers, Migrate}
-  alias Troupe.MCP.Import
+  alias Troupe.MCP.{Import, OAuth}
   alias Troupe.Workspace
 
   @type layer :: :config | :user | :workspace
@@ -288,9 +288,13 @@ defmodule Troupe.MCP.Local do
   def to_config(name, entry, workspace) do
     env = entry["env"] || %{}
     args = List.wrap(entry["args"])
+    oauth = entry["oauth"]
 
     unset =
-      unset_variable([entry["command"], entry["url"], entry["cd"] | args ++ Map.values(env)])
+      unset_variable(
+        [entry["command"], entry["url"], entry["cd"] | args ++ Map.values(env)] ++
+          oauth_strings(oauth)
+      )
 
     # With a variable unset the strings are kept as written: nothing is sent in its
     # place, and the refusal below names it.
@@ -306,11 +310,43 @@ defmodule Troupe.MCP.Local do
       timeout_ms: entry["timeout_ms"] || @default_timeout
     }
 
-    case refusal(name, unset, config) do
+    {config, oauth_refusal} = with_oauth(config, oauth, read)
+
+    case refusal(name, unset, config) || oauth_refusal(name, oauth_refusal, config) do
       nil -> config
       why -> Map.put(config, :refused, why)
     end
   end
+
+  # A server that wants the person signed in (Decision 741): its `oauth`, read, under
+  # `:oauth`, or why it cannot be used. Only where there is one, so every other server's
+  # config — and its fingerprint — is what it always was.
+  defp with_oauth(config, nil, _read), do: {config, nil}
+
+  defp with_oauth(config, oauth, read) do
+    oauth =
+      if is_map(oauth),
+        do:
+          Map.new(oauth, fn {key, value} ->
+            {key, if(is_binary(value), do: read.(value), else: value)}
+          end),
+        else: oauth
+
+    case OAuth.config(oauth) do
+      {:ok, read_config} -> {Map.put(config, :oauth, read_config), nil}
+      {:error, why} -> {config, why}
+    end
+  end
+
+  defp oauth_strings(%{} = oauth), do: [oauth["client_id"], oauth["issuer"]]
+  defp oauth_strings(_none), do: []
+
+  defp oauth_refusal(name, why, _config) when is_binary(why), do: "#{name}: #{why}"
+
+  defp oauth_refusal(name, nil, %{oauth: %{}, url: nil}),
+    do: "#{name} has oauth but no url: a sign-in is for a server over HTTP"
+
+  defp oauth_refusal(_name, nil, _config), do: nil
 
   defp unset_variable(values) do
     Enum.find_value(values, fn
@@ -350,8 +386,20 @@ defmodule Troupe.MCP.Local do
   """
   @spec fingerprint(map()) :: String.t()
   def fingerprint(config) do
+    # A sign-in's client and issuer say where a token comes from, so a workspace's
+    # server whose `oauth` changed is asked about again (Decision 741).
+    sign_in =
+      case config[:oauth] do
+        %{client_id: client_id} = oauth ->
+          [[client_id, oauth[:issuer], oauth[:scopes], oauth[:resource]]]
+
+        _none ->
+          []
+      end
+
     canonical =
-      [config[:command], config[:args] || [], config[:env] || %{}, config[:cd], config[:url]]
+      ([config[:command], config[:args] || [], config[:env] || %{}, config[:cd], config[:url]] ++
+         sign_in)
       |> Jason.encode!()
 
     :sha256 |> :crypto.hash(canonical) |> Base.encode16(case: :lower) |> binary_part(0, 16)

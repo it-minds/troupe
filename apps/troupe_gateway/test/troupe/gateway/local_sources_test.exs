@@ -301,7 +301,8 @@ defmodule Troupe.Gateway.LocalSourcesTest do
 
     refute Process.whereis(Daemon)
 
-    for method <- ~w(mcp.list mcp.add mcp.remove mcp.check skills.list skills.add skills.remove) do
+    for method <-
+          ~w(mcp.list mcp.add mcp.remove mcp.check mcp.sign_in mcp.sign_out skills.list skills.add skills.remove) do
       assert {:error, %Error{message: "method_not_found"}} = Dispatch.call(method, %{}, context)
     end
   end

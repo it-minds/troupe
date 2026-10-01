@@ -870,8 +870,9 @@ The MCP servers the session runs of its own — `mcp:` in `config.yaml` (`layer`
 `config`), the user's `mcp.json` (`user`) and the workspace's `.troupe/mcp.json`
 (`workspace`), `source` naming the file — as distinct from a pod's bundle servers:
 `state` is `connecting`, `ready`, `error`, `stopped`, `pending` (the workspace's trust
-question below is unanswered) or `disabled`. Their tools are `mcp.<server>.<tool>` like
-every other MCP tool.
+question below is unanswered), `disabled` or `sign_in` (the server wants the person
+signed in and they have not, or their sign-in has run out: `mcp.sign_in` below). Their
+tools are `mcp.<server>.<tool>` like every other MCP tool.
 
 #### `workflows.list`
 ```json
@@ -1005,14 +1006,20 @@ for a panel to print.
 ```
 `mcp.list` (`observe`; both optional) → `{"servers": [{"name", "layer", "source",
 "transport", "command", "args", "url", "cd", "env", "permission", "disabled",
-"refused", "trust", "state", "tools", "error"}], "warnings": [...]}` — every server the
-layers give the workspace, merged by name, the workspace's file over the user's over
-`config.yaml`. `layer` is `config`, `user` or `workspace` and `source` the file; `env` is
-the names of its variables, never their values; `refused` says why one will not start
-(an unset `{env:VAR}`); `trust` is `trusted` or `pending` for a workspace-level server
-and null otherwise. With `session_id`, each server also carries the `state`, `tools` and
-`error` that `mcp.status` reports for the session, and a server the session runs that no
-file names any more is listed too.
+"refused", "trust", "oauth", "auth", "state", "tools", "error"}], "warnings": [...]}` —
+every server the layers give the workspace, merged by name, the workspace's file over
+the user's over `config.yaml`. `layer` is `config`, `user` or `workspace` and `source`
+the file; `env` is the names of its variables, never their values; `refused` says why
+one will not start (an unset `{env:VAR}`, an `oauth` with no `client_id`); `trust` is
+`trusted` or `pending` for a workspace-level server and null otherwise. For a server
+that wants the person signed in, `oauth` is `{"client_id", "scopes"?, "issuer"?}` as its
+entry says, and `auth` is how their sign-in stands — `{"state", "account", "error"}`,
+`state` one of `signed_out`, `signing_in` (a browser is out), `signed_in` and `expired`
+(it ran out or was refused: sign in again), `account` whose it is when the provider said,
+`error` why the last attempt failed — and never a token; both are null for any other
+server. With `session_id`, each server also carries the `state`, `tools` and `error`
+that `mcp.status` reports for the session, and a server the session runs that no file
+names any more is listed too.
 
 ```json
 {"command_id": "c-14", "scope": "user", "from": "/home/me/.claude/.mcp.json", "link": false}
@@ -1022,7 +1029,8 @@ file names any more is listed too.
 Claude Desktop's `mcpServers`, Cursor's, VS Code's `servers` — copying its servers into
 the layer's `mcp.json`, or with `link: true` reading it in place from then on. `${VAR}`
 and `${env:VAR}` become `{env:VAR}`; a server with a `${input:…}` is skipped and said
-so; `headers` are dropped with a warning. Importing again updates.
+so; `headers` are dropped with a warning; an `oauth` is kept, `clientId`, `redirectUri`
+and `callbackPort` read as `client_id` and `redirect_uri`. Importing again updates.
 
 ```json
 {"command_id": "c-15", "scope": "workspace", "workspace": "/home/me/project",
@@ -1081,6 +1089,33 @@ directory, never in the repository, beside a fingerprint of what would run, so a
 command asks again; `once` runs them for the session; `deny` leaves them `stopped` until
 the next session. A workspace on `trusted_workspaces` is not asked. Under
 `managed_mcp_servers_only` no local server starts, and `mcp.status` says so for each.
+
+#### `mcp.sign_in`, `mcp.sign_out`
+
+A person's sign-in to one of their own servers that wants *them* rather than a machine
+(Decision 741): an entry with a `url` and an `oauth` naming a client registered with the
+server's authorization server. **The daemon's only**, like the rest of this section. The
+daemon runs the sign-in, because it is the process that calls the server: it discovers
+the authorization server from the server's `401` and protected-resource metadata, makes
+the PKCE pair and the `state`, and listens on a loopback port of its own machine for the
+browser to come back; the client only opens the URL. The tokens stay in the daemon's
+state directory and are never in an answer, an event or a log.
+
+```json
+{"command_id": "c-19", "name": "wiki", "workspace": "/home/me/project"}
+```
+`mcp.sign_in` (`admin`; `workspace` or `session_id` optional, as for `mcp.list`) →
+`{"server", "url", "redirect_uri", "expires_at"}`: open `url` in a browser on the
+daemon's machine; the answer comes back to `redirect_uri`, and the daemon stops waiting
+at `expires_at`, five minutes on. `mcp.list`'s `auth` says how it stands, and every
+local session that waits for the server asks it for its tools once the sign-in lands. A
+second `mcp.sign_in` for the same server replaces the first. A server with no `oauth`,
+one whose `oauth` is refused, and a workspace-level server the workspace's question has
+not approved are `invalid_params`; a name the layers do not give is `not_found`.
+
+`mcp.sign_out` (`admin`, the same parameters) → `{"server", "auth"}`: the sign-in is
+forgotten on this machine, and the server's sessions show `sign_in` again. The
+provider's own session in the browser is the provider's.
 
 #### `workspace.recent` → `{"workspaces": [{"path", "last_used_at", "sessions"}]}`
 #### `workspace.search`
@@ -1242,7 +1277,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `skills.add`, `skills.remove` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or

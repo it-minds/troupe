@@ -521,6 +521,61 @@
               "null"
             ]
           },
+          "oauth": {
+            "description": "A server over HTTP that wants you signed in: how to sign in.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "client_id": {
+                "description": "A client registered in advance with the server's authorization server.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "scopes": {
+                "description": "The scopes to ask for. Unset: what the server says it wants.",
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "redirect_uri": {
+                "description": "Where the browser comes back: `http://` on 127.0.0.1, [::1] or localhost. Unset: 127.0.0.1, any free port.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "resource": {
+                "description": "Send the resource indicator; `false` for an authorization server that refuses it.",
+                "default": true,
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "issuer": {
+                "description": "The authorization server, for a server that publishes no metadata naming one.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "patternProperties": {
+              "^x-": {}
+            },
+            "additionalProperties": false
+          },
           "permission": {
             "description": "`auto` runs its tools without asking.",
             "default": "ask",

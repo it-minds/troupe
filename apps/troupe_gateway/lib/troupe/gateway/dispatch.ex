@@ -128,6 +128,10 @@ defmodule Troupe.Gateway.Dispatch do
     "mcp.add" => :admin,
     "mcp.remove" => :admin,
     "mcp.check" => :admin,
+    # A sign-in to a server that wants the person (Decision 741) puts a token of theirs
+    # where a server can use it, and signing out takes it away: both are the person's.
+    "mcp.sign_in" => :admin,
+    "mcp.sign_out" => :admin,
     "skills.list" => :observe,
     "skills.add" => :admin,
     "skills.remove" => :admin
