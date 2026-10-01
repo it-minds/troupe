@@ -24,6 +24,8 @@ defmodule Troupe.Plane.FakeCluster do
   What it answers carries `metadata.managedFields` in the API server's own shape, so the
   plane reads ownership the way it would read it from a cluster. `put/1` stores an object
   as given, with no managers at all, for the tests where who wrote it is not the point.
+  `refuse_next_write/0` makes the next write fail, for the tests about a write that did
+  not land.
 
   One at a time, by name. Only for tests that are not `async`.
   """
@@ -40,7 +42,9 @@ defmodule Troupe.Plane.FakeCluster do
   def start do
     ExUnit.Callbacks.start_supervised!(%{
       id: __MODULE__,
-      start: {Agent, :start_link, [fn -> %{objects: %{}, requests: []} end, [name: __MODULE__]]}
+      start:
+        {Agent, :start_link,
+         [fn -> %{objects: %{}, requests: [], refuse: false} end, [name: __MODULE__]]}
     })
 
     conn = %K8s.Conn{url: "https://kubernetes.example.test", http_provider: __MODULE__}
@@ -111,6 +115,14 @@ defmodule Troupe.Plane.FakeCluster do
   @doc "Every write it was asked for, as `{method, name, field_manager}`, oldest first."
   @spec writes() :: [{atom(), String.t(), String.t() | nil}]
   def writes, do: Agent.get(__MODULE__, &Enum.reverse(&1.requests))
+
+  @doc """
+  Refuse the next write, whatever it is, as an API server that is restarting would:
+  `ServiceUnavailable`, and nothing changes. It is still counted among `writes/0`. The
+  one after it is answered as usual.
+  """
+  @spec refuse_next_write() :: :ok
+  def refuse_next_write, do: Agent.update(__MODULE__, &%{&1 | refuse: true})
 
   # -- the provider -------------------------------------------------------------
 
@@ -183,6 +195,15 @@ defmodule Troupe.Plane.FakeCluster do
       {:ok, entry} -> {{:ok, render(entry)}, state}
       :error -> {not_found(), state}
     end
+  end
+
+  # Counted, refused, and the refusal used up.
+  defp answer(%{refuse: true} = state, method, {:one, _kind, name}, query, _body)
+       when method in [:patch, :delete] do
+    manager = if method == :patch, do: URI.decode_query(query || "")["fieldManager"]
+
+    {unavailable(),
+     %{state | refuse: false, requests: [{method, name, manager} | state.requests]}}
   end
 
   defp answer(state, :patch, {:one, _kind, name}, query, body) do
@@ -389,6 +410,17 @@ defmodule Troupe.Plane.FakeCluster do
       "reason" => "Invalid",
       "message" => message,
       "code" => 422
+    })
+  end
+
+  defp unavailable do
+    APIError.from_kubernetes_error(%{
+      "kind" => "Status",
+      "apiVersion" => "v1",
+      "status" => "Failure",
+      "reason" => "ServiceUnavailable",
+      "message" => "the server is currently unable to handle the request",
+      "code" => 503
     })
   end
 end

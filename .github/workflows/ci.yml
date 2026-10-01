@@ -397,6 +397,26 @@ jobs:
             exit 1
           fi
 
+      # An uninstall, a reinstall, or a GitOps controller's remediation that uninstalls must
+      # not delete the namespace, because more than the chart lives in it. And a chart told
+      # not to make the namespace makes none. Each render is kept in a variable rather than
+      # piped: under `pipefail`, `grep -q` leaving early fails the pipe and reads as no match.
+      - name: The namespace outlives the chart
+        run: |
+          for values in values.yaml values.small.yaml values.example.yaml; do
+            namespace=$(helm template troupe charts/troupe --values "charts/troupe/$values" \
+              --show-only templates/namespace.yaml)
+            if ! grep -qx '    helm.sh/resource-policy: keep' <<<"$namespace"; then
+              echo "$values: the namespace renders without helm.sh/resource-policy: keep"
+              exit 1
+            fi
+          done
+          rendered=$(helm template troupe charts/troupe --set createNamespace=false)
+          if grep -qx 'kind: Namespace' <<<"$rendered"; then
+            echo "createNamespace=false rendered a Namespace"
+            exit 1
+          fi
+
       # Rendered and checked against the Kubernetes API schemas, which is what catches a
       # misspelled field before a cluster does. The CRDs are included so a TroupePolicy
       # and a WorkerProfile are checked against their own schemas; the kinds no schema
