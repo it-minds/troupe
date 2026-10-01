@@ -45,6 +45,11 @@ defmodule Troupe.Registry do
   @spec session_mcp(String.t()) :: GenServer.name()
   def session_mcp(session_id), do: via({:session_mcp, session_id})
 
+  @doc "Every session's MCP holder, for news that concerns them all: a person signed in to a server."
+  @spec session_mcp_holders() :: [pid()]
+  def session_mcp_holders,
+    do: Registry.select(@registry, [{{{:session_mcp, :_}, :"$1", :_}, [], [:"$1"]}])
+
   @doc "One local MCP server on its standard streams."
   @spec mcp_server(String.t(), String.t()) :: GenServer.name()
   def mcp_server(session_id, name), do: via({:mcp_server, session_id, name})

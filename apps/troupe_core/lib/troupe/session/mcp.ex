@@ -38,7 +38,7 @@ defmodule Troupe.Session.MCP do
 
   use GenServer
 
-  alias Troupe.MCP.{Client, Local, Server, Stdio, Tool, Trust}
+  alias Troupe.MCP.{Client, Local, OAuth, Server, Stdio, Tool, Trust}
   alias Troupe.Session.Questions
 
   require Logger
@@ -73,7 +73,8 @@ defmodule Troupe.Session.MCP do
   @doc """
   What a client shows about the servers: name, layer, source, state, tool names, error.
   `state` is `connecting`, `ready`, `error`, `stopped`, `pending` (the workspace's
-  question is unanswered) or `disabled`.
+  question is unanswered), `disabled` or `sign_in` (the server wants the person signed
+  in, and they have not, or their sign-in has run out: Decision 741).
   """
   @spec status(String.t()) :: [map()]
   def status(session_id), do: call(session_id, :status, [])
@@ -99,6 +100,20 @@ defmodule Troupe.Session.MCP do
   end
 
   @doc """
+  Tell every local session that a person has signed in to a server (Decision 741), so a
+  session that was waiting for it asks for its tools now.
+  """
+  @spec signed_in(OAuth.binding()) :: :ok
+  def signed_in(binding) do
+    state_dir = Troupe.Paths.state_dir(binding.state_dir)
+
+    Enum.each(
+      Troupe.Registry.session_mcp_holders(),
+      &send(&1, {:oauth_signed_in, state_dir, binding.key})
+    )
+  end
+
+  @doc """
   Try a server outside any session: start it, wait until it is ready or has failed,
   stop it, and say what it offered. What `mcp.check` answers before a server is kept.
   """
@@ -113,7 +128,7 @@ defmodule Troupe.Session.MCP do
           Stdio.probe(name, config, workspace, @wait_for_state)
 
         is_binary(config[:url]) ->
-          name |> http_server(config) |> http_status()
+          name |> http_server(config, nil) |> http_status()
 
         true ->
           %{name: name, state: :error, tools: [], error: "has neither a command nor a url"}
@@ -242,7 +257,7 @@ defmodule Troupe.Session.MCP do
         end
 
       is_binary(config[:url]) ->
-        %{record: record, kind: :http, http: http_server(name, config)}
+        %{record: record, kind: :http, http: http_server(name, config, state.state_dir)}
 
       true ->
         Logger.warning("troupe: MCP server #{name} has neither command nor url; ignored")
@@ -350,6 +365,23 @@ defmodule Troupe.Session.MCP do
 
     # Asked again for whatever was added while the question was out.
     {:noreply, ask_for_workspace(state)}
+  end
+
+  # A sign-in finished (Decision 741): every server of this session that it serves is
+  # asked for its tools again, which is how one that waited for it becomes `ready`.
+  def handle_info({:oauth_signed_in, state_dir, key}, state) do
+    servers =
+      Map.new(state.servers, fn
+        {name, %{kind: :http, http: %{server: %Server{oauth: %{key: ^key} = binding}}} = entry} ->
+          if Troupe.Paths.state_dir(binding.state_dir) == state_dir,
+            do: {name, start(state, entry.record)},
+            else: {name, entry}
+
+        other ->
+          other
+      end)
+
+    {:noreply, %{state | servers: servers}}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -460,18 +492,30 @@ defmodule Troupe.Session.MCP do
     Map.merge(status, %{layer: record.layer, source: record.source})
   end
 
-  defp http_status(%{server: server, tools: tools, error: error}) do
-    %{
-      name: server.name,
-      state: if(error, do: :error, else: :ready),
-      tools: Enum.map(tools, & &1.remote_name),
-      error: error
-    }
+  # A server that wants the person signed in is `sign_in` until they have, and again
+  # once their sign-in has run out, whichever session found that out.
+  defp http_status(%{server: server, tools: tools, error: error} = http) do
+    {state, error} =
+      cond do
+        Map.get(http, :sign_in, false) -> {:sign_in, error}
+        error -> {:error, error}
+        run_out?(server) -> {:sign_in, "the sign-in to #{server.name} has run out; sign in again"}
+        true -> {:ready, nil}
+      end
+
+    %{name: server.name, state: state, tools: Enum.map(tools, & &1.remote_name), error: error}
   end
 
+  defp run_out?(%Server{oauth: %{} = binding}),
+    do: OAuth.status(binding).state in [:expired, :signed_out]
+
+  defp run_out?(_server), do: false
+
   # Discovered once, here: a URL server's tools are a property of the server, and a
-  # session asking on every prompt would put the server's latency on every turn.
-  defp http_server(name, config) do
+  # session asking on every prompt would put the server's latency on every turn. One that
+  # wants the person signed in (Decision 741) is asked with their token, and waits for
+  # their sign-in when there is none: `signed_in/1` brings it back.
+  defp http_server(name, config, state_dir) do
     server =
       Server.from_config(%{
         "name" => name,
@@ -479,13 +523,40 @@ defmodule Troupe.Session.MCP do
         "permission" => config[:permission] || :ask,
         "timeout_ms" => config[:timeout_ms] || 30_000
       })
+      |> with_oauth(config[:oauth], state_dir)
 
-    case Client.list_tools(server) do
+    case OAuth.authorized(server, &Client.list_tools/1) do
       {:ok, listed} ->
         %{server: server, tools: Enum.map(listed, &Tool.new(server, &1)), error: nil}
+
+      {:error, :sign_in_required} ->
+        %{
+          server: server,
+          tools: [],
+          sign_in: true,
+          error:
+            "sign in to #{name}: /mcp sign-in #{name}, or Sign in on the desktop app's Servers and skills"
+        }
+
+      {:error, {:unauthorized, _challenge}} ->
+        %{
+          server: server,
+          tools: [],
+          error:
+            "answered 401: it wants a sign-in; give its entry oauth.client_id, " <>
+              "a client registered with the server's authorization server"
+        }
+
+      {:error, reason} when is_binary(reason) ->
+        %{server: server, tools: [], error: reason}
 
       {:error, reason} ->
         %{server: server, tools: [], error: "unreachable: #{inspect(reason)}"}
     end
   end
+
+  defp with_oauth(server, %{client_id: _} = oauth, state_dir),
+    do: %{server | oauth: OAuth.binding(server.name, server.url, oauth, state_dir)}
+
+  defp with_oauth(server, _none, _state_dir), do: server
 end

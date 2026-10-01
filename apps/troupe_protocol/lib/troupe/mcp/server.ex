@@ -31,7 +31,11 @@ defmodule Troupe.MCP.Server do
     # which of them may be offered at all. Applied at discovery, so an unlisted tool is
     # not merely denied but absent from what a model can see.
     permission: :ask,
-    tools: :all
+    tools: :all,
+    # A person's own server that wants them signed in (Decision 741): where the daemon
+    # keeps that sign-in, so `credential` is filled per call from it. Never set on a
+    # pod, which holds nobody's sign-in.
+    oauth: nil
   ]
 
   @type t :: %__MODULE__{
@@ -42,7 +46,8 @@ defmodule Troupe.MCP.Server do
           header: String.t(),
           timeout_ms: pos_integer(),
           permission: :ask | :auto,
-          tools: :all | [String.t()]
+          tools: :all | [String.t()],
+          oauth: map() | nil
         }
 
   @doc """

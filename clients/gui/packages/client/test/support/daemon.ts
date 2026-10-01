@@ -106,6 +106,15 @@ export interface FakeServer {
   url?: string;
   env?: Record<string, string>;
   disabled?: boolean;
+  /** A server that wants the person signed in (troupe-remote Decision 741). */
+  oauth?: { client_id: string; scopes?: string[] };
+}
+
+/** How a person's sign-in to a server stands, as `mcp.list`'s `auth` says it. */
+export interface FakeAuth {
+  state: "signed_out" | "signing_in" | "signed_in" | "expired";
+  account: string | null;
+  error: string | null;
 }
 
 export interface FakeSkill {
@@ -175,6 +184,8 @@ export class FakeDaemon {
   };
   /** The two layers of `mcp.json` and `skills/`, as the seven `mcp.*`/`skills.*` methods keep them. */
   servers: FakeServer[] = [];
+  /** Sign-ins by server name (troupe-remote Decision 741); a server with `oauth` and no entry is signed out. */
+  signIns: Record<string, FakeAuth> = {};
   skills: FakeSkill[] = [];
   /** What lies at a path a test names, for `mcp.add` and `skills.add` with `from`. */
   importable: Record<string, Importable> = {};
@@ -621,6 +632,8 @@ export class FakeDaemon {
       case "mcp.add":
       case "mcp.remove":
       case "mcp.check":
+      case "mcp.sign_in":
+      case "mcp.sign_out":
       case "skills.list":
       case "skills.add":
       case "skills.remove":
@@ -854,6 +867,11 @@ export class FakeDaemon {
     };
   }
 
+  /** The person came back from the browser: a sign-in started with `mcp.sign_in` lands. */
+  finishSignIn(name: string, account: string | null = "ada@example.test"): void {
+    this.signIns[name] = { state: "signed_in", account, error: null };
+  }
+
   /**
    * The person's own servers and skills (troupe-remote Decision 700), with the daemon's
    * shapes: a layer's file written by scope, an import reading what `importable` says
@@ -869,7 +887,13 @@ export class FakeDaemon {
     if (scope === "workspace" && !workspace) return invalid("the workspace scope needs a workspace");
 
     const visible = <T extends { layer: string }>(rows: T[]): T[] => rows.filter((r) => r.layer === "user" || Boolean(workspace));
-    const liveOf = (s: FakeServer) => (s.disabled ? { state: "disabled", tools: [], error: null } : { state: "ready", tools: ["greet"], error: null });
+    const authOf = (s: FakeServer): FakeAuth | null => (s.oauth ? (this.signIns[s.name] ?? { state: "signed_out", account: null, error: null }) : null);
+    const liveOf = (s: FakeServer) =>
+      s.disabled
+        ? { state: "disabled", tools: [], error: null }
+        : s.oauth && authOf(s)?.state !== "signed_in"
+          ? { state: "sign_in", tools: [], error: `sign in to ${s.name}: /mcp sign-in ${s.name}, or Sign in on the desktop app's Servers and skills` }
+          : { state: "ready", tools: ["greet"], error: null };
     const serverJson = (s: FakeServer, live: boolean) => ({
       name: s.name,
       layer: s.layer,
@@ -884,6 +908,8 @@ export class FakeDaemon {
       disabled: Boolean(s.disabled),
       refused: null,
       trust: s.layer === "workspace" ? "trusted" : null,
+      oauth: s.oauth ?? null,
+      auth: authOf(s),
       ...(live ? liveOf(s) : { state: null, tools: [], error: null }),
     });
 
@@ -948,7 +974,31 @@ export class FakeDaemon {
         const base = known ? serverJson(known, false) : { name, layer: "request", source: "request" };
         if (command.startsWith("no-such")) return reply(ws, id, { server: { ...base, state: "error", tools: [], error: `could not start: {:not_found, "${command}"}` } });
         if (known?.disabled) return reply(ws, id, { server: { ...base, state: "disabled", tools: [], error: null } });
+        if (known) return reply(ws, id, { server: { ...base, ...liveOf(known) } });
         return reply(ws, id, { server: { ...base, state: "ready", tools: ["greet"], error: null } });
+      }
+
+      // The daemon runs the sign-in and listens for the browser; here the browser is a
+      // test calling `finishSignIn`.
+      case "mcp.sign_in":
+      case "mcp.sign_out": {
+        if (!params["command_id"]) return invalid("command_id is required");
+        const name = String(params["name"] ?? "");
+        const known = this.servers.find((s) => s.name === name);
+        if (!known) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "mcp_server", name } });
+        if (!known.oauth) return invalid(`${name} takes no sign-in: give its entry an oauth.client_id to sign in to it`);
+        if (method === "mcp.sign_out") {
+          delete this.signIns[name];
+          return reply(ws, id, { server: name, auth: authOf(known) });
+        }
+        this.signIns[name] = { state: "signing_in", account: this.signIns[name]?.account ?? null, error: null };
+        const query = new URLSearchParams({ client_id: known.oauth.client_id, response_type: "code", redirect_uri: "http://127.0.0.1:53682/callback" });
+        return reply(ws, id, {
+          server: name,
+          url: `https://login.example.test/tenant/authorize?${query.toString()}`,
+          redirect_uri: "http://127.0.0.1:53682/callback",
+          expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+        });
       }
 
       case "skills.list":

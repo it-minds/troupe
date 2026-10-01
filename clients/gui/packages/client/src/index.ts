@@ -93,6 +93,8 @@ export type {
   RecentWorkspace,
   RemoveResult,
   ScopedParams,
+  ServerAuth,
+  SignInStarted,
   SourceLayer,
   SourceScope,
   Worktree,

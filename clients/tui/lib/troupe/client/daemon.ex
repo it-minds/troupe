@@ -357,6 +357,7 @@ defmodule Troupe.Client.Daemon do
   defp mcp_state("stopped"), do: :stopped
   defp mcp_state("pending"), do: :pending
   defp mcp_state("disabled"), do: :disabled
+  defp mcp_state("sign_in"), do: :sign_in
   defp mcp_state(_other), do: :unknown
 
   # The person's own servers and skills (troupe-remote Decision 700), as the `/mcp`
@@ -381,11 +382,12 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
-  # `mcp.add`, `mcp.remove`, `mcp.check`, `skills.add` and `skills.remove` on this
-  # session's workspace; a command gets its id here, as every other does.
+  # `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `skills.add`
+  # and `skills.remove` on this session's workspace; a command gets its id here, as
+  # every other does.
   @impl true
   def manage_sources(sid, method, params)
-      when method in ~w(mcp.add mcp.remove skills.add skills.remove) do
+      when method in ~w(mcp.add mcp.remove mcp.sign_in mcp.sign_out skills.add skills.remove) do
     params =
       Map.merge(%{workspace: workspace(sid), command_id: Troupe.Remote.RPC.command_id()}, params)
 
@@ -418,9 +420,28 @@ defmodule Troupe.Client.Daemon do
       tools: List.wrap(server["tools"]),
       error: server["error"] || server["refused"],
       disabled?: server["disabled"] == true,
-      trust: server["trust"]
+      trust: server["trust"],
+      auth: auth_entry(server["auth"])
     }
   end
+
+  # How the person's sign-in to a server that wants them stands (troupe-remote
+  # Decision 741), or `nil` for a server that takes none.
+  defp auth_entry(%{"state" => state} = auth) do
+    %{
+      state:
+        case state do
+          "signed_in" -> :signed_in
+          "signing_in" -> :signing_in
+          "expired" -> :expired
+          _other -> :signed_out
+        end,
+      account: auth["account"],
+      error: auth["error"]
+    }
+  end
+
+  defp auth_entry(_none), do: nil
 
   defp skill_entry(skill) do
     %{

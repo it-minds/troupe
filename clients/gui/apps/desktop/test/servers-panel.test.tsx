@@ -77,4 +77,55 @@ describe("the servers and skills panel", () => {
     const methods = new Set(daemon.calls.map((c) => c.method));
     expect([...methods].filter((m) => m.startsWith("mcp.") || m.startsWith("skills.")).sort()).toEqual(["mcp.add", "mcp.check", "mcp.list", "mcp.remove", "skills.add", "skills.list", "skills.remove"]);
   });
+
+  // troupe-remote Decision 741: a server that wants you signed in.
+  it("signs in to a server that wants you, opens the browser, and says whose the sign-in is", async () => {
+    daemon.servers.push({
+      name: "notes",
+      layer: "user",
+      source: "/home/ada/.config/troupe/mcp.json",
+      url: "https://mcp.example.test/mcp",
+      oauth: { client_id: "troupe-test-client" },
+    });
+    const opened: string[] = [];
+    const before = globalThis.open;
+    globalThis.open = ((url: string) => {
+      opened.push(url);
+      return null;
+    }) as typeof globalThis.open;
+
+    try {
+      unmount = render(<Servers client={client} />).unmount;
+      const row = await waitFor(() => [...document.querySelectorAll("tr")].find((r) => r.textContent?.includes("notes")), "the server's row");
+      expect(row.textContent).toContain("Not signed in");
+
+      button("Check", row)!.click();
+      await waitFor(() => row.textContent?.includes("Needs sign-in"), "the check says it waits for a sign-in");
+
+      button("Sign in", row)!.click();
+      await waitFor(() => says("notes: finish signing in in your browser"), "the sign-in's outcome");
+      expect(opened).toEqual([expect.stringContaining("https://login.example.test/tenant/authorize?")]);
+      await waitFor(() => says("Waiting for the browser"), "the row waits for the browser");
+      expect(document.body.textContent).toContain("Open the sign-in page for notes");
+
+      // The person finishes in the browser; the panel reads it again by itself.
+      daemon.finishSignIn("notes");
+      const signedIn = await waitFor(
+        () => [...document.querySelectorAll("tr")].find((r) => r.textContent?.includes("Signed in as ada@example.test")),
+        "the row says whose the sign-in is",
+        5000,
+      );
+      expect(button("Sign in", signedIn)).toBeFalsy();
+
+      button("Sign out", signedIn)!.click();
+      await waitFor(() => says("notes: signed out on this computer"), "the sign-out's outcome");
+      await waitFor(() => says("Not signed in"), "the row is signed out again");
+
+      const calls = daemon.calls.filter((c) => c.method === "mcp.sign_in" || c.method === "mcp.sign_out");
+      expect(calls.map((c) => c.method)).toEqual(["mcp.sign_in", "mcp.sign_out"]);
+      expect(calls.every((c) => String(c.params["command_id"]).startsWith("c-"))).toBe(true);
+    } finally {
+      globalThis.open = before;
+    }
+  });
 });

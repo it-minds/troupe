@@ -671,6 +671,21 @@ defmodule Troupe.Protocol.Schema do
         "name" => optional(:string),
         "server" => optional(:object)
       },
+      # A person's sign-in to a server that wants them (Decision 741) — the daemon's only:
+      # it listens for the browser on this machine and keeps the tokens, and a client opens
+      # the URL it answers. `mcp.list`'s `auth` says how a sign-in stands.
+      "mcp.sign_in" => %{
+        "command_id" => required(:string),
+        "name" => required(:string),
+        "workspace" => optional(:string),
+        "session_id" => optional(:string)
+      },
+      "mcp.sign_out" => %{
+        "command_id" => required(:string),
+        "name" => required(:string),
+        "workspace" => optional(:string),
+        "session_id" => optional(:string)
+      },
       "skills.list" => %{"workspace" => optional(:string)},
       "skills.add" => %{
         "command_id" => required(:string),

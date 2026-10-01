@@ -18,6 +18,10 @@ defmodule Troupe.Application do
     children = [
       Troupe.Registry,
       Troupe.Events,
+      # A person's sign-ins to their own MCP servers (Decision 741): the one process that
+      # uses and refreshes them, and the sign-ins whose browser is out.
+      Troupe.MCP.OAuth.Tokens,
+      {DynamicSupervisor, name: Troupe.MCP.OAuth.SignIns, strategy: :one_for_one},
       Troupe.Sessions.Index,
       Troupe.Sessions
     ]
