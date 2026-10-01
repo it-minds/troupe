@@ -35,7 +35,11 @@ defmodule Troupe.MCP.Server do
     # A person's own server that wants them signed in (Decision 741): where the daemon
     # keeps that sign-in, so `credential` is filled per call from it. Never set on a
     # pod, which holds nobody's sign-in.
-    oauth: nil
+    oauth: nil,
+    # Where the MCP sessions this server issues are kept (`Troupe.MCP.Sessions`, Decision
+    # 746): the table of whoever calls it, a local session or a pod. `nil` opens one per
+    # call.
+    sessions: nil
   ]
 
   @type t :: %__MODULE__{
@@ -47,7 +51,8 @@ defmodule Troupe.MCP.Server do
           timeout_ms: pos_integer(),
           permission: :ask | :auto,
           tools: :all | [String.t()],
-          oauth: map() | nil
+          oauth: map() | nil,
+          sessions: :ets.tid() | nil
         }
 
   @doc """

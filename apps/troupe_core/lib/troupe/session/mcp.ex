@@ -16,10 +16,11 @@ defmodule Troupe.Session.MCP do
           url: https://wiki.example/mcp
 
   A `command` server speaks over its standard streams and lives as long as the session
-  (`Troupe.MCP.Stdio`); a `url` server is the same one-shot HTTP client the pod uses,
-  discovered once when the session starts. Both kinds' tools are `mcp.<server>.<tool>`
-  and go through the same gate as everything else; `permission: auto` on a server
-  lowers its tools from the default `ask`.
+  (`Troupe.MCP.Stdio`); a `url` server is the same HTTP client the pod uses, discovered
+  once when the session starts, and the MCP session it issues lasts as long as the
+  session (Decision 746). Both kinds' tools are `mcp.<server>.<tool>` and go through the
+  same gate as everything else; `permission: auto` on a server lowers its tools from the
+  default `ask`.
 
   **The workspace's servers are asked about first.** A `.troupe/mcp.json` arrives with
   a clone, so its servers start only once somebody attached has said so, through the
@@ -38,7 +39,7 @@ defmodule Troupe.Session.MCP do
 
   use GenServer
 
-  alias Troupe.MCP.{Client, Local, OAuth, Server, Stdio, Tool, Trust}
+  alias Troupe.MCP.{Client, Local, OAuth, Server, Sessions, Stdio, Tool, Trust}
   alias Troupe.Session.Questions
 
   require Logger
@@ -47,6 +48,8 @@ defmodule Troupe.Session.MCP do
     :session_id,
     :workspace,
     :state_dir,
+    # The table the URL servers' MCP sessions are kept in (Decision 746), the session's.
+    :sessions,
     local?: true,
     trusted?: false,
     managed_only?: false,
@@ -127,8 +130,10 @@ defmodule Troupe.Session.MCP do
         is_binary(config[:command]) ->
           Stdio.probe(name, config, workspace, @wait_for_state)
 
+        # Outside any session, so nowhere to keep an MCP session: one is opened for each
+        # request and ended after it.
         is_binary(config[:url]) ->
-          name |> http_server(config, nil) |> http_status()
+          name |> http_server(config, nil, nil) |> http_status()
 
         true ->
           %{name: name, state: :error, tools: [], error: "has neither a command nor a url"}
@@ -170,6 +175,7 @@ defmodule Troupe.Session.MCP do
       session_id: session_id,
       workspace: workspace,
       state_dir: Keyword.get(opts, :state_dir),
+      sessions: opts |> Keyword.get(:sessions) |> Sessions.table(),
       local?: Keyword.get(opts, :local, true),
       trusted?: Keyword.get(opts, :trusted, false),
       managed_only?: Keyword.get(opts, :managed_only, false)
@@ -257,7 +263,11 @@ defmodule Troupe.Session.MCP do
         end
 
       is_binary(config[:url]) ->
-        %{record: record, kind: :http, http: http_server(name, config, state.state_dir)}
+        %{
+          record: record,
+          kind: :http,
+          http: http_server(name, config, state.state_dir, state.sessions)
+        }
 
       true ->
         Logger.warning("troupe: MCP server #{name} has neither command nor url; ignored")
@@ -514,8 +524,9 @@ defmodule Troupe.Session.MCP do
   # Discovered once, here: a URL server's tools are a property of the server, and a
   # session asking on every prompt would put the server's latency on every turn. One that
   # wants the person signed in (Decision 741) is asked with their token, and waits for
-  # their sign-in when there is none: `signed_in/1` brings it back.
-  defp http_server(name, config, state_dir) do
+  # their sign-in when there is none: `signed_in/1` brings it back. The MCP session the
+  # server issues is the local session's, kept in its table (Decision 746).
+  defp http_server(name, config, state_dir, sessions) do
     server =
       Server.from_config(%{
         "name" => name,
@@ -523,6 +534,7 @@ defmodule Troupe.Session.MCP do
         "permission" => config[:permission] || :ask,
         "timeout_ms" => config[:timeout_ms] || 30_000
       })
+      |> Map.put(:sessions, sessions)
       |> with_oauth(config[:oauth], state_dir)
 
     case OAuth.authorized(server, &Client.list_tools/1) do

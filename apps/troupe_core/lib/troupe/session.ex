@@ -74,6 +74,9 @@ defmodule Troupe.Session do
         # have no way of knowing it needed to offer its tools again.
         {Troupe.Session.ClientTools,
          session_id: session_id, managed_servers_only: config.managed_mcp_servers_only},
+        # The sessions its URL servers issue (Decision 746): before the servers, and
+        # stopped after them, which is when each is ended at its server.
+        {Troupe.MCP.Sessions, name: Troupe.Registry.mcp_sessions(session_id)},
         # The workspace's own MCP servers (Decision 654) and the person's (Decision 700),
         # started with the session and gone with it. Above the agent, since their tools
         # are in its list; below `Questions`, which the workspace's servers are asked
@@ -86,7 +89,8 @@ defmodule Troupe.Session do
          local: Keyword.get(opts, :kind, :local) == :local,
          trusted: Config.Trust.trusted?(workspace.root_real, config.trusted_workspaces),
          managed_only: config.managed_mcp_servers_only,
-         state_dir: config.state_dir}
+         state_dir: config.state_dir,
+         sessions: Troupe.Registry.mcp_sessions(session_id)}
       ] ++
         fake_child(session_id, config, opts) ++
         [
