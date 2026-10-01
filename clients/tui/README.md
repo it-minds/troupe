@@ -235,8 +235,9 @@ troupe --version
 ```
 
 `troupe run --headless` prints the transcript, one line per event prefixed with the agent
-that wrote it, and exits when the agent comes to rest: when its turn ends, whether or not
-the model called `finish`. Nobody is there to answer an approval, so it is refused; pass
+that wrote it, the harness's notes among them as the window shows them (`done:` and the
+summary, a compaction, a reply cut or empty), and exits when the agent comes to rest: when
+its turn ends, whether or not the model called `finish`. Nobody is there to answer an approval, so it is refused; pass
 `--auto-approve` for a task that writes files or runs commands, or set `auto_approve` in
 the config, which `--auto-approve`, `--watch` and `--full-send` beat only when given. A
 headless run starts no librarian: the project brief is refreshed automatically only for
@@ -249,7 +250,7 @@ code says how the run ended, for scripts and CI:
 | code | the run |
 |---|---|
 | `0` | ended its turn, or the agent finished |
-| `1` | stopped short: the agent ran out of budget, refused, or gave a cut or empty reply; its last model request failed; the turn was cancelled; the session could not start; or the connection to the daemon went and did not come back within a minute. The last line says which |
+| `1` | stopped short: the agent ran out of budget, refused, or gave a cut or empty reply; its last model request failed; a tool kept failing and the harness stopped the turn; the agent kept crashing and its session stopped; the turn was cancelled; the session could not start; or the connection to the daemon went and did not come back within a minute. The last line says which, and for a crash what the agent raised |
 | `2` | never started: the command line did not parse |
 | `3` | was refused an approval, with nobody to ask. Run it again with `--auto-approve`, or `troupe resume` the session to carry on by hand |
 | `130` | was interrupted with Ctrl-C |

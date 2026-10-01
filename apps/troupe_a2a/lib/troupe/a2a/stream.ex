@@ -294,7 +294,7 @@ defmodule Troupe.A2A.Stream do
         state = Events.state_of_row(row)
 
         if from_seq == nil and state in ~w(completed failed canceled input-required),
-          do: answer_at_rest(conn, id, task_id, row, state),
+          do: answer_at_rest(conn, caller, id, task_id, row, state),
           else: serve(conn, caller, task_id, id, mode: "read", from_seq: from_seq)
 
       {:error, error} ->
@@ -302,15 +302,32 @@ defmodule Troupe.A2A.Stream do
     end
   end
 
-  # Nothing to replay and the task is at rest: one final update says where it stands,
-  # and no pod is dialled for it. The conn is kept whether or not the write landed.
-  defp answer_at_rest(conn, id, task_id, row, state) do
-    acc = %{Events.new(task_id) | state: state, last_seq: row["last_seq"] || 0}
-    conn = HTTP.sse_start(conn)
+  # Nothing to replay and the task is at rest: one final update says where it stands.
+  # A row that is done or waiting says so, and no pod is dialled for it; an idle one says
+  # only that a turn ended, and the log says whether the harness stopped it, which is a
+  # task `failed` and why, as the live stream has it. The conn is kept whether or not the
+  # write landed.
+  defp answer_at_rest(conn, caller, id, task_id, row, state) do
+    case at_rest(caller, task_id, row, state) do
+      {:ok, acc} ->
+        conn = HTTP.sse_start(conn)
 
-    case HTTP.sse_result(conn, id, Events.status_update(acc, nil, nil, true)) do
-      {:ok, conn} -> conn
-      {:error, _reason} -> conn
+        case HTTP.sse_result(conn, id, Events.status_update(acc, nil, acc.message, true)) do
+          {:ok, conn} -> conn
+          {:error, _reason} -> conn
+        end
+
+      {:error, error} ->
+        HTTP.error(conn, id, Error.from_plane(error, task_id))
+    end
+  end
+
+  defp at_rest(caller, task_id, row, state) do
+    if Events.known_from_row?(row) do
+      {:ok, %{Events.new(task_id) | state: state, last_seq: row["last_seq"] || 0}}
+    else
+      with {:ok, acc} <- replay(caller, task_id),
+           do: {:ok, if(Events.at_rest?(acc), do: acc, else: %{acc | state: state})}
     end
   end
 

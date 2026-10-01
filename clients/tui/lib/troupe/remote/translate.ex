@@ -258,7 +258,15 @@ defmodule Troupe.Remote.Translate do
       type when type in ["tool.completed", "tool_call_completed"] ->
         {[emit.(:tool_call_completed, completed(data))], memory}
 
-      type when type in ["tool_results", "mounts_resolved", "config_upgraded_ack"] ->
+      # What the prompt was read from (`instructions_loaded`) is `/context`'s to show, not a
+      # line in the transcript at every turn the files changed.
+      type
+      when type in [
+             "tool_results",
+             "mounts_resolved",
+             "config_upgraded_ack",
+             "instructions_loaded"
+           ] ->
         {[], memory}
 
       type when type in ["approval.requested", "approval_requested"] ->
@@ -364,15 +372,17 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:remote_note, %{text: "woken"}), emit.(:agent_state, %{to: :thinking})], memory}
 
       # The reason rides along, so a reader that must tell a finish from a stop short (the
-      # headless printer's exit code) does not have to parse the note.
+      # headless printer's exit code) does not have to parse the note. The note comes
+      # first: a headless run ends at the state, and would end without the summary.
       "agent_done" ->
-        {[emit.(:agent_state, %{to: :done, reason: data["reason"]})] ++ done_note(emit, data),
+        {done_note(emit, data) ++ [emit.(:agent_state, %{to: :done, reason: data["reason"]})],
          memory}
 
       # The turn is over and the agent waits for input: the same `idle` the live
       # `agent_state` says, but from the log, so it is neither dropped nor missed by a
       # client that attached after it happened. A `reason` rides along when the harness
-      # ended the turn rather than the model (`tool_failures`, troupe-remote Decision 687).
+      # ended the turn rather than the model (`tool_failures`, troupe-remote Decision 687;
+      # `agent_failed`, with its `detail`, Decision 727).
       "turn_ended" ->
         {[emit.(:agent_state, ended_by(%{to: :idle}, data))], memory}
 
@@ -592,8 +602,13 @@ defmodule Troupe.Remote.Translate do
 
   defp done_note(_emit, _data), do: []
 
-  defp ended_by(idle, %{"reason" => reason}) when is_binary(reason),
-    do: Map.put(idle, :reason, reason)
+  # With what it raised when the agent kept crashing (`agent_failed`, Decision 727).
+  defp ended_by(idle, %{"reason" => reason} = data) when is_binary(reason) do
+    case data["detail"] do
+      detail when is_binary(detail) -> Map.merge(idle, %{reason: reason, detail: detail})
+      _ -> Map.put(idle, :reason, reason)
+    end
+  end
 
   defp ended_by(idle, _data), do: idle
 

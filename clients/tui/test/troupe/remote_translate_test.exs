@@ -243,9 +243,10 @@ defmodule Troupe.RemoteTranslateTest do
     assert [%{type: :agent_state, data: %{to: :thinking}}] =
              translate(durable("llm_request", %{"model" => "m"}))
 
+    # The note first: a headless run ends at the state (D42).
     assert [
-             %{type: :agent_state, data: %{to: :done, reason: "finished"}},
-             %{type: :remote_note, data: %{text: "done: all green"}}
+             %{type: :remote_note, data: %{text: "done: all green"}},
+             %{type: :agent_state, data: %{to: :done, reason: "finished"}}
            ] =
              translate(durable("agent_done", %{"reason" => "finished", "summary" => "all green"}))
 
@@ -259,6 +260,16 @@ defmodule Troupe.RemoteTranslateTest do
     # One the harness stopped says why (troupe-remote Decision 687).
     assert [%{type: :agent_state, data: %{to: :idle, reason: "tool_failures"}}] =
              translate(durable("turn_ended", %{"reason" => "tool_failures"}))
+
+    # And one whose agent kept crashing says what it raised (Decision 727).
+    crashed = %{"reason" => "agent_failed", "detail" => "** (RuntimeError) boom"}
+
+    assert [
+             %{
+               type: :agent_state,
+               data: %{to: :idle, reason: "agent_failed", detail: "** (RuntimeError) boom"}
+             }
+           ] = translate(durable("turn_ended", crashed))
 
     assert [
              %{type: :cancelled},
@@ -278,6 +289,10 @@ defmodule Troupe.RemoteTranslateTest do
              translate(durable("agent_woken", %{"from" => "finished", "source" => "user"}))
 
     assert [] = translate(durable("tool_results", %{"results" => []}))
+
+    # A documented event, not one to render generically: `/context` shows what it says.
+    loaded = %{"budget" => 16_000, "used" => 0, "searched" => [], "files" => []}
+    assert [] = translate(durable("instructions_loaded", loaded))
   end
 
   test "ephemerals: a delta's kind decides what it is, and agent_state is the agent's word" do
