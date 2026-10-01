@@ -130,10 +130,8 @@ defmodule Troupe.Session.MCP do
         is_binary(config[:command]) ->
           Stdio.probe(name, config, workspace, @wait_for_state)
 
-        # Outside any session, so nowhere to keep an MCP session: one is opened for each
-        # request and ended after it.
         is_binary(config[:url]) ->
-          name |> http_server(config, nil, nil) |> http_status()
+          name |> http_server(config, nil) |> http_status()
 
         true ->
           %{name: name, state: :error, tools: [], error: "has neither a command nor a url"}
@@ -525,8 +523,9 @@ defmodule Troupe.Session.MCP do
   # session asking on every prompt would put the server's latency on every turn. One that
   # wants the person signed in (Decision 741) is asked with their token, and waits for
   # their sign-in when there is none: `signed_in/1` brings it back. The MCP session the
-  # server issues is the local session's, kept in its table (Decision 746).
-  defp http_server(name, config, state_dir, sessions) do
+  # server issues is the local session's, kept in its table (Decision 746); with none,
+  # outside a session, each request opens and ends its own.
+  defp http_server(name, config, state_dir, sessions \\ nil) do
     server =
       Server.from_config(%{
         "name" => name,
