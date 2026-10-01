@@ -35,6 +35,7 @@ import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
+import { OfferLine, OfferPanel } from "./Offer";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
 
 export function Session({
@@ -130,6 +131,7 @@ export function Session({
       />
 
       <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
+      <OfferLine offer={view.offer} />
       {away && <Away summary={away} onSeen={seenAway} />}
 
       <div className="stagearea">
@@ -145,6 +147,9 @@ export function Session({
           {openQuestions(view.state).map((entry) => (
             <QuestionPanel key={entry.callId} entry={entry} canAnswer={!readOnly} onAnswer={(text) => view.answer(entry.callId, text)} />
           ))}
+
+          {/* The session's question about your own servers, before it takes their tools. */}
+          {view.offer.state === "asking" && <OfferPanel ask={view.offer.ask} onAnswer={view.answerOffer} />}
 
           {readOnly ? (
             <ReadOnly />

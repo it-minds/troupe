@@ -3227,6 +3227,62 @@ citation keeps meaning what it meant.
        `crash_loop_test.exs` (listed, and cleared by the next turn) and the gateway's
        `daemon_test.exs` (over the socket).
 
+746. **An MCP server is opened with the lifecycle's handshake, and the session it issues is
+     kept by whoever calls it, per server and credential, opened again once on a `404`,
+     and ended when the caller stops.** Issue #319. `Troupe.MCP.Client` sent `tools/list`
+     and `tools/call` as lone POSTs with no `initialize` before them and kept nothing a
+     server answered, so a server that keeps state per client, and refuses a request
+     without the `Mcp-Session-Id` its `initialize` issued, could not be used from a local
+     session or a pod at all. That is the handshake 741 left out.
+     - **The handshake, once.** Before the first request to a server: `initialize` with
+       the version Troupe speaks (`2025-06-18`), then `notifications/initialized`, whose
+       answer is waited for and not read. Every request after carries the session id the
+       server answered and, in `MCP-Protocol-Version`, the version it chose. A server that
+       answers with no session id keeps none, and is called without one, as before.
+     - **Where the session lives.** `Troupe.MCP.Sessions`, an ETS table owned by a small
+       process in the caller's supervision tree: one per local session, before
+       `Troupe.Session.MCP`, and one per pod, in the worker's application before
+       `Troupe.Worker.MCP`. A `Troupe.MCP.Server` carries the table as `sessions`, so the
+       tools built at discovery find it, and `client.ex` stays the only module that talks
+       to a server. Not one table for the node: `troupe_protocol` has no application to
+       own it, and a session's MCP sessions should end with it. Not the state of
+       `Troupe.Session.MCP`: the lookup is on every call's path, and a table is read
+       without queueing.
+     - **The key** is the server's URL and a hash of the headers the call carries, which
+       is the credential: a person's token and a profile's are two sessions, as a server
+       that binds a session to whoever opened it needs, and a refreshed token opens a new
+       one. Not keyed on whose credential it is, which the client does not see for every
+       caller and which would present one token's session with another.
+     - **A forgotten session.** A `404` to a request that carried a session id drops it,
+       opens one more and sends the request again, once. Two calls that open a session at
+       once both finish the handshake; `:ets.insert_new/2` keeps one and the other is ended.
+     - **Its end.** The holder traps exits, and when its supervisor stops it, after the
+       servers that use it, it sends each session a server issued a `DELETE`, a few seconds
+       at most, whatever the answer (`405` included). That needs the credential the
+       session was opened with, so it is kept beside it, except a person's on a pod, which
+       is held for as long as a call takes (`Troupe.MCP.person_credential/2`): that session
+       is left to the server's expiry. A call with no holder (`mcp.check` on a server not
+       in a session) opens a session for its one request and ends it after;
+       `Client.initialize/1`, the bare call sign-in discovery makes, ends any session it is
+       given.
+     - **Out of this slice.** A `400` to a request that carried a session id, which some
+       servers built from the SDKs' examples answer for a session they have forgotten, is
+       an error rather than a reason to open another. A session left behind by a refreshed
+       token is ended only when its holder stops. Streams the server opens (`GET`) and
+       resuming one.
+     - **Proof:** `Troupe.MCPHandshakeTest`, against `test/support/fake_mcp.exs`, which
+       refuses a request without its session id (`400`), with one it has forgotten (`404`)
+       or with another credential than the session's (`403`), answers an older protocol
+       version, and ends a session on `DELETE` or refuses it (`405`): an agent lists and
+       calls the tools in one session carrying the version the server chose, a forgotten
+       session is opened again once, the session ends when the local session stops and a
+       `405` is let be, two credentials are two sessions, a server that keeps none is
+       called without one, and a check's session lasts its one request; and
+       `Troupe.Worker.MCPTest`: discovery per server and credential, every session of a pod
+       in the profile's one, a person's in their own, a forgotten one opened again, and the
+       pod's stopping. The fakes in `Troupe.MCPTest` and `fake_oauth.exs` now answer the
+       `notifications/initialized` they had never been sent, with `202`.
+
 747. **A worker calls an MCP server as its profile's own identity, by OAuth client
      credentials with an assertion signed through OpenBao transit; the profile says who it
      is, and the bundle only that the server is called so.** Issue #315. A bundle server
@@ -3316,3 +3372,65 @@ citation keeps meaning what it meant.
        `worker_profile_identity_test.exs`, `bundle_test.exs`, the operator's
        `resources_test.exs` and `reconciler_test.exs`, the plane's `bundles_test.exs` and
        `admin_test.exs`, and `mcp_test.exs` for the core's half.
+
+748. **A person's own signed-in servers are offered to a pod session they open in the
+     desktop app, as tools the app hosts, and the daemon makes every call with their
+     sign-in.** Issue #308, the first part, following 741. What was there: a server a
+     person signed in to served their local sessions only. A pod session reads none of the
+     person's files and holds none of their sign-ins, and the protocol's path for tools a
+     client hosts (section 8) had nothing in the app using it.
+     - **The daemon lists and calls a server outside any session.** `mcp.tools {name}`
+       answers the server's tools with their descriptions and schemas, asked as a local
+       session asks (`Troupe.Session.MCP.discover/1`), with `state` and `error` as
+       `mcp.check` reports them. `mcp.call {name, tool, arguments}` makes the call through
+       `Troupe.MCP.Tool.invoke/4`, the path a local session's tool takes, so a refresh and
+       one more try on a `401`, and the `sign_in_required` note once the sign-in has run
+       out, are the same, and `content` is what a local session's model would read. Both
+       are `admin` and the daemon's only, like the rest of `mcp.*`. A server with a `url`
+       only: one that runs a command is a process a local session keeps, and starting one
+       per call for somebody else's session is a question of its own. A refused, disabled
+       or unapproved workspace server is refused, as for a sign-in. `mcp.call` carries a
+       `command_id`, which the app makes from the session and the pod's `call_id`, so a
+       call the pod sends again after a drop is answered from the ledger rather than made
+       twice.
+     - **The desktop app offers them** (`ServerOffer` in `@troupe/client`). On a team
+       session opened on its own screen, with a daemon to make the calls and a token with
+       `control`, it lists the person's servers whose sign-in stands `signed_in`, asks the
+       daemon for each one's tools, and registers them with `tools.register`. The session's
+       challenge is shown in a panel where the approval and question panels sit, in the
+       session's words and naming the servers, and **Offer them** sends it back with the
+       person's subject as `confirmed_by`. Every signed-in server rather than a choice
+       among them: the prompt names every tool, the person can say no to the lot, and a
+       choice per server is a refinement the first slice does without. Names are
+       `<server>.<tool>`, so the pod sees `client.<server>.<tool>`, under the prefix no
+       built-in and no profile's `mcp.<server>.<tool>` carries, and two servers' tools
+       never meet. Their permission is the default `ask`: the consent is to offering the
+       tools, not to every call, and the entry's own `permission: auto` is about the
+       person's own sessions.
+     - **A `tool.invoke` goes to `mcp.call`**, and only `{content}` goes back to the pod. An
+       error from the daemon goes back as an error.
+     - **Again on every socket.** `SessionAttachment` takes `onToolInvoke`, and says
+       `tools` at `initialize` when given one, and `onLive`, called on each socket it
+       opens. A registration goes with its socket, so each new one is offered the tools
+       again; the session issues a fresh challenge per socket, and the app answers it with
+       the consent the person gave for the same tools in this attachment rather than asking
+       again, since a parked call has the call grace, a minute, and asking again for what
+       was just allowed teaches people to say yes without reading. A different set of
+       tools is asked about again, and **Not now** holds for the attachment. Leaving the
+       session's screen closes its socket, and the tools go with it.
+     - **No token reaches the pod or the plane.** The pod is sent the tools' names,
+       descriptions and schemas, the consent, and each answer's text. The daemon uses the
+       token on its call to the server, and no answer of `mcp.tools` or `mcp.call` has it.
+     - **Out of this slice.** The TUI's half (#308); offering again when the person signs
+       in to another server while attached; choosing servers; a stdio server; the reason
+       of a client's error reaching the pod's model (the pod's `ClientTool` reads only an
+       error's `message`); dynamic registration, step-up and revocation (#308); the session
+       handshake (#319).
+     - **Proof:** `Troupe.Gateway.MCPCallTest` (against `fake_oauth.exs`: listing and
+       calling with the sign-in, a refresh on a `401`, `sign_in_required` before a sign-in
+       and after a refused refresh, the refusals, and a session started as a pod's, whose
+       agent calls the person's server through the client that offered it, with no token in
+       its log), the client's `own-servers.test.ts` (a fake pod and daemon: the call made
+       by the daemon, no token in any frame the pod got, offered again on a new socket
+       without asking, a no kept, a reader offering nothing) and the desktop app's
+       `own-servers.test.tsx` (the panel, the line, and a call through the app).

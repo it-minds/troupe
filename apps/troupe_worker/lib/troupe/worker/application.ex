@@ -36,11 +36,13 @@ defmodule Troupe.Worker.Application do
   # bundle hash the pod already has. `Connections` before the registry, because a
   # person-mode server discovered at start-up is one whose credentials may be asked for
   # on the first turn; `ClientCredentials` too, because discovering a server the profile
-  # calls as itself takes its token.
+  # calls as itself takes its token. The MCP sessions the servers issue before all of
+  # them, and stopped after them, which is when each is ended at its server (Decision 746).
   defp children do
     [
       Troupe.Worker.Sessions,
       Troupe.Worker.Auth,
+      {Troupe.MCP.Sessions, name: Troupe.Worker.MCP.Sessions},
       Troupe.Worker.Connections,
       Troupe.Worker.ClientCredentials,
       Troupe.Worker.MCP,

@@ -686,6 +686,22 @@ defmodule Troupe.Protocol.Schema do
         "workspace" => optional(:string),
         "session_id" => optional(:string)
       },
+      # One of the person's servers outside any session (Decision 748) — the daemon's only:
+      # its tools with their schemas, and a call made with the person's sign-in, for a
+      # client that offers them to a session on a pod. The token never comes back.
+      "mcp.tools" => %{
+        "name" => required(:string),
+        "workspace" => optional(:string),
+        "session_id" => optional(:string)
+      },
+      "mcp.call" => %{
+        "command_id" => required(:string),
+        "name" => required(:string),
+        "tool" => required(:string),
+        "arguments" => optional(:object),
+        "workspace" => optional(:string),
+        "session_id" => optional(:string)
+      },
       "skills.list" => %{"workspace" => optional(:string)},
       "skills.add" => %{
         "command_id" => required(:string),

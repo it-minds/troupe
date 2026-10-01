@@ -335,9 +335,17 @@ defmodule Troupe.MCPTest do
     }
   end
 
+  # The handshake every request to a server now opens with, when nothing keeps its session
+  # (Decision 746), is passed over: these tests read the request it was for. It carries
+  # the same credential, and `Troupe.MCPHandshakeTest` reads it.
   defp assert_request(timeout \\ 5_000) do
     receive do
-      {:mcp_request, request} -> request
+      {:mcp_request, %{body: %{"method" => method}}}
+      when method in ["initialize", "notifications/initialized"] ->
+        assert_request(timeout)
+
+      {:mcp_request, request} ->
+        request
     after
       timeout -> flunk("the MCP server saw no request within #{timeout}ms")
     end
@@ -364,6 +372,11 @@ defmodule Troupe.MCPTest do
 
     :gen_tcp.close(socket)
   end
+
+  # A notification is accepted with no body, as the specification has a server do: the
+  # handshake sends one (Decision 746).
+  defp response(%{"method" => "notifications/" <> _}),
+    do: ["HTTP/1.1 202 Accepted\r\n", "content-length: 0\r\n", "connection: close\r\n\r\n"]
 
   defp response(%{"id" => id, "method" => "tools/list"}) do
     reply(id, %{
