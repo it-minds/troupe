@@ -57,6 +57,8 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
   timeout), the worker's `ReaderLogTest` "a log an activation has taken over" and the
   gateway's `RestartTest` (once with a `FunctionClauseError` in `Troupe.LLM.Fake.render/2`)
   each failed once; all pass alone.
+- The worker suite's plane-backed tests share `troupe_plane_test` with the plane suite, so
+  running both at once can deadlock in Postgres (`40P01` in `plane_link_test.exs`).
 - Under full load, the TUI's `ClipboardTest` and `TUISelectionTest` (Ctrl-Y copy) fail
   now and then; both pass alone.
 - The gateway suite prints `erl_child_setup: failed with error 32 on line 284` a few
@@ -163,7 +165,7 @@ groups in PR #265.
 
 Found by the #258 and #273 fixers (PRs #264, #274), 2026-09-29.
 
-### D41 - The desktop app after the daemon restarts (medium)
+### D41 - A click in Windows' notification centre (unconfirmed)
 
 - Unconfirmed: whether Windows raises `Activated` in the running app for a click in the
   notification centre or starts a second copy. `tauri-winrt-notification` 0.8 can't set a
@@ -240,6 +242,63 @@ Found by the chunk 9 fixers, 2026-09-29.
 
 Found by the chunk 10 fixers, 2026-09-30.
 
+### D46 - The TUI and headless runs don't follow a restarted daemon (medium)
+
+For a daemon session, `Troupe.Remote.Worker` keeps the endpoint and token it was given at
+attach (`clients/tui/lib/troupe/client/daemon.ex`), while the daemon's loopback picks a new
+port and a random token on every start (`apps/troupe_gateway/lib/troupe/gateway/loopback.ex`,
+`bind/1`, `token/0`). A TUI window or a headless run therefore never reconnects after the
+daemon restarts, and a headless run ends 1 after 60 s, though the printer says a daemon
+that comes back within a minute costs a script nothing. Read in the code; the desktop app's
+half was fixed for #305. Found by the chunk 11 fixer of slot C1 (PR #306), 2026-10-01.
+
+### D47 - On a plane, a turn the harness stopped reads as a finished one (medium, unconfirmed)
+
+The worker's lifecycle (`apps/troupe_worker/lib/troupe/worker/session/manager.ex`,
+`observe/2`, `status_fields/1`) never carries `turn_ended`'s reason, so a turn stopped by
+the failure guard or ended `agent_failed` leaves the plane's row `idle` with no reason. The
+plane's own readers of the outcome see a plain completed turn: the status page
+(`web/live/status.ex`), a trigger run's outcome (`triggers.ex`), `notify_url` posts
+(`notify.ex`), the review queue, and team sessions' rows in the desktop app. The manager
+also may not notice the session tree stopping after `agent_failed`. A2A reads the log since
+PR #306 and is not affected. Found by the chunk 11 fixers of slots C1 and C2 (PRs #306,
+#309), 2026-10-01.
+
+### D48 - A dormant session whose log its root can't replay can never be woken (medium)
+
+When the root's first start fails inside the session's own start (a log the replay can't
+fold), `input.send` answers `unavailable` with the raw term
+(`{:shutdown, {:failed_to_start_child, {Troupe.Agent.Node, ["root"]}, ...}}`) and no
+`turn_ended` `agent_failed` is written: Decision 727 covers a root that crashes after the
+session is up, not one that never starts. Found by the chunk 11 fixer of slot C2
+(PR #309), 2026-10-01.
+
+### D49 - Small leftovers from the 0.7.1 work (low)
+
+- A fresh install that follows `docs/admin/installing.md` §1 creates its Secrets in the
+  release's namespace first, so Helm then refuses to install the chart's own Namespace
+  ("exists and cannot be imported"); `createNamespace: false` is the documented answer, but
+  `values.small.yaml` and `values.example.yaml` still default it to `true`.
+- The scaler doesn't recreate a profile's resource that is missing in `direct` mode, resyncs
+  only `replicas`, warns every 15 s while a resend keeps being refused, and reads the
+  resource twice a tick (`Upgrade.step` too); `Harness.warm_up` has the same row-first
+  order, healed by the read-back but untested.
+- The chart is linted and rendered only on pull requests into `main`; `dev-check` doesn't.
+- `troupe run <agent>` with an agent that doesn't exist starts the tree anyway and shows
+  the raw term as the error.
+- `Troupe.Remote.Translate` crashes on a `goal_set` whose `text` isn't a string (only a
+  malformed log has one), and the headless printer can print a client-made
+  `branch_spawned` twice (it has no `seq`).
+- The desktop transcript says a local session was "activated on a pod" (`transcript.ts`
+  falls back to "a pod" when `session_activated` has no `pod`), and shows a `tool_failures`
+  stop only as the guard's question answered `stop`.
+- `Troupe.Tools.identity_of` finds only a pod's configured servers, so a call to a person's
+  own MCP server is recorded with the subject `profile`, though since PR #310 the token is
+  the person's; `Troupe.MCP.Import` drops `headers`, so a local server that needs a static
+  key can't be imported.
+
+Found by the chunk 11 fixers, 2026-10-01.
+
 ## Taken
 
 | Defect | Taken by |
@@ -302,6 +361,9 @@ Found by the chunk 10 fixers, 2026-09-30.
 | A trigger's timezone typed in the console was ignored; the MCP schema of `admin.trigger.put` didn't match its handler; a profile's bundle channel never reached its row; an ssh profile got a StatefulSet (found by the #186 fixers) | #290, PR #291 |
 | Team and host admin methods accepted fields they don't document; the profile editor couldn't save a storage class; the console's budget bars drew no fill and showed the wrong currency (found by the #290 and #188 fixers) | PR #292 |
 | D42 - The clients drop what a stopped turn says | #301, PR #306; #305, PR #309 |
+| D39 - A `session.read` and an activation of the same session on one pod | #302, PR #307 |
+| D44 - Uninstalling the chart deletes its namespace; the scaler forgot a failed write (D40's first item) | #303, PR #304 |
+| A person's own remote MCP server that needs their OAuth sign-in (found by the deployment's first profile); the pod path, client registration and the `initialize`/session handshake are next | #300, PR #310; #308 |
 
 ## Checked and not a defect
 
