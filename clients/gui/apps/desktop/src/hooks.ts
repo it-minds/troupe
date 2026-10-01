@@ -14,6 +14,7 @@ import {
   FleetStore,
   isDurable,
   PlaneSource,
+  ServerOffer,
   SessionAttachment,
 } from "@troupe/client";
 import { noticeEvent } from "./notify";
@@ -24,6 +25,7 @@ import type {
   DaemonEndpoint,
   DaemonIdentity,
   FleetSnapshot,
+  OfferState,
   Principal,
   ProfileOffering,
   SessionKind,
@@ -287,6 +289,14 @@ export interface SessionHandle {
   stopLoop(): Promise<void>;
   /** Fetch a blob's text. Called on expand and never on load. */
   readBlob(blob: string): Promise<string>;
+  /**
+   * Your own signed-in servers, offered to a team session (troupe Decision 748): `asking`
+   * while the session's question waits for you, then `offered`, `declined` or `refused`.
+   * `none` where there is nothing to offer, or no daemon to make the calls.
+   */
+  offer: OfferState;
+  /** Answer the session's question about your servers. */
+  answerOffer(allow: boolean): void;
   error: string | null;
 }
 
@@ -328,6 +338,9 @@ export function useSessionView(
   // be told to let it go; a daemon's view is one of several on a socket that stays.
   const attachment = useRef<SessionAttachment | null>(null);
   const [view, setView] = useState<SessionView | null>(null);
+  const [offer, setOffer] = useState<OfferState>({ state: "none" });
+  // The answer the offer's question waits for, until the person gives it.
+  const answering = useRef<((allow: boolean) => void) | null>(null);
   const local = kind !== "team";
 
   useEffect(() => {
@@ -349,6 +362,20 @@ export function useSessionView(
     setState(emptyTranscript);
     setError(null);
     setStatus("connecting");
+    setOffer({ state: "none" });
+
+    // Your own signed-in servers, offered to a session on a pod (troupe Decision 748): the
+    // daemon makes their calls with your sign-in, so only where there is one, and only from
+    // the session's own screen, the one that activates it. The session asks you first.
+    const offering =
+      !local && daemon && mode === "activate"
+        ? new ServerOffer(daemon, {
+            sessionId,
+            confirmedBy: auth?.me?.subject,
+            confirm: () => new Promise<boolean>((resolve) => (answering.current = resolve)),
+            onState: (s) => live && setOffer(s),
+          })
+        : null;
 
     // Two ways in, one view out. A session on this computer is reached over the socket
     // the daemon already has — there is no token to expire and nothing to reconnect
@@ -392,6 +419,7 @@ export function useSessionView(
             setStatus(s);
             setDetail(d ?? null);
           },
+          ...(offering ? { onToolInvoke: offering.invoke, onLive: (conn) => void offering.offer(conn) } : {}),
         }).then((a) => {
           if (!live) return void a.close();
           attachment.current = a;
@@ -411,6 +439,8 @@ export function useSessionView(
     return () => {
       live = false;
       settle(null);
+      answering.current?.(false);
+      answering.current = null;
       const a = attachment.current;
       attachment.current = null;
       ref.current = null;
@@ -510,7 +540,13 @@ export function useSessionView(
     return v.blobText(blob);
   }, []);
 
-  return { state, status, detail, view, send, respond, answer, cancel, switchProfile, setGoal, clearGoal, startLoop, stopLoop, readBlob, error };
+  const answerOffer = useCallback((allow: boolean) => {
+    const resolve = answering.current;
+    answering.current = null;
+    resolve?.(allow);
+  }, []);
+
+  return { state, status, detail, view, send, respond, answer, cancel, switchProfile, setGoal, clearGoal, startLoop, stopLoop, readBlob, offer, answerOffer, error };
 }
 
 /**

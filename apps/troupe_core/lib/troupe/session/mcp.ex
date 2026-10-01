@@ -137,6 +137,23 @@ defmodule Troupe.Session.MCP do
     Map.merge(status, %{layer: server.layer, source: server.source})
   end
 
+  @doc """
+  A URL server's tools outside any session, for a person's client that offers them to a
+  session somewhere else (`mcp.tools`, Decision 748): asked for as a session asks, with
+  the person's sign-in when the server wants one, and answered as `probe/2` answers, with
+  the tools themselves beside the status.
+  """
+  @spec discover(Local.server()) :: {map(), [Tool.t()]}
+  def discover(%{name: name, config: %{url: url} = config} = server) when is_binary(url) do
+    http = http_server(name, config, nil)
+    {Map.merge(http_status(http), %{layer: server.layer, source: server.source}), http.tools}
+  end
+
+  @doc "The server a session would call for a URL server, sign-in and all: what `mcp.call` calls (Decision 748)."
+  @spec server(Local.server()) :: Server.t()
+  def server(%{name: name, config: %{url: url} = config}) when is_binary(url),
+    do: server_of(name, config, nil)
+
   defp call(session_id, message, default) do
     GenServer.call(Troupe.Registry.session_mcp(session_id), message, 15_000)
   catch
@@ -516,14 +533,7 @@ defmodule Troupe.Session.MCP do
   # wants the person signed in (Decision 741) is asked with their token, and waits for
   # their sign-in when there is none: `signed_in/1` brings it back.
   defp http_server(name, config, state_dir) do
-    server =
-      Server.from_config(%{
-        "name" => name,
-        "url" => config[:url],
-        "permission" => config[:permission] || :ask,
-        "timeout_ms" => config[:timeout_ms] || 30_000
-      })
-      |> with_oauth(config[:oauth], state_dir)
+    server = server_of(name, config, state_dir)
 
     case OAuth.authorized(server, &Client.list_tools/1) do
       {:ok, listed} ->
@@ -553,6 +563,16 @@ defmodule Troupe.Session.MCP do
       {:error, reason} ->
         %{server: server, tools: [], error: "unreachable: #{inspect(reason)}"}
     end
+  end
+
+  defp server_of(name, config, state_dir) do
+    Server.from_config(%{
+      "name" => name,
+      "url" => config[:url],
+      "permission" => config[:permission] || :ask,
+      "timeout_ms" => config[:timeout_ms] || 30_000
+    })
+    |> with_oauth(config[:oauth], state_dir)
   end
 
   defp with_oauth(server, %{client_id: _} = oauth, state_dir),

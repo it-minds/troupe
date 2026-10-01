@@ -199,8 +199,15 @@ taking it, the server's line says to sign in again, and a tool the model calls a
 forgets it. A workspace's server is signed in to only after the workspace's servers are
 allowed, since its `oauth` came with the repository.
 
-A session on your team's pod does not get these tools yet: the sign-in stays on your
-machine, and the path that offers your own tools to a pod session is the next step.
+A session on your team's pod gets them from the desktop app. Open the session and it asks
+whether to take your signed-in servers' tools, naming them; **Offer them** registers
+each as `client.<server>.<tool>`, and a line at the top says what is offered. When the
+agent calls one, the call comes back to the app and the daemon on this machine makes it
+with your sign-in: the pod sees the arguments and the answer, never the sign-in, and
+everyone in the session can see that it uses tools on your machine. A call goes through
+the session's approvals like any other tool's. Closing the session, or the app, takes the tools away;
+a connection that drops and comes back offers them again without asking twice. The TUI
+does not offer them to a pod session yet.
 
 ## Instruction files
 
