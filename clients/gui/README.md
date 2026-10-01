@@ -146,7 +146,9 @@ pnpm fake && pnpm dev      # sign in to the fake plane; "This computer" is alrea
 ```
 
 Then *New session* in `~/demo`. The desktop application skips step 4: it reads
-`daemon.json` itself and starts `troupe-daemon run` when nothing is listening. Steps are
+`daemon.json` itself and starts `troupe-daemon run` when nothing is listening, and reads
+it again before it dials a daemon that went away, since one that restarts serves a new port
+with a new token. A browser build told by hand dials where it was told. Steps are
 the daemon's `Troupe.LLM.Fake` script: `text`, `tools`, `reasoning`, `stop`
 (`max_tokens` / `refusal`) and `error`, one step per model call, per agent under `routes`.
 

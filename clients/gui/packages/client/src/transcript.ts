@@ -136,6 +136,12 @@ export interface TranscriptState {
   error: string | undefined;
   /** Set once the root agent reports it has finished; its `agent_done.reason`. */
   doneReason: string | undefined;
+  /**
+   * How the root agent's last turn failed, when the harness ended it so: `agent_failed`,
+   * a root that kept crashing, with what it raised; the session stops after it (Decision
+   * 727). Cleared by the next turn's input.
+   */
+  failed: { reason: string; detail: string | undefined } | undefined;
   /** Summed from every `llm_response.gateway.cost_micros`; undefined if none said. */
   costMicros: number | undefined;
   /** The session's goal from `goal_set`, until `goal_cleared`: what every turn works towards. */
@@ -163,6 +169,7 @@ export const emptyTranscript: TranscriptState = {
   lastSeq: 0,
   error: undefined,
   doneReason: undefined,
+  failed: undefined,
   costMicros: undefined,
   goal: undefined,
   loop: undefined,
@@ -238,6 +245,11 @@ export function loopEnding(loop: LoopState): string {
   const iterations = n === 1 ? "1 iteration" : `${n} iterations`;
   if (loop.reason === "goal_complete") return `loop done after ${iterations}: the goal is met${said(loop.summary)}`;
   return `loop stopped after ${iterations}: ${LOOP_REASONS[loop.reason ?? ""] ?? loop.reason ?? "it stopped"}${said(loop.detail)}`;
+}
+
+/** A root's turn that `agent_failed` ended, in the transcript's words, with what it raised. */
+function failedText(detail: string | undefined): string {
+  return `the agent kept crashing and the session stopped${detail ? `: ${detail}` : ""}`;
 }
 
 /** `content` is a string, or a blob reference when the result ran past 16 KiB. */
@@ -352,26 +364,44 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
       return { ...next, pending: state.pending.filter((p) => p.commandId !== id) };
     }
 
-    case "user_input":
+    case "user_input": {
+      // Input to the root is a turn starting, and a turn that failed before it is behind it.
+      const started = isRoot(d.agent) ? { ...next, failed: undefined } : next;
       // A loop's iteration starts the agent's turn like any input, but nobody typed it:
       // the note `loop_iteration_started` left says which iteration it is, rather than
       // the words the loop gave the model, the way the terminal client says it.
-      if (str(d.data["source"]) === "loop") return next;
+      if (str(d.data["source"]) === "loop") return started;
       // The note the harness gives a model whose reply was cut or empty (troupe-remote
       // Decision 659) is not something a person typed, and is shown as what it is.
       if (str(d.data["source"]) === "harness") {
         return {
-          ...next,
+          ...started,
           entries: [...state.entries, { kind: "system", ...base, type: "harness_note", text: `the harness said: ${str(d.data["text"])}` }],
         };
       }
       return {
-        ...next,
+        ...started,
         entries: [
           ...state.entries,
           { kind: "user", ...base, text: str(d.data["text"]), author: d.actor.subject, source: str(d.data["source"], "user") },
         ],
       };
+    }
+
+    // A turn ends as a rest, and says nothing, unless the harness ended it. `agent_failed`
+    // is a root that crashed as often as it may be restarted: the turn is over, with what
+    // it raised, and the session stops after it (Decision 727). Nothing more reaches the
+    // screen from that agent, so it is at rest here, whatever it last said it was doing.
+    case "turn_ended": {
+      if (!isRoot(d.agent) || str(d.data["reason"]) !== "agent_failed") return next;
+      const detail = str(d.data["detail"]) || undefined;
+      return {
+        ...next,
+        failed: { reason: "agent_failed", detail },
+        agentState: { ...next.agentState, [pathKey(d.agent)]: "idle" },
+        entries: [...state.entries, { kind: "system", ...base, type: "agent_failed", text: failedText(detail) }],
+      };
+    }
 
     case "llm_response": {
       const text = textOf(d.data["message"]);

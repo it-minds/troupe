@@ -54,6 +54,8 @@ export interface DaemonSessionRow {
   pending_questions?: number;
   /** What happened while nobody was reading it (`Unseen`); absent from a daemon before #119. */
   unseen?: FleetRow["unseen"];
+  /** How the root's last turn failed (`agent_failed`, Decision 727); absent from a daemon before 0.7.1. */
+  failed?: { reason: string; detail?: string | null } | null;
   [k: string]: unknown;
 }
 
@@ -140,6 +142,21 @@ export interface CreateLocalParams {
 
 export interface DaemonHooks {
   onClose?: (reason: string) => void;
+  /**
+   * A socket is open: the first, or one dialled again after the last one dropped, at the
+   * endpoint it reached. Whatever said "not answering" when the socket closed hears here
+   * that the daemon answers again.
+   */
+  onOpen?: (endpoint: DaemonEndpoint) => void;
+  /**
+   * Where the daemon says it is now, read before dialling again after a socket dropped or
+   * a dial failed. A daemon that restarts publishes a new port and a new token — the
+   * kernel picks the one and the other is random — so the pair this client was made with
+   * names nothing once it has. Null, or a read that fails, keeps the pair it has. A desktop
+   * shell reads `daemon.json`; a browser was told by hand, has nothing to read, and dials
+   * where it was told.
+   */
+  locate?: () => Promise<DaemonEndpoint | null>;
   /** A tool the client is hosting. Registered per session through `tools.register`. */
   onToolInvoke?: (invoke: ToolInvoke) => Promise<unknown>;
 }
@@ -160,7 +177,10 @@ export function daemonUrl(endpoint: Pick<DaemonEndpoint, "port">): string {
  * worker socket; there is simply more than one candidate here.
  */
 export class DaemonClient {
-  readonly endpoint: DaemonEndpoint;
+  private at: DaemonEndpoint;
+  // Whether the next dial follows a socket that dropped or a dial that failed, and so
+  // reads where the daemon is before it goes.
+  private lost = false;
   private conn: TroupeConnection | null = null;
   private readonly views = new Map<string, SessionView>();
   // Sessions whose `open` is between dialling and subscribing. A second `open` for the
@@ -181,8 +201,13 @@ export class DaemonClient {
   private opening: Promise<TroupeConnection> | null = null;
 
   constructor(endpoint: DaemonEndpoint, hooks: DaemonHooks = {}) {
-    this.endpoint = endpoint;
+    this.at = endpoint;
     this.hooks = hooks;
+  }
+
+  /** Where the daemon is: where this client was told, or where `locate` last found it. */
+  get endpoint(): DaemonEndpoint {
+    return this.at;
   }
 
   get connected(): boolean {
@@ -234,27 +259,17 @@ export class DaemonClient {
       },
       onClose: (reason) => {
         this.conn = null;
+        this.lost = true;
         for (const view of this.views.values()) view.unbind();
         this.hooks.onClose?.(reason);
       },
       ...(this.hooks.onToolInvoke ? { onToolInvoke: this.hooks.onToolInvoke } : {}),
     };
 
-    this.opening = TroupeConnection.open(
-      {
-        url: daemonUrl(this.endpoint),
-        token: this.endpoint.token,
-        clientInfo: { name: "troupe-gui", version: "1" },
-        // Tools only when something is actually hosting them: a client that says it can
-        // serve `tool.invoke` and then answers `method_not_found` is worse than one that
-        // never offered.
-        capabilities: { blobs: true, ...(this.hooks.onToolInvoke ? { tools: true } : {}) },
-        ...opts,
-      },
-      hooks,
-    )
+    this.opening = this.dial(hooks, opts)
       .then((conn) => {
         this.conn = conn;
+        this.lost = false;
         // A view here was open when the last socket dropped, and its subscription went with
         // that socket. It carries on from its cursor, so the daemon replays what it missed
         // with no gap and no duplicate; one that fails waits for the next socket, and one
@@ -266,6 +281,7 @@ export class DaemonClient {
             .then(() => (this.views.get(view.sessionId) === view ? undefined : view.unsubscribe()))
             .catch(() => undefined);
         }
+        this.hooks.onOpen?.(this.at);
         return conn;
       })
       .finally(() => {
@@ -273,6 +289,35 @@ export class DaemonClient {
       });
 
     return this.opening;
+  }
+
+  /**
+   * Dial the daemon: where it was, or, after a socket that dropped or a dial that failed,
+   * where it says it is now. A dial that fails leaves the next one to read again.
+   */
+  private async dial(hooks: ConnectionHooks, opts: Partial<ConnectOptions>): Promise<TroupeConnection> {
+    if (this.lost && this.hooks.locate) {
+      const found = await this.hooks.locate().catch(() => null);
+      if (found) this.at = found;
+    }
+    try {
+      return await TroupeConnection.open(
+        {
+          url: daemonUrl(this.at),
+          token: this.at.token,
+          clientInfo: { name: "troupe-gui", version: "1" },
+          // Tools only when something is actually hosting them: a client that says it can
+          // serve `tool.invoke` and then answers `method_not_found` is worse than one that
+          // never offered.
+          capabilities: { blobs: true, ...(this.hooks.onToolInvoke ? { tools: true } : {}) },
+          ...opts,
+        },
+        hooks,
+      );
+    } catch (e) {
+      this.lost = true;
+      throw e;
+    }
   }
 
   private route(envelope: EventEnvelope): void {
@@ -597,6 +642,7 @@ export function rowFromDaemon(row: DaemonSessionRow, source = "daemon"): FleetRo
     reviewedBy: null,
     sync: kind === "private" ? ((row["sync"] as FleetRow["sync"]) ?? "this-device-only") : null,
     unseen: row.unseen ?? null,
+    failed: row.failed ? { reason: row.failed.reason, detail: row.failed.detail ?? null } : null,
     raw: row,
   };
 }

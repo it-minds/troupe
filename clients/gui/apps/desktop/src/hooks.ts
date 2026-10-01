@@ -126,6 +126,9 @@ export function useDaemon(): {
   );
   const [error, setError] = useState<string | null>(null);
   const [round, setRound] = useState(0);
+  // Where the client reached it last, which is not `endpoint` once the daemon restarted
+  // somewhere else and the client followed it there.
+  const [reached, setReached] = useState<DaemonEndpoint | null>(null);
 
   // A shell can find it; a browser has to be told. Asked once per launch, and again
   // whenever somebody presses the control that bumps `round`.
@@ -158,18 +161,36 @@ export function useDaemon(): {
     if (hint) setEndpoint(hint);
   }, []);
 
+  // The socket drops when the daemon goes, and the client dials again at the next call —
+  // the list's poll makes one every few seconds — reading where the daemon is first, where
+  // a shell can: a daemon that restarted is at a new port with a new token. A dial that
+  // works is connected again, whoever made it.
   useEffect(() => {
     if (!endpoint) return;
-    const next = new DaemonClient(endpoint, {
-      onClose: () => setStatus("error"),
-    });
     let live = true;
+    // Until the first answer, a socket opening is that answer's to report.
+    let answered = false;
+    const locate = shell()?.readDaemon;
+    const next = new DaemonClient(endpoint, {
+      onClose: () => live && setStatus("error"),
+      onOpen: (at) => {
+        if (!live || !answered) return;
+        setReached(at);
+        setPrincipal(next.principal);
+        setStatus("connected");
+        setError(null);
+      },
+      ...(locate ? { locate } : {}),
+    });
+    setReached(null);
     next
       .identity()
       .then((who) => {
         if (!live) return;
+        answered = true;
         setIdentity(who);
         setPrincipal(next.principal);
+        setReached(next.endpoint);
         setClient(next);
         setStatus("connected");
         setError(null);
@@ -189,7 +210,7 @@ export function useDaemon(): {
 
   return {
     client,
-    endpoint,
+    endpoint: reached ?? endpoint,
     status,
     identity,
     user: machineUser(identity, principal),
@@ -201,6 +222,7 @@ export function useDaemon(): {
     }, []),
     forget: useCallback(() => {
       setEndpoint(null);
+      setReached(null);
       setIdentity(null);
       setPrincipal(null);
       setStatus(shell()?.findDaemon ? "absent" : "unsupported");

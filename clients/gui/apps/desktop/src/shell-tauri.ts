@@ -18,7 +18,7 @@
 //                 have to be told about.
 //
 //   findDaemon    the daemon on this computer publishes its port and token into a file
-//                 outside anything a page may open, and a page cannot start a program
+//   readDaemon    outside anything a page may open, and a page cannot start a program
 //   pickDirectory a workspace is a directory, and a browser build can only take a path
 //                 somebody typed
 //   notifications the page's own `Notification` is refused in WebView2, so the OS's are
@@ -64,10 +64,20 @@ function keychainStore(): TokenStore {
  * daemon rather than a race.
  */
 async function findDaemon(): Promise<DaemonEndpoint | null> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  const running = await invoke<DaemonEndpoint | null>("daemon_endpoint");
+  const running = await readDaemon();
   if (running) return running;
+  const { invoke } = await import("@tauri-apps/api/core");
   return (await invoke<DaemonEndpoint | null>("daemon_start", { binary: null })) ?? null;
+}
+
+/**
+ * What `daemon.json` says now, and nothing started: the first half of `findDaemon`, and
+ * what the client reads before dialling again after the socket dropped, which is how a
+ * daemon that restarted on a new port with a new token is found without a person.
+ */
+async function readDaemon(): Promise<DaemonEndpoint | null> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return (await invoke<DaemonEndpoint | null>("daemon_endpoint")) ?? null;
 }
 
 async function pickDirectory(): Promise<string | null> {
@@ -146,6 +156,7 @@ export async function installShell(): Promise<void> {
     // registered as a redirect URI.
     signInFlow: "device",
     findDaemon,
+    readDaemon,
     pickDirectory,
     notifications: notifications(),
   };

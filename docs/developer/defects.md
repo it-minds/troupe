@@ -165,28 +165,14 @@ Found by the #258 and #273 fixers (PRs #264, #274), 2026-09-29.
 
 ### D41 - The desktop app after the daemon restarts (medium)
 
-- A daemon that restarts publishes a new port and token (`loopback.ex`: a port the kernel
-  picks, a random token), and `DaemonClient` keeps redialling the old endpoint: the app
-  says "Not answering" until Find is pressed under This computer. PR #263's resubscribe
-  covers a dropped socket to the same endpoint only. Redialling should read `daemon.json`
-  again.
-- `useDaemon`'s `onClose` (`clients/gui/apps/desktop/src/hooks.ts`) sets the status to
-  "error", and nothing sets it back after a redial that works.
 - Unconfirmed: whether Windows raises `Activated` in the running app for a click in the
   notification centre or starts a second copy. `tauri-winrt-notification` 0.8 can't set a
   toast's `launch` argument, so a copy Windows starts can't tell which session was
   clicked; it brings the window forward.
 
-Found by the chunk 9 fixer of slot G (PR #263), 2026-09-29.
-
-### D42 - The clients drop what a stopped turn says (medium)
-
-- The desktop app treats a `turn_ended` with reason `agent_failed` (PR #266) as an
-  ordinary rest.
-
-Found by the chunk 9 fixers of slots D and E (PRs #262, #266), 2026-09-29. The TUI's,
-headless runs' and A2A's share (the printer's notes, `agent_failed` in the window and a
-headless run's exit code, A2A's answer at rest for an idle row) was fixed for issue #301.
+Found by the chunk 9 fixer of slot G (PR #263), 2026-09-29. The redial to the port and
+token a restarted daemon publishes, and the status after a redial that works, were fixed
+for issue #305.
 
 ### D43 - Small leftovers from the 0.6.3 work (low)
 
@@ -315,6 +301,7 @@ Found by the chunk 10 fixers, 2026-09-30.
 | The plane's `gitops` mode worked only in tests: no `git` in its image, no repository setting, no push credential (found while planning #186) | #186, PR #285 |
 | A trigger's timezone typed in the console was ignored; the MCP schema of `admin.trigger.put` didn't match its handler; a profile's bundle channel never reached its row; an ssh profile got a StatefulSet (found by the #186 fixers) | #290, PR #291 |
 | Team and host admin methods accepted fields they don't document; the profile editor couldn't save a storage class; the console's budget bars drew no fill and showed the wrong currency (found by the #290 and #188 fixers) | PR #292 |
+| D42 - The clients drop what a stopped turn says | #301, PR #306; #305, PR #309 |
 
 ## Checked and not a defect
 

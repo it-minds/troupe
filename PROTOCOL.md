@@ -530,7 +530,7 @@ runs on, and a client cannot move it.
             "parent": "s-3a"}}
 ```
 → `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
-"pending_approvals", "pending_questions", "unseen", "tokens", "cost", "created_at",
+"failed", "pending_approvals", "pending_questions", "unseen", "tokens", "cost", "created_at",
 "last_active_at", "pinned"}]}`
 
 `filter.parent` selects the branches of one session.
@@ -560,6 +560,13 @@ markers. `pending_*` say what is still open, `unseen` what was raised with nobod
 a question asked and timed out while away is in the second and not the first. A session no
 client has ever read has nothing unseen, and a session asleep answers from its log exactly
 as it answered awake.
+
+`failed` is how the root agent's last turn failed, when the harness ended it so, read from
+the log: `{"reason": "agent_failed", "detail": "<the first line of what was raised>"}` for a
+root that crashed as often as it may be restarted, whose session stopped on it (see
+`turn_ended`; Decision 727). `null` otherwise, and once another turn has started (the next
+`user_input`). It is how a client that was not watching tells a session that failed from one
+at rest: the session is `dormant` afterwards, as one that went to sleep is.
 
 #### `session.get` → one session object plus `head_seq`.
 
