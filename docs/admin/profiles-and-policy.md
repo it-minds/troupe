@@ -88,9 +88,10 @@ objects that are no longer desired. Deleting a `WorkerProfile` deletes its names
 | `SecretMissing` | a referenced Secret was not found in the worker namespace. The operator has no RBAC on Secrets, so do not rely on it |
 | `UpgradePending` | the StatefulSet has a newer revision than the named pods run; each keeps its revision until the plane has drained it and the operator replaced it, and the message says how far each has got ([§3](#3-upgrades-and-drains)) |
 | `EgressByHostname` | the `CiliumNetworkPolicy` was written and applied, so a worker reaches its allowlist and the installation's own OpenBao and object store by name, and nothing else outside the cluster; `False` with `NoCilium` or `CiliumPolicyNotApplied` ([egress](#4-troupepolicy)) |
+| `EndpointUnreachable` | without Cilium, an endpoint the profile names is one its workers do not reach (`NoCilium`): the message names each and says what to do; `False` with `Reachable`, or `Cilium` where there is Cilium ([egress](#4-troupepolicy)) |
 
-`SecretMissing`, `UpgradePending` and `EgressByHostname` do not affect `Ready`. `kubectl -n troupe-system get
-wp` shows `Replicas`, `Ready`, `Violation`, `Age`.
+`SecretMissing`, `UpgradePending`, `EgressByHostname` and `EndpointUnreachable` do not affect
+`Ready`. `kubectl -n troupe-system get wp` shows `Replicas`, `Ready`, `Violation`, `Age`.
 
 ## 3. Upgrades and drains
 
@@ -202,6 +203,22 @@ whether Cilium is there:
   certificate then has to name the address), add a NetworkPolicy of your own to each
   worker namespace that admits it (policies add up, and the operator removes only
   objects it labelled), or use Cilium.
+
+  A profile's own endpoints get nothing beyond the public rule, and a `*.svc` host its
+  namespace on its port. So an LLM endpoint, MCP server or `egress.fqdns` entry on a port
+  other than 443 and 80, or at a private, loopback, link-local or IPv6 address, is one its
+  workers would not reach, and it is refused where it is set up (Decision 749):
+  `admin.profile.put` and the profile editor refuse a profile whose workers are pods with
+  `invalid_params`, naming each endpoint, counting the servers its channel's bundle gives
+  it; publishing a bundle that names such a server to a channel such a profile follows is
+  refused the same way. The plane knows there is no Cilium from `operator.ciliumAvailable`,
+  which the chart gives it too. In `gitops` mode nothing can refuse what a repository
+  holds, so the operator reports it on the profile as `EndpointUnreachable`, which the
+  console's **Workers** page shows; it does in `direct` mode too, for a profile saved
+  before. Use Cilium, serve the endpoint at a public address on 443 or 80, or, for one in
+  the cluster, name its Service (`<service>.<namespace>.svc`). A name on 443 or 80 is not
+  refused, since what it resolves to is not known where it is typed: one that resolves to
+  a private address is still not reached, and nothing says so.
 
 `ciliumAvailable: true` on a cluster without Cilium fails closed: a worker reaches nothing
 outside the cluster, and the profile is `Ready: False` with `ApplyFailed` naming the

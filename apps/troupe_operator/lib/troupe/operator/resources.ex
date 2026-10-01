@@ -15,7 +15,7 @@ defmodule Troupe.Operator.Resources do
   alias Troupe.Operator.{Names, Settings}
   alias Troupe.Policy
   alias Troupe.WorkerProfile, as: Profile
-  alias Troupe.WorkerProfile.MCPServer
+  alias Troupe.WorkerProfile.{MCPServer, Reach}
 
   # Where a worker keeps everything it can rebuild: sealed segments, materialised
   # bundles, restored workspaces. The mount and `TROUPE_STATE_HOME` have to name the same
@@ -400,15 +400,10 @@ defmodule Troupe.Operator.Resources do
     ]
   end
 
+  # The ranges left out are read from `Troupe.WorkerProfile.Reach`, which refuses or reports
+  # a profile's endpoint at one of them, so the rule and the check cannot drift apart.
   defp public_addresses do
-    [
-      %{
-        "ipBlock" => %{
-          "cidr" => "0.0.0.0/0",
-          "except" => ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
-        }
-      }
-    ]
+    [%{"ipBlock" => %{"cidr" => "0.0.0.0/0", "except" => Reach.excepted()}}]
   end
 
   # And without Cilium, OpenBao and object storage when they are outside the cluster but

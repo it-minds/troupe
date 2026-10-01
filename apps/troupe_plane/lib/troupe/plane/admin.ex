@@ -50,7 +50,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Fleet.{Bundle, Provisioner, SizeClass, Worker}
   alias Troupe.Plane.Gitops.Triggers, as: GitopsTriggers
   alias Troupe.Plane.Identity.ServicePrincipal
-  alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
+  alias Troupe.Plane.{OIDC, Principals, Provision, Reach, Sessions, Settings, Triggers}
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision}
@@ -300,7 +300,8 @@ defmodule Troupe.Plane.Admin do
          :ok <- not_held_by_repository(actor, "profile.put", name),
          {:ok, attrs} <- without_derived(attrs),
          :ok <- release_named(attrs),
-         :ok <- Provision.check(attrs) do
+         :ok <- Provision.check(attrs),
+         :ok <- Reach.check(attrs) do
       before = Fleet.get_profile(name)
 
       case Fleet.put_profile(attrs) do

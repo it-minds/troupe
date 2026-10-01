@@ -23,6 +23,7 @@ defmodule Troupe.Operator.Reconciler do
   alias Troupe.Operator.{Names, Resources, Settings, Status}
   alias Troupe.Policy
   alias Troupe.WorkerProfile, as: Profile
+  alias Troupe.WorkerProfile.Reach
 
   require Logger
 
@@ -149,6 +150,7 @@ defmodule Troupe.Operator.Reconciler do
       |> egress_status(desired, failures, generation(resource))
       |> secret_status(missing, generation(resource))
       |> upgrade_status(upgrade, generation(resource))
+      |> endpoint_status(profile, settings, generation(resource))
 
     write_status(conn, resource, status)
 
@@ -196,6 +198,31 @@ defmodule Troupe.Operator.Reconciler do
     failed = Enum.map(failures, fn {resource, _error} -> resource end)
     {holds?, reason, message} = Resources.egress_by_hostname(desired, failed)
     Status.put(status, "EgressByHostname", holds?, reason, message, generation)
+  end
+
+  # One of the profile's own endpoints that its workers cannot reach: without Cilium the
+  # NetworkPolicy reaches outside the cluster only public addresses on 443 and 80. Reported
+  # rather than refused, and beside `Ready`, as a missing secret is: the profile reconciled,
+  # and in gitops mode it was applied by something nothing here can refuse, so this is how
+  # it reads as broken rather than as a session's first call timing out (Decision 749).
+  defp endpoint_status(status, _profile, %Settings{cilium_available: true}, generation) do
+    message = "with Cilium a worker reaches each endpoint the profile names, by name or address"
+    Status.put(status, "EndpointUnreachable", false, "Cilium", message, generation)
+  end
+
+  defp endpoint_status(status, profile, _settings, generation) do
+    case Reach.unreachable(profile) do
+      [] ->
+        message =
+          "the worker's NetworkPolicy admits every endpoint the profile names, as far as " <>
+            "their URLs say"
+
+        Status.put(status, "EndpointUnreachable", false, "Reachable", message, generation)
+
+      found ->
+        message = Reach.explain(found)
+        Status.put(status, "EndpointUnreachable", true, "NoCilium", message, generation)
+    end
   end
 
   # A secret the profile refers to and the cluster does not have. Reported rather than
