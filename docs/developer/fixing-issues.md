@@ -106,17 +106,58 @@ else keeps state.
      <the question>". A slice that avoids the hard part delivers nothing: #54 asked for
      less documentation, and a slice that moved reports into `docs/history/` and added
      an index was rightly rejected. Git history is the archive; delete rather than move.
+   - **done when**: one sentence someone can check. An issue that cannot have one is
+     re-scoped here, in triage, or it is not ready - never taken into a chunk to be
+     discovered there.
+   - **weight**: `heavy` if it needs a new subsystem, a schema, or a decision that is not
+     made yet; otherwise one fixer finishes it inside the chunk
+   - **unblocks**: the issues that wait on it
+   - **files**: the files it will rewrite, so two picks never share one
 
    With many issues, split the read-only code search across parallel helpers if the
    harness has them.
-4. Order: bugs first (user-facing before internal), then small, then epic slices. Within
-   a group, prefer what the local install can verify (daemon, TUI) over what it cannot
-   (the GUI's Tauri shell, cluster-only server paths).
+4. Pick the chunk from the triage (next section). Within what is picked, run bugs first,
+   then the rest; prefer what the local install can verify (daemon, TUI) over what it
+   cannot (the GUI's Tauri shell, cluster-only server paths).
+
+### Pick the chunk
+
+A chunk is about five issues, and they are picked by these rules, in this order of
+weight:
+
+1. **A chunk has a spine.** Before picking anything, write the sentence it will be in
+   the release notes - "runs on someone else's cluster", "the client stops surprising
+   you". Three of the five serve that sentence. A chunk that needs five sentences is a
+   backlog, not a chunk.
+2. **Every P0 is in, or out with the reason said.** Correctness does not wait a whole
+   cycle. A P0 that does not fit the spine goes in anyway, as the odd one out - one, not
+   three.
+3. **At most one heavy issue.** The others are each finishable by one fixer inside the
+   chunk. Two heavy issues is how a chunk slips.
+4. **Decisions are not chunk work.** An open decision - a stack choice (#56), how memory
+   is framed (#248) - is a short meeting with the person that unlocks months. Book it
+   before the chunk; never give it a build slot, where it keeps losing to anything with
+   code attached.
+5. **One slot finishes something half-built.** An issue whose protocol landed and whose
+   UI did not (#124, #76, #59) is cheap, closes honestly, and stops the board claiming
+   less than exists.
+6. **Prefer the issue that unblocks two others** over the one that unblocks none, even
+   when the second is more interesting (#57).
+7. **One small visible win** - something a person sees in a screenshot (#228). For the
+   demo, and because the adopter documentation needs pictures.
+8. **No two issues rewrite the same file.** Chunk pull requests that conflict have to be
+   stacked and reviewed one at a time.
+9. **Every pick has its "done when"** from triage. One without it is not ready (see
+   triage).
+10. **Two or three components per chunk.** Five issues across five apps means no fixer
+    reuses what another learned.
 
 ### Agree the queue, once, before any fixing
 
-Show the triage as one table - `# | title | area | size | plan | verification` - and ask
-the person which issues and which epic slices to run, plus any decision triage surfaced.
+Show the proposed chunk: the spine sentence, then one table -
+`# | title | area | size | weight | done when | plan | verification` - with the rule each
+pick answers. Under it, the P0s left out and why, and the decisions to book before the
+chunk starts. Ask the person which issues and which epic slices to run.
 That answer is what authorises cutting the chunk, pushing branches and opening pull
 requests for those issues in this run. It does not cover issues added later, and it never covers merging.
 
