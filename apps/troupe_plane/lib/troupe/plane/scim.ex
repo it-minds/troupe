@@ -162,8 +162,10 @@ defmodule Troupe.Plane.SCIM do
 
   # -- reading a resource -----------------------------------------------------
 
-  # `externalId` is the identity provider's own id for the person and is what shows up
-  # as `sub` in a token; `userName` is the fallback for providers that do not send one.
+  # `externalId` is the identity provider's own id for the person and is what shows up in
+  # a token as the claim `subject_claim` names — `sub`, or for Entra ID `oid`, once its
+  # mapping sends `objectId` (Decision 751); `userName` is the fallback for providers that
+  # do not send one.
   defp subject_of(resource) do
     Map.get(resource, "externalId") || Map.fetch!(resource, "userName")
   end

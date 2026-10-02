@@ -19,7 +19,8 @@ defmodule Troupe.Plane.Settings do
   stays the floor, and the worst a bad setting can do is be reset.
 
   Some settings are deliberately **not** editable and are here to be read: the audience,
-  the base URL, the deployment's own tokens, and whether a repository holds the profiles. Changing those from inside the console is how
+  the base URL, the deployment's own tokens, whether a repository holds the profiles, and
+  which claim is the person. Changing those from inside the console is how
   you lock every administrator out at once, and they belong to the deployment for the same
   reason a lock's keyhole is not adjustable from inside the house. They are listed anyway,
   with their values, because "where is this plane's configuration" should have one answer
@@ -321,6 +322,20 @@ defmodule Troupe.Plane.Settings do
       consequence:
         "Blank means <base_url>/mcp/admin, the resource's own name, which is the only name a client may send as RFC 8707's resource. Set it only where the registration exposes another.",
       effect: :immediate
+    },
+    # The deployment's, not the console's (Decision 751). Changing it re-keys every person
+    # at their next sign-in, and there is no reset that puts a re-keyed person back.
+    %Setting{
+      key: "subject_claim",
+      group: :sign_in,
+      type: :string,
+      app_key: [:oidc, :subject_claim],
+      editable: false,
+      fallback: "sub",
+      summary: "The claim in an identity token that is the person: sub, or oid for Entra ID.",
+      consequence:
+        "SCIM's externalId has to be the same value. Switched on a plane that has people, each is re-keyed from their old sub to it once, at their next sign-in, and keeps their sessions, grants and teams. Switching back moves nobody back. Deployment only.",
+      effect: :restart
     },
     # -- read-only: what this plane was deployed with ---------------------------
     %Setting{

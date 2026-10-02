@@ -191,6 +191,12 @@ plane:
     # as its `resource` parameter. The app registration has to expose it under that name;
     # set this only where it exposes another.
     mcpScope: ""
+    # The claim in a token that is the person. Empty means `sub`. Microsoft Entra's `sub`
+    # differs in every app registration and is not what its SCIM client sends, so set
+    # `oid` there and map SCIM's `externalId` from `objectId`. Switched on a plane that
+    # already has people, each is moved from their old `sub` once, at their next sign-in,
+    # keeping their sessions, grants and teams; switching back does not move them back.
+    subjectClaim: ""
     secretName: troupe-plane-oidc
     secretKey: client-secret
   # A way into the panel when the identity provider cannot let you in — a misconfigured

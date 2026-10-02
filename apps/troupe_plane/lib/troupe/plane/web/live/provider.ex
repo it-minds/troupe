@@ -308,7 +308,7 @@ defmodule Troupe.Plane.Web.Live.Provider do
               type={if setting.secret, do: "password", else: "text"}
               value={field_value(@drafts, setting)}
               placeholder={placeholder(setting)}
-              disabled={@actor.role != :platform_admin}
+              disabled={@actor.role != :platform_admin or not setting.editable}
             />
             <p class="field-help">{setting.summary} {setting.consequence}</p>
           </div>

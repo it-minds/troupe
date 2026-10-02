@@ -3523,3 +3523,60 @@ citation keeps meaning what it meant.
        makes the run failed, on the row and in the post, with no place under the cap; a
        crashed session asleep is failed and broken, and told once). Each failed before
        this change.
+
+751. **The person is the claim `subject_claim` names, `sub` by default and `oid` for Entra
+     ID, and a plane switched to another claim moves each person it already knows once, at
+     their next sign-in.** Issue #267, the other half of defect D9. Entra's `sub` is
+     pairwise, a different string in every app registration and no attribute its SCIM
+     client can send, so the person SCIM made and the same person signing in were two rows.
+     - **One setting, every door.** `subject_claim` (`TROUPE_OIDC_SUBJECT_CLAIM`,
+       `plane.oidc.subjectClaim`) is read in `Login.from_claims/1`, which the CLI's and the
+       desktop app's exchange, the console's sign-in and an MCP client's provider token all
+       go through. SCIM's subject stays `externalId`, else `userName`; for Entra the
+       provisioning mapping sends `objectId` as `externalId`. `oid` is unique within a
+       tenant and the plane trusts one tenant's issuer, so `tid` is not part of it. A token
+       without the claim is refused as `{:no_subject, claim}`, which names it. A provider
+       whose `sub` already is what SCIM sends keeps the default, and nothing changes there.
+     - **The deployment's, not the console's.** Shown on the Identity provider card and not
+       editable there, as `provisioning_mode` is (736): switching it moves people, and
+       switching back does not move them back, since somebody moved to `oid` is not found
+       under their `sub`. A setting `reset` cannot undo is not one to offer beside a reset.
+     - **A move, not a fresh start.** Somebody not found under the claim's value but found
+       under the `sub` the same token carries is the same person by the provider's word in
+       one signed token, and that token would have signed in as them the day before, so
+       moving them gives it nothing it did not have. Their row is renamed. If SCIM
+       provisioned them under the new value first, which is the order an Entra rollout
+       usually goes in, the old row is folded into that one and removed, so SCIM's own id
+       for the person stays good; their own spend ceiling is kept where SCIM's row has none.
+       Moved is every column that says *who*: a session's owner and the sponsor in a run's
+       origin (whose cap it counts against), ACL entries, shares made out to them, the teams
+       they administer, triggers' `notify`, usage records and open reservations, and the
+       principals they sponsor (left behind, deprovisioning them would leave those firing).
+       What says *who did*, the hash-chained audit trail and every `*_by`, keeps the name it
+       was written with. One transaction with the old row locked, so two devices signing in
+       at once move the person once; afterwards nobody is under the old value, and the next
+       sign-in has nothing to do. Logged and audited as `person.rekey` with the two
+       identifiers and the claim's name, and nothing else from the token.
+     - **A plane token minted before the move is refused**, `unauthenticated` with "no such
+       user", as a disabled principal's is, because the router resolves the subject on every
+       request. Honouring it would need a second name per person that every lookup by
+       subject knew, for one token lifetime of fifteen minutes; a client exchanges again on
+       its own. A console session holding the old name is turned away and signs in again.
+     - **The key manager is not moved.** What is under `troupe/people/<old>/`, a person's
+       person-mode MCP credentials and their private sessions' data keys, stays there: the
+       plane holds no credential that can read or write it (375, 377). A moved person
+       connects their person-mode servers again, and a private session sealed before the
+       move cannot be restored on another device; the device holding its log keeps it.
+       Keeping the old name as the person's name at the key manager instead needs the worker
+       and the daemon to take that name from the plane rather than from the session's owner,
+       which is more than this issue.
+     - In `gitops` mode a trigger's `notify` is the repository's, and the next change to the
+       resource puts back whatever the repository says.
+     - **Proof:** the plane's `subject_claim_test.exs`: with `oid`, an Entra-shaped user
+       SCIM provisioned and the same user signing in are one person; the default, with an
+       Authentik-shaped `sub`, unchanged; a person known by `sub` moved once at their next
+       sign-in, keeping a session, the team they administer and the team they are in, and
+       every other column above moved while `created_by` and `granted_by` are not; a second
+       sign-in moving nobody; SCIM first, folded in; a token without `oid` refused naming
+       it; a plane token from before the move refused. The first and every move failed on
+       the chunk tip.

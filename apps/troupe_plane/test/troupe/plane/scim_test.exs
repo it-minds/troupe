@@ -170,7 +170,8 @@ defmodule Troupe.Plane.SCIMTest do
     end
 
     test "a login without a subject is refused" do
-      assert {:error, :no_subject} = Login.from_claims(%{"email" => "nobody@example.test"})
+      assert {:error, {:no_subject, "sub"}} =
+               Login.from_claims(%{"email" => "nobody@example.test"})
     end
 
     test "leaving a group at login removes the team it gave" do

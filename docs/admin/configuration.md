@@ -83,6 +83,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_OIDC_CLIENT_SECRET` | unset | redeems the console's authorization code; device flow works without | `plane.oidc.secretName`/`secretKey` |
 | `TROUPE_OIDC_SCOPES` | `openid profile email offline_access` | scopes advertised and asked for. Not `groups`: Entra refuses it (`AADSTS650053`) | `plane.oidc.scopes` |
 | `TROUPE_OIDC_MCP_SCOPE` | `<base_url>/mcp/admin` | the scope MCP clients are told to ask for | `plane.oidc.mcpScope` |
+| `TROUPE_OIDC_SUBJECT_CLAIM` | `sub` | the claim that is the person, in sign-in and as SCIM's `externalId`: `oid` for Entra ID. Deployment only; switching it moves each known person once, at their next sign-in ([§ Which claim is the person](#which-claim-is-the-person)) | `plane.oidc.subjectClaim` |
 | `TROUPE_BREAKGLASS_TOKEN`, `_SUBJECT`, `_LIFETIME_SECONDS` | unset, `breakglass`, `3600` | the emergency console door; unset, its routes 404 | `plane.breakglass.*` |
 | `TROUPE_BAO_ADDR` | `http://openbao.troupe-system.svc:8200` | OpenBao, for transit signing | `bao.address` |
 | `TROUPE_BAO_TOKEN` | unset | a static token (development); set, no Kubernetes login is tried | `bao.tokenSecretName`/`tokenSecretKey` |
@@ -203,13 +204,57 @@ stored value from before 0.7.0 is not read), **team defaults** that seed a team 
 is enabled (budgets, idle timeout, cache eviction, erase-after, pins, whether members may
 control sessions), **sessions** (managed permission rules and MCP servers only, the default
 bundle channel), **sign in** (issuer, client, endpoints, scopes — the console's **Identity
-provider** card), **client defaults** (the provider and models people's own machines are
-offered), and **deployment** keys that are shown but only change with a rollout.
+provider** card — and `subject_claim`, shown there and not editable), **client defaults**
+(the provider and models people's own machines are offered), and **deployment** keys that
+are shown but only change with a rollout.
 
 `admin.settings.list`, `admin.setting.effective`, `admin.setting.put` and
 `admin.setting.reset` are the methods; the console's settings pages are the same calls. A
 wrong `platform_admin_group` or `groups_claim` locks everyone out at their next request, so
 the console will not save the group until `admin.identity.check` has passed for it.
+
+### Which claim is the person
+
+Everything the plane keeps about a person is keyed on one string from their token: the
+sessions they own, the teams they administer, their spend, the principals they sponsor.
+`subject_claim` names the claim it is read from, `sub` by default, and SCIM's `externalId`
+(or `userName`, where there is none) has to be the same value. It is the deployment's
+(`TROUPE_OIDC_SUBJECT_CLAIM`, `plane.oidc.subjectClaim`), because changing it moves people
+(Decision 751). A token without the claim is refused at sign-in with a reason that names
+it. A provider whose `sub` already is what SCIM sends, such as Authentik with its subject
+mode set to the user's UUID ([authentik.md §0](authentik.md#0-one-string-is-the-person-and-it-cannot-be-fixed-afterwards)),
+keeps `sub` and sees no change.
+
+**Entra ID.** Its `sub` is pairwise, a different string in every app registration, and no
+attribute SCIM can send. Its `oid`, the user's object id, is the same in every registration
+of the tenant. So set `plane.oidc.subjectClaim: oid`, and in the enterprise application's
+provisioning map `externalId` from `objectId`. An id token carries `oid` when `profile` is
+among the scopes, as it is by default; an access token for MCP always does.
+
+**Switching on a plane that already has people.** At each person's first sign-in after the
+rollout, a person the plane does not know by the new claim but knows by the `sub` the same
+token carries is moved to the new value, once. What moves with them: the sessions they own
+and the runs whose spend counts against them, their ACL entries and the shares made out to
+them, the teams they administer, the triggers that notify them, their recorded spend and
+open reservations, the principals they sponsor; team membership is on their row and stays. If
+SCIM provisioned them under the new value before they signed in, their old row is folded
+into the one SCIM made. Each move is logged and audited as `person.rekey` with the two
+identifiers and nothing else from the token. The audit trail and every `*_by` keep the name
+they were written with. Somebody who never signs in again is never moved.
+
+What does not move:
+
+- A plane token minted before the move names nobody afterwards: `/rpc` answers
+  `unauthenticated` until the client exchanges again, which it does within fifteen minutes.
+  An open console session is turned away and signs in again.
+- What the key manager holds under the old value (`troupe/people/<old sub>/`), since the
+  plane has no credential that can read or write it (Decisions 375 and 377). A person
+  connects their person-mode MCP servers again, and a private session sealed before the
+  move can no longer be restored on another device; the device holding its log keeps it.
+- In `gitops` mode, a trigger's `notify` list is the repository's: change it there.
+
+Switching back moves nobody back. People moved to `oid` are not found under their `sub`
+and arrive as new people, so pick the claim before people sign in where you can.
 
 ---
 

@@ -407,6 +407,9 @@ if config_env() == :prod do
         # scope named after the resource itself — the only name a client is allowed to send
         # as RFC 8707's `resource`. Set it where the registration exposes another.
         mcp_scope: presence.(System.get_env("TROUPE_OIDC_MCP_SCOPE")),
+        # Which claim is the person. Absent means `sub`; `oid` for Entra ID, whose `sub`
+        # differs per app registration and is not what its SCIM client sends (Decision 751).
+        subject_claim: presence.(System.get_env("TROUPE_OIDC_SUBJECT_CLAIM")),
         device_authorization_endpoint: oidc_required.("TROUPE_OIDC_DEVICE_URL"),
         token_endpoint: oidc_required.("TROUPE_OIDC_TOKEN_URL")
       ]

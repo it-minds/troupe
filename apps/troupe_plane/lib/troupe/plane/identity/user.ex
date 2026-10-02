@@ -2,7 +2,8 @@ defmodule Troupe.Plane.Identity.User do
   @moduledoc """
   A person, as the identity provider describes them.
 
-  `subject` — the IdP's `sub` — is the identity. Email and display name are labels that
+  `subject` — the claim `subject_claim` names, the IdP's `sub` unless a deployment says
+  otherwise (Decision 751) — is the identity. Email and display name are labels that
   change when people marry, move team, or correct a typo, and a system that keyed on
   either would lose track of them when they did.
 
