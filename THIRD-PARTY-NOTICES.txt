@@ -28,10 +28,10 @@ These packages are under a licence that asks whoever ships them in a program to 
 where their source code is (MPL-2.0, section 3.2). Troupe uses them unmodified, and
 the source of each is the package exactly as its registry publishes it:
 
-  cssparser 0.36.0 (MPL-2.0): https://static.crates.io/crates/cssparser/cssparser-0.36.0.crate
+  cssparser 0.37.0 (MPL-2.0): https://static.crates.io/crates/cssparser/cssparser-0.37.0.crate
   dtoa-short 0.3.5 (MPL-2.0): https://static.crates.io/crates/dtoa-short/dtoa-short-0.3.5.crate
   option-ext 0.2.0 (MPL-2.0): https://static.crates.io/crates/option-ext/option-ext-0.2.0.crate
-  selectors 0.36.1 (MPL-2.0): https://static.crates.io/crates/selectors/selectors-0.36.1.crate
+  selectors 0.38.0 (MPL-2.0): https://static.crates.io/crates/selectors/selectors-0.38.0.crate
 
 ========================================================================================
 Hex packages: aws_signature
@@ -160,12 +160,13 @@ SOFTWARE.
 Hex packages: castore, db_connection, ecto, ecto_sql, elixir_make, file_system,
   mint_web_socket, nimble_pool, postgrex, rustler_precompiled, stream_data
 Rust crates: dispatch2, icy_sixel, libappindicator-sys, mac-notification-sys, ndk,
-  ndk-sys, objc2-app-kit, objc2-cloud-kit, objc2-core-data, objc2-core-foundation,
-  objc2-core-graphics, objc2-core-image, objc2-core-location, objc2-core-text,
-  objc2-exception-helper, objc2-io-surface, objc2-quartz-core, objc2-ui-kit,
-  objc2-user-notifications, objc2-web-kit, quantette, r-efi, rustler, tui-big-text,
-  tui-markdown, unic-char-property, unic-char-range, unic-common, unic-ucd-ident,
-  unic-ucd-version, wasip3, winapi-i686-pc-windows-gnu, winapi-x86_64-pc-windows-gnu
+  ndk-context, ndk-sys, objc2-app-kit, objc2-cloud-kit, objc2-core-data,
+  objc2-core-foundation, objc2-core-graphics, objc2-core-image, objc2-core-location,
+  objc2-core-text, objc2-exception-helper, objc2-io-surface, objc2-quartz-core,
+  objc2-ui-kit, objc2-user-notifications, objc2-web-kit, quantette, r-efi, rustler,
+  tui-big-text, tui-markdown, unic-char-property, unic-char-range, unic-common,
+  unic-ucd-ident, unic-ucd-version, wasip3, winapi-i686-pc-windows-gnu,
+  winapi-x86_64-pc-windows-gnu
 None of these ships a licence file. Each declares Apache-2.0, and this is its standard
 text.
 ----------------------------------------------------------------------------------------
@@ -360,10 +361,9 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ========================================================================================
 Hex packages: inflex
-Rust crates: cookie_store, crc32fast, ctor, derive_builder, diff, dpi, dtor,
-  foreign-types, foreign-types-shared, hex, jni-sys, json-patch, notify-rust,
-  pretty_assertions, quick-error, serde_spanned, tao, toml, toml_datetime, toml_parser,
-  toml_writer, winapi
+Rust crates: cookie_store, crc32fast, ctor, derive_builder, diff, dpi, foreign-types,
+  foreign-types-shared, hex, jni-sys, json-patch, notify-rust, pretty_assertions,
+  quick-error, serde_spanned, tao, toml, toml_datetime, toml_parser, toml_writer, winapi
 ----------------------------------------------------------------------------------------
 
 [The terms and conditions of the Apache License, Version 2.0, word for word as in LICENSE.]
@@ -827,11 +827,11 @@ SUCH DAMAGE.
 ========================================================================================
 Hex packages: yaml_elixir
 Rust crates: base64-simd, block2, dispatch2, dlopen2, icy_sixel, libappindicator-sys,
-  mac-notification-sys, ndk, ndk-sys, objc2, objc2-app-kit, objc2-cloud-kit,
-  objc2-core-data, objc2-core-foundation, objc2-core-graphics, objc2-core-image,
-  objc2-core-location, objc2-core-text, objc2-encode, objc2-exception-helper,
-  objc2-foundation, objc2-io-surface, objc2-quartz-core, objc2-ui-kit,
-  objc2-user-notifications, objc2-web-kit, quantette, r-efi, ratatui-3d,
+  mac-notification-sys, ndk, ndk-context, ndk-sys, objc2, objc2-app-kit,
+  objc2-cloud-kit, objc2-core-data, objc2-core-foundation, objc2-core-graphics,
+  objc2-core-image, objc2-core-location, objc2-core-text, objc2-encode,
+  objc2-exception-helper, objc2-foundation, objc2-io-surface, objc2-quartz-core,
+  objc2-ui-kit, objc2-user-notifications, objc2-web-kit, quantette, r-efi, ratatui-3d,
   ratatui-termina, render3d, rustler, tui-big-text, tui-markdown, unic-char-property,
   unic-char-range, unic-common, unic-ucd-ident, unic-ucd-version, vsimd, vtparse,
   wasip3, webview2-com, webview2-com-sys, wezterm-input-types,
@@ -1208,6 +1208,31 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ========================================================================================
+npm packages: @tauri-apps/api
+----------------------------------------------------------------------------------------
+
+SPDXVersion: SPDX-2.1
+DataLicense: CC0-1.0
+PackageName: tauri
+DataFormat: SPDXRef-1
+PackageSupplier: Organization: The Tauri Programme in the Commons Conservancy
+PackageHomePage: https://tauri.app
+PackageLicenseDeclared: Apache-2.0
+PackageLicenseDeclared: MIT
+PackageCopyrightText: 2019-2025, The Tauri Programme in the Commons Conservancy
+PackageSummary: <text>Tauri is a rust project that enables developers to make secure
+and small desktop applications using a web frontend.
+                </text>
+PackageComment: <text>The package includes the following libraries; see
+Relationship information.
+                </text>
+Created: 2019-05-20T09:00:00Z
+PackageDownloadLocation: git://github.com/tauri-apps/tauri
+PackageDownloadLocation: git+https://github.com/tauri-apps/tauri.git
+PackageDownloadLocation: git+ssh://github.com/tauri-apps/tauri.git
+Creator: Person: Daniel Thompson-Yvetot
+
+========================================================================================
 npm packages: @tauri-apps/plugin-dialog, @tauri-apps/plugin-http,
   @tauri-apps/plugin-notification, @tauri-apps/plugin-opener
 Rust crates: tauri-plugin-dialog, tauri-plugin-fs, tauri-plugin-http,
@@ -1488,7 +1513,7 @@ OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 Rust crates: adler2, allocator-api2, anyhow, async-channel, async-executor, async-io,
   async-lock, async-process, async-signal, async-task, atk, atk-sys, atomic-waker,
   blocking, cairo-rs, cairo-sys-rs, camino, cargo-platform, cargo_metadata,
-  concurrent-queue, ctor, dtoa, dtor, dyn-clone, endi, erased-serde, event-listener,
+  concurrent-queue, ctor, dtoa, dyn-clone, endi, erased-serde, event-listener,
   event-listener-strategy, fastrand, finl_unicode, futures-lite, gdk, gdk-pixbuf,
   gdk-pixbuf-sys, gdk-sys, gdkwayland-sys, gdkx11, gdkx11-sys, gio, gio-sys, glam, glib,
   glib-sys, gobject-sys, gtk, gtk-sys, hermit-abi, inventory, itoa, linux-raw-sys,
