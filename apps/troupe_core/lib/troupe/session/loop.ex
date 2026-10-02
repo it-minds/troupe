@@ -1,12 +1,12 @@
 defmodule Troupe.Session.Loop do
   @moduledoc """
-  The process that runs a session's `/loop` (issue #59, Decision 681): it starts a loop
+  The process that runs a session's `/loop` (issue #59, Decision 679): it starts a loop
   towards the goal, gives the root agent one iteration at a time, reads how each one
   ended, and writes the `loop_*` events that `Troupe.Loop` folds. The decisions are
   `Troupe.Loop`'s; this is the part that talks to the agent and the log.
 
   **An iteration is a turn of the root agent**, on its own conversation, with the goal
-  already in its prompt (Decision 680): a `:loop` input, which the agent logs as a
+  already in its prompt (Decision 678): a `:loop` input, which the agent logs as a
   `user_input` from `loop`, and the turn it starts. What the previous iterations tried and
   what failed is exactly what the next one needs, and the root agent's turns already have
   approvals, the budget question, compaction and cancelling; a subagent per iteration

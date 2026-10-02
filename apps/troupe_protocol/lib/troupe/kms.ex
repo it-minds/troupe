@@ -27,10 +27,14 @@ defmodule Troupe.KMS do
   Who a session's key belongs to: a team, or a person.
 
   A team session's key is under `teams/<team>/`, read by a pod with a credential scoped
-  to that team. A private session's is under `people/<subject>/`, read by that person's
+  to that team. A private session's is under `people/<name>/`, read by that person's
   daemon with a credential the identity provider vouched for and no pod has. The two
   subtrees do not overlap and neither credential can reach the other, which is the
   property that makes "no worker profile is involved" true rather than intended.
+
+  `<name>` is the person's name at the key manager, which the plane keeps and answers
+  (Decision 755): their subject when they were first known, and unchanged when their
+  subject changes, so nothing under it has to move.
   """
   @type owner :: team() | {:person, String.t()}
 
@@ -60,13 +64,13 @@ defmodule Troupe.KMS do
       "troupe/people/idp|ada/sessions/s-2"
 
   Two shapes and one function, because a path built in two places is a path that will
-  one day be built two ways. The subject is not escaped: OpenBao takes it as a path
-  segment and a subject containing a `/` would address somebody else's subtree, so
+  one day be built two ways. The name is not escaped: OpenBao takes it as a path segment
+  and a name containing a `/` would address somebody else's subtree, so
   `person_segment/1` refuses one rather than mangling it.
   """
   @spec path(owner(), session_id()) :: String.t()
-  def path({:person, subject}, session_id) do
-    person_prefix(subject) <> "/sessions/#{session_id}"
+  def path({:person, name}, session_id) do
+    person_prefix(name) <> "/sessions/#{session_id}"
   end
 
   def path(team, session_id) when is_binary(team) do
@@ -83,27 +87,27 @@ defmodule Troupe.KMS do
       "troupe/people/idp|ada/mcp/jira"
   """
   @spec slot_path(String.t(), String.t()) :: String.t()
-  def slot_path(subject, slot), do: person_prefix(subject) <> "/mcp/#{slot}"
+  def slot_path(name, slot), do: person_prefix(name) <> "/mcp/#{slot}"
 
-  defp person_prefix(subject), do: "troupe/people/#{person_segment(subject)}"
+  defp person_prefix(name), do: "troupe/people/#{person_segment(name)}"
 
   @doc """
-  A subject as one path segment, or a raise.
+  A person's name as one path segment, or a raise.
 
-  A subject comes from an identity provider and is opaque to us — `idp|ada`,
-  `ada@example.test`, a UUID — and every shape we have seen is fine as a segment. One
-  with a slash in it is not, and the failure of letting it through is that Ada's daemon
-  writes under Bo's subtree. There is no sanitising here on purpose: a mangled subject
-  would silently be a *different* person, and two subjects that mangled the same way
-  would share a key.
+  The name is a subject from an identity provider, or the plane's own id for a person —
+  `idp|ada`, `ada@example.test`, a UUID — opaque to us, and every shape we have seen is
+  fine as a segment. One with a slash in it is not, and the failure of letting it through
+  is that Ada's daemon writes under Bo's subtree. There is no sanitising here on purpose:
+  a mangled name would silently be a *different* person, and two names that mangled the
+  same way would share a key.
   """
   @spec person_segment(String.t()) :: String.t()
-  def person_segment(subject) when is_binary(subject) do
-    if String.contains?(subject, "/") or subject == "" do
-      raise ArgumentError, "a subject may not contain a slash or be empty: #{inspect(subject)}"
+  def person_segment(name) when is_binary(name) do
+    if String.contains?(name, "/") or name == "" do
+      raise ArgumentError, "a person's name may not contain a slash or be empty: #{inspect(name)}"
     end
 
-    subject
+    name
   end
 
   @doc "A fresh 256-bit data key."

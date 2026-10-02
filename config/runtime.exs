@@ -102,6 +102,7 @@ if config_env() == :prod do
       plane_control_port: String.to_integer(System.get_env("TROUPE_PLANE_CONTROL_PORT", "4001")),
       plane_namespace: System.get_env("TROUPE_PLANE_NAMESPACE", "troupe-system"),
       bao_address: System.get_env("TROUPE_BAO_ADDR", "http://openbao.troupe-system.svc:8200"),
+      bao_role_per_profile: System.get_env("TROUPE_BAO_WORKER_ROLE_PER_PROFILE") == "true",
       object_store_endpoint:
         System.get_env("TROUPE_OBJECT_ENDPOINT", "http://minio.troupe-system.svc:9000"),
       object_store_bucket: System.get_env("TROUPE_OBJECT_BUCKET", "troupe-sessions"),
@@ -407,6 +408,9 @@ if config_env() == :prod do
         # scope named after the resource itself — the only name a client is allowed to send
         # as RFC 8707's `resource`. Set it where the registration exposes another.
         mcp_scope: presence.(System.get_env("TROUPE_OIDC_MCP_SCOPE")),
+        # Which claim is the person. Absent means `sub`; `oid` for Entra ID, whose `sub`
+        # differs per app registration and is not what its SCIM client sends (Decision 751).
+        subject_claim: presence.(System.get_env("TROUPE_OIDC_SUBJECT_CLAIM")),
         device_authorization_endpoint: oidc_required.("TROUPE_OIDC_DEVICE_URL"),
         token_endpoint: oidc_required.("TROUPE_OIDC_TOKEN_URL")
       ]
@@ -489,7 +493,11 @@ if config_env() == :prod do
       kms: [
         address: System.get_env("TROUPE_BAO_ADDR", "http://openbao.troupe-system.svc:8200"),
         token: presence.(System.get_env("TROUPE_BAO_TOKEN")),
-        mount: System.get_env("TROUPE_BAO_MOUNT", "secret")
+        mount: System.get_env("TROUPE_BAO_MOUNT", "secret"),
+        # The Kubernetes-auth role this pod logs in under (Decision 753): its profile's own
+        # where the installation makes one per profile, which the operator then names here,
+        # and otherwise `troupe-worker`, the one role every pod shares.
+        role: presence.(System.get_env("TROUPE_BAO_ROLE")) || "troupe-worker"
       ]
 
     if store = object_store.() do

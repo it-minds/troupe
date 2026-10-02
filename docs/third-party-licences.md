@@ -101,7 +101,7 @@ tools included.
 
 ## The GUI (pnpm)
 
-93 packages, from `clients/gui/pnpm-lock.yaml`, build and test tools included. A
+91 packages, from `clients/gui/pnpm-lock.yaml`, build and test tools included. A
 package's builds for one operating system and processor, such as esbuild's, are checked
 and not listed: each is under its parent's licence, and which of them are installed
 depends on the machine.
@@ -176,9 +176,7 @@ depends on the machine.
 | `rolldown` | MIT |
 | `saxes` | ISC |
 | `scheduler` | MIT |
-| `siginfo` | ISC |
 | `source-map-js` | BSD-3-Clause |
-| `stackback` | MIT |
 | `std-env` | MIT |
 | `tinybench` | MIT |
 | `tinyexec` | MIT |
@@ -204,7 +202,7 @@ depends on the machine.
 
 ## The desktop app (Cargo)
 
-487 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
+485 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
 platform, build dependencies included.
 
 | package | licence |
@@ -275,7 +273,6 @@ platform, build dependencies included.
 | `cssparser` | MPL-2.0 |
 | `cssparser-macros` | MPL-2.0 |
 | `ctor` | Apache-2.0 OR MIT |
-| `ctor-proc-macro` | Apache-2.0 OR MIT |
 | `darling` | MIT |
 | `darling_core` | MIT |
 | `darling_macro` | MIT |
@@ -300,8 +297,6 @@ platform, build dependencies included.
 | `dpi` | Apache-2.0 AND MIT |
 | `dtoa` | MIT OR Apache-2.0 |
 | `dtoa-short` | MPL-2.0 |
-| `dtor` | Apache-2.0 OR MIT |
-| `dtor-proc-macro` | Apache-2.0 OR MIT |
 | `dunce` | CC0-1.0 OR MIT-0 OR Apache-2.0 |
 | `dyn-clone` | MIT OR Apache-2.0 |
 | `embed-resource` | MIT |
@@ -425,6 +420,7 @@ platform, build dependencies included.
 | `multiversion-macros` | MIT OR Apache-2.0 |
 | `multiversion_no_op` | Apache-2.0 OR MIT |
 | `ndk` | MIT OR Apache-2.0 |
+| `ndk-context` | MIT OR Apache-2.0 |
 | `ndk-sys` | MIT OR Apache-2.0 |
 | `new_debug_unreachable` | MIT |
 | `notify-rust` | MIT OR Apache-2.0 |

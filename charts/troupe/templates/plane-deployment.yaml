@@ -293,6 +293,11 @@ spec:
             - name: TROUPE_OIDC_MCP_SCOPE
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.plane.oidc.subjectClaim }}
+            # Only where the person is not the token's `sub`: `oid` for Microsoft Entra.
+            - name: TROUPE_OIDC_SUBJECT_CLAIM
+              value: {{ . | quote }}
+            {{- end }}
             - name: TROUPE_OIDC_DEVICE_URL
               value: {{ .Values.plane.oidc.deviceUrl | quote }}
             - name: TROUPE_OIDC_TOKEN_URL

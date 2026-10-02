@@ -65,7 +65,7 @@ defmodule Troupe.Agent.State do
     # and read into every prompt the root agent makes; a subagent is handed a task
     # instead and never carries one.
     goal: nil,
-    # The `/loop` whose iterations this agent takes (Decision 681), as the loop process
+    # The `/loop` whose iterations this agent takes (Decision 679), as the loop process
     # last said. Not folded: that process says it again whenever either of them restarts.
     loop: nil,
     # The instruction files and the brief the last prompt was read from (Decision 706),

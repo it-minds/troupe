@@ -2,7 +2,8 @@ defmodule Troupe.Plane.Identity.User do
   @moduledoc """
   A person, as the identity provider describes them.
 
-  `subject` — the IdP's `sub` — is the identity. Email and display name are labels that
+  `subject` — the claim `subject_claim` names, the IdP's `sub` unless a deployment says
+  otherwise (Decision 751) — is the identity. Email and display name are labels that
   change when people marry, move team, or correct a typo, and a system that keyed on
   either would lose track of them when they did.
 
@@ -29,9 +30,20 @@ defmodule Troupe.Plane.Identity.User do
   schema "users" do
     field(:subject, :string)
     field(:external_id, :string)
+
+    # SCIM's `userName`, as the provider last sent it: what its filter asks for before it
+    # creates or changes somebody. A label, like the email; with an `externalId` beside
+    # it, it is not the subject (Decision 754).
+    field(:user_name, :string)
+
     field(:email, :string)
     field(:display_name, :string)
     field(:active, :boolean, default: true)
+
+    # This person's name at the key manager (Decision 755): set when they are first known
+    # and changed by nothing afterwards, a re-key included, so what is stored under it is
+    # found again. Not in `changeset/2`, which is what SCIM and a login write.
+    field(:kms_name, :string)
 
     # This person's own spend ceiling, in millionths, across every team they are in, per
     # calendar month in UTC. Zero and `nil` both mean no ceiling: somebody who has never
@@ -56,10 +68,24 @@ defmodule Troupe.Plane.Identity.User do
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
   def changeset(user, attrs) do
     user
-    |> cast(attrs, [:subject, :external_id, :email, :display_name, :active])
+    |> cast(attrs, [:subject, :external_id, :user_name, :email, :display_name, :active])
     |> validate_required([:subject])
     |> unique_constraint(:subject)
+    |> unique_constraint(:kms_name)
   end
+
+  @doc """
+  This person's name at the key manager: the segment under `troupe/people/` their
+  credentials for person-mode MCP servers and their private sessions' data keys are kept
+  under (Decision 755). Whatever asks the key manager for a person takes it from here.
+
+  A row without one, written by a replica of the release before during a rollout, and a
+  principal, which has no row, are their subject, which is what the name was before it
+  was a column.
+  """
+  @spec kms_name(t()) :: String.t()
+  def kms_name(%__MODULE__{kms_name: name}) when is_binary(name), do: name
+  def kms_name(%__MODULE__{subject: subject}), do: subject
 
   @doc """
   Set or clear this person's own ceiling.

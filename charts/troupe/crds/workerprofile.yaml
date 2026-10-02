@@ -111,7 +111,7 @@ spec:
                           Whose credential goes out with a call. `profile` is the service
                           account in secretRef, the same for every session. `person` is
                           the session's owner, read from the key manager at
-                          troupe/people/<subject>/mcp/<slot> by the pod alone — there is
+                          troupe/people/<name>/mcp/<slot> by the pod alone — there is
                           no Secret and nothing here for the operator to mount.
                           `client_credentials` is the profile's own identity, the entry of
                           mcpIdentities for this server: a token got with an assertion

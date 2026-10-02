@@ -1653,16 +1653,16 @@ than an admin uses them:
 | `session.review` | control | anybody who can see the session | `{session_id}` → sets `reviewed_by`/`reviewed_at` on the session and its run, audited as `session.review` |
 | `me.client_defaults` | observe | anybody | `{}` → `{configured, provider, base_url, auth, models: {default, cheap, expensive}}` — what an administrator says people's own machines should talk to (the *Client defaults* settings), for a client to pre-fill its model settings with. **Never a key**: anybody signed in may ask, so each person supplies their own. `configured` is false, and the rest null, until a provider is set |
 | `me.connections.list` | observe | anybody | the MCP servers on the caller's profiles that act as *them*, each with its `slot` and whether they have `connected` it. Whether, never what: the plane can see that a slot has a version and cannot read one |
-| `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own subject, which the client exchanges with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
+| `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own name at the key manager (`name`, the segment of `path` under `troupe/people/`, not always their subject: Decision 755). The client exchanges it with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
 | `session.register` | control | anybody, for their own private sessions | `{session_id, device, epoch, head_hash, last_seq, object_bytes, workspace_bytes, title, claim}` → the session row. Idempotent on the id: the first call mints epoch 1, a later one is a seal report. A seal carries the `epoch` the device holds and is refused with `stale_version` if another device has moved past it; `last_seq` never goes backwards. `claim: true` takes the session over on this device, bumping the epoch conditionally — two devices sending the same `epoch` produce one winner, and the loser learns it lost on its next seal rather than by being told |
 | `session.presign` | control | anybody, for their own private sessions | `{session_id, method (`get`/`put`), keys}` → `{expires_in, urls}`, one signed URL per key, good for five minutes. Every key must be under `sessions/<session_id>/` and at most 64 per call. **The bytes never cross the plane**: it holds an object-storage credential scoped to signing and no key for what it signs for, which is the narrowest revision of `DECISIONS.md` 90 that lets a laptop seal at all |
 | `session.objects` | observe | anybody, for their own private sessions | `{session_id, prefix}` → `{keys}` under `sessions/<session_id>/`. A caller with no object-storage credential cannot list — a listing is signed against the bucket, not against a key it does not yet know — so the plane lists for it. A `prefix` may narrow the listing and may not widen it; one that is not under the session's own is ignored |
-| `session.assertion` | control | anybody, for their own private sessions | `{session_id}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, path}}`, the same shape `me.connections.grant` answers and for the same reason. The path is `troupe/people/<subject>/sessions/<session_id>`; the person policy covers their own subtree and no pod role covers any of it. The session must already be registered, which is what makes this a statement about a session the plane agrees is theirs |
+| `session.assertion` | control | anybody, for their own private sessions | `{session_id}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`, the same shape `me.connections.grant` answers and for the same reason. The path is `troupe/people/<name>/sessions/<session_id>`; the person policy covers their own subtree and no pod role covers any of it. A daemon makes or finds the session's key under `name`, and under the subject it is linked as only where a plane from before Decision 755 answers none. The session must already be registered, which is what makes this a statement about a session the plane agrees is theirs |
 
 ### Private sessions
 
 A private session belongs to a person, not a team. It runs on their own machine, is
-sealed under `troupe/people/<subject>/sessions/<id>`, and is never placed on a pod. The
+sealed under `troupe/people/<name>/sessions/<id>`, and is never placed on a pod. The
 plane's row carries `kind: "private"`, no `team`, no `profile` and no worker — sizes,
 sequence numbers, hashes and a `device` name, and nothing else. A team admin does not see
 it; a platform admin sees a count and a size.
@@ -1678,8 +1678,12 @@ unshared team session has always been visibility-private and is not a private se
 
 A person-mode MCP server reaches its far side as the session's **owner**, fixed at
 activation and recorded in `session_created`. The credential is in the key manager under
-`troupe/people/<subject>/mcp/<slot>`; the plane never holds it and cannot read it, and a
-pod reads it with a token it exchanged for an assertion naming that person. Where nobody
+`troupe/people/<name>/mcp/<slot>`; the plane never holds it and cannot read it, and a
+pod reads it with a token it exchanged for an assertion naming that person. `<name>` is
+the person's name at the key manager, fixed when the plane first knew them and unchanged
+when a switched `subject_claim` moves their subject (Decision 755); the plane's answer to
+`kms.assertion` carries it as `key_manager.name`, and the pod reads under it rather than
+under the owner it was told at activation. Where nobody
 has connected, the tool answers a result the model can read —
 `{"error": "not_connected", "server": …, "hint": …}` — and the session carries on.
 

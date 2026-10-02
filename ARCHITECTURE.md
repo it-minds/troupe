@@ -66,7 +66,7 @@ ordered by dependency: `Session.Log` first, because everything persists through 
 `Approvals`, `Questions`, `ClientTools` and the workspace's MCP servers above the agent, so
 a restarted agent finds the same answers and registrations; the root `Agent.Node`; then
 `Watcher` and `Files`, so file watching can never disturb a running agent; `Loop`, which
-runs `/loop` as turns of the root agent (Decision 681); and `Session.Summary` last,
+runs `/loop` as turns of the root agent (Decision 679); and `Session.Summary` last,
 because a projection that could restart an agent by crashing would be worse than none. Sessions live in the core's own tree, not the daemon's, so a daemon can
 lose its listener and every client without an agent noticing.
 
@@ -333,8 +333,9 @@ heartbeats, the session *index* (ids, epochs, sequence numbers, head hashes), st
 columns and usage batches; downward, idempotent pushes — activate, dormant, drain, erase,
 fence, JWKS and ACL changes, `config.updated` — routed to whichever replica holds the pod.
 Bundles and key-manager assertions are fetched, not pushed: `kms.assertion {session_id}`
-answers a short-lived JWT for *that session owner's* key slots, the subject read off the
-session row, so a pod naming a session it does not hold gets `not_found`.
+answers a short-lived JWT for *that session owner's* key slots, the owner read off the
+session row, so a pod naming a session it does not hold gets `not_found`, and names the
+owner's name at the key manager, which the pod reads their slots under.
 
 **The harness API** (`/rpc`) is a fleet API: `me`, `teams.list`, `profiles.list`,
 `sessions.list`, `session.get`, `session.create`, `session.open`, `token.mint`, archive,
@@ -402,9 +403,10 @@ holds live sessions; the operator replaces a pod on an older revision once the p
 alone knows when a pod holds nothing, has drained it and recorded that on the profile. **Egress** is default-deny: DNS, the plane's control port, OpenBao,
 object storage, the model, the profile's MCP servers and git hosts. Plain NetworkPolicy
 cannot name a host, so without Cilium the external ones are a wide rule on 443 and 80,
-with the installation's own OpenBao and object storage beside it on the ports they name,
-recorded rather than hidden, and a profile's own endpoint that rule does not reach is
-refused where it is set up and reported on the profile; with Cilium the operator writes the `toFQDNs` rule the profile asked for,
+with the installation's own OpenBao and object storage and the profile's own endpoints
+beside it on the ports they name, recorded rather than hidden, and a profile's own
+endpoint at a loopback or link-local address, which no rule admits, refused where it is
+set up and reported on the profile; with Cilium the operator writes the `toFQDNs` rule the profile asked for,
 with the installation's own OpenBao and object storage in it when they are outside the
 cluster (a `toCIDR` of one address for a host given as an address), a DNS rule through Cilium's proxy so it can learn addresses, and no wide rule
 beside it, since Cilium admits the union of every policy on a pod. Which of the two a
@@ -507,13 +509,17 @@ MCP tool list — the pod still discovers once.
 ## 10. What belongs to a person
 
 Key paths take an owner: `troupe/teams/<team>/sessions/<id>` for a pod, scoped to its
-granted teams, and `troupe/people/<subject>/…` for a person, which no pod rule mentions. A
-bundle's MCP server may use `credential_mode: person` — the session owner's credential,
-fixed at activation — kept at `troupe/people/<subject>/mcp/<slot>`, which only that person
-can read: the pod exchanges a plane-signed assertion at OpenBao's JWT auth for a token
-templated on the subject, and a person connects a server with `me.connections.grant`, which
-takes no value and returns none. Where nobody has connected, the tool answers
-`not_connected` rather than a 401 the model would retry.
+granted teams, and `troupe/people/<name>/…` for a person, which no pod rule mentions. The
+name is the person's at the key manager, a column on their row: their subject when they
+were first known, and left alone when a switched `subject_claim` moves their subject, so
+nothing under it has to move (Decision 755). Whatever reaches the key manager for a person
+takes the name from the plane's answer, never from a subject. A bundle's MCP server may use
+`credential_mode: person` — the session owner's credential, fixed at activation — kept at
+`troupe/people/<name>/mcp/<slot>`, which only that person can read: the pod exchanges a
+plane-signed assertion at OpenBao's JWT auth for a token templated on the name, and a
+person connects a server with `me.connections.grant`, which takes no value and returns
+none. Where nobody has connected, the tool answers `not_connected` rather than a 401 the
+model would retry.
 
 A **private session** runs on a person's machine and never touches a pod. The daemon seals
 it with the same sealer under the person's key subtree; the plane holds a row

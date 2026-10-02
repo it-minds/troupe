@@ -28,6 +28,7 @@ defmodule Troupe.Plane.SCIMTest do
       assert {:ok, user} = SCIM.put_user(@alice)
 
       assert user.subject == "idp|alice"
+      assert user.user_name == "alice@example.test"
       assert user.email == "alice@example.test"
       assert user.display_name == "Alice Ng"
       assert user.active
@@ -86,7 +87,10 @@ defmodule Troupe.Plane.SCIMTest do
 
       assert rendered["schemas"] == ["urn:ietf:params:scim:schemas:core:2.0:User"]
       assert rendered["id"] == alice.id
-      assert rendered["userName"] == "idp|alice"
+      # As the provider sent it, which is what its filter will ask for; the subject is
+      # the externalId beside it.
+      assert rendered["userName"] == "alice@example.test"
+      assert rendered["externalId"] == "idp|alice"
       assert [%{"value" => "alice@example.test", "primary" => true}] = rendered["emails"]
       assert rendered["meta"]["resourceType"] == "User"
 
@@ -170,7 +174,8 @@ defmodule Troupe.Plane.SCIMTest do
     end
 
     test "a login without a subject is refused" do
-      assert {:error, :no_subject} = Login.from_claims(%{"email" => "nobody@example.test"})
+      assert {:error, {:no_subject, "sub"}} =
+               Login.from_claims(%{"email" => "nobody@example.test"})
     end
 
     test "leaving a group at login removes the team it gave" do

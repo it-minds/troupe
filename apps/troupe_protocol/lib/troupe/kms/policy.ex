@@ -7,9 +7,10 @@ defmodule Troupe.KMS.Policy do
   * **a worker pod** may create and read keys, but only under the teams its profile is
     granted. A `ux` pod asking for a key of a team granted only to `dev` is refused by
     OpenBao, not by Troupe. No pod rule mentions `people/` at all.
-  * **a person's daemon** may create and read keys under its own subject, and no other's.
-    The policy is templated on the subject the identity provider vouched for, so there is
-    one policy for everybody and no rule anybody has to write per person.
+  * **a person's daemon** may create and read keys under its own name, and no other's.
+    The policy is templated on the name the plane vouched for, which is the person's name
+    at the key manager (Decision 755), so there is one policy for everybody and no rule
+    anybody has to write per person.
   * **the plane** may destroy key *metadata* — which is what erasure needs — and may not
     read a key at all. That is the Forbidden list's "no plane credential that can read
     session keys", and it is the reason a compromised plane cannot decrypt anything.
@@ -49,13 +50,15 @@ defmodule Troupe.KMS.Policy do
   end
 
   @doc """
-  The policy for a person's daemon: create and read, under their own subject only.
+  The policy for a person's daemon: create and read, under their own name only.
 
   Templated rather than per-person: `identity.entity.aliases.<accessor>.name` is the
-  subject OpenBao itself put on the entity when it verified the identity provider's
-  token, so a daemon cannot name somebody else's subtree by asking. One policy, attached
-  to one JWT role, and adding a person is the identity provider's business rather than
-  an operator's.
+  `sub` OpenBao itself put on the entity when it verified the plane's assertion, and the
+  plane writes the person's name at the key manager there (Decision 755), so a daemon
+  cannot name somebody else's subtree by asking. That name is their subject unless they
+  have been moved to another claim since they were first known, and is what keeps a
+  moved person's subtree theirs. One policy, attached to one JWT role, and adding a
+  person is the identity provider's business rather than an operator's.
 
   The whole subtree under the person, not one prefix of it. There are two tenants there
   already — `sessions/` for a private session's data key, `mcp/` for a credential they
@@ -72,22 +75,22 @@ defmodule Troupe.KMS.Policy do
   end
 
   @doc """
-  The same policy with a subject already in it, rather than a template.
+  The same policy with a name already in it, rather than a template.
 
   This is what OpenBao evaluates `person/2` to once it has verified a token and resolved
-  the entity — the template decides *which* subject lands here and changes nothing about
+  the entity — the template decides *which* name lands here and changes nothing about
   the capabilities. Exposed because a test that wants to prove what a person's credential
   may and may not reach can then issue a token with this policy directly, instead of
   standing up a JWT auth mount and an identity provider to arrive at the same string.
   """
   @spec person_for(String.t(), String.t()) :: String.t()
-  def person_for(mount, subject) do
+  def person_for(mount, name) do
     """
-    path "#{mount}/data/troupe/people/#{subject}/*" {
+    path "#{mount}/data/troupe/people/#{name}/*" {
       capabilities = ["create", "read", "update"]
     }
 
-    path "#{mount}/metadata/troupe/people/#{subject}/*" {
+    path "#{mount}/metadata/troupe/people/#{name}/*" {
       capabilities = ["read", "list"]
     }
     """
@@ -153,7 +156,7 @@ defmodule Troupe.KMS.Policy do
   transit key named after the pod's own namespace, `<namespace>.<anything>`, and nothing
   else.
 
-  Templated on the namespace Kubernetes auth vouched for, as `person/2` is on the subject:
+  Templated on the namespace Kubernetes auth vouched for, as `person/2` is on the name:
   one policy, on the one role every pod logs in with, and a pod in `troupe-w-ux` cannot
   sign with `troupe-w-dev.jira` however it asks, because the name its policy evaluates to
   is its own. `accessor` is the Kubernetes auth mount's.
@@ -192,6 +195,14 @@ defmodule Troupe.KMS.Policy do
   @spec worker_policy_name(String.t()) :: String.t()
   def worker_policy_name(profile), do: "troupe-worker-#{profile}"
 
+  @doc """
+  The Kubernetes-auth role a profile's pods log in under, where an installation makes one
+  per profile (Decision 753): named as its policy is, and carrying it. Otherwise every pod
+  logs in as `troupe-worker`.
+  """
+  @spec worker_role_name(String.t()) :: String.t()
+  def worker_role_name(profile), do: worker_policy_name(profile)
+
   @doc "The name the plane's policy is installed under."
   @spec plane_policy_name() :: String.t()
   def plane_policy_name, do: "troupe-plane"
@@ -208,9 +219,9 @@ defmodule Troupe.KMS.Policy do
 
   Every field is a narrowing. `bound_audiences` and `bound_issuer` say the assertion has
   to be one the plane minted for the key manager — a session token, whose audience is a
-  pod, is refused here. `user_claim: "sub"` is what makes the alias name the person, and
-  the alias name is what the policy templates on, so a caller cannot name somebody else's
-  subtree by asking.
+  pod, is refused here. `user_claim: "sub"` is what makes the alias name the person, by
+  the name the plane keeps for them there (Decision 755), and the alias name is what the
+  policy templates on, so a caller cannot name somebody else's subtree by asking.
   """
   @spec person_role(String.t(), String.t()) :: map()
   def person_role(issuer, audience) do

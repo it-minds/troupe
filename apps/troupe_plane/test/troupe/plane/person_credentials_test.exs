@@ -17,7 +17,8 @@ defmodule Troupe.Plane.PersonCredentialsTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.KMS.{OpenBao, Policy}
-  alias Troupe.Plane.{Bundles, Fleet, Harness, Tokens}
+  alias Troupe.Plane.{Bundles, Fleet, Harness, Identity, Login, PersonAuth, Tokens}
+  alias Troupe.Protocol.SessionId
 
   @moduletag timeout: 60_000
 
@@ -30,7 +31,7 @@ defmodule Troupe.Plane.PersonCredentialsTest do
       Application.put_env(:troupe_plane, :issuer, @issuer)
       on_exit(fn -> Application.delete_env(:troupe_plane, :issuer) end)
 
-      case configure_jwt_auth() do
+      case PersonAuth.configure(@auth_path, @role, @issuer) do
         :ok -> :ok
         {:error, reason} -> {:ok, skip: "could not configure JWT auth: #{inspect(reason)}"}
       end
@@ -201,6 +202,117 @@ defmodule Troupe.Plane.PersonCredentialsTest do
     end
   end
 
+  # Decision 755. A person moved to another claim (751) kept everything the plane holds and
+  # lost everything the key manager holds, because the key manager's name for them was
+  # their subject and the plane, which cannot read or write that subtree, had moved the
+  # subject. The name is now theirs for good.
+  describe "a person moved to another claim" do
+    setup context do
+      requires_bao(context)
+
+      _team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      {:ok, _} = Fleet.put_profile(%{name: "dev", config_bundle_channel: "stable", replicas: 1})
+
+      {:ok, _bundle} =
+        Bundles.publish(
+          "stable",
+          %{
+            "schema" => 1,
+            "mcp_servers" => [
+              %{
+                "name" => "jira",
+                "url" => "https://mcp.jira.example/mcp",
+                "credential_mode" => "person"
+              }
+            ]
+          },
+          announce: false
+        )
+
+      previous = Application.get_env(:troupe_plane, :oidc)
+      on_exit(fn -> restore(:oidc, previous) end)
+
+      # Entra-shaped: a pairwise `sub` the plane knew her by, and the `oid` it is switched
+      # to. Unique per run, because the key manager is not sandboxed as the database is.
+      claims = %{
+        "sub" => "pairwise-#{unique()}",
+        "oid" => "oid-#{unique()}",
+        "email" => "ada@example.test",
+        "groups" => ["engineering"]
+      }
+
+      {:ok, ada, _teams} = Login.from_claims(claims)
+
+      %{ada: ada, claims: claims, oidc: previous || []}
+    end
+
+    test "finds her credential and her private session's key where she left them", context do
+      %{ada: ada, claims: claims} = context
+
+      # Before the switch she connects Jira, as a client does: the grant, the exchange, and
+      # a write of her own.
+      assert {:ok, grant} = Harness.call("me.connections.grant", %{"slot" => "jira"}, as(ada))
+      token = exchange(grant["assertion"])
+      :ok = write_with(token, grant["key_manager"]["path"], %{"value" => "ada's jira token"})
+
+      # And her laptop seals a private session, whose key it makes where the plane says.
+      session_id = SessionId.generate()
+
+      assert {:ok, _row} =
+               Harness.call(
+                 "session.register",
+                 %{"session_id" => session_id, "device" => "laptop"},
+                 as(ada)
+               )
+
+      assert {:ok, sealing} =
+               Harness.call("session.assertion", %{"session_id" => session_id}, as(ada))
+
+      key = Base.encode64(:crypto.strong_rand_bytes(32))
+
+      :ok =
+        write_with(exchange(sealing["assertion"]), sealing["key_manager"]["path"], %{"key" => key})
+
+      # The deployment switches to `oid`, and her next sign-in moves her.
+      Application.put_env(:troupe_plane, :oidc, Keyword.put(context.oidc, :subject_claim, "oid"))
+      assert {:ok, moved, _teams} = Login.from_claims(claims)
+      assert moved.id == ada.id
+      assert moved.subject == claims["oid"]
+
+      # Her name at the key manager is the one she had: what a client is answered for her
+      # names it, and the assertion it spends is for it.
+      assert {:ok, %{"connections" => [jira]}} =
+               Harness.call("me.connections.list", %{}, as(moved))
+
+      assert jira["connected"]
+
+      assert {:ok, again} = Harness.call("me.connections.grant", %{"slot" => "jira"}, as(moved))
+      assert again["key_manager"]["name"] == claims["sub"]
+      assert again["key_manager"]["path"] == grant["key_manager"]["path"]
+      assert %{"sub" => sub} = payload_of(again["assertion"])
+      assert sub == claims["sub"]
+
+      assert {:ok, "ada's jira token"} =
+               read_data(exchange(again["assertion"]), again["key_manager"]["path"])
+
+      # Another device restoring the session is told the same name, and gets the key the
+      # laptop sealed with rather than making a second one.
+      assert {:ok, restoring} =
+               Harness.call("session.assertion", %{"session_id" => session_id}, as(moved))
+
+      assert restoring["key_manager"]["name"] == claims["sub"]
+
+      assert {:ok, ^key} =
+               read_key(exchange(restoring["assertion"]), restoring["key_manager"]["path"])
+
+      # And the token is for that name alone: her new subject is not a name she has there.
+      assert {:error, :forbidden} =
+               read_data(exchange(again["assertion"]), slot_path(claims["oid"], "jira"))
+
+      assert Identity.get_user(claims["oid"]).id == ada.id
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp requires_bao(%{skip: reason}), do: flunk("skipped: #{reason}")
@@ -212,88 +324,47 @@ defmodule Troupe.Plane.PersonCredentialsTest do
   # subject and find the slot that run wrote still there.
   defp unique, do: Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
 
-  defp address, do: Application.get_env(:troupe_plane, :transit, [])[:address]
+  defp address, do: PersonAuth.address()
   defp root_token, do: Application.get_env(:troupe_plane, :transit, [])[:token]
   defp mount, do: "secret"
+  defp reachable?, do: PersonAuth.reachable?()
+  defp put(path, body), do: PersonAuth.put(path, body)
 
-  defp reachable? do
-    match?(
-      {:ok, %{status: 200}},
-      Req.request(method: :get, url: address() <> "/v1/sys/health", retry: false)
-    )
-  rescue
-    _ -> false
+  # What a client does with an assertion: spend it at the key manager for a token.
+  defp exchange(assertion) do
+    assert {:ok, %{token: token}} = OpenBao.jwt_login(address(), @auth_path, @role, assertion)
+    token
   end
 
-  # What an operator writes once: the person policy, a JWT auth mount, and a role bound
-  # to the plane's issuer and the key manager's audience, verifying against the transit
-  # key's public half.
-  defp configure_jwt_auth do
-    with {:ok, jwk} <- Tokens.public_jwk(),
-         pem <- jwk |> JOSE.JWK.from_map() |> JOSE.JWK.to_pem() |> elem(1),
-         :ok <- enable_auth(),
-         {:ok, accessor} <- auth_accessor(),
-         # The policy templates on the *mount accessor*, not the mount path: a path can
-         # be re-used after a mount is deleted and an accessor cannot, so a policy keyed
-         # to the path could one day read a subtree written under a different mount.
-         :ok <-
-           put("/v1/sys/policies/acl/#{Policy.person_policy_name()}", %{
-             "policy" => Policy.person(mount(), accessor)
-           }),
-         :ok <- put("/v1/auth/#{@auth_path}/config", Policy.person_auth_config([pem])) do
-      put(
-        "/v1/auth/#{@auth_path}/role/#{@role}",
-        Policy.person_role(@issuer, Tokens.kms_audience())
-      )
-    end
-  end
-
-  defp auth_accessor do
-    case Req.request(
-           method: :get,
-           url: address() <> "/v1/sys/auth",
-           headers: [{"x-vault-token", root_token()}],
-           decode_body: true,
-           retry: false
-         ) do
-      {:ok, %{status: 200, body: body}} ->
-        case get_in(body, ["data", "#{@auth_path}/", "accessor"]) ||
-               get_in(body, ["#{@auth_path}/", "accessor"]) do
-          accessor when is_binary(accessor) -> {:ok, accessor}
-          _ -> {:error, {:no_accessor, body}}
-        end
-
-      other ->
-        {:error, other}
-    end
-  end
-
-  # Enabling twice is not an error worth failing a suite over: the mount is per-server
-  # and every run after the first finds it already there.
-  defp enable_auth do
-    case put("/v1/sys/auth/#{@auth_path}", %{"type" => "jwt"}) do
-      :ok -> :ok
-      {:error, {:status, 400, body}} -> if already?(body), do: :ok, else: {:error, body}
-      error -> error
-    end
-  end
-
-  defp already?(body), do: inspect(body) =~ "already in use"
-
-  defp put(path, body) do
+  defp write_with(token, path, data) do
     case Req.request(
            method: :post,
-           url: address() <> path,
-           headers: [{"x-vault-token", root_token()}],
-           json: body,
-           decode_body: true,
+           url: address() <> "/v1/#{mount()}/data/#{encode(path)}",
+           headers: [{"x-vault-token", token}],
+           json: %{"data" => data},
            retry: false
          ) do
       {:ok, %{status: status}} when status in 200..299 -> :ok
-      {:ok, %{status: status, body: body}} -> {:error, {:status, status, body}}
+      other -> {:error, other}
+    end
+  end
+
+  defp read_key(token, path) do
+    case Req.request(
+           method: :get,
+           url: address() <> "/v1/#{mount()}/data/#{encode(path)}",
+           headers: [{"x-vault-token", token}],
+           decode_body: true,
+           retry: false
+         ) do
+      {:ok, %{status: 200, body: body}} -> {:ok, get_in(body, ["data", "data", "key"])}
+      {:ok, %{status: status}} -> {:error, status}
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp restore(key, nil), do: Application.delete_env(:troupe_plane, key)
+  defp restore(key, value), do: Application.put_env(:troupe_plane, key, value)
 
   defp write_slot(subject, slot, value) do
     path = encode(slot_path(subject, slot))
