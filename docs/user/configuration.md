@@ -212,7 +212,9 @@ with your sign-in: the pod sees the arguments and the answer, never the sign-in,
 everyone in the session can see that it uses tools on your machine. A call goes through
 the session's approvals like any other tool's. Closing the session, or the app, takes the tools away;
 a connection that drops and comes back offers them again without asking twice. The TUI
-does not offer them to a pod session yet.
+does the same for a pod session you open from HQ: the session's question waits in its
+window as an approval naming the tools, `y` offers them and `n` does not, and a line in
+the transcript says what was offered.
 
 ## Instruction files
 
