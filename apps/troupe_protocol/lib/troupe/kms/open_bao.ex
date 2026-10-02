@@ -8,13 +8,16 @@ defmodule Troupe.KMS.OpenBao do
   alive in its own history.
 
   Two ways to authenticate. In a pod, Kubernetes auth: the worker presents its projected
-  ServiceAccount token and OpenBao gives back a token whose policy allows the paths of
-  its profile's granted teams — which is what stops a `ux` pod reading a `dev` team's
-  keys. Outside one, a token from configuration, which is how the development server is
-  reached.
+  ServiceAccount token under the role its pod is given and OpenBao gives back a token
+  whose policy allows the paths of its profile's granted teams — which is what stops a
+  `ux` pod reading a `dev` team's keys. The token is kept and used until shortly before
+  it runs out (`Troupe.KMS.OpenBao.Login`). Outside a pod, a token from configuration,
+  which is how the development server is reached.
   """
 
   @behaviour Troupe.KMS
+
+  alias Troupe.KMS.OpenBao.Login
 
   @impl Troupe.KMS
   def create(team, session_id, opts \\ []) do
@@ -194,12 +197,33 @@ defmodule Troupe.KMS.OpenBao do
 
   # -- transport --------------------------------------------------------------
 
+  # A token from a login that OpenBao answers `403` to may be one it has stopped honouring,
+  # so it is exchanged once more before the refusal stands. Once, not in a loop: a second
+  # refusal is a policy's answer, which a retry would only repeat.
   defp request(method, path, body, opts) do
+    case static_token(opts) do
+      nil ->
+        token = kubernetes_token(opts, nil)
+
+        case send_request(method, path, body, opts, token) do
+          {:ok, 403, _body} when is_binary(token) ->
+            send_request(method, path, body, opts, kubernetes_token(opts, token))
+
+          answer ->
+            answer
+        end
+
+      token ->
+        send_request(method, path, body, opts, token)
+    end
+  end
+
+  defp send_request(method, path, body, opts, token) do
     request =
       [
         method: method,
         url: address(opts) <> path,
-        headers: [{"x-vault-token", token(opts) || ""}],
+        headers: [{"x-vault-token", token || ""}],
         decode_body: true,
         retry: false,
         receive_timeout: 15_000
@@ -226,20 +250,21 @@ defmodule Troupe.KMS.OpenBao do
   defp mount(opts), do: config(opts)[:mount] || "secret"
 
   # A token from configuration outside a pod; inside one, the token Kubernetes auth
-  # exchanged the ServiceAccount token for.
-  defp token(opts) do
-    config(opts)[:token] || System.get_env("TROUPE_BAO_TOKEN") || kubernetes_token(opts)
-  end
+  # exchanged the ServiceAccount token for, under the role the pod was given
+  # (`TROUPE_BAO_ROLE`), and kept by `Login` until shortly before its lease ends.
+  defp static_token(opts), do: config(opts)[:token] || System.get_env("TROUPE_BAO_TOKEN")
 
-  defp kubernetes_token(opts) do
-    auth_path = config(opts)[:auth_path] || "kubernetes"
-    role = config(opts)[:role] || "troupe-worker"
+  defp kubernetes_token(opts, rejected) do
+    login = %{
+      address: address(opts),
+      auth_path: config(opts)[:auth_path] || "kubernetes",
+      role: config(opts)[:role] || "troupe-worker",
+      jwt_path: service_account_token_path()
+    }
 
-    with {:ok, jwt} <- File.read(service_account_token_path()),
-         {:ok, %{token: token}} <- kubernetes_login(address(opts), auth_path, role, jwt) do
-      token
-    else
-      _ -> nil
+    case Login.token(login, rejected) do
+      {:ok, token} -> token
+      {:error, _reason} -> nil
     end
   end
 

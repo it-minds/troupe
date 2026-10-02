@@ -13,31 +13,77 @@ defmodule Troupe.Plane.Login do
   without first asking the identity provider for a list.
   """
 
-  alias Troupe.Plane.Identity
+  alias Troupe.Plane.{Audit, Identity, Settings}
   alias Troupe.Plane.Identity.User
-  alias Troupe.Plane.Settings
+
+  require Logger
 
   @doc """
   Apply an access token's claims.
 
-  `sub` is the identity. `groups` is read from the claim named in configuration, since
-  providers disagree about whether it is `groups`, `roles`, or something
-  vendor-prefixed.
+  The identity is the claim `subject_claim` names: `sub` unless the deployment says
+  otherwise, `oid` for Entra ID (Decision 751). `groups` is read from the claim named in
+  configuration, since providers disagree about whether it is `groups`, `roles`, or
+  something vendor-prefixed.
   """
   @spec from_claims(map()) :: {:ok, User.t(), [Identity.Team.t()]} | {:error, term()}
   def from_claims(claims) do
-    with {:ok, subject} <- fetch_subject(claims),
+    claim = Settings.get("subject_claim")
+
+    with {:ok, subject} <- fetch_subject(claims, claim),
+         :ok <- rekey(claims, claim, subject),
          {:ok, user} <- upsert(subject, claims),
          :ok <- sync_groups(user, groups_in(claims)) do
       {:ok, user, Identity.teams_for(user)}
     end
   end
 
-  defp fetch_subject(claims) do
-    case Map.get(claims, "sub") do
+  # The reason names the claim, because "no subject" from a token that plainly has a `sub`
+  # sends whoever reads it looking in the wrong place.
+  defp fetch_subject(claims, claim) do
+    case Map.get(claims, claim) do
       subject when is_binary(subject) and subject != "" -> {:ok, subject}
-      _ -> {:error, :no_subject}
+      _ -> {:error, {:no_subject, claim}}
     end
+  end
+
+  # A plane switched to another claim already knows its people by their `sub`. Somebody
+  # it has never seen under the new value but knows under the `sub` this same token
+  # carries is the same person, and is moved over once, here, with everything they own
+  # (Decision 751). Under `sub` itself, or when the two values agree, there is nothing to
+  # move; after the move there is nobody left under the old value, so the next sign-in
+  # finds nothing to do either.
+  #
+  # The token that moves somebody is one that would have signed in as them under `sub`
+  # the day before, so the move gives it nothing it did not have.
+  defp rekey(_claims, "sub", _subject), do: :ok
+
+  defp rekey(claims, claim, subject) do
+    case Map.get(claims, "sub") do
+      old when is_binary(old) and old != "" and old != subject ->
+        case Identity.rekey(old, subject) do
+          {:ok, :none} -> :ok
+          {:ok, outcome} -> announce(outcome, old, subject, claim)
+          {:error, reason} -> {:error, {:rekey_failed, reason}}
+        end
+
+      _same_or_absent ->
+        :ok
+    end
+  end
+
+  # The two identifiers and the claim's name, and nothing else the token said: this is a
+  # log line and an audit entry, and neither is a place for an email or a tenant.
+  defp announce(outcome, old, new, claim) do
+    Logger.info(
+      "troupe plane: #{if outcome == :merged, do: "merged", else: "re-keyed"} a person " <>
+        "from #{old} to #{new}, the #{claim} claim (Decision 751)"
+    )
+
+    detail = %{"from" => old, "to" => new, "claim" => claim}
+    detail = if outcome == :merged, do: Map.put(detail, "merged", true), else: detail
+    {:ok, _} = Audit.record(new, "person.rekey", new, detail)
+    :ok
   end
 
   # A person the identity provider has deactivated is refused here, before anything else

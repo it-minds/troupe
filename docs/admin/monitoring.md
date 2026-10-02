@@ -54,6 +54,7 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 | Line (prefix `troupe plane:` unless noted) | Meaning |
 |---|---|
 | `no OpenBao credential (...)` | the plane can neither sign tokens nor publish its JWKS |
+| `troupe worker: no OpenBao token (...)` | a worker pod could not log in under the role it names; a role per profile that was never made reads `refused with HTTP 400` |
 | `break-glass panel login from <ip>` / `break-glass token refused from <ip>` | the door was used or probed |
 | `admin sign-in refused (<step>) — <reason>` | which console login step failed, and why |
 | `no TroupePolicy is configured or reachable; every MCP host is allowed` | the plane has no Kubernetes connection; bundle egress checks are open |

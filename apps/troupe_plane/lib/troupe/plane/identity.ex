@@ -112,6 +112,119 @@ defmodule Troupe.Plane.Identity do
   def get_user(subject), do: Repo.get_by(User, subject: subject)
 
   @doc """
+  Move a person from one subject to another, with everything the plane keys on it.
+
+  What switching `subject_claim` needs (Decision 751). With nobody under `new` yet, the
+  person's row is renamed. With somebody there already — SCIM provisioned them under the
+  new value before they next signed in — the old row is folded into that one and removed,
+  so the id SCIM addresses them by stays good. `:none` when nobody is under `old`.
+
+  Moved are the columns that say *who*: a session's owner and the person its spend counts
+  against, an ACL entry, a share made out to them, a team they administer, a trigger that
+  tells them, their spend and open reservations, the principals they sponsor. What says
+  *who did*, the audit trail and every `_by`, keeps the name it was written with.
+
+  One transaction with the old row locked, so two devices signing in at once move the
+  person once and the second finds nobody left to move.
+  """
+  @spec rekey(String.t(), String.t()) :: {:ok, :none | :rekeyed | :merged} | {:error, term()}
+  def rekey(old, new) when is_binary(old) and is_binary(new) and old != new do
+    if Repo.exists?(from(u in User, where: u.subject == ^old)),
+      do: Repo.transaction(fn -> move_locked(old, new) end),
+      else: {:ok, :none}
+  end
+
+  defp move_locked(old, new) do
+    case lock_user(old) do
+      nil -> :none
+      known -> move_person(known, lock_user(new), new)
+    end
+  end
+
+  defp lock_user(subject),
+    do: Repo.one(from(u in User, where: u.subject == ^subject, lock: "FOR UPDATE"))
+
+  defp move_person(known, nil, new) do
+    move_references(known.subject, new)
+
+    case known |> User.changeset(%{subject: new}) |> Repo.update() do
+      {:ok, _user} -> :rekeyed
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  defp move_person(known, provisioned, new) do
+    move_references(known.subject, new)
+
+    Repo.update_all(
+      from(s in "sessions", where: s.owner_id == ^Ecto.UUID.dump!(known.id)),
+      set: [owner_id: Ecto.UUID.dump!(provisioned.id)]
+    )
+
+    # A ceiling is the plane's opinion of the person, not the provider's, so the one they
+    # had is kept where the row SCIM made has none.
+    if is_nil(provisioned.budget_micros) and not is_nil(known.budget_micros) do
+      {:ok, _} =
+        provisioned
+        |> User.budget_changeset(%{budget_micros: known.budget_micros})
+        |> Repo.update()
+    end
+
+    Repo.delete!(known)
+    :merged
+  end
+
+  # By table name, as `Sessions` reaches `Identity`'s tables: these rows are other modules'.
+  # Where a person could be named twice — an ACL entry, a team's administrator — the entry
+  # under the new name wins and the old one goes, or the rename would break the index.
+  defp move_references(old, new) do
+    for {table, column} <- [
+          {"sessions", :owner_subject},
+          {"session_shares", :audience},
+          {"usage_records", :owner_subject},
+          {"budget_reservations", :owner_subject},
+          {"service_principals", :sponsor_subject}
+        ] do
+      Repo.update_all(from(r in table, where: field(r, ^column) == ^old), set: [{column, new}])
+    end
+
+    for {table, scope} <- [{"session_acls", :session_id}, {"team_admins", :team_id}] do
+      taken = from(r in table, where: r.subject == ^new, select: field(r, ^scope))
+
+      Repo.delete_all(
+        from(r in table, where: r.subject == ^old and field(r, ^scope) in subquery(taken))
+      )
+
+      Repo.update_all(from(r in table, where: r.subject == ^old), set: [subject: new])
+    end
+
+    # Whose cap a trigger's run counts against: the sponsor, kept inside the session's
+    # origin (`Principal`), and read back when the reservation is released.
+    Repo.update_all(
+      from(s in "sessions",
+        where: fragment("?->'principal'->>'subject' = ?", s.origin, ^old),
+        update: [
+          set: [
+            origin:
+              fragment("jsonb_set(?, '{principal,subject}', to_jsonb(?::text))", s.origin, ^new)
+          ]
+        ]
+      ),
+      []
+    )
+
+    Repo.update_all(
+      from(t in "triggers",
+        where: fragment("? = ANY(?)", ^old, t.notify),
+        update: [set: [notify: fragment("array_replace(?, ?, ?)", t.notify, ^old, ^new)]]
+      ),
+      []
+    )
+
+    :ok
+  end
+
+  @doc """
   Set or clear a person's own spend ceiling.
 
   Through `User.budget_changeset/2` rather than the changeset SCIM and a login write, so

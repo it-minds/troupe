@@ -12,6 +12,7 @@ defmodule Troupe.Operator.Resources do
   with it.
   """
 
+  alias Troupe.KMS.Policy, as: KMSPolicy
   alias Troupe.Operator.{Names, Settings}
   alias Troupe.Policy
   alias Troupe.WorkerProfile, as: Profile
@@ -32,9 +33,6 @@ defmodule Troupe.Operator.Resources do
   # `k8s-app` label kube-dns had, in the namespace kube-dns ran in.
   @dns_namespace "kube-system"
   @dns_app "kube-dns"
-
-  # The ports the NetworkPolicy opens to every public address where there is no Cilium.
-  @public_ports [443, 80]
 
   @doc "Every object a profile implies, in dependency order."
   @spec for_profile(Profile.t(), Policy.t(), Settings.t()) :: [map()]
@@ -357,9 +355,10 @@ defmodule Troupe.Operator.Resources do
   # the FQDN rules could not take it back.
   #
   # Without Cilium there is nothing to write a hostname in, so the external destinations
-  # stay one wide rule, with the installation's own OpenBao and object storage beside it
-  # on their own ports, and the gap is written down rather than hidden: a policy that
-  # silently allows more than it says is worse than one that admits what it cannot do.
+  # stay one wide rule, with the installation's own OpenBao and object storage and the
+  # profile's own endpoints beside it on their own ports, and the gap is written down
+  # rather than hidden: a policy that silently allows more than it says is worse than one
+  # that admits what it cannot do.
   defp network_policy(namespace, profile, policy, settings) do
     %{
       "apiVersion" => "networking.k8s.io/v1",
@@ -408,7 +407,8 @@ defmodule Troupe.Operator.Resources do
         ],
         "ports" => [%{"protocol" => "TCP", "port" => settings.plane_control_port}]
       }
-    ] ++ public_rule(settings) ++ platform_rules(settings) ++ in_cluster_rules(profile, settings)
+    ] ++
+      public_rule(settings) ++ admitted_rules(profile, settings) ++ in_cluster_rules(profile, settings)
   end
 
   # Everything outside the cluster — the LLM endpoint, the MCP servers, the git hosts,
@@ -416,54 +416,48 @@ defmodule Troupe.Operator.Resources do
   # and 80, because that is as close as a NetworkPolicy can come to a list of names. Only
   # where there is no Cilium to hold the names instead; see `network_policy/4`.
   defp public_rule(%Settings{cilium_available: true}), do: []
+  defp public_rule(_settings), do: [admission_rule({:public, Reach.public_ports()})]
 
-  defp public_rule(_settings) do
-    [
-      %{
-        "to" => public_addresses(),
-        "ports" => Enum.map(@public_ports, &%{"protocol" => "TCP", "port" => &1})
-      }
-    ]
-  end
-
-  # The ranges left out are read from `Troupe.WorkerProfile.Reach`, which refuses or reports
-  # a profile's endpoint at one of them, so the rule and the check cannot drift apart.
-  defp public_addresses do
-    [%{"ipBlock" => %{"cidr" => "0.0.0.0/0", "except" => Reach.excepted()}}]
-  end
-
-  # And without Cilium, OpenBao and object storage when they are outside the cluster but
-  # not where the public rule reaches: a hosted S3 service on 9000, a key manager at an
-  # address on the office network. A worker that reaches neither activates no session, so
-  # each gets a rule of its own on the port it names, and the public rule stays 443 and 80
-  # for every other destination.
+  # And without Cilium, what is outside the cluster but not where the public rule reaches,
+  # each on the port it names. OpenBao and object storage first (Decision 724): a hosted S3
+  # service on 9000, a key manager at an address on the office network; a worker that
+  # reaches neither activates no session. Then the profile's own endpoints (Decision 752):
+  # an LLM gateway on 8443, an MCP server on the office network, an `egress.fqdns` entry
+  # with a port. The public rule stays 443 and 80 for every other destination.
   #
-  # An address, private or public, is that one address. A name on another port is the
-  # public rule's addresses on that port, since a NetworkPolicy cannot name a host; so a
-  # name that resolves to a private address is admitted by nothing here, and such an
-  # endpoint has to be given by its address, or admitted by a NetworkPolicy of the
-  # installation's own in the worker namespace. A name on 443 or 80 needs nothing more.
-  defp platform_rules(%Settings{cilium_available: true}), do: []
+  # An address is that one address. A name on another port is the public rule's addresses
+  # on that port, since a NetworkPolicy cannot name a host; so a name that resolves to a
+  # private address is admitted by nothing here, and such an endpoint has to be given by
+  # its address, or admitted by a NetworkPolicy of the installation's own in the worker
+  # namespace. A name on 443 or 80 needs nothing more.
+  #
+  # Which rules those are is `Troupe.WorkerProfile.Reach`'s to say, and the plane's refusal
+  # and the profile's `EndpointUnreachable` read the same judgement: a profile's endpoint
+  # at a loopback or link-local address gets no rule, and is what those name.
+  defp admitted_rules(_profile, %Settings{cilium_available: true}), do: []
 
-  defp platform_rules(%Settings{} = settings) do
-    for url <- [settings.bao_address, settings.object_store_endpoint],
-        host <- external_host(url),
-        rule <- platform_rule(host, URI.parse(url).port),
-        uniq: true,
-        do: rule
+  defp admitted_rules(%Profile{} = profile, %Settings{} = settings) do
+    platform =
+      for url <- [settings.bao_address, settings.object_store_endpoint],
+          host <- external_host(url),
+          port = URI.parse(url).port,
+          is_integer(port),
+          admission <- Reach.admission(host, [port]),
+          do: admission
+
+    (platform ++ Reach.admitted(profile))
+    |> Enum.uniq()
+    |> Enum.map(&admission_rule/1)
   end
 
-  defp platform_rule(_host, nil), do: []
-
-  defp platform_rule(host, port) do
-    ports = [%{"protocol" => "TCP", "port" => port}]
-
-    case address_block(host) do
-      nil when port in @public_ports -> []
-      nil -> [%{"to" => public_addresses(), "ports" => ports}]
-      block -> [%{"to" => [%{"ipBlock" => %{"cidr" => block}}], "ports" => ports}]
-    end
+  defp admission_rule({to, ports}) do
+    %{"to" => peers(to), "ports" => Enum.map(ports, &%{"protocol" => "TCP", "port" => &1})}
   end
+
+  # The ranges left out are read from `Troupe.WorkerProfile.Reach` too, so the rule and the
+  # judgement cannot drift apart.
+  defp peers(:public), do: [%{"ipBlock" => %{"cidr" => "0.0.0.0/0", "except" => Reach.excepted()}}]
+  defp peers(block), do: [%{"ipBlock" => %{"cidr" => block}}]
 
   # And when they are *not* external. A worker fetches its session key from the key
   # manager and reads and writes sealed segments in object storage; a pod that could
@@ -499,7 +493,7 @@ defmodule Troupe.Operator.Resources do
   # `openbao.troupe-system.svc` and `openbao.troupe-system.svc.cluster.local` both name
   # a Service in `troupe-system`. Anything else is a name this cluster does not serve,
   # and the FQDN rule covers it — or, without Cilium, the public one and
-  # `platform_rules/1`.
+  # `admitted_rules/2`.
   defp cluster_namespace(host) do
     case String.split(host, ".") do
       [_service, namespace, "svc" | _rest] -> namespace
@@ -807,11 +801,20 @@ defmodule Troupe.Operator.Resources do
     ]
 
     base ++
+      bao_role_env(profile, settings) ++
       workers_port_env(settings) ++
       allowed_origins_env(settings) ++
       object_store_env(settings) ++
       llm_env(profile) ++ mcp_env(profile) ++ identities_env(profile)
   end
+
+  # The role the pod logs in to OpenBao under (Decision 753). Only where the installation
+  # made one per profile: otherwise the worker's own default, `troupe-worker`, applies, and
+  # a pod template that names nothing new is not a new revision every pod is replaced for.
+  defp bao_role_env(_profile, %Settings{bao_role_per_profile: false}), do: []
+
+  defp bao_role_env(profile, _settings),
+    do: [%{"name" => "TROUPE_BAO_ROLE", "value" => KMSPolicy.worker_role_name(profile.name)}]
 
   # Where the file is, which never changes; what is in it may.
   defp identities_env(%Profile{mcp_identities: []}), do: []
@@ -959,21 +962,32 @@ defmodule Troupe.Operator.Resources do
   # optional fields are left out when the spec is silent, so the worker's own defaults
   # apply rather than a `null` it has to be taught to ignore.
   #
-  # The mode is written for a server the profile calls as itself and left out otherwise,
-  # so a profile that has none keeps the value it had and its pods are not replaced.
+  # The mode is written for a server the profile calls as itself, and for one it calls as
+  # the session's owner with the slot the owner's credential is in, which is what
+  # `credential_ref` means in that mode (Decision 753): without it a pod read such a server
+  # as one it calls as the profile, with no credential, until its first bundle said
+  # otherwise. Left out for the default, so a profile whose servers are all called as the
+  # profile with a Secret, or with nothing, keeps the value it had and its pods are not
+  # replaced.
   defp mcp_server_config(%MCPServer{} = server) do
     %{
       "name" => server.name,
       "url" => server.url,
-      "credential_ref" => if(server.secret_name, do: MCPServer.credential_env(server)),
+      "credential_ref" => credential_ref(server),
       "credential_mode" =>
-        if(server.credential_mode == "client_credentials", do: "client_credentials"),
+        if(server.credential_mode in ["person", "client_credentials"],
+          do: server.credential_mode
+        ),
       "header" => server.header,
       "timeout_ms" => server.timeout_ms
     }
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
     |> Map.new()
   end
+
+  defp credential_ref(%MCPServer{credential_mode: "person", credential_slot: slot}), do: slot
+  defp credential_ref(%MCPServer{secret_name: nil}), do: nil
+  defp credential_ref(server), do: MCPServer.credential_env(server)
 
   # The projected token is the pod's enrolment credential, and the only one it has.
   defp volumes(profile) do

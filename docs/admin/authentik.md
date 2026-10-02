@@ -45,7 +45,7 @@ paths produce it and they must produce the same one:
 
 | Path | Where the string comes from |
 |---|---|
-| Sign-in | the `sub` claim, always (`login.ex`, `fetch_subject/1`) |
+| Sign-in | the claim `subject_claim` names, `sub` unless the deployment says otherwise (`login.ex`, `fetch_subject/2`) |
 | SCIM | `externalId`, falling back to `userName` (`scim.ex`, `subject_of/1`) |
 
 If those disagree, the person SCIM created and the person who signs in are **two rows**,
@@ -54,12 +54,15 @@ provisioning is turned on for, so it is worth ten minutes now.
 
 Authentik's OIDC provider has a **subject mode** and its default is a hashed user id,
 which is salted per provider and is not a value SCIM sends. So the default is wrong here,
-in the same way Entra ID's pairwise `sub` is.
+in the same way Entra ID's pairwise `sub` is. Entra's answer is `subject_claim: oid`
+([configuration.md](configuration.md#which-claim-is-the-person)); Authentik's is simpler,
+and `subject_claim` stays `sub`.
 
 **Set both sides to the user's UUID.** Subject mode `Based on the User's UUID`, and a SCIM
 user property mapping whose `externalId` is that same UUID. They then agree by
 construction rather than by luck. A UUID also survives a rename, which an email or a
-username does not.
+username does not. Changing the subject mode later is not something the plane can follow:
+every `sub` changes, and nothing links a person's old one to their new one.
 
 > **Verify, do not assume.** Whether Authentik's *default* SCIM user mapping sets
 > `externalId`, and to what, is something to read on your instance before the first sync,

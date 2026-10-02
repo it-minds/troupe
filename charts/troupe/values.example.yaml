@@ -116,6 +116,9 @@ bao:
   address: http://openbao.troupe-system.svc:8200
   authPath: kubernetes
   planeRole: troupe-plane
+  # `true` once there is a role per profile, `troupe-worker-<profile>`
+  # (`docs/admin/roles-and-permissions.md` section 8); until then every pod is `troupe-worker`.
+  workerRolePerProfile: false
   # Empty: the plane and the workers authenticate as their ServiceAccounts. A static
   # token belongs in a development cluster and nowhere else.
   tokenSecretName: ""

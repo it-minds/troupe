@@ -17,12 +17,14 @@ Troupe is a plain relying party. Of the provider it needs:
 | For MCP: `<base_url>/mcp` as an identifier URI beside `api://<client_id>`, the delegated scope `<base_url>/mcp/admin` (or `plane.oidc.mcpScope`), groups on access tokens | an MCP client sends `https://<plane>/mcp` as RFC 8707's `resource`, and Entra refused the older `api://<client-id>/admin` pairing (`AADSTS9010010`) |
 
 Default scopes are `openid profile email offline_access`; `offline_access` is what gets a
-client a refresh token. The person is the token's `sub`, and no setting names another claim.
-So SCIM does not work with Entra: its `sub` is pairwise, a different string in every app
-registration and not one SCIM can push, and the person SCIM creates and the person who
-signs in would be two rows
+client a refresh token. The person is the claim `subject_claim` names, `sub` by default,
+and SCIM's `externalId` has to carry the same value or the person SCIM creates and the
+person who signs in are two rows
 ([authentik.md §0](authentik.md#0-one-string-is-the-person-and-it-cannot-be-fixed-afterwards)).
-On Entra, people and groups come from sign-in alone.
+Entra's `sub` is pairwise, a different string in every app registration and not one SCIM
+can push, so on Entra set `subject_claim` to `oid` and map SCIM's `externalId` from
+`objectId`; switching it on a plane that already has people moves each of them once, at
+their next sign-in ([configuration.md](configuration.md#which-claim-is-the-person)).
 
 `admin.identity.check` runs four timed checks — discovery names the same issuer, the JWKS
 has keys, the configured endpoints match discovery, and how many known people carry the
@@ -38,7 +40,7 @@ check. Authentik specifically: [authentik.md](authentik.md).
 | **Transit** at `transit`, key `troupe-session-tokens`, `ecdsa-p256`, not exportable | the plane signs plane tokens with it and publishes every key version as its JWKS |
 | **KV v2** at `secret` | per-session data keys at `troupe/teams/<team>/sessions/<id>`; erasure deletes the metadata path so every version goes |
 | **Kubernetes auth** at `kubernetes`, with a **reviewer JWT** (a ServiceAccount bound to `system:auth-delegator`) | without one every login is `permission denied` and nothing says why |
-| Role `troupe-worker` (ServiceAccount `troupe-worker`, any namespace, audience `troupe-kms`) | worker pods log in with their projected `kms-token` |
+| Role `troupe-worker` (ServiceAccount `troupe-worker`, any namespace, audience `troupe-kms`), or with `bao.workerRolePerProfile` one role `troupe-worker-<profile>` per profile, bound to its namespace | worker pods log in with their projected `kms-token` under the role in `TROUPE_BAO_ROLE`, cache the client token until shortly before its lease ends, retry a 403 once after a fresh login |
 | Role `troupe-plane` (ServiceAccount `troupe-plane` in `troupe-system`), with the plane **and** signing policies | the plane logs in with its projected `bao-token`, caches the client token, retries a 403 once after a fresh login |
 
 The policies are in [roles-and-permissions.md §8](roles-and-permissions.md#8-openbao-policies);
@@ -134,7 +136,7 @@ the RFC 9728 document at `/.well-known/oauth-protected-resource`. Destructive to
 | Endpoints | `/scim/v2/Users[/:id]` and `/scim/v2/Groups[/:id]`: create, list with a filter, replace, patch, delete |
 | Token | minted on the console's Identity provider card (`admin.scim.rotate`, shown once, kept as a salted hash), or the deployment's `TROUPE_SCIM_TOKEN`. Either opens the door; neither, and every request is 401 |
 | Status | `admin.scim.get`: the last authorised request; `teams_from_groups` (off by default) makes a pushed group a team |
-| Semantics | the subject is `externalId`, else `userName`, and must match the token's `sub` (Entra's cannot, [§1](#1-identity-provider-oidc)); membership is replaced per push; deleting a user deactivates it, deleting a group empties it; one `<attribute> eq "<value>"` filter, anything else refused; no pagination, bulk or `/Schemas` |
+| Semantics | the subject is `externalId`, else `userName`, and must match the claim `subject_claim` names (`oid` for Entra, [§1](#1-identity-provider-oidc)); membership is replaced per push; deleting a user deactivates it, deleting a group empties it; one `<attribute> eq "<value>"` filter, anything else refused; no pagination, bulk or `/Schemas` |
 | Without SCIM | sign-in builds the same rows from the group claim; a person who has left is only noticed at their next sign-in |
 
 ## 9. The GUI

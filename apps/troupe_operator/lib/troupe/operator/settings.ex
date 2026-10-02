@@ -12,6 +12,10 @@ defmodule Troupe.Operator.Settings do
             plane_control_port: 4001,
             plane_namespace: "troupe-system",
             bao_address: "http://openbao.troupe-system.svc:8200",
+            # Whether the installation made an OpenBao role per profile (Decision 753).
+            # Then each profile's pods log in as `troupe-worker-<profile>`, the role its
+            # own policy is bound to; otherwise every pod logs in as `troupe-worker`.
+            bao_role_per_profile: false,
             object_store_endpoint: "http://minio.troupe-system.svc:9000",
             object_store_bucket: "troupe-sessions",
             # The region every signature over that bucket claims. It matters even

@@ -3473,7 +3473,8 @@ citation keeps meaning what it meant.
      which would open that port to every public address for one profile's gateway; and
      CIDRs a profile names, which needs a field and a policy for it. A NetworkPolicy an
      installation adds to the worker namespace, 724's remedy for the platform's endpoints,
-     does not get a profile past the refusal. Proof: `reach_test.exs` in the protocol (the
+     does not get a profile past the refusal. (752 admits the first after all, and what is
+     refused and reported is now an endpoint at a loopback or link-local address.) Proof: `reach_test.exs` in the protocol (the
      sentences: ports, each range, IPv6, `*.svc`, names, entries) and in the plane (the
      refusal and its message, a name on 443 and a Service saved, machines, a channel's
      server, with Cilium, a plane told nothing, the bundle, the editor, the Workers page),
@@ -3523,3 +3524,161 @@ citation keeps meaning what it meant.
        makes the run failed, on the row and in the post, with no place under the cap; a
        crashed session asleep is failed and broken, and told once). Each failed before
        this change.
+
+751. **The person is the claim `subject_claim` names, `sub` by default and `oid` for Entra
+     ID, and a plane switched to another claim moves each person it already knows once, at
+     their next sign-in.** Issue #267, the other half of defect D9. Entra's `sub` is
+     pairwise, a different string in every app registration and no attribute its SCIM
+     client can send, so the person SCIM made and the same person signing in were two rows.
+     - **One setting, every door.** `subject_claim` (`TROUPE_OIDC_SUBJECT_CLAIM`,
+       `plane.oidc.subjectClaim`) is read in `Login.from_claims/1`, which the CLI's and the
+       desktop app's exchange, the console's sign-in and an MCP client's provider token all
+       go through. SCIM's subject stays `externalId`, else `userName`; for Entra the
+       provisioning mapping sends `objectId` as `externalId`. `oid` is unique within a
+       tenant and the plane trusts one tenant's issuer, so `tid` is not part of it. A token
+       without the claim is refused as `{:no_subject, claim}`, which names it. A provider
+       whose `sub` already is what SCIM sends keeps the default, and nothing changes there.
+     - **The deployment's, not the console's.** Shown on the Identity provider card and not
+       editable there, as `provisioning_mode` is (736): switching it moves people, and
+       switching back does not move them back, since somebody moved to `oid` is not found
+       under their `sub`. A setting `reset` cannot undo is not one to offer beside a reset.
+     - **A move, not a fresh start.** Somebody not found under the claim's value but found
+       under the `sub` the same token carries is the same person by the provider's word in
+       one signed token, and that token would have signed in as them the day before, so
+       moving them gives it nothing it did not have. Their row is renamed. If SCIM
+       provisioned them under the new value first, which is the order an Entra rollout
+       usually goes in, the old row is folded into that one and removed, so SCIM's own id
+       for the person stays good; their own spend ceiling is kept where SCIM's row has none.
+       Moved is every column that says *who*: a session's owner and the sponsor in a run's
+       origin (whose cap it counts against), ACL entries, shares made out to them, the teams
+       they administer, triggers' `notify`, usage records and open reservations, and the
+       principals they sponsor (left behind, deprovisioning them would leave those firing).
+       What says *who did*, the hash-chained audit trail and every `*_by`, keeps the name it
+       was written with. One transaction with the old row locked, so two devices signing in
+       at once move the person once; afterwards nobody is under the old value, and the next
+       sign-in has nothing to do. Logged and audited as `person.rekey` with the two
+       identifiers and the claim's name, and nothing else from the token.
+     - **A plane token minted before the move is refused**, `unauthenticated` with "no such
+       user", as a disabled principal's is, because the router resolves the subject on every
+       request. Honouring it would need a second name per person that every lookup by
+       subject knew, for one token lifetime of fifteen minutes; a client exchanges again on
+       its own. A console session holding the old name is turned away and signs in again.
+     - **The key manager is not moved.** What is under `troupe/people/<old>/`, a person's
+       person-mode MCP credentials and their private sessions' data keys, stays there: the
+       plane holds no credential that can read or write it (375, 377). A moved person
+       connects their person-mode servers again, and a private session sealed before the
+       move cannot be restored on another device; the device holding its log keeps it.
+       Keeping the old name as the person's name at the key manager instead needs the worker
+       and the daemon to take that name from the plane rather than from the session's owner,
+       which is more than this issue.
+     - In `gitops` mode a trigger's `notify` is the repository's, and the next change to the
+       resource puts back whatever the repository says.
+     - **Proof:** the plane's `subject_claim_test.exs`: with `oid`, an Entra-shaped user
+       SCIM provisioned and the same user signing in are one person; the default, with an
+       Authentik-shaped `sub`, unchanged; a person known by `sub` moved once at their next
+       sign-in, keeping a session, the team they administer and the team they are in, and
+       every other column above moved while `created_by` and `granted_by` are not; a second
+       sign-in moving nobody; SCIM first, folded in; a token without `oid` refused naming
+       it; a plane token from before the move refused. The first and every move failed on
+       the chunk tip.
+
+752. **Without Cilium, a profile's own endpoints are admitted as the installation's are: a
+     name on another port as the public rule's addresses on that port, an address as that
+     one address on its port. One at a loopback or link-local address is admitted by
+     nothing, and is what is still refused.** Issue #268, its second part, as decided
+     there; 749 did not choose this. 749 refused an LLM gateway on 8443, or an MCP server
+     on the office network, where the profile was set up, so an installation without
+     Cilium that ran its gateway in-house could not use it.
+     - **What is admitted.** The worker NetworkPolicy gives each of a profile's endpoints
+       the public rule does not reach a rule of its own, as 724 does OpenBao and the object
+       store: the LLM endpoint, each MCP server (its own, and its channel's bundle's
+       through the `mcpServers` the plane projects) and each `egress.fqdns` entry, whose
+       port is written `host:port`. An entry with none is reached where a name is, on 443
+       and 80, an address as itself on those. An IPv6 address, which 749 refused because
+       the public rule has no v6 block, is its `/128`. A public address on 443 gets its
+       own rule too, as 724's do; a name on 443 and 80 needs nothing and is unchanged. No
+       CRD change.
+     - **The cost is 724's.** A name on 8443 opens 8443 to every public address for that
+       profile's workers, which is as much as a NetworkPolicy can say about a name. A name
+       that resolves to a private address is still not reached and still not said, since
+       what it resolves to is not known where it is typed; the docs say to give it as its
+       address or use Cilium.
+     - **Loopback and link-local stay refused,** `127.0.0.0/8`, `::1`, `169.254.0.0/16`
+       and `fe80::/10`, and a v4 address in v6 spelling (`::ffff:169.254.169.254`) is the
+       v4 address it names, where the connection goes. From a pod, loopback is the pod
+       itself, and link-local is the node's, where a cloud's metadata service answers: a
+       rule would open that to the pod for one profile's endpoint. These are what
+       `admin.profile.put`, the editor, a bundle's publish and `EndpointUnreachable` name
+       now, and the message says why and to give the endpoint as a pod reaches it.
+     - **One judgement.** `Troupe.WorkerProfile.Reach` judges each endpoint once, into the
+       rules that admit it (`admitted/1`, through `admission/2`, which the operator also
+       uses for the platform's endpoints) or the sentence that refuses it
+       (`unreachable/1`), and the public rule's ports and ranges are read from it. So the
+       NetworkPolicy, the refusal and the condition cannot disagree about an endpoint.
+     - The git hosts and an MCP identity's token endpoint are still not judged, as #268
+       does not name them. With Cilium nothing changes.
+     - **Proof:** the protocol's `reach_test.exs` (admissions and refusals: ports, both
+       families, the ranges' edges, the v6 spelling, entries with and without a port, the
+       platform's), the operator's `resources_test.exs` (a name on 8443, private and public
+       addresses in both families, entries, loopback and link-local admitted by nothing, a
+       port the platform shares, the Cilium path) and `reconciler_test.exs` (the condition
+       reachable for the gateway and the server, beside their rules; named for loopback and
+       link-local), and the plane's `reach_test.exs` (saved, refused, a channel's server,
+       the bundle, the editor, the Workers page). The operator's NetworkPolicy and
+       condition cases and the plane's saves failed on the chunk tip.
+
+753. **A worker logs in to OpenBao under the role its pod is given and keeps the login
+     until shortly before it runs out; the operator names a role per profile where the
+     installation made them, and says a person-mode server's mode.** Issue #336, defect
+     D52. What was there: the worker's configuration never read `TROUPE_BAO_ROLE`, so every
+     pod logged in as `troupe-worker` and the per-profile policy `Troupe.KMS.Policy.worker/2`
+     renders could not be bound to one profile's pods; `Troupe.KMS.OpenBao` logged in again
+     for every request; and a person-mode server reached a pod's `TROUPE_MCP_SERVERS`
+     without its mode.
+     - **The role is the pod's.** The worker reads `TROUPE_BAO_ROLE`, `troupe-worker` when it
+       is unset. The operator writes it as `troupe-worker-<profile>`
+       (`Policy.worker_role_name/1`, the name of the profile's policy) when the chart's
+       `bao.workerRolePerProfile` (`TROUPE_BAO_WORKER_ROLE_PER_PROFILE`) is on, and nothing
+       otherwise: an existing installation's pod templates are unchanged and its pods keep
+       logging in as `troupe-worker`. A switch rather than a role name with a placeholder,
+       because the name follows the policy's and the one thing an installation decides is
+       whether it made the roles. Each such role is bound to the ServiceAccount
+       `troupe-worker` in its profile's namespace, audience `troupe-kms`, and carries the
+       profile's policy and, where its profile calls an MCP server as itself,
+       `troupe-worker-mcp-identity` (747), which does not change: it is templated on the
+       namespace Kubernetes auth vouched for, not on the role. Once every pod is on its own
+       role, the installation deletes the shared `troupe-worker` or takes its wide policy
+       off, since a pod names the role it asks for. Turning the switch on is a new pod
+       template for every profile, which reports `UpgradePending` until its pods are
+       replaced.
+     - **One login, kept.** `Troupe.KMS.OpenBao.Login`, one process first in the worker's
+       tree, holds the client token per OpenBao address, mount and role, and hands it out
+       until a minute before its lease ends, or three quarters of the lease when that is
+       shorter (747's rule for a profile's tokens); a lease of zero does not end. A request
+       whose login token is answered `403` asks for one other than it, new unless another
+       caller already got one, and is made once more; a second `403` is the answer. A static
+       token is never retried. Outside a tree that started it, each call logs in, as before.
+       A failed login is logged with the role and mount; the token and the projected JWT are
+       in no log line, and `format_status` keeps both out of the process's state and last
+       message.
+     - **A person-mode server says so before the first bundle.** The operator writes
+       `credential_mode: person` and the slot as `credential_ref`, the bundle's own shape,
+       where a pod read such a server as one it calls as the profile, with no credential,
+       until the plane's bundle arrived. 747 left the mode out so that no profile's
+       template changed; here the cost is taken: on upgrade every profile with a
+       person-mode server has a new template once and reports `UpgradePending` until its
+       pods are replaced. Profile mode, the default, is still left out.
+     - **Out of this decision.** Nothing writes the roles or the policies, and a profile's
+       policy names its granted teams, so the installation writes it again when they
+       change; the worker's auth mount is `kubernetes` (`TROUPE_BAO_AUTH_PATH` is the
+       plane's); the development cluster keeps its one role.
+     - **Proof:** the worker's `bao_login_test.exs`, against the development OpenBao behind
+       a fake Kubernetes login (`FakeBaoLogin`) that issues OpenBao's own tokens with the
+       role's policy and lease: the role read from `TROUPE_BAO_ROLE` through
+       `config/runtime.exs` and logged in under, `troupe-worker` without it, one login over
+       six requests, a new one past three quarters of a six-second lease, one more after a
+       revoked token's `403` and none after a second, no token in a log line or
+       `:sys.get_status/1`, and none in the events of a session opened with it; five of them
+       failed on the chunk tip. The operator's `resources_test.exs` (the role with the
+       switch and none without, a person-mode server's mode and slot); the first and the
+       last failed on the tip.
