@@ -18,7 +18,7 @@ defmodule Troupe.Gateway.PrivateTest do
   alias Troupe.ObjectStore
   alias Troupe.Protocol.{Client, Endpoint, Event}
   alias Troupe.Session.Log
-  alias Troupe.Sessions.{Cipher, Sealer, Storage}
+  alias Troupe.Sessions.{Cipher, Context, Sealer, Storage}
 
   @moduletag :object_store
 
@@ -169,6 +169,42 @@ defmodule Troupe.Gateway.PrivateTest do
       assert FakePlane.row(ctx.plane.state, session_id)["device"] == "the other one"
     end
 
+    # Decision 755. The key is under the person's name at the key manager, which the plane
+    # answers and a re-key (751) leaves alone; the subject a device is linked under is not
+    # it once the person has been moved.
+    test "another device finds the key a session was sealed with before its owner was moved",
+         ctx do
+      session_id = unique("p")
+
+      # Ada's laptop seals under her name, which was her subject when she was first known.
+      {:ok, _sealer, laptop} = start_private(session_id, ctx, kms_name: "ada@example.test")
+
+      events = [%{"seq" => 1, "type" => "message", "data" => %{"text" => "before the move"}}]
+
+      {:ok, segment} =
+        Storage.seal_segment(laptop.store, session_id, laptop.data_key, %{
+          events: events,
+          epoch: laptop.epoch,
+          head_hash: "sha256:head"
+        })
+
+      :ok = Private.stop(session_id)
+
+      # The plane moves her to another claim. Her desktop signs in under the new subject,
+      # and the plane answers her name as it always was.
+      desktop = link_as("ada-oid@example.test", ctx)
+
+      {:ok, _sealer, restored} =
+        start_private(session_id, %{ctx | name: desktop}, kms_name: "ada@example.test")
+
+      assert restored.owner_subject == "ada-oid@example.test"
+      assert Context.key_path(restored) == "troupe/people/ada@example.test/sessions/#{session_id}"
+      assert restored.data_key == laptop.data_key
+
+      assert {:ok, ^events} =
+               Storage.read_segment(restored.store, session_id, restored.data_key, segment.key)
+    end
+
     test "claiming bumps the epoch, and a second claim on the old one is refused", ctx do
       session_id = unique("p")
       {:ok, _sealer, _context} = start_private(session_id, ctx)
@@ -298,13 +334,13 @@ defmodule Troupe.Gateway.PrivateTest do
   defp requires_services(_),
     do: flunk("no object storage or OpenBao; see the message from setup_all")
 
-  defp start_private(session_id, ctx) do
+  defp start_private(session_id, ctx, opts \\ []) do
     result =
       Private.start(session_id,
         plane: ctx.name,
         device: "test-laptop",
         subscribe: fn _id -> :ok end,
-        key_manager: &fake_key_manager/2
+        key_manager: fn plane, id -> fake_key_manager(plane, id, opts[:kms_name]) end
       )
 
     case result do
@@ -323,10 +359,26 @@ defmodule Troupe.Gateway.PrivateTest do
 
   # What the real exchange answers, without the signature. Minting an assertion is the
   # plane's job and is proven in the plane's own suite; what this test is about is what
-  # the daemon does with the token afterwards.
-  defp fake_key_manager(_plane, _session_id) do
+  # the daemon does with the token afterwards. `name` is the person's name at the key
+  # manager as the plane answers it; a plane from before Decision 755 answers none.
+  defp fake_key_manager(_plane, _session_id, name \\ nil) do
     kms = Application.get_env(:troupe_worker, :kms, [])
-    {:ok, token: System.get_env("TROUPE_BAO_TOKEN") || kms[:token]}
+    token = System.get_env("TROUPE_BAO_TOKEN") || kms[:token]
+    {:ok, if(name, do: [token: token, name: name], else: [token: token])}
+  end
+
+  # A second device of the same person, signed in under `subject`, on the same plane.
+  defp link_as(subject, ctx) do
+    name = :"plane-#{System.unique_integer([:positive])}"
+    start_supervised!(Supervisor.child_spec({Plane, name: name}, id: name))
+
+    :ok =
+      Plane.link(
+        %{"subject" => subject, "plane_url" => ctx.plane.url, "plane_token" => "plane-token"},
+        name
+      )
+
+    name
   end
 
   # The Sealer subscribes; here nothing publishes, so the events are handed to it

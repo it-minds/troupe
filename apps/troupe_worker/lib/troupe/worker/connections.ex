@@ -19,6 +19,12 @@ defmodule Troupe.Worker.Connections do
   holding, and the plane reads the owner off the row. A pod that has been fenced, or that
   names a session belonging to another pod, is told `not_found`.
 
+  The answer also names the owner's name at the key manager, which the token is for and
+  their slots are under, and it is held beside the token. Not the owner the session was
+  activated with: that is a subject, and a person moved to another claim keeps their name
+  and not their subject (Decision 755). A plane from before that names none, and there
+  the subject is the name.
+
   ## Why it refreshes rather than being handed one
 
   A token lives twenty minutes and a session can live all day. A pod handed one at
@@ -66,8 +72,8 @@ defmodule Troupe.Worker.Connections do
   @spec credential(Server.t(), map()) :: {:ok, String.t()} | {:error, term()}
   def credential(%Server{} = server, ctx) do
     with {:ok, subject} <- owner(ctx),
-         {:ok, token} <- token(ctx.session_id) do
-      read(subject, Server.slot(server), token, ctx.session_id)
+         {:ok, token, name} <- token(ctx.session_id, subject) do
+      read(name, Server.slot(server), token, ctx.session_id, subject)
     end
   end
 
@@ -106,19 +112,20 @@ defmodule Troupe.Worker.Connections do
     end
   end
 
-  defp token(session_id) do
+  defp token(session_id, subject) do
     case :ets.lookup(@table, session_id) do
-      [{^session_id, token}] -> {:ok, token}
-      [] -> exchange(session_id)
+      [{^session_id, token, name}] -> {:ok, token, name}
+      [] -> exchange(session_id, subject)
     end
   end
 
-  defp exchange(session_id) do
-    with {:ok, %{"assertion" => assertion}} <-
+  defp exchange(session_id, subject) do
+    with {:ok, %{"assertion" => assertion} = answer} <-
            Link.request(Link, "kms.assertion", %{"session_id" => session_id}),
          {:ok, %{token: token}} <- KMS.OpenBao.jwt_login(address(), auth_path(), role(), assertion) do
-      :ets.insert(@table, {session_id, token})
-      {:ok, token}
+      name = get_in(answer, ["key_manager", "name"]) || subject
+      :ets.insert(@table, {session_id, token, name})
+      {:ok, token, name}
     else
       {:error, reason} ->
         Logger.warning(
@@ -135,13 +142,13 @@ defmodule Troupe.Worker.Connections do
   # A token that has expired is indistinguishable from one that was never right, and the
   # answer to both is the same: throw it away and exchange once more. Once, not in a
   # loop — a second refusal is a policy problem that a retry would only repeat.
-  defp read(subject, slot, token, session_id) do
-    case fetch_slot(subject, slot, token) do
+  defp read(name, slot, token, session_id, subject) do
+    case fetch_slot(name, slot, token) do
       {:error, :forbidden} ->
         :ets.delete(@table, session_id)
 
-        with {:ok, fresh} <- exchange(session_id) do
-          fetch_slot(subject, slot, fresh)
+        with {:ok, fresh, name} <- exchange(session_id, subject) do
+          fetch_slot(name, slot, fresh)
         end
 
       answer ->
@@ -149,8 +156,8 @@ defmodule Troupe.Worker.Connections do
     end
   end
 
-  defp fetch_slot(subject, slot, token) do
-    path = KMS.slot_path(subject, slot)
+  defp fetch_slot(name, slot, token) do
+    path = KMS.slot_path(name, slot)
 
     case Req.request(
            method: :get,

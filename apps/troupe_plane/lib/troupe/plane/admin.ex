@@ -1273,7 +1273,7 @@ defmodule Troupe.Plane.Admin do
         %{
           subject: user.subject,
           display_name: user.display_name,
-          connected: Connections.connected?(user.subject, server.slot)
+          connected: Connections.connected?(Identity.User.kms_name(user), server.slot)
         }
       end)
     )

@@ -3563,14 +3563,9 @@ citation keeps meaning what it meant.
        request. Honouring it would need a second name per person that every lookup by
        subject knew, for one token lifetime of fifteen minutes; a client exchanges again on
        its own. A console session holding the old name is turned away and signs in again.
-     - **The key manager is not moved.** What is under `troupe/people/<old>/`, a person's
-       person-mode MCP credentials and their private sessions' data keys, stays there: the
-       plane holds no credential that can read or write it (375, 377). A moved person
-       connects their person-mode servers again, and a private session sealed before the
-       move cannot be restored on another device; the device holding its log keeps it.
-       Keeping the old name as the person's name at the key manager instead needs the worker
-       and the daemon to take that name from the plane rather than from the session's owner,
-       which is more than this issue.
+     - **The key manager is not moved**, since the plane holds no credential that can read
+       or write it (375, 377), and does not need to be: a person's name there is not their
+       subject (755).
      - In `gitops` mode a trigger's `notify` is the repository's, and the next change to the
        resource puts back whatever the repository says.
      - **Proof:** the plane's `subject_claim_test.exs`: with `oid`, an Entra-shaped user
@@ -3734,3 +3729,58 @@ citation keeps meaning what it meant.
        group's members added and removed by value and by path filter, then renamed, one
        row; `DELETE` emptying it, `PUT` still replacing; and refused PATCHes changing
        nothing.
+
+755. **A person's name at the key manager is a column of its own, fixed when the plane first
+     knows them and left alone by a re-key, and whatever reaches the key manager for a
+     person takes it from the plane.** Issue #341. What a person keeps there, their
+     credentials for person-mode MCP servers and their private sessions' data keys, was
+     under `troupe/people/<subject>/`, and the plane cannot move that subtree (375, 377), so
+     a person moved to another claim (751) connected their servers again and could not
+     restore a private session on another device.
+     - **The name.** `users.kms_name`, unique. The migration fills it with each person's
+       subject, so nothing in the key manager moves and an installation that never switches
+       its claim sees no difference. Somebody first known afterwards is named by their
+       subject too, rather than by `users.id`: the key manager's tree then reads as the
+       people in it, and a daemon older than its plane keeps working for everybody it
+       worked for. An id never collides, and that is the one case it is used for: a
+       newcomer whose subject is already somebody's name, which only a switched claim can
+       bring about (one person's new value being another's old one), is named by their own
+       id rather than share a subtree. Nullable, because a replica of the release before,
+       still serving during the rollout, writes people without one; `User.kms_name/1` reads
+       such a row as its subject, which is what the name was, and a re-key writes that
+       down before it moves the subject.
+     - **A re-key leaves it.** `Identity.rekey/2` moves the subject and every column that
+       says *who*, and not the name. Where SCIM made a row under the new value first, the
+       row the old one is folded into takes the old one's name, once the old one is gone:
+       everything the person stored is under it, and nobody could sign in as SCIM's row
+       without being moved first.
+     - **Carried with the assertion.** A pod or a daemon does not derive the name; it comes
+       in the answer whose token reaches it. `kms.assertion` answers `key_manager: {name}`
+       beside the assertion, and `session.assertion` and `me.connections.grant` add `name`
+       to their `key_manager`. The assertion's `sub` is the name, so the person policy,
+       templated on the alias name OpenBao takes from `sub`, covers the name's subtree with
+       no change to the role, the policy or anything an installation wrote. The pod
+       (`Troupe.Worker.Connections`) keeps the name beside the token and reads slots under
+       it; the daemon (`Troupe.Gateway.Private`) makes or finds a private session's key
+       under it; `me.connections.list` and the console's per-server list ask under it. Not
+       carried at activation or in the plane token: those name the session's owner and the
+       caller, who are subjects, and a name that arrived apart from its token could
+       disagree with it.
+     - **Older clients.** A plane that answers no name is from before this, and a pod or
+       daemon then uses the subject, which is what the name was there. A daemon from before
+       this, against a plane with it, reads under the subject; for a moved person it is
+       refused, and their private sessions stay local on that machine until it is upgraded.
+       Nobody else sees a difference.
+     - **Proof:** the plane's `person_credentials_test.exs`, against the development OpenBao
+       and its JWT auth: a credential connected through the grant and a private session's
+       key written where `session.assertion` says, before a switch to `oid`; after her next
+       sign-in moves her, she is listed as connected, the grant and `session.assertion`
+       answer her old name and path, and the tokens they exchange for read both back. The
+       worker's `person_credentials_test.exs`: a pod, with a real plane over its link, finds
+       the credential before the move and after it, with the session's owner as either
+       subject. The gateway's `private_test.exs`: a second device, linked under the new
+       subject, gets the key the first sealed with and reads its segment. These three
+       failed on the tip of #339's branch. Also the plane's `subject_claim_test.exs` (the
+       name kept by a move and by a fold, a newcomer named by their subject or, where a
+       moved person has it, their id, a row without one keeping its subject) and
+       `control_test.exs` (`kms.assertion` for a moved owner names their old name).

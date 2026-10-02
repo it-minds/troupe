@@ -40,6 +40,11 @@ defmodule Troupe.Plane.Identity.User do
     field(:display_name, :string)
     field(:active, :boolean, default: true)
 
+    # This person's name at the key manager (Decision 755): set when they are first known
+    # and changed by nothing afterwards, a re-key included, so what is stored under it is
+    # found again. Not in `changeset/2`, which is what SCIM and a login write.
+    field(:kms_name, :string)
+
     # This person's own spend ceiling, in millionths, across every team they are in, per
     # calendar month in UTC. Zero and `nil` both mean no ceiling: somebody who has never
     # been given one should not be unable to work.
@@ -66,7 +71,21 @@ defmodule Troupe.Plane.Identity.User do
     |> cast(attrs, [:subject, :external_id, :user_name, :email, :display_name, :active])
     |> validate_required([:subject])
     |> unique_constraint(:subject)
+    |> unique_constraint(:kms_name)
   end
+
+  @doc """
+  This person's name at the key manager: the segment under `troupe/people/` their
+  credentials for person-mode MCP servers and their private sessions' data keys are kept
+  under (Decision 755). Whatever asks the key manager for a person takes it from here.
+
+  A row without one, written by a replica of the release before during a rollout, and a
+  principal, which has no row, are their subject, which is what the name was before it
+  was a column.
+  """
+  @spec kms_name(t()) :: String.t()
+  def kms_name(%__MODULE__{kms_name: name}) when is_binary(name), do: name
+  def kms_name(%__MODULE__{subject: subject}), do: subject
 
   @doc """
   Set or clear this person's own ceiling.
