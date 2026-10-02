@@ -110,7 +110,7 @@ defmodule Troupe.Session do
            agent_path: @root_path,
            enabled: config.fs_events,
            debounce_ms: config.fs_debounce_ms},
-          # `/loop` (Decision 681): after the agent it drives, and after the watchers, so
+          # `/loop` (Decision 679): after the agent it drives, and after the watchers, so
           # a loop that crashes restarts none of them.
           {Troupe.Session.Loop, session_id: session_id, config: config},
           # Last, and deliberately so: a projection is a subscriber, and one that could

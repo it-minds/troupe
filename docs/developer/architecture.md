@@ -86,7 +86,7 @@ flowchart LR
 ```
 
 The approvals, questions and client tools sit above the agent so that a restarted agent
-finds the same answers and registrations; the watchers, the loop (Decision 681) and the
+finds the same answers and registrations; the watchers, the loop (Decision 679) and the
 projection sit below it so that none of them can restart it. The root `Agent.Node` is
 `significant`: when it gives up, past its own restart limit, the session ends and comes
 back dormant from its log (Decision 727).
