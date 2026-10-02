@@ -491,7 +491,7 @@ defmodule Troupe.Plane.Web.Router do
   defp scim(conn, ["Users"]) do
     case conn.method do
       "POST" ->
-        scim_put_user(conn)
+        scim_put_user(conn, 201)
 
       "GET" ->
         case SCIM.find_users(conn.query_params["filter"]) do
@@ -510,8 +510,7 @@ defmodule Troupe.Plane.Web.Router do
   defp scim(conn, ["Users", id]) do
     case conn.method do
       "DELETE" ->
-        SCIM.deactivate_user(id)
-        send_resp(conn, 204, "")
+        scim_no_content(conn, SCIM.deactivate_user(id))
 
       "GET" ->
         case Identity.get_user_by_id(id) do
@@ -526,14 +525,14 @@ defmodule Troupe.Plane.Web.Router do
         end
 
       _ ->
-        scim_put_user(conn)
+        scim_put_user(conn, 200)
     end
   end
 
   defp scim(conn, ["Groups"]) do
     case conn.method do
       "POST" ->
-        scim_put_group(conn)
+        scim_put_group(conn, 201)
 
       "GET" ->
         case SCIM.find_groups(conn.query_params["filter"]) do
@@ -555,7 +554,7 @@ defmodule Troupe.Plane.Web.Router do
       "GET" -> scim_get_group(conn, id)
       "PATCH" -> scim_no_content(conn, SCIM.patch_group(id, conn.body_params))
       "DELETE" -> scim_no_content(conn, SCIM.empty_group(id))
-      _ -> scim_put_group(conn)
+      _ -> scim_put_group(conn, 200)
     end
   end
 
@@ -569,8 +568,9 @@ defmodule Troupe.Plane.Web.Router do
   end
 
   # A change to a group answers nothing but that it was made, as Entra's documented
-  # responses do; a group's members are most of it.
-  defp scim_no_content(conn, {:ok, _group}), do: send_resp(conn, 204, "")
+  # responses do; a group's members are most of it. So does a delete, and an id the plane
+  # does not have is a 404 either way (RFC 7644 §3.6).
+  defp scim_no_content(conn, {:ok, _resource}), do: send_resp(conn, 204, "")
   defp scim_no_content(conn, {:error, reason}), do: scim_error(conn, reason)
 
   # SCIM's error body (RFC 7644 §3.12). Whatever a request asked that the plane cannot do
@@ -584,19 +584,35 @@ defmodule Troupe.Plane.Web.Router do
   defp scim_error(conn, %Ecto.Changeset{} = changeset),
     do: send_json(conn, 400, SCIM.render_error(400, "invalidValue", inspect(changeset.errors)))
 
-  defp scim_put_user(conn) do
+  # `201` for a `POST`, `200` for a `PUT` (RFC 7644 §3.3, §3.5.1). A push upserts on the
+  # subject, so a `POST` of somebody the plane already has, who signed in first, is a
+  # create as well: the provider asked for a resource, and it is where `Location` says.
+  defp scim_put_user(conn, status) do
     case SCIM.put_user(conn.body_params) do
-      {:ok, user} -> send_json(conn, 200, SCIM.render_user(user))
+      {:ok, user} -> scim_resource(conn, status, SCIM.render_user(user))
       {:error, reason} -> send_json(conn, 400, %{"status" => "400", "detail" => inspect(reason)})
     end
   end
 
-  defp scim_put_group(conn) do
+  defp scim_put_group(conn, status) do
     case SCIM.put_group(conn.body_params) do
-      {:ok, group} -> send_json(conn, 200, SCIM.render_group(group, Identity.members_of(group)))
-      {:error, reason} -> send_json(conn, 400, %{"status" => "400", "detail" => inspect(reason)})
+      {:ok, group} ->
+        scim_resource(conn, status, SCIM.render_group(group, Identity.members_of(group)))
+
+      {:error, reason} ->
+        send_json(conn, 400, %{"status" => "400", "detail" => inspect(reason)})
     end
   end
+
+  # A create says where the resource now is, in `Location` and in its `meta.location`,
+  # which are the same path.
+  defp scim_resource(conn, 201, %{"meta" => %{"location" => location}} = resource) do
+    conn
+    |> put_resp_header("location", location)
+    |> send_json(201, resource)
+  end
+
+  defp scim_resource(conn, status, resource), do: send_json(conn, status, resource)
 
   # Two doors, either of which opens: the token rotated from the console, kept as a hash
   # on the connector row, and the deployed `TROUPE_SCIM_TOKEN`, which stays the floor so

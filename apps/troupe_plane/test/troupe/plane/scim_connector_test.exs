@@ -74,13 +74,13 @@ defmodule Troupe.Plane.ScimConnectorTest do
       assert {:ok, %{token: first, token_set: true, status: :never_pushed}} =
                Admin.scim_rotate(context.root)
 
-      assert push(:post, "/scim/v2/Users", user("ada@example.test"), first).status in [200, 201]
+      assert push(:post, "/scim/v2/Users", user("ada@example.test"), first).status == 201
 
       assert {:ok, %{token: second}} = Admin.scim_rotate(context.root)
       refute first == second
 
       assert push(:post, "/scim/v2/Users", user("bea@example.test"), first).status == 401
-      assert push(:post, "/scim/v2/Users", user("bea@example.test"), second).status in [200, 201]
+      assert push(:post, "/scim/v2/Users", user("bea@example.test"), second).status == 201
       assert Identity.get_user("bea@example.test")
     end
 
@@ -102,15 +102,20 @@ defmodule Troupe.Plane.ScimConnectorTest do
 
       # No row at all: what every plane upgrading into this looks like.
       refute Connector.current()
-      assert push(:post, "/scim/v2/Users", user("ada@example.test"), "deployed-secret").status in [200, 201]
+
+      assert push(:post, "/scim/v2/Users", user("ada@example.test"), "deployed-secret").status ==
+               201
 
       # And it says so.
       assert {:ok, %{token_set: false, deployed_token_set: true, status: :connected}} =
                Admin.scim_get(context.root)
 
       assert {:ok, %{token: stored}} = Admin.scim_rotate(context.root)
-      assert push(:post, "/scim/v2/Users", user("bea@example.test"), "deployed-secret").status in [200, 201]
-      assert push(:post, "/scim/v2/Users", user("cyd@example.test"), stored).status in [200, 201]
+
+      assert push(:post, "/scim/v2/Users", user("bea@example.test"), "deployed-secret").status ==
+               201
+
+      assert push(:post, "/scim/v2/Users", user("cyd@example.test"), stored).status == 201
     end
 
     test "delete closes the stored door and leaves the deployment's where it was", context do
@@ -122,13 +127,15 @@ defmodule Troupe.Plane.ScimConnectorTest do
                Admin.scim_delete(context.root, "https://elsewhere.example.test/scim/v2")
 
       assert expected == @base <> "/scim/v2"
-      assert push(:post, "/scim/v2/Users", user("ada@example.test"), stored).status in [200, 201]
+      assert push(:post, "/scim/v2/Users", user("ada@example.test"), stored).status == 201
 
       assert {:ok, %{token_set: false, deployed_token_set: true}} =
                Admin.scim_delete(context.root, @base <> "/scim/v2")
 
       assert push(:post, "/scim/v2/Users", user("bea@example.test"), stored).status == 401
-      assert push(:post, "/scim/v2/Users", user("bea@example.test"), "deployed-secret").status in [200, 201]
+
+      assert push(:post, "/scim/v2/Users", user("bea@example.test"), "deployed-secret").status ==
+               201
 
       # With neither, the card says off.
       Application.delete_env(:troupe_plane, :scim_token)
@@ -164,7 +171,7 @@ defmodule Troupe.Plane.ScimConnectorTest do
     test "off, a pushed group is a group; on, it is a team with the platform's defaults", context do
       assert {:ok, %{token: token}} = Admin.scim_rotate(context.root)
 
-      assert push(:post, "/scim/v2/Groups", group("grp-data", "Data Platform"), token).status in [200, 201]
+      assert push(:post, "/scim/v2/Groups", group("grp-data", "Data Platform"), token).status == 201
       assert Identity.get_group("grp-data")
       refute Identity.get_team("data-platform")
 
@@ -174,7 +181,7 @@ defmodule Troupe.Plane.ScimConnectorTest do
       assert changes == %{"teams_from_groups" => %{"from" => false, "to" => true}}
 
       # The same group again — the provider re-pushes on every sync — becomes the team now.
-      assert push(:post, "/scim/v2/Groups", group("grp-data", "Data Platform"), token).status in [200, 201]
+      assert push(:post, "/scim/v2/Groups", group("grp-data", "Data Platform"), token).status == 201
 
       assert %{enabled_by: "scim"} = team = Identity.get_team("data-platform")
       assert Identity.links_of(team) |> Enum.map(& &1.group.external_id) == ["grp-data"]
@@ -185,7 +192,7 @@ defmodule Troupe.Plane.ScimConnectorTest do
       assert event.detail["group"] == "grp-data"
 
       # Pushing it a third time changes nothing: one group, one team.
-      assert push(:post, "/scim/v2/Groups", group("grp-data", "Data Platform"), token).status in [200, 201]
+      assert push(:post, "/scim/v2/Groups", group("grp-data", "Data Platform"), token).status == 201
       assert length(Identity.list_teams()) == 2
     end
 
@@ -195,7 +202,7 @@ defmodule Troupe.Plane.ScimConnectorTest do
 
       # "Engineering" would default to the name of the team that already exists over
       # `backend`. Enabling it the ordinary way would have linked the strangers in.
-      assert push(:post, "/scim/v2/Groups", group("grp-eng", "Engineering"), token).status in [200, 201]
+      assert push(:post, "/scim/v2/Groups", group("grp-eng", "Engineering"), token).status == 201
 
       engineering = Identity.get_team("engineering")
       assert Identity.links_of(engineering) |> Enum.map(& &1.group.external_id) == ["backend"]
@@ -205,13 +212,13 @@ defmodule Troupe.Plane.ScimConnectorTest do
     test "turning it off creates no more and deletes none", context do
       assert {:ok, %{token: token}} = Admin.scim_rotate(context.root)
       assert {:ok, _} = Admin.scim_update(context.root, %{teams_from_groups: true})
-      assert push(:post, "/scim/v2/Groups", group("grp-data", "Data Platform"), token).status in [200, 201]
+      assert push(:post, "/scim/v2/Groups", group("grp-data", "Data Platform"), token).status == 201
       assert Identity.get_team("data-platform")
 
       assert {:ok, %{teams_from_groups: false}} =
                Admin.scim_update(context.root, %{teams_from_groups: false})
 
-      assert push(:post, "/scim/v2/Groups", group("grp-ops", "Operations"), token).status in [200, 201]
+      assert push(:post, "/scim/v2/Groups", group("grp-ops", "Operations"), token).status == 201
       refute Identity.get_team("operations")
       assert Identity.get_team("data-platform")
     end
