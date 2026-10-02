@@ -861,6 +861,7 @@ defmodule Troupe.Gateway.Dispatch do
           # not a label. A client that sends none links the name alone, which is what a
           # daemon with only local sessions needs.
           :ok = Plane.link(Map.put(params, "subject", subject))
+          erasures(params)
 
           # The connection that linked is relabelled where it stands; everything else
           # reads the file at its next handshake.
@@ -1001,6 +1002,16 @@ defmodule Troupe.Gateway.Dispatch do
         false
     end
   end
+
+  # A link that carries a plane token is this daemon connecting to its plane, and the
+  # moment it is told what of its person's was erased while it was away (Decision 756).
+  # Not waited for: the link answers now, and a plane that cannot be reached is asked again
+  # at the next one.
+  defp erasures(%{"plane_token" => token}) when is_binary(token) and token != "" do
+    Task.start(fn -> Private.apply_erasures() end)
+  end
+
+  defp erasures(_params), do: :ok
 
   # -- helpers ----------------------------------------------------------------
 

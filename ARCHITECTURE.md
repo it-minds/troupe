@@ -207,7 +207,9 @@ administers — are checked once per method.
 | `erased` | gone | `not_found` |
 
 A remote session also has `pending`, created on a profile that is full but may still grow,
-with no endpoint until a worker has room ([PROTOCOL.md](PROTOCOL.md#session-states-dormancy-and-activation)).
+with no endpoint until a worker has room ([PROTOCOL.md](PROTOCOL.md#session-states-dormancy-and-activation)),
+and a private session somebody erased is `erasure_pending` until the plane has destroyed
+its key (Decision 756).
 Nothing brings a session back from `read_only` or `erased`:
 
 ```mermaid
@@ -380,7 +382,9 @@ else drains itself on SIGTERM.
 is driven by the plane and done by a pod, since only a pod holds the key and storage
 credentials: the key is destroyed **first**, so nothing under the prefix decrypts — not
 old object versions, not backups — and the deletion after it is tidiness. An offline pod
-applies pending erasures when it enrols.
+applies pending erasures when it enrols. A private session has no pod: the plane destroys
+its key itself, with the metadata `delete` its policy has for this, and the objects go
+when the owner's daemon next connects and says it has stopped (Decision 756).
 
 ### 6.3 The operator
 
@@ -528,7 +532,10 @@ for one key under the session's prefix (`session.presign`), listing through
 `session.objects`, and the **epoch** fences two devices waking the same session:
 `session.register` with `claim: true` bumps it conditionally, and the loser learns at its
 next seal and keeps its local log read-only. The daemon's plane token comes from the
-client that signed in (`identity.link`) and is held in memory only.
+client that signed in (`identity.link`) and is held in memory only. Each link is also when
+the daemon asks what was erased while it was away (`session.erasures`), drops its sealer
+and its copy of each, and says so (`session.erased`), which is when the plane deletes the
+objects.
 
 ## 11. Reading old logs
 

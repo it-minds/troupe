@@ -44,8 +44,10 @@ gateway and never repairs ([integrations.md §5](integrations.md#5-llm-gateway))
 **Erasure is ordered so a restore cannot bring a session back**: a tombstone first (the
 session goes read-only), then a healthy pod of the profile destroys the key's metadata —
 every version — and then deletes the objects. A pod that was offline applies pending
-erasures when it enrols. Because the key goes first, old object versions and backup copies
-are unreadable. That holds only with **bucket versioning on**.
+erasures when it enrols. A private session has no pod: the plane destroys its key itself,
+and deletes its objects when the owner's daemon next connects. Because the key goes first,
+old object versions and backup copies are unreadable. That holds only with **bucket
+versioning on**.
 
 ## 3. What it does not provide
 

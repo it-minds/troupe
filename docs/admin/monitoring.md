@@ -62,6 +62,7 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 | `ledger drift of N micros — ...` | the reconcile found disagreement |
 | `scheduler could not fire <trigger> ...` | a cron firing failed to create its session |
 | `erasure of <id> is pending: ...` | no healthy pod could erase; it runs at the next enrolment |
+| `erasure of <id> is pending: its key was not destroyed: ...` | OpenBao refused the plane, or could not be reached, for a private session's key; the session reads `erasure_pending` until an erase is retried or its owner's daemon next connects |
 | `troupe operator: refusing <profile>: <violations>` | a policy violation; nothing was created |
 | `troupe operator: pruning <kind>/<name>` | a scale-down, a revoked grant or `ciliumAvailable` switched off took an object away |
 
