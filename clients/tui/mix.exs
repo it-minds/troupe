@@ -41,7 +41,7 @@ defmodule Troupe.MixProject do
       harness(:troupe_gateway),
       {:req, "~> 0.7"},
       {:mint_web_socket, "~> 1.0.6"},
-      {:mint, "~> 1.10.1"},
+      {:mint, "~> 1.11"},
       {:jason, "~> 1.4"},
       {:telemetry, "~> 1.4"},
       {:yaml_elixir, "~> 2.12"},
