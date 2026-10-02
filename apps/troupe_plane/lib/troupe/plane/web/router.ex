@@ -486,17 +486,21 @@ defmodule Troupe.Plane.Web.Router do
 
   # -- SCIM -------------------------------------------------------------------
 
+  # A provider asks with a filter before it creates anybody and changes what it pushed
+  # with PATCH, and addresses a resource by the `id` this plane gave it (Decision 754).
   defp scim(conn, ["Users"]) do
     case conn.method do
       "POST" ->
         scim_put_user(conn)
 
       "GET" ->
-        send_json(
-          conn,
-          200,
-          SCIM.render_list(Enum.map(Identity.list_users(), &SCIM.render_user/1))
-        )
+        case SCIM.find_users(conn.query_params["filter"]) do
+          {:ok, users} ->
+            send_json(conn, 200, SCIM.render_list(Enum.map(users, &SCIM.render_user/1)))
+
+          {:error, reason} ->
+            scim_error(conn, reason)
+        end
 
       _ ->
         send_json(conn, 405, %{"status" => "405"})
@@ -510,9 +514,15 @@ defmodule Troupe.Plane.Web.Router do
         send_resp(conn, 204, "")
 
       "GET" ->
-        case Identity.get_user(id) do
-          nil -> send_json(conn, 404, %{"status" => "404"})
+        case Identity.get_user_by_id(id) do
+          nil -> scim_error(conn, :not_found)
           user -> send_json(conn, 200, SCIM.render_user(user))
+        end
+
+      "PATCH" ->
+        case SCIM.patch_user(id, conn.body_params) do
+          {:ok, user} -> send_json(conn, 200, SCIM.render_user(user))
+          {:error, reason} -> scim_error(conn, reason)
         end
 
       _ ->
@@ -526,19 +536,53 @@ defmodule Troupe.Plane.Web.Router do
         scim_put_group(conn)
 
       "GET" ->
-        send_json(
-          conn,
-          200,
-          SCIM.render_list(Enum.map(Identity.list_groups(), &SCIM.render_group/1))
-        )
+        case SCIM.find_groups(conn.query_params["filter"]) do
+          {:ok, groups} ->
+            groups = Enum.map(groups, &SCIM.render_group_for(&1, conn.query_params))
+            send_json(conn, 200, SCIM.render_list(groups))
+
+          {:error, reason} ->
+            scim_error(conn, reason)
+        end
 
       _ ->
         send_json(conn, 405, %{"status" => "405"})
     end
   end
 
-  defp scim(conn, ["Groups", _id]), do: scim_put_group(conn)
+  defp scim(conn, ["Groups", id]) do
+    case conn.method do
+      "GET" -> scim_get_group(conn, id)
+      "PATCH" -> scim_no_content(conn, SCIM.patch_group(id, conn.body_params))
+      "DELETE" -> scim_no_content(conn, SCIM.empty_group(id))
+      _ -> scim_put_group(conn)
+    end
+  end
+
   defp scim(conn, _rest), do: send_json(conn, 404, %{"status" => "404"})
+
+  defp scim_get_group(conn, id) do
+    case Identity.get_group_by_id(id) do
+      nil -> scim_error(conn, :not_found)
+      group -> send_json(conn, 200, SCIM.render_group_for(group, conn.query_params))
+    end
+  end
+
+  # A change to a group answers nothing but that it was made, as Entra's documented
+  # responses do; a group's members are most of it.
+  defp scim_no_content(conn, {:ok, _group}), do: send_resp(conn, 204, "")
+  defp scim_no_content(conn, {:error, reason}), do: scim_error(conn, reason)
+
+  # SCIM's error body (RFC 7644 §3.12). Whatever a request asked that the plane cannot do
+  # is a 400 that says so, never a 500 a provider would retry forever.
+  defp scim_error(conn, :not_found),
+    do: send_json(conn, 404, SCIM.render_error(404, nil, "no such resource"))
+
+  defp scim_error(conn, {scim_type, detail}),
+    do: send_json(conn, 400, SCIM.render_error(400, scim_type, detail))
+
+  defp scim_error(conn, %Ecto.Changeset{} = changeset),
+    do: send_json(conn, 400, SCIM.render_error(400, "invalidValue", inspect(changeset.errors)))
 
   defp scim_put_user(conn) do
     case SCIM.put_user(conn.body_params) do
