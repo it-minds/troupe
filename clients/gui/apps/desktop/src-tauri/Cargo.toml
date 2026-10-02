@@ -26,7 +26,7 @@ serde_json = "1"
 # needs no CORS entry for the desktop app. `~2.6` because 2.7's JavaScript half wants
 # @tauri-apps/api 2.12, which goes with tauri 2.12, and the Tauri CLI refuses a build
 # whose two halves of a plugin differ in their minor (Decision 717).
-tauri-plugin-http = "~2.7"
+tauri-plugin-http = "~2.8"
 # `target="_blank"` does nothing in a webview and the device grant needs a real browser.
 tauri-plugin-opener = "2"
 # A workspace is a directory on this computer, and the browser build can only ask for a
