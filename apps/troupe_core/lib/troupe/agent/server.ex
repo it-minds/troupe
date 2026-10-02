@@ -141,7 +141,7 @@ defmodule Troupe.Agent.Server do
   def definitions(pid), do: :gen_statem.call(pid, :definitions, 5_000)
 
   @doc """
-  Which loop's iterations this agent takes (Decision 681): `Troupe.Session.Loop` names
+  Which loop's iterations this agent takes (Decision 679): `Troupe.Session.Loop` names
   its loop when it starts or resumes one, and says when it ends. Process-local rather
   than folded, because the loop process says it again whenever either of them restarts.
   """
@@ -1800,7 +1800,7 @@ defmodule Troupe.Agent.Server do
       config: state.config,
       timeout_ms: state.config.shell_timeout_ms,
       # Only on a turn a loop started, and only while that loop still runs: it is what
-      # offers `goal_complete` (Decision 681).
+      # offers `goal_complete` (Decision 679).
       loop: if(state.turn_mode == :loop, do: state.loop)
     }
   end

@@ -1,6 +1,6 @@
 defmodule Troupe.Loop do
   @moduledoc """
-  A loop towards the session's goal, as data (issue #59, Decision 681).
+  A loop towards the session's goal, as data (issue #59, Decision 679).
 
   `/loop [n]` runs the root agent through up to `n` iterations towards the goal `/goal`
   set. What a loop is doing is a fold over its own durable events, all written under the

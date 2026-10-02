@@ -1,6 +1,6 @@
 defmodule Troupe.Session.LoopTest do
   @moduledoc """
-  `/loop` in a running session (issue #59, Decision 681): iterations are the root agent's
+  `/loop` in a running session (issue #59, Decision 679): iterations are the root agent's
   own turns, each one's verdict is a `goal_complete` call or its absence, and the loop
   stops on the goal, the cap, failures in a row, the budget question, a cancel, a cleared
   goal or `/loop stop` — each written as `loop_*` events a replay folds back to the same

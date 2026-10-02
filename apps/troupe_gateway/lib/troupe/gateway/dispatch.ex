@@ -577,7 +577,7 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  # A loop towards the goal (Decision 681). Starting one activates the session, since its
+  # A loop towards the goal (Decision 679). Starting one activates the session, since its
   # iterations are the root agent's turns; the answer names the loop and its cap, and the
   # effect is `loop_started`, carrying this `command_id`, then the iterations. A session
   # with no goal, or with a loop already running, is refused with what to do instead.

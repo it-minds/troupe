@@ -1,6 +1,6 @@
 defmodule Troupe.Tools.GoalComplete do
   @moduledoc """
-  How an iteration of `/loop` says the session's goal is met (issue #59, Decision 681).
+  How an iteration of `/loop` says the session's goal is met (issue #59, Decision 679).
 
   A loop never reads the model's prose to decide whether it is done. This call, completed,
   is the whole of the verdict, and an iteration that ends without one is an iteration that
