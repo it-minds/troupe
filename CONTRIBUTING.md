@@ -57,7 +57,9 @@ Every commit carries a `Signed-off-by:` line with your name and email. It certif
 change, or have the right to submit it under the project's licence. `git commit -s` adds
 it. For a branch that lacks it, `git rebase --signoff main` and push the branch again.
 The `dco` check requires it of commits authored from 2026-09-27, when the rule started;
-the history before that is unsigned.
+the history before that is unsigned. Dependabot's own commits are not checked, since a bot
+can't certify anything; whoever merges its pull request answers for the version it moves,
+and a commit added to its branch needs that person's sign-off.
 
 ## Coding agents
 
