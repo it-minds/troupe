@@ -8,7 +8,11 @@ defmodule Troupe.Plane.Connections do
 
   * **whether** a slot has been filled — `list` on the key manager's metadata, which
     answers versions and timestamps and no value at all;
-  * **an assertion** for the caller's own subject, which the client exchanges itself.
+  * **an assertion** for the caller's own name at the key manager, which the client
+    exchanges itself.
+
+  Every function here takes that name, `User.kms_name/1`, and not the subject: the name
+  is fixed when a person is first known and their subject is not (Decision 755).
 
   ## The plane never holds the value, and never holds a token that could read it
 
@@ -41,8 +45,8 @@ defmodule Troupe.Plane.Connections do
   in a listing of six servers would hide the five that answered.
   """
   @spec connected?(String.t(), String.t()) :: boolean()
-  def connected?(subject, slot) do
-    case metadata(subject, slot) do
+  def connected?(name, slot) do
+    case metadata(name, slot) do
       {:ok, :present} -> true
       _other -> false
     end
@@ -54,23 +58,24 @@ defmodule Troupe.Plane.Connections do
   The assertion, and where to spend it. No value in, no value out.
   """
   @spec grant(String.t(), String.t()) :: {:ok, map()} | {:error, Error.t()}
-  def grant(subject, slot), do: assertion(subject, KMS.slot_path(subject, slot))
+  def grant(name, slot), do: assertion(name, KMS.slot_path(name, slot))
 
   @doc """
   The same assertion, for any path under this person's own subtree.
 
-  A private session's key is at `troupe/people/<subject>/sessions/<id>`, which the person
+  A private session's key is at `troupe/people/<name>/sessions/<id>`, which the person
   policy covers for the same reason it covers their MCP slots: it is theirs. The daemon
   sealing that session needs a key manager token exactly as a pod does, and gets one the
   same way — a signed statement of who the caller is, exchanged by the caller.
 
-  The path is spelled out rather than left to the client. A client that built its own
-  would one day build one under somebody else, and be refused — which is right, and
-  confusing.
+  The path is spelled out rather than left to the client, and so is the name. A client
+  that built its own would one day build one under somebody else, and be refused — which
+  is right, and confusing — and one that took its subject for the name would look in the
+  wrong place for anybody moved to another claim.
   """
   @spec assertion(String.t(), String.t()) :: {:ok, map()} | {:error, Error.t()}
-  def assertion(subject, path) do
-    case Tokens.mint_kms_assertion(subject) do
+  def assertion(name, path) do
+    case Tokens.mint_kms_assertion(name) do
       {:ok, assertion, claims} ->
         {:ok,
          %{
@@ -82,6 +87,7 @@ defmodule Troupe.Plane.Connections do
              "mount" => mount(),
              "auth_path" => auth_path(),
              "role" => role(),
+             "name" => name,
              "path" => path
            }
          }}
@@ -117,8 +123,8 @@ defmodule Troupe.Plane.Connections do
   # KV v2 metadata: versions and timestamps, never a value. The plane's policy has `list`
   # and `read` here and nothing at all on the data path, which is the same absence that
   # stops it reading a session key.
-  defp metadata(subject, slot) do
-    path = subject |> KMS.slot_path(slot) |> encode()
+  defp metadata(name, slot) do
+    path = name |> KMS.slot_path(slot) |> encode()
 
     case Req.request(
            method: :get,

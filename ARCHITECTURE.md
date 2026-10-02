@@ -333,8 +333,9 @@ heartbeats, the session *index* (ids, epochs, sequence numbers, head hashes), st
 columns and usage batches; downward, idempotent pushes — activate, dormant, drain, erase,
 fence, JWKS and ACL changes, `config.updated` — routed to whichever replica holds the pod.
 Bundles and key-manager assertions are fetched, not pushed: `kms.assertion {session_id}`
-answers a short-lived JWT for *that session owner's* key slots, the subject read off the
-session row, so a pod naming a session it does not hold gets `not_found`.
+answers a short-lived JWT for *that session owner's* key slots, the owner read off the
+session row, so a pod naming a session it does not hold gets `not_found`, and names the
+owner's name at the key manager, which the pod reads their slots under.
 
 **The harness API** (`/rpc`) is a fleet API: `me`, `teams.list`, `profiles.list`,
 `sessions.list`, `session.get`, `session.create`, `session.open`, `token.mint`, archive,
@@ -508,13 +509,17 @@ MCP tool list — the pod still discovers once.
 ## 10. What belongs to a person
 
 Key paths take an owner: `troupe/teams/<team>/sessions/<id>` for a pod, scoped to its
-granted teams, and `troupe/people/<subject>/…` for a person, which no pod rule mentions. A
-bundle's MCP server may use `credential_mode: person` — the session owner's credential,
-fixed at activation — kept at `troupe/people/<subject>/mcp/<slot>`, which only that person
-can read: the pod exchanges a plane-signed assertion at OpenBao's JWT auth for a token
-templated on the subject, and a person connects a server with `me.connections.grant`, which
-takes no value and returns none. Where nobody has connected, the tool answers
-`not_connected` rather than a 401 the model would retry.
+granted teams, and `troupe/people/<name>/…` for a person, which no pod rule mentions. The
+name is the person's at the key manager, a column on their row: their subject when they
+were first known, and left alone when a switched `subject_claim` moves their subject, so
+nothing under it has to move (Decision 755). Whatever reaches the key manager for a person
+takes the name from the plane's answer, never from a subject. A bundle's MCP server may use
+`credential_mode: person` — the session owner's credential, fixed at activation — kept at
+`troupe/people/<name>/mcp/<slot>`, which only that person can read: the pod exchanges a
+plane-signed assertion at OpenBao's JWT auth for a token templated on the name, and a
+person connects a server with `me.connections.grant`, which takes no value and returns
+none. Where nobody has connected, the tool answers `not_connected` rather than a 401 the
+model would retry.
 
 A **private session** runs on a person's machine and never touches a pod. The daemon seals
 it with the same sealer under the person's key subtree; the plane holds a row

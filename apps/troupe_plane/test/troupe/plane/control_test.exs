@@ -198,6 +198,24 @@ defmodule Troupe.Plane.ControlTest do
       assert is_integer(expires_at)
     end
 
+    test "is for the owner's name at the key manager, which a re-key leaves", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(worker, [])
+
+      [pod] = Fleet.list_workers("dev")
+      ada = person("idp|ada-old", [])
+      {:ok, :rekeyed} = Identity.rekey(ada.subject, "idp|ada-new")
+      {:ok, _} = Sessions.create(%{id: "s-ada3", owner_subject: "idp|ada-new", profile: "dev"})
+      {:ok, _} = Sessions.place("s-ada3", pod)
+
+      # The pod was told `idp|ada-new` at activation; her slots are under the name she had
+      # when she was first known, and the answer says so (Decision 755).
+      assert {:ok, %{"assertion" => assertion, "key_manager" => %{"name" => "idp|ada-old"}}} =
+               call(worker, "kms.assertion", %{"session_id" => "s-ada3"})
+
+      assert %{"sub" => "idp|ada-old"} = payload_of(assertion)
+    end
+
     test "is refused once the session's owner is deactivated", %{port: port} do
       worker = enrolled(port, "dev-token", "troupe-w-dev-0")
       answer_index(worker, [])

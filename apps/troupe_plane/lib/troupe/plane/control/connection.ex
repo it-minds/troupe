@@ -448,7 +448,10 @@ defmodule Troupe.Plane.Control.Connection do
   #
   # The subject is **not** the pod's to choose. It is read from the session row, so a pod
   # asking for a session it is not holding — or naming somebody else — gets the owner of
-  # the session it actually has, or nothing.
+  # the session it actually has, or nothing. The answer names the owner's name at the key
+  # manager, which the assertion is for and the pod reads their slots under: the subject
+  # the pod was given at activation is not it once they have been moved to another claim
+  # (Decision 755).
   defp dispatch("kms.assertion", params, state) do
     case session_of(params["session_id"], state.worker) do
       %Session{owner_subject: owner} when is_binary(owner) ->
@@ -511,10 +514,18 @@ defmodule Troupe.Plane.Control.Connection do
       %User{active: false} ->
         {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
 
-      _active ->
-        case Tokens.mint_kms_assertion(owner) do
+      # An owner the plane has no person for is named by their subject, as everybody was.
+      user ->
+        name = if user, do: User.kms_name(user), else: owner
+
+        case Tokens.mint_kms_assertion(name) do
           {:ok, assertion, claims} ->
-            {:ok, %{"assertion" => assertion, "expires_at" => claims["exp"]}, state}
+            {:ok,
+             %{
+               "assertion" => assertion,
+               "expires_at" => claims["exp"],
+               "key_manager" => %{"name" => name}
+             }, state}
 
           {:error, reason} ->
             {:error, Error.new(:unavailable, %{reason: inspect(reason)}), state}

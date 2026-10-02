@@ -9,8 +9,12 @@ defmodule Troupe.Gateway.Private do
 
   * **The key** comes from the key manager, through a token the daemon exchanges for an
     assertion the plane signs. `session.assertion` names the path under
-    `troupe/people/<subject>/sessions/<id>`, the person policy covers their own subtree
-    and nobody else's, and no pod role covers any of it.
+    `troupe/people/<name>/sessions/<id>`, the person policy covers their own subtree
+    and nobody else's, and no pod role covers any of it. The name is the person's at the
+    key manager, which the answer carries: the subject this daemon was linked under is
+    not it once they have been moved to another claim, and a device that took the
+    subject for it would make a second key rather than find the first (Decision 755). A
+    plane from before that names none, and there the subject is the name.
   * **The bytes** go through `Troupe.ObjectStore.Signed`: one presigned URL per key, and
     a listing the plane does because a listing cannot be signed per-key.
 
@@ -166,16 +170,18 @@ defmodule Troupe.Gateway.Private do
   end
 
   defp context(plane, subject, session_id, row, opts, exchange) do
-    with {:ok, token} <- exchange.(plane, session_id) do
+    with {:ok, key_manager} <- exchange.(plane, session_id) do
+      {name, kms_options} = Keyword.pop(key_manager, :name)
+
       Context.open(session_id,
-        team: {:person, subject},
+        team: {:person, name || subject},
         epoch: row["epoch"] || 1,
         owner_subject: subject,
         store: Keyword.get_lazy(opts, :store, fn -> store(session_id, plane) end),
         state_dir: opts[:state_dir],
         workspace: opts[:workspace],
         kms: Keyword.get(opts, :kms, KMS.adapter()),
-        kms_options: token
+        kms_options: kms_options
       )
     end
   end
@@ -201,9 +207,18 @@ defmodule Troupe.Gateway.Private do
            ) do
         # The address the key manager named, not whatever this machine was configured
         # with: a laptop has no reason to know where the cluster keeps its key manager,
-        # and the plane is the thing that does.
-        {:ok, %{token: token}} -> {:ok, [token: token, address: manager["address"], mount: manager["mount"]]}
-        {:error, reason} -> {:error, reason}
+        # and the plane is the thing that does. The same for the person's name there.
+        {:ok, %{token: token}} ->
+          {:ok,
+           [
+             token: token,
+             address: manager["address"],
+             mount: manager["mount"],
+             name: manager["name"]
+           ]}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
