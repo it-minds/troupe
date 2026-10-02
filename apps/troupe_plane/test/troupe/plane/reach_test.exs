@@ -1,14 +1,15 @@
 defmodule Troupe.Plane.ReachTest do
   @moduledoc """
   Without Cilium, a profile's own endpoint its pods cannot reach is refused where it is
-  set up (Decision 749).
+  set up (Decision 749), and since Decision 752 that is one at a loopback or link-local
+  address and nothing else.
 
-  A worker's NetworkPolicy reaches outside the cluster only public addresses on 443 and
-  80 where there is no Cilium, so an LLM gateway on 8443, or an MCP server at a private
-  address, was saved without a word and failed at the first call a session made. The
-  plane knows whether there is Cilium from the chart, the value the operator is given,
-  and now says so where the endpoint is typed: the profile editor and `admin.profile.put`,
-  and the bundle that names a channel's MCP servers.
+  A worker's NetworkPolicy reached outside the cluster only public addresses on 443 and
+  80 where there was no Cilium, so an LLM gateway on 8443, or an MCP server at a private
+  address, was refused here. The operator now admits such an endpoint on its port, or as
+  its one address, and the plane saves it. The plane knows whether there is Cilium from
+  the chart, the value the operator is given, and says so where the endpoint is typed: the
+  profile editor and `admin.profile.put`, and the bundle that names a channel's MCP servers.
   """
 
   use Troupe.Plane.PanelCase, async: false
@@ -33,67 +34,69 @@ defmodule Troupe.Plane.ReachTest do
       Application.put_env(:troupe_plane, :cilium_available, false)
     end
 
-    test "whose LLM endpoint is on another port is refused, naming it and saying why", context do
-      assert {:error, error} =
+    test "whose LLM endpoint is on another port is saved", context do
+      # Issue #268: refused until the operator admitted the port (Decision 752).
+      assert {:ok, _} =
                Admin.profile_put(
                  context.actor,
                  profile("gw", "https://gateway.example.test:8443/v1")
                )
 
-      assert error.message == "invalid_params"
-      assert [said] = error.data.unreachable
-      assert said =~ "llm.endpoint https://gateway.example.test:8443/v1"
-      assert said =~ "port 8443"
-
-      # Why, and what to do, in the one sentence the console shows.
-      assert error.data.reason =~ said
-      assert error.data.reason =~ "without Cilium"
-      assert error.data.reason =~ "NetworkPolicy"
-      assert error.data.reason =~ "operator.ciliumAvailable"
-      assert error.data.reason =~ ".svc"
-      assert {:ok, _json} = Jason.encode(error.data)
-
-      assert Fleet.get_profile("gw") == nil
+      assert Fleet.get_profile("gw")
     end
 
-    test "at a private address, with its MCP servers and its own hosts, names each", context do
+    test "at a private address, with its MCP servers and its own hosts there, is saved",
+         context do
       attrs =
         "office"
         |> profile("https://10.20.0.5/v1")
         |> put_in(["spec", "mcpServers"], [
-          %{"name" => "tickets", "url" => "https://192.168.1.20/mcp"},
-          %{"name" => "local", "url" => "http://127.0.0.1:9000/mcp"},
-          %{"name" => "docs", "url" => "https://docs.example.test/mcp"}
+          %{"name" => "tickets", "url" => "https://192.168.1.20:8443/mcp"},
+          %{"name" => "docs", "url" => "https://[fd00::5]/mcp"}
         ])
         |> put_in(["spec", "egress"], %{
-          "fqdns" => [
-            "registry.example.test:5000",
-            "169.254.169.254",
-            "fd00::5",
-            "pypi.example.test"
-          ]
+          "fqdns" => ["registry.example.test:5000", "10.1.2.3", "pypi.example.test"]
+        })
+
+      assert {:ok, _} = Admin.profile_put(context.actor, attrs)
+      assert Fleet.get_profile("office")
+    end
+
+    test "at a loopback or link-local address is refused, naming each and saying why",
+         context do
+      attrs =
+        "local"
+        |> profile("http://127.0.0.1:4000/v1")
+        |> put_in(["spec", "mcpServers"], [
+          %{"name" => "meta", "url" => "http://169.254.169.254/latest"},
+          %{"name" => "mapped", "url" => "http://[::ffff:169.254.169.254]/latest"},
+          %{"name" => "local", "url" => "http://[::1]:9000/mcp"},
+          %{"name" => "docs", "url" => "https://docs.example.test:8443/mcp"}
+        ])
+        |> put_in(["spec", "egress"], %{
+          "fqdns" => ["fe80::1", "10.1.2.3", "pypi.example.test"]
         })
 
       assert {:error, error} = Admin.profile_put(context.actor, attrs)
+      assert error.message == "invalid_params"
 
-      said = error.data.unreachable
-      assert length(said) == 6, inspect(said)
-      assert "llm.endpoint https://10.20.0.5/v1 is at 10.20.0.5, a private address" in said
+      assert error.data.unreachable == [
+               "llm.endpoint http://127.0.0.1:4000/v1 is at 127.0.0.1, a loopback address",
+               "MCP server meta at http://169.254.169.254/latest is at 169.254.169.254, a link-local address",
+               "MCP server mapped at http://[::ffff:169.254.169.254]/latest is at ::ffff:169.254.169.254, a link-local address",
+               "MCP server local at http://[::1]:9000/mcp is at ::1, a loopback address",
+               "egress.fqdns entry fe80::1 is at fe80::1, a link-local address"
+             ]
 
-      assert "MCP server tickets at https://192.168.1.20/mcp is at 192.168.1.20, a private address" in said
+      # Why, and what to do, in the one sentence the console shows.
+      assert error.data.reason =~ hd(error.data.unreachable)
+      assert error.data.reason =~ "without Cilium"
+      assert error.data.reason =~ "NetworkPolicy"
+      assert error.data.reason =~ "metadata"
+      assert error.data.reason =~ ".svc"
+      assert {:ok, _json} = Jason.encode(error.data)
 
-      assert "MCP server local at http://127.0.0.1:9000/mcp is at 127.0.0.1, a loopback address, on port 9000" in said
-
-      assert "egress.fqdns entry registry.example.test:5000 is on port 5000" in said
-
-      assert "egress.fqdns entry 169.254.169.254 is at 169.254.169.254, a link-local address" in said
-
-      assert "egress.fqdns entry fd00::5 is at fd00::5, an IPv6 address" in said
-
-      # A name on 443 is not refused: a NetworkPolicy cannot name hosts, and what one
-      # resolves to is not known here.
-      refute Enum.any?(said, &(&1 =~ "docs.example.test" or &1 =~ "pypi.example.test"))
-      assert Fleet.get_profile("office") == nil
+      assert Fleet.get_profile("local") == nil
     end
 
     test "on a public name on 443, or in the cluster on any port, is saved", context do
@@ -128,9 +131,7 @@ defmodule Troupe.Plane.ReachTest do
         Fleet.put_profile(%{name: "laptops", provisioner: "ssh", config_bundle_channel: "edge"})
 
       assert {:ok, _} =
-               Bundles.publish("edge", bundle("https://mcp.example.test:8443/mcp"),
-                 announce: false
-               )
+               Bundles.publish("edge", bundle("https://169.254.169.254/mcp"), announce: false)
 
       attrs =
         "pods"
@@ -140,8 +141,25 @@ defmodule Troupe.Plane.ReachTest do
       assert {:error, error} = Admin.profile_put(context.actor, attrs)
 
       assert error.data.unreachable == [
-               "MCP server jira at https://mcp.example.test:8443/mcp is on port 8443"
+               "MCP server jira at https://169.254.169.254/mcp is at 169.254.169.254, a link-local address"
              ]
+    end
+
+    test "is saved for a server its channel's bundle names on another port", context do
+      {:ok, _} =
+        Fleet.put_profile(%{name: "laptops", provisioner: "ssh", config_bundle_channel: "edge"})
+
+      assert {:ok, _} =
+               Bundles.publish("edge", bundle("https://mcp.example.test:8443/mcp"),
+                 announce: false
+               )
+
+      attrs =
+        "pods"
+        |> profile("https://gateway.example.test/v1")
+        |> put_in(["spec", "configBundleChannel"], "edge")
+
+      assert {:ok, _} = Admin.profile_put(context.actor, attrs)
     end
   end
 
@@ -150,10 +168,10 @@ defmodule Troupe.Plane.ReachTest do
       Application.put_env(:troupe_plane, :cilium_available, true)
 
       attrs =
-        "gw"
-        |> profile("https://gateway.example.test:8443/v1")
+        "local"
+        |> profile("http://127.0.0.1:4000/v1")
         |> put_in(["spec", "mcpServers"], [
-          %{"name" => "tickets", "url" => "https://192.168.1.20/mcp"}
+          %{"name" => "meta", "url" => "http://169.254.169.254/latest"}
         ])
 
       assert {:ok, _} = Admin.profile_put(context.actor, attrs)
@@ -168,7 +186,7 @@ defmodule Troupe.Plane.ReachTest do
     assert {:ok, _} =
              Admin.profile_put(
                context.actor,
-               profile("gw", "https://gateway.example.test:8443/v1")
+               profile("local", "http://127.0.0.1:4000/v1")
              )
   end
 
@@ -181,10 +199,12 @@ defmodule Troupe.Plane.ReachTest do
 
     test "naming an MCP server the pods on its channel cannot reach is refused" do
       assert {:error, {:invalid_bundle, [said]}} =
-               Bundles.publish("stable", bundle("https://10.0.0.7:8443/mcp"), announce: false)
+               Bundles.publish("stable", bundle("https://169.254.169.254:8443/mcp"),
+                 announce: false
+               )
 
       assert said =~
-               "MCP server jira at https://10.0.0.7:8443/mcp is at 10.0.0.7, a private address, on port 8443"
+               "MCP server jira at https://169.254.169.254:8443/mcp is at 169.254.169.254, a link-local address"
 
       # Whose pods, since a bundle is a channel's and not a profile's.
       assert said =~ "dev"
@@ -192,9 +212,11 @@ defmodule Troupe.Plane.ReachTest do
       assert Bundles.current("stable") == nil
     end
 
-    test "naming one on a public name on 443 is published" do
-      assert {:ok, _} =
-               Bundles.publish("stable", bundle("https://mcp.example.test/mcp"), announce: false)
+    test "naming one on a public name on 443, on another port or at a private address is published" do
+      for url <-
+            ~w(https://mcp.example.test/mcp https://mcp.example.test:8443/mcp https://10.0.0.7:8443/mcp) do
+        assert {:ok, _} = Bundles.publish("stable", bundle(url), announce: false), url
+      end
     end
 
     test "for a channel only machines follow is published" do
@@ -202,14 +224,14 @@ defmodule Troupe.Plane.ReachTest do
         Fleet.put_profile(%{name: "laptops", provisioner: "ssh", config_bundle_channel: "edge"})
 
       assert {:ok, _} =
-               Bundles.publish("edge", bundle("https://10.0.0.7:8443/mcp"), announce: false)
+               Bundles.publish("edge", bundle("https://169.254.169.254/mcp"), announce: false)
     end
 
     test "is published with Cilium" do
       Application.put_env(:troupe_plane, :cilium_available, true)
 
       assert {:ok, _} =
-               Bundles.publish("stable", bundle("https://10.0.0.7:8443/mcp"), announce: false)
+               Bundles.publish("stable", bundle("https://169.254.169.254/mcp"), announce: false)
     end
   end
 
@@ -223,16 +245,16 @@ defmodule Troupe.Plane.ReachTest do
       view
       |> element("form")
       |> render_change(%{
-        "name" => "gw",
+        "name" => "local",
         "image" => "ghcr.io/troupe/worker:1",
-        "llm.endpoint" => "https://gateway.example.test:8443/v1"
+        "llm.endpoint" => "http://127.0.0.1:4000/v1"
       })
 
       html = view |> element("#profile-editor") |> render_submit()
 
-      assert html =~ "llm.endpoint https://gateway.example.test:8443/v1 is on port 8443"
-      assert html =~ "operator.ciliumAvailable"
-      assert Fleet.get_profile("gw") == nil
+      assert html =~ "llm.endpoint http://127.0.0.1:4000/v1 is at 127.0.0.1, a loopback address"
+      assert html =~ "metadata"
+      assert Fleet.get_profile("local") == nil
     end
   end
 
@@ -243,7 +265,7 @@ defmodule Troupe.Plane.ReachTest do
       Application.put_env(:troupe_plane, :provisioning_mode, :gitops)
       on_exit(fn -> Application.delete_env(:troupe_plane, :provisioning_mode) end)
 
-      said = Reach.unreachable([{:llm, "https://gateway.example.test:8443/v1"}])
+      said = Reach.unreachable([{:llm, "http://127.0.0.1:4000/v1"}])
 
       condition = %{
         "type" => "EndpointUnreachable",
@@ -252,14 +274,14 @@ defmodule Troupe.Plane.ReachTest do
         "message" => Reach.explain(said)
       }
 
-      FakeWorkerProfiles.start(%{"gw" => %{"conditions" => [condition]}})
-      {:ok, _} = Fleet.put_profile(%{name: "gw", image: "ghcr.io/troupe/worker:1"})
+      FakeWorkerProfiles.start(%{"local" => %{"conditions" => [condition]}})
+      {:ok, _} = Fleet.put_profile(%{name: "local", image: "ghcr.io/troupe/worker:1"})
 
       {:ok, view, _html} = context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
 
       shown = view |> element("li.bad", "EndpointUnreachable") |> render()
-      assert shown =~ "llm.endpoint https://gateway.example.test:8443/v1 is on port 8443"
-      assert shown =~ "operator.ciliumAvailable"
+      assert shown =~ "llm.endpoint http://127.0.0.1:4000/v1 is at 127.0.0.1, a loopback address"
+      assert shown =~ "metadata"
     end
   end
 

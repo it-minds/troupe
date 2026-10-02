@@ -203,10 +203,12 @@ defmodule Troupe.Operator.Reconciler do
   end
 
   # One of the profile's own endpoints that its workers cannot reach: without Cilium the
-  # NetworkPolicy reaches outside the cluster only public addresses on 443 and 80. Reported
-  # rather than refused, and beside `Ready`, as a missing secret is: the profile reconciled,
-  # and in gitops mode it was applied by something nothing here can refuse, so this is how
-  # it reads as broken rather than as a session's first call timing out (Decision 749).
+  # NetworkPolicy admits one on its port or as its one address, but none at a loopback or
+  # link-local address, and this reads the judgement the rules were written from (Decision
+  # 752). Reported rather than refused, and beside `Ready`, as a missing secret is: the
+  # profile reconciled, and in gitops mode it was applied by something nothing here can
+  # refuse, so this is how it reads as broken rather than as a session's first call timing
+  # out (Decision 749).
   defp endpoint_status(status, _profile, %Settings{cilium_available: true}, generation) do
     message = "with Cilium a worker reaches each endpoint the profile names, by name or address"
     Status.put(status, "EndpointUnreachable", false, "Cilium", message, generation)

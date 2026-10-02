@@ -5,7 +5,9 @@ defmodule Troupe.Plane.Reach do
   publishing the bundle that names a channel's MCP servers.
 
   Which endpoints those are is `Troupe.WorkerProfile.Reach`'s to say, the same sentences
-  the operator writes on a profile nothing here could refuse, one a repository holds.
+  the operator writes on a profile nothing here could refuse, one a repository holds. Since
+  the operator admits an endpoint on its own port, or as its one address (Decision 752),
+  they are the ones at a loopback or link-local address, which no rule admits.
 
   ## How the plane knows whether there is Cilium
 
