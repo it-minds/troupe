@@ -66,7 +66,7 @@ ordered by dependency: `Session.Log` first, because everything persists through 
 `Approvals`, `Questions`, `ClientTools` and the workspace's MCP servers above the agent, so
 a restarted agent finds the same answers and registrations; the root `Agent.Node`; then
 `Watcher` and `Files`, so file watching can never disturb a running agent; `Loop`, which
-runs `/loop` as turns of the root agent (Decision 681); and `Session.Summary` last,
+runs `/loop` as turns of the root agent (Decision 679); and `Session.Summary` last,
 because a projection that could restart an agent by crashing would be worse than none. Sessions live in the core's own tree, not the daemon's, so a daemon can
 lose its listener and every client without an agent noticing.
 

@@ -261,7 +261,7 @@ defmodule Troupe do
   end
 
   @doc """
-  Start a loop towards the session's goal (`/loop`, Decision 681): up to `:max_iterations`
+  Start a loop towards the session's goal (`/loop`, Decision 679): up to `:max_iterations`
   turns of the root agent (else the config's `loop_max_iterations`), each ending with the
   agent's own verdict, `goal_complete` or not. Written as `loop_started` under `actor`;
   `:command_id` rides along. A session with no goal has nothing to loop towards.

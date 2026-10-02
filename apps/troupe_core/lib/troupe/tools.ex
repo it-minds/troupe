@@ -121,7 +121,7 @@ defmodule Troupe.Tools do
   defp skills_root(%Ctx{workspace: %Troupe.Workspace{root_real: root}}), do: root
   defp skills_root(%Ctx{}), do: nil
 
-  # A loop's structured verdict (Decision 681), on the turns a running loop started and
+  # A loop's structured verdict (Decision 679), on the turns a running loop started and
   # no others, and outside the profile's list: it changes nothing but whether the loop
   # goes on, and a loop whose agent could not say "done" would only ever stop at its cap.
   defp loop_tools(%Ctx{loop: loop}) when is_binary(loop), do: [Troupe.Tools.GoalComplete]

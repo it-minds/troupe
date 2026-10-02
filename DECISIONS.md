@@ -1000,10 +1000,10 @@ citation keeps meaning what it meant.
 679. **`/loop` runs its iterations as turns of the root agent, not as subagents; each ends
      with the agent's verdict as a tool call; and a loop the whole session came back from
      is stopped, not resumed.** An iteration is an input to the root agent from `loop`, on
-     the root's own conversation, with the goal already in its prompt (680). A subagent
+     the root's own conversation, with the goal already in its prompt (678). A subagent
      per iteration was the other way, and it is worse at what a loop is for: it starts
      from nothing and reports only a summary, when what the earlier iterations tried and
-     what failed is exactly what the next one needs; it carries no goal (680 gives it to
+     what failed is exactly what the next one needs; it carries no goal (678 gives it to
      the root alone); its budget is a slice of the root's; and the person watching sees a
      delegation instead of the work. The root's turns already have approvals, the budget
      question, compaction and cancelling, and an iteration may still delegate. The
@@ -1782,7 +1782,7 @@ citation keeps meaning what it meant.
        profile, in the plane. `budget_asks: false` still asks nothing at all, and every
        session the plane places has it, so this holds for the day the terms let one ask.
      - **`/loop`.** "This run" means this iteration, and the question says so; a loop
-       still stops at the question (Decision 681). A cap of the loop's own that the same
+       still stops at the question (Decision 679). A cap of the loop's own that the same
        question could raise is not designed here.
      - **Not done:** a comment-preserving scalar edit (`Yaml.edit_list/4` covers lists
        only), and a "this machine" scope.

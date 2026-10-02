@@ -99,7 +99,7 @@ defmodule Troupe.Plane.MCPAuthTest do
       # fault.
       # First, and followed by the sign-in's own scopes: a client asks for what is
       # advertised and nothing else, and a token minted without `groups` carried no groups
-      # claim — which the plane once read as a person in no groups (Decision 679).
+      # claim — which the plane once read as a person in no groups (Decision 680).
       mcp_scope = document["resource"] <> "/admin"
       assert [^mcp_scope | rest] = document["scopes_supported"]
       assert "offline_access" in rest

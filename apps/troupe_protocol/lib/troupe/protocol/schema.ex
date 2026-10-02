@@ -159,7 +159,7 @@ defmodule Troupe.Protocol.Schema do
       # carrying the `command_id` of the `session.goal.*` call that asked.
       "goal_set" => %{"text" => required(:string), "command_id" => optional(:string)},
       "goal_cleared" => %{"command_id" => optional(:string)},
-      # A loop towards the goal (`session.loop.*`, Decision 681), written under the root
+      # A loop towards the goal (`session.loop.*`, Decision 679), written under the root
       # agent's path by the session's loop process. `loop_started` carries the protocol
       # command that asked; an iteration's `command_id` is the one its input carries, which
       # the root's `input_accepted` echoes. `outcome` is `continue`, `complete`, `failed`
