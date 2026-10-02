@@ -347,6 +347,57 @@ Found by the chunk 12 fixer of slot B (PR #324), 2026-10-01; the rest is #336.
 
 Found by the chunk 12 fixers, 2026-10-01.
 
+### D54 - What a worker may reach: the edges left after #268 (medium)
+
+- With Cilium the plane refuses no endpoint, so an IP-literal endpoint at a loopback or
+  link-local address (the cloud's metadata address among them) becomes a `toCIDR` rule
+  (Decision 723) whenever the TroupePolicy's `allowedEgress` names it: only that list
+  stands between a profile and such an address. Without Cilium they are refused
+  (Decisions 749, 752); the same refusal in both modes would close it.
+- An `egress.fqdns` entry written `host:port` is compared to `allowedEgress` as the whole
+  string (`Troupe.Policy.matches?/2`), and with Cilium it becomes a `toFQDNs` `matchName`
+  that carries the port and admits nothing: ports in entries work without Cilium only.
+- Without Cilium, an MCP identity's `tokenUrl` (Decision 747) on a port other than 443 or
+  80 is neither admitted nor judged.
+- An IP-literal endpoint inside the cluster (a pod's address) gets an `ipBlock`, and what
+  that admits depends on the CNI; the docs say to name the Service.
+- `:inet.ntoa` prints an IPv6 address in `::/96` as `::0.0.0.2`, in `Reach`'s blocks and the
+  Cilium path's `address_block` alike (a deprecated range; cosmetic).
+
+Found by the chunk 13 fixer of slot B13 (PR #338), 2026-10-02.
+
+### D55 - A worker's OpenBao login: what #336 left (medium)
+
+- By default every worker pod logs in as the one role `troupe-worker`, and the dev
+  manifests give that role a policy over every team's keys. Keeping profiles apart takes
+  per-profile roles and `bao.workerRolePerProfile` (Decision 753), and then narrowing or
+  removing the shared role, since a pod chooses the role it asks for.
+- The worker doesn't read `TROUPE_BAO_AUTH_PATH`: its auth mount is always `kubernetes`,
+  where the plane's follows `bao.authPath`.
+- `Troupe.KMS.OpenBao.static_token/1` takes `TROUPE_BAO_TOKEN` unfiltered, so an empty
+  value counts as a static token and no login is made (the operator never sets it on a
+  pod).
+
+Found by the chunk 13 fixer of slot C13 (PR #337), 2026-10-02.
+
+### D56 - SCIM and the subject claim: small leftovers (low)
+
+- `POST /scim/v2/Users` and `/Groups` answer `200`; RFC 7644 section 3.3 and Microsoft's
+  documented responses have `201`.
+- `DELETE /scim/v2/Users/:id` answers `204` for an id the plane doesn't have (the RFC has
+  `404`).
+- A `PUT` with `active: false` deactivates a person but doesn't stop the service
+  principals they sponsor; `DELETE` and, since PR #345, `PATCH` do.
+- After a re-key (Decision 751) a plane token minted before the move is refused as an
+  unknown user; how the desktop app and the TUI take that one refusal is untested, and so
+  is the budget ceiling carried over when an old row is folded into SCIM's.
+- The gateway suite's `FakePlane` doesn't answer `session.assertion`, so the daemon's
+  `exchange/2` for a private session is covered only by an installed-build check.
+- `SubjectClaimTest` ("switching on an installation that already has people...") failed
+  once under the full plane suite's load and passed alone.
+
+Found by the chunk 13 fixers of slots A13, D13 and E13 (PRs #339, #345, #343), 2026-10-02.
+
 ## Taken
 
 | Defect | Taken by |
@@ -403,7 +454,7 @@ Found by the chunk 12 fixers, 2026-10-01.
 | `session.read` left the log it restored on the pod; a fork read a failed listing as "no archives" (found by the #259 fixer) | #269, PR #271 |
 | `Troupe.Reaper.open/3` raised when the helper couldn't start, which crashed the agent on every model call (found by the chunk 9 fixer of slot D) | #270, PR #272 |
 | The plane's scale-down removed pods without draining them (found by the #258 fixer) | #273, PR #274 |
-| With Entra and SCIM, the plane keys a person on `sub` only (found by the chunk 9 fixer of slot F) | #267 |
+| With Entra and SCIM, the plane keys a person on `sub` only (found by the chunk 9 fixer of slot F) | #267, PR #339; #340, PR #345; #341, PR #343 |
 | Without Cilium, a profile's own endpoints on other ports or at private addresses are unreachable (found by the #257 fixer) | #268 |
 | The plane's `gitops` mode worked only in tests: no `git` in its image, no repository setting, no push credential (found while planning #186) | #186, PR #285 |
 | A trigger's timezone typed in the console was ignored; the MCP schema of `admin.trigger.put` didn't match its handler; a profile's bundle channel never reached its row; an ssh profile got a StatefulSet (found by the #186 fixers) | #290, PR #291 |
