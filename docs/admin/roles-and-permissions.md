@@ -144,12 +144,43 @@ Rendered by `Troupe.KMS.Policy`, so the tested string and the installed one are 
 
 The Kubernetes-auth roles in `dev/kind/dependencies.yaml` (`troupe-worker` for the
 ServiceAccount of that name in any namespace, audience `troupe-kms`; `troupe-plane` in
-`troupe-system`) are the shape production needs. The dev manifest installs one wide worker
-policy; nothing here installs the per-profile ones in a cluster, and a production plane role
-needs the plane policy **and** the signing policy. A worker role whose profiles call an MCP
-server as themselves also needs `troupe-worker-mcp-identity`, written with the Kubernetes
-auth mount's accessor (`bao read -field=accessor sys/auth/kubernetes`), as the dev manifest
+`troupe-system`) are the shape production needs. A production plane role needs the plane
+policy **and** the signing policy. A worker role whose profiles call an MCP server as
+themselves also needs `troupe-worker-mcp-identity`, written once with the Kubernetes auth
+mount's accessor (`bao read -field=accessor sys/auth/kubernetes`), as the dev manifest
 writes it.
+
+**One worker role, or one per profile.** By default every worker pod logs in as
+`troupe-worker`, so whatever policy that role carries is every profile's: the dev manifest
+gives it one wide policy over every team. For a pod of one profile to be refused another's
+session keys, make a role per profile, named as its policy, and turn on
+`bao.workerRolePerProfile`. The operator then gives each profile's pods
+`TROUPE_BAO_ROLE=troupe-worker-<profile>` and they log in under it (Decision 753):
+
+```sh
+bao policy write troupe-worker-dev policy-dev.hcl   # Policy.worker/2 for dev's granted teams
+bao write auth/kubernetes/role/troupe-worker-dev \
+  bound_service_account_names=troupe-worker \
+  bound_service_account_namespaces=troupe-w-dev \
+  audience=troupe-kms \
+  policies=troupe-worker-dev,troupe-worker-mcp-identity \
+  ttl=1h
+```
+
+Each role is bound to its profile's namespace alone (`<namespacePrefix><profile>`), so a
+pod cannot log in as another profile. Once every pod is on its own role, delete the shared
+`troupe-worker` role or take the wide policy off it: a pod names the role it asks for, and
+a role every namespace may use is one any pod can ask for. `troupe-worker-mcp-identity`
+does not change: it is templated on the namespace Kubernetes auth vouched for, not on the
+role, so the same policy goes on every per-profile role that needs it.
+
+Nothing writes these roles and policies for you, and a profile's policy names its granted
+teams, so it is written again when they change. Make every profile's role before turning
+the setting on: a pod given a role OpenBao doesn't have logs `no OpenBao token` with the
+role's name and can open no session. The setting changes every profile's pod template, so
+each profile reports `UpgradePending` until its pods are replaced. A pod keeps its OpenBao
+token until shortly before its lease ends, and logs in again once when OpenBao answers
+`403`.
 
 ## 9. The admin methods
 

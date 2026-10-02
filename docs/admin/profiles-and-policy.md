@@ -188,7 +188,7 @@ objects that are no longer desired. Deleting a `WorkerProfile` deletes its names
 | `MCPIdentityMissing` | a server the bundle calls with client credentials has no identity in `mcpIdentities`, or its identity is incomplete; the message says which ([above](#calling-an-mcp-server-as-the-profile)) |
 | `UpgradePending` | the StatefulSet has a newer revision than the named pods run; each keeps its revision until the plane has drained it and the operator replaced it, and the message says how far each has got ([§3](#3-upgrades-and-drains)) |
 | `EgressByHostname` | the `CiliumNetworkPolicy` was written and applied, so a worker reaches its allowlist and the installation's own OpenBao and object store by name, and nothing else outside the cluster; `False` with `NoCilium` or `CiliumPolicyNotApplied` ([egress](#4-troupepolicy)) |
-| `EndpointUnreachable` | without Cilium, an endpoint the profile names is one its workers do not reach (`NoCilium`): the message names each and says what to do; `False` with `Reachable`, or `Cilium` where there is Cilium ([egress](#4-troupepolicy)) |
+| `EndpointUnreachable` | without Cilium, an endpoint the profile names is at a loopback or link-local address, which its workers do not reach (`NoCilium`): the message names each and says what to do; `False` with `Reachable`, or `Cilium` where there is Cilium ([egress](#4-troupepolicy)) |
 
 `SecretMissing`, `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname` and
 `EndpointUnreachable` do not affect `Ready`. `kubectl -n troupe-system get wp` shows
@@ -305,10 +305,23 @@ whether Cilium is there:
   worker namespace that admits it (policies add up, and the operator removes only
   objects it labelled), or use Cilium.
 
-  A profile's own endpoints get nothing beyond the public rule, and a `*.svc` host its
-  namespace on its port. So an LLM endpoint, MCP server or `egress.fqdns` entry on a port
-  other than 443 and 80, or at a private, loopback, link-local or IPv6 address, is one its
-  workers would not reach, and it is refused where it is set up (Decision 749):
+  A profile's own endpoints, its LLM endpoint, its MCP servers (its own and those its
+  channel's bundle gives it) and its `egress.fqdns` entries, are admitted the same way
+  (Decision 752): one given as an IP address, private or public, as that one address on
+  its port, and one given by name on a port other than 443 and 80 as public addresses on
+  that port, so a gateway on 8443 opens 8443 to every public host for that profile's
+  workers. An `egress.fqdns` entry says its port as `host:port`; one without is reached on
+  443 and 80, an address as itself. A `*.svc` host is its namespace on its port, as above.
+  A name that resolves to a private address is still not reached, and since what a name
+  resolves to is not known where it is typed, nothing says so: give that endpoint as its
+  address (over TLS its certificate then has to name the address), or use Cilium. An
+  address inside the cluster, a Service's cluster IP say, is not dependably admitted by an
+  `ipBlock`, so name the Service instead.
+
+  An endpoint at a loopback or link-local address (`127.0.0.1`, `::1`, `169.254.169.254`,
+  `fe80::1`, or the same written as `::ffff:127.0.0.1`) gets no rule: from a pod, loopback
+  is the pod itself, and link-local is the node's, where a cloud's metadata service
+  answers. Such an endpoint is refused where it is set up (Decision 749):
   `admin.profile.put` and the profile editor refuse a profile whose workers are pods with
   `invalid_params`, naming each endpoint, counting the servers its channel's bundle gives
   it; publishing a bundle that names such a server to a channel such a profile follows is
@@ -316,10 +329,8 @@ whether Cilium is there:
   which the chart gives it too. In `gitops` mode nothing can refuse what a repository
   holds, so the operator reports it on the profile as `EndpointUnreachable`, which the
   console's **Workers** page shows; it does in `direct` mode too, for a profile saved
-  before. Use Cilium, serve the endpoint at a public address on 443 or 80, or, for one in
-  the cluster, name its Service (`<service>.<namespace>.svc`). A name on 443 or 80 is not
-  refused, since what it resolves to is not known where it is typed: one that resolves to
-  a private address is still not reached, and nothing says so.
+  before. Give the endpoint as a pod reaches it: by name, at another address, or, for one
+  in the cluster, as its Service (`<service>.<namespace>.svc`).
 
 `ciliumAvailable: true` on a cluster without Cilium fails closed: a worker reaches nothing
 outside the cluster, and the profile is `Ready: False` with `ApplyFailed` naming the

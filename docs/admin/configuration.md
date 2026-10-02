@@ -34,6 +34,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_PLANE_CONTROL_PORT` | `4001` | its port; also the worker egress rule to the plane | `plane.controlPort` |
 | `TROUPE_PLANE_NAMESPACE` | `troupe-system` | namespace the operator watches | `namespace` |
 | `TROUPE_BAO_ADDR` | `http://openbao.troupe-system.svc:8200` | copied into worker pods; a `.svc` host adds an in-cluster egress rule, with Cilium any other host is admitted in the `CiliumNetworkPolicy`, and without it on the port it names ([Part E](#part-e--ports-and-network-policy)) | `bao.address` |
+| `TROUPE_BAO_WORKER_ROLE_PER_PROFILE` | false | gives each profile's pods `TROUPE_BAO_ROLE=troupe-worker-<profile>`, a role the installation made per profile ([roles §8](roles-and-permissions.md#8-openbao-policies)); off, pods are given none and log in as `troupe-worker` | `bao.workerRolePerProfile` |
 | `TROUPE_OBJECT_ENDPOINT` | `http://minio.troupe-system.svc:9000` | copied into worker pods; same rules | `objectStore.endpoint` |
 | `TROUPE_OBJECT_BUCKET` | `troupe-sessions` | copied into worker pods | `objectStore.bucket` |
 | `TROUPE_OBJECT_SECRET_NAME` | `troupe-object-store` | Secret in each worker namespace with `access-key-id` and `secret-access-key` | `objectStore.secretName` |
@@ -74,7 +75,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_PLANE_AUDIENCE` | `troupe-plane-api` | `aud` of plane tokens | none |
 | `TROUPE_PROVISIONING_MODE` | `direct` | `direct`: the console writes profiles to the cluster. `gitops`: a repository holds the `WorkerProfile`, `TroupePolicy` and `Trigger` resources and something else applies them; the plane reads them, shows them locked, refuses `admin.profile.put`, `admin.trigger.put` and their `.delete` as `managed_by_gitops`, and writes only `spec.replicas`, `spec.teams` and `spec.mcpServers` ([profiles-and-policy.md §6](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository), [bundles-and-triggers.md §2](bundles-and-triggers.md#triggers-from-a-repository)). Deployment only; the chart's Role drops `create` and `delete` on `WorkerProfile` and reads `Trigger` in `gitops` | `plane.provisioningMode` |
 | `TROUPE_GITOPS_SOURCE` | unset | where the profiles and triggers come from in `gitops` mode, as the console shows it beside "Locked to gitops": a repository and a path. Display only; the plane never reads it | `plane.gitops.source` |
-| `TROUPE_CILIUM_AVAILABLE` | unset: nothing refused | the operator's value. `false`: a profile whose workers are pods is refused when its LLM endpoint, an MCP server (its own or its channel's bundle's) or an `egress.fqdns` entry is on a port other than 443 and 80 or at a private, loopback, link-local or IPv6 address, and so is a bundle naming such a server for a channel such a profile follows ([profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy)) | `operator.ciliumAvailable` |
+| `TROUPE_CILIUM_AVAILABLE` | unset: nothing refused | the operator's value. `false`: a profile whose workers are pods is refused when its LLM endpoint, an MCP server (its own or its channel's bundle's) or an `egress.fqdns` entry is at a loopback or link-local address, which no rule of the operator's admits, and so is a bundle naming such a server for a channel such a profile follows ([profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy)) | `operator.ciliumAvailable` |
 | `TROUPE_KUBECONFIG` | unset | how the plane reaches Kubernetes to apply profiles and read the policy; unset, the in-pod ServiceAccount; with neither, profiles are saved and reported `not_applied` | none |
 | `TROUPE_WORKER_IMAGE` | unset | the image a profile whose image is `release` runs | `worker.image.*`, tag default `appVersion` |
 | `TROUPE_OIDC_ISSUER`, `TROUPE_OIDC_CLIENT_ID` | none | the identity provider and app registration (required) | `plane.oidc.issuer`, `clientId` |
@@ -106,7 +107,8 @@ Worker pods are created by the operator, so the chart sets none of these.
 | `TROUPE_MCP_IDENTITIES_PATH` | none | the file holding the profile's `mcpIdentities`, read again whenever a token is asked for ([profiles](profiles-and-policy.md#calling-an-mcp-server-as-the-profile)) | yes, when there are any |
 | `TROUPE_KMS_TOKEN_PATH` | `/var/run/secrets/troupe/kms-token` | projected token (audience `troupe-kms`) for OpenBao | path matches |
 | `TROUPE_TOKEN_PATH`, `TROUPE_HOST_SECRET` | unset | a registered machine's enrolment secret, from a file or directly ([single-machine.md](single-machine.md)) | no |
-| `TROUPE_BAO_ADDR`, `TROUPE_BAO_TOKEN`, `TROUPE_BAO_MOUNT` | as the plane, unset, `secret` | KV v2 for session keys; without a token, Kubernetes auth as `troupe-worker` | address only |
+| `TROUPE_BAO_ADDR`, `TROUPE_BAO_TOKEN`, `TROUPE_BAO_MOUNT` | as the plane, unset, `secret` | KV v2 for session keys; without a token, Kubernetes auth | address only |
+| `TROUPE_BAO_ROLE` | `troupe-worker` | the Kubernetes-auth role the pod logs in under; the client token is kept until shortly before its lease ends | `troupe-worker-<profile>` with `bao.workerRolePerProfile` |
 | `TROUPE_OBJECT_*` | as the plane | the object store; credentials from `TROUPE_OBJECT_SECRET_NAME`. `_REGION` is never injected, so a worker signs for `us-east-1` | all but region |
 | `TROUPE_ALLOWED_ORIGINS` | every origin | origins the WebSocket upgrade admits | from `TROUPE_WORKER_ALLOWED_ORIGINS` |
 | `TROUPE_BASE_URL` | unset | **the LLM endpoint** — not the plane's meaning of the name | from `llm.endpoint` |
@@ -305,7 +307,7 @@ from those and from operator pods.
 | `troupe-plane` | HTTP from ingress namespaces (and A2A pods when enabled); control port from worker namespaces and the operator; epmd and dist from plane pods | unrestricted |
 | `troupe-operator` | nothing | unrestricted |
 | `troupe-a2a` | `a2a.port` from ingress namespaces | unrestricted |
-| `troupe-w-<profile>` | TCP 4000 from ingress namespaces | DNS to `k8s-app=kube-dns` in `kube-system`; the plane's control port; OpenBao, object storage, the LLM endpoint and MCP servers when their hosts are `*.svc`; **without Cilium only**, `0.0.0.0/0` minus private and link-local ranges on 443 and 80, and OpenBao and object storage outside the cluster on the port they name: an IP address as that one address (`/32`, `/128`), a name on another port as the same ranges on that port |
+| `troupe-w-<profile>` | TCP 4000 from ingress namespaces | DNS to `k8s-app=kube-dns` in `kube-system`; the plane's control port; OpenBao, object storage, the LLM endpoint and MCP servers when their hosts are `*.svc`; **without Cilium only**, `0.0.0.0/0` minus private and link-local ranges on 443 and 80, and OpenBao, object storage outside the cluster and the profile's own LLM endpoint, MCP servers and `egress.fqdns` entries on the port they name: an IP address as that one address (`/32`, `/128`), a name on another port as the same ranges on that port; a profile's endpoint at a loopback or link-local address gets nothing |
 | `troupe-egress` (Cilium only) | — | `toFQDNs` for the LLM endpoint, MCP servers, `egress.fqdns` and `gitHosts`, and for OpenBao and object storage when their hosts are not `*.svc`; `toCIDR` (`/32`, `/128`) instead for any of these given as an IP address; DNS to kube-dns through Cilium's DNS proxy (a `dns` rule), which is how `toFQDNs` learns addresses |
 
 With Cilium a worker reaches the hosts its profile names, the installation's own OpenBao
@@ -314,11 +316,11 @@ policies, so the NetworkPolicy carries no address block. The operator admits Ope
 the object store itself, in the cluster or outside it; the profile's allowlist is for the
 profile's own destinations. Without Cilium a worker can reach any public host on 443 and
 80; `allowedEgress` is then a check at admission and reconcile, not on the wire. OpenBao
-and an object store outside the cluster are admitted on their own ports too, so one named
-on 9000 opens 9000 to every public host; a name that resolves to a private address cannot
-be admitted by name without Cilium, so give it as an address instead
-([profiles-and-policy.md](profiles-and-policy.md#4-troupepolicy) says what else works). A
-profile's own endpoints get no such rule: one on another port or at a private address is
+and an object store outside the cluster are admitted on their own ports too, and so are a
+profile's own endpoints, so one named on 9000 opens 9000 to every public host; a name that
+resolves to a private address cannot be admitted by name without Cilium, so give it as an
+address instead ([profiles-and-policy.md](profiles-and-policy.md#4-troupepolicy) says what
+else works). A profile's endpoint at a loopback or link-local address gets no rule: it is
 refused by the plane where it is set up, and reported by the operator as
 `EndpointUnreachable` on a profile a repository holds.
 

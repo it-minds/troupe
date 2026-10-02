@@ -319,16 +319,11 @@ a new session. Found by the chunk 12 fixer of slot A (PR #323), 2026-10-01.
 
 ### D52 - A worker's own OpenBao identity (medium)
 
-- Workers always log in to OpenBao as the role `troupe-worker`: the worker's runtime
-  configuration never reads `TROUPE_BAO_ROLE`, so the per-profile policy
-  `Troupe.KMS.Policy.worker/2` describes can't be bound per profile on a cluster.
-- `Troupe.KMS.OpenBao.kubernetes_token/1` logs in again on every request; nothing caches
-  the token.
-- The operator's `TROUPE_MCP_SERVERS` leaves out `credential_mode` for a person-mode
-  server, so until a pod's first bundle arrives it treats such a server as a profile-mode
-  server with no credential.
+- Nothing writes a profile's OpenBao role and policy: an installation that turns on
+  `bao.workerRolePerProfile` (Decision 753) makes `troupe-worker-<profile>` by hand, and
+  writes the profile's policy again whenever its granted teams change.
 
-Found by the chunk 12 fixer of slot B (PR #324), 2026-10-01.
+Found by the chunk 12 fixer of slot B (PR #324), 2026-10-01; the rest is #336.
 
 ### D53 - Small leftovers from the 0.7.2 work (low)
 
@@ -418,6 +413,7 @@ Found by the chunk 12 fixers, 2026-10-01.
 | D44 - Uninstalling the chart deletes its namespace; the scaler forgot a failed write (D40's first item) | #303, PR #304 |
 | A person's own remote MCP server that needs their OAuth sign-in (found by the deployment's first profile); then the `initialize`/session handshake and the desktop app's half of the pod path; client registration and the TUI's half are next | #300, PR #310; #319, PR #323; #308, PR #322 |
 | D47 - On a plane, a turn the harness stopped reads as a finished one | #320, PR #325 |
+| D52 - A worker logs in to OpenBao as one shared role and for every request; a person-mode server's mode before the first bundle | #336, PR #337 |
 
 ## Checked and not a defect
 

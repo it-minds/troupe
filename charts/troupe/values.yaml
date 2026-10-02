@@ -45,9 +45,10 @@ operator:
   # Whether Cilium is installed. With it the operator writes CiliumNetworkPolicy with
   # real FQDN rules and no address block beside them, so a worker reaches the hosts its
   # profile names, `bao.address` and `objectStore.endpoint`, and nothing else outside the
-  # cluster; without it, egress to named hosts is a CIDR rule and a documented gap, and
-  # the plane, given this too, refuses a profile whose own endpoint is on a port other
-  # than 443 and 80 or at a private address. True on a cluster without Cilium fails closed.
+  # cluster; without it, egress to named hosts is a CIDR rule and a documented gap, a
+  # profile's own endpoint on another port or at an address gets a rule of its own, and
+  # the plane, given this too, refuses one at a loopback or link-local address. True on a
+  # cluster without Cilium fails closed.
   ciliumAvailable: false
   # The namespace running this controller must carry `troupe.dev/ingress=true`: a
   # worker's NetworkPolicy admits traffic from namespaces with that label and from
@@ -294,6 +295,12 @@ bao:
   # audience the workers' key-manager token carries.
   authPath: kubernetes
   planeRole: troupe-plane
+  # Worker pods log in under that mount as `troupe-worker`, one role for every profile.
+  # `true` once you have made a role per profile, `troupe-worker-<profile>`, carrying that
+  # profile's policy: each profile's pods then log in as their own, and a pod of one
+  # profile cannot read another's session keys. Turning it on changes every profile's pod
+  # template, so each profile reports `UpgradePending` until its pods are replaced.
+  workerRolePerProfile: false
   # A static token instead, for a development cluster with OpenBao in dev mode. Empty
   # in any real deployment: the plane authenticates as its ServiceAccount.
   tokenSecretName: ""
