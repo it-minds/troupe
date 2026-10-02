@@ -50,8 +50,9 @@ export function Pill({ status, children, title }: { status: Status; children?: s
  * a session whose only open question is the workspace's trust question, asked before
  * the agent has done anything, is waiting on a person like any other — and a session
  * that stopped on an error outranks the fact that it is technically idle, or asleep: one
- * whose root kept crashing stopped on its failed turn (Decision 727). What is left is
- * idle or stopped, which is not a state so much as the absence of one.
+ * whose root kept crashing stopped on its failed turn (Decision 727), and a plane says so
+ * of a turn the harness stopped as well (Decision 750). What is left is idle or stopped,
+ * which is not a state so much as the absence of one.
  */
 export function statusOf(row: Pick<FleetRow, "state" | "status" | "pendingApprovals" | "pendingQuestions" | "doneReason" | "failed">): Status {
   if (row.pendingApprovals > 0 || row.pendingQuestions > 0 || row.status === "waiting") return "waiting";
@@ -68,10 +69,17 @@ export function RowStatus({ row }: { row: FleetRow }): JSX.Element {
   return <Pill status={status} title={failedTitle(row) ?? `${row.state}${row.status ? ` · ${row.status}` : ""}`}>{status === "idle" ? word(detail) : undefined}</Pill>;
 }
 
-/** What a row whose last turn failed says on hover: what the agent raised. */
+/** Each way the harness ends a turn as a failure, in words (Decisions 727 and 750). */
+const FAILED: Record<string, string> = {
+  agent_failed: "The agent kept crashing and the session stopped",
+  tool_failures: "A tool kept failing and the harness stopped the turn",
+};
+
+/** What a row whose last turn failed says on hover: why, and what the agent raised where the source says. */
 export function failedTitle(row: Pick<FleetRow, "failed">): string | undefined {
   if (!row.failed) return undefined;
-  return `The agent kept crashing and the session stopped${row.failed.detail ? `: ${row.failed.detail}` : ""}`;
+  const why = FAILED[row.failed.reason] ?? `The turn failed (${row.failed.reason.replace(/_/g, " ")})`;
+  return `${why}${row.failed.detail ? `: ${row.failed.detail}` : ""}`;
 }
 
 function word(s: string): string {

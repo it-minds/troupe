@@ -327,11 +327,9 @@ Found by the chunk 12 fixer of slot B (PR #324), 2026-10-01; the rest is #336.
 
 ### D53 - Small leftovers from the 0.7.2 work (low)
 
-- The desktop app doesn't read the plane row's new `failed_reason` (Decision 750):
-  `rowFromPlane` (`clients/gui/packages/client/src/fleet.ts`) should map it to
-  `FleetRow.failed`, and `failedTitle` (`views/bits.tsx`) has no words for
-  `tool_failures` yet ("kept crashing" would be wrong). A2A's `state_of_row` could read the
-  same field instead of the log, and `Web.Live.Status.from_session/1` is used by no page.
+- A2A's `state_of_row` could read the plane row's `failed_reason` (Decision 750) instead
+  of the log, and `Web.Live.Status.from_session/1` is used by no page. (The desktop app
+  reads it since #354.)
 - A plane row's `cost_micros` lags: a pod reports status on lifecycle changes only, and
   the summary folds the cost later, so a report just after a turn says 0.
 - `EndpointUnreachable` (Decision 749): in `gitops` mode an ssh profile's resource gets the
