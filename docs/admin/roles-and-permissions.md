@@ -39,7 +39,8 @@ of the person's. A session's pod gets a token of its own, minted per pod (§5).
 
 SCIM (`/scim/v2/Users`, `/scim/v2/Groups`) writes the same rows, keyed on `externalId`
 (else `userName`), which must be what later appears as the subject. Group pushes replace
-membership; deletes are soft. Membership is never edited in Troupe.
+membership and a PATCH adds or removes members; deletes are soft. Membership is never
+edited in Troupe.
 
 ## 2. The admin roles
 

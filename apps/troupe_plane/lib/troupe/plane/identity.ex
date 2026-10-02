@@ -284,9 +284,49 @@ defmodule Troupe.Plane.Identity do
   @spec list_users() :: [User.t()]
   def list_users, do: Repo.all(from(u in User, order_by: u.subject))
 
+  @doc """
+  The users a SCIM filter names. `userName` ignores case, as SCIM compares it, and is the
+  subject for somebody no push has named; `externalId` is exact.
+  """
+  @spec find_users(:user_name | :external_id, String.t()) :: [User.t()]
+  def find_users(:user_name, value) do
+    Repo.all(
+      from(u in User,
+        where: fragment("lower(coalesce(?, ?)) = lower(?)", u.user_name, u.subject, ^value),
+        order_by: u.subject
+      )
+    )
+  end
+
+  def find_users(:external_id, value),
+    do: Repo.all(from(u in User, where: u.external_id == ^value, order_by: u.subject))
+
   @doc "A group by IdP id, or `nil`."
   @spec get_group(String.t()) :: Group.t() | nil
   def get_group(external_id), do: Repo.get_by(Group, external_id: external_id)
+
+  @doc "A group by the id this plane gave it, or `nil`. SCIM addresses groups this way."
+  @spec get_group_by_id(Ecto.UUID.t()) :: Group.t() | nil
+  def get_group_by_id(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(Group, uuid)
+      :error -> nil
+    end
+  end
+
+  @doc "The groups a SCIM filter names: `displayName` ignoring case, `externalId` exactly."
+  @spec find_groups(:display_name | :external_id, String.t()) :: [Group.t()]
+  def find_groups(:display_name, value) do
+    Repo.all(
+      from(g in Group,
+        where: fragment("lower(?) = lower(?)", g.display_name, ^value),
+        order_by: g.display_name
+      )
+    )
+  end
+
+  def find_groups(:external_id, value),
+    do: Repo.all(from(g in Group, where: g.external_id == ^value))
 
   @doc "Every group, for an admin choosing which to enable."
   @spec list_groups() :: [Group.t()]

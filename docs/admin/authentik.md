@@ -272,7 +272,8 @@ refusal rather than a degraded answer:
 | | |
 |---|---|
 | `POST` / `PUT` a whole resource | yes |
-| `GET` with a filter | one `<attribute> eq "<value>"`, and any other filter is refused with `invalidFilter` |
+| `PATCH` | `add`, `replace` and `remove` on what a push sets, and on a group's members |
+| `GET` with a filter | one `<attribute> eq "<value>"` on `userName` or `externalId` (a group: `displayName` or `externalId`), and any other filter is refused with `invalidFilter` |
 | `DELETE` a user | soft. The row stays, inactive |
 | `DELETE` a group | empties it, keeps it |
 | Pagination, sort, bulk, ETag, `/Schemas`, `/ResourceTypes` | no |

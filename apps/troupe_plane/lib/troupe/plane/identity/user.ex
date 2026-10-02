@@ -30,6 +30,12 @@ defmodule Troupe.Plane.Identity.User do
   schema "users" do
     field(:subject, :string)
     field(:external_id, :string)
+
+    # SCIM's `userName`, as the provider last sent it: what its filter asks for before it
+    # creates or changes somebody. A label, like the email; with an `externalId` beside
+    # it, it is not the subject (Decision 754).
+    field(:user_name, :string)
+
     field(:email, :string)
     field(:display_name, :string)
     field(:active, :boolean, default: true)
@@ -57,7 +63,7 @@ defmodule Troupe.Plane.Identity.User do
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()
   def changeset(user, attrs) do
     user
-    |> cast(attrs, [:subject, :external_id, :email, :display_name, :active])
+    |> cast(attrs, [:subject, :external_id, :user_name, :email, :display_name, :active])
     |> validate_required([:subject])
     |> unique_constraint(:subject)
   end
