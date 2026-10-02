@@ -308,14 +308,12 @@ Found by the chunk 12 fixers of slots C and A (PRs #322, #323), 2026-10-01.
 
 ### D51 - MCP sessions a caller leaves open (low)
 
-`Troupe.MCP.Sessions` keys a session on the server and a hash of the call's headers
-(Decision 746), so a renewed token opens a new session and the old one is ended only when
-its holder stops: a worker calling a server as its profile (Decision 747) opens one per
-token renewal, about one an hour, for as long as the pod runs.
-`Troupe.Worker.MCP.put_servers` doesn't end the sessions of servers a new bundle dropped.
-Servers built from the TypeScript and Python SDK examples answer `400`, not the
-specification's `404`, for a session they have forgotten, and a `400` is not retried with
-a new session. Found by the chunk 12 fixer of slot A (PR #323), 2026-10-01.
+A person's MCP session on a pod is not ended when a refreshed token of theirs opens
+another: nothing in the client tells one person's renewed token from another person's,
+and the pod does not hold the credential to end it with (Decisions 746, 757), so it stays
+in the pod's `Troupe.MCP.Sessions` until the pod stops or a bundle drops the server, and
+at the server until the server expires it. Found by the chunk 12 fixer of slot A (PR
+#323), 2026-10-01; the rest is #358.
 
 ### D52 - A worker's own OpenBao identity (medium)
 
