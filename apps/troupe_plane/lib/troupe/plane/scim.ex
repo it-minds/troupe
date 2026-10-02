@@ -275,14 +275,12 @@ defmodule Troupe.Plane.SCIM do
   @spec patch_group(String.t(), map()) :: {:ok, Group.t()} | {:error, error()}
   def patch_group(id, body) do
     with {:ok, operations} <- Patch.operations(body, @group_schema) do
-      Repo.transaction(fn ->
-        case apply_group(lock_group(id), operations) do
-          {:ok, group} -> group
-          {:error, reason} -> Repo.rollback(reason)
-        end
-      end)
+      Repo.transaction(fn -> id |> lock_group() |> apply_group(operations) |> or_rollback() end)
     end
   end
+
+  defp or_rollback({:ok, result}), do: result
+  defp or_rollback({:error, reason}), do: Repo.rollback(reason)
 
   # A change to the members reads them and writes them back, so two at once for one group
   # would lose one of them: the row is held until the change is written.

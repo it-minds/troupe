@@ -552,30 +552,26 @@ defmodule Troupe.Plane.Web.Router do
 
   defp scim(conn, ["Groups", id]) do
     case conn.method do
-      "GET" ->
-        case Identity.get_group_by_id(id) do
-          nil -> scim_error(conn, :not_found)
-          group -> send_json(conn, 200, SCIM.render_group_for(group, conn.query_params))
-        end
-
-      "PATCH" ->
-        case SCIM.patch_group(id, conn.body_params) do
-          {:ok, _group} -> send_resp(conn, 204, "")
-          {:error, reason} -> scim_error(conn, reason)
-        end
-
-      "DELETE" ->
-        case SCIM.empty_group(id) do
-          {:ok, _group} -> send_resp(conn, 204, "")
-          {:error, reason} -> scim_error(conn, reason)
-        end
-
-      _ ->
-        scim_put_group(conn)
+      "GET" -> scim_get_group(conn, id)
+      "PATCH" -> scim_no_content(conn, SCIM.patch_group(id, conn.body_params))
+      "DELETE" -> scim_no_content(conn, SCIM.empty_group(id))
+      _ -> scim_put_group(conn)
     end
   end
 
   defp scim(conn, _rest), do: send_json(conn, 404, %{"status" => "404"})
+
+  defp scim_get_group(conn, id) do
+    case Identity.get_group_by_id(id) do
+      nil -> scim_error(conn, :not_found)
+      group -> send_json(conn, 200, SCIM.render_group_for(group, conn.query_params))
+    end
+  end
+
+  # A change to a group answers nothing but that it was made, as Entra's documented
+  # responses do; a group's members are most of it.
+  defp scim_no_content(conn, {:ok, _group}), do: send_resp(conn, 204, "")
+  defp scim_no_content(conn, {:error, reason}), do: scim_error(conn, reason)
 
   # SCIM's error body (RFC 7644 §3.12). Whatever a request asked that the plane cannot do
   # is a 400 that says so, never a 500 a provider would retry forever.

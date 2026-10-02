@@ -45,18 +45,17 @@ defmodule Troupe.Plane.SCIM.Patch do
 
   defp read(operation, schema) when is_map(operation) do
     with {:ok, op} <- op(field(operation, "op")) do
-      case field(operation, "path") do
-        nil ->
-          spread(op, field(operation, "value"), schema)
-
-        path ->
-          with {:ok, path} <- path(path, schema),
-               do: {:ok, [{op, path, field(operation, "value")}]}
-      end
+      aim(op, field(operation, "path"), field(operation, "value"), schema)
     end
   end
 
   defp read(_operation, _schema), do: {:error, {"invalidSyntax", "an operation is an object"}}
+
+  defp aim(op, nil, value, schema), do: spread(op, value, schema)
+
+  defp aim(op, path, value, schema) do
+    with {:ok, path} <- path(path, schema), do: {:ok, [{op, path, value}]}
+  end
 
   defp op(name) when is_binary(name) do
     case Map.fetch(@ops, String.downcase(name)) do
@@ -124,17 +123,16 @@ defmodule Troupe.Plane.SCIM.Patch do
   # SCIM's names are case-insensitive, the message's own included.
   defp field(map, name) do
     case Map.fetch(map, name) do
-      {:ok, value} ->
-        value
-
-      :error ->
-        wanted = String.downcase(name)
-
-        map
-        |> Enum.find_value({nil}, fn {key, value} ->
-          if is_binary(key) and String.downcase(key) == wanted, do: {value}
-        end)
-        |> elem(0)
+      {:ok, value} -> value
+      :error -> field_in_any_case(map, String.downcase(name))
     end
+  end
+
+  defp field_in_any_case(map, wanted) do
+    map
+    |> Enum.find_value({nil}, fn {key, value} ->
+      if is_binary(key) and String.downcase(key) == wanted, do: {value}
+    end)
+    |> elem(0)
   end
 end

@@ -3728,7 +3728,8 @@ citation keeps meaning what it meant.
        `"False"`; `active: false` stopping a sponsored principal and refusing sign-in; a
        group's members added and removed by value and by path filter, then renamed, one
        row; `DELETE` emptying it, `PUT` still replacing; and refused PATCHes changing
-       nothing.
+       nothing. All 13 failed on the tip of #339's branch: the filter answered with
+       everybody, an unread filter with `200`, and every PATCH raised.
 
 755. **A person's name at the key manager is a column of its own, fixed when the plane first
      knows them and left alone by a re-key, and whatever reaches the key manager for a
