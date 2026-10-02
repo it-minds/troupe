@@ -41,11 +41,25 @@ defmodule Troupe.Plane.Identity do
   @spec upsert_user(map()) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
   def upsert_user(%{subject: subject} = attrs) do
     case Repo.get_by(User, subject: subject) do
-      nil -> %User{}
+      nil -> new_user(subject)
       user -> user
     end
     |> User.changeset(attrs)
     |> Repo.insert_or_update()
+  end
+
+  # A person's name at the key manager is fixed here, when they are first known, and
+  # nothing changes it afterwards (Decision 755). Their subject, so the key manager's tree
+  # reads as the people in it and a plane that never switches its claim sees what it
+  # always did. Where that is already somebody's name, which only a switched claim can
+  # make so, their own id, which nobody else's can be.
+  defp new_user(subject) do
+    if Repo.exists?(from(u in User, where: u.kms_name == ^subject)) do
+      id = Ecto.UUID.generate()
+      %User{id: id, kms_name: id}
+    else
+      %User{kms_name: subject}
+    end
   end
 
   @doc "Create or update a group by its identity-provider id."
@@ -122,7 +136,9 @@ defmodule Troupe.Plane.Identity do
   Moved are the columns that say *who*: a session's owner and the person its spend counts
   against, an ACL entry, a share made out to them, a team they administer, a trigger that
   tells them, their spend and open reservations, the principals they sponsor. What says
-  *who did*, the audit trail and every `_by`, keeps the name it was written with.
+  *who did*, the audit trail and every `_by`, keeps the name it was written with. Their
+  name at the key manager does not move either (Decision 755): what is stored under it is
+  found under it.
 
   One transaction with the old row locked, so two devices signing in at once move the
   person once and the second finds nobody left to move.
@@ -144,10 +160,16 @@ defmodule Troupe.Plane.Identity do
   defp lock_user(subject),
     do: Repo.one(from(u in User, where: u.subject == ^subject, lock: "FOR UPDATE"))
 
+  # A row a replica of the release before wrote has no name and is read as its subject,
+  # so the name is written down before the subject moves out from under it.
   defp move_person(known, nil, new) do
     move_references(known.subject, new)
 
-    case known |> User.changeset(%{subject: new}) |> Repo.update() do
+    known
+    |> User.changeset(%{subject: new})
+    |> Ecto.Changeset.put_change(:kms_name, User.kms_name(known))
+    |> Repo.update()
+    |> case do
       {:ok, _user} -> :rekeyed
       {:error, changeset} -> Repo.rollback(changeset)
     end
@@ -171,6 +193,15 @@ defmodule Troupe.Plane.Identity do
     end
 
     Repo.delete!(known)
+
+    # Theirs at the key manager is the old row's name, under which everything they stored
+    # before the switch is. The row SCIM made has stored nothing, since nobody could sign
+    # in as it without being moved here. After the delete, because the name is unique.
+    {:ok, _} =
+      provisioned
+      |> Ecto.Changeset.change(kms_name: User.kms_name(known))
+      |> Repo.update()
+
     :merged
   end
 

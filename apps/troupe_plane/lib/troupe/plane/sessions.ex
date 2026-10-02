@@ -397,7 +397,7 @@ defmodule Troupe.Plane.Sessions do
   Register a session that runs on somebody's own machine.
 
   The plane learns that it exists and how far it has got. It learns nothing else: the
-  bytes are sealed with a key under `troupe/people/<subject>/sessions/<id>` that no pod
+  bytes are sealed with a key under `troupe/people/<name>/sessions/<id>` that no pod
   and no operator role can read, and the row carries sizes, sequence numbers and hashes.
 
   Idempotent on the id, because a daemon that seals, loses its connection and retries

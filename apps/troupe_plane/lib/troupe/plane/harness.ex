@@ -299,7 +299,7 @@ defmodule Troupe.Plane.Harness do
           "profile" => profile,
           "server" => server.name,
           "slot" => slot,
-          "connected" => Connections.connected?(user.subject, slot)
+          "connected" => Connections.connected?(User.kms_name(user), slot)
         }
       end
 
@@ -310,9 +310,9 @@ defmodule Troupe.Plane.Harness do
   # read anybody's.
   #
   # **No value crosses the plane.** `grant` does not take one and does not return one: it
-  # returns an assertion the plane has just signed for the caller's own subject, and the
-  # client exchanges that with the key manager itself for a token scoped to its own
-  # subtree. The plane is never in possession of a credential that could read the slot —
+  # returns an assertion the plane has just signed for the caller's own name at the key
+  # manager, and the client exchanges that with the key manager itself for a token scoped
+  # to its own subtree. The plane is never in possession of a credential that could read the slot —
   # which is stronger than handing back a token it minted, because a token it minted is a
   # token it held.
   #
@@ -324,7 +324,7 @@ defmodule Troupe.Plane.Harness do
 
     with {:ok, slot} <- required_string(params, "slot"),
          :ok <- Connections.known_slot(slots, slot) do
-      case Connections.grant(user.subject, slot) do
+      case Connections.grant(User.kms_name(user), slot) do
         {:ok, grant} -> {:ok, grant}
         {:error, %Error{} = error} -> {:error, error}
       end
@@ -627,7 +627,9 @@ defmodule Troupe.Plane.Harness do
   # What a daemon needs in order to make this session's key: an assertion for its own
   # owner, and where to spend it. The same shape `me.connections.grant` answers, and for
   # the same reason — the plane signs a statement of who the caller is and holds no token
-  # that could read what the caller then writes.
+  # that could read what the caller then writes. The key is under the owner's name at the
+  # key manager, which the answer carries, so a device signed in under a subject they have
+  # been moved to finds the key another made before the move (Decision 755).
   #
   # The session has to be registered first. That is not ceremony: it is what makes this a
   # statement about a session the plane knows is theirs, and it is where a deactivated
@@ -635,7 +637,8 @@ defmodule Troupe.Plane.Harness do
   defp handle("session.assertion", params, %{user: user}) do
     with {:ok, session_id} <- required_string(params, "session_id"),
          {:ok, session} <- own_private(session_id, user) do
-      Connections.assertion(user.subject, KMS.path({:person, user.subject}, session.id))
+      name = User.kms_name(user)
+      Connections.assertion(name, KMS.path({:person, name}, session.id))
     end
   end
 
