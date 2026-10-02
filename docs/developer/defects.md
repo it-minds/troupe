@@ -349,11 +349,6 @@ Found by the chunk 12 fixers, 2026-10-01.
 
 ### D54 - What a worker may reach: the edges left after #268 (medium)
 
-- With Cilium the plane refuses no endpoint, so an IP-literal endpoint at a loopback or
-  link-local address (the cloud's metadata address among them) becomes a `toCIDR` rule
-  (Decision 723) whenever the TroupePolicy's `allowedEgress` names it: only that list
-  stands between a profile and such an address. Without Cilium they are refused
-  (Decisions 749, 752); the same refusal in both modes would close it.
 - An `egress.fqdns` entry written `host:port` is compared to `allowedEgress` as the whole
   string (`Troupe.Policy.matches?/2`), and with Cilium it becomes a `toFQDNs` `matchName`
   that carries the port and admits nothing: ports in entries work without Cilium only.

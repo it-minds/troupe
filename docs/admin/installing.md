@@ -14,7 +14,7 @@ is a worked example.
 | Kubernetes ≥ 1.30 | `ValidatingAdmissionPolicy` | the operator still refuses a bad profile; the cluster no longer does |
 | `kubectl`, `helm` | everything below | — |
 | A CNI that enforces NetworkPolicy | a worker's isolation is a NetworkPolicy | **policies are accepted and enforced by nothing** (kind's default CNI) |
-| Cilium, optionally | egress by hostname: a worker reaches its allowlist and nothing else | a worker reaches any public host on 443 and 80; the allowlist is checked at admission, not on the wire; a profile's own endpoint on another port, or given as an address, opens that port or that address; one at a loopback or link-local address is refused |
+| Cilium, optionally | egress by hostname: a worker reaches its allowlist and nothing else | a worker reaches any public host on 443 and 80; the allowlist is checked at admission, not on the wire; a profile's own endpoint on another port, or given as an address, opens that port or that address; one at a loopback or link-local address is refused, as it is with Cilium |
 | An ingress controller | how a client reaches a worker | sessions are created and cannot be attached to from outside |
 
 Label the ingress controller's namespace, or every worker drops its traffic:

@@ -261,10 +261,6 @@ spec:
             # Shown beside "Locked to gitops"; the plane never reads the repository it names.
             - name: TROUPE_GITOPS_SOURCE
               value: {{ .Values.plane.gitops.source | quote }}
-            # The operator's own value: without Cilium the plane refuses a profile whose
-            # endpoint a worker's NetworkPolicy cannot reach, where it is set up.
-            - name: TROUPE_CILIUM_AVAILABLE
-              value: {{ .Values.operator.ciliumAvailable | quote }}
             # What a profile whose image is `release` runs: this release's worker, so an
             # upgrade of the chart is an upgrade of those profiles' workers too.
             - name: TROUPE_WORKER_IMAGE
