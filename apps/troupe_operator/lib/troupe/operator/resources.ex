@@ -12,6 +12,7 @@ defmodule Troupe.Operator.Resources do
   with it.
   """
 
+  alias Troupe.KMS.Policy, as: KMSPolicy
   alias Troupe.Operator.{Names, Settings}
   alias Troupe.Policy
   alias Troupe.WorkerProfile, as: Profile
@@ -807,11 +808,20 @@ defmodule Troupe.Operator.Resources do
     ]
 
     base ++
+      bao_role_env(profile, settings) ++
       workers_port_env(settings) ++
       allowed_origins_env(settings) ++
       object_store_env(settings) ++
       llm_env(profile) ++ mcp_env(profile) ++ identities_env(profile)
   end
+
+  # The role the pod logs in to OpenBao under (Decision 753). Only where the installation
+  # made one per profile: otherwise the worker's own default, `troupe-worker`, applies, and
+  # a pod template that names nothing new is not a new revision every pod is replaced for.
+  defp bao_role_env(_profile, %Settings{bao_role_per_profile: false}), do: []
+
+  defp bao_role_env(profile, _settings),
+    do: [%{"name" => "TROUPE_BAO_ROLE", "value" => KMSPolicy.worker_role_name(profile.name)}]
 
   # Where the file is, which never changes; what is in it may.
   defp identities_env(%Profile{mcp_identities: []}), do: []
@@ -959,21 +969,32 @@ defmodule Troupe.Operator.Resources do
   # optional fields are left out when the spec is silent, so the worker's own defaults
   # apply rather than a `null` it has to be taught to ignore.
   #
-  # The mode is written for a server the profile calls as itself and left out otherwise,
-  # so a profile that has none keeps the value it had and its pods are not replaced.
+  # The mode is written for a server the profile calls as itself, and for one it calls as
+  # the session's owner with the slot the owner's credential is in, which is what
+  # `credential_ref` means in that mode (Decision 753): without it a pod read such a server
+  # as one it calls as the profile, with no credential, until its first bundle said
+  # otherwise. Left out for the default, so a profile whose servers are all called as the
+  # profile with a Secret, or with nothing, keeps the value it had and its pods are not
+  # replaced.
   defp mcp_server_config(%MCPServer{} = server) do
     %{
       "name" => server.name,
       "url" => server.url,
-      "credential_ref" => if(server.secret_name, do: MCPServer.credential_env(server)),
+      "credential_ref" => credential_ref(server),
       "credential_mode" =>
-        if(server.credential_mode == "client_credentials", do: "client_credentials"),
+        if(server.credential_mode in ["person", "client_credentials"],
+          do: server.credential_mode
+        ),
       "header" => server.header,
       "timeout_ms" => server.timeout_ms
     }
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
     |> Map.new()
   end
+
+  defp credential_ref(%MCPServer{credential_mode: "person", credential_slot: slot}), do: slot
+  defp credential_ref(%MCPServer{secret_name: nil}), do: nil
+  defp credential_ref(server), do: MCPServer.credential_env(server)
 
   # The projected token is the pod's enrolment credential, and the only one it has.
   defp volumes(profile) do

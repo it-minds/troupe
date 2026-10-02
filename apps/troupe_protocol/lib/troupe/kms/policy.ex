@@ -192,6 +192,14 @@ defmodule Troupe.KMS.Policy do
   @spec worker_policy_name(String.t()) :: String.t()
   def worker_policy_name(profile), do: "troupe-worker-#{profile}"
 
+  @doc """
+  The Kubernetes-auth role a profile's pods log in under, where an installation makes one
+  per profile (Decision 753): named as its policy is, and carrying it. Otherwise every pod
+  logs in as `troupe-worker`.
+  """
+  @spec worker_role_name(String.t()) :: String.t()
+  def worker_role_name(profile), do: worker_policy_name(profile)
+
   @doc "The name the plane's policy is installed under."
   @spec plane_policy_name() :: String.t()
   def plane_policy_name, do: "troupe-plane"

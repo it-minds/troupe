@@ -38,7 +38,7 @@ check. Authentik specifically: [authentik.md](authentik.md).
 | **Transit** at `transit`, key `troupe-session-tokens`, `ecdsa-p256`, not exportable | the plane signs plane tokens with it and publishes every key version as its JWKS |
 | **KV v2** at `secret` | per-session data keys at `troupe/teams/<team>/sessions/<id>`; erasure deletes the metadata path so every version goes |
 | **Kubernetes auth** at `kubernetes`, with a **reviewer JWT** (a ServiceAccount bound to `system:auth-delegator`) | without one every login is `permission denied` and nothing says why |
-| Role `troupe-worker` (ServiceAccount `troupe-worker`, any namespace, audience `troupe-kms`) | worker pods log in with their projected `kms-token` |
+| Role `troupe-worker` (ServiceAccount `troupe-worker`, any namespace, audience `troupe-kms`), or with `bao.workerRolePerProfile` one role `troupe-worker-<profile>` per profile, bound to its namespace | worker pods log in with their projected `kms-token` under the role in `TROUPE_BAO_ROLE`, cache the client token until shortly before its lease ends, retry a 403 once after a fresh login |
 | Role `troupe-plane` (ServiceAccount `troupe-plane` in `troupe-system`), with the plane **and** signing policies | the plane logs in with its projected `bao-token`, caches the client token, retries a 403 once after a fresh login |
 
 The policies are in [roles-and-permissions.md §8](roles-and-permissions.md#8-openbao-policies);

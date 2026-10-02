@@ -12,6 +12,7 @@ defmodule Troupe.Operator.ResourcesTest do
 
   import Troupe.Operator.Fixtures
 
+  alias Troupe.MCP.Server
   alias Troupe.Operator.{Names, Resources, Settings}
   alias Troupe.Policy
   alias Troupe.WorkerProfile, as: Profile
@@ -235,6 +236,25 @@ defmodule Troupe.Operator.ResourcesTest do
       # A token scoped to one audience cannot be replayed against the Kubernetes API,
       # which is the point of not automounting the real one.
       for source <- sources, do: assert(source["expirationSeconds"] <= 3600)
+    end
+
+    # Decision 753: where the installation makes an OpenBao role per profile, the pod logs
+    # in as its profile's, which is the role that profile's policy is bound to.
+    test "the pod logs in to OpenBao as its profile's own role where there is one per profile",
+         %{profile: profile, policy: policy} do
+      env =
+        profile
+        |> Resources.for_profile(policy, %Settings{bao_role_per_profile: true})
+        |> container()
+        |> Map.fetch!("env")
+
+      assert %{"name" => "TROUPE_BAO_ROLE", "value" => "troupe-worker-dev"} in env
+    end
+
+    # And where it makes none, the pod is told nothing and logs in as `troupe-worker`, so
+    # an existing installation's pod template is the one it had.
+    test "the pod is told no OpenBao role where every pod shares one", %{resources: resources} do
+      refute Enum.find(container(resources)["env"], &(&1["name"] == "TROUPE_BAO_ROLE"))
     end
   end
 
@@ -945,6 +965,44 @@ defmodule Troupe.Operator.ResourcesTest do
 
       assert [%{"credential_ref" => "JIRA_MCP_TOKEN"}] =
                Jason.decode!(Enum.find(env, &(&1["name"] == "TROUPE_MCP_SERVERS"))["value"])
+    end
+
+    # Before its first bundle, a pod reads a server with no mode as one it calls as the
+    # profile, with no credential. One it calls as the session's owner says so, with the
+    # slot the owner's credential is in, as a bundle would.
+    test "a server called with the session owner's credential is marked so, with its slot",
+         %{policy: policy, settings: settings} do
+      server = %{
+        "name" => "jira",
+        "url" => "https://mcp.internal.test/jira",
+        "credentialMode" => "person",
+        "credentialSlot" => "jira-cloud"
+      }
+
+      env =
+        [mcpServers: [server]]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, settings)
+        |> container()
+        |> Map.fetch!("env")
+
+      assert [config] =
+               Jason.decode!(Enum.find(env, &(&1["name"] == "TROUPE_MCP_SERVERS"))["value"])
+
+      assert config == %{
+               "name" => "jira",
+               "url" => "https://mcp.internal.test/jira",
+               "credential_mode" => "person",
+               "credential_ref" => "jira-cloud"
+             }
+
+      worker = Server.from_config(config)
+      assert worker.credential_mode == :person
+      assert Server.slot(worker) == "jira-cloud"
+
+      # Nothing to mount: the value is the owner's, in the key manager.
+      refute Enum.find(env, &(&1["name"] == "TROUPE_MCP_JIRA_TOKEN"))
     end
 
     test "a profile without MCP servers says nothing about them", %{

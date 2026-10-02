@@ -34,6 +34,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_PLANE_CONTROL_PORT` | `4001` | its port; also the worker egress rule to the plane | `plane.controlPort` |
 | `TROUPE_PLANE_NAMESPACE` | `troupe-system` | namespace the operator watches | `namespace` |
 | `TROUPE_BAO_ADDR` | `http://openbao.troupe-system.svc:8200` | copied into worker pods; a `.svc` host adds an in-cluster egress rule, with Cilium any other host is admitted in the `CiliumNetworkPolicy`, and without it on the port it names ([Part E](#part-e--ports-and-network-policy)) | `bao.address` |
+| `TROUPE_BAO_WORKER_ROLE_PER_PROFILE` | false | gives each profile's pods `TROUPE_BAO_ROLE=troupe-worker-<profile>`, a role the installation made per profile ([roles §8](roles-and-permissions.md#8-openbao-policies)); off, pods are given none and log in as `troupe-worker` | `bao.workerRolePerProfile` |
 | `TROUPE_OBJECT_ENDPOINT` | `http://minio.troupe-system.svc:9000` | copied into worker pods; same rules | `objectStore.endpoint` |
 | `TROUPE_OBJECT_BUCKET` | `troupe-sessions` | copied into worker pods | `objectStore.bucket` |
 | `TROUPE_OBJECT_SECRET_NAME` | `troupe-object-store` | Secret in each worker namespace with `access-key-id` and `secret-access-key` | `objectStore.secretName` |
@@ -105,7 +106,8 @@ Worker pods are created by the operator, so the chart sets none of these.
 | `TROUPE_MCP_IDENTITIES_PATH` | none | the file holding the profile's `mcpIdentities`, read again whenever a token is asked for ([profiles](profiles-and-policy.md#calling-an-mcp-server-as-the-profile)) | yes, when there are any |
 | `TROUPE_KMS_TOKEN_PATH` | `/var/run/secrets/troupe/kms-token` | projected token (audience `troupe-kms`) for OpenBao | path matches |
 | `TROUPE_TOKEN_PATH`, `TROUPE_HOST_SECRET` | unset | a registered machine's enrolment secret, from a file or directly ([single-machine.md](single-machine.md)) | no |
-| `TROUPE_BAO_ADDR`, `TROUPE_BAO_TOKEN`, `TROUPE_BAO_MOUNT` | as the plane, unset, `secret` | KV v2 for session keys; without a token, Kubernetes auth as `troupe-worker` | address only |
+| `TROUPE_BAO_ADDR`, `TROUPE_BAO_TOKEN`, `TROUPE_BAO_MOUNT` | as the plane, unset, `secret` | KV v2 for session keys; without a token, Kubernetes auth | address only |
+| `TROUPE_BAO_ROLE` | `troupe-worker` | the Kubernetes-auth role the pod logs in under; the client token is kept until shortly before its lease ends | `troupe-worker-<profile>` with `bao.workerRolePerProfile` |
 | `TROUPE_OBJECT_*` | as the plane | the object store; credentials from `TROUPE_OBJECT_SECRET_NAME`. `_REGION` is never injected, so a worker signs for `us-east-1` | all but region |
 | `TROUPE_ALLOWED_ORIGINS` | every origin | origins the WebSocket upgrade admits | from `TROUPE_WORKER_ALLOWED_ORIGINS` |
 | `TROUPE_BASE_URL` | unset | **the LLM endpoint** — not the plane's meaning of the name | from `llm.endpoint` |

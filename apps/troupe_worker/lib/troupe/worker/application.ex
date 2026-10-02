@@ -38,8 +38,11 @@ defmodule Troupe.Worker.Application do
   # on the first turn; `ClientCredentials` too, because discovering a server the profile
   # calls as itself takes its token. The MCP sessions the servers issue before all of
   # them, and stopped after them, which is when each is ended at its server (Decision 746).
+  # The pod's OpenBao login first of all, since a session's key and a profile's signature
+  # are both asked for with it (Decision 753).
   defp children do
     [
+      Troupe.KMS.OpenBao.Login,
       Troupe.Worker.Sessions,
       Troupe.Worker.Auth,
       {Troupe.MCP.Sessions, name: Troupe.Worker.MCP.Sessions},

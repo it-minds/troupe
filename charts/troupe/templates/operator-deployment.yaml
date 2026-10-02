@@ -89,6 +89,10 @@ spec:
               value: {{ join "," .Values.operator.workerAllowedOrigins | quote }}
             - name: TROUPE_BAO_ADDR
               value: {{ .Values.bao.address | quote }}
+            # Each profile's pods log in to OpenBao as `troupe-worker-<profile>`, which the
+            # installation has made, rather than all as `troupe-worker`.
+            - name: TROUPE_BAO_WORKER_ROLE_PER_PROFILE
+              value: {{ .Values.bao.workerRolePerProfile | quote }}
             - name: TROUPE_OBJECT_ENDPOINT
               value: {{ .Values.objectStore.endpoint | quote }}
             - name: TROUPE_OBJECT_BUCKET

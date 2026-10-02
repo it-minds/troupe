@@ -288,6 +288,12 @@ bao:
   # audience the workers' key-manager token carries.
   authPath: kubernetes
   planeRole: troupe-plane
+  # Worker pods log in under that mount as `troupe-worker`, one role for every profile.
+  # `true` once you have made a role per profile, `troupe-worker-<profile>`, carrying that
+  # profile's policy: each profile's pods then log in as their own, and a pod of one
+  # profile cannot read another's session keys. Turning it on changes every profile's pod
+  # template, so each profile reports `UpgradePending` until its pods are replaced.
+  workerRolePerProfile: false
   # A static token instead, for a development cluster with OpenBao in dev mode. Empty
   # in any real deployment: the plane authenticates as its ServiceAccount.
   tokenSecretName: ""
