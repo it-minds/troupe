@@ -144,6 +144,22 @@ defmodule Troupe.FakeRemote do
   @spec worker_paths(pid()) :: [String.t()]
   def worker_paths(remote), do: GenServer.call(remote, :worker_paths)
 
+  @doc """
+  The tools a client has registered with `tools.register`, on the connections still open,
+  as the client named them (no `client.` prefix), sorted.
+  """
+  @spec registered(pid()) :: [String.t()]
+  def registered(remote), do: GenServer.call(remote, :registered)
+
+  @doc """
+  Sends a server-to-client `tool.invoke` for `name` over the connection that registered it,
+  as a pod's agent calling the tool does, and answers the client's reply as it came: a map
+  with `"result"` or `"error"`. `{:error, :not_registered}` when no connection offers it.
+  """
+  @spec invoke_tool(pid(), String.t(), map(), String.t()) :: map() | {:error, :not_registered}
+  def invoke_tool(remote, name, arguments, call_id \\ "call-1"),
+    do: GenServer.call(remote, {:invoke_tool, name, arguments, call_id}, 30_000)
+
   @doc "A session as the fixtures describe it, with sensible defaults."
   @spec session(keyword()) :: session()
   def session(fields) do
@@ -211,7 +227,13 @@ defmodule Troupe.FakeRemote do
       # The worker that really has a session, where `move/4` said it is not the one the
       # plane names; and the workers that refuse connections.
       holders: %{},
-      gone: MapSet.new()
+      gone: MapSet.new(),
+      # Client-hosted tools (PROTOCOL.md section 8): the challenges issued and not yet
+      # spent, what each connection registered, and the `tool.invoke`s waiting on a reply.
+      challenges: MapSet.new(),
+      registered: %{},
+      invokes: %{},
+      next_invoke: 1
     }
 
     owner = self()
@@ -396,8 +418,52 @@ defmodule Troupe.FakeRemote do
 
   def handle_call(:plane_up?, _from, state), do: {:reply, state.plane_up?, state}
 
+  def handle_call(:registered, _from, state),
+    do: {:reply, state.registered |> Map.values() |> List.flatten() |> Enum.sort(), state}
+
+  def handle_call({:invoke_tool, name, arguments, call_id}, from, state) do
+    case Enum.find(state.registered, fn {_pid, names} -> name in names end) do
+      nil ->
+        {:reply, {:error, :not_registered}, state}
+
+      {pid, _names} ->
+        id = "srv-#{state.next_invoke}"
+
+        send(
+          pid,
+          {:push,
+           %{
+             "jsonrpc" => "2.0",
+             "id" => id,
+             "method" => "tool.invoke",
+             "params" => %{
+               "call_id" => call_id,
+               "name" => "client." <> name,
+               "arguments" => arguments
+             }
+           }}
+        )
+
+        {:noreply,
+         %{state | next_invoke: state.next_invoke + 1, invokes: Map.put(state.invokes, id, from)}}
+    end
+  end
+
   def handle_call({:http, method, path, headers, body}, _from, state),
     do: http(state, method, path, headers, body)
+
+  # The client's answer to a `tool.invoke` this server sent.
+  @impl true
+  def handle_cast({:answered, id, reply}, state) do
+    case Map.pop(state.invokes, id) do
+      {nil, _invokes} ->
+        {:noreply, state}
+
+      {from, invokes} ->
+        GenServer.reply(from, Map.take(reply, ["result", "error"]))
+        {:noreply, %{state | invokes: invokes}}
+    end
+  end
 
   @impl true
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
@@ -405,7 +471,8 @@ defmodule Troupe.FakeRemote do
      %{
        state
        | connections: Map.delete(state.connections, pid),
-         subscriptions: Map.delete(state.subscriptions, pid)
+         subscriptions: Map.delete(state.subscriptions, pid),
+         registered: Map.delete(state.registered, pid)
      }}
   end
 
@@ -589,6 +656,37 @@ defmodule Troupe.FakeRemote do
 
   defp dispatch(state, _kind, "auth.refresh", _params, _pid),
     do: {{:ok, %{"accepted" => true}}, state}
+
+  # Two steps, as the worker does it: no consent, or one whose challenge is not one this
+  # server issued and has not spent, gets a fresh challenge; a spent one registers the
+  # tools with this connection, which a drop takes away again.
+  defp dispatch(state, :worker, "tools.register", %{"tools" => [_ | _] = tools} = params, pid) do
+    names = Enum.map(tools, & &1["name"])
+    challenge = get_in(params, ["consent", "challenge"])
+
+    if is_binary(challenge) and MapSet.member?(state.challenges, challenge) do
+      state = %{
+        state
+        | challenges: MapSet.delete(state.challenges, challenge),
+          registered: Map.put(state.registered, pid, names)
+      }
+
+      {{:ok,
+        %{"registered" => Enum.map(names, &("client." <> &1)), "taint" => "personal_connector"}},
+       state}
+    else
+      fresh = "ch-" <> Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
+      n = length(names)
+
+      {{:error, -32_013, "consent_required",
+        %{
+          "challenge" => fresh,
+          "prompt" =>
+            "Let this session run #{n} #{if n == 1, do: "tool", else: "tools"} on your machine?",
+          "tools" => names
+        }}, %{state | challenges: MapSet.put(state.challenges, fresh)}}
+    end
+  end
 
   # Commands answer `{accepted: true}` and nothing else; the effect is an event.
   defp dispatch(state, _kind, "input.send", params, pid) do
@@ -1157,6 +1255,10 @@ defmodule Troupe.FakeRemote do
           end
 
         :gen_tcp.send(socket, encode_frame(Jason.encode!(reply)))
+
+      # The client answering a request this server sent it (`tool.invoke`).
+      {:ok, %{"id" => id} = reply} when not is_map_key(reply, "method") ->
+        GenServer.cast(owner, {:answered, id, reply})
 
       _ ->
         :ok

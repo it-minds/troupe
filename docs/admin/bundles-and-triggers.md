@@ -100,11 +100,11 @@ pod or the plane (Decision 741). What you provide is the client: register one pu
 client (no secret, PKCE, a loopback redirect such as `http://localhost`, with any port
 where the provider allows it) with the server's authorization server, grant it the
 server's scope, and give people its id. That serves their local sessions, and the desktop
-app offers the same tools to a session on a pod they open, through `tools.register` once
-they agree (Decision 748): the pod's agent calls them, the daemon on their machine makes
-the call, and the pod sees the arguments and the answer, never the token. A platform with
-`managed_mcp_servers_only` takes none, as for any client-hosted tool. The TUI does not
-offer them yet.
+app and the TUI offer the same tools to a session on a pod they open, through
+`tools.register` once they agree (Decision 748): the pod's agent calls them, the daemon on
+their machine makes the call, and the pod sees the arguments and the answer, never the
+token. A platform with `managed_mcp_servers_only` takes none, as for any client-hosted
+tool.
 
 ## 2. Triggers
 

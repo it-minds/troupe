@@ -20,7 +20,11 @@ defmodule Troupe.Remote.Worker do
       that failed, the plane is asked where the session is before the next attempt;
       a pod's `not_found` for the session sends an activating command once more, with
       the same command id, wherever the plane opens it; and after ten tries in a row
-      the worker stops and says so, until the next command.
+      the worker stops and says so, until the next command;
+    * a plane session's own window offers it the person's signed-in MCP servers (root
+      Decision 748, `Troupe.Remote.Offer`): on every socket that reaches it active and
+      with `control`, asking the person once for the attachment, and serving the pod's
+      `tool.invoke` for them through the daemon.
 
   It is supervised, so a crash reconnects and resumes from the journal's cursor.
   """
@@ -28,7 +32,20 @@ defmodule Troupe.Remote.Worker do
   use GenServer
 
   alias Troupe.Client.Events
-  alias Troupe.Remote.{Backoff, Branch, Capability, Journal, Plane, RPC, Socket, Tokens, Translate}
+
+  alias Troupe.Remote.{
+    Backoff,
+    Branch,
+    Capability,
+    Credentials,
+    Journal,
+    Offer,
+    Plane,
+    RPC,
+    Socket,
+    Tokens,
+    Translate
+  }
 
   require Logger
 
@@ -155,6 +172,21 @@ defmodule Troupe.Remote.Worker do
     :exit, _ -> %{up?: false, state: :unknown, scopes: [], endpoint: nil, error: :down}
   end
 
+  @doc """
+  The question this client has out to the person in the session's window, as the event
+  that put it there, or nothing: a window rebuilt from the journal while it waits shows
+  it too, since the question is the worker's and never written down.
+  """
+  @spec asking(String.t()) :: [Troupe.Event.t()]
+  def asking(session_id) do
+    case whereis(session_id) do
+      nil -> []
+      pid -> GenServer.call(pid, :asking, 5_000)
+    end
+  catch
+    :exit, _ -> []
+  end
+
   @doc "What this session is attached to: plane, endpoint, team and profile."
   @spec attachment(String.t()) :: map() | nil
   def attachment(session_id) do
@@ -237,7 +269,11 @@ defmodule Troupe.Remote.Worker do
       # each attempt. Above zero, the next attempt asks the plane where the session is.
       misses: 0,
       # Command ids already sent a second time after a pod did not hold the session.
-      resent: MapSet.new()
+      resent: MapSet.new(),
+      # One per socket, so what a task finds out for an earlier one is not used on this.
+      conn: nil,
+      # The person's own servers offered to the session, for this attachment.
+      offer: Offer.new()
     }
 
     {:ok, state, {:continue, :connect}}
@@ -259,6 +295,8 @@ defmodule Troupe.Remote.Worker do
        error: state.error
      }, state}
   end
+
+  def handle_call(:asking, _from, state), do: {:reply, asking_events(state), state}
 
   def handle_call(:attachment, _from, state) do
     {:reply,
@@ -296,6 +334,14 @@ defmodule Troupe.Remote.Worker do
 
   def handle_call(:cancel, from, state),
     do: command(state, from, "turn.cancel", %{command_id: RPC.command_id()})
+
+  # The person's answer to this client's own question: it goes nowhere else.
+  def handle_call(
+        {:approve, call_id, decision},
+        _from,
+        %{offer: %{asking: %{call_id: call_id}}} = state
+      ),
+      do: {:reply, :ok, decide(state, decision != :deny)}
 
   def handle_call({:approve, call_id, decision}, from, state) do
     activating(state, from, "approval.respond", %{
@@ -371,6 +417,19 @@ defmodule Troupe.Remote.Worker do
   def handle_info(:connect, state), do: {:noreply, state}
 
   def handle_info(:flush_deltas, state), do: {:noreply, flush_deltas(%{state | flush_ref: nil})}
+
+  # What a task found out for this socket; one for an earlier socket is dropped.
+  def handle_info({:offer_collected, conn, result}, %{conn: conn, status: :up} = state),
+    do: {:noreply, collected(state, result)}
+
+  def handle_info({:offer_collected, _conn, _result}, state), do: {:noreply, state}
+
+  # The pod asks again after a drop, and the daemon answers that from its first call.
+  def handle_info({:tool_answered, conn, id, answer}, %{conn: conn, socket: socket} = state)
+      when socket != nil,
+      do: {:noreply, send_frame(state, tool_answer(id, answer))}
+
+  def handle_info({:tool_answered, _conn, _id, _answer}, state), do: {:noreply, state}
 
   def handle_info({:rpc_timeout, id}, state) do
     case Map.pop(state.pending, id) do
@@ -561,14 +620,15 @@ defmodule Troupe.Remote.Worker do
            Socket.connect(Troupe.Remote.Discovery.worker_url(state.endpoint), [
              {"authorization", "Bearer " <> token}
            ]) do
-      state = %{state | socket: socket, status: :handshaking, error: nil}
+      state = %{state | socket: socket, status: :handshaking, error: nil, conn: make_ref()}
 
       # A worker reads the bearer header; the daemon's loopback socket reads `auth.token`
-      # (PROTOCOL.md §1), so the token goes in both places.
+      # (PROTOCOL.md §1), so the token goes in both places. A plane session may be offered
+      # tools this client hosts, and says so.
       send_request(state, {:internal, :initialize}, "initialize", %{
         protocol_version: Troupe.Remote.Discovery.wire_version(),
         client_info: %{name: "troupe", version: to_string(Application.spec(:troupe, :vsn))},
-        capabilities: %{},
+        capabilities: if(state.plane_url, do: %{tools: true}, else: %{}),
         auth: %{token: token}
       })
     else
@@ -626,6 +686,9 @@ defmodule Troupe.Remote.Worker do
       {{{:internal, :subscribe}, _method, _params}, pending} ->
         subscribed(%{state | pending: pending}, result)
 
+      {{{:internal, {:offer, _tries}}, _method, _params}, pending} ->
+        registered(%{state | pending: pending})
+
       {{{:internal, _other}, _method, _params}, pending} ->
         %{state | pending: pending}
 
@@ -638,6 +701,10 @@ defmodule Troupe.Remote.Worker do
     case Map.pop(state.pending, id) do
       {nil, _pending} ->
         state
+
+      # The session's refusal of an offer is the session's, not the connection's.
+      {{{:internal, {:offer, tries}}, _method, _params}, pending} ->
+        refused(%{state | pending: pending}, tries, error)
 
       {{{:internal, _step}, _method, _params}, pending} ->
         %{state | pending: pending}
@@ -673,12 +740,28 @@ defmodule Troupe.Remote.Worker do
 
   defp dispatch({:notification, _method, _params}, state), do: state
 
-  defp dispatch({:request, id, _method, _params}, state) do
-    case Socket.send_text(state.socket, RPC.method_not_found(id)) do
-      {:ok, socket} -> %{state | socket: socket}
-      {:error, _reason} -> state
+  defp dispatch({:request, id, "tool.invoke", params}, state) do
+    case Offer.route(state.offer, params["name"]) do
+      {:ok, route} ->
+        worker = self()
+        {conn, sid} = {state.conn, state.session_id}
+
+        _ =
+          Task.start(fn ->
+            answer = Offer.call(sid, params["call_id"], route, params["arguments"])
+            send(worker, {:tool_answered, conn, id, answer})
+          end)
+
+        state
+
+      :error ->
+        message = "#{params["name"]} is not a tool this computer offered the session"
+        send_frame(state, RPC.error_response(id, -32_005, message))
     end
   end
+
+  defp dispatch({:request, id, _method, _params}, state),
+    do: send_frame(state, RPC.method_not_found(id))
 
   defp dispatch(:ignore, state), do: state
 
@@ -795,9 +878,180 @@ defmodule Troupe.Remote.Worker do
     head = if is_map(result), do: result["head_seq"], else: nil
     state = %{state | head_seq: head, misses: 0, backoff: Backoff.reset(state.backoff)}
 
-    Enum.reduce(state.waiting, %{state | waiting: []}, fn {from, method, params}, acc ->
-      send_request(acc, from, method, params)
-    end)
+    state =
+      Enum.reduce(state.waiting, %{state | waiting: []}, fn {from, method, params}, acc ->
+        send_request(acc, from, method, params)
+      end)
+
+    offer(state)
+  end
+
+  ## The person's own servers (root Decision 748)
+
+  # A plane session's own window, reached active and with `control`: registering steers
+  # the session and activates it, so a reader or a dormant session is offered nothing, and
+  # a branch shown inside another session's screen is not asked about on its own. The
+  # daemon is asked from a task, and what it says comes back tagged with this socket.
+  defp offer(%{plane_url: plane, as: nil, session_state: :active, status: :up} = state)
+       when is_binary(plane) do
+    if "control" in state.scopes do
+      worker = self()
+      conn = state.conn
+      _ = Task.start(fn -> send(worker, {:offer_collected, conn, Offer.collect()}) end)
+    end
+
+    state
+  end
+
+  defp offer(state), do: state
+
+  defp collected(state, {:error, reason}) do
+    publish_note(state, "your own MCP servers were not offered to this session: #{said(reason)}")
+    state
+  end
+
+  defp collected(state, {:ok, []}), do: state
+
+  defp collected(state, {:ok, tools}) do
+    offer = Offer.put(state.offer, tools)
+    state = %{state | offer: offer}
+    if offer.key == offer.declined, do: state, else: register(state, nil, 0)
+  end
+
+  # Without a challenge the session answers with one; with it, it takes the tools.
+  defp register(state, challenge, tries) do
+    params = %{command_id: RPC.command_id(), tools: state.offer.tools}
+
+    params =
+      if challenge, do: Map.put(params, :consent, consent(state, challenge)), else: params
+
+    send_request(state, {:internal, {:offer, tries}}, "tools.register", addressed(state, params))
+  end
+
+  defp consent(state, challenge) do
+    case Credentials.fetch(state.plane_url) do
+      {:ok, %{sub: sub}} when is_binary(sub) -> %{challenge: challenge, confirmed_by: sub}
+      _ -> %{challenge: challenge}
+    end
+  end
+
+  # Said once for the attachment, and again only for a different set of tools.
+  defp registered(%{offer: offer} = state) do
+    state = %{state | offer: %{offer | registered: offer.key}}
+
+    if offer.registered == offer.key do
+      state
+    else
+      names = Enum.join(Offer.names(offer), ", ")
+
+      write_notes(%{
+        state
+        | notes: state.notes ++ ["your own MCP servers' tools offered to this session: #{names}"]
+      })
+    end
+  end
+
+  # A challenge for tools the person allowed in this attachment is answered with their
+  # consent; one that ran out while it travelled is answered again, twice, and then it is
+  # the session's fault. Anything else is a question for the person.
+  defp refused(state, tries, error) do
+    challenge = is_map(error.data) && error.data["challenge"]
+
+    cond do
+      RPC.reason(error) != :consent_required or not is_binary(challenge) ->
+        publish_note(
+          state,
+          "your own MCP servers were not offered to this session: #{RPC.describe(error)}"
+        )
+
+        state
+
+      state.offer.key == state.offer.allowed and tries < 3 ->
+        register(state, challenge, tries + 1)
+
+      state.offer.key == state.offer.allowed ->
+        publish_note(
+          state,
+          "your own MCP servers were not offered: the session kept asking for consent"
+        )
+
+        state
+
+      true ->
+        ask(state, challenge, error.data["prompt"])
+    end
+  end
+
+  # The question goes in the session's window as an approval: `y` offers the tools, `n`
+  # does not. One already out about the same tools waits for its answer, which goes with
+  # the newest challenge; one about other tools is replaced.
+  defp ask(%{offer: %{asking: %{key: key} = asking} = offer} = state, challenge, _prompt)
+       when key == offer.key,
+       do: %{state | offer: %{offer | asking: %{asking | challenge: challenge}}}
+
+  defp ask(state, challenge, prompt) do
+    state = if state.offer.asking, do: close_ask(state, :deny), else: state
+    state = ensure_window(state)
+
+    asking = %{
+      call_id: "offer-" <> RPC.command_id(),
+      key: state.offer.key,
+      challenge: challenge,
+      prompt: if(is_binary(prompt), do: prompt, else: "Let this session run tools on your machine?")
+    }
+
+    state = %{state | offer: %{state.offer | asking: asking}}
+    Enum.each(asking_events(state), &publish(state, &1))
+    state
+  end
+
+  defp asking_events(%{offer: %{asking: nil}}), do: []
+
+  defp asking_events(%{offer: %{asking: asking} = offer} = state) do
+    name = "#{asking.prompt} #{Enum.join(Offer.names(offer), ", ")}"
+
+    [
+      Troupe.Event.transient(state.session_id, state.agent || "root", :approval_requested, %{
+        call_id: asking.call_id,
+        name: name,
+        preview: nil
+      })
+    ]
+  end
+
+  defp close_ask(%{offer: %{asking: asking} = offer} = state, decision) do
+    notify(state, state.agent || "root", :approval_answered, %{
+      call_id: asking.call_id,
+      decision: decision
+    })
+
+    %{state | offer: %{offer | asking: nil}}
+  end
+
+  defp decide(%{offer: %{asking: asking}} = state, allow?) do
+    state = close_ask(state, if(allow?, do: :allow, else: :deny))
+    offer = state.offer
+
+    cond do
+      not allow? ->
+        %{state | offer: %{offer | declined: asking.key}}
+
+      state.status == :up and asking.key == offer.key ->
+        register(%{state | offer: %{offer | allowed: asking.key}}, asking.challenge, 1)
+
+      true ->
+        %{state | offer: %{offer | allowed: asking.key}}
+    end
+  end
+
+  defp tool_answer(id, {:ok, result}), do: RPC.response(id, result)
+  defp tool_answer(id, {:error, message}), do: RPC.error_response(id, -32_010, message)
+
+  defp send_frame(state, frame) do
+    case Socket.send_text(state.socket, frame) do
+      {:ok, socket} -> %{state | socket: socket}
+      {:error, _reason} -> state
+    end
   end
 
   ## Events
