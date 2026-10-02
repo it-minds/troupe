@@ -137,25 +137,50 @@ defmodule Troupe.Operator.ReconcilerTest do
     # it is written: the operator says on the profile what its workers will not reach, as
     # it says a Secret is missing, and the console shows it.
 
-    test "without Cilium, names each endpoint a worker's NetworkPolicy cannot reach" do
-      conn = FakeCluster.start([unreachable_policy(), unreachable_profile()])
+    test "without Cilium, names each endpoint at a loopback or link-local address" do
+      conn = FakeCluster.start([local_policy(), local_profile()])
 
       assert {:ok, _result} = reconcile(conn, cilium: false)
 
       assert %{"status" => "True", "reason" => "NoCilium", "message" => message} =
                condition("EndpointUnreachable")
 
-      assert message =~ "llm.endpoint https://llm.internal.test:8443/v1 is on port 8443"
-      assert message =~ "MCP server tickets at https://10.20.0.5/tickets is at 10.20.0.5"
+      assert message =~
+               "llm.endpoint http://127.0.0.1:4000/v1 is at 127.0.0.1, a loopback address"
+
+      assert message =~
+               "MCP server meta at http://169.254.169.254/latest is at 169.254.169.254, a link-local address"
+
       assert message =~ "without Cilium"
-      assert message =~ "operator.ciliumAvailable"
 
       # Beside `Ready`, as `SecretMissing` is: everything the profile implies was made.
       assert condition("Ready")["status"] == "True"
     end
 
-    test "with Cilium, the same profile reaches them" do
-      conn = FakeCluster.start([unreachable_policy(), unreachable_profile()])
+    test "without Cilium, a gateway on another port and a server at a private address are reached" do
+      # Issue #268: both were reported, and refused where they were set up, because the
+      # NetworkPolicy admitted neither. It admits them now, by the same judgement the
+      # condition makes, so the two say the same thing.
+      conn = FakeCluster.start([office_policy(), office_profile()])
+
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+      assert %{"status" => "False", "reason" => "Reachable"} = condition("EndpointUnreachable")
+
+      rules =
+        {"networking.k8s.io/v1", "NetworkPolicy", "troupe-w-dev", "troupe-w-dev"}
+        |> get()
+        |> get_in(["spec", "egress"])
+
+      assert Enum.any?(rules, &(&1["ports"] == [%{"protocol" => "TCP", "port" => 8443}]))
+
+      assert %{
+               "to" => [%{"ipBlock" => %{"cidr" => "10.20.0.5/32"}}],
+               "ports" => [%{"protocol" => "TCP", "port" => 443}]
+             } in rules
+    end
+
+    test "with Cilium, an endpoint at a loopback address is not this condition's" do
+      conn = FakeCluster.start([local_policy(), local_profile()])
 
       assert {:ok, _result} = reconcile(conn, cilium: true)
       assert %{"status" => "False", "reason" => "Cilium"} = condition("EndpointUnreachable")
@@ -455,8 +480,8 @@ defmodule Troupe.Operator.ReconcilerTest do
   end
 
   # A gateway on 8443 and an MCP server at an address on the office network, which the
-  # policy allows and a worker without Cilium does not reach.
-  defp unreachable_profile do
+  # policy allows and a worker without Cilium reaches by a rule of their own.
+  defp office_profile do
     profile(
       llm: %{
         "endpoint" => "https://llm.internal.test:8443/v1",
@@ -466,8 +491,23 @@ defmodule Troupe.Operator.ReconcilerTest do
     )
   end
 
-  defp unreachable_policy,
+  defp office_policy,
     do: policy(allowedEgress: ["*.anthropic.com", "llm.internal.test", "github.com", "10.20.0.5"])
+
+  # A gateway on the pod's own loopback and a server at the cloud's metadata address, which
+  # the policy allows and no rule admits.
+  defp local_profile do
+    profile(
+      llm: %{
+        "endpoint" => "http://127.0.0.1:4000/v1",
+        "secretRef" => %{"name" => "llm-credentials", "key" => "api-key"}
+      },
+      mcpServers: [%{"name" => "meta", "url" => "http://169.254.169.254/latest"}]
+    )
+  end
+
+  defp local_policy,
+    do: policy(allowedEgress: ["*.anthropic.com", "github.com", "127.0.0.1", "169.254.169.254"])
 
   defp identity do
     %{

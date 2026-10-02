@@ -31,9 +31,10 @@ skills the bundle has, and replaces a built-in agent only with `override: true`.
 needs `SKILL.md` (whose `name`, if present, must be its own), relative text files with no
 `..`, at most 512 KiB. An MCP `url` is `https://`, or `http://` to a `.svc` host, and its
 host must pass the policy's egress check. Without Cilium, publishing to a channel that a
-profile whose workers are pods follows also refuses a `url` on a port other than 443 and 80,
-or at a private, loopback, link-local or IPv6 address, which such a worker does not reach
-([profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy)); `admin.bundle.validate`
+profile whose workers are pods follows also refuses a `url` at a loopback or link-local
+address, which such a worker does not reach; one on another port, or at another address,
+gets a rule of its own in those workers' NetworkPolicy
+([profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy)). `admin.bundle.validate`
 is not given a channel and does not make this check.
 
 **MCP entries.**

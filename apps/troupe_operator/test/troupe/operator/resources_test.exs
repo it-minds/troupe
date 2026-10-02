@@ -639,6 +639,116 @@ defmodule Troupe.Operator.ResourcesTest do
       assert cidrs(resources) == ["10.20.0.5/32"]
     end
 
+    test "without Cilium, a profile's own endpoint by name on another port is that port on the public addresses",
+         %{policy: policy} do
+      # Issue #268: an LLM gateway on 8443 was admitted by no rule, and refused where it was
+      # set up. A NetworkPolicy cannot name the host, so it is the public rule's addresses
+      # on its port, as the installation's own object store on 9000 is (Decision 724).
+      rules =
+        [
+          llm: %{"endpoint" => "https://gateway.example.test:8443/v1"},
+          egress: %{"fqdns" => ["registry.example.test:5000", "pypi.example.test"]}
+        ]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: false})
+        |> egress()
+
+      assert Enum.sort(address_rules(rules)) ==
+               Enum.sort([
+                 public_addresses_on([443, 80]),
+                 public_addresses_on([8443]),
+                 public_addresses_on([5000])
+               ])
+    end
+
+    test "without Cilium, a profile's own endpoint at an address is that one address on its port",
+         %{policy: policy} do
+      rules =
+        [
+          llm: %{"endpoint" => "https://10.20.0.5/v1"},
+          mcpServers: [
+            %{"name" => "tickets", "url" => "https://192.168.1.20:8443/mcp"},
+            %{"name" => "docs", "url" => "https://[fd00::5]/mcp"},
+            %{"name" => "wiki", "url" => "https://203.0.113.5:9443/mcp"}
+          ],
+          # An address with no port is reached where a name with none is, on 443 and 80.
+          egress: %{"fqdns" => ["10.1.2.3", "10.1.2.4:5432"]}
+        ]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: false})
+        |> egress()
+
+      assert Enum.sort(address_rules(rules)) ==
+               Enum.sort([
+                 public_addresses_on([443, 80]),
+                 one_address_on("10.20.0.5/32", 443),
+                 one_address_on("192.168.1.20/32", 8443),
+                 one_address_on("fd00::5/128", 443),
+                 one_address_on("203.0.113.5/32", 9443),
+                 one_address_on("10.1.2.3/32", [443, 80]),
+                 one_address_on("10.1.2.4/32", 5432)
+               ])
+    end
+
+    test "without Cilium, a profile's endpoint at a loopback or link-local address is admitted by nothing",
+         %{policy: policy} do
+      # From a pod, loopback is the pod itself, and link-local is its node's, where the
+      # cloud's metadata service answers: no rule opens either, however it is spelled.
+      rules =
+        [
+          llm: %{"endpoint" => "http://127.0.0.1:4000/v1"},
+          mcpServers: [
+            %{"name" => "meta", "url" => "http://169.254.169.254/latest"},
+            %{"name" => "mapped", "url" => "http://[::ffff:169.254.169.254]/latest"},
+            %{"name" => "local", "url" => "http://[::1]:9000/mcp"},
+            %{"name" => "link", "url" => "https://[fe80::1]/mcp"}
+          ],
+          egress: %{"fqdns" => ["169.254.169.254:8080"]}
+        ]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: false})
+        |> egress()
+
+      assert address_rules(rules) == [public_addresses_on([443, 80])]
+    end
+
+    test "without Cilium, a port the platform and the profile share is one rule",
+         %{policy: policy} do
+      settings = %Settings{
+        cilium_available: false,
+        object_store_endpoint: "https://objects.example.test:9000"
+      }
+
+      rules =
+        [llm: %{"endpoint" => "https://gateway.example.test:9000/v1"}]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, settings)
+        |> egress()
+
+      assert Enum.sort(address_rules(rules)) ==
+               Enum.sort([public_addresses_on([443, 80]), public_addresses_on([9000])])
+    end
+
+    test "with Cilium, a profile's own ports and addresses add nothing to the NetworkPolicy",
+         %{policy: policy} do
+      resources =
+        [
+          llm: %{"endpoint" => "https://gateway.example.test:8443/v1"},
+          mcpServers: [%{"name" => "tickets", "url" => "https://10.20.0.5/mcp"}]
+        ]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: true})
+
+      assert address_rules(egress(resources)) == []
+      assert "gateway.example.test" in fqdn_names(resources)
+      assert cidrs(resources) == ["10.20.0.5/32"]
+    end
+
     test "DNS is the cluster's resolver in kube-system, and nothing that merely carries its label",
          %{resources: resources} do
       rules = get_in(find(resources, "NetworkPolicy", "troupe-w-dev"), ["spec", "egress"])
@@ -1243,10 +1353,10 @@ defmodule Troupe.Operator.ResourcesTest do
     }
   end
 
-  defp one_address_on(cidr, port) do
+  defp one_address_on(cidr, ports) do
     %{
       "to" => [%{"ipBlock" => %{"cidr" => cidr}}],
-      "ports" => [%{"protocol" => "TCP", "port" => port}]
+      "ports" => ports |> List.wrap() |> Enum.map(&%{"protocol" => "TCP", "port" => &1})
     }
   end
 end

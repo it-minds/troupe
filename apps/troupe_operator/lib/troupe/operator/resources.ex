@@ -34,9 +34,6 @@ defmodule Troupe.Operator.Resources do
   @dns_namespace "kube-system"
   @dns_app "kube-dns"
 
-  # The ports the NetworkPolicy opens to every public address where there is no Cilium.
-  @public_ports [443, 80]
-
   @doc "Every object a profile implies, in dependency order."
   @spec for_profile(Profile.t(), Policy.t(), Settings.t()) :: [map()]
   def for_profile(%Profile{} = profile, %Policy{} = policy, %Settings{} = settings) do
@@ -358,9 +355,10 @@ defmodule Troupe.Operator.Resources do
   # the FQDN rules could not take it back.
   #
   # Without Cilium there is nothing to write a hostname in, so the external destinations
-  # stay one wide rule, with the installation's own OpenBao and object storage beside it
-  # on their own ports, and the gap is written down rather than hidden: a policy that
-  # silently allows more than it says is worse than one that admits what it cannot do.
+  # stay one wide rule, with the installation's own OpenBao and object storage and the
+  # profile's own endpoints beside it on their own ports, and the gap is written down
+  # rather than hidden: a policy that silently allows more than it says is worse than one
+  # that admits what it cannot do.
   defp network_policy(namespace, profile, policy, settings) do
     %{
       "apiVersion" => "networking.k8s.io/v1",
@@ -409,7 +407,8 @@ defmodule Troupe.Operator.Resources do
         ],
         "ports" => [%{"protocol" => "TCP", "port" => settings.plane_control_port}]
       }
-    ] ++ public_rule(settings) ++ platform_rules(settings) ++ in_cluster_rules(profile, settings)
+    ] ++
+      public_rule(settings) ++ admitted_rules(profile, settings) ++ in_cluster_rules(profile, settings)
   end
 
   # Everything outside the cluster — the LLM endpoint, the MCP servers, the git hosts,
@@ -417,54 +416,48 @@ defmodule Troupe.Operator.Resources do
   # and 80, because that is as close as a NetworkPolicy can come to a list of names. Only
   # where there is no Cilium to hold the names instead; see `network_policy/4`.
   defp public_rule(%Settings{cilium_available: true}), do: []
+  defp public_rule(_settings), do: [admission_rule({:public, Reach.public_ports()})]
 
-  defp public_rule(_settings) do
-    [
-      %{
-        "to" => public_addresses(),
-        "ports" => Enum.map(@public_ports, &%{"protocol" => "TCP", "port" => &1})
-      }
-    ]
-  end
-
-  # The ranges left out are read from `Troupe.WorkerProfile.Reach`, which refuses or reports
-  # a profile's endpoint at one of them, so the rule and the check cannot drift apart.
-  defp public_addresses do
-    [%{"ipBlock" => %{"cidr" => "0.0.0.0/0", "except" => Reach.excepted()}}]
-  end
-
-  # And without Cilium, OpenBao and object storage when they are outside the cluster but
-  # not where the public rule reaches: a hosted S3 service on 9000, a key manager at an
-  # address on the office network. A worker that reaches neither activates no session, so
-  # each gets a rule of its own on the port it names, and the public rule stays 443 and 80
-  # for every other destination.
+  # And without Cilium, what is outside the cluster but not where the public rule reaches,
+  # each on the port it names. OpenBao and object storage first (Decision 724): a hosted S3
+  # service on 9000, a key manager at an address on the office network; a worker that
+  # reaches neither activates no session. Then the profile's own endpoints (Decision 752):
+  # an LLM gateway on 8443, an MCP server on the office network, an `egress.fqdns` entry
+  # with a port. The public rule stays 443 and 80 for every other destination.
   #
-  # An address, private or public, is that one address. A name on another port is the
-  # public rule's addresses on that port, since a NetworkPolicy cannot name a host; so a
-  # name that resolves to a private address is admitted by nothing here, and such an
-  # endpoint has to be given by its address, or admitted by a NetworkPolicy of the
-  # installation's own in the worker namespace. A name on 443 or 80 needs nothing more.
-  defp platform_rules(%Settings{cilium_available: true}), do: []
+  # An address is that one address. A name on another port is the public rule's addresses
+  # on that port, since a NetworkPolicy cannot name a host; so a name that resolves to a
+  # private address is admitted by nothing here, and such an endpoint has to be given by
+  # its address, or admitted by a NetworkPolicy of the installation's own in the worker
+  # namespace. A name on 443 or 80 needs nothing more.
+  #
+  # Which rules those are is `Troupe.WorkerProfile.Reach`'s to say, and the plane's refusal
+  # and the profile's `EndpointUnreachable` read the same judgement: a profile's endpoint
+  # at a loopback or link-local address gets no rule, and is what those name.
+  defp admitted_rules(_profile, %Settings{cilium_available: true}), do: []
 
-  defp platform_rules(%Settings{} = settings) do
-    for url <- [settings.bao_address, settings.object_store_endpoint],
-        host <- external_host(url),
-        rule <- platform_rule(host, URI.parse(url).port),
-        uniq: true,
-        do: rule
+  defp admitted_rules(%Profile{} = profile, %Settings{} = settings) do
+    platform =
+      for url <- [settings.bao_address, settings.object_store_endpoint],
+          host <- external_host(url),
+          port = URI.parse(url).port,
+          is_integer(port),
+          admission <- Reach.admission(host, [port]),
+          do: admission
+
+    (platform ++ Reach.admitted(profile))
+    |> Enum.uniq()
+    |> Enum.map(&admission_rule/1)
   end
 
-  defp platform_rule(_host, nil), do: []
-
-  defp platform_rule(host, port) do
-    ports = [%{"protocol" => "TCP", "port" => port}]
-
-    case address_block(host) do
-      nil when port in @public_ports -> []
-      nil -> [%{"to" => public_addresses(), "ports" => ports}]
-      block -> [%{"to" => [%{"ipBlock" => %{"cidr" => block}}], "ports" => ports}]
-    end
+  defp admission_rule({to, ports}) do
+    %{"to" => peers(to), "ports" => Enum.map(ports, &%{"protocol" => "TCP", "port" => &1})}
   end
+
+  # The ranges left out are read from `Troupe.WorkerProfile.Reach` too, so the rule and the
+  # judgement cannot drift apart.
+  defp peers(:public), do: [%{"ipBlock" => %{"cidr" => "0.0.0.0/0", "except" => Reach.excepted()}}]
+  defp peers(block), do: [%{"ipBlock" => %{"cidr" => block}}]
 
   # And when they are *not* external. A worker fetches its session key from the key
   # manager and reads and writes sealed segments in object storage; a pod that could
@@ -500,7 +493,7 @@ defmodule Troupe.Operator.Resources do
   # `openbao.troupe-system.svc` and `openbao.troupe-system.svc.cluster.local` both name
   # a Service in `troupe-system`. Anything else is a name this cluster does not serve,
   # and the FQDN rule covers it — or, without Cilium, the public one and
-  # `platform_rules/1`.
+  # `admitted_rules/2`.
   defp cluster_namespace(host) do
     case String.split(host, ".") do
       [_service, namespace, "svc" | _rest] -> namespace
