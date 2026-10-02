@@ -140,7 +140,7 @@ starts with an `O_EXCL` lock.
 | Daemon discovery | `$XDG_RUNTIME_DIR/troupe/daemon.sock`, or `daemon.json` (TCP port and token, loopback WebSocket) |
 | A pod's working copies | the `data` volume at `/var/lib/troupe` |
 | Sealed sessions | S3 `sessions/<id>/…`, written by workers and by daemons for private sessions |
-| Session keys | OpenBao KV v2, `troupe/teams/<team>/…` for pods, `troupe/people/<subject>/…` for a person |
+| Session keys | OpenBao KV v2, `troupe/teams/<team>/…` for pods, `troupe/people/<name>/…` for a person, under the name the plane keeps for them there (Decision 755) |
 | Index, identity, ledger, audit, settings, triggers | PostgreSQL, never session content |
 | `WorkerProfile` (written), `TroupePolicy` (read), `TokenReview` | the plane, through the Kubernetes API |
 | Everything in `troupe-w-<profile>` | the operator, server-side apply as `troupe-operator` |

@@ -87,8 +87,9 @@ defmodule Troupe.Protocol.Bundle do
     environment variable, the operator writes a `secretKeyRef`, and every session on the
     profile reaches the server as the same service account.
   * `:person` — `credential_ref` is not a variable name but a **slot**. The value lives
-    in the key manager at `troupe/people/<subject>/mcp/<slot>`, and neither the plane nor
-    the operator ever reads it. The slot defaults to the server's own name.
+    in the key manager at `troupe/people/<name>/mcp/<slot>`, under the session owner's
+    name there (Decision 755), and neither the plane nor the operator ever reads it. The
+    slot defaults to the server's own name.
   * `:client_credentials` — the profile's own identity, by OAuth client credentials with
     an assertion signed through the key manager (Decision 747). The bundle only marks the
     server; who the profile is there is the profile's `mcpIdentities`, because a channel

@@ -18,6 +18,7 @@ defmodule Troupe.Plane.SubjectClaimTest do
   import ExUnit.CaptureLog
 
   alias Troupe.Plane.{Admin, Audit, Identity, Ledger, Principals, Sessions, Settings, Triggers}
+  alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Triggers.Trigger
   alias Troupe.Plane.Web.Router
 
@@ -101,7 +102,10 @@ defmodule Troupe.Plane.SubjectClaimTest do
 
       assert {:ok, %{status: 200, body: body}} = exchange(context, "uuid:" <> uuid)
       assert body["subject"] == uuid
-      assert [_bo] = people_called("bo@example.test")
+      assert [bo] = people_called("bo@example.test")
+
+      # Her name at the key manager is her subject, as it always was (Decision 755).
+      assert bo.kms_name == uuid
 
       # An Entra-shaped token under the default is keyed on its `sub`, as it always was.
       assert {:ok, %{status: 200, body: ada}} = exchange(context, "ada")
@@ -147,6 +151,10 @@ defmodule Troupe.Plane.SubjectClaimTest do
       rekeyed = Identity.get_user(@ada_oid)
       assert rekeyed.id == context.ada.id
       refute Identity.get_user(@ada_sub)
+
+      # Her name at the key manager does not move, so what is stored under it is still
+      # hers (Decision 755).
+      assert rekeyed.kms_name == @ada_sub
 
       # Her session is hers: on its row, and in what she is shown.
       assert Sessions.get(context.session.id).owner_subject == @ada_oid
@@ -278,6 +286,9 @@ defmodule Troupe.Plane.SubjectClaimTest do
       assert ada.id == provisioned["id"]
       refute Identity.get_user(@ada_sub)
 
+      # The row SCIM made takes the name the old one had, under which she stored things.
+      assert ada.kms_name == @ada_sub
+
       session = Sessions.get(context.session.id)
       assert session.owner_id == ada.id
       assert session.owner_subject == @ada_oid
@@ -286,6 +297,33 @@ defmodule Troupe.Plane.SubjectClaimTest do
       assert [event] = rekeys()
       assert event.detail["from"] == @ada_sub
       assert event.detail["merged"] == true
+    end
+
+    test "somebody new is named by their subject, unless a moved person already has it",
+         context do
+      subject_claim("oid")
+      assert {:ok, %{status: 200}} = exchange(context, "ada")
+
+      {:ok, bo} = Identity.upsert_user(%{subject: "bo-oid"})
+      assert bo.kms_name == "bo-oid"
+
+      # A value under the new claim that is the `sub` Ada was known by. No provider hands
+      # out such a thing on purpose, and a name two people shared would be a subtree they
+      # shared, so the newcomer is named by their own id instead.
+      {:ok, cy} = Identity.upsert_user(%{subject: @ada_sub})
+      assert cy.kms_name == cy.id
+      assert Identity.get_user(@ada_oid).kms_name == @ada_sub
+    end
+
+    test "somebody a replica of the release before made, with no name, keeps their subject",
+         context do
+      # Written during a rollout by a replica that did not know the column.
+      Repo.update_all(from(u in User, where: u.id == ^context.ada.id), set: [kms_name: nil])
+
+      subject_claim("oid")
+      assert {:ok, %{status: 200}} = exchange(context, "ada")
+
+      assert Identity.get_user(@ada_oid).kms_name == @ada_sub
     end
   end
 

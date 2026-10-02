@@ -72,11 +72,12 @@ defmodule Troupe.Plane.Tokens do
   Mint an assertion a pod exchanges for a key-manager token of the session's *owner*.
 
   The same signer that mints session tokens, a different audience, and one claim that
-  matters: `sub` is the person the session belongs to, fixed at activation and recorded
-  in `session_created`. OpenBao's JWT auth method verifies it against the transit key's
-  public half and issues a token whose policy is templated on that subject — so a pod
-  running Ada's session can read Ada's slots and nothing else, and a stolen plane mints
-  assertions and reads nothing.
+  matters: `sub` is the person the session belongs to, by their name at the key manager
+  (`User.kms_name/1`, Decision 755), which is their subject unless they have been moved to
+  another claim since they were first known. OpenBao's JWT auth method verifies it against
+  the transit key's public half and issues a token whose policy is templated on that name
+  — so a pod running Ada's session can read Ada's slots and nothing else, and a stolen
+  plane mints assertions and reads nothing.
 
   Short-lived on purpose. The pod exchanges it once at activation and holds the *Bao*
   token for the life of the session, as it already does for the data key; the assertion
@@ -92,9 +93,9 @@ defmodule Troupe.Plane.Tokens do
 
   @spec mint_kms_assertion(String.t(), keyword()) ::
           {:ok, String.t(), map()} | {:error, term()}
-  def mint_kms_assertion(subject, opts \\ []) when is_binary(subject) do
+  def mint_kms_assertion(name, opts \\ []) when is_binary(name) do
     mint(
-      %{"sub" => subject},
+      %{"sub" => name},
       Keyword.merge(
         [audience: @kms_audience, lifetime: @assertion_lifetime],
         opts

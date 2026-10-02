@@ -244,15 +244,20 @@ into the one SCIM made. Each move is logged and audited as `person.rekey` with t
 identifiers and nothing else from the token. The audit trail and every `*_by` keep the name
 they were written with. Somebody who never signs in again is never moved.
 
+What the key manager holds for a person, their credentials for person-mode MCP servers and
+their private sessions' data keys, needs no move: it is under their name there
+(`troupe/people/<name>/`), which the plane fixed when it first knew them, as their subject
+at the time, and keeps through the move (Decision 755). Their servers stay connected, and a
+private session sealed before the move is restored on another device as before. The plane
+tells pods and daemons the name. A daemon from before Decision 755 does not ask for it and
+looks under the person's new subject, where it is refused, so a moved person's private
+sessions on that machine stay local, unsealed, until the daemon is upgraded.
+
 What does not move:
 
 - A plane token minted before the move names nobody afterwards: `/rpc` answers
   `unauthenticated` until the client exchanges again, which it does within fifteen minutes.
   An open console session is turned away and signs in again.
-- What the key manager holds under the old value (`troupe/people/<old sub>/`), since the
-  plane has no credential that can read or write it (Decisions 375 and 377). A person
-  connects their person-mode MCP servers again, and a private session sealed before the
-  move can no longer be restored on another device; the device holding its log keeps it.
 - In `gitops` mode, a trigger's `notify` list is the repository's: change it there.
 
 Switching back moves nobody back. People moved to `oid` are not found under their `sub`
