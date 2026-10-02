@@ -100,6 +100,11 @@ export interface SessionRow {
   /** What the worker last reported: idle, thinking, acting, waiting, done, interrupted. */
   status: string | null;
   done_reason: string | null;
+  /**
+   * A turn the harness stopped, until the root's next input: `tool_failures` or
+   * `agent_failed` (Decision 750). Absent from a plane older than the column.
+   */
+  failed_reason?: string | null;
   pending_approvals: number | null;
   /** Absent from a plane older than the column. */
   pending_questions?: number | null;
