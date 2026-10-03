@@ -140,6 +140,8 @@ describe("the first screen", () => {
     await waitFor(() => says("Where is the first project?"), "the workspace step");
     type(document.querySelector<HTMLInputElement>('[aria-label="Directory"]')!, "/home/ada/project");
     button("Continue")!.click();
+    await waitFor(() => says("Start Troupe when you log in?"), "the daemon step");
+    button("Continue")!.click();
     await waitFor(() => says("Ready"), "the finish step");
     button("Finish without starting one")!.click();
 

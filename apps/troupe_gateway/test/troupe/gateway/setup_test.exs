@@ -82,7 +82,12 @@ defmodule Troupe.Gateway.SetupTest do
       assert {:ok, %{"step" => "workspace"}} = answer(ctx.client, "c-5", "models", suggested)
       assert File.read!(ctx.config_file) =~ "sk-typed-into-a-form"
 
-      assert {:ok, %{"step" => "finish", "suggested_prompt" => prompt}} =
+      assert {:ok,
+              %{
+                "step" => "daemon",
+                "suggested_prompt" => prompt,
+                "daemon" => %{"at_login" => false}
+              }} =
                answer(ctx.client, "c-6", "workspace", %{
                  "workspace" => ctx.workspace,
                  "approvals" => "ask"
@@ -90,8 +95,14 @@ defmodule Troupe.Gateway.SetupTest do
 
       assert is_binary(prompt)
 
+      # Into the suite's scratch home (test_helper.exs), and out again afterwards.
+      on_exit(fn -> Troupe.StartAtLogin.disable() end)
+
+      assert {:ok, %{"step" => "finish", "daemon" => %{"at_login" => true}}} =
+               answer(ctx.client, "c-7", "daemon", %{"at_login" => true})
+
       assert {:ok, %{"step" => "done", "session" => %{"session_id" => session_id} = session}} =
-               answer(ctx.client, "c-7", "finish", %{})
+               answer(ctx.client, "c-8", "finish", %{})
 
       # The first session is a real one: stopped here, or it keeps the next suite's daemon
       # busy (`Idle`) and in its `session.list`.

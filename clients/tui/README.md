@@ -52,7 +52,9 @@ clients to add, and `-y` / `-Yes` asks nothing. A private repository answers
 `daemon.json` as every client finds it, and starts the same daemon inside itself when
 none is. `troupe daemon run` starts the standalone `troupe-daemon` instead — found through
 `TROUPE_DAEMON_COMMAND` or on the `PATH` — and `troupe daemon status` says whether one is
-running.
+running. `troupe daemon login on` has the standalone one start every time you log in and
+stay up, `troupe daemon login off` takes that back, and a first run that saves settings
+asks the same question.
 
 ### Unsigned binaries
 

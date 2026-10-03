@@ -10,7 +10,7 @@ import { TroupeRpcError } from "./connection.js";
 import type { ModelOffer, ModelRole } from "./config.js";
 import { ErrorCodes } from "./types.js";
 
-export type SetupStepName = "where" | "provider" | "key" | "models" | "workspace" | "finish";
+export type SetupStepName = "where" | "provider" | "key" | "models" | "workspace" | "daemon" | "finish";
 
 export interface SetupStep {
   name: SetupStepName;
@@ -46,6 +46,18 @@ export interface SetupDetected {
   plane: { url: string | null; linked: boolean };
 }
 
+/**
+ * Whether the daemon starts when this user logs in (troupe Decision 762): the platform's
+ * kind of login entry, its file, and the `troupe-daemon` it starts — null when there is
+ * none on this computer to start.
+ */
+export interface SetupDaemon {
+  at_login: boolean;
+  kind: "startup_folder" | "launch_agent" | "systemd" | "autostart";
+  path: string;
+  command: string | null;
+}
+
 /** The session `finish` started, or why it could not. */
 export interface SetupSession {
   workspace: string;
@@ -67,6 +79,8 @@ export interface SetupFlow {
   suggested: { default: string | null; cheap: string | null };
   check: SetupCheck | null;
   suggested_prompt: string | null;
+  /** Absent from a daemon from before the `daemon` step. */
+  daemon?: SetupDaemon;
   session: SetupSession | null;
 }
 

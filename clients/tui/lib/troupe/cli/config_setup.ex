@@ -16,6 +16,9 @@ defmodule Troupe.CLI.ConfigSetup do
       plane (`troupe login`, then `troupe config pull`); or not now, which says where
       each of those lives.
 
+  Settings saved here end with the question the desktop app's first run asks last, where
+  `troupe-daemon` is installed: whether it starts at login (`troupe daemon login on`).
+
   A `config.yaml` through which no model can be asked (`Troupe.Config.key_problem/1`)
   gets the report, whose last line names `troupe config` as the next step, and then the
   same three ways on. Without a terminal it asks nothing and prints the ways on. Every
@@ -38,7 +41,9 @@ defmodule Troupe.CLI.ConfigSetup do
   `say` prints a line, `ask` reads one (`nil` at end of input), `secret` reads one
   without echo, `call` is a daemon request, `login` and `pull` are the commands of the
   same names, `describe` is the full report, `opencode` the providers Troupe is reading
-  from opencode right now, and `usable?` whether the settings in force can ask a model.
+  from opencode right now, `usable?` whether the settings in force can ask a model, and
+  `troupe_daemon?` and `troupe_daemon` whether there is a standalone daemon binary and
+  `troupe daemon ARGS` run through it.
   """
   @type io :: %{
           interactive?: boolean(),
@@ -51,7 +56,9 @@ defmodule Troupe.CLI.ConfigSetup do
           describe: (-> String.t()),
           opencode: (-> %{names: [String.t()], default: String.t() | nil}),
           local_file?: (-> boolean()),
-          usable?: (-> boolean())
+          usable?: (-> boolean()),
+          troupe_daemon?: (-> boolean()),
+          troupe_daemon: ([String.t()] -> non_neg_integer())
         }
 
   @doc "Run `troupe config` for a workspace; returns the exit status."
@@ -183,7 +190,7 @@ defmodule Troupe.CLI.ConfigSetup do
         0
 
       yes?(io, "Copy them into #{path}, keys as opencode has them written?", true) ->
-        import_opencode(io)
+        io |> import_opencode() |> at_login(io)
 
       true ->
         io.say.("Left as it is: Troupe keeps reading opencode's config.")
@@ -221,7 +228,7 @@ defmodule Troupe.CLI.ConfigSetup do
 
     case io.ask.("choice [1]: ") do
       answer when answer in ["", "1"] ->
-        set_up_here(path, io)
+        path |> set_up_here(io) |> at_login(io)
 
       "2" ->
         from_plane(io)
@@ -406,6 +413,25 @@ defmodule Troupe.CLI.ConfigSetup do
     end
   end
 
+  # -- at login -----------------------------------------------------------------
+
+  # The question the desktop app's first run asks last (root Decision 762): whether the
+  # daemon starts when this person logs in. Asked once the settings are saved, only
+  # where there is a `troupe-daemon` to start, and Enter is no; yes is `troupe daemon
+  # login on`, which says what it wrote.
+  defp at_login(0, io) do
+    if io.troupe_daemon?.() and
+         yes?(
+           io,
+           "Start troupe-daemon when you log in, so it is running before any window is?",
+           false
+         ),
+       do: io.troupe_daemon.(["login", "on"]),
+       else: 0
+  end
+
+  defp at_login(status, _io), do: status
+
   # -- helpers ------------------------------------------------------------------
 
   defp yes?(io, question, default) do
@@ -459,7 +485,9 @@ defmodule Troupe.CLI.ConfigSetup do
       describe: fn -> describe(workspace) end,
       opencode: fn -> opencode(workspace) end,
       local_file?: fn -> File.regular?(Troupe.Config.user_path()) end,
-      usable?: fn -> usable?(workspace) end
+      usable?: fn -> usable?(workspace) end,
+      troupe_daemon?: fn -> match?({:ok, _path}, Troupe.CLI.Daemon.command()) end,
+      troupe_daemon: &Troupe.CLI.Daemon.run/1
     }
   end
 
