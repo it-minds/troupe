@@ -383,6 +383,66 @@ Found by the chunk 13 fixer of slot C13 (PR #337), 2026-10-02.
 
 Found by the chunk 13 fixers of slots A13, D13 and E13 (PRs #339, #345, #343), 2026-10-02.
 
+### D57 - SCIM: what is left after #356 (low)
+
+- `PUT /scim/v2/Users/:id` and `/Groups/:id` ignore the id in the path and upsert on the
+  body's subject: a `PUT` to an id the plane doesn't have creates a resource (RFC 7644
+  section 3.5.1 says a `PUT` must not), and one whose body names another `externalId` (or
+  `userName`) changes or creates that person instead of being refused as `mutability`, the
+  way a `PATCH` is (Decision 754). Addressing `PUT` by id through the `PATCH` path would
+  close both.
+- A refused `POST` or `PUT` answers `400` as `{"status", "detail"}` without SCIM's error
+  schema, and a user body with neither `externalId` nor `userName` (or a group body with
+  neither `externalId` nor `id`) raises and answers `500`.
+- A deleted user stays visible to `GET` by id and to filters (the plane deactivates rather
+  than deletes, for the audit trail and a later reactivation); RFC 7644 section 3.6 has a
+  `404` and leaves it out. That is deliberate but no decision says so.
+- Responses carry `application/json`, not `application/scim+json`.
+- Unconfirmed: a `POST` or `PUT` passes `active` to the changeset unread, so a string
+  `"False"` is probably refused where a `PATCH` reads it as false.
+
+Found by the chunk 14 fixer of slot D14 (PR #362), 2026-10-03.
+
+### D58 - The desktop app and a failed turn: what #354 left (low)
+
+- The review queue shows a failed run's Failed pill but says "Ended: Idle", and
+  `wentWrong` ignores `row.failed`, so the run's group isn't sorted first or marked as
+  something that did not finish (`views/Review.tsx`; about two lines).
+- A session whose turn stopped on `tool_failures` still reads Idle in the session view's
+  header while the list says Failed; changing it reopens Decision 745's choice for the
+  transcript.
+- A local session can't carry `tool_failures`: the daemon's `session.list` `failed` is
+  `agent_failed` only (Decision 745).
+
+Found by the chunk 14 fixer of slot E14 (PR #359), 2026-10-03.
+
+### D59 - Private sessions and MCP sessions: small leftovers of 0.7.4 (low)
+
+- `ObjectStore.list_versions/2` reads one page, so an erasure (a pod's, and since PR #364
+  a private session's) of a session with more than 1000 object versions leaves the rest.
+- How the desktop app and the TUI show a session in the new `erasure_pending` state is
+  untested: the client library types a state as an open string, and the TUI's remote
+  worker reads a state it doesn't know as none.
+- `Troupe.Session.MCP`, reloading after a server left `mcp.json`, stops the server but
+  leaves its HTTP sessions in the local session's table and open at the server until the
+  local session stops (`Sessions.retain/2` would end them, as `put_servers` now does on a
+  pod).
+
+Found by the chunk 14 fixers of slots A14 and B14 (PRs #364, #363), 2026-10-03.
+
+### D60 - A checkout that built the previous version keeps reporting it (low)
+
+Every `mix.exs` reads `VERSION` when the project loads (Decision 668), but Mix rewrites an
+app's compiled `.app` only when `mix.exs` or the config changes, not when `VERSION` does.
+So after a version bump an incremental build in a checkout that built before keeps the old
+`vsn`: `scripts/install-local.ps1` then installs a TUI whose `troupe version` reports the
+previous release (the daemon's release reads the version afresh and is right), and
+`Troupe.VersionTest` fails with "troupe_core is 0.7.2-beta and VERSION is 0.7.3-beta".
+CI builds from clean and is not affected. Removing `_build/*/lib/troupe*/ebin/*.app`
+before building clears it; `install-local.ps1` could do that, or the projects could make a
+change to `VERSION` recompile them. Found by the chunk 14 coordinator verifying the chunk's
+tip, 2026-10-03.
+
 ## Taken
 
 | Defect | Taken by |
@@ -450,7 +510,10 @@ Found by the chunk 13 fixers of slots A13, D13 and E13 (PRs #339, #345, #343), 2
 | A person's own remote MCP server that needs their OAuth sign-in (found by the deployment's first profile); then the `initialize`/session handshake and the desktop app's half of the pod path; client registration and the TUI's half are next | #300, PR #310; #319, PR #323; #308, PR #322 |
 | D47 - On a plane, a turn the harness stopped reads as a finished one | #320, PR #325 |
 | D52 - A worker logs in to OpenBao as one shared role and for every request; a person-mode server's mode before the first bundle | #336, PR #337 |
-| D56's SCIM items - a create answered `200`, a delete of an unknown id `204`, and a `PUT` with `active: false` left sponsored principals running | #356 |
+| D56's SCIM items - a create answered `200`, a delete of an unknown id `204`, and a `PUT` with `active: false` left sponsored principals running | #356, PR #362 |
+| D54's first item - with Cilium, a profile could name a loopback or link-local endpoint | #355, PR #360 |
+| D51 - an MCP session a renewed token or a dropped server left open (the person-mode case stays in D51) | #358, PR #363 |
+| D53's first item - the desktop app showed a team turn that failed on the plane as finished | #354, PR #359 |
 
 ## Checked and not a defect
 
