@@ -3719,7 +3719,7 @@ citation keeps meaning what it meant.
        `excludedAttributes=members` leaves a group's members out, as Entra asks for groups.
        `DELETE` on a group empties it, which the docs said and the route did not do.
      - Unchanged: `POST` and `PUT`, which upsert on the subject and answer `200`; no
-       pagination, bulk, ETags or `/Schemas`.
+       pagination, bulk, ETags or `/Schemas`. (759 revises this: a `POST` answers `201`.)
      - **Proof:** the plane's `scim_entra_test.exs`, Microsoft's documented provisioning
        requests with `example.test` names, sent to the router as Entra sends them: a filter
        finding one user and nobody, a group by name without its members, and refusals as
@@ -3828,3 +3828,63 @@ citation keeps meaning what it meant.
        whatever the plane was told, a public address and a Service saved, the bundle
        refused with Cilium). The operator's two and the plane's two failed on the chunk
        tip.
+
+759. **A SCIM create answers `201` with where the resource is, a delete of an id the plane
+     does not have answers `404`, and a push with `active: false` deactivates a person the
+     way a `DELETE` and a `PATCH` do.** Issue #356, the SCIM items of defect D56, left by
+     754, which kept `POST` and `PUT` as they were.
+     - **The answers RFC 7644 gives.** A `POST` to `/Users` or `/Groups` answers `201`, the
+       resource, and its path in `Location`, the same as its `meta.location` (section 3.3);
+       both are relative to the plane, as `meta.location` already was, because a plane
+       behind an Ingress without `TROUPE_BASE_URL` does not know the name it is reached by.
+       A `PUT` still answers `200` (3.5.1). A `DELETE` of a user answers `404` for an id
+       nobody has, as one of a group already did (3.6), and `204` otherwise.
+     - **A create of somebody the plane has is still a create.** A push upserts on the
+       subject, so a `POST` of a person who signed in before their first push, or one
+       pushed before, updates that row and answers `201`. The RFC's answer to a duplicate
+       is `409`, which would leave somebody who signed in first unprovisionable: a row
+       sign-in keyed on Entra's object id, which no push has named yet, does not answer the
+       provider's filter on `userName` (754), so the provider creates, and a refusal there
+       is a refusal at every cycle.
+     - **One way to deactivate.** `put_user/1`, behind `POST` and `PUT`, writes through
+       the same function as a `PATCH` and a `DELETE`, which stops the principals the
+       person sponsors before it writes `active: false`. Stopping only touches principals
+       still running, so the same push again, or a `DELETE` after a `PUT`, stops nothing
+       twice; a push that keeps them active does nothing to principals.
+     - Unchanged: a `PUT` keys on the body's subject rather than the `id` in its path, and
+       a refused `POST` or `PUT` answers `400` without SCIM's error body.
+     - **Proof:** the plane's `scim_answers_test.exs`, through the router with the
+       connector's bearer: a user's and a group's create with `Location` equal to
+       `meta.location`, a person who signed in first created as the same row, a replace's
+       `200`, a delete's `204` and `404` for an unknown and a malformed id on users and
+       groups, a `PUT` with `active: false` stopping a sponsored principal (and refusing
+       sign-in) and the same `PUT` again leaving its `disabled_at`, and a `PUT` with
+       `active` true or absent leaving it running. The creates, the unknown delete and the
+       stop failed on the tip. `scim_entra_test.exs`, `scim_connector_test.exs`,
+       `subject_claim_test.exs` and `web_test.exs` asked for `200` or either on a create,
+       and now ask for `201`.
+
+760. **The desktop app shows a team session whose turn the harness stopped as failed, and
+     says why in words.** Issue #354, defect D53's first bullet, following 745 and 750.
+     - **A plane's row is read for its reason.** `rowFromPlane` maps `failed_reason` to
+       `FleetRow.failed` as `{reason, detail: null}`, the field a daemon's rows fill (745),
+       so the list's row, the launcher's and the review queue's status say Failed for a
+       team session as they do for a local one, and nothing that reads `failed` has a new
+       shape to learn. `detail` is null because a plane holds no content (750). A plane
+       from before the column, or a row without one, says nothing failed.
+     - **Each reason has its words.** `failedTitle` says "The agent kept crashing and the
+       session stopped" for `agent_failed`, as before, and "A tool kept failing and the
+       harness stopped the turn" for `tool_failures`: the failure guard counts one tool's
+       failures in a row, so it is a tool and not the agent. A reason the app does not know
+       reads "The turn failed (<reason>)" rather than nothing.
+     - **A local session still cannot say `tool_failures`.** The daemon's `failed` is
+       `agent_failed` only (745), so those words reach a local row only once a daemon lists
+       it, and the transcript still shows such a turn as the failure guard's question
+       answered `stop`, as 745 left it. A notification that reads a row's `failed` follows,
+       though a plane's rows count nothing unseen and so raise none.
+     - **Proof:** the client's `fleet` test (a plane row with each reason, one with none,
+       one from before the column) and the desktop app's `team-failed` test (a fake plane
+       lists a session stopped on each reason beside one that finished; the launcher's
+       recent rows and the list say Failed, with the reason's words on hover), both failing
+       on the tip; and the web build against `pnpm fake`, which now seeds a run stopped on
+       `tool_failures`.

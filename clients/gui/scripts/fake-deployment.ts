@@ -29,7 +29,10 @@ const plane = await FakePlane.start({
   clientDefaults: process.env["NO_CLIENT_DEFAULTS"] ? { configured: false } : GATEWAY_DEFAULTS,
 });
 
-// Something to look at on the first screen.
+// Something to look at on the first screen. The oldest is a run whose turn the harness
+// stopped, a tool that kept failing (Decision 750), so the list has a failure to show.
+const stopped = plane.seed("alice@example.com", { title: "Weekly licence audit", profile: "dev", origin: { kind: "trigger", trigger: "weekly" } });
+plane.fail(stopped.id, "tool_failures");
 plane.seed("alice@example.com", { title: "Rewrite the placement loop", profile: "dev" });
 plane.seed("alice@example.com", { title: "Nightly dependency sweep", profile: "ux", origin: { kind: "trigger", trigger: "nightly" } });
 const waiting = plane.seed("bob@example.com", { title: "Migrate the ledger table", profile: "dev" });

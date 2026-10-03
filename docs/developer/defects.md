@@ -327,11 +327,9 @@ Found by the chunk 12 fixer of slot B (PR #324), 2026-10-01; the rest is #336.
 
 ### D53 - Small leftovers from the 0.7.2 work (low)
 
-- The desktop app doesn't read the plane row's new `failed_reason` (Decision 750):
-  `rowFromPlane` (`clients/gui/packages/client/src/fleet.ts`) should map it to
-  `FleetRow.failed`, and `failedTitle` (`views/bits.tsx`) has no words for
-  `tool_failures` yet ("kept crashing" would be wrong). A2A's `state_of_row` could read the
-  same field instead of the log, and `Web.Live.Status.from_session/1` is used by no page.
+- A2A's `state_of_row` could read the plane row's `failed_reason` (Decision 750) instead
+  of the log, and `Web.Live.Status.from_session/1` is used by no page. (The desktop app
+  reads it since #354.)
 - A plane row's `cost_micros` lags: a pod reports status on lifecycle changes only, and
   the summary folds the cost later, so a report just after a turn says 0.
 - `EndpointUnreachable` (Decision 749): in `gitops` mode an ssh profile's resource gets the
@@ -377,12 +375,6 @@ Found by the chunk 13 fixer of slot C13 (PR #337), 2026-10-02.
 
 ### D56 - SCIM and the subject claim: small leftovers (low)
 
-- `POST /scim/v2/Users` and `/Groups` answer `200`; RFC 7644 section 3.3 and Microsoft's
-  documented responses have `201`.
-- `DELETE /scim/v2/Users/:id` answers `204` for an id the plane doesn't have (the RFC has
-  `404`).
-- A `PUT` with `active: false` deactivates a person but doesn't stop the service
-  principals they sponsor; `DELETE` and, since PR #345, `PATCH` do.
 - After a re-key (Decision 751) a plane token minted before the move is refused as an
   unknown user; how the desktop app and the TUI take that one refusal is untested, and so
   is the budget ceiling carried over when an old row is folded into SCIM's.
@@ -460,6 +452,7 @@ Found by the chunk 13 fixers of slots A13, D13 and E13 (PRs #339, #345, #343), 2
 | A person's own remote MCP server that needs their OAuth sign-in (found by the deployment's first profile); then the `initialize`/session handshake and the desktop app's half of the pod path; client registration and the TUI's half are next | #300, PR #310; #319, PR #323; #308, PR #322 |
 | D47 - On a plane, a turn the harness stopped reads as a finished one | #320, PR #325 |
 | D52 - A worker logs in to OpenBao as one shared role and for every request; a person-mode server's mode before the first bundle | #336, PR #337 |
+| D56's SCIM items - a create answered `200`, a delete of an unknown id `204`, and a `PUT` with `active: false` left sponsored principals running | #356 |
 
 ## Checked and not a defect
 
