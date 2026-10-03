@@ -67,6 +67,7 @@ defmodule Troupe.Worker.AuthTest do
     "unsubscribe",
     "session.get",
     "commands.list",
+    "commands.run",
     "input.send",
     "turn.cancel",
     "approval.respond",

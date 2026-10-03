@@ -552,6 +552,14 @@ defmodule Troupe.Protocol.Schema do
       # The slash commands a client may offer for a session, agents included; reading
       # the table wakes nothing.
       "commands.list" => %{"session_id" => required(:string)},
+      # A command a markdown file defines, run by the harness: its prompt, with
+      # `arguments` for `$ARGUMENTS`, sent as the session's input (Decision 763).
+      "commands.run" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "name" => required(:string),
+        "arguments" => optional(:string)
+      },
       "memory.get" => %{"workspace" => required(:string)},
       # Every file the session's next prompt is read from, with its scope and its share
       # of the budget (Decision 706); reading it wakes nothing.
