@@ -75,7 +75,8 @@ export function App(): JSX.Element {
   // where it ends — on the session it started, or on the list — and the next start is
   // the first that opens here.
   const [where, setWhere] = useState<Where>(startScreen);
-  const daemon = useDaemon();
+  // Given the sign-in, so the daemon is handed the plane token it seals with (#365).
+  const daemon = useDaemon(auth);
   // The theme, light or dark and notifications follow the person through the daemon (troupe #57).
   useSharedPrefs(daemon.client);
   const { snapshot, store, refresh } = useFleet(auth, daemon.client);

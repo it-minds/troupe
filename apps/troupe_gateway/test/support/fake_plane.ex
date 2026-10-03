@@ -18,7 +18,12 @@ defmodule Troupe.Gateway.FakePlane do
 
   And the two an erasure needs (Decision 756): `session.erasures` names the rows `erase/2`
   marked that a device has not acknowledged, and `session.erased` records the device and
-  deletes every version under the prefix in MinIO, as the plane does.
+  deletes every version under the prefix in MinIO, as the plane does. `session.get`
+  answers a row as its owner reads it, and an erased one as `not_found`, as the plane does.
+
+  It takes one plane token at a time, `"plane-token"` unless told otherwise, and
+  `renew/2` replaces it, as a plane token running out and a client renewing it does: the
+  old one is refused from then on (issue #365).
   """
 
   use Agent
@@ -27,17 +32,21 @@ defmodule Troupe.Gateway.FakePlane do
 
   @spec start_link(keyword()) :: Agent.on_start()
   def start_link(opts \\ []) do
-    Agent.start_link(fn -> %{sessions: %{}, calls: []} end, name: Keyword.get(opts, :name))
+    token = Keyword.get(opts, :token, "plane-token")
+
+    Agent.start_link(fn -> %{sessions: %{}, calls: [], token: token} end,
+      name: Keyword.get(opts, :name)
+    )
   end
 
   @doc "Start the fake plane and an HTTP server in front of it. Returns its base URL."
   @spec serve(keyword()) :: %{url: String.t(), state: pid()}
   def serve(opts \\ []) do
-    {:ok, state} = start_link([])
+    {:ok, state} = start_link(token: Keyword.get(opts, :token, "plane-token"))
 
     {:ok, server} =
       Bandit.start_link(
-        plug: {__MODULE__.Router, state: state, token: Keyword.get(opts, :token, "plane-token")},
+        plug: {__MODULE__.Router, state: state},
         scheme: :http,
         ip: {127, 0, 0, 1},
         port: 0,
@@ -47,6 +56,13 @@ defmodule Troupe.Gateway.FakePlane do
     {:ok, {_ip, port}} = ThousandIsland.listener_info(server)
     %{url: "http://127.0.0.1:#{port}", state: state, server: server}
   end
+
+  @doc "Take `token` from now on, and refuse the one taken before."
+  @spec renew(pid(), String.t()) :: :ok
+  def renew(state, token), do: Agent.update(state, &%{&1 | token: token})
+
+  @doc false
+  def token(state), do: Agent.get(state, & &1.token)
 
   @doc "The row the fake plane holds for a session, or nil."
   @spec row(pid(), String.t()) :: map() | nil
@@ -102,6 +118,14 @@ defmodule Troupe.Gateway.FakePlane do
           {{:error, "stale_version"}, s}
       end
     end)
+  end
+
+  defp dispatch(state, "session.get", %{"session_id" => id}) do
+    case row(state, id) do
+      nil -> {:error, "not_found"}
+      %{"state" => "erased"} -> {:error, "not_found", %{"session_id" => id, "reason" => "erased"}}
+      row -> {:ok, row}
+    end
   end
 
   defp dispatch(state, "session.register", params) do
@@ -210,7 +234,7 @@ defmodule Troupe.Gateway.FakePlane do
       {:ok, body, conn} = read_body(conn)
       request = Jason.decode!(body)
 
-      if authorized?(conn, opts[:token]) do
+      if authorized?(conn, FakePlane.token(opts[:state])) do
         answer(conn, request, FakePlane.call(opts[:state], request["method"], request["params"]))
       else
         send_resp(conn, 401, "")
@@ -232,6 +256,14 @@ defmodule Troupe.Gateway.FakePlane do
         "jsonrpc" => "2.0",
         "id" => request["id"],
         "error" => %{"code" => -32_007, "message" => message}
+      })
+    end
+
+    defp answer(conn, request, {:error, message, data}) do
+      json(conn, %{
+        "jsonrpc" => "2.0",
+        "id" => request["id"],
+        "error" => %{"code" => -32_005, "message" => message, "data" => data}
       })
     end
 

@@ -249,17 +249,18 @@ export interface CommandArg {
 /**
  * One slash command as `commands.list` lists it: the one table behind every client's
  * palette (PROTOCOL.md §6). `availability` is what the command needs, for the client to
- * judge and say rather than hide the row.
+ * judge and say rather than hide the row. `source` `user` or `project` is a command a
+ * markdown file defines, which `commands.run` runs.
  */
 export interface CommandEntry {
   name: string;
   aliases: string[];
-  section: "session" | "navigate" | "workspace" | "setup" | "agents" | "quit" | string;
+  section: "session" | "navigate" | "workspace" | "setup" | "agents" | "custom" | "quit" | string;
   summary: string;
   usage: string;
   args: CommandArg[];
   availability: "always" | "window" | "local" | "plane" | string;
-  source: "builtin" | "agent" | string;
+  source: "builtin" | "agent" | "user" | "project" | string;
   detail: string;
   example: string | null;
   [k: string]: unknown;

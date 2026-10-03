@@ -106,6 +106,54 @@ defmodule Troupe.Daemon.CLITest do
     assert line =~ "nothing to copy"
   end
 
+  # Into a scratch home, as a systemd user unit whatever runs the test: never the login
+  # items of the person running it (Decision 762).
+  test "login turns starting at login on and off, and status says which", %{base: base} do
+    home = Path.join(base, "home")
+    previous = Application.get_env(:troupe_core, :start_at_login)
+
+    Application.put_env(:troupe_core, :start_at_login,
+      kind: :systemd,
+      env: %{"HOME" => home, "XDG_CONFIG_HOME" => Path.join(home, ".config"), "APPDATA" => home},
+      command: "/opt/troupe/bin/troupe-daemon"
+    )
+
+    on_exit(fn ->
+      if previous,
+        do: Application.put_env(:troupe_core, :start_at_login, previous),
+        else: Application.delete_env(:troupe_core, :start_at_login)
+    end)
+
+    assert CLI.parse(["login", "on"]) == {:login, :on}
+    assert CLI.parse(["login", "off"]) == {:login, :off}
+    assert CLI.parse(["login", "status"]) == {:login, :status}
+    assert CLI.parse(["login"]) == {:login, :status}
+    assert {:error, _} = CLI.parse(["login", "maybe"])
+
+    unit = Path.join(home, ".config/systemd/user/troupe-daemon.service")
+
+    assert capture_io(fn -> assert CLI.main({:login, :status}) == 1 end) ==
+             "troupe-daemon does not start at login\n"
+
+    assert capture_io(fn -> assert CLI.main({:login, :on}) == 0 end) ==
+             "troupe-daemon starts at login: #{unit}\n" <>
+               "  runs       /opt/troupe/bin/troupe-daemon run, and stays up until you log out\n" <>
+               "  from       your next login; nothing is started now\n"
+
+    assert File.read!(unit) =~ ~s(ExecStart="/opt/troupe/bin/troupe-daemon" run)
+
+    assert capture_io(fn -> assert CLI.main({:login, :status}) == 0 end) ==
+             "troupe-daemon starts at login: #{unit}\n"
+
+    assert capture_io(fn -> assert CLI.main({:login, :off}) == 0 end) ==
+             "troupe-daemon no longer starts at login: removed #{unit}\n"
+
+    refute File.exists?(unit)
+
+    assert capture_io(fn -> assert CLI.main({:login, :off}) == 0 end) ==
+             "troupe-daemon does not start at login; there was nothing to remove\n"
+  end
+
   test "run's options open the loopback door and read the idle timeout from config" do
     opts = CLI.run_opts()
     assert opts[:loopback] == [enabled: true]

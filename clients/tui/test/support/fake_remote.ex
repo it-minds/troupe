@@ -81,6 +81,17 @@ defmodule Troupe.FakeRemote do
   @spec calls(pid()) :: [{String.t(), map()}]
   def calls(remote), do: GenServer.call(remote, :calls)
 
+  @doc """
+  The private sessions a daemon registered (`session.register`), by id, as the plane
+  keeps their rows. Only a call carrying a plane token `/auth/exchange` minted gets here.
+  """
+  @spec registered(pid()) :: %{String.t() => map()}
+  def registered(remote), do: GenServer.call(remote, :registered)
+
+  @doc "Every plane token `/auth/exchange` has minted."
+  @spec plane_tokens(pid()) :: MapSet.t()
+  def plane_tokens(remote), do: GenServer.call(remote, :plane_tokens)
+
   @doc "Drops every worker connection, as a network partition or a worker restart would."
   @spec kill_workers(pid()) :: :ok
   def kill_workers(remote), do: GenServer.call(remote, :kill_workers)
@@ -205,6 +216,10 @@ defmodule Troupe.FakeRemote do
       transport: Keyword.get(opts, :transport, :websocket),
       exchange?: Keyword.get(opts, :exchange, true),
       plane_tokens: MapSet.new(),
+      # Seconds a plane token from `/auth/exchange` is good for.
+      plane_token_ttl: Keyword.get(opts, :plane_token_ttl, 900),
+      # The private sessions a daemon registered, by id (issue #365).
+      private: %{},
       device: %{code: "DEV-CODE", user_code: "WXYZ-1234", approved?: false},
       refresh_broken?: false,
       seq: Map.new(sessions, fn {id, session} -> {id, highest(session.events)} end),
@@ -266,6 +281,8 @@ defmodule Troupe.FakeRemote do
   end
 
   def handle_call(:calls, _from, state), do: {:reply, Enum.reverse(state.calls), state}
+  def handle_call(:registered, _from, state), do: {:reply, state.private, state}
+  def handle_call(:plane_tokens, _from, state), do: {:reply, state.plane_tokens, state}
 
   def handle_call(:kill_workers, _from, state) do
     for {pid, %{kind: :worker}} <- state.connections, do: send(pid, :die)
@@ -638,6 +655,21 @@ defmodule Troupe.FakeRemote do
     {{:ok, %{"path" => params["path"], "bytes" => byte_size(params["content"])}}, state}
   end
 
+  # A daemon registering a private session it runs (issue #365): a row at epoch 1 the
+  # first time, the same row after, as the plane keeps one.
+  defp dispatch(state, :plane, "session.register", %{"session_id" => id} = params, _pid) do
+    row =
+      Map.get(state.private, id, %{
+        "session_id" => id,
+        "kind" => "private",
+        "epoch" => 1,
+        "device" => params["device"],
+        "last_seq" => 0
+      })
+
+    {{:ok, row}, %{state | private: Map.put(state.private, id, row)}}
+  end
+
   defp dispatch(state, _kind, "blob.get", params, _pid) do
     bytes = "the whole blob"
 
@@ -922,7 +954,7 @@ defmodule Troupe.FakeRemote do
 
         body = %{
           "token" => token,
-          "expires_at" => System.system_time(:second) + 900,
+          "expires_at" => System.system_time(:second) + state.plane_token_ttl,
           "subject" => state.principal["sub"],
           "display_name" => state.principal["name"],
           "teams" => Enum.map(state.teams, & &1["name"]),

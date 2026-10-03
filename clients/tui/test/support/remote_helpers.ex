@@ -11,8 +11,9 @@ defmodule Troupe.RemoteHelpers do
   import ExUnit.Callbacks, only: [on_exit: 1]
 
   alias Troupe.Client
+  alias Troupe.Client.Daemon.Link
   alias Troupe.FakeRemote
-  alias Troupe.Remote.Tokens
+  alias Troupe.Remote.{RPC, Tokens}
 
   @doc "Starts a FakeRemote for this test and forgets every credential afterwards."
   @spec start_remote!(keyword()) :: {pid(), String.t()}
@@ -27,6 +28,10 @@ defmodule Troupe.RemoteHelpers do
       detach_all()
       _ = Tokens.logout(:all)
       if Process.alive?(remote), do: GenServer.stop(remote, :normal)
+      # A TUI signed in links the daemon it attaches to as the person the plane names and
+      # hands it the plane token (issue #365), and the daemon this VM embeds outlives the
+      # test: the next one meets it as it would on a machine nobody has signed in on.
+      if Link.up?(), do: Link.call("identity.unlink", %{command_id: RPC.command_id()})
     end)
 
     {remote, url}

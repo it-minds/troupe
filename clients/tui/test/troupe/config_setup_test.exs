@@ -218,6 +218,39 @@ defmodule Troupe.ConfigSetupTest do
       assert Enum.join(said(), "\n") =~ "no key is in force yet"
     end
 
+    # The desktop app's last question too (root Decision 762), where there is a
+    # troupe-daemon to start: Enter is no, yes is `troupe daemon login on`.
+    test "saved settings end with whether troupe-daemon starts at login" do
+      daemon = fn
+        "config.get", _ -> {:ok, @nothing}
+        "config.models", _ -> {:ok, %{"models" => [%{"id" => "m"}], "failures" => []}}
+        "config.set", _ -> {:ok, %{"path" => @path, "api_key_set" => true}}
+      end
+
+      setup = ["1", "1", "", "key", "", "", ""]
+
+      assert ConfigSetup.run("/w", io(daemon: daemon, troupe_daemon?: true, answers: setup ++ [""])) ==
+               0
+
+      assert_received {:ask, "Start troupe-daemon when you log in" <> question}
+      assert question =~ "[y/N]"
+      refute_received {:troupe_daemon, _}
+
+      assert ConfigSetup.run(
+               "/w",
+               io(daemon: daemon, troupe_daemon?: true, answers: setup ++ ["y"])
+             ) ==
+               0
+
+      assert_received {:ask, "Start troupe-daemon when you log in" <> _}
+      assert_received {:troupe_daemon, ["login", "on"]}
+
+      # Without one installed there is nothing to start, and nothing is asked.
+      assert ConfigSetup.run("/w", io(daemon: daemon, answers: setup ++ ["y"])) == 0
+      refute_received {:troupe_daemon, _}
+      refute_received {:ask, "Start troupe-daemon" <> _}
+    end
+
     test "saying no at the end saves nothing" do
       daemon = fn
         "config.get", _ -> {:ok, @nothing}
@@ -336,7 +369,12 @@ defmodule Troupe.ConfigSetupTest do
       describe: fn -> "REPORT" end,
       opencode: fn -> Keyword.get(opts, :opencode, %{names: [], default: nil}) end,
       local_file?: fn -> Keyword.get(opts, :local_file?, false) end,
-      usable?: fn -> Keyword.get(opts, :usable?, false) end
+      usable?: fn -> Keyword.get(opts, :usable?, false) end,
+      troupe_daemon?: fn -> Keyword.get(opts, :troupe_daemon?, false) end,
+      troupe_daemon: fn args ->
+        send(test, {:troupe_daemon, args})
+        0
+      end
     }
   end
 

@@ -105,8 +105,9 @@ With no daemon running on its own, `troupe` runs one inside itself, so the sessi
 when you quit. Its [log](glossary.md#log) is kept, and `troupe resume` opens the session
 where it was. To keep
 sessions working with no window open, run the daemon on its own, `troupe daemon run` in a
-terminal you leave open, or use the desktop app, which starts it; every client on the
-machine then sees the same sessions.
+terminal you leave open, `troupe daemon login on` to have it start every time you log in,
+or use the desktop app, which starts it; every client on the machine then sees the same
+sessions.
 
 ## 4. What it cost
 

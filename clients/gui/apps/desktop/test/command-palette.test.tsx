@@ -72,7 +72,7 @@ describe("the command palette", () => {
 
     // Sections in the table's order, and a summary beside each name.
     const sections = [...dialog.querySelectorAll(".section")].map((el) => el.textContent);
-    expect(sections).toEqual(["Session", "Navigate", "Workspace", "Setup", "Agents", "Quit"]);
+    expect(sections).toEqual(["Session", "Navigate", "Workspace", "Setup", "Agents", "Custom", "Quit"]);
     expect(rowNames()).toContain("/merge");
     expect(says("Land a worktree branch on the checkout")).toBe(true);
     expect(says("Set, show or clear the session's goal")).toBe(true);
@@ -142,5 +142,32 @@ describe("the command palette", () => {
     key(input, "Enter");
     await waitFor(() => daemon.calls.some((c) => c.method === "session.goal.set" && c.params["text"] === "make the suite green"), "the goal to reach the daemon");
     await waitFor(() => says("goal set: make the suite green"), "the palette's notice");
+  });
+
+  // A command the repository's `.troupe/commands/review.md` defines (Decision 763): a row
+  // of its own section with its file's description, which runs through the client's
+  // `commands.run`, and whose prompt comes back as the session's input.
+  it("lists a command a file defines in its own section, and runs it through the daemon", async () => {
+    const composer = await openSession();
+    key(composer, "/");
+    const dialog = await waitFor(palette, "the palette");
+    await waitFor(() => rowNames().length === COMMANDS.length, "the list");
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+
+    type(input, "review the parser");
+    await waitFor(() => selected() === "/review", "the cursor on /review, the rest being its argument");
+    expect([...dialog.querySelectorAll(".section")].map((el) => el.textContent)).toEqual(["Custom"]);
+    const row = [...dialog.querySelectorAll<HTMLElement>(".row")].find((r) => r.textContent?.startsWith("/review"))!;
+    expect(row.classList.contains("unavailable")).toBe(false);
+    expect(row.textContent).toContain("Review the change on this branch");
+    expect(says("/review <what to look at>")).toBe(true);
+
+    key(input, "Enter");
+    await waitFor(
+      () => daemon.calls.some((c) => c.method === "commands.run" && c.params["name"] === "review" && c.params["arguments"] === "the parser"),
+      "the command to reach the daemon",
+    );
+    await waitFor(() => palette() === null, "the palette to close");
+    await waitFor(() => says("Review the change on this branch. Look hardest at the parser."), "its prompt in the transcript");
   });
 });

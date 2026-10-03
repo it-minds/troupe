@@ -86,6 +86,7 @@ defmodule Troupe.Client do
   @callback dispatch(session_id(), String.t(), String.t() | map()) ::
               {:ok, String.t()} | {:error, term()}
   @callback send_input(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
+  @callback run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback approve(session_id(), String.t(), decision()) :: :ok | {:error, term()}
   @callback answer(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback edit_todo(session_id(), String.t(), term()) :: :ok | {:error, term()}
@@ -195,6 +196,14 @@ defmodule Troupe.Client do
 
   @spec send_input(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   def send_input(sid, path, text), do: impl(sid).send_input(sid, path, text)
+
+  @doc """
+  Runs a command a markdown file defines — a row of the table whose `source` is `user`
+  or `project` — with what was typed after its name. The harness reads the file and
+  sends its prompt as the session's input (`commands.run`, Decision 763).
+  """
+  @spec run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
+  def run_command(sid, name, arguments), do: impl(sid).run_command(sid, name, arguments)
 
   @spec approve(session_id(), String.t(), decision()) :: :ok | {:error, term()}
   def approve(sid, call_id, decision), do: impl(sid).approve(sid, call_id, decision)

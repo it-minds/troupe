@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
-import { COMMANDS } from "./commands.js";
+import { COMMANDS, expandDefined } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 
 export const BLOB_THRESHOLD = 16 * 1024;
@@ -449,6 +449,20 @@ export class FakeWorker {
       case "commands.list":
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         return reply(ws, id, { commands: COMMANDS });
+
+      // A command a file defines is a turn on its prompt, as `input.send` is on its text.
+      case "commands.run": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        if (!client.token.scopes.includes("control")) {
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { required_scope: "control" } });
+        }
+        const name = String(params["name"] ?? "");
+        const text = expandDefined(name, String(params["arguments"] ?? ""));
+        if (text === null) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "command", name } });
+        reply(ws, id, { accepted: true, command_id: params["command_id"] ?? null });
+        await this.turn(session, text, String(params["command_id"] ?? ""), client.token);
+        return;
+      }
 
       case "fs.list": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });

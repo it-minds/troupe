@@ -52,7 +52,9 @@ clients to add, and `-y` / `-Yes` asks nothing. A private repository answers
 `daemon.json` as every client finds it, and starts the same daemon inside itself when
 none is. `troupe daemon run` starts the standalone `troupe-daemon` instead — found through
 `TROUPE_DAEMON_COMMAND` or on the `PATH` — and `troupe daemon status` says whether one is
-running.
+running. `troupe daemon login on` has the standalone one start every time you log in and
+stay up, `troupe daemon login off` takes that back, and a first run that saves settings
+asks the same question.
 
 ### Unsigned binaries
 
@@ -222,6 +224,7 @@ the same lines.
 troupe                                  # TUI in the current directory
 troupe --watch                          # TUI with watch mode on
 troupe --no-mouse                       # TUI without mouse reporting (terminal selection works)
+troupe --private                        # a private session, sealed to the plane you signed in to
 troupe run code "make the tests pass" --headless --auto-approve
 troupe run plan "how should we split billing" --worktree
 troupe resume [SESSION_ID]              # no id: reopen the last session here, picker open
@@ -287,6 +290,7 @@ Inside the TUI, everything starts with `/`:
 | `/models` | pick the default model from every model Troupe detected |
 | `/observer` | agent tree: every branch and subagent, its state, worktree and tokens |
 | `/copy [n]` | copy the activated transcript (or tile `n`'s) to the system clipboard |
+| `/<name> [arguments]` | a command you or the repository wrote as `<name>.md` in your config's `commands/` or the workspace's `.troupe/commands/`: sends its prompt, with what follows the name for `$ARGUMENTS` ([configuration](../../docs/user/configuration.md#your-own-commands)) |
 
 Keys: `1`–`9`, Enter, or a mouse click on its tile activate a window; Esc returns to the command line;
 `y`/`n`/`a` answer an approval (allow / deny / allow for session); typing +
@@ -400,8 +404,9 @@ config does not mention. The cheap model has the same menu on the settings page.
 
 `/` on an empty command line, Ctrl-K with nothing typed, or `/help` opens a popup
 over the session listing every command in sections — Session, Navigate, Workspace,
-Setup, Agents (one entry per agent, with its description), Quit — each with a
-one-line description, and the selected one explained beside it with an example.
+Setup, Agents (one entry per agent, with its description), Custom (the commands you and
+the repository wrote as markdown files, with the file each came from), Quit — each with
+a one-line description, and the selected one explained beside it with an example.
 Typing filters by name, alias or description (`mer` narrows to `/merge`); `↑`/`↓`
 and PgUp/PgDn move; Enter runs the command, or leaves it on the line when it needs an
 argument; Tab or Space leave it on the line too, so `/merge 2` types exactly as it
@@ -539,6 +544,15 @@ lands in `~/.config/troupe/credentials.json` (`%APPDATA%\troupe` on Windows) as
 a file only your account can read — `0600` on unix, an ACL naming only you on
 Windows. `troupe whoami` says who you are and which teams you are in;
 `troupe logout` forgets one plane, `troupe logout --all` every one.
+
+Signed in, `troupe` links the daemon on this machine to you at that plane and hands it
+the plane token it holds, when it attaches, again a minute before the token runs out, and
+again after the daemon restarted, which leaves it with none. The daemon keeps the token in
+memory only, and seals a private session with it: `troupe --private` (or `troupe run
+--private`) starts one, which runs here, is sealed under your own key and listed by the
+plane, and can be opened from another device. One started while the daemon has no token
+is sealed once it is handed one, from its first event. A daemon somebody else linked is
+left as it is.
 
 ```
 troupe --remote

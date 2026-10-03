@@ -75,6 +75,8 @@ defmodule Troupe.Gateway.Dispatch do
     "workspace.recent" => :observe,
     "agents.list" => :observe,
     "commands.list" => :observe,
+    # A command a file defines sends the session its prompt, so it takes what input does.
+    "commands.run" => :control,
     "workflows.list" => :observe,
     "memory.get" => :observe,
     "context.get" => :observe,
@@ -454,12 +456,32 @@ defmodule Troupe.Gateway.Dispatch do
   # table, then one entry per primary agent, described by its definition. The agents are
   # the ones the running session was started with, which on a pod are its bundle's as the
   # team's grant narrows them; a session that is asleep has them loaded for its workspace,
-  # as `agents.list` answers, rather than woken to be asked.
+  # as `agents.list` answers, rather than woken to be asked. Then the commands the user's
+  # and the workspace's markdown files define (Decision 763), read as the list is asked
+  # for, so a file written a moment ago is in it.
   defp handle("commands.list", params, _context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, session} <- lookup(session_id) do
-      agents = session_id |> session_definitions(session) |> Definitions.primaries()
-      {:ok, %{"commands" => Troupe.Commands.list(agents: agents)}}
+      {:ok, %{"commands" => Troupe.Commands.list(table_opts(session_id, session))}}
+    end
+  end
+
+  # A command a file defines, run by the harness rather than a client (Decision 763):
+  # the file's prompt, with what was typed after the name for `$ARGUMENTS`, goes to the
+  # session exactly as `input.send` would send it, under the same `command_id`. Only a
+  # name the session's table lists as defined runs; a built-in is the client's to run.
+  defp handle("commands.run", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, name} <- fetch(params, "name"),
+         {:ok, arguments} <- command_arguments(params),
+         {:ok, session} <- lookup(session_id),
+         {:ok, command} <- defined_command(session_id, session, name),
+         :ok <- activate(session_id, context) do
+      text = Troupe.Commands.expand(command, arguments)
+      command_id = Map.get(params, "command_id")
+
+      Troupe.send_input(session_id, text, :user, actor(context), command_opts(params))
+      {:ok, %{"accepted" => true, "command_id" => command_id}}
     end
   end
 
@@ -1082,11 +1104,16 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   # A link that carries a plane token is this daemon connecting to its plane, and the
-  # moment it is told what of its person's was erased while it was away (Decision 756).
+  # moment it is told what of its person's was erased while it was away (Decision 756),
+  # then carries on sealing what it could not seal without a token: a restart leaves it
+  # none, and a session made while nobody had linked was never registered (Decision 764).
   # Not waited for: the link answers now, and a plane that cannot be reached is asked again
-  # at the next one.
+  # at the next one, which a client makes whenever its token is renewed.
   defp erasures(%{"plane_token" => token}) when is_binary(token) and token != "" do
-    Task.start(fn -> Private.apply_erasures() end)
+    Task.start(fn ->
+      Private.apply_erasures()
+      Private.resume()
+    end)
   end
 
   defp erasures(_params), do: :ok
@@ -1324,6 +1351,40 @@ defmodule Troupe.Gateway.Dispatch do
     case Troupe.definitions(session_id) do
       {:ok, definitions} -> definitions
       {:error, :no_agent} -> session.workspace |> Path.expand() |> Definitions.load()
+    end
+  end
+
+  # What the session's command table is built from: its primary agents and its workspace.
+  defp table_opts(session_id, session) do
+    agents = session_id |> session_definitions(session) |> Definitions.primaries()
+    [agents: agents, workspace: Path.expand(session.workspace)]
+  end
+
+  defp defined_command(session_id, session, name) do
+    case session_id
+         |> table_opts(session)
+         |> Troupe.Commands.defined()
+         |> Enum.find(&(&1.name == name)) do
+      nil ->
+        {:error,
+         Error.new(:not_found, %{
+           kind: "command",
+           name: name,
+           reason: "no command file of this session's defines /#{name}"
+         })}
+
+      command ->
+        {:ok, command}
+    end
+  end
+
+  # What was typed after the command's name: absent is nothing, and anything but text is
+  # a mistake rather than something to turn into text.
+  defp command_arguments(params) do
+    case Map.get(params, "arguments") do
+      nil -> {:ok, ""}
+      text when is_binary(text) -> {:ok, text}
+      _ -> {:error, Error.new(:invalid_params, %{field: "arguments", reason: "text"})}
     end
   end
 

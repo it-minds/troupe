@@ -14,16 +14,29 @@ defmodule Troupe.Client.Daemon.Link do
   `identity.get`) go over one `Troupe.Protocol.Client` on the native transport; each
   attached session has its own `Troupe.Remote.Worker` on the WebSocket, so a session's
   stream never queues behind a listing.
+
+  ## The plane token
+
+  The daemon registers and seals a private session with a plane token, which it cannot
+  get: it signs nobody in. So when this machine is signed in to a plane (`troupe login`),
+  every new connection to the daemon hands it the token with `identity.link`, and so does
+  the token's renewal, a minute before it runs out (issue #365). A new connection is when,
+  because it may be to a daemon with none: one this VM just embedded, or one that
+  restarted. The daemon is linked as the person the plane names when it is linked to
+  nobody yet or to them already; one linked to somebody else is left as it is.
   """
 
   use GenServer
 
   alias Troupe.Protocol.{Client, Endpoint}
+  alias Troupe.Remote.{Credentials, Discovery, RPC, Tokens}
 
   require Logger
 
   @name __MODULE__
   @call_timeout 30_000
+  # How long a hand-over that failed for want of the plane waits to try again.
+  @retry_ms 60_000
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: @name)
 
@@ -69,7 +82,7 @@ defmodule Troupe.Client.Daemon.Link do
 
   @impl true
   def init(_opts) do
-    {:ok, %{client: nil, endpoint: nil, embedded: nil, error: nil, watch: %{}}}
+    {:ok, %{client: nil, endpoint: nil, embedded: nil, error: nil, watch: %{}, renew: nil}}
   end
 
   @impl true
@@ -129,6 +142,17 @@ defmodule Troupe.Client.Daemon.Link do
   def handle_info({:troupe_notification, "config.changed", params}, state) do
     Troupe.Client.Events.settings_changed(params)
     {:noreply, state}
+  end
+
+  # The token is due for renewal, or a hand-over failed for want of the plane. A daemon
+  # this process is not connected to is handed one when it next is.
+  def handle_info(:hand_over, %{client: client} = state) when is_pid(client),
+    do: {:noreply, hand_over(%{state | renew: nil})}
+
+  def handle_info(:hand_over, state), do: {:noreply, %{state | renew: nil}}
+
+  def handle_info({:handed, result}, state) do
+    {:noreply, renew_after(state, result)}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -198,7 +222,7 @@ defmodule Troupe.Client.Daemon.Link do
              capabilities: %{"blobs" => true}
            ) do
         {:ok, client} ->
-          {:ok, %{state | client: client, error: nil}}
+          {:ok, hand_over(%{state | client: client, error: nil})}
 
         # A daemon whose socket answers and whose protocol does not, a wedged one above
         # all: which daemon, in words, is what a person can act on (#231).
@@ -206,6 +230,79 @@ defmodule Troupe.Client.Daemon.Link do
           message = "no connection to the daemon at #{Endpoint.describe(state.endpoint)}"
           {:error, "#{message}: #{inspect(reason)}", %{state | error: reason}}
       end
+    end
+  end
+
+  ## The plane token (issue #365)
+
+  # Out of this process: renewing the token is an HTTP round trip, and the link it ends in
+  # is a call through this process. What it answers is when to do it again.
+  defp hand_over(state) do
+    link = self()
+    Task.start(fn -> send(link, {:handed, handed_over()}) end)
+    state
+  end
+
+  defp handed_over do
+    with {:ok, %{plane_url: plane}} <- signed_in(),
+         {:ok, person} <- Tokens.person(plane),
+         {:ok, identity} <- call("identity.get", %{}),
+         :ok <- ours(identity, person, plane),
+         {:ok, _linked} <- call("identity.link", link_params(person, identity, plane)) do
+      {:ok, person.renew_at}
+    end
+  end
+
+  defp signed_in do
+    case Credentials.fetch() do
+      {:ok, entry} -> {:ok, entry}
+      :error -> {:error, :not_signed_in}
+    end
+  end
+
+  # Unlinked, or linked to this person at this plane already: a daemon somebody else
+  # linked, or linked at another plane, is theirs to change.
+  defp ours(_identity, %{subject: nil}, _plane), do: {:error, :no_subject}
+  defp ours(%{"linked" => false}, _person, _plane), do: :ok
+
+  defp ours(%{"subject" => subject, "plane_url" => url}, %{subject: subject}, plane)
+       when is_binary(url) do
+    if Discovery.base(url) == plane, do: :ok, else: {:error, :not_ours}
+  end
+
+  defp ours(_identity, _person, _plane), do: {:error, :not_ours}
+
+  defp link_params(person, identity, plane) do
+    %{
+      command_id: RPC.command_id(),
+      subject: person.subject,
+      display_name: person.display_name || identity["display_name"],
+      plane_url: plane,
+      plane_token: person.token
+    }
+    |> Map.reject(fn {_key, value} -> is_nil(value) end)
+  end
+
+  # Again a moment after the store would renew the token, so the daemon is handed the
+  # renewed one before the one it holds runs out; and a while after a hand-over the plane
+  # was not there for. Not when nobody is signed in or the daemon is somebody else's.
+  defp renew_after(state, result) do
+    if state.renew, do: Process.cancel_timer(state.renew)
+
+    case result do
+      {:ok, renew_at} when is_integer(renew_at) ->
+        wait = max(renew_at - System.system_time(:millisecond) + 1_000, 1_000)
+        %{state | renew: Process.send_after(self(), :hand_over, wait)}
+
+      {:error, reason} when reason in [:not_signed_in, :logged_out, :no_subject, :not_ours] ->
+        %{state | renew: nil}
+
+      {:error, reason} ->
+        Logger.debug("daemon link: the plane token was not handed over: #{inspect(reason)}")
+        %{state | renew: Process.send_after(self(), :hand_over, @retry_ms)}
+
+      _other ->
+        %{state | renew: nil}
     end
   end
 

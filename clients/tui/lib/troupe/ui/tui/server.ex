@@ -726,6 +726,11 @@ defmodule Troupe.UI.TUI.Server do
         not slash? ->
           Client.send_input(sid, "root", typed)
 
+        # A command a markdown file defines is the harness's to run (Decision 763): it
+        # sends the file's prompt, and the line comes back as the session's own input.
+        defined?(state, name) ->
+          Client.run_command(sid, name, args)
+
         true ->
           Client.dispatch(sid, name, args)
       end
@@ -761,6 +766,9 @@ defmodule Troupe.UI.TUI.Server do
       entry -> entry["name"]
     end
   end
+
+  defp defined?(state, name),
+    do: Enum.any?(state.commands, &(&1["name"] == name and &1["source"] in ["user", "project"]))
 
   defp builtin("quit", _args, _state, _target), do: :quit
   defp builtin("settings", _args, _state, _target), do: :settings

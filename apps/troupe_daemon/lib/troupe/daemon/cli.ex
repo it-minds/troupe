@@ -13,6 +13,7 @@ defmodule Troupe.Daemon.CLI do
       troupe-daemon config import-opencode   copy opencode's providers into config.yaml
       troupe-daemon models [--refresh]  every model this machine can address
       troupe-daemon doctor              check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure
+      troupe-daemon login on|off|status   start at login, or not; status exits 1 when it does not
       troupe-daemon version
       troupe-daemon help
 
@@ -34,6 +35,7 @@ defmodule Troupe.Daemon.CLI do
   alias Troupe.LLM.Catalog
   alias Troupe.Protocol.Daemon
   alias Troupe.Protocol.Endpoint
+  alias Troupe.StartAtLogin
 
   # What the config reports call this program, for the commands they suggest.
   @command "troupe-daemon"
@@ -50,6 +52,7 @@ defmodule Troupe.Daemon.CLI do
           | :config_import_opencode
           | {:models, refresh: boolean()}
           | :doctor
+          | {:login, :on | :off | :status}
           | :version
           | :help
           | {:error, String.t()}
@@ -114,6 +117,10 @@ defmodule Troupe.Daemon.CLI do
   def parse(["models"]), do: {:models, refresh: false}
   def parse(["models", "--refresh"]), do: {:models, refresh: true}
   def parse(["doctor"]), do: :doctor
+  def parse(["login"]), do: {:login, :status}
+  def parse(["login", "status"]), do: {:login, :status}
+  def parse(["login", "on"]), do: {:login, :on}
+  def parse(["login", "off"]), do: {:login, :off}
   def parse(["version"]), do: :version
   def parse(["--version"]), do: :version
   def parse(["help"]), do: :help
@@ -196,6 +203,53 @@ defmodule Troupe.Daemon.CLI do
     checks = Troupe.Doctor.run(workspace: File.cwd!(), command: @command)
     IO.write(Troupe.Doctor.format(checks))
     Troupe.Doctor.exit_status(checks)
+  end
+
+  # Whether this daemon starts when the person logs in (Decision 762): an entry of the
+  # platform's own, which takes effect at the next login and starts nothing now.
+  def main({:login, :status}) do
+    status = StartAtLogin.status()
+
+    if status["at_login"] do
+      IO.puts("troupe-daemon starts at login: #{status["path"]}")
+      0
+    else
+      IO.puts("troupe-daemon does not start at login")
+      1
+    end
+  end
+
+  def main({:login, :on}) do
+    case StartAtLogin.enable() do
+      {:ok, status} ->
+        IO.puts("troupe-daemon starts at login: #{status["path"]}")
+        IO.puts("  runs       #{status["command"]} run, and stays up until you log out")
+        IO.puts("  from       your next login; nothing is started now")
+        0
+
+      {:error, reason} ->
+        IO.puts(:stderr, reason)
+        1
+    end
+  end
+
+  def main({:login, :off}) do
+    before = StartAtLogin.status()
+
+    case StartAtLogin.disable() do
+      {:ok, _status} ->
+        IO.puts(
+          if before["at_login"],
+            do: "troupe-daemon no longer starts at login: removed #{before["path"]}",
+            else: "troupe-daemon does not start at login; there was nothing to remove"
+        )
+
+        0
+
+      {:error, reason} ->
+        IO.puts(:stderr, reason)
+        1
+    end
   end
 
   def main(:version) do
@@ -322,6 +376,7 @@ defmodule Troupe.Daemon.CLI do
     troupe-daemon config import-opencode   copy opencode's providers into config.yaml
     troupe-daemon models [--refresh]  every model this machine can address
     troupe-daemon doctor              check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure
+    troupe-daemon login on|off|status   start at login, or not; status exits 1 when it does not
     troupe-daemon version
 
     Environment: TROUPE_DAEMON_IDLE_MINUTES (10; 0 = never), TROUPE_DAEMON_LOG (file|stderr),

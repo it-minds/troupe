@@ -163,6 +163,11 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def send_input(sid, path, text), do: route(sid, path, &Worker.input(&1, text))
 
+  # A command a file defines goes to this session, whatever window is activated: it is
+  # the session's table that listed it.
+  @impl true
+  def run_command(sid, name, arguments), do: describe(Worker.run_command(sid, name, arguments))
+
   @impl true
   def approve(sid, call_id, decision),
     do: describe(Worker.approve(call_target(sid, call_id), call_id, decision))
@@ -645,7 +650,8 @@ defmodule Troupe.Client.Daemon do
   `params`: `profile`, `prompt`, `worktree` (`"auto"`, `"never"`, `"always"`), a
   `config` map of what a client may set — `auto_approve`, `watch`, `full_send` — and
   `refresh_brief: false` for a session that must not start the librarian beside itself,
-  such as a headless run's.
+  such as a headless run's. `private: true` asks for a private session, which the daemon
+  seals to the plane it is linked at, with the token this machine hands it (issue #365).
   """
   @impl true
   def create_session({:local, workspace} = origin, params) do
@@ -656,6 +662,7 @@ defmodule Troupe.Client.Daemon do
         prompt: blank_to_nil(params[:prompt]),
         worktree: params[:worktree] || "never",
         config: params[:config] || %{},
+        private: if(params[:private] == true, do: true),
         command_id: Troupe.Remote.RPC.command_id()
       }
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)
