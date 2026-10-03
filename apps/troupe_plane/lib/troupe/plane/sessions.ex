@@ -393,6 +393,9 @@ defmodule Troupe.Plane.Sessions do
 
   # -- private sessions -------------------------------------------------------
 
+  # A private session somebody has erased, whether or not its key is gone yet.
+  @erasing ["erasure_pending", "erased"]
+
   @doc """
   Register a session that runs on somebody's own machine.
 
@@ -402,10 +405,12 @@ defmodule Troupe.Plane.Sessions do
 
   Idempotent on the id, because a daemon that seals, loses its connection and retries
   must not end up with two sessions or a rejected one. A first registration mints epoch
-  1; a later one is a progress report, fenced.
+  1; a later one is a progress report, fenced. A report on a session that has been erased,
+  or whose erasure is pending, is refused with `:erased`: there is nothing left to seal
+  into (Decision 756).
   """
   @spec register(String.t(), map()) ::
-          {:ok, Session.t()} | {:error, :stale_epoch | :not_yours | Ecto.Changeset.t()}
+          {:ok, Session.t()} | {:error, :stale_epoch | :not_yours | :erased | Ecto.Changeset.t()}
   def register(subject, %{"session_id" => session_id} = params) when is_binary(subject) do
     case Repo.get(Session, session_id) do
       nil -> insert_private(subject, session_id, params)
@@ -434,6 +439,14 @@ defmodule Troupe.Plane.Sessions do
   # still has a log and still wants to write it; this is where it is told not to, and it
   # is told on the *next seal* rather than at the moment it lost, because nothing reaches
   # a laptop that is not asking.
+  defp reseal_private(
+         subject,
+         %Session{kind: "private", owner_subject: subject, state: state},
+         _p
+       )
+       when state in @erasing,
+       do: {:error, :erased}
+
   defp reseal_private(subject, %Session{kind: "private", owner_subject: subject} = session, p) do
     {count, rows} =
       Repo.update_all(
@@ -483,14 +496,14 @@ defmodule Troupe.Plane.Sessions do
   has to resolve rather than refuse.
   """
   @spec claim(String.t(), String.t(), integer(), String.t() | nil) ::
-          {:ok, Session.t()} | {:error, :stale_epoch | :not_found | :not_yours}
+          {:ok, Session.t()} | {:error, :stale_epoch | :not_found | :not_yours | :erased}
   def claim(session_id, subject, from_epoch, device \\ nil) do
     {count, rows} =
       Repo.update_all(
         from(s in Session,
           where:
             s.id == ^session_id and s.epoch == ^from_epoch and s.kind == "private" and
-              s.owner_subject == ^subject and s.state != "erased",
+              s.owner_subject == ^subject and s.state not in @erasing,
           select: s
         ),
         inc: [epoch: 1],
@@ -507,9 +520,17 @@ defmodule Troupe.Plane.Sessions do
 
   defp claim_refusal(session_id, subject) do
     case Repo.get(Session, session_id) do
-      nil -> {:error, :not_found}
-      %Session{kind: "private", owner_subject: ^subject} -> {:error, :stale_epoch}
-      %Session{} -> {:error, :not_yours}
+      nil ->
+        {:error, :not_found}
+
+      %Session{kind: "private", owner_subject: ^subject, state: s} when s in @erasing ->
+        {:error, :erased}
+
+      %Session{kind: "private", owner_subject: ^subject} ->
+        {:error, :stale_epoch}
+
+      %Session{} ->
+        {:error, :not_yours}
     end
   end
 

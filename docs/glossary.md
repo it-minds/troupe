@@ -131,7 +131,8 @@ in as a person does and can hold no admin role.
 
 One agent, and the agents it delegates to, working in one workspace, with its log. It lives
 in the daemon or on a worker pod, not in the window you look at it through, and it is
-`active`, `dormant` (stopped with its log kept, woken when opened), `read_only` or `erased`.
+`active`, `dormant` (stopped with its log kept, woken when opened), `read_only` or `erased`;
+a private session being erased is `erasure_pending` until its key is destroyed.
 
 ### Skill
 

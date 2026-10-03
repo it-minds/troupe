@@ -4,7 +4,8 @@ defmodule Troupe.Gateway.Plane do
 
   A private session is sealed by this machine and listed by the plane, so the daemon has
   to be able to call `session.register`, `session.presign`, `session.objects` and
-  `session.assertion`. Every one of those needs a plane token, and the daemon has no way
+  `session.assertion`, and, for one that was erased, `session.erasures` and
+  `session.erased`. Every one of those needs a plane token, and the daemon has no way
   to get one: it does not authenticate anybody. The client that signed in does, and hands
   one over with `identity.link`.
 

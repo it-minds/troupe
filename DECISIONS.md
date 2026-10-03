@@ -63,7 +63,9 @@ citation keeps meaning what it meant.
     the erasure on enrol, before serving anything. The component that decides *whether*
     to erase is not the component that can read what it is erasing. (390 revises the
     second sentence: the plane signs object-storage URLs for a person's own sessions, and
-    still holds no key for what it signs for.)
+    still holds no key for what it signs for. 756 revises the first for a private session,
+    which has no pod: the plane destroys its key and, once the owner's daemon has stopped,
+    deletes its objects.)
 
 92. **The object store and the session layout live in `troupe_protocol`, not in
     `troupe_worker`.** They are a contract both sides hold, for the same reason the KMS
@@ -3474,7 +3476,8 @@ citation keeps meaning what it meant.
      CIDRs a profile names, which needs a field and a policy for it. A NetworkPolicy an
      installation adds to the worker namespace, 724's remedy for the platform's endpoints,
      does not get a profile past the refusal. (752 admits the first after all, and what is
-     refused and reported is now an endpoint at a loopback or link-local address.) Proof: `reach_test.exs` in the protocol (the
+     refused and reported is now an endpoint at a loopback or link-local address; 758
+     refuses that with Cilium too, and the plane is no longer told about Cilium.) Proof: `reach_test.exs` in the protocol (the
      sentences: ports, each range, IPv6, `*.svc`, names, entries) and in the plane (the
      refusal and its message, a name on 443 and a Service saved, machines, a channel's
      server, with Cilium, a plane told nothing, the bundle, the editor, the Workers page),
@@ -3785,6 +3788,161 @@ citation keeps meaning what it meant.
        name kept by a move and by a fold, a newcomer named by their subject or, where a
        moved person has it, their id, a row without one keeping its subject) and
        `control_test.exs` (`kms.assertion` for a moved owner names their old name).
+
+756. **Erasing a private session is final when the plane has destroyed its key, which it
+     does itself and at once; the session is `erasure_pending` until then, and its objects
+     and the device's copy go when the owner's daemon next connects.** Issue #348.
+     `Erasure` handed every erasure to a healthy pod of the session's profile, and a private
+     session has none. On the tip the first `session.erase` of one exited in the placement
+     actor, which cannot load a `nil` profile, after the tombstone was written: the row
+     stayed `active`, every later erase answered `erased: true` from the tombstone, the key
+     stayed in the key manager, and `session.assertion` and `session.presign` went on
+     answering, so a daemon still running the session could have made a fresh key where the
+     old one was and sealed into the erased prefix.
+     - **The key, by the plane, now.** With the plane's own credential, whose policy has
+       `delete` on `metadata/troupe/people/+/sessions/*` for exactly this and no rule for the
+       data path (`Policy.plane/1`): every version goes and none could have been read. That
+       revises 90's first sentence for a session with no pod and keeps its reason, since the
+       component that decides to erase still cannot read what it erases. Under the owner's
+       name at the key manager (755), looked up from their subject. No slot, budget slice or pod to give back, so the drain's park is
+       not run, and that is what failed on the tip.
+     - **`erasure_pending` until it is gone.** A session state, for a private session whose
+       key the key manager refused or could not be reached to destroy. Listed as it is, to
+       its owner and to an administrator, so somebody can see an erasure did not finish.
+       Nothing seals, keys, signs or lists for it: `session.register` (with `claim` or
+       without), `session.assertion`, `session.presign` and `session.objects` answer
+       `not_found` with `reason: "erased"`, as they now do for an erased one, and it is not
+       forked. `session.erase` answers `erased: false, state: "erasure_pending"`, and
+       `admin.session.erase` the same `state`. Erasing again tries again, and so does the
+       owner's daemon connecting. A row a plane from before this tombstoned and then failed
+       on is finished the same way.
+     - **The objects when the daemon next connects.** A daemon connects to its plane when a
+       client links it with a plane token. It asks `session.erasures {device}`, the owner's
+       erased private sessions this device has not acknowledged, as `pending_for/2` tells a
+       pod on enrol; for each it stops the sealer, erases its own copy and answers
+       `session.erased {session_id, device}`, and on that the plane deletes every version
+       under `sessions/<id>/` and records the device in the tombstone's `applied_by`. After
+       the device rather than at the erasure, because the device is the only writer: a
+       deletion before it had stopped could be followed by the segment it was uploading.
+       By the plane rather than the daemon, which is where this departs from the issue's
+       wording: the issue took the objects to be reachable only by the daemon, and the plane
+       holds the object-storage credential it signs with (390). `ObjectStore.Signed` keeps
+       deletion off a daemon on purpose, and a presigned `DELETE` per version would let a
+       person destroy their own session's ciphertext outside an erasure. Only for an erased
+       session of the caller's own, since saying a session is erased does not erase it.
+       Every device is told until it acknowledges, since any of them may hold a copy; the
+       second one finds nothing left to delete.
+     - **A device that never comes back.** Its key is gone, so the objects are unreadable to
+       anybody, the plane included, and they stay until one of the owner's devices connects:
+       the deletion is tidiness, as `Erasure` says of a pod's. The copy on that machine is on
+       the person's own disk, which no erasure reaches.
+     - **A team session is unchanged**: handed to a healthy pod of its profile, or left for
+       the next one to enrol, and its key is never the plane's to touch.
+     - **Proof:** the plane's `private_erasure_test.exs`, against the development OpenBao and
+       MinIO with a plane credential carrying the plane's policies and nothing more: the key
+       destroyed at once under a moved owner's name; `erasure_pending` under a credential
+       that may not delete (listed so, not handed to the daemon, everything refused), and
+       finished by erasing again, by an administrator's erase and by the daemon connecting;
+       a row tombstoned the tip's way finished; the objects, a prior version included, kept
+       until a device acknowledges and then gone, that device told once and another until it
+       acknowledges; an acknowledgement refused for a live session and for somebody else's;
+       and a team session as before, with a pod and without, and never handed to a daemon.
+       The gateway's `private_test.exs`: a sealing daemon told of its session's erasure stops
+       sealing and erases its copy, the objects go, and it is told once; nothing is deleted
+       for a session the plane did not erase; and a link through the daemon is when it
+       happens. All but the two team pins failed on the tip of `development-2026-10-03`.
+
+757. **A session a newer credential replaced is ended when the new one is kept, a server
+     a bundle drops has its sessions ended, and a `400` to a request in a session is a
+     forgotten session, once.** Issue #358, defect D51, and two of the things 746 left
+     out of its slice. 746 kept a server's MCP session under its URL and a hash of the
+     call's headers and ended it only when its holder stopped. A pod calling a server as
+     its profile (747) gets a new token about once an hour, and each opened a new session
+     and left the one before open at the server until the pod stopped; a daemon's
+     refreshed sign-in (741) did the same for as long as the local session ran. A bundle
+     that dropped a server left its sessions open. And a server that answers a session it
+     has forgotten with `400` rather than the specification's `404` failed every call
+     after it restarted, until the pod did.
+     - **What a session is kept for.** The key does not change: two credentials are two
+       sessions, and a person's and a profile's are never one. Beside it each session
+       records the server it was opened for, by URL and name, and its credential mode
+       (`Sessions.kept_for/1`). A call that keeps a new session takes out any kept for the
+       same under another key and ends it with a `DELETE` carrying its own credential,
+       best-effort and `405` let be, before its request goes out. Not keyed on the server
+       and mode instead: a session would then be presented with a token it was not opened
+       with, which a server that binds a session to a credential refuses.
+     - **Not a person's.** On a person-mode server every person is a caller of their own,
+       the client does not see whose credential a call carries, and on a pod it does not
+       hold a person's credential to end their session with (746). A person's session a
+       refreshed token left behind stays in the pod's table until the pod stops or the
+       bundle drops the server, and at the server until it expires it.
+     - **Two tokens at once.** A call still holding the old token while another holds the
+       new may open one more session in the overlap, and each one kept ends the other's;
+       once the old token is no longer handed out (747 hands out one), that stops.
+     - **A bundle that drops a server.** `Troupe.Worker.MCP.put_servers/2` keeps only the
+       sessions of the new bundle's servers (`Sessions.retain/2`) and ends the rest before
+       it discovers again. A server still there by URL, name and mode keeps its session,
+       and one whose credential changed has its session replaced by discovery, as above.
+     - **A `400` to a request that carried a session id** drops the session, ends it (a
+       server may answer `400` for something else and still hold it), opens one more and
+       sends the request again, once, as a `404` does. A `400` the new session does not
+       cure is the call's error: one handshake more for such a call, never a loop. A
+       `400` to a request without a session id is the call's, as before. Read from the
+       SDKs: the TypeScript SDK 1.30.0's transport answers `404`, but its example servers
+       look the session up before it and answer an unknown one with `400`, `DELETE`
+       included; the Python SDK's session manager answered `400` through at least 1.23.0
+       and answers `404` on its main branch now.
+     - **Proof:** `Troupe.MCPHandshakeTest`, against `test/support/fake_mcp.exs`, which
+       now takes `forgotten: 400` and `bad_calls: true`: a credential that replaced another
+       ends the session the other opened and leaves a person's be; a session the server
+       answers `400` for is opened again once and the call goes through; a `400` a new
+       session does not cure is the call's error after one retry, with one session left.
+       `Troupe.Worker.MCPTest`: a profile's renewed token, through `:profile_tokens`, ends
+       the session the token before it opened, and a bundle that drops a server ends the
+       session discovery opened for it, lets go of a person's and keeps the other
+       server's. All five failed on the tip of `development-2026-10-03`.
+
+758. **With Cilium as without, a profile's endpoint at a loopback or link-local address is
+     admitted by no rule and refused where it is set up, so the plane no longer needs to
+     know which.** Issue #355, the first part of defect D54. With Cilium the plane refused
+     nothing (749), and the `CiliumNetworkPolicy` writes a host given as an address as a
+     `toCIDR` of that one address (723). So a profile naming `http://169.254.169.254/` got
+     a rule to the node's metadata service wherever the TroupePolicy's `allowedEgress`
+     named the address, and that list was all that stood between a profile and it.
+     - **No rule in either mode.** The `CiliumNetworkPolicy` now leaves out every host of
+       the profile's that `Troupe.WorkerProfile.Reach.refused?/1` names: loopback
+       (`127.0.0.0/8`, `::1`) or link-local (`169.254.0.0/16`, `fe80::/10`), a v4 address in
+       v6 spelling as the address it names, the one judgement 752 made for the
+       NetworkPolicy. Every host means the git hosts and an MCP identity's token endpoint
+       too, though only the LLM endpoint, the MCP servers and `egress.fqdns` are judged and
+       named, as before. The installation's own OpenBao and object store are its choice and
+       stay as they are. A profile applied in `gitops` mode, which nothing refused, gets no
+       such rule either.
+     - **Refused and reported in both.** `admin.profile.put`, the editor and a bundle's
+       publish refuse such an endpoint whatever the plane was told, and
+       `EndpointUnreachable` is `True` in both modes, with the reason
+       `LoopbackOrLinkLocal` where it was `NoCilium`; `False` stays `Reachable`, or
+       `Cilium`. The message names both policies.
+     - **The plane is not told about Cilium.** 749 gave it `operator.ciliumAvailable` as
+       `TROUPE_CILIUM_AVAILABLE` to know what the operator would admit, and a plane told
+       nothing refused nothing for want of knowing. What it refuses no longer depends on
+       the mode, so the chart no longer gives it the value, the plane no longer reads it,
+       and a plane run without the chart refuses what one with it does. Undoes that part
+       of 749.
+     - Public and private addresses and in-cluster Services are unchanged in both modes. A
+       name is still taken at its word (749): with Cilium, a name in `allowedEgress` whose
+       DNS answer is such an address is admitted by the `toFQDNs` rule, which cannot be
+       seen where the name is typed.
+     - **Proof:** the protocol's `reach_test.exs` (`refused?/1` over both families, the v6
+       spelling and the ranges' edges; the message), the operator's `resources_test.exs`
+       (with Cilium, every spelling and every kind of profile host left out of `toCIDR`,
+       a public and a private address kept) and `reconciler_test.exs` (with Cilium, the
+       condition naming the gateway on loopback and the server at the metadata address,
+       and no `toCIDR`, then the same message without; reachable endpoints with Cilium
+       stay `Cilium`), and the plane's `reach_test.exs` (the metadata address refused
+       whatever the plane was told, a public address and a Service saved, the bundle
+       refused with Cilium). The operator's two and the plane's two failed on the chunk
+       tip.
 
 759. **A SCIM create answers `201` with where the resource is, a delete of an id the plane
      does not have answers `404`, and a push with `active: false` deactivates a person the

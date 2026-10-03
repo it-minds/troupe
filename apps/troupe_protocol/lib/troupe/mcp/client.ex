@@ -16,9 +16,11 @@ defmodule Troupe.MCP.Client do
   which every request after carries — is kept in the caller's `Troupe.MCP.Sessions`, under
   the server and the credential that went out. A server that gives no session id keeps
   none, and is called as before once the handshake is done. A `404` to a request that
-  carried a session id is the server having forgotten it: one new handshake, and the
-  request once more. A call with nowhere to keep a session (a server tried before it is
-  kept) opens one for that request and ends it after.
+  carried a session id is the server having forgotten it, and so is a `400`, which some
+  servers built on the SDKs answer instead (Decision 757): one new handshake, and the
+  request once more. A session kept for a credential that replaced another, a token
+  renewed, ends the one the other opened. A call with nowhere to keep a session (a server
+  tried before it is kept) opens one for that request and ends it after.
 
   Every request carries the server's service credential and nothing about the session
   except metadata for the server's own logs. That separation is the whole point of this
@@ -110,6 +112,14 @@ defmodule Troupe.MCP.Client do
           Sessions.forget(server.sessions, key, session)
           again(server, headers, key, message)
 
+        # What the TypeScript SDK's example servers, and the Python SDK's before it changed
+        # to `404`, answer for a session they have forgotten. A server may mean something
+        # else by it and still hold the session, so it is ended rather than left there.
+        {:error, {:unexpected_status, 400, _body}} when is_binary(session.id) ->
+          Sessions.forget(server.sessions, key, session)
+          end_session(session)
+          again(server, headers, key, message)
+
         answer ->
           done(answer, session, held)
       end
@@ -117,7 +127,7 @@ defmodule Troupe.MCP.Client do
   end
 
   # Once, not in a loop: a server that forgets the session it has just issued will not
-  # keep the next one either.
+  # keep the next one either, and a `400` a new session does not cure is the request's.
   defp again(server, headers, key, message) do
     with {:ok, session, held} <- session(server, headers, key) do
       server |> post(headers, session, message) |> answer() |> done(session, held)
@@ -126,7 +136,8 @@ defmodule Troupe.MCP.Client do
 
   # The session kept for this server and credential, or a new one: kept, or used for this
   # one request when there is nowhere to keep it. Two calls that open one at once both
-  # finish the handshake; the one whose session was not kept ends it.
+  # finish the handshake; the one whose session was not kept ends it. One kept for a
+  # credential that replaced another ends the other's.
   defp session(server, headers, key) do
     case Sessions.lookup(server.sessions, key) do
       %{} = session -> {:ok, session, :kept}
@@ -138,6 +149,7 @@ defmodule Troupe.MCP.Client do
     with {:ok, session} <- handshake(server, headers) do
       case Sessions.keep(server.sessions, key, session) do
         :kept ->
+          server.sessions |> Sessions.superseded(key, session) |> Enum.each(&end_session/1)
           {:ok, session, :kept}
 
         {:taken, theirs} ->
@@ -177,7 +189,8 @@ defmodule Troupe.MCP.Client do
       url: server.url,
       # A person's credential on a pod is held for as long as a call takes, and not kept
       # here for a `DELETE` later (`Troupe.MCP.Sessions`).
-      ends_with: if(server.credential_mode == :person and headers != [], do: nil, else: headers)
+      ends_with: if(server.credential_mode == :person and headers != [], do: nil, else: headers),
+      kept_for: Sessions.kept_for(server)
     }
   end
 

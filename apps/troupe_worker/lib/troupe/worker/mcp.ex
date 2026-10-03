@@ -18,7 +18,8 @@ defmodule Troupe.Worker.MCP do
   The MCP sessions the servers issue are the pod's (Decision 746), kept in the
   application's `Troupe.MCP.Sessions` under each server and credential: one for the
   profile's, one for each person's on a person-mode server, reused by every session on
-  the pod and ended when the pod stops.
+  the pod and ended when the pod stops, or when a bundle drops their server (Decision
+  757).
   """
 
   use GenServer
@@ -67,7 +68,11 @@ defmodule Troupe.Worker.MCP do
   end
 
   def handle_call({:put_servers, configs}, _from, state) do
-    state = discover(%{state | servers: Enum.map(configs, &Server.from_config/1)})
+    servers = Enum.map(configs, &Server.from_config/1)
+    # A server the new bundle dropped has its sessions ended now rather than when the pod
+    # stops; the others' are kept, and discovery goes on in them.
+    state.sessions |> Sessions.table() |> Sessions.retain(servers)
+    state = discover(%{state | servers: servers})
     {:reply, {:ok, Enum.map(state.tools, & &1.name)}, state}
   end
 

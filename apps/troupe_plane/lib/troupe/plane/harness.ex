@@ -111,6 +111,8 @@ defmodule Troupe.Plane.Harness do
     "session.presign" => :control,
     "session.objects" => :observe,
     "session.assertion" => :control,
+    "session.erasures" => :control,
+    "session.erased" => :control,
     "session.pin" => :control,
     "session.unpin" => :control,
     "session.erase" => :control,
@@ -591,6 +593,7 @@ defmodule Troupe.Plane.Harness do
       case register_or_claim(params, user) do
         {:ok, session} -> {:ok, session_json(session, user)}
         {:error, :stale_epoch} -> {:error, stale(session_id)}
+        {:error, :erased} -> {:error, gone(session_id)}
         {:error, :not_yours} -> {:error, Error.new(:forbidden, %{session_id: session_id})}
         {:error, :not_found} -> {:error, Error.new(:not_found, %{session_id: session_id})}
         {:error, %Ecto.Changeset{} = changeset} -> {:error, invalid_row(changeset)}
@@ -656,6 +659,38 @@ defmodule Troupe.Plane.Harness do
       case ObjectStore.list(ObjectStore.from_env(), under) do
         {:ok, keys} -> {:ok, %{"session_id" => session.id, "keys" => keys}}
         {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+      end
+    end
+  end
+
+  # What this device has still to carry out of its owner's erasures, asked when the daemon
+  # connects as a pod is told on enrol (Decision 756). The device names itself, as it does
+  # in `session.register`: a name rather than something the plane can check, which is all
+  # an acknowledgement needs it to be.
+  defp handle("session.erasures", params, %{user: user}) do
+    with {:ok, device} <- required_string(params, "device") do
+      erasures =
+        user.subject
+        |> Erasure.pending_for_owner(device)
+        |> Enum.map(&Map.update!(&1, "erased_at", fn at -> DateTime.to_iso8601(at) end))
+
+      {:ok, %{"erasures" => erasures}}
+    end
+  end
+
+  # The device has stopped and dropped its copy, so nothing more is coming: the plane
+  # deletes every version under the prefix. Only for an erased session of the caller's
+  # own, since saying a session is erased is not how one is erased.
+  defp handle("session.erased", params, %{user: user}) do
+    with {:ok, session_id} <- required_string(params, "session_id"),
+         {:ok, device} <- required_string(params, "device"),
+         {:ok, session} <- own_erased(session_id, user) do
+      case Erasure.device_applied(session, device) do
+        {:ok, deleted} ->
+          {:ok, %{"session_id" => session.id, "device" => device, "objects_deleted" => deleted}}
+
+        {:error, reason} ->
+          {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
       end
     end
   end
@@ -746,13 +781,22 @@ defmodule Troupe.Plane.Harness do
   defp handle("session.pin", params, context), do: pin(params, context, true)
   defp handle("session.unpin", params, context), do: pin(params, context, false)
 
+  # `erased` is true once the erasure is final, which for a private session is once its key
+  # is destroyed; until then `state` says `erasure_pending` (Decision 756).
   defp handle("session.erase", params, %{user: user}) do
     with {:ok, session} <- visible(params["session_id"], user),
          :ok <- must_administer(user, session) do
       case Erasure.erase(session, actor: user.subject, reason: "requested") do
         {:ok, tombstone} ->
+          state = Sessions.get(session.id).state
+
           {:ok,
-           %{"session_id" => session.id, "erased" => true, "head_hash" => tombstone.head_hash}}
+           %{
+             "session_id" => session.id,
+             "erased" => state == "erased",
+             "state" => state,
+             "head_hash" => tombstone.head_hash
+           }}
 
         {:error, reason} ->
           {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
@@ -1051,8 +1095,15 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # An erased session, or one whose erasure is pending, is signed for, keyed and listed no
+  # more: a daemon still running it would otherwise seal into the erased prefix and, asking
+  # for an assertion, make a fresh key where the destroyed one was.
   defp own_private(session_id, user) do
     case Sessions.get(session_id) do
+      %Session{kind: "private", owner_subject: subject, state: state}
+      when subject == user.subject and state in ["erasure_pending", "erased"] ->
+        {:error, gone(session_id)}
+
       %Session{kind: "private", owner_subject: subject} = session when subject == user.subject ->
         {:ok, session}
 
@@ -1063,6 +1114,20 @@ defmodule Troupe.Plane.Harness do
         {:error, Error.new(:forbidden, %{session_id: session_id})}
     end
   end
+
+  # Not-found for anything but the caller's own erased private session, whatever it is.
+  defp own_erased(session_id, user) do
+    case Sessions.get(session_id) do
+      %Session{kind: "private", owner_subject: subject, state: "erased"} = session
+      when subject == user.subject ->
+        {:ok, session}
+
+      _other ->
+        {:error, Error.new(:not_found, %{session_id: session_id})}
+    end
+  end
+
+  defp gone(session_id), do: Error.new(:not_found, %{session_id: session_id, reason: "erased"})
 
   defp invalid_row(changeset) do
     Error.new(:invalid_params, %{reason: inspect(changeset.errors)})
@@ -1899,7 +1964,8 @@ defmodule Troupe.Plane.Harness do
 
   defp spawnable(%Session{}), do: :ok
 
-  defp forkable(%Session{state: state}, _user) when state in ["erased", "archived"] do
+  defp forkable(%Session{state: state}, _user)
+       when state in ["erasure_pending", "erased", "archived"] do
     {:error, Error.new(:forbidden, %{reason: "that session is #{state}"})}
   end
 

@@ -217,6 +217,64 @@ defmodule Troupe.Gateway.PrivateTest do
     end
   end
 
+  # Decision 756. The plane destroys an erased session's key and cannot reach this disk;
+  # the daemon is told when it connects, drops its sealer and its copy, and says so, and
+  # that is when the objects go.
+  describe "erasure" do
+    setup context do
+      requires_services(context)
+      start_supervised!(Private.Sealers)
+      :ok
+    end
+
+    test "a session the plane erased stops sealing here, and its objects go once", ctx do
+      session_id = unique("p")
+      {:ok, sealer, context} = start_private(session_id, ctx)
+
+      send_event(context, sealer, 1)
+      assert {:ok, %{segments: 1}} = Sealer.seal_now(sealer)
+      store = ObjectStore.from_env()
+      assert {:ok, [_ | _]} = ObjectStore.list_versions(store, "sessions/#{session_id}/")
+
+      FakePlane.erase(ctx.plane.state, session_id)
+      test = self()
+
+      erase = fn id ->
+        send(test, {:erased_here, id})
+        :ok
+      end
+
+      assert {:ok, [^session_id]} =
+               Private.apply_erasures(plane: ctx.name, device: "test-laptop", erase: erase)
+
+      assert_received {:erased_here, ^session_id}
+      refute Process.alive?(sealer)
+      refute Private.sealing?(session_id)
+      assert {:ok, []} = ObjectStore.list_versions(store, "sessions/#{session_id}/")
+
+      # Told once: the next connection finds nothing to do.
+      assert {:ok, []} =
+               Private.apply_erasures(plane: ctx.name, device: "test-laptop", erase: erase)
+
+      assert [_once] = acknowledgements(ctx.plane.state, session_id)
+    end
+
+    test "nothing is deleted for a session the plane did not erase", ctx do
+      session_id = unique("p")
+      {:ok, sealer, context} = start_private(session_id, ctx)
+
+      send_event(context, sealer, 1)
+      assert {:ok, _} = Sealer.seal_now(sealer)
+
+      assert {:ok, []} = Private.apply_erasures(plane: ctx.name, device: "test-laptop")
+      assert Private.sealing?(session_id)
+      assert acknowledgements(ctx.plane.state, session_id) == []
+
+      store = ObjectStore.from_env()
+      assert {:ok, [_ | _]} = ObjectStore.list_versions(store, "sessions/#{session_id}/")
+    end
+  end
+
   describe "without a plane" do
     test "a session that cannot be registered is refused, and nothing is lost", ctx do
       :ok = Plane.unlink(ctx.name)
@@ -275,6 +333,48 @@ defmodule Troupe.Gateway.PrivateTest do
       events = Log.read_session(created["session_id"], ctx.state_dir)
       created_event = Enum.find(events, &(&1.type == "session_created"))
       assert created_event.data["kind"] == "private"
+    end
+
+    # Decision 756: linking is the daemon connecting to its plane, and when it is told.
+    test "a link is when an erased session's copy here goes, and the plane is told", ctx do
+      requires_services(ctx)
+      {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: ctx.endpoint, spawn: false)
+      on_exit(fn -> if Process.alive?(client), do: Client.close(client) end)
+
+      # Made while nobody had linked, so it is on this disk and nowhere else yet.
+      assert {:ok, %{"session_id" => id}} =
+               Client.call(client, "session.create", %{
+                 "command_id" => Client.command_id(),
+                 "workspace" => ctx.workspace,
+                 "private" => true,
+                 "config" => %{"auto_approve" => true}
+               })
+
+      on_exit(fn -> Troupe.stop_session(id) end)
+      assert Troupe.get_session(id)
+
+      # What another of its devices sealed, before somebody erased it from elsewhere.
+      store = ObjectStore.from_env()
+      {:ok, _} = ObjectStore.put(store, "sessions/#{id}/manifest.json", "{}")
+      FakePlane.erase(ctx.plane.state, id)
+
+      link = %{
+        "subject" => "ada@example.test",
+        "plane_url" => ctx.plane.url,
+        "plane_token" => "plane-token"
+      }
+
+      assert {:ok, _identity} = Client.call(client, "identity.link", link)
+
+      assert eventually(fn -> acknowledgements(ctx.plane.state, id) != [] end)
+      assert Troupe.get_session(id) == nil
+      assert {:ok, []} = ObjectStore.list_versions(store, "sessions/#{id}/")
+
+      # A second link asks again and has nothing to do.
+      asked = length(asked_for_erasures(ctx.plane.state))
+      assert {:ok, _identity} = Client.call(client, "identity.link", link)
+      assert eventually(fn -> length(asked_for_erasures(ctx.plane.state)) > asked end)
+      assert [_once] = acknowledgements(ctx.plane.state, id)
     end
 
     test "a local session has no sealer, and stopping one is a no-op", ctx do
@@ -379,6 +479,30 @@ defmodule Troupe.Gateway.PrivateTest do
       )
 
     name
+  end
+
+  defp acknowledgements(state, session_id) do
+    for {"session.erased", %{"session_id" => ^session_id} = params} <- FakePlane.calls(state),
+        do: params
+  end
+
+  defp asked_for_erasures(state) do
+    for {"session.erasures", params} <- FakePlane.calls(state), do: params
+  end
+
+  # The link answers before the daemon has asked; what it does next is a task of its own.
+  defp eventually(check, deadline \\ 5_000) do
+    cond do
+      check.() ->
+        true
+
+      deadline <= 0 ->
+        false
+
+      true ->
+        Process.sleep(50)
+        eventually(check, deadline - 50)
+    end
   end
 
   # The Sealer subscribes; here nothing publishes, so the events are handed to it

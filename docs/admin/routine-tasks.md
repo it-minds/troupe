@@ -134,6 +134,13 @@ key is destroyed first, then every object version; the owner is not told; spend 
 the ledger; the audit row keeps your name. With no healthy pod of the profile the erasure is
 pending until one enrols.
 
+A person's private session has no pod. The plane destroys its key itself, and the answer's
+`state` says whether it did: `erased`, or `erasure_pending` when OpenBao refused or could
+not be reached, which also shows in the session list. Erase it again to retry; the owner's
+daemon retries it too the next time it is signed in. Its objects go once the owner's
+daemon has connected and dropped its own copy; until then they are unreadable, because the
+key is gone (Decision 756).
+
 ## Decommission a profile
 
 1. `admin.team.revoke` it from every team: no new sessions, existing ones read-only.

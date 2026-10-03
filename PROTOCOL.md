@@ -721,7 +721,9 @@ in memory only: `identity.json` records the name, never the token, because a tok
 disk is a token a backup copies. A restarted daemon therefore has no token until a client
 links again, which costs nothing: the local log is already durable, so a daemon with no
 token seals later rather than losing anything. A client that refreshes its token links
-again.
+again. A link that carries one is also when the daemon asks the plane which of the
+person's private sessions were erased while it was away, and drops its copy of each
+(Decision 756).
 
 #### `identity.unlink` → `{"linked": false}`. The events already written keep the actor
 they were written with.
@@ -1211,6 +1213,7 @@ while its session is working.
 | `active` | running | everything |
 | `dormant` | stopped | read it; an activating command brings the tree back |
 | `read_only` | stopped | read it; activating commands return `forbidden`. A session is parked here when its team lost the grant — running, dormant or still `pending` — or its profile is gone, and when a pod could not put its tree back because the directory it was recorded in is gone (Decision 661). A running one is put to sleep on its pod, as an archive does (§7) |
+| `erasure_pending` | none | a private session somebody erased whose key the plane has not yet destroyed: listed as such; sealing, keying and signing for it answer `not_found` with `reason: "erased"`; `session.erase` again tries again (Decision 756) |
 | `erased` | gone | `not_found` |
 
 `pending` is a remote state and a short one. A `session.create` on a profile that is full
@@ -1398,6 +1401,15 @@ running is answered as it stands, one still `pending` is refused with `conflict`
 whose pod does not answer stays as it was, with `unavailable`. The plane's erasure reaches
 the pod over the same control channel and deletes the pod's copy along with the key and
 the objects.
+
+**Erasing a private session** (Decision 756) has no pod to reach. The plane destroys the
+session's key itself, every version, and answers `{session_id, erased, state, head_hash}`:
+`erased: true` with `state: "erased"` once the key is gone, and `erased: false` with
+`state: "erasure_pending"` where the key manager refused or could not be reached, in which
+case asking again tries again. The objects and the copy on the owner's machine go when
+the owner's daemon next connects: it asks `session.erasures`, drops its sealer and its copy
+of each session named, and answers `session.erased`, on which the plane deletes every
+version under the session's prefix.
 
 ### `auth.expiring` (notification, server → client)
 
@@ -1658,6 +1670,13 @@ than an admin uses them:
 | `session.presign` | control | anybody, for their own private sessions | `{session_id, method (`get`/`put`), keys}` → `{expires_in, urls}`, one signed URL per key, good for five minutes. Every key must be under `sessions/<session_id>/` and at most 64 per call. **The bytes never cross the plane**: it holds an object-storage credential scoped to signing and no key for what it signs for, which is the narrowest revision of `DECISIONS.md` 90 that lets a laptop seal at all |
 | `session.objects` | observe | anybody, for their own private sessions | `{session_id, prefix}` → `{keys}` under `sessions/<session_id>/`. A caller with no object-storage credential cannot list — a listing is signed against the bucket, not against a key it does not yet know — so the plane lists for it. A `prefix` may narrow the listing and may not widen it; one that is not under the session's own is ignored |
 | `session.assertion` | control | anybody, for their own private sessions | `{session_id}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`, the same shape `me.connections.grant` answers and for the same reason. The path is `troupe/people/<name>/sessions/<session_id>`; the person policy covers their own subtree and no pod role covers any of it. A daemon makes or finds the session's key under `name`, and under the subject it is linked as only where a plane from before Decision 755 answers none. The session must already be registered, which is what makes this a statement about a session the plane agrees is theirs |
+| `session.erasures` | control | anybody, for their own private sessions | `{device}` → `{erasures: [{session_id, erased_at}]}`: the caller's private sessions whose key is destroyed and whose erasure this `device` has not acknowledged. A daemon asks when a client links it with a plane token. A session whose key is not yet destroyed is tried again first and is not listed until it is (Decision 756) |
+| `session.erased` | control | anybody, for their own erased private sessions | `{session_id, device}` → `{session_id, device, objects_deleted}`: this device has stopped sealing the session and erased its copy, and the plane deletes every version of every object under `sessions/<session_id>/` and records the device. `not_found` for a session that is not the caller's, not private or not erased: saying a session is erased does not erase it |
+
+`session.register`, `session.presign`, `session.objects` and `session.assertion` answer
+`not_found` with `reason: "erased"` for a session that is erased or `erasure_pending`: a
+daemon still running it would otherwise seal into the erased prefix, or make a fresh key
+where the destroyed one was.
 
 ### Private sessions
 

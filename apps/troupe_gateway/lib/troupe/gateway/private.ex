@@ -32,6 +32,14 @@ defmodule Troupe.Gateway.Private do
 
   The one error that is not transient is `stale_version`: another device has taken the
   session, and this one must stop. It does, and says so.
+
+  ## When the session is erased
+
+  The plane destroys the key and keeps the tombstone; it cannot reach this disk, and it
+  does not delete the objects while this device may still be writing them. So when the
+  daemon connects it asks what was erased while it was away, drops its sealer and its copy
+  of each, and says so, and that is when the plane deletes the objects
+  (`apply_erasures/1`, Decision 756).
   """
 
   alias Troupe.Gateway.Plane
@@ -106,6 +114,53 @@ defmodule Troupe.Gateway.Private do
       },
       plane
     )
+  end
+
+  @doc """
+  Carry out what the plane has erased of this person's private sessions since this device
+  last asked.
+
+  Called when the daemon connects to its plane, which for a daemon is a client linking
+  it: the first moment it can ask anything. For each session the plane names, the sealer
+  stops, the copy on this disk is erased, and the plane is told, which is when it deletes
+  the session's objects: this device was writing them, and has stopped. One the plane could
+  not be told about it names again at the next connection.
+
+  Answers the sessions the plane was told about.
+  """
+  @spec apply_erasures(keyword()) :: {:ok, [String.t()]} | {:error, term()}
+  def apply_erasures(opts \\ []) do
+    plane = Keyword.get(opts, :plane, Plane)
+    device = device(opts)
+
+    with {:ok, %{"erasures" => erasures}} <-
+           Plane.call("session.erasures", %{"device" => device}, plane) do
+      {:ok, Enum.flat_map(erasures, &carry_out(&1["session_id"], plane, device, opts))}
+    end
+  end
+
+  # The sealer first, so stopping the session sends it nothing more to seal. Its own last
+  # seal on the way down is refused by the plane, and anything that got through before is
+  # under the prefix the plane then deletes.
+  defp carry_out(session_id, plane, device, opts) do
+    case Registry.whereis_name({__MODULE__.Registry, session_id}) do
+      :undefined -> :ok
+      pid -> DynamicSupervisor.terminate_child(__MODULE__.Sealers, pid)
+    end
+
+    :ok = Keyword.get(opts, :erase, &Troupe.erase_session/1).(session_id)
+
+    case Plane.call("session.erased", %{"session_id" => session_id, "device" => device}, plane) do
+      {:ok, _done} ->
+        [session_id]
+
+      {:error, reason} ->
+        Logger.info(
+          "troupe: #{session_id} is erased here and the plane was not told: #{inspect(reason)}"
+        )
+
+        []
+    end
   end
 
   @doc """
