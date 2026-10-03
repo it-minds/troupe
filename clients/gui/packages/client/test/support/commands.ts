@@ -1,9 +1,25 @@
 // The command table the fakes answer `commands.list` with: a slice of the harness's
 // (`Troupe.Commands`), enough for a palette to have sections, aliases, a command that
-// needs an argument, one a pod cannot run, an agent, and `/goal` with the `/loop` whose
-// summary names the goal too.
+// needs an argument, one a pod cannot run, an agent, `/goal` with the `/loop` whose
+// summary names the goal too, and a command a repository's `.troupe/commands/review.md`
+// defines, which the fakes run as `commands.run` does: its prompt, `$ARGUMENTS` replaced,
+// as the session's input.
 
 import type { CommandEntry } from "../../src/types.js";
+
+/** The prompts the fakes' defined commands send, by name. */
+export const DEFINED: Record<string, string> = {
+  review: "Review the change on this branch. Look hardest at $ARGUMENTS.",
+};
+
+/** What `commands.run` sends for a defined command, or null for a name no file defines. */
+export function expandDefined(name: string, args: string): string | null {
+  const body = DEFINED[name];
+  if (body === undefined) return null;
+  const typed = args.trim();
+  if (body.includes("$ARGUMENTS")) return body.replaceAll("$ARGUMENTS", typed);
+  return typed === "" ? body : `${body}\n\n${typed}`;
+}
 
 const arg = (name: string, required: boolean, kind: string) => ({ name, required, kind });
 
@@ -114,6 +130,18 @@ export const COMMANDS: CommandEntry[] = [
     availability: "local",
     source: "agent",
     detail: "Implement a change in the checkout.",
+    example: null,
+  },
+  {
+    name: "review",
+    aliases: [],
+    section: "custom",
+    summary: "Review the change on this branch",
+    usage: "/review <what to look at>",
+    args: [arg("arguments", false, "text")],
+    availability: "always",
+    source: "project",
+    detail: "Review the change on this branch\n\nFrom .troupe/commands/review.md.",
     example: null,
   },
   {

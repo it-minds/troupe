@@ -214,6 +214,40 @@ the session's approvals like any other tool's. Closing the session, or the app, 
 a connection that drops and comes back offers them again without asking twice. The TUI
 does not offer them to a pod session yet.
 
+## Your own commands
+
+A prompt you type often can be a command of its own, written as a markdown file in the
+shape other tools' command files have:
+
+```
+<config>/commands/<name>.md             your commands, in every workspace
+<workspace>/.troupe/commands/<name>.md  the repository's, for whoever opens it
+```
+
+The file name is the command, so `.troupe/commands/review.md` is `/review`; a name is
+lower-case letters, digits and dashes. The body is the prompt the command sends, and
+`$ARGUMENTS` in it stands for whatever is typed after the name. The frontmatter is
+optional: `description` is what the palette shows (the prompt's first line without
+one), and `argument-hint` what its usage line says follows the name.
+
+```markdown
+---
+description: Review the change on this branch
+argument-hint: <what to look at>
+---
+Review the change on this branch against main. Look hardest at $ARGUMENTS, and say what
+you would change before changing anything.
+```
+
+`/review the parser` sends that prompt with `the parser` in place of `$ARGUMENTS`, as if
+you had typed it; a prompt without the placeholder gets what you typed as a paragraph
+of its own. Both the terminal UI's and the desktop app's palettes list the commands in a
+Custom section, each with its description and the file it came from. The repository's
+command wins over yours of the same name. A built-in's name, or an agent's, stays
+theirs: a file named `merge.md` is skipped, and the daemon's log says so. A repository's
+commands are read whether or not the workspace is trusted, since a command only sends a
+prompt, which goes through the session's approvals like anything typed.
+
 ## Instruction files
 
 A repository that carries an `AGENTS.md` has told coding agents how to work in it, and
@@ -254,6 +288,7 @@ things:
 | `<config>/mcp.json`, then `<workspace>/.troupe/mcp.json` | MCP servers | your servers, then the workspace's, over `mcp:` in `config.yaml` | the same name merges key by key, the workspace's file last; a workspace's servers run only once you allow them |
 | `<config>/skills/<name>/SKILL.md`, `<workspace>/.troupe/skills/`, a profile's bundle | skills | what a skill tool may read | one name, the nearer layer's |
 | Troupe's built-in agents, a profile's bundle, `<config>/agents/*.md`, `<workspace>/.troupe/agents/*.md` | agents | the agents a session may run | a file at a higher layer replaces the same name below it |
+| `<config>/commands/*.md`, `<workspace>/.troupe/commands/*.md` | commands | the slash commands you and the repository define | one name, the workspace's; a built-in's or an agent's name is theirs |
 | `<workspace>/.troupe/workflows/<name>.json` | workflows | the steps `workflows.list` offers | one name, one file |
 | `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace (aliases `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, first found wins) | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out |
 | `<workspace>/.troupe/memory.md` | instructions | the project brief Troupe's agents write | read after the instruction files; never authoritative, `read_file` and `grep` are |

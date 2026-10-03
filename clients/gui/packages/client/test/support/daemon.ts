@@ -22,7 +22,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
-import { COMMANDS } from "./commands.js";
+import { COMMANDS, expandDefined } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 
 interface Session {
@@ -606,6 +606,21 @@ export class FakeDaemon {
       case "commands.list":
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
         return reply(ws, id, { commands: COMMANDS });
+
+      // A command a file defines, as the daemon runs it (Decision 763): its prompt, with
+      // `arguments` for `$ARGUMENTS`, goes in as input under the call's `command_id`.
+      case "commands.run": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        const name = String(params["name"] ?? "");
+        const text = expandDefined(name, String(params["arguments"] ?? ""));
+        if (text === null) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "command", name } });
+        const commandId = String(params["command_id"] ?? "");
+        const actor = { kind: "user", subject: this.principal.subject };
+        session.log.append("input_queued", { command_id: commandId, author: this.principal.subject, text }, actor);
+        session.log.append("input_accepted", { command_id: commandId, author: this.principal.subject }, actor);
+        session.log.append("user_input", { command_id: commandId, text, source: "user" }, actor);
+        return reply(ws, id, { accepted: true, command_id: commandId });
+      }
 
       case "workspace.recent":
         return reply(ws, id, {
