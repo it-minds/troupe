@@ -41,7 +41,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_INGRESS_CLASS` | `nginx` | class of every per-pod Ingress; nginx annotations only for `nginx` | `operator.ingressClassName` |
 | `TROUPE_WORKERS_TLS_SECRET` | unset | one TLS Secret shared by every pod Ingress; ignored when a cert issuer is set | `operator.tlsSecretName` |
 | `TROUPE_WORKERS_CERT_ISSUER` | unset | cert-manager ClusterIssuer per pod Ingress, secret `<profile>-<ordinal>-tls` | `operator.certIssuer` |
-| `TROUPE_CILIUM_AVAILABLE` | false | writes a `CiliumNetworkPolicy` with FQDN rules per profile, and drops the public 443/80 rule from the worker NetworkPolicy ([Part E](#part-e--ports-and-network-policy)); each profile's `EgressByHostname` condition says whether it applied, and is what the plane reports; without it, `EndpointUnreachable` names a profile's endpoints a worker does not reach. The plane is given it too ([A.2](#a2-plane-troupe_plane)) | `operator.ciliumAvailable` |
+| `TROUPE_CILIUM_AVAILABLE` | false | writes a `CiliumNetworkPolicy` with FQDN rules per profile, and drops the public 443/80 rule from the worker NetworkPolicy ([Part E](#part-e--ports-and-network-policy)); each profile's `EgressByHostname` condition says whether it applied, and is what the plane reports. With it or without, `EndpointUnreachable` names a profile's endpoints a worker does not reach | `operator.ciliumAvailable` |
 | `TROUPE_MAX_PORTS` | `65536` | `+Q` in every worker's `ERL_FLAGS` | `operator.maxPorts` |
 | `TROUPE_WORKERS_SCHEME`, `TROUPE_WORKERS_PORT` | `wss`, unset | scheme and port of the endpoint a pod advertises (kind uses `ws`, `30080`) | `operator.workersScheme`, `operator.workersPort` |
 | `TROUPE_DRAIN_TIMEOUT_SECONDS` | `300` | worker `terminationGracePeriodSeconds`; **not** put in the pod's env, so the worker's own drain wait stays 300. A pod stopped without a drain gives turns 150 s of its grace period and needs the rest to put its sessions to sleep, so keep this at 300 or more | `operator.drainTimeoutSeconds` |
@@ -75,7 +75,6 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_PLANE_AUDIENCE` | `troupe-plane-api` | `aud` of plane tokens | none |
 | `TROUPE_PROVISIONING_MODE` | `direct` | `direct`: the console writes profiles to the cluster. `gitops`: a repository holds the `WorkerProfile`, `TroupePolicy` and `Trigger` resources and something else applies them; the plane reads them, shows them locked, refuses `admin.profile.put`, `admin.trigger.put` and their `.delete` as `managed_by_gitops`, and writes only `spec.replicas`, `spec.teams` and `spec.mcpServers` ([profiles-and-policy.md §6](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository), [bundles-and-triggers.md §2](bundles-and-triggers.md#triggers-from-a-repository)). Deployment only; the chart's Role drops `create` and `delete` on `WorkerProfile` and reads `Trigger` in `gitops` | `plane.provisioningMode` |
 | `TROUPE_GITOPS_SOURCE` | unset | where the profiles and triggers come from in `gitops` mode, as the console shows it beside "Locked to gitops": a repository and a path. Display only; the plane never reads it | `plane.gitops.source` |
-| `TROUPE_CILIUM_AVAILABLE` | unset: nothing refused | the operator's value. `false`: a profile whose workers are pods is refused when its LLM endpoint, an MCP server (its own or its channel's bundle's) or an `egress.fqdns` entry is at a loopback or link-local address, which no rule of the operator's admits, and so is a bundle naming such a server for a channel such a profile follows ([profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy)) | `operator.ciliumAvailable` |
 | `TROUPE_KUBECONFIG` | unset | how the plane reaches Kubernetes to apply profiles and read the policy; unset, the in-pod ServiceAccount; with neither, profiles are saved and reported `not_applied` | none |
 | `TROUPE_WORKER_IMAGE` | unset | the image a profile whose image is `release` runs | `worker.image.*`, tag default `appVersion` |
 | `TROUPE_OIDC_ISSUER`, `TROUPE_OIDC_CLIENT_ID` | none | the identity provider and app registration (required) | `plane.oidc.issuer`, `clientId` |
@@ -313,7 +312,7 @@ from those and from operator pods.
 | `troupe-operator` | nothing | unrestricted |
 | `troupe-a2a` | `a2a.port` from ingress namespaces | unrestricted |
 | `troupe-w-<profile>` | TCP 4000 from ingress namespaces | DNS to `k8s-app=kube-dns` in `kube-system`; the plane's control port; OpenBao, object storage, the LLM endpoint and MCP servers when their hosts are `*.svc`; **without Cilium only**, `0.0.0.0/0` minus private and link-local ranges on 443 and 80, and OpenBao, object storage outside the cluster and the profile's own LLM endpoint, MCP servers and `egress.fqdns` entries on the port they name: an IP address as that one address (`/32`, `/128`), a name on another port as the same ranges on that port; a profile's endpoint at a loopback or link-local address gets nothing |
-| `troupe-egress` (Cilium only) | — | `toFQDNs` for the LLM endpoint, MCP servers, `egress.fqdns` and `gitHosts`, and for OpenBao and object storage when their hosts are not `*.svc`; `toCIDR` (`/32`, `/128`) instead for any of these given as an IP address; DNS to kube-dns through Cilium's DNS proxy (a `dns` rule), which is how `toFQDNs` learns addresses |
+| `troupe-egress` (Cilium only) | — | `toFQDNs` for the LLM endpoint, MCP servers, `egress.fqdns` and `gitHosts`, and for OpenBao and object storage when their hosts are not `*.svc`; `toCIDR` (`/32`, `/128`) instead for any of these given as an IP address, except a profile's at a loopback or link-local address, which gets nothing; DNS to kube-dns through Cilium's DNS proxy (a `dns` rule), which is how `toFQDNs` learns addresses |
 
 With Cilium a worker reaches the hosts its profile names, the installation's own OpenBao
 and object store, and nothing else outside the cluster: Cilium admits the union of both
@@ -325,9 +324,10 @@ and an object store outside the cluster are admitted on their own ports too, and
 profile's own endpoints, so one named on 9000 opens 9000 to every public host; a name that
 resolves to a private address cannot be admitted by name without Cilium, so give it as an
 address instead ([profiles-and-policy.md](profiles-and-policy.md#4-troupepolicy) says what
-else works). A profile's endpoint at a loopback or link-local address gets no rule: it is
-refused by the plane where it is set up, and reported by the operator as
-`EndpointUnreachable` on a profile a repository holds.
+else works). A profile's endpoint at a loopback or link-local address gets no rule, with
+Cilium or without, even where `allowedEgress` names it: it is refused by the plane where it
+is set up, and reported by the operator as `EndpointUnreachable` on a profile a repository
+holds.
 
 **Ingress annotations.** Plane: 3600 s read and send timeouts, `proxy-body-size`, the rate
 limits above. A2A: buffering off, 3600 s timeouts, 2m bodies. Worker (nginx only): 3600 s

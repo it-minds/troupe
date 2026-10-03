@@ -1,15 +1,17 @@
 defmodule Troupe.Plane.ReachTest do
   @moduledoc """
-  Without Cilium, a profile's own endpoint its pods cannot reach is refused where it is
-  set up (Decision 749), and since Decision 752 that is one at a loopback or link-local
-  address and nothing else.
+  A profile's own endpoint its pods cannot reach is refused where it is set up (Decision
+  749), and since Decision 752 that is one at a loopback or link-local address and nothing
+  else, with Cilium as without (Decision 758).
 
   A worker's NetworkPolicy reached outside the cluster only public addresses on 443 and
   80 where there was no Cilium, so an LLM gateway on 8443, or an MCP server at a private
   address, was refused here. The operator now admits such an endpoint on its port, or as
-  its one address, and the plane saves it. The plane knows whether there is Cilium from
-  the chart, the value the operator is given, and says so where the endpoint is typed: the
-  profile editor and `admin.profile.put`, and the bundle that names a channel's MCP servers.
+  its one address, and the plane saves it. With Cilium the plane refused nothing, and the
+  operator gave a loopback or link-local address its own `toCIDR` rule wherever the
+  policy allowed it; it admits none now, so the plane refuses them whatever it was told
+  about Cilium, and says so where the endpoint is typed: the profile editor and
+  `admin.profile.put`, and the bundle that names a channel's MCP servers.
   """
 
   use Troupe.Plane.PanelCase, async: false
@@ -29,11 +31,7 @@ defmodule Troupe.Plane.ReachTest do
     %{actor: Admin.actor_for(root), root: root}
   end
 
-  describe "a profile, without Cilium" do
-    setup do
-      Application.put_env(:troupe_plane, :cilium_available, false)
-    end
-
+  describe "a profile" do
     test "whose LLM endpoint is on another port is saved", context do
       # Issue #268: refused until the operator admitted the port (Decision 752).
       assert {:ok, _} =
@@ -90,8 +88,8 @@ defmodule Troupe.Plane.ReachTest do
 
       # Why, and what to do, in the one sentence the console shows.
       assert error.data.reason =~ hd(error.data.unreachable)
-      assert error.data.reason =~ "without Cilium"
       assert error.data.reason =~ "NetworkPolicy"
+      assert error.data.reason =~ "with Cilium"
       assert error.data.reason =~ "metadata"
       assert error.data.reason =~ ".svc"
       assert {:ok, _json} = Jason.encode(error.data)
@@ -161,38 +159,46 @@ defmodule Troupe.Plane.ReachTest do
 
       assert {:ok, _} = Admin.profile_put(context.actor, attrs)
     end
-  end
 
-  describe "a profile, with Cilium" do
-    test "is saved with every endpoint the profile above was refused for", context do
-      Application.put_env(:troupe_plane, :cilium_available, true)
-
+    test "at the cloud's metadata address is refused whatever the plane was told about Cilium",
+         context do
+      # Issue #355: with Cilium nothing was refused, and the operator wrote the address into
+      # a `toCIDR` rule wherever the policy's `allowedEgress` named it. No rule admits one
+      # in either mode now, so the plane refuses it without asking which.
       attrs =
-        "local"
-        |> profile("http://127.0.0.1:4000/v1")
+        "meta"
+        |> profile("https://gateway.example.test/v1")
         |> put_in(["spec", "mcpServers"], [
-          %{"name" => "meta", "url" => "http://169.254.169.254/latest"}
+          %{"name" => "meta", "url" => "http://169.254.169.254/"}
+        ])
+
+      for cilium <- [true, false, nil] do
+        Application.put_env(:troupe_plane, :cilium_available, cilium)
+
+        assert {:error, error} = Admin.profile_put(context.actor, attrs), inspect(cilium)
+
+        assert error.data.unreachable == [
+                 "MCP server meta at http://169.254.169.254/ is at 169.254.169.254, a link-local address"
+               ]
+      end
+
+      assert Fleet.get_profile("meta") == nil
+    end
+
+    test "at a public address on another port, with a server in the cluster, is saved", context do
+      attrs =
+        "office"
+        |> profile("https://203.0.113.5:8443/v1")
+        |> put_in(["spec", "mcpServers"], [
+          %{"name" => "tools", "url" => "http://tools.mcp.svc:8080/mcp"}
         ])
 
       assert {:ok, _} = Admin.profile_put(context.actor, attrs)
     end
   end
 
-  test "a plane nobody told about Cilium refuses nothing", context do
-    # A plane run without the chart, a laptop drafting profiles say: what the operator has
-    # is not known here, and the operator still reports the profile (`EndpointUnreachable`).
-    Application.delete_env(:troupe_plane, :cilium_available)
-
-    assert {:ok, _} =
-             Admin.profile_put(
-               context.actor,
-               profile("local", "http://127.0.0.1:4000/v1")
-             )
-  end
-
-  describe "a bundle, without Cilium" do
+  describe "a bundle" do
     setup do
-      Application.put_env(:troupe_plane, :cilium_available, false)
       {:ok, _} = Fleet.put_profile(%{name: "dev", config_bundle_channel: "stable", replicas: 1})
       :ok
     end
@@ -208,7 +214,7 @@ defmodule Troupe.Plane.ReachTest do
 
       # Whose pods, since a bundle is a channel's and not a profile's.
       assert said =~ "dev"
-      assert said =~ "without Cilium"
+      assert said =~ "metadata"
       assert Bundles.current("stable") == nil
     end
 
@@ -227,18 +233,22 @@ defmodule Troupe.Plane.ReachTest do
                Bundles.publish("edge", bundle("https://169.254.169.254/mcp"), announce: false)
     end
 
-    test "is published with Cilium" do
+    test "naming one at a link-local address is refused with Cilium too" do
+      # Issue #355: published, where a plane told there was Cilium refused nothing.
       Application.put_env(:troupe_plane, :cilium_available, true)
 
-      assert {:ok, _} =
+      assert {:error, {:invalid_bundle, [said]}} =
                Bundles.publish("stable", bundle("https://169.254.169.254/mcp"), announce: false)
+
+      assert said =~
+               "MCP server jira at https://169.254.169.254/mcp is at 169.254.169.254, a link-local address"
+
+      assert Bundles.current("stable") == nil
     end
   end
 
   describe "the profile editor" do
     test "says why it was refused, in the console", context do
-      Application.put_env(:troupe_plane, :cilium_available, false)
-
       {:ok, view, _html} =
         context.conn |> sign_in(context.root.subject) |> live("/admin/profile/new")
 
@@ -270,7 +280,7 @@ defmodule Troupe.Plane.ReachTest do
       condition = %{
         "type" => "EndpointUnreachable",
         "status" => "True",
-        "reason" => "NoCilium",
+        "reason" => "LoopbackOrLinkLocal",
         "message" => Reach.explain(said)
       }
 

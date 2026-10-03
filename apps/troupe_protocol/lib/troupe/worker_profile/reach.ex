@@ -1,7 +1,7 @@
 defmodule Troupe.WorkerProfile.Reach do
   @moduledoc """
   What a worker without Cilium reaches of a profile's own endpoints, by which rule, and
-  which of them it cannot reach at all.
+  which of them no worker reaches at all, with Cilium or without.
 
   Without Cilium a worker's NetworkPolicy reaches outside the cluster through the public
   rule, public IPv4 addresses on 443 and 80 (`Troupe.Operator.Resources`), and a host in
@@ -26,8 +26,10 @@ defmodule Troupe.WorkerProfile.Reach do
   name that resolves to a private address is not reached, the public rule leaving those
   ranges out, and nothing here can say so. Such an endpoint is given as its address.
 
-  With Cilium none of this applies: the `CiliumNetworkPolicy` admits each endpoint by name
-  or by address, on any port.
+  With Cilium the rest of this does not apply: the `CiliumNetworkPolicy` admits each
+  endpoint by name or by address, on any port. But not at a loopback or link-local address
+  either (`refused?/1`), so a profile naming one is refused and reported in both modes
+  alike (Decision 758).
   """
 
   alias Troupe.WorkerProfile, as: Profile
@@ -102,7 +104,8 @@ defmodule Troupe.WorkerProfile.Reach do
   end
 
   @doc """
-  The endpoints a profile names that a worker without Cilium cannot reach, a sentence each:
+  The endpoints a profile names that a worker cannot reach, with Cilium or without, a
+  sentence each:
   `"llm.endpoint http://127.0.0.1:4000/v1 is at 127.0.0.1, a loopback address"`.
 
   Taken as `admitted/1` takes them.
@@ -113,6 +116,14 @@ defmodule Troupe.WorkerProfile.Reach do
   def unreachable(endpoints) when is_list(endpoints) do
     for endpoint <- endpoints, {:refused, said} <- [judge(endpoint)], uniq: true, do: said
   end
+
+  @doc """
+  Whether `host` is an address no rule admits for a profile's endpoint, loopback or
+  link-local, as `unreachable/1` reads it: the `CiliumNetworkPolicy` leaves such a host
+  out, whichever of the profile's hosts names it, as the NetworkPolicy does.
+  """
+  @spec refused?(String.t()) :: boolean()
+  def refused?(host), do: refusal(host) != nil
 
   @doc "A profile's endpoints, as `admitted/1` and `unreachable/1` take them."
   @spec endpoints(Profile.t()) :: [endpoint()]
@@ -135,12 +146,12 @@ defmodule Troupe.WorkerProfile.Reach do
   @spec explain([String.t(), ...]) :: String.t()
   def explain(problems) do
     Enum.join(problems, "; ") <>
-      ": without Cilium a worker's NetworkPolicy admits a profile's endpoint on its own " <>
-      "port, by name or as its one address, but no rule opens a loopback address, which " <>
-      "from a pod is the pod itself, or a link-local one, which is the node's and where a " <>
-      "cloud's metadata service answers. Give the endpoint as a pod reaches it: by name, " <>
-      "at another address, or, for one in the cluster, as its Service " <>
-      "(<service>.<namespace>.svc), which is reached on its own port."
+      ": a worker's NetworkPolicy, or with Cilium its CiliumNetworkPolicy, admits a " <>
+      "profile's endpoint by name or as its one address, but no rule opens a loopback " <>
+      "address, which from a pod is the pod itself, or a link-local one, which is the " <>
+      "node's and where a cloud's metadata service answers. Give the endpoint as a pod " <>
+      "reaches it: by name, at another address, or, for one in the cluster, as its " <>
+      "Service (<service>.<namespace>.svc), which is reached on its own port."
   end
 
   # -- one endpoint -------------------------------------------------------------
@@ -167,11 +178,19 @@ defmodule Troupe.WorkerProfile.Reach do
   end
 
   defp judge_host(label, host, port) do
+    case refusal(host) do
+      nil -> {:admitted, admission(host, if(port, do: [port], else: @public_ports))}
+      kind -> {:refused, "#{label} is at #{host}, a #{kind} address"}
+    end
+  end
+
+  # What a host at an address no rule admits is called in a sentence, or `nil`.
+  defp refusal(host) do
     with {:ok, address} <- address(host),
          {_block, kind} <- Enum.find(@refused, fn {block, _kind} -> within?(address, block) end) do
-      {:refused, "#{label} is at #{host}, a #{kind} address"}
+      kind
     else
-      _admitted -> {:admitted, admission(host, if(port, do: [port], else: @public_ports))}
+      _admitted -> nil
     end
   end
 

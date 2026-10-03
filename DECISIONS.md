@@ -3476,7 +3476,8 @@ citation keeps meaning what it meant.
      CIDRs a profile names, which needs a field and a policy for it. A NetworkPolicy an
      installation adds to the worker namespace, 724's remedy for the platform's endpoints,
      does not get a profile past the refusal. (752 admits the first after all, and what is
-     refused and reported is now an endpoint at a loopback or link-local address.) Proof: `reach_test.exs` in the protocol (the
+     refused and reported is now an endpoint at a loopback or link-local address; 758
+     refuses that with Cilium too, and the plane is no longer told about Cilium.) Proof: `reach_test.exs` in the protocol (the
      sentences: ports, each range, IPv6, `*.svc`, names, entries) and in the plane (the
      refusal and its message, a name on 443 and a Service saved, machines, a channel's
      server, with Cilium, a plane told nothing, the bundle, the editor, the Workers page),
@@ -3720,7 +3721,7 @@ citation keeps meaning what it meant.
        `excludedAttributes=members` leaves a group's members out, as Entra asks for groups.
        `DELETE` on a group empties it, which the docs said and the route did not do.
      - Unchanged: `POST` and `PUT`, which upsert on the subject and answer `200`; no
-       pagination, bulk, ETags or `/Schemas`.
+       pagination, bulk, ETags or `/Schemas`. (759 revises this: a `POST` answers `201`.)
      - **Proof:** the plane's `scim_entra_test.exs`, Microsoft's documented provisioning
        requests with `example.test` names, sent to the router as Entra sends them: a filter
        finding one user and nobody, a group by name without its members, and refusals as
@@ -3850,3 +3851,155 @@ citation keeps meaning what it meant.
        sealing and erases its copy, the objects go, and it is told once; nothing is deleted
        for a session the plane did not erase; and a link through the daemon is when it
        happens. All but the two team pins failed on the tip of `development-2026-10-03`.
+
+757. **A session a newer credential replaced is ended when the new one is kept, a server
+     a bundle drops has its sessions ended, and a `400` to a request in a session is a
+     forgotten session, once.** Issue #358, defect D51, and two of the things 746 left
+     out of its slice. 746 kept a server's MCP session under its URL and a hash of the
+     call's headers and ended it only when its holder stopped. A pod calling a server as
+     its profile (747) gets a new token about once an hour, and each opened a new session
+     and left the one before open at the server until the pod stopped; a daemon's
+     refreshed sign-in (741) did the same for as long as the local session ran. A bundle
+     that dropped a server left its sessions open. And a server that answers a session it
+     has forgotten with `400` rather than the specification's `404` failed every call
+     after it restarted, until the pod did.
+     - **What a session is kept for.** The key does not change: two credentials are two
+       sessions, and a person's and a profile's are never one. Beside it each session
+       records the server it was opened for, by URL and name, and its credential mode
+       (`Sessions.kept_for/1`). A call that keeps a new session takes out any kept for the
+       same under another key and ends it with a `DELETE` carrying its own credential,
+       best-effort and `405` let be, before its request goes out. Not keyed on the server
+       and mode instead: a session would then be presented with a token it was not opened
+       with, which a server that binds a session to a credential refuses.
+     - **Not a person's.** On a person-mode server every person is a caller of their own,
+       the client does not see whose credential a call carries, and on a pod it does not
+       hold a person's credential to end their session with (746). A person's session a
+       refreshed token left behind stays in the pod's table until the pod stops or the
+       bundle drops the server, and at the server until it expires it.
+     - **Two tokens at once.** A call still holding the old token while another holds the
+       new may open one more session in the overlap, and each one kept ends the other's;
+       once the old token is no longer handed out (747 hands out one), that stops.
+     - **A bundle that drops a server.** `Troupe.Worker.MCP.put_servers/2` keeps only the
+       sessions of the new bundle's servers (`Sessions.retain/2`) and ends the rest before
+       it discovers again. A server still there by URL, name and mode keeps its session,
+       and one whose credential changed has its session replaced by discovery, as above.
+     - **A `400` to a request that carried a session id** drops the session, ends it (a
+       server may answer `400` for something else and still hold it), opens one more and
+       sends the request again, once, as a `404` does. A `400` the new session does not
+       cure is the call's error: one handshake more for such a call, never a loop. A
+       `400` to a request without a session id is the call's, as before. Read from the
+       SDKs: the TypeScript SDK 1.30.0's transport answers `404`, but its example servers
+       look the session up before it and answer an unknown one with `400`, `DELETE`
+       included; the Python SDK's session manager answered `400` through at least 1.23.0
+       and answers `404` on its main branch now.
+     - **Proof:** `Troupe.MCPHandshakeTest`, against `test/support/fake_mcp.exs`, which
+       now takes `forgotten: 400` and `bad_calls: true`: a credential that replaced another
+       ends the session the other opened and leaves a person's be; a session the server
+       answers `400` for is opened again once and the call goes through; a `400` a new
+       session does not cure is the call's error after one retry, with one session left.
+       `Troupe.Worker.MCPTest`: a profile's renewed token, through `:profile_tokens`, ends
+       the session the token before it opened, and a bundle that drops a server ends the
+       session discovery opened for it, lets go of a person's and keeps the other
+       server's. All five failed on the tip of `development-2026-10-03`.
+
+758. **With Cilium as without, a profile's endpoint at a loopback or link-local address is
+     admitted by no rule and refused where it is set up, so the plane no longer needs to
+     know which.** Issue #355, the first part of defect D54. With Cilium the plane refused
+     nothing (749), and the `CiliumNetworkPolicy` writes a host given as an address as a
+     `toCIDR` of that one address (723). So a profile naming `http://169.254.169.254/` got
+     a rule to the node's metadata service wherever the TroupePolicy's `allowedEgress`
+     named the address, and that list was all that stood between a profile and it.
+     - **No rule in either mode.** The `CiliumNetworkPolicy` now leaves out every host of
+       the profile's that `Troupe.WorkerProfile.Reach.refused?/1` names: loopback
+       (`127.0.0.0/8`, `::1`) or link-local (`169.254.0.0/16`, `fe80::/10`), a v4 address in
+       v6 spelling as the address it names, the one judgement 752 made for the
+       NetworkPolicy. Every host means the git hosts and an MCP identity's token endpoint
+       too, though only the LLM endpoint, the MCP servers and `egress.fqdns` are judged and
+       named, as before. The installation's own OpenBao and object store are its choice and
+       stay as they are. A profile applied in `gitops` mode, which nothing refused, gets no
+       such rule either.
+     - **Refused and reported in both.** `admin.profile.put`, the editor and a bundle's
+       publish refuse such an endpoint whatever the plane was told, and
+       `EndpointUnreachable` is `True` in both modes, with the reason
+       `LoopbackOrLinkLocal` where it was `NoCilium`; `False` stays `Reachable`, or
+       `Cilium`. The message names both policies.
+     - **The plane is not told about Cilium.** 749 gave it `operator.ciliumAvailable` as
+       `TROUPE_CILIUM_AVAILABLE` to know what the operator would admit, and a plane told
+       nothing refused nothing for want of knowing. What it refuses no longer depends on
+       the mode, so the chart no longer gives it the value, the plane no longer reads it,
+       and a plane run without the chart refuses what one with it does. Undoes that part
+       of 749.
+     - Public and private addresses and in-cluster Services are unchanged in both modes. A
+       name is still taken at its word (749): with Cilium, a name in `allowedEgress` whose
+       DNS answer is such an address is admitted by the `toFQDNs` rule, which cannot be
+       seen where the name is typed.
+     - **Proof:** the protocol's `reach_test.exs` (`refused?/1` over both families, the v6
+       spelling and the ranges' edges; the message), the operator's `resources_test.exs`
+       (with Cilium, every spelling and every kind of profile host left out of `toCIDR`,
+       a public and a private address kept) and `reconciler_test.exs` (with Cilium, the
+       condition naming the gateway on loopback and the server at the metadata address,
+       and no `toCIDR`, then the same message without; reachable endpoints with Cilium
+       stay `Cilium`), and the plane's `reach_test.exs` (the metadata address refused
+       whatever the plane was told, a public address and a Service saved, the bundle
+       refused with Cilium). The operator's two and the plane's two failed on the chunk
+       tip.
+
+759. **A SCIM create answers `201` with where the resource is, a delete of an id the plane
+     does not have answers `404`, and a push with `active: false` deactivates a person the
+     way a `DELETE` and a `PATCH` do.** Issue #356, the SCIM items of defect D56, left by
+     754, which kept `POST` and `PUT` as they were.
+     - **The answers RFC 7644 gives.** A `POST` to `/Users` or `/Groups` answers `201`, the
+       resource, and its path in `Location`, the same as its `meta.location` (section 3.3);
+       both are relative to the plane, as `meta.location` already was, because a plane
+       behind an Ingress without `TROUPE_BASE_URL` does not know the name it is reached by.
+       A `PUT` still answers `200` (3.5.1). A `DELETE` of a user answers `404` for an id
+       nobody has, as one of a group already did (3.6), and `204` otherwise.
+     - **A create of somebody the plane has is still a create.** A push upserts on the
+       subject, so a `POST` of a person who signed in before their first push, or one
+       pushed before, updates that row and answers `201`. The RFC's answer to a duplicate
+       is `409`, which would leave somebody who signed in first unprovisionable: a row
+       sign-in keyed on Entra's object id, which no push has named yet, does not answer the
+       provider's filter on `userName` (754), so the provider creates, and a refusal there
+       is a refusal at every cycle.
+     - **One way to deactivate.** `put_user/1`, behind `POST` and `PUT`, writes through
+       the same function as a `PATCH` and a `DELETE`, which stops the principals the
+       person sponsors before it writes `active: false`. Stopping only touches principals
+       still running, so the same push again, or a `DELETE` after a `PUT`, stops nothing
+       twice; a push that keeps them active does nothing to principals.
+     - Unchanged: a `PUT` keys on the body's subject rather than the `id` in its path, and
+       a refused `POST` or `PUT` answers `400` without SCIM's error body.
+     - **Proof:** the plane's `scim_answers_test.exs`, through the router with the
+       connector's bearer: a user's and a group's create with `Location` equal to
+       `meta.location`, a person who signed in first created as the same row, a replace's
+       `200`, a delete's `204` and `404` for an unknown and a malformed id on users and
+       groups, a `PUT` with `active: false` stopping a sponsored principal (and refusing
+       sign-in) and the same `PUT` again leaving its `disabled_at`, and a `PUT` with
+       `active` true or absent leaving it running. The creates, the unknown delete and the
+       stop failed on the tip. `scim_entra_test.exs`, `scim_connector_test.exs`,
+       `subject_claim_test.exs` and `web_test.exs` asked for `200` or either on a create,
+       and now ask for `201`.
+
+760. **The desktop app shows a team session whose turn the harness stopped as failed, and
+     says why in words.** Issue #354, defect D53's first bullet, following 745 and 750.
+     - **A plane's row is read for its reason.** `rowFromPlane` maps `failed_reason` to
+       `FleetRow.failed` as `{reason, detail: null}`, the field a daemon's rows fill (745),
+       so the list's row, the launcher's and the review queue's status say Failed for a
+       team session as they do for a local one, and nothing that reads `failed` has a new
+       shape to learn. `detail` is null because a plane holds no content (750). A plane
+       from before the column, or a row without one, says nothing failed.
+     - **Each reason has its words.** `failedTitle` says "The agent kept crashing and the
+       session stopped" for `agent_failed`, as before, and "A tool kept failing and the
+       harness stopped the turn" for `tool_failures`: the failure guard counts one tool's
+       failures in a row, so it is a tool and not the agent. A reason the app does not know
+       reads "The turn failed (<reason>)" rather than nothing.
+     - **A local session still cannot say `tool_failures`.** The daemon's `failed` is
+       `agent_failed` only (745), so those words reach a local row only once a daemon lists
+       it, and the transcript still shows such a turn as the failure guard's question
+       answered `stop`, as 745 left it. A notification that reads a row's `failed` follows,
+       though a plane's rows count nothing unseen and so raise none.
+     - **Proof:** the client's `fleet` test (a plane row with each reason, one with none,
+       one from before the column) and the desktop app's `team-failed` test (a fake plane
+       lists a session stopped on each reason beside one that finished; the launcher's
+       recent rows and the list say Failed, with the reason's words on hover), both failing
+       on the tip; and the web build against `pnpm fake`, which now seeds a run stopped on
+       `tool_failures`.

@@ -132,17 +132,19 @@ defmodule Troupe.Operator.ReconcilerTest do
     end
   end
 
-  describe "EndpointUnreachable (Decision 749)" do
+  describe "EndpointUnreachable (Decisions 749 and 758)" do
     # In gitops mode a profile is applied by something else, so nothing refuses it where
     # it is written: the operator says on the profile what its workers will not reach, as
     # it says a Secret is missing, and the console shows it.
 
-    test "without Cilium, names each endpoint at a loopback or link-local address" do
+    test "with Cilium, names each endpoint at a loopback or link-local address, and admits none" do
+      # Issue #355: the condition said `Cilium`, and both addresses went into a `toCIDR`
+      # rule because the policy's `allowedEgress` names them.
       conn = FakeCluster.start([local_policy(), local_profile()])
 
-      assert {:ok, _result} = reconcile(conn, cilium: false)
+      assert {:ok, _result} = reconcile(conn, cilium: true)
 
-      assert %{"status" => "True", "reason" => "NoCilium", "message" => message} =
+      assert %{"status" => "True", "reason" => "LoopbackOrLinkLocal", "message" => message} =
                condition("EndpointUnreachable")
 
       assert message =~
@@ -151,9 +153,20 @@ defmodule Troupe.Operator.ReconcilerTest do
       assert message =~
                "MCP server meta at http://169.254.169.254/latest is at 169.254.169.254, a link-local address"
 
-      assert message =~ "without Cilium"
+      assert message =~ "metadata"
+
+      rules = @cilium_policy |> get() |> get_in(["spec", "egress"])
+      refute Enum.any?(rules, &Map.has_key?(&1, "toCIDR"))
 
       # Beside `Ready`, as `SecretMissing` is: everything the profile implies was made.
+      assert condition("Ready")["status"] == "True"
+
+      # And without Cilium, word for word.
+      assert {:ok, _result} = reconcile(conn, cilium: false)
+
+      assert %{"status" => "True", "reason" => "LoopbackOrLinkLocal", "message" => ^message} =
+               condition("EndpointUnreachable")
+
       assert condition("Ready")["status"] == "True"
     end
 
@@ -179,11 +192,14 @@ defmodule Troupe.Operator.ReconcilerTest do
              } in rules
     end
 
-    test "with Cilium, an endpoint at a loopback address is not this condition's" do
-      conn = FakeCluster.start([local_policy(), local_profile()])
+    test "with Cilium, a gateway on another port and a server at a private address are reached" do
+      conn = FakeCluster.start([office_policy(), office_profile()])
 
       assert {:ok, _result} = reconcile(conn, cilium: true)
       assert %{"status" => "False", "reason" => "Cilium"} = condition("EndpointUnreachable")
+
+      rules = @cilium_policy |> get() |> get_in(["spec", "egress"])
+      assert %{"toCIDR" => ["10.20.0.5/32"]} in rules
     end
 
     test "without Cilium, public names on 443 and hosts in the cluster are reached" do
