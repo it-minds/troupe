@@ -44,7 +44,8 @@ defmodule Troupe.Config.SettingsTest do
     test "every key, with its value, layer, file and scopes, and no secret", ctx do
       File.write!(
         ctx.user,
-        "api_key: sk-a-long-secret-key\nbase_url: \"{env:SETTINGS_TEST_KEY}\"\nmax_turns: 7\n"
+        "api_key: sk-a-long-secret-key\nbase_url: \"{env:SETTINGS_TEST_KEY}\"\nmax_turns: 7\n" <>
+          "mcp:\n  notes:\n    command: notes-server\n    args: [\"{env:SETTINGS_TEST_KEY}\"]\n"
       )
 
       File.write!(ctx.project, "max_depth: 2\n")
@@ -60,7 +61,10 @@ defmodule Troupe.Config.SettingsTest do
       assert project == ctx.project
       assert %{"value" => "****", "secret" => true} = key(answer, "api_key")
       # A reference to a variable that is not set is shown as written: it is not the key.
+      # In a list too, and the answer is JSON all the same.
       assert key(answer, "base_url")["value"] == "{env:SETTINGS_TEST_KEY}"
+      assert key(answer, "mcp.notes.args")["value"] == ["{env:SETTINGS_TEST_KEY}"]
+      assert {:ok, _json} = Jason.encode(answer)
 
       # Untrusted: a key marked trusted is the user's to set alone, here.
       refute answer["trusted"]

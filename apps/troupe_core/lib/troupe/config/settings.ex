@@ -98,7 +98,14 @@ defmodule Troupe.Config.Settings do
   defp value_json({:unset_env, _var, raw}, _secret?), do: raw
   defp value_json(nil, _secret?), do: nil
   defp value_json(_value, true), do: "****"
-  defp value_json(value, false), do: value
+  defp value_json(value, false), do: as_written(value)
+
+  # A list or map can hold a `{env:VAR}` whose variable is not set, too: it is answered
+  # as the file wrote it.
+  defp as_written({:unset_env, _var, raw}), do: raw
+  defp as_written(list) when is_list(list), do: Enum.map(list, &as_written/1)
+  defp as_written(map) when is_map(map), do: Map.new(map, fn {k, v} -> {k, as_written(v)} end)
+  defp as_written(value), do: value
 
   defp source_json(%{layer: layer, source: source})
        when layer in [:user, :project, :local, :opencode] and is_binary(source),
