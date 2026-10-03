@@ -52,7 +52,7 @@ defmodule Troupe.Plane.SubjectClaimTest do
          context do
       subject_claim("oid")
 
-      assert {:ok, %{status: 200, body: provisioned}} = scim_user(context, entra_user())
+      assert {:ok, %{status: 201, body: provisioned}} = scim_user(context, entra_user())
 
       assert {:ok, %{status: 200, body: signed_in}} = exchange(context, "ada")
       assert signed_in["subject"] == @ada_oid
@@ -98,7 +98,7 @@ defmodule Troupe.Plane.SubjectClaimTest do
           "emails" => [%{"primary" => true, "value" => "bo@example.test"}]
       }
 
-      assert {:ok, %{status: 200}} = scim_user(context, bo)
+      assert {:ok, %{status: 201}} = scim_user(context, bo)
 
       assert {:ok, %{status: 200, body: body}} = exchange(context, "uuid:" <> uuid)
       assert body["subject"] == uuid
@@ -276,7 +276,7 @@ defmodule Troupe.Plane.SubjectClaimTest do
 
     test "when SCIM got there first, her old row is folded into the one SCIM made", context do
       subject_claim("oid")
-      {:ok, %{status: 200, body: provisioned}} = scim_user(context, entra_user())
+      {:ok, %{status: 201, body: provisioned}} = scim_user(context, entra_user())
 
       assert {:ok, %{status: 200, body: body}} = exchange(context, "ada")
       assert body["subject"] == @ada_oid

@@ -749,6 +749,35 @@ defmodule Troupe.Operator.ResourcesTest do
       assert cidrs(resources) == ["10.20.0.5/32"]
     end
 
+    test "with Cilium, a profile's host at a loopback or link-local address is admitted by nothing",
+         %{policy: policy} do
+      # Issue #355: each became a `toCIDR` of its one address wherever the policy's
+      # `allowedEgress` named it, the cloud's metadata address among them. Left out as
+      # without Cilium, however it is spelled and whichever of the profile's hosts it is.
+      resources =
+        [
+          llm: %{"endpoint" => "http://127.0.0.1:4000/v1"},
+          mcpServers: [
+            %{"name" => "meta", "url" => "http://169.254.169.254/"},
+            %{"name" => "mapped", "url" => "http://[::ffff:169.254.169.254]/latest"},
+            %{"name" => "local", "url" => "http://[::1]:9000/mcp"},
+            %{"name" => "link", "url" => "https://[fe80::1]/mcp"},
+            %{"name" => "tickets", "url" => "https://10.20.0.5/mcp"}
+          ],
+          egress: %{
+            "fqdns" => ["169.254.169.254", "FE80::2", "203.0.113.5"],
+            "gitHosts" => ["127.0.0.2", "github.com"]
+          }
+        ]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: true})
+
+      # A public address and a private one stay that one address, and a name a name.
+      assert Enum.sort(cidrs(resources)) == ["10.20.0.5/32", "203.0.113.5/32"]
+      assert Enum.sort(fqdn_names(resources)) == ["github.com"]
+    end
+
     test "DNS is the cluster's resolver in kube-system, and nothing that merely carries its label",
          %{resources: resources} do
       rules = get_in(find(resources, "NetworkPolicy", "troupe-w-dev"), ["spec", "egress"])

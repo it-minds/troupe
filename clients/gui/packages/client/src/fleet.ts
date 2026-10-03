@@ -48,8 +48,10 @@ export interface FleetRow {
   unseen?: Unseen | null;
   /**
    * How the root agent's last turn failed, where the source says: `agent_failed`, a root
-   * that kept crashing, with what it raised, and the session stopped on it (Decision 727).
-   * A daemon's rows say it; a plane's and an older daemon's say nothing.
+   * that kept crashing, and the session stopped on it (Decision 727); or `tool_failures`,
+   * a tool that kept failing until the harness stopped the turn. A daemon's rows say the
+   * first, with what the agent raised; a plane's say either, by its reason alone, since a
+   * plane holds no content (Decision 750). An older daemon or plane says nothing.
    */
   failed?: { reason: string; detail: string | null } | null;
   /** The source's own row, for anything a view needs that this shape does not carry. */
@@ -83,6 +85,7 @@ export function rowFromPlane(row: SessionRow, source = "plane"): FleetRow {
     origin: row.origin ?? null,
     reviewedBy: row.reviewed_by ?? null,
     sync: null,
+    failed: row.failed_reason ? { reason: row.failed_reason, detail: null } : null,
     raw: row,
   };
 }

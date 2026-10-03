@@ -568,8 +568,15 @@ defmodule Troupe.Operator.Resources do
   # No rule at all where there is nothing to put in it, rather than a `toFQDNs` or a
   # `toCIDR` that is empty and means whatever the Cilium version at hand takes an empty
   # list to mean.
+  #
+  # Except a host of the profile's at a loopback or link-local address, which is left out
+  # as the NetworkPolicy leaves it out without Cilium (Decision 758): from a pod, loopback
+  # is the pod itself, and link-local is the node's, where a cloud's metadata service
+  # answers. The policy's `allowedEgress` naming it is not enough. `EndpointUnreachable`
+  # says so on the profile, from the same judgement.
   defp allowlist_rules(profile, settings) do
-    hosts = Enum.uniq(Profile.egress_destinations(profile) ++ platform_hosts(settings))
+    own = Enum.reject(Profile.egress_destinations(profile), &Reach.refused?/1)
+    hosts = Enum.uniq(own ++ platform_hosts(settings))
     {addresses, names} = Enum.split_with(hosts, &address_block/1)
 
     fqdn_rule(names) ++ cidr_rule(addresses |> Enum.map(&address_block/1) |> Enum.uniq())

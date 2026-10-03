@@ -474,7 +474,7 @@ defmodule Troupe.Plane.WebTest do
 
       assert {:ok, %{status: 401}} = post(context, "/scim/v2/Users", user)
 
-      assert {:ok, %{status: 200, body: body}} =
+      assert {:ok, %{status: 201, body: body}} =
                post(context, "/scim/v2/Users", user, [{"authorization", "Bearer scim-secret"}])
 
       assert body["userName"] == "ada@example.test"

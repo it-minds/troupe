@@ -38,10 +38,15 @@ defmodule Troupe.Plane.SCIM do
   @typedoc "Why a request was refused: no such resource, or SCIM's `scimType` and a detail."
   @type error :: :not_found | {String.t(), String.t()} | Ecto.Changeset.t()
 
-  @doc "Apply a SCIM User resource."
+  @doc """
+  Apply a SCIM User resource.
+
+  `active: false` deactivates the person as `deactivate_user/1` does, whether the resource
+  came as a `POST` or a `PUT`.
+  """
   @spec put_user(map()) :: {:ok, User.t()} | {:error, term()}
   def put_user(resource) do
-    Identity.upsert_user(%{
+    save_user(%{
       subject: subject_of(resource),
       external_id: Map.get(resource, "externalId"),
       user_name: Map.get(resource, "userName"),
@@ -113,16 +118,21 @@ defmodule Troupe.Plane.SCIM do
   end
 
   # Every change SCIM makes to somebody it already has, under the subject they have.
-  defp update_user(user, changes) do
-    if Map.get(changes, :active) == false do
+  defp update_user(user, changes), do: save_user(Map.put(changes, :subject, user.subject))
+
+  # Every change SCIM makes to a person, whether a push, a PATCH or a DELETE carried it, so
+  # a deactivation is the same however it arrives.
+  defp save_user(attrs) do
+    if Map.get(attrs, :active) == false do
       # And everything that person was answerable for. A service principal is a
       # credential that starts sessions and spends a budget; one whose sponsor has left
       # the provider has nobody to ask about it, so it stops firing within this push
-      # rather than at whatever point somebody notices.
-      {:ok, _stopped} = Principals.sponsor_left(user.subject)
+      # rather than at whatever point somebody notices. One already stopped is left as it
+      # is, so the same push again stops nothing more.
+      {:ok, _stopped} = Principals.sponsor_left(attrs.subject)
     end
 
-    Identity.upsert_user(Map.put(changes, :subject, user.subject))
+    Identity.upsert_user(attrs)
   end
 
   # -- filters and PATCH ------------------------------------------------------
