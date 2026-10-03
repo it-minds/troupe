@@ -15,4 +15,20 @@ File.write!(
 
 System.at_exit(fn _ -> File.rm_rf!(config_home) end)
 
+# The first run's `daemon` step writes a login entry (Decision 762): into a scratch home
+# here, never the developer's own login items.
+login_home =
+  Path.join(System.tmp_dir!(), "troupe-gateway-test-login-#{System.unique_integer([:positive])}")
+
+Application.put_env(:troupe_core, :start_at_login,
+  env: %{
+    "HOME" => login_home,
+    "APPDATA" => Path.join(login_home, "AppData"),
+    "XDG_CONFIG_HOME" => Path.join(login_home, ".config")
+  },
+  command: "/opt/troupe/bin/troupe-daemon"
+)
+
+System.at_exit(fn _ -> File.rm_rf!(login_home) end)
+
 ExUnit.start()

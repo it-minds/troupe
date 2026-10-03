@@ -266,6 +266,17 @@ export class SessionView {
     return this.conn.call<CommandsList>("commands.list", { session_id: this.sessionId });
   }
 
+  /**
+   * `commands.run`: a command a markdown file defines (`source` `user` or `project`). The
+   * harness sends the file's prompt as the session's input, with `args` for `$ARGUMENTS`;
+   * the answer is the acknowledgement and the input's own events, carrying `commandId`,
+   * are the effect.
+   */
+  async runCommand(name: string, args = "", commandId: string = this.conn.nextCommandId()): Promise<{ commandId: string }> {
+    await this.conn.call("commands.run", { command_id: commandId, session_id: this.sessionId, name, arguments: args });
+    return { commandId };
+  }
+
   /** `session.goal.get`. Read from the log; wakes nothing. */
   getGoal(): Promise<GoalResult> {
     return this.conn.call<GoalResult>("session.goal.get", { session_id: this.sessionId });

@@ -30,6 +30,9 @@ defmodule Troupe.Setup do
       `.troupe/`.
     * `workspace` — the first project directory, and the approval model in two
       sentences: ask first (the default), or every call runs. Writes `auto_approve`.
+    * `daemon` — whether the daemon starts when the person logs in (Decision 762). Yes
+      writes the platform's login entry and no removes it, through
+      `Troupe.StartAtLogin`; the report's `daemon` says whether one is there now.
     * `finish` — records that the first run is done (`<state>/setup.json`), and says
       which session to start, with a suggested prompt; the daemon starts it.
 
@@ -43,8 +46,9 @@ defmodule Troupe.Setup do
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
   alias Troupe.LLM.Endpoint
+  alias Troupe.StartAtLogin
 
-  @steps ~w(where provider key models workspace finish)
+  @steps ~w(where provider key models workspace daemon finish)
   @providers ~w(anthropic openai fake)
   @kinds ~w(anthropic openai gateway litellm)
   @vendor_vars ~w(ANTHROPIC_API_KEY OPENAI_API_KEY)
@@ -218,8 +222,8 @@ defmodule Troupe.Setup do
   @doc """
   The flow as a client sees it: whether a first run is needed and when one was done,
   the step it is at and the steps this path takes, every answer so far (the key as where
-  it came from), what the provider listed, the suggestion, the last check and, after
-  `finish`, the session asked for.
+  it came from), what the provider listed, the suggestion, the last check, whether the
+  daemon starts at login and, after `finish`, the session asked for.
   """
   @spec report(t()) :: map()
   def report(%__MODULE__{} = flow) do
@@ -236,6 +240,7 @@ defmodule Troupe.Setup do
       "suggested" => flow.suggested,
       "check" => flow.check,
       "suggested_prompt" => suggested_prompt(get_in(flow.answers, ["workspace", "workspace"])),
+      "daemon" => StartAtLogin.status(),
       "session" => flow.session
     }
   end
@@ -248,7 +253,7 @@ defmodule Troupe.Setup do
         ~w(where finish)
 
       get_in(answers, ["provider", "reuse"]) in ~w(opencode config) ->
-        ~w(where provider workspace finish)
+        ~w(where provider workspace daemon finish)
 
       true ->
         @steps
@@ -403,9 +408,19 @@ defmodule Troupe.Setup do
          {:ok, _path} <-
            Config.write_key(Config.user_path(), ["auto_approve"], approvals == "auto") do
       {:ok,
-       advance(flow, "workspace", %{"workspace" => workspace, "approvals" => approvals}, "finish")}
+       advance(flow, "workspace", %{"workspace" => workspace, "approvals" => approvals}, "daemon")}
     end
   end
+
+  # The answer is the state: yes writes the login entry (again, if it is there), no
+  # removes one, so a re-run is also how it is turned off.
+  defp take(flow, "daemon", %{"at_login" => on}, _opts) when is_boolean(on) do
+    with {:ok, status} <- if(on, do: StartAtLogin.enable(), else: StartAtLogin.disable()) do
+      {:ok, advance(flow, "daemon", %{"at_login" => status["at_login"]}, "finish")}
+    end
+  end
+
+  defp take(_flow, "daemon", _answer, _opts), do: {:error, "at_login must be true or false"}
 
   defp take(flow, "finish", answer, opts) do
     choice = get_in(flow.answers, ["where", "choice"]) || "local"

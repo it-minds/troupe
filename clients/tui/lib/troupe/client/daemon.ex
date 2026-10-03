@@ -163,6 +163,11 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def send_input(sid, path, text), do: route(sid, path, &Worker.input(&1, text))
 
+  # A command a file defines goes to this session, whatever window is activated: it is
+  # the session's table that listed it.
+  @impl true
+  def run_command(sid, name, arguments), do: describe(Worker.run_command(sid, name, arguments))
+
   @impl true
   def approve(sid, call_id, decision),
     do: describe(Worker.approve(call_target(sid, call_id), call_id, decision))

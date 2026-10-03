@@ -22,7 +22,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
-import { COMMANDS } from "./commands.js";
+import { COMMANDS, expandDefined } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 
 interface Session {
@@ -90,7 +90,7 @@ interface FakeSetupFlow {
   check: { state: string; reason: string | null } | null;
 }
 
-const SETUP_STEPS = ["where", "provider", "key", "models", "workspace", "finish"] as const;
+const SETUP_STEPS = ["where", "provider", "key", "models", "workspace", "daemon", "finish"] as const;
 
 function freshSetup(): FakeSetupFlow {
   return { step: "where", answers: {}, key: null, offered: [], suggested: { default: null, cheap: null }, check: null };
@@ -218,6 +218,8 @@ export class FakeDaemon {
   setupCompleted: { completed_at: string; choice: string; subject: string | null } | null;
   /** The first run in progress. */
   setup: FakeSetupFlow = freshSetup();
+  /** Whether the login entry is there (troupe Decision 762): the `daemon` step writes and removes it. */
+  atLogin = false;
   /** Directories the workspace step accepts; anything else "is not a directory". */
   directories: string[] = ["/home/ada/project", "/home/ada/notes", "/home/ada/repo"];
   /** How long `subscribe` takes to answer: a busy machine, where a screen is up before its view is. */
@@ -631,6 +633,21 @@ export class FakeDaemon {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
         return reply(ws, id, { commands: COMMANDS });
 
+      // A command a file defines, as the daemon runs it (Decision 763): its prompt, with
+      // `arguments` for `$ARGUMENTS`, goes in as input under the call's `command_id`.
+      case "commands.run": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        const name = String(params["name"] ?? "");
+        const text = expandDefined(name, String(params["arguments"] ?? ""));
+        if (text === null) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "command", name } });
+        const commandId = String(params["command_id"] ?? "");
+        const actor = { kind: "user", subject: this.principal.subject };
+        session.log.append("input_queued", { command_id: commandId, author: this.principal.subject, text }, actor);
+        session.log.append("input_accepted", { command_id: commandId, author: this.principal.subject }, actor);
+        session.log.append("user_input", { command_id: commandId, text, source: "user" }, actor);
+        return reply(ws, id, { accepted: true, command_id: commandId });
+      }
+
       case "workspace.recent":
         return reply(ws, id, {
           workspaces: [...new Set([...this.sessions.values()].map((s) => s.workspace))].map((path) => ({
@@ -738,7 +755,8 @@ export class FakeDaemon {
    * is the current one or one already answered (which forgets what came after), a key
    * is checked before anything is written — right when it looks like one, refused
    * otherwise — the settings are written at the models step, `auto_approve` at the
-   * workspace step, and `finish` records the run and starts the session.
+   * workspace step, the login entry (`atLogin`) at the daemon step, and `finish` records
+   * the run and starts the session.
    */
   private setupCall(ws: WebSocket, id: unknown, method: string, params: Record<string, unknown>): void {
     const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
@@ -850,7 +868,13 @@ export class FakeDaemon {
         if (!this.directories.includes(workspace)) return invalid(`${workspace} is not a directory`);
         const approvals = answer["approvals"] ?? "ask";
         if (approvals !== "ask" && approvals !== "auto") return invalid(`approvals must be ask or auto, not ${JSON.stringify(approvals)}`);
-        advance({ workspace, approvals }, "finish");
+        advance({ workspace, approvals }, "daemon");
+        break;
+      }
+      case "daemon": {
+        if (typeof answer["at_login"] !== "boolean") return invalid("at_login must be true or false");
+        this.atLogin = answer["at_login"];
+        advance({ at_login: this.atLogin }, "finish");
         break;
       }
       case "finish": {
@@ -887,7 +911,7 @@ export class FakeDaemon {
       flow.answers["where"]?.["choice"] === "plane"
         ? ["where", "finish"]
         : typeof flow.answers["provider"]?.["reuse"] === "string"
-          ? ["where", "provider", "workspace", "finish"]
+          ? ["where", "provider", "workspace", "daemon", "finish"]
           : [...SETUP_STEPS];
     const config = this.configJson();
     return {
@@ -907,6 +931,12 @@ export class FakeDaemon {
       suggested: flow.suggested,
       check: flow.check,
       suggested_prompt: this.suggestedPrompt(flow.answers["workspace"]?.["workspace"] as string | undefined),
+      daemon: {
+        at_login: this.atLogin,
+        kind: "systemd",
+        path: `/home/${this.osUser}/.config/systemd/user/troupe-daemon.service`,
+        command: `/home/${this.osUser}/.local/bin/troupe-daemon`,
+      },
       session: null,
     };
   }

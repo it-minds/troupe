@@ -5,9 +5,11 @@
 // rather than hidden, because the list is how somebody learns the tool.
 //
 // The list is the harness's and nothing here is one: this file holds only what running
-// each command means in this app, and which ones it cannot run yet. It uses the theme's
-// tokens and restyles nothing around it, so the app's coming re-skin (#52) can take it
-// as a component.
+// each command means in this app, and which ones it cannot run yet. A command a markdown
+// file defines (`source` `user` or `project`, Decision 763) is the harness's to run: it
+// sends the file's prompt as the session's input. It uses the theme's tokens and
+// restyles nothing around it, so the app's coming re-skin (#52) can take it as a
+// component.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
@@ -110,13 +112,29 @@ const SECTION_NAMES: Record<string, string> = {
   workspace: "Workspace",
   setup: "Setup",
   agents: "Agents",
+  custom: "Custom",
   quit: "Quit",
 };
+
+/** A command a file defines, yours or the repository's: the harness runs it. */
+function defined(entry: CommandEntry): boolean {
+  return entry.source === "user" || entry.source === "project";
+}
+
+// The file's prompt goes to the session as input, and the transcript shows it as it
+// shows anything typed.
+async function runDefined({ view }: RunContext, name: string, args: string): Promise<string | undefined> {
+  const v = view.view;
+  if (!v) return "not attached";
+  await v.runCommand(name, args);
+  return undefined;
+}
 
 function reasonFor(entry: CommandEntry, local: boolean): string | null {
   if (entry.availability === "local" && !local) return "only for a session on this computer";
   if (entry.availability === "plane") return "needs a plane";
   if (entry.source === "agent") return "start a branch on it from the terminal client, or a new session from the list";
+  if (defined(entry)) return null;
   if (!(entry.name in RUNNERS)) return NOT_HERE[entry.name] ?? "not in the desktop app yet";
   return null;
 }
@@ -206,7 +224,8 @@ export function CommandPalette({
       return;
     }
     try {
-      const result = await RUNNERS[entry.name]!({ view, ...actions }, args);
+      const ctx = { view, ...actions };
+      const result = defined(entry) ? await runDefined(ctx, entry.name, args) : await RUNNERS[entry.name]!(ctx, args);
       if (result === undefined) onClose();
       else if (result === "") setQuery("");
       else setNotice(result);

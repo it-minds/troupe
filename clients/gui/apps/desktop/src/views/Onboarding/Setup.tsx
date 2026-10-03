@@ -10,6 +10,7 @@ import type { JSX } from "react";
 import { previousStep } from "@troupe/client";
 import type { DaemonClient, SetupFlow, SetupStepName } from "@troupe/client";
 import { Failed, Loading } from "../bits";
+import { Daemon } from "./Daemon";
 import { Finish } from "./Finish";
 import { Key } from "./Key";
 import { PickModels } from "./PickModels";
@@ -57,6 +58,8 @@ export function SetupSteps({ client, onDone }: { client: DaemonClient | null; on
       return <PickModels {...common} onAnswer={answer} />;
     case "workspace":
       return <Workspace {...common} client={client} onAnswer={answer} />;
+    case "daemon":
+      return <Daemon {...common} onAnswer={answer} />;
     case "finish":
       return (
         <Finish
@@ -87,8 +90,8 @@ export function SetupScreen({ client, onDone }: { client: DaemonClient | null; o
         <header className="stack" style={{ gap: "var(--space-2)" }}>
           <h1>Setup</h1>
           <p style={{ margin: 0, maxWidth: "var(--measure-reading)", color: "var(--text-secondary)" }}>
-            The first run&apos;s questions, again: the provider, the key, the models, a project. Everything is written to this computer&apos;s
-            own settings, and the terminal client reads the same file.
+            The first run&apos;s questions, again: the provider, the key, the models, a project, and whether the daemon starts when you log
+            in. Everything is written to this computer&apos;s own settings, and the terminal client reads the same file.
           </p>
         </header>
         <SetupSteps client={client} onDone={onDone} />
