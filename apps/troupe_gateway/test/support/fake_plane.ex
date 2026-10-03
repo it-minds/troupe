@@ -15,6 +15,10 @@ defmodule Troupe.Gateway.FakePlane do
   `session.assertion` is not implemented here at all, because minting an assertion is
   signing, and signing is the plane's job. The tests pass `:key_manager` instead and the
   exchange is proven where it can be, in the plane's own suite.
+
+  And the two an erasure needs (Decision 756): `session.erasures` names the rows `erase/2`
+  marked that a device has not acknowledged, and `session.erased` records the device and
+  deletes every version under the prefix in MinIO, as the plane does.
   """
 
   use Agent
@@ -59,6 +63,16 @@ defmodule Troupe.Gateway.FakePlane do
       row = Map.fetch!(sessions, session_id)
       taken = %{row | "epoch" => row["epoch"] + 1, "device" => "the other one"}
       {taken, %{s | sessions: Map.put(sessions, session_id, taken)}}
+    end)
+  end
+
+  @doc "Erase the session, as the plane would on somebody's word: a row, erased."
+  @spec erase(pid(), String.t()) :: map()
+  def erase(state, session_id) do
+    Agent.get_and_update(state, fn %{sessions: sessions} = s ->
+      row = Map.get(sessions, session_id, %{"session_id" => session_id, "kind" => "private"})
+      erased = Map.merge(row, %{"state" => "erased", "applied_by" => []})
+      {erased, %{s | sessions: Map.put(sessions, session_id, erased)}}
     end)
   end
 
@@ -130,6 +144,32 @@ defmodule Troupe.Gateway.FakePlane do
       prefix = params["prefix"] || "sessions/#{params["session_id"]}/"
       {:ok, keys} = ObjectStore.list(ObjectStore.from_env(), prefix)
       {:ok, %{"session_id" => params["session_id"], "keys" => keys}}
+    end
+  end
+
+  defp dispatch(state, "session.erasures", %{"device" => device}) do
+    erasures =
+      for {id, %{"state" => "erased"} = row} <- Agent.get(state, & &1.sessions),
+          device not in row["applied_by"],
+          do: %{"session_id" => id, "erased_at" => "2026-10-03T00:00:00Z"}
+
+    {:ok, %{"erasures" => erasures}}
+  end
+
+  defp dispatch(state, "session.erased", %{"session_id" => id, "device" => device}) do
+    case row(state, id) do
+      %{"state" => "erased"} ->
+        {:ok, deleted} = ObjectStore.delete_prefix(ObjectStore.from_env(), "sessions/#{id}/")
+
+        Agent.update(state, fn %{sessions: sessions} = s ->
+          acknowledged = Map.update!(sessions[id], "applied_by", &[device | &1])
+          %{s | sessions: Map.put(sessions, id, acknowledged)}
+        end)
+
+        {:ok, %{"session_id" => id, "device" => device, "objects_deleted" => deleted}}
+
+      _other ->
+        {:error, "not_found"}
     end
   end
 

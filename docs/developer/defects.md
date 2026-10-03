@@ -308,14 +308,12 @@ Found by the chunk 12 fixers of slots C and A (PRs #322, #323), 2026-10-01.
 
 ### D51 - MCP sessions a caller leaves open (low)
 
-`Troupe.MCP.Sessions` keys a session on the server and a hash of the call's headers
-(Decision 746), so a renewed token opens a new session and the old one is ended only when
-its holder stops: a worker calling a server as its profile (Decision 747) opens one per
-token renewal, about one an hour, for as long as the pod runs.
-`Troupe.Worker.MCP.put_servers` doesn't end the sessions of servers a new bundle dropped.
-Servers built from the TypeScript and Python SDK examples answer `400`, not the
-specification's `404`, for a session they have forgotten, and a `400` is not retried with
-a new session. Found by the chunk 12 fixer of slot A (PR #323), 2026-10-01.
+A person's MCP session on a pod is not ended when a refreshed token of theirs opens
+another: nothing in the client tells one person's renewed token from another person's,
+and the pod does not hold the credential to end it with (Decisions 746, 757), so it stays
+in the pod's `Troupe.MCP.Sessions` until the pod stops or a bundle drops the server, and
+at the server until the server expires it. Found by the chunk 12 fixer of slot A (PR
+#323), 2026-10-01; the rest is #358.
 
 ### D52 - A worker's own OpenBao identity (medium)
 
@@ -327,11 +325,9 @@ Found by the chunk 12 fixer of slot B (PR #324), 2026-10-01; the rest is #336.
 
 ### D53 - Small leftovers from the 0.7.2 work (low)
 
-- The desktop app doesn't read the plane row's new `failed_reason` (Decision 750):
-  `rowFromPlane` (`clients/gui/packages/client/src/fleet.ts`) should map it to
-  `FleetRow.failed`, and `failedTitle` (`views/bits.tsx`) has no words for
-  `tool_failures` yet ("kept crashing" would be wrong). A2A's `state_of_row` could read the
-  same field instead of the log, and `Web.Live.Status.from_session/1` is used by no page.
+- A2A's `state_of_row` could read the plane row's `failed_reason` (Decision 750) instead
+  of the log, and `Web.Live.Status.from_session/1` is used by no page. (The desktop app
+  reads it since #354.)
 - A plane row's `cost_micros` lags: a pod reports status on lifecycle changes only, and
   the summary folds the cost later, so a report just after a turn says 0.
 - `EndpointUnreachable` (Decision 749): in `gitops` mode an ssh profile's resource gets the
@@ -349,11 +345,6 @@ Found by the chunk 12 fixers, 2026-10-01.
 
 ### D54 - What a worker may reach: the edges left after #268 (medium)
 
-- With Cilium the plane refuses no endpoint, so an IP-literal endpoint at a loopback or
-  link-local address (the cloud's metadata address among them) becomes a `toCIDR` rule
-  (Decision 723) whenever the TroupePolicy's `allowedEgress` names it: only that list
-  stands between a profile and such an address. Without Cilium they are refused
-  (Decisions 749, 752); the same refusal in both modes would close it.
 - An `egress.fqdns` entry written `host:port` is compared to `allowedEgress` as the whole
   string (`Troupe.Policy.matches?/2`), and with Cilium it becomes a `toFQDNs` `matchName`
   that carries the port and admits nothing: ports in entries work without Cilium only.
@@ -382,12 +373,6 @@ Found by the chunk 13 fixer of slot C13 (PR #337), 2026-10-02.
 
 ### D56 - SCIM and the subject claim: small leftovers (low)
 
-- `POST /scim/v2/Users` and `/Groups` answer `200`; RFC 7644 section 3.3 and Microsoft's
-  documented responses have `201`.
-- `DELETE /scim/v2/Users/:id` answers `204` for an id the plane doesn't have (the RFC has
-  `404`).
-- A `PUT` with `active: false` deactivates a person but doesn't stop the service
-  principals they sponsor; `DELETE` and, since PR #345, `PATCH` do.
 - After a re-key (Decision 751) a plane token minted before the move is refused as an
   unknown user; how the desktop app and the TUI take that one refusal is untested, and so
   is the budget ceiling carried over when an old row is folded into SCIM's.
@@ -397,6 +382,66 @@ Found by the chunk 13 fixer of slot C13 (PR #337), 2026-10-02.
   once under the full plane suite's load and passed alone.
 
 Found by the chunk 13 fixers of slots A13, D13 and E13 (PRs #339, #345, #343), 2026-10-02.
+
+### D57 - SCIM: what is left after #356 (low)
+
+- `PUT /scim/v2/Users/:id` and `/Groups/:id` ignore the id in the path and upsert on the
+  body's subject: a `PUT` to an id the plane doesn't have creates a resource (RFC 7644
+  section 3.5.1 says a `PUT` must not), and one whose body names another `externalId` (or
+  `userName`) changes or creates that person instead of being refused as `mutability`, the
+  way a `PATCH` is (Decision 754). Addressing `PUT` by id through the `PATCH` path would
+  close both.
+- A refused `POST` or `PUT` answers `400` as `{"status", "detail"}` without SCIM's error
+  schema, and a user body with neither `externalId` nor `userName` (or a group body with
+  neither `externalId` nor `id`) raises and answers `500`.
+- A deleted user stays visible to `GET` by id and to filters (the plane deactivates rather
+  than deletes, for the audit trail and a later reactivation); RFC 7644 section 3.6 has a
+  `404` and leaves it out. That is deliberate but no decision says so.
+- Responses carry `application/json`, not `application/scim+json`.
+- Unconfirmed: a `POST` or `PUT` passes `active` to the changeset unread, so a string
+  `"False"` is probably refused where a `PATCH` reads it as false.
+
+Found by the chunk 14 fixer of slot D14 (PR #362), 2026-10-03.
+
+### D58 - The desktop app and a failed turn: what #354 left (low)
+
+- The review queue shows a failed run's Failed pill but says "Ended: Idle", and
+  `wentWrong` ignores `row.failed`, so the run's group isn't sorted first or marked as
+  something that did not finish (`views/Review.tsx`; about two lines).
+- A session whose turn stopped on `tool_failures` still reads Idle in the session view's
+  header while the list says Failed; changing it reopens Decision 745's choice for the
+  transcript.
+- A local session can't carry `tool_failures`: the daemon's `session.list` `failed` is
+  `agent_failed` only (Decision 745).
+
+Found by the chunk 14 fixer of slot E14 (PR #359), 2026-10-03.
+
+### D59 - Private sessions and MCP sessions: small leftovers of 0.7.4 (low)
+
+- `ObjectStore.list_versions/2` reads one page, so an erasure (a pod's, and since PR #364
+  a private session's) of a session with more than 1000 object versions leaves the rest.
+- How the desktop app and the TUI show a session in the new `erasure_pending` state is
+  untested: the client library types a state as an open string, and the TUI's remote
+  worker reads a state it doesn't know as none.
+- `Troupe.Session.MCP`, reloading after a server left `mcp.json`, stops the server but
+  leaves its HTTP sessions in the local session's table and open at the server until the
+  local session stops (`Sessions.retain/2` would end them, as `put_servers` now does on a
+  pod).
+
+Found by the chunk 14 fixers of slots A14 and B14 (PRs #364, #363), 2026-10-03.
+
+### D60 - A checkout that built the previous version keeps reporting it (low)
+
+Every `mix.exs` reads `VERSION` when the project loads (Decision 668), but Mix rewrites an
+app's compiled `.app` only when `mix.exs` or the config changes, not when `VERSION` does.
+So after a version bump an incremental build in a checkout that built before keeps the old
+`vsn`: `scripts/install-local.ps1` then installs a TUI whose `troupe version` reports the
+previous release (the daemon's release reads the version afresh and is right), and
+`Troupe.VersionTest` fails with "troupe_core is 0.7.2-beta and VERSION is 0.7.3-beta".
+CI builds from clean and is not affected. Removing `_build/*/lib/troupe*/ebin/*.app`
+before building clears it; `install-local.ps1` could do that, or the projects could make a
+change to `VERSION` recompile them. Found by the chunk 14 coordinator verifying the chunk's
+tip, 2026-10-03.
 
 ## Taken
 
@@ -465,6 +510,10 @@ Found by the chunk 13 fixers of slots A13, D13 and E13 (PRs #339, #345, #343), 2
 | A person's own remote MCP server that needs their OAuth sign-in (found by the deployment's first profile); then the `initialize`/session handshake and the desktop app's half of the pod path; client registration and the TUI's half are next | #300, PR #310; #319, PR #323; #308, PR #322 |
 | D47 - On a plane, a turn the harness stopped reads as a finished one | #320, PR #325 |
 | D52 - A worker logs in to OpenBao as one shared role and for every request; a person-mode server's mode before the first bundle | #336, PR #337 |
+| D56's SCIM items - a create answered `200`, a delete of an unknown id `204`, and a `PUT` with `active: false` left sponsored principals running | #356, PR #362 |
+| D54's first item - with Cilium, a profile could name a loopback or link-local endpoint | #355, PR #360 |
+| D51 - an MCP session a renewed token or a dropped server left open (the person-mode case stays in D51) | #358, PR #363 |
+| D53's first item - the desktop app showed a team turn that failed on the plane as finished | #354, PR #359 |
 
 ## Checked and not a defect
 

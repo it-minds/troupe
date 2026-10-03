@@ -8,12 +8,14 @@ defmodule Troupe.MCPHandshakeTest do
 
   A local session opens the MCP session before its first request and carries it, with
   the protocol version the server chose, on every request after; the agent lists the
-  server's tools and calls one; a session the server has forgotten (`404`) is opened again
-  once and the request goes through; the session is ended with a `DELETE` when the local
-  session stops, and a `405` to it is let be; two credentials are two sessions; a server
-  that keeps no session is called without one once the handshake is done; and a server
-  tried outside any session gets a session for its one request, ended after it. Nothing
-  here skips.
+  server's tools and calls one; a session the server has forgotten (`404`, or `400` as
+  some servers built on the SDKs answer) is opened again once and the request goes
+  through, and a `400` a new session does not cure is the call's error after that one
+  retry; the session is ended with a `DELETE` when the local session stops, and a `405`
+  to it is let be; two credentials are two sessions, and a credential that replaced
+  another ends the session the other opened; a server that keeps no session is called
+  without one once the handshake is done; and a server tried outside any session gets a
+  session for its one request, ended after it. Nothing here skips.
   """
 
   use Troupe.SessionCase, async: true
@@ -105,6 +107,100 @@ defmodule Troupe.MCPHandshakeTest do
                Tool.invoke(search, %{"topic" => "cars"}, ctx(session, context))
 
       assert [%{rpc: "tools/call", session: "session-2", status: 200}] = requests()
+    end
+
+    @tag fake: [forgotten: 400]
+    test "a session the server answers 400 for is opened again once, as a 404 is", context do
+      %{session: session} = with_server(context)
+      wait_for_state(session.id, "notes", [:ready])
+      search = tool(session.id)
+      _handshake_and_listing = requests()
+
+      FakeMCP.forget(context.fake)
+
+      assert {:ok, "three notes on boats"} =
+               Tool.invoke(search, %{"topic" => "boats"}, ctx(session, context))
+
+      # Ended too, since a server may answer 400 for a session it still holds.
+      assert [
+               %{rpc: "tools/call", session: "session-1", status: 400},
+               %{method: "DELETE", session: "session-1", status: 400},
+               %{rpc: "initialize", session: nil, status: 200},
+               %{rpc: "notifications/initialized", session: "session-2"},
+               %{rpc: "tools/call", session: "session-2", status: 200}
+             ] = requests()
+
+      assert {:ok, "three notes on cars"} =
+               Tool.invoke(search, %{"topic" => "cars"}, ctx(session, context))
+
+      assert [%{rpc: "tools/call", session: "session-2", status: 200}] = requests()
+    end
+
+    @tag fake: [bad_calls: true]
+    test "a 400 a new session does not cure is the call's error, after one more try",
+         context do
+      {:ok, holder} = Sessions.start_link()
+
+      server = %Server{
+        name: "notes",
+        url: context.fake.url,
+        credential: "profile-token",
+        sessions: Sessions.table(holder)
+      }
+
+      assert {:ok, [%{"name" => "search"}]} = Client.list_tools(server)
+      _handshake_and_listing = requests()
+
+      assert {:error, {:unexpected_status, 400, _body}} =
+               Client.call_tool(server, "search", %{"topic" => "a"})
+
+      assert [
+               %{rpc: "tools/call", session: "session-1", status: 400},
+               %{method: "DELETE", session: "session-1", status: 200},
+               %{rpc: "initialize", status: 200},
+               %{rpc: "notifications/initialized", session: "session-2"},
+               %{rpc: "tools/call", session: "session-2", status: 400}
+             ] = requests()
+
+      # The session it opened is kept, and nothing is left open beside it.
+      assert Map.keys(FakeMCP.sessions(context.fake)) == ["session-2"]
+      :ok = GenServer.stop(holder)
+    end
+
+    test "a credential that replaced another ends the session the other opened", context do
+      {:ok, holder} = Sessions.start_link()
+      server = %Server{name: "notes", url: context.fake.url, sessions: Sessions.table(holder)}
+      person = %{server | credential: "ada-token", credential_mode: :person}
+
+      assert {:ok, _} = Client.list_tools(%{server | credential: "token-1"})
+      assert {:ok, _} = Client.call_tool(person, "search", %{"topic" => "a"})
+      _so_far = requests()
+
+      # A sign-in refreshed, or a profile's token renewed: the same server and caller.
+      renewed = %{server | credential: "token-2"}
+      assert {:ok, _} = Client.call_tool(renewed, "search", %{"topic" => "b"})
+
+      assert [
+               %{rpc: "initialize", authorization: "Bearer token-2"},
+               %{rpc: "notifications/initialized", session: "session-3"},
+               %{
+                 method: "DELETE",
+                 session: "session-1",
+                 authorization: "Bearer token-1",
+                 status: 200
+               },
+               %{rpc: "tools/call", session: "session-3", status: 200}
+             ] = requests()
+
+      # A person's is theirs: no credential of the profile's replaces it.
+      assert FakeMCP.sessions(context.fake) == %{
+               "session-2" => "Bearer ada-token",
+               "session-3" => "Bearer token-2"
+             }
+
+      assert {:ok, _} = Client.call_tool(renewed, "search", %{"topic" => "c"})
+      assert [%{rpc: "tools/call", session: "session-3", status: 200}] = requests()
+      :ok = GenServer.stop(holder)
     end
 
     test "the session ends at the server when the local session stops", context do

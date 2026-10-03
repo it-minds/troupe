@@ -17,15 +17,27 @@ defmodule Troupe.Plane.Erasure do
   component that can read what it is erasing.
 
   A pod that was offline when this ran applies the erasure when it enrols, before
-  serving anything, which is what `pending_for/1` is for.
+  serving anything, which is what `pending_for/2` is for.
+
+  A private session has no profile and so no pod to ask (Decision 756). The plane
+  destroys its key itself, with the `delete` on key metadata its policy has for exactly
+  this and nothing at all on the data path, so it still cannot read what it destroys.
+  Until the key is gone the session is `erasure_pending`, not `erased`. The objects, and
+  the copy on the owner's machine, go when the owner's daemon next connects: it is told
+  the tombstone, as a pod is on enrol, drops its copy and says so, and the plane then
+  deletes every version under the prefix with the object-storage credential it signs a
+  daemon's URLs with (Decision 390; `pending_for_owner/2`, `device_applied/2`).
   """
 
   import Ecto.Query
 
+  alias Troupe.KMS
+  alias Troupe.ObjectStore
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.{Drain, Fleet, Identity, Repo, Sessions}
-  alias Troupe.Plane.Identity.Team
+  alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.{Session, Tombstone}
+  alias Troupe.Plane.Tokens.Credential
 
   require Logger
 
@@ -34,6 +46,8 @@ defmodule Troupe.Plane.Erasure do
 
   Idempotent: a session that is already erased has its tombstone returned rather than a
   second one written, because erasure is the sort of thing a retry must not make worse.
+  A private session whose key is not yet destroyed has it tried again, which is what a
+  retry is for.
   """
   @spec erase(Session.t() | String.t(), keyword()) :: {:ok, Tombstone.t()} | {:error, term()}
   def erase(session_id, opts) when is_binary(session_id) do
@@ -46,8 +60,14 @@ defmodule Troupe.Plane.Erasure do
   def erase(%Session{} = session, opts) do
     case tombstone_for(session.id) do
       nil -> do_erase(session, opts)
-      existing -> {:ok, existing}
+      existing -> if unfinished?(session), do: finish(session, existing), else: {:ok, existing}
     end
+  end
+
+  # No slot, no budget slice and no pod to give back or to ask: the plane does the one
+  # part that makes it final, here and now.
+  defp do_erase(%Session{kind: "private"} = session, opts) do
+    with {:ok, tombstone} <- write_tombstone(session, opts), do: finish(session, tombstone)
   end
 
   defp do_erase(session, opts) do
@@ -122,6 +142,119 @@ defmodule Troupe.Plane.Erasure do
       |> Repo.update()
 
     updated
+  end
+
+  # -- a private session --------------------------------------------------------
+
+  # Pending until the key is gone, and erased once it is. A key manager that refused or
+  # could not be reached has destroyed nothing, and the session says so rather than that
+  # it is done; erasing it again finishes it, and so does its owner's daemon connecting.
+  defp finish(session, tombstone) do
+    Sessions.put_state(session.id, "erasure_pending")
+
+    case destroy_key(session) do
+      :ok ->
+        Sessions.put_state(session.id, "erased")
+        {:ok, tombstone}
+
+      {:error, reason} ->
+        Logger.warning(
+          "troupe plane: erasure of #{session.id} is pending: its key was not destroyed: " <>
+            inspect(reason)
+        )
+
+        {:ok, tombstone}
+    end
+  end
+
+  # A tombstone with the key still there: `erasure_pending`, or a row a plane from before
+  # Decision 756 tombstoned and then failed on.
+  defp unfinished?(%Session{kind: "private", state: state}), do: state != "erased"
+  defp unfinished?(_session), do: false
+
+  # With the plane's own credential, whose policy has `delete` on the metadata of every
+  # person's session keys and no rule for the data path (`Troupe.KMS.Policy.plane/1`):
+  # every version goes, and none could have been read. Under the owner's name at the key
+  # manager, which is not their subject once they have been moved (Decision 755).
+  defp destroy_key(session) do
+    config = Application.get_env(:troupe_plane, :transit, [])
+
+    with {:ok, token} <- Credential.fetch(config) do
+      options = [
+        token: token,
+        address: config[:address],
+        mount: Application.get_env(:troupe_plane, :kms_mount, "secret")
+      ]
+
+      case KMS.adapter().destroy({:person, owner_name(session)}, session.id, options) do
+        # A login OpenBao has stopped honouring is exchanged at the next attempt.
+        {:error, {:unexpected_status, 403}} = refused ->
+          Credential.forget(config, token)
+          refused
+
+        result ->
+          result
+      end
+    end
+  end
+
+  defp owner_name(session) do
+    case Identity.get_user(session.owner_subject) do
+      %User{} = user -> User.kms_name(user)
+      nil -> session.owner_subject
+    end
+  end
+
+  @doc """
+  Erasures of a person's private sessions that one of their devices has not yet carried
+  out.
+
+  Asked by their daemon when it connects, and answered as `pending_for/2` answers a pod:
+  a device that was off when a session was erased may still hold a copy, and is told until
+  it says it has dropped it. Only sessions whose key is gone are on the list, since the key
+  goes first and the objects after it; one whose key is not is tried again first, because
+  the person is back and the plane is on this path anyway.
+  """
+  @spec pending_for_owner(String.t(), String.t()) :: [map()]
+  def pending_for_owner(subject, device) do
+    Repo.all(
+      from s in Session,
+        join: t in Tombstone,
+        on: t.session_id == s.id,
+        where: s.kind == "private" and s.owner_subject == ^subject and s.state != "erased",
+        select: {s, t}
+    )
+    |> Enum.each(fn {session, tombstone} -> finish(session, tombstone) end)
+
+    Repo.all(
+      from t in Tombstone,
+        join: s in Session,
+        on: s.id == t.session_id,
+        where:
+          s.kind == "private" and s.owner_subject == ^subject and s.state == "erased" and
+            ^device not in t.applied_by,
+        order_by: t.erased_at,
+        select: %{"session_id" => t.session_id, "erased_at" => t.erased_at}
+    )
+  end
+
+  @doc """
+  A device has dropped its copy of an erased private session: delete every version of
+  every object under the session's prefix, and record the device.
+
+  After the device says so rather than at the erasure, because the device is the only
+  writer and a deletion before it had stopped could be followed by the segment it was
+  uploading. The key is gone by then, so what waited was unreadable, and a device that
+  never comes back leaves objects nobody can read (Decision 756). Done again for each
+  device that says so, which finds nothing the second time.
+  """
+  @spec device_applied(Session.t(), String.t()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def device_applied(%Session{kind: "private", state: "erased"} = session, device) do
+    with {:ok, deleted} <-
+           ObjectStore.delete_prefix(ObjectStore.from_env(), "sessions/#{session.id}/") do
+      applied(session.id, device)
+      {:ok, deleted}
+    end
   end
 
   @doc """

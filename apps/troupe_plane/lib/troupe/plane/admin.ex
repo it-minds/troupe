@@ -1346,7 +1346,12 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
-  @doc "Erase a session, for an administrator entitled to."
+  @doc """
+  Erase a session, for an administrator entitled to.
+
+  `state` is `erased`, or `erasure_pending` for a person's private session whose key the
+  key manager did not destroy; erasing it again tries again (Decision 756).
+  """
   @spec session_erase(actor(), String.t()) :: result()
   def session_erase(actor, session_id) do
     with :ok <- require_admin(actor),
@@ -1355,8 +1360,16 @@ defmodule Troupe.Plane.Admin do
         Audit.record(actor.subject, "session.erase", session_id, %{"profile" => session.profile})
 
       case Erasure.erase(session, actor: actor.subject, reason: "admin") do
-        {:ok, tombstone} -> {:ok, %{session_id: session_id, head_hash: tombstone.head_hash}}
-        {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+        {:ok, tombstone} ->
+          {:ok,
+           %{
+             session_id: session_id,
+             head_hash: tombstone.head_hash,
+             state: Sessions.get(session_id).state
+           }}
+
+        {:error, reason} ->
+          {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
       end
     end
   end

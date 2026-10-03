@@ -10,15 +10,21 @@
 # version than Troupe asks for, as a server that does not speak the newer one does, so a
 # test can see the version it chose carried afterwards. `DELETE` ends a session, or is
 # refused with `405` when told to. Started `stateful: false`, it issues no session and
-# takes every request, which is what a stateless server does. Every request is sent to
-# the test process as `{:fake_mcp, request}`.
+# takes every request, which is what a stateless server does. Started `forgotten: 400`, it
+# answers a session it does not hold with `400`, as the TypeScript SDK's example servers
+# and older Python SDK releases do; started `bad_calls: true`, it refuses every `tools/call` with `400`, in a session it
+# holds too, as a server that dislikes the request rather than the session.
+# Every request is sent to the test process as `{:fake_mcp, request}`.
 unless Code.ensure_loaded?(Troupe.Test.FakeMCP) do
   defmodule Troupe.Test.FakeMCP do
     @version "2025-03-26"
 
     def version, do: @version
 
-    @doc "Start one. Options: `stateful` (true), `delete` (`:ok`, or `:not_allowed` for `405`)."
+    @doc """
+    Start one. Options: `stateful` (true), `delete` (`:ok`, or `:not_allowed` for `405`),
+    `forgotten` (`404`, or `400`) and `bad_calls` (false).
+    """
     def start(test, opts \\ []) do
       {:ok, listener} =
         :gen_tcp.listen(0, [:binary, active: false, packet: :raw, ip: {127, 0, 0, 1}])
@@ -31,6 +37,8 @@ unless Code.ensure_loaded?(Troupe.Test.FakeMCP) do
             test: test,
             stateful: Keyword.get(opts, :stateful, true),
             delete: Keyword.get(opts, :delete, :ok),
+            forgotten: Keyword.get(opts, :forgotten, 404),
+            bad_calls: Keyword.get(opts, :bad_calls, false),
             sessions: %{},
             issued: 0
           }
@@ -132,7 +140,7 @@ unless Code.ensure_loaded?(Troupe.Test.FakeMCP) do
           {200, respond(200, "text/plain", "", [])}
 
         true ->
-          {404, respond(404, "text/plain", "", [])}
+          {state.forgotten, respond(state.forgotten, "text/plain", "", [])}
       end
     end
 
@@ -143,13 +151,17 @@ unless Code.ensure_loaded?(Troupe.Test.FakeMCP) do
       cond do
         not state.stateful -> answer(rpc)
         id == nil -> refuse(400, "Bad Request: No valid session ID provided")
-        not Map.has_key?(state.sessions, id) -> refuse(404, "Session not found")
+        not Map.has_key?(state.sessions, id) -> forgotten(state.forgotten)
         state.sessions[id] != headers["authorization"] -> refuse(403, "Not this session's")
+        state.bad_calls and rpc["method"] == "tools/call" -> refuse(400, "Bad Request: no")
         true -> answer(rpc)
       end
     end
 
     defp route(_method, _rpc, _headers, _agent), do: {405, respond(405, "text/plain", "", [])}
+
+    defp forgotten(404), do: refuse(404, "Session not found")
+    defp forgotten(400), do: refuse(400, "Bad Request: No valid session ID provided")
 
     defp answer(%{"method" => "notifications/" <> _}),
       do: {202, respond(202, "text/plain", "", [])}

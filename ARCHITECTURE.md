@@ -207,7 +207,9 @@ administers — are checked once per method.
 | `erased` | gone | `not_found` |
 
 A remote session also has `pending`, created on a profile that is full but may still grow,
-with no endpoint until a worker has room ([PROTOCOL.md](PROTOCOL.md#session-states-dormancy-and-activation)).
+with no endpoint until a worker has room ([PROTOCOL.md](PROTOCOL.md#session-states-dormancy-and-activation)),
+and a private session somebody erased is `erasure_pending` until the plane has destroyed
+its key (Decision 756).
 Nothing brings a session back from `read_only` or `erased`:
 
 ```mermaid
@@ -380,7 +382,9 @@ else drains itself on SIGTERM.
 is driven by the plane and done by a pod, since only a pod holds the key and storage
 credentials: the key is destroyed **first**, so nothing under the prefix decrypts — not
 old object versions, not backups — and the deletion after it is tidiness. An offline pod
-applies pending erasures when it enrols.
+applies pending erasures when it enrols. A private session has no pod: the plane destroys
+its key itself, with the metadata `delete` its policy has for this, and the objects go
+when the owner's daemon next connects and says it has stopped (Decision 756).
 
 ### 6.3 The operator
 
@@ -404,12 +408,12 @@ alone knows when a pod holds nothing, has drained it and recorded that on the pr
 object storage, the model, the profile's MCP servers and git hosts. Plain NetworkPolicy
 cannot name a host, so without Cilium the external ones are a wide rule on 443 and 80,
 with the installation's own OpenBao and object storage and the profile's own endpoints
-beside it on the ports they name, recorded rather than hidden, and a profile's own
-endpoint at a loopback or link-local address, which no rule admits, refused where it is
-set up and reported on the profile; with Cilium the operator writes the `toFQDNs` rule the profile asked for,
+beside it on the ports they name, recorded rather than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for,
 with the installation's own OpenBao and object storage in it when they are outside the
 cluster (a `toCIDR` of one address for a host given as an address), a DNS rule through Cilium's proxy so it can learn addresses, and no wide rule
-beside it, since Cilium admits the union of every policy on a pod. Which of the two a
+beside it, since Cilium admits the union of every policy on a pod. In either mode a
+profile's own endpoint at a loopback or link-local address is admitted by no rule, and is
+refused where it is set up and reported on the profile. Which of the two a
 profile has is its `EgressByHostname` condition, and the plane claims egress by hostname
 for a profile only where that condition says so.
 
@@ -528,7 +532,10 @@ for one key under the session's prefix (`session.presign`), listing through
 `session.objects`, and the **epoch** fences two devices waking the same session:
 `session.register` with `claim: true` bumps it conditionally, and the loser learns at its
 next seal and keeps its local log read-only. The daemon's plane token comes from the
-client that signed in (`identity.link`) and is held in memory only.
+client that signed in (`identity.link`) and is held in memory only. Each link is also when
+the daemon asks what was erased while it was away (`session.erasures`), drops its sealer
+and its copy of each, and says so (`session.erased`), which is when the plane deletes the
+objects.
 
 ## 11. Reading old logs
 

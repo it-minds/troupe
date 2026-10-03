@@ -16,6 +16,8 @@ interface Row {
   title: string | null;
   state: string;
   status: string | null;
+  /** A turn the harness stopped, `tool_failures` or `agent_failed`, until the next input (Decision 750). */
+  failed_reason: string | null;
   epoch: number;
   pinned: boolean;
   reviewed_by: string | null;
@@ -92,6 +94,7 @@ export class FakePlane {
       title: params.title ?? null,
       state: "active",
       status: "idle",
+      failed_reason: null,
       epoch: 1,
       pinned: false,
       reviewed_by: null,
@@ -101,6 +104,17 @@ export class FakePlane {
     this.rows.set(id, row);
     this.opts.worker.createSession(id, { profile: row.profile });
     return row;
+  }
+
+  /**
+   * A turn the harness stopped, as the pod's report leaves the row (Decision 750): the
+   * reason and nothing else, and a root that kept crashing asleep after it.
+   */
+  fail(id: string, reason: "tool_failures" | "agent_failed"): void {
+    const row = this.rows.get(id);
+    if (!row) throw new Error(`no session ${id}`);
+    row.failed_reason = reason;
+    if (reason === "agent_failed") row.state = "dormant";
   }
 
   private async handle(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse): Promise<void> {
@@ -321,6 +335,7 @@ export class FakePlane {
       // The index, reported by the worker over the control channel — not a replay.
       status: session?.status ?? row.status,
       done_reason: null,
+      failed_reason: row.failed_reason,
       pending_approvals: session?.pendingApprovalCount ?? 0,
       cost_micros: session?.costMicros ?? 0,
       origin: row.origin,

@@ -19,9 +19,9 @@ defmodule Troupe.ObjectStore.Signed do
   content. That is the `list` function this struct is built with.
 
   **Deleting** is not here at all. Erasure has to remove *every version* of every object,
-  which is a bucket-level operation and a decision with an owner; it stays on
-  `session.erase`, where the plane does it with the credential and the audit row that
-  belongs to it.
+  which is a bucket-level operation and a decision with an owner; it stays with the plane,
+  which does it with its own credential once the session is erased and the daemon has said
+  it has stopped (`session.erased`, Decision 756).
 
   One thing is quietly different, and it is written down rather than discovered.
   `:metadata` is dropped. S3 refuses a request carrying an `x-amz-*` header the signature

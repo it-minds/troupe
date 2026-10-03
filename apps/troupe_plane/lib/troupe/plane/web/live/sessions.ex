@@ -79,7 +79,7 @@ defmodule Troupe.Plane.Web.Live.Sessions do
         {:noreply,
          socket
          |> assign(
-           flash_message: "erased #{id}; the tombstone keeps #{result.head_hash}",
+           flash_message: erased_message(id, result),
            confirming: nil,
            effect: nil,
            typed: ""
@@ -91,6 +91,12 @@ defmodule Troupe.Plane.Web.Live.Sessions do
          assign(socket, flash_message: error.message, confirming: nil, effect: nil, typed: "")}
     end
   end
+
+  # Not "erased" while a person's private session still has its key (Decision 756).
+  defp erased_message(id, %{state: "erasure_pending"}),
+    do: "erasure of #{id} is pending: its key was not destroyed; erase it again to retry"
+
+  defp erased_message(id, result), do: "erased #{id}; the tombstone keeps #{result.head_hash}"
 
   defp put_present(filter, _key, value) when value in [nil, ""], do: filter
   defp put_present(filter, key, value), do: Map.put(filter, key, value)

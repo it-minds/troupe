@@ -519,8 +519,7 @@ defmodule Troupe.Plane.SCIMEntraTest do
     do: create(context, "/scim/v2/Groups", entra_group(oid, display_name))
 
   defp create(context, path, resource) do
-    assert {status, created} = request(context, :post, path, resource)
-    assert status in [200, 201]
+    assert {201, created} = request(context, :post, path, resource)
     created
   end
 

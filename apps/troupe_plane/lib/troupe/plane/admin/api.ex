@@ -479,7 +479,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.put",
       function: :profile_put,
       summary:
-        "Create or update a profile, returning the diff that was applied. Refused on a gitops plane as managed_by_gitops: there a repository holds the profiles, and a change is a commit to it. Without Cilium, refused as invalid_params for a profile whose workers are pods and whose LLM endpoint, MCP servers (its own or its channel's) or egress.fqdns name a loopback or link-local address, which those pods do not reach: `unreachable` names each, `reason` says what to do. One on another port, or at another address, gets a rule of its own in the pods' NetworkPolicy.",
+        "Create or update a profile, returning the diff that was applied. Refused on a gitops plane as managed_by_gitops: there a repository holds the profiles, and a change is a commit to it. Refused as invalid_params, with Cilium or without, for a profile whose workers are pods and whose LLM endpoint, MCP servers (its own or its channel's) or egress.fqdns name a loopback or link-local address, which those pods do not reach: `unreachable` names each, `reason` says what to do. Without Cilium, one on another port, or at another address, gets a rule of its own in the pods' NetworkPolicy.",
       risk: :write,
       arguments: [
         %Argument{
@@ -996,7 +996,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.bundle.publish",
       function: :bundle_publish,
       summary:
-        "Publish a new version of a channel, which pushes config.updated to every pod on it. History is append-only: a rollback is a new version carrying the old content. Without Cilium, refused for an MCP server at a loopback or link-local address when a profile whose workers are pods follows the channel.",
+        "Publish a new version of a channel, which pushes config.updated to every pod on it. History is append-only: a rollback is a new version carrying the old content. Refused, with Cilium or without, for an MCP server at a loopback or link-local address when a profile whose workers are pods follows the channel.",
       risk: :write,
       arguments: [
         %Argument{name: "channel", type: :string, required: true, description: "The channel."},

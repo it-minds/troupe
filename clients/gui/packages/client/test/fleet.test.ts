@@ -175,6 +175,14 @@ describe("the fleet store", () => {
     assert.equal(r.status, null);
     assert.equal(r.sync, null, "a team session has no sync state");
   });
+
+  it("reads a turn the harness stopped off a plane's row, by its reason alone (Decision 750)", () => {
+    // A plane holds no content, so there is no `detail`: the reason is all it says.
+    assert.deepEqual(rowFromPlane(planeRow("f", { failed_reason: "tool_failures" })).failed, { reason: "tool_failures", detail: null });
+    assert.deepEqual(rowFromPlane(planeRow("g", { state: "dormant", failed_reason: "agent_failed" })).failed, { reason: "agent_failed", detail: null });
+    assert.equal(rowFromPlane(planeRow("h", { failed_reason: null })).failed, null);
+    assert.equal(rowFromPlane(planeRow("i")).failed, null, "a plane from before the column says nothing failed");
+  });
 });
 
 describe("what happened while nobody was reading (issue #119)", () => {

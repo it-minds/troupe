@@ -3,8 +3,8 @@ defmodule Troupe.WorkerProfile.ReachTest do
   What a worker without Cilium reaches of a profile's own endpoints (Decisions 749 and
   752): a name on 443 and 80 through the public rule, a name on another port as the public
   rule's addresses on that port, an address as that one address, and a loopback or
-  link-local address not at all. A name is taken at its word, since what it resolves to
-  is not known where it is typed.
+  link-local address not at all, nor with Cilium (Decision 758). A name is taken at its
+  word, since what it resolves to is not known where it is typed.
   """
 
   use ExUnit.Case, async: true
@@ -190,14 +190,29 @@ defmodule Troupe.WorkerProfile.ReachTest do
            ]
   end
 
-  test "the explanation says why and what to do" do
+  test "a host at a loopback or link-local address is refused with Cilium too, as an address" do
+    # The CiliumNetworkPolicy leaves such a host out of its `toCIDR` rule (Decision 758),
+    # whichever of the profile's hosts it is, and asks this.
+    for host <- ~w(169.254.169.254 127.0.0.1 127.8.9.1 ::1 fe80::1 FE80::2 febf::1
+                   ::ffff:169.254.169.254 ::ffff:127.0.0.1) do
+      assert Reach.refused?(host), host
+    end
+
+    for host <- ~w(10.20.0.5 203.0.113.5 169.253.255.255 169.255.0.1 128.0.0.1 fec0::1
+                   2001:db8::9 metadata.example.test tools.mcp.svc *.example.test) do
+      refute Reach.refused?(host), host
+    end
+  end
+
+  test "the explanation says why and what to do, with Cilium or without" do
     explained =
       Reach.explain(["llm.endpoint http://127.0.0.1:4000/v1 is at 127.0.0.1, a loopback address"])
 
     assert explained =~
-             "llm.endpoint http://127.0.0.1:4000/v1 is at 127.0.0.1, a loopback address: without Cilium"
+             "llm.endpoint http://127.0.0.1:4000/v1 is at 127.0.0.1, a loopback address: "
 
     assert explained =~ "NetworkPolicy"
+    assert explained =~ "with Cilium its CiliumNetworkPolicy"
     assert explained =~ "the pod itself"
     assert explained =~ "metadata"
     assert explained =~ "<service>.<namespace>.svc"
