@@ -125,6 +125,12 @@ defmodule Troupe.Client.Daemon.Link do
     {:noreply, %{state | client: nil, error: reason}}
   end
 
+  # A settings file the daemon writes changed, from this client or another (#57).
+  def handle_info({:troupe_notification, "config.changed", params}, state) do
+    Troupe.Client.Events.settings_changed(params)
+    {:noreply, state}
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
 
   # A daemon that has not answered in time has answered too: the caller gets an error it

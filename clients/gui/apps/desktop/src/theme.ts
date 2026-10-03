@@ -15,12 +15,13 @@
 // app and there must never be one: a component that needs a special case for one theme
 // is telling you that theme's token values are wrong.
 //
-// The choice is per person and kept in this browser. Nothing about a theme carries
-// meaning — two people in the same session see the same content — so it never leaves
-// the machine and no server is asked about it. When the plane learns how to keep it on
-// the user record, this is the one module that changes.
+// The choice is per person and kept on this computer: in this window, and by the daemon
+// when there is one (`ui.theme` and `ui.mode`, troupe #57), so the next client has it too
+// (`shared.ts`). Nothing about a theme carries meaning — two people in the same session
+// see the same content — so it never leaves the machine and no plane is asked about it.
 
 import { useCallback, useEffect, useState } from "react";
+import { onSharedChange, share } from "./shared";
 import { prefs } from "./shell";
 
 export type ThemeId = "afterglow" | "signal" | "footlight" | "limelight";
@@ -169,14 +170,24 @@ export function useAppearance(): {
     return () => q.removeEventListener("change", onChange);
   }, [mode]);
 
+  // Chosen in another client, or another window: the daemon said so.
+  useEffect(
+    () =>
+      onSharedChange(() => {
+        setThemeState(storedTheme());
+        setModeState(storedMode());
+      }),
+    [],
+  );
+
   const setTheme = useCallback((t: ThemeId) => {
     setThemeState(t);
-    prefs.set("theme", t);
+    share("theme", t);
   }, []);
 
   const setMode = useCallback((m: Mode) => {
     setModeState(m);
-    prefs.set("mode", m);
+    share("mode", m);
   }, []);
 
   return { theme, mode, resolved, setTheme, setMode };

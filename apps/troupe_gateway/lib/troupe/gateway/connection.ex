@@ -181,6 +181,13 @@ defmodule Troupe.Gateway.Connection do
     {:noreply, %{state | principal: principal}}
   end
 
+  # Something the daemon tells every client, about no one session: a settings file it
+  # writes has changed (`config.changed`). Like `auth.expiring`, a control message, never
+  # dropped; an ACP client has no word for it.
+  def handle_info({:notify, method, params}, %{initialized?: true, protocol: :troupe} = state) do
+    {:noreply, send_control(state, {:notification, method, params})}
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
 
   defp read(data, state) do

@@ -71,10 +71,13 @@ defmodule Troupe.Phase3ClientTest do
       assert {:ok, %{type: :bool, effect: :next_run}} = Troupe.Settings.fetch(key)
     end
 
-    # A workspace with a config of its own, so the setting lands there and not in the
-    # machine config every other session of this run reads.
-    ws = tmp_workspace(%{".troupe/config.yaml" => "auto_approve: true\n"})
-    assert {:ok, path} = Troupe.Settings.persist(ws, "full_send", true)
+    # Into the workspace's own file, named, and not the machine config every other
+    # session of this run reads.
+    {sid, _, ws} = start_session!()
+
+    assert {:ok, %{"written" => %{"path" => path}}} =
+             Client.put_setting(sid, "full_send", true, "project")
+
     assert path == Path.join(ws, ".troupe/config.yaml")
     assert File.read!(path) =~ "full_send: true"
     assert Troupe.Config.load(ws).full_send == true

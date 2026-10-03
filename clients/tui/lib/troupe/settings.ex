@@ -1,23 +1,25 @@
 defmodule Troupe.Settings do
   @moduledoc """
-  The tweakable subset of the daemon's `Troupe.Config`, as data: one entry per setting
-  with its type, the field it lives in, the YAML key it is written under, when a change
-  takes effect, and the help text the settings page shows next to it.
+  The settings page's keys, as data: the keys of `Troupe.Config.Schema` with a `label`,
+  each with the type the page edits it as, the struct field it lives in, when a change
+  takes effect, and the help the page shows beside it, which is the schema's `doc` (#57).
+  The desktop app's settings come from the same table, so the two clients describe one
+  setting one way, and `docs/user/configuration.md` is generated from it too.
 
-  A setting is a line in a config file the daemon reads when a session starts — the
-  project's `.troupe/config.yaml` when the project has one, else the global
-  `config.yaml`. `put/3` returns the config as it will read; `persist/3` writes the value
-  back. Nothing here reaches into a running agent: `watch` is the one setting a session
-  takes live, through the protocol (`Troupe.Client.put_setting/3`), and everything else
-  is for the next session.
+  The `ui` keys are the desktop app's (its theme, light or dark, its notifications): the
+  terminal has none of those, so its page leaves them out.
 
-  Each setting's key is its name in `Troupe.Config.Schema`, and it is written under that
-  name only (`models.default`, never the old `model`), through the same writer the
-  daemon's model settings use. `mouse` is the TUI's own; the daemon reads it and does
-  nothing with it.
+  What a setting is set to is the daemon's to say: `config.get` answers every key with
+  its value and the layer and file that set it, and `view/1` makes that the page's view.
+  A change is `config.set` with the scope it is written to, which `target/3` picks: the
+  one the person chose on the page, else the file the value on screen came from, else the
+  user's own. Nothing here writes a file. `watch` is the one setting a session takes live,
+  through the protocol (`Troupe.Client.put_setting/4`); everything else is for the next
+  session.
   """
 
   alias Troupe.Config
+  alias Troupe.Config.Schema
 
   @type type :: :bool | :int | :float | :string | :model
   @type effect :: :now | :next_run
@@ -26,213 +28,119 @@ defmodule Troupe.Settings do
           key: String.t(),
           label: String.t(),
           type: type(),
-          path: atom(),
+          path: atom() | nil,
           yaml: [String.t()],
           effect: effect(),
           help: String.t()
         }
 
-  @fields [
-    %{
-      key: "auto_approve",
-      label: "auto approve",
-      type: :bool,
-      path: :auto_approve,
-      yaml: ["auto_approve"],
-      effect: :next_run,
-      help: """
-      Run every tool call without asking. Off means writes, edits and shell
-      commands stop the agent until you answer y (allow once), a (allow that
-      tool for the whole session) or n (deny) in the activated window.
-      """
-    },
-    %{
-      key: "mouse",
-      label: "mouse",
-      type: :bool,
-      path: :mouse,
-      yaml: ["mouse"],
-      effect: :next_run,
-      help: """
-      Capture the mouse: click tiles to activate them, wheel to scroll. Off keeps
-      the terminal's own click-and-drag selection. `troupe --no-mouse` overrides
-      it for one run.
-      """
-    },
-    %{
-      key: "watch",
-      label: "watch mode",
-      type: :bool,
-      path: :watch,
-      yaml: ["watch"],
-      effect: :now,
-      help: """
-      Watch the workspace for `AI!` and `AI?` comments and act on them. Takes
-      effect on the open session at once, and on every new one.
-      """
-    },
-    %{
-      key: "models.default",
-      label: "model",
-      type: :model,
-      path: :model,
-      yaml: ["models", "default"],
-      effect: :next_run,
-      help: """
-      The model every agent uses unless its definition names one. A bare id goes
-      to the session-wide provider; `<provider>/<model>` goes to a named one from
-      `providers:` or opencode. `troupe models` lists what this machine can address.
-      """
-    },
-    %{
-      key: "models.cheap",
-      label: "cheap model",
-      type: :model,
-      path: :small_model,
-      yaml: ["models", "cheap"],
-      effect: :next_run,
-      help: """
-      The model for the small jobs — compaction summaries among them. Unset means
-      the default model.
-      """
-    },
-    %{
-      key: "models.expensive",
-      label: "expensive model",
-      type: :model,
-      path: :expensive_model,
-      yaml: ["models", "expensive"],
-      effect: :next_run,
-      help: """
-      The model for agents whose definition asks for the "expensive" alias. Unset
-      means the default model.
-      """
-    },
-    %{
-      key: "context_window",
-      label: "context window",
-      type: :int,
-      path: :context_window,
-      yaml: ["context_window"],
-      effect: :next_run,
-      help: """
-      Tokens the model is assumed to hold when nothing else says: a provider's
-      declaration or the catalog wins where they exist. Compaction is planned
-      against this.
-      """
-    },
-    %{
-      key: "compact_at",
-      label: "compact at",
-      type: :float,
-      path: :compact_at,
-      yaml: ["compact_at"],
-      effect: :next_run,
-      help: """
-      The fraction of the context window at which an agent summarises the older
-      part of its conversation.
-      """
-    },
-    %{
-      key: "max_turns",
-      label: "max turns",
-      type: :int,
-      path: :max_turns,
-      yaml: ["max_turns"],
-      effect: :next_run,
-      help: "Model calls an agent may make before its budget stops it."
-    },
-    %{
-      key: "max_depth",
-      label: "delegation depth",
-      type: :int,
-      path: :max_depth,
-      yaml: ["max_depth"],
-      effect: :next_run,
-      help: "How deep subagents may delegate: 1 means the root alone may."
-    },
-    %{
-      key: "shell_timeout_ms",
-      label: "shell timeout (ms)",
-      type: :int,
-      path: :shell_timeout_ms,
-      yaml: ["shell_timeout_ms"],
-      effect: :next_run,
-      help: "How long a shell command may run before it and everything it spawned are killed."
-    },
-    %{
-      key: "tool_output_limit",
-      label: "tool output limit",
-      type: :int,
-      path: :tool_output_limit,
-      yaml: ["tool_output_limit"],
-      effect: :next_run,
-      help: "Bytes of a tool's output the model sees before the rest becomes a blob."
-    },
-    %{
-      key: "full_send",
-      label: "full send",
-      type: :bool,
-      path: :full_send,
-      yaml: ["full_send"],
-      effect: :next_run,
-      help: """
-      No budget warnings: an agent that nears a limit says nothing until the limit
-      stops it. `troupe --full-send` sets it for one run.
-      """
-    },
-    %{
-      key: "memory",
-      label: "project brief",
-      type: :bool,
-      path: :memory,
-      yaml: ["memory"],
-      effect: :next_run,
-      help: """
-      Read `.troupe/memory.md` into every agent's prompt and let `remember` write it.
-      `/memory` shows it; `/memory refresh` has the librarian rewrite it.
-      """
-    },
-    %{
-      key: "memory_auto_refresh",
-      label: "refresh the brief",
-      type: :bool,
-      path: :memory_auto_refresh,
-      yaml: ["memory_auto_refresh"],
-      effect: :next_run,
-      help: """
-      Start the librarian when a new session in a git repository finds the brief missing
-      or stale; never for a headless run. Off means only `/memory refresh` writes it.
-      """
-    }
-  ]
+  @typedoc """
+  What the daemon says the settings are: each key's `value`, `layer`, `source` and
+  `scopes`, by name, and each scope's file. `served?` is false for a daemon too old to
+  answer every key, whose values the page then reads from the config struct, and which is
+  not asked to set one.
+  """
+  @type view :: %{
+          served?: boolean(),
+          keys: %{String.t() => %{String.t() => term()}},
+          files: %{String.t() => String.t()}
+        }
+
+  # The one setting a running session takes at once.
+  @live ["watch"]
 
   @spec fields() :: [field()]
-  def fields, do: @fields
+  def fields do
+    for {path, spec} <- Schema.settings(), hd(path) != "ui" do
+      key = Enum.join(path, ".")
+
+      %{
+        key: key,
+        label: spec.label,
+        type: type(path, spec.type),
+        path: spec.field,
+        yaml: path,
+        effect: if(key in @live, do: :now, else: :next_run),
+        help: spec.doc
+      }
+    end
+  end
+
+  defp type(["models" | _], :string), do: :model
+  defp type(_path, :boolean), do: :bool
+  defp type(_path, {:integer, _min}), do: :int
+  defp type(_path, :fraction), do: :float
+  defp type(_path, _type), do: :string
 
   @spec fetch(String.t()) :: {:ok, field()} | :error
   def fetch(key) do
-    case Enum.find(@fields, &(&1.key == key)) do
+    case Enum.find(fields(), &(&1.key == key)) do
       nil -> :error
       field -> {:ok, field}
     end
   end
 
-  @doc "The current value of a setting."
-  @spec get(Config.t(), String.t()) :: term()
-  def get(%Config{} = cfg, key) do
+  @doc "The page's view of a `config.get` answer."
+  @spec view(map()) :: view()
+  def view(%{"keys" => keys} = answer) when is_list(keys) do
+    %{
+      served?: true,
+      keys: Map.new(keys, &{&1["key"], &1}),
+      files: Map.new(List.wrap(answer["files"]), &{&1["scope"], &1["path"]})
+    }
+  end
+
+  def view(_answer), do: %{served?: false, keys: %{}, files: %{}}
+
+  @doc "The current value of a setting: the daemon's, or the config's for an old daemon."
+  @spec value(view(), Config.t(), String.t()) :: term()
+  def value(%{served?: true, keys: keys}, _config, key), do: get_in(keys, [key, "value"])
+
+  def value(_view, %Config{} = config, key) do
     {:ok, field} = fetch(key)
-    Map.fetch!(cfg, field.path)
+    Map.get(config, field.path)
+  end
+
+  @doc "Which layer set a setting's value (`user`, `project`, `default`, ...), when the daemon said."
+  @spec layer(view(), String.t()) :: String.t() | nil
+  def layer(%{keys: keys}, key), do: get_in(keys, [key, "layer"])
+
+  @doc """
+  The scope a change to `key` is written to: `picked`, the scope chosen on the page, when
+  the key may be written there; else the file its value came from; else the user's.
+  """
+  @spec target(view(), String.t(), String.t() | nil) :: String.t()
+  def target(view, key, picked) do
+    scopes = scopes(view, key)
+    from = layer(view, key)
+
+    cond do
+      picked in scopes -> picked
+      from in scopes -> from
+      true -> "user"
+    end
+  end
+
+  @doc "The scopes the daemon says `key` may be written to here."
+  @spec scopes(view(), String.t()) :: [String.t()]
+  def scopes(%{keys: keys}, key), do: get_in(keys, [key, "scopes"]) || ["user"]
+
+  @doc "The next scope `s` moves a change of `key` to, after the one it goes to now."
+  @spec next_scope(view(), String.t(), String.t() | nil) :: String.t()
+  def next_scope(view, key, picked) do
+    scopes = scopes(view, key)
+    now = target(view, key, picked)
+    Enum.at(scopes, rem((Enum.find_index(scopes, &(&1 == now)) || 0) + 1, length(scopes)))
   end
 
   @doc "Whether the TUI should capture the mouse, as the config says."
   @spec mouse?(Config.t()) :: boolean()
-  def mouse?(%Config{} = cfg), do: get(cfg, "mouse") == true
+  def mouse?(%Config{} = config), do: config.mouse == true
 
   @doc "The value as shown on the settings page."
-  @spec format(Config.t(), String.t()) :: String.t()
-  def format(%Config{} = cfg, key) do
-    case get(cfg, key) do
+  @spec format(view(), Config.t(), String.t()) :: String.t()
+  def format(view, config, key) do
+    case value(view, config, key) do
       true -> "on"
       false -> "off"
       nil -> "(default)"
@@ -292,12 +200,11 @@ defmodule Troupe.Settings do
 
   @doc """
   The values a setting offers as a menu, or `[]` when it is free text. Model settings
-  offer every model `Troupe.Config.models/1` detected, with the value in use first.
+  offer every model `Troupe.Config.models/1` detected, with `current`, the value in use,
+  first.
   """
-  @spec choices(field(), Config.t()) :: [choice()]
-  def choices(%{type: :model} = field, %Config{} = cfg) do
-    current = get(cfg, field.key)
-
+  @spec choices(field(), Config.t(), term()) :: [choice()]
+  def choices(%{type: :model}, %Config{} = cfg, current) do
     cfg
     |> Config.models()
     |> Enum.map(fn model ->
@@ -314,7 +221,7 @@ defmodule Troupe.Settings do
     |> Enum.sort_by(&(&1.value != current))
   end
 
-  def choices(_field, _cfg), do: []
+  def choices(_field, _cfg, _current), do: []
 
   @doc """
   How a model reads in a menu: its context window, where it came from, and whether a
@@ -331,86 +238,6 @@ defmodule Troupe.Settings do
     ]
     |> Enum.filter(&(is_binary(&1) and &1 != ""))
     |> Enum.join(" · ")
-  end
-
-  @doc "Returns the config with one setting changed."
-  @spec put(Config.t(), String.t(), term()) :: Config.t()
-  def put(%Config{} = cfg, key, value) do
-    {:ok, field} = fetch(key)
-
-    case field.path do
-      :model -> %Config{cfg | model: value, models_explicit?: true}
-      k when is_atom(k) -> Map.put(cfg, k, value)
-    end
-  end
-
-  @doc """
-  Writes a setting to the config file that owns it and returns that path: the
-  project's `.troupe/config.yaml` when the project already has one (it would
-  otherwise override the global value), else the global `config.yaml` — except that a
-  setting a project's file may set only in a trusted workspace goes to the global file
-  when this one is not trusted, since the project's would be ignored.
-
-  Written by its new name only, with any old spelling of it removed, through the writer
-  every config file goes through (`Troupe.Config.Migrate.write/2`): the file keeps
-  everything else, and the file before the save is kept as `.previous`.
-  """
-  @spec persist(String.t(), String.t(), term()) :: {:ok, String.t()} | {:error, String.t()}
-  def persist(workspace, key, value) do
-    case fetch(key) do
-      :error ->
-        {:error, "unknown setting #{key}"}
-
-      {:ok, field} ->
-        path = target_path(workspace, key)
-
-        with {:ok, existing} <- read_yaml(path),
-             merged =
-               existing |> Config.drop_spellings(field.yaml) |> put_in_yaml(field.yaml, value),
-             :ok <- Config.write_file(path, merged) do
-          {:ok, path}
-        end
-    end
-  end
-
-  @doc "The config file the settings page writes a setting to."
-  @spec target_path(String.t(), String.t() | nil) :: String.t()
-  def target_path(workspace, key \\ nil) do
-    project = Config.project_path(workspace)
-
-    cond do
-      not File.exists?(project) -> Config.user_path()
-      gated?(key) and not Config.trusted?(workspace) -> Config.user_path()
-      true -> project
-    end
-  end
-
-  defp gated?(nil), do: false
-
-  defp gated?(key) do
-    {:ok, field} = fetch(key)
-    Config.gated?(field.yaml)
-  end
-
-  defp read_yaml(path) do
-    if File.exists?(path) do
-      case YamlElixir.read_from_file(path) do
-        {:ok, map} when is_map(map) -> {:ok, map}
-        {:ok, _} -> {:ok, %{}}
-        {:error, reason} -> {:error, "could not parse #{path}: #{inspect(reason)}"}
-      end
-    else
-      {:ok, %{}}
-    end
-  end
-
-  # "default" is the absence of a key, not a key holding nothing.
-  defp put_in_yaml(map, [key], nil), do: Map.delete(map, key)
-  defp put_in_yaml(map, [key], value), do: Map.put(map, key, value)
-
-  defp put_in_yaml(map, [key | rest], value) do
-    nested = if is_map(Map.get(map, key)), do: Map.get(map, key), else: %{}
-    Map.put(map, key, put_in_yaml(nested, rest, value))
   end
 
   @doc """
@@ -436,7 +263,7 @@ defmodule Troupe.Settings do
       {"Setup commands", setup},
       {"Where things live",
        [
-         "settings         the project's .troupe/config.yaml, else ~/.config/troupe/config.yaml",
+         "settings         ~/.config/troupe/config.yaml, and a project's .troupe/config.yaml",
          "sessions         the daemon's state directory; `troupe daemon status` says where",
          "logs             troupe.log and daemon.log, in that same directory",
          "models           `troupe models` lists what this machine can address"

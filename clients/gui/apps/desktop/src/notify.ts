@@ -20,7 +20,8 @@
 // Where it goes is the shell's, when it has one (WebView2 refuses the page's own), and
 // the page's `Notification` in a browser. Asked once, on the first thing the person does
 // here rather than out of nowhere at start, and a refusal is kept: nothing asks again by
-// itself. The preference beside the appearance settings turns it off.
+// itself. The preference beside the appearance settings turns it off, and follows the
+// person to the next client through the daemon (`ui.notifications`, shared.ts).
 //
 // A notification leads to its session. A browser says when one is clicked, and the click
 // brings the window forward and opens the session. So does the shell on Windows, which
@@ -33,6 +34,7 @@
 import { useEffect, useState } from "react";
 import { describeUnseen } from "@troupe/client";
 import type { DurableEvent, FleetRow, TroupeEvent, Unseen } from "@troupe/client";
+import { onSharedChange, share } from "./shared";
 import { prefs, shell } from "./shell";
 import type { NotifyPermission } from "./shell";
 
@@ -248,11 +250,13 @@ export function useNotificationSetting(): { on: boolean; permission: Permission;
     listeners.add(l);
     return () => void listeners.delete(l);
   }, []);
+  // Turned on or off in another client: `ui.notifications`, which the daemon keeps (shared.ts).
+  useEffect(() => onSharedChange(() => setOnState(notificationsOn())), []);
   return {
     on,
     permission,
     setOn: (next) => {
-      prefs.set("notify", next ? "on" : "off");
+      share("notify", next ? "on" : "off");
       setOnState(next);
       // Turning it on is the person asking, so the question is put if it has not been answered.
       if (next && permission === "default") void askPermission();

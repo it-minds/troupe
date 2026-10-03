@@ -182,6 +182,18 @@ export interface AuthExpiring {
 }
 
 /**
+ * `config.changed`: a settings file the daemon writes has changed, whoever changed it
+ * (troupe #57). `keys` names what changed in it; a client reads `config.get` again for
+ * the values.
+ */
+export interface ConfigChanged {
+  scope: "user" | "project" | "local";
+  path: string;
+  keys: string[];
+  workspace?: string;
+}
+
+/**
  * A server → client request the client must answer (client-hosted tools, §8). `name` is
  * the tool as the model called it, `client.` prefix and all.
  */

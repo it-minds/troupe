@@ -29,6 +29,7 @@ defmodule Mix.Tasks.Troupe.Xref do
       Troupe.Protocol.Client, .Daemon, .Endpoint   finding, starting and talking to a daemon
       Troupe.Protocol.Glob                          escaping a path a glob starts from
       Troupe.Config                                 the configuration the daemon reads too
+      Troupe.Config.Schema                          the key table: each setting's label, type and help
       Troupe.Paths                                  where state and config live
       Troupe.Reaper                                 the helper every OS process runs under
       Troupe.LLM.Catalog.Store                      refreshing the model catalog on request
@@ -64,6 +65,7 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Protocol.Endpoint,
     Troupe.Protocol.Glob,
     Troupe.Config,
+    Troupe.Config.Schema,
     Troupe.Paths,
     Troupe.Reaper,
     Troupe.LLM.Catalog.Store,

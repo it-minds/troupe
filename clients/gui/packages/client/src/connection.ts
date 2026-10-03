@@ -1,5 +1,6 @@
 import type {
   AuthExpiring,
+  ConfigChanged,
   EventEnvelope,
   InitializeResult,
   JsonRpcError,
@@ -74,6 +75,8 @@ export interface ConnectionHooks {
   onEvent?: (envelope: EventEnvelope) => void;
   onResyncRequired?: (r: ResyncRequired) => void;
   onAuthExpiring?: (a: AuthExpiring) => void;
+  /** A daemon's settings file changed, from this client or another (troupe #57). */
+  onConfigChanged?: (c: ConfigChanged) => void;
   /** Serve a `tool.invoke`. Return the result, or throw to answer with an error. */
   onToolInvoke?: (invoke: ToolInvoke) => Promise<unknown>;
   onClose?: (reason: string) => void;
@@ -300,6 +303,9 @@ export class TroupeConnection {
           return;
         case "auth.expiring":
           this.hooks.onAuthExpiring?.(params as AuthExpiring);
+          return;
+        case "config.changed":
+          this.hooks.onConfigChanged?.(params as ConfigChanged);
           return;
         case "tool.invoke": {
           const id = (msg as JsonRpcRequest).id;

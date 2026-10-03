@@ -413,18 +413,25 @@ desktop app shows the same one.
 ### Settings page
 
 `/settings` opens a page listing every tweakable setting with its
-current value, and a curated help text next to it: what the selected setting
-does, plus the commands, keys and concepts worth knowing. `↑`/`↓` moves, Enter
-toggles a boolean, opens a menu (the models) or edits a value, PgUp/PgDn or the
-wheel scrolls the help, Esc goes back.
+current value and the file it came from, and a help text next to it: what the
+selected setting does, plus the commands, keys and concepts worth knowing. The
+settings, their names and their help are the ones the desktop app shows, from one
+key table (the reference in `docs/user/configuration.md`). `↑`/`↓` moves, Enter
+toggles a boolean, opens a menu (the models) or edits a value, `s` changes where a
+change goes, PgUp/PgDn or the wheel scrolls the help, Esc goes back.
 
-Watch mode applies to the running session immediately; everything else to the
-sessions and branches started from then on. A change is written, under its
-current name (`models.default`, never the old `model`), to the config file that
-owns it: the project's `.troupe/config.yaml` when the project has one, else the
-global `config.yaml` — and `auto_approve` to the global one while the workspace is
-not trusted, since the project's would be ignored. Environment variables still win
-over both, so a setting masked by `TROUPE_MODEL` is saved but not in effect.
+The daemon says what each setting is, and writes a change (`config.get` and
+`config.set`), so the page and the desktop app always agree; a change made in one
+shows on the other while it is open. Watch mode applies to the running session
+immediately; everything else to the sessions and branches started from then on. A
+change is written, under its current name (`models.default`, never the old
+`model`), to the file the value on screen came from — the project's
+`.troupe/config.yaml`, its `config.local.yaml`, or your own `config.yaml` — and a
+default to your own; the title says which, and `s` picks another of the files the
+setting may be written to. The daemon refuses a setting the file may not hold, such
+as `auto_approve` in the project's file of a workspace that is not trusted.
+Environment variables still win over every file, so a setting masked by
+`TROUPE_MODEL` is saved but not in effect, and the status line says so.
 
 ### Watch mode
 
