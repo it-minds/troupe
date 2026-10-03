@@ -619,7 +619,8 @@ defmodule Troupe.Client.Daemon do
   `params`: `profile`, `prompt`, `worktree` (`"auto"`, `"never"`, `"always"`), a
   `config` map of what a client may set — `auto_approve`, `watch`, `full_send` — and
   `refresh_brief: false` for a session that must not start the librarian beside itself,
-  such as a headless run's.
+  such as a headless run's. `private: true` asks for a private session, which the daemon
+  seals to the plane it is linked at, with the token this machine hands it (issue #365).
   """
   @impl true
   def create_session({:local, workspace} = origin, params) do
@@ -630,6 +631,7 @@ defmodule Troupe.Client.Daemon do
         prompt: blank_to_nil(params[:prompt]),
         worktree: params[:worktree] || "never",
         config: params[:config] || %{},
+        private: if(params[:private] == true, do: true),
         command_id: Troupe.Remote.RPC.command_id()
       }
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)

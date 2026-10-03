@@ -1004,11 +1004,16 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   # A link that carries a plane token is this daemon connecting to its plane, and the
-  # moment it is told what of its person's was erased while it was away (Decision 756).
+  # moment it is told what of its person's was erased while it was away (Decision 756),
+  # then carries on sealing what it could not seal without a token: a restart leaves it
+  # none, and a session made while nobody had linked was never registered (Decision 764).
   # Not waited for: the link answers now, and a plane that cannot be reached is asked again
-  # at the next one.
+  # at the next one, which a client makes whenever its token is renewed.
   defp erasures(%{"plane_token" => token}) when is_binary(token) and token != "" do
-    Task.start(fn -> Private.apply_erasures() end)
+    Task.start(fn ->
+      Private.apply_erasures()
+      Private.resume()
+    end)
   end
 
   defp erasures(_params), do: :ok

@@ -458,6 +458,28 @@ describe("stage 2, done item 3: who the daemon records", () => {
   it("refuses to link nobody", async () => {
     await assert.rejects(() => client.linkIdentity({ subject: "" }), /invalid_params|subject/);
   });
+
+  // Issue #365. The daemon authenticates nobody, so the token it registers and seals a
+  // private session with is the one the signed-in client hands it here; it is held in
+  // memory there and in no answer.
+  it("hands the daemon the plane token, which no answer carries back", async () => {
+    const linked = await client.linkIdentity({
+      subject: "ada@example.test",
+      display_name: "Ada",
+      plane_url: "https://troupe.example",
+      plane_token: "plane-token-1",
+    });
+    assert.equal(linked.linked, true);
+    assert.equal(daemon.planeToken, "plane-token-1");
+    assert.ok(!JSON.stringify(linked).includes("plane-token-1"), "the answer is the label, not the token");
+    assert.ok(!JSON.stringify(await client.identity()).includes("plane-token-1"));
+
+    // A refreshed token is a second link, and the daemon holds the new one.
+    await client.linkIdentity({ subject: "ada@example.test", plane_url: "https://troupe.example", plane_token: "plane-token-2" });
+    assert.equal(daemon.planeToken, "plane-token-2");
+    await client.unlinkIdentity();
+    assert.equal(daemon.planeToken, null);
+  });
 });
 
 describe("stage 2: the commands only a local session has", () => {

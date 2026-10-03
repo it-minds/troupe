@@ -92,6 +92,29 @@ function machineUser(identity: DaemonIdentity | null, principal: Principal | nul
   return null;
 }
 
+/** The same plane, whatever trailing slashes either was written with. */
+function samePlane(a: string | null | undefined, b: string): boolean {
+  return Boolean(a) && a!.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+}
+
+/**
+ * Hand the daemon this app's plane token, where the daemon is linked to the person signed
+ * in here at this plane (issue #365). The daemon signs nobody in: it registers and seals a
+ * private session with the token it was last handed, holds it in memory only, and cannot
+ * renew it. A daemon linked to somebody else, or not linked, is left as it is: linking is
+ * the person's own choice, on This computer.
+ */
+async function handOver(client: DaemonClient, auth: AuthSession | null, who: DaemonIdentity | null): Promise<DaemonIdentity | null> {
+  if (!auth?.me || !who?.linked || who.subject !== auth.me.subject || !samePlane(who.plane_url, auth.planeUrl)) return null;
+  const token = await auth.token();
+  return client.linkIdentity({
+    subject: who.subject,
+    ...(who.display_name ? { display_name: who.display_name } : {}),
+    plane_url: auth.planeUrl,
+    plane_token: token,
+  });
+}
+
 /**
  * The daemon on this computer, if there is one and this host can find it.
  *
@@ -103,8 +126,12 @@ function machineUser(identity: DaemonIdentity | null, principal: Principal | nul
  * The token stays in memory. It is a credential, and the rule that the GUI persists
  * exactly one secret — the identity provider's refresh token, in the OS store — has no
  * exception for a local one.
+ *
+ * Signed in to a plane (`auth`), it hands a daemon linked to the person their plane token
+ * when it links, when it reaches the daemon, again when the token is renewed, and again
+ * when the daemon has restarted and so holds none (issue #365).
  */
-export function useDaemon(): {
+export function useDaemon(auth: AuthSession | null = null): {
   client: DaemonClient | null;
   endpoint: DaemonEndpoint | null;
   status: "unsupported" | "searching" | "absent" | "connected" | "error";
@@ -131,6 +158,9 @@ export function useDaemon(): {
   // Where the client reached it last, which is not `endpoint` once the daemon restarted
   // somewhere else and the client followed it there.
   const [reached, setReached] = useState<DaemonEndpoint | null>(null);
+  // The sign-in as it is now, for a socket that opens again long after this rendered.
+  const signedIn = useRef(auth);
+  signedIn.current = auth;
 
   // A shell can find it; a browser has to be told. Asked once per launch, and again
   // whenever somebody presses the control that bumps `round`.
@@ -181,6 +211,15 @@ export function useDaemon(): {
         setPrincipal(next.principal);
         setStatus("connected");
         setError(null);
+        // A socket opened again may be to a daemon that restarted, which holds no token.
+        void next
+          .identity()
+          .then((who) => {
+            if (live) setIdentity(who);
+            return handOver(next, signedIn.current, who);
+          })
+          .then((linked) => live && linked && setIdentity(linked))
+          .catch(() => undefined);
       },
       ...(locate ? { locate } : {}),
     });
@@ -210,6 +249,26 @@ export function useDaemon(): {
     };
   }, [endpoint]);
 
+  // The daemon reached with somebody signed in, or somebody signing in with the daemon
+  // reached, and every token the sign-in renews after that.
+  useEffect(() => {
+    if (!client || !auth) return;
+    let live = true;
+    const give = (): void => {
+      void client
+        .identity()
+        .then((who) => handOver(client, auth, who))
+        .then((linked) => live && linked && setIdentity(linked))
+        .catch(() => undefined);
+    };
+    give();
+    const off = auth.onCredential(give);
+    return () => {
+      live = false;
+      off();
+    };
+  }, [client, auth]);
+
   return {
     client,
     endpoint: reached ?? endpoint,
@@ -230,10 +289,14 @@ export function useDaemon(): {
       setStatus(shell()?.findDaemon ? "absent" : "unsupported");
     }, []),
     find: useCallback(() => setRound((n) => n + 1), []),
+    // With the token, when the link names the plane this app is signed in to: linking is
+    // what a private session needs, and the label alone seals nothing.
     link: useCallback(
       async (who) => {
         if (!client) return;
-        setIdentity(await client.linkIdentity(who));
+        const a = signedIn.current;
+        const token = a && samePlane(who.plane_url, a.planeUrl) ? await a.token() : null;
+        setIdentity(await client.linkIdentity({ ...who, ...(token ? { plane_token: token } : {}) }));
       },
       [client],
     ),

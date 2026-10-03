@@ -50,6 +50,21 @@ defmodule Troupe.CLITest do
              %{auto_approve: true, watch: false}
   end
 
+  # Issue #365: a private session from the terminal, asked for beside the config as the
+  # daemon reads it, and only when the command line says so.
+  test "--private asks the daemon for a private session" do
+    assert {:ok, %{mode: :tui, private: false}} = CLI.parse([])
+    assert {:ok, %{mode: :tui, private: true}} = CLI.parse(["--private"])
+    assert CLI.usage() =~ "--private"
+
+    {:ok, args} = CLI.parse(["run", "x", "--private", "--headless"])
+    assert %{private: true, config: config} = Runner.run_params(args)
+    refute Map.has_key?(config, :private)
+
+    {:ok, args} = CLI.parse(["run", "x"])
+    assert %{private: false} = Runner.run_params(args)
+  end
+
   test "parses the config command lines" do
     assert {:ok, %{mode: :config}} = CLI.parse(["config"])
 

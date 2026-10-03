@@ -222,6 +222,7 @@ the same lines.
 troupe                                  # TUI in the current directory
 troupe --watch                          # TUI with watch mode on
 troupe --no-mouse                       # TUI without mouse reporting (terminal selection works)
+troupe --private                        # a private session, sealed to the plane you signed in to
 troupe run code "make the tests pass" --headless --auto-approve
 troupe run plan "how should we split billing" --worktree
 troupe resume [SESSION_ID]              # no id: reopen the last session here, picker open
@@ -532,6 +533,15 @@ lands in `~/.config/troupe/credentials.json` (`%APPDATA%\troupe` on Windows) as
 a file only your account can read — `0600` on unix, an ACL naming only you on
 Windows. `troupe whoami` says who you are and which teams you are in;
 `troupe logout` forgets one plane, `troupe logout --all` every one.
+
+Signed in, `troupe` links the daemon on this machine to you at that plane and hands it
+the plane token it holds, when it attaches, again a minute before the token runs out, and
+again after the daemon restarted, which leaves it with none. The daemon keeps the token in
+memory only, and seals a private session with it: `troupe --private` (or `troupe run
+--private`) starts one, which runs here, is sealed under your own key and listed by the
+plane, and can be opened from another device. One started while the daemon has no token
+is sealed once it is handed one, from its first event. A daemon somebody else linked is
+left as it is.
 
 ```
 troupe --remote

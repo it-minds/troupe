@@ -183,6 +183,15 @@ export class FakeDaemon {
   readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   /** Who the daemon says its user is. `null` until somebody links an identity. */
   linked: { subject: string; display_name?: string; plane_url?: string } | null = null;
+  /**
+   * The plane token the last link carried, as the daemon holds it: in memory, in no
+   * answer, kept by a link that carries none and gone with an unlink or a restart.
+   */
+  planeToken: string | null = null;
+  /** Every plane token a link has handed over, oldest first. */
+  readonly planeTokens: string[] = [];
+  /** The private sessions `session.create` was asked for, by id. */
+  readonly privateSessions = new Set<string>();
   /** The settings file, as `config.set` last wrote it. Nothing is saved until then. */
   settings: FakeModelSettings = {
     exists: false,
@@ -272,6 +281,8 @@ export class FakeDaemon {
     await this.stop();
     this.restarts += 1;
     this.token = `daemon-token-${this.restarts}`;
+    // The label is in `identity.json` and survives; the plane token was in memory.
+    this.planeToken = null;
     await this.start();
   }
 
@@ -469,11 +480,16 @@ export class FakeDaemon {
           ...(params["display_name"] ? { display_name: String(params["display_name"]) } : {}),
           ...(params["plane_url"] ? { plane_url: String(params["plane_url"]) } : {}),
         };
+        if (typeof params["plane_token"] === "string" && params["plane_token"]) {
+          this.planeToken = params["plane_token"];
+          this.planeTokens.push(params["plane_token"]);
+        }
         return reply(ws, id, this.identityJson());
       }
 
       case "identity.unlink":
         this.linked = null;
+        this.planeToken = null;
         return reply(ws, id, this.identityJson());
 
       case "session.list": {
@@ -489,7 +505,17 @@ export class FakeDaemon {
         if (!workspace) return reply(ws, id, null, { code: -32602, message: "invalid_params" });
         const config = (params["config"] ?? {}) as { watch?: boolean };
         const created = this.seed(workspace, { watch: Boolean(config.watch) });
-        return reply(ws, id, { session_id: created.id, workspace, worktree: null, branch: null });
+        // `private` beside `workspace`, as the daemon reads it; one inside `config` is a
+        // setting no client may choose, and is not asked for.
+        const asked = params["private"] === true;
+        if (asked) this.privateSessions.add(created.id);
+        return reply(ws, id, {
+          session_id: created.id,
+          workspace,
+          worktree: null,
+          branch: null,
+          syncing: asked && this.planeToken !== null,
+        });
       }
 
       case "subscribe": {
