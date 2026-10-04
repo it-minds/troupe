@@ -220,12 +220,15 @@ the same lines.
 
 ## Use
 
+`troupe --help` prints every command line `troupe` takes, and
+[the command reference](../../docs/user/cli-reference.md) lists the same; a few of them:
+
 ```
 troupe                                  # TUI in the current directory
 troupe --watch                          # TUI with watch mode on
 troupe --no-mouse                       # TUI without mouse reporting (terminal selection works)
 troupe --private                        # a private session, sealed to the plane you signed in to
-troupe run code "make the tests pass" --headless --auto-approve
+troupe run build "make the tests pass" --headless --auto-approve
 troupe run plan "how should we split billing" --worktree
 troupe resume [SESSION_ID]              # no id: reopen the last session here, picker open
 troupe models [--refresh]               # every model, its window and its price
@@ -262,34 +265,19 @@ The terminal UI needs a terminal: `troupe`, `troupe resume` and `troupe run` wit
 `--headless`, with standard output sent to a file or a pipe, say so in one line and exit
 `1` rather than draw into it.
 
-Inside the TUI, everything starts with `/`:
+Inside the TUI, everything starts with `/`. Every built-in command, what it does and what
+it needs, is in [the command reference](../../docs/user/cli-reference.md#inside-a-session),
+generated from the harness's table as `troupe --help` is, and `/help`, `/` on an empty line
+or Ctrl-K opens the same list as the [command palette](#command-palette). Besides those,
+each agent is a command, and so is each command you write:
 
 | command | effect |
 |---|---|
-| `/code <prompt>` | edit in your checkout (all tools) |
-| `/worktree <prompt>` | same, in its own git worktree; then `/merge` or `/discard` |
-| `/worktree <name>: <prompt>` | run in a Troupe worktree of that name, created the first time and reused after |
-| `/worktree <existing> <prompt>` | run in a worktree you already checked out (Tab completes them); nothing is committed for you |
+| `/build <prompt>` | edit in your checkout (all tools); `/worktree <prompt>` does the same in a worktree of its own, then `/merge` or `/discard` |
 | `/workflow <task>` | orchestrate the engineering pipeline in a worktree: an expensive orchestrator delegates every step to a subagent |
 | `/workflow <name> <task>` | the same, with the steps from `.troupe/workflows/<name>.json` |
 | `/plan <prompt>` | investigate and write a task list; read-only |
 | `/ask <question>` | answer across finished branches with the cheap model |
-| `/watch` | toggle AI-comment watch mode |
-| `/cancel [n]` | stop branch `n` and remove it: the window goes, and so does the worktree Troupe made for it |
-| `/dismiss`, `/merge`, `/discard` `[n]` | act on the activated window or the one on tile `n` (a path works too) |
-| `/agents` | list the agents you can dispatch |
-| `/resume`, `/sessions` | this directory's sessions, newest first: Enter switches the window to one (`/resume <n\|ID>` goes straight there) |
-| `/help`, `/` on an empty line, Ctrl-K | the command palette: every command with a one-line description, filtered as you type |
-| `/settings` | settings page: tweak settings and read the curated help |
-| `/hq`, `/remote` | HQ: a plane's teams, profiles and sessions, with this machine's own listed alongside |
-| `/files` | the session's files, live: Enter opens, ← goes up, `r` reloads |
-| `/mcp`, `/skills` | your MCP servers and skills: each one's layer, state, tools and errors; `/mcp import <path>` copies a `.mcp.json`, `link` reads it in place, `remove <name>`, `check <name>`; the same verbs on `/skills` for a directory of skills; `--workspace` writes the workspace's files |
-| `/goal <text>` | set the session's goal: every later turn works towards it and the status line shows it; `/goal` shows it, `/goal clear` clears it |
-| `/loop [n]` | work towards the goal on its own, up to `n` turns (the config's `loop_max_iterations` without one), until the agent says the goal is met; the status line shows `loop 2/10`, and `/loop stop` stops it |
-| `/upload <path>` | send a local file into the session's own mount |
-| `/models` | pick the default model from every model Troupe detected |
-| `/observer` | agent tree: every branch and subagent, its state, worktree and tokens |
-| `/copy [n]` | copy the activated transcript (or tile `n`'s) to the system clipboard |
 | `/<name> [arguments]` | a command you or the repository wrote as `<name>.md` in your config's `commands/` or the workspace's `.troupe/commands/`: sends its prompt, with what follows the name for `$ARGUMENTS` ([configuration](../../docs/user/configuration.md#your-own-commands)) |
 
 Keys: `1`–`9`, Enter, or a mouse click on its tile activate a window; Esc returns to the command line;

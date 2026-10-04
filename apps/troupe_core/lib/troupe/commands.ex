@@ -8,7 +8,10 @@ defmodule Troupe.Commands do
   now: every built-in with a name, its aliases, the section it belongs to, a one-line
   summary, how it is typed, its arguments, what it needs to be available and where it
   came from. A client renders a palette from it and keeps only the code that runs each
-  command; the TUI's suite holds its set of built-ins equal to this one.
+  command; the TUI's suite holds its set of built-ins equal to this one. `troupe --help`
+  prints the built-ins and `docs/user/cli-reference.md` lists them, both from this table
+  (Decision 767): a built-in changed here is a page to regenerate with
+  `mix troupe.cli.reference` in `clients/tui`, which CI checks.
 
   Agents are in the table too, in a section of their own, described by their
   definition's `description` rather than pretending to be built-ins. So are the commands
