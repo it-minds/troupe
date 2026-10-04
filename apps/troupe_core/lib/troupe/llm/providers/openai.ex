@@ -315,7 +315,11 @@ defmodule Troupe.LLM.Providers.OpenAI do
     end)
   end
 
-  defp encode_messages(%Request{system: system, messages: messages}) do
+  # The system prompt goes as one message, its tail included. An OpenAI-compatible
+  # provider that caches does so by itself, on whatever prefix repeats; there is nothing
+  # to mark (Decision 770).
+  defp encode_messages(%Request{messages: messages} = request) do
+    system = Request.system_text(request)
     system_messages = if system, do: [%{role: "system", content: system}], else: []
     system_messages ++ Enum.flat_map(messages, &encode_message/1)
   end
