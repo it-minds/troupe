@@ -1,0 +1,26 @@
+{
+  "tool_calls": {
+    "model_calls": 31,
+    "system_prompt_bytes": 1500,
+    "tool_definition_bytes": 13500,
+    "first_prompt_bytes": 15000,
+    "largest_prompt_bytes": 31000,
+    "growth_per_call_bytes": 550,
+    "turn_input_tokens": 180000,
+    "events_per_turn": 170
+  },
+  "cut_output": {
+    "model_calls": 3,
+    "cut_result_bytes": 61000
+  },
+  "compaction": {
+    "compactions": 2,
+    "fired_at_share": 0.82,
+    "largest_prompt_tokens": 13500,
+    "after_compaction_share": 0.7
+  },
+  "cancel": {
+    "calls_after_cancel": 0,
+    "tasks_left_running": 0
+  }
+}
