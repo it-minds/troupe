@@ -234,7 +234,41 @@ defmodule Troupe.Tools.FileToolsTest do
 
       for rg <- Enum.uniq([nil, System.find_executable("rg")]) do
         assert {:ok, output} = Grep.search(args, ctx, rg)
-        assert output == "logs/service.log:2:ERROR code=E1042 timed out", inspect(rg)
+
+        assert output ==
+                 "1 matching line in 1 file:\nlogs/service.log:2:ERROR code=E1042 timed out",
+               inspect(rg)
+      end
+    end
+
+    # Decision 777: asked how many of a log's lines matched, a model shown 53 of them
+    # counted 60, three runs in three.
+    test "the answer starts with how many lines matched in how many files", %{
+      root: root,
+      ctx: ctx
+    } do
+      File.mkdir_p!(Path.join(root, "lib"))
+      File.write!(Path.join(root, "lib/a.ex"), "needle\nhay\nneedle\n")
+      File.write!(Path.join(root, "lib/b.ex"), "needle\n")
+      File.write!(Path.join(root, "many.log"), String.duplicate("needle\n", 250))
+
+      for rg <- Enum.uniq([nil, System.find_executable("rg")]) do
+        assert {:ok,
+                "3 matching lines in 2 files:\nlib/a.ex:1:needle\nlib/a.ex:3:needle\nlib/b.ex:1:needle"} =
+                 Grep.search(%{"pattern" => "needle", "path" => "lib"}, ctx, rg)
+
+        assert {:ok, many} = Grep.search(%{"pattern" => "needle", "path" => "many.log"}, ctx, rg)
+        [first | shown] = String.split(many, "\n")
+        assert length(shown) == 200
+
+        # The built-in scan counts every match and shows the first 200; ripgrep stops a
+        # file at 200, so it says there may be more.
+        assert first in [
+                 "250 matching lines in 1 file; the first 200 follow:",
+                 "200 matching lines in 1 file, and more in a file that reached 200:"
+               ]
+
+        if rg == nil, do: assert(first == "250 matching lines in 1 file; the first 200 follow:")
       end
     end
 
@@ -250,7 +284,7 @@ defmodule Troupe.Tools.FileToolsTest do
                    rg
                  )
 
-        assert {:ok, "lib/cart.exs:1:def line_total(x), do: x"} =
+        assert {:ok, "1 matching line in 1 file:\nlib/cart.exs:1:def line_total(x), do: x"} =
                  Grep.search(
                    %{"pattern" => "line_total", "glob" => "**/*.exs"},
                    ctx,

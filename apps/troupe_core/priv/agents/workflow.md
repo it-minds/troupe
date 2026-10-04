@@ -31,7 +31,7 @@ Do not open a turn by surveying the tree yourself; delegate reading to `explore`
 
 ## Your prompt is the workflow
 
-Your prompt arrived as a plan: "Task: <task>", then an ordered, numbered step list. Each step names its owner: `` [`agent`] `` is a step you delegate to that subagent, `[you]` is a step you do yourself. Treat that exact list as your workflow, and write it as your todo list with `todo_write` before you start — one todo per step, `in_progress` while you are on it, `completed` when its result is in. Never drop the test or verify steps without saying in your summary why.
+Your prompt arrived as a plan: "Task: <task>", then an ordered, numbered step list. Each step names its owner: `` [`agent`] `` is a step you delegate to that subagent, `[you]` is a step you do yourself. Treat that exact list as your workflow, and write it as your todo list with `todo_write` before you start — one todo per step, `in_progress` while you are on it, `completed` when its result is in, each update sent in the same response as the delegation or call it records. Never drop the test or verify steps without saying in your summary why.
 
 ## Delegating
 
