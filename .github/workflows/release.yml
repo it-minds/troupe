@@ -120,6 +120,23 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: bash scripts/release-installers "$VERSION" dist
 
+      # The VS Code extension as `pnpm package` builds it, attached as troupe.vsix, which
+      # the installers' --vscode (-VSCode) installs (Decision 765).
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: clients/vscode/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .tool-versions
+          cache: pnpm
+          cache-dependency-path: clients/vscode/pnpm-lock.yaml
+      - name: The VS Code extension
+        working-directory: clients/vscode
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm package
+          cp troupe.vsix ../../dist/troupe.vsix
+
       # The tag is pushed with this workflow's own token, which starts no other workflow:
       # everything this release needs happens in this run. The release is a draft until
       # the native builds have attached their artifacts (`publish`, below).
@@ -135,6 +152,16 @@ jobs:
           owner="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           cat > notes.md <<NOTES
           Everything in this repository at \`${GITHUB_SHA::7}\`, as one release, after the full suite.
+
+          **Try it in one line** — this release's installer, downloaded whole and then run: the daemon, the TUI and the VS Code extension (leave out \`--vscode\` where there is no VS Code). It shows its plan and asks before it changes anything.
+
+          \`\`\`sh
+          curl -fsSLO https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.sh && sh install.sh --tui --vscode
+          \`\`\`
+
+          \`\`\`powershell
+          irm https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.ps1 -OutFile install.ps1; if (\$?) { powershell -ExecutionPolicy Bypass -File .\\install.ps1 -Tui -VSCode }
+          \`\`\`
 
           **On a cluster** — the chart, whose images are this version, from the registry:
 
@@ -167,7 +194,7 @@ jobs:
           powershell -ExecutionPolicy Bypass -File .\\install.ps1
           \`\`\`
 
-          No questions: \`--tui --gui -y\` (\`-Tui -Gui -Yes\`). Start over: \`--clean-install\` (\`-CleanInstall\`). Remove: \`--uninstall\` (\`-Uninstall\`). The desktop app's own installers are attached as well.
+          No questions: \`--tui --gui -y\` (\`-Tui -Gui -Yes\`). The VS Code extension: \`--vscode\` (\`-VSCode\`), or \`troupe.vsix\` below with **Extensions: Install from VSIX…**. Start over: \`--clean-install\` (\`-CleanInstall\`). Remove: \`--uninstall\` (\`-Uninstall\`). The desktop app's own installers are attached as well.
 
           Then, in a new terminal, \`troupe config\` sets up a model (Enter at every question is Anthropic, with the key from \`ANTHROPIC_API_KEY\`) and \`troupe\` in a project directory opens a session; without the TUI, the desktop app sets the model up on This computer, under Models. The [first run](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/docs/user/README.md#first-run) has both.
           NOTES
@@ -175,7 +202,7 @@ jobs:
           [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)
           # The licence files too, beside the downloads that are one binary or an installer;
           # each of those carries them inside as well.
-          gh release create "$TAG" "${flags[@]}" dist/troupe-*.tgz dist/install.sh dist/install.ps1 \
+          gh release create "$TAG" "${flags[@]}" dist/troupe-*.tgz dist/install.sh dist/install.ps1 dist/troupe.vsix \
             LICENSE NOTICE THIRD-PARTY-NOTICES.txt
 
   native:

@@ -9,14 +9,31 @@ as Troupe resolves them.
 
 ## Installing it
 
-The extension is not on the Visual Studio Marketplace or Open VSX yet. CI builds it on
-every pull request that changes it, as the run's `troupe-vscode` artifact, which holds
-`troupe.vsix`. Install that with **Extensions: Install from VSIX…** in the command palette,
-or:
+The extension is not on the Visual Studio Marketplace or Open VSX yet. Every release and
+pre-release attaches it as `troupe.vsix`, covered by the release's `SHA256SUMS`, and the
+installers install it with `--vscode` (`-VSCode` on Windows): they download it with the
+rest, check it, and hand it to VS Code's own `code --install-extension`. Asked which
+clients to install, they ask about it too where VS Code is. Each release's notes open with
+one line that installs the daemon, the TUI and the extension from that release:
 
 ```
-code --install-extension troupe.vsix
+curl -fsSLO https://github.com/it-minds/troupe/releases/download/<tag>/install.sh && sh install.sh --tui --vscode
 ```
+
+```
+irm https://github.com/it-minds/troupe/releases/download/<tag>/install.ps1 -OutFile install.ps1; if ($?) { powershell -ExecutionPolicy Bypass -File .\install.ps1 -Tui -VSCode }
+```
+
+The installer is downloaded whole and then run, never piped into a shell, and it shows its
+plan and asks before it changes anything (Decision 682). The `if ($?)` is not decoration:
+PowerShell runs the next statement on a line after `irm` fails, which would run an older
+`install.ps1` left in the directory. `code` is found on the `PATH`, then where VS Code's
+setups put it; `TROUPE_VSCODE_CLI` names another. A VS Code window open already may need
+**Developer: Reload Window**. `--uninstall` (`-Uninstall`) removes the extension as well.
+
+The `.vsix` by itself installs with **Extensions: Install from VSIX…** in the command
+palette, or `code --install-extension troupe.vsix`. CI also builds one on every pull
+request that changes the extension, as the run's `troupe-vscode` artifact.
 
 To build it yourself, with Node and pnpm (the versions in `.tool-versions` and
 `clients/vscode/package.json`):

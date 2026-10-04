@@ -643,8 +643,8 @@ jobs:
   # The VS Code extension (clients/vscode): its unit tests, which put the line it types
   # through each shell the runner has; its suite inside a real VS Code, downloaded, against
   # a fake `troupe`, where the shell is bash on Linux and PowerShell on Windows; and the
-  # `.vsix`, kept as the run's artifact and published nowhere (Decision 765). macOS only in
-  # a full run, for the reason `native` gives.
+  # `.vsix`, kept as the run's artifact; a release builds its own and attaches it (Decision
+  # 765). macOS only in a full run, for the reason `native` gives.
   vscode:
     name: the VS Code extension — test, package (${{ matrix.os }})
     needs: [changes]

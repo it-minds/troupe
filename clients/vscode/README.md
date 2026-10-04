@@ -78,8 +78,15 @@ host, "Troupe isn't installed in WSL: Ubuntu", for example.
 
 ## Installing
 
-The extension is not on a marketplace yet. CI builds it on every change as a `.vsix`;
-install that with **Extensions: Install from VSIX…** or
+The extension is not on a marketplace yet. Every Troupe release attaches it as
+`troupe.vsix`, and Troupe's installer installs it with `--vscode` (`-VSCode` on Windows),
+`troupe` with it:
+
+```
+curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh && sh install.sh --tui --vscode
+```
+
+The `.vsix` by itself installs with **Extensions: Install from VSIX…** or
 `code --install-extension troupe.vsix`.
 
 ## No telemetry

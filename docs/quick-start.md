@@ -32,7 +32,8 @@ That installs the latest release's [daemon](glossary.md#daemon), `troupe-daemon`
 terminal [client](glossary.md#client), `troupe`, for your user alone: in `~/.local/bin`, or
 `%LOCALAPPDATA%\Programs\troupe` on Windows. Every download is checked against the release's
 `SHA256SUMS` first, and in a terminal the script shows its plan and asks before it changes
-anything; read it before you run it if you like. `--gui` (`-Gui`) adds the desktop app. The
+anything; read it before you run it if you like. `--gui` (`-Gui`) adds the desktop app, and
+`--vscode` (`-VSCode`) the [VS Code extension](user/vscode.md) where VS Code is. The
 programs are not code-signed, and [the TUI's README](../clients/tui/README.md#unsigned-binaries)
 says what macOS and Windows make of that.
 

@@ -4289,15 +4289,16 @@ citation keeps meaning what it meant.
      `clients/vscode` has one command that opens anything, `Troupe: Open`, which types
      `troupe --workspace <folder>` into a terminal it opens at that folder, by default a
      tab in the editor area, one terminal per folder; its side bar shows the folder's
-     settings as `troupe config --explain --json` reports them; and it is built as a
-     `.vsix` in CI and published nowhere yet.** Issue #378's v1, its first slice; the TUI
+     settings as `troupe config --explain --json` reports them; and every release attaches
+     it as `troupe.vsix`, which the installers' `--vscode` installs, on no marketplace
+     yet.** Issue #378's v1, its first slice; the TUI
      is the product (#378), and the panel over the daemon's ACP is v2.
      - **Where it lives and how it ships.** A pnpm project of its own, not a package of the
        GUI's workspace, which shares a protocol client the extension has no use for.
        TypeScript compiled by `tsc`, no runtime dependencies, so the `.vsix` that
        `vsce package --no-dependencies` makes is its own code with LICENSE and NOTICE,
        copied in at packaging as every release artifact carries them. `dev-check.yml` and
-       `ci.yml` keep the `.vsix` as the run's artifact; nothing publishes it. The Marketplace
+       `ci.yml` keep the `.vsix` as the run's artifact. The Marketplace
        or Open VSX, a version check against the TUI, and telemetry are not in it, as decided
        on the issue; the README says there is no telemetry. Its id is
        `objective-mj.troupe`, under the desktop app's identifier (710), and its version is
@@ -4361,6 +4362,25 @@ citation keeps meaning what it meant.
        `cmd.exe /d /s /c` with the line quoted as the terminal's is, since Node runs no batch
        file without a shell. The models to choose from, with windows and prices, wait on
        `troupe models --json` (#387).
+     - **A release attaches it, and one line installs it to try.** `release.yml` and
+       `prerelease.yml` build the `.vsix` as `dev-check.yml` does and attach it as
+       `troupe.vsix`, in the release's `SHA256SUMS` with the rest. `install.sh --vscode` and
+       `install.ps1 -VSCode` download it with the rest, check it, and hand it to VS Code's
+       own `code --install-extension --force`: `code` on the `PATH`, then where VS Code's
+       setups put it, or `TROUPE_VSCODE_CLI`. Without one, `--vscode` stops before the plan.
+       Asked which clients to install, they ask about the extension only where `code` is,
+       yes by default where the TUI is being installed on a fresh machine; `code` is run
+       only then, never for the summary, since a first `code` in WSL sets up VS Code's
+       server. A failed `--install-extension` is a warning, the rest being installed, and
+       `--uninstall` removes the extension too. Each release's notes open with one line per
+       system that installs the daemon, the TUI and the extension from that release:
+       `curl -fsSLO …/install.sh && sh install.sh --tui --vscode`, and `irm …/install.ps1
+       -OutFile install.ps1; if ($?) { powershell -ExecutionPolicy Bypass -File
+       .\install.ps1 -Tui -VSCode }`. That is Decision 682's download, then run, on one
+       line, not a pipe into a shell: the file is whole before it runs, stays to be read,
+       and still shows its plan and asks. The `if ($?)` is needed: in Windows PowerShell
+       5.1 and PowerShell 7 alike, the statement after a failed `irm` on the same line
+       runs, which would run an older `install.ps1` left in the directory.
      - **Finding `troupe`**, where the terminal runs: `troupe.path`, then the `PATH`, then
        where the installers put it, which a window older than the installer's change to the
        `PATH` would otherwise miss. On Windows only a `.exe`, `.cmd` or `.bat`, `.exe`
@@ -4414,7 +4434,18 @@ citation keeps meaning what it meant.
        person's own VS Code 1.140 on a US-International layout, used by hand: the key, the
        tab, the title bar's and the activity bar's masks; and the Settings rows made from
        that machine's real `troupe config --explain --json`, which showed its gateway, its
-       models and the workspace untrusted, and no key.
+       models and the workspace untrusted, and no key. The installers against a local
+       mirror of v0.8.0-beta with this `troupe.vsix` and a `SHA256SUMS` over both, every
+       Troupe directory a scratch one: `install.ps1 -VSCode -Yes` under Windows PowerShell
+       5.1 with a recording `code.cmd` that writes to stderr, and under PowerShell 7 with
+       the real `code.cmd`, which installed it; without any `code`, refused before the plan
+       with nothing made. `install.sh --vscode -y` under dash in WSL with a scratch `HOME`
+       and a recording `code`: installed, then `--uninstall -y` removed the extension;
+       through a pseudo-terminal, the question about it after the other two, `[y/N]` with
+       the TUI declined; without `code`, refused before the plan. The release notes'
+       heredocs rendered with sample values, `$?` and `.\install.ps1` as written. Not run:
+       `-VSCode` asked interactively on Windows, and `release.yml`'s new steps, which run
+       at the next release.
 
 766. **Signing out of a plane takes back the plane token the client handed the daemon, and
      the daemon seals nothing until somebody signs in again; the link stays.** Issue #381,

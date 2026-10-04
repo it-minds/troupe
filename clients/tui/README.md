@@ -26,9 +26,10 @@ truly idle: zero LLM calls, zero tokens.
 `troupe` is released with the rest of the repository: every release on this repository's
 GitHub releases page carries a binary per platform, `troupe-<version>-<target>` (`.exe` on
 Windows), beside `troupe-daemon-<version>-<target>.tar.gz` and one `SHA256SUMS`. The
-installers at the repository root put `troupe-daemon` on the machine, and `troupe` and the
-desktop app when asked (`--tui`, `--gui`; `-Tui`, `-Gui` on Windows), and check them
-against `SHA256SUMS` before replacing anything:
+installers at the repository root put `troupe-daemon` on the machine, and `troupe`, the
+desktop app and the VS Code extension when asked (`--tui`, `--gui`, `--vscode`; `-Tui`,
+`-Gui`, `-VSCode` on Windows), and check them against `SHA256SUMS` before replacing
+anything:
 
 ```sh
 curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh
