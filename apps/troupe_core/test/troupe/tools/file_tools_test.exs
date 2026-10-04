@@ -3,7 +3,7 @@ defmodule Troupe.Tools.FileToolsTest do
 
   alias Troupe.Tool.Ctx
   alias Troupe.Tools
-  alias Troupe.Tools.{EditFile, Glob, ListFiles, ReadFile, WriteFile}
+  alias Troupe.Tools.{EditFile, Glob, Grep, ListFiles, ReadFile, WriteFile}
   alias Troupe.Workspace
 
   setup do
@@ -179,7 +179,10 @@ defmodule Troupe.Tools.FileToolsTest do
 
     # The workspace path starts the glob, and only the pattern after it may be read as
     # one: a checkout at `app[1]` must not be searched as `app1`.
-    test "a workspace path with glob characters in it is searched literally", %{root: root, ctx: ctx} do
+    test "a workspace path with glob characters in it is searched literally", %{
+      root: root,
+      ctx: ctx
+    } do
       odd = Path.join(root, "app[1]{a,b}")
       File.mkdir_p!(Path.join(odd, "lib"))
       File.write!(Path.join(odd, "lib/a.ex"), "def hello, do: :world\n")
@@ -187,7 +190,9 @@ defmodule Troupe.Tools.FileToolsTest do
 
       assert {:ok, "lib/a.ex"} = ListFiles.run(%{"pattern" => "**/*.ex"}, ctx)
       assert {:ok, "lib/a.ex"} = Glob.run(%{"pattern" => "**/*.ex"}, ctx)
-      assert Tools.execute(Troupe.Tools.Grep, %{"pattern" => "def hello"}, ctx).content =~ "lib/a.ex:1:"
+
+      assert Tools.execute(Troupe.Tools.Grep, %{"pattern" => "def hello"}, ctx).content =~
+               "lib/a.ex:1:"
     end
   end
 
@@ -210,6 +215,48 @@ defmodule Troupe.Tools.FileToolsTest do
     test "an invalid regex is a readable error, not a crash", %{ctx: ctx} do
       result = Tools.execute(Troupe.Tools.Grep, %{"pattern" => "("}, ctx)
       refute result.ok?
+    end
+
+    # Decision 776: a model told "No matches." for a search of the very file that holds
+    # them answers wrongly with confidence, as the first standard bench's large_log did.
+    test "a path naming one file searches that file, with ripgrep and without", %{
+      root: root,
+      ctx: ctx
+    } do
+      File.mkdir_p!(Path.join(root, "logs"))
+
+      File.write!(
+        Path.join(root, "logs/service.log"),
+        "INFO ok\nERROR code=E1042 timed out\nWARN code=E1042 slow\nERROR code=E2001 rejected\n"
+      )
+
+      args = %{"path" => "logs/service.log", "pattern" => "ERROR.*E1042"}
+
+      for rg <- Enum.uniq([nil, System.find_executable("rg")]) do
+        assert {:ok, output} = Grep.search(args, ctx, rg)
+        assert output == "logs/service.log:2:ERROR code=E1042 timed out", inspect(rg)
+      end
+    end
+
+    test "a glob that matches no file says which glob it was", %{root: root, ctx: ctx} do
+      File.mkdir_p!(Path.join(root, "lib"))
+      File.write!(Path.join(root, "lib/cart.exs"), "def line_total(x), do: x\n")
+
+      for rg <- Enum.uniq([nil, System.find_executable("rg")]) do
+        assert {:ok, "No matches in files matching **/*.ex."} =
+                 Grep.search(
+                   %{"pattern" => "line_total", "glob" => "**/*.ex"},
+                   ctx,
+                   rg
+                 )
+
+        assert {:ok, "lib/cart.exs:1:def line_total(x), do: x"} =
+                 Grep.search(
+                   %{"pattern" => "line_total", "glob" => "**/*.exs"},
+                   ctx,
+                   rg
+                 )
+      end
     end
   end
 end

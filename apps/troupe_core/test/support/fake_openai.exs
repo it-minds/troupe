@@ -132,7 +132,11 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
            {:tools,
             [
               {"edit_file",
-               %{"path" => "lib/cart.exs", "old_string" => "def line_total(", "new_string" => "def subtotal("}},
+               %{
+                 "path" => "lib/cart.exs",
+                 "old_string" => "def line_total(",
+                 "new_string" => "def subtotal("
+               }},
               {"edit_file",
                %{
                  "path" => "lib/receipt.exs",
@@ -149,7 +153,11 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
            {:tools,
             [
               {"edit_file",
-               %{"path" => "lib/cart.exs", "old_string" => "&line_total/1", "new_string" => "&subtotal/1"}}
+               %{
+                 "path" => "lib/cart.exs",
+                 "old_string" => "&line_total/1",
+                 "new_string" => "&subtotal/1"
+               }}
             ]},
            {:text, "Renamed, and the tests pass."}
          ]},
@@ -160,7 +168,8 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
          ]},
         {"logs/service.log is the log of a busy service",
          [
-           {:tools, [{"grep", %{"pattern" => "ERROR code=E1042", "path" => "logs"}}]},
+           # The file itself as the path, as a model asks (Decision 776).
+           {:tools, [{"grep", %{"pattern" => "ERROR code=E1042", "path" => "logs/service.log"}}]},
            {:tools, [{"write_file", %{"path" => "answer.txt", "content" => "53\n"}}]},
            {:text, "53 lines are ERROR with code E1042."}
          ]},
@@ -181,11 +190,18 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
          [
            {:tools, [{"read_file", %{"path" => "TASK.md"}}]},
            {:tools,
-            [{"write_file", %{"path" => "out/greeting.txt", "content" => "hello from the bench\n"}}]},
+            [
+              {"write_file",
+               %{"path" => "out/greeting.txt", "content" => "hello from the bench\n"}}
+            ]},
            {:tools,
             [
               {"edit_file",
-               %{"path" => "config.ini", "old_string" => "mode = draft", "new_string" => "mode = final"}}
+               %{
+                 "path" => "config.ini",
+                 "old_string" => "mode = draft",
+                 "new_string" => "mode = final"
+               }}
             ]},
            {:tools,
             [
