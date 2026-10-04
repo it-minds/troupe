@@ -990,12 +990,16 @@ at a later one, without ever travelling back to a client.
 ```
 `setup.get` (`observe`) → `{"needed", "completed", "step", "steps": [{"name",
 "done"}], "answers", "detected", "key_storage", "offered", "suggested", "check",
-"suggested_prompt", "session"}`. `needed` says whether a client should offer the
+"suggested_prompt", "daemon", "session"}`. `needed` says whether a client should offer the
 questions: nothing recorded, no `config.yaml`, and no model that can be asked.
 `completed` is `null` or `{"completed_at", "choice", "subject"}`, recorded once for every
 client in the daemon's state directory. `step` is the step to answer next — `where`,
-`provider`, `key`, `models`, `workspace`, `finish` — and `steps` the ones this path
+`provider`, `key`, `models`, `workspace`, `daemon`, `finish` — and `steps` the ones this path
 takes, since a plane finishes at once and reused settings skip the key and the models.
+`daemon` says whether the daemon starts when this user logs in (Decision 762):
+`{"at_login", "kind": "startup_folder" | "launch_agent" | "systemd" | "autostart",
+"path", "command"}`, the entry's file and the `troupe-daemon` it starts, `command` being
+`null` when there is none to start.
 `detected` is what is already here: `env` (which of `ANTHROPIC_API_KEY` and
 `OPENAI_API_KEY` are set, names only), `opencode` (`path`, `providers`, `default`),
 `config` (the file, as `config.get` reports it, plus `usable`) and `plane` (`url`,
@@ -1019,6 +1023,7 @@ whose person wants the question again. Each step's `answer`:
 | `key` | `{"api_key"}`, `{"env": "VAR"}` (kept as `{env:VAR}`) or `{}` for a gateway that wants none | checked with a real request, the provider's model listing: `check` is `{"state": "ok" \| "refused" \| "unknown", "reason"}`. Refused stays on `key`; `ok` fills `offered` (`{"id", "context", "max_output", "input", "output"}`, prices per million tokens) and `suggested` (`{"default", "cheap"}`, a safe answer); `unknown` goes on with nothing listed |
 | `models` | `{"default", "cheap"?}` | writes the provider, the key and the models into the user's `config.yaml` |
 | `workspace` | `{"workspace", "approvals": "ask" \| "auto"}` | the first project directory, which must exist; writes `auto_approve`. `ask` is the default |
+| `daemon` | `{"at_login": true \| false}` | `true` writes the platform's login entry, which starts `troupe-daemon run` at the next login and keeps it up; `false` removes it. The answer is the state, so answering again turns it the other way; nothing is started or stopped now |
 | `finish` | `{"start"?: true, "prompt"?}` | records the run as done; for a local setup starts a session in the workspace with `prompt`, or `suggested_prompt`, and answers it as `session` (`session.create`'s answer, or `{"error"}`) |
 
 A bad answer is `invalid_params` with `data.reason` in one sentence, and the flow stays

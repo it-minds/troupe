@@ -30,8 +30,8 @@ and exits 1 when one fails.
 **The desktop app** asks the same questions on its first run, as screens: where the work
 runs, the provider (with what is already on the machine offered: a key in the environment,
 an opencode setup, a `config.yaml`), the key, the models with their context and price, a
-first directory and the approval model, then a first session there with a suggested
-prompt. It writes the same `config.yaml`, and once it is done the terminal client does not
+first directory and the approval model, whether the daemon starts when you log in, then a
+first session there with a suggested prompt. It writes the same `config.yaml`, and once it is done the terminal client does not
 ask again. **Setup** in the app's rail runs it again at any time, and a session whose key
 the provider refuses offers it too.
 
@@ -52,7 +52,10 @@ On your own machine every way in is a client of one daemon, `troupe-daemon`, whi
 your sessions and outlives the windows you look at them through. Whichever client needs
 it first starts it (the terminal client runs one inside itself when none is running), and
 it stops on its own a while after the last client leaves
-([troupe-daemon](../../apps/troupe_daemon/README.md#how-long-it-stays-up)):
+([troupe-daemon](../../apps/troupe_daemon/README.md#how-long-it-stays-up)).
+`troupe daemon login on` starts it every time you log in instead, and then it stays up
+until you log out; `troupe daemon login off` takes that back, and the first run asks
+([start at login](../../apps/troupe_daemon/README.md#start-at-login)):
 
 ```mermaid
 flowchart LR

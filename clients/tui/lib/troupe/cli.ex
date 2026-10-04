@@ -21,7 +21,7 @@ defmodule Troupe.CLI do
       troupe config pull [PLANE_URL]  save the plane's default provider and models here (never a key)
       troupe models [--refresh]    list every model, its window and its price
       troupe doctor                check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure
-      troupe daemon [ARGS]         the local daemon: `run` (default), `status`, `config`, `models`, `version`
+      troupe daemon [ARGS]         the local daemon: `run` (default), `status`, `config`, `models`, `login on|off`, `version`
       troupe --version
   """
 

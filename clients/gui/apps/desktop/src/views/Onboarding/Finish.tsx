@@ -83,6 +83,12 @@ export function Finish({ flow, busy, error, onAnswer, onBack }: StepProps): JSX.
         <dd className="mono micro">{String(workspace?.["workspace"] ?? "")}</dd>
         <dt>Approvals</dt>
         <dd>{workspace?.["approvals"] === "auto" ? "every call runs without asking" : "the agent asks before it writes or runs anything"}</dd>
+        {flow.answers.daemon && (
+          <>
+            <dt>Daemon</dt>
+            <dd>{flow.answers.daemon["at_login"] === true ? "starts when you log in" : "starts when an app needs it"}</dd>
+          </>
+        )}
       </dl>
 
       <label>

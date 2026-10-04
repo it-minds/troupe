@@ -96,7 +96,7 @@ defmodule Troupe.SetupTest do
       refute inspect(report) =~ "sk-fake-typed"
 
       assert Enum.map(report["steps"], & &1["name"]) ==
-               ~w(where provider key models workspace finish)
+               ~w(where provider key models workspace daemon finish)
 
       assert [%{"id" => "fake-model", "context" => 200_000} | _] = report["offered"]
 
@@ -114,8 +114,11 @@ defmodule Troupe.SetupTest do
                  "approvals" => "ask"
                })
 
-      assert flow.step == "finish"
+      assert flow.step == "daemon"
       assert File.read!(ctx.config_file) =~ "auto_approve: false"
+
+      assert {:ok, flow} = Setup.answer(flow, "daemon", %{"at_login" => false})
+      assert flow.step == "finish"
 
       assert Setup.report(flow)["suggested_prompt"] ==
                "Look around this directory and tell me what you find."
@@ -150,6 +153,7 @@ defmodule Troupe.SetupTest do
       {:ok, flow} =
         Setup.answer(flow, "workspace", %{"workspace" => ctx.workspace, "approvals" => "auto"})
 
+      {:ok, flow} = Setup.answer(flow, "daemon", %{"at_login" => false})
       assert File.read!(ctx.config_file) =~ "auto_approve: true"
       assert Setup.report(flow)["suggested_prompt"] =~ "what this project does"
 
@@ -260,6 +264,44 @@ defmodule Troupe.SetupTest do
     end
   end
 
+  # The login entry goes to the suite's scratch home (test_helper.exs), never the real one.
+  describe "the daemon step" do
+    test "comes after the project: yes writes the login entry, no removes it, and finish follows",
+         ctx do
+      {:ok, flow} = Setup.answer(Setup.new(), "where", %{"choice" => "local"})
+      {:ok, flow} = Setup.answer(flow, "provider", %{"provider" => "fake"})
+      {:ok, flow} = Setup.answer(flow, "key", %{"api_key" => "sk-fake"})
+      {:ok, flow} = Setup.answer(flow, "models", %{"default" => "fake-model"})
+      {:ok, flow} = Setup.answer(flow, "workspace", %{"workspace" => ctx.workspace})
+
+      assert flow.step == "daemon"
+      report = Setup.report(flow)
+
+      assert Enum.map(report["steps"], & &1["name"]) ==
+               ~w(where provider key models workspace daemon finish)
+
+      assert %{"at_login" => false, "command" => "/opt/troupe/bin/troupe-daemon"} =
+               report["daemon"]
+
+      assert {:error, "at_login must be true or false"} = Setup.answer(flow, "daemon", %{})
+
+      assert {:ok, on} = Setup.answer(flow, "daemon", %{"at_login" => true})
+      assert on.step == "finish"
+      assert on.answers["daemon"] == %{"at_login" => true}
+      assert Setup.report(on)["daemon"]["at_login"]
+      entry = Troupe.StartAtLogin.path(Troupe.StartAtLogin.kind())
+      assert File.read!(entry) =~ "/opt/troupe/bin/troupe-daemon"
+
+      # Changing one's mind is answering it again: the entry goes.
+      assert {:ok, off} = Setup.answer(on, "daemon", %{"at_login" => false})
+      assert off.step == "finish"
+      assert off.answers["daemon"] == %{"at_login" => false}
+      refute File.exists?(entry)
+
+      assert {:ok, %{step: "done"}} = Setup.answer(off, "finish", %{"start" => false})
+    end
+  end
+
   describe "the other paths" do
     test "a plane finishes at once and starts no session" do
       {:ok, flow} =
@@ -290,7 +332,7 @@ defmodule Troupe.SetupTest do
       assert flow.step == "workspace"
 
       assert Enum.map(Setup.report(flow)["steps"], & &1["name"]) ==
-               ~w(where provider workspace finish)
+               ~w(where provider workspace daemon finish)
 
       assert File.read!(ctx.config_file) =~ "default: scripted"
     end

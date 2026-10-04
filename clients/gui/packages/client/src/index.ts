@@ -136,6 +136,7 @@ export type {
   SetupAnswer,
   SetupCheck,
   SetupCompleted,
+  SetupDaemon,
   SetupDetected,
   SetupFlow,
   SetupSession,
