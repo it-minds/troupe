@@ -57,6 +57,29 @@ defmodule Troupe.Session.UsageTest do
     assert [%{seq: 2}] = Usage.records("s-1", events)
   end
 
+  # Decision 769: the summariser's call was billed and never reached the ledger.
+  test "the call that wrote a compaction's summary is a row, and a compaction from before is not" do
+    summarised =
+      event(
+        5,
+        %{
+          "summary" => "the gist",
+          "conversation" => [],
+          "usage" => %{"input_tokens" => 900, "output_tokens" => 40},
+          "model" => "anthropic/claude-haiku-4-5",
+          "gateway" => %{"request_id" => "gw_5", "cost_micros" => 1_100}
+        },
+        "compacted"
+      )
+
+    before = event(6, %{"summary" => "the gist", "conversation" => []}, "compacted")
+
+    assert [row] = Usage.records("s-1", [summarised, before])
+
+    assert %{seq: 5, request_id: "gw_5", input_tokens: 900, output_tokens: 40, cost_micros: 1_100} =
+             row
+  end
+
   test "rows come back in sequence order however the events arrived" do
     assert [%{seq: 2}, %{seq: 5}, %{seq: 9}] =
              Usage.records("s-1", [metered(9, 1), metered(2, 1), metered(5, 1)])

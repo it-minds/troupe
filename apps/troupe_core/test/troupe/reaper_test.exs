@@ -88,7 +88,7 @@ defmodule Troupe.ReaperTest do
                       %Event{type: "turn_ended", agent: ["root"], data: data}},
                      10_000
 
-      assert data == %{}
+      assert Map.delete(data, "turn") == %{}
       assert Fake.call_count(fake) == 1
       assert events_of_type(sid, :agent_restarted) == []
     end

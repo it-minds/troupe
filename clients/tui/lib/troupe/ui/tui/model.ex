@@ -62,6 +62,17 @@ defmodule Troupe.UI.TUI.Model do
           cache_write: non_neg_integer()
         }
 
+  @typedoc """
+  What one turn cost, as the event that ends it says (root Decision 769): its model calls,
+  their usage summed, the micro-dollars of the calls that were priced, and how many were not.
+  """
+  @type turn :: %{
+          calls: non_neg_integer(),
+          usage: usage(),
+          cost_micros: non_neg_integer(),
+          unpriced: non_neg_integer()
+        }
+
   @type agent :: %{
           transcript: [entry()],
           streaming: String.t(),
@@ -345,6 +356,7 @@ defmodule Troupe.UI.TUI.Model do
             do: w |> ensure_agent(path) |> push(path, {:system, crashed(d[:detail])}),
             else: w
         end)
+        |> turn_cost(path, d, e.transient?)
 
       :assistant_message ->
         text = Message.text(d.content)
@@ -384,6 +396,15 @@ defmodule Troupe.UI.TUI.Model do
         Enum.reduce(Message.tool_uses(d.content), %{w | usage: add(w.usage, used)}, fn tu, acc ->
           push(acc, path, {:tool, new_tool(tu.id, tu.name, summarize_input(tu.name, tu.input))})
         end)
+
+      # A model call that drew no reply, the summariser's (root Decision 769): counted as a
+      # reply's usage is.
+      :call_usage ->
+        used = used(d.usage)
+
+        %{w | usage: add(w.usage, used)}
+        |> ensure_agent(path)
+        |> update_agent(path, fn a -> %{a | usage: add(a.usage, used)} end)
 
       # The call is over, and so is an approval or a question it was still waiting for: a
       # cancel closes each call it stops with one of these, and so does a tool that timed
@@ -535,6 +556,13 @@ defmodule Troupe.UI.TUI.Model do
         w
     end
   end
+
+  # What the turn cost, once, in the line under it (Decision 139): the event that ends a
+  # turn carries it, and a live `agent_state` never does, so nothing is said while it runs.
+  defp turn_cost(w, path, %{turn: %{calls: calls} = turn}, false) when calls > 0,
+    do: w |> ensure_agent(path) |> push(path, {:system, turn_line(turn)})
+
+  defp turn_cost(w, _path, _data, _transient?), do: w
 
   # Only the optimistic copy of an input carries a command id worth waiting on:
   # one that came off the wire is already confirmed by definition.
@@ -1138,6 +1166,27 @@ defmodule Troupe.UI.TUI.Model do
         note -> ["⚠ " <> note]
       end
   end
+
+  @doc """
+  What one turn cost, as the line under it says (Decision 139): its model calls, what was
+  sent and billed in full (`↑`, as the window's own count reads it), what the prompt cache
+  served, what came back, and the money. A turn nobody priced says so, rather than that it
+  was free.
+  """
+  @spec turn_line(turn()) :: String.t()
+  def turn_line(%{calls: calls, usage: u} = turn) do
+    "turn: #{calls} #{if calls == 1, do: "call", else: "calls"} · ↑ #{short(u.input + u.cache_write)} sent · " <>
+      "#{short(u.cache_read)} cached · ↓ #{short(u.output)} received · " <> money(turn)
+  end
+
+  defp money(%{calls: n, unpriced: n}), do: "no price"
+  defp money(%{cost_micros: micros, unpriced: 0}), do: dollars(micros)
+  defp money(%{cost_micros: micros, unpriced: 1}), do: dollars(micros) <> ", 1 call unpriced"
+  defp money(%{cost_micros: micros, unpriced: n}), do: dollars(micros) <> ", #{n} calls unpriced"
+
+  defp dollars(0), do: "$0.00"
+  defp dollars(micros) when micros < 10_000, do: "under a cent"
+  defp dollars(micros), do: "$" <> :erlang.float_to_binary(micros / 1_000_000, decimals: 2)
 
   @doc "Every token a window or agent has accounted for, cached input included."
   @spec total_tokens(%{usage: usage()}) :: non_neg_integer()

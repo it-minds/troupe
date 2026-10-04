@@ -12,6 +12,9 @@
     "profile": {
       "type": "string"
     },
+    "prompt_bytes": {
+      "type": "object"
+    },
     "tools": {
       "items": {
         "type": "string"

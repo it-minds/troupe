@@ -21,7 +21,9 @@ defmodule Troupe.Agent.TurnEndedTest do
 
     assert ["llm_response", "turn_ended"] = sid |> event_types() |> Enum.take(-2)
     assert [%Event{agent: ["root"], data: data}] = events_of_type(sid, :turn_ended)
-    assert data == %{}
+    # No reason: the model ended it. What it cost rides along (Decision 769).
+    assert Map.keys(data) == ["turn"]
+    assert data["turn"]["calls"] == 1
     assert events_of_type(sid, :agent_done) == []
   end
 

@@ -353,6 +353,11 @@ side panel (`⟳ 148.0k from cache`) and in the observer's detail. Budgets spend
 the billed part, so re-reading a cached prompt does not exhaust
 `max_input_tokens`.
 
+Those counts are the whole session's. What one turn cost is the line under it
+when it ends, never a running figure while it works:
+`turn: 3 calls · ↑ 300 sent · 3.0k cached · ↓ 120 received · $0.04`, its
+subagents' calls included, and `no price` when nothing prices the model.
+
 ### Observer
 
 `/observer` is the overview across branches: every root agent with the
