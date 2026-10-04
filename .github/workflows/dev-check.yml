@@ -58,6 +58,7 @@ jobs:
               - apps/troupe_core/**
               - apps/troupe_gateway/**
               - apps/troupe_protocol/**
+              - docs/user/cli-reference.md
             gui:
               - clients/gui/**
               - protocol/**
@@ -131,6 +132,10 @@ jobs:
         run: elixir scripts/locks-agree.exs
       - run: mix deps.get
       - run: mix compile --warnings-as-errors
+      # docs/user/cli-reference.md, generated from the command-line table and the
+      # harness's command table, which a change to either leaves stale.
+      - name: The committed command reference is current
+        run: mix troupe.cli.reference --check
 
   gui:
     name: the GUI - build and typecheck
