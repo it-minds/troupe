@@ -4363,4 +4363,9 @@ citation keeps meaning what it meant.
        a clean quit closing the terminal; a failed start keeping it and running again on
        the next press; a missing `troupe` as the sentence and no terminal; and an
        extensionless `troupe` beside the `.cmd` never opened. CI runs both on Linux and
-       Windows, macOS in a full run.
+       Windows, macOS in a full run. And installed: the `.vsix` put into a scratch VS Code
+       profile, whose terminals had scratch homes, found the installed `troupe.exe` on the
+       `PATH` and ran it through PowerShell 7 at the folder, the TUI's session recorded with
+       that folder as its workspace and a second press reusing its terminal; and the
+       installed `troupe.exe --workspace DIR`, typed into a terminal in another directory,
+       rooted its session at DIR and none at the directory it started in.

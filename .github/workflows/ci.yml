@@ -673,6 +673,10 @@ jobs:
       - run: pnpm test
 
       # A runner has no display: Linux's VS Code gets a virtual one.
+      - name: A virtual display
+        if: runner.os == 'Linux'
+        run: command -v xvfb-run || { sudo apt-get update && sudo apt-get install -y xvfb; }
+
       - name: The suite inside VS Code
         run: ${{ runner.os == 'Linux' && 'xvfb-run -a ' || '' }}pnpm test:vscode
 
