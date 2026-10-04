@@ -76,6 +76,7 @@ skips, and `shell` does not run. A release sets the two Linux triples.
 | `docs/third-party-licences.md`, `THIRD-PARTY-NOTICES.txt`, `charts/troupe/{LICENSE,NOTICE}` | `elixir scripts/licences.exs`, from the two Mix locks, the pnpm workspace and `Cargo.lock`, once their packages are fetched: the inventory, the licence texts the shipped packages carry, and the chart's copies of the root's | `--check` in `licences.yml`, which also refuses a licence outside the script's policy |
 | `clients/gui/apps/desktop/src/{tokens.css,mark.ts}` | `pnpm tokens`, from `clients/gui/docs/design/themes/*.tokens.json` | `pnpm tokens:check` |
 | `clients/tui/lib/troupe/ui/tui/palette.ex` | `mix troupe.palette` in `clients/tui`, from `clients/gui/docs/design/themes/afterglow.tokens.json`: the TUI's colours by role, with their xterm-256 and sixteen-colour stand-ins, and the mask in two cuts (Decision 716) | `--check`, in the TUI's `mix check` |
+| `docs/user/cli-reference.md`, between its markers | `mix troupe.cli.reference` in `clients/tui`, from the command lines beside the parser (`Troupe.CLI.commands/0`) and the harness's slash commands (`Troupe.Commands`), the two tables `troupe --help` prints (Decision 767) | `--check`, in the TUI's `mix check` and in `dev-check` |
 | `clients/gui/apps/desktop/src-tauri/icons/*` | `pnpm icons`, from `mark.ts` and the Signal tokens: every icon the bundler wants, the NSIS images and the dmg background (Decision 703) | `pnpm icons:check`, on the pixels |
 | `test/fixtures/logs/<version>/` | `mix troupe.fixtures.record <version>`, once per release; refuses to overwrite | `fold_test.exs` replays every version |
 
@@ -91,3 +92,10 @@ check` compares (CI's `versions` job) and `elixir scripts/version.exs set <versi
 writes. The desktop app gets the version without its pre-release part, because WiX
 refuses a non-numeric one. A release is a merged change to `VERSION`
 ([deployment.md](deployment.md)).
+
+Mix writes an app's `.app`, where its version is compiled, again only when `mix.exs` or the
+config changed, so every project that reads `VERSION` lists `troupe_protocol`'s
+`:troupe_version` compiler after `:app` (`compilers: Mix.compilers() ++ [:troupe_version]`).
+It has `:app` write the `.app` again when its version is not `VERSION`'s, which is what makes
+a checkout that built the previous release build the new one (Decision 768). A new
+`mix.exs` that reads `VERSION` lists it too.
