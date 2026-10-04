@@ -443,6 +443,57 @@ before building clears it; `install-local.ps1` could do that, or the projects co
 change to `VERSION` recompile them. Found by the chunk 14 coordinator verifying the chunk's
 tip, 2026-10-03.
 
+### D61 - Private sessions after #365: what is left (medium)
+
+- `troupe logout` neither unlinks the daemon nor withdraws the plane token it was handed;
+  the daemon keeps using the token until it expires.
+- The daemon's `session.list` rows carry no `kind` or `sync`, so the desktop app lists a
+  private session as a local one ("Here only").
+- A private session whose plane row names another device is left alone on resume
+  (Decision 764), but no client offers `claim`, which a renamed machine needs too.
+- A private session sealed before PR #373 lacks its first events (`session_created`): the
+  sealer subscribed after the session started.
+
+Found by the chunk 15 fixer of slot D15 (PR #373), 2026-10-04.
+
+### D62 - Start at login: small leftovers (low)
+
+- Uninstalling (`install.sh` / `install.ps1 --uninstall`) doesn't run
+  `troupe-daemon login off` first, so the login entry is left pointing at nothing.
+- On macOS and Linux a daemon started at login (and one a Finder-launched desktop app
+  starts) gets the session manager's minimal `PATH`, so tools an agent's shell expects
+  (Homebrew, `~/.local`) may be missing.
+- Unchecked: the desktop shell's `spawn_any` (`src-tauri/src/daemon.rs`) starts
+  `troupe-daemon.cmd run` without `CREATE_NO_WINDOW`, so a daemon the desktop app starts
+  on Windows may get a console window of its own.
+- A Startup item disabled in Task Manager still reads as on in `troupe daemon login
+  status`, and the Windows entry spells the drive in lower case.
+- A test suite that reaches the setup flow's `daemon` step must point
+  `:troupe_core, :start_at_login` at a scratch home (core's and the gateway's do), or it
+  writes the developer's real login entry.
+
+Found by the chunk 15 fixer of slot B15 (PR #372), 2026-10-04.
+
+### D63 - Shared settings and user commands: small leftovers (low)
+
+- `troupe config --explain --json` likely fails when a list holds an unset `{env:VAR}` (an
+  MCP server's `args`): `Explain.json_value` keeps the `{:unset_env, ...}` tuple, which
+  JSON can't encode. `config.get` has the fix (PR #374); `Explain` doesn't.
+- A daemon older than 0.8.0 treats a `config.set` without `provider` as a model-panel save
+  and writes `provider: anthropic` when the file has none. This release's clients refuse to
+  set a single key unless `config.get` lists `keys`; another client could still do it.
+- The TUI's settings help says a `next_run` setting applies "the next time the TUI
+  starts"; most apply to the next session.
+- Two clients saving one file at the same moment: the last write wins (Decision 761).
+- A command file that shadows a built-in is skipped with a warning logged on every
+  `commands.list`, so each time a palette opens; and the TUI reads the command table only
+  when a session opens (the desktop app reads it each time its palette opens).
+- The TUI suite prints "spawn: Could not cd to /tmp/troupe-ws-NNN" in several tests, and
+  `InterruptTest` ("a console that cannot be read ends the watch") failed once under the
+  full gate's load and passed alone.
+
+Found by the chunk 15 fixers of slots A15, B15 and C15 (PRs #374, #372, #370), 2026-10-04.
+
 ## Taken
 
 | Defect | Taken by |
