@@ -11,8 +11,9 @@ defmodule Troupe.Bench.Scenario do
     * `script` — the offline model's steps (`Troupe.Bench.Model`); a run against a real
       model has none, the model decides
     * `outcome` — what a script can check afterwards whoever answered, or `nil`:
-      `{:file, path, content}` (the file holds exactly that) or `{:command, argv}` (the
-      command, run in the workspace, exits 0: a test passing)
+      `{:file, path, content}` (the file holds that text, line endings and trailing
+      whitespace aside) or `{:command, argv}` (the command, run in the workspace, exits
+      0: a test passing)
     * `drive` — `nil` to type the prompt and wait for the turn to end, or a function
       of the run's context that does something else (cancel half way) and returns it
     * `measure` — a function of the run's context answering `{metrics, checks}`: each
@@ -68,17 +69,62 @@ defmodule Troupe.Bench.Scenario do
 
   def outcome(%__MODULE__{outcome: {:file, relative, content}}, workspace) do
     case File.read(Path.join(workspace, relative)) do
-      {:ok, ^content} -> true
+      {:ok, found} -> text(found) == text(content)
       _other -> false
     end
   end
 
   def outcome(%__MODULE__{outcome: {:command, [program | args]}}, workspace) do
     case System.find_executable(program) do
-      nil -> false
-      path -> match?({_output, 0}, System.cmd(path, args, cd: workspace, stderr_to_stdout: true))
+      nil ->
+        false
+
+      path ->
+        env = [{"PATH", command_path(System.get_env("PATH", ""), release_bin())}]
+
+        {_output, status} =
+          System.cmd(path, args, cd: workspace, stderr_to_stdout: true, env: env)
+
+        status == 0
     end
   end
+
+  @doc """
+  The `PATH` a command outcome runs with: this VM's, less `erts_bin`.
+
+  The VM puts its own runtime's `bin` first on the `PATH` its children get. In a release,
+  the installed `troupe` or `troupe-daemon`, that runtime has no boot file of its own, so
+  the `elixir` a test runs with started on it and failed before the test did: the outcome
+  was a failure whatever the model had done (Decision 773). Outside a release `erts_bin`
+  is `nil` and the `PATH` is the VM's.
+  """
+  @spec command_path(String.t(), Path.t() | nil) :: String.t()
+  def command_path(path, nil), do: path
+
+  def command_path(path, erts_bin) do
+    separator = if match?({:win32, _}, :os.type()), do: ";", else: ":"
+
+    path
+    |> String.split(separator)
+    |> Enum.reject(&(dir(&1) == dir(erts_bin)))
+    |> Enum.join(separator)
+  end
+
+  defp release_bin do
+    if System.get_env("RELEASE_ROOT") do
+      Path.join([to_string(:code.root_dir()), "erts-#{:erlang.system_info(:version)}", "bin"])
+    end
+  end
+
+  # One directory however it is spelled: separators, a trailing one, and on Windows case.
+  defp dir(path) do
+    path = path |> String.replace("\\", "/") |> String.trim_trailing("/")
+    if match?({:win32, _}, :os.type()), do: String.downcase(path), else: path
+  end
+
+  # What a file says, whatever it ends with: a model asked for one line may or may not
+  # end it with a newline, and on Windows may write `\r\n` (Decision 773).
+  defp text(content), do: content |> String.replace("\r\n", "\n") |> String.trim_trailing()
 
   @doc "The outcome in words, for the report."
   @spec describe_outcome(t()) :: String.t() | nil

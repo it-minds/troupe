@@ -89,6 +89,7 @@ nav:
       - The terminal client: clients/tui/README.md
       - Command reference: user/cli-reference.md
       - In VS Code: user/vscode.md
+      - What a task costs: user/bench.md
       - The daemon: apps/troupe_daemon/README.md
       - Configuration: user/configuration.md
       - The desktop app, unsigned: clients/gui/docs/install.md

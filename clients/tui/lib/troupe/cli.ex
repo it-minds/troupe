@@ -54,6 +54,13 @@ defmodule Troupe.CLI do
           write: boolean(),
           list: boolean(),
           live: boolean(),
+          repeat: pos_integer() | nil,
+          model: String.t() | nil,
+          yes: boolean(),
+          md: String.t() | nil,
+          compare: boolean(),
+          json_path: String.t() | nil,
+          ref: String.t() | nil,
           key: String.t() | nil,
           path: String.t() | nil
         }
@@ -76,7 +83,12 @@ defmodule Troupe.CLI do
     json: :boolean,
     write: :boolean,
     list: :boolean,
-    live: :boolean
+    live: :boolean,
+    repeat: :integer,
+    model: :string,
+    yes: :boolean,
+    md: :string,
+    compare: :boolean
   ]
 
   # Every command line `troupe` takes: how it is typed, what it does, and command lines
@@ -126,11 +138,18 @@ defmodule Troupe.CLI do
      [["models", "--refresh"]]},
     {"troupe doctor", "check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure",
      [["doctor"]]},
-    {"troupe bench [--json]",
+    {"troupe bench [--json [FILE]] [--md FILE]",
      "measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one",
-     [["bench"], ["bench", "--json"]]},
-    {"troupe bench --live", "reserved: the same suite against your own provider (not yet)",
-     [["bench", "--live"]]},
+     [["bench"], ["bench", "--json"], ["bench", "--json", "bench.json", "--md", "bench.md"]]},
+    {"troupe bench --live [--repeat N] [--model M] [--yes] [--json [FILE]] [--md FILE]",
+     "small tasks against your own provider, under a cap it prints and asks about first; kept in a history",
+     [
+       ["bench", "--live"],
+       ["bench", "--live", "--repeat", "3", "--model", "m", "--yes", "--json", "live.json"]
+     ]},
+    {"troupe bench --compare [VERSION|MODEL]",
+     "the last live bench against the one before it, or against a version's or a model's",
+     [["bench", "--compare"], ["bench", "--compare", "0.8.1-beta"]]},
     {"troupe daemon [ARGS]",
      "the local daemon: `run` (default), `status`, `config`, `models`, `login on|off`, `version`",
      [["daemon"], ["daemon", "status"]]},
@@ -145,7 +164,31 @@ defmodule Troupe.CLI do
     with {:ok, base} <- parse([]), do: {:ok, %{base | mode: :daemon, daemon_args: rest}}
   end
 
-  def parse(argv) do
+  # `--json` and `--compare` take a value or none (TUI Decision 141): the word after one,
+  # unless it is a flag, is its value, taken out before the option parser sees a switch
+  # with no value and a word it does not place.
+  def parse(["bench" | _] = argv) do
+    {argv, values} = optional_values(argv, ["--json", "--compare"], [], %{})
+
+    with {:ok, args} <- parse_argv(argv) do
+      {:ok, %{args | json_path: values["--json"], ref: values["--compare"]}}
+    end
+  end
+
+  def parse(argv), do: parse_argv(argv)
+
+  defp optional_values([flag, value | rest], flags, acc, values) when is_binary(value) do
+    if flag in flags and not String.starts_with?(value, "-"),
+      do: optional_values(rest, flags, [flag | acc], Map.put(values, flag, value)),
+      else: optional_values([value | rest], flags, [flag | acc], values)
+  end
+
+  defp optional_values([arg | rest], flags, acc, values),
+    do: optional_values(rest, flags, [arg | acc], values)
+
+  defp optional_values([], _flags, acc, values), do: {Enum.reverse(acc), values}
+
+  defp parse_argv(argv) do
     {opts, rest, invalid} = OptionParser.parse(argv, strict: @switches)
 
     base = %{
@@ -174,6 +217,13 @@ defmodule Troupe.CLI do
       write: Keyword.get(opts, :write, false),
       list: Keyword.get(opts, :list, false),
       live: Keyword.get(opts, :live, false),
+      repeat: Keyword.get(opts, :repeat),
+      model: Keyword.get(opts, :model),
+      yes: Keyword.get(opts, :yes, false),
+      md: Keyword.get(opts, :md),
+      compare: Keyword.get(opts, :compare, false),
+      json_path: nil,
+      ref: nil,
       key: nil,
       path: nil
     }
