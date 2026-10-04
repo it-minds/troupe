@@ -96,6 +96,11 @@ defmodule Troupe.Agent.State do
     # of (Decision 769), for the `compacted` event.
     compact_reason: nil,
     compact_prompt: nil,
+    # How many messages at the head of the conversation the last compaction left behind it
+    # (Decision 771): up to the model's last reply, so a result it had not answered yet is
+    # not among them. A large tool result among them is sent as a stub naming its
+    # `read_output` call. Folded from `compacted`.
+    compacted_through: 0,
     # The budget question (Decision 660): the `call_id` of the one outstanding, the task
     # waiting on its answer, how many have been asked (the id is that count, so a replay
     # asks again under the same id), and which limit it is about, which is the one
@@ -164,6 +169,7 @@ defmodule Troupe.Agent.State do
           overflow_retried: boolean(),
           compact_reason: String.t() | nil,
           compact_prompt: map() | nil,
+          compacted_through: non_neg_integer(),
           budget_ask_pending: String.t() | nil,
           budget_ask_task: pid() | nil,
           budget_asks: non_neg_integer(),

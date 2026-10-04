@@ -25,6 +25,7 @@ defmodule Troupe.CLI do
           | :config_pull
           | :models
           | :doctor
+          | :bench
           | :login
           | :logout
           | :whoami
@@ -52,6 +53,7 @@ defmodule Troupe.CLI do
           json: boolean(),
           write: boolean(),
           list: boolean(),
+          live: boolean(),
           key: String.t() | nil,
           path: String.t() | nil
         }
@@ -73,7 +75,8 @@ defmodule Troupe.CLI do
     explain: :boolean,
     json: :boolean,
     write: :boolean,
-    list: :boolean
+    list: :boolean,
+    live: :boolean
   ]
 
   # Every command line `troupe` takes: how it is typed, what it does, and command lines
@@ -123,6 +126,11 @@ defmodule Troupe.CLI do
      [["models", "--refresh"]]},
     {"troupe doctor", "check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure",
      [["doctor"]]},
+    {"troupe bench [--json]",
+     "measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one",
+     [["bench"], ["bench", "--json"]]},
+    {"troupe bench --live", "reserved: the same suite against your own provider (not yet)",
+     [["bench", "--live"]]},
     {"troupe daemon [ARGS]",
      "the local daemon: `run` (default), `status`, `config`, `models`, `login on|off`, `version`",
      [["daemon"], ["daemon", "status"]]},
@@ -165,6 +173,7 @@ defmodule Troupe.CLI do
       json: Keyword.get(opts, :json, false),
       write: Keyword.get(opts, :write, false),
       list: Keyword.get(opts, :list, false),
+      live: Keyword.get(opts, :live, false),
       key: nil,
       path: nil
     }
@@ -238,6 +247,7 @@ defmodule Troupe.CLI do
 
   defp parse_rest(["models"], base), do: {:ok, %{base | mode: :models}}
   defp parse_rest(["doctor"], base), do: {:ok, %{base | mode: :doctor}}
+  defp parse_rest(["bench"], base), do: {:ok, %{base | mode: :bench}}
   defp parse_rest(["resume"], base), do: {:ok, %{base | mode: :resume}}
   defp parse_rest(["resume", sid], base), do: {:ok, %{base | mode: :resume, session_id: sid}}
   defp parse_rest(other, _base), do: {:error, "unknown arguments: #{Enum.join(other, " ")}"}

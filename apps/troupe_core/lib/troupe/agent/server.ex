@@ -53,6 +53,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions}
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
+  alias Troupe.Tools.{Output, ReadOutput}
   alias Troupe.Watch.Trigger
 
   require Logger
@@ -371,7 +372,9 @@ defmodule Troupe.Agent.Server do
   # What the conversation was compacted to, and the budget's own history (Decision 660):
   # a grant survives a restart, and a question without its answer is still owed.
   defp fold_limits(state, "compacted", data) do
-    %{state | conversation: Enum.map(data["conversation"], &Message.from_json/1)}
+    conversation = Enum.map(data["conversation"], &Message.from_json/1)
+
+    %{state | conversation: conversation, compacted_through: compacted_through(conversation)}
     |> fold_summary_call(data)
   end
 
@@ -1170,17 +1173,29 @@ defmodule Troupe.Agent.Server do
 
   defp build_request(state, definition) do
     ctx = base_ctx(state, "")
+    tools = Tools.specs(definition, ctx)
 
     %Request{
       model: nil,
-      messages: state.conversation,
+      messages: sent_conversation(state, tools, ctx),
       system: system_prompt(state, definition),
-      tools: Tools.specs(definition, ctx),
+      system_tail: todo_section(state),
+      cache: true,
+      tools: tools,
       max_tokens: state.config.max_tokens,
       attribution: attribution(state),
       extra: request_extra(state)
     }
     |> aim(state, definition.model)
+  end
+
+  # The conversation, but for a large tool result the last compaction left behind: that
+  # goes as a stub naming the `read_output` call that returns it (Decision 771), when this
+  # turn offers the call. The conversation and the log keep the result whole.
+  defp sent_conversation(state, tools, ctx) do
+    if Enum.any?(tools, &(&1.name == ReadOutput.name())),
+      do: Output.stub_behind(state.conversation, state.compacted_through, ctx),
+      else: state.conversation
   end
 
   # Where the request goes. A model spelled `<provider>/<model>` names a provider of its
@@ -1238,15 +1253,16 @@ defmodule Troupe.Agent.Server do
   #
   # The goal comes after everything that describes the agent and its surroundings and
   # before the task list: it is what the list is for, and it changes less often than the
-  # list does, which keeps more of the prompt the same from one request to the next.
+  # list does, which keeps more of the prompt the same from one request to the next. The
+  # list itself, which the agent rewrites within a turn, is the request's `system_tail`:
+  # still the end of the system prompt, but behind the prompt cache's mark (Decision 770).
   defp system_prompt(state, definition) do
     [
       definition.prompt,
       Instructions.to_prompt(state.instructions),
       environment_section(state),
       Skills.prompt_section(state.bundle, definition, state.workspace.root_real),
-      goal_section(state),
-      todo_section(state)
+      goal_section(state)
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
@@ -2641,6 +2657,7 @@ defmodule Troupe.Agent.Server do
       ref = Provider.start_stream(tasks(state), request.provider || state.provider, request, self())
       timer = Process.send_after(self(), {:llm_timeout, ref}, request.timeout_ms)
 
+      # The boundary moves with the messages, for a summary that fails and leaves `keep`.
       state = %{
         state
         | llm_ref: ref,
@@ -2650,6 +2667,7 @@ defmodule Troupe.Agent.Server do
           compact_reason: state.compact_reason || "threshold",
           compact_prompt: Spend.prompt_bytes(request, ""),
           conversation: keep,
+          compacted_through: max(state.compacted_through - length(drop), 0),
           llm_text: ""
       }
 
@@ -2724,7 +2742,23 @@ defmodule Troupe.Agent.Server do
     })
 
     state = count_call(state, response.usage, gateway, %{summariser: true})
-    %{state | conversation: conversation, last_input_tokens: 0}
+
+    %{
+      state
+      | conversation: conversation,
+        compacted_through: compacted_through(conversation),
+        last_input_tokens: 0
+    }
+  end
+
+  # What a compaction leaves behind it ends at the model's last reply in what it kept
+  # (Decision 771). A result after that reply, the one a compaction in the middle of a turn
+  # was waiting to send, has not been read yet, so it goes whole until a later compaction.
+  defp compacted_through(conversation) do
+    case conversation |> Enum.reverse() |> Enum.find_index(&(&1.role == :assistant)) do
+      nil -> 0
+      from_end -> length(conversation) - from_end
+    end
   end
 
   defp resume_after_compaction(state) do

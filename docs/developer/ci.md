@@ -56,7 +56,7 @@ Arrows point at what an app depends on; a change flows back along them. So:
 | `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | |
 | anything else (docs) | — | only `versions` |
 
-Each umbrella app is its own parallel leg (`test <app>`), and one `lint` job compiles the whole umbrella with warnings as errors and runs format, credo, the generated-asset checks and the boundaries whenever any app is under test.
+Each umbrella app is its own parallel leg (`test <app>`), and one `lint` job compiles the whole umbrella with warnings as errors and runs format, credo, the generated-asset checks, the boundaries and the bench ([bench.md](bench.md): a turn's cost and shape held to budgets, its table in the run's summary) whenever any app is under test.
 
 ```mermaid
 flowchart LR
