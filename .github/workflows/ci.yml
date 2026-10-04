@@ -283,6 +283,25 @@ jobs:
       - name: Boundaries
         run: MIX_ENV=test mix troupe.boundaries
 
+      # `troupe bench`'s offline suite (Decision 772): what a turn costs and does, against
+      # a scripted model, held to the budgets in apps/troupe_core/priv/bench/budgets.json.
+      # A few seconds. The table goes into the run's summary and the JSON is kept, so two
+      # runs can be compared.
+      - name: The bench is within its budgets
+        run: |
+          status=0
+          MIX_ENV=test mix troupe.bench --json bench.json > bench.md || status=$?
+          cat bench.md
+          cat bench.md >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bench
+          path: bench.json
+          if-no-files-found: ignore
+
       # The clients depend on the platform — the TUI on the harness apps, by path — and
       # never the other way: nothing under `apps/` may name anything under `clients/`.
       # `troupe.boundaries` sees only the umbrella, so this is the check for the direction
