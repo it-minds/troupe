@@ -45,6 +45,7 @@ Arrows point at what an app depends on; a change flows back along them. So:
 | `clients/gui/**` | — | GUI (tokens, typecheck, build, test); GUI-e2e if the client package |
 | `clients/tui/**` | — | TUI `mix check`; native builds (PR) |
 | `clients/vscode/**` | — | the VS Code extension: typecheck, unit tests, its suite inside a real VS Code on Linux and Windows (and macOS in a full run), and the `.vsix` as the run's artifact |
+| `docs/user/cli-reference.md` | — | TUI `mix check`, which holds it to the command tables |
 | `apps/troupe_daemon` | daemon | native builds (PR) |
 | `apps/troupe_plane` | plane, worker | GUI-e2e |
 | `apps/troupe_operator` / `troupe_a2a` | that app | — |

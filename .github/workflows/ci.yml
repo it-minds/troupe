@@ -128,9 +128,12 @@ jobs:
               - dev/kind/**
               - scripts/remote-up
               - scripts/build-images
+            # The command reference is generated from the TUI's tables (Decision 767), so
+            # a hand edit to it is checked as the palette is.
             tui:
               - clients/tui/**
               - clients/gui/docs/design/themes/**
+              - docs/user/cli-reference.md
               - scripts/locks-agree.exs
             gui:
               - clients/gui/**

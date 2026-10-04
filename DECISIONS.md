@@ -4369,3 +4369,150 @@ citation keeps meaning what it meant.
        that folder as its workspace and a second press reusing its terminal; and the
        installed `troupe.exe --workspace DIR`, typed into a terminal in another directory,
        rooted its session at DIR and none at the directory it started in.
+
+766. **Signing out of a plane takes back the plane token the client handed the daemon, and
+     the daemon seals nothing until somebody signs in again; the link stays.** Issue #381,
+     the first item of D61, following 764. `troupe logout` forgot `credentials.json` and
+     nothing else, and the desktop app's *Sign out* forgot its own sign-in: a daemon either
+     of them had handed a token went on registering and sealing private sessions with it
+     until it ran out.
+     - **A command of its own, not `identity.unlink`.** `identity.sign_out` names the plane
+       and the person (`plane_url`, `subject`). The daemon forgets its token if it is for
+       that plane and that person, stops every sealer (`Private.suspend/1`), and answers
+       `signed_out`; the label stays. Unlinking was the other way, and was not taken: in the
+       desktop app linking is the person's own choice on *This computer*, which a sign-out
+       would undo, so signing in again would carry nothing on until they chose it again;
+       and a daemon left unlinked is one the next `troupe login` links, as whoever that is,
+       and a link with a token carries on every private session the daemon has (764),
+       whoever made it. Taking back the token leaves the daemon as a restart does, which
+       764 already carries on from.
+     - **The daemon decides whose token it is.** It compares the plane, up to a trailing
+       slash, and the subject it was linked under, so a client signing somebody else out,
+       or out of another plane, takes nothing, and needs no `identity.get` first. Without
+       `subject` it is the token for that plane, whoever it is for: a TUI signed in before
+       this has no subject on disk, and taking back a token that was somebody else's costs
+       them a hand-over at their next renewal, where keeping the person's own would go on
+       sealing for up to a token's lifetime after they signed out.
+     - **Sealing stops and nothing is lost.** The token goes first, then the sealers, so the
+       last seal each makes on its way down finds no token and calls nobody; its events are
+       in the log on this disk, and the session's key goes with the sealer. A private
+       session made while signed out is local for now (`syncing: false`), as on a daemon
+       nobody has linked. The next link with a token runs `resume` as after a restart: each
+       carries on from the row's `last_seq` at its epoch, and one the plane has never heard
+       of from its first event.
+     - **The TUI.** `troupe logout [PLANE_URL]` and `--all` read who was signed in where
+       before forgetting it, then, where a daemon is running (`spawn: false`: none is
+       started to be told), send `identity.sign_out` for each plane, and say so where the
+       daemon let go of a token. Nothing is said about a daemon that is not running or
+       that held no token of the person's. The subject is `credentials.json`'s `sub`, the
+       plane's subject at the last exchange, a label now written beside the refresh token
+       at login and at every refresh. A TUI still running hands nothing more over: its
+       renewal reads that file first.
+     - **The desktop app.** *Sign out* sends it with the sign-in's plane and subject before
+       forgetting the sign-in, without waiting for the answer (`signOutIdentity`).
+     - **Signed in elsewhere still.** The other client, signed in as the same person at the
+       same plane, hands a token over again at its next renewal or reconnect, and sealing
+       carries on: the person is still signed in there.
+     - **Proof:** the TUI's `private_link_test` against `FakeRemote` (after `troupe logout`
+       the daemon holds no token and says so, keeps the label, and registers a private
+       session made then nowhere, and signing in again hands one over; `--all` likewise; a
+       daemon linked to somebody else keeps theirs; with no daemon running nothing is said
+       and none is started), two of the four failing on the tip. The gateway's
+       `private_test` against MinIO and OpenBao (`Plane.sign_out` forgets that plane's and
+       that person's token and nothing else, and keeps the label; a session sealing when
+       the person signs out stops, nothing more reaches the plane, its last seal included,
+       and the next link carries it on from `last_seq`, the turn's event and one written
+       while signed out in a second segment; through the daemon, `identity.sign_out` for
+       somebody else or another plane takes nothing, and for the person takes the token and
+       the sealer and keeps the label). The desktop app's `private-link` test (*Sign out*
+       tells the daemon the plane and the subject, and the token goes and the link stays;
+       a daemon linked to somebody else keeps theirs), failing on the tip. And the
+       installed daemon and `troupe`, with scratch homes, against the plane stand-in of
+       764's proof: `troupe login` and `troupe run --headless --private` registered a
+       session and sealed it through its eleventh event; `troupe logout` said the daemon no
+       longer held a token; a turn given to that session afterwards and a private session
+       `troupe run` made then reached the plane with nothing, still nothing a minute and a
+       half later with the old token still good; after `troupe login` the next `troupe run`
+       handed a token over, and the daemon sealed the first session on from its twelfth
+       event at epoch 1 and the one made while signed out from its first; `--all` said the
+       same, and with no daemon running `troupe logout` said nothing about one and started
+       none.
+
+767. **`troupe --help` and the command reference are written from two tables, the command
+     lines beside `troupe`'s parser and the harness's slash commands, and the TUI's suite
+     fails when either drifts.** Issue #124, its last done-when item, left by 698 and 763.
+     The help was the parser module's hand-written moduledoc and listed no slash command
+     at all; the TUI's README carried a second hand-written list of both, which had lost
+     `/memory` and `/context` and still offered `/code` for the agent called `build`; and
+     no page said what every command does.
+     - **What "one table" covers.** The slash commands are `Troupe.Commands`, the table
+       `commands.list` serves both clients (698): the help prints its built-ins by section
+       with each one's usage, summary and aliases, and the page adds the detail, an
+       example and what each needs. The command lines are a table of their own,
+       `Troupe.CLI.commands/0`, beside the parser in the TUI rather than in the harness:
+       they are this client's command line, which neither the daemon nor the desktop app
+       has, and nothing in the umbrella may depend on a client (666). A row is how the
+       line is typed, what it does, and command lines that are it.
+     - **Held to the parser, not only to the page.** A table nothing checks against the
+       parser is the hand-written text with more punctuation. The suite parses every
+       row's command lines, holds the modes they reach equal to `Troupe.CLI.mode()`, and
+       every switch the parser takes to one the help names; a subcommand added without a
+       row, or a row the parser no longer takes, fails it.
+     - **The page.** `docs/user/cli-reference.md`, in the users' track and the site's nav:
+       two parts between markers, written by `mix troupe.cli.reference` in `clients/tui`,
+       the one project that sees both tables, and the rest by hand, as `configuration.md`
+       holds the key reference. `--check` runs in the TUI's `mix check` and in
+       `dev-check`'s TUI job, and both workflows run that job when the page alone changes.
+       The TUI's README points at it and keeps what no table holds: the agents a session
+       has and the commands people write, which are a session's own (its config, bundle
+       and workspace), so the help and the page name them in a sentence and the palette
+       lists them.
+     - **`troupe --help` needs no daemon.** It reads the table compiled into the binary,
+       the one the daemon serves, so `Troupe.Commands` joins the harness modules the TUI
+       may call (`mix troupe.xref`), as `Troupe.Config.Schema` did (761); TUI Decision
+       138. A command line that does not parse is still answered with the command lines
+       alone.
+     - **Not here:** `/todo`, which a branch window's input box takes and the table does
+       not list, and `troupe-daemon`'s own command line.
+     - **Proof:** the TUI's `cli_reference_test.exs` (the help lists every built-in with
+       its summary, and the committed page is what the tables render, both failing on the
+       chunk's tip; every row parses and the rows reach every mode; every switch is
+       named), and the installed `troupe --help`, on the pull request.
+
+768. **A build after `VERSION` changes writes the new version into every app's `.app`:
+     each project that reads `VERSION` lists `troupe_protocol`'s `:troupe_version` compiler
+     after `:app`.** Issue #380 (D60), following 668. Every `mix.exs` reads `VERSION` when
+     Mix loads it, but Mix's `:app` compiler writes an `.app` again only when `mix.exs`, the
+     config or the compile directory is newer than it, and a new `VERSION` is none of those.
+     So an incremental build after a bump kept the previous `vsn` in every `.app` but
+     `troupe_protocol`'s (its `Troupe.Version` recompiles on `VERSION`, which touches the
+     compile directory): `scripts/install-local.ps1` in a checkout that had built the
+     previous release installed binaries that said it, and `Troupe.VersionTest` failed in a
+     test build. CI builds from clean and never saw it.
+     - **A compiler, not the script.** Mix has no way for a project to say its `mix.exs`
+       reads a file: `@external_resource` is a module's, and the config files Mix watches
+       are the ones the config imports. That left a compiler that checks, or a script that
+       removes the `.app` files before it builds. The script would mend `install-local.ps1`
+       alone; the compiler mends every incremental build, `mix test` in a checkout and a TUI
+       built by hand among them, and needs no record of the version a `_build` last saw,
+       because the `.app` is that record.
+     - **What it does.** After `:app` it reads the `.app`, and when its `vsn` is not the
+       project's version has `:app` write it again (`compile.app --force`). Otherwise it
+       reads one small file and does nothing.
+     - **Where it lives.** In `troupe_protocol` (`Mix.Tasks.Compile.TroupeVersion`), because
+       every other project here, the umbrella's apps and the TUI, depends on that app, so it
+       is compiled and on the code path before them; `troupe_protocol` reaches its own after
+       `:elixir`, as `troupe_core` does `:reaper`. The alternative was a file every
+       `mix.exs` required, one more thing each would load before Mix knows its project.
+     - **A new project that reads `VERSION` lists it too** (`docs/developer/build.md`).
+       Nothing checks that one does.
+     - **Proof:** `Mix.Tasks.Compile.TroupeVersionTest` builds a project that reads its
+       version from a file twice, each time in a `mix` of its own, the file changed between:
+       with `:troupe_version` the second `.app` says the new version, and without it, kept
+       as the reason, the first. On the tip, a test build, `VERSION` at 0.8.1-beta and a
+       second build left seven of the eight `.app` files at 0.8.0-beta and
+       `Troupe.VersionTest` failing ("troupe_core is 0.8.0-beta and VERSION is
+       0.8.1-beta"); with this all eight said 0.8.1-beta and that test passed. And
+       `install-local.ps1`, run in this checkout at 0.8.0-beta, then with `VERSION` at
+       0.8.1-beta, then put back, installed a `troupe-daemon` and a `troupe` that said
+       0.8.1-beta and then 0.8.0-beta, each time the version the checkout had not built.

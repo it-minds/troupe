@@ -10,7 +10,8 @@ defmodule Troupe.CLI.Remote do
   """
 
   alias Troupe.Client
-  alias Troupe.Remote.{Auth, Credentials, Discovery, Tokens}
+  alias Troupe.Protocol
+  alias Troupe.Remote.{Auth, Credentials, Discovery, RPC, Tokens}
 
   @doc "Runs the device flow against a plane and stores the refresh token."
   @spec login(String.t(), keyword()) :: non_neg_integer()
@@ -28,7 +29,10 @@ defmodule Troupe.CLI.Remote do
     end
   end
 
-  @doc "Forgets a plane's credentials, or every plane's with `all: true`."
+  @doc """
+  Forgets a plane's credentials, or every plane's with `all: true`, and has a daemon
+  running here let go of the plane token it was handed for each (issue #381).
+  """
   @spec logout(String.t() | nil, keyword()) :: non_neg_integer()
   def logout(plane_url, opts \\ []) do
     say = Keyword.get(opts, :say, &IO.puts/1)
@@ -46,9 +50,13 @@ defmodule Troupe.CLI.Remote do
         0
 
       target ->
+        # Read before it is forgotten: who was signed in where is what the daemon is told.
+        signed_in = signed_in(target)
+
         case Tokens.logout(target) do
           {:ok, path} ->
             say.("signed out of #{describe(target)}; #{Troupe.Paths.display(path)} updated")
+            sign_out_daemon(signed_in, say)
             0
 
           {:error, reason} ->
@@ -129,6 +137,66 @@ defmodule Troupe.CLI.Remote do
 
   defp describe(:all), do: "every plane"
   defp describe(url), do: url
+
+  defp signed_in(:all), do: Enum.map(Credentials.list(), &{&1.plane_url, &1.sub})
+
+  defp signed_in(url) do
+    case Credentials.fetch(url) do
+      {:ok, entry} -> [{url, entry.sub}]
+      :error -> []
+    end
+  end
+
+  # A daemon here holds the plane token this machine's TUI or desktop app handed it, in
+  # memory, and seals private sessions with it (Decision 764). Signing out takes it back
+  # where it is the person's at that plane: the daemon decides, from the plane and the
+  # subject it is told, and leaves somebody else's. A daemon that is not running holds
+  # nothing, and is not started to be told so.
+  defp sign_out_daemon([], _say), do: :ok
+
+  defp sign_out_daemon(planes, say) do
+    info = %{"name" => "troupe", "version" => to_string(Application.spec(:troupe, :vsn) || "dev")}
+
+    case Protocol.Daemon.connect(spawn: false, client_info: info) do
+      {:ok, client} ->
+        try do
+          Enum.each(planes, &sign_out_at(client, &1, say))
+        after
+          Protocol.Client.close(client)
+        end
+
+      {:error, :not_running} ->
+        :ok
+
+      {:error, reason} ->
+        say.(
+          "could not reach the daemon on this machine to take its plane token back: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp sign_out_at(client, {url, subject}, say) do
+    params =
+      %{command_id: RPC.command_id(), plane_url: url, subject: subject}
+      |> Map.reject(fn {_key, value} -> is_nil(value) end)
+
+    case Protocol.Client.call(client, "identity.sign_out", params) do
+      {:ok, %{"signed_out" => true}} ->
+        say.(
+          "the daemon on this machine no longer holds a plane token for #{url}; " <>
+            "private sessions sync again once you sign in"
+        )
+
+      {:ok, _answer} ->
+        :ok
+
+      {:error, error} ->
+        say.("the daemon on this machine kept its plane token for #{url}: #{daemon_error(error)}")
+    end
+  end
+
+  defp daemon_error(%{message: message}) when is_binary(message), do: message
+  defp daemon_error(error), do: inspect(error)
 
   # A file this machine could not restrict is still written — losing the login
   # would be worse — but it says so, once, where the user is looking.

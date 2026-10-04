@@ -11,6 +11,9 @@ defmodule Troupe.Protocol.MixProject do
       lockfile: "../../mix.lock",
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
+      # `:troupe_version` writes the `.app` again when `VERSION` changes (Decision 768).
+      # It is this app's own, in lib/, which is why it can only run after `:elixir`.
+      compilers: Mix.compilers() ++ [:troupe_version],
       start_permanent: Mix.env() == :prod,
       description: "Wire format: JSON-RPC messages, events, schemas, and a client",
       package: [licenses: ["Apache-2.0"]],
