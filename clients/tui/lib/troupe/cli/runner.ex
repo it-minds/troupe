@@ -127,6 +127,9 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :doctor} = args} ->
         Troupe.CLI.Doctor.run(args.workspace)
 
+      {:ok, %{mode: :bench} = args} ->
+        Troupe.CLI.Bench.run(args)
+
       {:ok, %{mode: :run} = args} ->
         run(args)
 
@@ -200,7 +203,7 @@ defmodule Troupe.CLI.Runner do
   def interruptible?({:ok, %{mode: :run} = args}), do: args.headless
 
   def interruptible?({:ok, %{mode: mode}}),
-    do: mode in [:daemon, :login, :logout, :whoami, :models, :doctor, :config_pull]
+    do: mode in [:daemon, :login, :logout, :whoami, :models, :doctor, :bench, :config_pull]
 
   def interruptible?(_parsed), do: false
 
