@@ -4855,11 +4855,15 @@ citation keeps meaning what it meant.
      results without their call and failed too, so a session on those endpoints stalled
      until a person started another. A gateway that does not check passed it, which is
      how it went unnoticed.
-     - **Results at the head of what would be kept go into the summary with their call.**
-       Cutting back before the call keeps the pair too, but can leave nothing to summarise
-       but the last summary, a compaction that saves nothing. Cutting only at a person's
-       input means a turn of nothing but calls, the turn #389 is about, could never be
-       compacted, and an overflow in it would end the turn.
+     - **The cut still moves back to the person's message a reply answers, but never onto
+       tool results; results at the head of what would be kept go into the summary with
+       their call.** That is the old rule without its fault: an input stays with the
+       replies to it, a compaction with nothing older to summarise does not happen, and a
+       turn of nothing but calls can still be compacted. Cutting back past the results to
+       their call keeps the pair too, but can leave nothing to summarise but the input or
+       the last summary, a call that saves nothing. Cutting only at a person's input means
+       a turn of nothing but calls, the turn #389 is about, could never be compacted, and
+       an overflow in it would end the turn.
      - **The conversation is replaced when the summary arrives, not when it is asked
        for.** Nothing is added to the conversation while an agent compacts (input waits),
        so `apply_compaction` takes the same split the summariser was sent. A summary that
@@ -4880,9 +4884,11 @@ citation keeps meaning what it meant.
        overflows compacts once and finishes, which failed before this change (no
        `compacted`: the summary request was refused); a long turn compacts after its
        results and again when it ends, two turns of it, with as many `compacted` as
-       summary requests, which without the new cut came to 5 of 7; a summary that fails
+       summary requests, which without the move past results came to 5 of 7 (and with the
+       cut allowed back onto results, to none, as on the tip); a summary that fails
        leaves the ten messages in memory that a restart rebuilds, which failed before
        (memory had fewer); and `compacted` holds a large kept result as the blob
        `tool_results` holds, which a restart resolves to the same conversation, inline
-       before. `FakeScriptTest`: the stand-in refuses both kinds of request and answers the
-       paired one with the step it had not taken.
+       before. `TurnCostTest`'s compaction (one, at the turn's end, five calls) holds as
+       769 wrote it. `FakeScriptTest`: the stand-in refuses both kinds of request and
+       answers the paired one with the step it had not taken.

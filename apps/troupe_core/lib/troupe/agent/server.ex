@@ -2678,11 +2678,11 @@ defmodule Troupe.Agent.Server do
   end
 
   # Keep the most recent turns and anything with an unresolved tool call, summarise
-  # the rest. The cut never falls between a call and its results, which providers refuse
-  # (Decision 774): results are a `:user` message, so a cut at any user message used to
-  # keep results whose call had gone into the summary. Results at the head of what would
-  # be kept go into the summary with their call instead, so a turn of nothing but calls
-  # can still be compacted, and a compaction always summarises more than the last summary.
+  # the rest. The kept part starts at the person's message a reply answers, as it always
+  # did, but never at tool results, which providers refuse without their call (Decision
+  # 774): results are a `:user` message too, and a cut moved back to one kept results
+  # whose call had gone into the summary. Results at the head go into the summary with
+  # their call instead, so a turn of nothing but calls can still be compacted.
   defp split_for_compaction(conversation) do
     keep_count = 6
 
@@ -2693,6 +2693,16 @@ defmodule Troupe.Agent.Server do
       {drop, keep} = Enum.split(conversation, split_at)
       {adjusted_drop, adjusted_keep} = align_to_call(drop, keep)
       {adjusted_keep, adjusted_drop}
+    end
+  end
+
+  defp align_to_call(drop, [%Message{role: :assistant} | _] = keep) do
+    case List.pop_at(drop, -1) do
+      {%Message{role: :user} = said, rest} ->
+        if tool_results?(said), do: {drop, keep}, else: {rest, [said | keep]}
+
+      _nothing_before ->
+        {drop, keep}
     end
   end
 
