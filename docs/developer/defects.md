@@ -430,19 +430,6 @@ Found by the chunk 14 fixer of slot E14 (PR #359), 2026-10-03.
 
 Found by the chunk 14 fixers of slots A14 and B14 (PRs #364, #363), 2026-10-03.
 
-### D60 - A checkout that built the previous version keeps reporting it (low)
-
-Every `mix.exs` reads `VERSION` when the project loads (Decision 668), but Mix rewrites an
-app's compiled `.app` only when `mix.exs` or the config changes, not when `VERSION` does.
-So after a version bump an incremental build in a checkout that built before keeps the old
-`vsn`: `scripts/install-local.ps1` then installs a TUI whose `troupe version` reports the
-previous release (the daemon's release reads the version afresh and is right), and
-`Troupe.VersionTest` fails with "troupe_core is 0.7.2-beta and VERSION is 0.7.3-beta".
-CI builds from clean and is not affected. Removing `_build/*/lib/troupe*/ebin/*.app`
-before building clears it; `install-local.ps1` could do that, or the projects could make a
-change to `VERSION` recompile them. Found by the chunk 14 coordinator verifying the chunk's
-tip, 2026-10-03.
-
 ### D61 - Private sessions after #365: what is left (medium)
 
 - `troupe logout` neither unlinks the daemon nor withdraws the plane token it was handed;
@@ -565,6 +552,7 @@ Found by the chunk 15 fixers of slots A15, B15 and C15 (PRs #374, #372, #370), 2
 | D54's first item - with Cilium, a profile could name a loopback or link-local endpoint | #355, PR #360 |
 | D51 - an MCP session a renewed token or a dropped server left open (the person-mode case stays in D51) | #358, PR #363 |
 | D53's first item - the desktop app showed a team turn that failed on the plane as finished | #354, PR #359 |
+| D60 - A checkout that built the previous version kept reporting it | #380, PR #382 |
 
 ## Checked and not a defect
 

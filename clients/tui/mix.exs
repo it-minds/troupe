@@ -12,6 +12,9 @@ defmodule Troupe.MixProject do
       package: [licenses: ["Apache-2.0"]],
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
+      # `troupe_protocol`'s, which writes the `.app` again when `VERSION` changes, so a
+      # checkout that built the previous release says the new one (Decision 768).
+      compilers: Mix.compilers() ++ [:troupe_version],
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),

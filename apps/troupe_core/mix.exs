@@ -12,7 +12,8 @@ defmodule Troupe.Core.MixProject do
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       # `:reaper` runs after `:elixir` because the compiler task itself lives in lib/.
-      compilers: Mix.compilers() ++ [:reaper],
+      # `:troupe_version` writes the `.app` again when `VERSION` changes (Decision 768).
+      compilers: Mix.compilers() ++ [:reaper, :troupe_version],
       start_permanent: Mix.env() == :prod,
       description: "Session actor trees: agents, tools, providers, and the log",
       package: [licenses: ["Apache-2.0"]],
