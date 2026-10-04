@@ -4908,8 +4908,10 @@ citation keeps meaning what it meant.
        `tool_call_completed`, by agent and id, since a provider that gives no ids gets the
        same `call_0` in every agent. Usage and cost are the log's. Retries happen inside the
        provider's call and never reach the log, so `Troupe.LLM.Provider` now says each as
-       `[:troupe, :llm, :retry]` telemetry, which the runner counts for its run. Until
-       Decision 769's per-call records land, a call's prompt breakdown is `null` live.
+       `[:troupe, :llm, :retry]` telemetry, which the runner counts for its run. What a
+       call's prompt was made of is its `llm_request.prompt_bytes` (Decision 769), the
+       offline suite's measure, and a compaction's summary is a call too, from the
+       `compacted` that carries it, so its cost counts against the run's share of the cap.
      - **One report, with `mode: "live"`.** Schema 1 (Decision 772) with the live fields
        filled, and added: the report's `model`, `repeat`, `cap_micros`, `started_at` and
        `skipped`; a run's `error` (why it did not end by itself), `checks` and `succeeded`
@@ -4943,6 +4945,7 @@ citation keeps meaning what it meant.
        delegation timed across two agents with the same call ids; a retry counted; a run
        past its wall clock stopped; a run past its share of the cap stopped; the history
        and `--compare` by last, version and model; a file's text; a release's runtime out
-       of a command's `PATH`. The TUI's `bench_cli_test.exs`, which failed on #397's tip
-       with `troupe bench --live: not yet`; and the installed `troupe bench --live --repeat
-       2 --json` against the stand-in, on the pull request.
+       of a command's `PATH`; a compaction's summary as a call with its prompt and cost.
+       The TUI's `bench_cli_test.exs`, which failed on #397's tip with `troupe bench
+       --live: not yet`; and the installed `troupe bench --live --repeat 2 --json` against
+       the stand-in, on the pull request.

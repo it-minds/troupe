@@ -112,8 +112,8 @@ To compare, run each three times or more: a success rate of one run is a coin to
 "live"`; `--json` alone prints it instead of the table. Each run has its own record: the
 outcome, the stop reason, the turns, model calls, input, cached and output tokens, the cost,
 the wall clock, the provider's retries, compactions, approvals, each tool by name with its
-calls, failures and time, and each model call with its agent, tokens, cost, latency and time
-to first token. [The bench](../developer/bench.md#the-report-schema-1) has every field.
+calls, failures and time, and each model call with its agent, what its prompt was made of,
+its tokens, cost, latency and time to first token. [The bench](../developer/bench.md#the-report-schema-1) has every field.
 `--md FILE` writes the table to a file as well.
 
 ## Comparing

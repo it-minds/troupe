@@ -19,7 +19,8 @@ defmodule Troupe.BenchLiveTest do
   use ExUnit.Case, async: false
 
   alias Troupe.Bench
-  alias Troupe.Bench.{History, LiveScenarios, Scenario}
+  alias Troupe.Bench.{History, Live, LiveScenarios, Scenario}
+  alias Troupe.Protocol.Event
   alias Troupe.Test.FakeOpenAI
 
   @moduletag :tmp_dir
@@ -165,6 +166,13 @@ defmodule Troupe.BenchLiveTest do
             assert call["input_tokens"] > 0 and call["output_tokens"] > 0
             # Priced by models.prices, since a stream carries no cost header.
             assert is_integer(call["cost_micros"]) and call["cost_micros"] > 0
+            # What the prompt was made of, as its llm_request says (Decision 769).
+            assert call["prompt_bytes"] ==
+                     call["system_bytes"] + call["tool_definition_bytes"] +
+                       call["conversation_bytes"]
+
+            assert call["system_bytes"] > 0 and is_integer(call["tool_result_bytes"])
+            refute call["summariser"]
           end
 
           assert run["cost_micros"] == run["calls"] |> Enum.map(& &1["cost_micros"]) |> Enum.sum()
@@ -329,6 +337,69 @@ defmodule Troupe.BenchLiveTest do
 
     File.write!(Path.join(dir, "a.txt"), "Pemberton the cat\n")
     refute Scenario.outcome(scenario, dir)
+  end
+
+  # The call that writes a compaction's summary has no llm_request or llm_response: the
+  # `compacted` that takes its answer carries it (Decision 769), and it is a call like any
+  # other, with no times since nothing announced it.
+  test "a compaction's summary is a model call, with what its prompt was made of and cost" do
+    bytes = %{
+      "system" => 10,
+      "tools" => 20,
+      "conversation" => 30,
+      "tool_results" => 5,
+      "total" => 60
+    }
+
+    usage = %{"input_tokens" => 40, "output_tokens" => 7, "cache_read" => 3, "cache_write" => 2}
+
+    events = [
+      %Event{seq: 1, type: "llm_request", agent: ["root"], data: %{"prompt_bytes" => bytes}},
+      %Event{
+        seq: 2,
+        type: "llm_response",
+        agent: ["root"],
+        data: %{"usage" => usage, "gateway" => %{"cost_micros" => 90}}
+      },
+      %Event{seq: 3, type: "compacted", agent: ["root"], data: %{"summary" => "old, no call"}},
+      %Event{
+        seq: 4,
+        type: "compacted",
+        agent: ["root"],
+        data: %{
+          "prompt_bytes" => %{bytes | "total" => 61},
+          "usage" => usage,
+          "gateway" => %{"cost_micros" => 12}
+        }
+      }
+    ]
+
+    timings = %{2 => %{latency: 400, first: 120, bytes: bytes}}
+
+    assert [reply, summary] = Live.calls(events, timings)
+
+    assert %{
+             "summariser" => false,
+             "prompt_bytes" => 60,
+             "system_bytes" => 10,
+             "tool_definition_bytes" => 20,
+             "conversation_bytes" => 30,
+             "tool_result_bytes" => 5,
+             "input_tokens" => 42,
+             "cached_tokens" => 3,
+             "output_tokens" => 7,
+             "cost_micros" => 90,
+             "latency_ms" => 400,
+             "first_token_ms" => 120
+           } = reply
+
+    assert %{
+             "summariser" => true,
+             "prompt_bytes" => 61,
+             "cost_micros" => 12,
+             "latency_ms" => nil,
+             "first_token_ms" => nil
+           } = summary
   end
 
   # In a release the VM's own runtime comes first on the PATH, and an `elixir` started on

@@ -412,9 +412,10 @@ defmodule Troupe.Bench.Live do
   defp ended?(_event), do: false
 
   # Times are taken as each event arrives: an agent's calls are one after another, so its
-  # request, first delta and response pair up by the agent alone.
-  defp note(acc, %Event{type: "llm_request", agent: agent, ephemeral?: false}, at),
-    do: put_in(acc, [:pending, agent], %{at: at, first: nil})
+  # request, first delta and response pair up by the agent alone. The request says what
+  # its prompt was made of (Decision 769).
+  defp note(acc, %Event{type: "llm_request", agent: agent, ephemeral?: false, data: data}, at),
+    do: put_in(acc, [:pending, agent], %{at: at, first: nil, bytes: data["prompt_bytes"]})
 
   defp note(acc, %Event{type: "llm_delta", agent: agent}, at) do
     case acc.pending do
@@ -428,18 +429,15 @@ defmodule Troupe.Bench.Live do
 
     timing =
       if call,
-        do: %{latency: at - call.at, first: call.first && call.first - call.at},
-        else: %{latency: nil, first: nil}
+        do: %{latency: at - call.at, first: call.first && call.first - call.at, bytes: call.bytes},
+        else: %{latency: nil, first: nil, bytes: nil}
 
-    cost = get_in(data, ["gateway", "cost_micros"])
-
-    %{
-      acc
-      | pending: pending,
-        calls: Map.put(acc.calls, seq, timing),
-        cost: acc.cost + if(is_integer(cost), do: cost, else: 0)
-    }
+    spent(%{acc | pending: pending, calls: Map.put(acc.calls, seq, timing)}, data)
   end
+
+  # The call that writes a compaction's summary is on the `compacted` that takes its answer
+  # (Decision 769), and costs what any other does.
+  defp note(acc, %Event{type: "compacted", data: data}, _at), do: spent(acc, data)
 
   defp note(acc, %Event{type: "llm_error", agent: agent}, _at),
     do: %{acc | pending: Map.delete(acc.pending, agent)}
@@ -457,6 +455,13 @@ defmodule Troupe.Bench.Live do
   end
 
   defp note(acc, _event, _at), do: acc
+
+  defp spent(acc, data) do
+    case get_in(data, ["gateway", "cost_micros"]) do
+      cost when is_integer(cost) -> %{acc | cost: acc.cost + cost}
+      _unpriced -> acc
+    end
+  end
 
   # Why the run did not end by itself, or `nil` when it did.
   defp error({:ended, %Event{type: "turn_ended", data: data}}, _plan) do
@@ -485,13 +490,8 @@ defmodule Troupe.Bench.Live do
   # succeeded: no error, the outcome held, every check held.
   defp record(plan, ctx, acc, wall, error, checks) do
     events = ctx.events
-    responses = Enum.filter(events, &(&1.type == "llm_response"))
-    usage = Enum.map(responses, &(&1.data["usage"] || %{}))
-
-    costs =
-      responses
-      |> Enum.map(&get_in(&1.data, ["gateway", "cost_micros"]))
-      |> Enum.filter(&is_integer/1)
+    calls = calls(events, acc.calls)
+    costs = numbers(calls, "cost_micros")
 
     checks =
       Enum.map(checks, fn {name, label, passed} ->
@@ -501,19 +501,19 @@ defmodule Troupe.Bench.Live do
     %{
       "model" => plan.model,
       "outcome" => ctx.outcome,
-      "stop_reason" => stop_reason(responses),
+      "stop_reason" => stop_reason(events),
       "turns" => count(events, "user_input"),
-      "model_calls" => length(responses),
-      "input_tokens" => sum(usage, "input_tokens") + sum(usage, "cache_write"),
-      "cached_tokens" => sum(usage, "cache_read"),
-      "output_tokens" => sum(usage, "output_tokens"),
+      "model_calls" => length(calls),
+      "input_tokens" => sum(calls, "input_tokens"),
+      "cached_tokens" => sum(calls, "cached_tokens"),
+      "output_tokens" => sum(calls, "output_tokens"),
       "cost_micros" => if(costs == [], do: nil, else: Enum.sum(costs)),
       "wall_ms" => wall,
       "retries" => acc.retries,
       "compactions" => count(events, "compacted"),
       "approvals" => count(events, "approval_requested"),
       "tools" => tools(events, acc.tool_ms),
-      "calls" => Enum.map(responses, &call(&1, acc.calls)),
+      "calls" => calls,
       "error" => error,
       "checks" => checks,
       "succeeded" => error == nil and ctx.outcome != false and Enum.all?(checks, & &1["passed"])
@@ -544,32 +544,53 @@ defmodule Troupe.Bench.Live do
     }
   end
 
-  # Each model call as the log has it, with the times the runner took. What its prompt was
-  # made of is the offline suite's to measure: the log does not say yet (#389).
-  defp call(%Event{} = response, timings) do
-    usage = response.data["usage"] || %{}
-    timing = Map.get(timings, response.seq, %{latency: nil, first: nil})
+  @doc """
+  Every model call a run's events record, in the order they were answered, with the times
+  `timings` holds for each, by its `llm_response`'s seq: an agent's replies, and a
+  compaction's summary, whose call the `compacted` that takes its answer carries
+  (Decision 769).
+  """
+  @spec calls([Event.t()], %{pos_integer() => map()}) :: [map()]
+  def calls(events, timings) do
+    events
+    |> Enum.filter(&model_call?/1)
+    |> Enum.map(&call(&1, timings))
+  end
+
+  defp model_call?(%Event{type: "llm_response"}), do: true
+  defp model_call?(%Event{type: "compacted", data: %{"usage" => usage}}), do: is_map(usage)
+  defp model_call?(_event), do: false
+
+  # Each model call as the log has it, with the times the runner took and what its prompt
+  # was made of, as `llm_request.prompt_bytes` (or the `compacted`) says (Decision 769): the
+  # measure the offline suite takes of a request. A summary's call has no request event,
+  # so no times.
+  defp call(%Event{} = event, timings) do
+    usage = event.data["usage"] || %{}
+    summariser = event.type == "compacted"
+    timing = Map.get(timings, event.seq, %{latency: nil, first: nil, bytes: nil})
+    bytes = if(summariser, do: event.data["prompt_bytes"], else: timing.bytes) || %{}
 
     %{
-      "agent" => Enum.join(response.agent || [], "/"),
-      "summariser" => false,
-      "prompt_bytes" => nil,
-      "system_bytes" => nil,
-      "tool_definition_bytes" => nil,
-      "conversation_bytes" => nil,
-      "tool_result_bytes" => nil,
+      "agent" => Enum.join(event.agent || [], "/"),
+      "summariser" => summariser,
+      "prompt_bytes" => bytes["total"],
+      "system_bytes" => bytes["system"],
+      "tool_definition_bytes" => bytes["tools"],
+      "conversation_bytes" => bytes["conversation"],
+      "tool_result_bytes" => bytes["tool_results"],
       "input_tokens" => (usage["input_tokens"] || 0) + (usage["cache_write"] || 0),
       "cached_tokens" => usage["cache_read"] || 0,
       "output_tokens" => usage["output_tokens"] || 0,
-      "cost_micros" => get_in(response.data, ["gateway", "cost_micros"]),
+      "cost_micros" => get_in(event.data, ["gateway", "cost_micros"]),
       "latency_ms" => timing.latency,
       "first_token_ms" => timing.first
     }
   end
 
-  defp stop_reason(responses) do
-    responses
-    |> Enum.filter(&(&1.agent == ["root"]))
+  defp stop_reason(events) do
+    events
+    |> Enum.filter(&(&1.type == "llm_response" and &1.agent == ["root"]))
     |> List.last()
     |> case do
       nil -> nil
@@ -599,7 +620,7 @@ defmodule Troupe.Bench.Live do
   end
 
   defp count(events, type), do: Enum.count(events, &(&1.type == type))
-  defp sum(usage, key), do: usage |> Enum.map(&(&1[key] || 0)) |> Enum.sum()
+  defp sum(calls, key), do: calls |> Enum.map(&(&1[key] || 0)) |> Enum.sum()
 
   # -- a scenario's runs together ------------------------------------------------------
 

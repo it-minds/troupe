@@ -196,7 +196,10 @@ first; a run that did not end by itself says why in its `error`.
 `llm_request` to its `llm_response`, its time to first token the first `llm_delta` between
 them, a tool call's time its `tool_call_started` to its `tool_call_completed`, each taken
 as the event arrives; usage and cost are the log's (`gateway.cost_micros`, which the
-harness prices from the catalog or `models.prices` when the gateway does not). Retries
+harness prices from the catalog or `models.prices` when the gateway does not), and what a
+call's prompt was made of is its `llm_request.prompt_bytes` (Decision 769), the measure the
+offline suite takes of a request. A compaction's summary is a call too, carried by the
+`compacted` that takes its answer, with no times since no event announced it. Retries
 happen inside the provider's call and never reach the log, so the provider says each one as
 telemetry, `[:troupe, :llm, :retry]`, which the runner counts.
 
@@ -223,8 +226,9 @@ Schema 1, with `"mode": "live"`, and these added:
 The run's fields that are `null` offline are filled: `cost_micros` (`null` when nothing
 priced a call), `wall_ms`, `retries`, each tool's `ms`, each call's `latency_ms` and
 `first_token_ms`. `input_tokens` counts what was billed in full (fresh input and cache
-writes) and `cached_tokens` the cache reads. A call's prompt breakdown (`prompt_bytes` and
-the rest) is `null`: the log does not record it yet.
+writes) and `cached_tokens` the cache reads. A call's prompt breakdown (`prompt_bytes`,
+`system_bytes`, `tool_definition_bytes`, `conversation_bytes`, `tool_result_bytes`) is
+the log's, so a live call and an offline one are measured alike.
 
 ### Testing it
 
@@ -243,8 +247,6 @@ pointed at.
 
 - **The nightly.** The live bench is on demand. Decision 773 says how the nightly should
   run it; wiring it in is a change to `.github/workflows/live.yml` of its own.
-- **The per-call prompt breakdown from the log.** Offline, the bench measures each request
-  the model is handed. When the event log records what each prompt was made of (#389's
-  first slice), a live run reads the same `calls[]` fields from there.
+
 - **Lifecycle across a daemon restart**, dormancy, and the budget's own question: issue
   #390's other scenarios.

@@ -9,7 +9,8 @@
 # it answers is scripted: `scripts` is a list of `{marker, steps}`, the first whose marker
 # is in one of the request's user messages is the conversation's, and the step is the
 # number of answers the conversation already has (its assistant messages), so a script
-# needs no state and two sessions at once do not mix. A step is `{:text, text}` or
+# needs no state and two sessions at once do not mix; a request with no tools, a
+# compaction's, is answered with a summary. A step is `{:text, text}` or
 # `{:tools, [{name, arguments}]}`; past its last step a script says "done". `errors: n`
 # answers the first `n` requests `500`, which the provider retries. Its usage counts four
 # bytes of the request as a token, and half the prompt as cached once a conversation has
@@ -168,7 +169,13 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
     defp stream(socket, request, body, state) do
       messages = request["messages"] || []
       answered = Enum.count(messages, &(&1["role"] == "assistant"))
-      step = step(state.scripts, messages, answered)
+
+      # A request with no tools is a compaction's summary, whatever the script says.
+      step =
+        if request["tools"] in [nil, []],
+          do: {:text, "Summary of the work so far: nothing is left to do."},
+          else: step(state.scripts, messages, answered)
+
       {chunks, output} = chunks(step, answered)
 
       prompt = max(div(byte_size(body), 4), 1)
