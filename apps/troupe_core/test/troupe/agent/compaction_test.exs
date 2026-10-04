@@ -142,6 +142,36 @@ defmodule Troupe.Agent.CompactionTest do
       assert result_in(resent, read.tool_use_id).content == read.content
     end
 
+    # The second compaction drops seven messages, the first's summary and everything it
+    # left behind, and its summariser fails, so the conversation is what it kept. A
+    # boundary still counted from the longer one would cover the read the model has not
+    # answered.
+    test "a summary that fails leaves the boundary with the messages it kept", context do
+      steps =
+        read_then_overflow() ++
+          [
+            {:tools, [{"read_file", %{"path" => "big.txt"}}]},
+            @overflow,
+            {:error, {:http_status, 500, "the summariser is down"}},
+            {:text, "read it again"}
+          ]
+
+      %{session: session, fake: fake} = start_session(context, steps: steps)
+      Troupe.subscribe(session.id)
+
+      Enum.each(
+        ["first", "second", "read big.txt", "carry on", "read it again"],
+        &turn(session.id, &1)
+      )
+
+      assert [_] = events_of_type(session.id, "compacted")
+      [overflowed, _summariser, resent] = fake |> Fake.requests() |> Enum.take(-3)
+
+      assert [%ToolResult{} = read] = List.last(overflowed.messages).content
+      assert byte_size(read.content) > Blobs.inline_limit()
+      assert result_in(resent, read.tool_use_id).content == read.content
+    end
+
     test "a restarted agent sends the same stub, and the log still holds the whole result",
          context do
       %{session: session, fake: fake} = start_session(context, steps: read_then_overflow())

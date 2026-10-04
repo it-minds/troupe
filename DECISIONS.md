@@ -4639,7 +4639,8 @@ citation keeps meaning what it meant.
        chunk's tip (the result went whole); `read_output` with the stub's id returns the
        result byte for byte; a result since the compaction is sent whole after the model
        has answered it; one the model had not answered when a compaction in the middle of
-       a turn ran is sent whole; and a killed agent folds its log to the same conversation
-       and sends the same stub, while the log holds the result as a blob and in the
+       a turn ran is sent whole, and so is one when the summary fails and the boundary
+       has to move down; and a killed agent folds its log to the same conversation and
+       sends the same stub, while the log holds the result as a blob and in the
        `compacted` conversation. `OutputTest`: the stub, ids that repeat across responses,
        the floor, an error's flag.
