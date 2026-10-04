@@ -13,12 +13,16 @@ defmodule Troupe.Bench do
   change to that file, reviewed like any other (`docs/developer/bench.md`).
 
   The report is one map, written as JSON (`json/1`) or as a Markdown table
-  (`markdown/1`). Its shape is the one a run against a real model will fill too: an
+  (`markdown/1`). Its shape is the one a run against a real model fills too: an
   offline run leaves what it cannot know (times, cost, retries) `nil`, and the JSON of
   two offline runs of one build is the same, byte for byte.
+
+  The live bench (`plan/1`, `live/2`, Decision 773) runs `Troupe.Bench.LiveScenarios`
+  against the person's own provider, under a cap said before it starts, into the same
+  report with `mode: "live"`, and keeps a history that `compare/1` reads.
   """
 
-  alias Troupe.Bench.{Runner, Scenario, Scenarios}
+  alias Troupe.Bench.{History, Live, Runner, Scenario, Scenarios}
 
   @schema 1
 
@@ -138,6 +142,38 @@ defmodule Troupe.Bench do
 
   defp version, do: :troupe_core |> Application.spec(:vsn) |> to_string()
 
+  # -- live ---------------------------------------------------------------------------
+
+  @doc """
+  What `troupe bench --live` will do and the most it can spend, or why it cannot run:
+  `Troupe.Bench.Live.plan/1`. Nothing has started when this answers.
+  """
+  @spec plan(keyword()) :: {:ok, Live.Plan.t()} | {:error, String.t()}
+  def plan(opts \\ []), do: Live.plan(opts)
+
+  @doc "The plan in words, the cap last: what is printed before the question."
+  @spec describe_plan(Live.Plan.t()) :: String.t()
+  def describe_plan(plan), do: Live.describe(plan)
+
+  @doc "The question asked before a live bench spends anything."
+  @spec question(Live.Plan.t()) :: String.t()
+  def question(plan), do: Live.question(plan)
+
+  @doc "Run a plan against the person's provider and answer the report (`Troupe.Bench.Live.run/2`)."
+  @spec live(Live.Plan.t(), keyword()) :: map()
+  def live(plan, opts \\ []), do: Live.run(plan, opts)
+
+  @doc """
+  The last live bench against the ones before it, as a Markdown table, from the history in
+  the person's state directory (`Troupe.Bench.History.compare/2`). Options: `:ref`, a
+  version or a model to compare with rather than each scenario's last runs, and `:history`,
+  the file.
+  """
+  @spec compare(keyword()) :: {:ok, String.t()} | {:error, String.t()}
+  def compare(opts \\ []) do
+    History.compare(Keyword.get_lazy(opts, :history, &History.path/0), Keyword.get(opts, :ref))
+  end
+
   # -- the two formats --------------------------------------------------------------
 
   @doc "The report as JSON, keys sorted, so two runs diff line by line."
@@ -149,6 +185,23 @@ defmodule Troupe.Bench do
   `troupe bench` prints and CI puts in its summary.
   """
   @spec markdown(map()) :: String.t()
+  def markdown(%{"mode" => "live"} = report) do
+    # No budgets: a live run's numbers are what the model did, not a regression.
+    rows =
+      report["scenarios"]
+      |> Enum.flat_map(&rows/1)
+      |> Enum.map(fn [name, measure, value, _budget, ok] -> [name, measure, value, ok] end)
+
+    failed = Enum.flat_map(report["scenarios"], &failures/1)
+    skipped = Enum.map(report["skipped"] || [], &"Left out: #{&1["name"]}, since #{&1["why"]}.\n")
+
+    table =
+      ["| scenario | measure | value | |", "| --- | --- | ---: | --- |"] ++
+        Enum.map(rows, fn cells -> "| " <> Enum.join(cells, " | ") <> " |" end)
+
+    Enum.join(table, "\n") <> "\n\n" <> Enum.join(skipped) <> verdict(report, failed) <> "\n"
+  end
+
   def markdown(report) do
     rows = Enum.flat_map(report["scenarios"], &rows/1)
     failed = Enum.flat_map(report["scenarios"], &failures/1)
@@ -162,16 +215,32 @@ defmodule Troupe.Bench do
 
   defp rows(scenario) do
     name = scenario["name"]
+    # A live scenario ran; what its error says is which of its runs went wrong.
+    live? =
+      is_list(scenario["runs"]) and Enum.any?(scenario["runs"], &Map.has_key?(&1, "succeeded"))
 
     error =
-      if scenario["error"],
-        do: [[name, "did not run: " <> scenario["error"], "", "", "FAILED"]],
-        else: []
+      cond do
+        scenario["error"] == nil -> []
+        live? -> [[name, scenario["error"], "", "", "FAILED"]]
+        true -> [[name, "did not run: " <> scenario["error"], "", "", "FAILED"]]
+      end
 
     outcome =
       case scenario["outcome"] do
         nil ->
           []
+
+        %{"held" => held} = outcome ->
+          [
+            [
+              name,
+              "outcome: " <> outcome["what"],
+              "#{held} of #{length(scenario["runs"])}",
+              "",
+              ok(outcome["passed"])
+            ]
+          ]
 
         outcome ->
           [
@@ -192,7 +261,7 @@ defmodule Troupe.Bench do
           metric["label"],
           value(metric["value"], metric["unit"]),
           value(metric["budget"], nil),
-          ok(metric["passed"])
+          if(live?, do: "", else: ok(metric["passed"]))
         ]
       end)
 
@@ -216,6 +285,16 @@ defmodule Troupe.Bench do
     error ++ Enum.map(failed, &(name <> "/" <> &1["name"])) ++ outcome
   end
 
+  defp verdict(%{"mode" => "live"} = report, []) do
+    "troupe bench #{report["version"]}, live against #{report["model"]}: " <>
+      "#{length(report["scenarios"])} scenarios, #{report["repeat"]} runs each, every run succeeded."
+  end
+
+  defp verdict(%{"mode" => "live"} = report, failed) do
+    "troupe bench #{report["version"]}, live against #{report["model"]}: FAILED " <>
+      Enum.join(failed, ", ") <> "."
+  end
+
   defp verdict(report, []) do
     "troupe bench #{report["version"]}, #{report["mode"]}: #{length(report["scenarios"])} scenarios, " <>
       "every measure within its budget."
@@ -229,6 +308,7 @@ defmodule Troupe.Bench do
   defp value(nil, _unit), do: ""
   defp value(value, nil), do: to_string(value)
   defp value(value, unit) when unit in ["share"], do: to_string(value)
+  defp value(value, "$"), do: "$" <> :erlang.float_to_binary(value / 1, decimals: 4)
   defp value(value, unit), do: "#{value} #{unit}"
 
   defp yes_no(true), do: "yes"

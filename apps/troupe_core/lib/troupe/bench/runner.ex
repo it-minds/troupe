@@ -36,18 +36,9 @@ defmodule Troupe.Bench.Runner do
     Enum.each(["work", "config", "state"], &File.mkdir_p!(Path.join(dir, &1)))
     Scenario.seed(scenario, work)
 
-    # opencode's files too, which a config reads for providers when it has no key of its
-    # own: they name files that are not there.
-    env = %{
-      "TROUPE_CONFIG_HOME" => Path.join(dir, "config"),
-      "TROUPE_STATE_HOME" => Path.join(dir, "state"),
-      "TROUPE_OPENCODE_CONFIG" => Path.join(dir, "no-opencode.jsonc"),
-      "TROUPE_OPENCODE_AUTH" => Path.join(dir, "no-opencode-auth.json")
-    }
-
     # In a process of its own, so the session's events and the model's notes die with
     # it rather than waiting in the caller's mailbox.
-    with_env(env, fn ->
+    with_env(isolation(dir), fn ->
       fn -> attempt(scenario, work, Path.join(dir, "state")) end
       |> Task.async()
       |> Task.await(:infinity)
@@ -236,7 +227,24 @@ defmodule Troupe.Bench.Runner do
     end)
   end
 
-  defp with_env(env, fun) do
+  @doc """
+  The environment a run under `dir` has: its own config and state directories, and
+  opencode's files too, which a config reads for providers when it has no key of its
+  own, naming files that are not there. The live runner's runs have the same.
+  """
+  @spec isolation(Path.t()) :: %{String.t() => String.t()}
+  def isolation(dir) do
+    %{
+      "TROUPE_CONFIG_HOME" => Path.join(dir, "config"),
+      "TROUPE_STATE_HOME" => Path.join(dir, "state"),
+      "TROUPE_OPENCODE_CONFIG" => Path.join(dir, "no-opencode.jsonc"),
+      "TROUPE_OPENCODE_AUTH" => Path.join(dir, "no-opencode-auth.json")
+    }
+  end
+
+  @doc "Run `fun` with `env` set, putting back what was there before, however it ends."
+  @spec with_env(%{String.t() => String.t()}, (-> result)) :: result when result: term()
+  def with_env(env, fun) do
     previous = Map.new(env, fn {key, _value} -> {key, System.get_env(key)} end)
     Enum.each(env, fn {key, value} -> System.put_env(key, value) end)
 

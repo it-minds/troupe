@@ -25,7 +25,9 @@ model says to run `troupe config` rather than failing without a reason. `troupe 
 checks the setup — the config files, the provider and its key (with a real request), the
 helper every command runs under, the daemon, the two programs on the PATH and any plane
 you are signed in to — one line each,
-and exits 1 when one fails.
+and exits 1 when one fails. `troupe bench --live` goes one step further: it runs four small
+tasks against your model, under a cap it prints and asks about first, and says whether they
+got done and what each cost ([what a task costs](bench.md)).
 
 **The desktop app** asks the same questions on its first run, as screens: where the work
 runs, the provider (with what is already on the machine offered: a key in the environment,
