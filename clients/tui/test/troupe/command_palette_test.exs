@@ -167,6 +167,46 @@ defmodule Troupe.CommandPaletteTest do
     assert user_state(pid).cmd_text == "ab"
   end
 
+  # A command a repository defines (Decision 763): `.troupe/commands/review.md` is a row of
+  # a section of its own with its file's description, and running it sends its prompt
+  # with what was typed after the name, which comes back as the session's input.
+  test "a command a file defines is in the palette with its description, and runs" do
+    ws =
+      tmp_workspace(%{
+        ".troupe/commands/review.md" => """
+        ---
+        description: Review the change on this branch
+        argument-hint: <what to look at>
+        ---
+        Review the change on this branch. Look hardest at $ARGUMENTS.
+        """
+      })
+
+    {sid, _, _} = start_session!(workspace: ws, script: [{:text, "looked"}])
+    {pid, session} = start_tui(sid)
+    eventually(fn -> user_state(pid).commands != [] end)
+
+    press(pid, "/")
+    type(pid, "review")
+    text = screen_text(pid, session)
+    assert text =~ "─ Custom "
+    assert text =~ "/review"
+    assert text =~ "Review the change on this branch"
+    assert text =~ "/review <what to look at>"
+    {rows, cursor} = Troupe.UI.TUI.View.palette_view(user_state(pid))
+    assert %{entry: %{"source" => "project"}, status: :ok} = Enum.at(rows, cursor)
+
+    # Space leaves it on the line, and what follows the name is its argument.
+    press(pid, " ")
+    assert user_state(pid).cmd_text == "/review "
+    type(pid, "the parser")
+    press(pid, "enter")
+
+    input = await_event("root", :input, 10_000)
+    assert input.data.content == "Review the change on this branch. Look hardest at the parser."
+    assert user_state(pid).focus == :command
+  end
+
   test "a query nothing matches runs as typed, as an unknown command always did" do
     {sid, _, _} = start_session!(script: [])
     {pid, session} = start_tui(sid)

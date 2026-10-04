@@ -95,12 +95,16 @@ defmodule Troupe.UI.TUI.Server do
   @type selection :: %{anchor: point(), cursor: point(), dragging?: boolean()}
 
   @typedoc """
-  Settings-page state: the config as loaded, the cursor, the value being typed,
-  and the open menu — a setting with choices (the models) shows them instead of
+  Settings-page state: what the daemon says the settings are (`view`, every key with its
+  value and the layer that set it), the config as loaded, for the models it detects, the
+  scope picked with `s` (nil: the file each value came from), the cursor, the value being
+  typed, and the open menu — a setting with choices (the models) shows them instead of
   asking you to type an identifier from memory.
   """
   @type settings :: %{
+          view: Settings.view(),
           config: Troupe.Config.t(),
+          scope: String.t() | nil,
           cursor: non_neg_integer(),
           editing: String.t() | nil,
           scroll: non_neg_integer(),
@@ -161,6 +165,7 @@ defmodule Troupe.UI.TUI.Server do
   def mount(opts) do
     sid = Keyword.fetch!(opts, :session_id)
     :ok = Client.subscribe(sid)
+    :ok = Client.subscribe_settings()
     model = rebuild(sid)
 
     state = %{
@@ -276,6 +281,16 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   def handle_info({:troupe_fleet, _plane, _session_id, _diff}, state),
+    do: {:noreply, state, render?: false}
+
+  # A settings file changed, here or in another client (#57): an open settings page reads
+  # them again, so a model picked in the desktop app is on it without a key pressed.
+  def handle_info({:troupe_settings_changed, _changed}, %{settings: s} = state) when s != nil do
+    state = %{refresh_settings(state) | dirty: true}
+    {:noreply, schedule_tick(state), render?: false}
+  end
+
+  def handle_info({:troupe_settings_changed, _changed}, state),
     do: {:noreply, state, render?: false}
 
   def handle_info(:force_render, state),
@@ -711,6 +726,11 @@ defmodule Troupe.UI.TUI.Server do
         not slash? ->
           Client.send_input(sid, "root", typed)
 
+        # A command a markdown file defines is the harness's to run (Decision 763): it
+        # sends the file's prompt, and the line comes back as the session's own input.
+        defined?(state, name) ->
+          Client.run_command(sid, name, args)
+
         true ->
           Client.dispatch(sid, name, args)
       end
@@ -746,6 +766,9 @@ defmodule Troupe.UI.TUI.Server do
       entry -> entry["name"]
     end
   end
+
+  defp defined?(state, name),
+    do: Enum.any?(state.commands, &(&1["name"] == name and &1["source"] in ["user", "project"]))
 
   defp builtin("quit", _args, _state, _target), do: :quit
   defp builtin("settings", _args, _state, _target), do: :settings
@@ -1708,17 +1731,41 @@ defmodule Troupe.UI.TUI.Server do
 
   ## Settings page
 
+  # What the settings are is the daemon's to say (#57); the config struct is read too, for
+  # the models it detects, and for the values when the daemon is too old to say them.
   defp open_settings(state) do
-    {_workspace, config} = Client.context(state.session_id)
-
     %{
       state
       | focus: :settings,
         cmd_text: "",
         cmd_pos: 0,
-        settings: %{config: config, cursor: 0, editing: nil, scroll: 0, status: nil, picker: nil}
+        settings:
+          Map.merge(read_settings(state.session_id), %{
+            scope: nil,
+            cursor: 0,
+            editing: nil,
+            scroll: 0,
+            status: nil,
+            picker: nil
+          })
     }
   end
+
+  defp read_settings(sid) do
+    {_workspace, config} = Client.context(sid)
+
+    view =
+      case Client.settings(sid) do
+        {:ok, answer} -> Settings.view(answer)
+        {:error, _reason} -> Settings.view(%{})
+      end
+
+    %{view: view, config: config}
+  end
+
+  # The cursor, a value being typed and the scope picked stay where they are.
+  defp refresh_settings(%{settings: s} = state),
+    do: %{state | settings: Map.merge(s, read_settings(state.session_id))}
 
   # `/models` is `/settings` opened on the default model, with its menu up.
   defp open_models(state) do
@@ -1729,12 +1776,15 @@ defmodule Troupe.UI.TUI.Server do
 
   defp open_picker(%{settings: s} = state) do
     field = Enum.at(Settings.fields(), s.cursor)
+    current = Settings.value(s.view, s.config, field.key)
 
-    case Settings.choices(field, s.config) do
-      [] -> put_settings(state, editing: Settings.format(s.config, field.key), status: nil)
+    case Settings.choices(field, s.config, current) do
+      [] -> put_settings(state, editing: shown(s, field.key), status: nil)
       choices -> put_settings(state, picker: %{choices: choices, cursor: 0}, status: nil)
     end
   end
+
+  defp shown(s, key), do: Settings.format(s.view, s.config, key)
 
   defp settings_key(%Key{code: "esc"}, %{settings: %{picker: p}} = state) when p != nil,
     do: put_settings(state, picker: nil)
@@ -1753,7 +1803,7 @@ defmodule Troupe.UI.TUI.Server do
 
     case Enum.at(p.choices, p.cursor) do
       nil ->
-        put_settings(state, picker: nil, editing: Settings.format(s.config, field.key))
+        put_settings(state, picker: nil, editing: shown(s, field.key))
 
       choice ->
         state |> put_settings(picker: nil) |> apply_setting(field.key, choice.value)
@@ -1796,13 +1846,21 @@ defmodule Troupe.UI.TUI.Server do
   defp settings_key(%Key{code: "page_down"}, %{settings: s} = state),
     do: put_settings(state, scroll: s.scroll + 5)
 
+  # `s` moves where a change goes: through the scopes the daemon says the setting may be
+  # written to here, from the one it goes to now.
+  defp settings_key(%Key{code: "s"}, %{settings: s} = state) do
+    field = Enum.at(Settings.fields(), s.cursor)
+    scope = Settings.next_scope(s.view, field.key, s.scope)
+    put_settings(state, scope: scope, status: "a change goes to #{scope_file(s.view, scope)}")
+  end
+
   defp settings_key(%Key{code: code}, %{settings: s} = state) when code in ["enter", " "] do
     field = Enum.at(Settings.fields(), s.cursor)
 
     case field.type do
-      :bool -> apply_setting(state, field.key, not Settings.get(s.config, field.key))
+      :bool -> apply_setting(state, field.key, Settings.value(s.view, s.config, field.key) != true)
       :model -> open_picker(state)
-      _ -> put_settings(state, editing: Settings.format(s.config, field.key), status: nil)
+      _ -> put_settings(state, editing: shown(s, field.key), status: nil)
     end
   end
 
@@ -1817,25 +1875,46 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  defp apply_setting(state, key, value) do
+  # Written into the scope `Settings.target/3` names, which the help beside the setting
+  # said before Enter was pressed; the status says where it went, and what still wins
+  # over it there when something does.
+  defp apply_setting(%{settings: s} = state, key, value) do
     sid = state.session_id
+    scope = Settings.target(s.view, key, s.scope)
 
     state =
-      case Client.put_setting(sid, key, value) do
-        {:ok, config, path} ->
+      case Client.put_setting(sid, key, value, scope) do
+        {:ok, answer} ->
+          {_workspace, config} = Client.context(sid)
+          view = Settings.view(answer)
+          path = get_in(answer, ["written", "path"])
+
           put_settings(state,
+            view: view,
             config: config,
             editing: nil,
-            status: "#{key} = #{Settings.format(config, key)} · saved to #{path}"
+            status:
+              "#{key} = #{Settings.format(view, config, key)} · saved to #{path}" <>
+                wins(view, key, scope)
           )
 
         {:error, msg} ->
-          {_workspace, config} = Client.context(sid)
-          put_settings(state, config: config, editing: nil, status: to_message(msg))
+          state |> refresh_settings() |> put_settings(editing: nil, status: to_message(msg))
       end
 
     %{state | model: %{state.model | watch: Client.watch_status(sid)}}
   end
+
+  # A value written below one that beats it: the project's file over the user's, or a
+  # `TROUPE_*` variable over both.
+  defp wins(view, key, scope) do
+    case Settings.layer(view, key) do
+      layer when layer in [nil, "default", scope] -> ""
+      layer -> " · #{layer} sets it too, and wins here"
+    end
+  end
+
+  defp scope_file(view, scope), do: "#{scope} (#{Map.get(view.files, scope, "its file")})"
 
   defp put_settings(state, changes),
     do: %{state | settings: Enum.into(changes, state.settings)}

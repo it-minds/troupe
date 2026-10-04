@@ -18,6 +18,7 @@ troupe-daemon config trust [PATH]   let a workspace's own files set the trusted 
 troupe-daemon config untrust [PATH]   take that back
 troupe-daemon config import-opencode   copy opencode's providers into config.yaml
 troupe-daemon models [--refresh]  every model this machine can address
+troupe-daemon login on|off|status   start at login, or not; status exits 1 when it does not
 troupe-daemon version
 ```
 
@@ -53,6 +54,25 @@ with `troupe-daemon` linked into `~/.local/bin` (a `.cmd` shim in
 `%LOCALAPPDATA%\Programs\troupe`, on the user `PATH`). Both installers verify `SHA256SUMS`,
 keep the previous release beside the new one for rollback, and take `--uninstall` /
 `-Uninstall`. Releases are at <https://github.com/it-minds/troupe/releases>.
+
+### Start at login
+
+`troupe-daemon login on` has the daemon start every time you log in, and `login off` takes
+that back; `login status` says which. The first run's questions ask the same thing, in the
+desktop app and in `troupe config`. Each platform gets its own per-user entry, and none
+needs an administrator ([DECISIONS.md](../../DECISIONS.md) 762):
+
+| Platform | The entry |
+|---|---|
+| Windows | `troupe-daemon.cmd` in your Startup folder (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`); the daemon runs in a console window minimised to the taskbar, and closing that window stops it |
+| macOS | a launchd agent, `~/Library/LaunchAgents/com.objective-mj.troupe.daemon.plist` |
+| Linux with systemd | a user unit, `~/.config/systemd/user/troupe-daemon.service`, enabled for `default.target` |
+| Linux without systemd | an autostart entry, `~/.config/autostart/troupe-daemon.desktop`, which a desktop session starts |
+
+The entry runs `troupe-daemon run` — the one on the `PATH`, as a client finds it — with
+`TROUPE_DAEMON_IDLE_MINUTES=0`, so a daemon started at login stays up until you log out
+rather than exiting when idle. Turning it on takes effect at the next login and starts
+nothing now; turning it off removes the file and stops nothing that is running.
 
 ## Configuration
 
@@ -112,7 +132,7 @@ has one clock, and the three modules that keep them (`Troupe.Session.ClientTools
 | a session sleeps, read | never, while a client is subscribed to it by name: a session is not stopped under the person looking at it, and the clocks below start when they leave | | |
 | a session sleeps, watched | idle or waiting on a person, with somebody following it but not reading it — a `fleet` subscriber, watch mode | `TROUPE_SESSION_IDLE_MINUTES` (`:troupe_core, :session_idle_ms`) | 30 min |
 | a session sleeps, unwatched | the same, with nobody watching it | `TROUPE_SESSION_DETACHED_MINUTES` (`:troupe_core, :detached_idle_ms`) | 2 min |
-| the daemon exits | no client connected and no session awake | `TROUPE_DAEMON_IDLE_MINUTES` (`:troupe_daemon, :idle_shutdown_ms`) | 10 min |
+| the daemon exits | no client connected and no session awake; never for one started at login ([above](#start-at-login)) | `TROUPE_DAEMON_IDLE_MINUTES` (`:troupe_daemon, :idle_shutdown_ms`) | 10 min |
 
 `0` means never on the minute clocks. A session that sleeps stops its tree and keeps its
 log: the next command that acts on it — input, an answer, an approval — brings it back,

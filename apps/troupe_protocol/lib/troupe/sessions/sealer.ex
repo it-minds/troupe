@@ -28,6 +28,14 @@ defmodule Troupe.Sessions.Sealer do
   `troupe_protocol` is what `troupe_core` is built on and cannot call back into it. That
   is not a workaround: what this process is *for* is getting events into storage, and
   where they arrive from is the host's business.
+
+  ## Starting partway
+
+  A sealer started for a session that already has a log — a daemon carrying a private
+  session on after it restarted, or sealing for the first time one it made while it could
+  not — starts at `:sealed_through`, what storage already has, and takes what the log
+  holds after it from `:backfill`, a function of that sequence number. It asks after it
+  subscribes, so nothing written between the two is missed, and drops what arrives twice.
   """
 
   use GenServer
@@ -87,6 +95,8 @@ defmodule Troupe.Sessions.Sealer do
     subscribe = Keyword.get(opts, :subscribe, fn _session_id -> :ok end)
     subscribe.(context.session_id)
 
+    sealed_through = Keyword.get(opts, :sealed_through, 0)
+
     state = %__MODULE__{
       context: context,
       # Where to send `session.sealed`. A function rather than a pid so a worker with no
@@ -98,13 +108,36 @@ defmodule Troupe.Sessions.Sealer do
       snapshot: Keyword.get(opts, :snapshot),
       seal_interval_ms: Keyword.get(opts, :seal_interval_ms, @seal_interval_ms),
       snapshot_every: Keyword.get(opts, :snapshot_every, @snapshot_every),
-      sealed_through: Keyword.get(opts, :sealed_through, 0)
+      sealed_through: sealed_through,
+      object_bytes: Keyword.get(opts, :object_bytes, 0),
+      # After the subscription, so an event written meanwhile is in the mailbox, and
+      # dropped there as one already held.
+      pending: opts |> Keyword.get(:backfill, fn _seq -> [] end) |> backfill(sealed_through)
     }
+
+    # What the log held is sealed now rather than at the next turn's end, which for a
+    # session nobody is using may be a long way off.
+    if state.pending != [], do: send(self(), :interval)
 
     {:ok, schedule(state)}
   end
 
+  # An event this sealer already holds, from the log it was started with or sealed
+  # before, is not sealed twice.
   @impl GenServer
+  def handle_info({:troupe_event, _session_id, %Event{seq: seq}}, state)
+      when is_integer(seq) and seq <= state.sealed_through do
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:troupe_event, _session_id, %Event{seq: seq}},
+        %{pending: [%Event{seq: held} | _]} = state
+      )
+      when is_integer(seq) and is_integer(held) and seq <= held do
+    {:noreply, state}
+  end
+
   def handle_info({:troupe_event, _session_id, %Event{seq: nil} = event}, state) do
     # Ephemerals are not durable and are never sealed — dropping them is what keeps the
     # object tier the size of the session rather than the size of its typing. They are
@@ -145,6 +178,15 @@ defmodule Troupe.Sessions.Sealer do
     # the chance it has.
     seal(state)
     :ok
+  end
+
+  # The durable events after `sealed_through`, oldest first from the host, held newest
+  # first like everything else pending.
+  defp backfill(read, sealed_through) do
+    sealed_through
+    |> read.()
+    |> Enum.filter(&(is_integer(&1.seq) and &1.seq > sealed_through))
+    |> Enum.reverse()
   end
 
   # -- sealing ----------------------------------------------------------------

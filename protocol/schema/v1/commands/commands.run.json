@@ -1,0 +1,26 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/commands.run.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "arguments": {
+      "type": "string"
+    },
+    "command_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "name",
+    "session_id"
+  ],
+  "title": "commands.run",
+  "type": "object"
+}

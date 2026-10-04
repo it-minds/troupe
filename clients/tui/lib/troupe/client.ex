@@ -86,6 +86,7 @@ defmodule Troupe.Client do
   @callback dispatch(session_id(), String.t(), String.t() | map()) ::
               {:ok, String.t()} | {:error, term()}
   @callback send_input(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
+  @callback run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback approve(session_id(), String.t(), decision()) :: :ok | {:error, term()}
   @callback answer(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback edit_todo(session_id(), String.t(), term()) :: :ok | {:error, term()}
@@ -100,8 +101,9 @@ defmodule Troupe.Client do
   @callback dismiss(session_id(), String.t()) :: :ok | {:error, term()}
   @callback merge(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback discard(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  @callback put_setting(session_id(), String.t(), term()) ::
-              {:ok, Config.t(), String.t()} | {:error, term()}
+  @callback settings(session_id()) :: {:ok, map()} | {:error, term()}
+  @callback put_setting(session_id(), String.t(), term(), String.t()) ::
+              {:ok, map()} | {:error, term()}
   @callback watch(session_id(), boolean()) :: {:ok, atom()} | :ok | {:error, term()}
   @callback watch_status(session_id()) :: map()
   @callback mcp_status(session_id()) :: [map()]
@@ -195,6 +197,14 @@ defmodule Troupe.Client do
   @spec send_input(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   def send_input(sid, path, text), do: impl(sid).send_input(sid, path, text)
 
+  @doc """
+  Runs a command a markdown file defines — a row of the table whose `source` is `user`
+  or `project` — with what was typed after its name. The harness reads the file and
+  sends its prompt as the session's input (`commands.run`, Decision 763).
+  """
+  @spec run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
+  def run_command(sid, name, arguments), do: impl(sid).run_command(sid, name, arguments)
+
   @spec approve(session_id(), String.t(), decision()) :: :ok | {:error, term()}
   def approve(sid, call_id, decision), do: impl(sid).approve(sid, call_id, decision)
 
@@ -247,9 +257,29 @@ defmodule Troupe.Client do
   @spec discard(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def discard(sid, path), do: impl(sid).discard(sid, path)
 
-  @spec put_setting(session_id(), String.t(), term()) ::
-          {:ok, Config.t(), String.t()} | {:error, term()}
-  def put_setting(sid, key, value), do: impl(sid).put_setting(sid, key, value)
+  @doc """
+  The settings as the daemon serves them for the session's workspace (`config.get`, #57):
+  every key with its value, the layer and file that set it, and the scopes it may be
+  written to. `Troupe.Settings.view/1` is the page's reading of it.
+  """
+  @spec settings(session_id()) :: {:ok, map()} | {:error, term()}
+  def settings(sid), do: impl(sid).settings(sid)
+
+  @doc """
+  Sets one setting in the file of `scope` (`user`, `project` or `local`) through the
+  daemon (`config.set`), and answers what `settings/1` now does, with `written`, the key,
+  scope and file. Every client attached hears `config.changed`.
+  """
+  @spec put_setting(session_id(), String.t(), term(), String.t()) :: {:ok, map()} | {:error, term()}
+  def put_setting(sid, key, value, scope), do: impl(sid).put_setting(sid, key, value, scope)
+
+  @doc """
+  Hear `{:troupe_settings_changed, params}` whenever the daemon says a settings file
+  changed, whoever changed it (`config.changed`): the settings page shows what another
+  client set while it is open.
+  """
+  @spec subscribe_settings() :: :ok
+  def subscribe_settings, do: Troupe.Client.Events.subscribe_settings()
 
   @spec watch(session_id(), boolean()) :: {:ok, atom()} | :ok | {:error, term()}
   def watch(sid, enabled?), do: impl(sid).watch(sid, enabled?)

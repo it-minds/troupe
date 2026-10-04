@@ -12,6 +12,8 @@
 //   it can be told who you are   `identity.link` changes the actor on everything after
 //   it keeps the model settings  `config.set` writes them, `config.get` reads them back
 //                                without the key, and `config.models` asks a provider
+//   it tells every client        `config.changed` goes to every client attached once a
+//   what changed                 settings file changed (troupe #57), whoever changed it
 //   it asks the first run's      `setup.get` says where it stands and `setup.answer`
 //   questions                    moves it a step, checking a key and writing the settings
 //
@@ -22,7 +24,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
-import { COMMANDS } from "./commands.js";
+import { COMMANDS, expandDefined } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 
 interface Session {
@@ -78,7 +80,15 @@ export interface FakeDaemonOptions {
   env?: Record<string, string>;
   /** What the machine's opencode config holds, as the daemon detects it. */
   opencode?: { providers: string[]; default: string | null };
+  /**
+   * False is a daemon from before troupe #57: `config.get` answers no `keys`, and a
+   * `config.set` with no `provider` is the model panel's, as an old one reads it.
+   */
+  servesKeys?: boolean;
 }
+
+/** The `ui` keys the fake keeps (troupe #57), with their defaults: the daemon acts on none of them. */
+const UI_DEFAULTS: Record<string, unknown> = { "ui.theme": "afterglow", "ui.mode": "system", "ui.notifications": true };
 
 /** The first run in progress, as the fake daemon holds it. The key is here and in no answer. */
 interface FakeSetupFlow {
@@ -90,7 +100,7 @@ interface FakeSetupFlow {
   check: { state: string; reason: string | null } | null;
 }
 
-const SETUP_STEPS = ["where", "provider", "key", "models", "workspace", "finish"] as const;
+const SETUP_STEPS = ["where", "provider", "key", "models", "workspace", "daemon", "finish"] as const;
 
 function freshSetup(): FakeSetupFlow {
   return { step: "where", answers: {}, key: null, offered: [], suggested: { default: null, cheap: null }, check: null };
@@ -183,6 +193,15 @@ export class FakeDaemon {
   readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   /** Who the daemon says its user is. `null` until somebody links an identity. */
   linked: { subject: string; display_name?: string; plane_url?: string } | null = null;
+  /**
+   * The plane token the last link carried, as the daemon holds it: in memory, in no
+   * answer, kept by a link that carries none and gone with an unlink or a restart.
+   */
+  planeToken: string | null = null;
+  /** Every plane token a link has handed over, oldest first. */
+  readonly planeTokens: string[] = [];
+  /** The private sessions `session.create` was asked for, by id. */
+  readonly privateSessions = new Set<string>();
   /** The settings file, as `config.set` last wrote it. Nothing is saved until then. */
   settings: FakeModelSettings = {
     exists: false,
@@ -192,6 +211,8 @@ export class FakeDaemon {
     api_key: null,
     models: { default: null, cheap: null, expensive: null },
   };
+  /** The `ui` keys the file sets, by name; one not here is its default. */
+  ui: Record<string, unknown> = {};
   /** The two layers of `mcp.json` and `skills/`, as the seven `mcp.*`/`skills.*` methods keep them. */
   servers: FakeServer[] = [];
   /** Sign-ins by server name (troupe-remote Decision 741); a server with `oauth` and no entry is signed out. */
@@ -209,6 +230,8 @@ export class FakeDaemon {
   setupCompleted: { completed_at: string; choice: string; subject: string | null } | null;
   /** The first run in progress. */
   setup: FakeSetupFlow = freshSetup();
+  /** Whether the login entry is there (troupe Decision 762): the `daemon` step writes and removes it. */
+  atLogin = false;
   /** Directories the workspace step accepts; anything else "is not a directory". */
   directories: string[] = ["/home/ada/project", "/home/ada/notes", "/home/ada/repo"];
   /** How long `subscribe` takes to answer: a busy machine, where a screen is up before its view is. */
@@ -223,6 +246,7 @@ export class FakeDaemon {
   private readonly overrides: NonNullable<FakeDaemonOptions["overrides"]>;
   private readonly env: Record<string, string>;
   private readonly opencode: { providers: string[]; default: string | null };
+  private readonly servesKeys: boolean;
   private nextId = 1;
   private restarts = 0;
 
@@ -234,7 +258,19 @@ export class FakeDaemon {
     this.overrides = opts.overrides ?? [];
     this.env = opts.env ?? {};
     this.opencode = opts.opencode ?? { providers: [], default: null };
+    this.servesKeys = opts.servesKeys ?? true;
     this.setupCompleted = opts.firstRun ? null : { completed_at: "2026-09-01T08:00:00Z", choice: "local", subject: null };
+  }
+
+  /**
+   * What the daemon does after a settings file changed (troupe #57): `config.changed` to
+   * every client attached, the one that changed it too. Public, so a test can play the
+   * terminal changing the file.
+   */
+  announce(keys: string[]): void {
+    if (keys.length === 0 || !this.servesKeys) return;
+    const changed = { scope: "user", path: String(this.configJson()["path"]), keys };
+    for (const c of this.clients) notify(c.ws, "config.changed", changed);
   }
 
   get principal(): { subject: string; display_name: string; kind: string } {
@@ -272,6 +308,8 @@ export class FakeDaemon {
     await this.stop();
     this.restarts += 1;
     this.token = `daemon-token-${this.restarts}`;
+    // The label is in `identity.json` and survives; the plane token was in memory.
+    this.planeToken = null;
     await this.start();
   }
 
@@ -469,11 +507,16 @@ export class FakeDaemon {
           ...(params["display_name"] ? { display_name: String(params["display_name"]) } : {}),
           ...(params["plane_url"] ? { plane_url: String(params["plane_url"]) } : {}),
         };
+        if (typeof params["plane_token"] === "string" && params["plane_token"]) {
+          this.planeToken = params["plane_token"];
+          this.planeTokens.push(params["plane_token"]);
+        }
         return reply(ws, id, this.identityJson());
       }
 
       case "identity.unlink":
         this.linked = null;
+        this.planeToken = null;
         return reply(ws, id, this.identityJson());
 
       case "session.list": {
@@ -489,7 +532,17 @@ export class FakeDaemon {
         if (!workspace) return reply(ws, id, null, { code: -32602, message: "invalid_params" });
         const config = (params["config"] ?? {}) as { watch?: boolean };
         const created = this.seed(workspace, { watch: Boolean(config.watch) });
-        return reply(ws, id, { session_id: created.id, workspace, worktree: null, branch: null });
+        // `private` beside `workspace`, as the daemon reads it; one inside `config` is a
+        // setting no client may choose, and is not asked for.
+        const asked = params["private"] === true;
+        if (asked) this.privateSessions.add(created.id);
+        return reply(ws, id, {
+          session_id: created.id,
+          workspace,
+          worktree: null,
+          branch: null,
+          syncing: asked && this.planeToken !== null,
+        });
       }
 
       case "subscribe": {
@@ -605,6 +658,21 @@ export class FakeDaemon {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
         return reply(ws, id, { commands: COMMANDS });
 
+      // A command a file defines, as the daemon runs it (Decision 763): its prompt, with
+      // `arguments` for `$ARGUMENTS`, goes in as input under the call's `command_id`.
+      case "commands.run": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        const name = String(params["name"] ?? "");
+        const text = expandDefined(name, String(params["arguments"] ?? ""));
+        if (text === null) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "command", name } });
+        const commandId = String(params["command_id"] ?? "");
+        const actor = { kind: "user", subject: this.principal.subject };
+        session.log.append("input_queued", { command_id: commandId, author: this.principal.subject, text }, actor);
+        session.log.append("input_accepted", { command_id: commandId, author: this.principal.subject }, actor);
+        session.log.append("user_input", { command_id: commandId, text, source: "user" }, actor);
+        return reply(ws, id, { accepted: true, command_id: commandId });
+      }
+
       case "workspace.recent":
         return reply(ws, id, {
           workspaces: [...new Set([...this.sessions.values()].map((s) => s.workspace))].map((path) => ({
@@ -690,6 +758,8 @@ export class FakeDaemon {
 
     // config.set
     if (!params["command_id"]) return invalid("command_id is required");
+    if (this.servesKeys && ("key" in params || "path" in params)) return this.setKey(ws, id, params);
+    const before = { ...s, models: { ...s.models } };
     const provider = String(params["provider"] ?? "");
     if (!OFFERS[provider]) return invalid(`provider must be one of ${Object.keys(OFFERS).join(", ")}`);
     const auth = params["auth"];
@@ -704,7 +774,52 @@ export class FakeDaemon {
     for (const role of ["default", "cheap", "expensive"] as const) {
       if (role in models) s.models[role] = models[role] || null;
     }
-    return reply(ws, id, this.configJson());
+    reply(ws, id, this.configJson());
+    // The keys whose lines changed, as the daemon reads the file before and after.
+    const fields = ["api_key", "auth", "base_url", "provider"] as const;
+    const roles = ["cheap", "default", "expensive"] as const;
+    this.announce([
+      ...fields.filter((f) => before[f] !== s[f]),
+      ...roles.filter((r) => before.models[r] !== s.models[r]).map((r) => `models.${r}`),
+    ]);
+  }
+
+  /**
+   * `config.set` of one key (troupe #57), as the daemon does it for the keys a client of
+   * this fake sets: the model roles and the `ui` keys, into the user's file. Anything else
+   * is not a setting it knows, and another scope needs a workspace it does not have.
+   */
+  private setKey(ws: WebSocket, id: unknown, params: Record<string, unknown>): void {
+    const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
+    const key = Array.isArray(params["path"]) ? (params["path"] as string[]).join(".") : String(params["key"] ?? "");
+    const scope = String(params["scope"] ?? "user");
+    const value = params["value"] ?? null;
+    if (scope !== "user") return invalid(`the ${scope} scope needs a workspace`);
+
+    const role = /^models\.(default|cheap|expensive)$/.exec(key)?.[1] as keyof FakeModelSettings["models"] | undefined;
+    let changed: boolean;
+    if (role) {
+      if (value !== null && typeof value !== "string") return invalid(`${key} must be a string, not ${JSON.stringify(value)}`);
+      changed = this.settings.models[role] !== value;
+      this.settings.models[role] = value;
+    } else if (key in UI_DEFAULTS) {
+      if (key === "ui.mode" && value !== null && !["system", "light", "dark"].includes(String(value))) {
+        return invalid(`ui.mode must be one of system, light, dark, not ${JSON.stringify(value)}`);
+      }
+      if (key === "ui.notifications" && value !== null && typeof value !== "boolean") {
+        return invalid(`ui.notifications must be true or false, not ${JSON.stringify(value)}`);
+      }
+      changed = this.ui[key] !== (value ?? undefined);
+      if (value === null) delete this.ui[key];
+      else this.ui[key] = value;
+    } else {
+      return invalid(`${key} is not a setting Troupe knows; \`troupe config --explain\` lists them all`);
+    }
+
+    this.settings.exists = true;
+    const path = String(this.configJson()["path"]);
+    reply(ws, id, { ...this.configJson(), written: { key, scope, path } });
+    if (changed) this.announce([key]);
   }
 
   /**
@@ -712,7 +827,8 @@ export class FakeDaemon {
    * is the current one or one already answered (which forgets what came after), a key
    * is checked before anything is written — right when it looks like one, refused
    * otherwise — the settings are written at the models step, `auto_approve` at the
-   * workspace step, and `finish` records the run and starts the session.
+   * workspace step, the login entry (`atLogin`) at the daemon step, and `finish` records
+   * the run and starts the session.
    */
   private setupCall(ws: WebSocket, id: unknown, method: string, params: Record<string, unknown>): void {
     const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
@@ -816,6 +932,7 @@ export class FakeDaemon {
           models: { default: def, cheap, expensive: null },
         };
         advance({ default: def, cheap }, "workspace");
+        this.announce(["provider", "models.default", "models.cheap"]);
         break;
       }
       case "workspace": {
@@ -824,7 +941,13 @@ export class FakeDaemon {
         if (!this.directories.includes(workspace)) return invalid(`${workspace} is not a directory`);
         const approvals = answer["approvals"] ?? "ask";
         if (approvals !== "ask" && approvals !== "auto") return invalid(`approvals must be ask or auto, not ${JSON.stringify(approvals)}`);
-        advance({ workspace, approvals }, "finish");
+        advance({ workspace, approvals }, "daemon");
+        break;
+      }
+      case "daemon": {
+        if (typeof answer["at_login"] !== "boolean") return invalid("at_login must be true or false");
+        this.atLogin = answer["at_login"];
+        advance({ at_login: this.atLogin }, "finish");
         break;
       }
       case "finish": {
@@ -861,7 +984,7 @@ export class FakeDaemon {
       flow.answers["where"]?.["choice"] === "plane"
         ? ["where", "finish"]
         : typeof flow.answers["provider"]?.["reuse"] === "string"
-          ? ["where", "provider", "workspace", "finish"]
+          ? ["where", "provider", "workspace", "daemon", "finish"]
           : [...SETUP_STEPS];
     const config = this.configJson();
     return {
@@ -881,6 +1004,12 @@ export class FakeDaemon {
       suggested: flow.suggested,
       check: flow.check,
       suggested_prompt: this.suggestedPrompt(flow.answers["workspace"]?.["workspace"] as string | undefined),
+      daemon: {
+        at_login: this.atLogin,
+        kind: "systemd",
+        path: `/home/${this.osUser}/.config/systemd/user/troupe-daemon.service`,
+        command: `/home/${this.osUser}/.local/bin/troupe-daemon`,
+      },
       session: null,
     };
   }
@@ -1092,9 +1221,10 @@ export class FakeDaemon {
   private configJson(): Record<string, unknown> {
     const s = this.settings;
     const dir = `/home/${this.osUser}/.config/troupe`;
-    return {
+    const path = `${dir}/config.yaml`;
+    const answer: Record<string, unknown> = {
       config_dir: dir,
-      path: `${dir}/config.yaml`,
+      path,
       exists: s.exists,
       provider: s.provider,
       base_url: s.base_url,
@@ -1103,6 +1233,36 @@ export class FakeDaemon {
       api_key_source: s.api_key !== null ? "file" : null,
       models: { ...s.models },
       overrides: this.overrides,
+    };
+    if (!this.servesKeys) return answer;
+
+    // Every key the fake keeps, with where it came from (troupe #57): the file, or the default.
+    const key = (name: string, value: unknown, fallback: unknown, label: string) => ({
+      key: name,
+      value: value ?? fallback,
+      layer: value === undefined || value === null ? "default" : "user",
+      source: value === undefined || value === null ? null : path,
+      default: fallback,
+      scopes: ["user"],
+      secret: false,
+      label,
+      doc: null,
+    });
+    return {
+      ...answer,
+      workspace: null,
+      trusted: false,
+      files: [{ scope: "user", path, exists: s.exists }],
+      keys: [
+        key("models.default", s.models.default, "claude-sonnet-5", "model"),
+        key("models.cheap", s.models.cheap, null, "cheap model"),
+        key("models.expensive", s.models.expensive, null, "expensive model"),
+        key("ui.theme", this.ui["ui.theme"], UI_DEFAULTS["ui.theme"], "theme"),
+        key("ui.mode", this.ui["ui.mode"], UI_DEFAULTS["ui.mode"], "light or dark"),
+        key("ui.notifications", this.ui["ui.notifications"], UI_DEFAULTS["ui.notifications"], "notifications"),
+      ],
+      warnings: [],
+      errors: [],
     };
   }
 

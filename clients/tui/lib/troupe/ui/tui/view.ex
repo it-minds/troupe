@@ -898,10 +898,19 @@ defmodule Troupe.UI.TUI.View do
     %{settings: s} = state
     [list_rect, help_rect] = Layout.split(rect, :horizontal, [{:fill, 2}, {:fill, 3}])
 
+    # Each value with the layer that set it, when that is not the default: what the
+    # daemon says a session here would read (#57).
     items =
       Enum.map(Settings.fields(), fn field ->
-        value = Settings.format(s.config, field.key)
-        "#{String.pad_trailing(field.label, 26)} #{value}"
+        value = Settings.format(s.view, s.config, field.key)
+
+        from =
+          case Settings.layer(s.view, field.key) do
+            layer when layer in [nil, "default"] -> ""
+            layer -> "  · " <> layer
+          end
+
+        "#{String.pad_trailing(field.label, 26)} #{value}#{from}"
       end)
 
     list = %ExRatatui.Widgets.List{
@@ -910,7 +919,7 @@ defmodule Troupe.UI.TUI.View do
       highlight_symbol: "▸ ",
       highlight_style: selected(),
       block: %Block{
-        title: " settings — #{Settings.target_path(state.model.workspace)} ",
+        title: " settings — #{settings_title(s)} ",
         borders: [:all],
         border_type: :double
       }
@@ -957,6 +966,7 @@ defmodule Troupe.UI.TUI.View do
         field.label <> "  (" <> field.key <> ")",
         String.duplicate("─", String.length(field.label) + String.length(field.key) + 4),
         effect_line(field.effect),
+        where_line(s, field.key),
         ""
       ] ++ String.split(String.trim_trailing(field.help), "\n") ++ [""]
 
@@ -1174,12 +1184,27 @@ defmodule Troupe.UI.TUI.View do
         _ -> "Enter edits"
       end
 
-    {s.status || "", " settings — ↑↓ move · #{hint} · Esc back "}
+    {s.status || "", " settings — ↑↓ move · #{hint} · s where it goes · Esc back "}
   end
 
   defp settings_command_line(%{settings: %{editing: text} = s}) do
     field = Enum.at(Settings.fields(), s.cursor)
     {text <> "▏", " " <> (s.status || "#{field.key} = (Enter saves, Esc cancels)") <> " "}
+  end
+
+  # Where the selected setting's change goes: the scope and its file.
+  defp settings_title(s) do
+    field = Enum.at(Settings.fields(), s.cursor)
+    scope = Settings.target(s.view, field.key, s.scope)
+    "a change goes to #{scope}: #{Map.get(s.view.files, scope, "config.yaml")}"
+  end
+
+  defp where_line(s, key) do
+    case Settings.layer(s.view, key) do
+      nil -> "set by: unknown to this daemon"
+      "default" -> "set by: nobody; this is the default"
+      layer -> "set by: #{layer} (#{get_in(s.view.keys, [key, "source"])})"
+    end
   end
 
   defp effect_line(:now), do: "applies immediately"

@@ -6,7 +6,8 @@ defmodule Troupe.CLI do
       troupe --watch               TUI with watch mode on
       troupe --no-mouse            TUI without mouse reporting, so the terminal's own selection works
       troupe --full-send           start with every budget/token limit lifted for the session
-      troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--workspace DIR]
+      troupe --private             a private session, sealed to the plane you are signed in to
+      troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--private] [--workspace DIR]
       troupe resume [SESSION_ID]   no id: reopen the last session here, picker open
       troupe --remote [PLANE_URL]  open HQ: teams, profiles and sessions on a plane
       troupe login PLANE_URL       sign in to a plane with the device flow
@@ -21,7 +22,7 @@ defmodule Troupe.CLI do
       troupe config pull [PLANE_URL]  save the plane's default provider and models here (never a key)
       troupe models [--refresh]    list every model, its window and its price
       troupe doctor                check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure
-      troupe daemon [ARGS]         the local daemon: `run` (default), `status`, `config`, `models`, `version`
+      troupe daemon [ARGS]         the local daemon: `run` (default), `status`, `config`, `models`, `login on|off`, `version`
       troupe --version
   """
 
@@ -53,6 +54,7 @@ defmodule Troupe.CLI do
           auto_approve: boolean() | nil,
           full_send: boolean() | nil,
           watch: boolean() | nil,
+          private: boolean(),
           mouse: boolean() | nil,
           workspace: String.t(),
           session_id: String.t() | nil,
@@ -85,6 +87,7 @@ defmodule Troupe.CLI do
           auto_approve: :boolean,
           full_send: :boolean,
           watch: :boolean,
+          private: :boolean,
           mouse: :boolean,
           workspace: :string,
           version: :boolean,
@@ -109,6 +112,8 @@ defmodule Troupe.CLI do
       auto_approve: Keyword.get(opts, :auto_approve),
       full_send: Keyword.get(opts, :full_send),
       watch: Keyword.get(opts, :watch),
+      # Not a setting: `session.create` takes it beside the config, and no file says it.
+      private: Keyword.get(opts, :private, false),
       # nil, not false: no flag means "whatever the `mouse` setting says".
       mouse: Keyword.get(opts, :mouse),
       workspace: Path.expand(Keyword.get(opts, :workspace, File.cwd!())),

@@ -11,8 +11,12 @@ defmodule Troupe.Commands do
   command; the TUI's suite holds its set of built-ins equal to this one.
 
   Agents are in the table too, in a section of their own, described by their
-  definition's `description` rather than pretending to be built-ins. The maps are keyed
-  by strings because they go on the wire as they are.
+  definition's `description` rather than pretending to be built-ins. So are the commands
+  a person or a repository writes as markdown files (`Troupe.Commands.Local`, Decision
+  763), in the `custom` section with `source` `user` or `project`: a client lists them
+  like any other row and runs one by asking the harness (`commands.run`), which sends its
+  prompt as the session's input. The maps are keyed by strings because they go on the
+  wire as they are.
 
   `availability` is a requirement the client judges, not a verdict: `always`; `window`
   (acts on a window: the activated one, or one named as an argument); `local` (a session
@@ -22,6 +26,9 @@ defmodule Troupe.Commands do
   """
 
   alias Troupe.Agent.Definition
+  alias Troupe.Commands.Local
+
+  require Logger
 
   @typedoc "One command as `commands.list` lists it."
   @type entry :: %{String.t() => term()}
@@ -29,7 +36,7 @@ defmodule Troupe.Commands do
   @typedoc "One argument, for completion and for the usage line."
   @type arg :: %{String.t() => term()}
 
-  @sections ~w(session navigate workspace setup agents quit)
+  @sections ~w(session navigate workspace setup agents custom quit)
 
   @doc "The sections, in the order a palette shows them."
   @spec sections() :: [String.t()]
@@ -37,16 +44,61 @@ defmodule Troupe.Commands do
 
   @doc """
   Every command available in a session: the built-ins, then one entry per primary agent
-  in `agents:` (the definitions `agents.list` answers with), grouped by section in the
-  order `sections/0` gives.
+  in `agents:` (the definitions `agents.list` answers with), then, given a `workspace:`,
+  the commands files define for it (`defined/1`), grouped by section in the order
+  `sections/0` gives.
   """
   @spec list(keyword()) :: [entry()]
   def list(opts \\ []) do
     agents = opts |> Keyword.get(:agents, []) |> Enum.map(&agent/1)
+    defined = opts |> defined() |> Enum.map(&defined_entry/1)
 
     Enum.flat_map(@sections, fn section ->
-      Enum.filter(builtins() ++ agents, &(&1["section"] == section))
+      Enum.filter(builtins() ++ agents ++ defined, &(&1["section"] == section))
     end)
+  end
+
+  @doc """
+  The commands files define for a session in `workspace:`, the workspace's and the
+  user's (`Troupe.Commands.Local`; `user_dir:` names the user's directory), less any
+  whose name a built-in, an alias or one of the session's `agents:` already has. A name
+  in the table is one command, and a built-in is code in each client that a person's
+  fingers know: a file, which may have come with a clone, does not get to make `/merge`
+  send a prompt instead. Without a workspace, none.
+  """
+  @spec defined(keyword()) :: [Local.command()]
+  def defined(opts) do
+    case Keyword.get(opts, :workspace) do
+      nil ->
+        []
+
+      workspace ->
+        taken = opts |> Keyword.get(:agents, []) |> taken()
+        workspace |> Local.list(opts) |> Enum.reject(&shadowed?(&1, taken))
+    end
+  end
+
+  @doc "The prompt a defined command sends, given what was typed after its name."
+  @spec expand(Local.command(), String.t() | nil) :: String.t()
+  defdelegate expand(command, arguments), to: Local
+
+  defp taken(agents) do
+    builtins()
+    |> Enum.flat_map(&[&1["name"] | &1["aliases"]])
+    |> Enum.concat(Enum.map(agents, & &1.name))
+    |> MapSet.new()
+  end
+
+  defp shadowed?(command, taken) do
+    if MapSet.member?(taken, command.name) do
+      Logger.warning(
+        "troupe: skipping command #{command.path}: /#{command.name} is a built-in's or an agent's"
+      )
+
+      true
+    else
+      false
+    end
   end
 
   @doc "The built-in commands alone, in section order."
@@ -255,6 +307,36 @@ defmodule Troupe.Commands do
     )
   end
 
+  # A command a file defines is summarised by its description, or by its prompt's first
+  # line where it has none, and says which file it is, since that is where to change it.
+  # It takes what follows its name when its file says so, and never insists on it.
+  defp defined_entry(command) do
+    summary = first_line(command.description) || first_line(command.body)
+    described = if command.description == "", do: summary, else: command.description
+
+    file =
+      if command.layer == :project,
+        do: Path.join([".troupe", "commands", Path.basename(command.path)]),
+        else: command.path
+
+    {usage, args} =
+      cond do
+        command.hint -> {"/#{command.name} #{command.hint}", [arguments()]}
+        Local.takes_arguments?(command) -> {"/#{command.name} [arguments]", [arguments()]}
+        true -> {"/" <> command.name, []}
+      end
+
+    entry(command.name, "custom", summary,
+      usage: usage,
+      args: args,
+      source: Atom.to_string(command.layer),
+      detail: "#{described}\n\nFrom #{Troupe.Paths.display(file)}."
+    )
+  end
+
+  defp first_line(text),
+    do: text |> String.split("\n") |> Enum.map(&String.trim/1) |> Enum.find(&(&1 != ""))
+
   defp entry(name, section, summary, opts) do
     %{
       "name" => name,
@@ -273,4 +355,5 @@ defmodule Troupe.Commands do
   defp arg(name, required?, kind), do: %{"name" => name, "required" => required?, "kind" => kind}
   defp window, do: arg("window", false, "window")
   defp prompt, do: arg("prompt", true, "text")
+  defp arguments, do: arg("arguments", false, "text")
 end

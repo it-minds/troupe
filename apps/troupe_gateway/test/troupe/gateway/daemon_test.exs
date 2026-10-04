@@ -110,6 +110,33 @@ defmodule Troupe.Gateway.DaemonTest do
       Client.close(linked)
     end
 
+    # Issue #365. A daemon seals a private session through its plane — the plane signs
+    # every object's URL — and holds no object-store configuration of its own, as an
+    # installed one does not. Somewhere to seal to is the plane the link names.
+    test "private_sessions is true for a daemon linked at a plane, with no object store of its own",
+         context do
+      store = Application.get_env(:troupe_protocol, :object_store)
+      Application.delete_env(:troupe_protocol, :object_store)
+      on_exit(fn -> Application.put_env(:troupe_protocol, :object_store, store) end)
+
+      {:ok, _identity} =
+        Troupe.Identity.link(%{subject: "idp|ada", display_name: "Ada"}, context.state_dir)
+
+      nowhere = connect(context)
+      assert Client.info(nowhere).capabilities["private_sessions"] == false
+      Client.close(nowhere)
+
+      {:ok, _identity} =
+        Troupe.Identity.link(
+          %{subject: "idp|ada", display_name: "Ada", plane_url: "https://plane.example"},
+          context.state_dir
+        )
+
+      linked = connect(context)
+      assert Client.info(linked).capabilities["private_sessions"] == true
+      Client.close(linked)
+    end
+
     test "a version the server cannot speak is refused, with what it can", context do
       {address, port} = Endpoint.connect_args(context.endpoint)
 

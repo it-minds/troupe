@@ -81,6 +81,9 @@ defmodule Troupe.Client.Remote do
   def send_input(sid, _path, text), do: describe(Worker.input(sid, text))
 
   @impl true
+  def run_command(sid, name, arguments), do: describe(Worker.run_command(sid, name, arguments))
+
+  @impl true
   def approve(sid, call_id, decision), do: describe(Worker.approve(sid, call_id, decision))
 
   # The contract has no question method: an answer is input, which is how a
@@ -144,7 +147,10 @@ defmodule Troupe.Client.Remote do
   def discard(_sid, _path), do: {:error, "a remote session has no local worktree to discard"}
 
   @impl true
-  def put_setting(_sid, _key, _value),
+  def settings(_sid), do: {:error, "settings for a remote session belong to its plane"}
+
+  @impl true
+  def put_setting(_sid, _key, _value, _scope),
     do: {:error, "settings for a remote session belong to its plane"}
 
   @impl true

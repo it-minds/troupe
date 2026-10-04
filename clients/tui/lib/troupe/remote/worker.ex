@@ -43,8 +43,9 @@ defmodule Troupe.Remote.Worker do
   @max_tries 10
   # What is sent through `activating/4`: the commands that wake a session, and the only
   # ones sent again after a pod said it does not hold the session.
-  @activating ~w(input.send approval.respond question.answer todo.edit profile.switch
-                 session.goal.set session.goal.clear session.loop.start fs.upload)
+  @activating ~w(input.send commands.run approval.respond question.answer todo.edit
+                 profile.switch session.goal.set session.goal.clear session.loop.start
+                 fs.upload)
 
   @type mode :: :read | :activate
 
@@ -77,6 +78,14 @@ defmodule Troupe.Remote.Worker do
   @doc "Sends user input, rendering it optimistically before the server has seen it."
   @spec input(String.t(), String.t()) :: :ok | {:error, term()}
   def input(session_id, text), do: call(session_id, {:input, text})
+
+  @doc """
+  Runs a command a markdown file defines (`commands.run`): the harness sends the file's
+  prompt as input, and the line arrives as the session's own events. Activating.
+  """
+  @spec run_command(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  def run_command(session_id, name, arguments),
+    do: call(session_id, {:run_command, name, arguments})
 
   @doc "Cancels the current turn."
   @spec cancel(String.t()) :: :ok | {:error, term()}
@@ -292,6 +301,21 @@ defmodule Troupe.Remote.Worker do
     })
 
     activating(state, from, "input.send", %{text: text, command_id: command})
+  end
+
+  def handle_call({:run_command, _name, _arguments}, _from, %{session_state: :read_only} = state),
+    do: {:reply, {:error, :read_only}, state}
+
+  # Nothing is drawn ahead of the server here: the prompt is the file's, which only the
+  # harness reads, and its `user_input` draws the line when it comes back.
+  def handle_call({:run_command, name, arguments}, from, state) do
+    state = ensure_window(state)
+
+    activating(state, from, "commands.run", %{
+      name: name,
+      arguments: arguments,
+      command_id: RPC.command_id()
+    })
   end
 
   def handle_call(:cancel, from, state),

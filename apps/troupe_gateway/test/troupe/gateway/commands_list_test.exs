@@ -114,9 +114,10 @@ defmodule Troupe.Gateway.CommandsListTest do
     assert by_name["build"]["section"] == "agents"
     refute Map.has_key?(by_name, "explore")
 
-    # Sections come in their order, each one contiguous.
+    # Sections come in their order, each one contiguous; with no command files there is
+    # no custom section.
     sections = commands |> Enum.map(& &1["section"]) |> Enum.dedup()
-    assert sections == Troupe.Commands.sections()
+    assert sections == Troupe.Commands.sections() -- ["custom"]
 
     # The same agents `agents.list` offers, so a palette and a session picker agree.
     {:ok, %{"agents" => agents}} =
@@ -163,6 +164,107 @@ defmodule Troupe.Gateway.CommandsListTest do
     agents = for %{"source" => "agent"} = command <- commands, do: command
 
     assert [%{"name" => "triage", "summary" => "Sorts the team's incoming issues."}] = agents
+  end
+
+  # A command a repository defines (Decision 763): `.troupe/commands/review.md` is
+  # `/review`, listed with its description in a section of its own, and running it sends
+  # its prompt as the session's input.
+  describe "a command a file defines" do
+    setup context do
+      File.mkdir_p!(Path.join(context.workspace, ".troupe/commands"))
+
+      File.write!(Path.join(context.workspace, ".troupe/commands/review.md"), """
+      ---
+      description: Review the change on this branch
+      argument-hint: <what to look at>
+      ---
+      Review the change on this branch. Look hardest at $ARGUMENTS.
+      """)
+
+      :ok
+    end
+
+    test "is listed in the custom section, described by its file", context do
+      session = start_session(context)
+
+      {:ok, %{"commands" => commands}} =
+        Client.call(context.client, "commands.list", %{"session_id" => session.id})
+
+      assert %{
+               "section" => "custom",
+               "source" => "project",
+               "summary" => "Review the change on this branch",
+               "usage" => "/review <what to look at>",
+               "availability" => "always"
+             } = Enum.find(commands, &(&1["name"] == "review"))
+
+      assert commands |> Enum.map(& &1["section"]) |> Enum.dedup() == Troupe.Commands.sections()
+    end
+
+    test "commands.run sends its prompt, $ARGUMENTS replaced, as the session's input", context do
+      session = start_session(context)
+      command_id = Client.command_id()
+
+      assert {:ok, %{"accepted" => true, "command_id" => ^command_id}} =
+               Client.call(context.client, "commands.run", %{
+                 "command_id" => command_id,
+                 "session_id" => session.id,
+                 "name" => "review",
+                 "arguments" => "the parser"
+               })
+
+      input =
+        eventually(fn -> Enum.find(Troupe.events(session.id), &(&1.type == "user_input")) end)
+
+      assert input.data["text"] ==
+               "Review the change on this branch. Look hardest at the parser."
+
+      assert input.data["command_id"] == command_id
+      assert input.actor.kind == :user
+    end
+
+    test "commands.run runs only what a file defines", context do
+      session = start_session(context)
+
+      run =
+        &Client.call(
+          context.client,
+          "commands.run",
+          Map.merge(%{"command_id" => Client.command_id(), "session_id" => session.id}, &1)
+        )
+
+      # A built-in is the client's to run, and a name nobody defined is nobody's.
+      for name <- ["merge", "build", "nope"] do
+        assert {:error,
+                %Error{message: "not_found", data: %{"kind" => "command", "name" => ^name}}} =
+                 run.(%{"name" => name})
+      end
+
+      assert {:error, %Error{message: "invalid_params", data: %{"missing" => "name"}}} = run.(%{})
+
+      assert {:error, %Error{message: "invalid_params", data: %{"field" => "arguments"}}} =
+               run.(%{"name" => "review", "arguments" => 3})
+
+      refute Enum.any?(Troupe.events(session.id), &(&1.type == "user_input"))
+    end
+
+    test "running one takes what input takes" do
+      assert Dispatch.methods()["commands.run"] == :control
+    end
+  end
+
+  defp eventually(fun, tries \\ 100) do
+    case fun.() do
+      nil when tries > 0 ->
+        Process.sleep(50)
+        eventually(fun, tries - 1)
+
+      nil ->
+        flunk("condition not met")
+
+      value ->
+        value
+    end
   end
 
   test "reading the table needs a session id and an existing session", context do

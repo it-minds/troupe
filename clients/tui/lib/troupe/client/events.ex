@@ -31,4 +31,24 @@ defmodule Troupe.Client.Events do
   def notify(session_id, agent_path, type, data) do
     publish(Event.transient(session_id, agent_path, type, data))
   end
+
+  # Not a session's: what the daemon says about the machine's settings files.
+  @settings :settings
+
+  @doc "Hear `{:troupe_settings_changed, params}` for every `config.changed` the daemon sends."
+  @spec subscribe_settings() :: :ok
+  def subscribe_settings do
+    case Registry.register(__MODULE__, @settings, nil) do
+      {:ok, _} -> :ok
+      {:error, {:already_registered, _}} -> :ok
+    end
+  end
+
+  @doc "Hands a `config.changed` to everybody listening."
+  @spec settings_changed(map()) :: :ok
+  def settings_changed(params) do
+    Registry.dispatch(__MODULE__, @settings, fn entries ->
+      for {pid, _} <- entries, do: send(pid, {:troupe_settings_changed, params})
+    end)
+  end
 end

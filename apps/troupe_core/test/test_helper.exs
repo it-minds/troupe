@@ -18,6 +18,23 @@ File.write!(
 System.delete_env("TROUPE_STATE_HOME")
 System.at_exit(fn _ -> File.rm_rf!(config_home) end)
 
+# Starting the daemon at login (Decision 762) writes into the person's own login items:
+# here into a scratch home instead, for every test that reaches it through the first
+# run's questions, starting a `troupe-daemon` that need not exist.
+login_home =
+  Path.join(System.tmp_dir!(), "troupe-test-login-#{System.unique_integer([:positive])}")
+
+Application.put_env(:troupe_core, :start_at_login,
+  env: %{
+    "HOME" => login_home,
+    "APPDATA" => Path.join(login_home, "AppData"),
+    "XDG_CONFIG_HOME" => Path.join(login_home, ".config")
+  },
+  command: "/opt/troupe/bin/troupe-daemon"
+)
+
+System.at_exit(fn _ -> File.rm_rf!(login_home) end)
+
 # Logger output is noise here: the suite asserts on events and telemetry, never on
 # log lines, and the crashing-agent tests would otherwise print stacktraces that
 # look like failures.

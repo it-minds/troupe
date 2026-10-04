@@ -36,7 +36,7 @@ defmodule Troupe.Client.Daemon do
 
   alias Troupe.Client.Daemon.Link
   alias Troupe.Client.Events
-  alias Troupe.{Config, Settings}
+  alias Troupe.Config
   alias Troupe.Remote.{Branch, Capability, Journal, Worker}
 
   require Logger
@@ -163,6 +163,11 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def send_input(sid, path, text), do: route(sid, path, &Worker.input(&1, text))
 
+  # A command a file defines goes to this session, whatever window is activated: it is
+  # the session's table that listed it.
+  @impl true
+  def run_command(sid, name, arguments), do: describe(Worker.run_command(sid, name, arguments))
+
   @impl true
   def approve(sid, call_id, decision),
     do: describe(Worker.approve(call_target(sid, call_id), call_id, decision))
@@ -281,20 +286,46 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
-  # Settings live in the config files the daemon reads at session start. `watch` is the
+  # Settings are the daemon's to read and write (#57): `config.get` for this session's
+  # workspace, and `config.set` of one key into the scope the page names. `watch` is the
   # one a running session can take, through the protocol.
   @impl true
-  def put_setting(sid, key, value) do
-    workspace = workspace(sid)
-
-    with {:ok, path} <- Settings.persist(workspace, key, value),
-         :ok <- apply_live(sid, key, value) do
-      case Config.resolve(workspace) do
-        {:ok, config, _layers} -> {:ok, config, path}
-        {:error, error} -> {:error, "saved to #{path}, but " <> Exception.message(error)}
-      end
+  def settings(sid) do
+    case Link.call("config.get", %{workspace: workspace(sid)}) do
+      {:ok, %{} = answer} -> {:ok, answer}
+      {:ok, other} -> {:error, "unexpected config.get answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
     end
   end
+
+  # A daemon from before #57 reads a `config.set` with no `provider` as the model panel's
+  # and would write the default provider, so it is not asked to set one key.
+  @impl true
+  def put_setting(sid, key, value, scope) do
+    params = %{
+      key: key,
+      value: value,
+      scope: scope,
+      workspace: workspace(sid),
+      command_id: Troupe.Remote.RPC.command_id()
+    }
+
+    with {:ok, current} <- settings(sid),
+         :ok <- serves_keys(current),
+         {:ok, answer} <- Link.call("config.set", params),
+         :ok <- apply_live(sid, key, value) do
+      {:ok, answer}
+    else
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  defp serves_keys(%{"keys" => keys}) when is_list(keys), do: :ok
+
+  defp serves_keys(_answer),
+    do:
+      {:error,
+       "the daemon answering is older than this troupe and cannot set one setting; start this version's"}
 
   defp apply_live(sid, "watch", enabled?) when is_boolean(enabled?) do
     case watch(sid, enabled?) do
@@ -619,7 +650,8 @@ defmodule Troupe.Client.Daemon do
   `params`: `profile`, `prompt`, `worktree` (`"auto"`, `"never"`, `"always"`), a
   `config` map of what a client may set — `auto_approve`, `watch`, `full_send` — and
   `refresh_brief: false` for a session that must not start the librarian beside itself,
-  such as a headless run's.
+  such as a headless run's. `private: true` asks for a private session, which the daemon
+  seals to the plane it is linked at, with the token this machine hands it (issue #365).
   """
   @impl true
   def create_session({:local, workspace} = origin, params) do
@@ -630,6 +662,7 @@ defmodule Troupe.Client.Daemon do
         prompt: blank_to_nil(params[:prompt]),
         worktree: params[:worktree] || "never",
         config: params[:config] || %{},
+        private: if(params[:private] == true, do: true),
         command_id: Troupe.Remote.RPC.command_id()
       }
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)

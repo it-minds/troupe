@@ -30,6 +30,8 @@ defmodule Troupe.Remote.Auth do
         }
 
   @type tokens :: %{
+          optional(:subject) => String.t() | nil,
+          optional(:display_name) => String.t() | nil,
           access_token: String.t(),
           refresh_token: String.t() | nil,
           expires_at: integer() | nil,
@@ -156,7 +158,10 @@ defmodule Troupe.Remote.Auth do
            refresh_token: nil,
            id_token: nil,
            scope: nil,
-           expires_at: seconds_to_ms(body["expires_at"]) || expiry(token)
+           expires_at: seconds_to_ms(body["expires_at"]) || expiry(token),
+           # Who the plane says the token is for, which is what the daemon is linked as.
+           subject: body["subject"],
+           display_name: body["display_name"]
          }}
 
       {:ok, other} ->

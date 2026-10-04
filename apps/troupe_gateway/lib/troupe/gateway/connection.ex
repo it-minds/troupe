@@ -181,6 +181,13 @@ defmodule Troupe.Gateway.Connection do
     {:noreply, %{state | principal: principal}}
   end
 
+  # Something the daemon tells every client, about no one session: a settings file it
+  # writes has changed (`config.changed`). Like `auth.expiring`, a control message, never
+  # dropped; an ACP client has no word for it.
+  def handle_info({:notify, method, params}, %{initialized?: true, protocol: :troupe} = state) do
+    {:noreply, send_control(state, {:notification, method, params})}
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
 
   defp read(data, state) do
@@ -562,7 +569,7 @@ defmodule Troupe.Gateway.Connection do
     }
   end
 
-  defp capabilities(state) do
+  defp capabilities(_state) do
     %{
       "worktrees" => true,
       # A session may be created as a branch of another (`session.create` with
@@ -571,7 +578,7 @@ defmodule Troupe.Gateway.Connection do
       "branches" => true,
       "watch" => true,
       "remote" => false,
-      "private_sessions" => private_sessions?(state)
+      "private_sessions" => private_sessions?()
     }
   end
 
@@ -580,15 +587,17 @@ defmodule Troupe.Gateway.Connection do
   # person the daemon can name — `local:<username>` means nothing to a plane or to
   # another device — and somewhere to seal to. A client that offered the checkbox on a
   # daemon with neither would be offering a session that silently stayed local.
-  defp private_sessions?(state) do
-    linked?(state) and Application.get_env(:troupe_protocol, :object_store) != nil
+  #
+  # Somewhere to seal to is the plane the link names. A daemon writes through the URLs
+  # that plane signs and holds no object-store configuration of its own, which an
+  # installed one never has (Decision 764). Whether it holds a token yet is not asked: one
+  # with none seals once a client hands it one, and loses nothing meanwhile.
+  defp private_sessions? do
+    match?(
+      %Troupe.Identity{plane_url: url} when is_binary(url) and url != "",
+      Troupe.Identity.get()
+    )
   end
-
-  # `Troupe.Identity.principal/2` puts `linked` on the map when a subject has been
-  # recorded, so the answer is already in hand for a connection that has initialised;
-  # the disk read is for the one that has not.
-  defp linked?(%{principal: %{"linked" => true}}), do: true
-  defp linked?(_state), do: Troupe.Identity.get() != nil
 
   defp maybe_put_expiry(result, %{auth: %{expires_at: expires_at}}) when is_integer(expires_at) do
     Map.put(result, "auth", %{"expires_at" => expires_at})

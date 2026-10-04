@@ -194,6 +194,19 @@ defmodule Troupe.Config.Layers do
     end
   end
 
+  @doc """
+  Check a map as `check/2` checks a file, before anything is written: what a client
+  sets through the daemon (`Troupe.Config.Settings.set/4`) is held to what the loader
+  would take back.
+  """
+  @spec check_map(Troupe.Config.Layers.layer(), map()) :: %{warnings: [Issue.t()], errors: [Issue.t()]}
+  def check_map(layer, map) when is_map(map) do
+    checked =
+      check_file(layer, nil, stringify_keys(map), nil, %{trusted?: true, pod?: false, user_path: nil, workspace: nil})
+
+    %{warnings: checked.warnings, errors: checked.errors}
+  end
+
   @doc false
   @spec parse(Path.t()) :: :absent | {:ok, map(), String.t()} | {:error, Issue.t()}
   def parse(path) do
