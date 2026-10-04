@@ -19,6 +19,7 @@ import { chooseLocalOnly, storedLocalOnly } from "./mode";
 import type { AppMode } from "./mode";
 import { useNotifications } from "./notify";
 import { capabilities, likelyPlaneUrl, prefs } from "./shell";
+import { useSharedPrefs } from "./shared";
 import { hasChosen, markChosen, useAppearance } from "./theme";
 import { Approvals } from "./views/Approvals";
 import { Launcher, opensOnLauncher } from "./views/Launcher";
@@ -76,6 +77,8 @@ export function App(): JSX.Element {
   const [where, setWhere] = useState<Where>(startScreen);
   // Given the sign-in, so the daemon is handed the plane token it seals with (#365).
   const daemon = useDaemon(auth);
+  // The theme, light or dark and notifications follow the person through the daemon (troupe #57).
+  useSharedPrefs(daemon.client);
   const { snapshot, store, refresh } = useFleet(auth, daemon.client);
   // Only the Review screen still needs it: `admin.runs.list` is how a reviewer finds
   // the runs nobody has looked at. Administration itself is the console's, at /admin.

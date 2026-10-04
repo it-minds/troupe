@@ -138,6 +138,12 @@ defmodule Troupe.Client.Daemon.Link do
     {:noreply, %{state | client: nil, error: reason}}
   end
 
+  # A settings file the daemon writes changed, from this client or another (#57).
+  def handle_info({:troupe_notification, "config.changed", params}, state) do
+    Troupe.Client.Events.settings_changed(params)
+    {:noreply, state}
+  end
+
   # The token is due for renewal, or a hand-over failed for want of the plane. A daemon
   # this process is not connected to is handed one when it next is.
   def handle_info(:hand_over, %{client: client} = state) when is_pid(client),

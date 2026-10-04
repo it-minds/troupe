@@ -932,27 +932,47 @@ tools are `mcp.<server>.<tool>` like every other MCP tool.
 `.troupe/workflows/<name>.json` files in the workspace, each a JSON array of
 `{"name", "prompt", "agent"?, "parallel"?}` steps.
 
-#### `config.get`, `config.models`, `config.set`, `config.import`
+#### `config.get`, `config.models`, `config.set`, `config.import`, and `config.changed`
 
-The machine's own model settings — the provider, key and models every local session
-starts from — for a settings screen. **The daemon's only**: a worker answers
-`method_not_found`, because a pod's provider is its profile's business — or `forbidden` to
-a token for one session, like every method not about its session (§7). They edit one file,
-the user's `config.yaml` in the daemon's config directory; a client never names a path,
-because the daemon is the process whose environment decides which file a session reads.
+The machine's own settings — the provider, key and models every local session starts
+from, and every other key of `config.yaml` — for a settings screen, so the desktop app and
+the terminal UI show and change the same settings (#57). **The daemon's only**: a worker
+answers `method_not_found`, because a pod's provider is its profile's business — or
+`forbidden` to a token for one session, like every method not about its session (§7).
+They edit `config.yaml` at the scopes of the configuration ladder: the user's file in the
+daemon's config directory (`user`), a workspace's `.troupe/config.yaml` (`project`) and its
+git-ignored `.troupe/config.local.yaml` (`local`). A client names a scope and never a
+path, because the daemon is the process whose environment decides which file a session
+reads. There is no second settings file.
 
 ```json
 {"workspace": "/home/me/project"}
 ```
 `config.get` (`observe`; `workspace` optional) → `{"config_dir", "path", "exists",
 "provider", "base_url", "auth", "api_key_set", "api_key_source", "models": {"default",
-"cheap", "expensive"}, "overrides": [{"source", "detail"}]}` — what the **file** says,
-since that is what saving changes. The key is never in the answer: `api_key_set` says
-whether one is in force and `api_key_source` where from (`file`, `env`, `opencode` or
-null). `overrides` names what beats the file anyway: a project's `.troupe/config.yaml`
-(only when `workspace` is given), a `TROUPE_*` variable, or the opencode fallback that
-applies while no key is saved. `config_dir` and `path` are written as a person on the
-daemon's platform writes them, for a screen to print.
+"cheap", "expensive"}, "overrides": [{"source", "detail"}], "workspace", "trusted",
+"files", "keys", "warnings", "errors"}`. The first fields are what the user's **file**
+says, since that is what the model panel's save changes. The key is never in the answer:
+`api_key_set` says whether one is in force and `api_key_source` where from (`file`, `env`,
+`opencode` or null). `overrides` names what beats the file anyway: a project's
+`.troupe/config.yaml` (only when `workspace` is given), a `TROUPE_*` variable, or the
+opencode fallback that applies while no key is saved. `config_dir` and `path` are written
+as a person on the daemon's platform writes them, for a screen to print.
+
+`keys` is every key the schema knows (`protocol/schema/config/v1.json`), as a session in
+`workspace` would read it (`troupe config --explain`): `{"key", "value", "layer",
+"source", "default", "scopes", "secret", "label", "doc"}`. `layer` is the one that set the
+value in effect — `default`, `user`, `project`, `local`, `env`, `cli` or `opencode` — and
+`source` its file or variable. A secret's `value` is `****`, or the `{env:VAR}` a file
+wrote when the variable is not set; never the secret. `scopes` are the scopes `config.set`
+writes the key to here: only `user` without a workspace, for the trust list, and for a key
+marked trusted while the workspace is not; none for `version` and `$schema`. `label` is
+the name a settings page shows the key by and `doc` its help, the same in both clients and
+in the generated reference. `files` is each scope's file, `{"scope", "path", "exists"}`;
+`trusted` whether the workspace is; `warnings` what loading warned about. A file that is
+refused leaves `keys` empty and says why in `errors`. These fields were added for #57; a
+daemon from before answers without them, and a client that finds no `keys` sets no single
+key (below).
 
 ```json
 {"provider": "openai", "base_url": "https://llm-gw.example/v1", "api_key": "sk-...", "auth": "bearer"}
@@ -968,15 +988,46 @@ because it sends a key to a URL of the caller's choosing.
 {"command_id": "c-12", "provider": "openai", "base_url": "https://llm-gw.example/v1",
  "auth": "bearer", "api_key": "sk-...", "models": {"default": "glm-5.2", "cheap": "qwen3.6-35b"}}
 ```
-`config.set` (`admin`) → the `config.get` answer after the write. `provider` is
-`anthropic` or `openai` (anything speaking Chat Completions), or `fake`, the scripted
-model a packaged build is tried with. An absent `api_key` keeps
+`config.set` (`admin`) → the `config.get` answer after the write. With `provider` it is
+the model panel's save, into the user's file: `provider` is `anthropic` or `openai`
+(anything speaking Chat Completions), or `fake`, the scripted model a packaged build is
+tried with. An absent `api_key` keeps
 the saved one and `""` removes it; a `base_url` of null or `""` removes it; a model role
 set to null is removed. Only the lines of the keys it sets change: every other line of
 the file, comments included, stays as it was, and the file before the save is kept as
 `config.yaml.previous`. A file
 that does not parse is never overwritten — the call fails with `invalid_params`. The
 next session reads the new file; nothing restarts.
+
+```json
+{"command_id": "c-14", "key": "models.default", "value": "gateway/glm-5.2", "scope": "user"}
+```
+With `key` it sets one key, by its name (`models.default`, `ui.theme`; an old spelling is
+written by its new name), or with `path` by its path as a list, for a name under a map
+that has a dot in it (`["models", "prices", "gpt-4.1"]`). `value` is the key's value as
+JSON, and null takes the key out of that file so the layer below shows through. `scope`
+is `user` (the default), `project` or `local`; the last two need `workspace`. The answer
+carries `"written": {"key", "scope", "path"}`. It is refused with `invalid_params` and the
+reason, and nothing written, for a key the schema does not know (with the nearest one
+that it does), `version` and `$schema`, which the writer keeps, a value the loader would
+refuse or warn about, a scope that may not set the key — `trusted_workspaces` outside the
+user's file, a key marked trusted in the project or local file of a workspace that is not
+trusted, which names `troupe config trust` — and a file that does not parse. The same
+writer, so the same lines change and the same `.previous` is kept.
+
+`config.changed` (a notification, server → client) is sent to every client attached once
+a `config.set`, a `config.import` or a `setup.answer` has changed a settings file, the
+client that made the change included, so a screen in one client shows what another set:
+
+```json
+{"jsonrpc": "2.0", "method": "config.changed",
+ "params": {"scope": "user", "path": "/home/me/.config/troupe/config.yaml", "keys": ["models.default"]}}
+```
+`keys` are the keys whose values differ in that file, read before and after the write; a
+save that changed nothing sends nothing. `workspace` is there for `project` and `local`.
+A client reads `config.get` again for the values. A file edited by hand is not announced:
+the daemon reads the files when a session starts and at every `config.get`, so nothing
+of its own is stale, and a screen sees the edit the next time it asks.
 
 ```json
 {"command_id": "c-13", "from": "opencode"}

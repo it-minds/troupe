@@ -147,7 +147,10 @@ defmodule Troupe.Client.Remote do
   def discard(_sid, _path), do: {:error, "a remote session has no local worktree to discard"}
 
   @impl true
-  def put_setting(_sid, _key, _value),
+  def settings(_sid), do: {:error, "settings for a remote session belong to its plane"}
+
+  @impl true
+  def put_setting(_sid, _key, _value, _scope),
     do: {:error, "settings for a remote session belong to its plane"}
 
   @impl true

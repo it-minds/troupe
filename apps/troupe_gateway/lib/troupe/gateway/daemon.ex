@@ -115,4 +115,15 @@ defmodule Troupe.Gateway.Connections do
     |> DynamicSupervisor.which_children()
     |> Enum.flat_map(fn {_, pid, _, _} -> if is_pid(pid), do: [pid], else: [] end)
   end
+
+  @doc """
+  Tell every attached client something that is about none of their sessions, as a
+  notification: `config.changed` (#57). A connection that has not initialised, or speaks
+  ACP, lets it go.
+  """
+  @spec broadcast(String.t(), map()) :: :ok
+  def broadcast(method, params) do
+    if Process.whereis(__MODULE__), do: Enum.each(list(), &send(&1, {:notify, method, params}))
+    :ok
+  end
 end
