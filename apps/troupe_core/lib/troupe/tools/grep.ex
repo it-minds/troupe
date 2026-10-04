@@ -22,8 +22,10 @@ defmodule Troupe.Tools.Grep do
   def description do
     """
     Search file contents with a regular expression. Returns `path:line: text` for
-    each match. Narrow with `glob` (e.g. `**/*.ex`) or `path`. Ignored files and
-    .git are skipped. Prefer this over reading whole files to find something.
+    each match. Narrow with `path`, a directory or one file, or with `glob`, a
+    pattern of file names: check what the files are really called before narrowing
+    by their extension. Ignored files and .git are skipped. Prefer this over reading
+    whole files to find something.
     """
   end
 
@@ -33,7 +35,10 @@ defmodule Troupe.Tools.Grep do
       "type" => "object",
       "properties" => %{
         "pattern" => %{"type" => "string", "description" => "Regular expression to search for."},
-        "path" => %{"type" => "string", "description" => "Directory to search within."},
+        "path" => %{
+          "type" => "string",
+          "description" => "A directory to search within, or one file to search."
+        },
         "glob" => %{"type" => "string", "description" => "Only search files matching this glob."},
         "case_sensitive" => %{"type" => "boolean", "description" => "Defaults to false."}
       },
@@ -45,24 +50,32 @@ defmodule Troupe.Tools.Grep do
   def default_permission, do: :auto
 
   @impl Troupe.Tool
-  def run(args, ctx) do
+  def run(args, ctx), do: search(args, ctx, ripgrep_path())
+
+  @doc false
+  # `rg` is ripgrep's path, or `nil` for the built-in scan: a test takes each.
+  def search(args, ctx, rg) do
     with {:ok, pattern} <- Tool.fetch_string(args, "pattern"),
          {:ok, root} <-
-           Workspace.resolve_readable(ctx.workspace, Map.get(args, "path") || ".", Workspace.read_roots(ctx)) do
+           Workspace.resolve_readable(
+             ctx.workspace,
+             Map.get(args, "path") || ".",
+             Workspace.read_roots(ctx)
+           ) do
       opts = %{
         glob: Map.get(args, "glob"),
         case_sensitive: Map.get(args, "case_sensitive", false)
       }
 
       matches =
-        case ripgrep_path() do
+        case rg do
           nil -> builtin_search(root, pattern, opts, ctx)
           rg -> ripgrep_search(rg, root, pattern, opts, ctx)
         end
 
       case matches do
         {:error, _} = error -> error
-        lines -> {:ok, render(lines, ctx)}
+        lines -> {:ok, render(lines, ctx, opts)}
       end
     end
   end
@@ -71,18 +84,25 @@ defmodule Troupe.Tools.Grep do
 
   # Through reaper, like every other OS process: a search over a huge tree is exactly
   # as cancellable as a shell command because it is started the same way.
+  #
+  # `path` may name one file (Decision 776): ripgrep then runs beside it and searches it
+  # alone, and `--with-filename` keeps the `path:line:` shape a single file would drop.
   defp ripgrep_search(rg, root, pattern, opts, ctx) do
+    {dir, target} =
+      if File.regular?(root), do: {Path.dirname(root), Path.basename(root)}, else: {root, "."}
+
     flags =
-      ["--line-number", "--no-heading", "--color=never", "--max-count", "#{@max_matches}"] ++
+      ["--line-number", "--with-filename", "--no-heading", "--color=never"] ++
+        ["--max-count", "#{@max_matches}"] ++
         if(opts.case_sensitive, do: ["--case-sensitive"], else: ["--ignore-case"]) ++
         if(opts.glob, do: ["--glob", opts.glob], else: []) ++
-        ["--regexp", pattern, "."]
+        ["--regexp", pattern, target]
 
-    case Reaper.run(root, [rg | flags], timeout_ms: 60_000) do
+    case Reaper.run(dir, [rg | flags], timeout_ms: 60_000) do
       {:ok, output, status} when status in [0, 1] ->
         output
         |> String.split("\n", trim: true)
-        |> Enum.map(&rebase(&1, root, ctx))
+        |> Enum.map(&rebase(&1, dir, ctx))
 
       {:ok, output, :timeout} ->
         {:error, "The search timed out. Narrow it with `glob` or `path`.\n" <> output}
@@ -115,21 +135,31 @@ defmodule Troupe.Tools.Grep do
 
     case Regex.compile(pattern, regex_opts) do
       {:ok, regex} ->
-        ignore = Gitignore.load(ctx.workspace.root_real)
-        glob = opts.glob || "**/*"
-
         root
-        |> Paths.glob_escape()
-        |> Path.join(glob)
-        |> Path.wildcard(match_dot: false)
-        |> Enum.filter(&File.regular?/1)
-        |> Enum.reject(&Gitignore.ignored?(ignore, Workspace.relative(ctx.workspace, &1)))
-        |> Enum.sort()
+        |> files(opts, ctx)
         |> Enum.flat_map(&search_file(&1, regex, ctx))
         |> Enum.take(@max_matches)
 
       {:error, {reason, at}} ->
         {:error, "Invalid regular expression at position #{at}: #{reason}"}
+    end
+  end
+
+  # A file named as the `path` is searched as asked, as ripgrep searches a file it is
+  # given (Decision 776); a directory's files are those the glob and `.gitignore` leave.
+  defp files(root, opts, ctx) do
+    if File.regular?(root) do
+      [root]
+    else
+      ignore = Gitignore.load(ctx.workspace.root_real)
+
+      root
+      |> Paths.glob_escape()
+      |> Path.join(opts.glob || "**/*")
+      |> Path.wildcard(match_dot: false)
+      |> Enum.filter(&File.regular?/1)
+      |> Enum.reject(&Gitignore.ignored?(ignore, Workspace.relative(ctx.workspace, &1)))
+      |> Enum.sort()
     end
   end
 
@@ -161,8 +191,13 @@ defmodule Troupe.Tools.Grep do
     :binary.match(head, <<0>>) != :nomatch
   end
 
-  defp render([], _ctx), do: "No matches."
-  defp render(lines, ctx), do: lines |> Enum.join("\n") |> Output.cap(cap(ctx), ctx)
+  # A glob that matched no file looks the same as a pattern that matched no line, so the
+  # answer names the glob (Decision 776).
+  defp render([], _ctx, %{glob: glob}) when is_binary(glob),
+    do: "No matches in files matching #{glob}."
+
+  defp render([], _ctx, _opts), do: "No matches."
+  defp render(lines, ctx, _opts), do: lines |> Enum.join("\n") |> Output.cap(cap(ctx), ctx)
 
   defp cap(%{config: nil}), do: 60_000
   defp cap(%{config: config}), do: config.tool_output_limit

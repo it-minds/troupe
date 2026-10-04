@@ -9,9 +9,10 @@ defmodule Troupe.Tools.Shell do
   entire process tree. There is no cleanup code here because none could be trusted in
   the case that matters most.
 
-  `bash` on Linux and macOS. On Windows: `bash` from Git for Windows when present,
-  otherwise `pwsh`, otherwise `powershell.exe` — and the tool's description tells the
-  model which one it got.
+  `bash` on Linux and macOS. On Windows: `bash` from Git for Windows when present, or
+  another on the `PATH` that is not WSL's launcher (`windows_bash/2`), otherwise `pwsh`,
+  otherwise `powershell.exe` — and the tool's description tells the model which one it
+  got.
   """
 
   @behaviour Troupe.Tool
@@ -149,23 +150,83 @@ defmodule Troupe.Tools.Shell do
 
   defp windows_shell do
     cond do
-      bash = git_bash() -> {bash, "-c"}
+      bash = windows_bash(System.get_env()) -> {bash, "-c"}
       pwsh = System.find_executable("pwsh") -> {pwsh, "-Command"}
       ps = System.find_executable("powershell.exe") -> {ps, "-Command"}
       true -> {"cmd.exe", "/c"}
     end
   end
 
-  defp git_bash do
-    System.find_executable("bash") ||
-      Enum.find(
-        [
-          "C:/Program Files/Git/bin/bash.exe",
-          "C:/Program Files (x86)/Git/bin/bash.exe"
-        ],
-        &File.regular?/1
-      )
+  @doc """
+  The bash commands run with on Windows, or `nil`: Git for Windows' own, beside the `git`
+  on the `PATH` or where its installer puts it, else a `bash.exe` on the `PATH` that is not
+  WSL's launcher (Decision 776).
+
+  The first `bash` on a Windows `PATH` is often `C:\\Windows\\System32\\bash.exe` (or its
+  `WindowsApps` alias), which starts a Linux distribution: a command there runs in another
+  operating system, with that system's programs, where the Windows `elixir` finds no
+  `erl`, while the tool's description tells the model it is on Windows. `env` is the
+  environment, its names in any case, and `exists?` says whether a file is there.
+  """
+  @spec windows_bash(%{String.t() => String.t()}, (Path.t() -> boolean())) :: Path.t() | nil
+  def windows_bash(env, exists? \\ &File.regular?/1) do
+    path =
+      env
+      |> env_var("PATH")
+      |> Kernel.||("")
+      |> String.split(";", trim: true)
+      |> Enum.map(&slashes/1)
+
+    beside_git =
+      for dir <- path,
+          exists?.(dir <> "/git.exe"),
+          root <- [Path.dirname(dir), Path.dirname(Path.dirname(dir))],
+          do: root
+
+    installed =
+      for {var, under} <- [
+            {"ProgramFiles", "Git"},
+            {"ProgramW6432", "Git"},
+            {"ProgramFiles(x86)", "Git"},
+            {"LOCALAPPDATA", "Programs/Git"}
+          ],
+          base = env_var(env, var),
+          do: slashes(base) <> "/" <> under
+
+    from_git =
+      for root <- beside_git ++ installed,
+          bin <- ["bin", "usr/bin"],
+          do: "#{root}/#{bin}/bash.exe"
+
+    on_path = for dir <- path, not wsl_launcher?(dir, env), do: dir <> "/bash.exe"
+
+    Enum.find(from_git ++ on_path, exists?)
   end
+
+  # Where WSL's `bash.exe` lives: the Windows directory, and the per-user app aliases.
+  defp wsl_launcher?(dir, env) do
+    windows =
+      env |> env_var("SystemRoot") |> Kernel.||("C:/Windows") |> slashes() |> String.downcase()
+
+    dir = String.downcase(dir)
+
+    String.starts_with?(dir <> "/", windows <> "/") or
+      String.ends_with?(dir, "/microsoft/windowsapps")
+  end
+
+  defp env_var(env, name) do
+    Enum.find_value(env, fn {key, value} ->
+      String.downcase(key) == String.downcase(name) and value
+    end)
+  end
+
+  defp slashes(path),
+    do:
+      path
+      |> String.trim()
+      |> String.trim("\"")
+      |> String.replace("\\", "/")
+      |> String.trim_trailing("/")
 
   defp os_name do
     case :os.type() do

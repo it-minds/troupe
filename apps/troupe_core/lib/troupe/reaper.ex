@@ -75,7 +75,15 @@ defmodule Troupe.Reaper do
   """
   @spec open_stdio(Path.t(), [String.t()], keyword()) :: {:ok, port()} | {:error, term()}
   def open_stdio(cwd, [exe | _] = argv, opts \\ []) do
-    env = env(Keyword.update(opts, :env, [{"TROUPE_REAPER_STDIO", "1"}], &[{"TROUPE_REAPER_STDIO", "1"} | &1]))
+    env =
+      env(
+        Keyword.update(
+          opts,
+          :env,
+          [{"TROUPE_REAPER_STDIO", "1"}],
+          &[{"TROUPE_REAPER_STDIO", "1"} | &1]
+        )
+      )
 
     common = [
       :binary,
@@ -209,10 +217,58 @@ defmodule Troupe.Reaper do
     :error, :badarg -> :ok
   end
 
+  # The caller's variables over `child_env/0`'s.
   defp env(opts) do
-    opts
-    |> Keyword.get(:env, [])
+    given = Keyword.get(opts, :env, [])
+    names = MapSet.new(given, fn {k, _v} -> String.upcase(k) end)
+
+    child_env()
+    |> Enum.reject(fn {k, _v} -> MapSet.member?(names, String.upcase(k)) end)
+    |> Kernel.++(given)
     |> Enum.map(fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+  end
+
+  @doc """
+  What every command started here gets beside the VM's own environment: in a release, a
+  `PATH` without the release's runtime `bin` (Decision 776), else nothing.
+
+  The VM puts its own runtime's `bin` first on the `PATH` its children inherit. In a
+  release (the installed `troupe` and `troupe-daemon`) that runtime has no boot file of
+  its own, so the `elixir` or `mix` a person's command runs found its `erl` there and died
+  at boot (`cannot get bootfile ... start.boot`): no session could run an Elixir project's
+  tests from the shell tool. Decision 773 found it for the bench's outcome commands.
+  """
+  @spec child_env() :: [{String.t(), String.t()}]
+  def child_env do
+    case release_bin() do
+      nil -> []
+      bin -> [{"PATH", path_without(System.get_env("PATH", ""), bin)}]
+    end
+  end
+
+  @doc "`path`, a `PATH` value, without the directory `bin`, however it is spelled there."
+  @spec path_without(String.t(), Path.t() | nil) :: String.t()
+  def path_without(path, nil), do: path
+
+  def path_without(path, bin) do
+    separator = if match?({:win32, _}, :os.type()), do: ";", else: ":"
+
+    path
+    |> String.split(separator)
+    |> Enum.reject(&(same_dir(&1) == same_dir(bin)))
+    |> Enum.join(separator)
+  end
+
+  defp release_bin do
+    if System.get_env("RELEASE_ROOT") do
+      Path.join([to_string(:code.root_dir()), "erts-#{:erlang.system_info(:version)}", "bin"])
+    end
+  end
+
+  # One directory however it is spelled: separators, a trailing one, and on Windows case.
+  defp same_dir(path) do
+    path = path |> String.replace("\\", "/") |> String.trim_trailing("/")
+    if match?({:win32, _}, :os.type()), do: String.downcase(path), else: path
   end
 
   @doc "The Zig target triple for the host, matching the `priv/reaper/` layout."
