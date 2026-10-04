@@ -85,6 +85,71 @@ defmodule Troupe.LLM.ProvidersTest do
       assert Usage.total_input(usage) == 182_012
     end
 
+    test "a cached request marks the last tool, the system prompt and the last two user messages" do
+      messages = [
+        Message.user("read both"),
+        Message.assistant([%ToolUse{id: "t1", name: "read_file", input: %{"path" => "a"}}]),
+        Message.tool_results([
+          %ToolResult{tool_use_id: "t1", content: "a's contents", error?: false}
+        ]),
+        Message.assistant([
+          %Text{text: "and b"},
+          %ToolUse{id: "t2", name: "read_file", input: %{"path" => "b"}}
+        ]),
+        Message.tool_results([
+          %ToolResult{tool_use_id: "t2", content: "b's contents", error?: false}
+        ])
+      ]
+
+      tail = "<task_list>\n[~] [a] read both\n</task_list>"
+      request = request(chunks: anthropic_text_only(), messages: messages)
+
+      tools = [
+        %{name: "grep", description: "Search.", schema: %{"type" => "object"}} | request.tools
+      ]
+
+      assert {:ok, _} = run(Anthropic, %{request | cache: true, system_tail: tail, tools: tools})
+      [sent] = FakeTransport.drain_requests()
+      body = FakeTransport.body(sent)
+      mark = %{"type" => "ephemeral"}
+
+      assert [%{"name" => "grep"} = first, %{"name" => "read_file", "cache_control" => ^mark}] =
+               body["tools"]
+
+      refute Map.has_key?(first, "cache_control")
+
+      # The task list changes within a turn, so it comes after the mark rather than
+      # taking the system prompt and everything behind it out of the cache.
+      assert body["system"] == [
+               %{"type" => "text", "text" => "You are a test.", "cache_control" => mark},
+               %{"type" => "text", "text" => tail}
+             ]
+
+      marked =
+        for {message, index} <- Enum.with_index(body["messages"]),
+            {block, at} <- Enum.with_index(message["content"]),
+            Map.has_key?(block, "cache_control"),
+            do: {index, at, block["type"]}
+
+      # The newest user message, and the one the previous call ended on.
+      assert marked == [{2, 0, "tool_result"}, {4, 0, "tool_result"}]
+
+      assert length(Regex.scan(~r/cache_control/, Jason.encode!(body))) == 4,
+             "four marks, Anthropic's limit"
+    end
+
+    test "a request not to be cached marks nothing and sends the system prompt as one text" do
+      tail = "<task_list>\n[ ] [a] summarise\n</task_list>"
+      request = request(chunks: anthropic_text_only())
+
+      assert {:ok, _} = run(Anthropic, %{request | system_tail: tail})
+      [sent] = FakeTransport.drain_requests()
+      body = FakeTransport.body(sent)
+
+      assert body["system"] == "You are a test.\n\n" <> tail
+      refute Jason.encode!(body) =~ "cache_control"
+    end
+
     test "captures thinking, its signature and redacted thinking, and replays them when thinking is on" do
       assert {:ok, %Response{content: content} = response} =
                run(Anthropic, request(chunks: anthropic_thinking_stream()))
@@ -374,6 +439,20 @@ defmodule Troupe.LLM.ProvidersTest do
 
       assert [%{"type" => "function", "function" => %{"parameters" => _}}] = body["tools"]
       assert body["stream_options"]["include_usage"] == true
+    end
+
+    test "the task list ends the system message, and nothing is marked for a cache" do
+      tail = "<task_list>\n[ ] [a] read it\n</task_list>"
+      request = %{request(chunks: [openai_text_only()]) | cache: true, system_tail: tail}
+
+      assert {:ok, _response} = run(OpenAI, request)
+      [sent] = FakeTransport.drain_requests()
+      body = FakeTransport.body(sent)
+
+      assert [%{"role" => "system", "content" => "You are a test.\n\n" <> ^tail} | _] =
+               body["messages"]
+
+      refute Jason.encode!(body) =~ "cache_control"
     end
 
     test "works against any base url without an api key" do

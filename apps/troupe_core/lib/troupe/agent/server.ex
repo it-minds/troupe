@@ -1150,6 +1150,8 @@ defmodule Troupe.Agent.Server do
       model: nil,
       messages: state.conversation,
       system: system_prompt(state, definition),
+      system_tail: todo_section(state),
+      cache: true,
       tools: Tools.specs(definition, ctx),
       max_tokens: state.config.max_tokens,
       attribution: attribution(state),
@@ -1208,15 +1210,16 @@ defmodule Troupe.Agent.Server do
   #
   # The goal comes after everything that describes the agent and its surroundings and
   # before the task list: it is what the list is for, and it changes less often than the
-  # list does, which keeps more of the prompt the same from one request to the next.
+  # list does, which keeps more of the prompt the same from one request to the next. The
+  # list itself, which the agent rewrites within a turn, is the request's `system_tail`:
+  # still the end of the system prompt, but behind the prompt cache's mark (Decision 770).
   defp system_prompt(state, definition) do
     [
       definition.prompt,
       Instructions.to_prompt(state.instructions),
       environment_section(state),
       Skills.prompt_section(state.bundle, definition, state.workspace.root_real),
-      goal_section(state),
-      todo_section(state)
+      goal_section(state)
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")

@@ -449,6 +449,34 @@ max_turns: 20
 wall_clock_ms: 600000
 ```
 
+## What each provider caches
+
+One thing you type can take an agent many model calls, and each call sends the whole
+conversation again. A provider that caches the prompt bills what it has seen before at a
+fraction of the input price, which on a long turn is most of what was sent. There is
+nothing to set; what happens depends on the provider.
+
+- **Anthropic** (`provider: anthropic`, or a provider of `type: anthropic`) caches only
+  what a request asks it to, and every call an agent makes asks: the tool definitions,
+  the system prompt and the conversation so far are marked, and the next call reads them
+  back. The cache lasts five minutes from its last use, so the calls of a turn keep it
+  warm and a reply after a long pause starts it again. A prompt shorter than the model's
+  minimum (512 to 4096 tokens, by model) is not cached. The agent's task list is sent
+  after the cached system prompt, so rewriting it leaves the tools and the system prompt
+  cached; the conversation is written to the cache again on the next call. A gateway that
+  speaks Anthropic's API passes the marks on or drops them.
+- **OpenAI** caches a long enough prompt by itself, with nothing to ask.
+- **An OpenAI-compatible gateway or server** (`provider: openai` with a `base_url`, such as
+  LiteLLM, vLLM or Ollama) caches whatever it and the model behind it do, which may be
+  nothing. Troupe sends no marks this way; a LiteLLM deployment can be configured to add
+  them for the Anthropic models it serves.
+
+Whichever it is, the provider's own figures say whether it happened: each model call's
+`cache_read` in the session's log, and the terminal UI's token detail, which says how
+much of the prompt came from the cache. A call priced from the catalog or `models.prices`
+is priced at its `cache_read` and `cache_write` rates, or at the input price where those
+are not set.
+
 ## Every key
 
 `Set by` says which files may set a key. "user; project if trusted" keys are read from a

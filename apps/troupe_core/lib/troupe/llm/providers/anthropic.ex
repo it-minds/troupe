@@ -225,11 +225,14 @@ defmodule Troupe.LLM.Providers.Anthropic do
       model: request.model,
       max_tokens: request.max_tokens,
       stream: true,
-      messages: Enum.map(request.messages, &encode_message(&1, keep_thinking?))
+      messages:
+        request.messages
+        |> Enum.map(&encode_message(&1, keep_thinking?))
+        |> mark_messages(request.cache)
     }
-    |> maybe_put(:system, request.system)
+    |> maybe_put(:system, encode_system(request))
     |> maybe_put(:temperature, request.temperature)
-    |> maybe_put(:tools, encode_tools(request.tools))
+    |> maybe_put(:tools, request.tools |> encode_tools() |> mark_last(request.cache))
     # Anthropic takes one opaque end-user id and nothing else, so the session's owner
     # goes there. Everything else a gateway wants is carried by the OpenAI-compatible
     # adapter, which is what a LiteLLM deployment actually speaks.
@@ -282,6 +285,61 @@ defmodule Troupe.LLM.Providers.Anthropic do
   defp encode_tools(tools) do
     Enum.map(tools, fn tool ->
       %{name: tool.name, description: tool.description, input_schema: tool.schema}
+    end)
+  end
+
+  # Anthropic caches nothing it is not asked to: a block marked `cache_control` caches
+  # the prompt up to and including it, in the order tools, system, messages, and a later
+  # request that repeats a marked prefix reads it at a fraction of the input price. Four
+  # marks at most, and each one sits where what comes before it stays the same from call
+  # to call (Decision 770):
+  #
+  #   * the last tool, so the tools stay cached when the system prompt changes;
+  #   * the system prompt, without the tail that changes within a turn — the task list,
+  #     which goes after the mark as a block of its own;
+  #   * the last block of each of the last two user messages: the newest one writes the
+  #     whole conversation for the next call, and the one before is where the previous
+  #     call's mark was, so that call's cache is read whatever came in between.
+  #
+  # A prompt shorter than the model's minimum is not cached and nothing fails; five
+  # minutes is the cache's life, and each read renews it.
+  @cache_control %{type: "ephemeral"}
+
+  defp encode_system(%Request{cache: true, system: system} = request)
+       when is_binary(system) and system != "" do
+    tail =
+      if request.system_tail in [nil, ""],
+        do: [],
+        else: [%{type: "text", text: request.system_tail}]
+
+    [%{type: "text", text: system, cache_control: @cache_control} | tail]
+  end
+
+  defp encode_system(%Request{} = request), do: Request.system_text(request)
+
+  defp mark_last(nil, _cache?), do: nil
+  defp mark_last(blocks, false), do: blocks
+  defp mark_last([], true), do: []
+
+  defp mark_last(blocks, true),
+    do: List.update_at(blocks, -1, &Map.put(&1, :cache_control, @cache_control))
+
+  defp mark_messages(messages, false), do: messages
+
+  defp mark_messages(messages, true) do
+    marked =
+      messages
+      |> Enum.with_index()
+      |> Enum.filter(fn {message, _index} -> message.role == "user" and message.content != [] end)
+      |> Enum.take(-2)
+      |> MapSet.new(fn {_message, index} -> index end)
+
+    messages
+    |> Enum.with_index()
+    |> Enum.map(fn {message, index} ->
+      if MapSet.member?(marked, index),
+        do: %{message | content: mark_last(message.content, true)},
+        else: message
     end)
   end
 
