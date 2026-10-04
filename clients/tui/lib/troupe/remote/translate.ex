@@ -375,16 +375,17 @@ defmodule Troupe.Remote.Translate do
       # headless printer's exit code) does not have to parse the note. The note comes
       # first: a headless run ends at the state, and would end without the summary.
       "agent_done" ->
-        {done_note(emit, data) ++ [emit.(:agent_state, %{to: :done, reason: data["reason"]})],
-         memory}
+        {done_note(emit, data) ++
+           [emit.(:agent_state, spent(%{to: :done, reason: data["reason"]}, data))], memory}
 
       # The turn is over and the agent waits for input: the same `idle` the live
       # `agent_state` says, but from the log, so it is neither dropped nor missed by a
       # client that attached after it happened. A `reason` rides along when the harness
       # ended the turn rather than the model (`tool_failures`, troupe-remote Decision 687;
-      # `agent_failed`, with its `detail`, Decision 727).
+      # `agent_failed`, with its `detail`, Decision 727), and so does what the turn cost
+      # (root Decision 769), on each of the three events that end one.
       "turn_ended" ->
-        {[emit.(:agent_state, ended_by(%{to: :idle}, data))], memory}
+        {[emit.(:agent_state, %{to: :idle} |> ended_by(data) |> spent(data))], memory}
 
       # The model's own `:cancelled`, not a note that says so: it also ends whatever the
       # agent and those under it were still asking, which a subagent the cancel took down
@@ -392,11 +393,13 @@ defmodule Troupe.Remote.Translate do
       "cancelled" ->
         {[
            emit.(:cancelled, %{}),
-           emit.(:agent_state, %{to: :idle, reason: "cancelled"})
+           emit.(:agent_state, spent(%{to: :idle, reason: "cancelled"}, data))
          ], budget_cancelled(memory, agent)}
 
+      # The summariser's call is the session's to pay for as a reply's is (root Decision
+      # 769), so what it used reaches the window's count.
       "compacted" ->
-        {[emit.(:remote_note, %{text: "context compacted"})], memory}
+        {[emit.(:remote_note, %{text: "context compacted"})] ++ summarised(emit, data), memory}
 
       "budget_exhausted" ->
         {[emit.(:remote_note, %{text: "budget exhausted" <> limit(data)})], memory}
@@ -611,6 +614,22 @@ defmodule Troupe.Remote.Translate do
   end
 
   defp ended_by(idle, _data), do: idle
+
+  # What the turn an event ends cost, in the model's shape (root Decision 769); a log
+  # written before turns were counted has none.
+  defp spent(state, %{"turn" => %{} = turn}) do
+    Map.put(state, :turn, %{
+      calls: int(turn["calls"]),
+      usage: usage(turn),
+      cost_micros: int(turn["cost_micros"]),
+      unpriced: int(turn["unpriced"])
+    })
+  end
+
+  defp spent(state, _data), do: state
+
+  defp summarised(emit, %{"usage" => %{} = used}), do: [emit.(:call_usage, %{usage: usage(used)})]
+  defp summarised(_emit, _data), do: []
 
   defp as(%{"profile" => profile}) when is_binary(profile), do: " as #{profile}"
   defp as(_data), do: ""

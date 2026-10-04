@@ -104,7 +104,10 @@ slice, folded from the log (Decision 660), and `always` lifts the one limit aske
 (Decision 687). **A tool that keeps failing** — ten times in a row, by default — stops the
 turn before the next request and asks, whatever the budget says (Decision 687).
 **Compaction** is planned against the whole prompt including cache reads, keeps the recent
-turns and logs the replacement conversation so replay is faithful.
+turns and logs the replacement conversation so replay is faithful. A tool result over
+16 KiB in the turns it kept, once the model has answered it, is sent from then on as one
+line naming the `read_output` call that returns it; the conversation and the log keep it
+whole (Decision 771).
 
 ### 2.3 Tools
 

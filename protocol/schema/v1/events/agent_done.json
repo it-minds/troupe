@@ -11,6 +11,9 @@
     },
     "summary": {
       "type": "string"
+    },
+    "turn": {
+      "type": "object"
     }
   },
   "required": [

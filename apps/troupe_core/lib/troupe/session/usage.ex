@@ -4,7 +4,8 @@ defmodule Troupe.Session.Usage do
 
   A projection, not a record. Every model call a session makes is already a durable
   `llm_response` event carrying the tokens, the model and — where a gateway sat in front
-  of the provider — that gateway's request id and price. Turning those events into
+  of the provider — that gateway's request id and price; the summariser's call says the
+  same on the `compacted` that took its answer (Decision 769). Turning those events into
   ledger rows is therefore a fold, and the fold is the only place the two shapes meet.
 
   That it is a fold is the whole point. A pod that could not reach the plane for an hour
@@ -57,25 +58,27 @@ defmodule Troupe.Session.Usage do
   @doc """
   Every usage record implied by these events, in sequence order.
 
-  Events that are not `llm_response` are ignored, so a caller may pass a whole replay.
+  Events that are no model call are ignored, so a caller may pass a whole replay.
   """
   @spec records(String.t(), [Event.t()]) :: [t()]
   def records(session_id, events) when is_binary(session_id) and is_list(events) do
     events
-    |> Enum.filter(&match?(%Event{type: "llm_response"}, &1))
+    |> Enum.filter(&billed?/1)
     |> Enum.map(&record(session_id, &1))
     |> Enum.sort_by(& &1.seq)
   end
 
   @doc """
-  One record from one `llm_response`.
+  One record from one `llm_response`, or from the `compacted` that took the summariser's
+  answer, which says what that call used in the same words (Decision 769).
 
   Public because the live path folds a single event as it arrives and the catch-up path
   folds a list; both must produce the same row for the same event, and the way to
   guarantee that is for there to be one function.
   """
   @spec record(String.t(), Event.t()) :: t()
-  def record(session_id, %Event{type: "llm_response", seq: seq, data: data} = event) do
+  def record(session_id, %Event{type: type, seq: seq, data: data} = event)
+      when type in ["llm_response", "compacted"] do
     usage = data["usage"] || %{}
     gateway = data["gateway"] || %{}
 
@@ -107,14 +110,22 @@ defmodule Troupe.Session.Usage do
   there is no ledger to report to.
   """
   @spec observe(String.t(), Event.t()) :: :ok
-  def observe(session_id, %Event{type: "llm_response"} = event) do
+  def observe(session_id, %Event{} = event) do
+    if billed?(event), do: put(session_id, event), else: :ok
+  end
+
+  defp put(session_id, event) do
     case Application.get_env(:troupe_core, :usage_sink) do
       nil -> :ok
       module -> module.put(session_id, record(session_id, event))
     end
   end
 
-  def observe(_session_id, %Event{}), do: :ok
+  # A model call: every `llm_response`, and a `compacted` that says what the summariser's
+  # call used. One written before it did says nothing, and is no call of anybody's.
+  defp billed?(%Event{type: "llm_response"}), do: true
+  defp billed?(%Event{type: "compacted", data: %{"usage" => %{}}}), do: true
+  defp billed?(_event), do: false
 
   @doc "The wire shape of a record, as `usage.batch` carries it."
   @spec to_json(t()) :: map()
