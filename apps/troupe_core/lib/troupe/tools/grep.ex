@@ -21,8 +21,8 @@ defmodule Troupe.Tools.Grep do
   @impl Troupe.Tool
   def description do
     """
-    Search file contents with a regular expression. Returns `path:line: text` for
-    each match. Narrow with `path`, a directory or one file, or with `glob`, a
+    Search file contents with a regular expression. Answers how many lines matched in
+    how many files, then `path:line: text` for each match. Narrow with `path`, a directory or one file, or with `glob`, a
     pattern of file names: check what the files are really called before narrowing
     by their extension. Ignored files and .git are skipped. Prefer this over reading
     whole files to find something.
@@ -75,7 +75,7 @@ defmodule Troupe.Tools.Grep do
 
       case matches do
         {:error, _} = error -> error
-        lines -> {:ok, render(lines, ctx, opts)}
+        found -> {:ok, render(found, ctx, opts)}
       end
     end
   end
@@ -100,9 +100,12 @@ defmodule Troupe.Tools.Grep do
 
     case Reaper.run(dir, [rg | flags], timeout_ms: 60_000) do
       {:ok, output, status} when status in [0, 1] ->
-        output
-        |> String.split("\n", trim: true)
-        |> Enum.map(&rebase(&1, dir, ctx))
+        lines =
+          output
+          |> String.split("\n", trim: true)
+          |> Enum.map(&rebase(&1, dir, ctx))
+
+        found(lines, lines, capped?(lines))
 
       {:ok, output, :timeout} ->
         {:error, "The search timed out. Narrow it with `glob` or `path`.\n" <> output}
@@ -135,10 +138,8 @@ defmodule Troupe.Tools.Grep do
 
     case Regex.compile(pattern, regex_opts) do
       {:ok, regex} ->
-        root
-        |> files(opts, ctx)
-        |> Enum.flat_map(&search_file(&1, regex, ctx))
-        |> Enum.take(@max_matches)
+        all = root |> files(opts, ctx) |> Enum.flat_map(&search_file(&1, regex, ctx))
+        found(all, Enum.take(all, @max_matches), false)
 
       {:error, {reason, at}} ->
         {:error, "Invalid regular expression at position #{at}: #{reason}"}
@@ -191,13 +192,51 @@ defmodule Troupe.Tools.Grep do
     :binary.match(head, <<0>>) != :nomatch
   end
 
+  # What a search found (Decision 777): the lines to show, how many lines matched in how
+  # many files, and whether a file stopped at the cap, so that there may be more.
+  defp found(all, shown, more?) do
+    files = Enum.map(all, &file_of/1)
+    %{lines: shown, total: length(all), files: files |> Enum.uniq() |> length(), more: more?}
+  end
+
+  # ripgrep stops each file at `--max-count`: a file that reached it may hold more.
+  defp capped?(lines) do
+    lines |> Enum.frequencies_by(&file_of/1) |> Enum.any?(fn {_file, n} -> n >= @max_matches end)
+  end
+
+  # `path:line:text`, the path possibly an absolute one with a drive.
+  defp file_of(line) do
+    case Regex.run(~r/\A((?:[A-Za-z]:)?[^:]*):\d+:/, line) do
+      [_, path] -> path
+      nil -> line
+    end
+  end
+
   # A glob that matched no file looks the same as a pattern that matched no line, so the
   # answer names the glob (Decision 776).
-  defp render([], _ctx, %{glob: glob}) when is_binary(glob),
+  defp render(%{lines: []}, _ctx, %{glob: glob}) when is_binary(glob),
     do: "No matches in files matching #{glob}."
 
-  defp render([], _ctx, _opts), do: "No matches."
-  defp render(lines, ctx, _opts), do: lines |> Enum.join("\n") |> Output.cap(cap(ctx), ctx)
+  defp render(%{lines: []}, _ctx, _opts), do: "No matches."
+
+  # The count first, where a cut result keeps it: a model asked how many lines match
+  # counts them from the list by eye otherwise, and a long list it counts wrong.
+  defp render(found, ctx, _opts) do
+    (count(found) <> "\n" <> Enum.join(found.lines, "\n")) |> Output.cap(cap(ctx), ctx)
+  end
+
+  defp count(%{lines: lines, total: total, files: files, more: more?}) do
+    matched = "#{plural(total, "matching line")} in #{plural(files, "file")}"
+
+    cond do
+      more? -> matched <> ", and more in a file that reached #{@max_matches}:"
+      length(lines) < total -> matched <> "; the first #{length(lines)} follow:"
+      true -> matched <> ":"
+    end
+  end
+
+  defp plural(1, noun), do: "1 #{noun}"
+  defp plural(n, noun), do: "#{n} #{noun}s"
 
   defp cap(%{config: nil}), do: 60_000
   defp cap(%{config: config}), do: config.tool_output_limit
