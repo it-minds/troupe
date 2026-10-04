@@ -33,7 +33,7 @@ defmodule Mix.Tasks.Troupe.Xref do
       Troupe.Commands                               the command table, which `troupe --help` prints
       Troupe.Paths                                  where state and config live
       Troupe.Reaper                                 the helper every OS process runs under
-      Troupe.LLM.Catalog.Store                      refreshing the model catalog on request
+      Troupe.LLM.Catalog.Store                      the model catalog, refreshed when stale or asked
       Troupe.Doctor                                 the checks `troupe doctor` prints, read from the files
       Troupe.Bench                                  the offline suite `troupe bench` runs on this binary's harness
 

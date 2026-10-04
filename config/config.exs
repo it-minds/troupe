@@ -9,6 +9,11 @@ if Mix.env() == :test do
     Troupe.Test.AskingTool,
     Troupe.Test.CountingTool
   ]
+
+  # No session a test starts asks its provider for the model list (Decision 778): many
+  # carry a key and no base URL, which is a real provider's own endpoint. A test of the
+  # refresh turns it on and points it at a stand-in.
+  config :troupe_core, catalog_refresh: false
 end
 
 # Bonny reads a handful of things from application configuration rather than from the

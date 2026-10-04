@@ -9,7 +9,8 @@
     * `troupe-daemon run` starts, and `troupe-daemon status` sees it inside the timeout:
       the daemon installed in %LOCALAPPDATA%\Programs\troupe-daemon, by the program that
       listens where daemon.json says, not whichever daemon answers there
-    * `troupe-daemon models` answers while it runs
+    * `troupe-daemon models` answers while it runs, under a scratch config, so it asks no
+      provider this machine is configured with
 
   The daemon it starts is stopped again at the end, and only that one. Another that
   answers in its place -- a TUI that found no daemon serves its own harness -- fails the
@@ -66,6 +67,13 @@ function Get-DaemonListener {
   $path = $null
   try { $path = (Get-Process -Id $listening.OwningProcess -ErrorAction Stop).Path } catch { }
   [pscustomobject]@{ Port = $port; Id = $listening.OwningProcess; Path = $path }
+}
+
+# Set, or with $null remove, a variable of this process. Not SetEnvironmentVariable with
+# $null: PowerShell 7 passes it as an empty string, which a program then reads as set.
+function Set-ProcessVariable($Name, $Value) {
+  if ($null -eq $Value) { Remove-Item -Path "Env:\$Name" -ErrorAction SilentlyContinue }
+  else { Set-Item -Path "Env:\$Name" -Value $Value }
 }
 
 function Test-Installed($Listener) {
@@ -132,7 +140,26 @@ try {
   }
 
   if ($up) {
-    $out = (& $Shim models 2>&1 | Out-String)
+    # `models` asks the providers first when its cached list is stale (root Decision 778),
+    # and this machine's own config may name a real gateway. It is run here under a scratch
+    # config with no provider, no key and no opencode, so it answers without reaching one.
+    $isolate = @{
+      TROUPE_CONFIG_HOME     = (Join-Path $Workspace "config")
+      TROUPE_OPENCODE_CONFIG = (Join-Path $Workspace "no-opencode.jsonc")
+      TROUPE_OPENCODE_AUTH   = (Join-Path $Workspace "no-opencode-auth.json")
+      TROUPE_API_KEY         = $null
+      TROUPE_AUTH_TOKEN      = $null
+    }
+    New-Item -ItemType Directory -Force -Path $isolate.TROUPE_CONFIG_HOME | Out-Null
+    $saved = @{}
+    foreach ($name in @($isolate.Keys)) {
+      $saved[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+      Set-ProcessVariable $name $isolate[$name]
+    }
+    try { $out = (& $Shim models 2>&1 | Out-String) }
+    finally {
+      foreach ($name in @($saved.Keys)) { Set-ProcessVariable $name $saved[$name] }
+    }
     if ($LASTEXITCODE -eq 0) { Pass "troupe-daemon models answers" }
     else { Fail "troupe-daemon models exited $LASTEXITCODE`: $($out.Trim())" }
   }

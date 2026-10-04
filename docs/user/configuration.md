@@ -421,11 +421,11 @@ models:
 
 A price for a model the catalog does not price, such as one a LiteLLM gateway serves
 and streams, in dollars per million tokens by the name the model is addressed with. What
-the gateway says a call cost still wins, and then the catalog's price
-(`troupe models --refresh`); a call none of the three prices counts as free, and the
-daemon's log says so once a session. `troupe models` shows each model's price and where
-it came from, or `no price`, and `troupe config --explain models.prices` which file set
-it. The line under each turn in the terminal UI is priced the same way.
+the gateway says a call cost still wins, and then the catalog's price (the provider's
+own list, which refreshes itself when it is a day old); a call none of the three prices
+counts as free, and the daemon's log says so once a session. `troupe models` shows each
+model's price and where it came from, or `no price`, and `troupe config --explain
+models.prices` which file set it. The line under each turn in the terminal UI is priced the same way.
 `TROUPE_MODEL_PRICES` takes the same map as JSON, which is how a profile's `llm.prices`
 reaches its pods.
 

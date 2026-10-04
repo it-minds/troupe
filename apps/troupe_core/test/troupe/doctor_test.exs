@@ -1,3 +1,5 @@
+Code.require_file("../support/fake_gateway.exs", __DIR__)
+
 defmodule Troupe.DoctorTest do
   @moduledoc """
   `troupe doctor`'s checks (Decision 705): one line each, a failure that names the next
@@ -9,6 +11,7 @@ defmodule Troupe.DoctorTest do
   use ExUnit.Case, async: false
 
   alias Troupe.Doctor
+  alias Troupe.Test.FakeGateway
 
   @vars ~w(TROUPE_CONFIG_HOME TROUPE_STATE_HOME TROUPE_OPENCODE_CONFIG TROUPE_OPENCODE_AUTH TROUPE_API_KEY
            TROUPE_AUTH_TOKEN TROUPE_PROVIDER TROUPE_MODEL ANTHROPIC_API_KEY OPENAI_API_KEY)
@@ -155,6 +158,102 @@ defmodule Troupe.DoctorTest do
     assert detail =~ "the reaper helper #{Troupe.Paths.display(helper)} will not start"
     assert detail =~ "no shell, git or MCP server"
     assert Doctor.format(checks) =~ ~r/^FAIL  reaper                the reaper helper /m
+  end
+
+  # Issue #410: the key line fetched the gateway's four models and never looked for the
+  # configured one among them, so a setup that could not run a turn passed.
+  describe "the configured models, against what a stand-in gateway serves" do
+    setup ctx do
+      gateway = FakeGateway.start()
+      on_exit(fn -> FakeGateway.stop(gateway) end)
+
+      write = fn models ->
+        File.write!(ctx.config_file, """
+        provider: openai
+        base_url: #{gateway.base_url}
+        api_key: #{FakeGateway.key()}
+        models:
+        #{models}
+        """)
+      end
+
+      %{gateway: gateway, write: write}
+    end
+
+    test "a model it does not serve fails, naming the nearest it does", ctx do
+      ctx.write.("  default: qwen3.5\n  cheap: qwen3.6-35b")
+
+      checks = Doctor.run(workspace: ctx.base, command: "troupe")
+      by_name = Map.new(checks, &{&1.name, &1})
+
+      assert %{state: :ok, detail: "accepted by openai; 4 models listed"} = by_name["key"]
+
+      assert %{state: :fail, detail: detail} = by_name["model default"]
+
+      assert detail ==
+               "qwen3.5 is not served by openai; it serves qwen3.6-35b, qwen3-235b, " <>
+                 "gpt-oss-120b, mistral-small-3.2; set models.default to one"
+
+      assert %{state: :ok, detail: "qwen3.6-35b, served by openai"} = by_name["model cheap"]
+      refute Map.has_key?(by_name, "model expensive")
+      assert Doctor.exit_status(checks) == 1
+      assert Doctor.format(checks) =~ ~r/^FAIL  model default         qwen3\.5 is not served/m
+    end
+
+    test "served models pass, and a dated snapshot answers for its alias", ctx do
+      FakeGateway.serve_models(ctx.gateway, [
+        %{id: "qwen3-235b", context: 131_072, max_output: 16_384, input: 2.2e-7, output: 8.8e-7},
+        %{
+          id: "claude-haiku-4-5-20251001",
+          context: 200_000,
+          max_output: 64_000,
+          input: 1.0e-6,
+          output: 5.0e-6
+        }
+      ])
+
+      ctx.write.("  default: qwen3-235b\n  cheap: claude-haiku-4-5\n  expensive: qwen3-235b")
+
+      checks = Doctor.run(workspace: ctx.base, command: "troupe")
+      by_name = Map.new(checks, &{&1.name, &1})
+
+      assert %{state: :ok, detail: "qwen3-235b, served by openai"} = by_name["model default"]
+      assert %{state: :ok, detail: "claude-haiku-4-5, served by openai"} = by_name["model cheap"]
+      assert %{state: :ok} = by_name["model expensive"]
+      refute Enum.any?(checks, &(&1.state == :fail and String.starts_with?(&1.name, "model")))
+    end
+
+    test "a provider that refuses the key, or lists nothing, keeps the lines it had", ctx do
+      File.write!(ctx.config_file, """
+      provider: openai
+      base_url: #{ctx.gateway.base_url}
+      api_key: sk-not-the-stand-ins-key
+      models:
+        default: qwen3.5
+      """)
+
+      checks = Doctor.run(workspace: ctx.base, command: "troupe")
+
+      assert %{state: :fail, detail: "refused by openai: 401 unauthorized: the key was refused"} =
+               Enum.find(checks, &(&1.name == "key"))
+
+      refute Enum.any?(checks, &String.starts_with?(&1.name, "model "))
+
+      FakeGateway.serve_models(ctx.gateway, [])
+      ctx.write.("  default: qwen3.5")
+      checks = Doctor.run(workspace: ctx.base, command: "troupe")
+      assert %{state: :warn} = Enum.find(checks, &(&1.name == "key"))
+      refute Enum.any?(checks, &String.starts_with?(&1.name, "model "))
+    end
+  end
+
+  test "a name longer than its column still has a space before what it says" do
+    text =
+      Doctor.format([
+        %{name: "plane https://plane.example.test", state: :ok, detail: "answers (troupe)"}
+      ])
+
+    assert text == "ok    plane https://plane.example.test answers (troupe)\n"
   end
 
   defp run_live_free(workspace), do: Doctor.run(workspace: workspace, live: false)

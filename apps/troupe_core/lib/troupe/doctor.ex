@@ -12,6 +12,9 @@ defmodule Troupe.Doctor do
     * `key` — the key is accepted: a real request to the provider, the model listing
       (`Troupe.Setup.check_key/1`). A provider that answers but will not list is a
       warning, not a failure; the `fake` provider asks nobody.
+    * `model default`, `model cheap`, `model expensive` — each model the config names,
+      among what its provider listed: one it does not serve fails, naming the ones
+      nearest it that it does (Decision 778). No line when the provider listed nothing.
     * `key storage` — where the key is kept: the user's `config.yaml`, there being no
       keychain in this build.
     * `reaper` — the helper every command runs under starts (`reaper --version`). One
@@ -29,6 +32,8 @@ defmodule Troupe.Doctor do
   """
 
   alias Troupe.{Config, Reaper}
+  alias Troupe.LLM.Catalog
+  alias Troupe.LLM.Catalog.Store
   alias Troupe.Protocol.{Daemon, Endpoint}
 
   @type state :: :ok | :warn | :fail
@@ -49,27 +54,32 @@ defmodule Troupe.Doctor do
     live? = Keyword.get(opts, :live, true)
     resolved = Config.resolve(workspace)
 
-    [
-      config_check(resolved),
-      provider_check(resolved, command),
-      key_check(resolved, live?),
-      storage_check(),
-      reaper_check(workspace),
-      daemon_check(),
-      path_check("troupe-daemon", "a client starts the daemon from the PATH; troupe embeds one"),
-      path_check(
-        "troupe",
-        "the terminal client; the desktop app and troupe-daemon work without it"
-      )
-    ] ++ plane_checks(opts, live?)
+    [config_check(resolved), provider_check(resolved, command)] ++
+      key_checks(resolved, live?) ++
+      [
+        storage_check(),
+        reaper_check(workspace),
+        daemon_check(),
+        path_check(
+          "troupe-daemon",
+          "a client starts the daemon from the PATH; troupe embeds one"
+        ),
+        path_check(
+          "troupe",
+          "the terminal client; the desktop app and troupe-daemon work without it"
+        )
+      ] ++ plane_checks(opts, live?)
   end
 
-  @doc "One line per check, as both programs print them."
+  @doc """
+  One line per check, as both programs print them. A name longer than its column (a
+  plane's URL) still has a space after it.
+  """
   @spec format([check()]) :: String.t()
   def format(checks) do
     Enum.map_join(checks, "", fn check ->
       String.pad_trailing(label(check.state), 6) <>
-        String.pad_trailing(check.name, 22) <> check.detail <> "\n"
+        String.pad_trailing(check.name, 21) <> " " <> check.detail <> "\n"
     end)
   end
 
@@ -124,27 +134,80 @@ defmodule Troupe.Doctor do
     end
   end
 
-  defp key_check({:error, _error}, _live?),
-    do: check("key", :fail, "not checked: the config files do not load")
+  defp key_checks({:error, _error}, _live?),
+    do: [check("key", :fail, "not checked: the config files do not load")]
 
-  defp key_check({:ok, config, _layers}, live?) do
+  defp key_checks({:ok, config, _layers}, live?) do
     target = Config.target(config, nil)
 
     cond do
       Config.key_problem(config) != nil ->
-        check("key", :fail, "not checked: no key")
+        [check("key", :fail, "not checked: no key")]
 
       target.provider == "fake" ->
-        check("key", :ok, "the fake provider asks nobody")
+        [check("key", :ok, "the fake provider asks nobody")]
 
       not live? ->
-        check("key", :ok, "not tried")
+        [check("key", :ok, "not tried")]
 
       true ->
-        target
-        |> key_params()
-        |> Troupe.Setup.check_key()
-        |> key_result(target)
+        listed = target |> key_params() |> Troupe.Setup.check_key()
+        [key_result(listed, target) | model_checks(config, target, listed)]
+    end
+  end
+
+  # Each model the config names for a role, against what its provider lists (#410): the
+  # key line's list for the default model's provider, and one more request for any other
+  # provider a role names. A provider that lists nothing or does not answer adds no line;
+  # for the default's, the key line has said so.
+  defp model_checks(config, default_target, default_listed) do
+    lists = %{listing(default_target) => default_listed}
+
+    {checks, _lists} =
+      Enum.flat_map_reduce(Store.roles(config), lists, fn {role, model}, lists ->
+        target = Config.target(config, model)
+        lists = Map.put_new_lazy(lists, listing(target), fn -> listed(target) end)
+        {model_check(config, role, model, target, lists[listing(target)]), lists}
+      end)
+
+    checks
+  end
+
+  defp listing(target), do: Map.take(target, [:provider, :base_url, :api_key, :auth])
+
+  # The fake provider and a refused one are asked nothing.
+  defp listed(%{provider: "fake"}), do: {:unknown, "not asked"}
+  defp listed(%{api_key: {:refused, _why}}), do: {:unknown, "not asked"}
+  defp listed(target), do: target |> key_params() |> Troupe.Setup.check_key()
+
+  defp model_check(config, role, model, target, {:ok, [_ | _] = listed}) do
+    ids = Enum.map(listed, & &1.id)
+    name = provider_name(config, model)
+
+    if Catalog.serves?(ids, target.model) do
+      [check("model #{role}", :ok, "#{model}, served by #{name}")]
+    else
+      [
+        check(
+          "model #{role}",
+          :fail,
+          "#{model} is not served by #{name}; it serves #{alternatives(config, model, target, ids)}; " <>
+            "set models.#{role} to one"
+        )
+      ]
+    end
+  end
+
+  defp model_check(_config, _role, _model, _target, _not_listed), do: []
+
+  # The served ids nearest the name first, five of them, each as the role would name it.
+  defp alternatives(config, model, target, ids) do
+    prefix = if name = named(config, model), do: name <> "/", else: ""
+    shown = target.model |> Catalog.nearest(ids, 5) |> Enum.map_join(", ", &(prefix <> &1))
+
+    case length(ids) - 5 do
+      more when more > 0 -> "#{shown} and #{more} more"
+      _all -> shown
     end
   end
 
@@ -290,13 +353,16 @@ defmodule Troupe.Doctor do
 
   # -- words ----------------------------------------------------------------------
 
-  defp provider_name(config) do
-    case Config.split_model(config, Config.resolve_model(config, :default)) do
-      {nil, _bare} ->
-        to_string(config.provider)
+  defp provider_name(config, model \\ :default),
+    do: named(config, model) || to_string(config.provider)
 
-      {_provider, _bare} ->
-        config |> Config.resolve_model(:default) |> String.split("/", parts: 2) |> hd()
+  # The named provider a model goes to, or `nil` for the session-wide one.
+  defp named(config, model) do
+    model = Config.resolve_model(config, model)
+
+    case Config.split_model(config, model) do
+      {nil, _bare} -> nil
+      {_provider, _bare} -> model |> String.split("/", parts: 2) |> hd()
     end
   end
 
