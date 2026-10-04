@@ -171,6 +171,18 @@ the scripted model's requests, and their budgets are the script's.
 | `fix_test` | make `calc_test.exs` pass by fixing `calc.exs` | `elixir calc_test.exs` exits 0 | the test file is as it was |
 | `delegate` | delegate the question to `explore`, write its answer to `answer.txt` | the file holds the answer | the root agent called `delegate` |
 | `recover` | read `settings/port.txt`, which is never there, and fall back to a default | `port.txt` holds the default | `read_file` failed |
+| `rename_symbol` | rename `Shop.Cart.line_total/1` to `subtotal/1` in its module and two callers' files | `elixir shop_test.exs` exits 0 | `line_total` is in no file of `lib/`; the test is as it was |
+| `implement_spec` | write `Roman.encode/1` from its `@doc` | `elixir roman_test.exs` exits 0 | the test is as it was |
+| `large_log` | count the `ERROR` lines with code `E1042` in a 480 kB log (`service_log/0`) | `answer.txt` holds 53 | |
+| `precise_edit` | change `[database]`'s `max_connections` in a 1,560-line file (`settings_conf/1`) where `[cache]` has the same line | the file is `settings_conf(250)` | no `write_file` of it |
+| `follow_steps` | the three steps of `TASK.md` | `out/done.txt` lists the two files | each step's file holds what it should |
+| `answer_only` | a sum, with no tool | | the reply has 391; no tool was called |
+
+The first four are the `smoke` suite, the default; all ten are `standard` (Decision 775).
+`LiveScenarios.select/2` takes a suite or a list of names, which may come from either, and
+answers them in report order; `--suite` and `--scenario` reach it through `plan/1`'s
+`:suite` and `:only`. A task added to `standard` needs a script in `fake_openai.exs`, so
+the suite's own test can run it, and a test that it fails when nothing is done.
 
 **Before anything starts**, `Troupe.Bench.plan/1` reads the person's configuration and
 takes from it where a model call goes (provider, URL, key, named providers, windows,
@@ -190,7 +202,12 @@ output, and `inspect/1` of a plan leaves it out. Every tool is allowed, a budget
 rather than asks, and there is no brief. The runner watches the session's events and stops
 the session when the root agent's turn ends, when the run's cost reaches its share of the
 cap, or a quarter of its wall clock (at most 30 s) after the wall clock, whichever is
-first; a run that did not end by itself says why in its `error`.
+first; a run that did not end by itself says why in its `error`. A run that ended with
+`agent_done` for its budget but whose root's last reply ended the turn (`end_turn`) ended
+by itself: the stopping budget is checked again as a turn ends, so the last allowed call
+answering ends the agent that way too (issue #405, Decision 775). With `--keep DIR`
+(`:keep`) the run's directories are left under `DIR/<bench start>/<scenario>-<n>`
+rather than removed.
 
 **What a run records** comes from the session as it happens: a model call's latency is its
 `llm_request` to its `llm_response`, its time to first token the first `llm_delta` between
@@ -207,7 +224,9 @@ telemetry, `[:troupe, :llm, :retry]`, which the runner counts.
 appended as each run ends: the run's record with `schema`, `bench` (when the bench
 started, which groups its runs), `version`, `scenario` and `run`. `troupe bench --compare`
 puts the last bench beside each scenario's last runs in an earlier one, or, with a version
-or a model, the last runs of that one, measure by measure.
+or a model, the last runs of that one, measure by measure, and, when more than one
+scenario is in both, `all` rows over those (`Live.overall/1`: measures per run and per
+success, so benches of different `--repeat` compare).
 
 ### The live report
 
@@ -216,11 +235,14 @@ Schema 1, with `"mode": "live"`, and these added:
 | where | field | |
 |---|---|---|
 | the report | `model`, `repeat`, `cap_micros`, `started_at`, `skipped[]` | what ran against what, how often, under what cap; the scenarios left out, `{name, why}` |
-| a scenario | `metrics[]` | taken over its runs, with no budget: `success_rate`, `median_cost` and `worst_cost` (in dollars), and the medians `median_wall_ms`, `median_call_ms`, `median_first_token_ms`, `median_model_calls`, `median_input_tokens`, `median_cached_tokens`, `median_output_tokens` |
+| the report | `live_suite`, `kept_in` | `smoke`, `standard`, or `only` for scenarios named; where `--keep` left the runs, else `null` (Decision 775) |
+| the report | `summary` | every run together: `scenarios`, `runs`, `succeeded`, `success_rate`, `success_low`, `success_high` (the 95% Wilson interval), `cost_micros`, `cost_per_run_micros`, `cost_per_success_micros`, `model_calls`, `input_tokens`, `cached_tokens`, `output_tokens`, `tokens_per_success`, `wall_ms`, `median_wall_ms` |
+| a scenario | `metrics[]` | taken over its runs, with no budget: `success_rate` with `success_low` and `success_high`, `median_cost`, `worst_cost` and `cost_per_success` (in dollars), and the medians `median_wall_ms`, `median_call_ms`, `median_first_token_ms`, `median_model_calls`, `median_input_tokens`, `median_cached_tokens`, `median_output_tokens`, `median_largest_tool_result` (bytes) |
 | a scenario | `outcome.held` | how many runs it held in; `passed` is every one |
 | a scenario | `checks[]` | each held in every run; the label says in how many |
 | a scenario | `error` | which runs did not end by themselves, and why |
 | a run | `error`, `checks[]`, `succeeded` | why it did not end by itself; its own checks; no error, the outcome held and every check held |
+| a run | `tool_calls[]`, `largest_tool_result_bytes` | each tool call as it ended, `{agent, name, ok, ms, result_bytes, cut}`: the bytes of the result the model was given (a blob resolved), and whether it says part was left out; never its input or output (issue #406) |
 | a call | `agent`, `cached_tokens`, `cost_micros` | which agent made it (`root`, `root/<subagent>`), and its cache reads and cost |
 
 The run's fields that are `null` offline are filled: `cost_micros` (`null` when nothing
@@ -250,3 +272,8 @@ pointed at.
 
 - **Lifecycle across a daemon restart**, dormancy, and the budget's own question: issue
   #390's other scenarios.
+
+- **A benchmark of models at scale.** Ten tasks compare one build or one model with
+  another on the same work; they do not rank models the way hundreds of tasks from real
+  repositories do, and the bench runs only this harness, so another harness on the same
+  model is not in the comparison.

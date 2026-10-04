@@ -71,16 +71,17 @@ defmodule Troupe.Bench.History do
   end
 
   defp table(now, earlier, ref) do
+    scenarios = now |> Enum.map(& &1["scenario"]) |> Enum.uniq()
+
     rows =
-      now
-      |> Enum.map(& &1["scenario"])
-      |> Enum.uniq()
-      |> Enum.flat_map(fn scenario ->
+      Enum.flat_map(scenarios, fn scenario ->
         mine = Enum.filter(now, &(&1["scenario"] == scenario))
         rows(scenario, before(earlier, scenario), mine)
       end)
 
     [first | _] = now
+
+    rows = rows ++ overall(scenarios, now, earlier)
 
     header = [
       "| scenario | measure | then | now | change |",
@@ -117,6 +118,28 @@ defmodule Troupe.Bench.History do
       end)
 
     [row(scenario, "runs", runs(then), runs(now), "") | measures]
+  end
+
+  # Every scenario both benches ran, together (Decision 775): measures per run and per
+  # success, so a bench of three runs a scenario compares with one of one.
+  defp overall(scenarios, now, earlier) do
+    shared = Enum.filter(scenarios, &(before(earlier, &1) != []))
+
+    if length(shared) < 2 do
+      []
+    else
+      then = Enum.flat_map(shared, &before(earlier, &1))
+      now = Enum.filter(now, &(&1["scenario"] in shared))
+      count = "#{length(shared)} scenarios"
+
+      measures =
+        Enum.zip_with(Live.overall(then), Live.overall(now), fn {_name, label, unit, was},
+                                                                {_, _, _, is} ->
+          row("all", label, show(was, unit), show(is, unit), change(was, is, unit))
+        end)
+
+      [row("all", "scenarios in both", count, count, "") | measures]
+    end
   end
 
   defp row(scenario, measure, then, now, change),

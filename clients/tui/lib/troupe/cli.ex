@@ -61,6 +61,9 @@ defmodule Troupe.CLI do
           compare: boolean(),
           json_path: String.t() | nil,
           ref: String.t() | nil,
+          suite: String.t() | nil,
+          scenario: String.t() | nil,
+          keep: String.t() | nil,
           key: String.t() | nil,
           path: String.t() | nil
         }
@@ -88,7 +91,10 @@ defmodule Troupe.CLI do
     model: :string,
     yes: :boolean,
     md: :string,
-    compare: :boolean
+    compare: :boolean,
+    suite: :string,
+    scenario: :string,
+    keep: :string
   ]
 
   # Every command line `troupe` takes: how it is typed, what it does, and command lines
@@ -141,11 +147,13 @@ defmodule Troupe.CLI do
     {"troupe bench [--json [FILE]] [--md FILE]",
      "measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one",
      [["bench"], ["bench", "--json"], ["bench", "--json", "bench.json", "--md", "bench.md"]]},
-    {"troupe bench --live [--repeat N] [--model M] [--yes] [--json [FILE]] [--md FILE]",
-     "small tasks against your own provider, under a cap it prints and asks about first; kept in a history",
+    {"troupe bench --live [--suite smoke|standard] [--scenario NAME,...] [--repeat N] [--model M] [--yes] [--keep DIR] [--json [FILE]] [--md FILE]",
+     "tasks against your own provider, under a cap it prints and asks about first; scored, and kept in a history",
      [
        ["bench", "--live"],
-       ["bench", "--live", "--repeat", "3", "--model", "m", "--yes", "--json", "live.json"]
+       ["bench", "--live", "--repeat", "3", "--model", "m", "--yes", "--json", "live.json"],
+       ["bench", "--live", "--suite", "standard", "--keep", "runs"],
+       ["bench", "--live", "--scenario", "fix_test,large_log"]
      ]},
     {"troupe bench --compare [VERSION|MODEL]",
      "the last live bench against the one before it, or against a version's or a model's",
@@ -224,6 +232,9 @@ defmodule Troupe.CLI do
       compare: Keyword.get(opts, :compare, false),
       json_path: nil,
       ref: nil,
+      suite: Keyword.get(opts, :suite),
+      scenario: Keyword.get(opts, :scenario),
+      keep: Keyword.get(opts, :keep),
       key: nil,
       path: nil
     }

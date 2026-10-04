@@ -319,6 +319,218 @@ defmodule Troupe.BenchLiveTest do
     end
   end
 
+  describe "a benchmark (Decision 775)" do
+    test "smoke unless told otherwise; standard; scenarios by name; an unknown one refused" do
+      fake = start_fake()
+
+      assert {:ok, plan} = Bench.plan(config: person(fake), history: nil)
+      assert plan.suite == "smoke"
+      assert Enum.map(plan.scenarios, & &1.name) == ~w(write_file fix_test delegate recover)
+      assert Bench.describe_plan(plan) =~ "The smoke suite: write_file, fix_test, delegate, recover."
+
+      assert {:ok, plan} = Bench.plan(config: person(fake), suite: "standard", history: nil)
+
+      assert Enum.map(plan.scenarios, & &1.name) ==
+               ~w(write_file fix_test delegate recover rename_symbol implement_spec large_log precise_edit follow_steps answer_only)
+
+      assert plan.cap_micros == 960_000 * 10
+
+      assert {:ok, plan} =
+               Bench.plan(config: person(fake), only: ["large_log", "write_file"], history: nil)
+
+      assert Enum.map(plan.scenarios, & &1.name) == ~w(write_file large_log)
+      assert Bench.describe_plan(plan) =~ "The scenarios asked for: write_file, large_log."
+
+      assert {:error, "no live suite is called huge; there are smoke and standard"} =
+               Bench.plan(config: person(fake), suite: "huge", history: nil)
+
+      assert {:error, why} = Bench.plan(config: person(fake), only: ["nope"], history: nil)
+      assert why =~ "no live scenario is called nope; there are write_file, fix_test"
+      assert FakeOpenAI.requests(fake) == []
+    end
+
+    test "the standard suite against the stand-in: every task's outcome and checks hold, and a summary" do
+      fake = start_fake()
+      {:ok, plan} = Bench.plan(config: person(fake), suite: "standard", history: nil)
+
+      report = Bench.live(plan)
+
+      assert Bench.passed?(report), Bench.markdown(report)
+      assert %{"suite" => "troupe bench", "live_suite" => "standard"} = report
+      assert length(report["scenarios"]) == 10
+
+      for entry <- report["scenarios"] do
+        assert %{"passed" => true, "error" => nil} = entry
+        assert Enum.all?(entry["checks"], & &1["passed"]), inspect(entry["checks"])
+      end
+
+      # The log was searched, not read whole: the largest result is the grep's.
+      [log_run] = scenario(report, "large_log")["runs"]
+      assert log_run["largest_tool_result_bytes"] < 16_384
+      assert [%{"name" => "grep", "cut" => false}, %{"name" => "write_file"}] = log_run["tool_calls"]
+
+      [answer_run] = scenario(report, "answer_only")["runs"]
+      assert %{"model_calls" => 1, "tool_calls" => [], "largest_tool_result_bytes" => 0} = answer_run
+
+      assert %{
+               "scenarios" => 10,
+               "runs" => 10,
+               "succeeded" => 10,
+               "success_rate" => 1.0,
+               "success_low" => 0.722,
+               "success_high" => 1.0,
+               "cost_micros" => cost,
+               "cost_per_success_micros" => per_success
+             } = report["summary"]
+
+      assert per_success == round(cost / 10)
+      assert cost == report["scenarios"] |> Enum.flat_map(& &1["runs"]) |> Enum.map(& &1["cost_micros"]) |> Enum.sum()
+
+      md = Bench.markdown(report)
+      assert md =~ "| 10 scenarios together | |"
+      assert md =~ "| runs that succeeded | 10 of 10, 1.0 (95% interval 0.722 to 1.0) |"
+      assert md =~ "| precise_edit | settings.conf was edited in place, not written whole (1 of 1) | yes | ok |"
+      assert md =~ "| rename_symbol | outcome: `elixir shop_test.exs` exits 0 | 1 of 1 | ok |"
+      assert md =~ "live against openai/standin-1: 10 scenarios, 1 run each, every run succeeded."
+    end
+
+    test "nothing done is nothing scored: each new task fails untouched" do
+      fake = start_fake(scripts: [])
+
+      {:ok, plan} =
+        Bench.plan(
+          config: person(fake),
+          only: ~w(rename_symbol implement_spec large_log precise_edit follow_steps answer_only),
+          history: nil
+        )
+
+      report = Bench.live(plan)
+
+      # The stand-in says "done" to everything and touches nothing: no outcome holds, and
+      # answer_only's reply is not the number.
+      for entry <- report["scenarios"] do
+        assert [%{"succeeded" => false}] = entry["runs"], entry["name"]
+      end
+
+      assert report["summary"]["succeeded"] == 0
+      assert report["summary"]["cost_per_success_micros"] == nil
+    end
+
+    test "a run whose last allowed call ends the turn ended by itself (#405); one cut off did not" do
+      fake = start_fake()
+
+      # write_file takes two calls: the write, then the answer.
+      {:ok, plan} =
+        Bench.plan(
+          config: person(fake),
+          scenarios: only(["write_file"]),
+          limits: [max_turns: 2],
+          history: nil
+        )
+
+      assert [%{"succeeded" => true, "error" => nil, "model_calls" => 2, "stop_reason" => "end_turn"}] =
+               scenario(Bench.live(plan), "write_file")["runs"]
+
+      {:ok, plan} =
+        Bench.plan(
+          config: person(fake),
+          scenarios: only(["write_file"]),
+          limits: [max_turns: 1],
+          history: nil
+        )
+
+      assert [%{"succeeded" => false, "error" => error, "stop_reason" => "tool_use"}] =
+               scenario(Bench.live(plan), "write_file")["runs"]
+
+      assert error == "the run's budget stopped it (max_turns)"
+    end
+
+    test "each tool call is in the run's record, a cut one says so (#406), and --keep keeps the run",
+         %{tmp_dir: dir} do
+      # 3,000 lines of 40 bytes: a read returns 2,000 of them, cut at the 60,000-byte limit.
+      big = Enum.map_join(1..3_000, fn i -> String.pad_trailing("line #{i}", 39, ".") <> "\n" end)
+
+      scenario = %Scenario{
+        name: "big_read",
+        title: "a read too large to send whole",
+        prompt: "Read big.txt and say what it holds.",
+        files: %{"big.txt" => big},
+        measure: fn _ctx -> {[], []} end
+      }
+
+      fake =
+        start_fake(
+          scripts: [
+            {"Read big.txt",
+             [{:tools, [{"read_file", %{"path" => "big.txt"}}]}, {:text, "Numbered lines."}]}
+          ]
+        )
+
+      keep = Path.join(dir, "kept")
+
+      {:ok, plan} =
+        Bench.plan(config: person(fake), scenarios: [scenario], keep: keep, history: nil)
+
+      assert Bench.describe_plan(plan) =~ "Each run's workspace and session log are kept under #{keep}."
+
+      report = Bench.live(plan)
+      [run] = scenario(report, "big_read")["runs"]
+
+      assert [
+               %{
+                 "agent" => "root",
+                 "name" => "read_file",
+                 "ok" => true,
+                 "ms" => ms,
+                 "result_bytes" => bytes,
+                 "cut" => true
+               }
+             ] = run["tool_calls"]
+
+      assert is_integer(ms)
+      # Kept as a blob in the log, measured as the text the model was given.
+      assert bytes > 59_000 and bytes < 61_000
+      assert run["largest_tool_result_bytes"] == bytes
+      assert metric(scenario(report, "big_read"), "median_largest_tool_result") == bytes
+
+      # The run's directories, under one of the bench's own.
+      assert String.starts_with?(report["kept_in"], keep)
+      assert File.read!(Path.join([report["kept_in"], "big_read-1", "work", "big.txt"])) == big
+
+      assert [_log] =
+               Path.wildcard(Path.join([report["kept_in"], "big_read-1", "state", "**", "events.jsonl"]))
+    end
+
+    test "the interval a success rate has, from its runs" do
+      assert Live.wilson(3, 3) == {0.438, 1.0}
+      assert Live.wilson(2, 3) == {0.208, 0.939}
+      assert Live.wilson(0, 3) == {0.0, 0.562}
+      assert Live.wilson(30, 30) == {0.886, 1.0}
+      assert Live.wilson(0, 0) == {0.0, 1.0}
+    end
+
+    test "--compare sets every scenario both benches ran beside each other, per run and per success",
+         %{tmp_dir: dir} do
+      path = Path.join(dir, "results.jsonl")
+
+      # Then: two scenarios, one run each, one failed. Now: three runs each, all succeeded.
+      for {scenario, cost, ok} <- [{"write_file", 4_000, true}, {"recover", 6_000, false}] do
+        History.append(path, %{line("2026-10-01T10:00:00Z", "0.8.1-beta", "openai/a", cost, ok, 1) | "scenario" => scenario})
+      end
+
+      for scenario <- ["write_file", "recover"], n <- 1..3 do
+        History.append(path, %{line("2026-10-02T10:00:00Z", "0.8.2-beta", "openai/a", 3_000, true, n) | "scenario" => scenario})
+      end
+
+      assert {:ok, table} = Bench.compare(history: path)
+      assert table =~ "| all | scenarios in both | 2 scenarios | 2 scenarios |  |"
+      assert table =~ "| all | runs that succeeded | 0.5 | 1.0 | +0.5 |"
+      # $0.010 in all for one success, then $0.018 for six.
+      assert table =~ "| all | cost per success | $0.0100 | $0.0030 | -70% |"
+      assert table =~ "| all | cost per run | $0.0050 | $0.0030 | -40% |"
+    end
+  end
+
   test "a file's outcome is its text, whatever line endings and trailing newline it has", %{
     tmp_dir: dir
   } do

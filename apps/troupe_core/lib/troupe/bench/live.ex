@@ -21,12 +21,18 @@ defmodule Troupe.Bench.Live do
   latency (its `llm_request` to its `llm_response`) and time to first token (the first
   streamed delta), each tool call's time, and the call's usage and cost as the log has
   them; telemetry gives the provider's retries, which the log never sees.
+
+  A bench is a suite of scenarios, `smoke` unless the plan names another or names the
+  scenarios themselves (Decision 775). Beside each scenario's measures the report has a
+  `summary` of every run: how many succeeded, with a 95% interval, since three runs of a
+  model are not a rate; what they cost in all and per success; and their tokens.
   """
 
   alias Troupe.Bench.{History, LiveScenarios, Runner, Scenario}
   alias Troupe.Config
   alias Troupe.LLM.Catalog
   alias Troupe.Protocol.Event
+  alias Troupe.Session.Blobs
 
   defmodule Plan do
     @moduledoc """
@@ -44,6 +50,8 @@ defmodule Troupe.Bench.Live do
       :run_cap_micros,
       :cap_micros,
       :history,
+      :suite,
+      :keep,
       scenarios: [],
       skipped: [],
       settings: []
@@ -83,20 +91,24 @@ defmodule Troupe.Bench.Live do
 
   Options: `:repeat` (1), the runs of each scenario; `:model`, instead of the configured
   default, as `troupe` addresses one (`<provider>/<model>`, a bare id, or an alias);
-  `:scenarios` (`Troupe.Bench.LiveScenarios.all/0`); `:limits`, over a run's own; and,
-  for a test, `:config`, the person's configuration, and `:history`, its file, `nil` for
-  none. A scenario whose outcome is a command that is not on the PATH is left out, and
-  `skipped` says why: nothing is spent on a run nobody can check.
+  `:suite` (`"smoke"`), or `:only`, the names of the scenarios to run whatever suite they
+  are in (`Troupe.Bench.LiveScenarios.select/2`); `:keep`, a directory to leave each
+  run's workspace and session log in rather than remove them; `:limits`, over a run's
+  own; and, for a test, `:scenarios` themselves, `:config`, the person's configuration,
+  and `:history`, its file, `nil` for none. A scenario whose outcome is a command that is
+  not on the PATH is left out, and `skipped` says why: nothing is spent on a run nobody
+  can check.
   """
   @spec plan(keyword()) :: {:ok, Plan.t()} | {:error, String.t()}
   def plan(opts \\ []) do
-    with {:ok, config} <- person(opts),
+    with {:ok, chosen} <- chosen(opts),
+         {:ok, config} <- person(opts),
          model = Config.resolve_model(config, Keyword.get(opts, :model) || config.model),
          config = %{config | model: model},
          :ok <- reachable(config, model) do
       limits = Keyword.merge(@limits, Keyword.get(opts, :limits, []))
       repeat = Keyword.get(opts, :repeat, 1)
-      {scenarios, skipped} = checkable(Keyword.get(opts, :scenarios, LiveScenarios.all()))
+      {scenarios, skipped} = checkable(chosen)
       price = price(config, model)
       run_cap = price && run_cap(price.entry, limits)
 
@@ -110,10 +122,29 @@ defmodule Troupe.Bench.Live do
          run_cap_micros: run_cap,
          cap_micros: run_cap && run_cap * repeat * length(scenarios),
          history: Keyword.get_lazy(opts, :history, fn -> History.path(config.state_dir) end),
+         suite: suite_name(opts),
+         keep: opts[:keep] && Path.expand(opts[:keep]),
          scenarios: scenarios,
          skipped: skipped,
          settings: settings(config, model)
        }}
+    end
+  end
+
+  defp chosen(opts) do
+    case Keyword.fetch(opts, :scenarios) do
+      {:ok, scenarios} -> {:ok, scenarios}
+      :error -> LiveScenarios.select(opts[:suite], opts[:only])
+    end
+  end
+
+  # What the report calls the set that ran: the suite's name, or `only` for scenarios named
+  # one by one.
+  defp suite_name(opts) do
+    cond do
+      Keyword.has_key?(opts, :scenarios) -> nil
+      match?([_ | _], opts[:only]) -> "only"
+      true -> opts[:suite] || "smoke"
     end
   end
 
@@ -210,6 +241,7 @@ defmodule Troupe.Bench.Live do
 
     [
       "troupe bench --live: #{plural(length(plan.scenarios), "scenario")}, #{plural(plan.repeat, "run")} each, against #{plan.model}.",
+      suite_line(plan),
       "Each run has a scratch directory and a session of its own, with every tool allowed, " <>
         "the shell among them, " <>
         "and may make #{limits[:max_turns]} model calls, send #{thousands(limits[:max_input_tokens])} tokens " <>
@@ -218,8 +250,22 @@ defmodule Troupe.Bench.Live do
     ]
     |> Kernel.++(Enum.map(plan.skipped, &"#{&1["name"]} is left out: #{&1["why"]}."))
     |> Kernel.++(if plan.history, do: ["Each run is added to #{plan.history}."], else: [])
+    |> Kernel.++(
+      if plan.keep,
+        do: ["Each run's workspace and session log are kept under #{plan.keep}."],
+        else: []
+    )
+    |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
   end
+
+  defp suite_line(%Plan{suite: nil}), do: nil
+
+  defp suite_line(%Plan{suite: "only"} = plan),
+    do: "The scenarios asked for: #{Enum.map_join(plan.scenarios, ", ", & &1.name)}."
+
+  defp suite_line(%Plan{} = plan),
+    do: "The #{plan.suite} suite: #{Enum.map_join(plan.scenarios, ", ", & &1.name)}."
 
   defp cost(%Plan{price: nil} = plan, runs) do
     "Nothing prices #{plan.model} (the provider's catalog does not, nor does models.prices), " <>
@@ -250,8 +296,16 @@ defmodule Troupe.Bench.Live do
   @spec run(Plan.t(), keyword()) :: map()
   def run(%Plan{} = plan, opts \\ []) do
     progress = Keyword.get(opts, :progress, fn _line -> :ok end)
-    base = Path.join(System.tmp_dir!(), "troupe-bench-live-#{System.unique_integer([:positive])}")
-    started = DateTime.to_iso8601(DateTime.utc_now())
+    now = DateTime.utc_now()
+    started = DateTime.to_iso8601(now)
+
+    # Kept runs go under a directory of this bench's own, so a second bench beside the
+    # first never seeds its workspaces with what the first left.
+    base =
+      if plan.keep,
+        do: Path.join(plan.keep, Calendar.strftime(now, "%Y%m%dT%H%M%SZ")),
+        else:
+          Path.join(System.tmp_dir!(), "troupe-bench-live-#{System.unique_integer([:positive])}")
 
     try do
       entries =
@@ -274,14 +328,17 @@ defmodule Troupe.Bench.Live do
         "version" => plan.version,
         "model" => plan.model,
         "repeat" => plan.repeat,
+        "live_suite" => plan.suite,
+        "kept_in" => plan.keep && base,
         "cap_micros" => plan.cap_micros,
         "started_at" => started,
         "skipped" => plan.skipped,
         "passed" => Enum.all?(entries, & &1["passed"]),
+        "summary" => summary(Enum.flat_map(entries, & &1["runs"]), length(entries)),
         "scenarios" => entries
       }
     after
-      File.rm_rf(base)
+      unless plan.keep, do: File.rm_rf(base)
     end
   end
 
@@ -349,11 +406,12 @@ defmodule Troupe.Bench.Live do
     :ok = :telemetry.attach(handler, [:troupe, :llm, :retry], &__MODULE__.retried/4, self())
 
     try do
-      {ending, acc, wall, events} = in_session(scenario, root, overrides, plan)
+      {sid, ending, acc, wall, events} = in_session(scenario, root, overrides, plan)
       ctx = %{scenario: scenario, workspace: root, events: events, marks: %{}}
       ctx = Map.put(ctx, :outcome, Scenario.outcome(scenario, root))
       {_metrics, checks} = scenario.measure.(ctx)
-      record(plan, ctx, acc, wall, error(ending, plan), checks)
+      tool_calls = tool_calls(events, acc.tool_ms, &Blobs.resolve(sid, root, &1))
+      record(plan, ctx, acc, wall, error(ending, events, plan), checks, tool_calls)
     after
       :telemetry.detach(handler)
     end
@@ -371,7 +429,7 @@ defmodule Troupe.Bench.Live do
       started = now()
       :ok = Troupe.send_input(sid, scenario.prompt)
       {ending, acc} = watch(sid, started + deadline(plan.limits), plan.run_cap_micros, new_acc())
-      {ending, acc, now() - started, Troupe.events(sid)}
+      {sid, ending, acc, now() - started, Troupe.events(sid)}
     after
       Troupe.unsubscribe(sid)
       Troupe.stop_session(sid)
@@ -464,23 +522,29 @@ defmodule Troupe.Bench.Live do
   end
 
   # Why the run did not end by itself, or `nil` when it did.
-  defp error({:ended, %Event{type: "turn_ended", data: data}}, _plan) do
+  defp error({:ended, %Event{type: "turn_ended", data: data}}, _events, _plan) do
     if reason = data["reason"], do: "the harness ended the turn (#{reason})"
   end
 
+  # A budget that stops rather than asks is checked again when a turn ends, so a turn that
+  # answered on its last allowed call ends the agent as `budget_exhausted` too (issue
+  # #405): the root's last reply says which it was.
   defp error(
          {:ended, %Event{type: "agent_done", data: %{"reason" => "budget_exhausted"} = data}},
+         events,
          _plan
-       ),
-       do: "the run's budget stopped it (#{data["limit"]})"
+       ) do
+    unless stop_reason(events) == "end_turn",
+      do: "the run's budget stopped it (#{data["limit"]})"
+  end
 
-  defp error({:ended, %Event{type: "agent_done", data: data}}, _plan),
+  defp error({:ended, %Event{type: "agent_done", data: data}}, _events, _plan),
     do: "the agent stopped (#{data["reason"]})"
 
-  defp error(:timeout, plan),
+  defp error(:timeout, _events, plan),
     do: "it had not ended #{seconds(deadline(plan.limits))} after it started, and was stopped"
 
-  defp error(:over_cap, plan),
+  defp error(:over_cap, _events, plan),
     do: "it reached its share of the cap, #{money(plan.run_cap_micros)}, and was stopped"
 
   # -- what a run recorded -------------------------------------------------------------
@@ -488,7 +552,7 @@ defmodule Troupe.Bench.Live do
   # Schema 1's run (Decision 772), filled: what the log counts, what the runner timed, and
   # what a live run adds, why it did not end by itself, its checks and whether it
   # succeeded: no error, the outcome held, every check held.
-  defp record(plan, ctx, acc, wall, error, checks) do
+  defp record(plan, ctx, acc, wall, error, checks, tool_calls) do
     events = ctx.events
     calls = calls(events, acc.calls)
     costs = numbers(calls, "cost_micros")
@@ -513,12 +577,17 @@ defmodule Troupe.Bench.Live do
       "compactions" => count(events, "compacted"),
       "approvals" => count(events, "approval_requested"),
       "tools" => tools(events, acc.tool_ms),
+      "tool_calls" => tool_calls,
+      "largest_tool_result_bytes" => largest(tool_calls),
       "calls" => calls,
       "error" => error,
       "checks" => checks,
       "succeeded" => error == nil and ctx.outcome != false and Enum.all?(checks, & &1["passed"])
     }
   end
+
+  defp largest(tool_calls),
+    do: tool_calls |> Enum.map(& &1["result_bytes"]) |> Enum.max(fn -> 0 end)
 
   # A run that never got going: nothing counted, and why.
   defp failed(plan, error) do
@@ -537,6 +606,8 @@ defmodule Troupe.Bench.Live do
       "compactions" => 0,
       "approvals" => 0,
       "tools" => [],
+      "tool_calls" => [],
+      "largest_tool_result_bytes" => 0,
       "calls" => [],
       "error" => error,
       "checks" => [],
@@ -619,6 +690,46 @@ defmodule Troupe.Bench.Live do
     end)
   end
 
+  @doc """
+  Every tool call of a run, in the order each ended (issue #406): its agent, the tool, how
+  long it took, whether it succeeded, the bytes of its result as the model was given it,
+  and whether that result says part of it was left out (cut at `tool_output_limit`, or a
+  read that stopped short). Never its input or its output. `resolve` turns a result the
+  log keeps as a blob back into its text, which is how a large one is measured.
+  """
+  @spec tool_calls([Event.t()], map(), (term() -> String.t())) :: [map()]
+  def tool_calls(events, tool_ms, resolve) do
+    for %Event{type: "tool_call_completed", agent: agent, data: data} <- events do
+      text = result_text(data["content"], resolve)
+
+      %{
+        "agent" => Enum.join(agent || [], "/"),
+        "name" => data["name"],
+        "ok" => data["ok"] != false,
+        "ms" => Map.get(tool_ms, {agent, data["call_id"]}),
+        "result_bytes" => byte_size(text),
+        "cut" => cut?(text)
+      }
+    end
+  end
+
+  defp result_text(content, _resolve) when is_binary(content), do: content
+
+  defp result_text(%{"blob" => _} = reference, resolve) do
+    resolve.(reference)
+  rescue
+    _unreadable -> reference["preview"] || ""
+  end
+
+  defp result_text(nil, _resolve), do: ""
+  defp result_text(other, _resolve), do: Jason.encode!(other)
+
+  # The markers `Troupe.Tools.Output`, `read_output` and `read_file` put in a result that
+  # is not the whole of what was asked for.
+  @cut ~r/\[truncated: \d+ |\[full output kept\. Call read_output|lines \d+–\d+ of \d+ omitted\.|\A\(lines \d+-\d+ of \d+\)/u
+
+  defp cut?(text), do: Regex.match?(@cut, text)
+
   defp count(events, type), do: Enum.count(events, &(&1.type == type))
   defp sum(calls, key), do: calls |> Enum.map(&(&1[key] || 0)) |> Enum.sum()
 
@@ -667,21 +778,28 @@ defmodule Troupe.Bench.Live do
   end
 
   @doc """
-  What a scenario's runs come to, as `{name, label, unit, value}`: the success rate, the
-  median and worst cost, and the medians of the wall clock, a model call's latency and
-  time to first token, the model calls and the tokens each way. A cost is in dollars; a
-  measure nothing recorded is `nil`. The report's metrics, and what `--compare` compares.
+  What a scenario's runs come to, as `{name, label, unit, value}`: the success rate and
+  its 95% interval (`wilson/2`), the median and worst cost and the cost per success, the
+  medians of the wall clock, a model call's latency and time to first token, the model
+  calls and the tokens each way, and the median of each run's largest tool result. A cost
+  is in dollars; a measure nothing recorded is `nil`. The report's metrics, and what
+  `--compare` compares.
   """
   @spec metrics([map()]) :: [{String.t(), String.t(), String.t(), number() | nil}]
   def metrics(runs) do
     calls = Enum.flat_map(runs, &(&1["calls"] || []))
     costs = numbers(runs, "cost_micros")
+    succeeded = Enum.count(runs, & &1["succeeded"])
+    {low, high} = wilson(succeeded, length(runs))
 
     [
       {"success_rate", "runs that succeeded", "share",
-       Float.round(Enum.count(runs, & &1["succeeded"]) / max(length(runs), 1), 3)},
+       Float.round(succeeded / max(length(runs), 1), 3)},
+      {"success_low", "runs that succeeded, 95% interval from", "share", low},
+      {"success_high", "runs that succeeded, 95% interval to", "share", high},
       {"median_cost", "median cost", "$", dollars(median(costs))},
       {"worst_cost", "worst cost", "$", dollars(Enum.max(costs, fn -> nil end))},
+      {"cost_per_success", "cost per success", "$", dollars(per_success(costs, succeeded))},
       {"median_wall_ms", "median wall clock", "ms", median(numbers(runs, "wall_ms"))},
       {"median_call_ms", "median model call", "ms", median(numbers(calls, "latency_ms"))},
       {"median_first_token_ms", "median time to first token", "ms",
@@ -692,7 +810,83 @@ defmodule Troupe.Bench.Live do
       {"median_cached_tokens", "median cached input tokens", "tokens",
        median(numbers(runs, "cached_tokens"))},
       {"median_output_tokens", "median output tokens", "tokens",
-       median(numbers(runs, "output_tokens"))}
+       median(numbers(runs, "output_tokens"))},
+      {"median_largest_tool_result", "median largest tool result", "bytes",
+       median(numbers(runs, "largest_tool_result_bytes"))}
+    ]
+  end
+
+  @doc """
+  The 95% Wilson interval of `successes` in `runs`, rounded to three places: where the
+  success rate of the model on this task probably lies. Three runs that all succeeded put
+  it only above 0.43; thirty, above 0.88. `{0.0, 1.0}` for no runs.
+  """
+  @spec wilson(non_neg_integer(), non_neg_integer()) :: {float(), float()}
+  def wilson(_successes, 0), do: {0.0, 1.0}
+
+  def wilson(successes, runs) do
+    z = 1.96
+    p = successes / runs
+    denominator = 1 + z * z / runs
+    centre = (p + z * z / (2 * runs)) / denominator
+    half = z * :math.sqrt(p * (1 - p) / runs + z * z / (4 * runs * runs)) / denominator
+    {Float.round(max(centre - half, 0.0), 3), Float.round(min(centre + half, 1.0), 3)}
+  end
+
+  # What the runs cost in all, over the runs that succeeded: the price of getting the work
+  # done once, failures included, which is how two models compare (issue #390).
+  defp per_success([], _succeeded), do: nil
+  defp per_success(_costs, 0), do: nil
+  defp per_success(costs, succeeded), do: round(Enum.sum(costs) / succeeded)
+
+  @doc """
+  Every run of a bench together, for the report's `summary`: how many there were and
+  succeeded, with the interval; what they cost in all, per run and per success; their
+  tokens, model calls and wall clock in all; and the median run's wall clock. Costs are in
+  micro-dollars, `nil` when nothing was priced.
+  """
+  @spec summary([map()], non_neg_integer()) :: map()
+  def summary(runs, scenarios) do
+    succeeded = Enum.count(runs, & &1["succeeded"])
+    costs = numbers(runs, "cost_micros")
+    {low, high} = wilson(succeeded, length(runs))
+    tokens = Enum.sum(Enum.map(~w(input_tokens cached_tokens output_tokens), &sum(runs, &1)))
+
+    %{
+      "scenarios" => scenarios,
+      "runs" => length(runs),
+      "succeeded" => succeeded,
+      "success_rate" => Float.round(succeeded / max(length(runs), 1), 3),
+      "success_low" => low,
+      "success_high" => high,
+      "cost_micros" => if(costs == [], do: nil, else: Enum.sum(costs)),
+      "cost_per_run_micros" => if(costs == [], do: nil, else: round(Enum.sum(costs) / length(runs))),
+      "cost_per_success_micros" => per_success(costs, succeeded),
+      "model_calls" => sum(runs, "model_calls"),
+      "input_tokens" => sum(runs, "input_tokens"),
+      "cached_tokens" => sum(runs, "cached_tokens"),
+      "output_tokens" => sum(runs, "output_tokens"),
+      "tokens_per_success" => if(succeeded == 0, do: nil, else: round(tokens / succeeded)),
+      "wall_ms" => runs |> numbers("wall_ms") |> Enum.sum(),
+      "median_wall_ms" => median(numbers(runs, "wall_ms"))
+    }
+  end
+
+  @doc """
+  What `--compare` sets beside each other for a bench's runs together, over the scenarios
+  both benches ran: measures that hold whatever the number of runs, so a bench of three
+  runs a scenario compares with one of one.
+  """
+  @spec overall([map()]) :: [{String.t(), String.t(), String.t(), number() | nil}]
+  def overall(runs) do
+    s = summary(runs, 0)
+
+    [
+      {"success_rate", "runs that succeeded", "share", s["success_rate"]},
+      {"cost_per_success", "cost per success", "$", dollars(s["cost_per_success_micros"])},
+      {"cost_per_run", "cost per run", "$", dollars(s["cost_per_run_micros"])},
+      {"median_wall_ms", "median run's wall clock", "ms", s["median_wall_ms"]},
+      {"tokens_per_success", "tokens per success", "tokens", s["tokens_per_success"]}
     ]
   end
 
