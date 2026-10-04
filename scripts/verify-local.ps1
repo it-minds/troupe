@@ -69,6 +69,13 @@ function Get-DaemonListener {
   [pscustomobject]@{ Port = $port; Id = $listening.OwningProcess; Path = $path }
 }
 
+# Set, or with $null remove, a variable of this process. Not SetEnvironmentVariable with
+# $null: PowerShell 7 passes it as an empty string, which a program then reads as set.
+function Set-ProcessVariable($Name, $Value) {
+  if ($null -eq $Value) { Remove-Item -Path "Env:\$Name" -ErrorAction SilentlyContinue }
+  else { Set-Item -Path "Env:\$Name" -Value $Value }
+}
+
 function Test-Installed($Listener) {
   [bool]($Listener -and $Listener.Path -and $Listener.Path.StartsWith("$LibDir\", [StringComparison]::OrdinalIgnoreCase))
 }
@@ -147,11 +154,11 @@ try {
     $saved = @{}
     foreach ($name in @($isolate.Keys)) {
       $saved[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
-      [Environment]::SetEnvironmentVariable($name, $isolate[$name], "Process")
+      Set-ProcessVariable $name $isolate[$name]
     }
     try { $out = (& $Shim models 2>&1 | Out-String) }
     finally {
-      foreach ($name in @($saved.Keys)) { [Environment]::SetEnvironmentVariable($name, $saved[$name], "Process") }
+      foreach ($name in @($saved.Keys)) { Set-ProcessVariable $name $saved[$name] }
     }
     if ($LASTEXITCODE -eq 0) { Pass "troupe-daemon models answers" }
     else { Fail "troupe-daemon models exited $LASTEXITCODE`: $($out.Trim())" }
