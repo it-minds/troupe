@@ -12,6 +12,7 @@ looked things up in.
 | [tech-stack.md](tech-stack.md) | Every runtime, library and binary, and why |
 | [local-setup.md](local-setup.md) | Prerequisites, the toolbox, development services, a plane on kind, development variables |
 | [testing.md](testing.md) | Running the suites, what each needs, fixtures, the checks that are tests in all but name |
+| [bench.md](bench.md) | `troupe bench`: what a turn costs and does, held to budgets; reading the report, moving a budget, the report's schema |
 | [build.md](build.md) | The images, the native builds, the reaper, generated files, `VERSION` |
 | [ci.md](ci.md) | CI, pre-releases, releases, the nightly, and the documentation site |
 | [deployment.md](deployment.md) | What a release publishes, what a roll does, rolling back |

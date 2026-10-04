@@ -34,6 +34,8 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe config pull [PLANE_URL]` | save the plane's default provider and models here (never a key) |
 | `troupe models [--refresh]` | list every model, its window and its price |
 | `troupe doctor` | check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure |
+| `troupe bench [--json]` | measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one |
+| `troupe bench --live` | reserved: the same suite against your own provider (not yet) |
 | `troupe daemon [ARGS]` | the local daemon: `run` (default), `status`, `config`, `models`, `login on\|off`, `version` |
 | `troupe --version` | print the version |
 | `troupe --help` | print the command lines and the commands inside a session |

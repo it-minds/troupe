@@ -773,3 +773,14 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      joins the modules `mix troupe.xref` lets the TUI reach, as `Troupe.Doctor` and
      `Troupe.Config.Schema` did; the TUI calls only `builtins/0`, which is data, and the
      palette still reads `commands.list`. Proof: `test/troupe/cli_reference_test.exs`.
+
+140. **`troupe bench` runs the harness's offline suite in this VM, against the harness
+     compiled into this binary, and `Troupe.Bench` is a door the TUI may call.** Issue
+     #390, root Decision 772. It prints the Markdown table, or with `--json` the JSON
+     report, and exits 1 when a measure is past its budget or a check fails. It never asks
+     the machine's daemon: what it measures is this build, and a daemon of another version
+     would answer for itself. So `Troupe.Bench` joins the modules `mix troupe.xref` lets
+     the TUI reach, as `Troupe.Doctor` did for `troupe doctor`; the TUI calls `run/0`,
+     `json/1`, `markdown/1` and `passed?/1`, and nothing of the session it runs. `--live`
+     is parsed and refused with exit 2 until the live runner exists, so the flag is the
+     one that runner takes. Proof: `test/troupe/bench_cli_test.exs`.
