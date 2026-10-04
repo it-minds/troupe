@@ -67,7 +67,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Tui
 
 Then, in a new terminal and with your key in `ANTHROPIC_API_KEY` (or none, and it asks),
 `troupe config` shows the model it will use and `troupe` in a project directory opens a
-session. `--gui` (`-Gui`) adds the desktop app. The [quick start](docs/quick-start.md) is
+session. `--gui` (`-Gui`) adds the desktop app, `--vscode` (`-VSCode`) the
+[VS Code extension](docs/user/vscode.md). The [quick start](docs/quick-start.md) is
 the ten-minute version: a first session, what it cost, how to cap the next one, and what a
 plane adds. CI runs its commands against the latest release every night.
 

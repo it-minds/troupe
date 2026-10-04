@@ -14,6 +14,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | command | what it does |
 | --- | --- |
 | `troupe` | open the TUI in the current directory |
+| `troupe --workspace DIR` | open the TUI rooted at DIR, wherever it is started |
 | `troupe --watch` | TUI with watch mode on |
 | `troupe --no-mouse` | TUI without mouse reporting, so the terminal's own selection works |
 | `troupe --full-send` | start with every budget/token limit lifted for the session |
@@ -22,7 +23,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe resume [SESSION_ID]` | no id: reopen the last session here, picker open |
 | `troupe --remote [PLANE_URL]` | open HQ: teams, profiles and sessions on a plane |
 | `troupe login PLANE_URL` | sign in to a plane with the device flow |
-| `troupe logout [PLANE_URL]` | forget a plane's credentials (--all forgets every one) |
+| `troupe logout [PLANE_URL]` | forget a plane's credentials and sign this machine's daemon out of it (--all: every plane) |
 | `troupe whoami [PLANE_URL]` | print who the plane says you are, and your teams |
 | `troupe config` | show the resolved providers and models (keys masked); with none, set them up |
 | `troupe config --explain [KEY] [--json]` | every setting, or KEY's, and which file set it (secrets masked) |

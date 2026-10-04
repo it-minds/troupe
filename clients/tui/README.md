@@ -26,9 +26,10 @@ truly idle: zero LLM calls, zero tokens.
 `troupe` is released with the rest of the repository: every release on this repository's
 GitHub releases page carries a binary per platform, `troupe-<version>-<target>` (`.exe` on
 Windows), beside `troupe-daemon-<version>-<target>.tar.gz` and one `SHA256SUMS`. The
-installers at the repository root put `troupe-daemon` on the machine, and `troupe` and the
-desktop app when asked (`--tui`, `--gui`; `-Tui`, `-Gui` on Windows), and check them
-against `SHA256SUMS` before replacing anything:
+installers at the repository root put `troupe-daemon` on the machine, and `troupe`, the
+desktop app and the VS Code extension when asked (`--tui`, `--gui`, `--vscode`; `-Tui`,
+`-Gui`, `-VSCode` on Windows), and check them against `SHA256SUMS` before replacing
+anything:
 
 ```sh
 curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh
@@ -225,6 +226,7 @@ the same lines.
 
 ```
 troupe                                  # TUI in the current directory
+troupe --workspace DIR                  # TUI rooted at DIR, wherever it is started
 troupe --watch                          # TUI with watch mode on
 troupe --no-mouse                       # TUI without mouse reporting (terminal selection works)
 troupe --private                        # a private session, sealed to the plane you signed in to
@@ -239,6 +241,10 @@ troupe whoami [PLANE_URL]               # who the plane says you are, and your t
 troupe --remote [PLANE_URL]             # HQ: teams, profiles and sessions on a plane
 troupe --version
 ```
+
+In VS Code, the extension's **Troupe: Open** runs `troupe --workspace <folder>` in a
+terminal at the folder you are working in, by default a tab beside your files
+([vscode.md](../../docs/user/vscode.md)).
 
 `troupe run --headless` prints the transcript, one line per event prefixed with the agent
 that wrote it, the harness's notes among them as the window shows them (`done:` and the

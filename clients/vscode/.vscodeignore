@@ -1,0 +1,10 @@
+# What the .vsix leaves out: everything but package.json, the compiled extension, its
+# icons, the README, LICENSE and NOTICE. It has no runtime dependencies, so no node_modules
+# either.
+**
+!package.json
+!out/src/**
+!media/**
+!README.md
+!LICENSE
+!NOTICE

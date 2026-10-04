@@ -5,6 +5,7 @@
 #   sh install.sh                        # asks which clients, shows the plan, asks to go on
 #
 #   sh install.sh --tui --gui -y         # daemon, TUI and desktop app; no questions
+#   sh install.sh --tui --vscode         # daemon, TUI and the VS Code extension
 #   sh install.sh -y                     # the daemon alone; no questions
 #   sh install.sh --clean-install        # remove the current install first; config and state stay
 #   sh install.sh --uninstall [--purge]  # --purge removes config and state as well
@@ -20,15 +21,17 @@
 #     running daemon if there is one and otherwise runs the same harness in its own process.
 #   * the desktop app (--gui): on Linux the release's AppImage, as ~/.local/bin/troupe-desktop
 #     with a menu entry; on macOS Troupe.app in ~/Applications.
+#   * the VS Code extension (--vscode): the release's troupe.vsix, handed to VS Code's own
+#     `code --install-extension`. It opens `troupe` in VS Code, so it goes with the TUI.
 #   * LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt, from the daemon's release, in
 #     ~/.local/share/doc/troupe.
 # Everything is downloaded and checked against the release's SHA256SUMS before anything is
 # replaced, and a daemon or TUI running from what is replaced is stopped first.
 #
-# In a terminal it shows what it is about to do and asks first, and with neither --tui nor
-# --gui it asks which clients to install. -y asks nothing: it installs what the flags name,
-# and the daemon alone if they name neither. Without a terminal it asks nothing either, and
-# naming neither then needs -y.
+# In a terminal it shows what it is about to do and asks first, and with none of --tui,
+# --gui and --vscode it asks which clients to install. -y asks nothing: it installs what the
+# flags name, and the daemon alone if they name none. Without a terminal it asks nothing
+# either, and naming none then needs -y.
 #
 # The copy attached to a release installs that release. TROUPE_VERSION names another; with
 # neither it installs the latest release, which GitHub names at /releases/latest. A private
@@ -63,6 +66,9 @@ OS=$(uname -s)
 # Where the TUI's Burrito wrapper unpacks itself on first run, once per version.
 if [ "$OS" = Darwin ]; then BURRITO_DIR="$HOME/Library/Application Support/.burrito"; else BURRITO_DIR="$DATA_DIR/.burrito"; fi
 MARK='# added by troupe installer'
+# The VS Code extension: its id, and the file a release attaches.
+VSCODE_EXTENSION="objective-mj.troupe"
+VSIX="troupe.vsix"
 # A mirror may be plain HTTP; GitHub never is, and a redirect off HTTPS is refused.
 case "${TROUPE_RELEASE_URL:-}" in http://*) PROTO='=http,https' ;; *) PROTO='=https' ;; esac
 
@@ -129,6 +135,35 @@ installed_summary() {
   if [ -e "$TUI" ]; then summary="${summary:+$summary, }troupe"; fi
   if gui_installed; then summary="${summary:+$summary, }the desktop app"; fi
   printf '%s' "$summary"
+}
+
+# VS Code's command line, which installs an extension: TROUPE_VSCODE_CLI, else `code` on the
+# PATH, else the one inside the macOS app, which VS Code puts on the PATH only when asked.
+# In a WSL or SSH window's terminal, `code` is the remote's, and installs it there. It is
+# run only where the extension is in question: a first `code` in WSL sets up VS Code's
+# server there, which is no part of a summary.
+code_cli() {
+  for cli in "${TROUPE_VSCODE_CLI:-}" "$(command -v code 2>/dev/null || true)" \
+    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
+    "$HOME/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"; do
+    if [ -n "$cli" ] && [ -x "$cli" ]; then printf '%s' "$cli"; return 0; fi
+  done
+  return 1
+}
+
+extension_installed() {
+  cli=$(code_cli) || return 1
+  "$cli" --list-extensions 2>/dev/null | grep -qix "$VSCODE_EXTENSION"
+}
+
+# The extension, from the release, into every VS Code that `code` installs into. A failure
+# here leaves the rest installed, so it is said, not fatal.
+install_extension() {
+  if "$code" --install-extension "$tmp/$VSIX" --force >/dev/null 2>&1; then
+    say "installed the VS Code extension $VERSION with $code"
+  else
+    say "warning: $code --install-extension failed; install $BASE_URL/$VSIX from VS Code (Extensions: Install from VSIX...)"
+  fi
 }
 
 # Pids whose command line matches, space-separated. A release's BEAM names its own
@@ -223,6 +258,7 @@ plan_removal() {
   if gui_installed; then
     if [ "$OS" = Darwin ]; then item "remove the desktop app ($MAC_APP)"; else item "remove the desktop app ($GUI) and its menu entry"; fi
   fi
+  if [ "$mode" = uninstall ] && [ "$ext" = 1 ]; then item "remove the VS Code extension ($VSCODE_EXTENSION)"; fi
   if [ "$1" = 1 ]; then
     item "DELETE config ($CONFIG_DIR) and state, sessions included ($STATE_DIR)"
   else
@@ -241,7 +277,9 @@ go_ahead() {
 
 uninstall() {
   heading "Uninstall Troupe"
-  if [ -z "$(installed_summary)" ] && [ "$purge" = 0 ]; then
+  ext=0
+  if extension_installed; then ext=1; fi
+  if [ -z "$(installed_summary)" ] && [ "$ext" = 0 ] && [ "$purge" = 0 ]; then
     say "  nothing of Troupe's is installed here"
     remove_path_line
     return 0
@@ -257,6 +295,9 @@ uninstall() {
   stop_pids troupe-daemon "$(pids_of "$DAEMON_MATCH")"
   stop_pids troupe "$(pids_of "$TUI_MATCH")"
   remove_installed
+  if [ "$ext" = 1 ]; then
+    "$(code_cli)" --uninstall-extension "$VSCODE_EXTENSION" >/dev/null 2>&1 || say "warning: could not remove the VS Code extension; remove it in VS Code"
+  fi
   remove_path_line
   if [ "$purge" = 1 ]; then rm -rf "$CONFIG_DIR" "$STATE_DIR"; fi
   say "troupe uninstalled"
@@ -419,6 +460,10 @@ install() {
   BASE_URL="${TROUPE_RELEASE_URL:-https://github.com/$REPO/releases/download/v${VERSION}}"
   gui_offered=$(gui_artifact_for "$target")
   if [ "$with_gui" = 1 ] && [ -z "$gui_offered" ]; then die "no desktop app is released for $target; leave out --gui"; fi
+  code=
+  if [ "$with_vscode" = 1 ]; then
+    code=$(code_cli) || die "--vscode, but no VS Code command line here: put \`code\` on the PATH (VS Code's command palette: Shell Command: Install 'code' command in PATH), or set TROUPE_VSCODE_CLI"
+  fi
 
   was=$(installed_summary)
   heading "Troupe installer"
@@ -426,7 +471,7 @@ install() {
   say "  platform   $target"
   say "  installed  ${was:-nothing yet}"
 
-  if [ "$with_tui" = 0 ] && [ "$with_gui" = 0 ]; then
+  if [ "$with_tui" = 0 ] && [ "$with_gui" = 0 ] && [ "$with_vscode" = 0 ]; then
     if [ "$tty" = 1 ]; then
       heading "What to install"
       say "  troupe-daemon, the local harness, always. And:"
@@ -438,8 +483,13 @@ install() {
       else
         say "  (no desktop app is released for $target)"
       fi
+      # Asked only where VS Code is, and yes by default where it opens a TUI being installed.
+      if code=$(code_cli); then
+        if { [ -z "$was" ] && [ "$with_tui" = 1 ]; } || extension_installed; then d=y; else d=n; fi
+        if ask "  The VS Code extension, which opens troupe in VS Code?" "$d"; then with_vscode=1; else code=; fi
+      fi
     elif [ "$yes" = 0 ]; then
-      die "neither --tui nor --gui given, and no terminal to ask on; pass -y to install the daemon alone"
+      die "none of --tui, --gui and --vscode given, and no terminal to ask on; pass -y to install the daemon alone"
     fi
   fi
   gui_artifact=
@@ -456,6 +506,7 @@ install() {
   what="troupe-daemon"
   if [ "$with_tui" = 1 ]; then what="$what, troupe"; fi
   if [ "$with_gui" = 1 ]; then what="$what, the desktop app"; fi
+  if [ "$with_vscode" = 1 ]; then what="$what, the VS Code extension"; fi
   item "download $what $VERSION and check each against SHA256SUMS"
   if [ -n "$daemon_pids" ]; then item "stop troupe-daemon (pid $daemon_pids); the sessions it runs end"; fi
   if [ -n "$tui_pids" ]; then item "stop troupe (pid $tui_pids)"; fi
@@ -471,6 +522,10 @@ install() {
   fi
   if [ "$with_gui" = 1 ]; then
     if [ "$OS" = Darwin ]; then item "install the desktop app as $MAC_APP"; else item "install the desktop app as $GUI, with a menu entry"; fi
+  fi
+  if [ "$with_vscode" = 1 ]; then
+    item "install the VS Code extension with $code"
+    if [ "$with_tui" = 0 ] && [ ! -e "$TUI" ]; then item "(the extension runs troupe, which this leaves out: add --tui)"; fi
   fi
   # 1: this run adds the line; 2: an earlier one did, and a new terminal will have it.
   path_added=0
@@ -495,6 +550,7 @@ install() {
   fetch "$daemon_artifact"
   if [ "$with_tui" = 1 ]; then fetch "$tui_artifact"; fi
   if [ -n "$gui_artifact" ]; then fetch "$gui_artifact"; fi
+  if [ "$with_vscode" = 1 ]; then fetch "$VSIX"; fi
 
   heading "Install"
   stop_pids troupe-daemon "$(pids_of "$DAEMON_MATCH")"
@@ -546,6 +602,8 @@ install() {
     esac
   fi
 
+  if [ "$with_vscode" = 1 ]; then install_extension; fi
+
   if [ "$path_added" = 1 ]; then add_to_path; fi
 
   heading "Check"
@@ -577,15 +635,19 @@ install() {
   if [ "$with_gui" = 1 ]; then
     if [ "$OS" = Darwin ]; then item "Troupe            the desktop app, in ~/Applications"; else item "Troupe            the desktop app, in your applications menu"; fi
   fi
+  if [ "$with_vscode" = 1 ]; then
+    item "VS Code           Troupe: Open, or the mask in the activity bar (a window open already: Developer: Reload Window)"
+  fi
   item "the desktop app starts the daemon when it needs one; so does troupe"
   item "sh install.sh --uninstall removes it again (--purge: config and state too)"
 }
 
-purge=0; mode=install; with_tui=0; with_gui=0; yes=0; clean=0; no_modify_path=0
+purge=0; mode=install; with_tui=0; with_gui=0; with_vscode=0; ext=0; yes=0; clean=0; no_modify_path=0
 for arg in "$@"; do
   case "$arg" in
     --tui) with_tui=1 ;;
     --gui) with_gui=1 ;;
+    --vscode) with_vscode=1 ;;
     -y | --yes) yes=1 ;;
     --no-tui) yes=1 ;; # the daemon alone, as before --tui and --gui
     --clean-install) clean=1 ;;
@@ -593,7 +655,7 @@ for arg in "$@"; do
     --purge) purge=1 ;;
     --no-modify-path) no_modify_path=1 ;;
     --help | -h)
-      say "usage: install.sh [--tui] [--gui] [-y] [--clean-install [--purge]] [--no-modify-path]"
+      say "usage: install.sh [--tui] [--gui] [--vscode] [-y] [--clean-install [--purge]] [--no-modify-path]"
       say "       install.sh --uninstall [--purge] [-y]"
       exit 0
       ;;

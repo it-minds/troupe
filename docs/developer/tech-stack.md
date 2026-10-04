@@ -1,7 +1,7 @@
 # Tech stack
 
-Versions are pinned in `.tool-versions`, `mix.lock`, `clients/gui/pnpm-lock.yaml` and
-`docker/Dockerfile`; this page says why each thing is there, as the code's own comments
+Versions are pinned in `.tool-versions`, `mix.lock`, `clients/gui/pnpm-lock.yaml`,
+`clients/vscode/pnpm-lock.yaml` and `docker/Dockerfile`; this page says why each thing is there, as the code's own comments
 give it.
 
 ## Toolchain

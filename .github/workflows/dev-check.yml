@@ -35,6 +35,7 @@ jobs:
       protocol: ${{ steps.filter.outputs.protocol }}
       tui: ${{ steps.filter.outputs.tui }}
       gui: ${{ steps.filter.outputs.gui }}
+      vscode: ${{ steps.filter.outputs.vscode }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -62,6 +63,8 @@ jobs:
             gui:
               - clients/gui/**
               - protocol/**
+            vscode:
+              - clients/vscode/**
 
   elixir:
     name: umbrella - compile, credo, schema
@@ -159,14 +162,43 @@ jobs:
       # `build` typechecks the desktop app against the freshly built protocol client.
       - run: pnpm build
 
+  # The `.vsix` it builds is the run's artifact, so a pull request's extension can be
+  # installed and tried before it is merged.
+  vscode:
+    name: the VS Code extension - typecheck and package
+    needs: [changes]
+    if: needs.changes.outputs.vscode == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/vscode
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: clients/vscode/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .tool-versions
+          cache: pnpm
+          cache-dependency-path: clients/vscode/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm package
+      - uses: actions/upload-artifact@v7
+        with:
+          name: troupe-vscode
+          path: clients/vscode/troupe.vsix
+          if-no-files-found: error
+
   dev-ok:
     name: dev-ok
     if: always()
-    needs: [changes, elixir, tui, gui]
+    needs: [changes, elixir, tui, gui, vscode]
     runs-on: ubuntu-latest
     steps:
       - name: Every job that ran passed
         run: |
-          for r in "${{ needs.changes.result }}" "${{ needs.elixir.result }}" "${{ needs.tui.result }}" "${{ needs.gui.result }}"; do
+          for r in "${{ needs.changes.result }}" "${{ needs.elixir.result }}" "${{ needs.tui.result }}" "${{ needs.gui.result }}" "${{ needs.vscode.result }}"; do
             case "$r" in success|skipped) ;; *) echo "a job ended $r"; exit 1 ;; esac
           done

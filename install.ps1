@@ -12,13 +12,15 @@
       there is one and otherwise runs the same harness in its own process.
     * the desktop app (-Gui), from the release's per-user setup, run silently. It installs
       into %LOCALAPPDATA%\Programs\troupe-desktop.
+    * the VS Code extension (-VSCode): the release's troupe.vsix, handed to VS Code's own
+      `code --install-extension`. It opens troupe in VS Code, so it goes with the TUI.
   Everything is downloaded and checked against the release's SHA256SUMS before anything is
   replaced, and Troupe processes running from what is replaced are stopped first.
 
-  In a terminal it shows what it is about to do and asks first, and with neither -Tui nor
-  -Gui it asks which clients to install. -Yes asks nothing: it installs what the switches
-  name, and the daemon alone if they name neither. Without a terminal it asks nothing
-  either, and naming neither then needs -Yes.
+  In a terminal it shows what it is about to do and asks first, and with none of -Tui,
+  -Gui and -VSCode it asks which clients to install. -Yes asks nothing: it installs what the
+  switches name, and the daemon alone if they name none. Without a terminal it asks nothing
+  either, and naming none then needs -Yes.
 
   The copy attached to a release installs that release. TROUPE_VERSION names another; with
   neither it installs the latest release, which GitHub names at /releases/latest. A private
@@ -30,6 +32,7 @@
   powershell -ExecutionPolicy Bypass -File .\install.ps1
 .EXAMPLE
   .\install.ps1 -Tui -Gui -Yes        # daemon, TUI and desktop app; no questions
+  .\install.ps1 -Tui -VSCode          # daemon, TUI and the VS Code extension
   .\install.ps1 -Yes                  # the daemon alone; no questions
   .\install.ps1 -CleanInstall         # remove the current install first; config and state stay
   .\install.ps1 -Uninstall [-Purge]   # -Purge removes config and state as well
@@ -38,6 +41,7 @@
 param(
   [switch]$Tui,
   [switch]$Gui,
+  [switch]$VSCode,
   [switch]$Yes,
   [switch]$CleanInstall,
   [switch]$Uninstall,
@@ -66,6 +70,9 @@ $StateDir = if ($env:TROUPE_STATE_HOME) { $env:TROUPE_STATE_HOME } else { Join-P
 $ConfigDir = if ($env:TROUPE_CONFIG_HOME) { $env:TROUPE_CONFIG_HOME } else { Join-Path $env:APPDATA "troupe" }
 # Where the TUI's Burrito wrapper unpacks itself on first run, once per version.
 $BurritoDirs = @((Join-Path $env:APPDATA ".burrito"), (Join-Path $env:LOCALAPPDATA ".burrito"))
+# The VS Code extension: its id, and the file a release attaches.
+$VSCodeExtension = "objective-mj.troupe"
+$Vsix = "troupe.vsix"
 
 # `return`, not `exit`, throughout: run through iex or a scriptblock, `exit` closes the
 # person's terminal.
@@ -121,6 +128,33 @@ function Get-DesktopEntry {
     ForEach-Object { Get-ItemProperty $_.PSPath } |
     Where-Object { $_.DisplayName -eq "Troupe" -and $_.UninstallString } |
     Select-Object -First 1
+}
+
+# VS Code's command line, which installs an extension: TROUPE_VSCODE_CLI, else code.cmd on
+# the PATH, else where VS Code's user and system setups put it. Run only where the
+# extension is in question, not for a summary: it starts VS Code's own Node.
+function Get-CodeCli {
+  $candidates = @(
+    $env:TROUPE_VSCODE_CLI,
+    $(try { (Get-Command code.cmd -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source } catch { $null }),
+    (Join-Path $env:LOCALAPPDATA "Programs\Microsoft VS Code\bin\code.cmd"),
+    $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles "Microsoft VS Code\bin\code.cmd" })
+  )
+  foreach ($c in $candidates) { if ($c -and (Test-Path -PathType Leaf $c)) { return $c } }
+  return $null
+}
+
+# Windows PowerShell turns a native command's stderr into a terminating error under
+# "Stop", and code.cmd's Node writes warnings there.
+function Invoke-Code([string]$Cli) {
+  $ErrorActionPreference = "Continue"
+  $out = @(& $Cli @args 2>$null | ForEach-Object { "$_" })
+  return [pscustomobject]@{ Ok = ($LASTEXITCODE -eq 0); Out = $out }
+}
+
+function Test-ExtensionInstalled([string]$Cli) {
+  if (-not $Cli) { return $false }
+  return [bool]((Invoke-Code $Cli --list-extensions).Out | Where-Object { $_ -eq $VSCodeExtension })
 }
 
 function Get-DaemonVersion {
@@ -310,7 +344,9 @@ function Get-InstalledSummary {
 
 if ($Uninstall) {
   Write-Heading "Uninstall Troupe"
-  if (-not (Get-InstalledSummary) -and -not $Purge) {
+  $codeCli = Get-CodeCli
+  $extensionWas = Test-ExtensionInstalled $codeCli
+  if (-not (Get-InstalledSummary) -and -not $extensionWas -and -not $Purge) {
     Write-Host "  nothing of Troupe's is installed here"
     Remove-FromUserPath
     return
@@ -318,6 +354,7 @@ if ($Uninstall) {
   $running = @(Get-Running)
   Write-StopPlan $running
   Write-RemovalPlan $Purge
+  if ($extensionWas) { Write-Item "remove the VS Code extension ($VSCodeExtension)" }
   if ((Get-UserPathParts) -contains $BinDir) { Write-Item "take $BinDir off the user PATH" }
   if ($Interactive) {
     Write-Host ""
@@ -325,6 +362,9 @@ if ($Uninstall) {
   }
   Stop-Running @(Get-Running)
   Remove-Installed
+  if ($extensionWas -and -not (Invoke-Code $codeCli --uninstall-extension $VSCodeExtension).Ok) {
+    Write-Warn "could not remove the VS Code extension; remove it in VS Code"
+  }
   if ((Test-Path $BinDir) -and -not (Get-ChildItem $BinDir)) { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $BinDir }
   Remove-FromUserPath
   # After the desktop app's uninstaller: one set up before 0.5.2 is in the state directory.
@@ -363,14 +403,25 @@ Write-Host "  release    $Version ($VersionFrom)"
 Write-Host "  platform   windows_x86_64"
 Write-Host "  installed  $(if ($Was) { $Was } else { 'nothing yet' })"
 
-if (-not $Tui -and -not $Gui) {
+$CodeCli = $null
+if ($VSCode) {
+  $CodeCli = Get-CodeCli
+  if (-not $CodeCli) { throw "-VSCode, but no VS Code command line here (code.cmd): install VS Code, or set TROUPE_VSCODE_CLI" }
+}
+
+if (-not $Tui -and -not $Gui -and -not $VSCode) {
   if ($Interactive) {
     Write-Heading "What to install"
     Write-Host "  troupe-daemon, the local harness, always. And:"
     $Tui = Read-YesNo "  troupe, the terminal client?" ((-not $Was) -or $TuiWas)
     $Gui = Read-YesNo "  Troupe, the desktop app?" ((-not $Was) -or $DesktopWas)
+    # Asked only where VS Code is, and yes by default where it opens a TUI being installed.
+    $CodeCli = Get-CodeCli
+    if ($CodeCli) {
+      $VSCode = Read-YesNo "  The VS Code extension, which opens troupe in VS Code?" (((-not $Was) -and $Tui) -or (Test-ExtensionInstalled $CodeCli))
+    }
   } elseif (-not $Yes) {
-    throw "neither -Tui nor -Gui given, and no terminal to ask on; pass -Yes to install the daemon alone"
+    throw "none of -Tui, -Gui and -VSCode given, and no terminal to ask on; pass -Yes to install the daemon alone"
   }
 }
 
@@ -394,6 +445,7 @@ Write-Heading "Plan"
 $names = @("troupe-daemon")
 if ($Tui) { $names += "troupe" }
 if ($Gui) { $names += "the desktop app" }
+if ($VSCode) { $names += "the VS Code extension" }
 Write-Item "download $($names -join ', ') $Version and check each against SHA256SUMS"
 Write-StopPlan (Select-ToStop @(Get-Running))
 if ($CleanInstall -and $Was) { Write-RemovalPlan $Purge }
@@ -408,6 +460,10 @@ if ($Tui) {
   else { Write-Item "install troupe as $TuiExe" }
 }
 if ($Gui) { Write-Item "run the desktop app's setup silently (per user, no admin rights)" }
+if ($VSCode) {
+  Write-Item "install the VS Code extension with $CodeCli"
+  if (-not $Tui -and -not $TuiWas) { Write-Item "(the extension runs troupe, which this leaves out: add -Tui)" }
+}
 $AddPath = (-not $NoModifyPath) -and ((Get-UserPathParts) -notcontains $BinDir)
 if ($AddPath) { Write-Item "add $BinDir to the user PATH" }
 if ($Interactive) {
@@ -446,6 +502,7 @@ try {
   Get-Verified $Artifact
   if ($Tui) { Get-Verified $TuiArtifact }
   if ($Gui) { Get-Verified $GuiArtifact }
+  if ($VSCode) { Get-Verified $Vsix }
 
   Write-Heading "Install"
   Stop-Running (Select-ToStop @(Get-Running))
@@ -502,6 +559,16 @@ try {
     Write-Host "installed the desktop app $Version"
   }
 
+  # Into every VS Code profile code.cmd installs into. A failure leaves the rest installed,
+  # so it is said, not thrown.
+  if ($VSCode) {
+    if ((Invoke-Code $CodeCli --install-extension (Join-Path $Tmp $Vsix) --force).Ok) {
+      Write-Host "installed the VS Code extension $Version with $CodeCli"
+    } else {
+      Write-Warn "$CodeCli --install-extension failed; install $BaseUrl/$Vsix from VS Code (Extensions: Install from VSIX...)"
+    }
+  }
+
   if ($AddPath) { Add-ToUserPath }
 
   Write-Heading "Check"
@@ -527,6 +594,7 @@ if ($Tui) {
   Write-Item "troupe            then the TUI, in a project directory"
 }
 if ($Gui) { Write-Item "Troupe            the desktop app, in the Start menu" }
+if ($VSCode) { Write-Item "VS Code           Troupe: Open, or the mask in the activity bar (a window open already: Developer: Reload Window)" }
 Write-Item "the desktop app starts the daemon when it needs one; so does troupe"
 Write-Item "the release is unsigned: SmartScreen may ask the first time something runs"
 Write-Item "install.ps1 -Uninstall removes it again (-Purge: config and state too)"

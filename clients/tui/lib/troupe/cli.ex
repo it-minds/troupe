@@ -82,6 +82,8 @@ defmodule Troupe.CLI do
   # neither list what the parser refuses nor leave out what it takes.
   @commands [
     {"troupe", "open the TUI in the current directory", [[]]},
+    {"troupe --workspace DIR", "open the TUI rooted at DIR, wherever it is started",
+     [["--workspace", "."]]},
     {"troupe --watch", "TUI with watch mode on", [["--watch"]]},
     {"troupe --no-mouse", "TUI without mouse reporting, so the terminal's own selection works",
      [["--no-mouse"]]},
@@ -98,7 +100,8 @@ defmodule Troupe.CLI do
      [["--remote"]]},
     {"troupe login PLANE_URL", "sign in to a plane with the device flow",
      [["login", "https://plane.example"]]},
-    {"troupe logout [PLANE_URL]", "forget a plane's credentials (--all forgets every one)",
+    {"troupe logout [PLANE_URL]",
+     "forget a plane's credentials and sign this machine's daemon out of it (--all: every plane)",
      [["logout"], ["logout", "--all"]]},
     {"troupe whoami [PLANE_URL]", "print who the plane says you are, and your teams", [["whoami"]]},
     {"troupe config",

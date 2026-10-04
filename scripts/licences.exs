@@ -32,7 +32,8 @@
 #   * the umbrella's and the TUI's Mix locks: `mix deps.get` at the root and in
 #     `clients/tui`. A Hex package's licence is in `deps/<name>/hex_metadata.config`, a git
 #     dependency's in its `src/<name>.app.src`.
-#   * the GUI's pnpm workspace: `pnpm install` in `clients/gui`, then `pnpm licenses list`.
+#   * the GUI's pnpm workspace and the VS Code extension's pnpm project: `pnpm install` in
+#     `clients/gui` and in `clients/vscode`, then `pnpm licenses list` in each.
 #   * the desktop app's crates, and for the notices those of the TUI's NIF, whose
 #     Cargo.lock comes with `ex_ratatui` in `clients/tui/deps`: `cargo metadata`, which
 #     fetches what it needs.
@@ -49,6 +50,7 @@ defmodule Licences do
   @texts "scripts/licence-texts"
   @copies [{"charts/troupe/LICENSE", "LICENSE"}, {"charts/troupe/NOTICE", "NOTICE"}]
   @gui "clients/gui"
+  @vscode "clients/vscode"
   @crate "clients/gui/apps/desktop/src-tauri/Cargo.toml"
 
   # Permissive licences: use, change and ship, open or closed, keeping the notice. A package
@@ -95,7 +97,22 @@ defmodule Licences do
     {:pnpm, "lightningcss", "MPL-2.0",
      "Vite's CSS minifier from Vite 8, one of the GUI's build tools. It does not ship: the " <>
        "bundle holds the stylesheet it wrote, not its code. MPL-2.0 is copyleft per file, " <>
-       "and we use it unmodified, as npm publishes it with its source."}
+       "and we use it unmodified, as npm publishes it with its source."},
+    {:pnpm, "@vscode/vsce-sign", "Unknown",
+     "Microsoft's licence (`SEE LICENSE IN LICENSE.txt`, so no SPDX name), which allows " <>
+       "using it with Visual Studio Code to develop and test an application, and not " <>
+       "sharing or shipping it. `@vscode/vsce`, the tool that packages the VS Code " <>
+       "extension's `.vsix`, requires it; the build runs it, and neither the `.vsix` nor " <>
+       "this repository carries it. Its builds for each platform are covered with it."},
+    {:pnpm, "istextorbinary", "Artistic-2.0",
+     "Used by `@secretlint/source-creator`, through which `@vscode/vsce` checks the " <>
+       "extension's files for secrets before packaging. A build tool: nothing of it is in " <>
+       "the `.vsix`. Artistic-2.0 asks more only of a changed copy that is distributed; we " <>
+       "use it unmodified."},
+    {:pnpm, "binaryextensions", "Artistic-2.0", "Used by `istextorbinary`. As `istextorbinary`."},
+    {:pnpm, "textextensions", "Artistic-2.0", "Used by `istextorbinary`. As `istextorbinary`."},
+    {:pnpm, "editions", "Artistic-2.0", "Used by `istextorbinary`. As `istextorbinary`."},
+    {:pnpm, "version-range", "Artistic-2.0", "Used by `editions`. As `istextorbinary`."}
   ]
 
   # Licences that ask whoever ships a binary to say where its source is: MPL-2.0's section
@@ -129,7 +146,7 @@ defmodule Licences do
 
   @headings %{
     hex: "Elixir: the umbrella and the TUI (Hex)",
-    pnpm: "The GUI (pnpm)",
+    pnpm: "The GUI and the VS Code extension (pnpm)",
     cargo: "The desktop app (Cargo)"
   }
 
@@ -155,13 +172,17 @@ defmodule Licences do
   # Every package, which is what the policy reads, and the ones whose texts ship. What
   # ships is less: none of the GUI's build and test tools is in its bundle, and no crate
   # that only builds something (a build script's, a procedural macro's) is in a binary.
-  # And more: the crates of the TUI's NIF, and what no lock file names.
+  # And more: the crates of the TUI's NIF, and what no lock file names. The VS Code
+  # extension's packages are all build and test tools: its `.vsix` is its own code alone
+  # (`vsce package --no-dependencies`), so none of them ships.
   defp packages do
     hex = hex()
     desktop = cargo(@crate)
     nif = cargo(@nif)
     shipped = Enum.filter(desktop ++ nif, & &1.shipped)
-    {hex ++ pnpm([]) ++ desktop, hex ++ pnpm(["--prod"]) ++ shipped ++ components()}
+
+    {hex ++ pnpm(@gui, []) ++ pnpm(@vscode, []) ++ desktop,
+     hex ++ pnpm(@gui, ["--prod"]) ++ shipped ++ components()}
   end
 
   defp outputs(packages, shipped) do
@@ -275,9 +296,9 @@ defmodule Licences do
   # -- pnpm -----------------------------------------------------------------------------
 
   # `--prod` is what the GUI's bundle is made from: the packages it depends on to run.
-  defp pnpm(only) do
+  defp pnpm(dir, only) do
     args = ["licenses", "list", "--json" | only]
-    json = run("pnpm", args, @gui, "run `pnpm install` in #{@gui}")
+    json = run("pnpm", args, dir, "run `pnpm install` in #{dir}")
 
     for {_licence, entries} <- JSON.decode!(json),
         %{"name" => name, "license" => licence} = entry <- entries,
@@ -563,7 +584,8 @@ defmodule Licences do
 
   defp about(:pnpm, names) do
     """
-    #{names} packages, from `clients/gui/pnpm-lock.yaml`, build and test tools included. A
+    #{names} packages, from `clients/gui/pnpm-lock.yaml` and `clients/vscode/pnpm-lock.yaml`,
+    build and test tools included; the VS Code extension's are all build and test tools. A
     package's builds for one operating system and processor, such as esbuild's, are checked
     and not listed: each is under its parent's licence, and which of them are installed
     depends on the machine.
