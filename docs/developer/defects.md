@@ -479,6 +479,24 @@ Found by the chunk 15 fixer of slot B15 (PR #372), 2026-10-04.
 
 Found by the chunk 15 fixers of slots A15, B15 and C15 (PRs #374, #372, #370), 2026-10-04.
 
+### D64 - Small leftovers from the 0.8.1 work (low)
+
+- Nothing checks that a new `mix.exs` that reads `VERSION` also lists the `:troupe_version`
+  compiler (Decision 768); `build.md` says it should. An assertion in `Troupe.VersionTest`
+  would hold it.
+- `/todo complete|cancel|add`, typed in a branch window, is a slash command missing from
+  `Troupe.Commands`, so it is in neither `commands.list`, the palettes, `troupe --help` nor
+  the command reference.
+- `docs/developer/build.md` section 3 has no row for `mix troupe.config.schema` (the
+  config schema and the configuration reference it writes).
+- `troupe --workspace DIR` with a directory that doesn't exist is unchecked; the VS Code
+  extension always passes a real folder.
+- The TUI suite shares one embedded daemon, which answers a replayed `command_id` with the
+  first answer: two tests using the same literal id make the second a silent no-op. Tests
+  should take ids from `RPC.command_id()`.
+
+Found by the chunk 16 fixers, 2026-10-04.
+
 ## Taken
 
 | Defect | Taken by |
@@ -551,6 +569,7 @@ Found by the chunk 15 fixers of slots A15, B15 and C15 (PRs #374, #372, #370), 2
 | D51 - an MCP session a renewed token or a dropped server left open (the person-mode case stays in D51) | #358, PR #363 |
 | D53's first item - the desktop app showed a team turn that failed on the plane as finished | #354, PR #359 |
 | D60 - A checkout that built the previous version kept reporting it | #380, PR #382 |
+| D61's first item - `troupe logout` left the daemon holding the plane token | #381, PR #385 |
 
 ## Checked and not a defect
 
