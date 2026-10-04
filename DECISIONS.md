@@ -5072,8 +5072,9 @@ citation keeps meaning what it meant.
        `troupe bench --live --suite standard --repeat 2 --keep --json` against the
        stand-in, on the pull request.
 
-776. **On Windows the shell is Git for Windows' bash, never WSL's launcher; `grep` searches
-     a file its `path` names; and a glob that matched nothing says so.** Found by the
+776. **On Windows the shell is Git for Windows' bash, never WSL's launcher; no command
+     Troupe starts has the release's own runtime on its `PATH`; `grep` searches a file its
+     `path` names; and a glob that matched nothing says so.** Found by the
      first `troupe bench --live --suite standard --repeat 3` (Decision 775), against
      `qwen3-235b` from the installed `troupe` on Windows: 20 of 30 runs succeeded, and nine
      of the ten failures came from these three, not from the model.
@@ -5090,6 +5091,15 @@ citation keeps meaning what it meant.
        `bash.exe` on the `PATH` outside the Windows directory and the `WindowsApps`
        aliases; with none it is PowerShell, as before. A person who wants WSL runs Troupe in
        WSL, where the host and the shell agree.
+     - **And then `elixir` died at boot.** With Git's bash, the next layer showed: the VM
+       puts its own runtime's `bin` first on the `PATH` its children inherit, and in a
+       release (the installed `troupe` and `troupe-daemon`) that runtime's `erl` has no
+       boot file, so the `elixir` or `mix` a command ran found it first and stopped with
+       `cannot get bootfile ... start.boot`. Decision 773 found this for the bench's
+       outcome commands and fixed it there alone. `Troupe.Reaper.child_env/0` now gives
+       every command started through reaper (the shell tool, `grep`'s ripgrep, git, MCP
+       servers) a `PATH` without the release's runtime, and the bench's outcome uses the
+       same; a caller's own variables still win.
      - **`grep` on one file.** Its `path` was taken for a directory: ripgrep ran in it and
        the built-in scan globbed under it, so a file found nothing, and the answer was "No
        matches." for a search of the very file that held them. Every `large_log` run asked
@@ -5109,11 +5119,15 @@ citation keeps meaning what it meant.
        much before it moves.
      - **Proof:** `Troupe.Tools.ShellTest`: WSL's launcher first on the `PATH` passed over
        for Git's bash, a Git found from its `git` wherever installed, another bash with no
-       Git, neither WSL path ever, and a per-user Git. `FileToolsTest`: a file as the path,
+       Git, neither WSL path ever, and a per-user Git; `ShellReleasePathTest`: with
+       `RELEASE_ROOT` set and the runtime's `bin` first on the `PATH`, a shell command's
+       `$PATH` is without it. `FileToolsTest`: a file as the path,
        with ripgrep and with the built-in scan; a glob that matched nothing named. On the
        chunk's `grep.ex` the same search of a file answered `No matches.` with the built-in
        scan and `ripgrep failed: ` with ripgrep on Linux, and `No matches.` in the bench's
        own log on Windows; the stand-in's `large_log` script now greps the file, as the
        model did. On this machine the installed daemon's `Shell.shell/0` answered
-       `C:/WINDOWS/system32/bash.exe` before the change and Git's after, on the pull
-       request.
+       `C:/WINDOWS/system32/bash.exe` before the change and Git's after, and a headless
+       session of the installed `troupe` ran `uname -s; elixir -e ...` as `MINGW64_NT` with
+       the boot failure above, then, with the `PATH` fixed, printing the answer, on the
+       pull request.

@@ -76,3 +76,69 @@ defmodule Troupe.Tools.ShellTest do
              "C:/Users/me/AppData/Local/Programs/Git/bin/bash.exe"
   end
 end
+
+defmodule Troupe.Tools.ShellReleasePathTest do
+  @moduledoc """
+  A command the shell tool runs never has the release's own runtime on its `PATH`
+  (Decision 776), whose `erl` has no boot file: the `elixir` a person's tests run with
+  died at boot on it. `async: false`: it sets `RELEASE_ROOT` and `PATH`, which the whole
+  VM reads.
+  """
+
+  use ExUnit.Case, async: false
+
+  alias Troupe.Reaper
+  alias Troupe.Tool.Ctx
+  alias Troupe.Tools.Shell
+  alias Troupe.Workspace
+
+  @moduletag :tmp_dir
+
+  setup %{tmp_dir: root} do
+    previous = Map.new(~w(PATH RELEASE_ROOT), &{&1, System.get_env(&1)})
+
+    on_exit(fn ->
+      Enum.each(previous, fn
+        {var, nil} -> System.delete_env(var)
+        {var, value} -> System.put_env(var, value)
+      end)
+    end)
+
+    {:ok, workspace} = Workspace.new(root)
+
+    ctx = %Ctx{
+      session_id: "s-#{System.unique_integer([:positive])}",
+      agent_path: ["root"],
+      workspace: workspace,
+      call_id: "call_1",
+      agent_pid: self(),
+      config: %Troupe.Config{}
+    }
+
+    %{ctx: ctx}
+  end
+
+  test "outside a release the PATH is the VM's" do
+    System.delete_env("RELEASE_ROOT")
+    assert Reaper.child_env() == []
+  end
+
+  test "in a release, the runtime's bin is left out of a command's PATH", %{ctx: ctx} do
+    if match?({:win32, _}, :os.type()), do: :ok, else: in_a_release(ctx)
+  end
+
+  defp in_a_release(ctx) do
+    erts_bin =
+      Path.join([to_string(:code.root_dir()), "erts-#{:erlang.system_info(:version)}", "bin"])
+
+    System.put_env("RELEASE_ROOT", to_string(:code.root_dir()))
+    System.put_env("PATH", erts_bin <> ":" <> System.get_env("PATH"))
+
+    assert [{"PATH", path}] = Reaper.child_env()
+    refute erts_bin in String.split(path, ":")
+
+    assert {:ok, output} = Shell.run(%{"command" => "echo \"$PATH\""}, ctx)
+    refute erts_bin in (output |> String.trim() |> String.split(":"))
+    assert output =~ "/usr/bin"
+  end
+end

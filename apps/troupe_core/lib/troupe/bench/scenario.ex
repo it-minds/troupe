@@ -76,47 +76,27 @@ defmodule Troupe.Bench.Scenario do
         false
 
       path ->
-        env = [{"PATH", command_path(System.get_env("PATH", ""), release_bin())}]
-
+        # The environment every command Troupe starts gets (Decision 776): in a release,
+        # a PATH without the release's own runtime, whose `erl` has no boot file
+        # (Decision 773).
         {_output, status} =
-          System.cmd(path, args, cd: workspace, stderr_to_stdout: true, env: env)
+          System.cmd(path, args,
+            cd: workspace,
+            stderr_to_stdout: true,
+            env: Troupe.Reaper.child_env()
+          )
 
         status == 0
     end
   end
 
   @doc """
-  The `PATH` a command outcome runs with: this VM's, less `erts_bin`.
-
-  The VM puts its own runtime's `bin` first on the `PATH` its children get. In a release,
-  the installed `troupe` or `troupe-daemon`, that runtime has no boot file of its own, so
-  the `elixir` a test runs with started on it and failed before the test did: the outcome
-  was a failure whatever the model had done (Decision 773). Outside a release `erts_bin`
-  is `nil` and the `PATH` is the VM's.
+  The `PATH` a command outcome runs with: this VM's, less `erts_bin`
+  (`Troupe.Reaper.path_without/2`, which every command started through reaper gets since
+  Decision 776).
   """
   @spec command_path(String.t(), Path.t() | nil) :: String.t()
-  def command_path(path, nil), do: path
-
-  def command_path(path, erts_bin) do
-    separator = if match?({:win32, _}, :os.type()), do: ";", else: ":"
-
-    path
-    |> String.split(separator)
-    |> Enum.reject(&(dir(&1) == dir(erts_bin)))
-    |> Enum.join(separator)
-  end
-
-  defp release_bin do
-    if System.get_env("RELEASE_ROOT") do
-      Path.join([to_string(:code.root_dir()), "erts-#{:erlang.system_info(:version)}", "bin"])
-    end
-  end
-
-  # One directory however it is spelled: separators, a trailing one, and on Windows case.
-  defp dir(path) do
-    path = path |> String.replace("\\", "/") |> String.trim_trailing("/")
-    if match?({:win32, _}, :os.type()), do: String.downcase(path), else: path
-  end
+  def command_path(path, erts_bin), do: Troupe.Reaper.path_without(path, erts_bin)
 
   @doc """
   Whether a file of the workspace holds `content`, as a `{:file, ...}` outcome is judged:
