@@ -15,8 +15,21 @@ defmodule Troupe.Gateway.Dispatch do
   """
 
   alias Troupe.Agent.Definitions
-  alias Troupe.Config.ModelSettings
-  alias Troupe.Gateway.{ClientTool, Commands, LocalSources, Plane, Presence, Private, Session, Setup, Worktrees}
+  alias Troupe.Config.{ModelSettings, Settings}
+
+  alias Troupe.Gateway.{
+    ClientTool,
+    Commands,
+    Connections,
+    LocalSources,
+    Plane,
+    Presence,
+    Private,
+    Session,
+    Setup,
+    Worktrees
+  }
+
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Identity
   alias Troupe.LLM.Provider
@@ -112,9 +125,9 @@ defmodule Troupe.Gateway.Dispatch do
     "identity.get" => :observe,
     "identity.link" => :admin,
     "identity.unlink" => :admin,
-    # The machine's own model settings. Reading them says nothing secret — the key is
-    # reported as set or not — but trying a provider sends a key to a URL, and saving
-    # changes what every later session on the machine talks to.
+    # The machine's own settings (#57). Reading them says nothing secret — the key is
+    # reported as set or not, a secret's value as `****` — but trying a provider sends a
+    # key to a URL, and saving changes what every later session on the machine does.
     "config.get" => :observe,
     "config.models" => :admin,
     "config.set" => :admin,
@@ -922,11 +935,19 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("skills." <> _ = method, params, _context), do: local_sources(method, params)
 
   # A first run's questions (Decision 705): the daemon's alone, since they write the
-  # settings file and start a session on this machine.
+  # settings file and start a session on this machine. An answer that wrote the settings
+  # is announced to every client as a `config.set` is (#57).
   defp handle("setup." <> _ = method, params, context) do
-    if Process.whereis(Troupe.Gateway.Daemon),
-      do: setup(method, params, context),
-      else: {:error, Error.new(:method_not_found, %{method: method})}
+    cond do
+      Process.whereis(Troupe.Gateway.Daemon) == nil ->
+        {:error, Error.new(:method_not_found, %{method: method})}
+
+      method == "setup.answer" ->
+        announcing("user", nil, fn -> setup(method, params, context) end)
+
+      true ->
+        setup(method, params, context)
+    end
   end
 
   defp handle(method, _params, _context) do
@@ -939,20 +960,43 @@ defmodule Troupe.Gateway.Dispatch do
       else: {:error, Error.new(:method_not_found, %{method: method})}
   end
 
+  # `config.get` is the model panel's fields, as before, and every key with where it came
+  # from (#57); `config.set` and `config.import` answer the same after the write.
   defp model_settings("config.get", params) do
-    {:ok, ModelSettings.describe(workspace_param(params))}
+    {:ok, settings(ModelSettings.describe(workspace_param(params)), workspace_param(params))}
   end
 
   defp model_settings("config.models", params) do
     settings_result(ModelSettings.discover(params))
   end
 
+  # One key by name, into the scope the client names.
+  defp model_settings("config.set", params)
+       when is_map_key(params, "key") or is_map_key(params, "path") do
+    workspace = workspace_param(params)
+    scope = Map.get(params, "scope") || "user"
+    key = params["key"] || params["path"]
+
+    answer =
+      announcing(scope, workspace, fn ->
+        with {:ok, written} <- Settings.set(key, params["value"], scope, workspace) do
+          {:ok, workspace |> ModelSettings.describe() |> settings(workspace) |> Map.put("written", written)}
+        end
+      end)
+
+    settings_result(answer)
+  end
+
   defp model_settings("config.set", params) do
-    settings_result(ModelSettings.write(params, workspace_param(params)))
+    workspace = workspace_param(params)
+    written = announcing("user", nil, fn -> ModelSettings.write(params, workspace) end)
+    settings_result(written, workspace)
   end
 
   defp model_settings("config.import", %{"from" => "opencode"} = params) do
-    settings_result(ModelSettings.import_opencode(workspace_param(params)))
+    workspace = workspace_param(params)
+    imported = announcing("user", nil, fn -> ModelSettings.import_opencode(workspace) end)
+    settings_result(imported, workspace)
   end
 
   defp model_settings("config.import", %{"from" => from}) do
@@ -963,6 +1007,40 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp settings_result({:error, reason}),
     do: {:error, Error.new(:invalid_params, %{reason: reason})}
+
+  defp settings_result({:ok, result}, workspace), do: {:ok, settings(result, workspace)}
+  defp settings_result(error, _workspace), do: settings_result(error)
+
+  defp settings(model_settings, workspace), do: Map.merge(model_settings, Settings.describe(workspace))
+
+  # Every client attached hears that a file the daemon writes has changed, and which of
+  # its keys did, so one client shows what another set (#57). The file is read before
+  # and after the write: a save that changed nothing says nothing, and a write that
+  # failed changed nothing. The writer hears it too, like everybody else.
+  defp announcing(scope, workspace, write) do
+    case Settings.file(scope, workspace) do
+      {:ok, path} ->
+        before = Settings.read(path)
+        result = write.()
+        if match?({:ok, _answer}, result), do: announce(scope, workspace, path, before)
+        result
+
+      {:error, _no_file} ->
+        write.()
+    end
+  end
+
+  defp announce(scope, workspace, path, before) do
+    case Settings.changed(before, Settings.read(path)) do
+      [] ->
+        :ok
+
+      keys ->
+        changed = %{"scope" => scope, "path" => Troupe.Paths.display(path), "keys" => keys}
+        changed = if scope == "user", do: changed, else: Map.put(changed, "workspace", workspace)
+        Connections.broadcast("config.changed", changed)
+    end
+  end
 
   defp setup("setup.get", _params, _context), do: {:ok, Setup.get()}
 
@@ -1026,11 +1104,16 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   # A link that carries a plane token is this daemon connecting to its plane, and the
-  # moment it is told what of its person's was erased while it was away (Decision 756).
+  # moment it is told what of its person's was erased while it was away (Decision 756),
+  # then carries on sealing what it could not seal without a token: a restart leaves it
+  # none, and a session made while nobody had linked was never registered (Decision 764).
   # Not waited for: the link answers now, and a plane that cannot be reached is asked again
-  # at the next one.
+  # at the next one, which a client makes whenever its token is renewed.
   defp erasures(%{"plane_token" => token}) when is_binary(token) and token != "" do
-    Task.start(fn -> Private.apply_erasures() end)
+    Task.start(fn ->
+      Private.apply_erasures()
+      Private.resume()
+    end)
   end
 
   defp erasures(_params), do: :ok

@@ -257,11 +257,14 @@ function LocalSession({
     setBusy(true);
     setError(null);
     try {
+      // `private` beside the workspace, where the daemon reads it: inside `config` it was a
+      // setting no client may choose, and the session was made local (issue #365).
       const created = await daemon.createSession({
         workspace: workspace.trim(),
         worktree,
         ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
-        config: { watch, ...(privately ? { private: true } : {}) },
+        config: { watch },
+        ...(privately ? { private: true } : {}),
       });
       onCreated(created.session_id, privately ? "private" : "local");
     } catch (e) {
@@ -322,8 +325,10 @@ function LocalSession({
       </section>
 
       {/* Only where the daemon says it can seal one. A checkbox for something the
-          server has never heard of reads as a setting that did not take. */}
-      {daemon.supportsPrivateSessions && (
+          server has never heard of reads as a setting that did not take. It says so at
+          `initialize`, which a link made since cannot change: a daemon that knows the
+          capability and is linked now can seal one too (#365). */}
+      {(daemon.supportsPrivateSessions || (linked && "private_sessions" in daemon.capabilities)) && (
         <section>
           <label className="inline">
             <input type="checkbox" checked={privately} onChange={(e) => setPrivately(e.target.checked)} disabled={!linked} />

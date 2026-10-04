@@ -12,15 +12,17 @@ import {
   DaemonClient,
   applyClientDefaults,
   clientDefaults,
+  configKey,
   configSetParams,
   describeOffer,
   describeOverride,
   discoveryParams,
   formFromConfig,
   modelConfigError,
+  servesKeys,
   tokenCount,
 } from "../src/index.js";
-import type { DaemonEndpoint, ModelConfig, ModelForm } from "../src/index.js";
+import type { ConfigChanged, DaemonEndpoint, ModelConfig, ModelForm } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 import { startHarness, type Harness } from "./support/harness.js";
 import { GATEWAY_DEFAULTS } from "./support/plane.js";
@@ -219,6 +221,83 @@ describe("the model settings on the daemon", () => {
         () => other.modelConfig(),
         (e: unknown) => modelConfigError(e) === "This daemon does not support model settings yet; update troupe-daemon.",
       );
+    } finally {
+      other.disconnect();
+      await old.stop();
+    }
+  });
+});
+
+// troupe #57: the desktop app and the terminal show the same settings, and a change one
+// makes shows in the other. The terminal is another client of the same daemon here.
+describe("settings shared between clients", () => {
+  let daemon: FakeDaemon;
+  let desktop: DaemonClient;
+  let terminal: DaemonClient;
+
+  before(async () => {
+    daemon = new FakeDaemon();
+    await daemon.start();
+    desktop = new DaemonClient(endpointOf(daemon));
+    terminal = new DaemonClient(endpointOf(daemon));
+  });
+
+  after(async () => {
+    desktop.disconnect();
+    terminal.disconnect();
+    await daemon.stop();
+  });
+
+  function heard(client: DaemonClient): Promise<ConfigChanged> {
+    return new Promise((resolve) => {
+      const stop = client.onConfigChanged((changed) => {
+        stop();
+        resolve(changed);
+      });
+    });
+  }
+
+  it("a model the desktop app saves is announced to the terminal, which reads it with where it came from", async () => {
+    await terminal.modelConfig();
+    const news = heard(terminal);
+    await desktop.setModelConfig({ provider: "anthropic", models: { default: "claude-opus-5" } });
+
+    assert.deepEqual((await news).keys, ["provider", "models.default"]);
+    const seen = await terminal.modelConfig();
+    assert.equal(servesKeys(seen), true);
+    assert.deepEqual(
+      { value: configKey(seen, "models.default")?.value, layer: configKey(seen, "models.default")?.layer },
+      { value: "claude-opus-5", layer: "user" },
+    );
+  });
+
+  it("one setting set by name in the terminal reaches the desktop app, and the scope is the user's", async () => {
+    await desktop.modelConfig();
+    const news = heard(desktop);
+    const answer = await terminal.setSetting("models.default", "glm-5.2");
+
+    assert.equal(answer.written?.scope, "user");
+    assert.equal(daemon.calls.at(-1)?.params["scope"], "user");
+    assert.deepEqual((await news).keys, ["models.default"]);
+    assert.equal((await desktop.modelConfig()).models.default, "glm-5.2");
+  });
+
+  it("a key the daemon does not know is refused, and nothing is announced", async () => {
+    let told = false;
+    const stop = desktop.onConfigChanged(() => {
+      told = true;
+    });
+    await assert.rejects(() => terminal.setSetting("ui.colour", "pink"), /is not a setting Troupe knows/);
+    stop();
+    assert.equal(told, false);
+  });
+
+  it("a daemon from before shared settings answers no keys", async () => {
+    const old = new FakeDaemon({ servesKeys: false });
+    await old.start();
+    const other = new DaemonClient(endpointOf(old));
+    try {
+      assert.equal(servesKeys(await other.modelConfig()), false);
     } finally {
       other.disconnect();
       await old.stop();

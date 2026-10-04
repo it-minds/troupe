@@ -1,0 +1,29 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/config.changed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "keys": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "path": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "keys",
+    "path",
+    "scope"
+  ],
+  "title": "config.changed",
+  "type": "object"
+}

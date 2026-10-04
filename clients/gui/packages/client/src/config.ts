@@ -32,6 +32,30 @@ export interface ConfigOverride {
   detail: string;
 }
 
+/**
+ * Which file a setting is written to (troupe #57): the user's `config.yaml`, a
+ * workspace's `.troupe/config.yaml`, or its git-ignored `.troupe/config.local.yaml`.
+ */
+export type ConfigScope = "user" | "project" | "local";
+
+/** One key as `config.get` answers it, with where its value came from (troupe #57). */
+export interface ConfigKey {
+  key: string;
+  /** The value in effect. A secret's is `****`, never itself. */
+  value: unknown;
+  layer: "default" | "user" | "project" | "local" | "env" | "cli" | "opencode";
+  /** The file that set it, or the variable; null for a default. */
+  source: string | null;
+  default: unknown;
+  /** The scopes `config.set` writes it to here. */
+  scopes: ConfigScope[];
+  secret: boolean;
+  /** The name a settings page shows it by, in both clients; null for one no page shows. */
+  label: string | null;
+  /** What it does, from the one key table both clients and the docs read. */
+  doc: string | null;
+}
+
 /** `config.get`, and what `config.set` answers with. */
 export interface ModelConfig {
   config_dir: string;
@@ -45,6 +69,29 @@ export interface ModelConfig {
   api_key_source: "file" | "env" | "opencode" | null;
   models: Partial<Record<ModelRole, string | null>>;
   overrides: ConfigOverride[];
+  /** Every key with where it came from; absent from a daemon older than troupe #57. */
+  keys?: ConfigKey[];
+  files?: Array<{ scope: ConfigScope; path: string; exists: boolean }>;
+  workspace?: string | null;
+  trusted?: boolean;
+  warnings?: string[];
+  errors?: string[];
+  /** What a `config.set` of one key wrote. */
+  written?: { key: string; scope: ConfigScope; path: string };
+}
+
+/** One key of a `config.get` answer, when the daemon answers every key. */
+export function configKey(config: ModelConfig, key: string): ConfigKey | undefined {
+  return config.keys?.find((k) => k.key === key);
+}
+
+/**
+ * Whether the daemon answers every key, and so may be asked to set one. A daemon from
+ * before troupe #57 reads a `config.set` with no `provider` as the model panel's and
+ * would write the default provider, so it is asked nothing of the kind.
+ */
+export function servesKeys(config: ModelConfig): boolean {
+  return Array.isArray(config.keys);
 }
 
 /** One model a provider offered. Every figure is null when the provider did not say. */

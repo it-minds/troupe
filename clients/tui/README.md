@@ -52,7 +52,9 @@ clients to add, and `-y` / `-Yes` asks nothing. A private repository answers
 `daemon.json` as every client finds it, and starts the same daemon inside itself when
 none is. `troupe daemon run` starts the standalone `troupe-daemon` instead — found through
 `TROUPE_DAEMON_COMMAND` or on the `PATH` — and `troupe daemon status` says whether one is
-running.
+running. `troupe daemon login on` has the standalone one start every time you log in and
+stay up, `troupe daemon login off` takes that back, and a first run that saves settings
+asks the same question.
 
 ### Unsigned binaries
 
@@ -222,6 +224,7 @@ the same lines.
 troupe                                  # TUI in the current directory
 troupe --watch                          # TUI with watch mode on
 troupe --no-mouse                       # TUI without mouse reporting (terminal selection works)
+troupe --private                        # a private session, sealed to the plane you signed in to
 troupe run code "make the tests pass" --headless --auto-approve
 troupe run plan "how should we split billing" --worktree
 troupe resume [SESSION_ID]              # no id: reopen the last session here, picker open
@@ -415,18 +418,25 @@ desktop app shows the same one.
 ### Settings page
 
 `/settings` opens a page listing every tweakable setting with its
-current value, and a curated help text next to it: what the selected setting
-does, plus the commands, keys and concepts worth knowing. `↑`/`↓` moves, Enter
-toggles a boolean, opens a menu (the models) or edits a value, PgUp/PgDn or the
-wheel scrolls the help, Esc goes back.
+current value and the file it came from, and a help text next to it: what the
+selected setting does, plus the commands, keys and concepts worth knowing. The
+settings, their names and their help are the ones the desktop app shows, from one
+key table (the reference in `docs/user/configuration.md`). `↑`/`↓` moves, Enter
+toggles a boolean, opens a menu (the models) or edits a value, `s` changes where a
+change goes, PgUp/PgDn or the wheel scrolls the help, Esc goes back.
 
-Watch mode applies to the running session immediately; everything else to the
-sessions and branches started from then on. A change is written, under its
-current name (`models.default`, never the old `model`), to the config file that
-owns it: the project's `.troupe/config.yaml` when the project has one, else the
-global `config.yaml` — and `auto_approve` to the global one while the workspace is
-not trusted, since the project's would be ignored. Environment variables still win
-over both, so a setting masked by `TROUPE_MODEL` is saved but not in effect.
+The daemon says what each setting is, and writes a change (`config.get` and
+`config.set`), so the page and the desktop app always agree; a change made in one
+shows on the other while it is open. Watch mode applies to the running session
+immediately; everything else to the sessions and branches started from then on. A
+change is written, under its current name (`models.default`, never the old
+`model`), to the file the value on screen came from — the project's
+`.troupe/config.yaml`, its `config.local.yaml`, or your own `config.yaml` — and a
+default to your own; the title says which, and `s` picks another of the files the
+setting may be written to. The daemon refuses a setting the file may not hold, such
+as `auto_approve` in the project's file of a workspace that is not trusted.
+Environment variables still win over every file, so a setting masked by
+`TROUPE_MODEL` is saved but not in effect, and the status line says so.
 
 ### Watch mode
 
@@ -534,6 +544,15 @@ lands in `~/.config/troupe/credentials.json` (`%APPDATA%\troupe` on Windows) as
 a file only your account can read — `0600` on unix, an ACL naming only you on
 Windows. `troupe whoami` says who you are and which teams you are in;
 `troupe logout` forgets one plane, `troupe logout --all` every one.
+
+Signed in, `troupe` links the daemon on this machine to you at that plane and hands it
+the plane token it holds, when it attaches, again a minute before the token runs out, and
+again after the daemon restarted, which leaves it with none. The daemon keeps the token in
+memory only, and seals a private session with it: `troupe --private` (or `troupe run
+--private`) starts one, which runs here, is sealed under your own key and listed by the
+plane, and can be opened from another device. One started while the daemon has no token
+is sealed once it is handed one, from its first event. A daemon somebody else linked is
+left as it is.
 
 ```
 troupe --remote

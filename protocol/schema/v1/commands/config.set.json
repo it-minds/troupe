@@ -18,19 +18,31 @@
     "command_id": {
       "type": "string"
     },
+    "key": {
+      "type": "string"
+    },
     "models": {
       "type": "object"
+    },
+    "path": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "provider": {
       "type": "string"
     },
+    "scope": {
+      "type": "string"
+    },
+    "value": {},
     "workspace": {
       "type": "string"
     }
   },
   "required": [
-    "command_id",
-    "provider"
+    "command_id"
   ],
   "title": "config.set",
   "type": "object"

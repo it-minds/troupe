@@ -5,26 +5,40 @@ defmodule Troupe.SettingsTest do
   import Troupe.TUIHelpers
 
   alias Troupe.{Config, Settings}
+  alias Troupe.Config.Schema
 
-  # A project config file makes the settings page write there instead of the
-  # (shared) global one, which keeps these tests independent of each other.
-  defp workspace_with_config(yaml \\ "max_turns: 40\n") do
-    tmp_workspace(%{".troupe/config.yaml" => yaml})
-  end
+  # The workspace's own file sets what these tests change, so the page writes there and
+  # not into the user's file every other test of the run reads (`shared_settings_test.exs`
+  # is the one about that file).
+  @own %{"max_turns" => 40, "context_window" => 200_000}
 
   describe "schema" do
+    # One key table (#57): the page's keys are the schema's, with its help.
+    test "the page shows the schema's settings, by their labels and with their docs, but not the desktop app's" do
+      expected =
+        for {path, spec} <- Schema.settings(),
+            hd(path) != "ui",
+            do: {Enum.join(path, "."), spec.label, spec.doc}
+
+      assert Enum.map(Settings.fields(), &{&1.key, &1.label, &1.help}) == expected
+      refute Enum.any?(Settings.fields(), &String.starts_with?(&1.key, "ui."))
+      assert {:ok, %{type: :model}} = Settings.fetch("models.default")
+      assert {:ok, %{type: :bool, effect: :now}} = Settings.fetch("watch")
+    end
+
     test "every field reads back out of a default config and formats" do
       cfg = %Config{}
+      view = Settings.view(%{})
 
       for field <- Settings.fields() do
         # `nil` is a real value for the cheap and expensive models: it means the default.
         inherits? = field.key in ["models.cheap", "models.expensive"]
-        assert Settings.get(cfg, field.key) != nil or inherits?, field.key
-        assert is_binary(Settings.format(cfg, field.key)), field.key
+        assert Settings.value(view, cfg, field.key) != nil or inherits?, field.key
+        assert is_binary(Settings.format(view, cfg, field.key)), field.key
       end
 
       assert Settings.mouse?(cfg)
-      assert Settings.format(cfg, "mouse") == "on"
+      assert Settings.format(view, cfg, "mouse") == "on"
     end
 
     test "parse validates per type" do
@@ -51,12 +65,39 @@ defmodule Troupe.SettingsTest do
       assert Settings.parse(cheap, "default") == {:ok, nil}
     end
 
-    test "put changes the field, marks an explicit default model, and sets mouse" do
-      cfg = %Config{}
-      assert %Config{max_turns: 3} = Settings.put(cfg, "max_turns", 3)
-      assert %Config{model: "x", models_explicit?: true} = Settings.put(cfg, "models.default", "x")
-      assert %Config{mouse: false} = off = Settings.put(cfg, "mouse", false)
-      refute Settings.mouse?(off)
+    # A change goes where the person said; else to the file its value came from, so that
+    # it takes effect; else to the user's.
+    test "where a change goes" do
+      view =
+        Settings.view(%{
+          "keys" => [
+            %{
+              "key" => "max_turns",
+              "value" => 9,
+              "layer" => "project",
+              "scopes" => ~w(user project local)
+            },
+            %{
+              "key" => "max_depth",
+              "value" => 3,
+              "layer" => "default",
+              "scopes" => ~w(user project local)
+            },
+            %{"key" => "auto_approve", "value" => true, "layer" => "env", "scopes" => ["user"]}
+          ],
+          "files" => [%{"scope" => "user", "path" => "/home/me/.config/troupe/config.yaml"}]
+        })
+
+      assert Settings.value(view, %Config{}, "max_turns") == 9
+      assert Settings.target(view, "max_turns", nil) == "project"
+      assert Settings.target(view, "max_depth", nil) == "user"
+      assert Settings.target(view, "auto_approve", nil) == "user"
+      assert Settings.target(view, "max_turns", "local") == "local"
+      assert Settings.target(view, "auto_approve", "project") == "user"
+
+      assert Settings.next_scope(view, "max_turns", nil) == "local"
+      assert Settings.next_scope(view, "max_turns", "local") == "user"
+      assert Settings.next_scope(view, "auto_approve", nil) == "user"
     end
 
     # The help beside the settings named commands in prose that could drift from the
@@ -76,142 +117,45 @@ defmodule Troupe.SettingsTest do
 
     test "unknown keys are reported, not raised" do
       assert :error = Settings.fetch("nope")
-      assert {:error, msg} = Settings.persist(tmp_workspace(), "nope", 1)
-      assert msg =~ "unknown setting"
-    end
-  end
-
-  describe "persistence" do
-    test "writes to the project config and Config.load reads it back" do
-      ws = workspace_with_config()
-      {:ok, path} = Settings.persist(ws, "max_turns", 3)
-      assert path == Path.join(ws, ".troupe/config.yaml")
-      assert Config.load(ws).max_turns == 3
-
-      {:ok, _} = Settings.persist(ws, "models.default", "gateway/opus")
-      assert Config.load(ws).model == "gateway/opus"
-      # the other keys in the file survive a write
-      assert File.read!(path) =~ "max_turns: 3"
-    end
-
-    test "falls back to the global config file when the project has none" do
-      ws = tmp_workspace()
-      {:ok, path} = Settings.persist(ws, "auto_approve", true)
-      assert path == Path.join(Troupe.Paths.config_dir(), "config.yaml")
-      assert Config.load(ws).auto_approve
-      {:ok, _} = Settings.persist(ws, "auto_approve", false)
-    end
-
-    test "mouse defaults to on and persists off" do
-      ws = workspace_with_config()
-      assert Settings.mouse?(Config.load(ws))
-      {:ok, _} = Settings.persist(ws, "mouse", false)
-      refute Settings.mouse?(Config.load(ws))
-    end
-
-    test "writes the new spelling only, replacing the old one, and leaves the other keys as they were" do
-      ws =
-        workspace_with_config(
-          "# hand-written\nmodel: old-default\nsmall_model: old-cheap\nmax_turns: 5\n"
-        )
-
-      {:ok, path} = Settings.persist(ws, "models.default", "gateway/opus")
-
-      # The setting's old spelling goes and its new one comes; `small_model` is another
-      # setting's, so it stays as written, and loads with its warning until a migrate.
-      assert File.read!(path) ==
-               "# hand-written\nsmall_model: old-cheap\nmax_turns: 5\nmodels:\n  default: gateway/opus\n"
-
-      assert File.read!(path <> ".previous") =~ "# hand-written"
-
-      config = Config.load(ws)
-
-      assert {config.model, config.small_model, config.max_turns} ==
-               {"gateway/opus", "old-cheap", 5}
-
-      assert [warning] = config.warnings
-      assert warning =~ "small_model"
-    end
-
-    test "a save changes the setting's own line, and the file's comments stay" do
-      text = """
-      # the team's settings
-
-      models:
-        default: gateway/glm-5.2   # the one we use
-        cheap: gateway/qwen        # for summaries
-
-      max_turns: 40   # raised in the spring
-      """
-
-      ws = workspace_with_config(text)
-
-      {:ok, path} = Settings.persist(ws, "max_turns", 60)
-      assert File.read!(path) == String.replace(text, "max_turns: 40 ", "max_turns: 60 ")
-
-      {:ok, _} = Settings.persist(ws, "models.default", "gateway/opus")
-
-      assert File.read!(path) ==
-               text
-               |> String.replace("max_turns: 40 ", "max_turns: 60 ")
-               |> String.replace("default: gateway/glm-5.2 ", "default: gateway/opus ")
-
-      # "default" takes the cheap model's override off: its line goes, and only that one.
-      {:ok, _} = Settings.persist(ws, "models.cheap", nil)
-      refute File.read!(path) =~ "cheap"
-
-      assert File.read!(path) =~
-               "# the team's settings\n\nmodels:\n  default: gateway/opus   # the one we use\n\n"
-    end
-
-    test "writes auto_approve to the user's file while the workspace is not trusted" do
-      # The suite trusts the temp directory; this workspace is outside it.
-      ws = Path.join([File.cwd!(), "tmp", "untrusted-#{System.unique_integer([:positive])}"])
-      File.mkdir_p!(Path.join(ws, ".troupe"))
-      File.write!(Path.join(ws, ".troupe/config.yaml"), "max_turns: 5\n")
-      on_exit(fn -> File.rm_rf(ws) end)
-
-      refute Config.trusted?(ws)
-      assert Settings.target_path(ws, "auto_approve") == Config.user_path()
-      assert Settings.target_path(ws, "max_turns") == Path.join(ws, ".troupe/config.yaml")
     end
   end
 
   describe "the settings page" do
-    test "/settings shows values and the curated help, and Esc goes back" do
-      ws = workspace_with_config()
-      {sid, _fake, _ws} = start_session!(workspace: ws)
+    test "/settings shows values, where they came from, and the curated help, and Esc goes back" do
+      {sid, _fake, ws} = start_session!(config: @own)
       {pid, session} = start_tui(sid)
 
       type(pid, "settings")
       press(pid, "enter")
 
       text = screen_text(pid, session)
-      assert text =~ "settings —"
-      assert text =~ "▸ auto approve"
-      assert text =~ "max turns"
+      assert text =~ "settings — a change goes to"
+      assert text =~ "▸ model"
+      assert text =~ "auto approve"
+      assert text =~ ~r/max turns\s+40  · project/
+      assert text =~ "set by: project (#{Path.join(ws, ".troupe/config.yaml")})"
 
       press(pid, "esc")
       assert user_state(pid).focus == :command
     end
 
-    test "Enter toggles a boolean and persists it to the workspace's config" do
-      ws = workspace_with_config()
-      {sid, _fake, _ws} = start_session!(workspace: ws, auto_approve: false)
+    test "Enter toggles a boolean and persists it to the file it came from" do
+      {sid, _fake, ws} = start_session!(auto_approve: false, config: @own)
       {pid, session} = start_tui(sid)
 
       type(pid, "settings")
       press(pid, "enter")
+      to_setting(pid, "auto_approve")
       assert screen_text(pid, session) =~ "auto approve"
 
       press(pid, "enter")
       eventually(fn -> screen_text(pid, session) =~ "auto_approve = on · saved to" end)
       assert Config.load(ws).auto_approve
+      assert File.read!(Path.join(ws, ".troupe/config.yaml")) =~ "auto_approve: true"
     end
 
     test "Enter edits a number, rejecting a bad value without changing anything" do
-      ws = workspace_with_config()
-      {sid, _fake, _ws} = start_session!(workspace: ws)
+      {sid, _fake, ws} = start_session!(config: @own)
       {pid, session} = start_tui(sid)
 
       type(pid, "settings")
@@ -234,6 +178,31 @@ defmodule Troupe.SettingsTest do
       press(pid, "enter")
 
       eventually(fn -> Config.load(ws).max_turns == 3 end)
+    end
+
+    test "s moves where a change goes, and the change goes there" do
+      {sid, _fake, ws} = start_session!(config: @own)
+      {pid, session} = start_tui(sid)
+
+      type(pid, "settings")
+      press(pid, "enter")
+      to_setting(pid, "context_window")
+      assert screen_text(pid, session) =~ "a change goes to project:"
+
+      # project, then local, the git-ignored file beside it.
+      press(pid, "s")
+      local = Path.join(ws, ".troupe/config.local.yaml")
+      assert screen_text(pid, session) =~ "a change goes to local (#{local})"
+
+      press(pid, "enter")
+      for _ <- 1..6, do: press(pid, "backspace")
+      type(pid, "100000")
+      press(pid, "enter")
+
+      eventually(fn -> File.exists?(local) and File.read!(local) =~ "context_window: 100000" end)
+      assert Config.load(ws).context_window == 100_000
+      refute File.read!(Path.join(ws, ".troupe/config.yaml")) =~ "100000"
+      eventually(fn -> screen_text(pid, session) =~ ~r/context window\s+100000  · local/ end)
     end
   end
 end

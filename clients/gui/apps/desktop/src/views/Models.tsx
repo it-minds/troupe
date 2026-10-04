@@ -11,8 +11,12 @@
 // is empty every time the panel is opened. An empty field on save keeps the saved key,
 // so saving a model change never asks for the key again, and removing one is a separate
 // button that says it removes it.
+//
+// The terminal UI sets the same settings through the same daemon (troupe #57), and the
+// daemon says so to every client (`config.changed`): the panel reads them again, and the
+// form follows unless somebody is part way through editing it, who is told instead.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import {
   MODEL_ROLES,
@@ -46,6 +50,10 @@ const KEY_SOURCES: Record<string, string> = {
   opencode: "Key from OpenCode's settings",
 };
 
+function sameForm(a: ModelForm, b: ModelForm): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 export function Models({ client, auth }: { client: DaemonClient; auth: AuthSession | null }): JSX.Element {
   const [saved, setSaved] = useState<ModelConfig | null>(null);
   const [form, setForm] = useState<ModelForm | null>(null);
@@ -68,6 +76,33 @@ export function Models({ client, auth }: { client: DaemonClient; auth: AuthSessi
       .catch((e: unknown) => live && setReadError(modelConfigError(e)));
     return () => {
       live = false;
+    };
+  }, [client]);
+
+  // What is saved and what is on screen now, for a change that arrives from elsewhere.
+  const current = useRef({ saved, form });
+  current.current = { saved, form };
+
+  useEffect(() => {
+    let live = true;
+    const stop = client.onConfigChanged(() => {
+      client
+        .modelConfig()
+        .then((next) => {
+          if (!live) return;
+          const { saved: before, form: shown } = current.current;
+          const theirs = formFromConfig(next);
+          setSaved(next);
+          // Already on screen: this panel's own save, or nothing it shows.
+          if (shown === null || sameForm(shown, theirs)) return;
+          if (before !== null && sameForm(shown, formFromConfig(before))) setForm(theirs);
+          else setOutcome({ done: false, text: "Changed in another window or the terminal. Save keeps what is on screen; reopen this to see theirs." });
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      live = false;
+      stop();
     };
   }, [client]);
 

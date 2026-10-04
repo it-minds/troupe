@@ -4004,6 +4004,141 @@ citation keeps meaning what it meant.
        on the tip; and the web build against `pnpm fake`, which now seeds a run stopped on
        `tool_failures`.
 
+761. **The desktop app and the terminal UI share one set of settings: `config.yaml` at the
+     ladder's scopes, served by the daemon with where each value came from, one key set
+     into the scope a client names, and every client told when a file changed.** Issue
+     #57, as decided on it and on #122: no second settings file and no second schema.
+     Amends 675, which had the methods read and edit the user's file alone, for the model
+     panel.
+     - **`config.get` is additive.** It keeps every field it answered (the model panel's,
+       what the user's file says) and adds `keys`, `files`, `workspace`, `trusted`,
+       `warnings` and `errors`, so the protocol stays version 1 and an older client reads
+       what it read. `keys` is `Troupe.Config.Explain.rows/1`, what `troupe config
+       --explain` prints, as JSON: every schema key with its value in effect, the layer
+       and file that set it, its default, the scopes it may be written to here, and its
+       label and help. A secret is `****`, not `Config.mask/1`'s first and last letters:
+       those are for the person at the console, and nothing of a key goes over a socket
+       (675). `Troupe.Config.Settings` is the new module behind both methods.
+     - **`config.set` takes one key by name, or the panel's fields.** With `key` (or
+       `path`, for a name under a map with a dot in it) it writes `value` into the file of
+       `scope` (`user`, the default, `project` or `local`), through `Migrate.write/2`, the
+       writer 711 made every screen use; `null` takes the key out. With `provider` it is the
+       model panel's save, unchanged. Nothing is written for a key the schema does not know,
+       `version` and `$schema`, a value the loader would refuse or warn about (the value is
+       checked by the loader's own walk, `Layers.check_map/2`), or a scope that may not set
+       the key: `trusted_workspaces` outside the user's file, and a key marked trusted in the
+       project or local file of a workspace that is not trusted, the trust rules of 686. A
+       daemon from before this reads a `config.set` without `provider` as the panel's and
+       would write `provider: anthropic`, so both clients set one key only on a daemon whose
+       `config.get` answers `keys`.
+     - **`config.changed` goes to every client after a write that changed a file.** The
+       daemon reads the file before and after a `config.set`, a `config.import` and a
+       `setup.answer`, and names the keys whose values differ (`Settings.changed/2`; the
+       writer's own `version` is no change), to every connection that speaks the protocol,
+       the writer's included: it is how one client shows what another set. A save that
+       changed nothing says nothing. **A file edited by hand is not announced:** the
+       daemon would need a watcher for every workspace a client names, and nothing in the
+       daemon goes stale without one, since it reads the files at every session start and
+       every `config.get`. A watcher on the user's file is the follow-up if a screen left
+       open turns out to matter.
+     - **A `ui` section holds what follows the person**: `ui.theme`, `ui.mode` and
+       `ui.notifications`, the desktop app's three. The daemon keeps them and acts on none,
+       as it does `mouse`, which keeps its name (686 made it a key, and moving it is a
+       migration). The theme is a string, one the app does not know reading as its
+       default, so a newer app's theme is not a file an older daemon refuses; the mode is an
+       enum. Neither client has keybindings a person sets, so `ui` has none yet. What
+       belongs to one device — a window's size, the plane the app last used, whether it
+       opens on Home — stays in that window. The desktop app keeps its `prefs` as the
+       first frame's and a browser's copy (`shared.ts`): what a file sets wins when the
+       daemon is reached and whenever `config.changed` names a `ui` key, a choice made there
+       is written through, and a default met at first contact does not undo a choice made
+       before there was anywhere to share it.
+     - **One key table.** A schema key a settings page shows has a `label`, and its `doc`
+       is the help both clients show; the terminal UI's own table (`Troupe.Settings`) is
+       now `Schema.settings/0` less the `ui` keys, and its longer help is folded into the
+       docs. The generated reference has a `Shown as` column. The TUI reads the schema as
+       data, the one door added to its `troupe.xref` list. TUI Decision 136 is the page.
+     - **The desktop app follows.** The model panel reads `config.get` again on
+       `config.changed`, and its form follows unless somebody is part way through an edit,
+       who is told instead; the Appearance screen's theme, light or dark and notifications
+       are the `ui` keys.
+     - **Not done:** "set by your organisation", which waits for #122's organisation layer;
+       a desktop screen listing every key, rather than the ones it acts on; and two clients
+       saving one file at the same moment, which stays last-write-wins as it was.
+     - **Proof:** `Troupe.Gateway.SharedSettingsTest` (two clients on one daemon: a model
+       saved in one announced to the other, one key set by name into the user's and a
+       project's file, null taking a key out, every refusal, `config.get` with layers,
+       scopes and no secret), whose announcement tests failed on the tip;
+       `Troupe.Config.SettingsTest`; `Troupe.Gateway.ModelSettingsTest` unchanged; the
+       terminal UI's `Troupe.SharedSettingsTest` (a model the desktop app saves shows on the
+       open settings page; one picked there reaches the desktop app's `config.get`), both
+       failing on the tip; `@troupe/client`'s `config` test and the desktop app's
+       `shared-settings` test against the fake daemon; and the installed daemon and terminal
+       UI on scratch homes, a model set through the daemon from a script showing on the
+       running terminal's settings page, on the pull request.
+
+762. **The daemon starts at login when a person says so: one module writes the platform's
+     own per-user entry, removes it and says whether it is there, and a daemon started
+     that way stays up until the person logs out.** Issue #76's last item, after 705.
+     `Troupe.StartAtLogin` is the one place; `troupe-daemon login on|off|status` (so also
+     `troupe daemon login …`) and the first run's new `daemon` step both call it. It is in
+     the harness, beside `Troupe.Setup`, because the step is the setup flow's and the
+     terminal client embeds the same code.
+     - **The entry is each platform's own, and none needs an administrator.** Windows: a
+       `troupe-daemon.cmd` in the Startup folder, a file a person can see and delete, which
+       Task Manager's startup list shows. macOS: a launchd agent run at load,
+       `com.objective-mj.troupe.daemon`, named under the desktop app's identifier (710).
+       Linux: a `systemd --user` unit wanted by `default.target`, written with the link
+       `systemctl --user enable` would make, where `/run/systemd/system` says systemd runs
+       the machine; elsewhere an XDG autostart entry, which only a desktop session reads,
+       so a console login there starts nothing.
+     - **On Windows the daemon runs in a console minimised to the taskbar.** A start with no
+       window needs a script host (VBScript, which Windows is retiring) or a hidden
+       PowerShell, and both are how malware keeps itself running, which is what a virus
+       scanner looks for. A minimised console can be seen, and closing it stops the
+       daemon. The entry runs `cmd /c` so the window goes when the daemon does, and switches
+       the console to UTF-8 only for a path beyond ASCII.
+     - **Only files.** Nothing is loaded into launchd or systemd and nothing is started:
+       turning it on takes effect at the next login, and turning it off stops nothing that
+       is running. The same on every platform, testable in a scratch home without the
+       person's session manager, and a test cannot leave a service running.
+     - **It starts `troupe-daemon run` as a client finds it**: `TROUPE_DAEMON_COMMAND`, then
+       the `PATH` (the installers' shim, whose path an upgrade or a rollback keeps), then the
+       wrapper of the release it runs in. With none, turning it on is refused with the
+       reason and writes nothing, and the desktop app's choice is greyed.
+     - **A daemon started at login does not exit when idle**: the entry sets
+       `TROUPE_DAEMON_IDLE_MINUTES=0`. Starting at login is for having the daemon there;
+       one that went away ten minutes after login would leave the entry doing nothing a
+       client's start on demand does not. A daemon a client starts still exits when idle,
+       and one stopped by hand is started on demand by the next client, idle rules and all.
+     - **The step is the answer, not a toggle.** `daemon` comes between `workspace` and
+       `finish` on the local paths, `{"at_login": true | false}`: true writes the entry
+       (again, picking up a moved binary), false removes one, so re-running Setup is also
+       how it is turned off, and what is there now is the answer a screen presses.
+       `setup.get` reports it as `daemon` (`at_login`, `kind`, `path`, `command`). A plane's
+       path stays `where`, `finish` (705); `troupe daemon login on` is there for its users.
+     - **The terminal client asks it too**, after a first run saves settings and only where
+       a `troupe-daemon` is installed, Enter meaning no, and answers yes with `troupe daemon
+       login on`. Its full-screen flow is still a later slice.
+     - **Not the installer's.** #76 asked whether this belongs in the installer: the entry
+       is the daemon's, so that one module knows the paths. An installer that offers it
+       runs `troupe-daemon login on`, as it runs `config import-opencode`, and its
+       uninstall should run `login off` first; neither does yet. A switch on the desktop
+       app's settings screen is not in this change either: Setup asks again.
+     - **Proof:** `start_at_login_test.exs` (each platform's entry in a scratch home, its
+       exact text and quoting, its removal, a unit nothing wants being off, the binary's
+       discovery), `setup_test.exs` ("the daemon step …") and the daemon's `cli_test.exs`
+       ("login turns …"), both failing on the chunk's tip; the gateway's setup test over
+       the socket; the desktop app's onboarding test (the first run through the step, the
+       screen on its own) against the client's fake daemon, and the first run in a browser
+       against that fake, dark at desktop width and light at 380px; the terminal client's
+       `config_setup_test.exs`; and on Windows, the installed `troupe-daemon login on`,
+       `status` and `off`, and `troupe daemon login …` through the installed TUI, against a
+       scratch `APPDATA`, the entry run as Explorer runs a Startup item starting a daemon
+       that was still up after 100 seconds with `TROUPE_DAEMON_IDLE_MINUTES=1` around it,
+       and the real Startup folder untouched, on the pull request. Every test writes
+       into a scratch home: the suites set `:troupe_core, :start_at_login` to one.
+
 763. **A command a person or a repository writes as a markdown file is a row of the
      command table, in a section of its own, and the harness runs it: the file's prompt,
      with what follows the name for `$ARGUMENTS`, goes to the session as input.** Issue
@@ -4062,3 +4197,90 @@ citation keeps meaning what it meant.
        the line with an argument) and the desktop app's `command-palette.test.tsx` (the
        row in its section, Enter calling `commands.run` and the prompt in the
        transcript).
+
+764. **A client signed in to a plane hands the daemon its plane token when it links it, when
+     it reaches it, when the token is renewed and when the daemon restarted; a link that
+     carries one is when the daemon carries on sealing what it could not; and both clients
+     ask for a private session where the daemon reads it.** Issue #365, following 745 and
+     756. The daemon cannot obtain a plane token and holds the one it is handed in memory
+     only, and neither client handed it one: the desktop app's `linkIdentity` had no
+     `plane_token`, and the TUI never called `identity.link`. Nothing private was registered
+     or sealed from either. Four more things stood between either client and a sealed
+     private session, and are fixed here because the issue's done-when needs each.
+     - **The desktop app.** `linkIdentity` takes `plane_token`. `useDaemon` is given the
+       sign-in and hands the token over where the daemon is linked to the person signed in,
+       at this plane: when it reaches the daemon or the person signs in, for every token
+       the `AuthSession` takes after that (`onCredential`, new: a renewal comes from the
+       list's poll, two minutes before expiry), and when the socket opens again, which after
+       a restart is a daemon holding none (745 follows it there). *Use my account* links
+       with it. A daemon linked to nobody or to somebody else is not touched: linking stays
+       the person's choice, on *This computer*.
+     - **The TUI.** Signed in (`troupe login`; the current plane in `credentials.json`),
+       every new connection `Troupe.Client.Daemon.Link` makes hands the daemon the token,
+       because a new connection may be to a daemon with none, one this VM just embedded or
+       one that restarted; so does a timer a second after the store would renew the token,
+       a minute before expiry (`Tokens.person/1`), and a minute after a hand-over the plane
+       was not there for. The subject and name are the plane's, from `/auth/exchange`'s
+       answer, now kept, or from `me` where it was asked. It links a daemon linked to nobody
+       or to this person at this plane, and leaves one linked to somebody else. Unlike the
+       desktop app it links an unlinked daemon: the TUI has no control to do it with, and
+       signing in with `troupe login` is the person asking. Out of the link process, in a
+       task, because a renewal is a round trip and the link is a call through it.
+     - **Asking for a private session.** The desktop app sent `private` inside `config`, a
+       setting no client may choose, so *Keep it private* made a local session; it goes
+       beside `config` now, where the daemon reads it and PROTOCOL.md now says so. The TUI
+       had no way to ask: `troupe --private` and `troupe run --private`.
+     - **`private_sessions` on an installed daemon.** It asked for an object-store
+       configuration, which a daemon never uses (it writes through the URLs its plane
+       signs) and an installed one never has, so the desktop app offered no checkbox
+       outside development. Somewhere to seal to is now the plane the link names. It is
+       still computed at `initialize`, so a connection made before *Use my account* says
+       false after it; the desktop app offers the checkbox where the daemon knows the
+       capability and is linked now, rather than after the next launch.
+     - **Carrying on.** A sealer was started at `session.create` and nowhere else, so a
+       private session made while nobody had linked was never sealed, and none was sealed
+       again after a restart, though PROTOCOL.md promised a daemon with no token seals
+       later. A link that carries a token now runs `Private.resume/1` after the erasures:
+       for each private session the daemon has with no sealer (`kind` is in the index now,
+       read from `session_created`), `session.get` decides. One the plane has never heard
+       of is registered and sealed from its first event. One this device sealed last
+       carries on from the row's `last_seq` with its `object_bytes`, registered with the
+       row's epoch, so a claim another device made meanwhile refuses it. One another device
+       sealed last is left to it: taking it back is a claim, which a person asks for. One
+       being erased is the erasures'. Keyed on the row's `device`, the name a daemon
+       registers under, so a machine whose name changed carries on nothing until it claims.
+     - **The sealer starts partway.** It takes what the log holds after its starting point
+       (`:backfill`), asked after it subscribes, and drops an event it already holds. So a
+       session that starts sealing as it is created now also seals the events its start
+       wrote before the sealer subscribed, `session_created` among them, which no sealed
+       private session had until now. A pod passes no backfill and seals as before.
+     - **Unchanged:** the token is in no file and no answer; `identity.json` holds the
+       label. A link without one is the label alone. The daemon's `session.list` still does
+       not say a session is private, so the desktop app lists one as local.
+     - **Proof:** the client's `stage2` (a link carries the token and no answer does; its
+       type refused it on the tip) and the desktop app's `private-link` test against the
+       fake deployment with plane tokens of 125 seconds (handed over on reaching the
+       daemon and again renewed, both honoured by the plane; handed to a restarted daemon;
+       none to a daemon linked to somebody else; *Use my account* with it, the checkbox on
+       a connection that said no private sessions, and `private` beside `config`), three
+       of four failing on the tip. The TUI's `private_link_test`
+       against `FakeRemote` on the POST transport, whose `/rpc` honours only the tokens it
+       minted (linked with the token on attach and a private session registered with it;
+       a renewed token handed over; a restarted daemon linked again; one linked to
+       somebody else left), three failing on the tip, and `cli_test` for `--private`. The
+       gateway's `private_test` against MinIO (a session sealed before a restart carried on
+       once linked, from `last_seq` at its epoch, its later events in a second segment; one
+       another device took left to it; one made while unlinked registered and sealed from
+       its first event, an event delivered twice sealed once; a renewed token sealing what
+       waited for it; through the daemon, a link registering a session made while unlinked,
+       the token in no file) and `daemon_test` (`private_sessions` with no object store),
+       all failing on the tip but the renewal, which the daemon already took and is kept
+       as a pin. And the installed daemon and `troupe`, with scratch homes, against a plane
+       stand-in that signs real assertions through the development OpenBao and presigns
+       real MinIO URLs: the desktop app's client library linked the daemon with its token
+       and a private session was registered and sealed; `troupe login` and `troupe run
+       --headless --private` likewise; after the daemon was killed and started again, the
+       TUI's next attach handed it a token, and the daemon registered the two sessions from
+       before the restart again at epoch 1 and sealed the one the run had just made, while
+       it had no token, from its first event; and a turn added to the first session then
+       was sealed from the next sequence number on.

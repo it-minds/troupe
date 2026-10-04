@@ -12,6 +12,9 @@
     "parent": {
       "type": "string"
     },
+    "private": {
+      "type": "boolean"
+    },
     "profile": {
       "type": "string"
     },

@@ -21,6 +21,7 @@ const STEP_WORDS: Record<SetupStepName, string> = {
   key: "Key",
   models: "Models",
   workspace: "Project",
+  daemon: "At login",
   finish: "First session",
 };
 

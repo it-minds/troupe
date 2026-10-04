@@ -14,10 +14,10 @@
 import { TroupeConnection } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { ConnectOptions, ConnectionHooks } from "./connection.js";
-import type { ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
+import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
-import type { EventEnvelope, Principal, SessionCreateResult, ToolInvoke, TroupeEvent } from "./types.js";
+import type { ConfigChanged, EventEnvelope, Principal, SessionCreateResult, ToolInvoke, TroupeEvent } from "./types.js";
 
 /** What `daemon.json` says about the WebSocket the daemon serves for graphical clients. */
 export interface DaemonEndpoint {
@@ -186,8 +186,14 @@ export interface CreateLocalParams {
   prompt?: string;
   /** `auto` branches when the workspace already has a live session. */
   worktree?: "auto" | "never" | "always";
-  /** Only what a client may choose: `auto_approve`, `watch`, `profile`, `private`. */
+  /** Only what a client may choose: `auto_approve`, `watch`, `profile`, `full_send`. */
   config?: Record<string, unknown>;
+  /**
+   * A private session: sealed under the person's own key to the plane the daemon is linked
+   * at, with the plane token the signed-in client hands it (`linkIdentity`). A daemon that
+   * cannot seal yet makes the session anyway, and says `syncing: false`.
+   */
+  private?: boolean;
 }
 
 export interface DaemonHooks {
@@ -247,6 +253,8 @@ export class DaemonClient {
   // The listeners handed to `open`, per session, each with how to stop it: null while its
   // view is still being made, and the listener waits to be attached before `subscribe`.
   private readonly listening = new Map<string, Map<Listener, (() => void) | null>>();
+  // Who hears `config.changed`, across every socket this client dials.
+  private readonly configListeners = new Set<(c: ConfigChanged) => void>();
   private readonly hooks: DaemonHooks;
   private opening: Promise<TroupeConnection> | null = null;
 
@@ -312,6 +320,9 @@ export class DaemonClient {
         this.lost = true;
         for (const view of this.views.values()) view.unbind();
         this.hooks.onClose?.(reason);
+      },
+      onConfigChanged: (changed) => {
+        for (const listener of this.configListeners) listener(changed);
       },
       ...(this.hooks.onToolInvoke ? { onToolInvoke: this.hooks.onToolInvoke } : {}),
     };
@@ -492,8 +503,13 @@ export class DaemonClient {
    * Not authentication — the socket's token already admitted the caller. It is a label,
    * so that what happens here is recorded under a name that means something off this
    * machine, which is what a private session synced to a plane needs.
+   *
+   * `plane_token` is the one part that is not a label: the daemon signs nobody in, and
+   * registers and seals a private session with the token it is handed here. It holds it
+   * in memory and in no answer, so a client signed in hands it over again when its token
+   * is renewed and when the daemon has restarted (issue #365).
    */
-  linkIdentity(identity: { subject: string; display_name?: string; plane_url?: string }): Promise<DaemonIdentity> {
+  linkIdentity(identity: { subject: string; display_name?: string; plane_url?: string; plane_token?: string }): Promise<DaemonIdentity> {
     return this.command<DaemonIdentity>("identity.link", { ...identity });
   }
 
@@ -561,6 +577,26 @@ export class DaemonClient {
   /** Write the model settings. The next session reads them; nothing has to restart. */
   setModelConfig(params: ConfigSetParams): Promise<ModelConfig> {
     return this.command<ModelConfig>("config.set", { ...params });
+  }
+
+  /**
+   * Write one setting into the file of `scope` (troupe #57) — the user's own unless told
+   * otherwise — and answer what `config.get` now says, with `written`. `null` takes the
+   * key out of that file. The daemon refuses a key that scope may not set. Ask only a
+   * daemon that `servesKeys`: an older one would read this as the model panel's save.
+   */
+  setSetting(key: string, value: unknown, scope: ConfigScope = "user", workspace?: string): Promise<ModelConfig> {
+    return this.command<ModelConfig>("config.set", { key, value, scope, ...(workspace ? { workspace } : {}) });
+  }
+
+  /**
+   * Hear `config.changed`: a settings file the daemon writes changed, from this client or
+   * another (troupe #57), so a screen shows what the terminal set. Returns the function
+   * that stops listening. Heard while a socket is open, which every call opens.
+   */
+  onConfigChanged(listener: (changed: ConfigChanged) => void): () => void {
+    this.configListeners.add(listener);
+    return () => void this.configListeners.delete(listener);
   }
 
   /**

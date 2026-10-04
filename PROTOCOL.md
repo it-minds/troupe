@@ -157,7 +157,9 @@ The server's `capabilities`:
 `private_sessions` is computed at every `initialize`, never compiled in, and it is what
 un-gates the client's control. It is true only where both things it needs are true: a
 person the server can name — `local:<username>` means nothing to a plane or to another
-device, so an unlinked daemon says false — and somewhere to seal to. A worker always
+device, so an unlinked daemon says false — and somewhere to seal to, which for a daemon is
+the plane its link names: it writes through the URLs that plane signs and needs no object
+store of its own, and one not yet handed a token seals once it is. A worker always
 says false: a private session is sealed under its person's own key, in a subtree no pod
 credential can reach, and no worker profile is involved in one.
 
@@ -524,6 +526,13 @@ this say `branches: true` at `initialize`.
 is written, which provider is used, what a key is — belongs to the machine the daemon
 runs on, and a client cannot move it.
 
+`private: true`, beside `config` and not in it, asks a daemon for a **private session**:
+recorded `kind: "private"` in its `session_created`, registered with the plane the daemon
+is linked at and sealed under the person's own key with the token a client handed it
+(`identity.link`). The answer's `syncing` says whether it is being sealed now. A daemon
+that cannot yet — no token, or no plane answering — makes the session anyway and says
+`false`, and seals it from its first event once a client links it with a token.
+
 #### `session.list`
 ```json
 {"filter": {"state": ["active", "dormant"], "workspace": "/home/me/project",
@@ -736,9 +745,14 @@ in memory only: `identity.json` records the name, never the token, because a tok
 disk is a token a backup copies. A restarted daemon therefore has no token until a client
 links again, which costs nothing: the local log is already durable, so a daemon with no
 token seals later rather than losing anything. A client that refreshes its token links
-again. A link that carries one is also when the daemon asks the plane which of the
-person's private sessions were erased while it was away, and drops its copy of each
-(Decision 756).
+again, and so does one that finds the daemon restarted; the desktop app and `troupe` do
+both for a daemon linked to the person signed in at that plane (Decision 764). A link that
+carries one is also when the daemon asks the plane which of the person's private sessions
+were erased while it was away, and drops its copy of each (Decision 756), and then carries
+on sealing each private session it has no sealer for: from the row's `last_seq`, at the
+epoch the row says, registered with that epoch so a claim made meanwhile refuses it, for
+one this device sealed last; from its first event for one the plane has never heard of;
+not at all for one another device sealed last, until it is claimed here.
 
 #### `identity.unlink` → `{"linked": false}`. The events already written keep the actor
 they were written with.
@@ -918,27 +932,47 @@ tools are `mcp.<server>.<tool>` like every other MCP tool.
 `.troupe/workflows/<name>.json` files in the workspace, each a JSON array of
 `{"name", "prompt", "agent"?, "parallel"?}` steps.
 
-#### `config.get`, `config.models`, `config.set`, `config.import`
+#### `config.get`, `config.models`, `config.set`, `config.import`, and `config.changed`
 
-The machine's own model settings — the provider, key and models every local session
-starts from — for a settings screen. **The daemon's only**: a worker answers
-`method_not_found`, because a pod's provider is its profile's business — or `forbidden` to
-a token for one session, like every method not about its session (§7). They edit one file,
-the user's `config.yaml` in the daemon's config directory; a client never names a path,
-because the daemon is the process whose environment decides which file a session reads.
+The machine's own settings — the provider, key and models every local session starts
+from, and every other key of `config.yaml` — for a settings screen, so the desktop app and
+the terminal UI show and change the same settings (#57). **The daemon's only**: a worker
+answers `method_not_found`, because a pod's provider is its profile's business — or
+`forbidden` to a token for one session, like every method not about its session (§7).
+They edit `config.yaml` at the scopes of the configuration ladder: the user's file in the
+daemon's config directory (`user`), a workspace's `.troupe/config.yaml` (`project`) and its
+git-ignored `.troupe/config.local.yaml` (`local`). A client names a scope and never a
+path, because the daemon is the process whose environment decides which file a session
+reads. There is no second settings file.
 
 ```json
 {"workspace": "/home/me/project"}
 ```
 `config.get` (`observe`; `workspace` optional) → `{"config_dir", "path", "exists",
 "provider", "base_url", "auth", "api_key_set", "api_key_source", "models": {"default",
-"cheap", "expensive"}, "overrides": [{"source", "detail"}]}` — what the **file** says,
-since that is what saving changes. The key is never in the answer: `api_key_set` says
-whether one is in force and `api_key_source` where from (`file`, `env`, `opencode` or
-null). `overrides` names what beats the file anyway: a project's `.troupe/config.yaml`
-(only when `workspace` is given), a `TROUPE_*` variable, or the opencode fallback that
-applies while no key is saved. `config_dir` and `path` are written as a person on the
-daemon's platform writes them, for a screen to print.
+"cheap", "expensive"}, "overrides": [{"source", "detail"}], "workspace", "trusted",
+"files", "keys", "warnings", "errors"}`. The first fields are what the user's **file**
+says, since that is what the model panel's save changes. The key is never in the answer:
+`api_key_set` says whether one is in force and `api_key_source` where from (`file`, `env`,
+`opencode` or null). `overrides` names what beats the file anyway: a project's
+`.troupe/config.yaml` (only when `workspace` is given), a `TROUPE_*` variable, or the
+opencode fallback that applies while no key is saved. `config_dir` and `path` are written
+as a person on the daemon's platform writes them, for a screen to print.
+
+`keys` is every key the schema knows (`protocol/schema/config/v1.json`), as a session in
+`workspace` would read it (`troupe config --explain`): `{"key", "value", "layer",
+"source", "default", "scopes", "secret", "label", "doc"}`. `layer` is the one that set the
+value in effect — `default`, `user`, `project`, `local`, `env`, `cli` or `opencode` — and
+`source` its file or variable. A secret's `value` is `****`, or the `{env:VAR}` a file
+wrote when the variable is not set; never the secret. `scopes` are the scopes `config.set`
+writes the key to here: only `user` without a workspace, for the trust list, and for a key
+marked trusted while the workspace is not; none for `version` and `$schema`. `label` is
+the name a settings page shows the key by and `doc` its help, the same in both clients and
+in the generated reference. `files` is each scope's file, `{"scope", "path", "exists"}`;
+`trusted` whether the workspace is; `warnings` what loading warned about. A file that is
+refused leaves `keys` empty and says why in `errors`. These fields were added for #57; a
+daemon from before answers without them, and a client that finds no `keys` sets no single
+key (below).
 
 ```json
 {"provider": "openai", "base_url": "https://llm-gw.example/v1", "api_key": "sk-...", "auth": "bearer"}
@@ -954,15 +988,46 @@ because it sends a key to a URL of the caller's choosing.
 {"command_id": "c-12", "provider": "openai", "base_url": "https://llm-gw.example/v1",
  "auth": "bearer", "api_key": "sk-...", "models": {"default": "glm-5.2", "cheap": "qwen3.6-35b"}}
 ```
-`config.set` (`admin`) → the `config.get` answer after the write. `provider` is
-`anthropic` or `openai` (anything speaking Chat Completions), or `fake`, the scripted
-model a packaged build is tried with. An absent `api_key` keeps
+`config.set` (`admin`) → the `config.get` answer after the write. With `provider` it is
+the model panel's save, into the user's file: `provider` is `anthropic` or `openai`
+(anything speaking Chat Completions), or `fake`, the scripted model a packaged build is
+tried with. An absent `api_key` keeps
 the saved one and `""` removes it; a `base_url` of null or `""` removes it; a model role
 set to null is removed. Only the lines of the keys it sets change: every other line of
 the file, comments included, stays as it was, and the file before the save is kept as
 `config.yaml.previous`. A file
 that does not parse is never overwritten — the call fails with `invalid_params`. The
 next session reads the new file; nothing restarts.
+
+```json
+{"command_id": "c-14", "key": "models.default", "value": "gateway/glm-5.2", "scope": "user"}
+```
+With `key` it sets one key, by its name (`models.default`, `ui.theme`; an old spelling is
+written by its new name), or with `path` by its path as a list, for a name under a map
+that has a dot in it (`["models", "prices", "gpt-4.1"]`). `value` is the key's value as
+JSON, and null takes the key out of that file so the layer below shows through. `scope`
+is `user` (the default), `project` or `local`; the last two need `workspace`. The answer
+carries `"written": {"key", "scope", "path"}`. It is refused with `invalid_params` and the
+reason, and nothing written, for a key the schema does not know (with the nearest one
+that it does), `version` and `$schema`, which the writer keeps, a value the loader would
+refuse or warn about, a scope that may not set the key — `trusted_workspaces` outside the
+user's file, a key marked trusted in the project or local file of a workspace that is not
+trusted, which names `troupe config trust` — and a file that does not parse. The same
+writer, so the same lines change and the same `.previous` is kept.
+
+`config.changed` (a notification, server → client) is sent to every client attached once
+a `config.set`, a `config.import` or a `setup.answer` has changed a settings file, the
+client that made the change included, so a screen in one client shows what another set:
+
+```json
+{"jsonrpc": "2.0", "method": "config.changed",
+ "params": {"scope": "user", "path": "/home/me/.config/troupe/config.yaml", "keys": ["models.default"]}}
+```
+`keys` are the keys whose values differ in that file, read before and after the write; a
+save that changed nothing sends nothing. `workspace` is there for `project` and `local`.
+A client reads `config.get` again for the values. A file edited by hand is not announced:
+the daemon reads the files when a session starts and at every `config.get`, so nothing
+of its own is stale, and a screen sees the edit the next time it asks.
 
 ```json
 {"command_id": "c-13", "from": "opencode"}
@@ -990,12 +1055,16 @@ at a later one, without ever travelling back to a client.
 ```
 `setup.get` (`observe`) → `{"needed", "completed", "step", "steps": [{"name",
 "done"}], "answers", "detected", "key_storage", "offered", "suggested", "check",
-"suggested_prompt", "session"}`. `needed` says whether a client should offer the
+"suggested_prompt", "daemon", "session"}`. `needed` says whether a client should offer the
 questions: nothing recorded, no `config.yaml`, and no model that can be asked.
 `completed` is `null` or `{"completed_at", "choice", "subject"}`, recorded once for every
 client in the daemon's state directory. `step` is the step to answer next — `where`,
-`provider`, `key`, `models`, `workspace`, `finish` — and `steps` the ones this path
+`provider`, `key`, `models`, `workspace`, `daemon`, `finish` — and `steps` the ones this path
 takes, since a plane finishes at once and reused settings skip the key and the models.
+`daemon` says whether the daemon starts when this user logs in (Decision 762):
+`{"at_login", "kind": "startup_folder" | "launch_agent" | "systemd" | "autostart",
+"path", "command"}`, the entry's file and the `troupe-daemon` it starts, `command` being
+`null` when there is none to start.
 `detected` is what is already here: `env` (which of `ANTHROPIC_API_KEY` and
 `OPENAI_API_KEY` are set, names only), `opencode` (`path`, `providers`, `default`),
 `config` (the file, as `config.get` reports it, plus `usable`) and `plane` (`url`,
@@ -1019,6 +1088,7 @@ whose person wants the question again. Each step's `answer`:
 | `key` | `{"api_key"}`, `{"env": "VAR"}` (kept as `{env:VAR}`) or `{}` for a gateway that wants none | checked with a real request, the provider's model listing: `check` is `{"state": "ok" \| "refused" \| "unknown", "reason"}`. Refused stays on `key`; `ok` fills `offered` (`{"id", "context", "max_output", "input", "output"}`, prices per million tokens) and `suggested` (`{"default", "cheap"}`, a safe answer); `unknown` goes on with nothing listed |
 | `models` | `{"default", "cheap"?}` | writes the provider, the key and the models into the user's `config.yaml` |
 | `workspace` | `{"workspace", "approvals": "ask" \| "auto"}` | the first project directory, which must exist; writes `auto_approve`. `ask` is the default |
+| `daemon` | `{"at_login": true \| false}` | `true` writes the platform's login entry, which starts `troupe-daemon run` at the next login and keeps it up; `false` removes it. The answer is the state, so answering again turns it the other way; nothing is started or stopped now |
 | `finish` | `{"start"?: true, "prompt"?}` | records the run as done; for a local setup starts a session in the workspace with `prompt`, or `suggested_prompt`, and answers it as `session` (`session.create`'s answer, or `{"error"}`) |
 
 A bad answer is `invalid_params` with `data.reason` in one sentence, and the flow stays

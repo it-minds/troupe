@@ -133,15 +133,19 @@ defmodule Troupe.DaemonClientTest do
       end)
     end
 
-    test "the settings a client changes land in the workspace's config file" do
+    test "a setting a client changes lands in the file of the scope it names" do
       ws = tmp_workspace()
       {sid, _, _} = start_session!(workspace: ws)
 
-      {:ok, config, path} = Client.put_setting(sid, "max_turns", 7)
-      assert config.max_turns == 7
+      {:ok, answer} = Client.put_setting(sid, "max_turns", 7, "project")
+      assert %{"path" => path, "scope" => "project"} = answer["written"]
       assert path == Path.join(ws, ".troupe/config.yaml")
+      assert Enum.find(answer["keys"], &(&1["key"] == "max_turns"))["value"] == 7
       assert Troupe.Config.load(ws).max_turns == 7
-      assert {:error, _} = Client.put_setting(sid, "provider", "openai")
+
+      # The daemon refuses what the scope may not set, rather than writing it elsewhere.
+      assert {:error, reason} = Client.put_setting(sid, "trusted_workspaces", [ws], "project")
+      assert reason =~ "read only from the user's config.yaml"
     end
   end
 

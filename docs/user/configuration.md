@@ -311,7 +311,7 @@ migrate` prints, for each file, the rewrite that stops the warnings, and `troupe
 migrate --write` makes it and keeps the file as it was beside it as
 `config.yaml.previous`.
 
-The terminal UI's settings page, the desktop app's model settings and a budget raised
+The terminal UI's settings page, the desktop app's settings and a budget raised
 for a workspace do not rewrite a file: they change the lines of the settings they set,
 written by the new names, and leave every other line, comments included, as it was. The
 file before the save is kept as `config.yaml.previous` all the same.
@@ -330,6 +330,49 @@ troupe config trust --list          # the workspaces whose own files set the tru
 ```
 
 Secrets are masked everywhere. `troupe-daemon config` takes the same arguments.
+
+## Settings in the desktop app and the terminal
+
+The desktop app and the terminal UI show and change the same settings, and there is no
+settings file of their own: a setting is a key of the files above. The daemon serves
+them both (`config.get`, `config.set` and `config.changed` in the protocol), so a change
+made in one is there in the other at once, while its settings screen is open, and the
+next session either of them starts reads it.
+
+- **What each setting is.** Both read every key from the daemon as a session in that
+  workspace would: its value, and the layer and file that set it. The terminal UI's
+  `/settings` shows the layer beside each value that is not a default; secrets are never
+  shown, in either.
+- **Where a change goes.** Into one of the files above, named: the desktop app's model
+  settings and its theme, light or dark and notifications go into your own
+  `config.yaml`. The terminal UI's settings page writes the file the value on screen came
+  from, and a default into your own file; its title says which, and `s` picks another.
+  A key a file may not hold is refused rather than written where it would be ignored:
+  `trusted_workspaces` outside your own file, and, in a workspace that is not trusted, a
+  key marked trusted in its project or local file, such as `auto_approve`. The writer is
+  the one every settings screen uses: the key's own line changes and the rest of the
+  file stays.
+- **One name and one help for each.** A key a settings page shows has a name for it, the
+  `Shown as` column in the reference below, and its help is the `What it does` there. Both
+  clients read them from the same table, so they cannot describe one setting two ways.
+  The terminal leaves out the `ui` keys, which only the desktop app acts on.
+- **What follows you, and what stays.** The `ui` keys are what should follow you from one
+  client to another: the desktop app's theme (`ui.theme`), light or dark
+  (`ui.mode`) and notifications (`ui.notifications`). The daemon keeps them and acts on
+  none of them, as it does `mouse`. What belongs to one window — its size, which plane the
+  desktop app last used, whether it opens on Home — stays in that window.
+- **Edited by hand.** A file you edit yourself is read at the next session and the next
+  time a settings screen asks; a screen already open does not hear of it.
+
+```yaml
+version: 1
+models:
+  default: gateway/glm-5.2
+ui:
+  theme: signal
+  mode: dark
+  notifications: false
+```
 
 ## Editors
 
@@ -410,125 +453,135 @@ wall_clock_ms: 600000
 
 `Set by` says which files may set a key. "user; project if trusted" keys are read from a
 workspace's files only once it is trusted; every key may also come from the environment
-or the command line where one exists for it.
+or the command line where one exists for it. `Shown as` is the name a settings page
+shows a key by, in the desktop app and the terminal UI alike.
 
 <!-- config-keys:begin -->
 ### File
 
-| Key | Type | Default | Set by | What it does |
-|---|---|---|---|---|
-| `version` | integer | `1` | any | The version of this format. A file without it is version 1. |
-| `$schema` | string |  | any | Where an editor finds this schema. Troupe does not read it. |
+| Key | Type | Default | Set by | Shown as | What it does |
+|---|---|---|---|---|---|
+| `version` | integer | `1` | any |  | The version of this format. A file without it is version 1. |
+| `$schema` | string |  | any |  | Where an editor finds this schema. Troupe does not read it. |
 
 ### Model and provider
 
-| Key | Type | Default | Set by | What it does |
-|---|---|---|---|---|
-| `provider` | `anthropic` \| `openai` \| `fake` | `anthropic` | user; project if trusted | The session-wide provider's API. |
-| `base_url` | string |  | user; project if trusted | The session-wide provider's URL. Unset: the vendor's own endpoint. |
-| `api_key` | string |  | user; project if trusted | The session-wide provider's key. `{env:VAR}` reads it from the environment. |
-| `auth` | `api_key` \| `bearer` | `api_key` | user; project if trusted | How the key is sent: the vendor's own header, or `Authorization: Bearer`. |
-| `providers` | map of name to settings |  | user; project if trusted | Named providers. A model spelled `<provider>/<model>` goes to that provider. |
-| `providers.<name>.type` | `openai` \| `anthropic` | `openai` | user; project if trusted | The API it speaks. A gateway such as LiteLLM or vLLM is `openai`. |
-| `providers.<name>.base_url` | string |  | user; project if trusted | Where it is. Unset: the vendor's own endpoint. |
-| `providers.<name>.api_key` | string |  | user; project if trusted | Its key. `{env:VAR}` reads it from the environment. |
-| `providers.<name>.auth` | `api_key` \| `bearer` | `api_key` | user; project if trusted | How the key is sent: the vendor's own header, or `Authorization: Bearer`. |
-| `providers.<name>.models` | map of name to settings |  | user; project if trusted | The models it serves, by the name Troupe addresses them with. |
-| `providers.<name>.models.<model>.id` | string |  | user; project if trusted | The id that goes on the wire, when the gateway renamed the model. Unset: the name. |
-| `providers.<name>.models.<model>.context` | integer ≥ 1 |  | user; project if trusted | The model's context window, in tokens. |
-| `providers.<name>.models.<model>.max_output` | integer ≥ 1 |  | user; project if trusted | The most output tokens to ask for. |
-| `providers.<name>.models.<model>.reasoning_effort` | string or integer |  | user; project if trusted | How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or a thinking budget in tokens. |
-| `models` | settings |  | any | Which model each role uses. |
-| `models.default` | string | `claude-sonnet-5` | any | The model every agent uses unless its definition names one. |
-| `models.cheap` | string |  | any | The model for small jobs, compaction summaries among them. Unset: the default model. |
-| `models.expensive` | string |  | any | The model an agent asking for `expensive` gets. Unset: the default model. |
-| `models.windows` | map of name to integer ≥ 1 |  | any | Context windows for bare model ids, in tokens. |
-| `models.prices` | map of name to settings |  | any | Prices for models the provider's catalog does not price, by the name a model is addressed with. What a gateway says a call cost still wins, then the catalog's price. |
-| `models.prices.<model>.input` | number ≥ 0 |  | any | Dollars per million input tokens. |
-| `models.prices.<model>.output` | number ≥ 0 |  | any | Dollars per million output tokens. |
-| `models.prices.<model>.cache_read` | number ≥ 0 |  | any | Dollars per million prompt tokens read from the cache. Unset: the input price. |
-| `models.prices.<model>.cache_write` | number ≥ 0 |  | any | Dollars per million prompt tokens written to the cache. Unset: the input price. |
-| `max_tokens` | integer ≥ 1 | `8192` | any | The most output tokens one model call asks for. |
-| `context_window` | integer ≥ 1 | `200000` | any | The window assumed when neither a provider nor the catalog says. |
-| `compact_at` | number, 0 to 1 | `0.75` | any | The share of the window at which an agent summarises older turns. |
-| `llm_timeout_ms` | integer ≥ 1 | `300000` | any | How long one model call may take before it is given up on. |
+| Key | Type | Default | Set by | Shown as | What it does |
+|---|---|---|---|---|---|
+| `provider` | `anthropic` \| `openai` \| `fake` | `anthropic` | user; project if trusted |  | The session-wide provider's API. |
+| `base_url` | string |  | user; project if trusted |  | The session-wide provider's URL. Unset: the vendor's own endpoint. |
+| `api_key` | string |  | user; project if trusted |  | The session-wide provider's key. `{env:VAR}` reads it from the environment. |
+| `auth` | `api_key` \| `bearer` | `api_key` | user; project if trusted |  | How the key is sent: the vendor's own header, or `Authorization: Bearer`. |
+| `providers` | map of name to settings |  | user; project if trusted |  | Named providers. A model spelled `<provider>/<model>` goes to that provider. |
+| `providers.<name>.type` | `openai` \| `anthropic` | `openai` | user; project if trusted |  | The API it speaks. A gateway such as LiteLLM or vLLM is `openai`. |
+| `providers.<name>.base_url` | string |  | user; project if trusted |  | Where it is. Unset: the vendor's own endpoint. |
+| `providers.<name>.api_key` | string |  | user; project if trusted |  | Its key. `{env:VAR}` reads it from the environment. |
+| `providers.<name>.auth` | `api_key` \| `bearer` | `api_key` | user; project if trusted |  | How the key is sent: the vendor's own header, or `Authorization: Bearer`. |
+| `providers.<name>.models` | map of name to settings |  | user; project if trusted |  | The models it serves, by the name Troupe addresses them with. |
+| `providers.<name>.models.<model>.id` | string |  | user; project if trusted |  | The id that goes on the wire, when the gateway renamed the model. Unset: the name. |
+| `providers.<name>.models.<model>.context` | integer ≥ 1 |  | user; project if trusted |  | The model's context window, in tokens. |
+| `providers.<name>.models.<model>.max_output` | integer ≥ 1 |  | user; project if trusted |  | The most output tokens to ask for. |
+| `providers.<name>.models.<model>.reasoning_effort` | string or integer |  | user; project if trusted |  | How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or a thinking budget in tokens. |
+| `models` | settings |  | any |  | Which model each role uses. |
+| `models.default` | string | `claude-sonnet-5` | any | model | The model every agent uses unless its definition names one. A bare id goes to the session-wide provider; `<provider>/<model>` goes to a named one, from `providers` or opencode. `troupe models` lists what this machine can address. |
+| `models.cheap` | string |  | any | cheap model | The model for small jobs, compaction summaries among them. Unset: the default model. |
+| `models.expensive` | string |  | any | expensive model | The model an agent asking for `expensive` gets. Unset: the default model. |
+| `models.windows` | map of name to integer ≥ 1 |  | any |  | Context windows for bare model ids, in tokens. |
+| `models.prices` | map of name to settings |  | any |  | Prices for models the provider's catalog does not price, by the name a model is addressed with. What a gateway says a call cost still wins, then the catalog's price. |
+| `models.prices.<model>.input` | number ≥ 0 |  | any |  | Dollars per million input tokens. |
+| `models.prices.<model>.output` | number ≥ 0 |  | any |  | Dollars per million output tokens. |
+| `models.prices.<model>.cache_read` | number ≥ 0 |  | any |  | Dollars per million prompt tokens read from the cache. Unset: the input price. |
+| `models.prices.<model>.cache_write` | number ≥ 0 |  | any |  | Dollars per million prompt tokens written to the cache. Unset: the input price. |
+| `max_tokens` | integer ≥ 1 | `8192` | any |  | The most output tokens one model call asks for. |
+| `context_window` | integer ≥ 1 | `200000` | any | context window | The window, in tokens, assumed when neither a provider nor the catalog says; compaction is planned against it. |
+| `compact_at` | number, 0 to 1 | `0.75` | any | compact at | The share of the window at which an agent summarises older turns. |
+| `llm_timeout_ms` | integer ≥ 1 | `300000` | any |  | How long one model call may take before it is given up on. |
 
 ### Budget
 
-| Key | Type | Default | Set by | What it does |
-|---|---|---|---|---|
-| `max_turns` | integer ≥ 1 | `40` | any | Model calls an agent may make. |
-| `max_input_tokens` | integer ≥ 1 | `2000000` | any | Input tokens an agent may spend. |
-| `max_output_tokens` | integer ≥ 1 | `400000` | any | Output tokens an agent may spend. |
-| `wall_clock_ms` | integer ≥ 1 | `1800000` | any | How long an agent may run. |
-| `max_depth` | integer ≥ 0 | `3` | any | How deep agents may delegate; 1 means the root alone may. |
-| `budget_warn_at` | number, 0 to 1 | `0.8` | any | The share of any limit at which the agent is warned. |
-| `full_send` | boolean | `false` | any | No budget warnings. |
-| `budget_asks` | boolean | `true` | any | A spent budget asks the person attached, rather than stopping. |
+| Key | Type | Default | Set by | Shown as | What it does |
+|---|---|---|---|---|---|
+| `max_turns` | integer ≥ 1 | `40` | any | max turns | Model calls an agent may make before its budget stops it. |
+| `max_input_tokens` | integer ≥ 1 | `2000000` | any |  | Input tokens an agent may spend. |
+| `max_output_tokens` | integer ≥ 1 | `400000` | any |  | Output tokens an agent may spend. |
+| `wall_clock_ms` | integer ≥ 1 | `1800000` | any |  | How long an agent may run. |
+| `max_depth` | integer ≥ 0 | `3` | any | delegation depth | How deep agents may delegate; 1 means the root alone may. |
+| `budget_warn_at` | number, 0 to 1 | `0.8` | any |  | The share of any limit at which the agent is warned. |
+| `full_send` | boolean | `false` | any | full send | No budget warnings: an agent nearing a limit says nothing until the limit stops it. `troupe --full-send` sets it for one run. |
+| `budget_asks` | boolean | `true` | any |  | A spent budget asks the person attached, rather than stopping. |
 
 ### Approvals
 
-| Key | Type | Default | Set by | What it does |
-|---|---|---|---|---|
-| `auto_approve` | boolean | `false` | user; project if trusted | Run every tool call without asking. |
-| `approvals` | `wait` \| `deny` | `wait` | user; project if trusted | What a call that asks does with nobody attached: wait, or be denied. |
-| `managed_permission_rules_only` | boolean | `false` | user; project if trusted | A session may not allow a tool for itself. |
-| `managed_mcp_servers_only` | boolean | `false` | user; project if trusted | A client may not offer a session its own tools. |
+| Key | Type | Default | Set by | Shown as | What it does |
+|---|---|---|---|---|---|
+| `auto_approve` | boolean | `false` | user; project if trusted | auto approve | Run every tool call without asking. Off, a write, an edit or a shell command waits until a person allows it, once or for the rest of the session, or denies it. |
+| `approvals` | `wait` \| `deny` | `wait` | user; project if trusted |  | What a call that asks does with nobody attached: wait, or be denied. |
+| `managed_permission_rules_only` | boolean | `false` | user; project if trusted |  | A session may not allow a tool for itself. |
+| `managed_mcp_servers_only` | boolean | `false` | user; project if trusted |  | A client may not offer a session its own tools. |
 
 ### Tools
 
-| Key | Type | Default | Set by | What it does |
-|---|---|---|---|---|
-| `shell_timeout_ms` | integer ≥ 1 | `120000` | any | How long a shell command may run. |
-| `tool_output_limit` | integer ≥ 1 | `60000` | any | Bytes of a tool's output the model sees. |
-| `tool_failures_note_at` | integer ≥ 0 | `5` | any | Failures of one tool in a row after which the model is told to stop and reconsider; 0 never. |
-| `tool_failures_stop_at` | integer ≥ 0 | `10` | any | Failures of one tool in a row that stop the turn and ask whether it goes on, budget or not; 0 never. |
-| `read_roots` | list of strings |  | user; project if trusted | Directories outside the workspace the read tools may reach. |
-| `mcp` | map of name to settings |  | user; project if trusted | The workspace's own MCP servers, by name. |
-| `mcp.<name>.command` | string |  | user; project if trusted | A server on its standard streams: the program to run. |
-| `mcp.<name>.args` | list of strings |  | user; project if trusted | Its arguments. |
-| `mcp.<name>.env` | map of name to string |  | user; project if trusted | Variables to set for it. |
-| `mcp.<name>.cd` | string |  | user; project if trusted | The directory to run it in. Unset: the workspace. |
-| `mcp.<name>.url` | string |  | user; project if trusted | A server over HTTP: its URL. |
-| `mcp.<name>.oauth` | settings |  | user; project if trusted | A server over HTTP that wants you signed in: how to sign in. |
-| `mcp.<name>.oauth.client_id` | string |  | user; project if trusted | A client registered in advance with the server's authorization server. |
-| `mcp.<name>.oauth.scopes` | list of strings |  | user; project if trusted | The scopes to ask for. Unset: what the server says it wants. |
-| `mcp.<name>.oauth.redirect_uri` | string |  | user; project if trusted | Where the browser comes back: `http://` on 127.0.0.1, [::1] or localhost. Unset: 127.0.0.1, any free port. |
-| `mcp.<name>.oauth.resource` | boolean | `true` | user; project if trusted | Send the resource indicator; `false` for an authorization server that refuses it. |
-| `mcp.<name>.oauth.issuer` | string |  | user; project if trusted | The authorization server, for a server that publishes no metadata naming one. |
-| `mcp.<name>.permission` | `ask` \| `auto` | `ask` | user; project if trusted | `auto` runs its tools without asking. |
-| `mcp.<name>.timeout_ms` | integer ≥ 1 | `30000` | user; project if trusted | How long one call may take. |
+| Key | Type | Default | Set by | Shown as | What it does |
+|---|---|---|---|---|---|
+| `shell_timeout_ms` | integer ≥ 1 | `120000` | any | shell timeout (ms) | How long a shell command may run before it, and everything it started, is stopped. |
+| `tool_output_limit` | integer ≥ 1 | `60000` | any | tool output limit | Bytes of a tool's output the model sees; the rest is kept as a blob. |
+| `tool_failures_note_at` | integer ≥ 0 | `5` | any |  | Failures of one tool in a row after which the model is told to stop and reconsider; 0 never. |
+| `tool_failures_stop_at` | integer ≥ 0 | `10` | any |  | Failures of one tool in a row that stop the turn and ask whether it goes on, budget or not; 0 never. |
+| `read_roots` | list of strings |  | user; project if trusted |  | Directories outside the workspace the read tools may reach. |
+| `mcp` | map of name to settings |  | user; project if trusted |  | The workspace's own MCP servers, by name. |
+| `mcp.<name>.command` | string |  | user; project if trusted |  | A server on its standard streams: the program to run. |
+| `mcp.<name>.args` | list of strings |  | user; project if trusted |  | Its arguments. |
+| `mcp.<name>.env` | map of name to string |  | user; project if trusted |  | Variables to set for it. |
+| `mcp.<name>.cd` | string |  | user; project if trusted |  | The directory to run it in. Unset: the workspace. |
+| `mcp.<name>.url` | string |  | user; project if trusted |  | A server over HTTP: its URL. |
+| `mcp.<name>.oauth` | settings |  | user; project if trusted |  | A server over HTTP that wants you signed in: how to sign in. |
+| `mcp.<name>.oauth.client_id` | string |  | user; project if trusted |  | A client registered in advance with the server's authorization server. |
+| `mcp.<name>.oauth.scopes` | list of strings |  | user; project if trusted |  | The scopes to ask for. Unset: what the server says it wants. |
+| `mcp.<name>.oauth.redirect_uri` | string |  | user; project if trusted |  | Where the browser comes back: `http://` on 127.0.0.1, [::1] or localhost. Unset: 127.0.0.1, any free port. |
+| `mcp.<name>.oauth.resource` | boolean | `true` | user; project if trusted |  | Send the resource indicator; `false` for an authorization server that refuses it. |
+| `mcp.<name>.oauth.issuer` | string |  | user; project if trusted |  | The authorization server, for a server that publishes no metadata naming one. |
+| `mcp.<name>.permission` | `ask` \| `auto` | `ask` | user; project if trusted |  | `auto` runs its tools without asking. |
+| `mcp.<name>.timeout_ms` | integer ≥ 1 | `30000` | user; project if trusted |  | How long one call may take. |
 
 ### Watching
 
-| Key | Type | Default | Set by | What it does |
-|---|---|---|---|---|
-| `watch` | boolean | `false` | any | Act on `AI!` and `AI?` comments. |
-| `watch_debounce_ms` | integer ≥ 0 | `300` | any | How long watch mode waits for writes to settle. |
-| `watch_poll_interval_ms` | integer ≥ 1 | `1000` | any | How often watch mode polls where it cannot be told. |
-| `fs_events` | boolean | `false` | any | Record every file change in the workspace as an event. |
-| `fs_debounce_ms` | integer ≥ 0 | `100` | any | How long file events wait for writes to settle. |
+| Key | Type | Default | Set by | Shown as | What it does |
+|---|---|---|---|---|---|
+| `watch` | boolean | `false` | any | watch mode | Act on `AI!` and `AI?` comments in the workspace's files. |
+| `watch_debounce_ms` | integer ≥ 0 | `300` | any |  | How long watch mode waits for writes to settle. |
+| `watch_poll_interval_ms` | integer ≥ 1 | `1000` | any |  | How often watch mode polls where it cannot be told. |
+| `fs_events` | boolean | `false` | any |  | Record every file change in the workspace as an event. |
+| `fs_debounce_ms` | integer ≥ 0 | `100` | any |  | How long file events wait for writes to settle. |
 
 ### Sessions
 
-| Key | Type | Default | Set by | What it does |
-|---|---|---|---|---|
-| `default_agent` | string | `build` | any | The agent a session starts with. |
-| `resume_on_restart` | boolean | `false` | any | A session that comes back after a restart carries on by itself. |
-| `loop_max_iterations` | integer ≥ 1 | `10` | any | Turns `/loop` runs when not told. |
-| `loop_max_failures` | integer ≥ 1 | `3` | any | Failed turns in a row that stop a loop. |
-| `memory` | boolean | `true` | any | Agents read and write the project brief, `.troupe/memory.md`. |
-| `memory_auto_refresh` | boolean | `true` | any | A new session in a git repository refreshes a missing or stale brief, but not within `memory_max_age_days` of a refresh that built nothing; never a headless run. |
-| `memory_max_chars` | integer ≥ 1 | `6000` | any | How much of the brief goes into a prompt. |
-| `memory_max_age_days` | integer ≥ 1 | `7` | any | How old the brief may be before it counts as stale. |
-| `instructions_max_chars` | integer ≥ 1 | `16000` | any | How many characters of instruction files (`AGENTS.md` and its aliases, every scope together) go into a prompt; the nearest are kept whole first. |
+| Key | Type | Default | Set by | Shown as | What it does |
+|---|---|---|---|---|---|
+| `default_agent` | string | `build` | any |  | The agent a session starts with. |
+| `resume_on_restart` | boolean | `false` | any |  | A session that comes back after a restart carries on by itself. |
+| `loop_max_iterations` | integer ≥ 1 | `10` | any |  | Turns `/loop` runs when not told. |
+| `loop_max_failures` | integer ≥ 1 | `3` | any |  | Failed turns in a row that stop a loop. |
+| `memory` | boolean | `true` | any | project brief | Agents read the project brief, `.troupe/memory.md`, into every prompt and write it with `remember`. `/memory` shows it. |
+| `memory_auto_refresh` | boolean | `true` | any | refresh the brief | A new session in a git repository refreshes a missing or stale brief, but not within `memory_max_age_days` of a refresh that built nothing; never a headless run. |
+| `memory_max_chars` | integer ≥ 1 | `6000` | any |  | How much of the brief goes into a prompt. |
+| `memory_max_age_days` | integer ≥ 1 | `7` | any |  | How old the brief may be before it counts as stale. |
+| `instructions_max_chars` | integer ≥ 1 | `16000` | any |  | How many characters of instruction files (`AGENTS.md` and its aliases, every scope together) go into a prompt; the nearest are kept whole first. |
 
 ### This machine
 
-| Key | Type | Default | Set by | What it does |
-|---|---|---|---|---|
-| `trusted_workspaces` | list of strings |  | user file only | Workspaces whose own files may set the keys marked trusted. A path trusts everything under it. |
-| `state_dir` | string |  | user; project if trusted | Where session logs go. Unset: the platform's state directory. |
-| `fake_script` | string |  | user; project if trusted | With `provider: fake`, the file of scripted answers. |
-| `mouse` | boolean | `true` | any | The terminal UI captures the mouse. |
+| Key | Type | Default | Set by | Shown as | What it does |
+|---|---|---|---|---|---|
+| `trusted_workspaces` | list of strings |  | user file only |  | Workspaces whose own files may set the keys marked trusted. A path trusts everything under it. |
+| `state_dir` | string |  | user; project if trusted |  | Where session logs go. Unset: the platform's state directory. |
+| `fake_script` | string |  | user; project if trusted |  | With `provider: fake`, the file of scripted answers. |
+
+### Clients
+
+| Key | Type | Default | Set by | Shown as | What it does |
+|---|---|---|---|---|---|
+| `mouse` | boolean | `true` | any | mouse | The terminal UI captures the mouse: a click activates a window and the wheel scrolls. Off keeps the terminal's own click-and-drag selection; `troupe --no-mouse` turns it off for one run. |
+| `ui` | settings |  | any |  | What follows a person from one client to the other. The daemon keeps it and acts on none of it. |
+| `ui.theme` | string | `afterglow` | any | theme | The desktop app's palette: `afterglow`, `signal`, `footlight` or `limelight`. One it does not know reads as `afterglow`. |
+| `ui.mode` | `system` \| `light` \| `dark` | `system` | any | light or dark | Light or dark in the desktop app, or `system` to follow the computer. |
+| `ui.notifications` | boolean | `true` | any | notifications | The desktop app says when a session nobody is reading finishes a turn or waits for you. |
 <!-- config-keys:end -->

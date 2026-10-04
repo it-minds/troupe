@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import type { DaemonClient, SetupFlow, SetupStepName } from "@troupe/client";
 import { App } from "../src/App";
+import { Daemon } from "../src/views/Onboarding/Daemon";
 import { Finish } from "../src/views/Onboarding/Finish";
 import { Key } from "../src/views/Onboarding/Key";
 import { PickModels } from "../src/views/Onboarding/PickModels";
@@ -99,8 +100,17 @@ describe("a fresh machine's first run", () => {
     type(field("Directory"), "/home/ada/project");
     button("Continue")!.click();
 
+    // At login: nothing added unless asked; yes has the daemon write the entry.
+    await waitFor(() => says("Start Troupe when you log in?"), "the daemon step");
+    expect(pressed("Only when an app needs it")).toBe(true);
+    button("Start it when I log in")!.click();
+    await waitFor(() => pressed("Start it when I log in") || null, "start at login pressed");
+    button("Continue")!.click();
+
     // Finish: what was set up, and the first session with its suggested prompt.
     await waitFor(() => says("Ready"), "the finish step");
+    expect(fake.atLogin).toBe(true);
+    expect(says("starts when you log in")).toBe(true);
     expect(says("saved in /home/ada/.config/troupe/config.yaml")).toBe(true);
     expect((field("What to ask first") as HTMLTextAreaElement).value).toBe("Look around this directory and tell me what you find.");
     button("Start the first session")!.click();
@@ -201,7 +211,7 @@ describe("a fresh machine's first run", () => {
 // -- each screen on its own --------------------------------------------------------
 
 function flowAt(step: SetupStepName, extra: Partial<SetupFlow> = {}): SetupFlow {
-  const all: SetupStepName[] = ["where", "provider", "key", "models", "workspace", "finish"];
+  const all: SetupStepName[] = ["where", "provider", "key", "models", "workspace", "daemon", "finish"];
   const done = all.slice(0, all.indexOf(step));
   return {
     needed: true,
@@ -214,6 +224,7 @@ function flowAt(step: SetupStepName, extra: Partial<SetupFlow> = {}): SetupFlow 
       ...(done.includes("key") ? { key: { source: "typed" } } : {}),
       ...(done.includes("models") ? { models: { default: "claude-opus-5", cheap: "claude-haiku-4-5" } } : {}),
       ...(done.includes("workspace") ? { workspace: { workspace: "/home/ada/repo", approvals: "ask" } } : {}),
+      ...(done.includes("daemon") ? { daemon: { at_login: false } } : {}),
     },
     detected: {
       env: [],
@@ -226,6 +237,7 @@ function flowAt(step: SetupStepName, extra: Partial<SetupFlow> = {}): SetupFlow 
     suggested: { default: null, cheap: null },
     check: null,
     suggested_prompt: null,
+    daemon: { at_login: false, kind: "systemd", path: "/home/ada/.config/systemd/user/troupe-daemon.service", command: "/home/ada/.local/bin/troupe-daemon" },
     session: null,
     ...extra,
   };
@@ -372,6 +384,43 @@ describe("each screen", () => {
     await waitFor(() => (pressed("Run everything without asking") && !button("Continue")!.disabled) || null, "the choices taken");
     button("Continue")!.click();
     expect(onAnswer).toHaveBeenLastCalledWith({ workspace: "/home/ada/repo", approvals: "auto" });
+  });
+
+  it("Daemon: what is there now pressed, the entry named, and nothing to start without troupe-daemon", async () => {
+    const onAnswer = vi.fn();
+    const off = render(<Daemon flow={flowAt("daemon")} {...idle} onAnswer={onAnswer} />);
+    await shown("Start Troupe when you log in?");
+    expect(pressed("Only when an app needs it")).toBe(true);
+    expect(says("Adds a systemd user unit. It starts /home/ada/.local/bin/troupe-daemon from your next login; nothing starts now.")).toBe(true);
+    expect(says("Its entry would be /home/ada/.config/systemd/user/troupe-daemon.service")).toBe(true);
+    button("Continue")!.click();
+    expect(onAnswer).toHaveBeenLastCalledWith({ at_login: false });
+    button("Start it when I log in")!.click();
+    await waitFor(() => pressed("Start it when I log in") || null, "start at login pressed");
+    button("Continue")!.click();
+    expect(onAnswer).toHaveBeenLastCalledWith({ at_login: true });
+    off.unmount();
+
+    // On already, on Windows: pressed, and turning it off says the entry goes.
+    const windows = flowAt("daemon", {
+      daemon: { at_login: true, kind: "startup_folder", path: "C:\\Users\\ada\\Startup\\troupe-daemon.cmd", command: "C:\\troupe\\troupe-daemon.cmd" },
+    });
+    const on = render(<Daemon flow={windows} {...idle} onAnswer={onAnswer} />);
+    await shown("It starts at login now, from C:\\Users\\ada\\Startup\\troupe-daemon.cmd");
+    expect(pressed("Start it when I log in")).toBe(true);
+    expect(says("console window minimised to the taskbar")).toBe(true);
+    expect(says("and the entry there now is removed")).toBe(true);
+    button("Only when an app needs it")!.click();
+    await waitFor(() => pressed("Only when an app needs it") || null, "off pressed");
+    button("Continue")!.click();
+    expect(onAnswer).toHaveBeenLastCalledWith({ at_login: false });
+    on.unmount();
+
+    // No troupe-daemon on the PATH: there is nothing to start.
+    const missing = flowAt("daemon", { daemon: { at_login: false, kind: "launch_agent", path: "/Users/ada/Library/LaunchAgents/x.plist", command: null } });
+    unmount = render(<Daemon flow={missing} {...idle} onAnswer={onAnswer} />).unmount;
+    await shown("troupe-daemon is not on this computer's PATH");
+    expect(button("Start it when I log in")!.disabled).toBe(true);
   });
 
   it("Finish: what was set up, the suggested prompt, starting or not, and the plane's way out", async () => {

@@ -172,7 +172,7 @@
       ],
       "properties": {
         "default": {
-          "description": "The model every agent uses unless its definition names one.",
+          "description": "The model every agent uses unless its definition names one. A bare id goes to the session-wide provider; `<provider>/<model>` goes to a named one, from `providers` or opencode. `troupe models` lists what this machine can address.",
           "default": "claude-sonnet-5",
           "type": [
             "string",
@@ -282,7 +282,7 @@
       "minimum": 1
     },
     "context_window": {
-      "description": "The window assumed when neither a provider nor the catalog says.",
+      "description": "The window, in tokens, assumed when neither a provider nor the catalog says; compaction is planned against it.",
       "default": 200000,
       "type": [
         "integer",
@@ -310,7 +310,7 @@
       "minimum": 1
     },
     "max_turns": {
-      "description": "Model calls an agent may make.",
+      "description": "Model calls an agent may make before its budget stops it.",
       "default": 40,
       "type": [
         "integer",
@@ -365,7 +365,7 @@
       "maximum": 1
     },
     "full_send": {
-      "description": "No budget warnings.",
+      "description": "No budget warnings: an agent nearing a limit says nothing until the limit stops it. `troupe --full-send` sets it for one run.",
       "default": false,
       "type": [
         "boolean",
@@ -381,7 +381,7 @@
       ]
     },
     "auto_approve": {
-      "description": "Run every tool call without asking. Read from a project's file only in a trusted workspace.",
+      "description": "Run every tool call without asking. Off, a write, an edit or a shell command waits until a person allows it, once or for the rest of the session, or denies it. Read from a project's file only in a trusted workspace.",
       "default": false,
       "type": [
         "boolean",
@@ -414,7 +414,7 @@
       ]
     },
     "shell_timeout_ms": {
-      "description": "How long a shell command may run.",
+      "description": "How long a shell command may run before it, and everything it started, is stopped.",
       "default": 120000,
       "type": [
         "integer",
@@ -423,7 +423,7 @@
       "minimum": 1
     },
     "tool_output_limit": {
-      "description": "Bytes of a tool's output the model sees.",
+      "description": "Bytes of a tool's output the model sees; the rest is kept as a blob.",
       "default": 60000,
       "type": [
         "integer",
@@ -602,7 +602,7 @@
       }
     },
     "watch": {
-      "description": "Act on `AI!` and `AI?` comments.",
+      "description": "Act on `AI!` and `AI?` comments in the workspace's files.",
       "default": false,
       "type": [
         "boolean",
@@ -679,7 +679,7 @@
       "minimum": 1
     },
     "memory": {
-      "description": "Agents read and write the project brief, `.troupe/memory.md`.",
+      "description": "Agents read the project brief, `.troupe/memory.md`, into every prompt and write it with `remember`. `/memory` shows it.",
       "default": true,
       "type": [
         "boolean",
@@ -749,12 +749,51 @@
       ]
     },
     "mouse": {
-      "description": "The terminal UI captures the mouse.",
+      "description": "The terminal UI captures the mouse: a click activates a window and the wheel scrolls. Off keeps the terminal's own click-and-drag selection; `troupe --no-mouse` turns it off for one run.",
       "default": true,
       "type": [
         "boolean",
         "null"
       ]
+    },
+    "ui": {
+      "description": "What follows a person from one client to the other. The daemon keeps it and acts on none of it.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "theme": {
+          "description": "The desktop app's palette: `afterglow`, `signal`, `footlight` or `limelight`. One it does not know reads as `afterglow`.",
+          "default": "afterglow",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "description": "Light or dark in the desktop app, or `system` to follow the computer.",
+          "default": "system",
+          "enum": [
+            "system",
+            "light",
+            "dark",
+            null
+          ]
+        },
+        "notifications": {
+          "description": "The desktop app says when a session nobody is reading finishes a turn or waits for you.",
+          "default": true,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
     },
     "model": {
       "description": "Old spelling of models.default.",

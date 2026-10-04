@@ -23,6 +23,13 @@ defmodule Troupe.Config.Schema do
   warning that names the new one. A file that uses both spellings of one setting is
   refused, because which of two disagreeing keys wins would otherwise depend on map
   order.
+
+  ## Settings pages
+
+  A key with a `label` is one a client's settings page shows, by that name and with its
+  `doc` as the help (#57): the terminal UI's `/settings` and the desktop app read the
+  same table, through the daemon's `config.get`, so the two cannot describe one setting
+  two ways. `settings/0` lists them.
   """
 
   @version 1
@@ -51,6 +58,7 @@ defmodule Troupe.Config.Schema do
           secret: boolean(),
           field: atom() | nil,
           group: String.t() | nil,
+          label: String.t() | nil,
           doc: String.t()
         }
 
@@ -166,15 +174,23 @@ defmodule Troupe.Config.Schema do
           "models",
           {:object,
            [
-             spec("default", :string, "The model every agent uses unless its definition names one.",
+             spec(
+               "default",
+               :string,
+               "The model every agent uses unless its definition names one. A bare id goes to the " <>
+                 "session-wide provider; `<provider>/<model>` goes to a named one, from `providers` or " <>
+                 "opencode. `troupe models` lists what this machine can address.",
                default: "claude-sonnet-5",
-               field: :model
+               field: :model,
+               label: "model"
              ),
              spec("cheap", :string, "The model for small jobs, compaction summaries among them. Unset: the default model.",
-               field: :small_model
+               field: :small_model,
+               label: "cheap model"
              ),
              spec("expensive", :string, "The model an agent asking for `expensive` gets. Unset: the default model.",
-               field: :expensive_model
+               field: :expensive_model,
+               label: "expensive model"
              ),
              spec("windows", {:map, {:integer, 1}}, "Context windows for bare model ids, in tokens.",
                default: %{},
@@ -195,13 +211,18 @@ defmodule Troupe.Config.Schema do
           default: 8192,
           field: :max_tokens
         ),
-        spec("context_window", {:integer, 1}, "The window assumed when neither a provider nor the catalog says.",
+        spec(
+          "context_window",
+          {:integer, 1},
+          "The window, in tokens, assumed when neither a provider nor the catalog says; compaction is planned against it.",
           default: 200_000,
-          field: :context_window
+          field: :context_window,
+          label: "context window"
         ),
         spec("compact_at", :fraction, "The share of the window at which an agent summarises older turns.",
           default: 0.75,
-          field: :compact_at
+          field: :compact_at,
+          label: "compact at"
         ),
         spec("llm_timeout_ms", {:integer, 1}, "How long one model call may take before it is given up on.",
           default: 300_000,
@@ -209,7 +230,11 @@ defmodule Troupe.Config.Schema do
         )
       ]),
       group("Budget", [
-        spec("max_turns", {:integer, 1}, "Model calls an agent may make.", default: 40, field: :max_turns),
+        spec("max_turns", {:integer, 1}, "Model calls an agent may make before its budget stops it.",
+          default: 40,
+          field: :max_turns,
+          label: "max turns"
+        ),
         spec("max_input_tokens", {:integer, 1}, "Input tokens an agent may spend.",
           default: 2_000_000,
           field: :max_input_tokens
@@ -221,23 +246,37 @@ defmodule Troupe.Config.Schema do
         spec("wall_clock_ms", {:integer, 1}, "How long an agent may run.", default: 1_800_000, field: :wall_clock_ms),
         spec("max_depth", {:integer, 0}, "How deep agents may delegate; 1 means the root alone may.",
           default: 3,
-          field: :max_depth
+          field: :max_depth,
+          label: "delegation depth"
         ),
         spec("budget_warn_at", :fraction, "The share of any limit at which the agent is warned.",
           default: 0.8,
           field: :budget_warn_at
         ),
-        spec("full_send", :boolean, "No budget warnings.", default: false, field: :full_send),
+        spec(
+          "full_send",
+          :boolean,
+          "No budget warnings: an agent nearing a limit says nothing until the limit stops it. " <>
+            "`troupe --full-send` sets it for one run.",
+          default: false,
+          field: :full_send,
+          label: "full send"
+        ),
         spec("budget_asks", :boolean, "A spent budget asks the person attached, rather than stopping.",
           default: true,
           field: :budget_asks
         )
       ]),
       group("Approvals", [
-        spec("auto_approve", :boolean, "Run every tool call without asking.",
+        spec(
+          "auto_approve",
+          :boolean,
+          "Run every tool call without asking. Off, a write, an edit or a shell command waits until " <>
+            "a person allows it, once or for the rest of the session, or denies it.",
           default: false,
           scope: :trusted,
-          field: :auto_approve
+          field: :auto_approve,
+          label: "auto approve"
         ),
         spec("approvals", {:enum, ~w(wait deny)}, "What a call that asks does with nobody attached: wait, or be denied.",
           default: "wait",
@@ -256,13 +295,18 @@ defmodule Troupe.Config.Schema do
         )
       ]),
       group("Tools", [
-        spec("shell_timeout_ms", {:integer, 1}, "How long a shell command may run.",
+        spec(
+          "shell_timeout_ms",
+          {:integer, 1},
+          "How long a shell command may run before it, and everything it started, is stopped.",
           default: 120_000,
-          field: :shell_timeout_ms
+          field: :shell_timeout_ms,
+          label: "shell timeout (ms)"
         ),
-        spec("tool_output_limit", {:integer, 1}, "Bytes of a tool's output the model sees.",
+        spec("tool_output_limit", {:integer, 1}, "Bytes of a tool's output the model sees; the rest is kept as a blob.",
           default: 60_000,
-          field: :tool_output_limit
+          field: :tool_output_limit,
+          label: "tool output limit"
         ),
         spec(
           "tool_failures_note_at",
@@ -290,7 +334,11 @@ defmodule Troupe.Config.Schema do
         )
       ]),
       group("Watching", [
-        spec("watch", :boolean, "Act on `AI!` and `AI?` comments.", default: false, field: :watch),
+        spec("watch", :boolean, "Act on `AI!` and `AI?` comments in the workspace's files.",
+          default: false,
+          field: :watch,
+          label: "watch mode"
+        ),
         spec("watch_debounce_ms", {:integer, 0}, "How long watch mode waits for writes to settle.",
           default: 300,
           field: :watch_debounce_ms
@@ -322,16 +370,22 @@ defmodule Troupe.Config.Schema do
           default: 3,
           field: :loop_max_failures
         ),
-        spec("memory", :boolean, "Agents read and write the project brief, `.troupe/memory.md`.",
+        spec(
+          "memory",
+          :boolean,
+          "Agents read the project brief, `.troupe/memory.md`, into every prompt and write it with " <>
+            "`remember`. `/memory` shows it.",
           default: true,
-          field: :memory
+          field: :memory,
+          label: "project brief"
         ),
         spec(
           "memory_auto_refresh",
           :boolean,
           "A new session in a git repository refreshes a missing or stale brief, but not within `memory_max_age_days` of a refresh that built nothing; never a headless run.",
           default: true,
-          field: :memory_auto_refresh
+          field: :memory_auto_refresh,
+          label: "refresh the brief"
         ),
         spec("memory_max_chars", {:integer, 1}, "How much of the brief goes into a prompt.",
           default: 6_000,
@@ -362,8 +416,45 @@ defmodule Troupe.Config.Schema do
         spec("fake_script", :string, "With `provider: fake`, the file of scripted answers.",
           scope: :trusted,
           field: :fake_script
+        )
+      ]),
+      # What a client reads and the daemon does not act on: stored, served and announced
+      # like every other key, so a choice made in one client is there in the other.
+      group("Clients", [
+        spec(
+          "mouse",
+          :boolean,
+          "The terminal UI captures the mouse: a click activates a window and the wheel scrolls. Off keeps " <>
+            "the terminal's own click-and-drag selection; `troupe --no-mouse` turns it off for one run.",
+          default: true,
+          field: :mouse,
+          label: "mouse"
         ),
-        spec("mouse", :boolean, "The terminal UI captures the mouse.", default: true, field: :mouse)
+        spec(
+          "ui",
+          {:object,
+           [
+             spec(
+               "theme",
+               :string,
+               "The desktop app's palette: `afterglow`, `signal`, `footlight` or `limelight`. One it does not know reads as `afterglow`.",
+               default: "afterglow",
+               label: "theme"
+             ),
+             spec("mode", {:enum, ~w(system light dark)}, "Light or dark in the desktop app, or `system` to follow the computer.",
+               default: "system",
+               label: "light or dark"
+             ),
+             spec(
+               "notifications",
+               :boolean,
+               "The desktop app says when a session nobody is reading finishes a turn or waits for you.",
+               default: true,
+               label: "notifications"
+             )
+           ]},
+          "What follows a person from one client to the other. The daemon keeps it and acts on none of it."
+        )
       ])
     ]
     |> List.flatten()
@@ -380,7 +471,8 @@ defmodule Troupe.Config.Schema do
       scope: Keyword.get(opts, :scope, :any),
       secret: Keyword.get(opts, :secret, false),
       field: Keyword.get(opts, :field),
-      group: nil
+      group: nil,
+      label: Keyword.get(opts, :label)
     }
   end
 
@@ -451,6 +543,20 @@ defmodule Troupe.Config.Schema do
       spec -> [{[spec.key], spec}]
     end)
     |> Enum.find(fn {_path, spec} -> spec.field == field end)
+  end
+
+  @doc """
+  The keys a settings page shows, each with its path, in the reference's order: every
+  key with a `label`.
+  """
+  @spec settings() :: [{[String.t()], spec()}]
+  def settings do
+    table()
+    |> Enum.flat_map(fn
+      %{type: {:object, children}} = spec -> Enum.map(children, &{[spec.key, &1.key], &1})
+      spec -> [{[spec.key], spec}]
+    end)
+    |> Enum.filter(fn {_path, spec} -> spec.label end)
   end
 
   @doc """
@@ -646,8 +752,8 @@ defmodule Troupe.Config.Schema do
 
   @doc """
   The key reference as Markdown: one table per group, each key with its type, default,
-  who may set it and what it does. What `docs/user/configuration.md` carries between
-  its generated markers.
+  who may set it, the name a settings page shows it by, and what it does. What
+  `docs/user/configuration.md` carries between its generated markers.
   """
   @spec reference() :: String.t()
   def reference do
@@ -656,7 +762,7 @@ defmodule Troupe.Config.Schema do
     |> Enum.map_join("\n", fn [first | _] = specs ->
       rows = Enum.flat_map(specs, &rows([], &1))
 
-      "### #{first.group}\n\n| Key | Type | Default | Set by | What it does |\n|---|---|---|---|---|\n" <>
+      "### #{first.group}\n\n| Key | Type | Default | Set by | Shown as | What it does |\n|---|---|---|---|---|---|\n" <>
         Enum.map_join(rows, "", &(&1 <> "\n"))
     end)
   end
@@ -679,7 +785,9 @@ defmodule Troupe.Config.Schema do
   defp inherit(child, parent), do: %{child | scope: parent.scope}
 
   defp row(path, spec) do
-    "| `#{Enum.join(path, ".")}` | #{short_type(spec.type)} | #{show_default(spec)} | #{who(spec)} | #{spec.doc} |"
+    shown = if spec.label, do: spec.label, else: ""
+
+    "| `#{Enum.join(path, ".")}` | #{short_type(spec.type)} | #{show_default(spec)} | #{who(spec)} | #{shown} | #{spec.doc} |"
   end
 
   defp short_type(:string), do: "string"

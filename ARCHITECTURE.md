@@ -532,10 +532,13 @@ for one key under the session's prefix (`session.presign`), listing through
 `session.objects`, and the **epoch** fences two devices waking the same session:
 `session.register` with `claim: true` bumps it conditionally, and the loser learns at its
 next seal and keeps its local log read-only. The daemon's plane token comes from the
-client that signed in (`identity.link`) and is held in memory only. Each link is also when
-the daemon asks what was erased while it was away (`session.erasures`), drops its sealer
-and its copy of each, and says so (`session.erased`), which is when the plane deletes the
-objects.
+client that signed in (`identity.link`), which hands it over again when it renews it and
+when the daemon has restarted, and is held in memory only. Each link that carries one is
+also when the daemon asks what was erased while it was away (`session.erasures`), drops its
+sealer and its copy of each, and says so (`session.erased`), which is when the plane deletes
+the objects; and when it carries on sealing each private session it has no sealer for, from
+the row's `last_seq` at the epoch it held, or from the first event for one the plane has
+never heard of (Decision 764).
 
 ## 11. Reading old logs
 

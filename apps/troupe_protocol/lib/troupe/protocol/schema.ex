@@ -21,6 +21,7 @@ defmodule Troupe.Protocol.Schema do
           | :object
           | :array
           | :text_or_blob
+          | :any
           | {:array, type()}
 
   defp required(type), do: %{type: type, required: true}
@@ -455,7 +456,8 @@ defmodule Troupe.Protocol.Schema do
         "worktree" => optional(:string),
         "config" => optional(:object),
         "parent" => optional(:string),
-        "workflow" => optional(:string)
+        "workflow" => optional(:string),
+        "private" => optional(:boolean)
       },
       "session.archive" => %{
         "command_id" => required(:string),
@@ -617,9 +619,12 @@ defmodule Troupe.Protocol.Schema do
         "plane_token" => optional(:string)
       },
       "identity.unlink" => %{"command_id" => required(:string)},
-      # The machine's model settings — the daemon's only; a worker answers
-      # `method_not_found`. The key goes in through `config.models` and `config.set` and
-      # never comes back out: `config.get` reports `api_key_set`.
+      # The machine's settings — the daemon's only; a worker answers `method_not_found`.
+      # The key goes in through `config.models` and `config.set` and never comes back out:
+      # `config.get` reports `api_key_set`, and a secret key's value as `****`. `config.set`
+      # takes the model panel's fields (`provider` and the rest), or one key by name (`key`,
+      # or `path` for a name with a dot in it) with its `value` and the `scope` to write
+      # (#57); `config.changed` then goes to every client.
       "config.get" => %{"workspace" => optional(:string)},
       "config.models" => %{
         "provider" => optional(:string),
@@ -629,12 +634,16 @@ defmodule Troupe.Protocol.Schema do
       },
       "config.set" => %{
         "command_id" => required(:string),
-        "provider" => required(:string),
+        "provider" => optional(:string),
         "base_url" => optional({:nullable, :string}),
         "auth" => optional(:string),
         "api_key" => optional(:string),
         "models" => optional(:object),
-        "workspace" => optional(:string)
+        "workspace" => optional(:string),
+        "key" => optional(:string),
+        "path" => optional({:array, :string}),
+        "value" => optional(:any),
+        "scope" => optional(:string)
       },
       "config.import" => %{
         "command_id" => required(:string),
@@ -731,9 +740,11 @@ defmodule Troupe.Protocol.Schema do
   @doc """
   Requests the **server** sends the client, and the shape of their params.
 
-  One so far. It exists because a client-hosted tool runs where the client is, so the
+  `tool.invoke` exists because a client-hosted tool runs where the client is, so the
   agent's call has to travel outwards over a connection the client already holds — there
   is nothing to dial back to, and a laptop behind a NAT could not be dialled anyway.
+  `config.changed` is a notification, with no answer: the daemon telling every client
+  that a settings file it writes has changed (#57), so one client shows what another set.
   """
   @spec server_requests() :: %{String.t() => shape()}
   def server_requests do
@@ -742,6 +753,12 @@ defmodule Troupe.Protocol.Schema do
         "call_id" => required(:string),
         "name" => required(:string),
         "arguments" => required(:object)
+      },
+      "config.changed" => %{
+        "scope" => required(:string),
+        "path" => required(:string),
+        "keys" => required({:array, :string}),
+        "workspace" => optional(:string)
       }
     }
   end
@@ -799,6 +816,8 @@ defmodule Troupe.Protocol.Schema do
   defp json_type(:text_or_blob), do: %{"type" => ["string", "object"]}
   defp json_type({:nullable, inner}), do: %{"type" => [Atom.to_string(inner), "null"]}
   defp json_type(:object), do: %{"type" => "object"}
+  # Any JSON value: a setting's value is whatever that setting's type is.
+  defp json_type(:any), do: %{}
   defp json_type(type), do: %{"type" => Atom.to_string(type)}
 
   # -- compatibility ----------------------------------------------------------
@@ -906,6 +925,7 @@ defmodule Troupe.Protocol.Schema do
   defp matches?(:object, value), do: is_map(value)
   defp matches?(:array, value), do: is_list(value)
   defp matches?(:text_or_blob, value), do: is_binary(value) or is_map(value)
+  defp matches?(:any, _value), do: true
 
   defp matches?({:array, inner}, value) do
     is_list(value) and Enum.all?(value, &matches?(inner, &1))

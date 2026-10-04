@@ -5,6 +5,7 @@
     "commands/blob.get.json",
     "commands/commands.list.json",
     "commands/commands.run.json",
+    "commands/config.changed.json",
     "commands/config.get.json",
     "commands/config.import.json",
     "commands/config.models.json",

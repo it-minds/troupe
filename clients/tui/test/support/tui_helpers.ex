@@ -123,7 +123,7 @@ defmodule Troupe.TUIHelpers do
   def to_setting(pid, key) do
     target = Enum.find_index(Troupe.Settings.fields(), &(&1.key == key))
     if target == nil, do: raise("no setting #{key}")
-    for _ <- 1..target, do: press(pid, "down")
+    for _ <- 1..target//1, do: press(pid, "down")
     ^target = user_state(pid).settings.cursor
     :ok
   end

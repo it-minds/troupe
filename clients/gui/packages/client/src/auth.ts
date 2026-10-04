@@ -208,6 +208,7 @@ export class AuthSession {
   private renewing: Promise<PlaneCredential> | null = null;
   private refusal: string | null = null;
   private readonly forcedFlow: "redirect" | "device" | null;
+  private readonly listeners = new Set<(credential: PlaneCredential) => void>();
 
   constructor(opts: AuthSessionOptions) {
     this.planeUrl = opts.planeUrl.replace(/\/+$/, "");
@@ -231,6 +232,16 @@ export class AuthSession {
   /** What the plane said about the person at the last exchange. */
   get me(): PlaneCredential | null {
     return this.credential;
+  }
+
+  /**
+   * Hear of every plane token this session takes from now on, renewed or signed in with.
+   * The daemon on this computer seals a private session with the token it was last handed
+   * and cannot renew one itself, so it is handed each (issue #365). Returns the unsubscribe.
+   */
+  onCredential(listener: (credential: PlaneCredential) => void): () => void {
+    this.listeners.add(listener);
+    return () => void this.listeners.delete(listener);
   }
 
   async discover(): Promise<Discovery> {
@@ -396,6 +407,13 @@ export class AuthSession {
     if (!idToken) throw new Error("the identity provider returned no id token");
     const credential = await reachable(this.planeUrl, this.origin, () => this.plane.exchange(idToken));
     this.credential = credential;
+    for (const listener of this.listeners) {
+      try {
+        listener(credential);
+      } catch {
+        // A listener's failure is its own; the token is taken either way.
+      }
+    }
     return credential;
   }
 
