@@ -90,11 +90,14 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "author" => required(:string)
       },
+      # `prompt_bytes`: what the prompt was made of, in bytes — `system`, `brief`, `tools`,
+      # `conversation`, `tool_results` (Decision 769). Absent from a log written before it.
       "llm_request" => %{
         "model" => required(:string),
         "message_count" => required(:integer),
         "tools" => required({:array, :string}),
-        "profile" => required(:string)
+        "profile" => required(:string),
+        "prompt_bytes" => optional(:object)
       },
       "llm_response" => %{
         "message" => required(:object),
@@ -255,22 +258,29 @@ defmodule Troupe.Protocol.Schema do
         "fraction" => required(:number),
         "detail" => required(:string)
       },
+      # `turn` here, on `turn_ended` and on `cancelled` is what the turn the event ends cost:
+      # `calls`, the four token figures summed, `cost_micros` and `unpriced` (Decision 769).
       "agent_done" => %{
         "reason" => required(:string),
         "summary" => optional(:string),
-        "limit" => optional(:string)
+        "limit" => optional(:string),
+        "turn" => optional(:object)
       },
       # The agent's turn is over and it waits for input: the durable twin of `agent_state`
       # reaching `idle`, for a client that was not listening when it happened (issue #127).
       # `reason` only when the harness ended it: `tool_failures` (Decision 687), or
       # `agent_failed`, the root crashing as often as its Node allows, with `detail` saying
       # what it raised; its session stops after it (Decision 727).
-      "turn_ended" => %{"reason" => optional(:string), "detail" => optional(:string)},
+      "turn_ended" => %{
+        "reason" => optional(:string),
+        "detail" => optional(:string),
+        "turn" => optional(:object)
+      },
       # Input that arrived after an agent finished. Recorded rather than dropped: it is
       # the difference between "the user said nothing" and "the user said something and
       # nobody was listening".
       "input_after_done" => %{"source" => required(:string)},
-      "cancelled" => %{},
+      "cancelled" => %{"turn" => optional(:object)},
       "approval_requested" => %{
         "call_id" => required(:string),
         "tool" => required(:string),

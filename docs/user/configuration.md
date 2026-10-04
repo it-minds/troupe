@@ -425,7 +425,7 @@ the gateway says a call cost still wins, and then the catalog's price
 (`troupe models --refresh`); a call none of the three prices counts as free, and the
 daemon's log says so once a session. `troupe models` shows each model's price and where
 it came from, or `no price`, and `troupe config --explain models.prices` which file set
-it.
+it. The line under each turn in the terminal UI is priced the same way.
 `TROUPE_MODEL_PRICES` takes the same map as JSON, which is how a profile's `llm.prices`
 reaches its pods.
 

@@ -28,7 +28,7 @@ defmodule Troupe.Agent.State do
   events, which is what makes a crash recoverable.
   """
 
-  alias Troupe.Agent.{Call, Definition, Definitions}
+  alias Troupe.Agent.{Call, Definition, Definitions, Spend}
   alias Troupe.{Budget, Config, Workspace}
   alias Troupe.LLM.Message
 
@@ -80,6 +80,10 @@ defmodule Troupe.Agent.State do
     monitors: %{},
     child_seq: 0,
     last_input_tokens: 0,
+    # What the turn this agent is on has cost so far (Decision 769): its own calls, folded,
+    # and what its subagents reported, which a restart forgets as the budget does. Written
+    # on the event that ends the turn, and started again after it.
+    turn: %Spend{},
     # Dimensions already warned about (Decision 655): one `budget_warning` each.
     headroom_warned: MapSet.new(),
     # At-most-once guards for the two recoveries a turn makes on its own (Decision 659):
@@ -153,6 +157,7 @@ defmodule Troupe.Agent.State do
           monitors: %{optional(reference()) => term()},
           child_seq: non_neg_integer(),
           last_input_tokens: non_neg_integer(),
+          turn: Spend.t(),
           truncation_retried: boolean(),
           overflow_retried: boolean(),
           compact_reason: String.t() | nil,

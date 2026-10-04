@@ -4593,3 +4593,61 @@ citation keeps meaning what it meant.
        `install-local.ps1`, run in this checkout at 0.8.0-beta, then with `VERSION` at
        0.8.1-beta, then put back, installed a `troupe-daemon` and a `troupe` that said
        0.8.1-beta and then 0.8.0-beta, each time the version the checkout had not built.
+
+769. **What a turn cost is written on the event that ends it, and what each model call's
+     prompt was made of on its `llm_request`, in bytes.** Issue #389, slices 1 and 4; the
+     terminal UI's half is TUI Decision 139. A turn, one input until the agent rests, is
+     many model calls, each resending the whole conversation. The log had each call's
+     tokens and cost (`llm_response.usage` and `gateway.cost_micros`, 657 and 689) and
+     nothing that said how many calls a turn took, what they came to together, or which
+     part of the prompt was the large one, so a turn billed in millions of tokens could not
+     be traced to any of the four causes the issue names.
+     - **Per turn.** `turn`, with `calls`, the four token figures summed, `cost_micros` and
+       `unpriced`, on whichever event ends the turn: `turn_ended`, `cancelled` or
+       `agent_done`. A field on those, not an event of its own: a client ignores a field it
+       does not know, while the terminal UI prints an event type it does not know as a note,
+       so a new type would have written itself into every older client's transcript at every
+       turn. `Troupe.Agent.Spend` adds each call as `record_response/2` takes it, and the
+       agent's replay adds the same from `llm_response` and starts again at each of the
+       three, so a restart in the middle of a turn still counts the calls made before it.
+     - **A subagent's calls are its parent's turn's.** A turn that delegates has paid for
+       what its subagents did, and the window's session count already includes them, so a
+       turn's figure without them would disagree with the total it sits under. A subagent
+       hands its parent its `Spend` in its result, where `Budget.usage/1` was: the budget is
+       charged that `usage`'s billed part, the same tokens as before, and the parent's turn
+       adds the whole of it. The subagent's own `agent_done` says what its task cost. Live
+       only, as the budget's charge always was: a cancel stops a subagent before it reports,
+       and a parent restarted mid-turn forgets what its subagents had reported. Writing each
+       delegation's spend on the parent's side of the log would make it replayable, and is
+       not done here.
+     - **Money.** `cost_micros` adds up the calls' `gateway.cost_micros`, the gateway's own
+       figure or this machine's arithmetic (689), so a turn is priced exactly as the listing
+       is. A call nobody priced is counted in `unpriced` and left out of the sum rather than
+       added as nothing, so a reader can tell free from not known, as PROTOCOL.md asks of a
+       reader of `gateway`.
+     - **Per call.** `llm_request.prompt_bytes`: `system` (the system prompt less the brief),
+       `brief` (the instruction files and project brief, 706), `tools` (each definition's
+       name, description and schema as JSON), `conversation` (text, tool calls and
+       reasoning) and `tool_results`; disjoint, they add up to the prompt. The provider's own
+       input, cached and output figures were already on the `llm_response` that answers the
+       call. On the request because it is what was sent, so a call that failed still says
+       what it sent.
+     - **Bytes, not characters or estimated tokens.** Bytes are exact and free to take:
+       `byte_size/1` reads a length, where counting characters walks every prompt on every
+       call in the agent's own process. They are the unit `tool_output_limit` is set in, so
+       the measurement reads straight against the default slice 3 is to move. And they are
+       the same whoever answers, where an estimate of tokens would be a second tokenizer that
+       disagrees with the provider's: the response's `input_tokens + cache_read +
+       cache_write` is the real count, and scales the parts to tokens for whoever wants them.
+     - **Not counted:** the call that writes a compaction's summary, which has never been
+       logged as an `llm_response` and so is not in the budget, the listing or a turn; and
+       an ACP delegate's model, which is its own.
+     - **The witness.** The agent's replay now acts on `cancelled`, so `Troupe.Log.Fold`
+       witnesses it, a `cancels` count present only once there has been one; no recorded
+       fixture holds a cancel, and no hash moves.
+     - **Proof:** core's `turn_cost_test.exs`: a turn of three calls sums the three responses
+       (945 micros); two calls' prompt parts, the brief from an `AGENTS.md`; a model with no
+       price; the next turn counting from nothing; a delegation's four calls, with the
+       subagent's two on its own `agent_done`; a cancel; a finish; and a kill in the middle of
+       a turn that keeps the calls before it. All eight fail on the chunk's tip. The terminal
+       UI's test is 139's, and the installed daemon and `troupe` are on the pull request.

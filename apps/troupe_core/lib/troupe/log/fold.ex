@@ -66,7 +66,7 @@ defmodule Troupe.Log.Fold do
       user_input llm_response llm_error
       tool_call_started tool_call_completed tool_results
       todo_updated profile_switched compacted
-      goal_set goal_cleared
+      goal_set goal_cleared cancelled
       delegation_started
       approval_requested approval_decided
       session_created session_dormant session_activated config_upgraded
@@ -181,6 +181,12 @@ defmodule Troupe.Log.Fold do
   end
 
   defp agent_fold(agent, %Event{type: "goal_cleared"}), do: Map.delete(agent, "goal")
+
+  # A cancel ends the turn it stopped, and what the next one costs is counted from nothing
+  # (Decision 769). Present only once there has been one, as the goal is, so a log without
+  # a cancel folds to the map it always did.
+  defp agent_fold(agent, %Event{type: "cancelled"}),
+    do: Map.update(agent, "cancels", 1, &(&1 + 1))
 
   # Compaction replaces the conversation rather than appending to it, which is the one
   # place the message count can go *down* — and therefore the one place a fold that

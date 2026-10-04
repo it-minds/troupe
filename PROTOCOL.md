@@ -251,7 +251,7 @@ Durable:
 | `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails), `text`, `command_id` — the send it was taken from, as its `input_accepted` names it; absent from a `harness` note, which nobody sent, and from a log written before 0.5.2 |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
-| `llm_request` | `model`, `message_count`, `tools`, `profile` |
+| `llm_request` | `model`, `message_count`, `tools`, `profile`, `prompt_bytes` — what the prompt was made of (see below) |
 | `llm_response` | `message` (`role`, `content`: blocks of type `text`, `tool_use`, `tool_result` or `reasoning` — the last is the model's thinking, `provider`-bound, replayed only to the provider that made it and carried by `Message.text` nowhere), `usage` (`input_tokens`, `cache_read`, `cache_write`, `output_tokens` — disjoint, so the first three sum to the prompt's length), `stop_reason`, `model`, `gateway` |
 | `llm_error` | `reason` — a sentence a person can act on: a blown context window, rejected credentials, an unknown model, a rate limit the backoff outlasted, with the provider's words in brackets; `note` — a root's, the words its conversation was given about the failure, which a replay puts back |
 | `truncated` | `reason` (`max_tokens`: the output cap cut the reply; `empty`: it had neither text nor a tool call), then one of `note` (the model was asked again), `calls` (tool calls cut mid-argument, answered with an error and not run) or `final: true` (asked once already; the agent ends `output_truncated` or `empty_reply`) |
@@ -275,7 +275,7 @@ Durable:
 | `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
 | `tool_failures_ask_started` | `call_id` (`failures-<n>`), `tool`, `failures`, `detail` — one tool has failed `failures` times in a row and the agent asks before its next model call whether the turn goes on; the question itself is a `question_asked` under the same `call_id`, with options `stop` / `continue`, answered with `question.answer` |
 | `tool_failures_ask_answered` | `call_id`, `decision` (`continue`: the tool's count starts again; `stop`: a `user_input` from `harness` saying why, then `turn_ended` with `reason: tool_failures`) |
-| `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`, `tool_failures`, `llm_error` — a subagent whose model request failed, after the `llm_error` that says why; a root rests instead; `interrupted` — a subagent a restart took down, written by the restart, see `delegation_started`), `summary`, `limit` |
+| `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`, `tool_failures`, `llm_error` — a subagent whose model request failed, after the `llm_error` that says why; a root rests instead; `interrupted` — a subagent a restart took down, written by the restart, see `delegation_started`), `summary`, `limit`, `turn` — what the agent's last turn cost, a subagent's whole task (see below); absent from one a restart wrote |
 
 A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
 `waiting` until the answer, input queues meanwhile, and the answer says how much more and
@@ -299,8 +299,8 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 `tool_failures` and hands its parent what it found, labelled partial.
 | `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
-| `cancelled` | — |
-| `turn_ended` | `reason` — the agent's turn is over and it waits for input: the model answered without asking for a tool, or a root's request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done`. `reason` is there only when the harness ended the turn: `tool_failures`, a tool kept failing and the answer to `tool_failures_ask_started` was `stop`; `agent_failed`, the root agent crashed as often as it may be restarted, `detail` says what it raised, and the session stops after it, to come back dormant (Decision 727). Neither turn is taken up again by a restart |
+| `cancelled` | `turn` — what the cancelled turn had cost (see below) |
+| `turn_ended` | `reason` — the agent's turn is over and it waits for input: the model answered without asking for a tool, or a root's request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done`. `reason` is there only when the harness ended the turn: `tool_failures`, a tool kept failing and the answer to `tool_failures_ask_started` was `stop`; `agent_failed`, the root agent crashed as often as it may be restarted, `detail` says what it raised, and the session stops after it, to come back dormant (Decision 727). Neither turn is taken up again by a restart. `turn` — what the turn cost (see below); absent from an `agent_failed` one |
 | `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
 | `approval_resolved` | `call_id`, `resolved_by` |
@@ -354,6 +354,36 @@ gateway's own records should expect those to differ from it a little.
 
 Neither key is present in events written before this release. A reader folding an old
 log gets the tokens and no cost, which is what was true.
+
+`turn`, on the event that ends a turn (`turn_ended`, `cancelled`, `agent_done`), is what the
+turn cost: one input, until the agent rests (Decision 769).
+
+```json
+{"calls": 3, "input_tokens": 300, "cache_read": 3000, "cache_write": 0,
+ "output_tokens": 3, "cost_micros": 945, "unpriced": 0}
+```
+
+`calls` counts the model calls the turn made, its subagents' included. The four token
+figures are those calls' `usage` added up, disjoint as they are there. `cost_micros` adds up
+the `gateway.cost_micros` of the calls that had one, and `unpriced` counts the calls that
+had none, which the sum leaves out rather than counting as free. A subagent's `agent_done`
+says what its task cost, which is part of its parent's turn. A cancel stops a subagent
+before it reports, so a cancelled turn leaves out what its running subagents had spent; and
+a restart in the middle of a turn reads the agent's own calls back from the log and forgets
+what its subagents had reported, as its budget does.
+
+`llm_request.prompt_bytes` is what that call's prompt was made of, in UTF-8 bytes:
+
+```json
+{"system": 4120, "brief": 2210, "tools": 18400, "conversation": 9300, "tool_results": 61200}
+```
+
+`system` is the system prompt less `brief`, the instruction files and project brief it
+carries; `tools` is the tool definitions, each its name, description and schema as JSON;
+`conversation` is every message's text, tool calls and reasoning, and `tool_results` the
+tool results among them. The five add up to the prompt. Bytes rather than tokens: the
+provider's own count is on the `llm_response` that answers the call, and the parts scale to
+it. Neither field is in events written before 0.8.2.
 
 ### Payloads are semantic
 
