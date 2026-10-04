@@ -12,9 +12,12 @@ defmodule Troupe.CLI.Bench do
   `--live` runs the live scenarios against the person's own provider (root Decision 773,
   TUI Decision 141): it prints what it will do and the most it can spend, on standard
   error, and runs nothing until the person answers yes, or passed `--yes`. `--repeat N`
-  runs each scenario N times, `--model` picks another model than the configured one. Every
-  run goes into the history, and `--compare [VERSION|MODEL]` prints the last bench against
-  the one before it, or against a version's or a model's.
+  runs each scenario N times, `--model` picks another model than the configured one.
+  `--suite` picks the live scenarios (`smoke`, the default, or `standard`), `--scenario
+  a,b` names them one by one, and `--keep DIR` leaves each run's workspace and session log
+  there (TUI Decision 142). Every run goes into the history, and `--compare
+  [VERSION|MODEL]` prints the last bench against the one before it, or against a
+  version's or a model's.
 
   `--json` prints the JSON report instead of the table; `--json FILE` writes it to FILE and
   still prints the table, and `--md FILE` writes the table to FILE as well.
@@ -31,10 +34,17 @@ defmodule Troupe.CLI.Bench do
   @spec run(Troupe.CLI.args(), keyword()) :: non_neg_integer()
   def run(args, opts \\ []) do
     cond do
-      args.live -> live(args, Keyword.get(opts, :ask, &ask/1))
-      args.repeat || args.model || args.yes -> refuse("--repeat, --model and --yes go with --live")
-      args.compare -> compare(args)
-      true -> offline(args)
+      args.live ->
+        live(args, Keyword.get(opts, :ask, &ask/1))
+
+      args.repeat || args.model || args.yes || args.suite || args.scenario || args.keep ->
+        refuse("--repeat, --model, --yes, --suite, --scenario and --keep go with --live")
+
+      args.compare ->
+        compare(args)
+
+      true ->
+        offline(args)
     end
   end
 
@@ -48,7 +58,13 @@ defmodule Troupe.CLI.Bench do
     do: refuse("--repeat takes a number of runs, 1 or more")
 
   defp live(args, ask) do
-    case Troupe.Bench.plan(repeat: args.repeat || 1, model: args.model) do
+    case Troupe.Bench.plan(
+           repeat: args.repeat || 1,
+           model: args.model,
+           suite: args.suite,
+           only: names(args.scenario),
+           keep: args.keep
+         ) do
       {:error, why} ->
         refuse(why)
 
@@ -68,6 +84,10 @@ defmodule Troupe.CLI.Bench do
         end
     end
   end
+
+  # `--scenario a,b`: the names, in any order; they run in the report's.
+  defp names(nil), do: nil
+  defp names(list), do: list |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 
   defp yes?(answer) when is_binary(answer), do: String.downcase(String.trim(answer)) in ["y", "yes"]
   defp yes?(_none), do: false

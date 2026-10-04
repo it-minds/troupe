@@ -71,8 +71,8 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
     end
 
     @doc """
-    Scripts for the four scenarios of `Troupe.Bench.LiveScenarios`, each doing what its
-    prompt asks, so every run succeeds; the delegated `explore` agent has its own.
+    Scripts for every scenario of `Troupe.Bench.LiveScenarios`, each doing what its prompt
+    asks, so every run succeeds; the delegated `explore` agent has its own.
     """
     def bench_scripts do
       [
@@ -120,7 +120,100 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
            {:tools, [{"write_file", %{"path" => "port.txt", "content" => "8080\n"}}]},
            {:text, "I wrote 8080 to port.txt."}
          ]}
+      ] ++ standard_scripts()
+    end
+
+    # The `standard` suite's six beyond the four above (Decision 775). One file's two
+    # edits go in two answers, since a response's tool calls may run at once.
+    defp standard_scripts do
+      [
+        {"Rename the function Shop.Cart.line_total/1",
+         [
+           {:tools,
+            [
+              {"edit_file",
+               %{"path" => "lib/cart.exs", "old_string" => "def line_total(", "new_string" => "def subtotal("}},
+              {"edit_file",
+               %{
+                 "path" => "lib/receipt.exs",
+                 "old_string" => "Shop.Cart.line_total(",
+                 "new_string" => "Shop.Cart.subtotal("
+               }},
+              {"edit_file",
+               %{
+                 "path" => "lib/discount.exs",
+                 "old_string" => "Shop.Cart.line_total(",
+                 "new_string" => "Shop.Cart.subtotal("
+               }}
+            ]},
+           {:tools,
+            [
+              {"edit_file",
+               %{"path" => "lib/cart.exs", "old_string" => "&line_total/1", "new_string" => "&subtotal/1"}}
+            ]},
+           {:text, "Renamed, and the tests pass."}
+         ]},
+        {"Roman.encode/1, that is not written yet",
+         [
+           {:tools, [{"write_file", %{"path" => "roman.exs", "content" => roman()}}]},
+           {:text, "Roman.encode/1 is written and the test passes."}
+         ]},
+        {"logs/service.log is the log of a busy service",
+         [
+           {:tools, [{"grep", %{"pattern" => "ERROR code=E1042", "path" => "logs"}}]},
+           {:tools, [{"write_file", %{"path" => "answer.txt", "content" => "53\n"}}]},
+           {:text, "53 lines are ERROR with code E1042."}
+         ]},
+        {"settings.conf is long",
+         [
+           {:tools,
+            [
+              {"edit_file",
+               %{
+                 "path" => "settings.conf",
+                 "old_string" => "max_connections = 100\nstatement_timeout_ms = 30000",
+                 "new_string" => "max_connections = 250\nstatement_timeout_ms = 30000"
+               }}
+            ]},
+           {:text, "max_connections is 250 in [database]."}
+         ]},
+        {"Do what TASK.md says",
+         [
+           {:tools, [{"read_file", %{"path" => "TASK.md"}}]},
+           {:tools,
+            [{"write_file", %{"path" => "out/greeting.txt", "content" => "hello from the bench\n"}}]},
+           {:tools,
+            [
+              {"edit_file",
+               %{"path" => "config.ini", "old_string" => "mode = draft", "new_string" => "mode = final"}}
+            ]},
+           {:tools,
+            [
+              {"write_file",
+               %{"path" => "out/done.txt", "content" => "out/greeting.txt\nconfig.ini\n"}}
+            ]},
+           {:text, "Every step of TASK.md is done."}
+         ]},
+        {"Answer without using any tool", [{:text, "391"}]}
       ]
+    end
+
+    defp roman do
+      """
+      defmodule Roman do
+        @numerals [
+          {1000, "M"}, {900, "CM"}, {500, "D"}, {400, "CD"}, {100, "C"}, {90, "XC"},
+          {50, "L"}, {40, "XL"}, {10, "X"}, {9, "IX"}, {5, "V"}, {4, "IV"}, {1, "I"}
+        ]
+
+        def encode(0), do: ""
+
+        def encode(number) do
+          {value, numeral} = Enum.find(@numerals, fn {value, _} -> value <= number end)
+          numeral <> encode(number - value)
+        end
+      end
+      """
     end
 
     # -- the server -------------------------------------------------------------------

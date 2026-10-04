@@ -199,7 +199,9 @@ defmodule Troupe.Bench do
       ["| scenario | measure | value | |", "| --- | --- | ---: | --- |"] ++
         Enum.map(rows, fn cells -> "| " <> Enum.join(cells, " | ") <> " |" end)
 
-    Enum.join(table, "\n") <> "\n\n" <> Enum.join(skipped) <> verdict(report, failed) <> "\n"
+    Enum.join(table, "\n") <>
+      "\n\n" <>
+      summary(report["summary"]) <> Enum.join(skipped) <> verdict(report, failed) <> "\n"
   end
 
   def markdown(report) do
@@ -274,6 +276,34 @@ defmodule Troupe.Bench do
     error ++ metrics ++ checks ++ outcome
   end
 
+  # Every run together (Decision 775): the score, what it cost, and what it took. A report
+  # written before there was a summary has none.
+  defp summary(nil), do: ""
+
+  defp summary(s) do
+    rows = [
+      {"runs that succeeded",
+       "#{s["succeeded"]} of #{s["runs"]}, #{s["success_rate"]} (95% interval #{s["success_low"]} to #{s["success_high"]})"},
+      {"cost",
+       "#{micros(s["cost_micros"])} in all, #{micros(s["cost_per_run_micros"])} a run, " <>
+         "#{micros(s["cost_per_success_micros"])} a success"},
+      {"tokens",
+       "#{s["input_tokens"]} in, #{s["cached_tokens"]} cached, #{s["output_tokens"]} out; " <>
+         "#{s["tokens_per_success"] || "none"} a success"},
+      {"model calls", to_string(s["model_calls"])},
+      {"wall clock", "#{s["wall_ms"]} ms in all, the median run #{s["median_wall_ms"]} ms"}
+    ]
+
+    Enum.join(
+      ["| #{s["scenarios"]} scenarios together | |", "| --- | ---: |"] ++
+        Enum.map(rows, fn {measure, value} -> "| #{measure} | #{value} |" end),
+      "\n"
+    ) <> "\n\n"
+  end
+
+  defp micros(nil), do: "no price"
+  defp micros(micros), do: "$" <> :erlang.float_to_binary(micros / 1_000_000, decimals: 4)
+
   # `scenario/measure` for each thing that failed, the scenario alone when it did not run.
   defp failures(%{"name" => name} = scenario) do
     error = if scenario["error"], do: [name], else: []
@@ -286,8 +316,10 @@ defmodule Troupe.Bench do
   end
 
   defp verdict(%{"mode" => "live"} = report, []) do
+    runs = if report["repeat"] == 1, do: "1 run", else: "#{report["repeat"]} runs"
+
     "troupe bench #{report["version"]}, live against #{report["model"]}: " <>
-      "#{length(report["scenarios"])} scenarios, #{report["repeat"]} runs each, every run succeeded."
+      "#{length(report["scenarios"])} scenarios, #{runs} each, every run succeeded."
   end
 
   defp verdict(%{"mode" => "live"} = report, failed) do

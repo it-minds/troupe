@@ -834,3 +834,16 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      (`plan/1`, `describe_plan/1`, `question/1`, `live/2`, `compare/1`), the door
      Decision 140 opened. Proof: `test/troupe/bench_cli_test.exs`, the question played
      through `Bench.run/2`'s `:ask`, and with none, under `capture_io`, no terminal.
+
+142. **`troupe bench --live` takes `--suite`, `--scenario` and `--keep`, and refuses them,
+     as it refuses `--repeat`, without `--live`.** Root Decision 775. `--suite NAME` is a
+     live suite (`smoke`, the default, or `standard`), `--scenario a,b` names scenarios
+     whatever their suite, in one comma-separated value, since OptionParser keeps only
+     the last of a repeated switch; `--keep DIR` leaves each run's directories there. An
+     unknown suite or scenario is the plan's error, said before the cap and with nothing
+     run, exit 2. The plan's words name the suite and its scenarios on standard error,
+     where the cap is; the table on standard output ends with the summary of every run
+     before the verdict. The TUI still calls only `Troupe.Bench`'s door (140, 141): the
+     new options are `plan/1`'s. Proof: `test/troupe/bench_cli_test.exs` (the flags
+     parsed, refused without `--live`, the `standard` suite with `--keep` and `--json`, a
+     scenario by name and one that is not there).

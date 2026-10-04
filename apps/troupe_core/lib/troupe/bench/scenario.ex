@@ -67,12 +67,8 @@ defmodule Troupe.Bench.Scenario do
   @spec outcome(t(), Path.t()) :: boolean() | nil
   def outcome(%__MODULE__{outcome: nil}, _workspace), do: nil
 
-  def outcome(%__MODULE__{outcome: {:file, relative, content}}, workspace) do
-    case File.read(Path.join(workspace, relative)) do
-      {:ok, found} -> text(found) == text(content)
-      _other -> false
-    end
-  end
+  def outcome(%__MODULE__{outcome: {:file, relative, content}}, workspace),
+    do: holds?(workspace, relative, content)
 
   def outcome(%__MODULE__{outcome: {:command, [program | args]}}, workspace) do
     case System.find_executable(program) do
@@ -120,6 +116,19 @@ defmodule Troupe.Bench.Scenario do
   defp dir(path) do
     path = path |> String.replace("\\", "/") |> String.trim_trailing("/")
     if match?({:win32, _}, :os.type()), do: String.downcase(path), else: path
+  end
+
+  @doc """
+  Whether a file of the workspace holds `content`, as a `{:file, ...}` outcome is judged:
+  the text, line endings and trailing whitespace aside. A check beside an outcome asks it
+  of another file (Decision 775).
+  """
+  @spec holds?(Path.t(), Path.t(), String.t()) :: boolean()
+  def holds?(workspace, relative, content) do
+    case File.read(Path.join(workspace, relative)) do
+      {:ok, found} -> text(found) == text(content)
+      _other -> false
+    end
   end
 
   # What a file says, whatever it ends with: a model asked for one line may or may not

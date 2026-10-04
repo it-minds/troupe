@@ -37,6 +37,9 @@ defmodule Troupe.BenchCLITest do
             }} =
              CLI.parse(~w(bench --live --repeat 3 --model gw/m --yes --json a.json --md a.md))
 
+    assert {:ok, %{suite: "standard", scenario: "fix_test,large_log", keep: "runs", live: true}} =
+             CLI.parse(~w(bench --live --suite standard --scenario fix_test,large_log --keep runs))
+
     assert {:ok, %{json: true, json_path: nil, live: true}} = CLI.parse(~w(bench --json --live))
     assert {:ok, %{compare: true, ref: nil}} = CLI.parse(~w(bench --compare))
     assert {:ok, %{compare: true, ref: "0.8.1-beta"}} = CLI.parse(~w(bench --compare 0.8.1-beta))
@@ -48,13 +51,17 @@ defmodule Troupe.BenchCLITest do
     assert {:ok, %{mode: :config_explain, json_path: nil}} = CLI.parse(~w(config --json))
   end
 
-  test "--repeat, --model and --yes are refused without --live, and run nothing" do
-    {:ok, args} = CLI.parse(~w(bench --repeat 2))
+  test "--repeat, --model, --yes, --suite, --scenario and --keep are refused without --live" do
+    for argv <- [~w(bench --repeat 2), ~w(bench --suite standard), ~w(bench --keep runs)] do
+      {:ok, args} = CLI.parse(argv)
 
-    err =
-      capture_io(:stderr, fn -> assert capture_io(fn -> assert Bench.run(args) == 2 end) == "" end)
+      err =
+        capture_io(:stderr, fn ->
+          assert capture_io(fn -> assert Bench.run(args) == 2 end) == ""
+        end)
 
-    assert err =~ "--repeat, --model and --yes go with --live"
+      assert err =~ "--repeat, --model, --yes, --suite, --scenario and --keep go with --live"
+    end
   end
 
   test "troupe bench prints a row a measure and exits 0 within every budget" do
@@ -171,6 +178,42 @@ defmodule Troupe.BenchCLITest do
 
       for text <- [out, err, File.read!(json), File.read!(md), File.read!(history)],
           do: refute(text =~ @key)
+    end
+
+    test "--suite standard --keep DIR: ten tasks, a summary, and every run's directory kept",
+         %{dir: dir} do
+      json = Path.join(dir, "standard.json")
+      keep = Path.join(dir, "runs")
+      {:ok, args} = CLI.parse(~w(bench --live --yes --suite standard --keep #{keep} --json #{json}))
+
+      {status, out, err} = run_bench(args, "")
+
+      assert status == 0, err
+      assert err =~ "The standard suite: write_file, fix_test, delegate, recover, rename_symbol,"
+      assert err =~ "Each run's workspace and session log are kept under #{keep}."
+
+      report = json |> File.read!() |> Jason.decode!()
+      assert %{"live_suite" => "standard", "summary" => %{"runs" => 10, "succeeded" => 10}} = report
+      assert File.dir?(Path.join(report["kept_in"], "large_log-1"))
+      assert out =~ "| 10 scenarios together | |"
+    end
+
+    test "--scenario runs the ones named, and refuses one that is not there", %{fake: fake} do
+      {:ok, args} = CLI.parse(~w(bench --live --yes --scenario answer_only,write_file))
+      {status, out, _err} = run_bench(args, "")
+
+      assert status == 0
+      assert out =~ "| write_file | runs that succeeded | 1.0 |"
+      assert out =~ "| answer_only | the reply is 391 (1 of 1) | yes | ok |"
+
+      requests = length(FakeOpenAI.requests(fake))
+      {:ok, args} = CLI.parse(~w(bench --live --yes --scenario fix_test,nope))
+      {status, out, err} = run_bench(args, "")
+
+      assert status == 2
+      assert out == ""
+      assert err =~ "troupe bench: no live scenario is called nope"
+      assert length(FakeOpenAI.requests(fake)) == requests
     end
 
     test "--compare reads the history: nothing yet, then the last bench against the one before" do
