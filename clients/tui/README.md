@@ -287,6 +287,7 @@ Inside the TUI, everything starts with `/`:
 | `/models` | pick the default model from every model Troupe detected |
 | `/observer` | agent tree: every branch and subagent, its state, worktree and tokens |
 | `/copy [n]` | copy the activated transcript (or tile `n`'s) to the system clipboard |
+| `/<name> [arguments]` | a command you or the repository wrote as `<name>.md` in your config's `commands/` or the workspace's `.troupe/commands/`: sends its prompt, with what follows the name for `$ARGUMENTS` ([configuration](../../docs/user/configuration.md#your-own-commands)) |
 
 Keys: `1`–`9`, Enter, or a mouse click on its tile activate a window; Esc returns to the command line;
 `y`/`n`/`a` answer an approval (allow / deny / allow for session); typing +
@@ -400,8 +401,9 @@ config does not mention. The cheap model has the same menu on the settings page.
 
 `/` on an empty command line, Ctrl-K with nothing typed, or `/help` opens a popup
 over the session listing every command in sections — Session, Navigate, Workspace,
-Setup, Agents (one entry per agent, with its description), Quit — each with a
-one-line description, and the selected one explained beside it with an example.
+Setup, Agents (one entry per agent, with its description), Custom (the commands you and
+the repository wrote as markdown files, with the file each came from), Quit — each with
+a one-line description, and the selected one explained beside it with an example.
 Typing filters by name, alias or description (`mer` narrows to `/merge`); `↑`/`↓`
 and PgUp/PgDn move; Enter runs the command, or leaves it on the line when it needs an
 argument; Tab or Space leave it on the line too, so `/merge 2` types exactly as it

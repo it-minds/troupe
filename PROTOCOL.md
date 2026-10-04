@@ -589,6 +589,21 @@ knows each of them for the same line. A root agent that has *finished* is woken 
 input: `agent_woken`, then the turn as usual. One whose budget is exhausted is not, and
 writes `input_after_done` instead.
 
+#### `commands.run`
+```json
+{"command_id": "c-2", "session_id": "s-9f", "name": "review", "arguments": "the parser"}
+```
+→ `{"accepted": true, "command_id": "c-2"}`. Runs a command a markdown file defines (the
+`custom` section of `commands.list`): the harness reads the file and sends its prompt as
+the session's input, exactly as `input.send` would — the same events, carrying the
+`command_id`, under the actor who sent it, and activating a dormant session the same
+way. Every `$ARGUMENTS` in the prompt is replaced by `arguments`, trimmed; a prompt
+without one has `arguments`, when there are any, added as a paragraph of its own.
+`arguments` is optional and text; anything else is `invalid_params` with `field:
+"arguments"`. A `name` the session's table does not list as a defined command — a
+built-in's, an agent's, or nobody's — is `not_found` with `kind: "command"`: a built-in
+is the client's to run.
+
 #### `turn.cancel` → `{"command_id", "session_id"}`. Valid from any state.
 
 Each tool call the cancel stops is closed before `cancelled` is written: a
@@ -800,14 +815,25 @@ The slash commands a client may offer for the session — the one table behind e
 client's palette, so `/help` in the terminal and the desktop app show the same list and
 adding a command is one change in the harness. Entries come grouped by `section`, in
 the order a palette shows them: `session`, `navigate`, `workspace`, `setup`, `agents`,
-`quit`. Each has a `name`, its `aliases`, a one-line `summary`, how it is typed
-(`usage`: `/upload <path>`), its `args` (`{"name", "required", "kind"}`, where `kind`
-is `window`, `file` or `text`, for completion), a longer `detail`, an `example` or
-null, and where it came from: `source` is `builtin` or `agent`. The agents are the
-primary ones the session was started with, described by their definition: on a pod its
-bundle's, as the team's grant narrows them, and for a session that is asleep the ones
-`agents.list` answers with for its workspace. They take a `prompt` and start a branch on
-it, which a client without branches shows as such.
+`custom`, `quit`; a section with no entries is absent. Each has a `name`, its
+`aliases`, a one-line `summary`, how it is typed (`usage`: `/upload <path>`), its
+`args` (`{"name", "required", "kind"}`, where `kind` is `window`, `file` or `text`, for
+completion), a longer `detail`, an `example` or null, and where it came from: `source`
+is `builtin`, `agent`, `user` or `project`. The agents are the primary ones the session
+was started with, described by their definition: on a pod its bundle's, as the team's
+grant narrows them, and for a session that is asleep the ones `agents.list` answers with
+for its workspace. They take a `prompt` and start a branch on it, which a client without
+branches shows as such.
+
+The `custom` section is the commands markdown files define: `<config>/commands/<name>.md`
+(`source: "user"`) and the workspace's `.troupe/commands/<name>.md` (`source:
+"project"`), the workspace's winning a name both have. The file name is the command, the
+frontmatter's `description` its summary (the prompt's first line without one) and its
+`argument-hint` what `usage` says follows the name; `detail` names the file. A name a
+built-in, an alias or one of the session's agents has stays theirs, and the file is
+skipped. The files are read when the table is asked for, so one written a moment ago is
+listed. A client runs one with `commands.run` (Steering, above) and needs no code of its
+own for any of them.
 
 `availability` is what the command needs, for a client to judge and say rather than
 hide the row: `always`; `window` (acts on a window — the activated one, or one named
@@ -1320,7 +1346,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | scope | grants |
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
-| `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
+| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
@@ -1376,7 +1402,7 @@ ACL of each session a request names.
 require `session_id` (§6) but the four below: `session.get`, `input.send`, `turn.cancel`,
 `profile.switch`, `session.goal.*`, `session.loop.*`, `approval.respond`,
 `question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
-`mcp.status`, `context.get`, `commands.list`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
+`mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
 worker serves is about the pod or a path on it — `session.create`, `agents.list`,
 `workflows.list`, `memory.get`, `memory.forget`, `workspace.recent`, `workspace.search`,
 `worktree.*`, `watch.set`, `identity.*`, `config.*`, `skills.*` and the `mcp.*` methods

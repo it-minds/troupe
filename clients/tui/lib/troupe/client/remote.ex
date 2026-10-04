@@ -81,6 +81,9 @@ defmodule Troupe.Client.Remote do
   def send_input(sid, _path, text), do: describe(Worker.input(sid, text))
 
   @impl true
+  def run_command(sid, name, arguments), do: describe(Worker.run_command(sid, name, arguments))
+
+  @impl true
   def approve(sid, call_id, decision), do: describe(Worker.approve(sid, call_id, decision))
 
   # The contract has no question method: an answer is input, which is how a
