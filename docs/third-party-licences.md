@@ -36,6 +36,12 @@ the NIF's crates from its own Cargo.lock, the rest from a list kept in the scrip
 | pnpm | `@fontsource/dm-mono` | OFL-1.1 | As `@fontsource/figtree`. |
 | pnpm | `@fontsource/vt323` | OFL-1.1 | As `@fontsource/figtree`. |
 | pnpm | `lightningcss` | MPL-2.0 | Vite's CSS minifier from Vite 8, one of the GUI's build tools. It does not ship: the bundle holds the stylesheet it wrote, not its code. MPL-2.0 is copyleft per file, and we use it unmodified, as npm publishes it with its source. |
+| pnpm | `@vscode/vsce-sign` | Unknown | Microsoft's licence (`SEE LICENSE IN LICENSE.txt`, so no SPDX name), which allows using it with Visual Studio Code to develop and test an application, and not sharing or shipping it. `@vscode/vsce`, the tool that packages the VS Code extension's `.vsix`, requires it; the build runs it, and neither the `.vsix` nor this repository carries it. Its builds for each platform are covered with it. |
+| pnpm | `istextorbinary` | Artistic-2.0 | Used by `@secretlint/source-creator`, through which `@vscode/vsce` checks the extension's files for secrets before packaging. A build tool: nothing of it is in the `.vsix`. Artistic-2.0 asks more only of a changed copy that is distributed; we use it unmodified. |
+| pnpm | `binaryextensions` | Artistic-2.0 | Used by `istextorbinary`. As `istextorbinary`. |
+| pnpm | `textextensions` | Artistic-2.0 | Used by `istextorbinary`. As `istextorbinary`. |
+| pnpm | `editions` | Artistic-2.0 | Used by `istextorbinary`. As `istextorbinary`. |
+| pnpm | `version-range` | Artistic-2.0 | Used by `editions`. As `istextorbinary`. |
 
 ## Elixir: the umbrella and the TUI (Hex)
 
@@ -99,9 +105,10 @@ tools included.
 | `yaml_elixir` | MIT |
 | `ymlr` | MIT |
 
-## The GUI (pnpm)
+## The GUI and the VS Code extension (pnpm)
 
-91 packages, from `clients/gui/pnpm-lock.yaml`, build and test tools included. A
+227 packages, from `clients/gui/pnpm-lock.yaml` and `clients/vscode/pnpm-lock.yaml`,
+build and test tools included; the VS Code extension's are all build and test tools. A
 package's builds for one operating system and processor, such as esbuild's, are checked
 and not listed: each is under its parent's licence, and which of them are installed
 depends on the machine.
@@ -110,6 +117,18 @@ depends on the machine.
 |---|---|
 | `@asamuzakjp/css-color` | MIT |
 | `@asamuzakjp/dom-selector` | MIT |
+| `@azure/abort-controller` | MIT |
+| `@azure/core-auth` | MIT |
+| `@azure/core-client` | MIT |
+| `@azure/core-process` | MIT |
+| `@azure/core-rest-pipeline` | MIT |
+| `@azure/core-tracing` | MIT |
+| `@azure/core-util` | MIT |
+| `@azure/identity` | MIT |
+| `@azure/logger` | MIT |
+| `@azure/msal-browser` | MIT |
+| `@azure/msal-common` | MIT |
+| `@azure/msal-node` | MIT |
 | `@bramus/specificity` | MIT |
 | `@csstools/color-helpers` | MIT-0 |
 | `@csstools/css-calc` | MIT |
@@ -124,8 +143,15 @@ depends on the machine.
 | `@jridgewell/resolve-uri` | MIT |
 | `@jridgewell/sourcemap-codec` | MIT |
 | `@jridgewell/trace-mapping` | MIT |
+| `@napi-rs/keyring` | MIT |
 | `@oxc-project/types` | MIT |
 | `@rolldown/pluginutils` | MIT |
+| `@secretlint/core` | MIT |
+| `@secretlint/profiler` | MIT |
+| `@secretlint/secretlint-rule-no-dotenv` | MIT |
+| `@secretlint/secretlint-rule-preset-recommend` | MIT |
+| `@secretlint/source-creator` | MIT |
+| `@secretlint/types` | MIT |
 | `@tauri-apps/api` | Apache-2.0 OR MIT |
 | `@tauri-apps/cli` | Apache-2.0 OR MIT |
 | `@tauri-apps/plugin-dialog` | MIT OR Apache-2.0 |
@@ -138,46 +164,151 @@ depends on the machine.
 | `@types/node` | MIT |
 | `@types/react` | MIT |
 | `@types/react-dom` | MIT |
+| `@types/vscode` | MIT |
 | `@types/ws` | MIT |
+| `@typespec/ts-http-runtime` | MIT |
 | `@vitejs/plugin-react` | MIT |
 | `@vitest/mocker` | MIT |
 | `@vitest/spy` | MIT |
+| `@vscode/test-electron` | MIT |
+| `@vscode/vsce` | MIT |
+| `@vscode/vsce-sign` | Unknown |
+| `agent-base` | MIT |
+| `ansi-regex` | MIT |
 | `assertion-error` | MIT |
+| `azure-devops-node-api` | MIT |
+| `balanced-match` | MIT |
 | `bidi-js` | MIT |
+| `binaryextensions` | Artistic-2.0 |
+| `boundary` | BSD-2-Clause |
+| `brace-expansion` | MIT |
+| `buffer-crc32` | MIT |
+| `buffer-equal-constant-time` | BSD-3-Clause |
+| `bundle-name` | MIT |
+| `call-bind-apply-helpers` | MIT |
+| `call-bound` | MIT |
 | `chai` | MIT |
+| `chalk` | MIT |
+| `cli-cursor` | MIT |
+| `cli-spinners` | MIT |
+| `cockatiel` | MIT |
+| `commander` | MIT |
+| `core-util-is` | MIT |
 | `css-tree` | MIT |
 | `csstype` | MIT |
 | `data-urls` | MIT |
+| `debug` | MIT |
 | `decimal.js` | MIT |
+| `default-browser` | MIT |
+| `default-browser-id` | MIT |
+| `define-lazy-prop` | MIT |
 | `detect-libc` | Apache-2.0 |
+| `dunder-proto` | MIT |
+| `ecdsa-sig-formatter` | Apache-2.0 |
+| `editions` | Artistic-2.0 |
+| `emoji-regex` | MIT |
 | `entities` | BSD-2-Clause |
+| `es-define-property` | MIT |
+| `es-errors` | MIT |
 | `es-module-lexer` | MIT |
+| `es-object-atoms` | MIT |
 | `esbuild` | MIT |
 | `estree-walker` | MIT |
 | `expect-type` | Apache-2.0 |
 | `fdir` | MIT |
+| `function-bind` | MIT |
+| `get-east-asian-width` | MIT |
+| `get-intrinsic` | MIT |
+| `get-proto` | MIT |
+| `gopd` | MIT |
+| `graceful-fs` | ISC |
+| `has-symbols` | MIT |
+| `hasown` | MIT |
+| `hosted-git-info` | ISC |
 | `html-encoding-sniffer` | MIT |
+| `http-proxy-agent` | MIT |
+| `https-proxy-agent` | MIT |
+| `immediate` | MIT |
+| `inherits` | ISC |
+| `is-docker` | MIT |
+| `is-inside-container` | MIT |
+| `is-interactive` | MIT |
 | `is-potential-custom-element-name` | MIT |
+| `is-unicode-supported` | MIT |
+| `is-wsl` | MIT |
+| `isarray` | MIT |
+| `istextorbinary` | Artistic-2.0 |
 | `jsdom` | MIT |
+| `jsonc-parser` | MIT |
+| `jsonwebtoken` | MIT |
+| `jszip` | (MIT OR GPL-3.0-or-later) |
+| `jwa` | MIT |
+| `jws` | MIT |
+| `lie` | MIT |
 | `lightningcss` | MPL-2.0 |
+| `lodash.includes` | MIT |
+| `lodash.isboolean` | MIT |
+| `lodash.isinteger` | MIT |
+| `lodash.isnumber` | MIT |
+| `lodash.isplainobject` | MIT |
+| `lodash.isstring` | MIT |
+| `lodash.once` | MIT |
+| `log-symbols` | MIT |
 | `lru-cache` | BlueOak-1.0.0 |
+| `lru-cache` | ISC |
 | `magic-string` | MIT |
+| `marked` | MIT |
+| `math-intrinsics` | MIT |
 | `mdn-data` | CC0-1.0 |
+| `mime` | MIT |
+| `mimic-function` | MIT |
+| `minimatch` | BlueOak-1.0.0 |
+| `ms` | MIT |
+| `mute-stream` | ISC |
 | `nanoid` | MIT |
+| `object-inspect` | MIT |
 | `obug` | MIT |
+| `onetime` | MIT |
+| `open` | MIT |
+| `ora` | MIT |
+| `pako` | (MIT AND Zlib) |
 | `parse5` | MIT |
+| `pend` | MIT |
 | `picocolors` | ISC |
 | `picomatch` | MIT |
 | `postcss` | MIT |
+| `process-nextick-args` | MIT |
+| `proper-lockfile` | MIT |
 | `punycode` | MIT |
+| `qs` | BSD-3-Clause |
 | `react` | MIT |
 | `react-dom` | MIT |
+| `read` | ISC |
+| `readable-stream` | MIT |
 | `require-from-string` | MIT |
+| `restore-cursor` | MIT |
+| `retry` | MIT |
 | `rolldown` | MIT |
+| `run-applescript` | MIT |
+| `safe-buffer` | MIT |
+| `sax` | BlueOak-1.0.0 |
 | `saxes` | ISC |
 | `scheduler` | MIT |
+| `semver` | ISC |
+| `setimmediate` | MIT |
+| `side-channel` | MIT |
+| `side-channel-list` | MIT |
+| `side-channel-map` | MIT |
+| `side-channel-weakmap` | MIT |
+| `signal-exit` | ISC |
 | `source-map-js` | BSD-3-Clause |
 | `std-env` | MIT |
+| `stdin-discarder` | MIT |
+| `string-width` | MIT |
+| `string_decoder` | MIT |
+| `strip-ansi` | MIT |
+| `structured-source` | BSD-2-Clause |
+| `textextensions` | Artistic-2.0 |
 | `tinybench` | MIT |
 | `tinyexec` | MIT |
 | `tinyglobby` | MIT |
@@ -185,10 +316,17 @@ depends on the machine.
 | `tldts-core` | MIT |
 | `tough-cookie` | BSD-3-Clause |
 | `tr46` | MIT |
+| `tslib` | 0BSD |
 | `tsx` | MIT |
+| `tunnel` | MIT |
+| `typed-rest-client` | MIT |
 | `typescript` | Apache-2.0 |
+| `underscore` | MIT |
 | `undici` | MIT |
 | `undici-types` | MIT |
+| `url-join` | MIT |
+| `util-deprecate` | MIT |
+| `version-range` | Artistic-2.0 |
 | `vite` | MIT |
 | `vitest` | MIT |
 | `w3c-xmlserializer` | MIT |
@@ -197,8 +335,14 @@ depends on the machine.
 | `whatwg-url` | MIT |
 | `why-is-node-running` | MIT |
 | `ws` | MIT |
+| `wsl-utils` | MIT |
 | `xml-name-validator` | Apache-2.0 |
+| `xml2js` | MIT |
+| `xmlbuilder` | MIT |
 | `xmlchars` | MIT |
+| `yallist` | ISC |
+| `yauzl` | MIT |
+| `yazl` | MIT |
 
 ## The desktop app (Cargo)
 

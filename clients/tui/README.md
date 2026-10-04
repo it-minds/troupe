@@ -222,6 +222,7 @@ the same lines.
 
 ```
 troupe                                  # TUI in the current directory
+troupe --workspace DIR                  # TUI rooted at DIR, wherever it is started
 troupe --watch                          # TUI with watch mode on
 troupe --no-mouse                       # TUI without mouse reporting (terminal selection works)
 troupe --private                        # a private session, sealed to the plane you signed in to
@@ -236,6 +237,9 @@ troupe whoami [PLANE_URL]               # who the plane says you are, and your t
 troupe --remote [PLANE_URL]             # HQ: teams, profiles and sessions on a plane
 troupe --version
 ```
+
+In VS Code, the extension's **Troupe: Open** runs `troupe --workspace <folder>` in the
+integrated terminal, at the folder you are working in ([vscode.md](../../docs/user/vscode.md)).
 
 `troupe run --headless` prints the transcript, one line per event prefixed with the agent
 that wrote it, the harness's notes among them as the window shows them (`done:` and the

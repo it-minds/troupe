@@ -86,6 +86,7 @@ flowchart LR
 | Way in | What it is | Its documentation |
 |---|---|---|
 | `troupe` | the terminal UI, on the daemon on your machine; `troupe --remote` for your team's plane | [clients/tui](../../clients/tui/README.md) |
+| VS Code | **Troupe: Open** opens `troupe` in VS Code's terminal, at the folder you are working in | [vscode.md](vscode.md) |
 | The desktop app, or the GUI at your plane's `/app` | the graphical client: sessions on your machine and on the plane in one list, approvals from an inbox. **Use this computer only** on the sign-in screen skips signing in and never contacts a plane | [clients/gui](../../clients/gui/README.md); installing the unsigned desktop builds: [install.md](../../clients/gui/docs/install.md) |
 | Your own program | anything that speaks [PROTOCOL.md](../../PROTOCOL.md) to a daemon or a pod | the protocol |
 | Another agent | a profile called through the A2A facade | [a2a.md](../a2a.md) |

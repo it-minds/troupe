@@ -11,7 +11,8 @@
 # The desktop app gets the version without its pre-release part. Windows installers (WiX)
 # refuse a pre-release identifier that is not a number, so `0.3.0-rc.1` would fail the MSI
 # build; a release candidate's desktop build says `0.3.0`, and its file names still carry
-# the full version because the release workflow names them.
+# the full version because the release workflow names them. So does the VS Code
+# extension, whose `vsce publish` refuses a pre-release version (Decision 765).
 #
 # Edits are to the one line that holds the version in each file, so formatting is left as
 # it is.
@@ -29,7 +30,8 @@ defmodule Version.Files do
       {"clients/gui/apps/desktop/package.json", ~r/^  "version": "(.+)",$/m, :full},
       {"clients/gui/apps/desktop/src-tauri/tauri.conf.json", ~r/^  "version": "(.+)",$/m, :base},
       {"clients/gui/apps/desktop/src-tauri/Cargo.toml", ~r/\A\[package\]\nname = "troupe-desktop"\nversion = "(.+)"$/m, :base},
-      {"clients/gui/apps/desktop/src-tauri/Cargo.lock", ~r/^name = "troupe-desktop"\nversion = "(.+)"$/m, :base}
+      {"clients/gui/apps/desktop/src-tauri/Cargo.lock", ~r/^name = "troupe-desktop"\nversion = "(.+)"$/m, :base},
+      {"clients/vscode/package.json", ~r/^  "version": "(.+)",$/m, :base}
     ]
   end
 

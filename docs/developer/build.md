@@ -50,6 +50,10 @@ All on native runners in `.github/workflows/native.yml` ([CI](ci.md)):
   `.deb`/`.rpm`/`.AppImage`, unsigned until the signing secrets exist
   ([install.md](../../clients/gui/docs/install.md)).
 
+The VS Code extension is not a release artifact yet: `pnpm package` in `clients/vscode`
+builds `troupe.vsix` with `vsce`, and CI keeps the one it builds as the run's artifact
+([vscode.md](../user/vscode.md)).
+
 `install.sh` and `install.ps1` at the root install `troupe` and `troupe-daemon` from a
 release and check them against its `SHA256SUMS`. On this Windows machine,
 `scripts/setup-windows-toolchain.ps1` and `scripts/install-local.ps1` build and install

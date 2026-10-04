@@ -16,7 +16,8 @@ You run agents, on your own machine or on your team's plane.
 1. [user/](user/README.md) — what a session is, the first run in five steps, the ways in,
    and the words you will meet.
 2. [The terminal client](../clients/tui/README.md) — installing `troupe`, a model
-   provider, using it, and sessions on a plane.
+   provider, using it, and sessions on a plane; [in VS Code](user/vscode.md), opened in
+   its terminal at the workspace folder.
 3. [Configuration](user/configuration.md) — every key in `config.yaml`, and which file
    set it.
 4. [The daemon](../apps/troupe_daemon/README.md) — `troupe-daemon`, what runs your

@@ -14,6 +14,7 @@
 ├── charts/troupe/           the Helm chart (platform and GUI), its CRDs, values.small/example
 ├── clients/tui/             the terminal client: its own Mix project, the harness by path
 ├── clients/gui/             the graphical client: a pnpm workspace (client, bench, desktop)
+├── clients/vscode/          the VS Code extension that opens the TUI in VS Code's terminal: a pnpm project
 ├── config/                  config.exs (compile time) and runtime.exs (prod only)
 ├── dev/                     docker-compose.yml, kind/ (dependencies, values), toolbox/
 ├── docker/Dockerfile        the four server images

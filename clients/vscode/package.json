@@ -1,0 +1,94 @@
+{
+  "name": "troupe",
+  "displayName": "Troupe",
+  "description": "Opens Troupe's terminal client in VS Code's terminal, at the workspace folder.",
+  "version": "0.8.0",
+  "publisher": "objective-mj",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/it-minds/troupe.git",
+    "directory": "clients/vscode"
+  },
+  "homepage": "https://it-minds.github.io/troupe/user/vscode/",
+  "bugs": {
+    "url": "https://github.com/it-minds/troupe/issues"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "agent",
+    "terminal",
+    "tui"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./out/src/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "troupe.open",
+        "title": "Open",
+        "category": "Troupe",
+        "icon": "$(terminal)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "troupe.open",
+        "key": "ctrl+shift+alt+t",
+        "mac": "cmd+shift+alt+t"
+      }
+    ],
+    "configuration": {
+      "title": "Troupe",
+      "properties": {
+        "troupe.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "The `troupe` program to run. Empty: the first on the `PATH`, then where the installer puts it. On Windows only a `.exe`, `.cmd` or `.bat` is run. A user or remote setting only: a workspace cannot choose the program."
+        },
+        "troupe.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine",
+          "markdownDescription": "More arguments for `troupe`, such as `--no-mouse` (so the terminal's own selection works) or `--watch`. A user or remote setting only: a workspace cannot add `--auto-approve`."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc -p . --noEmit",
+    "test": "tsc -p . && node --test \"out/test/unit/**/*.test.js\"",
+    "test:vscode": "tsc -p . && node out/test/vscode/run.js",
+    "package": "tsc -p . && node -e \"for (const f of ['LICENSE', 'NOTICE']) require('fs').copyFileSync('../../' + f, f)\" && vsce package --no-dependencies --out troupe.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "~1.93.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^7.0.2"
+  }
+}

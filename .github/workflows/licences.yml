@@ -2,8 +2,8 @@
 #
 # Troupe is Apache-2.0, and a copyleft dependency - GPL, AGPL, LGPL, SSPL - arrives as a
 # line in a lock file that nobody reads. `scripts/licences.exs --check` reads every
-# package the two Mix locks, the GUI's pnpm workspace and the desktop app's Cargo.lock
-# name, refuses any licence its policy does not allow unless a person has recorded a
+# package the two Mix locks, the GUI's pnpm workspace, the VS Code extension's pnpm
+# project and the desktop app's Cargo.lock name, refuses any licence its policy does not allow unless a person has recorded a
 # reviewed exception, and fails when `docs/third-party-licences.md`, the licence texts in
 # `THIRD-PARTY-NOTICES.txt` (which every release artifact carries) or the chart's copies
 # of LICENSE and NOTICE are no longer what the locks and the root say. The policy and how
@@ -44,7 +44,9 @@ jobs:
         with:
           node-version-file: .tool-versions
           cache: pnpm
-          cache-dependency-path: clients/gui/pnpm-lock.yaml
+          cache-dependency-path: |
+            clients/gui/pnpm-lock.yaml
+            clients/vscode/pnpm-lock.yaml
       # Fetching is all it needs: the licences are in the packages' own metadata.
       - run: mix deps.get
       - run: mix deps.get
@@ -61,4 +63,6 @@ jobs:
           restore-keys: ${{ runner.os }}-licences-cargo-
       - run: pnpm install --frozen-lockfile
         working-directory: clients/gui
+      - run: pnpm install --frozen-lockfile
+        working-directory: clients/vscode
       - run: elixir scripts/licences.exs --check
