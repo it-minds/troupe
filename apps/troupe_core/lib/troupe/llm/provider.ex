@@ -76,7 +76,17 @@ defmodule Troupe.LLM.Provider do
     if attempt >= retries_for(max_retries, reason) do
       {:error, {:retries_exhausted, reason}}
     else
-      Process.sleep(backoff_ms(attempt, hint_ms))
+      wait = backoff_ms(attempt, hint_ms)
+
+      # Inside the call, so the log never sees it; said here for whoever counts a run's
+      # retries, as `troupe bench --live` does (Decision 773).
+      :telemetry.execute(
+        [:troupe, :llm, :retry],
+        %{attempt: attempt + 1, wait_ms: wait},
+        %{reason: reason}
+      )
+
+      Process.sleep(wait)
       do_retry(fun, attempt + 1, max_retries)
     end
   end

@@ -12,11 +12,17 @@ is the same, byte for byte. CI fails when a number goes past its budget, so a ch
 makes every turn more expensive is caught by the pull request that makes it, not by the
 person who gets the bill.
 
+`troupe bench --live` is the other tier: four small tasks against a real model, the
+person's own, under a spending cap it says before it starts, with a history to compare
+runs with (Decision 773; [the live bench](#the-live-bench) below, and
+[what a task costs](../user/bench.md) for the person running it). It never runs in CI.
+
 ## Running it
 
 | where | command | what it gives |
 |---|---|---|
-| an installed `troupe` | `troupe bench`, `troupe bench --json` | the table, or the JSON report; exit 1 past a budget |
+| an installed `troupe` | `troupe bench`, `troupe bench --json [FILE]` | the table, or the JSON report; exit 1 past a budget |
+| an installed `troupe` | `troupe bench --live [--repeat N] [--model M]`, `troupe bench --compare [REF]` | [the live bench](#the-live-bench) |
 | a checkout | `mix troupe.bench [--json PATH]` | the table on standard output, the JSON in `PATH`; exit 1 past a budget |
 | this machine's CI | `scripts/ci` | the step *bench within its budgets* |
 | CI | the `lint` job of `ci.yml` | the table in the run's summary, the JSON as the `bench` artifact |
@@ -104,7 +110,7 @@ schema 1 and never renamed or removed; a change that has to is schema 2.
 |---|---|
 | `schema` | `1` |
 | `suite` | `"troupe bench"` |
-| `mode` | `"offline"`; `"live"` is reserved for a run against a real model |
+| `mode` | `"offline"`, or `"live"` for a run against a real model ([below](#the-live-report)) |
 | `version` | the Troupe version that ran it |
 | `passed` | every scenario passed |
 | `scenarios[]` | in suite order: `name`, `title`, `passed`, `error` (why it did not run, else `null`), `outcome`, `runs`, `metrics`, `checks` |
@@ -142,7 +148,7 @@ A scenario is a `Troupe.Bench.Scenario` in `Troupe.Bench.Scenarios`:
 | `files` | the workspace before the run, `%{path => content}` |
 | `config` | settings beside the bench's own (the scripted model, every tool allowed, no brief) |
 | `script` | the scripted model's steps: `{:text, t}`, `{:tools, [{name, input}]}`, `{:delay, ms, step}`, or a function of the request that answers one (how `cut_output` passes on the id the cut result named); a request with no tools is the summariser's and gets a summary |
-| `outcome` | what a script can check afterwards, whoever answered: `{:file, path, content}`, or `{:command, argv}`, run in the workspace, passing on exit 0 (a test passing); or `nil` |
+| `outcome` | what a script can check afterwards, whoever answered: `{:file, path, content}`, the file's text, line endings and trailing whitespace aside, or `{:command, argv}`, run in the workspace, passing on exit 0 (a test passing), and in a release without the VM's own runtime first on its `PATH`, where an `elixir` would start on it and find no boot file; or `nil` |
 | `drive` | `nil` to type the prompt and wait for the turn to end, or a function that does something else (cancel half way) |
 | `measure` | a function of the run answering `{metrics, checks}`: `{name, label, unit, value}` and `{name, label, passed?}` |
 
@@ -151,15 +157,96 @@ To add one: write it, add it to `all/0`, give its measures budgets, run `mix tro
 runs (a time, a temporary path, a counter) is a measure that cannot be budgeted; leave it
 out or make it fixed.
 
+## The live bench
+
+`troupe bench --live` (Decision 773, TUI Decision 141) runs `Troupe.Bench.LiveScenarios`
+against the person's own provider and model: small tasks a model has to do itself, each
+with an outcome a script checks, so what a run shows is whether the work got done on that
+setup and what it cost. The offline scenarios stay offline: their drives and measures read
+the scripted model's requests, and their budgets are the script's.
+
+| scenario | asks | outcome | check |
+|---|---|---|---|
+| `write_file` | write `hello.txt` with one given line | the file holds it | |
+| `fix_test` | make `calc_test.exs` pass by fixing `calc.exs` | `elixir calc_test.exs` exits 0 | the test file is as it was |
+| `delegate` | delegate the question to `explore`, write its answer to `answer.txt` | the file holds the answer | the root agent called `delegate` |
+| `recover` | read `settings/port.txt`, which is never there, and fall back to a default | `port.txt` holds the default | `read_file` failed |
+
+**Before anything starts**, `Troupe.Bench.plan/1` reads the person's configuration and
+takes from it where a model call goes (provider, URL, key, named providers, windows,
+prices, the catalog) and nothing else; `--model` picks another than the default. It refuses
+a model whose key it cannot read, and leaves out a scenario whose outcome is a command not
+on the `PATH`. The cap is a run's limits (`scripts/live-check`'s: 12 model calls, 200,000
+tokens sent, 24,000 received, 240 s) at the model's price, the input at the dearer of its
+input and cache-write prices, times the runs; a model nothing prices has its cap in tokens.
+`troupe bench --live` prints it on standard error and runs nothing until the person answers
+`y` at a terminal, or passed `--yes`; with no terminal to ask in it runs nothing.
+
+**Each run** is the offline suite's kind: its own workspace, config and state directories
+under a new temporary one, `TROUPE_CONFIG_HOME` and `TROUPE_STATE_HOME` naming them and
+opencode's files naming none, and a session of this VM's harness. The person's provider
+settings reach it as config overrides, in memory: the key is in no file, no log and no
+output, and `inspect/1` of a plan leaves it out. Every tool is allowed, a budget stops
+rather than asks, and there is no brief. The runner watches the session's events and stops
+the session when the root agent's turn ends, when the run's cost reaches its share of the
+cap, or a quarter of its wall clock (at most 30 s) after the wall clock, whichever is
+first; a run that did not end by itself says why in its `error`.
+
+**What a run records** comes from the session as it happens: a model call's latency is its
+`llm_request` to its `llm_response`, its time to first token the first `llm_delta` between
+them, a tool call's time its `tool_call_started` to its `tool_call_completed`, each taken
+as the event arrives; usage and cost are the log's (`gateway.cost_micros`, which the
+harness prices from the catalog or `models.prices` when the gateway does not), and what a
+call's prompt was made of is its `llm_request.prompt_bytes` (Decision 769), the measure the
+offline suite takes of a request. A compaction's summary is a call too, carried by the
+`compacted` that takes its answer, with no times since no event announced it. Retries
+happen inside the provider's call and never reach the log, so the provider says each one as
+telemetry, `[:troupe, :llm, :retry]`, which the runner counts.
+
+**The history** is `<state>/bench/results.jsonl` (`Troupe.Bench.History`), a line a run,
+appended as each run ends: the run's record with `schema`, `bench` (when the bench
+started, which groups its runs), `version`, `scenario` and `run`. `troupe bench --compare`
+puts the last bench beside each scenario's last runs in an earlier one, or, with a version
+or a model, the last runs of that one, measure by measure.
+
+### The live report
+
+Schema 1, with `"mode": "live"`, and these added:
+
+| where | field | |
+|---|---|---|
+| the report | `model`, `repeat`, `cap_micros`, `started_at`, `skipped[]` | what ran against what, how often, under what cap; the scenarios left out, `{name, why}` |
+| a scenario | `metrics[]` | taken over its runs, with no budget: `success_rate`, `median_cost` and `worst_cost` (in dollars), and the medians `median_wall_ms`, `median_call_ms`, `median_first_token_ms`, `median_model_calls`, `median_input_tokens`, `median_cached_tokens`, `median_output_tokens` |
+| a scenario | `outcome.held` | how many runs it held in; `passed` is every one |
+| a scenario | `checks[]` | each held in every run; the label says in how many |
+| a scenario | `error` | which runs did not end by themselves, and why |
+| a run | `error`, `checks[]`, `succeeded` | why it did not end by itself; its own checks; no error, the outcome held and every check held |
+| a call | `agent`, `cached_tokens`, `cost_micros` | which agent made it (`root`, `root/<subagent>`), and its cache reads and cost |
+
+The run's fields that are `null` offline are filled: `cost_micros` (`null` when nothing
+priced a call), `wall_ms`, `retries`, each tool's `ms`, each call's `latency_ms` and
+`first_token_ms`. `input_tokens` counts what was billed in full (fresh input and cache
+writes) and `cached_tokens` the cache reads. A call's prompt breakdown (`prompt_bytes`,
+`system_bytes`, `tool_definition_bytes`, `conversation_bytes`, `tool_result_bytes`) is
+the log's, so a live call and an offline one are measured alike.
+
+### Testing it
+
+Nothing calls a real model. `apps/troupe_core/test/support/fake_openai.exs` is a stand-in
+for an OpenAI-compatible endpoint on a loopback port: it streams scripted answers, the
+first chunk after one delay and the rest after another, with usage, and can answer `500`
+first so the provider retries. Its scripts answer each live scenario the way it asks, by a
+phrase of the conversation's user messages, so every run succeeds. `bench_live_test.exs`
+runs the plan, the runs, the limits and the history against it, and the TUI's
+`bench_cli_test.exs` the command line, with a config file naming it. It needs only OTP and
+Elixir's `JSON`, so `elixir -r apps/troupe_core/test/support/fake_openai.exs -e
+"Troupe.Test.FakeOpenAI.serve(port: 18080)"` runs one for an installed `troupe` to be
+pointed at.
+
 ## What is not here yet
 
-- **The live mode.** `troupe bench --live` is reserved and refuses. The live runner will
-  run the same scenarios against the person's own provider, with no script, `--repeat N`
-  times under a printed spending cap, into the same report with `mode: "live"` and the
-  `null` fields filled, and keep a local history to compare runs with. It adds a runner,
-  not a format.
-- **The per-call prompt breakdown from the log.** Offline, the bench measures each request
-  the model is handed. When the event log records what each prompt was made of (#389's
-  first slice), a live run reads the same `calls[]` fields from there.
+- **The nightly.** The live bench is on demand. Decision 773 says how the nightly should
+  run it; wiring it in is a change to `.github/workflows/live.yml` of its own.
+
 - **Lifecycle across a daemon restart**, dormancy, and the budget's own question: issue
   #390's other scenarios.
