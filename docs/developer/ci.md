@@ -44,6 +44,8 @@ Arrows point at what an app depends on; a change flows back along them. So:
 |---|---|---|
 | `clients/gui/**` | — | GUI (tokens, typecheck, build, test); GUI-e2e if the client package |
 | `clients/tui/**` | — | TUI `mix check`; native builds (PR) |
+| `clients/vscode/**` | — | the VS Code extension: typecheck, unit tests, its suite inside a real VS Code on Linux and Windows (and macOS in a full run), and the `.vsix` as the run's artifact |
+| `docs/user/cli-reference.md` | — | TUI `mix check`, which holds it to the command tables |
 | `apps/troupe_daemon` | daemon | native builds (PR) |
 | `apps/troupe_plane` | plane, worker | GUI-e2e |
 | `apps/troupe_operator` / `troupe_a2a` | that app | — |
@@ -60,9 +62,9 @@ Each umbrella app is its own parallel leg (`test <app>`), and one `lint` job com
 flowchart LR
   changes[what changed] --> lint[compile, format, credo, boundaries]
   changes --> test["test &lt;app&gt; × N"]
-  changes --> chart & protocol[schema + Python client] & tui[TUI] & gui[GUI] & e2e[GUI vs a plane] & native[native builds · PR only]
+  changes --> chart & protocol[schema + Python client] & tui[TUI] & gui[GUI] & e2e[GUI vs a plane] & vscode[VS Code extension] & native[native builds · PR only]
   versions[versions agree] --> ok
-  lint & test & chart & protocol & tui & gui & e2e & native --> ok{{ci-ok}}
+  lint & test & chart & protocol & tui & gui & e2e & vscode & native --> ok{{ci-ok}}
   ok -->|push to main, changed an image| images[images · sha-&lt;short&gt;]
 ```
 
@@ -128,7 +130,7 @@ A failure is a harness regression until shown otherwise: the step prints the run
 | workflow | what | called by |
 |---|---|---|
 | `ci.yml` | every check; focused or full | pull requests into `main`, pushes to `main`, `nightly.yml`, `release.yml` |
-| `dev-check.yml` | compile, credo, schema, client builds; no tests | every other pull request: into a `development-*` chunk ([fixing-issues.md](fixing-issues.md)), or stacked on another branch |
+| `dev-check.yml` | compile, credo, schema, client builds (the VS Code extension's `.vsix` kept as the run's artifact); no tests | every other pull request: into a `development-*` chunk ([fixing-issues.md](fixing-issues.md)), or stacked on another branch |
 | `licences.yml` | every locked package's licence against the policy in `scripts/licences.exs`, and `docs/third-party-licences.md`, `THIRD-PARTY-NOTICES.txt` and the chart's LICENSE and NOTICE current | every pull request |
 | `pages.yml` | the documentation site (`mkdocs.yml`), strict: a broken link, a nav entry to a missing page or a page left out of the nav fails it; on `main`, published to GitHub Pages | every pull request, pushes to `main` |
 | `dco.yml` | every commit authored from 2026-09-27 has its author's `Signed-off-by:` ([CONTRIBUTING.md](../../CONTRIBUTING.md)) | pull requests into `main` and `development-*` |

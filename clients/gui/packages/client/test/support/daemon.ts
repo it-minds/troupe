@@ -519,6 +519,18 @@ export class FakeDaemon {
         this.planeToken = null;
         return reply(ws, id, this.identityJson());
 
+      // The token goes where it is that person's at that plane; the label stays (#381).
+      case "identity.sign_out": {
+        const plane = String(params["plane_url"] ?? "").replace(/\/+$/, "");
+        const subject = params["subject"];
+        const theirs =
+          this.planeToken !== null &&
+          (this.linked?.plane_url ?? "").replace(/\/+$/, "") === plane &&
+          (subject === undefined || subject === this.linked?.subject);
+        if (theirs) this.planeToken = null;
+        return reply(ws, id, { signed_out: theirs });
+      }
+
       case "session.list": {
         const filter = (params["filter"] ?? {}) as { kind?: string; workspace?: string };
         const sessions = [...this.sessions.values()]

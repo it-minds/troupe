@@ -58,6 +58,17 @@ defmodule Troupe.Gateway.Plane do
   @spec unlink(GenServer.server()) :: :ok
   def unlink(server \\ @name), do: GenServer.call(server, :unlink)
 
+  @doc """
+  Forget the token, and only the token, when it is for this plane and this person: the
+  person signed out at the client that handed it over (`identity.sign_out`). Where the
+  plane is and who the person is stay, as the label in `identity.json` does, so the next
+  link with a token is the same link again. Answers whether there was one to forget; a
+  token for another plane, or for somebody else, is theirs and stays.
+  """
+  @spec sign_out(String.t(), String.t() | nil, GenServer.server()) :: boolean()
+  def sign_out(plane_url, subject, server \\ @name),
+    do: GenServer.call(server, {:sign_out, plane_url, subject})
+
   @doc "Whether there is a token to call with. Not whether the plane is reachable."
   @spec linked?(GenServer.server()) :: boolean()
   def linked?(server \\ @name), do: GenServer.call(server, :linked?)
@@ -103,6 +114,15 @@ defmodule Troupe.Gateway.Plane do
   end
 
   def handle_call(:unlink, _from, _state), do: {:reply, :ok, %__MODULE__{}}
+
+  def handle_call({:sign_out, url, subject}, _from, %__MODULE__{token: token} = state)
+      when is_binary(token) do
+    if same_plane?(state.url, url) and subject in [nil, state.subject],
+      do: {:reply, true, %{state | token: nil, expires_at: nil}},
+      else: {:reply, false, state}
+  end
+
+  def handle_call({:sign_out, _url, _subject}, _from, state), do: {:reply, false, state}
 
   def handle_call(:linked?, _from, state) do
     {:reply, is_binary(state.url) and is_binary(state.token), state}
@@ -153,4 +173,11 @@ defmodule Troupe.Gateway.Plane do
 
   defp trim(value) when is_binary(value) and value != "", do: value
   defp trim(_value), do: nil
+
+  # The same plane however its URL was spelled: the clients agree on all but a trailing
+  # slash.
+  defp same_plane?(a, b) when is_binary(a) and is_binary(b),
+    do: String.trim_trailing(a, "/") == String.trim_trailing(b, "/")
+
+  defp same_plane?(_a, _b), do: false
 end

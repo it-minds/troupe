@@ -17,6 +17,7 @@
     "commands/fs.upload.json",
     "commands/identity.get.json",
     "commands/identity.link.json",
+    "commands/identity.sign_out.json",
     "commands/identity.unlink.json",
     "commands/initialize.json",
     "commands/input.send.json",

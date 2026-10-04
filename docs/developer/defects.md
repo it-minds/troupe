@@ -430,23 +430,8 @@ Found by the chunk 14 fixer of slot E14 (PR #359), 2026-10-03.
 
 Found by the chunk 14 fixers of slots A14 and B14 (PRs #364, #363), 2026-10-03.
 
-### D60 - A checkout that built the previous version keeps reporting it (low)
-
-Every `mix.exs` reads `VERSION` when the project loads (Decision 668), but Mix rewrites an
-app's compiled `.app` only when `mix.exs` or the config changes, not when `VERSION` does.
-So after a version bump an incremental build in a checkout that built before keeps the old
-`vsn`: `scripts/install-local.ps1` then installs a TUI whose `troupe version` reports the
-previous release (the daemon's release reads the version afresh and is right), and
-`Troupe.VersionTest` fails with "troupe_core is 0.7.2-beta and VERSION is 0.7.3-beta".
-CI builds from clean and is not affected. Removing `_build/*/lib/troupe*/ebin/*.app`
-before building clears it; `install-local.ps1` could do that, or the projects could make a
-change to `VERSION` recompile them. Found by the chunk 14 coordinator verifying the chunk's
-tip, 2026-10-03.
-
 ### D61 - Private sessions after #365: what is left (medium)
 
-- `troupe logout` neither unlinks the daemon nor withdraws the plane token it was handed;
-  the daemon keeps using the token until it expires.
 - The daemon's `session.list` rows carry no `kind` or `sync`, so the desktop app lists a
   private session as a local one ("Here only").
 - A private session whose plane row names another device is left alone on resume
@@ -493,6 +478,24 @@ Found by the chunk 15 fixer of slot B15 (PR #372), 2026-10-04.
   full gate's load and passed alone.
 
 Found by the chunk 15 fixers of slots A15, B15 and C15 (PRs #374, #372, #370), 2026-10-04.
+
+### D64 - Small leftovers from the 0.8.1 work (low)
+
+- Nothing checks that a new `mix.exs` that reads `VERSION` also lists the `:troupe_version`
+  compiler (Decision 768); `build.md` says it should. An assertion in `Troupe.VersionTest`
+  would hold it.
+- `/todo complete|cancel|add`, typed in a branch window, is a slash command missing from
+  `Troupe.Commands`, so it is in neither `commands.list`, the palettes, `troupe --help` nor
+  the command reference.
+- `docs/developer/build.md` section 3 has no row for `mix troupe.config.schema` (the
+  config schema and the configuration reference it writes).
+- `troupe --workspace DIR` with a directory that doesn't exist is unchecked; the VS Code
+  extension always passes a real folder.
+- The TUI suite shares one embedded daemon, which answers a replayed `command_id` with the
+  first answer: two tests using the same literal id make the second a silent no-op. Tests
+  should take ids from `RPC.command_id()`.
+
+Found by the chunk 16 fixers, 2026-10-04.
 
 ## Taken
 
@@ -565,6 +568,8 @@ Found by the chunk 15 fixers of slots A15, B15 and C15 (PRs #374, #372, #370), 2
 | D54's first item - with Cilium, a profile could name a loopback or link-local endpoint | #355, PR #360 |
 | D51 - an MCP session a renewed token or a dropped server left open (the person-mode case stays in D51) | #358, PR #363 |
 | D53's first item - the desktop app showed a team turn that failed on the plane as finished | #354, PR #359 |
+| D60 - A checkout that built the previous version kept reporting it | #380, PR #382 |
+| D61's first item - `troupe logout` left the daemon holding the plane token | #381, PR #385 |
 
 ## Checked and not a defect
 

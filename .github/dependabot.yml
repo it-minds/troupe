@@ -1,6 +1,7 @@
 # Keeping the ecosystems this repository actually has from rotting: the workflows' actions,
 # the GUI's npm packages and the desktop app's crates (from the GUI's own configuration,
-# which came with it), the two Mix projects, and what builds the documentation site.
+# which came with it), the VS Code extension's npm packages, the two Mix projects, and
+# what builds the documentation site.
 #
 # The GUI had no configuration at first, so only GitHub's default security updates ran —
 # and those produced one thing: a weekly failure on a `glib` advisory with no version that
@@ -83,6 +84,24 @@ updates:
       # rather than on the next advisory.
       - dependency-name: glib
         versions: ["0.18.x"]
+    commit-message:
+      prefix: deps
+
+  # The VS Code extension's build and test tools, in one pull request a month. Its
+  # `@types/vscode` is the API it promises (`engines.vscode`) and `@types/node` the Node
+  # that version of VS Code runs, not the newest of either: they move by hand, with that
+  # line (Decision 765).
+  - package-ecosystem: npm
+    directory: /clients/vscode
+    schedule:
+      interval: monthly
+    groups:
+      tooling:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "@types/vscode"
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: deps
 

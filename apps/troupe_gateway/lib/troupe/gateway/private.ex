@@ -48,6 +48,12 @@ defmodule Troupe.Gateway.Private do
   that hands it a token is when it carries on (`resume/1`, Decision 764): each private
   session it has with no sealer is sealed from where the plane says it got to, with what
   the log holds after that, and one the plane has never heard of from its first event.
+
+  ## When the person signs out
+
+  The client that handed the token over takes it back (`identity.sign_out`), and every
+  sealer stops (`suspend/1`), leaving the daemon as a restart would: nothing is sealed
+  until a link with a token carries each session on (issue #381).
   """
 
   alias Troupe.Gateway.Plane
@@ -175,6 +181,26 @@ defmodule Troupe.Gateway.Private do
       |> Enum.map(& &1.id)
 
     {:ok, resumed}
+  end
+
+  @doc """
+  Stop sealing anything, until a link with a token carries on (`resume/1`).
+
+  Called when the person signs out at the client that handed the daemon its token
+  (`identity.sign_out`), after the token is forgotten. Each sealer goes, and with it the
+  key it held; its last seal on the way down finds no token and keeps nothing, because the
+  log on this disk already has every event, and the next link carries the session on from
+  the row's `last_seq`. Answers the sessions that stopped.
+  """
+  @spec suspend(keyword()) :: [String.t()]
+  def suspend(opts \\ []) do
+    supervisor = Keyword.get(opts, :supervisor, __MODULE__.Sealers)
+
+    for {_id, pid, _type, _modules} <- DynamicSupervisor.which_children(supervisor),
+        is_pid(pid),
+        session_id <- Registry.keys(__MODULE__.Registry, pid),
+        :ok == DynamicSupervisor.terminate_child(supervisor, pid),
+        do: session_id
   end
 
   defp private_sessions do

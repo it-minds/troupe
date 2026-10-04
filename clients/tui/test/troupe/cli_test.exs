@@ -2,6 +2,7 @@ defmodule Troupe.CLITest do
   use ExUnit.Case, async: true
 
   import Troupe.TestHelpers
+  import Troupe.TUIHelpers, only: [start_tui: 1, user_state: 1]
 
   alias Troupe.{CLI, Client}
   alias Troupe.CLI.Runner
@@ -31,6 +32,35 @@ defmodule Troupe.CLITest do
     assert {:error, _} = CLI.parse(["run"])
     # The umbrella's `VERSION`, which the TUI shares with everything it is released with.
     assert CLI.version() == "troupe " <> (File.read!("../../VERSION") |> String.trim())
+  end
+
+  # Issue #378: the VS Code extension runs `troupe --workspace DIR` in a terminal it opens
+  # at DIR. The flag is parsed for every mode, and the TUI's session is rooted where it
+  # says, not where `troupe` was started; a relative DIR is from the current directory.
+  test "--workspace roots the TUI at DIR, wherever troupe runs" do
+    ws = Path.expand(tmp_workspace())
+    refute File.cwd!() == ws
+
+    assert {:ok, %{mode: :tui, workspace: ^ws} = args} = CLI.parse(["--workspace", ws])
+
+    assert {:ok, %{mode: :tui, mouse: false, workspace: ^ws}} =
+             CLI.parse(["--no-mouse", "--workspace", ws])
+
+    assert {:ok, %{mode: :resume, workspace: ^ws}} = CLI.parse(["resume", "--workspace", ws])
+    assert {:ok, %{workspace: sub}} = CLI.parse(["--workspace", "sub"])
+    assert sub == Path.join(File.cwd!(), "sub")
+
+    # The session as the TUI mode asks for it, and the window the daemon's record roots.
+    {sid, _, _} =
+      start_session!(
+        workspace: args.workspace,
+        params: %{config: CLI.session_config(args), private: args.private}
+      )
+
+    {pid, _session} = start_tui(sid)
+    assert user_state(pid).model.workspace == ws
+    assert {:ok, listed} = Client.sessions({:local, ws})
+    assert sid in Enum.map(listed, & &1.id)
   end
 
   # The config files' `auto_approve`, `watch` and `full_send` apply to a session `troupe`

@@ -1,52 +1,37 @@
 defmodule Troupe.CLI do
   @moduledoc """
-  Command-line parsing.
+  Command-line parsing, and the help `troupe --help` prints.
 
-      troupe                       open the TUI in the current directory
-      troupe --watch               TUI with watch mode on
-      troupe --no-mouse            TUI without mouse reporting, so the terminal's own selection works
-      troupe --full-send           start with every budget/token limit lifted for the session
-      troupe --private             a private session, sealed to the plane you are signed in to
-      troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--private] [--workspace DIR]
-      troupe resume [SESSION_ID]   no id: reopen the last session here, picker open
-      troupe --remote [PLANE_URL]  open HQ: teams, profiles and sessions on a plane
-      troupe login PLANE_URL       sign in to a plane with the device flow
-      troupe logout [PLANE_URL]    forget a plane's credentials (--all forgets every one)
-      troupe whoami [PLANE_URL]    print who the plane says you are, and your teams
-      troupe config                show the resolved providers and models (keys masked); with none, set them up
-      troupe config --explain [KEY] [--json]  every setting, or KEY's, and which file set it (secrets masked)
-      troupe config validate [PATH]   check the config files, or one; exits 1 on any problem
-      troupe config migrate [--write] [PATH]  show, or make, the rewrite to the current spellings
-      troupe config trust [PATH]   let a workspace's own files set the trusted keys; --list shows them
-      troupe config untrust [PATH] take that back
-      troupe config pull [PLANE_URL]  save the plane's default provider and models here (never a key)
-      troupe models [--refresh]    list every model, its window and its price
-      troupe doctor                check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure
-      troupe daemon [ARGS]         the local daemon: `run` (default), `status`, `config`, `models`, `login on|off`, `version`
-      troupe --version
+  The help is written from two tables, so that it says what the code does (root Decision
+  767): `commands/0`, beside the parser, for the command lines `troupe` takes, and the
+  harness's `Troupe.Commands` for the commands typed inside a session, the table
+  `commands.list` serves both clients. `docs/user/cli-reference.md` is written from the
+  same two by `mix troupe.cli.reference`.
   """
 
+  @type mode ::
+          :tui
+          | :run
+          | :resume
+          | :version
+          | :help
+          | :config
+          | :config_explain
+          | :config_validate
+          | :config_migrate
+          | :config_trust
+          | :config_untrust
+          | :config_trust_list
+          | :config_pull
+          | :models
+          | :doctor
+          | :login
+          | :logout
+          | :whoami
+          | :daemon
+
   @type args :: %{
-          mode:
-            :tui
-            | :run
-            | :resume
-            | :version
-            | :help
-            | :config
-            | :config_explain
-            | :config_validate
-            | :config_migrate
-            | :config_trust
-            | :config_untrust
-            | :config_trust_list
-            | :config_pull
-            | :models
-            | :doctor
-            | :login
-            | :logout
-            | :whoami
-            | :daemon,
+          mode: mode(),
           agent: String.t(),
           task: String.t() | nil,
           headless: boolean(),
@@ -71,6 +56,80 @@ defmodule Troupe.CLI do
           path: String.t() | nil
         }
 
+  @switches [
+    headless: :boolean,
+    worktree: :boolean,
+    auto_approve: :boolean,
+    full_send: :boolean,
+    watch: :boolean,
+    private: :boolean,
+    mouse: :boolean,
+    workspace: :string,
+    version: :boolean,
+    help: :boolean,
+    refresh: :boolean,
+    remote: :boolean,
+    all: :boolean,
+    explain: :boolean,
+    json: :boolean,
+    write: :boolean,
+    list: :boolean
+  ]
+
+  # Every command line `troupe` takes: how it is typed, what it does, and command lines
+  # that are it. The suite parses each of those, and holds the modes they reach equal to
+  # `mode()` and every switch in `@switches` to one these lines name, so the help can
+  # neither list what the parser refuses nor leave out what it takes.
+  @commands [
+    {"troupe", "open the TUI in the current directory", [[]]},
+    {"troupe --workspace DIR", "open the TUI rooted at DIR, wherever it is started",
+     [["--workspace", "."]]},
+    {"troupe --watch", "TUI with watch mode on", [["--watch"]]},
+    {"troupe --no-mouse", "TUI without mouse reporting, so the terminal's own selection works",
+     [["--no-mouse"]]},
+    {"troupe --full-send", "start with every budget/token limit lifted for the session",
+     [["--full-send"]]},
+    {"troupe --private", "a private session, sealed to the plane you are signed in to",
+     [["--private"]]},
+    {~s(troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--private] [--workspace DIR]),
+     "one task: in the TUI, or with --headless printed line by line until the agent rests",
+     [["run", "task"], ["run", "plan", "task", "--headless", "--workspace", "."]]},
+    {"troupe resume [SESSION_ID]", "no id: reopen the last session here, picker open",
+     [["resume"], ["resume", "id"]]},
+    {"troupe --remote [PLANE_URL]", "open HQ: teams, profiles and sessions on a plane",
+     [["--remote"]]},
+    {"troupe login PLANE_URL", "sign in to a plane with the device flow",
+     [["login", "https://plane.example"]]},
+    {"troupe logout [PLANE_URL]",
+     "forget a plane's credentials and sign this machine's daemon out of it (--all: every plane)",
+     [["logout"], ["logout", "--all"]]},
+    {"troupe whoami [PLANE_URL]", "print who the plane says you are, and your teams", [["whoami"]]},
+    {"troupe config",
+     "show the resolved providers and models (keys masked); with none, set them up", [["config"]]},
+    {"troupe config --explain [KEY] [--json]",
+     "every setting, or KEY's, and which file set it (secrets masked)",
+     [["config", "--explain"], ["config", "--explain", "max_turns", "--json"]]},
+    {"troupe config validate [PATH]", "check the config files, or one; exits 1 on any problem",
+     [["config", "validate"]]},
+    {"troupe config migrate [--write] [PATH]",
+     "show, or make, the rewrite to the current spellings", [["config", "migrate", "--write"]]},
+    {"troupe config trust [PATH]",
+     "let a workspace's own files set the trusted keys; --list shows them",
+     [["config", "trust"], ["config", "trust", "--list"]]},
+    {"troupe config untrust [PATH]", "take a workspace's trust back", [["config", "untrust"]]},
+    {"troupe config pull [PLANE_URL]",
+     "save the plane's default provider and models here (never a key)", [["config", "pull"]]},
+    {"troupe models [--refresh]", "list every model, its window and its price",
+     [["models", "--refresh"]]},
+    {"troupe doctor", "check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure",
+     [["doctor"]]},
+    {"troupe daemon [ARGS]",
+     "the local daemon: `run` (default), `status`, `config`, `models`, `login on|off`, `version`",
+     [["daemon"], ["daemon", "status"]]},
+    {"troupe --version", "print the version", [["--version"]]},
+    {"troupe --help", "print the command lines and the commands inside a session", [["--help"]]}
+  ]
+
   @spec parse([String.t()]) :: {:ok, args()} | {:error, String.t()}
   # Before the option parser sees anything: everything after `daemon` is the daemon's
   # own command line, flags included, and `--refresh` there is not ours to consume.
@@ -79,28 +138,7 @@ defmodule Troupe.CLI do
   end
 
   def parse(argv) do
-    {opts, rest, invalid} =
-      OptionParser.parse(argv,
-        strict: [
-          headless: :boolean,
-          worktree: :boolean,
-          auto_approve: :boolean,
-          full_send: :boolean,
-          watch: :boolean,
-          private: :boolean,
-          mouse: :boolean,
-          workspace: :string,
-          version: :boolean,
-          help: :boolean,
-          refresh: :boolean,
-          remote: :boolean,
-          all: :boolean,
-          explain: :boolean,
-          json: :boolean,
-          write: :boolean,
-          list: :boolean
-        ]
-      )
+    {opts, rest, invalid} = OptionParser.parse(argv, strict: @switches)
 
     base = %{
       mode: :tui,
@@ -220,8 +258,63 @@ defmodule Troupe.CLI do
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
 
+  @doc "Every command line `troupe` takes, as `{usage, what it does, command lines that are it}`."
+  @spec commands() :: [{String.t(), String.t(), [[String.t()]]}]
+  def commands, do: @commands
+
+  @doc false
+  @spec switches() :: keyword(atom())
+  def switches, do: @switches
+
+  @doc "The command lines, one to a line: the answer to one that does not parse, too."
   @spec usage() :: String.t()
-  def usage, do: @moduledoc |> String.split("\n") |> Enum.drop(2) |> Enum.join("\n")
+  def usage, do: columns(for {usage, what, _argv} <- @commands, do: {usage, what})
+
+  @doc """
+  What `troupe --help` prints: the command lines, then the built-in commands typed inside
+  a session, by section, from the harness's table. Read from the table compiled into this
+  binary, so it needs no daemon.
+  """
+  @spec help() :: String.t()
+  def help do
+    sections =
+      Troupe.Commands.builtins()
+      |> Enum.chunk_by(& &1["section"])
+      |> Enum.map_join("\n", fn [%{"section" => section} | _] = entries ->
+        String.capitalize(section) <> "\n" <> columns(Enum.map(entries, &slash_row/1))
+      end)
+
+    """
+    #{usage()}
+
+    Inside a session every command starts with /, and / on an empty line, Ctrl-K or /help
+    opens them as a palette, filtered as you type.
+
+    #{sections}
+
+    Each agent is a command too, /build <prompt> or /plan <prompt> (/agents lists them),
+    and so is each <name>.md in your config's commands/ or the workspace's .troupe/commands/.\
+    """
+  end
+
+  defp slash_row(%{"usage" => usage, "summary" => summary, "aliases" => []}), do: {usage, summary}
+
+  defp slash_row(%{"usage" => usage, "summary" => summary, "aliases" => aliases}),
+    do: {usage, "#{summary} (also #{Enum.map_join(aliases, ", ", &("/" <> &1))})"}
+
+  # Two columns, the second at a fixed tab; a first column too wide for it puts the
+  # second on the line below, at the tab.
+  @tab 34
+
+  defp columns(rows) do
+    Enum.map_join(rows, "\n", fn {left, right} ->
+      left = "  " <> left
+
+      if String.length(left) + 2 <= @tab,
+        do: String.pad_trailing(left, @tab) <> right,
+        else: left <> "\n" <> String.duplicate(" ", @tab) <> right
+    end)
+  end
 
   @spec version() :: String.t()
   def version, do: "troupe #{Application.spec(:troupe, :vsn)}"

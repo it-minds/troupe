@@ -517,6 +517,15 @@ export class DaemonClient {
     return this.command<DaemonIdentity>("identity.unlink");
   }
 
+  /**
+   * Take back the plane token handed over with `linkIdentity`, when the person signs out
+   * here. The daemon lets go of it where it is that person's at that plane, and seals
+   * nothing until a client links it with a token again; the label stays (issue #381).
+   */
+  signOutIdentity(params: { plane_url: string; subject?: string }): Promise<{ signed_out: boolean }> {
+    return this.command("identity.sign_out", { ...params });
+  }
+
   listSessions(filter: Record<string, unknown> = {}): Promise<{ sessions: DaemonSessionRow[] }> {
     return this.call("session.list", { filter });
   }

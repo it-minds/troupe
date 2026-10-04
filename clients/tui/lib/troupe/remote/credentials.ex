@@ -12,6 +12,10 @@ defmodule Troupe.Remote.Credentials do
   One entry per plane, keyed by its URL, so a laptop can be logged in to a
   work plane and a personal one at once. `current` is the plane `troupe
   --remote` opens without an argument.
+
+  Beside the token, `sub`: who the plane said the person is at the last exchange. A
+  label, not a credential, and what `troupe logout` tells the daemon, so that it lets go
+  of the person's plane token and not of somebody else's (issue #381).
   """
 
   alias Troupe.Paths

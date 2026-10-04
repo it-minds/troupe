@@ -1,0 +1,169 @@
+{
+  "name": "troupe",
+  "displayName": "Troupe",
+  "description": "Opens Troupe's terminal client in VS Code's terminal, at the workspace folder.",
+  "version": "0.8.0",
+  "publisher": "objective-mj",
+  "license": "Apache-2.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/it-minds/troupe.git",
+    "directory": "clients/vscode"
+  },
+  "homepage": "https://it-minds.github.io/troupe/user/vscode/",
+  "bugs": {
+    "url": "https://github.com/it-minds/troupe/issues"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "agent",
+    "terminal",
+    "tui"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "main": "./out/src/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "troupe.open",
+        "title": "Open",
+        "category": "Troupe",
+        "icon": {
+          "light": "media/troupe-light.svg",
+          "dark": "media/troupe.svg"
+        }
+      },
+      {
+        "command": "troupe.refreshSettings",
+        "title": "Refresh Settings",
+        "category": "Troupe",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "troupe.open",
+          "group": "navigation",
+          "when": "workspaceFolderCount != 0 && resourceScheme != vscode-terminal"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "troupe.refreshSettings",
+          "group": "navigation",
+          "when": "view == troupe.settings"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "troupe",
+          "title": "Troupe",
+          "icon": "media/troupe.svg"
+        }
+      ]
+    },
+    "views": {
+      "troupe": [
+        {
+          "id": "troupe.folders",
+          "name": "Folders",
+          "icon": "media/troupe.svg"
+        },
+        {
+          "id": "troupe.settings",
+          "name": "Settings",
+          "icon": "media/troupe.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "troupe.folders",
+        "contents": "Troupe opens in a folder.\n[Open Folder](command:workbench.action.files.openFolder)"
+      },
+      {
+        "view": "troupe.settings",
+        "contents": "Troupe's settings are a folder's: open one to see them."
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "troupe.open",
+        "key": "ctrl+shift+alt+t",
+        "win": "shift+alt+t",
+        "mac": "cmd+shift+alt+t"
+      }
+    ],
+    "configuration": {
+      "title": "Troupe",
+      "properties": {
+        "troupe.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "The `troupe` program to run. Empty: the first on the `PATH`, then where the installer puts it. On Windows only a `.exe`, `.cmd` or `.bat` is run. A user or remote setting only: a workspace cannot choose the program."
+        },
+        "troupe.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine",
+          "markdownDescription": "More arguments for `troupe`, such as `--no-mouse` (so the terminal's own selection works) or `--watch`. A user or remote setting only: a workspace cannot add `--auto-approve`."
+        },
+        "troupe.openIn": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "beside",
+            "panel"
+          ],
+          "enumDescriptions": [
+            "A tab in the editor group in front, to split and tile as a file's is.",
+            "A tab in the editor group beside the one in front, opening one when there is none.",
+            "The terminal panel."
+          ],
+          "default": "editor",
+          "scope": "machine",
+          "markdownDescription": "Where Troupe's terminal opens. One that is open already stays where it is."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc -p . --noEmit",
+    "test": "tsc -p . && node --test \"out/test/unit/**/*.test.js\"",
+    "test:vscode": "tsc -p . && node out/test/vscode/run.js",
+    "package": "tsc -p . && node -e \"for (const f of ['LICENSE', 'NOTICE']) require('fs').copyFileSync('../../' + f, f)\" && vsce package --no-dependencies --out troupe.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "~1.93.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "typescript": "^7.0.2"
+  }
+}

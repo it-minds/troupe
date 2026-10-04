@@ -11,6 +11,8 @@ defmodule Troupe.Gateway.MixProject do
       lockfile: "../../mix.lock",
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
+      # `:troupe_version` writes the `.app` again when `VERSION` changes (Decision 768).
+      compilers: Mix.compilers() ++ [:troupe_version],
       start_permanent: Mix.env() == :prod,
       description: "The daemon: transports, connections, subscriptions, scopes",
       package: [licenses: ["Apache-2.0"]],

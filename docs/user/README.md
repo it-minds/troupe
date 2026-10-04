@@ -86,6 +86,7 @@ flowchart LR
 | Way in | What it is | Its documentation |
 |---|---|---|
 | `troupe` | the terminal UI, on the daemon on your machine; `troupe --remote` for your team's plane | [clients/tui](../../clients/tui/README.md) |
+| VS Code | **Troupe: Open** opens `troupe` in a terminal tab beside your files, at the folder you are working in; the Troupe side bar shows that folder's settings | [vscode.md](vscode.md) |
 | The desktop app, or the GUI at your plane's `/app` | the graphical client: sessions on your machine and on the plane in one list, approvals from an inbox. **Use this computer only** on the sign-in screen skips signing in and never contacts a plane | [clients/gui](../../clients/gui/README.md); installing the unsigned desktop builds: [install.md](../../clients/gui/docs/install.md) |
 | Your own program | anything that speaks [PROTOCOL.md](../../PROTOCOL.md) to a daemon or a pod | the protocol |
 | Another agent | a profile called through the A2A facade | [a2a.md](../a2a.md) |
@@ -117,7 +118,9 @@ and the copy on your machine goes the next time your client signs your daemon in
 by the plane and opened from another device: `troupe --private`, or *Keep it private* in
 the desktop app once *This computer* uses your account. Your client hands the daemon its
 sign-in to the plane, again as it renews it and after the daemon restarts, and the daemon
-keeps it in memory only; one started while it had none is sealed once it has.
+keeps it in memory only; one started while it had none is sealed once it has. Signing out
+(`troupe logout`, or *Sign out* in the desktop app) takes it back, and nothing is sealed
+until you sign in again, when each private session carries on where it stopped.
 One with nothing running goes dormant on its own a while after you stop looking at it,
 even while it waits on your answer to an approval or a question, so it does not keep the
 daemon up; answering it later wakes it, and the turn carries on.

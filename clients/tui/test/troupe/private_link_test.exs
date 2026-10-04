@@ -18,6 +18,7 @@ defmodule Troupe.PrivateLinkTest do
 
   alias Troupe.Client.Daemon.Link
   alias Troupe.FakeRemote
+  alias Troupe.Remote.RPC
 
   test "a signed-in TUI attaching to the daemon links it with its token, and a private session it starts is registered" do
     {remote, url} = start_remote!(transport: :http)
@@ -88,6 +89,90 @@ defmodule Troupe.PrivateLinkTest do
 
     assert {:ok, %{"subject" => "bob"}} = Link.call("identity.get", %{})
     refute daemon_token()
+  end
+
+  # Issue #381: signing out takes the token back. The daemon lets go of it where it is
+  # linked to the person signing out at that plane, keeps the label, and registers and seals
+  # nothing until somebody signs in again.
+  describe "troupe logout" do
+    test "takes the token back from the daemon, which registers nothing until the next sign-in" do
+      {remote, url} = start_remote!(transport: :http)
+      login!(remote, url)
+      reattach()
+      eventually(fn -> linked(url) end)
+      assert daemon_token()
+
+      assert logout(url) == 0
+      refute daemon_token()
+      assert Enum.any?(said(), &(&1 =~ "the daemon on this machine no longer holds"))
+      assert linked(url)["subject"] == "alice"
+
+      ws = tmp_workspace()
+
+      {sid, _, _} =
+        start_session!(workspace: ws, params: %{private: true}, script: [{:text, "ok"}])
+
+      refute Map.has_key?(FakeRemote.registered(remote), sid)
+
+      login!(remote, url)
+      reattach()
+      token = eventually(fn -> daemon_token() end)
+      assert token in FakeRemote.plane_tokens(remote)
+    end
+
+    test "--all takes it back too" do
+      {remote, url} = start_remote!(transport: :http)
+      login!(remote, url)
+      reattach()
+      eventually(fn -> linked(url) end)
+      assert daemon_token()
+
+      assert logout(nil, all: true) == 0
+      refute daemon_token()
+    end
+
+    test "leaves a daemon linked to somebody else holding their token" do
+      {remote, url} = start_remote!(transport: :http)
+      # Command ids of their own: the daemon answers a replayed one and does nothing.
+      {:ok, _} = Link.call("identity.unlink", %{command_id: RPC.command_id()})
+
+      {:ok, _} =
+        Link.call("identity.link", %{
+          command_id: RPC.command_id(),
+          subject: "bob",
+          display_name: "Bob",
+          plane_url: url,
+          plane_token: "bobs-token"
+        })
+
+      login!(remote, url)
+      reattach()
+      Process.sleep(500)
+      assert daemon_token() == "bobs-token"
+
+      assert logout(url) == 0
+      refute Enum.any?(said(), &(&1 =~ "daemon"))
+      assert daemon_token() == "bobs-token"
+    end
+
+    test "says nothing about a daemon when none is running, and starts none" do
+      {remote, url} = start_remote!(transport: :http)
+      login!(remote, url)
+      {:ok, _endpoint} = Link.ensure()
+      %{embedded: daemon} = :sys.get_state(Link)
+      :ok = DynamicSupervisor.terminate_child(Troupe.Client.Daemons, daemon)
+      eventually(fn -> not Troupe.Protocol.Daemon.running?() end)
+
+      assert logout(url) == 0
+      assert [line] = said()
+      assert line =~ "signed out of #{url}"
+      refute Troupe.Protocol.Daemon.running?()
+    end
+  end
+
+  defp logout(url, opts \\ []) do
+    me = self()
+    Troupe.CLI.Remote.logout(url, [say: &send(me, {:said, &1})] ++ opts)
   end
 
   # The TUI's connection to the daemon drops and is made again at the next call, as one

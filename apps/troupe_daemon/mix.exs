@@ -15,6 +15,8 @@ defmodule Troupe.Daemon.MixProject do
       deps_path: "../../deps",
       lockfile: "../../mix.lock",
       elixir: "~> 1.20",
+      # `:troupe_version` writes the `.app` again when `VERSION` changes (Decision 768).
+      compilers: Mix.compilers() ++ [:troupe_version],
       start_permanent: Mix.env() == :prod,
       description: "The local daemon: the harness on a laptop, under the TUI and the GUI",
       package: [licenses: ["Apache-2.0"]],

@@ -80,6 +80,7 @@ jobs:
       tui: ${{ steps.plan.outputs.tui }}
       gui: ${{ steps.plan.outputs.gui }}
       gui_e2e: ${{ steps.plan.outputs.gui_e2e }}
+      vscode: ${{ steps.plan.outputs.vscode }}
       native: ${{ steps.plan.outputs.native }}
       images: ${{ steps.plan.outputs.images }}
     steps:
@@ -127,9 +128,12 @@ jobs:
               - dev/kind/**
               - scripts/remote-up
               - scripts/build-images
+            # The command reference is generated from the TUI's tables (Decision 767), so
+            # a hand edit to it is checked as the palette is.
             tui:
               - clients/tui/**
               - clients/gui/docs/design/themes/**
+              - docs/user/cli-reference.md
               - scripts/locks-agree.exs
             gui:
               - clients/gui/**
@@ -137,6 +141,9 @@ jobs:
             gui_e2e:
               - clients/gui/packages/client/**
               - clients/gui/dev/**
+            vscode:
+              - clients/vscode/**
+              - scripts/version.exs
             native:
               - clients/tui/**
               - clients/gui/apps/desktop/**
@@ -195,6 +202,7 @@ jobs:
           gui=$(flag eval 'on shared || on gui')
           # The client against a plane built from this commit.
           gui_e2e=$(flag eval 'on shared || on gui_e2e || on chart || has troupe_plane || has troupe_gateway')
+          vscode=$(flag eval 'on shared || on vscode')
           # Native builds on a pull request that touches them; a full run leaves them to
           # its caller, which attaches them to what it publishes.
           native=$(flag eval '[ "$EVENT" = pull_request ] && on native')
@@ -209,6 +217,7 @@ jobs:
             echo "tui=$tui"
             echo "gui=$gui"
             echo "gui_e2e=$gui_e2e"
+            echo "vscode=$vscode"
             echo "native=$native"
             echo "images=$images"
           } | tee -a "$GITHUB_OUTPUT"
@@ -219,7 +228,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| umbrella apps | \`$json\` |"
-            for k in chart protocol tui gui gui_e2e native images; do echo "| $k | ${!k} |"; done
+            for k in chart protocol tui gui gui_e2e vscode native images; do echo "| $k | ${!k} |"; done
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Compile, format, credo, generated assets and boundaries: once, for the whole
@@ -631,6 +640,60 @@ jobs:
           docker compose -f dev/plane-stack.yml logs --no-color plane | tail -200
           docker compose -f dev/plane-stack.yml logs --no-color plane-migrate | tail -20
 
+  # The VS Code extension (clients/vscode): its unit tests, which put the line it types
+  # through each shell the runner has; its suite inside a real VS Code, downloaded, against
+  # a fake `troupe`, where the shell is bash on Linux and PowerShell on Windows; and the
+  # `.vsix`, kept as the run's artifact; a release builds its own and attaches it (Decision
+  # 765). macOS only in a full run, for the reason `native` gives.
+  vscode:
+    name: the VS Code extension — test, package (${{ matrix.os }})
+    needs: [changes]
+    if: needs.changes.outputs.vscode == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.full && '["ubuntu-latest", "windows-latest", "macos-latest"]' || '["ubuntu-latest", "windows-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: clients/vscode
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: clients/vscode/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .tool-versions
+          cache: pnpm
+          cache-dependency-path: clients/vscode/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+      # A runner has no display: Linux's VS Code gets a virtual one.
+      - name: A virtual display
+        if: runner.os == 'Linux'
+        run: command -v xvfb-run || { sudo apt-get update && sudo apt-get install -y xvfb; }
+
+      - name: The suite inside VS Code
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a ' || '' }}pnpm test:vscode
+
+      - name: The .vsix
+        if: runner.os == 'Linux'
+        run: pnpm package
+
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'Linux'
+        with:
+          name: troupe-vscode
+          path: clients/vscode/troupe.vsix
+          if-no-files-found: error
+
   # The chart, the GUI's packages and the desktop app repeat VERSION because they cannot
   # read it; a copy nobody checks is how four numbers came to have no relation. And a
   # Markdown link goes dead when any file moves, whatever the change was, so it is checked
@@ -731,7 +794,7 @@ jobs:
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, native, cluster]
+    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, vscode, native, cluster]
     runs-on: ubuntu-latest
     steps:
       - name: Every job that ran passed

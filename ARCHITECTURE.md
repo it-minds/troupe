@@ -538,7 +538,9 @@ also when the daemon asks what was erased while it was away (`session.erasures`)
 sealer and its copy of each, and says so (`session.erased`), which is when the plane deletes
 the objects; and when it carries on sealing each private session it has no sealer for, from
 the row's `last_seq` at the epoch it held, or from the first event for one the plane has
-never heard of (Decision 764).
+never heard of (Decision 764). Signing out at the client takes the token back
+(`identity.sign_out`), and the daemon stops every sealer until the next link carries them
+on (Decision 766).
 
 ## 11. Reading old logs
 
