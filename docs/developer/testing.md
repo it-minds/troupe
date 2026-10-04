@@ -73,6 +73,9 @@ temporary directory once per run and passes `state_dir` through config, because
   exists, is allowlisted and is served, and the front page spends the reserved colour once.
 - **The egress test**: `docs/egress-allowlist.md` names every host the components declare.
 - **`mix troupe.boundaries`** is part of `mix check`, not `mix test`.
+- **`mix troupe.bench`**, `troupe bench` from a checkout: the harness's offline suite, each
+  number held to a budget in `apps/troupe_core/priv/bench/budgets.json`; CI's `lint` job
+  and `scripts/ci` fail past one ([bench.md](bench.md)).
 
 ## 5. Beyond the unit suites
 
