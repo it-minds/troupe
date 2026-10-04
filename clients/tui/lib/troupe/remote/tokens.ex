@@ -28,6 +28,8 @@ defmodule Troupe.Remote.Tokens do
   @skew_ms 60_000
 
   @type plane :: %{
+          optional(:subject) => String.t() | nil,
+          optional(:display_name) => String.t() | nil,
           discovery: map(),
           refresh_token: String.t() | nil,
           id_token: String.t() | nil,
@@ -35,6 +37,17 @@ defmodule Troupe.Remote.Tokens do
           expires_at: integer() | nil,
           exchanged?: boolean() | nil,
           identity: map() | nil
+        }
+
+  @typedoc """
+  What the daemon is handed with `identity.link` (issue #365): the plane token, who it is
+  for, and when this store renews it.
+  """
+  @type person :: %{
+          token: String.t(),
+          subject: String.t() | nil,
+          display_name: String.t() | nil,
+          renew_at: integer() | nil
         }
 
   def start_link(opts),
@@ -55,6 +68,15 @@ defmodule Troupe.Remote.Tokens do
   @spec access_token(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def access_token(plane_url, opts \\ []),
     do: GenServer.call(server(opts), {:access_token, plane_url}, 60_000)
+
+  @doc """
+  The plane token, refreshed as `access_token/2` refreshes it, with who the plane says it
+  is for and when it will be renewed (`renew_at`, in ms). `subject` is nil from a plane
+  with no exchange, unless `me` has been asked.
+  """
+  @spec person(String.t(), keyword()) :: {:ok, person()} | {:error, term()}
+  def person(plane_url, opts \\ []),
+    do: GenServer.call(server(opts), {:person, plane_url}, 60_000)
 
   @doc "Forces a refresh now — what a -32001 from the plane asks for."
   @spec refresh(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
@@ -146,6 +168,16 @@ defmodule Troupe.Remote.Tokens do
 
       {:error, reason, state} ->
         {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:person, plane_url}, from, state) do
+    case handle_call({:access_token, plane_url}, from, state) do
+      {:reply, {:ok, token}, state} ->
+        {:reply, {:ok, person_of(state.planes[plane_url], token)}, state}
+
+      reply ->
+        reply
     end
   end
 
@@ -283,7 +315,9 @@ defmodule Troupe.Remote.Tokens do
          %{
            access_token: exchanged.access_token,
            expires_at: exchanged.expires_at,
-           exchanged?: true
+           exchanged?: true,
+           subject: exchanged[:subject],
+           display_name: exchanged[:display_name]
          }}
 
       {:error, :no_exchange} ->
@@ -299,6 +333,18 @@ defmodule Troupe.Remote.Tokens do
       access_token: tokens.access_token,
       expires_at: tokens.expires_at || Auth.expiry(tokens.access_token),
       exchanged?: false
+    }
+  end
+
+  # Who the token is for: the exchange's answer, or `me` where somebody asked it.
+  defp person_of(plane, token) do
+    identity = plane[:identity] || %{}
+
+    %{
+      token: token,
+      subject: plane[:subject] || identity[:sub],
+      display_name: plane[:display_name] || identity[:name],
+      renew_at: plane[:expires_at] && plane[:expires_at] - @skew_ms
     }
   end
 

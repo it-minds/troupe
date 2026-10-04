@@ -275,6 +275,115 @@ defmodule Troupe.Gateway.PrivateTest do
     end
   end
 
+  # Issue #365. The daemon holds its plane token in memory, so one that restarted seals
+  # nothing until a client links it again, and a token that ran out seals nothing until
+  # the client hands it the renewed one. Either way the session carries on from where the
+  # plane says it got to, at the epoch this device held, and nothing is lost meanwhile.
+  describe "carrying on" do
+    setup context do
+      requires_services(context)
+      start_supervised!(Private.Sealers)
+      :ok
+    end
+
+    test "a session sealing before a restart is sealed again once a client links, from where it got to",
+         ctx do
+      session_id = unique("p")
+      {:ok, sealer, context} = start_private(session_id, ctx)
+      send_event(context, sealer, 1)
+      assert {:ok, %{sealed_through: 1}} = Sealer.seal_now(sealer)
+
+      # The daemon goes, and the token with it. Its log goes on to the fourth event: what it
+      # wrote before it stopped, and what a turn wrote after it came back.
+      :ok = Private.stop(session_id)
+      restarted = restart_plane()
+      log = Enum.map(1..4, &event/1)
+
+      assert {:ok, []} = resume(restarted, [session_id], log)
+      refute Private.sealing?(session_id)
+
+      :ok = link(restarted, ctx, "plane-token")
+      assert {:ok, [^session_id]} = resume(restarted, [session_id], log)
+      assert Private.sealing?(session_id)
+      assert {:ok, %{sealed_through: 4}} = Sealer.seal_now(sealer_of(session_id))
+
+      # From the plane's `last_seq`, under its epoch, fenced: the first event is not sealed
+      # twice, and the row is this device's still.
+      row = FakePlane.row(ctx.plane.state, session_id)
+      assert row["last_seq"] == 4
+      assert row["epoch"] == context.epoch
+      assert row["device"] == "test-laptop"
+      assert [made, again] = registrations(ctx.plane.state, session_id)
+      refute Map.has_key?(made, "epoch")
+      assert again["epoch"] == context.epoch
+
+      assert {:ok, [first, second]} = Storage.list_segments(context.store, session_id)
+
+      assert {:ok, [%{"seq" => 1}]} =
+               Storage.read_segment(context.store, session_id, context.data_key, first.key)
+
+      assert {:ok, events} =
+               Storage.read_segment(context.store, session_id, context.data_key, second.key)
+
+      assert Enum.map(events, & &1["seq"]) == [2, 3, 4]
+
+      # And a second link with the same token starts nothing twice.
+      assert {:ok, []} = resume(restarted, [session_id], log)
+    end
+
+    test "a session another device has taken since is left to it", ctx do
+      session_id = unique("p")
+      {:ok, sealer, context} = start_private(session_id, ctx)
+      send_event(context, sealer, 1)
+      assert {:ok, _} = Sealer.seal_now(sealer)
+      :ok = Private.stop(session_id)
+
+      FakePlane.steal(ctx.plane.state, session_id)
+
+      assert {:ok, []} = resume(ctx.name, [session_id], Enum.map(1..2, &event/1))
+      refute Private.sealing?(session_id)
+      assert [_made] = registrations(ctx.plane.state, session_id)
+      assert FakePlane.row(ctx.plane.state, session_id)["device"] == "the other one"
+    end
+
+    test "a session made while nobody had linked is registered, and sealed from its first event",
+         ctx do
+      session_id = unique("p")
+      assert FakePlane.row(ctx.plane.state, session_id) == nil
+
+      assert {:ok, [^session_id]} = resume(ctx.name, [session_id], Enum.map(1..3, &event/1))
+      sealer = sealer_of(session_id)
+      assert {:ok, %{sealed_through: 3, segments: 1}} = Sealer.seal_now(sealer)
+
+      row = FakePlane.row(ctx.plane.state, session_id)
+      assert row["last_seq"] == 3
+      assert row["device"] == "test-laptop"
+
+      # An event the log gave it, delivered again as a subscription that raced the read
+      # would, and one after it: only the new one is sealed.
+      send(sealer, {:troupe_event, session_id, event(2)})
+      send(sealer, {:troupe_event, session_id, event(4)})
+      assert {:ok, %{sealed_through: 4, segments: 2}} = Sealer.seal_now(sealer)
+    end
+
+    test "a renewed token is the one it carries on with, and what waited for it is sealed", ctx do
+      session_id = unique("p")
+      {:ok, sealer, context} = start_private(session_id, ctx)
+      send_event(context, sealer, 1)
+      assert {:ok, %{sealed_through: 1}} = Sealer.seal_now(sealer)
+
+      # The token the daemon holds runs out: nothing is sealed, and nothing is dropped.
+      FakePlane.renew(ctx.plane.state, "plane-token-2")
+      send_event(context, sealer, 2)
+      assert {:ok, %{sealed_through: 1, pending: 1}} = Sealer.seal_now(sealer)
+
+      # The client renews it and links again.
+      :ok = link(ctx.name, ctx, "plane-token-2")
+      assert {:ok, %{sealed_through: 2, pending: 0}} = Sealer.seal_now(sealer)
+      assert FakePlane.row(ctx.plane.state, session_id)["last_seq"] == 2
+    end
+  end
+
   describe "without a plane" do
     test "a session that cannot be registered is refused, and nothing is lost", ctx do
       :ok = Plane.unlink(ctx.name)
@@ -375,6 +484,39 @@ defmodule Troupe.Gateway.PrivateTest do
       assert {:ok, _identity} = Client.call(client, "identity.link", link)
       assert eventually(fn -> length(asked_for_erasures(ctx.plane.state)) > asked end)
       assert [_once] = acknowledgements(ctx.plane.state, id)
+    end
+
+    # Issue #365: a link that carries a token is also when the daemon carries on with the
+    # private sessions it could not seal, here one it made while nobody had linked. The
+    # token is in no file. This fake plane signs no assertion, so the key and the sealing
+    # after the registration are the "carrying on" tests', with the exchange stood in for.
+    test "a link with a token registers a private session made while nobody had linked", ctx do
+      {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: ctx.endpoint, spawn: false)
+      on_exit(fn -> if Process.alive?(client), do: Client.close(client) end)
+
+      assert {:ok, %{"session_id" => id, "syncing" => false}} =
+               Client.call(client, "session.create", %{
+                 "command_id" => Client.command_id(),
+                 "workspace" => ctx.workspace,
+                 "private" => true,
+                 "config" => %{"auto_approve" => true}
+               })
+
+      on_exit(fn -> Troupe.stop_session(id) end)
+      assert FakePlane.row(ctx.plane.state, id) == nil
+
+      link = %{
+        "subject" => "ada@example.test",
+        "plane_url" => ctx.plane.url,
+        "plane_token" => "plane-token"
+      }
+
+      assert {:ok, identity} = Client.call(client, "identity.link", link)
+      refute inspect(identity) =~ "plane-token"
+
+      assert eventually(fn -> FakePlane.row(ctx.plane.state, id) != nil end)
+      assert FakePlane.row(ctx.plane.state, id)["kind"] == "private"
+      refute File.read!(Troupe.Identity.path(ctx.state_dir)) =~ "plane-token"
     end
 
     test "a local session has no sealer, and stopping one is a no-op", ctx do
@@ -480,6 +622,43 @@ defmodule Troupe.Gateway.PrivateTest do
 
     name
   end
+
+  # The daemon after a restart: a plane process nobody has linked.
+  defp restart_plane do
+    name = :"plane-#{System.unique_integer([:positive])}"
+    start_supervised!(Supervisor.child_spec({Plane, name: name}, id: name))
+    name
+  end
+
+  defp link(plane, ctx, token) do
+    Plane.link(
+      %{"subject" => "ada@example.test", "plane_url" => ctx.plane.url, "plane_token" => token},
+      plane
+    )
+  end
+
+  # `Private.resume/1` over these sessions, with `log` as what this disk holds of each.
+  defp resume(plane, session_ids, log) do
+    Private.resume(
+      plane: plane,
+      device: "test-laptop",
+      subscribe: fn _id -> :ok end,
+      key_manager: fn p, id -> fake_key_manager(p, id) end,
+      sessions: Enum.map(session_ids, &%{id: &1, workspace: nil}),
+      backfill: fn _id, after_seq -> Enum.filter(log, &(&1.seq > after_seq)) end
+    )
+  end
+
+  defp sealer_of(session_id), do: Registry.whereis_name({Private.Registry, session_id})
+
+  # A registration, rather than the progress report every seal makes on the same method.
+  defp registrations(state, session_id) do
+    for {"session.register", %{"session_id" => ^session_id} = params} <- FakePlane.calls(state),
+        not Map.has_key?(params, "last_seq"),
+        do: params
+  end
+
+  defp event(seq), do: %Event{seq: seq, type: "message", agent: ["root"], data: %{"n" => seq}}
 
   defp acknowledgements(state, session_id) do
     for {"session.erased", %{"session_id" => ^session_id} = params} <- FakePlane.calls(state),

@@ -157,7 +157,9 @@ The server's `capabilities`:
 `private_sessions` is computed at every `initialize`, never compiled in, and it is what
 un-gates the client's control. It is true only where both things it needs are true: a
 person the server can name — `local:<username>` means nothing to a plane or to another
-device, so an unlinked daemon says false — and somewhere to seal to. A worker always
+device, so an unlinked daemon says false — and somewhere to seal to, which for a daemon is
+the plane its link names: it writes through the URLs that plane signs and needs no object
+store of its own, and one not yet handed a token seals once it is. A worker always
 says false: a private session is sealed under its person's own key, in a subtree no pod
 credential can reach, and no worker profile is involved in one.
 
@@ -524,6 +526,13 @@ this say `branches: true` at `initialize`.
 is written, which provider is used, what a key is — belongs to the machine the daemon
 runs on, and a client cannot move it.
 
+`private: true`, beside `config` and not in it, asks a daemon for a **private session**:
+recorded `kind: "private"` in its `session_created`, registered with the plane the daemon
+is linked at and sealed under the person's own key with the token a client handed it
+(`identity.link`). The answer's `syncing` says whether it is being sealed now. A daemon
+that cannot yet — no token, or no plane answering — makes the session anyway and says
+`false`, and seals it from its first event once a client links it with a token.
+
 #### `session.list`
 ```json
 {"filter": {"state": ["active", "dormant"], "workspace": "/home/me/project",
@@ -736,9 +745,14 @@ in memory only: `identity.json` records the name, never the token, because a tok
 disk is a token a backup copies. A restarted daemon therefore has no token until a client
 links again, which costs nothing: the local log is already durable, so a daemon with no
 token seals later rather than losing anything. A client that refreshes its token links
-again. A link that carries one is also when the daemon asks the plane which of the
-person's private sessions were erased while it was away, and drops its copy of each
-(Decision 756).
+again, and so does one that finds the daemon restarted; the desktop app and `troupe` do
+both for a daemon linked to the person signed in at that plane (Decision 764). A link that
+carries one is also when the daemon asks the plane which of the person's private sessions
+were erased while it was away, and drops its copy of each (Decision 756), and then carries
+on sealing each private session it has no sealer for: from the row's `last_seq`, at the
+epoch the row says, registered with that epoch so a claim made meanwhile refuses it, for
+one this device sealed last; from its first event for one the plane has never heard of;
+not at all for one another device sealed last, until it is claimed here.
 
 #### `identity.unlink` → `{"linked": false}`. The events already written keep the actor
 they were written with.

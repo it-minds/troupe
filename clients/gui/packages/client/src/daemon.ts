@@ -186,8 +186,14 @@ export interface CreateLocalParams {
   prompt?: string;
   /** `auto` branches when the workspace already has a live session. */
   worktree?: "auto" | "never" | "always";
-  /** Only what a client may choose: `auto_approve`, `watch`, `profile`, `private`. */
+  /** Only what a client may choose: `auto_approve`, `watch`, `profile`, `full_send`. */
   config?: Record<string, unknown>;
+  /**
+   * A private session: sealed under the person's own key to the plane the daemon is linked
+   * at, with the plane token the signed-in client hands it (`linkIdentity`). A daemon that
+   * cannot seal yet makes the session anyway, and says `syncing: false`.
+   */
+  private?: boolean;
 }
 
 export interface DaemonHooks {
@@ -492,8 +498,13 @@ export class DaemonClient {
    * Not authentication — the socket's token already admitted the caller. It is a label,
    * so that what happens here is recorded under a name that means something off this
    * machine, which is what a private session synced to a plane needs.
+   *
+   * `plane_token` is the one part that is not a label: the daemon signs nobody in, and
+   * registers and seals a private session with the token it is handed here. It holds it
+   * in memory and in no answer, so a client signed in hands it over again when its token
+   * is renewed and when the daemon has restarted (issue #365).
    */
-  linkIdentity(identity: { subject: string; display_name?: string; plane_url?: string }): Promise<DaemonIdentity> {
+  linkIdentity(identity: { subject: string; display_name?: string; plane_url?: string; plane_token?: string }): Promise<DaemonIdentity> {
     return this.command<DaemonIdentity>("identity.link", { ...identity });
   }
 

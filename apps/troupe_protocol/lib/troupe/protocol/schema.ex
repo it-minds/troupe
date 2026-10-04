@@ -455,7 +455,8 @@ defmodule Troupe.Protocol.Schema do
         "worktree" => optional(:string),
         "config" => optional(:object),
         "parent" => optional(:string),
-        "workflow" => optional(:string)
+        "workflow" => optional(:string),
+        "private" => optional(:boolean)
       },
       "session.archive" => %{
         "command_id" => required(:string),

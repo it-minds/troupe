@@ -74,7 +74,8 @@ export function App(): JSX.Element {
   // where it ends — on the session it started, or on the list — and the next start is
   // the first that opens here.
   const [where, setWhere] = useState<Where>(startScreen);
-  const daemon = useDaemon();
+  // Given the sign-in, so the daemon is handed the plane token it seals with (#365).
+  const daemon = useDaemon(auth);
   const { snapshot, store, refresh } = useFleet(auth, daemon.client);
   // Only the Review screen still needs it: `admin.runs.list` is how a reviewer finds
   // the runs nobody has looked at. Administration itself is the console's, at /admin.

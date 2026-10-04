@@ -45,7 +45,8 @@ defmodule Troupe do
       Index.register(session_id, pid, %{
         workspace: workspace.root_real,
         profile: profile,
-        parent: Keyword.get(session_opts, :parent)
+        parent: Keyword.get(session_opts, :parent),
+        kind: kind_of(previously, session_opts)
       })
 
       # The event that says what this session is, so a listing can be rebuilt from the
@@ -106,6 +107,15 @@ defmodule Troupe do
     case Origin.fired(origin) do
       nil -> :ok
       data -> Log.append(session_id, Session.root_path(), :trigger_fired, data)
+    end
+  end
+
+  # Which kind of session this is, as its first `session_created` says: a resume is not
+  # told, and a private session woken by an input is still a private one.
+  defp kind_of(previously, session_opts) do
+    case Enum.find(previously, &(&1.type == "session_created")) do
+      %{data: %{"kind" => kind}} when is_binary(kind) -> kind
+      _ -> session_opts |> Keyword.get(:kind, :local) |> to_string()
     end
   end
 

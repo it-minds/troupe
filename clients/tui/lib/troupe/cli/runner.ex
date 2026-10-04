@@ -157,7 +157,8 @@ defmodule Troupe.CLI.Runner do
 
         case Client.create_session({:local, args.workspace}, %{
                worktree: "never",
-               config: CLI.session_config(args)
+               config: CLI.session_config(args),
+               private: args.private
              }) do
           {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
           {:error, reason} -> fail("troupe: could not start: " <> reason(reason))
@@ -241,6 +242,7 @@ defmodule Troupe.CLI.Runner do
       prompt: args.task,
       worktree: if(args.worktree, do: "always", else: "never"),
       config: CLI.session_config(args),
+      private: args.private,
       refresh_brief: not args.headless
     }
   end
