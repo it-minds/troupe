@@ -295,11 +295,10 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
     defp header(head, name) do
       head
       |> String.split("\r\n")
-      |> Enum.find_value(fn line ->
-        case String.split(line, ":", parts: 2) do
-          [key, value] -> if String.downcase(key) == name, do: String.trim(value)
-          _ -> nil
-        end
+      |> Enum.map(&String.split(&1, ":", parts: 2))
+      |> Enum.find_value(fn
+        [key, value] -> String.downcase(key) == name && String.trim(value)
+        _line -> nil
       end)
     end
   end
