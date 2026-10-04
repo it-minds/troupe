@@ -432,8 +432,6 @@ Found by the chunk 14 fixers of slots A14 and B14 (PRs #364, #363), 2026-10-03.
 
 ### D61 - Private sessions after #365: what is left (medium)
 
-- `troupe logout` neither unlinks the daemon nor withdraws the plane token it was handed;
-  the daemon keeps using the token until it expires.
 - The daemon's `session.list` rows carry no `kind` or `sync`, so the desktop app lists a
   private session as a local one ("Here only").
 - A private session whose plane row names another device is left alone on resume

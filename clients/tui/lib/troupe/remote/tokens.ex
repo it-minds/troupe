@@ -149,7 +149,8 @@ defmodule Troupe.Remote.Tokens do
           Credentials.put(plane_url, %{
             refresh_token: tokens.refresh_token,
             issuer: discovery.issuer,
-            client_id: discovery.client_id
+            client_id: discovery.client_id,
+            sub: credential[:subject]
           })
 
         {:reply, result, put_plane(state, plane_url, plane)}
@@ -290,7 +291,8 @@ defmodule Troupe.Remote.Tokens do
           Credentials.put(plane_url, %{
             refresh_token: tokens.refresh_token,
             issuer: plane.discovery.issuer,
-            client_id: plane.discovery.client_id
+            client_id: plane.discovery.client_id,
+            sub: plane[:subject]
           })
       end
 

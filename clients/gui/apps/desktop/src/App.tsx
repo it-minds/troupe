@@ -104,6 +104,9 @@ export function App(): JSX.Element {
   const setup = useSetupNeeded(mode === "local" ? daemon.client : null);
 
   const signOut = useCallback(async () => {
+    // The daemon gives back the plane token this app handed it, where it is this person's
+    // at this plane, and seals nothing until somebody signs in again (#381).
+    if (auth?.me) void daemon.client?.signOutIdentity({ plane_url: auth.planeUrl, subject: auth.me.subject }).catch(() => undefined);
     await auth?.signOut();
     setAuth(null);
     // Signing back in is a start like any other, so it lands where a start does.
@@ -111,7 +114,7 @@ export function App(): JSX.Element {
     // Whoever signs in next is a different person until proved otherwise, and whether
     // *they* have picked a theme is a question about them.
     setChosen(false);
-  }, [auth]);
+  }, [auth, daemon.client]);
 
   const setLocalOnly = useCallback((on: boolean) => {
     chooseLocalOnly(on);

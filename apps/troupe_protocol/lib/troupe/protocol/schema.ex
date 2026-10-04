@@ -619,6 +619,12 @@ defmodule Troupe.Protocol.Schema do
         "plane_token" => optional(:string)
       },
       "identity.unlink" => %{"command_id" => required(:string)},
+      # The person signed out at a client: the token goes, the label stays (issue #381).
+      "identity.sign_out" => %{
+        "command_id" => required(:string),
+        "plane_url" => required(:string),
+        "subject" => optional(:string)
+      },
       # The machine's settings — the daemon's only; a worker answers `method_not_found`.
       # The key goes in through `config.models` and `config.set` and never comes back out:
       # `config.get` reports `api_key_set`, and a secret key's value as `****`. `config.set`

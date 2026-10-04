@@ -125,6 +125,8 @@ defmodule Troupe.Gateway.Dispatch do
     "identity.get" => :observe,
     "identity.link" => :admin,
     "identity.unlink" => :admin,
+    # Taking back the plane token a client handed over stops the sealing it was for.
+    "identity.sign_out" => :admin,
     # The machine's own settings (#57). Reading them says nothing secret — the key is
     # reported as set or not, a secret's value as `****` — but trying a provider sends a
     # key to a URL, and saving changes what every later session on the machine does.
@@ -915,6 +917,18 @@ defmodule Troupe.Gateway.Dispatch do
     user = System.get_env("USER") || System.get_env("USERNAME") || "local"
     send(context.connection, {:principal_changed, Identity.principal(user)})
     {:ok, Identity.to_json(nil)}
+  end
+
+  # The person signed out at a client (issue #381). The token goes, if it is for that plane
+  # and that person, and the sealing it was for stops until a client links with one again;
+  # the label stays, so that link is the same one and carries each session on. A token for
+  # somebody else, or for another plane, is not this client's to take back.
+  defp handle("identity.sign_out", params, _context) do
+    with {:ok, plane_url} <- fetch(params, "plane_url") do
+      signed_out = Plane.sign_out(plane_url, params["subject"])
+      if signed_out, do: Private.suspend()
+      {:ok, %{"signed_out" => signed_out}}
+    end
   end
 
   # -- model settings -----------------------------------------------------------

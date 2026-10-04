@@ -109,6 +109,36 @@ describe("a daemon linked to the person signed in here", () => {
   });
 });
 
+// Issue #381: signing out takes the token back, where it is the person's at this plane, and
+// the daemon seals nothing until somebody signs in again. The link is the person's choice
+// on This computer and stays.
+describe("signing out", () => {
+  it("takes the plane token back from a daemon linked to the person, which stays linked", async () => {
+    linkedToAlice();
+    location.hash = `#daemon=${daemon.port}:${daemon.token}`;
+    unmount = render(<App />).unmount;
+    await waitFor(() => daemon.planeToken, "the plane token handed to the daemon");
+
+    (await waitFor(() => button("Sign out"), "the sign-out control")).click();
+    const told = await waitFor(() => daemon.calls.find((c) => c.method === "identity.sign_out"), "the daemon told");
+    expect(told.params).toMatchObject({ plane_url: harness.plane.baseUrl, subject: "alice@example.com" });
+    expect(daemon.planeToken).toBeNull();
+    expect(daemon.linked).toMatchObject({ subject: "alice@example.com", plane_url: harness.plane.baseUrl });
+  });
+
+  it("leaves the token of a daemon linked to somebody else", async () => {
+    daemon.linked = { subject: "bob@example.com", display_name: "Bob", plane_url: harness.plane.baseUrl };
+    daemon.planeToken = "bobs-token";
+    location.hash = `#daemon=${daemon.port}:${daemon.token}`;
+    unmount = render(<App />).unmount;
+    await waitFor(() => says("/home/ada/notes"), "the daemon's sessions in the list");
+
+    (await waitFor(() => button("Sign out"), "the sign-out control")).click();
+    await waitFor(() => daemon.calls.find((c) => c.method === "identity.sign_out"), "the daemon told");
+    expect(daemon.planeToken).toBe("bobs-token");
+  });
+});
+
 describe("linking this computer and starting a private session", () => {
   it("hands the token with the link, and asks the daemon for a private session where it reads it", async () => {
     location.hash = `#daemon=${daemon.port}:${daemon.token}`;
