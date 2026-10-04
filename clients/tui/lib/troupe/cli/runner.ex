@@ -85,7 +85,7 @@ defmodule Troupe.CLI.Runner do
         0
 
       {:ok, %{mode: :help}} ->
-        IO.puts(CLI.usage())
+        IO.puts(CLI.help())
         0
 
       {:ok, %{mode: :config} = args} ->
