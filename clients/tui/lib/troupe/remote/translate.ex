@@ -396,8 +396,10 @@ defmodule Troupe.Remote.Translate do
            emit.(:agent_state, spent(%{to: :idle, reason: "cancelled"}, data))
          ], budget_cancelled(memory, agent)}
 
+      # The summariser's call is the session's to pay for as a reply's is (root Decision
+      # 769), so what it used reaches the window's count.
       "compacted" ->
-        {[emit.(:remote_note, %{text: "context compacted"})], memory}
+        {[emit.(:remote_note, %{text: "context compacted"})] ++ summarised(emit, data), memory}
 
       "budget_exhausted" ->
         {[emit.(:remote_note, %{text: "budget exhausted" <> limit(data)})], memory}
@@ -625,6 +627,9 @@ defmodule Troupe.Remote.Translate do
   end
 
   defp spent(state, _data), do: state
+
+  defp summarised(emit, %{"usage" => %{} = used}), do: [emit.(:call_usage, %{usage: usage(used)})]
+  defp summarised(_emit, _data), do: []
 
   defp as(%{"profile" => profile}) when is_binary(profile), do: " as #{profile}"
   defp as(_data), do: ""

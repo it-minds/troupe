@@ -6,11 +6,23 @@
     "conversation": {
       "type": "array"
     },
+    "gateway": {
+      "type": "object"
+    },
+    "model": {
+      "type": "string"
+    },
+    "prompt_bytes": {
+      "type": "object"
+    },
     "reason": {
       "type": "string"
     },
     "summary": {
       "type": "string"
+    },
+    "usage": {
+      "type": "object"
     }
   },
   "required": [

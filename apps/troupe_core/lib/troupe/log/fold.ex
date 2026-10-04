@@ -190,12 +190,17 @@ defmodule Troupe.Log.Fold do
 
   # Compaction replaces the conversation rather than appending to it, which is the one
   # place the message count can go *down* — and therefore the one place a fold that
-  # ignored it would drift silently.
+  # ignored it would drift silently. The summariser's tokens are the agent's (Decision
+  # 769); a `compacted` written before it carries none, and adds nothing.
   defp agent_fold(agent, %Event{type: "compacted", data: data}) do
+    usage = data["usage"] || %{}
+
     %{
       agent
       | "messages" => length(data["conversation"] || []),
-        "compactions" => agent["compactions"] + 1
+        "compactions" => agent["compactions"] + 1,
+        "input_tokens" => agent["input_tokens"] + (usage["input_tokens"] || 0),
+        "output_tokens" => agent["output_tokens"] + (usage["output_tokens"] || 0)
     }
   end
 

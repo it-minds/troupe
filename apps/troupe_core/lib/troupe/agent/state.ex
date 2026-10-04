@@ -92,8 +92,10 @@ defmodule Troupe.Agent.State do
     # restart forgets them and grants the retry again, which errs towards finishing.
     truncation_retried: false,
     overflow_retried: false,
-    # Why the compaction in flight was started, for the `compacted` event.
+    # Why the compaction in flight was started, and what the summariser's prompt was made
+    # of (Decision 769), for the `compacted` event.
     compact_reason: nil,
+    compact_prompt: nil,
     # The budget question (Decision 660): the `call_id` of the one outstanding, the task
     # waiting on its answer, how many have been asked (the id is that count, so a replay
     # asks again under the same id), and which limit it is about, which is the one
@@ -161,6 +163,7 @@ defmodule Troupe.Agent.State do
           truncation_retried: boolean(),
           overflow_retried: boolean(),
           compact_reason: String.t() | nil,
+          compact_prompt: map() | nil,
           budget_ask_pending: String.t() | nil,
           budget_ask_task: pid() | nil,
           budget_asks: non_neg_integer(),

@@ -8,6 +8,7 @@ defmodule Troupe.Agent.TurnCostTest do
 
   use Troupe.SessionCase, async: true
 
+  alias Troupe.LLM.Message
   alias Troupe.Registry
 
   @turn_keys ~w(calls input_tokens cache_read cache_write output_tokens cost_micros unpriced)
@@ -63,21 +64,72 @@ defmodule Troupe.Agent.TurnCostTest do
 
     [first, second] = Enum.map(events_of_type(sid, :llm_request), & &1.data["prompt_bytes"])
 
-    for part <- ~w(system brief tools conversation tool_results),
+    for part <- ~w(system brief tools conversation tool_results total),
         do: assert(is_integer(first[part]) and first[part] >= 0, "#{part} in #{inspect(first)}")
 
-    assert first["system"] > 0
-    assert first["tools"] > 0
+    # The brief is part of the system prompt, and says so apart.
     assert first["brief"] > byte_size("Run the tests before you say you are done.")
-    # The person's "go" is all the conversation there is yet, and nothing has run.
-    assert first["conversation"] == byte_size("go")
+    assert first["system"] > first["brief"]
+    assert first["tools"] > 0
+
+    # The person's "go" is all the conversation there is yet, as the log writes a message,
+    # and nothing has run.
+    assert first["conversation"] ==
+             "go" |> Message.user() |> Message.to_json() |> Jason.encode!() |> byte_size()
+
     assert first["tool_results"] == 0
+    assert first["total"] == first["system"] + first["tools"] + first["conversation"]
 
     # The second call resends the first, its tool call and its result.
     assert second["conversation"] > first["conversation"]
-    assert second["tool_results"] > 0
+    assert second["tool_results"] in 1..(second["conversation"] - first["conversation"])
     assert second["system"] == first["system"]
     assert second["tools"] == first["tools"]
+  end
+
+  test "the call that writes a compaction's summary is counted, and says what it was made of",
+       context do
+    # A window so small that every prompt is over the threshold, and a conversation long
+    # enough to summarise once the fourth answer ends the turn: the fifth is the summary.
+    sid =
+      run(context,
+        config_overrides: [context_window: 120, compact_at: 0.5],
+        steps: [
+          {:tools, [{"todo_read", %{}}]},
+          {:tools, [{"todo_read", %{}}]},
+          {:tools, [{"todo_read", %{}}]},
+          {:text, "that is everything"},
+          {:text, "a summary of the work so far"}
+        ]
+      )
+
+    ended = await_event(sid, :turn_ended, 10_000)
+    [compacted] = events_of_type(sid, :compacted)
+
+    # The summariser's call, in the words an ordinary one is logged in.
+    assert compacted.data["usage"]["input_tokens"] == 100
+    assert compacted.data["model"] == "fake-model"
+    assert is_integer(compacted.data["gateway"]["cost_micros"])
+    # Its own system prompt, no tools (`[]`), and what it was asked to summarise.
+    assert %{"system" => system, "tools" => 2, "conversation" => said, "total" => total} =
+             compacted.data["prompt_bytes"]
+
+    assert system > 0 and said > 0
+    assert total == system + 2 + said
+
+    # Four answers came back as replies and one as the summary: five calls, all paid for.
+    assert length(events_of_type(sid, :llm_response)) == 4
+    assert ended.data["turn"]["calls"] == 5
+
+    costs =
+      Enum.map(events_of_type(sid, :llm_response), & &1.data["gateway"]["cost_micros"]) ++
+        [compacted.data["gateway"]["cost_micros"]]
+
+    assert ended.data["turn"]["cost_micros"] == Enum.sum(costs)
+
+    # And the budget was charged for it.
+    {_name, state} = :sys.get_state(Registry.agent_pid(sid, ["root"]))
+    assert state.budget.input_tokens == 500
   end
 
   test "a model that has no price is counted, and the turn says how many calls were not priced",

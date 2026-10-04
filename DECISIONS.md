@@ -4625,29 +4625,48 @@ citation keeps meaning what it meant.
        is. A call nobody priced is counted in `unpriced` and left out of the sum rather than
        added as nothing, so a reader can tell free from not known, as PROTOCOL.md asks of a
        reader of `gateway`.
-     - **Per call.** `llm_request.prompt_bytes`: `system` (the system prompt less the brief),
-       `brief` (the instruction files and project brief, 706), `tools` (each definition's
-       name, description and schema as JSON), `conversation` (text, tool calls and
-       reasoning) and `tool_results`; disjoint, they add up to the prompt. The provider's own
-       input, cached and output figures were already on the `llm_response` that answers the
-       call. On the request because it is what was sent, so a call that failed still says
-       what it sent.
-     - **Bytes, not characters or estimated tokens.** Bytes are exact and free to take:
-       `byte_size/1` reads a length, where counting characters walks every prompt on every
-       call in the agent's own process. They are the unit `tool_output_limit` is set in, so
-       the measurement reads straight against the default slice 3 is to move. And they are
-       the same whoever answers, where an estimate of tokens would be a second tokenizer that
-       disagrees with the provider's: the response's `input_tokens + cache_read +
-       cache_write` is the real count, and scales the parts to tokens for whoever wants them.
-     - **Not counted:** the call that writes a compaction's summary, which has never been
-       logged as an `llm_response` and so is not in the budget, the listing or a turn; and
-       an ACP delegate's model, which is its own.
+     - **Per call.** `llm_request.prompt_bytes`: `system` (the whole system prompt, the end a
+       request keeps apart for the prompt cache included, 770), `brief` (the part of it
+       that is the instruction files and the project brief, 706), `tools` (the definitions
+       as a JSON list of name, description and schema), `conversation` (each message as
+       `Message.to_json/1` writes it), `tool_results` (the part of it that is tool results'
+       text) and `total` (`system + tools + conversation`). The provider's own input, cached
+       and output figures were already on the `llm_response` that answers the call. On the
+       request because it is what was sent, so a call that failed still says what it sent.
+     - **Bytes as the log writes them, not characters or estimated tokens.** It is the
+       measure `troupe bench` takes of a request (772), less its writing the workspace's path
+       as `<workspace>`, so a live run can read its `calls[]` from the log and agree with an
+       offline one. Bytes are the unit `tool_output_limit` is set in, so the measurement reads
+       straight against the default slice 3 is to move. And they are the same whoever
+       answers, where an estimate of tokens would be a second tokenizer that disagrees with
+       the provider's: the response's `input_tokens + cache_read + cache_write` is the real
+       count, and scales the parts to tokens for whoever wants them. The price is encoding
+       the conversation once more a call, which the log does for every message anyway.
+     - **The summariser's call is counted.** The call that writes a compaction's summary is
+       billed like any other and was in nothing: not the log, the listing, the budget or the
+       ledger. It is not an `llm_response`, which the agent's replay reads as its reply and
+       a client draws as one, and not an `llm_request` either, which a listing reads as a
+       call still unanswered until an `llm_response` follows. So the `compacted` that takes
+       its answer carries what those two say of a call: `model`, `prompt_bytes`, `usage`
+       and `gateway`, priced as the cheap model it addressed. The budget is charged its
+       billed tokens and not a turn, since `max_turns` counts the agent's own calls; the
+       turn counts it among its `calls`; the listing adds it, live and from the log; the
+       ledger makes a row of it (`Troupe.Session.Usage`), so a team's money budget on the
+       plane has it too; telemetry's `[:troupe, :llm, :stop]` fires for it with
+       `summariser: true`; and the replay charges and counts it again from the event. A
+       `compacted` written before this has none of it, and folds as it always did.
+     - **Not counted:** an ACP delegate's model, which is its own.
      - **The witness.** The agent's replay now acts on `cancelled`, so `Troupe.Log.Fold`
-       witnesses it, a `cancels` count present only once there has been one; no recorded
-       fixture holds a cancel, and no hash moves.
+       witnesses it, a `cancels` count present only once there has been one, and adds a
+       `compacted`'s usage to the agent's tokens; no recorded fixture holds a cancel or a
+       compaction with usage, and no hash moves.
      - **Proof:** core's `turn_cost_test.exs`: a turn of three calls sums the three responses
-       (945 micros); two calls' prompt parts, the brief from an `AGENTS.md`; a model with no
+       (945 micros); two calls' prompt parts, the brief from an `AGENTS.md`; a turn that
+       compacts counts five calls, four replies and the summariser, whose `compacted` says
+       what it was made of and cost and whose tokens the budget was charged; a model with no
        price; the next turn counting from nothing; a delegation's four calls, with the
        subagent's two on its own `agent_done`; a cancel; a finish; and a kill in the middle of
-       a turn that keeps the calls before it. All eight fail on the chunk's tip. The terminal
-       UI's test is 139's, and the installed daemon and `troupe` are on the pull request.
+       a turn that keeps the calls before it. The eight written first fail on the chunk's
+       tip, and the compaction one reads fields the tip does not write. `UsageTest`: a
+       `compacted` with usage is a ledger row, one from before is not. The terminal UI's
+       test is 139's, and the installed daemon and `troupe` are on the pull request.

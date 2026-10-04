@@ -795,7 +795,11 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
        priced, and `, 2 calls unpriced` after the sum when some were not.
      - **Nothing** for a turn that made no call, and nothing from a log written before turns
        were counted.
+     - **The summariser's call is the session's too.** A `compacted` that says what the
+       call that wrote its summary used (769) is translated into a `:call_usage` beside its
+       note, and the window and its agent add it to their counts as they add a reply's, so a
+       turn's line that counts that call is never more than the session's count above it.
      - **Proof:** `test/troupe/turn_cost_test.exs` (a turn's line; a second turn's line with
        the session's count beside it; nothing while a turn runs; a cancel and a finish; an
-       unpriced turn and a partly priced one; an old log), four of the six failing on the
-       chunk's tip.
+       unpriced turn and a partly priced one; a compaction's call in the session's count; an
+       old log), four of the six first written failing on the chunk's tip.

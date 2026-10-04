@@ -372,6 +372,7 @@ defmodule Troupe.Agent.Server do
   # a grant survives a restart, and a question without its answer is still owed.
   defp fold_limits(state, "compacted", data) do
     %{state | conversation: Enum.map(data["conversation"], &Message.from_json/1)}
+    |> fold_summary_call(data)
   end
 
   defp fold_limits(state, "budget_ask_started", data) do
@@ -409,6 +410,21 @@ defmodule Troupe.Agent.Server do
   defp fold_limits(state, "tool_failures_ask_answered", _data) do
     %{state | budget_ask_pending: nil, failure_ask: nil}
   end
+
+  # The summariser's call, charged and counted as it was live (Decision 769). A `compacted`
+  # written before that has no usage, and folds as it always did.
+  defp fold_summary_call(state, %{"usage" => %{} = usage} = data) do
+    usage = Usage.from_json(usage)
+    cost = get_in(data, ["gateway", "cost_micros"])
+
+    %{
+      state
+      | budget: Budget.charge_usage(state.budget, usage),
+        turn: Spend.call(state.turn, usage, cost)
+    }
+  end
+
+  defp fold_summary_call(state, _data), do: state
 
   defp fold_done(state, "agent_done", data),
     do: %{reclaim_run_grant(state) | done_reason: safe_reason(data["reason"]), turn: %Spend{}}
@@ -1209,6 +1225,11 @@ defmodule Troupe.Agent.Server do
   defp request_extra(%State{fake: nil} = state), do: %{agent_path: state.agent_path}
   defp request_extra(%State{fake: fake} = state), do: %{fake: fake, agent_path: state.agent_path}
 
+  # What a call's prompt was made of (Decision 769), with the brief `system_prompt/2` put in
+  # it told apart from the rest.
+  defp prompt_bytes(state, %Request{} = request),
+    do: Spend.prompt_bytes(request, Instructions.to_prompt(state.instructions))
+
   # The repository's instruction files and the project brief come right after the
   # profile's own words and before the environment: what the people who work here wrote
   # for agents, and what earlier agents learned, are the first things a new one should
@@ -1229,12 +1250,6 @@ defmodule Troupe.Agent.Server do
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
-  end
-
-  # The brief as `system_prompt/2` put it in, so the system prompt can be told apart from it.
-  defp prompt_bytes(state, %Request{} = request) do
-    brief = Instructions.to_prompt(state.instructions)
-    Spend.prompt_bytes(request.system, brief, request.tools, request.messages)
   end
 
   # Read from disk at every turn, so an edit takes effect on the next one; the digest is
@@ -1304,38 +1319,47 @@ defmodule Troupe.Agent.Server do
       "gateway" => gateway
     })
 
+    state = count_call(state, response.usage, gateway)
+
+    # The call is one of the budget's turns; the prompt's whole length, cached or not, is
+    # what compaction and the context gauge read (Decision 657).
+    %{
+      state
+      | conversation: state.conversation ++ [message],
+        budget: Budget.charge_turn(state.budget),
+        last_input_tokens: Usage.total_input(response.usage),
+        overflow_retried: false
+    }
+    |> warn_headroom()
+  end
+
+  # A model call, wherever spend is added up: the listing, telemetry, the budget, which is
+  # charged what was billed (Decision 657), and the turn's spend (Decision 769). The
+  # summariser's call is counted here too, since it is billed like any other.
+  defp count_call(state, %Usage{} = usage, gateway, meta \\ %{}) do
+    cost = gateway && gateway["cost_micros"]
+
     # The same numbers the log just took, added to what a listing reports. The index has
     # carried `tokens` and `cost` from the start and only `pin_session/2` ever wrote to
     # it, so every session showed 0 tokens and $0.00 for as long as it ran.
-    Index.observe(
-      state.session_id,
-      response.usage.input_tokens + response.usage.output_tokens,
-      gateway && gateway["cost_micros"]
-    )
+    Index.observe(state.session_id, usage.input_tokens + usage.output_tokens, cost)
 
     :telemetry.execute(
       [:troupe, :llm, :stop],
       %{
-        input_tokens: response.usage.input_tokens,
-        output_tokens: response.usage.output_tokens,
-        cache_read: response.usage.cache_read,
-        cache_write: response.usage.cache_write
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        cache_read: usage.cache_read,
+        cache_write: usage.cache_write
       },
-      %{session_id: state.session_id, agent_path: state.agent_path}
+      Map.merge(%{session_id: state.session_id, agent_path: state.agent_path}, meta)
     )
 
-    # The budget is charged what was billed; the prompt's whole length, cached or not,
-    # is what compaction and the context gauge read (Decision 657). The turn counts the
-    # call and what it cost (Decision 769).
     %{
       state
-      | conversation: state.conversation ++ [message],
-        budget: state.budget |> Budget.charge_turn() |> Budget.charge_usage(response.usage),
-        last_input_tokens: Usage.total_input(response.usage),
-        turn: Spend.call(state.turn, response.usage, gateway && gateway["cost_micros"]),
-        overflow_retried: false
+      | budget: Budget.charge_usage(state.budget, usage),
+        turn: Spend.call(state.turn, usage, cost)
     }
-    |> warn_headroom()
   end
 
   # One `budget_warning` per dimension that has crossed `budget_warn_at`, so a person
@@ -1370,8 +1394,8 @@ defmodule Troupe.Agent.Server do
   # object rather than two flat keys so that a reader can tell "the gateway said nothing"
   # from "the gateway said this call was free", which are different facts and reconcile
   # differently. Keys the gateway did not answer are left out rather than sent as null.
-  defp gateway_json(%Gateway{} = gateway, state, response) do
-    ours = is_nil(gateway.cost_micros) and priced_here(state, response)
+  defp gateway_json(%Gateway{} = gateway, state, response, addressed \\ nil) do
+    ours = is_nil(gateway.cost_micros) and priced_here(state, response, addressed)
 
     %{
       "request_id" => gateway.request_id,
@@ -1399,8 +1423,8 @@ defmodule Troupe.Agent.Server do
   # number, when there is one, still wins, then the catalog's price, then a configured
   # one (Decision 689). A model with none of the three is still nothing rather than a
   # guess, and is said out loud once a session.
-  defp priced_here(%State{} = state, %Response{} = response) do
-    names = priced_as(state, response)
+  defp priced_here(%State{} = state, %Response{} = response, addressed) do
+    names = priced_as(state, response, addressed)
 
     case Config.price(state.config, names) do
       {%Catalog{} = entry, _source} -> round(Catalog.cost(entry, Map.from_struct(response.usage)) * 1_000_000)
@@ -1410,10 +1434,12 @@ defmodule Troupe.Agent.Server do
 
   # Every name the model goes by, the one the agent addressed it with first: that is how
   # the catalog is keyed and how a person writes it in `models.prices`, while the wire id
-  # and the one the provider answered as may be a gateway's renaming of it.
-  defp priced_as(%State{} = state, %Response{} = response) do
-    addressed = Config.resolve_model(state.config, effective_definition(state).model || state.config.model)
-    Enum.uniq(Enum.filter([addressed, state.llm_model, response.model], &is_binary/1))
+  # and the one the provider answered as may be a gateway's renaming of it. The summariser
+  # addresses the cheap model rather than the agent's.
+  defp priced_as(%State{} = state, %Response{} = response, addressed) do
+    model = addressed || effective_definition(state).model || state.config.model
+    names = [Config.resolve_model(state.config, model), state.llm_model, response.model]
+    Enum.uniq(Enum.filter(names, &is_binary/1))
   end
 
   # A call nobody priced counts as free wherever spend is added up — a team's budget on
@@ -2619,8 +2645,10 @@ defmodule Troupe.Agent.Server do
         state
         | llm_ref: ref,
           llm_timer: timer,
+          llm_model: request.model,
           compact_resume: resume,
           compact_reason: state.compact_reason || "threshold",
+          compact_prompt: Spend.prompt_bytes(request, ""),
           conversation: keep,
           llm_text: ""
       }
@@ -2672,8 +2700,13 @@ defmodule Troupe.Agent.Server do
     "Summarise everything above as described. Output only the summary."
   end
 
+  # The summariser's call is a model call like any other to whoever pays for it, so the
+  # `compacted` that takes its answer says what `llm_request` and `llm_response` say of one
+  # (Decision 769): its model, what its prompt was made of, its usage and what the gateway
+  # said. Not an `llm_response` of its own, which a replay reads as the agent's reply.
   defp apply_compaction(state, %Response{} = response) do
     summary = Message.text(Response.to_message(response))
+    gateway = gateway_json(response.gateway, state, response, "cheap")
 
     conversation = [
       Message.user("Summary of earlier work in this session:\n\n" <> summary)
@@ -2683,14 +2716,19 @@ defmodule Troupe.Agent.Server do
     log(state, :compacted, %{
       "summary" => summary,
       "reason" => state.compact_reason || "threshold",
-      "conversation" => Enum.map(conversation, &Message.to_json/1)
+      "conversation" => Enum.map(conversation, &Message.to_json/1),
+      "model" => response.model || state.llm_model,
+      "prompt_bytes" => state.compact_prompt,
+      "usage" => Usage.to_json(response.usage),
+      "gateway" => gateway
     })
 
+    state = count_call(state, response.usage, gateway, %{summariser: true})
     %{state | conversation: conversation, last_input_tokens: 0}
   end
 
   defp resume_after_compaction(state) do
-    state = %{state | compact_reason: nil}
+    state = %{state | compact_reason: nil, compact_prompt: nil}
 
     case state.compact_resume do
       :thinking -> start_turn(%{state | compact_resume: :idle})

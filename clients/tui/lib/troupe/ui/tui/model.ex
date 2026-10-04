@@ -397,6 +397,15 @@ defmodule Troupe.UI.TUI.Model do
           push(acc, path, {:tool, new_tool(tu.id, tu.name, summarize_input(tu.name, tu.input))})
         end)
 
+      # A model call that drew no reply, the summariser's (root Decision 769): counted as a
+      # reply's usage is.
+      :call_usage ->
+        used = used(d.usage)
+
+        %{w | usage: add(w.usage, used)}
+        |> ensure_agent(path)
+        |> update_agent(path, fn a -> %{a | usage: add(a.usage, used)} end)
+
       # The call is over, and so is an approval or a question it was still waiting for: a
       # cancel closes each call it stops with one of these, and so does a tool that timed
       # out waiting. Neither is ever answered.

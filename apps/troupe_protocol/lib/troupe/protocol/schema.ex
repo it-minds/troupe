@@ -90,8 +90,9 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "author" => required(:string)
       },
-      # `prompt_bytes`: what the prompt was made of, in bytes — `system`, `brief`, `tools`,
-      # `conversation`, `tool_results` (Decision 769). Absent from a log written before it.
+      # `prompt_bytes`: what the prompt was made of, in bytes — `system` (`brief` a part of
+      # it), `tools`, `conversation` (`tool_results` a part of it) and `total` (Decision
+      # 769). Absent from a log written before it.
       "llm_request" => %{
         "model" => required(:string),
         "message_count" => required(:integer),
@@ -206,7 +207,13 @@ defmodule Troupe.Protocol.Schema do
         # `threshold`, or `context_overflow` when the provider refused the prompt and
         # compacting is how the turn was sent again (Decision 659).
         "reason" => optional(:string),
-        "conversation" => optional(:array)
+        "conversation" => optional(:array),
+        # The summariser's own call, in the words `llm_request` and `llm_response` use for
+        # one (Decision 769). Absent from a log written before it.
+        "model" => optional(:string),
+        "prompt_bytes" => optional(:object),
+        "usage" => optional(:object),
+        "gateway" => optional(:object)
       },
       "budget_exhausted" => %{"limit" => required(:string)},
       # The budget is spent and the agent asks before the next model call (Decision 660).

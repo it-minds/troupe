@@ -4,19 +4,19 @@ defmodule Troupe.Agent.Spend do
 
   One thing a person types is many model calls, each resending the whole conversation, so
   the turn is what a person pays for and the call is what says why. An agent adds up each
-  call it makes, and what each subagent it delegated to reports when it is done, and
-  writes the sum on the event that ends the turn: `turn_ended`, `cancelled` or
-  `agent_done`. The tokens are `Troupe.LLM.Usage`'s four disjoint figures. The money is
-  what each call's `llm_response.gateway.cost_micros` said, the gateway's or this
-  machine's arithmetic; `unpriced` counts the calls nobody priced, which the sum leaves
-  out rather than counting as free.
+  call it makes, the one that writes a compaction's summary among them, and what each
+  subagent it delegated to reports when it is done, and writes the sum on the event that
+  ends the turn: `turn_ended`, `cancelled` or `agent_done`. The tokens are
+  `Troupe.LLM.Usage`'s four disjoint figures. The money is what each call's
+  `gateway.cost_micros` said, the gateway's or this machine's arithmetic; `unpriced`
+  counts the calls nobody priced, which the sum leaves out rather than counting as free.
 
-  A prompt is measured in bytes: exact, free to take on every call, the unit
-  `tool_output_limit` is set in, and the same whoever answers. The provider's own token
-  figures are on the response, and scale the parts to tokens.
+  A prompt is measured in bytes, as the event log writes it, which is how `troupe bench`
+  measures a request (Decision 772): exact, the unit `tool_output_limit` is set in, and the
+  same whoever answers. The provider's own token figures are on the response.
   """
 
-  alias Troupe.LLM.{Message, Reasoning, Text, ToolResult, ToolUse, Usage}
+  alias Troupe.LLM.{Message, Request, ToolResult, Usage}
 
   defstruct calls: 0, usage: %Usage{}, cost_micros: 0, unpriced: 0
 
@@ -64,49 +64,43 @@ defmodule Troupe.Agent.Spend do
   end
 
   @doc """
-  What a call's prompt was made of, in bytes, as `llm_request.prompt_bytes` carries it:
-  the system prompt less the brief, the brief (the instruction files and the project
-  brief, which the system prompt carries whole), the tool definitions, the conversation,
-  and the tool results in it. Disjoint, so they add up to the whole prompt.
+  What a request's prompt was made of, in bytes, as `prompt_bytes` carries it: `system`,
+  the whole system prompt, of which `brief` is the instruction files and the project
+  brief; `tools`, the tool definitions as JSON; `conversation`, each message as
+  `Message.to_json/1` writes it, of which `tool_results` is the tool results' text; and
+  `total`, the three that are not part of another.
   """
-  @spec prompt_bytes(String.t() | nil, String.t(), [map()], [Message.t()]) :: map()
-  def prompt_bytes(system, brief, tools, messages) do
-    {conversation, results} =
-      Enum.reduce(messages, {0, 0}, fn %Message{content: blocks}, acc ->
-        Enum.reduce(blocks, acc, &block_bytes/2)
-      end)
+  @spec prompt_bytes(Request.t(), String.t()) :: map()
+  def prompt_bytes(%Request{} = request, brief) do
+    system = byte_size(system_text(request))
+
+    tools = json_bytes(Enum.map(request.tools, &Map.take(&1, [:name, :description, :schema])))
+
+    conversation = request.messages |> Enum.map(&json_bytes(Message.to_json(&1))) |> Enum.sum()
+
+    tool_results =
+      for %Message{content: content} <- request.messages,
+          %ToolResult{content: text} <- content,
+          reduce: 0,
+          do: (acc -> acc + byte_size(to_string(text)))
 
     %{
-      "system" => max(byte_size(system || "") - byte_size(brief), 0),
+      "system" => system,
       "brief" => byte_size(brief),
-      "tools" => tools |> Enum.map(&tool_bytes/1) |> Enum.sum(),
+      "tools" => tools,
       "conversation" => conversation,
-      "tool_results" => results
+      "tool_results" => tool_results,
+      "total" => system + tools + conversation
     }
   end
 
-  defp block_bytes(%Text{text: text}, {said, results}), do: {said + text_bytes(text), results}
-
-  defp block_bytes(%Reasoning{text: text}, {said, results}),
-    do: {said + text_bytes(text), results}
-
-  defp block_bytes(%ToolUse{name: name, input: input}, {said, results}),
-    do: {said + text_bytes(name) + json_bytes(input), results}
-
-  defp block_bytes(%ToolResult{content: content}, {said, results}),
-    do: {said, results + text_bytes(content)}
-
-  defp block_bytes(_block, acc), do: acc
-
-  defp tool_bytes(tool) do
-    text_bytes(tool[:name]) + text_bytes(tool[:description]) + json_bytes(tool[:schema])
+  # The system prompt as it is sent, with the end a request keeps apart for the prompt
+  # cache where it has one (Decision 770).
+  defp system_text(request) do
+    [request.system, Map.get(request, :system_tail)]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join("\n\n")
   end
-
-  defp text_bytes(text) when is_binary(text), do: byte_size(text)
-  defp text_bytes(nil), do: 0
-  defp text_bytes(other), do: json_bytes(other)
-
-  defp json_bytes(nil), do: 0
 
   defp json_bytes(term) do
     case Jason.encode_to_iodata(term) do

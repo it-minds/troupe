@@ -268,7 +268,7 @@ Durable:
 | `loop_iteration_finished` | `loop_id`, `iteration`, `outcome` (`continue`: the turn ended and the goal is not met; `complete`: the agent called `goal_complete`; `failed`: the turn ended in an error; `stopped`: the loop stopped around it), `detail` |
 | `loop_stopped` | `loop_id`, `reason` (`goal_complete`, `max_iterations`, `failures`, `budget`, `requested`, `cancelled`, `goal_cleared`, `interrupted`, `agent_done`), `iterations`, `detail`, `summary` (the evidence `goal_complete` gave), `command_id` (the `session.loop.stop` that asked) |
 | `delegation_started` | `call_id`, `agent`, `child_path` (the parent's path and `<agent>#<n>`; `n` goes on counting across restarts, so a path names one child), `task`. The child writes its `agent_done` before the parent's `tool_call_completed` for the call, and is stopped once the parent has its result: from then on it is only its log. A delegation a restart closes as interrupted or takes up again leaves a child nothing starts again, so the restart closes that child's part of the log, and the part of each agent under it: a `tool_call_completed` for each call still open, then `agent_done` with `reason: interrupted` |
-| `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting) |
+| `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting), and the summariser's own model call as `llm_request` and `llm_response` say one: `model`, `prompt_bytes`, `usage`, `gateway` (absent from a log written before 0.8.2) |
 | `budget_exhausted` | `limit` |
 | `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, answered with `question.answer`. Its `question` says what the limit protects against, what the session has used and spent, and what the raise on offer would cost; its `options` are sizes and scopes — `+25 turns this run`, `+50 turns this session`, `no limit this session`, `+50 turns this workspace`, `stop` — and a typed amount (`50`, `+50 turns`, `+50k tokens`, `+15 min`, with `run`, `session` or `workspace` after it) is an answer too (Decision 699) |
 | `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: the limit the question was about, named in `lifted` — `max_turns`, `max_input_tokens`, `max_output_tokens` or `wall_clock` — is lifted for this agent and its subagents, and the others still ask; `raise`: `limit` goes up by `amount` — turns, tokens or milliseconds — for `scope` `run` (given back at the turn's end), `session` or `workspace`, the last also written to the project's file named in `path`, or `note` says why it was not; `unclear`: the answer could not be read, `note` says why, and the question is asked again under the next id; `deny`: `budget_exhausted` follows). An `always` without `lifted`, from a log written before Decision 687, lifted the limit its `budget_ask_started` named |
@@ -363,27 +363,32 @@ turn cost: one input, until the agent rests (Decision 769).
  "output_tokens": 3, "cost_micros": 945, "unpriced": 0}
 ```
 
-`calls` counts the model calls the turn made, its subagents' included. The four token
-figures are those calls' `usage` added up, disjoint as they are there. `cost_micros` adds up
-the `gateway.cost_micros` of the calls that had one, and `unpriced` counts the calls that
-had none, which the sum leaves out rather than counting as free. A subagent's `agent_done`
-says what its task cost, which is part of its parent's turn. A cancel stops a subagent
-before it reports, so a cancelled turn leaves out what its running subagents had spent; and
-a restart in the middle of a turn reads the agent's own calls back from the log and forgets
-what its subagents had reported, as its budget does.
+`calls` counts the model calls the turn made: its subagents' included, and the one that
+writes a compaction's summary, whose figures are on its `compacted`. The four token figures
+are those calls' `usage` added up, disjoint as they are there. `cost_micros` adds up the
+`gateway.cost_micros` of the calls that had one, and `unpriced` counts the calls that had
+none, which the sum leaves out rather than counting as free. A subagent's `agent_done` says
+what its task cost, which is part of its parent's turn. A cancel stops a subagent before it
+reports, so a cancelled turn leaves out what its running subagents had spent; and a restart
+in the middle of a turn reads the agent's own calls back from the log and forgets what its
+subagents had reported, as its budget does.
 
-`llm_request.prompt_bytes` is what that call's prompt was made of, in UTF-8 bytes:
+`prompt_bytes`, on `llm_request` and on `compacted` for the summariser's call, is what that
+call's prompt was made of, in UTF-8 bytes, as the log writes it:
 
 ```json
-{"system": 4120, "brief": 2210, "tools": 18400, "conversation": 9300, "tool_results": 61200}
+{"system": 6330, "brief": 2210, "tools": 18400, "conversation": 72700,
+ "tool_results": 61200, "total": 97430}
 ```
 
-`system` is the system prompt less `brief`, the instruction files and project brief it
-carries; `tools` is the tool definitions, each its name, description and schema as JSON;
-`conversation` is every message's text, tool calls and reasoning, and `tool_results` the
-tool results among them. The five add up to the prompt. Bytes rather than tokens: the
-provider's own count is on the `llm_response` that answers the call, and the parts scale to
-it. Neither field is in events written before 0.8.2.
+`system` is the whole system prompt, of which `brief` is the instruction files and the
+project brief; `tools` is the tool definitions as a JSON list of name, description and
+schema; `conversation` is every message as `llm_response.message` writes one, of which
+`tool_results` is the tool results' text; `total` is `system + tools + conversation`. It is
+the measure `troupe bench` takes of a request, which also writes the workspace's path as
+`<workspace>` (Decision 772). Bytes rather than tokens: the
+provider's own count is on the response, and the parts scale to it. Neither field is in
+events written before 0.8.2.
 
 ### Payloads are semantic
 

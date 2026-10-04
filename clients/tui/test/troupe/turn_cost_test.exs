@@ -86,6 +86,33 @@ defmodule Troupe.TurnCostTest do
     assert String.ends_with?(line, "· under a cent, 1 call unpriced")
   end
 
+  test "the call that wrote a compaction's summary counts in the session's tokens too" do
+    compacted =
+      wire("compacted", %{
+        "summary" => "the gist",
+        "conversation" => [],
+        "usage" => %{
+          "input_tokens" => 900,
+          "cache_read" => 0,
+          "cache_write" => 0,
+          "output_tokens" => 40
+        },
+        "gateway" => %{"cost_micros" => 2_000}
+      })
+
+    window = fold(turn("go", 2) ++ [compacted, ended(%{@turn | "calls" => 3})])
+
+    assert Model.tokens(window) == "↑1.1k ↓42"
+    assert window.agents["root"].usage.input == 1_100
+    assert {:system, "turn: 3 calls ·" <> _} = last_line(window)
+
+    # A compaction from before it said what the call used adds nothing.
+    old =
+      fold(turn("go", 1) ++ [wire("compacted", %{"summary" => "the gist", "conversation" => []})])
+
+    assert Model.tokens(old) == "↑100 ↓1"
+  end
+
   test "a log written before turns were counted ends its turns as it did" do
     window = fold(turn("go", 1) ++ [wire("turn_ended", %{})])
     assert turn_lines(window) == []
