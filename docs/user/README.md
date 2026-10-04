@@ -117,7 +117,9 @@ and the copy on your machine goes the next time your client signs your daemon in
 by the plane and opened from another device: `troupe --private`, or *Keep it private* in
 the desktop app once *This computer* uses your account. Your client hands the daemon its
 sign-in to the plane, again as it renews it and after the daemon restarts, and the daemon
-keeps it in memory only; one started while it had none is sealed once it has.
+keeps it in memory only; one started while it had none is sealed once it has. Signing out
+(`troupe logout`, or *Sign out* in the desktop app) takes it back, and nothing is sealed
+until you sign in again, when each private session carries on where it stopped.
 One with nothing running goes dormant on its own a while after you stop looking at it,
 even while it waits on your answer to an approval or a question, so it does not keep the
 daemon up; answering it later wakes it, and the turn carries on.

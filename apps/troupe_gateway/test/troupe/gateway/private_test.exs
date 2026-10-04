@@ -80,6 +80,28 @@ defmodule Troupe.Gateway.PrivateTest do
       :ok = Plane.unlink(name)
       refute Plane.linked?(name)
     end
+
+    # Issue #381: the person signed out at the client that handed it over.
+    test "signing out forgets the token for that plane and that person, and nothing else",
+         %{name: name, plane: plane} do
+      refute Plane.sign_out("https://elsewhere.example.test", "ada@example.test", name)
+      refute Plane.sign_out(plane.url, "bob@example.test", name)
+      assert Plane.linked?(name)
+
+      assert Plane.sign_out(plane.url <> "/", "ada@example.test", name)
+      refute Plane.linked?(name)
+      assert {:error, :unlinked} = Plane.call("session.register", %{}, name)
+      refute Plane.sign_out(plane.url, "ada@example.test", name)
+
+      # The label stays, so the next link with a token is the same link again.
+      assert Plane.subject(name) == "ada@example.test"
+      :ok = Plane.link(%{"plane_token" => "plane-token"}, name)
+      assert Plane.linked?(name)
+
+      # A client that does not know who signed out names the plane alone.
+      assert Plane.sign_out(plane.url, nil, name)
+      refute Plane.linked?(name)
+    end
   end
 
   describe "sealing" do
@@ -382,6 +404,48 @@ defmodule Troupe.Gateway.PrivateTest do
       assert {:ok, %{sealed_through: 2, pending: 0}} = Sealer.seal_now(sealer)
       assert FakePlane.row(ctx.plane.state, session_id)["last_seq"] == 2
     end
+
+    # Issue #381. Signing out leaves the daemon as a restart does: no token, no sealer, the
+    # log on this disk, and the next sign-in carrying the session on from where it got to.
+    test "a session sealing when the person signs out stops, and carries on at the next sign-in",
+         ctx do
+      session_id = unique("p")
+      {:ok, sealer, context} = start_private(session_id, ctx)
+      send_event(context, sealer, 1)
+      assert {:ok, %{sealed_through: 1}} = Sealer.seal_now(sealer)
+
+      # A turn is under way: its first event is in the log and not sealed yet.
+      send_event(context, sealer, 2)
+      asked = length(FakePlane.calls(ctx.plane.state))
+
+      assert Plane.sign_out(ctx.plane.url, "ada@example.test", ctx.name)
+      assert [^session_id] = Private.suspend()
+      refute Process.alive?(sealer)
+      refute Private.sealing?(session_id)
+
+      # Nothing more reached the plane, the last seal on the way down included, and a
+      # session made now is not registered.
+      assert {:error, :unlinked} = start_private(unique("p"), ctx)
+      assert length(FakePlane.calls(ctx.plane.state)) == asked
+      assert FakePlane.row(ctx.plane.state, session_id)["last_seq"] == 1
+
+      # The person signs in again and the client links with a token: what the log holds
+      # after the first event is sealed, the turn's and one written while signed out.
+      :ok = link(ctx.name, ctx, "plane-token")
+      log = Enum.map(1..3, &event/1)
+      assert {:ok, [^session_id]} = resume(ctx.name, [session_id], log)
+      assert {:ok, %{sealed_through: 3}} = Sealer.seal_now(sealer_of(session_id))
+
+      row = FakePlane.row(ctx.plane.state, session_id)
+      assert row["last_seq"] == 3
+      assert row["epoch"] == context.epoch
+      assert {:ok, [_first, second]} = Storage.list_segments(context.store, session_id)
+
+      assert {:ok, events} =
+               Storage.read_segment(context.store, session_id, context.data_key, second.key)
+
+      assert Enum.map(events, & &1["seq"]) == [2, 3]
+    end
   end
 
   describe "without a plane" do
@@ -519,6 +583,58 @@ defmodule Troupe.Gateway.PrivateTest do
       refute File.read!(Troupe.Identity.path(ctx.state_dir)) =~ "plane-token"
     end
 
+    # Issue #381: `identity.sign_out`, which `troupe logout` and the desktop app's sign-out
+    # send. The token goes and the sealing with it, where they are that person's at that
+    # plane; the label stays.
+    test "signing out takes back the person's token and stops sealing, and keeps the label",
+         ctx do
+      requires_services(ctx)
+      {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: ctx.endpoint, spawn: false)
+      on_exit(fn -> if Process.alive?(client), do: Client.close(client) end)
+
+      link = %{
+        "subject" => "ada@example.test",
+        "plane_url" => ctx.plane.url,
+        "plane_token" => "plane-token"
+      }
+
+      assert {:ok, _identity} = Client.call(client, "identity.link", link)
+
+      # A private session sealing here, its key from the stand-in the other tests use.
+      session_id = unique("p")
+
+      {:ok, sealer, _context} =
+        Private.start(session_id,
+          device: "test-laptop",
+          subscribe: fn _id -> :ok end,
+          key_manager: &fake_key_manager/2
+        )
+
+      on_exit(fn -> stop(sealer) end)
+
+      # Somebody else signing out, or signing out of another plane, takes nothing.
+      for {url, subject} <- [
+            {ctx.plane.url, "bob@example.test"},
+            {"https://elsewhere.example.test", "ada@example.test"}
+          ] do
+        assert {:ok, %{"signed_out" => false}} = sign_out(client, url, subject)
+      end
+
+      assert Plane.linked?()
+      assert Private.sealing?(session_id)
+
+      assert {:ok, %{"signed_out" => true}} = sign_out(client, ctx.plane.url, "ada@example.test")
+      refute Plane.linked?()
+      refute Private.sealing?(session_id)
+      refute Process.alive?(sealer)
+
+      assert {:ok, %{"linked" => true, "subject" => "ada@example.test"}} =
+               Client.call(client, "identity.get", %{})
+
+      assert {:error, %{message: "invalid_params"}} =
+               Client.call(client, "identity.sign_out", %{"command_id" => Client.command_id()})
+    end
+
     test "a local session has no sealer, and stopping one is a no-op", ctx do
       {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: ctx.endpoint, spawn: false)
       on_exit(fn -> if Process.alive?(client), do: Client.close(client) end)
@@ -635,6 +751,14 @@ defmodule Troupe.Gateway.PrivateTest do
       %{"subject" => "ada@example.test", "plane_url" => ctx.plane.url, "plane_token" => token},
       plane
     )
+  end
+
+  defp sign_out(client, plane_url, subject) do
+    Client.call(client, "identity.sign_out", %{
+      "command_id" => Client.command_id(),
+      "plane_url" => plane_url,
+      "subject" => subject
+    })
   end
 
   # `Private.resume/1` over these sessions, with `log` as what this disk holds of each.

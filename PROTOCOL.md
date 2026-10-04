@@ -746,7 +746,8 @@ disk is a token a backup copies. A restarted daemon therefore has no token until
 links again, which costs nothing: the local log is already durable, so a daemon with no
 token seals later rather than losing anything. A client that refreshes its token links
 again, and so does one that finds the daemon restarted; the desktop app and `troupe` do
-both for a daemon linked to the person signed in at that plane (Decision 764). A link that
+both for a daemon linked to the person signed in at that plane (Decision 764), and take it
+back when the person signs out (`identity.sign_out`). A link that
 carries one is also when the daemon asks the plane which of the person's private sessions
 were erased while it was away, and drops its copy of each (Decision 756), and then carries
 on sealing each private session it has no sealer for: from the row's `last_seq`, at the
@@ -756,6 +757,22 @@ not at all for one another device sealed last, until it is claimed here.
 
 #### `identity.unlink` → `{"linked": false}`. The events already written keep the actor
 they were written with.
+
+#### `identity.sign_out`
+```json
+{"command_id": "c-3", "plane_url": "https://troupe.example", "subject": "ada@example.test"}
+```
+→ `{"signed_out": true}`
+
+The person signed out of that plane at a client, which takes back the token it handed
+over. The daemon forgets its plane token if it is for that plane and, where `subject` is
+given, for that person, and stops sealing: each private session's sealer stops, as at a
+restart, and nothing is sealed until a client links with a token again, when each carries
+on as `identity.link` describes. Nothing on this disk is lost, and the label stays, so that
+link is the same link. `signed_out` says whether there was a token to forget: `false` for
+none, or one that is somebody else's or another plane's, which is left. A client that does
+not know who signed out leaves `subject` out and takes back the token for that plane,
+whoever it is for. `troupe logout` and the desktop app's *Sign out* send it (issue #381).
 
 **This is a label, not authentication.** Nothing here verifies a token, and nothing
 should: anything that can reach the daemon can already do everything on it, and what
@@ -1417,7 +1434,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or

@@ -1,0 +1,22 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/identity.sign_out.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "plane_url": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "plane_url"
+  ],
+  "title": "identity.sign_out",
+  "type": "object"
+}
