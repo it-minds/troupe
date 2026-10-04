@@ -22,6 +22,9 @@ defmodule Troupe.Application do
       # uses and refreshes them, and the sign-ins whose browser is out.
       Troupe.MCP.OAuth.Tokens,
       {DynamicSupervisor, name: Troupe.MCP.OAuth.SignIns, strategy: :one_for_one},
+      # Asks the providers what they serve when a local session starts and the cached
+      # list is stale (Decision 778), in the background.
+      Troupe.LLM.Catalog.Refresher,
       Troupe.Sessions.Index,
       Troupe.Sessions
     ]

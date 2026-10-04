@@ -9,7 +9,8 @@
     * `troupe-daemon run` starts, and `troupe-daemon status` sees it inside the timeout:
       the daemon installed in %LOCALAPPDATA%\Programs\troupe-daemon, by the program that
       listens where daemon.json says, not whichever daemon answers there
-    * `troupe-daemon models` answers while it runs
+    * `troupe-daemon models` answers while it runs, under a scratch config, so it asks no
+      provider this machine is configured with
 
   The daemon it starts is stopped again at the end, and only that one. Another that
   answers in its place -- a TUI that found no daemon serves its own harness -- fails the
@@ -132,7 +133,26 @@ try {
   }
 
   if ($up) {
-    $out = (& $Shim models 2>&1 | Out-String)
+    # `models` asks the providers first when its cached list is stale (root Decision 778),
+    # and this machine's own config may name a real gateway. It is run here under a scratch
+    # config with no provider, no key and no opencode, so it answers without reaching one.
+    $isolate = @{
+      TROUPE_CONFIG_HOME     = (Join-Path $Workspace "config")
+      TROUPE_OPENCODE_CONFIG = (Join-Path $Workspace "no-opencode.jsonc")
+      TROUPE_OPENCODE_AUTH   = (Join-Path $Workspace "no-opencode-auth.json")
+      TROUPE_API_KEY         = $null
+      TROUPE_AUTH_TOKEN      = $null
+    }
+    New-Item -ItemType Directory -Force -Path $isolate.TROUPE_CONFIG_HOME | Out-Null
+    $saved = @{}
+    foreach ($name in @($isolate.Keys)) {
+      $saved[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+      [Environment]::SetEnvironmentVariable($name, $isolate[$name], "Process")
+    }
+    try { $out = (& $Shim models 2>&1 | Out-String) }
+    finally {
+      foreach ($name in @($saved.Keys)) { [Environment]::SetEnvironmentVariable($name, $saved[$name], "Process") }
+    }
     if ($LASTEXITCODE -eq 0) { Pass "troupe-daemon models answers" }
     else { Fail "troupe-daemon models exited $LASTEXITCODE`: $($out.Trim())" }
   }

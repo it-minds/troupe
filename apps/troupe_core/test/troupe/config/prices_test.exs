@@ -174,7 +174,8 @@ defmodule Troupe.Config.PricesTest do
 
       report = Config.describe(config)
       assert report =~ ~r/qwen3-235b\s+.*\$0\.20\/\$0\.60 \(models\.prices\)/
-      assert report =~ ~r/catalog-model\s+.*\$1\.00\/\$2\.00 \(catalog\)/
+      # A price from the catalog goes with where the model's facts came from (Decision 778).
+      assert report =~ ~r/catalog-model\s+.*\$1\.00\/\$2\.00, from the cache/
       assert report =~ ~r/unpriced-model\s+.*no price/
     end
 

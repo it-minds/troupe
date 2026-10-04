@@ -102,6 +102,35 @@ defmodule Troupe.LLM.Catalog do
   def qualify(entries, provider) when is_binary(provider),
     do: Enum.map(entries, fn %__MODULE__{} = e -> %__MODULE__{e | id: provider <> "/" <> e.id} end)
 
+  @doc """
+  Does a provider that listed `ids` serve `model`? It does when it lists it, or lists a
+  dated snapshot the name is the alias of (`claude-haiku-4-5-20251001` for
+  `claude-haiku-4-5`), since Anthropic lists the one and answers to both.
+  """
+  @spec serves?([String.t()], String.t()) :: boolean()
+  def serves?(ids, model) when is_list(ids) and is_binary(model) do
+    model in ids or Enum.any?(ids, &snapshot_of?(&1, model))
+  end
+
+  defp snapshot_of?(id, model) do
+    case String.split_at(id, String.length(model)) do
+      {^model, "-" <> date} -> String.length(date) == 8 and String.match?(date, ~r/^\d+$/)
+      _ -> false
+    end
+  end
+
+  @doc """
+  The ids a name is nearest to, nearest first, for a message that says what was meant:
+  `qwen3.5` is nearest `qwen3.6-35b`, then `qwen3-235b`. Ties go in the order of the ids.
+  """
+  @spec nearest(String.t(), [String.t()], pos_integer()) :: [String.t()]
+  def nearest(model, ids, count \\ 5) do
+    ids
+    |> Enum.uniq()
+    |> Enum.sort_by(&{-String.jaro_distance(model, &1), &1})
+    |> Enum.take(count)
+  end
+
   @doc "Has this entry enough to quote a price?"
   @spec priced?(t()) :: boolean()
   def priced?(%__MODULE__{input: input, output: output}), do: is_float(input) and is_float(output)

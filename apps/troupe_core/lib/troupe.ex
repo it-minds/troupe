@@ -15,6 +15,7 @@ defmodule Troupe do
 
   alias Troupe.Agent.Server, as: Agent
   alias Troupe.{Events, Mounts, Registry, Session, Sessions}
+  alias Troupe.LLM.Catalog.Refresher
   alias Troupe.Protocol.Origin
   alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
   alias Troupe.Sessions.{Index, Unseen}
@@ -74,6 +75,12 @@ defmodule Troupe do
           Mounts.to_json(workspace.mounts)
         )
       end
+
+      # The model catalog is refreshed in the background when it is stale (Decision 778):
+      # this session started with the cache as it was and never waits. Not on a pod,
+      # whose model is its profile's business.
+      if Keyword.get(session_opts, :kind, :local) == :local,
+        do: Refresher.check(Keyword.fetch!(session_opts, :config))
 
       {:ok, %{id: session_id, pid: pid, workspace: workspace}}
     end

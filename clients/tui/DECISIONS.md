@@ -847,3 +847,13 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      new options are `plan/1`'s. Proof: `test/troupe/bench_cli_test.exs` (the flags
      parsed, refused without `--live`, the `standard` suite with `--keep` and `--json`, a
      scenario by name and one that is not there).
+
+143. **`troupe models` asks the providers first when the cached list is stale, and says
+     what it fetched, from where and when.** Root Decision 778, which amends 60's
+     "fetching is explicit": `--refresh` still asks at once, and a session still starts
+     from the cache and never waits, the daemon refreshing in the background instead.
+     The runner calls `Troupe.LLM.Catalog.Store.ensure/2` and hands what it asked to
+     `Troupe.Config.describe/2`, both doors `mix troupe.xref` already allowed; the report
+     is the harness's, the one `troupe-daemon models` prints. The failure notes it used
+     to append (`! (session): {:http, 401}`) are the report's own `catalog:` line now.
+     Proof: `test/troupe/models_cli_test.exs`, against a stand-in gateway.

@@ -376,23 +376,35 @@ Troupe detects every model it can address: the ones each provider declares in
 and `models.cheap` already name. `troupe config` prints the list with each
 model's context window, where it came from, and whether a key was found.
 
-`troupe models --refresh` asks the providers themselves what they serve and
-caches the answer in `models.json` next to the config, so windows and prices are
-theirs rather than typed by hand:
+`troupe models` asks the providers themselves what they serve and caches the
+answer in `models.json` next to the config, so windows and prices are theirs
+rather than typed by hand. It says what it fetched, from where and when, and a
+model the config names that its provider does not serve is said loudly
+(root Decision 778):
 
 ```
-  model                                   ctx     $in/$out per Mtok source
-  anthropic/claude-opus-5                 1000k   -                 catalog
-  portal/glm-5.2                          100k    $1.80/$5.50       yaml      provider says 256k
-  portal/qwen3.6-35b                      256k    $0.25/$1.50       catalog     <- cheap
+catalog: 4 models from openai at https://gateway.example.com/model_group/info, fetched just now
+models Troupe can address (use one as models.default; prices are $ per million tokens in/out):
+  gpt-oss-120b                                 131k ctx, $0.10/$0.50, from the provider
+  qwen3-235b                                   131k ctx, $0.22/$0.88, from the provider  <- cheap
+  qwen3.5                                      NOT SERVED by openai; it serves qwen3.6-35b, qwen3-235b, gpt-oss-120b  <- default
+  qwen3.6-35b                                  262k ctx, $0.20/$0.80, from the provider
 ```
 
 A LiteLLM gateway reports windows and prices; Anthropic reports windows only
 (it has no pricing endpoint, and an unpriced model reads as unpriced, not free);
 a plain OpenAI-compatible server reports whatever it feels like. A window you
-wrote in `config.yaml` still wins — the listing just says when the provider
-disagrees, which is usually a window that went stale. Refreshing is always
-explicit: starting a session reads the cache and never the network.
+wrote in `config.yaml` still wins. Each model says where its facts came from:
+the provider, asked just now; the cache of what it said before; or your config.
+
+The cache refreshes itself. `troupe models` asks first when it is stale, and
+`--refresh` always; a session that starts never waits for it, and has the daemon
+refresh it in the background instead: on the first run, when the provider or its
+base URL changed, when it is a day old, when a provider that did not answer is due
+another try (after an hour), and when a model the config names is not in it (after
+ten minutes). A provider that does not answer keeps what it listed before.
+`troupe doctor` checks `models.default`, `cheap` and `expensive` against what the
+provider lists, and fails on one it does not serve.
 
 `/models` opens that list as a menu in the TUI, with the model in use first;
 `↑`/`↓` move, Enter picks one and writes it to the config file that owns the
