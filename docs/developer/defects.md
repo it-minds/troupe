@@ -552,7 +552,7 @@ Found by the chunk 15 fixers of slots A15, B15 and C15 (PRs #374, #372, #370), 2
 | D54's first item - with Cilium, a profile could name a loopback or link-local endpoint | #355, PR #360 |
 | D51 - an MCP session a renewed token or a dropped server left open (the person-mode case stays in D51) | #358, PR #363 |
 | D53's first item - the desktop app showed a team turn that failed on the plane as finished | #354, PR #359 |
-| D60 - A checkout that built the previous version kept reporting it | #380 |
+| D60 - A checkout that built the previous version kept reporting it | #380, PR #382 |
 
 ## Checked and not a defect
 
