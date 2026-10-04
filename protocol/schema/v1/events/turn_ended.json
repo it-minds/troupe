@@ -8,6 +8,9 @@
     },
     "reason": {
       "type": "string"
+    },
+    "turn": {
+      "type": "object"
     }
   },
   "required": [],
