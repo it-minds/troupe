@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- Troupe's mask, one colour, for the activity bar (which reads only its shape) and for
+       a terminal tab in a dark theme. The shape is the favicon's
+       (clients/gui/apps/desktop/public/favicon.svg) at 5/8 size: the right half lit, its
+       eye cut out. -->
+  <defs>
+    <clipPath id="lit"><rect x="12" y="0" width="12" height="24"/></clipPath>
+  </defs>
+  <g transform="matrix(1.25 0 0 1.25 -3 -3.06)">
+    <g fill="#C5C5C5">
+      <path clip-path="url(#lit)" fill-rule="evenodd" d="M5.5 8 Q5.5 4.5 12 4.5 Q18.5 4.5 18.5 8 L18.5 12.5 Q18.5 17 12 20 Q5.5 17 5.5 12.5 Z M12.7 10.5 Q14.4 9.3 16.1 10.5 Q14.4 11.7 12.7 10.5 Z"/>
+      <path d="M7.9 10.5 Q9.6 9.3 11.3 10.5 Q9.6 11.7 7.9 10.5 Z"/>
+    </g>
+    <path fill="none" stroke="#C5C5C5" stroke-width="1.3" stroke-linejoin="round" d="M5.5 8 Q5.5 4.5 12 4.5 Q18.5 4.5 18.5 8 L18.5 12.5 Q18.5 17 12 20 Q5.5 17 5.5 12.5 Z"/>
+  </g>
+</svg>

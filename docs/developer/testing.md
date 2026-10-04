@@ -84,10 +84,11 @@ temporary directory once per run and passes `state_dir` through config, because
   `test/support` is a protocol-accurate identity provider, plane, worker and daemon; the
   GUI's plane end-to-end suite runs in CI against a plane built from the same commit
   ([e2e.md](../../clients/gui/docs/e2e.md)).
-- The VS Code extension's: `pnpm test` in `clients/vscode` (the folder, the program, and
-  the line it types, put through every shell the machine has), and `pnpm test:vscode`,
-  its suite inside a real VS Code against a fake `troupe`, with its own user data and
-  extensions directories ([vscode.md](../user/vscode.md#how-it-is-built-and-tested)).
+- The VS Code extension's: `pnpm test` in `clients/vscode` (the folder, the program, the
+  line it types, put through every shell the machine has, the Settings view's rows and the
+  manifest), and `pnpm test:vscode`, its suite inside a real VS Code against a fake
+  `troupe`, with its own user data and extensions directories
+  ([vscode.md](../user/vscode.md#how-it-is-built-and-tested)).
 - `scripts/verify-local.ps1` checks an install made by `scripts/install-local.ps1` on this
   Windows machine.
 - `scripts/live-check task|delegate|loop`: one headless run against a real model, and

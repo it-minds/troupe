@@ -46,13 +46,72 @@
         "command": "troupe.open",
         "title": "Open",
         "category": "Troupe",
-        "icon": "$(terminal)"
+        "icon": {
+          "light": "media/troupe-light.svg",
+          "dark": "media/troupe.svg"
+        }
+      },
+      {
+        "command": "troupe.refreshSettings",
+        "title": "Refresh Settings",
+        "category": "Troupe",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "troupe.open",
+          "group": "navigation",
+          "when": "workspaceFolderCount != 0 && resourceScheme != vscode-terminal"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "troupe.refreshSettings",
+          "group": "navigation",
+          "when": "view == troupe.settings"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "troupe",
+          "title": "Troupe",
+          "icon": "media/troupe.svg"
+        }
+      ]
+    },
+    "views": {
+      "troupe": [
+        {
+          "id": "troupe.folders",
+          "name": "Folders",
+          "icon": "media/troupe.svg"
+        },
+        {
+          "id": "troupe.settings",
+          "name": "Settings",
+          "icon": "media/troupe.svg"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "troupe.folders",
+        "contents": "Troupe opens in a folder.\n[Open Folder](command:workbench.action.files.openFolder)"
+      },
+      {
+        "view": "troupe.settings",
+        "contents": "Troupe's settings are a folder's: open one to see them."
       }
     ],
     "keybindings": [
       {
         "command": "troupe.open",
         "key": "ctrl+shift+alt+t",
+        "win": "shift+alt+t",
         "mac": "cmd+shift+alt+t"
       }
     ],
@@ -73,6 +132,22 @@
           "default": [],
           "scope": "machine",
           "markdownDescription": "More arguments for `troupe`, such as `--no-mouse` (so the terminal's own selection works) or `--watch`. A user or remote setting only: a workspace cannot add `--auto-approve`."
+        },
+        "troupe.openIn": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "beside",
+            "panel"
+          ],
+          "enumDescriptions": [
+            "A tab in the editor group in front, to split and tile as a file's is.",
+            "A tab in the editor group beside the one in front, opening one when there is none.",
+            "The terminal panel."
+          ],
+          "default": "editor",
+          "scope": "machine",
+          "markdownDescription": "Where Troupe's terminal opens. One that is open already stays where it is."
         }
       }
     }

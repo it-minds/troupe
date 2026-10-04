@@ -63,7 +63,7 @@ function powershellWord(word: string) {
 // inside quotes a backslash is literal unless quotes follow it, so those, and the ones
 // before the closing quote, are doubled. A `%NAME%` is still expanded inside quotes,
 // which no quoting at cmd's prompt prevents.
-function cmdWord(word: string) {
+export function cmdWord(word: string) {
   if (PLAIN_WINDOWS.test(word)) return word;
   return `"${word.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
 }

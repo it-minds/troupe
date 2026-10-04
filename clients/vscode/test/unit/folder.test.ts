@@ -5,6 +5,10 @@ import { chooseFolder } from "../../src/folder.js";
 const alpha = { name: "alpha" };
 const beta = { name: "beta" };
 
+test("a folder asked for, a row of the side bar's list, before any editor", () => {
+  assert.deepEqual(chooseFolder({ given: beta, editor: alpha, terminal: alpha, folders: [alpha, beta] }), { folder: beta });
+});
+
 test("the active editor's folder, in a workspace of one root or several", () => {
   assert.deepEqual(chooseFolder({ editor: beta, folders: [alpha, beta] }), { folder: beta });
   assert.deepEqual(chooseFolder({ editor: alpha, terminal: beta, folders: [alpha, beta] }), { folder: alpha });

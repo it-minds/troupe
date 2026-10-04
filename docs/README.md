@@ -17,7 +17,7 @@ You run agents, on your own machine or on your team's plane.
    and the words you will meet.
 2. [The terminal client](../clients/tui/README.md) — installing `troupe`, a model
    provider, using it, and sessions on a plane; [in VS Code](user/vscode.md), opened in
-   its terminal at the workspace folder.
+   a terminal tab at the workspace folder.
 3. [Command reference](user/cli-reference.md) (generated) — every command line `troupe`
    takes, and every command you type inside a session.
 4. [Configuration](user/configuration.md) — every key in `config.yaml`, and which file

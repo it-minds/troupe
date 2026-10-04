@@ -241,8 +241,9 @@ troupe --remote [PLANE_URL]             # HQ: teams, profiles and sessions on a 
 troupe --version
 ```
 
-In VS Code, the extension's **Troupe: Open** runs `troupe --workspace <folder>` in the
-integrated terminal, at the folder you are working in ([vscode.md](../../docs/user/vscode.md)).
+In VS Code, the extension's **Troupe: Open** runs `troupe --workspace <folder>` in a
+terminal at the folder you are working in, by default a tab beside your files
+([vscode.md](../../docs/user/vscode.md)).
 
 `troupe run --headless` prints the transcript, one line per event prefixed with the agent
 that wrote it, the harness's notes among them as the window shows them (`done:` and the

@@ -17,8 +17,11 @@ const base = path.join(root, ".vscode-test");
 const work = path.join(base, "w");
 const bin = path.join(work, "bin");
 
+// `troupe config --explain --json` prints explain.json, and is not one of the calls the
+// tests count.
 const posixFake = `#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
+[ "$1" = config ] && { cat "$here/explain.json"; exit 0; }
 { printf 'call\\t%s' "$(pwd -P)"; for a in "$@"; do printf '\\t%s' "$a"; done; printf '\\n'; } >> "$here/calls.log"
 case "$(cat "$here/mode" 2>/dev/null)" in
   exit0) exit 0 ;;
@@ -32,6 +35,7 @@ exec sleep 600
 // `bin\\troupe`, and only the `.cmd` may be what that finds.
 const windowsFake = [
   "@echo off",
+  'if "%~1"=="config" (type "%~dp0explain.json" & exit /b 0)',
   '>>"%~dp0calls.log" echo call\t%CD%\t%*',
   "set mode=",
   'set /p mode=<"%~dp0mode"',
@@ -57,6 +61,31 @@ async function main() {
   } else {
     fs.writeFileSync(path.join(bin, "troupe"), posixFake, { mode: 0o755 });
   }
+
+  // What the side bar's Settings is shown: a user file that sets the provider, a key and
+  // the model, and a warning at a line of it.
+  const userFile = path.join(bin, "config.yaml");
+  fs.writeFileSync(userFile, "provider: fake\napi_key: sk-test-not-a-key\nmodels:\n  default: fake-large\nmax_tokns: 1\n");
+  const step = (layer: string, value: unknown, source: string | null) => ({ layer, source, value, from: null, ignored: null });
+  const set = (key: string, value: unknown, fallback: unknown) => ({
+    key,
+    value,
+    layer: "user",
+    source: userFile,
+    ladder: [step("default", fallback, null), step("user", value, userFile)],
+  });
+  const explain = {
+    workspace: "",
+    trusted: false,
+    files: [
+      { layer: "user", path: userFile, exists: true },
+      { layer: "project", path: path.join(work, "nowhere", ".troupe", "config.yaml"), exists: false },
+    ],
+    keys: [set("provider", "fake", "anthropic"), set("api_key", "sk-t...ey", null), set("models.default", "fake-large", "claude-sonnet-5")],
+    warnings: [{ level: "warning", source: userFile, line: 5, key: "max_tokns", message: "max_tokns is not a key: max_tokens?" }],
+    refusals: [],
+  };
+  fs.writeFileSync(path.join(bin, "explain.json"), JSON.stringify(explain));
 
   const workspace = path.join(work, "four.code-workspace");
   fs.writeFileSync(workspace, JSON.stringify({ folders: folders.map((p) => ({ path: p })) }, null, 2));

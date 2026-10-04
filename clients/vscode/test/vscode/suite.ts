@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { Opened } from "../../src/extension.js";
+import type { Shown } from "../../src/settingsView.js";
 
 const work = process.env["TROUPE_TEST_WORK"] ?? "";
 const log = path.join(work, "bin", "calls.log");
@@ -53,6 +54,11 @@ it("opens the TUI at the active editor's folder, with --workspace, in a terminal
   assert.equal(call.args[0], "--workspace");
   samePath(call.args[1] ?? "", folder("beta"));
   assert.equal(call.args.length, 2);
+
+  // By default a tab in the editor area, in the group of the file it was opened from.
+  const tab = terminalTab("Troupe: beta");
+  assert.ok(tab, "beta's terminal is a tab in the editor area");
+  assert.equal(tab.group.viewColumn, vscode.ViewColumn.One);
 });
 
 it("a second press shows that terminal again and starts nothing", async () => {
@@ -74,9 +80,11 @@ it("in a workspace of several roots, the other root's editor opens the other roo
 });
 
 it("with no editor open, the Troupe terminal in front is the folder, and nothing is asked", async () => {
-  await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+  // The files' tabs, not the terminals': closing a TUI's tab would ask to end it.
+  await closeFiles();
   named("Troupe: beta")[0]?.show();
   await until(() => vscode.window.activeTerminal?.name === "Troupe: beta", "beta's terminal in front");
+  assert.equal(vscode.window.activeTextEditor, undefined);
 
   assert.deepEqual(await open(), { opened: vscode.Uri.file(folder("beta")).fsPath, terminal: "Troupe: beta", reused: true });
   assert.equal((await calls(2)).length, 2);
@@ -132,8 +140,132 @@ it("a missing troupe is one sentence and a link, and no terminal", async () => {
   }
 });
 
+it("troupe.openIn: beside opens it in an editor group beside the file's", async () => {
+  await closeAll();
+  mode("stay");
+  await edit("gamma");
+  const before = (await calls(0)).length;
+
+  await setting("openIn", "beside", async () => {
+    assert.deepEqual(await open(), { opened: vscode.Uri.file(folder("gamma")).fsPath, terminal: "Troupe: gamma", reused: false });
+    samePath((await calls(before + 1))[before]?.cwd ?? "", folder("gamma"));
+    const tab = terminalTab("Troupe: gamma");
+    assert.ok(tab, "gamma's terminal is a tab in the editor area");
+    assert.equal(tab.group.viewColumn, vscode.ViewColumn.Two);
+  });
+});
+
+it("troupe.openIn: panel opens it in the terminal panel, not the editor area", async () => {
+  await closeAll();
+  await edit("alpha");
+  const before = (await calls(0)).length;
+
+  await setting("openIn", "panel", async () => {
+    assert.deepEqual(await open(), { opened: vscode.Uri.file(folder("alpha")).fsPath, terminal: "Troupe: alpha", reused: false });
+    await calls(before + 1);
+    assert.equal(named("Troupe: alpha").length, 1);
+    assert.equal(terminalTab("Troupe: alpha"), undefined);
+  });
+});
+
+it("a folder given to the command, as a row of the side bar's list gives it, opens there", async () => {
+  await closeAll();
+  await edit("alpha");
+  const before = (await calls(0)).length;
+
+  const opened = await vscode.commands.executeCommand<Opened>("troupe.open", vscode.Uri.file(folder("delta")));
+  assert.deepEqual(opened, { opened: vscode.Uri.file(folder("delta")).fsPath, terminal: "Troupe: delta", reused: false });
+  samePath((await calls(before + 1))[before]?.cwd ?? "", folder("delta"));
+});
+
+it("the activity bar's Troupe opens Troupe at the editor's folder as its side bar shows", async () => {
+  await closeAll();
+  await vscode.commands.executeCommand("workbench.view.explorer");
+  await edit("beta");
+  const before = (await calls(0)).length;
+
+  await vscode.commands.executeCommand("workbench.view.extension.troupe");
+  samePath((await calls(before + 1))[before]?.cwd ?? "", folder("beta"));
+  await until(() => terminalTab("Troupe: beta") !== undefined, "beta's terminal tab");
+
+  // Shown again from the explorer, it shows that terminal, and starts nothing.
+  await vscode.commands.executeCommand("workbench.view.explorer");
+  await vscode.commands.executeCommand("workbench.view.extension.troupe");
+  await wait(2000);
+  assert.equal((await calls(0)).length, before + 1);
+  assert.equal(named("Troupe: beta").length, 1);
+});
+
+it("an editor's title bar opens Troupe at that file's folder, whichever editor is in front", async () => {
+  await closeAll();
+  await edit("alpha");
+  const before = (await calls(0)).length;
+
+  // What VS Code hands a command in editor/title: the URI of that group's file.
+  const opened = await vscode.commands.executeCommand<Opened>("troupe.open", vscode.Uri.file(path.join(folder("gamma"), "a.txt")));
+  assert.deepEqual(opened, { opened: vscode.Uri.file(folder("gamma")).fsPath, terminal: "Troupe: gamma", reused: false });
+  samePath((await calls(before + 1))[before]?.cwd ?? "", folder("gamma"));
+});
+
+it("the side bar's Settings is what troupe config --explain says of the folder worked in", async () => {
+  await closeAll();
+  await edit("delta");
+  const before = (await calls(0)).length;
+
+  const shown = await vscode.commands.executeCommand<Shown>("troupe.refreshSettings");
+  assert.ok("folder" in shown, "a folder is shown");
+  samePath(shown.folder, folder("delta"));
+
+  const model = shown.rows.find((r) => r.label === "Model")?.children ?? [];
+  assert.deepEqual(
+    model.map((r) => [r.label, r.description]),
+    [
+      ["Provider", "fake · user"],
+      ["Key", "set · user"],
+      ["Default model", "fake-large · user"],
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify(shown), /sk-t/);
+
+  const [warning] = shown.rows.find((r) => r.label === "Problems")?.children ?? [];
+  assert.equal(warning?.open?.line, 5);
+
+  // Asking is not opening: the fake's log has no call for it.
+  assert.equal((await calls(0)).length, before);
+});
+
 async function open() {
   return vscode.commands.executeCommand<Opened>("troupe.open");
+}
+
+function terminalTab(name: string) {
+  return vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .find((tab) => tab.input instanceof vscode.TabInputTerminal && tab.label === name);
+}
+
+async function closeFiles() {
+  const files = vscode.window.tabGroups.all.flatMap((group) => group.tabs).filter((tab) => tab.input instanceof vscode.TabInputText);
+  await vscode.window.tabGroups.close(files);
+}
+
+// Every terminal ended, as the extension sees it end, and every file closed.
+async function closeAll() {
+  for (const terminal of vscode.window.terminals) terminal.dispose();
+  await until(() => vscode.window.terminals.length === 0, "the terminals closed");
+  await closeFiles();
+  await vscode.commands.executeCommand("workbench.action.closeAllGroups");
+}
+
+async function setting(name: string, value: unknown, fn: () => Promise<void>) {
+  const config = vscode.workspace.getConfiguration("troupe");
+  const before = config.inspect(name)?.globalValue;
+  await config.update(name, value, vscode.ConfigurationTarget.Global);
+  try {
+    await fn();
+  } finally {
+    await config.update(name, before, vscode.ConfigurationTarget.Global);
+  }
 }
 
 async function edit(name: string) {

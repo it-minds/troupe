@@ -4286,10 +4286,12 @@ citation keeps meaning what it meant.
        was sealed from the next sequence number on.
 
 765. **VS Code reaches Troupe through a door, not a second client: the extension in
-     `clients/vscode` has one command, `Troupe: Open`, which types `troupe --workspace
-     <folder>` into a terminal it opens at that folder, one terminal per folder, and it is
-     built as a `.vsix` in CI and published nowhere yet.** Issue #378's v1, its first
-     slice; the TUI is the product (#378), and the panel over the daemon's ACP is v2.
+     `clients/vscode` has one command that opens anything, `Troupe: Open`, which types
+     `troupe --workspace <folder>` into a terminal it opens at that folder, by default a
+     tab in the editor area, one terminal per folder; its side bar shows the folder's
+     settings as `troupe config --explain --json` reports them; and it is built as a
+     `.vsix` in CI and published nowhere yet.** Issue #378's v1, its first slice; the TUI
+     is the product (#378), and the panel over the daemon's ACP is v2.
      - **Where it lives and how it ships.** A pnpm project of its own, not a package of the
        GUI's workspace, which shares a protocol client the extension has no use for.
        TypeScript compiled by `tsc`, no runtime dependencies, so the `.vsix` that
@@ -4326,6 +4328,39 @@ citation keeps meaning what it meant.
        integration says the line ended (a failed start). Without shell integration it is
        only shown. A terminal from before a window reload, which VS Code keeps with its
        process, is found by its name and only shown.
+     - **A tab in the editor area, by default.** A terminal in the panel cannot be tiled
+       with the files, and the TUI is what is being worked in, so it opens where files open:
+       `createTerminal`'s `location`, a tab in the editor group in front, with Troupe's mask
+       as its icon. `troupe.openIn` (`editor`, `beside`, `panel`) keeps the panel for whoever
+       wants it; it is `machine` scoped like the other two, so one rule covers every setting
+       read, though where a terminal opens is no risk.
+     - **Four ways in to the one command.** The mask in an editor's title bar
+       (`editor/title`, `navigation`, beside other tools' icons there), which hands the
+       command the file's URI, so the file's folder. The mask in the activity bar: a view
+       container whose Folders view opens Troupe when it is shown, since VS Code has no
+       activity-bar item that only runs a command; its list of folders is where a workspace
+       of several chooses, so that way in never asks. The command palette and the status
+       bar. And the key: <kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> on Windows,
+       <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> on Linux and
+       <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> on macOS. On Windows
+       Ctrl+Alt is AltGr, and unless `keyboard.mapAltGrToCtrlAlt` is on, VS Code types the
+       character a layout gives AltGr+Shift+T (Þ on US-International) instead of running a
+       Ctrl+Alt key; Shift+Alt+T has no default binding in VS Code 1.140. A unit test keeps
+       every Windows key off Ctrl+Alt.
+     - **The settings shown are Troupe's answer, not the extension's reading.** The side
+       bar's Settings view runs `troupe config --explain --json --workspace <folder>` where
+       the terminal runs (half a second here) and shows its rows: the model (provider,
+       endpoint, whether a key is set, the three models, the named providers), what else
+       differs from the defaults and which layer set it, the three files and whether the
+       workspace is trusted, the warnings and refusals, and every key, folded. Merging the
+       layers and deciding which of a repository's keys apply stay Troupe's, so the view
+       cannot disagree with a session. It asks only while shown: when the folder worked in
+       changes, when a file the answer named is saved, and on Refresh. A key is shown as set
+       or not set, never even masked; a unit test fails on `sk-` anywhere in the rows. A
+       `.cmd` `troupe` (the suite's fake, or a person's own wrapper) runs through
+       `cmd.exe /d /s /c` with the line quoted as the terminal's is, since Node runs no batch
+       file without a shell. The models to choose from, with windows and prices, wait on
+       `troupe models --json` (#387).
      - **Finding `troupe`**, where the terminal runs: `troupe.path`, then the `PATH`, then
        where the installers put it, which a window older than the installer's change to the
        `PATH` would otherwise miss. On Windows only a `.exe`, `.cmd` or `.bat`, `.exe`
@@ -4349,7 +4384,8 @@ citation keeps meaning what it meant.
        `troupe run`, `troupe doctor` and `troupe config` (which need a decision on "the
        same terminal" while a TUI runs in it), explorer and editor items that put a path in
        the TUI's prompt (which needs a way into the prompt from outside), opening on folder
-       open, and the terminal profile setting.
+       open, the terminal profile setting, and changing a setting or trusting the workspace
+       from the Settings view, which writes the person's own files.
      - **Proof:** the TUI's `cli_test` ("--workspace roots the TUI at DIR"), which passes on
        the chunk's tip, so this confirms rather than fixes, and stays as the pin. The
        extension's unit tests (the folder, the search on Linux and Windows file systems with
@@ -4362,13 +4398,23 @@ citation keeps meaning what it meant.
        terminal; the other root from its own editor; no editor, so the terminal in front;
        a clean quit closing the terminal; a failed start keeping it and running again on
        the next press; a missing `troupe` as the sentence and no terminal; and an
-       extensionless `troupe` beside the `.cmd` never opened. CI runs both on Linux and
+       extensionless `troupe` beside the `.cmd` never opened. With the editor area and the
+       side bar, 33 unit tests (2 skipped: sh and fish on Windows) and 14 of 14 in VS Code:
+       the tab in the editor group in front by default, `beside` in group two, `panel` with
+       no tab; a folder handed to the command, as the list and the title bar hand it; the
+       activity bar opening Troupe at the editor's folder and, shown again, only showing
+       it; and the Settings view's rows from the fake's `config --explain --json`, with no
+       key in them and the call not counted as a start. CI runs both on Linux and
        Windows, macOS in a full run. And installed: the `.vsix` put into a scratch VS Code
        profile, whose terminals had scratch homes, found the installed `troupe.exe` on the
        `PATH` and ran it through PowerShell 7 at the folder, the TUI's session recorded with
        that folder as its workspace and a second press reusing its terminal; and the
        installed `troupe.exe --workspace DIR`, typed into a terminal in another directory,
-       rooted its session at DIR and none at the directory it started in.
+       rooted its session at DIR and none at the directory it started in. Then into a
+       person's own VS Code 1.140 on a US-International layout, used by hand: the key, the
+       tab, the title bar's and the activity bar's masks; and the Settings rows made from
+       that machine's real `troupe config --explain --json`, which showed its gateway, its
+       models and the workspace untrusted, and no key.
 
 766. **Signing out of a plane takes back the plane token the client handed the daemon, and
      the daemon seals nothing until somebody signs in again; the link stays.** Issue #381,
