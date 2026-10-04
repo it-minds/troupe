@@ -16,7 +16,7 @@ defmodule Troupe.LLM.Fake do
 
   use GenServer
 
-  alias Troupe.LLM.{Gateway, Reasoning, Response, Text, ToolUse, Usage}
+  alias Troupe.LLM.{Gateway, Message, Reasoning, Response, Text, ToolResult, ToolUse, Usage}
 
   @type step ::
           {:text, String.t()}
@@ -33,7 +33,8 @@ defmodule Troupe.LLM.Fake do
             default: nil,
             delay_ms: 0,
             cost_micros: :derived,
-            cache_read: 0
+            cache_read: 0,
+            strict_pairs: false
 
   # -- client -----------------------------------------------------------------
 
@@ -56,6 +57,10 @@ defmodule Troupe.LLM.Fake do
     * `:cache_read` — prompt tokens every answer reports as served from the cache
       (default 0), for a test of what a budget counts: a real long conversation is
       mostly that
+    * `:strict_pairs` — refuse, with the `400` Anthropic's and OpenAI's APIs answer, a
+      request in which a tool result does not answer a call in the message before it, or
+      a call is not answered in the message after it (default `false`). A refused request
+      takes no step from the script
     * `:name` — registered name (tests usually pass one)
   """
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -173,15 +178,23 @@ defmodule Troupe.LLM.Fake do
        default: Keyword.get(opts, :default, {:text, "done"}),
        delay_ms: Keyword.get(opts, :delay_ms, 0),
        cost_micros: Keyword.get(opts, :cost_micros, :derived),
-       cache_read: Keyword.get(opts, :cache_read, 0)
+       cache_read: Keyword.get(opts, :cache_read, 0),
+       strict_pairs: Keyword.get(opts, :strict_pairs, false)
      }}
   end
 
   @impl GenServer
   def handle_call({:next, request}, _from, state) do
     state = %{state | requests: [request | state.requests]}
-    {step, state} = take_step(state, agent_name(request))
-    {:reply, render(step, state), state}
+
+    case state.strict_pairs && unpaired(request.messages) do
+      reason when is_binary(reason) ->
+        {:reply, {:error, {:http_status, 400, reason}}, state}
+
+      _paired ->
+        {step, state} = take_step(state, agent_name(request))
+        {:reply, render(step, state), state}
+    end
   end
 
   def handle_call(:requests, _from, state), do: {:reply, Enum.reverse(state.requests), state}
@@ -213,6 +226,42 @@ defmodule Troupe.LLM.Fake do
         end
     end
   end
+
+  # What Anthropic's and OpenAI's APIs check of tool blocks before anything else: every
+  # result answers a call in the message just before it, and every call is answered in the
+  # message just after it. The last message is a call only in a request nobody sends.
+  defp unpaired([]), do: nil
+
+  defp unpaired(messages) do
+    [[nil | messages], messages, tl(messages) ++ [nil]]
+    |> Enum.zip()
+    |> Enum.with_index()
+    |> Enum.find_value(fn {{before, message, next}, i} -> unpaired(before, message, next, i) end)
+  end
+
+  defp unpaired(before, message, next, i) do
+    orphan = List.first(result_ids(message) -- call_ids(before))
+    unanswered = next && List.first(call_ids(message) -- result_ids(next))
+
+    cond do
+      orphan ->
+        "messages.#{i}: tool_result for #{orphan} has no tool_use in the message before it"
+
+      unanswered ->
+        "messages.#{i}: tool_use #{unanswered} has no tool_result in the message after it"
+
+      true ->
+        nil
+    end
+  end
+
+  defp call_ids(%Message{role: :assistant} = message),
+    do: Enum.map(Message.tool_uses(message), & &1.id)
+
+  defp call_ids(_message), do: []
+
+  defp result_ids(%Message{content: blocks}),
+    do: for(%ToolResult{tool_use_id: id} <- blocks, do: id)
 
   # The agent's profile name, which is what a route is keyed by. `root` is special:
   # the root agent answers to its position, not its profile, so a test can script it

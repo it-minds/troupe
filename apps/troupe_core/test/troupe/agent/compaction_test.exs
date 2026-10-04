@@ -65,9 +65,8 @@ defmodule Troupe.Agent.CompactionTest do
   end
 
   # Decision 771. The threshold is never crossed here; a prompt the provider refuses as too
-  # long is what compacts, so the test says when. Two short turns come first, so the kept
-  # part starts at the second one's input and the read and its answer are behind the
-  # compaction.
+  # long is what compacts, so the test says when. Two short turns come first, so what the
+  # compaction keeps holds the read and its answer, behind it.
   describe "a large tool result a compaction left behind" do
     setup context do
       lines = Enum.map_join(1..400, "\n", &"line #{&1} #{String.duplicate("x", 60)}")
@@ -142,11 +141,11 @@ defmodule Troupe.Agent.CompactionTest do
       assert result_in(resent, read.tool_use_id).content == read.content
     end
 
-    # The second compaction drops seven messages, the first's summary and everything it
-    # left behind, and its summariser fails, so the conversation is what it kept. A
-    # boundary still counted from the longer one would cover the read the model has not
-    # answered.
-    test "a summary that fails leaves the boundary with the messages it kept", context do
+    # A second compaction whose summariser fails changes nothing (Decision 774): the
+    # conversation stays whole, and so does the boundary the first one set, which ends
+    # before the read the model has not answered.
+    test "a summary that fails leaves the conversation and its boundary as they were",
+         context do
       steps =
         read_then_overflow() ++
           [
@@ -182,14 +181,7 @@ defmodule Troupe.Agent.CompactionTest do
       before_restart = fake |> Fake.requests() |> List.last()
       conversation = Troupe.snapshot(session.id).conversation
 
-      agent = Registry.agent_pid(session.id, ["root"])
-      ref = Process.monitor(agent)
-      Process.exit(agent, :kill)
-      assert_receive {:DOWN, ^ref, :process, ^agent, :killed}, 2_000
-
-      # The restarted agent says so and then publishes :idle from `init`, before any input.
-      await_event(session.id, :agent_restarted)
-      await_state(session.id, [:idle])
+      restart(session.id)
 
       # The fold of the log is the conversation the agent had, and the boundary with it.
       assert Troupe.snapshot(session.id).conversation == conversation
@@ -202,19 +194,93 @@ defmodule Troupe.Agent.CompactionTest do
 
       assert result_in(after_restart, read.tool_use_id).content =~ "read_output(id: "
 
-      # The stub is in what was sent, not in what was kept: the log has the result whole.
-      logged =
-        session.id
-        |> events_of_type("tool_results")
-        |> Enum.flat_map(& &1.data["results"])
-        |> Enum.flat_map(& &1["content"])
-        |> Enum.find(&(&1["tool_use_id"] == read.tool_use_id))
-
-      assert %{"blob" => blob} = logged["content"]
-      assert blob == Blobs.digest(read.content)
-      assert [compacted] = events_of_type(session.id, "compacted")
-      assert Jason.encode!(compacted.data["conversation"]) =~ "line 400 "
+      # The stub is in what was sent, not in what was kept: the log has the result whole,
+      # as a blob in `tool_results` and again in the conversation `compacted` kept
+      # (Decision 774), which the restart above resolved back.
+      blob = Blobs.digest(read.content)
+      assert %{"blob" => ^blob} = logged_result(session.id, "tool_results", read.tool_use_id)
+      assert %{"blob" => ^blob} = logged_result(session.id, "compacted", read.tool_use_id)
     end
+  end
+
+  # Decision 774. Against a model that refuses, as Anthropic's and OpenAI's APIs do, a
+  # request with a tool result whose call is not in front of it.
+  describe "a compaction in a turn of many tool calls" do
+    test "keeps every tool result with its call, so a strict provider takes the request",
+         context do
+      steps =
+        List.duplicate({:tools, [{"todo_read", %{}}]}, 4) ++
+          [@overflow, {:text, "summary of the reads"}, {:text, "done"}]
+
+      %{session: session, fake: fake} = start_session(context, steps: steps, strict_pairs: true)
+      Troupe.subscribe(session.id)
+      turn(session.id, "read the list four times")
+
+      assert [%{data: %{"reason" => "context_overflow"}}] =
+               events_of_type(session.id, "compacted")
+
+      assert summaries_asked(fake) == 1
+      assert events_of_type(session.id, "llm_error") == []
+      assert Message.text(List.last(Troupe.snapshot(session.id).conversation)) == "done"
+    end
+
+    # Every call is over the threshold, so the turn compacts after each result once there
+    # is something old enough, and once more when it ends, where the cut lands on results;
+    # the summariser takes some of the steps. A summary request refused would only be
+    # logged, so the count of them is what says none was.
+    test "compacts again and again without a refusal", context do
+      steps = List.duplicate({:text_and_tools, "reading", [{"todo_read", %{}}]}, 12)
+
+      %{session: session, fake: fake} =
+        start_session(context,
+          config_overrides: [context_window: 120, compact_at: 0.5],
+          steps: steps,
+          strict_pairs: true
+        )
+
+      Troupe.subscribe(session.id)
+      turn(session.id, "keep reading the list")
+      turn(session.id, "and once more")
+
+      compacted = events_of_type(session.id, "compacted")
+      assert length(compacted) >= 3
+      assert summaries_asked(fake) == length(compacted)
+      assert events_of_type(session.id, "llm_error") == []
+    end
+
+    test "a summary that fails leaves memory and replay the same", context do
+      steps =
+        List.duplicate({:tools, [{"todo_read", %{}}]}, 4) ++
+          [@overflow, {:error, {:http_status, 500, "the summariser is down"}}, {:text, "done"}]
+
+      %{session: session} = start_session(context, steps: steps)
+      Troupe.subscribe(session.id)
+      turn(session.id, "read the list four times")
+
+      assert events_of_type(session.id, "compacted") == []
+      in_memory = Troupe.snapshot(session.id).conversation
+
+      # The input, four calls and their results, and the answer: nothing was summarised.
+      assert length(in_memory) == 10
+
+      restart(session.id)
+      assert Troupe.snapshot(session.id).conversation == in_memory
+    end
+  end
+
+  defp summaries_asked(fake) do
+    fake |> Fake.requests() |> Enum.count(&(&1.system =~ "compress a coding session"))
+  end
+
+  defp restart(session_id) do
+    agent = Registry.agent_pid(session_id, ["root"])
+    ref = Process.monitor(agent)
+    Process.exit(agent, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^agent, :killed}, 2_000
+
+    # The restarted agent says so and then publishes :idle from `init`, before any input.
+    await_event(session_id, :agent_restarted)
+    await_state(session_id, [:idle])
   end
 
   defp read_then_overflow do
@@ -244,6 +310,16 @@ defmodule Troupe.Agent.CompactionTest do
         _ -> nil
       end
     end)
+  end
+
+  # A tool result's content as an event of `type` logged it.
+  defp logged_result(session_id, type, tool_use_id) do
+    session_id
+    |> events_of_type(type)
+    |> Enum.flat_map(&(&1.data["results"] || &1.data["conversation"]))
+    |> Enum.flat_map(& &1["content"])
+    |> Enum.find(&(&1["tool_use_id"] == tool_use_id))
+    |> Map.fetch!("content")
   end
 
   defp result_in(request, tool_use_id) do

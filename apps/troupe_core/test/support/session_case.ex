@@ -56,6 +56,9 @@ defmodule Troupe.SessionCase do
          default: Keyword.get(opts, :default, {:text, "done"}),
          delay_ms: Keyword.get(opts, :delay_ms, 0),
          cache_read: Keyword.get(opts, :cache_read, 0),
+         # A model that refuses a tool result without its call, as Anthropic's and
+         # OpenAI's APIs do.
+         strict_pairs: Keyword.get(opts, :strict_pairs, false),
          # `nil` is a gateway that reports no cost, which is every gateway on a streamed
          # response.
          cost_micros: Keyword.get(opts, :cost_micros, :derived)},

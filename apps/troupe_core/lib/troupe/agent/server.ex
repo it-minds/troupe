@@ -367,7 +367,7 @@ defmodule Troupe.Agent.Server do
   # What the conversation was compacted to, and the budget's own history (Decision 660):
   # a grant survives a restart, and a question without its answer is still owed.
   defp fold_limits(state, "compacted", data) do
-    conversation = Enum.map(data["conversation"], &Message.from_json/1)
+    conversation = Enum.map(data["conversation"], &resolve_results(state, &1))
     %{state | conversation: conversation, compacted_through: compacted_through(conversation)}
   end
 
@@ -2381,6 +2381,8 @@ defmodule Troupe.Agent.Server do
 
   defp store_payload(_state, content), do: content
 
+  # Any message: its tool results are stored, every other block passes through, so a
+  # `compacted` conversation goes the same way (Decision 774).
   defp store_results(state, %Message{} = message) do
     json = Message.to_json(message)
     update_in(json, ["content"], fn blocks -> Enum.map(blocks, &store_block(state, &1)) end)
@@ -2576,7 +2578,7 @@ defmodule Troupe.Agent.Server do
   end
 
   defp enter_compaction(state, resume) do
-    {keep, drop} = split_for_compaction(state.conversation)
+    {_keep, drop} = split_for_compaction(state.conversation)
 
     if drop == [] do
       # Nothing old enough to summarise: compacting would loop.
@@ -2596,15 +2598,14 @@ defmodule Troupe.Agent.Server do
       ref = Provider.start_stream(tasks(state), request.provider || state.provider, request, self())
       timer = Process.send_after(self(), {:llm_timeout, ref}, request.timeout_ms)
 
-      # The boundary moves with the messages, for a summary that fails and leaves `keep`.
+      # The conversation stays whole until the summary arrives: one that fails leaves it as
+      # it was, which is what a replay of the log rebuilds (Decision 774).
       state = %{
         state
         | llm_ref: ref,
           llm_timer: timer,
           compact_resume: resume,
           compact_reason: state.compact_reason || "threshold",
-          conversation: keep,
-          compacted_through: max(state.compacted_through - length(drop), 0),
           llm_text: ""
       }
 
@@ -2614,8 +2615,11 @@ defmodule Troupe.Agent.Server do
   end
 
   # Keep the most recent turns and anything with an unresolved tool call, summarise
-  # the rest. Splitting on a `:user` boundary keeps tool_use/tool_result pairs whole,
-  # which providers reject if broken.
+  # the rest. The cut never falls between a call and its results, which providers refuse
+  # (Decision 774): results are a `:user` message, so a cut at any user message used to
+  # keep results whose call had gone into the summary. Results at the head of what would
+  # be kept go into the summary with their call instead, so a turn of nothing but calls
+  # can still be compacted, and a compaction always summarises more than the last summary.
   defp split_for_compaction(conversation) do
     keep_count = 6
 
@@ -2624,19 +2628,18 @@ defmodule Troupe.Agent.Server do
     else
       split_at = length(conversation) - keep_count
       {drop, keep} = Enum.split(conversation, split_at)
-      {adjusted_drop, adjusted_keep} = align_to_user_boundary(drop, keep)
+      {adjusted_drop, adjusted_keep} = align_to_call(drop, keep)
       {adjusted_keep, adjusted_drop}
     end
   end
 
-  defp align_to_user_boundary(drop, [%Message{role: :user} | _] = keep), do: {drop, keep}
-
-  defp align_to_user_boundary(drop, keep) do
-    case List.pop_at(drop, -1) do
-      {nil, _} -> {drop, keep}
-      {last, rest} -> align_to_user_boundary(rest, [last | keep])
-    end
+  defp align_to_call(drop, [%Message{} = first | rest] = keep) do
+    if tool_results?(first) and rest != [],
+      do: align_to_call(drop ++ [first], rest),
+      else: {drop, keep}
   end
+
+  defp tool_results?(%Message{content: blocks}), do: Enum.any?(blocks, &match?(%ToolResult{}, &1))
 
   defp summarizer_system do
     """
@@ -2655,18 +2658,22 @@ defmodule Troupe.Agent.Server do
     "Summarise everything above as described. Output only the summary."
   end
 
+  # The split is the one the summariser was sent: nothing is added to the conversation
+  # while an agent is compacting. What it keeps is logged as `tool_results` logs results,
+  # a large one as a blob (Decision 774).
   defp apply_compaction(state, %Response{} = response) do
     summary = Message.text(Response.to_message(response))
+    {keep, _drop} = split_for_compaction(state.conversation)
 
     conversation = [
       Message.user("Summary of earlier work in this session:\n\n" <> summary)
-      | state.conversation
+      | keep
     ]
 
     log(state, :compacted, %{
       "summary" => summary,
       "reason" => state.compact_reason || "threshold",
-      "conversation" => Enum.map(conversation, &Message.to_json/1)
+      "conversation" => Enum.map(conversation, &store_results(state, &1))
     })
 
     %{

@@ -4,12 +4,13 @@ defmodule Troupe.LLM.FakeScriptTest do
   script file named in the workspace's own `.troupe/config.yaml`, with no fake process
   handed to the session. This is how a client that speaks only the protocol — the TUI's
   test suite, a smoke of a packaged daemon — gets deterministic answers without the
-  daemon letting it choose a provider over the wire.
+  daemon letting it choose a provider over the wire. A strict one refuses what a real
+  provider refuses of tool blocks.
   """
 
   use Troupe.SessionCase, async: true
 
-  alias Troupe.LLM.Fake
+  alias Troupe.LLM.{Fake, Message, Request, ToolResult, ToolUse}
 
   test "a JSON script carries a shared list, or steps and per-agent routes" do
     assert Fake.normalize_script([%{"text" => "hi"}]) == [steps: [{:text, "hi"}], routes: %{}]
@@ -47,6 +48,26 @@ defmodule Troupe.LLM.FakeScriptTest do
            ]
 
     assert Fake.normalize_script(%{"steps" => []}) == [steps: [], routes: %{}]
+  end
+
+  # The stand-in for what Anthropic's and OpenAI's APIs refuse (Decision 774), which a
+  # compaction test runs against.
+  test "a strict model refuses a tool result without its call, and a call without its result" do
+    fake = start_supervised!({Fake, steps: [{:text, "answered"}], strict_pairs: true})
+    call = Message.assistant([%ToolUse{id: "call_1", name: "todo_read", input: %{}}])
+    result = Message.tool_results([%ToolResult{tool_use_id: "call_1", content: "[]"}])
+    request = &%Request{model: "fake-model", messages: &1}
+
+    assert {:error,
+            {:http_status, 400, "messages.1: tool_result for call_1 has no tool_use" <> _}} =
+             Fake.next(fake, request.([Message.user("summary"), result]))
+
+    assert {:error, {:http_status, 400, "messages.1: tool_use call_1 has no tool_result" <> _}} =
+             Fake.next(fake, request.([Message.user("go"), call, Message.user("summarise")]))
+
+    # Refused requests took no step: the paired one gets the first.
+    assert {:ok, %{content: [%{text: "answered"}]}, _delay} =
+             Fake.next(fake, request.([Message.user("go"), call, result]))
   end
 
   test "a workspace config names the script, and a subagent answers from its own route",
