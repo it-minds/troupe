@@ -91,3 +91,10 @@ check` compares (CI's `versions` job) and `elixir scripts/version.exs set <versi
 writes. The desktop app gets the version without its pre-release part, because WiX
 refuses a non-numeric one. A release is a merged change to `VERSION`
 ([deployment.md](deployment.md)).
+
+Mix writes an app's `.app`, where its version is compiled, again only when `mix.exs` or the
+config changed, so every project that reads `VERSION` lists `troupe_protocol`'s
+`:troupe_version` compiler after `:app` (`compilers: Mix.compilers() ++ [:troupe_version]`).
+It has `:app` write the `.app` again when its version is not `VERSION`'s, which is what makes
+a checkout that built the previous release build the new one (Decision 768). A new
+`mix.exs` that reads `VERSION` lists it too.
