@@ -494,7 +494,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `models.prices.<model>.cache_write` | number ≥ 0 |  | any |  | Dollars per million prompt tokens written to the cache. Unset: the input price. |
 | `max_tokens` | integer ≥ 1 | `8192` | any |  | The most output tokens one model call asks for. |
 | `context_window` | integer ≥ 1 | `200000` | any | context window | The window, in tokens, assumed when neither a provider nor the catalog says; compaction is planned against it. |
-| `compact_at` | number, 0 to 1 | `0.75` | any | compact at | The share of the window at which an agent summarises older turns. |
+| `compact_at` | number, 0 to 1 | `0.75` | any | compact at | The share of the window at which an agent summarises older turns. A tool result over 16 KiB it read before then is sent from then on as a stub `read_output` expands. |
 | `llm_timeout_ms` | integer ≥ 1 | `300000` | any |  | How long one model call may take before it is given up on. |
 
 ### Budget
