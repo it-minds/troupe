@@ -61,6 +61,11 @@ defmodule Troupe.Agent.State do
     budget: %Budget{},
     conversation: [],
     todos: [],
+    # The task list the system prompt shows (Decision 792): `todos` as it stood when the
+    # turn's input was taken or the conversation last compacted, held for the rest of the
+    # turn so a rewrite changes nothing in front of the cached conversation. A
+    # `todo_write`'s result says the list from then on. Folded.
+    prompt_todos: [],
     # What the session is for, in a person's words (`goal_set`, `goal_cleared`). Folded,
     # and read into every prompt the root agent makes; a subagent is handed a task
     # instead and never carries one.
@@ -160,6 +165,7 @@ defmodule Troupe.Agent.State do
           budget: Budget.t(),
           conversation: [Message.t()],
           todos: [Troupe.Todo.t()],
+          prompt_todos: [Troupe.Todo.t()],
           goal: String.t() | nil,
           loop: String.t() | nil,
           llm_text: String.t(),
