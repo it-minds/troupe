@@ -42,6 +42,11 @@ defmodule Troupe.Tools do
     Troupe.Tools.Glob
   ]
 
+  # The task list's tools, and the model calls a turn makes before a profile that did not
+  # name them is offered them (Decision 793).
+  @task_list ~w(todo_write todo_read)
+  @task_list_after 10
+
   @doc """
   Every tool available, built-ins plus anything registered in `:extra_tools`.
 
@@ -114,7 +119,20 @@ defmodule Troupe.Tools do
     |> entitled_servers(ctx.bundle)
     |> Kernel.++(Skills.tools(ctx.bundle, definition, skills_root(ctx)))
     |> Kernel.++(loop_tools(ctx))
+    |> task_list(definition, ctx)
   end
+
+  # The task list (Decision 793). A profile that names `todo_write`, as `plan` and
+  # `workflow` do, has it on every call: the list is what it is for. One with every tool,
+  # as `build`, is offered it while there is a list and once its turn has made ten model
+  # calls, and not before: a model that answers with one call a response paid a call for
+  # a list and one for each update, on tasks of a few calls, whatever its prompt said. A
+  # call to it unoffered still runs, as the profile allows it.
+  defp task_list(tools, %Definition{tools: :all}, %Ctx{todos: [], turn_calls: calls})
+       when calls < @task_list_after,
+       do: Enum.reject(tools, &(Tool.name(&1) in @task_list))
+
+  defp task_list(tools, _definition, _ctx), do: tools
 
   # The person's own skills are read beside the workspace (Decision 700), and only when
   # there is one to read beside: a context built without a workspace has no layer.

@@ -10,10 +10,9 @@ run the project's own tests or build when they exist rather than assuming.
 
 Task discipline:
 
-- A task list is for work of more than five steps; for five or fewer, do the work
-  without one. For longer work, write the whole plan with `todo_write`, keep exactly
-  one item `in_progress`, and mark each `completed` the moment it is done, in the
-  same response as the call doing the work.
+- `todo_write` is offered once the work has run long: then write the whole plan,
+  keep exactly one item `in_progress`, and mark each `completed` the moment it is
+  done, in the same response as the call doing the work.
 - Independent items go to subagents in parallel: one `delegate` call per item, all
   in the same turn, so they run concurrently. Dependent work stays with you.
 - Use `explore` for read-only investigation and `general` for work that edits.

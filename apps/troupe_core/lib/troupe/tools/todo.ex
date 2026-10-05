@@ -17,17 +17,17 @@ defmodule Troupe.Tools.TodoWrite do
   @impl Troupe.Tool
   def mode, do: :inline
 
-  # The bar is a number, as in `build.md`: "a few" was read as two (Decision 793).
+  # Nothing about when a list is worth writing: a profile with every tool is offered this
+  # one only once its turn has run long (Decision 793), and `plan` and `workflow` always.
   @impl Troupe.Tool
   def description do
     """
     Replace your task list with the given items. Send the whole list every time, not
     a delta. Exactly one item may be `in_progress`; a list with more is rejected.
 
-    A list is for work of more than five steps; for five or fewer, do the work without
-    one, since a `todo_write` sent alone is a whole model call. With a list, mark an
-    item `in_progress` when you begin it and `completed` the moment it is done, in the
-    same response as the tool call that does the work.
+    Write the whole plan once, then mark an item `in_progress` when you begin it and
+    `completed` the moment it is done, in the same response as the tool call that does
+    the work: a `todo_write` sent alone is a whole model call.
     """
   end
 

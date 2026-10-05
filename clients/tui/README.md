@@ -483,6 +483,9 @@ model uses for a coding branch.
 The tools a definition can list are `read_file`, `write_file`, `edit_file`,
 `list_files`, `grep`, `shell`, `web_fetch`, `todo_write` / `todo_read`,
 `delegate`, `remember`, `ask_user` and `finish` (`tools: all` is everything).
+With `tools: all` the task list's two are offered once a turn has made ten model
+calls, or while there is a list, so a small task spends no calls on one; a
+definition that names them, as `plan` and `workflow` do, has them on every call.
 `write_file`, `edit_file`, `shell` and `web_fetch` ask before they run — `y` /
 `n` / `a` in the window, or `auto_approve` for the session — and the rest run
 unattended; a definition can change either with a `permissions:` block.

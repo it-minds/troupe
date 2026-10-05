@@ -4,16 +4,16 @@ defmodule Troupe.Agent.TaskListCallsTest do
 
   The live bench's `follow_steps` (three steps read from a file), run offline by the
   bench's runner under a live run's 12-call cap, against a stand-in that answers as
-  `qwen3-235b` did in the live bench before the change: one tool call in each response,
-  never two, and a task list whenever the `build` agent's system prompt asks for one for
-  a task of three steps, written after reading the steps and updated as each is done, each
-  `todo_write` in a response of its own. Its other calls are the ones the model made in
-  all three runs: the file read, each step's work, and three reads to check it.
+  `qwen3-235b` did in the live bench: one tool call in each response, never two, and a
+  task list whenever `todo_write` is offered, written after reading the steps and updated
+  as each is done, each `todo_write` in a response of its own. Its other calls are the
+  ones the model made in the runs: the file read, each step's work, and three reads to
+  check it.
 
-  It reads the system prompt as that model did. A list for work of "more than a few
-  steps" was a list for every task of three; a number is that number. The tool's own
-  description said a task of two or three needs none, and the model wrote one for every
-  task of three all the same, so the stand-in does not read it.
+  It goes by the tool alone, as the model did. Told to write a list for "more than a few
+  steps", and then for "more than five steps" with "for five or fewer, do the work without
+  one", it wrote one for this task of three in every run, six of six, and updated it after
+  each step.
   """
 
   use ExUnit.Case, async: false
@@ -91,7 +91,7 @@ defmodule Troupe.Agent.TaskListCallsTest do
     done = Enum.count(@step_done_after, &(&1 <= worked))
 
     cond do
-      list_asked?(request.system) and worked >= 1 and lists < done + 1 ->
+      offered?(request) and worked >= 1 and lists < done + 1 ->
         {:tools, [{"todo_write", %{"items" => items(done)}}]}
 
       worked < length(@work) ->
@@ -120,27 +120,6 @@ defmodule Troupe.Agent.TaskListCallsTest do
     end
   end
 
-  # Whether the system prompt asks for a list for a task of TASK.md's size.
-  defp list_asked?(system) do
-    String.contains?(system || "", "todo_write") and @steps > bar(system)
-  end
-
-  defp bar(system) do
-    case Regex.run(~r/more than (a few|\w+) steps/, system) do
-      [_, "a few"] -> 2
-      [_, word] -> number(word)
-      nil -> 0
-    end
-  end
-
-  @numbers ~w(one two three four five six seven eight nine ten)
-           |> Enum.with_index(1)
-           |> Map.new()
-
-  defp number(word) do
-    case Integer.parse(word) do
-      {n, ""} -> n
-      _other -> Map.get(@numbers, word, 0)
-    end
-  end
+  # Whether the request offers the tool, which is all the model went by.
+  defp offered?(%Request{tools: tools}), do: Enum.any?(tools, &(&1.name == "todo_write"))
 end

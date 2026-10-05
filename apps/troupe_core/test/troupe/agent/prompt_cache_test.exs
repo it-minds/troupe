@@ -54,7 +54,11 @@ defmodule Troupe.Agent.PromptCacheTest do
     reads = Enum.map(usages, & &1.cache_read)
 
     assert hd(reads) == 0, "the first call has nothing to read"
-    assert Enum.all?(tl(reads), &(&1 > 0)), "every later call reads: #{inspect(reads)}"
+
+    # The list's tools are offered once there is a list (Decision 793): the second call is
+    # the first to carry them, in front of everything the first wrote, and reads nothing.
+    assert Enum.at(reads, 1) == 0
+    assert Enum.all?(Enum.drop(reads, 2), &(&1 > 0)), "every later call reads: #{inspect(reads)}"
 
     # What the provider reported is what the log holds, figure for figure.
     for {{_n, _path, _body, reported}, usage} <- Enum.zip(requests, usages) do
@@ -66,12 +70,12 @@ defmodule Troupe.Agent.PromptCacheTest do
     # A call whose task list is the one before's reads everything that call sent; one
     # after the list changed still reads the tools and the system prompt, the same each
     # time, and nothing of the conversation behind the list.
-    for n <- 2..@calls do
+    for n <- 3..@calls do
       previous = Enum.at(usages, n - 2)
       current = Enum.at(usages, n - 1)
 
       if (n - 1) in @todo_calls do
-        assert current.cache_read == Enum.at(usages, 1).cache_read
+        assert current.cache_read == Enum.at(usages, List.last(@todo_calls)).cache_read
       else
         assert current.cache_read == Usage.total_input(previous),
                "call #{n} reads all of call #{n - 1}'s prompt"
