@@ -215,6 +215,10 @@ defmodule Troupe.CLI.Runner do
   # when asked. Headless prints the transcript and exits when the agent rests, with a
   # code that says how (`Troupe.UI.Headless.Printer`); the TUI opens on it otherwise.
   defp run(args) do
+    # Said before this VM first speaks to the daemon, which names the session to the
+    # provider by what the connection called itself (root Decision 787).
+    Application.put_env(:troupe, :client_name, client_name(args))
+
     case Client.create_session({:local, args.workspace}, run_params(args)) do
       {:ok, sid} when args.headless ->
         me = self()
@@ -233,6 +237,14 @@ defmodule Troupe.CLI.Runner do
         fail("troupe: could not start: " <> reason(reason))
     end
   end
+
+  @doc """
+  What `troupe run` tells the daemon it is (Decision 147): a headless run, or the
+  terminal UI.
+  """
+  @spec client_name(CLI.args()) :: String.t()
+  def client_name(%{headless: true}), do: "troupe-headless"
+  def client_name(_args), do: "troupe"
 
   @doc """
   The session `troupe run` asks for. A headless run is a script's, and starts no

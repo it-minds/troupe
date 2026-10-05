@@ -75,7 +75,9 @@ lose its listener and every client without an agent noticing.
 `Agent.Server` is a `:gen_statem` over `:idle`, `:thinking`, `:acting`, `:compacting`
 and `:done`. The mailbox never blocks: the model request streams back from its own task,
 tool calls run in their own tasks concurrently and are reassembled in call order, and the
-only synchronous calls out are to `Session.Log`, which never calls back.
+only synchronous calls out are to `Session.Log`, which never calls back. A model call the
+agent gives up on, at `llm_timeout_ms` or on a cancel, has its task ended, which closes
+the request, and is counted for the usage the provider had reported (Decision 788).
 
 | State | Event | Next |
 |---|---|---|
@@ -84,7 +86,7 @@ only synchronous calls out are to `Session.Log`, which never calls back.
 | thinking | text only | done (`finished`) — an implicit finish |
 | thinking | prompt over the compaction threshold | compacting |
 | thinking | cut at the output cap, or empty | note it and re-issue once, then done (`output_truncated`, `empty_reply`) |
-| thinking | refusal, model error | done (`refused`); a root's failed request rests it idle, a subagent's is done (`llm_error`) and hands its parent what it has; a context overflow compacts once and retries |
+| thinking | refusal, model error, timeout | done (`refused`); a root's failed request rests it idle, a subagent's is done (`llm_error`) and hands its parent what it has; a context overflow compacts once and retries |
 | acting | each call | allowlist and permission check → error result, approval request, or a task |
 | acting | approval, answer, tool result, child result, a task's `DOWN` | record it, and stop a child that has reported; when none are outstanding, the next turn |
 | compacting | summary, model error, timeout | carry on the interrupted turn, or come to rest; without a summary the conversation is unchanged |

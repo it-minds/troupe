@@ -14,7 +14,9 @@
 # `{:tools, [{name, arguments}]}`; past its last step a script says "done". `errors: n`
 # answers the first `n` requests `500`, which the provider retries. Its usage counts four
 # bytes of the request as a token, and half the prompt as cached once a conversation has
-# an answer, so every figure a report carries is there.
+# an answer, so every figure a report carries is there. It records what each request said
+# about the caller (Decision 787): the User-Agent, LiteLLM's and OpenRouter's headers, and
+# the body's `user` and `metadata`; served on its own it prints them, never the key.
 unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
   defmodule Troupe.Test.FakeOpenAI do
     @model "standin-1"
@@ -23,7 +25,8 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
 
     @doc """
     Start one. Options: `scripts` (`bench_scripts/0`), `first_token_ms` (20), `done_ms`
-    (40), `errors` (0) and `port` (0, any free one).
+    (40), `errors` (0), `port` (0, any free one) and `print` (false: print what each
+    request said about its caller).
     """
     def start(opts \\ []) do
       {:ok, listener} =
@@ -44,6 +47,7 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
             first_token_ms: Keyword.get(opts, :first_token_ms, 20),
             done_ms: Keyword.get(opts, :done_ms, 40),
             errors: Keyword.get(opts, :errors, 0),
+            print: Keyword.get(opts, :print, false),
             requests: []
           }
         end)
@@ -60,12 +64,19 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
       :ok
     end
 
-    @doc "Every request so far, oldest first: `%{authorization, model, status}`."
+    @doc """
+    Every request so far, oldest first: `%{authorization, model, status, caller}`, where
+    `caller` is what it said about itself (`user_agent`, `tags`, `spend_metadata`,
+    `referer`, `title`, `user`, `metadata`).
+    """
     def requests(fake), do: fake.agent |> Agent.get(& &1.requests) |> Enum.reverse()
 
-    @doc "Run one until the VM is stopped, printing its URL: for an installed `troupe`."
+    @doc """
+    Run one until the VM is stopped, printing its URL and what each request said about its
+    caller: for an installed `troupe`.
+    """
     def serve(opts \\ []) do
-      fake = start(opts)
+      fake = start(Keyword.put_new(opts, :print, true))
       IO.puts("stand-in model #{@model} at #{fake.url}")
       Process.sleep(:infinity)
     end
@@ -250,19 +261,18 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
       with {:ok, head, body} <- read_request(socket),
            true <- Process.alive?(agent) do
         request = JSON.decode!(body)
-        authorization = header(head, "authorization")
         state = Agent.get(agent, & &1)
 
         if state.errors > 0 do
           Agent.update(agent, &%{&1 | errors: &1.errors - 1})
-          note(agent, authorization, request, 500)
+          note(agent, head, request, 500)
 
           :gen_tcp.send(
             socket,
             "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}"
           )
         else
-          note(agent, authorization, request, 200)
+          note(agent, head, request, 200)
           stream(socket, request, body, state)
         end
       end
@@ -270,9 +280,28 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
       :gen_tcp.close(socket)
     end
 
-    defp note(agent, authorization, request, status) do
-      entry = %{authorization: authorization, model: request["model"], status: status}
+    defp note(agent, head, request, status) do
+      caller = %{
+        user_agent: header(head, "user-agent"),
+        tags: header(head, "x-litellm-tags"),
+        spend_metadata: header(head, "x-litellm-spend-logs-metadata"),
+        referer: header(head, "http-referer"),
+        title: header(head, "x-title"),
+        user: request["user"],
+        metadata: request["metadata"]
+      }
+
+      entry = %{
+        authorization: header(head, "authorization"),
+        model: request["model"],
+        status: status,
+        caller: caller
+      }
+
       Agent.update(agent, &%{&1 | requests: [entry | &1.requests]})
+
+      if Agent.get(agent, & &1.print),
+        do: IO.puts("request #{request["model"]}: " <> JSON.encode!(caller))
     end
 
     defp stream(socket, request, body, state) do

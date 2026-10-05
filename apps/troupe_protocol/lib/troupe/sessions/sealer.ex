@@ -36,6 +36,14 @@ defmodule Troupe.Sessions.Sealer do
   not — starts at `:sealed_through`, what storage already has, and takes what the log
   holds after it from `:backfill`, a function of that sequence number. It asks after it
   subscribes, so nothing written between the two is missed, and drops what arrives twice.
+
+  ## When another device has the session
+
+  A report is where the plane fences a session: one it refuses as stale, which `:report`
+  answers as `{:error, :stale_version}`, means another device claimed it at a newer
+  epoch. The sealer seals nothing more, not even on its way down, and stops with
+  `{:shutdown, :stale_version}`, so a host restarts it only after a crash (issue #433).
+  A pod's reports are queued and answer nothing, so this is a daemon's.
   """
 
   use GenServer
@@ -65,7 +73,8 @@ defmodule Troupe.Sessions.Sealer do
     snapshot: nil,
     last_snapshot_at: 0,
     seal_interval_ms: @seal_interval_ms,
-    snapshot_every: @snapshot_every
+    snapshot_every: @snapshot_every,
+    fenced: false
   ]
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -73,13 +82,22 @@ defmodule Troupe.Sessions.Sealer do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
   end
 
-  @doc "Seal whatever is pending now, and wait for it. Dormancy and shutdown use this."
+  @doc """
+  Seal whatever is pending now, and wait for it. Dormancy and shutdown use this.
+
+  `{:error, :stale_version}` where the plane refused the report, and the sealer has stopped.
+  """
   @spec seal_now(GenServer.server(), timeout()) :: {:ok, map()} | {:error, term()}
   def seal_now(server, timeout \\ 60_000), do: GenServer.call(server, :seal_now, timeout)
 
-  @doc "How far this session is sealed, for tests and for the heartbeat."
-  @spec status(GenServer.server()) :: map()
-  def status(server), do: GenServer.call(server, :status)
+  @doc """
+  How far this session is sealed, for tests, the heartbeat and a daemon's listing.
+
+  A sealer answers between seals, so a listing that must not wait out an upload passes a
+  short `timeout` and reads the exit as a seal under way.
+  """
+  @spec status(GenServer.server(), timeout()) :: map()
+  def status(server, timeout \\ 5_000), do: GenServer.call(server, :status, timeout)
 
   @impl GenServer
   def init(opts) do
@@ -143,7 +161,7 @@ defmodule Troupe.Sessions.Sealer do
     # object tier the size of the session rather than the size of its typing. They are
     # still read for their timing: the root agent going back to idle is how a turn ends,
     # and that transition is only ever announced ephemerally.
-    if turn_complete?(event), do: {:noreply, seal(state)}, else: {:noreply, state}
+    if turn_complete?(event), do: state |> seal() |> sealed(), else: {:noreply, state}
   end
 
   def handle_info({:troupe_event, _session_id, %Event{} = event}, state) do
@@ -152,22 +170,27 @@ defmodule Troupe.Sessions.Sealer do
     # A turn ending is the natural seal point: everything the model and its tools did is
     # in, and the next thing to happen is a person.
     if turn_complete?(event) do
-      {:noreply, seal(state)}
+      state |> seal() |> sealed()
     else
       {:noreply, state}
     end
   end
 
   def handle_info(:interval, state) do
-    {:noreply, state |> seal() |> schedule()}
+    state |> seal() |> schedule() |> sealed()
   end
 
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl GenServer
   def handle_call(:seal_now, _from, state) do
-    state = seal(state)
-    {:reply, {:ok, summary(state)}, state}
+    case seal(state) do
+      %{fenced: true} = state ->
+        {:stop, {:shutdown, :stale_version}, {:error, :stale_version}, state}
+
+      state ->
+        {:reply, {:ok, summary(state)}, state}
+    end
   end
 
   def handle_call(:status, _from, state), do: {:reply, summary(state), state}
@@ -189,8 +212,15 @@ defmodule Troupe.Sessions.Sealer do
     |> Enum.reverse()
   end
 
+  # After a seal, carry on, or stop where the plane refused its report as stale.
+  defp sealed(%__MODULE__{fenced: true} = state), do: {:stop, {:shutdown, :stale_version}, state}
+  defp sealed(state), do: {:noreply, state}
+
   # -- sealing ----------------------------------------------------------------
 
+  # Nothing after a stale report: what this device would write now is beside the epoch
+  # another device holds.
+  defp seal(%__MODULE__{fenced: true} = state), do: state
   defp seal(%__MODULE__{pending: []} = state), do: state
 
   defp seal(state) do
@@ -212,6 +242,15 @@ defmodule Troupe.Sessions.Sealer do
         |> write_manifest()
         |> maybe_snapshot()
         |> report(segment)
+
+      # A daemon's store when nobody is linked, or the person signed out: nobody to seal for
+      # yet, which is a state and not a fault. Kept, as below, for the link that comes.
+      {:error, :unlinked} ->
+        Logger.info(
+          "troupe: #{context.session_id} is not sealed while nobody is linked; its events are kept"
+        )
+
+        state
 
       {:error, reason} ->
         # Keep them. The next interval tries again, and until it succeeds this session's
@@ -277,20 +316,22 @@ defmodule Troupe.Sessions.Sealer do
   end
 
   # Upload first, then report. A segment the plane has been told about but that is not
-  # in storage would make a rebuild claim history it cannot produce.
+  # in storage would make a rebuild claim history it cannot produce. A report refused as
+  # stale is another device holding the session, and the last one this sealer makes.
   defp report(state, segment) do
-    state.report.(%{
-      "session_id" => state.context.session_id,
-      "epoch" => segment.epoch,
-      "first_seq" => segment.first_seq,
-      "last_seq" => segment.last_seq,
-      "head_hash" => segment.head_hash,
-      "object_key" => segment.key,
-      "bytes" => segment.bytes,
-      "object_bytes" => state.object_bytes
-    })
+    reported =
+      state.report.(%{
+        "session_id" => state.context.session_id,
+        "epoch" => segment.epoch,
+        "first_seq" => segment.first_seq,
+        "last_seq" => segment.last_seq,
+        "head_hash" => segment.head_hash,
+        "object_key" => segment.key,
+        "bytes" => segment.bytes,
+        "object_bytes" => state.object_bytes
+      })
 
-    state
+    %{state | fenced: reported == {:error, :stale_version}}
   end
 
   # The root agent coming to rest is a turn ending: everything the model and its tools

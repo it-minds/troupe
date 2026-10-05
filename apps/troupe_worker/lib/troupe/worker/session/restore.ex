@@ -370,8 +370,14 @@ defmodule Troupe.Worker.Session.Restore do
       end)
       # Who the gateway bills and records this session against. The owner, not whoever
       # is typing: a collaborator's input is billed to the owner's team budget, because
-      # the budget belongs to the session and a session has one owner.
-      |> Keyword.put_new(:attribution, %{owner: context.owner_subject, team: context.team})
+      # the budget belongs to the session and a session has one owner. Its model calls
+      # name the worker as the client, whichever client is attached (Decision 787).
+      |> Keyword.put_new(:attribution, %{
+        owner: context.owner_subject,
+        team: context.team,
+        profile: context.profile
+      })
+      |> Keyword.put_new(:client, "worker")
       # A client attached to a remote session has no other way to know that `shell` wrote
       # something, so this is not optional here.
       |> Keyword.put_new(:fs_events, true)

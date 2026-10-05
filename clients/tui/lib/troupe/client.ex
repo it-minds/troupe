@@ -28,9 +28,14 @@ defmodule Troupe.Client do
   @typedoc """
   One session as a picker or HQ row shows it, whichever side it lives on.
   `state` is the remote vocabulary (`:active`, `:dormant`, `:read_only`,
-  `:erased`); a local session is `:active` while it runs and `:dormant` once it
-  is only on disk. A local row lists its `branches` (`%{id, state}`, what the daemon
-  says of each) and names its `parent` when it is one.
+  `:erasure_pending`, `:erased`); a local session is `:active` while it runs and
+  `:dormant` once it is only on disk. A local row lists its `branches` (`%{id, state}`,
+  what the daemon says of each) and names its `parent` when it is one.
+
+  `kind` is `"local"`, `"private"` or a plane's `"team"`. A private one carries its
+  `sync` as the daemon says it (root Decision 785): `"current"`, `"behind"`, `"paused"`,
+  `"elsewhere"` (another device holds it, `device` names it, and `claim_session/2` takes
+  it over) or `"erasure_pending"`; a plane's private row says only the last.
   """
   @type summary :: %{
           id: session_id(),
@@ -46,7 +51,10 @@ defmodule Troupe.Client do
           origin: origin(),
           branches: [%{id: session_id(), state: atom() | nil}],
           parent: session_id() | nil,
-          workspace: String.t() | nil
+          workspace: String.t() | nil,
+          kind: String.t() | nil,
+          sync: String.t() | nil,
+          device: String.t() | nil
         }
 
   @typedoc """
@@ -126,6 +134,7 @@ defmodule Troupe.Client do
   @callback create_session(origin(), map()) :: {:ok, session_id()} | {:error, term()}
   @callback open_session(origin(), session_id(), :read | :activate, keyword()) ::
               {:ok, session_id()} | {:error, term()}
+  @callback claim_session(origin(), session_id()) :: {:ok, map()} | {:error, term()}
   @callback whoami(origin()) :: {:ok, map()} | {:error, term()}
   @callback fleet_status(origin()) :: map()
   @callback subscribe_fleet(origin()) :: :ok | {:error, term()}
@@ -344,6 +353,14 @@ defmodule Troupe.Client do
           {:ok, session_id()} | {:error, term()}
   def open_session(origin, sid, mode \\ :read, opts \\ []),
     do: impl_for(origin).open_session(origin, sid, mode, opts)
+
+  @doc """
+  Take a private session another device sealed last over on this machine (root Decision
+  785): the daemon claims it at the plane and seals it from here. The answer is the
+  daemon's, with the `device` and `epoch` the plane's row now has.
+  """
+  @spec claim_session(origin(), session_id()) :: {:ok, map()} | {:error, term()}
+  def claim_session(origin, sid), do: impl_for(origin).claim_session(origin, sid)
 
   @spec whoami(origin()) :: {:ok, map()} | {:error, term()}
   def whoami(origin), do: impl_for(origin).whoami(origin)

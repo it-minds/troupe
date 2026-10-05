@@ -88,7 +88,12 @@ export interface SessionRow {
   owner: string;
   profile: string;
   visibility: string;
-  state: "active" | "dormant" | "read_only" | "erased" | string;
+  /** `erasure_pending`: a private session somebody erased whose key is not destroyed yet (troupe Decision 756). */
+  state: "active" | "dormant" | "read_only" | "erasure_pending" | "erased" | string;
+  /** `private` for one of the person's own sessions, listed beside the team's; absent from a plane before the column. */
+  kind?: "team" | "private" | string;
+  /** The device that sealed a private session last. */
+  device?: string | null;
   epoch: number;
   title: string | null;
   last_active_at: string | null;

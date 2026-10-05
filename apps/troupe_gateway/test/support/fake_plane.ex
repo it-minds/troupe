@@ -20,6 +20,9 @@ defmodule Troupe.Gateway.FakePlane do
   marked that a device has not acknowledged, and `session.erased` records the device and
   deletes every version under the prefix in MinIO, as the plane does. `session.get`
   answers a row as its owner reads it, and an erased one as `not_found`, as the plane does.
+  `session.erase` is the person's own erasure (Decision 789): the key first, which
+  `refuse_keys/2` can make the key manager refuse, leaving the row `erasure_pending` until
+  an erase or a `session.erasures` finds it willing again.
 
   It takes one plane token at a time, `"plane-token"` unless told otherwise, and
   `renew/2` replaces it, as a plane token running out and a client renewing it does: the
@@ -34,7 +37,7 @@ defmodule Troupe.Gateway.FakePlane do
   def start_link(opts \\ []) do
     token = Keyword.get(opts, :token, "plane-token")
 
-    Agent.start_link(fn -> %{sessions: %{}, calls: [], token: token} end,
+    Agent.start_link(fn -> %{sessions: %{}, calls: [], token: token, refuse_keys: false} end,
       name: Keyword.get(opts, :name)
     )
   end
@@ -90,6 +93,51 @@ defmodule Troupe.Gateway.FakePlane do
       erased = Map.merge(row, %{"state" => "erased", "applied_by" => []})
       {erased, %{s | sessions: Map.put(sessions, session_id, erased)}}
     end)
+  end
+
+  @doc """
+  Erase the session where the key manager would not destroy its key: the row is
+  `erasure_pending`, listed as it is, and not yet named to any device (Decision 756), and
+  the key manager goes on refusing until `refuse_keys/2` says otherwise.
+  """
+  @spec pend_erasure(pid(), String.t()) :: map()
+  def pend_erasure(state, session_id) do
+    Agent.get_and_update(state, fn %{sessions: sessions} = s ->
+      row = Map.get(sessions, session_id, %{"session_id" => session_id, "kind" => "private"})
+      pending = Map.put(row, "state", "erasure_pending")
+      {pending, %{s | sessions: Map.put(sessions, session_id, pending), refuse_keys: true}}
+    end)
+  end
+
+  @doc """
+  Have the key manager refuse to destroy a key, or destroy it again. While it refuses, an
+  erasure leaves the row `erasure_pending`; once it does not, the next `session.erase` or
+  `session.erasures` finishes it, as the plane's does.
+  """
+  @spec refuse_keys(pid(), boolean()) :: :ok
+  def refuse_keys(state, refuse?), do: Agent.update(state, &%{&1 | refuse_keys: refuse?})
+
+  @doc """
+  A row another device registered and sealed, as if the session had been carried on there:
+  `device`, `epoch`, `last_seq` and `head_hash` from `attrs`, over a first registration's.
+  """
+  @spec put(pid(), String.t(), map()) :: map()
+  def put(state, session_id, attrs) do
+    row =
+      Map.merge(
+        %{
+          "session_id" => session_id,
+          "kind" => "private",
+          "epoch" => 1,
+          "device" => "the other one",
+          "last_seq" => 0,
+          "head_hash" => nil
+        },
+        attrs
+      )
+
+    Agent.update(state, &%{&1 | sessions: Map.put(&1.sessions, session_id, row)})
+    row
   end
 
   # -- the methods ------------------------------------------------------------
@@ -171,7 +219,35 @@ defmodule Troupe.Gateway.FakePlane do
     end
   end
 
+  # The person's erasure of their own session: the key first, and `erasure_pending` until
+  # it is gone. The objects wait for a device to say it has stopped (`session.erased`).
+  defp dispatch(state, "session.erase", %{"session_id" => id}) do
+    Agent.get_and_update(state, fn %{sessions: sessions} = s ->
+      case sessions[id] do
+        nil ->
+          {{:error, "not_found"}, s}
+
+        row ->
+          erased = finish(row, s.refuse_keys)
+
+          answer = %{
+            "session_id" => id,
+            "erased" => erased["state"] == "erased",
+            "state" => erased["state"],
+            "head_hash" => row["head_hash"]
+          }
+
+          {{:ok, answer}, %{s | sessions: Map.put(sessions, id, erased)}}
+      end
+    end)
+  end
+
+  # A row whose key is not destroyed yet is tried again first, as the plane's is.
   defp dispatch(state, "session.erasures", %{"device" => device}) do
+    Agent.update(state, fn s ->
+      %{s | sessions: Map.new(s.sessions, fn {id, row} -> {id, retried(row, s.refuse_keys)} end)}
+    end)
+
     erasures =
       for {id, %{"state" => "erased"} = row} <- Agent.get(state, & &1.sessions),
           device not in row["applied_by"],
@@ -212,6 +288,17 @@ defmodule Troupe.Gateway.FakePlane do
       {{:ok, sealed}, %{s | sessions: Map.put(sessions, id, sealed)}}
     end
   end
+
+  defp finish(%{"state" => "erased"} = row, _refused?), do: row
+
+  defp finish(row, refused?) do
+    row
+    |> Map.put_new("applied_by", [])
+    |> Map.put("state", if(refused?, do: "erasure_pending", else: "erased"))
+  end
+
+  defp retried(%{"state" => "erasure_pending"} = row, refused?), do: finish(row, refused?)
+  defp retried(row, _refused?), do: row
 
   defp known(state, session_id) do
     if row(state, session_id), do: :ok, else: {:error, "not_found"}

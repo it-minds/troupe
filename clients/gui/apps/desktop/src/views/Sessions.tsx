@@ -11,7 +11,7 @@
 
 import { useMemo, useState } from "react";
 import type { JSX } from "react";
-import { filterRows } from "@troupe/client";
+import { claimable, claimRefusal, filterRows } from "@troupe/client";
 import type { FleetRow, SessionKind } from "@troupe/client";
 import { Cost, RowStatus, statusOf, Sync, Unread, When, Where } from "./bits";
 
@@ -21,6 +21,7 @@ export function Sessions({
   error,
   onOpen,
   onStart,
+  onClaim,
 }: {
   rows: FleetRow[];
   loading: boolean;
@@ -28,7 +29,20 @@ export function Sessions({
   onOpen: (id: string) => void;
   /** Go and cast a troupe: the start screen is the shell's, not the list's. */
   onStart: () => void;
+  /** Take a private session another device holds over on this computer; absent with no daemon to ask. */
+  onClaim?: ((id: string) => Promise<void>) | undefined;
 }): JSX.Element {
+  const [claimError, setClaimError] = useState<string | null>(null);
+  const claim = onClaim
+    ? async (id: string): Promise<void> => {
+        setClaimError(null);
+        try {
+          await onClaim(id);
+        } catch (e) {
+          setClaimError(claimRefusal(e));
+        }
+      }
+    : undefined;
   const [query, setQuery] = useState("");
   const [state, setState] = useState("");
   const [status, setStatus] = useState("");
@@ -115,6 +129,12 @@ export function Sessions({
         </div>
       )}
 
+      {claimError && (
+        <div className="banner error" role="alert">
+          <p>It was not claimed here. {claimError}.</p>
+        </div>
+      )}
+
       <div className="listing">
         {rows.length === 0 && !loading ? (
           <div className="empty">
@@ -137,13 +157,13 @@ export function Sessions({
             {waiting.length > 0 && (
               <section className="group waiting">
                 <h3>Waiting for you</h3>
-                <Rows rows={waiting} onOpen={onOpen} />
+                <Rows rows={waiting} onOpen={onOpen} onClaim={claim} />
               </section>
             )}
             {rest.length > 0 && (
               <section className="group">
                 {waiting.length > 0 && <h3>Everything else</h3>}
-                <Rows rows={rest} onOpen={onOpen} />
+                <Rows rows={rest} onOpen={onOpen} onClaim={claim} />
               </section>
             )}
           </>
@@ -158,13 +178,14 @@ export function Sessions({
  * says, in its order — the profile and the cost are what a session *is*, the pills are
  * where it runs and what it is doing, and the time sits at the edge to be scanned.
  */
-function Rows({ rows, onOpen }: { rows: FleetRow[]; onOpen: (id: string) => void }): JSX.Element {
+function Rows({ rows, onOpen, onClaim }: { rows: FleetRow[]; onOpen: (id: string) => void; onClaim?: ((id: string) => Promise<void>) | undefined }): JSX.Element {
   return (
     <ul className="rows">
       {rows.map((r) => {
         const status = statusOf(r);
+        const claim = onClaim && claimable(r);
         return (
-          <li key={r.id}>
+          <li key={r.id} className={claim ? "claimable" : undefined}>
             <button className={`row is-${status}`} onClick={() => onOpen(r.id)}>
               <span className="subject">
                 <span className="title">{r.title ?? r.id}</span>
@@ -176,14 +197,37 @@ function Rows({ rows, onOpen }: { rows: FleetRow[]; onOpen: (id: string) => void
               <span className="meta">
                 <Unread row={r} />
                 <Where kind={r.kind} />
-                <Sync state={r.sync} />
+                <Sync state={r.sync} device={r.device} />
                 <RowStatus row={r} />
                 <When iso={r.lastActiveAt} />
               </span>
             </button>
+            {claim && <Claim row={r} onClaim={onClaim} />}
           </li>
         );
       })}
     </ul>
+  );
+}
+
+/**
+ * Take a private session another device holds over on this computer (troupe Decision
+ * 785). Beside the row rather than in it: the row opens the session, and a button inside
+ * a button is neither.
+ */
+function Claim({ row, onClaim }: { row: FleetRow; onClaim: (id: string) => Promise<void> }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      className="claim"
+      disabled={busy}
+      title={`Seal it from this computer from now on; ${row.device ?? "the other device"} stops sealing it`}
+      onClick={() => {
+        setBusy(true);
+        void onClaim(row.id).finally(() => setBusy(false));
+      }}
+    >
+      {busy ? "Claiming" : "Claim"}
+    </button>
   );
 }

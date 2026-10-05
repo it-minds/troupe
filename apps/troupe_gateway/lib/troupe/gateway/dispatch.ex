@@ -50,14 +50,17 @@ defmodule Troupe.Gateway.Dispatch do
     @moduledoc "Who is calling, and what they are allowed to do."
 
     @enforce_keys [:principal, :scopes, :connection]
-    defstruct [:principal, :scopes, :connection, :next_subscription_id, :activate]
+    defstruct [:principal, :scopes, :connection, :next_subscription_id, :activate, :client]
 
+    # `client`: which client this connection is, a word from `Troupe.LLM.Identify.clients/0`;
+    # a session it creates or wakes names it to the provider (Decision 787).
     @type t :: %__MODULE__{
             principal: map(),
             scopes: [:observe | :control | :admin],
             connection: pid(),
             next_subscription_id: String.t() | nil,
-            activate: (String.t() -> {:ok, pid()} | {:error, term()}) | nil
+            activate: (String.t() -> {:ok, pid()} | {:error, term()}) | nil,
+            client: String.t() | nil
           }
   end
 
@@ -111,6 +114,9 @@ defmodule Troupe.Gateway.Dispatch do
     "session.pin" => :admin,
     "session.unpin" => :admin,
     "session.erase" => :admin,
+    # Taking a private session over from another device, which then stops sealing it, is
+    # the person's own say about where their session lives, like archiving or erasing it.
+    "session.claim" => :admin,
     "worktree.remove" => :admin,
     # Both change the user's own checkout — a merge lands a branch on it, a discard
     # throws work away — so they take the scope everything else that does takes.
@@ -766,17 +772,19 @@ defmodule Troupe.Gateway.Dispatch do
 
   # -- lifecycle --------------------------------------------------------------
 
-  defp handle("session.create", params, _context) do
+  defp handle("session.create", params, context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          {:ok, parent} <- parent_of(params),
          {:ok, resolved} <- Worktrees.resolve(workspace, Map.get(params, "worktree", "auto")) do
       private? = Map.get(params, "private", false) == true
       {profile, task} = workflow_of(params, workspace)
 
+      # The client that asked is the one the session names to the provider (Decision 787).
+      config = [client: context.client] ++ List.wrap(overrides(Map.get(params, "config")))
+
       opts =
-        [workspace: resolved.path, agent: profile]
+        [workspace: resolved.path, agent: profile, config_overrides: config]
         |> maybe_put(:task, task)
-        |> maybe_put(:config_overrides, overrides(Map.get(params, "config")))
         |> maybe_put(:parent, parent)
         |> maybe_private(private?)
 
@@ -816,10 +824,44 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("session.pin", params, _context), do: pin(params, true)
   defp handle("session.unpin", params, _context), do: pin(params, false)
 
+  # A private session is sealed at the plane as well, and erased there first, as one erased
+  # from elsewhere is; `state` says whether the plane has destroyed its key yet (Decision
+  # 789).
   defp handle("session.erase", params, _context) do
     with {:ok, session_id} <- fetch(params, "session_id") do
-      Troupe.erase_session(session_id)
-      {:ok, %{"session_id" => session_id, "erased" => true}}
+      case Troupe.get_session(session_id) do
+        %{kind: "private"} = session ->
+          erase_private(session)
+
+        _local ->
+          Troupe.erase_session(session_id)
+          {:ok, %{"session_id" => session_id, "erased" => true, "state" => "erased"}}
+      end
+    end
+  end
+
+  # A private session another device sealed last is that device's until the person claims
+  # it here (Decision 764), which a machine whose name changed needs too. Answered once the
+  # plane has said: the row as it now stands, and how sealing stands here.
+  defp handle("session.claim", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, session} <- lookup(session_id),
+         :ok <- private_session(session) do
+      case Private.take_over(session) do
+        {:ok, row} ->
+          {sync, _device} = Private.sync(session_id)
+
+          {:ok,
+           %{
+             "session_id" => session_id,
+             "device" => row["device"],
+             "epoch" => row["epoch"],
+             "sync" => sync
+           }}
+
+        {:error, reason} ->
+          {:error, claim_error(session_id, reason)}
+      end
     end
   end
 
@@ -891,8 +933,12 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle("identity.link", params, context) do
     with {:ok, subject} <- fetch(params, "subject") do
+      linked = Plane.subject()
+
       case Identity.link(Map.put(params, "subject", subject)) do
         {:ok, identity} ->
+          linked_over(linked, subject)
+
           # `plane_token`, if the client sent one, goes to the process that holds it
           # and nowhere near the file: `identity.json` records a label, and a token is
           # not a label. A client that sends none links the name alone, which is what a
@@ -911,9 +957,12 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # The token goes with the link, and the sealing with the token, as at a sign-out (issue
+  # #386): a sealer left running would seal with the token of whoever links next.
   defp handle("identity.unlink", _params, context) do
     Identity.unlink()
     :ok = Plane.unlink()
+    Private.suspend()
     user = System.get_env("USER") || System.get_env("USERNAME") || "local"
     send(context.connection, {:principal_changed, Identity.principal(user)})
     {:ok, Identity.to_json(nil)}
@@ -1132,6 +1181,14 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp erasures(_params), do: :ok
 
+  # Somebody else linking over the person before stops that person's sealing first, as an
+  # unlink would: a sealer seals with whatever token the daemon holds, and the one this link
+  # brings is not theirs (issue #386). The same person again, as at every renewal, stops
+  # nothing.
+  defp linked_over(nil, _subject), do: :ok
+  defp linked_over(subject, subject), do: :ok
+  defp linked_over(_before, _subject), do: Private.suspend()
+
   # -- helpers ----------------------------------------------------------------
 
   # A client cannot see this machine's filesystem, so "it did not work" is useless to
@@ -1346,8 +1403,8 @@ defmodule Troupe.Gateway.Dispatch do
   # Through the endpoint's own activation where it has one. On a pod only the plane brings
   # a session back, so there `not_found` is the answer for one with no tree running, and
   # the client asks the plane where the session is (PROTOCOL.md §6, "A session that moves").
-  defp activate(session_id, %Context{activate: activate}) do
-    case (activate || (&Troupe.activate/1)).(session_id) do
+  defp activate(session_id, %Context{activate: activate} = context) do
+    case (activate || (&Troupe.activate(&1, client: context.client))).(session_id) do
       {:ok, _pid} -> :ok
       {:error, :not_found} -> {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
       {:error, reason} -> {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
@@ -1514,6 +1571,69 @@ defmodule Troupe.Gateway.Dispatch do
       "last_active_at" => Map.get(session, :last_active_at),
       "pinned" => Map.get(session, :pinned, false)
     }
+    |> Map.merge(kept_json(session))
+  end
+
+  # Where a session is kept, `local` or `private` (a pod's are `team`), and for a private
+  # one how its sealing stands here (`Private.sync/1`): a client lists it as private, says
+  # whether its copy elsewhere is current, and offers `session.claim` for one another
+  # device holds, which `device` names. A local session has no sync to speak of.
+  defp kept_json(%{kind: "private", id: session_id}) do
+    {sync, device} = Private.sync(session_id)
+    %{"kind" => "private", "sync" => sync, "device" => device}
+  end
+
+  defp kept_json(session),
+    do: %{"kind" => Map.get(session, :kind) || "local", "sync" => nil, "device" => nil}
+
+  defp private_session(%{kind: "private"}), do: :ok
+
+  defp private_session(%{id: session_id}),
+    do:
+      {:error,
+       Error.new(:invalid_params, %{session_id: session_id, reason: "not a private session"})}
+
+  # Each way a claim is refused, in the protocol's words: not yet a session the plane
+  # knows, erased, held by another history than this copy's, lost to another device that
+  # claimed it first, or no plane to ask.
+  defp claim_error(session_id, :erased),
+    do: Error.new(:not_found, %{session_id: session_id, reason: "erased"})
+
+  defp claim_error(session_id, :not_registered),
+    do: Error.new(:not_found, %{session_id: session_id, reason: "not_registered"})
+
+  defp claim_error(session_id, :diverged),
+    do: Error.new(:conflict, %{session_id: session_id, reason: "diverged"})
+
+  defp claim_error(session_id, {:rpc, %{"message" => "stale_version"}}),
+    do: Error.new(:stale_version, %{session_id: session_id})
+
+  defp claim_error(session_id, :unlinked),
+    do: Error.new(:unavailable, %{session_id: session_id, reason: "unlinked"})
+
+  defp claim_error(session_id, reason),
+    do: Error.new(:unavailable, %{session_id: session_id, reason: inspect(reason)})
+
+  defp erase_private(%{id: session_id} = session) do
+    case Private.erase(session) do
+      {:ok, state} ->
+        {:ok, %{"session_id" => session_id, "erased" => state == "erased", "state" => state}}
+
+      {:error, reason} ->
+        {:error, erase_error(session_id, reason)}
+    end
+  end
+
+  # Nothing was erased: the plane could not be asked, with no token (`unlinked`), with one
+  # that is not the owner's (`not_owner`) or for want of an answer, and the sealed copy is
+  # there, at the plane this daemon was last linked to. It is erased there, or here once its
+  # owner links again.
+  defp erase_error(session_id, reason) do
+    Error.new(:unavailable, %{
+      session_id: session_id,
+      reason: if(is_atom(reason), do: Atom.to_string(reason), else: inspect(reason)),
+      plane_url: with(%{plane_url: url} <- Identity.get(), do: url)
+    })
   end
 
   defp unseen_json(nil), do: unseen_json(Unseen.none())

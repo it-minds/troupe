@@ -309,6 +309,14 @@
       ],
       "minimum": 1
     },
+    "identify": {
+      "description": "Every model call names Troupe: a User-Agent with the version and the client, LiteLLM's tags and the session's id to a gateway, OpenRouter's app headers to OpenRouter; never a person, a path or a repository. `false` sends none of it. `troupe doctor` prints what goes out. Read from a project's file only in a trusted workspace.",
+      "default": true,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "max_turns": {
       "description": "Model calls an agent may make before its budget stops it.",
       "default": 40,

@@ -5,10 +5,15 @@ defmodule Troupe.LLM.Provider do
   `stream/3` runs inside a task under the calling agent's `Agent.Tasks` supervisor.
   It sends `{:llm_delta, ref, delta}` zero or more times, then exactly one
   `{:llm_done, ref, response}` or `{:llm_error, ref, reason}`. Retries on 429 and 5xx
-  happen inside the task; the agent only ever sees a final outcome.
+  happen inside the task; the agent only ever sees a final outcome. Along the way it
+  sends `{:llm_usage, ref, usage}` whenever the provider has reported usage, the running
+  total so far, which is what a call the agent stops before it answers is counted as
+  (Decision 788).
 
   Because the task is supervised by the agent, an agent that dies takes its in-flight
-  request with it — cancellation needs no cooperation from the adapter.
+  request with it — cancellation needs no cooperation from the adapter. An agent that
+  gives up on a call, at its timeout or on a cancel, ends the task, which closes the
+  request.
   """
 
   alias Troupe.LLM.Request

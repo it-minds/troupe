@@ -309,13 +309,18 @@ defmodule Troupe.Agent.Server do
     do: %{state | child_seq: child_seq(state, data["child_path"])}
 
   # The note a root's failed request left in its conversation (Decision 693). A log written
-  # before the note was, has none, and replays as it always did.
-  defp fold_event(%Event{type: "llm_error", data: %{"note" => note}}, state) when is_binary(note),
-    do: %{state | conversation: state.conversation ++ [Message.user(note)]}
+  # before the note was, has none, and replays as it always did. A call the agent gave up
+  # on is counted as it was live (Decision 788).
+  defp fold_event(%Event{type: "llm_error", data: %{"note" => note} = data}, state)
+       when is_binary(note),
+       do: %{fold_stopped(state, data) | conversation: state.conversation ++ [Message.user(note)]}
+
+  defp fold_event(%Event{type: "llm_error", data: data}, state), do: fold_stopped(state, data)
 
   # A turn ends cancelled as well as at rest, and the next one counts what it costs from
   # nothing (Decision 769).
-  defp fold_event(%Event{type: "cancelled"}, state), do: %{state | turn: %Spend{}}
+  defp fold_event(%Event{type: "cancelled", data: data}, state),
+    do: %{fold_stopped(state, data) | turn: %Spend{}}
 
   defp fold_event(%Event{type: type, data: data}, state) do
     case type do
@@ -429,6 +434,21 @@ defmodule Troupe.Agent.Server do
   end
 
   defp fold_summary_call(state, _data), do: state
+
+  # A call stopped before it answered (Decision 788): one of the turn's calls, and the
+  # budget charged what it had reported, which may be nothing.
+  defp fold_stopped(state, %{"stopped" => %{} = stopped}) do
+    usage = Usage.from_json(stopped["usage"])
+    cost = get_in(stopped, ["gateway", "cost_micros"])
+
+    %{
+      state
+      | budget: Budget.charge_usage(state.budget, usage),
+        turn: Spend.call(state.turn, usage, cost)
+    }
+  end
+
+  defp fold_stopped(state, _data), do: state
 
   defp fold_done(state, "agent_done", data),
     do: %{reclaim_run_grant(state) | done_reason: safe_reason(data["reason"]), turn: %Spend{}}
@@ -710,6 +730,11 @@ defmodule Troupe.Agent.Server do
     {:keep_state, accumulate_delta(state, delta)}
   end
 
+  # What the provider has reported of the call so far, a running total: the response's
+  # replaces it, and a call given up on is counted by it (Decision 788).
+  def thinking(:info, {:llm_usage, ref, %Usage{} = usage}, %State{llm_ref: ref} = state),
+    do: {:keep_state, %{state | llm_usage: usage}}
+
   def thinking(:info, {:llm_done, ref, %Response{} = response}, %State{llm_ref: ref} = state) do
     state = state |> clear_llm() |> record_response(response)
     handle_response(state, response)
@@ -725,8 +750,8 @@ defmodule Troupe.Agent.Server do
   end
 
   def thinking(:info, {:llm_timeout, ref}, %State{llm_ref: ref} = state) do
-    {:keep_state_and_data,
-     [{:next_event, :info, {:llm_error, ref, {:timeout, state.config.llm_timeout_ms}}}]}
+    {state, stopped} = stop_llm(state)
+    llm_failed(state, Provider.describe_error({:timeout, state.config.llm_timeout_ms}), stopped)
   end
 
   def thinking(:info, :cancel, state), do: cancel_everything(state)
@@ -830,23 +855,22 @@ defmodule Troupe.Agent.Server do
     {:keep_state_and_data, []}
   end
 
+  def compacting(:info, {:llm_usage, ref, %Usage{} = usage}, %State{llm_ref: ref} = state),
+    do: {:keep_state, %{state | llm_usage: usage}}
+
   def compacting(:info, {:llm_done, ref, %Response{} = response}, %State{llm_ref: ref} = state) do
     state = state |> clear_llm() |> apply_compaction(response)
     resume_after_compaction(state)
   end
 
-  def compacting(:info, {:llm_error, ref, reason}, %State{llm_ref: ref} = state) do
-    # A failed summarisation is not fatal: keep the conversation as it stands and go
-    # on. The next turn may exceed the window, and the provider will say so.
-    Logger.warning("troupe: compaction failed: #{inspect(reason)}")
-    resume_after_compaction(clear_llm(state))
-  end
+  def compacting(:info, {:llm_error, ref, reason}, %State{llm_ref: ref} = state),
+    do: summary_failed(clear_llm(state), reason)
 
   # A summary that never comes fails as one refused does, after as long as any other
-  # model call is given (Decision 779).
+  # model call is given (Decision 779), and is stopped as any other is (Decision 788).
   def compacting(:info, {:llm_timeout, ref}, %State{llm_ref: ref} = state) do
-    {:keep_state_and_data,
-     [{:next_event, :info, {:llm_error, ref, {:timeout, state.config.llm_timeout_ms}}}]}
+    {state, _stopped} = stop_llm(state)
+    summary_failed(state, {:timeout, state.config.llm_timeout_ms})
   end
 
   def compacting(:info, :cancel, state), do: cancel_everything(state)
@@ -1159,6 +1183,7 @@ defmodule Troupe.Agent.Server do
           | llm_ref: ref,
             llm_timer: timer,
             llm_model: request.model,
+            llm_summariser: false,
             llm_text: "",
             llm_tool_names: %{}
         }
@@ -1210,7 +1235,9 @@ defmodule Troupe.Agent.Server do
   # own — its URL, its key, its auth scheme, the wire id it renamed the model to, possibly
   # an output cap smaller than the session's and how hard it should think — and the
   # adapter for it; a bare id goes to the session's provider with the session's key. The
-  # catalog may say which form the model takes thinking in (Decision 780).
+  # catalog may say which form the model takes thinking in (Decision 780). Wherever it
+  # goes, it names Troupe and the session's client unless the config says not to
+  # (Decision 787).
   defp aim(%Request{} = request, %State{config: config} = state, model) do
     target = Config.target(config, model)
 
@@ -1224,7 +1251,9 @@ defmodule Troupe.Agent.Server do
         reasoning_effort: target.reasoning_effort,
         thinking: Config.thinking(config, model),
         provider: adapter_for(target.provider, state),
-        timeout_ms: config.llm_timeout_ms
+        timeout_ms: config.llm_timeout_ms,
+        identify: config.identify != false,
+        client: config.client
     }
   end
 
@@ -1634,9 +1663,12 @@ defmodule Troupe.Agent.Server do
   # A subagent ends `llm_error` and hands its parent what it has: resting, as a root does,
   # waits for a person to say try again, and nobody talks to a subagent but its parent,
   # which was left waiting on the delegation for ever (Decision 688).
-  defp llm_failed(state, message) do
+  #
+  # A call the agent gave up on goes with the error as `stopped`, what that call had
+  # reported (Decision 788).
+  defp llm_failed(state, message, stopped \\ nil) do
     if State.subagent?(state) do
-      log(state, :llm_error, %{"reason" => message})
+      log(state, :llm_error, put_stopped(%{"reason" => message}, stopped))
       finish_short(state, :llm_error, failed_summary(state, message))
     else
       # The failure goes into the conversation so the next turn can react to it, rather
@@ -1645,7 +1677,7 @@ defmodule Troupe.Agent.Server do
       # from the harness: a client reads one of those as the turn going on, and this one
       # ends it.
       note = "The previous model request failed: #{message}. Try a different approach."
-      log(state, :llm_error, %{"reason" => message, "note" => note})
+      log(state, :llm_error, put_stopped(%{"reason" => message, "note" => note}, stopped))
       to_idle_or_done(%{state | conversation: state.conversation ++ [Message.user(note)]})
     end
   end
@@ -2676,6 +2708,7 @@ defmodule Troupe.Agent.Server do
         | llm_ref: ref,
           llm_timer: timer,
           llm_model: request.model,
+          llm_summariser: true,
           compact_resume: resume,
           compact_reason: state.compact_reason || "threshold",
           compact_prompt: Spend.prompt_bytes(request, ""),
@@ -2823,6 +2856,13 @@ defmodule Troupe.Agent.Server do
     end
   end
 
+  # A failed summarisation is not fatal: keep the conversation as it stands and go on. The
+  # next turn may exceed the window, and the provider will say so.
+  defp summary_failed(state, reason) do
+    Logger.warning("troupe: compaction failed: #{inspect(reason)}")
+    resume_after_compaction(state)
+  end
+
   defp resume_after_compaction(state) do
     state = %{state | compact_reason: nil, compact_prompt: nil}
 
@@ -2835,18 +2875,15 @@ defmodule Troupe.Agent.Server do
   # -- cancellation and termination -------------------------------------------
 
   defp cancel_everything(state) do
-    kill_llm(state)
+    {state, stopped} = stop_llm(state)
     Enum.each(Map.values(state.pending), &kill_task(state, &1))
     terminate_children(state)
     state = kill_budget_ask(state)
 
     state = close_cancelled_calls(state)
-    log(state, :cancelled, %{"turn" => Spend.to_json(state.turn)})
+    log(state, :cancelled, put_stopped(%{"turn" => Spend.to_json(state.turn)}, stopped))
 
-    state =
-      state
-      |> clear_llm()
-      |> Map.merge(%{turn_mode: nil, turn: %Spend{}})
+    state = Map.merge(state, %{turn_mode: nil, turn: %Spend{}})
 
     publish_state(state, :idle)
     {:next_state, :idle, state}
@@ -2874,20 +2911,63 @@ defmodule Troupe.Agent.Server do
     fold_results(state, State.ordered_results(state))
   end
 
-  defp kill_llm(%State{llm_ref: nil}), do: :ok
+  # A model call the agent gives up on is stopped, whatever gave it up: its timeout, in a
+  # turn or in a compaction, or a cancel (Decision 788). Req's `receive_timeout` bounds only
+  # the gap between packets, so a reply that kept coming went on being generated, and
+  # billed, up to `max_tokens` after the agent had moved on. Ending the task that streams
+  # it closes its HTTP request. What the provider had reported of it is counted as any
+  # call's figures are, and returned as the `stopped` the event that says so carries.
+  defp stop_llm(%State{llm_ref: nil} = state), do: {state, nil}
 
+  defp stop_llm(%State{llm_ref: ref} = state) do
+    kill_llm(state)
+    usage = reported_usage(ref, state.llm_usage)
+    stopped = stopped_json(state, usage)
+    meta = if state.llm_summariser, do: %{stopped: true, summariser: true}, else: %{stopped: true}
+
+    state = count_call(clear_llm(state), usage || %Usage{}, stopped["gateway"], meta)
+    {state, stopped}
+  end
+
+  # While a call is in flight its stream is the only task the agent runs.
   defp kill_llm(state) do
     Enum.each(Task.Supervisor.children(tasks(state)), fn pid ->
       Task.Supervisor.terminate_child(tasks(state), pid)
     end)
   end
 
+  # What the stream said before it was stopped that the agent had not read yet: a later
+  # report, or the whole answer, which came just as the agent gave up on it.
+  defp reported_usage(ref, usage) do
+    receive do
+      {:llm_usage, ^ref, %Usage{} = later} -> reported_usage(ref, later)
+      {:llm_done, ^ref, %Response{usage: final}} -> reported_usage(ref, final)
+    after
+      0 -> usage
+    end
+  end
+
+  # In the words `llm_response` uses for a call. One that had reported nothing has no usage
+  # and no price: it counts as a call nobody priced, not as a free one.
+  defp stopped_json(state, nil), do: %{"model" => state.llm_model}
+
+  defp stopped_json(state, %Usage{} = usage) do
+    addressed = if state.llm_summariser, do: "cheap"
+    gateway = gateway_json(%Gateway{}, state, %Response{content: [], usage: usage}, addressed)
+
+    %{"model" => state.llm_model, "usage" => Usage.to_json(usage), "gateway" => gateway}
+    |> Map.reject(fn {_key, value} -> is_nil(value) end)
+  end
+
+  defp put_stopped(data, nil), do: data
+  defp put_stopped(data, stopped), do: Map.put(data, "stopped", stopped)
+
   defp clear_llm(state) do
     if state.llm_timer, do: Process.cancel_timer(state.llm_timer)
     if state.llm_monitor, do: Process.demonitor(state.llm_monitor, [:flush])
 
     state = if state.llm_monitor, do: State.unwatch(state, state.llm_monitor), else: state
-    %{state | llm_ref: nil, llm_timer: nil, llm_monitor: nil}
+    %{state | llm_ref: nil, llm_timer: nil, llm_monitor: nil, llm_usage: nil}
   end
 
   defp terminate_children(state) do

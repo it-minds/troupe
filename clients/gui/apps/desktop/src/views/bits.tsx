@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX, ReactNode } from "react";
-import { hasUnseen, unseenSummary } from "@troupe/client";
+import { hasUnseen, syncWords, unseenSummary } from "@troupe/client";
 import type { FleetRow, SessionKind, SyncState } from "@troupe/client";
 import { Eye } from "./brand";
 
@@ -63,7 +63,9 @@ export function statusOf(row: Pick<FleetRow, "state" | "status" | "pendingApprov
   return "idle";
 }
 
-export function RowStatus({ row }: { row: FleetRow }): JSX.Element {
+export function RowStatus({ row }: { row: FleetRow }): JSX.Element | null {
+  // Nothing runs and nothing will: its sync pill says what it is waiting for.
+  if (row.state === "erasure_pending") return null;
   const status = statusOf(row);
   const detail = row.doneReason ?? row.status ?? row.state;
   return <Pill status={status} title={failedTitle(row) ?? `${row.state}${row.status ? ` · ${row.status}` : ""}`}>{status === "idle" ? word(detail) : undefined}</Pill>;
@@ -119,26 +121,30 @@ export function Unread({ row }: { row: FleetRow }): JSX.Element | null {
 }
 
 /**
- * Whether a private session's copy here is the copy everywhere.
+ * How a private session's sealing stands here (troupe Decision 785), in the words
+ * `@troupe/client` keeps, which the terminal client says too.
  *
  * Only private sessions have one, because only they are stored anywhere but the machine
- * that ran them. `conflict` is the one that needs a person: two devices resumed inside
- * one epoch, the platform fenced one of them, and nothing is merged — so the row says
- * which device won rather than pretending the two can be reconciled.
+ * that ran them. `elsewhere` is the one a person acts on: another device sealed it last,
+ * nothing is merged, and the row names that device and offers Claim beside it.
  */
-export function Sync({ state, device }: { state: SyncState | null; device?: string | null }): JSX.Element | null {
+export function Sync({ state, device }: { state: SyncState | null; device?: string | null | undefined }): JSX.Element | null {
   if (!state) return null;
-  if (state === "conflict") {
-    return (
-      <Pill status="error" title={device ? `${device} has the copy that counts` : "Another device resumed this first"}>
-        Conflict
-      </Pill>
-    );
-  }
-  if (state === "pending") return <Pill status="queued" title="Sealing; the platform does not have it all yet">Syncing</Pill>;
-  if (state === "this-device-only") return <Pill status="offline" title="Nothing has been stored off this machine">Here only</Pill>;
-  return <Pill status="allowed" title="The platform holds this session's sealed copy">Synced</Pill>;
+  const { label, detail } = syncWords(state, device);
+  return (
+    <Pill status={SYNC_STATUS[state]} title={detail}>
+      {label}
+    </Pill>
+  );
 }
+
+const SYNC_STATUS: Record<SyncState, Status> = {
+  current: "allowed",
+  behind: "queued",
+  paused: "offline",
+  elsewhere: "readonly",
+  erasure_pending: "denied",
+};
 
 /** Micros as money. Nothing reported is "—", which is not the same as free. */
 export function Cost({ micros }: { micros: number | null | undefined }): JSX.Element {

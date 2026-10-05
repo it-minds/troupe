@@ -880,3 +880,35 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      with nothing on standard output for a program to mistake for an answer. Its own line
      in the command table, so `troupe --help` and the reference list it. Proof:
      `test/troupe/models_cli_test.exs`, against a stand-in gateway.
+
+146. **The session picker says a private session is private and how its sealing stands,
+     and `c` claims one another device sealed last; a plane's `erasure_pending` is a
+     state.** Root Decision 785, D61, D59. A summary carries `kind`, `sync` and `device`
+     (a daemon's `session.list`, or a plane's row, which says only `erasure_pending`). A
+     private row's title starts `[private · synced]`, in `@troupe/client`'s words in
+     lower case (`View.kept/1`, `sync_words/2`), HQ's rows too; the detail pane says the
+     sentence, and for one another device holds, as its title does, that `c` claims it.
+     `c` calls `Troupe.Client.claim_session/2`, a fleet call the daemon answers with
+     `session.claim` and a plane with `:unsupported`, says a refusal in the desktop app's
+     words, and takes the list again. A key rather than a slash command: a claim is about
+     the row the person is looking at, and needs no `Troupe.Commands` entry.
+     `Remote.Worker.session_state/1` reads `erasure_pending`, which it read as none, so a
+     plane's row said dormant; `Capability` refuses input to it; HQ's state column says
+     `erasing`, in its ten cells. Proof: `test/troupe/private_sessions_test.exs` against
+     `FakeRemote`, which now keeps a claim fenced on its epoch and answers `session.get`
+     for a registered row: the picker says `[private · on ada-laptop]` and `c` makes the row
+     this machine's; `[private · waiting to be erased]`, and `c` has nothing to claim; a
+     plane's private row `erasure_pending` with no input; all three failing on the tip.
+
+147. **A headless run tells the daemon it is one: the link connects as `troupe-headless`,
+     and the terminal UI as `troupe`.** Issue #419, root Decision 787: the daemon names a
+     session's model calls by what the connection that created it called itself, and a
+     headless run and the terminal UI are one binary on one link. `Runner.run/1` puts
+     `client_name/1` in the application's `:client_name` before it creates the session,
+     and `Link.client_info/0` reads it when the link connects, which in a headless run is
+     that first call. Only the link: a headless run's session is created there and runs
+     its task to the end, and the session's per-session connection, which still says
+     `troupe`, wakes nothing in it. `troupe doctor` prints the root's `identify` line with
+     no change here. Proof: `test/troupe/cli_test.exs` ("a headless run tells the daemon
+     it is one"), and the installed `troupe run --headless` against a stand-in, whose
+     User-Agent said `headless`.
