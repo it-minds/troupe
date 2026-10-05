@@ -219,7 +219,10 @@ defmodule Troupe.Config.Schema do
           field: :context_window,
           label: "context window"
         ),
-        spec("compact_at", :fraction, "The share of the window at which an agent summarises older turns.",
+        spec(
+          "compact_at",
+          :fraction,
+          "The share of the window at which an agent summarises older turns. A tool result over 16 KiB it read before then is sent from then on as a stub `read_output` expands.",
           default: 0.75,
           field: :compact_at,
           label: "compact at"

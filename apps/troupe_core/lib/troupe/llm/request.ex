@@ -13,6 +13,16 @@ defmodule Troupe.LLM.Request do
     :model,
     :messages,
     system: nil,
+    # The end of the system prompt that changes from one call to the next — the task
+    # list — kept apart so a provider's prompt cache can stop in front of it (Decision
+    # 770). `system_text/1` is the two as one prompt, which is what a provider without
+    # cache marks is sent.
+    system_tail: nil,
+    # Whether the provider is asked to cache the prompt for the next call. An agent's own
+    # calls are, since each sends the one before's prompt again with a little more; a
+    # one-off such as a compaction summary is not, since writing a cache costs more than
+    # plain input and nothing would read it back.
+    cache: false,
     tools: [],
     max_tokens: 8192,
     temperature: nil,
@@ -48,6 +58,8 @@ defmodule Troupe.LLM.Request do
           model: String.t(),
           messages: [Message.t()],
           system: String.t() | nil,
+          system_tail: String.t() | nil,
+          cache: boolean(),
           tools: [tool_spec()],
           max_tokens: pos_integer(),
           temperature: float() | nil,
@@ -61,6 +73,15 @@ defmodule Troupe.LLM.Request do
           attribution: map(),
           extra: map()
         }
+
+  @doc "The whole system prompt as one text: `system`, then `system_tail` after a blank line."
+  @spec system_text(t()) :: String.t() | nil
+  def system_text(%__MODULE__{system: system, system_tail: tail}) do
+    case Enum.reject([system, tail], &(&1 in [nil, ""])) do
+      [] -> system
+      parts -> Enum.join(parts, "\n\n")
+    end
+  end
 end
 
 defmodule Troupe.LLM.Delta do

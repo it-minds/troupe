@@ -889,7 +889,9 @@ defmodule Troupe.Config do
   Every model this configuration can address: what each named provider declares,
   every bare id with a declared window, whatever the aliases currently name, every id
   `models.prices` prices, and what only the catalog knows — so the value in use is
-  always in the list. Each says what it costs and who said so (`price/2`).
+  always in the list. Each says what it costs and who said so (`price/2`), and where its
+  facts came from: `:catalog` when the provider's own list has it, else the files that
+  named it (`:config`, or a named provider's `:yaml` or `:opencode`).
   """
   @spec models(t()) :: [model_choice()]
   def models(%__MODULE__{} = config) do
@@ -928,10 +930,15 @@ defmodule Troupe.Config do
     choice(id, name, model, context_window(config, id), (provider && provider.source) || :config, key?)
   end
 
+  # A model the provider's own list has is the provider's, whoever else names it: its
+  # source says where the facts came from, not which file mentioned it (Decision 778).
   defp enrich(choice, config) do
     case Map.fetch(config.catalog, choice.id) do
-      {:ok, entry} -> priced(%{choice | context: choice.context || entry.context}, config)
-      :error -> priced(choice, config)
+      {:ok, entry} ->
+        priced(%{choice | context: choice.context || entry.context, source: :catalog}, config)
+
+      :error ->
+        priced(choice, config)
     end
   end
 
@@ -980,21 +987,37 @@ defmodule Troupe.Config do
   and the report names that program's subcommands. Only `troupe` sets a provider up by
   asking, and an install may have the daemon without it, so through `troupe-daemon` the
   next step is the file, which any install can write.
+
+  Each provider a refresh would ask has a `catalog:` line saying what the model list came
+  from: how many models, from which URL and when, fetched by this run or from the cache,
+  or why the provider did not answer (Decision 778). `asked` names the providers this run
+  refreshed (`Troupe.LLM.Catalog.Store.ensure/2`), `nil` being the session-wide one, whose
+  models' facts are then "from the provider" rather than "from the cache". A model a role
+  names that its provider does not list says so, and what the provider does serve.
   """
-  @spec describe(t(), command: String.t()) :: String.t()
+  @spec describe(t(), command: String.t(), asked: [String.t() | nil]) :: String.t()
   def describe(%__MODULE__{} = config, opts \\ []) do
     command = Keyword.get(opts, :command, "troupe-daemon")
+    asked = Keyword.get(opts, :asked, [])
+    sources = Store.sources()
+
+    answered =
+      Enum.filter(asked, fn name ->
+        match?(%{error: nil}, Enum.find(sources, &(&1.provider == name)))
+      end)
 
     """
     provider: #{config.provider} base_url=#{config.base_url || "(default)"} key=#{session_key(config)} auth=#{config.auth}
     models: default=#{config.model} cheap=#{config.small_model || "(default)"} expensive=#{config.expensive_model || "(default)"}
-    named providers (use as <name>/<model>):
-    #{describe_providers(config)}
-    models Troupe can address (use one as models.default; prices are $ per million tokens in/out):
-    #{describe_choices(config)}
-    config dir: #{Troupe.Paths.display(Troupe.Paths.config_dir())}   opencode: #{Troupe.Paths.display(OpenCode.config_path())}
-    catalog: #{Troupe.Paths.display(Store.path())} (#{Store.fetched_at() || "never fetched"})
-    """ <> describe_warnings(config.warnings, command) <> describe_next_step(config, command)
+    """ <>
+      describe_providers(config) <>
+      describe_catalog(config, sources, asked, command) <>
+      """
+      models Troupe can address (use one as models.default; prices are $ per million tokens in/out):
+      #{describe_choices(config, sources, answered)}
+      config dir: #{Troupe.Paths.display(Troupe.Paths.config_dir())}   opencode: #{Troupe.Paths.display(OpenCode.config_path())}
+      catalog cache: #{Troupe.Paths.display(Store.path())}
+      """ <> describe_warnings(config.warnings, command) <> describe_next_step(config, command)
   end
 
   defp session_key(%__MODULE__{refused: nil} = config),
@@ -1054,47 +1077,151 @@ defmodule Troupe.Config do
       Enum.map_join(warnings, "", &"  #{as_run_by(&1, command)}\n")
   end
 
-  defp describe_providers(%__MODULE__{providers: providers}) when map_size(providers) == 0,
-    do: "  (none; add `providers:` to config.yaml or set up opencode)"
+  # The providers beside the session-wide one. None is said only when it matters: when the
+  # session-wide provider cannot be asked either. Otherwise "none" two lines under a
+  # working provider read as no provider at all (#410).
+  defp describe_providers(%__MODULE__{providers: providers} = config)
+       when map_size(providers) == 0 do
+    if key_problem(config),
+      do:
+        "other named providers: none configured (add `providers:` to config.yaml, or set up opencode)\n",
+      else: ""
+  end
 
   defp describe_providers(%__MODULE__{providers: providers}) do
-    providers
-    |> Enum.sort()
-    |> Enum.map_join("\n", fn {name, p} ->
-      "  #{name}: #{p.type} #{p.base_url || "(default url)"} key=#{provider_key(p)} source=#{p.source}" <>
-        if(p.auth == :bearer, do: " auth=bearer", else: "") <>
-        if(p.models == %{}, do: "", else: " models=" <> describe_models(p.models))
-    end)
+    "other named providers (use as <name>/<model>):\n" <>
+      (providers
+       |> Enum.sort()
+       |> Enum.map_join("", fn {name, p} ->
+         "  #{name}: #{p.type} #{p.base_url || "(default url)"} key=#{provider_key(p)} source=#{p.source}" <>
+           if(p.auth == :bearer, do: " auth=bearer", else: "") <>
+           if(p.models == %{}, do: "", else: " models=" <> describe_models(p.models)) <> "\n"
+       end))
   end
 
   defp provider_key(%{refused: why}) when is_binary(why), do: "(refused)"
   defp provider_key(provider), do: key_label(provider.type, provider.base_url, provider.api_key)
 
-  defp describe_choices(config) do
+  # What the list was fetched from and when, one line for each provider a refresh asks.
+  defp describe_catalog(config, sources, asked, command) do
+    case Store.providers(config) do
+      [] ->
+        "catalog: no provider to ask; one is asked what it serves once the config gives it a key\n"
+
+      providers ->
+        Enum.map_join(providers, "", fn provider ->
+          "catalog: " <>
+            describe_source(provider, Store.source(sources, provider), asked, command) <> "\n"
+        end)
+    end
+  end
+
+  defp describe_source(provider, nil, _asked, command),
+    do:
+      "#{source_label(provider)} at #{source_url(provider)} not asked yet; `#{command} models` asks it"
+
+  defp describe_source(provider, %{error: error} = source, asked, _command)
+       when is_binary(error) do
+    failed = if provider.provider in asked, do: "", else: " " <> ago(source.failed_at)
+
+    kept =
+      case source.ids do
+        [] -> "nothing of it is cached"
+        ids -> "#{length(ids)} of its models from the cache, fetched #{ago(source.fetched_at)}"
+      end
+
+    "#{source_label(provider)} at #{source_url(provider)} did not answer#{failed}: #{error}; #{kept}"
+  end
+
+  defp describe_source(provider, source, asked, _command) do
+    count = if length(source.ids) == 1, do: "1 model", else: "#{length(source.ids)} models"
+    cached = if provider.provider in asked, do: "", else: "from the cache, "
+
+    "#{count} from #{source_label(provider)} at #{source.url}, #{cached}fetched #{ago(source.fetched_at)}"
+  end
+
+  defp source_label(%{provider: nil, type: type}), do: type
+  defp source_label(%{provider: name}), do: name
+
+  defp source_url(%{base_url: nil}), do: "its default URL"
+  defp source_url(%{base_url: url}), do: url
+
+  defp ago(nil), do: "never"
+
+  defp ago(%DateTime{} = at) do
+    case DateTime.diff(DateTime.utc_now(), at) do
+      s when s < 60 -> "just now"
+      s when s < 3_600 -> plural(div(s, 60), "minute") <> " ago"
+      s when s < 86_400 -> plural(div(s, 3_600), "hour") <> " ago"
+      s -> plural(div(s, 86_400), "day") <> " ago"
+    end
+  end
+
+  defp plural(1, word), do: "1 " <> word
+  defp plural(n, word), do: "#{n} #{word}s"
+
+  defp describe_choices(config, sources, answered) do
     case models(config) do
       [] ->
         "  (none detected; set models.default or configure a provider)"
 
       list ->
+        roles = config |> Store.roles() |> Enum.map(&elem(&1, 1))
+
         Enum.map_join(list, "\n", fn choice ->
-          "  " <> String.pad_trailing(choice.id, 44) <> " " <> describe_model(choice) <> in_use(config, choice.id)
+          "  " <>
+            String.pad_trailing(choice.id, 44) <>
+            " " <>
+            describe_choice(config, choice, roles, sources, answered) <>
+            in_use(config, choice.id)
         end)
     end
   end
 
+  defp describe_choice(config, choice, roles, sources, answered) do
+    with true <- choice.id in roles,
+         {:not_served, source, nearest} <- Store.served(config, choice.id, sources) do
+      not_served(source, nearest)
+    else
+      _served_or_unknown -> describe_model(choice, answered)
+    end
+  end
+
+  # Loud, and with what to use instead: a model the provider does not list cannot run a
+  # turn, and its default window and missing price were the only hint there was (#410).
+  defp not_served(source, nearest) do
+    more = length(source.ids) - length(nearest)
+
+    "NOT SERVED by #{source_label(source)}; it serves #{Enum.join(nearest, ", ")}" <>
+      if(more > 0, do: " and #{more} more", else: "")
+  end
+
   # Plain commas, as `mask/1` has plain dots: this is printed to a console.
-  defp describe_model(%{context: context, source: source, key?: key?} = model) do
-    [context && "#{div(context, 1000)}k ctx", describe_price(model), to_string(source), if(key?, do: nil, else: "no key")]
+  defp describe_model(%{context: context, key?: key?} = model, answered) do
+    [
+      context && "#{div(context, 1000)}k ctx",
+      describe_price(model),
+      facts_from(model, answered),
+      if(key?, do: nil, else: "no key")
+    ]
     |> Enum.filter(&(is_binary(&1) and &1 != ""))
     |> Enum.join(", ")
   end
 
   # Who said what a call costs, and a model nobody priced said out loud: its calls count
-  # as free wherever spend is added up, unless the gateway prices them itself.
+  # as free wherever spend is added up, unless the gateway prices them itself. A price from
+  # the provider's list is the model's, whose source follows it.
   defp describe_price(%{price: nil}), do: "no price"
   defp describe_price(%{price: price, price_source: :config}), do: price <> " (models.prices)"
-  defp describe_price(%{price: price, price_source: :catalog}), do: price <> " (catalog)"
   defp describe_price(%{price: price}), do: price
+
+  # Where a model's facts came from: its provider, which answered this run; the cache of
+  # what the provider said before; or the files that name it.
+  defp facts_from(%{source: :catalog, provider: provider}, answered),
+    do: if(provider in answered, do: "from the provider", else: "from the cache")
+
+  defp facts_from(%{source: :opencode}, _answered), do: "from opencode"
+  defp facts_from(%{source: _config}, _answered), do: "from your config"
 
   defp in_use(config, id) do
     cond do

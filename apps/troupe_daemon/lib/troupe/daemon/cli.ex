@@ -11,8 +11,8 @@ defmodule Troupe.Daemon.CLI do
       troupe-daemon config trust [PATH]   let a workspace's own files set the trusted keys; --list shows them
       troupe-daemon config untrust [PATH]   take that back
       troupe-daemon config import-opencode   copy opencode's providers into config.yaml
-      troupe-daemon models [--refresh]  every model this machine can address
-      troupe-daemon doctor              check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure
+      troupe-daemon models [--refresh]  what each provider serves; asked again when stale, or now with --refresh
+      troupe-daemon doctor              check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure
       troupe-daemon login on|off|status   start at login, or not; status exits 1 when it does not
       troupe-daemon version
       troupe-daemon help
@@ -185,10 +185,14 @@ defmodule Troupe.Daemon.CLI do
     end
   end
 
+  # Asked first when the cache is stale or for another provider (Decision 778), and
+  # always with `--refresh`; the report says which it was.
   def main({:models, refresh: refresh?}) do
     case Config.resolve(File.cwd!()) do
       {:ok, config, _layers} ->
-        IO.puts(Config.describe(if(refresh?, do: refresh(config), else: config), command: @command))
+        %{asked: asked, reason: reason} = Catalog.Store.ensure(config, force: refresh?)
+        config = if reason, do: Config.load(File.cwd!()), else: config
+        IO.puts(Config.describe(config, command: @command, asked: asked))
         0
 
       {:error, error} ->
@@ -305,12 +309,6 @@ defmodule Troupe.Daemon.CLI do
     System.halt(code)
   end
 
-  defp refresh(config) do
-    {:ok, _catalog, failures} = Catalog.Store.refresh(config)
-    Enum.each(failures, fn {name, reason} -> IO.puts(:stderr, "#{name}: #{inspect(reason)}") end)
-    Config.load(File.cwd!())
-  end
-
   defp print({text, code}) do
     IO.write(text)
     code
@@ -374,8 +372,8 @@ defmodule Troupe.Daemon.CLI do
     troupe-daemon config trust [PATH]   let a workspace's own files set the trusted keys; --list shows them
     troupe-daemon config untrust [PATH]   take that back
     troupe-daemon config import-opencode   copy opencode's providers into config.yaml
-    troupe-daemon models [--refresh]  every model this machine can address
-    troupe-daemon doctor              check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure
+    troupe-daemon models [--refresh]  what each provider serves; asked again when stale, or now with --refresh
+    troupe-daemon doctor              check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure
     troupe-daemon login on|off|status   start at login, or not; status exits 1 when it does not
     troupe-daemon version
 

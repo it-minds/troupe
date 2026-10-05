@@ -66,7 +66,7 @@ defmodule Troupe.Log.Fold do
       user_input llm_response llm_error
       tool_call_started tool_call_completed tool_results
       todo_updated profile_switched compacted
-      goal_set goal_cleared
+      goal_set goal_cleared cancelled
       delegation_started
       approval_requested approval_decided
       session_created session_dormant session_activated config_upgraded
@@ -182,14 +182,25 @@ defmodule Troupe.Log.Fold do
 
   defp agent_fold(agent, %Event{type: "goal_cleared"}), do: Map.delete(agent, "goal")
 
+  # A cancel ends the turn it stopped, and what the next one costs is counted from nothing
+  # (Decision 769). Present only once there has been one, as the goal is, so a log without
+  # a cancel folds to the map it always did.
+  defp agent_fold(agent, %Event{type: "cancelled"}),
+    do: Map.update(agent, "cancels", 1, &(&1 + 1))
+
   # Compaction replaces the conversation rather than appending to it, which is the one
   # place the message count can go *down* — and therefore the one place a fold that
-  # ignored it would drift silently.
+  # ignored it would drift silently. The summariser's tokens are the agent's (Decision
+  # 769); a `compacted` written before it carries none, and adds nothing.
   defp agent_fold(agent, %Event{type: "compacted", data: data}) do
+    usage = data["usage"] || %{}
+
     %{
       agent
       | "messages" => length(data["conversation"] || []),
-        "compactions" => agent["compactions"] + 1
+        "compactions" => agent["compactions"] + 1,
+        "input_tokens" => agent["input_tokens"] + (usage["input_tokens"] || 0),
+        "output_tokens" => agent["output_tokens"] + (usage["output_tokens"] || 0)
     }
   end
 

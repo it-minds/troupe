@@ -773,3 +773,87 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      joins the modules `mix troupe.xref` lets the TUI reach, as `Troupe.Doctor` and
      `Troupe.Config.Schema` did; the TUI calls only `builtins/0`, which is data, and the
      palette still reads `commands.list`. Proof: `test/troupe/cli_reference_test.exs`.
+
+139. **What a turn cost is one line under it when it ends: its calls, `↑` sent, cached, `↓`
+     received and the money, apart from the window's count, which is the session's.** Issue
+     #389, slice 4, root Decision 769. `↑ sent` on a tile and in the side panel is
+     cumulative, and that is how "every turn costs 9M" was read: nothing said what one turn
+     had cost. The event that ends a turn carries `turn` (769), `Troupe.Remote.Translate`
+     hands it on with the `agent_state` it already makes of `turn_ended`, `cancelled` and
+     `agent_done`, and the model writes
+     `turn: 3 calls · ↑ 300 sent · 3.0k cached · ↓ 3 received · $0.04` into that agent's
+     transcript, a system line as a cancel's is.
+     - **Under the turn, not in the status line.** The status line is the session's and
+       the windows'; a turn's figure there is one more number that moves, and nothing is to
+       stream while the turn runs. The transcript is where the turn is, the line stays under
+       it so scrolling back reads each turn's cost, and the tile's tail shows it as the turn
+       ends. A live `agent_state` carries no `turn`, so nothing is said before the end.
+     - **The words.** `↑ sent` is input billed in full, as the window's own count reads it,
+       so the two compare. `cached` is there even at nothing, because `0 cached` answers
+       whether the provider's cache is being used at all. The money is dollars to the cent,
+       `under a cent` below one as the budget question says it, `no price` when no call was
+       priced, and `, 2 calls unpriced` after the sum when some were not.
+     - **Nothing** for a turn that made no call, and nothing from a log written before turns
+       were counted.
+     - **The summariser's call is the session's too.** A `compacted` that says what the
+       call that wrote its summary used (769) is translated into a `:call_usage` beside its
+       note, and the window and its agent add it to their counts as they add a reply's, so a
+       turn's line that counts that call is never more than the session's count above it.
+     - **Proof:** `test/troupe/turn_cost_test.exs` (a turn's line; a second turn's line with
+       the session's count beside it; nothing while a turn runs; a cancel and a finish; an
+       unpriced turn and a partly priced one; a compaction's call in the session's count; an
+       old log), four of the six first written failing on the chunk's tip.
+
+140. **`troupe bench` runs the harness's offline suite in this VM, against the harness
+     compiled into this binary, and `Troupe.Bench` is a door the TUI may call.** Issue
+     #390, root Decision 772. It prints the Markdown table, or with `--json` the JSON
+     report, and exits 1 when a measure is past its budget or a check fails. It never asks
+     the machine's daemon: what it measures is this build, and a daemon of another version
+     would answer for itself. So `Troupe.Bench` joins the modules `mix troupe.xref` lets
+     the TUI reach, as `Troupe.Doctor` did for `troupe doctor`; the TUI calls `run/0`,
+     `json/1`, `markdown/1` and `passed?/1`, and nothing of the session it runs. `--live`
+     is parsed and refused with exit 2 until the live runner exists, so the flag is the
+     one that runner takes. Proof: `test/troupe/bench_cli_test.exs`.
+
+141. **`troupe bench --live` asks before it spends, at a terminal only, and `--json` and
+     `--compare` take a value or none.** Root Decision 773. The plan and its cap go to
+     standard error, so `--json` on standard output stays JSON. The question is asked only
+     where `troupe config` asks one, with standard input and output a terminal, and the
+     same way: on Windows key by key (`Troupe.CLI.Prompt`), since the binary's VM there
+     has no reader on standard input (Decision 128), so a cooked read never returned, and
+     the first installed run hung on it. `y` or `yes` runs it; anything else, or no
+     terminal to ask in (a script, a pipe), runs nothing and exits 2; `--yes` answers
+     beforehand. `--repeat N`, `--model M` and `--yes` belong to `--live` and are refused
+     without it. `--json` stays the switch it was (`troupe bench --json` prints the
+     report) and takes a file as well, `--json FILE` writing the report there and printing
+     the table; `--compare` alone compares with the last bench and `--compare REF` with a
+     version or a model. OptionParser has no switch with an optional value, so for
+     `troupe bench` only, the word after either, unless it is a flag, is taken as its
+     value before the parser runs; anywhere else `--json` is the plain switch. `--md FILE`
+     writes the table to a file, live or offline. The TUI calls only `Troupe.Bench`
+     (`plan/1`, `describe_plan/1`, `question/1`, `live/2`, `compare/1`), the door
+     Decision 140 opened. Proof: `test/troupe/bench_cli_test.exs`, the question played
+     through `Bench.run/2`'s `:ask`, and with none, under `capture_io`, no terminal.
+
+142. **`troupe bench --live` takes `--suite`, `--scenario` and `--keep`, and refuses them,
+     as it refuses `--repeat`, without `--live`.** Root Decision 775. `--suite NAME` is a
+     live suite (`smoke`, the default, or `standard`), `--scenario a,b` names scenarios
+     whatever their suite, in one comma-separated value, since OptionParser keeps only
+     the last of a repeated switch; `--keep DIR` leaves each run's directories there. An
+     unknown suite or scenario is the plan's error, said before the cap and with nothing
+     run, exit 2. The plan's words name the suite and its scenarios on standard error,
+     where the cap is; the table on standard output ends with the summary of every run
+     before the verdict. The TUI still calls only `Troupe.Bench`'s door (140, 141): the
+     new options are `plan/1`'s. Proof: `test/troupe/bench_cli_test.exs` (the flags
+     parsed, refused without `--live`, the `standard` suite with `--keep` and `--json`, a
+     scenario by name and one that is not there).
+
+143. **`troupe models` asks the providers first when the cached list is stale, and says
+     what it fetched, from where and when.** Root Decision 778, which amends 60's
+     "fetching is explicit": `--refresh` still asks at once, and a session still starts
+     from the cache and never waits, the daemon refreshing in the background instead.
+     The runner calls `Troupe.LLM.Catalog.Store.ensure/2` and hands what it asked to
+     `Troupe.Config.describe/2`, both doors `mix troupe.xref` already allowed; the report
+     is the harness's, the one `troupe-daemon models` prints. The failure notes it used
+     to append (`! (session): {:http, 401}`) are the report's own `catalog:` line now.
+     Proof: `test/troupe/models_cli_test.exs`, against a stand-in gateway.

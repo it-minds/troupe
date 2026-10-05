@@ -4593,3 +4593,656 @@ citation keeps meaning what it meant.
        `install-local.ps1`, run in this checkout at 0.8.0-beta, then with `VERSION` at
        0.8.1-beta, then put back, installed a `troupe-daemon` and a `troupe` that said
        0.8.1-beta and then 0.8.0-beta, each time the version the checkout had not built.
+
+769. **What a turn cost is written on the event that ends it, and what each model call's
+     prompt was made of on its `llm_request`, in bytes.** Issue #389, slices 1 and 4; the
+     terminal UI's half is TUI Decision 139. A turn, one input until the agent rests, is
+     many model calls, each resending the whole conversation. The log had each call's
+     tokens and cost (`llm_response.usage` and `gateway.cost_micros`, 657 and 689) and
+     nothing that said how many calls a turn took, what they came to together, or which
+     part of the prompt was the large one, so a turn billed in millions of tokens could not
+     be traced to any of the four causes the issue names.
+     - **Per turn.** `turn`, with `calls`, the four token figures summed, `cost_micros` and
+       `unpriced`, on whichever event ends the turn: `turn_ended`, `cancelled` or
+       `agent_done`. A field on those, not an event of its own: a client ignores a field it
+       does not know, while the terminal UI prints an event type it does not know as a note,
+       so a new type would have written itself into every older client's transcript at every
+       turn. `Troupe.Agent.Spend` adds each call as `record_response/2` takes it, and the
+       agent's replay adds the same from `llm_response` and starts again at each of the
+       three, so a restart in the middle of a turn still counts the calls made before it.
+     - **A subagent's calls are its parent's turn's.** A turn that delegates has paid for
+       what its subagents did, and the window's session count already includes them, so a
+       turn's figure without them would disagree with the total it sits under. A subagent
+       hands its parent its `Spend` in its result, where `Budget.usage/1` was: the budget is
+       charged that `usage`'s billed part, the same tokens as before, and the parent's turn
+       adds the whole of it. The subagent's own `agent_done` says what its task cost. Live
+       only, as the budget's charge always was: a cancel stops a subagent before it reports,
+       and a parent restarted mid-turn forgets what its subagents had reported. Writing each
+       delegation's spend on the parent's side of the log would make it replayable, and is
+       not done here.
+     - **Money.** `cost_micros` adds up the calls' `gateway.cost_micros`, the gateway's own
+       figure or this machine's arithmetic (689), so a turn is priced exactly as the listing
+       is. A call nobody priced is counted in `unpriced` and left out of the sum rather than
+       added as nothing, so a reader can tell free from not known, as PROTOCOL.md asks of a
+       reader of `gateway`.
+     - **Per call.** `llm_request.prompt_bytes`: `system` (the whole system prompt, the end a
+       request keeps apart for the prompt cache included, 770), `brief` (the part of it
+       that is the instruction files and the project brief, 706), `tools` (the definitions
+       as a JSON list of name, description and schema), `conversation` (each message as
+       `Message.to_json/1` writes it), `tool_results` (the part of it that is tool results'
+       text) and `total` (`system + tools + conversation`). The provider's own input, cached
+       and output figures were already on the `llm_response` that answers the call. On the
+       request because it is what was sent, so a call that failed still says what it sent.
+     - **Bytes as the log writes them, not characters or estimated tokens.** It is the
+       measure `troupe bench` takes of a request (772), less its writing the workspace's path
+       as `<workspace>`, so a live run can read its `calls[]` from the log and agree with an
+       offline one. Bytes are the unit `tool_output_limit` is set in, so the measurement reads
+       straight against the default slice 3 is to move. And they are the same whoever
+       answers, where an estimate of tokens would be a second tokenizer that disagrees with
+       the provider's: the response's `input_tokens + cache_read + cache_write` is the real
+       count, and scales the parts to tokens for whoever wants them. The price is encoding
+       the conversation once more a call, which the log does for every message anyway.
+     - **The summariser's call is counted.** The call that writes a compaction's summary is
+       billed like any other and was in nothing: not the log, the listing, the budget or the
+       ledger. It is not an `llm_response`, which the agent's replay reads as its reply and
+       a client draws as one, and not an `llm_request` either, which a listing reads as a
+       call still unanswered until an `llm_response` follows. So the `compacted` that takes
+       its answer carries what those two say of a call: `model`, `prompt_bytes`, `usage`
+       and `gateway`, priced as the cheap model it addressed. The budget is charged its
+       billed tokens and not a turn, since `max_turns` counts the agent's own calls; the
+       turn counts it among its `calls`; the listing adds it, live and from the log; the
+       ledger makes a row of it (`Troupe.Session.Usage`), so a team's money budget on the
+       plane has it too; telemetry's `[:troupe, :llm, :stop]` fires for it with
+       `summariser: true`; and the replay charges and counts it again from the event. A
+       `compacted` written before this has none of it, and folds as it always did.
+     - **Not counted:** an ACP delegate's model, which is its own.
+     - **The witness.** The agent's replay now acts on `cancelled`, so `Troupe.Log.Fold`
+       witnesses it, a `cancels` count present only once there has been one, and adds a
+       `compacted`'s usage to the agent's tokens; no recorded fixture holds a cancel or a
+       compaction with usage, and no hash moves.
+     - **Proof:** core's `turn_cost_test.exs`: a turn of three calls sums the three responses
+       (945 micros); two calls' prompt parts, the brief from an `AGENTS.md`; a turn that
+       compacts counts five calls, four replies and the summariser, whose `compacted` says
+       what it was made of and cost and whose tokens the budget was charged; a model with no
+       price; the next turn counting from nothing; a delegation's four calls, with the
+       subagent's two on its own `agent_done`; a cancel; a finish; and a kill in the middle of
+       a turn that keeps the calls before it. The eight written first fail on the chunk's
+       tip, and the compaction one reads fields the tip does not write. `UsageTest`: a
+       `compacted` with usage is a ledger row, one from before is not. The terminal UI's
+       test is 139's, and the installed daemon and `troupe` are on the pull request.
+
+770. **An agent's own model calls ask Anthropic to cache the prompt, with four marks: the
+     last tool, the system prompt without its task list, and the last two user messages.
+     An OpenAI-compatible provider caches by itself, and what either reports reaches the
+     log.** Issue #389, slice 2. Every model call of a turn sends the whole conversation
+     again, and Anthropic's prompt cache is opt-in: a request with no `cache_control` mark
+     caches nothing, so every resend was billed as fresh input. On the chunk's tip a
+     thirty-call turn against a stand-in that caches only what is marked read nothing on
+     any call.
+     - **Where the marks go.** Anthropic renders tools, then system, then messages; a mark
+       caches everything up to it, and a later request that repeats a marked prefix reads
+       it at a fraction of the input price (a tenth on most models) and pays a premium to
+       write what is new (a quarter more, for the five-minute cache). Four marks at most.
+       The last tool's keeps the tool definitions cached when the system prompt changes (an
+       instruction file edited, a `remember`, a goal set). The system prompt's caches the
+       tools and the system prompt together. The newest user message's last block writes
+       the whole conversation for the next call, and the user message before it is where
+       the previous call put its mark: Anthropic looks back at most twenty blocks from a
+       mark for an earlier entry, and with a mark on that very block the previous call's
+       cache is read however much came in between.
+     - **The task list goes behind the system prompt's mark.** `todo_write` rewrites the
+       list within a turn, and the list was the system prompt's last section, so every
+       rewrite changed the prefix in front of that mark. It is now the request's
+       `system_tail`: still the end of the system prompt and rendered fresh for each
+       request, as 678 has it, sent to Anthropic as a second system block after the mark
+       and to an OpenAI-compatible provider joined to the system message exactly as before
+       (`Request.system_text/1`). What this does not settle: the conversation's marks come
+       after the whole system prompt, so the call after a rewrite reads the tools and the
+       system prompt and writes the conversation again instead of reading it. Putting the
+       list after the conversation was not taken. A block added to the last user message
+       and gone from it on the next request is an edit of history, which on the newest
+       models invalidates the replayed thinking behind it and the cache with it; keeping
+       every copy is the message in the conversation 678 declined. Holding the list still
+       for a turn, or a system message in the conversation where the model takes one, is
+       left for a later slice, measured first.
+     - **Who asks.** `Request.cache` is false unless set, and the agent's own requests set
+       it. A one-off does not, the compaction summary among them: a cache write costs more
+       than plain input, and nothing would read it back.
+     - **The cache's life.** Anthropic's default of five minutes, which each read renews,
+       and a turn's calls come well inside it. The hour-long cache costs twice the input
+       price to write and is not asked for. Nothing here is configurable. A prompt shorter
+       than the model's minimum (512 to 4096 tokens, by model) is not cached, silently.
+     - **What a provider reports.** Anthropic's `cache_read_input_tokens` and
+       `cache_creation_input_tokens` were already read beside `input_tokens` (657), and an
+       OpenAI-compatible provider's `prompt_tokens_details.cached_tokens` out of
+       `prompt_tokens`; both reach `llm_response.usage`, and a call priced here is priced at
+       the cache rates of the catalog or `models.prices` where they are set (689). OpenAI
+       caches a long enough prompt without being asked and reports what it served. A
+       LiteLLM or self-hosted gateway behind `provider: openai` caches whatever it and the
+       model behind it do, which may be nothing, and `cache_read` says which; no marks go
+       on that wire. `docs/user/configuration.md` says this per provider.
+     - **Proof:** `Troupe.Agent.PromptCacheTest`. A thirty-call turn against a loopback
+       stand-in that caches what is marked as Anthropic does reads the cache on every call
+       after the first: all of the previous call's prompt where the task list was
+       unchanged, and the tools and the system prompt, the same each time, after the list
+       was rewritten. The log holds the stand-in's figures, and each call is priced at the
+       cache rates. On the tip every read was zero. The same stand-in as an
+       OpenAI-compatible server caches unasked, and its `cached_tokens` lands as
+       `cache_read` and out of `input_tokens`. `Troupe.LLM.ProvidersTest`: the four marks
+       and where they go, the task list after the system prompt's, and nothing marked on a
+       request not to be cached or on the OpenAI-compatible wire. And the installed daemon,
+       with scratch homes, run against a stand-in like the test's: a session made over the
+       protocol with `provider: anthropic` pointed at it took ten calls for one input, each
+       marked on the last tool, the system prompt and the last two user messages, and
+       every call after the first read the cache, the two after a rewritten task list the
+       tools and the system prompt; the build installed before it marked nothing and read
+       nothing on any of the ten.
+
+771. **A large tool result a compaction left behind is sent from then on as one line
+     naming the `read_output` call that returns it, not again in full on every call.**
+     Issue #389, the behaviour of slice 3; the numbers (`tool_output_limit`, `compact_at`)
+     stay as they are until slice 1's measurements say what they should be. A compaction
+     summarises the older part of the conversation and keeps the last few messages as they
+     were, so a 60 kB `grep` the model read just before it went out again with every call
+     after it, until a later compaction summarised it away.
+     - **What is behind.** The messages a compaction kept, up to the model's last reply
+       among them: `State.compacted_through`, set by the compaction and folded from its
+       `compacted` event. A result after that reply is the one a compaction in the middle
+       of a turn was about to send; the model has not read it, so it goes whole until the
+       next compaction. Results since the compaction are never touched.
+     - **Which results.** Those over the blob inline limit, 16 KiB: the log already keeps
+       them as blobs, so the stub's id names one without a new write (`Output.keep/2`
+       makes sure). Below that a stub saves less than the `read_output` round trip it may
+       cost, which sends the whole prompt again, and a floor of its own would be one more
+       number to guess before slice 1 measures.
+     - **An error result by the same rule.** The block keeps its error flag, so the model
+       still knows the call failed. Most failures are a short message, under the floor; a
+       large one is a failing command's output, the same bulk as any other.
+     - **The stub.** `[output of grep (48213 bytes) left out since a compaction. Call
+       read_output(id: "sha256:…", offset: 1, limit: 200) to see it again.]`, the call a
+       truncation marker names (650). The tool is named by the call just before the
+       result, not by id across the conversation: a gateway that numbers its calls gives
+       every response a `call_0`.
+     - **Only in what is sent.** `build_request` stubs; the conversation in memory, the
+       snapshot and the log keep the result whole, so a replay rebuilds the same
+       conversation and the same boundary, and an audit sees everything. The summariser
+       still reads what it summarises whole: it condenses those results rather than
+       sending them again.
+     - **Only where `read_output` is offered.** A profile without it (`explore`, `answer`,
+       `ask`, `librarian`) keeps its results whole: a stub it cannot expand is a result
+       lost.
+     - **A summary that fails** leaves the conversation, and the boundary with it, as
+       they were (774).
+     - **The prefix stays put.** What is behind changes only when a compaction rewrites the
+       head of the conversation anyway, so from one call to the next the prompt starts the
+       same, which a prompt cache (slice 2) needs.
+     - **Not here:** a smaller default `tool_output_limit`, the other half of slice 3, and
+       whether the floor should come down, both for slice 1's numbers.
+     - **Proof:** `CompactionTest`: the request after a compaction carries a one-line stub
+       for a `read_file` result over 16 KiB and nothing of its body, which failed on the
+       chunk's tip (the result went whole); `read_output` with the stub's id returns the
+       result byte for byte; a result since the compaction is sent whole after the model
+       has answered it; one the model had not answered when a compaction in the middle of
+       a turn ran is sent whole, and so is one when a later summary fails; and a killed
+       agent folds its log to the same conversation and sends the same stub, while the log
+       holds the result as a blob, in `tool_results` and in the `compacted` conversation
+       (774). `OutputTest`: the stub, ids that repeat across responses, the floor, an
+       error's flag.
+
+772. **`troupe bench` measures the harness offline against budgets kept in one file, and CI
+     fails past one.** Issue #390, its first tier; the live tier and `troupe doctor --bench`
+     stay open. The harness's cost curve (#389) was found by a person reading a bill:
+     nothing in the repository said how many model calls a turn makes or what each one
+     sends, so nothing could notice when that got worse.
+     - **Shape, not answers.** Five scenarios (`Troupe.Bench.Scenarios`): one turn of thirty
+       tool calls (calls per turn, the system prompt and tool definitions, the largest
+       prompt, growth per round trip, input tokens over the turn, events logged), a tool
+       result over the limit cut and read back with `read_output`, compaction at the
+       configured share of the window (never before, within one round trip after), a
+       cancel during a model call (its task ends, no call follows, the agent rests and
+       answers again), and the log against the session (the file folds as the running log
+       does, hashes chain, a replay from the start sees each event once, a resumed agent
+       has its conversation). Whether a model's answer is good is #114's question.
+     - **A scripted model that counts.** `Troupe.Bench.Model` answers the `fake` provider
+       as `Troupe.LLM.Fake` does, so the session runs the code a real one does, and
+       reports four bytes of the prompt as a token: the fake's flat 100 would never fire
+       compaction where a model's count would. Prompts are measured as the log writes them,
+       the scratch workspace's path written `<workspace>`, and tool calls are numbered
+       from one, so the JSON of two runs of one build is identical.
+     - **Budgets in one file, compiled in.** `apps/troupe_core/priv/bench/budgets.json`, a
+       maximum per scenario and measure, one file to review rather than one beside each
+       scenario; compiled into the harness, so an installed `troupe bench` holds itself
+       to what CI did. A budget naming a measure nothing takes fails. Moving one is a
+       change to that file, with both numbers in the pull request
+       (`docs/developer/bench.md`).
+     - **This build's harness, in this VM, isolated.** Each scenario has its own
+       workspace, config and state directories, and while it runs `TROUPE_CONFIG_HOME`
+       and `TROUPE_STATE_HOME` name them and opencode's files name none, so nothing of the
+       person's reaches the prompt being measured. The session is the harness's own in
+       the same VM rather than the machine's daemon, which could be another version and
+       would answer for itself; a daemon per scenario would measure a VM booting.
+     - **One report for both tiers.** Schema 1, JSON with sorted keys and a Markdown
+       table from it. Each scenario has `metrics` (value, budget, passed), `checks`, an
+       `outcome` a script checks whoever answered (a file's content, or a command exiting
+       0), and `runs[]`, each the record the live tier asks for: model, outcome, stop
+       reason, turns, model calls, input, cached and output tokens, cost, wall clock,
+       retries, compactions, approvals, tools by name with failures and time, and every
+       call's prompt breakdown with its latency and first token. Offline, what needs a
+       clock, a price or a provider's own retries is `null`. `troupe bench --live` is
+       reserved and refuses: the live runner adds a runner, not a format.
+     - **Where it runs.** `troupe bench [--json]` (TUI Decision 140), `mix troupe.bench
+       [--json PATH]` from a checkout, a step of `scripts/ci`, and CI's `lint` job, which
+       puts the table in the run's summary and keeps the JSON. A few seconds.
+     - **Reads the requests, not yet the log's breakdown.** Offline the bench measures each
+       request the model is handed. When #389's first slice records each call's prompt
+       breakdown and each turn's sum in the log, a live run reads the same `calls[]` from
+       there.
+     - **Proof:** `Troupe.BenchTest` (the suite passes on this build's numbers; a budget
+       lowered under a measure fails the run and the table names it; a budget for a
+       measure nobody takes fails; two runs write the same JSON; the report's fields are
+       schema 1's; both kinds of outcome), the TUI's `bench_cli_test.exs`, failing on the
+       chunk's tip with `unknown arguments: bench`, and the installed `troupe bench`, on
+       the pull request.
+
+774. **A compaction never cuts between a tool call and its results, a summary that fails
+     leaves the conversation as it was, and `compacted` keeps a large tool result as a
+     blob.** Issue #399, found while building 771. `split_for_compaction` moved its cut
+     back to the nearest user message, and a tool-results message is a user message, so
+     in a turn of many calls the part it kept could start with results whose call had
+     gone into the summary, while the summariser's own request ended on that call with
+     no results after it. Anthropic's and OpenAI's APIs refuse both with a `400` that is
+     not a context overflow: the summary failed, and every later request carried the same
+     results without their call and failed too, so a session on those endpoints stalled
+     until a person started another. A gateway that does not check passed it, which is
+     how it went unnoticed.
+     - **The cut still moves back to the person's message a reply answers, but never onto
+       tool results; results at the head of what would be kept go into the summary with
+       their call.** That is the old rule without its fault: an input stays with the
+       replies to it, a compaction with nothing older to summarise does not happen, and a
+       turn of nothing but calls can still be compacted. Cutting back past the results to
+       their call keeps the pair too, but can leave nothing to summarise but the input or
+       the last summary, a call that saves nothing. Cutting only at a person's input means
+       a turn of nothing but calls, the turn #389 is about, could never be compacted, and
+       an overflow in it would end the turn.
+     - **The conversation is replaced when the summary arrives, not when it is asked
+       for.** Nothing is added to the conversation while an agent compacts (input waits),
+       so `apply_compaction` takes the same split the summariser was sent. A summary that
+       fails, or a cancel while it is asked for, leaves the conversation whole, which is
+       what a replay rebuilds, since nothing was logged; before, memory held only the
+       kept part and a restart had everything. The next request may not fit, and the
+       provider says so (659).
+     - **`compacted` logs what it keeps as `tool_results` logs results**: a tool result
+       over 16 KiB is a blob reference, resolved on replay, as PROTOCOL.md's rule for
+       large payloads says. A log written before has its results inline, and they resolve
+       to themselves.
+     - **A stand-in that refuses what those providers refuse.** The fake model takes
+       `strict_pairs`: a request with a result that answers no call in the message before
+       it, or a call with no result in the message after it, gets the `400`, and takes no
+       step from the script. Opt-in; every core test passed with it on for every session,
+       so it could be the default.
+     - **Proof:** `CompactionTest`, against the strict stand-in: a turn of four calls that
+       overflows compacts once and finishes, which failed before this change (no
+       `compacted`: the summary request was refused); a long turn compacts after its
+       results and again when it ends, two turns of it, with as many `compacted` as
+       summary requests, which without the move past results came to 5 of 7 (and with the
+       cut allowed back onto results, to none, as on the tip); a summary that fails
+       leaves the ten messages in memory that a restart rebuilds, which failed before
+       (memory had fewer); and `compacted` holds a large kept result as the blob
+       `tool_results` holds, which a restart resolves to the same conversation, inline
+       before. `TurnCostTest`'s compaction (one, at the turn's end, five calls) holds as
+       769 wrote it. `FakeScriptTest`: the stand-in refuses both kinds of request and
+       answers the paired one with the step it had not taken.
+
+773. **`troupe bench --live` runs small tasks against the person's own model, under a cap it
+     says before it starts, and keeps a history `--compare` reads.** Issue #390, its local
+     live mode, on Decision 772's runner, scenario format and report; the nightly's wiring
+     and `troupe doctor --bench` stay open. The offline suite says what the harness does
+     with a scripted model; what a turn costs on a person's own gateway and model, and
+     whether the work gets done there, only a real model can say.
+     - **Tasks a script checks, not the offline scenarios.** `Troupe.Bench.LiveScenarios`:
+       write a file with given content; fix a failing test without touching it (`elixir
+       calc_test.exs` exits 0); delegate a question to `explore` and write its answer; read
+       a file that is never there and fall back to a default. Each has an outcome
+       (Decision 772's `{:file, ...}` or `{:command, ...}`) and a check that the work was
+       done the way the task is about (it delegated; the test is as it was; the read
+       failed). The offline scenarios stay offline: their drives and measures read the
+       scripted model's requests, their budgets are the script's, and thirty reads a turn
+       against a real model is the expensive way to learn what the offline suite already
+       says. A scenario whose outcome is a command not on the `PATH` is left out before
+       anything is spent, and the plan says so.
+     - **A file's outcome is its text.** `{:file, path, content}` now compares with line
+       endings and trailing whitespace aside: a model asked for one line may or may not end
+       it with a newline, and on Windows may write `\r\n`. The offline `replay` outcome holds
+       as before.
+     - **A command outcome runs on the person's `PATH`.** The VM puts its own runtime's
+       `bin` first on the `PATH` its children get; in a release (the installed `troupe`,
+       `troupe-daemon`) that runtime has no boot file of its own, so `elixir calc_test.exs`
+       started on it and died at boot (`cannot get bootfile ...start.boot`), and the first
+       installed run failed every `fix_test` the model had fixed. In a release the outcome
+       command gets the `PATH` without that directory (`Scenario.command_path/2`).
+     - **The person's provider, in memory.** `plan/1` resolves the person's configuration and
+       copies where a model call goes (provider, URL, key, named providers, windows, prices,
+       the catalog) into each run's config overrides, nothing else of theirs; `--model`
+       picks another model, addressed as `troupe` addresses one, which is also how another
+       provider is picked, so there is no `--provider`. The key is never written to a file
+       (a session's config is not logged), never printed, and `inspect/1` of a plan leaves
+       it out. A model whose key cannot be read is refused before anything starts.
+     - **A cap, said first, and asked about.** Each run's limits are `scripts/live-check`'s
+       (12 model calls, 200,000 tokens sent, 24,000 received, 240 s), well above what any of
+       the tasks needs and far below the defaults. The cap is those limits at the model's
+       price (the catalog, else `models.prices`; the input at the dearer of the input and
+       cache-write prices, since the budget counts both) times the runs, which is the
+       issue's "budget x scenarios x repeats"; a model nothing prices has its cap in tokens.
+       It is printed on standard error, and nothing runs without a `y` at a terminal or
+       `--yes`; with no terminal to ask in, nothing runs (TUI Decision 141). While a run
+       goes, the harness holds it to its limits and the runner stops it at its share of the
+       cap, counted from each call's `gateway.cost_micros`, which also covers the cache
+       reads the budget leaves out, so a run passes its share by at most the call in flight.
+     - **Each run isolated, and stopped whatever ends it.** A run is the offline suite's
+       kind: its own workspace, config and state directories with the environment naming
+       them, and a session of the harness this binary carries, with every tool allowed and a
+       budget that stops rather than asks. Not a daemon of its own: in this VM the session's
+       tree is what `scripts/live-check`'s daemon is there for, everything the run started,
+       and `stop_session/1` takes it all down when the root agent's turn ends, the run
+       reaches its share of the cap, or its wall clock passes by a quarter more (at most
+       30 s), which catches a call that hangs between the harness's own checks. A daemon for
+       each run would measure a VM booting, and could be another build than the one the bench
+       ships in. Every tool allowed includes the shell, in a scratch directory that is not
+       a sandbox; the plan says so, and the user page says to run it as one would such a
+       session.
+     - **Measured as it happens.** The runner subscribes to the session and stamps each event
+       as it arrives: a call's latency is its `llm_request` to its `llm_response`, its time
+       to first token the first `llm_delta` between them (an agent's calls are one after
+       another, so they pair up by agent), a tool call's time its `tool_call_started` to its
+       `tool_call_completed`, by agent and id, since a provider that gives no ids gets the
+       same `call_0` in every agent. Usage and cost are the log's. Retries happen inside the
+       provider's call and never reach the log, so `Troupe.LLM.Provider` now says each as
+       `[:troupe, :llm, :retry]` telemetry, which the runner counts for its run. What a
+       call's prompt was made of is its `llm_request.prompt_bytes` (Decision 769), the
+       offline suite's measure, and a compaction's summary is a call too, from the
+       `compacted` that carries it, so its cost counts against the run's share of the cap.
+     - **One report, with `mode: "live"`.** Schema 1 (Decision 772) with the live fields
+       filled, and added: the report's `model`, `repeat`, `cap_micros`, `started_at` and
+       `skipped`; a run's `error` (why it did not end by itself), `checks` and `succeeded`
+       (no error, the outcome held, every check held); a call's `agent`, `cached_tokens` and
+       `cost_micros`. A scenario's metrics are taken over its runs and held to no budget:
+       the success rate, median and worst cost, and the medians of the wall clock, a call's
+       latency and time to first token, the calls and the tokens each way; a model's
+       variance is not a regression. A scenario passes when every run succeeded, and
+       `troupe bench --live` exits 0 then, 1 otherwise, 2 when it ran nothing.
+     - **History and `--compare`.** Each run is appended to `<state>/bench/results.jsonl` as
+       it ends (so Ctrl-C keeps what ran): its record with `schema`, `bench` (when the bench
+       started, which groups its runs), `version`, `scenario` and `run`. `troupe bench
+       --compare` puts the last bench beside each scenario's last runs in an earlier one;
+       `--compare <version|model>` beside that version's or model's last runs. The file is
+       the person's, beside their sessions, and holds what runs did and cost, never what
+       they were sent.
+     - **`--repeat N`, default 1.** One run of each is the cheapest answer to "does it work
+       here and what does it cost"; to compare, three or more. The issue's open question
+       (3 or 5) is the nightly's.
+     - **The nightly, later.** It never runs for a pull request. The nightly should run it
+       after `scripts/live-check`, with the model and prices the `live` job already has
+       (`TROUPE_NIGHTLY_MODEL`, `qwen3-235b` by default), `--repeat 3 --yes --json`, its
+       table in the run's summary, and the history carried from night to night (an Actions
+       cache keyed by the branch) so `--compare` shows a trend break. That wiring is a
+       change to `live.yml` of its own.
+     - **Proof:** `Troupe.BenchLiveTest`, against a stand-in for an OpenAI-compatible
+       endpoint on a loopback port (`test/support/fake_openai.exs`, streamed scripted
+       answers with usage and delays, a `500` first when asked): the plan's cap and its
+       words, the key in none of them; no price, a cap in tokens; no key, refused; a
+       missing program, left out; four scenarios twice with every live field filled and the
+       delegation timed across two agents with the same call ids; a retry counted; a run
+       past its wall clock stopped; a run past its share of the cap stopped; the history
+       and `--compare` by last, version and model; a file's text; a release's runtime out
+       of a command's `PATH`; a compaction's summary as a call with its prompt and cost.
+       The TUI's `bench_cli_test.exs`, which failed on #397's tip with `troupe bench
+       --live: not yet`; and the installed `troupe bench --live --repeat 2 --json` against
+       the stand-in, on the pull request.
+
+775. **`troupe bench --live` is a benchmark: a `standard` suite of ten tasks beside the
+     four-task `smoke`, each run's tool calls in its record, a score with its interval and
+     a cost per success, and a run's directories kept on request.** Issue #390's second
+     tier, and issues #405 and #406, found in the first live bench against `qwen3-235b`
+     (Decision 773's four tasks, three runs each). That bench said whether the setup
+     worked; it could not say whether the harness is good at work, nor where a dear run's
+     money went: one `fix_test` run cost five times another, and nothing in the report
+     said why.
+     - **Two suites.** `smoke` is Decision 773's four and stays the default, so the
+       cheapest answer to "does it work here" costs what it did and its history compares
+       with the runs before this. `standard` adds six tasks that look more like work, each
+       with an outcome a script checks and, where the way it is done is the point, a check:
+       `rename_symbol` (a function renamed in its module and in its callers in two other
+       files; `elixir shop_test.exs` passes and the old name is in no file),
+       `implement_spec` (a Roman numeral encoder written from its documentation; the test
+       passes, unchanged), `large_log` (a count in a 480 kB log, more than one read returns,
+       whose level and code each count the wrong lines; the number is right), `precise_edit`
+       (one setting of a 1,560-line file changed where a second section has the same line;
+       the file is exactly as wanted, and was edited, not written whole), `follow_steps`
+       (three steps read from a file in the workspace; each step's file holds what it
+       should) and `answer_only` (a question that needs no tool; the answer is right and
+       no tool was called, which is the least a turn can cost: one call carrying the system
+       prompt and every tool's definition). `--suite NAME` picks one, `--scenario a,b`
+       names scenarios whatever their suite. Ten tasks are still not a quality benchmark
+       of a model; they are enough to compare one harness build, or one model, with
+       another on the same work, which is what the bench is for.
+     - **A score, not only a rate.** A scenario's measures add the success rate's 95%
+       Wilson interval (`success_low`, `success_high`), the cost per success (everything
+       its runs cost, over the runs that succeeded, which is how two models compare, per
+       issue #390) and the median of each run's largest tool result. The report adds
+       `summary`: runs and successes with the interval, cost in all, per run and per
+       success, tokens and model calls in all, tokens per success, and wall clock. Three
+       runs that all succeeded put a model's rate only above 0.43, so the table says so
+       rather than "1.0". `--compare` adds `all` rows over the scenarios both benches ran:
+       success rate, cost per success and per run, the median run's wall clock and tokens
+       per success, which hold whatever the number of runs.
+     - **Each tool call in the record (#406).** `tool_calls[]`: agent, tool, time, whether
+       it succeeded, the bytes of its result as the model was given it (a result the log
+       keeps as a blob is resolved and measured), and `cut`, whether the result says part
+       of it was left out. Never its input or its output, as the history has never held
+       what a run was sent. `largest_tool_result_bytes` beside it. The run that cost five
+       times another would have said: one `shell` call, 60 kB, cut.
+     - **`--keep DIR` (#406).** Each run's workspace and state directory, its session log
+       among them, are left under `DIR/<when the bench started>/<scenario>-<n>` instead of
+       removed, so a person can read what a run did. A directory of the bench's own, so a
+       second bench never seeds a workspace with what the first left. Off by default: the
+       log holds what the run was sent.
+     - **A run that answered on its last allowed call ended by itself (#405).** A live
+       run's budget stops rather than asks (773), and such a budget is checked again when
+       a turn ends (`to_idle_or_done/1`), so a turn that answered with its twelfth call of
+       twelve ended the agent as `agent_done` with `budget_exhausted`, and the bench
+       reported "the run's budget stopped it". The bench now reads the root's last reply:
+       one that ended the turn (`end_turn`) is a run that ended by itself, and one cut off
+       with a tool call pending is still the budget's. The harness is unchanged: on the
+       plane, a contract budget spent is a finished session either way, and logging a
+       `turn_ended` before the `agent_done` is a change of the log's meaning for every
+       reader, not the bench's to make.
+     - **`suite` stays the report's name.** Schema 1's `suite` is `"troupe bench"`; the
+       set that ran is `live_suite` (`smoke`, `standard`, or `only` for scenarios named).
+       Fields are added, none renamed (772).
+     - **Proof:** `Troupe.BenchLiveTest`: the suites, a scenario by name, an unknown suite
+       or scenario refused before anything is asked of the provider; the `standard` suite
+       against the stand-in, every outcome and check holding, the log searched rather than
+       read whole, `answer_only` in one call with no tool, the summary and its interval;
+       the six new tasks failing when the stand-in touches nothing; a run whose last
+       allowed call ends the turn succeeding, which failed on the chunk's tip with "the
+       run's budget stopped it (max_turns)", and one cut off with a call pending not; a
+       read cut at the limit in `tool_calls` as a blob measured whole, and `--keep`
+       leaving the workspace and the session log; the interval's values; `--compare`'s
+       `all` rows. The TUI's `bench_cli_test.exs` (TUI Decision 142). And the installed
+       `troupe bench --live --suite standard --repeat 2 --keep --json` against the
+       stand-in, on the pull request.
+
+776. **On Windows the shell is Git for Windows' bash, never WSL's launcher; no command
+     Troupe starts has the release's own runtime on its `PATH`; `grep` searches a file its
+     `path` names; and a glob that matched nothing says so.** Found by the
+     first `troupe bench --live --suite standard --repeat 3` (Decision 775), against
+     `qwen3-235b` from the installed `troupe` on Windows: 20 of 30 runs succeeded, and nine
+     of the ten failures came from these three, not from the model.
+     - **The shell ran in Linux.** `windows_shell/0` took the first `bash` the VM found,
+       and on a Windows `PATH` that is `C:\Windows\System32\bash.exe` wherever WSL is
+       installed: the launcher of a Linux distribution. Every command ran there, in another
+       operating system, while the tool's description told the model "the host is Windows";
+       there the Windows `elixir` is a shell script that finds no `erl`, so no run could
+       execute a test. `implement_spec` failed twice with code it could not try, and one
+       `fix_test` run spent ten shell calls repairing Erlang, one of them a 60 kB
+       `ls -R`. `Troupe.Tools.Shell.windows_bash/2` now looks for Git for Windows' bash
+       beside the `git` on the `PATH`, then where its installer puts it (the program files
+       directories, and `%LOCALAPPDATA%\Programs\Git` for a per-user install), then for any
+       `bash.exe` on the `PATH` outside the Windows directory and the `WindowsApps`
+       aliases; with none it is PowerShell, as before. A person who wants WSL runs Troupe in
+       WSL, where the host and the shell agree.
+     - **And then `elixir` died at boot.** With Git's bash, the next layer showed: the VM
+       puts its own runtime's `bin` first on the `PATH` its children inherit, and in a
+       release (the installed `troupe` and `troupe-daemon`) that runtime's `erl` has no
+       boot file, so the `elixir` or `mix` a command ran found it first and stopped with
+       `cannot get bootfile ... start.boot`. Decision 773 found this for the bench's
+       outcome commands and fixed it there alone. `Troupe.Reaper.child_env/0` now gives
+       every command started through reaper (the shell tool, `grep`'s ripgrep, git, MCP
+       servers) a `PATH` without the release's runtime, and the bench's outcome uses the
+       same; a caller's own variables still win.
+     - **`grep` on one file.** Its `path` was taken for a directory: ripgrep ran in it and
+       the built-in scan globbed under it, so a file found nothing, and the answer was "No
+       matches." for a search of the very file that held them. Every `large_log` run asked
+       exactly that (`ERROR.*E1042` in `logs/service.log`) and wrote 0. Now a file is
+       searched alone: ripgrep beside it with `--with-filename`, the built-in scan on that
+       file, both answering `path:line: text` relative to the workspace as before; the
+       schema says a directory or one file.
+     - **A glob that matched nothing.** The tool's description gave `**/*.ex` as its
+       example, and all three `rename_symbol` runs narrowed with exactly that in a project
+       of `.exs` files, were told "No matches.", and concluded the function had no callers.
+       The example is gone, the description says to check what the files are called before
+       narrowing by extension, and an empty search with a glob answers `No matches in files
+       matching **/*.ex.`, so a glob that missed is not taken for an absent name.
+     - **Not changed:** the `build` agent's "call `todo_write` first" for more than two
+       steps, which took about a third of `qwen3-235b`'s calls on these small tasks and one
+       `follow_steps` run's last call; a bench of real work should say whether that is too
+       much before it moves.
+     - **Proof:** `Troupe.Tools.ShellTest`: WSL's launcher first on the `PATH` passed over
+       for Git's bash, a Git found from its `git` wherever installed, another bash with no
+       Git, neither WSL path ever, and a per-user Git; `ShellReleasePathTest`: with
+       `RELEASE_ROOT` set and the runtime's `bin` first on the `PATH`, a shell command's
+       `$PATH` is without it. `FileToolsTest`: a file as the path,
+       with ripgrep and with the built-in scan; a glob that matched nothing named. On the
+       chunk's `grep.ex` the same search of a file answered `No matches.` with the built-in
+       scan and `ripgrep failed: ` with ripgrep on Linux, and `No matches.` in the bench's
+       own log on Windows; the stand-in's `large_log` script now greps the file, as the
+       model did. On this machine the installed daemon's `Shell.shell/0` answered
+       `C:/WINDOWS/system32/bash.exe` before the change and Git's after, and a headless
+       session of the installed `troupe` ran `uname -s; elixir -e ...` as `MINGW64_NT` with
+       the boot failure above, then, with the `PATH` fixed, printing the answer, on the
+       pull request.
+
+777. **`grep` says how many lines matched in how many files before it lists them, and a
+     task-list update goes with the call that does the work, not as a turn of its own.**
+     Found by the two standard live benches after Decision 776, against `qwen3-235b`: 23
+     and 24 of 30 runs succeeded, and the failures left were these two and a model's
+     claim to have written a file it never wrote.
+     - **The count.** `large_log` failed six runs in six: `grep` answered all 53 matching
+       lines, and the model, asked how many there were, counted them as 60 every time. A
+       model counting a long list by eye counts it wrong, and none of the six thought to
+       run `grep -c`. The answer now starts `53 matching lines in 1 file:`, before the
+       lines, where a result cut at `tool_output_limit` still has it. The built-in scan
+       counts every match and shows the first 200 (`250 matching lines in 1 file; the
+       first 200 follow:`); ripgrep stops each file at 200, so a file that reached that
+       says there may be more. The cost is one line a search.
+     - **The task list.** `todo_write` was 32 of the bench's 168 model calls, and five of
+       the twelve in each `rename_symbol` run that ran out of calls with the work done
+       (outcome and checks held). The tool's description and the `build` agent said to
+       write a list for anything of more than two steps and mark each item as it starts
+       and ends; a model that does each mark as a call of its own spends a whole round
+       trip, the whole conversation sent again, on every one. Now a list is for work of
+       more than a few steps, and each update goes in the same response as the tool call
+       that does the work (`todo_write`, `build.md`, `implementer.md`, `workflow.md`).
+       `build.md` says it in a line, since its text is the system prompt the bench holds
+       to 1,500 bytes; the reason is in the tool's description. Nothing is enforced: a response may still hold a `todo_write` alone, and the live
+       bench says whether the words were enough. `plan` keeps writing its plan into the
+       list, which is what it is for.
+     - **Not changed:** the 12-call limit of a live run, which is what made the overhead
+       a failure rather than a cost; a model that cannot finish a rename in twelve calls
+       is a measure worth keeping. And `recover`'s run that said it wrote `port.txt`
+       without calling `write_file`: the bench's outcome caught it, as it should.
+     - **Proof:** `FileToolsTest`: three lines in two files counted, 250 in one counted and
+       200 shown by the built-in scan, the cap said by ripgrep, the earlier tests' answers
+       with their count, both with `rg` on the `PATH` and without. The offline bench within
+       every budget (on Linux the system prompt 1,377 bytes, the tool definitions 12,723,
+       `cut_output`'s cut result one line longer). The live bench's numbers
+       before and after are the person's to take, on the pull request.
+
+778. **The model catalog refreshes itself in the background, says what it fetched from
+     where and when, and a model the configured provider does not serve fails `doctor`
+     and is marked in `troupe models`, with the ones it does serve.** Issue #410. A
+     setup whose `models.default` named a model the gateway did not serve passed
+     `doctor` with two green lines, `key` among them having fetched the gateway's four
+     models and never looked for the configured one; `troupe models` listed it with the
+     default window and `no price`, a served model the gateway prices read `no price`
+     too until someone ran `--refresh` (the cache on the machine was twelve days old),
+     `source` said which file named a model rather than where its facts came from, and
+     `named providers: (none ...)` two lines under a working provider read as no provider.
+     - **The record.** `models.json` keeps, beside the models, one record for each
+       provider a refresh asked (`Store.sources/0`): who it is (`provider`, `nil` for the
+       session-wide one), its `type` and `base_url`, the `url` of the listing that
+       answered (LiteLLM's `/model_group/info`, else `/v1/models`), the `ids` it listed and
+       `fetched_at`; or `error` and `failed_at` when it did not answer. A provider that
+       does not answer keeps the models it listed before at the same URL, so a refresh
+       offline forgets nothing, and one at another URL is not that provider's. The file
+       is written beside and renamed over, since the daemon now writes it while a client
+       may read it. A cache from before the record still loads.
+     - **When it is stale** (`Store.stale/2`): no cache (the first run); a provider worth
+       asking, one with a key, with no record at its type and base URL (a changed
+       provider or URL, or an old cache); a list a day old; a provider that did not
+       answer, again after an hour; and a model `default`, `cheap` or `expensive` names
+       that its provider's list lacks, after ten minutes, since it may be new. A day,
+       not two: a gateway's list changes when its operator adds or retires a model, on
+       the scale of days, and a day keeps a person who starts a session a day at most a
+       working day behind for one request a day per provider. The hour keeps an offline
+       laptop from asking at every session start, and the ten minutes keep a model nobody
+       serves to six requests an hour. A key that changes is not noticed by itself; the
+       next failure, miss or day is, and `--refresh` at once.
+     - **In the background.** A local session that starts hands its config to
+       `Troupe.LLM.Catalog.Refresher`, which decides and asks in a process of its own, one
+       refresh at a time, the last config that arrived meanwhile looked at after. The
+       session started with the cache as it was and never waits; the next one reads what
+       was written. A pod's session (`kind: :team`) does not: its model is its profile's
+       business, as before. `config :troupe_core, catalog_refresh: false` turns it off,
+       which both test suites set, since many of their sessions carry a key and no base
+       URL, which is a real provider's own endpoint. This amends TUI Decision 60's
+       "fetching is explicit": `Config.load/2` still only reads the cache.
+     - **`troupe models`** (and `troupe-daemon models`) asks first when the cache is
+       stale, whenever a provider last failed, since the person is waiting for this answer
+       and may just have fixed the key (`Store.ensure/2`), and always with `--refresh`.
+       One `catalog:` line for each provider says what came of it: `4 models from openai
+       at <url>, fetched just now`, `..., from the cache, fetched 12 days ago`, `openai at
+       <base_url> did not answer: 401 unauthorized: the key was refused; 4 of its models
+       from the cache, ...`, or `not asked yet`. A model's `source` is where its facts came
+       from: `:catalog` when the provider's list has it, whoever else names it; the report
+       words it `from the provider` (asked by this run), `from the cache`, `from your
+       config` or `from opencode`, and a catalog price no longer carries `(catalog)`; a
+       `models.prices` price still says `(models.prices)` (689). A model a role names that
+       its provider has answered without is `NOT SERVED by openai; it serves qwen3.6-35b,
+       qwen3-235b, ...`, the five nearest by name first (`Catalog.nearest/3`, Jaro), in
+       place of a window and a price it does not have. The named providers are `other
+       named providers`, and when there are none the section is left out unless the
+       session-wide provider cannot be asked either (`other named providers: none
+       configured (...)`). The cache's path is `catalog cache:` at the end.
+     - **`doctor`** adds `model default`, and `model cheap` and `model expensive` when they
+       are set: each among what its provider listed (the `key` line's request, or one more
+       for a role on another provider), failing with `qwen3.5 is not served by openai; it
+       serves qwen3.6-35b, qwen3-235b, gpt-oss-120b, mistral-small-3.2; set models.default
+       to one`. A provider that lists nothing or does not answer keeps the lines it had.
+       An alias matches the dated snapshot Anthropic lists (`claude-haiku-4-5` and
+       `claude-haiku-4-5-20251001`, `Catalog.serves?/2`). A check's name longer than its
+       column (a plane's URL) now has a space before its detail.
+     - **Not in this:** `troupe models --set`, onboarding picking from the list (#76), the
+       plane's profile picker (#56); a running session does not reload the catalog it
+       started with; a lookup that misses in the middle of a session (a delegated model,
+       a price at call time) does not start a refresh, only the next session's start does.
+     - **Proof:** a stand-in gateway (`test/support/fake_gateway.exs`: `/model_group/info`
+       with four models, windows and prices, `/v1/models`, a 401 for a key it does not
+       know). `Troupe.DoctorTest`: a model it does not serve fails with the four, a served
+       one and a dated snapshot pass, a refused key and an empty list add no line, the
+       plane's space. `Troupe.LLM.CatalogStoreTest`: the record, each reason to be stale
+       and its interval, a provider that does not answer keeping its models and being
+       asked again, a named provider, a vanilla `/v1/models`, the report's lines, and a
+       local session's start refreshing a stale catalog in the background and leaving a
+       fresh one alone. TUI `ModelsCLITest`: `troupe models` on its first run, from the
+       cache, with `--refresh`, with a refused key, and with no provider to ask.

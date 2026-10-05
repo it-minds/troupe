@@ -127,6 +127,9 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :doctor} = args} ->
         Troupe.CLI.Doctor.run(args.workspace)
 
+      {:ok, %{mode: :bench} = args} ->
+        Troupe.CLI.Bench.run(args)
+
       {:ok, %{mode: :run} = args} ->
         run(args)
 
@@ -200,7 +203,7 @@ defmodule Troupe.CLI.Runner do
   def interruptible?({:ok, %{mode: :run} = args}), do: args.headless
 
   def interruptible?({:ok, %{mode: mode}}),
-    do: mode in [:daemon, :login, :logout, :whoami, :models, :doctor, :config_pull]
+    do: mode in [:daemon, :login, :logout, :whoami, :models, :doctor, :bench, :config_pull]
 
   def interruptible?(_parsed), do: false
 
@@ -318,9 +321,10 @@ defmodule Troupe.CLI.Runner do
     end
   end
 
-  # `troupe models`: the catalog as the providers last described it, refreshed
-  # first when asked. Refreshing is never implicit — it costs two round trips
-  # and a session must start without them.
+  # `troupe models`: what the providers serve, asked first when the cache is stale or
+  # for another provider (root Decision 778), and always with `--refresh`; the report
+  # says which it was. A session never waits for this: the daemon refreshes in the
+  # background when one starts.
   defp models_report(args) do
     case Troupe.Config.resolve(args.workspace) do
       {:ok, cfg, _layers} -> {:ok, models_report(args, cfg)}
@@ -329,22 +333,9 @@ defmodule Troupe.CLI.Runner do
   end
 
   defp models_report(args, cfg) do
-    failures =
-      if args.refresh do
-        {:ok, _catalog, failures} = Troupe.LLM.Catalog.Store.refresh(cfg)
-        failures
-      else
-        []
-      end
-
-    cfg = if args.refresh, do: Troupe.Config.load(args.workspace), else: cfg
-
-    notes =
-      Enum.map(failures, fn {name, reason} ->
-        "  ! #{name}: #{inspect(reason)}"
-      end)
-
-    Enum.join([Troupe.Config.describe(cfg, command: "troupe") | notes], "\n")
+    %{asked: asked, reason: reason} = Troupe.LLM.Catalog.Store.ensure(cfg, force: args.refresh)
+    cfg = if reason, do: Troupe.Config.load(args.workspace), else: cfg
+    Troupe.Config.describe(cfg, command: "troupe", asked: asked)
   end
 
   defp print({text, code}) do

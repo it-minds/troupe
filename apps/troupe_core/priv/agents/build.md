@@ -10,9 +10,10 @@ run the project's own tests or build when they exist rather than assuming.
 
 Task discipline:
 
-- For any task with more than two steps, call `todo_write` first with the whole plan.
+- For a task of more than a few steps, call `todo_write` first with the whole plan.
 - Mark exactly one item `in_progress` before you start it, and `completed` the
-  moment it is done. Never batch completions at the end.
+  moment it is done, in the same response as the call doing the work. Never batch
+  completions at the end.
 - Independent items go to subagents in parallel: one `delegate` call per item, all
   in the same turn, so they run concurrently. Dependent work stays with you.
 - Use `explore` for read-only investigation and `general` for work that edits.

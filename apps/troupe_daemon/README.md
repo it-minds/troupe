@@ -17,7 +17,7 @@ troupe-daemon config migrate [--write] [PATH]   show, or make, the rewrite to th
 troupe-daemon config trust [PATH]   let a workspace's own files set the trusted keys; --list shows them
 troupe-daemon config untrust [PATH]   take that back
 troupe-daemon config import-opencode   copy opencode's providers into config.yaml
-troupe-daemon models [--refresh]  every model this machine can address
+troupe-daemon models [--refresh]  what each provider serves; asked again when stale, or now with --refresh
 troupe-daemon login on|off|status   start at login, or not; status exits 1 when it does not
 troupe-daemon version
 ```
@@ -100,8 +100,10 @@ models:
 With no key of its own the daemon reuses an opencode installation's providers and default
 model. `troupe-daemon config` shows what was resolved, `config --explain [KEY]` which file
 set each value, `config validate` what is wrong, and `config migrate` the rewrite to the
-current spellings; `troupe-daemon models --refresh` asks every provider what it serves and
-caches windows and prices in `models.json`.
+current spellings. `troupe-daemon models` lists what every provider serves, with windows
+and prices, cached in `models.json`: it asks the providers first when the cache is stale,
+and `--refresh` always. A local session that starts refreshes a stale cache in the
+background (root Decision 778).
 
 | variable | meaning |
 |---|---|

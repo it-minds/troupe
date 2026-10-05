@@ -9,6 +9,9 @@ defmodule Troupe.Tools.ReadOutput do
   it back. Ids are the blob's digest, so a path is never built from anything the model
   typed. `read_file` is not kept: reading again with the next offset returns the same
   bytes.
+
+  A large result of any tool that a compaction left behind is sent from then on as a stub
+  naming the same call (Decision 771), so this reads those back too.
   """
 
   @behaviour Troupe.Tool
@@ -24,10 +27,11 @@ defmodule Troupe.Tools.ReadOutput do
 
   @impl Troupe.Tool
   def description do
-    "Page through the full output of an earlier tool call that was truncated. `id` is " <>
-      "the identifier in the truncation marker (`sha256:…`); `offset` is the 1-based first " <>
-      "line and `limit` the number of lines (default #{@default_limit}). Use this instead " <>
-      "of running an expensive or non-idempotent command again."
+    "Page through the full output of an earlier tool call that was truncated, or left out " <>
+      "after a compaction. `id` is the identifier its marker names (`sha256:…`); `offset` " <>
+      "is the 1-based first line and `limit` the number of lines (default " <>
+      "#{@default_limit}). Use this instead of running an expensive or non-idempotent " <>
+      "command again."
   end
 
   @impl Troupe.Tool
@@ -35,7 +39,7 @@ defmodule Troupe.Tools.ReadOutput do
     %{
       "type" => "object",
       "properties" => %{
-        "id" => %{"type" => "string", "description" => "The id from the truncation marker."},
+        "id" => %{"type" => "string", "description" => "The id from the marker."},
         "offset" => %{"type" => "integer", "description" => "First line to return (1-based)."},
         "limit" => %{"type" => "integer", "description" => "Maximum number of lines."}
       },
@@ -60,6 +64,13 @@ defmodule Troupe.Tools.ReadOutput do
   @doc "The marker a capped result carries, naming the call that pages the rest."
   @spec marker(String.t(), pos_integer()) :: String.t()
   def marker(id, offset), do: "[full output kept. Call #{call(id, offset)} for more.]"
+
+  @doc "The one line a result a compaction left behind is sent as (Decision 771)."
+  @spec stub(String.t(), non_neg_integer(), String.t()) :: String.t()
+  def stub(tool, size, id) do
+    "[output of #{tool} (#{size} bytes) left out since a compaction. " <>
+      "Call #{call(id, 1)} to see it again.]"
+  end
 
   defp call(id, offset),
     do: ~s|read_output(id: "#{id}", offset: #{offset}, limit: #{@default_limit})|

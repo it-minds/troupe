@@ -36,11 +36,13 @@ defmodule Troupe.Agent.ToolFailuresTest do
     asked
   end
 
+  # Why the turn ended; what it cost rides along on every one (Decision 769) and is
+  # `TurnCostTest`'s.
   defp await_turn_ended(sid) do
     assert_receive {:troupe_event, ^sid, %Event{type: "turn_ended", agent: ["root"], data: data}},
                    10_000
 
-    data
+    Map.delete(data, "turn")
   end
 
   defp notes(sid) do

@@ -421,11 +421,11 @@ models:
 
 A price for a model the catalog does not price, such as one a LiteLLM gateway serves
 and streams, in dollars per million tokens by the name the model is addressed with. What
-the gateway says a call cost still wins, and then the catalog's price
-(`troupe models --refresh`); a call none of the three prices counts as free, and the
-daemon's log says so once a session. `troupe models` shows each model's price and where
-it came from, or `no price`, and `troupe config --explain models.prices` which file set
-it.
+the gateway says a call cost still wins, and then the catalog's price (the provider's
+own list, which refreshes itself when it is a day old); a call none of the three prices
+counts as free, and the daemon's log says so once a session. `troupe models` shows each
+model's price and where it came from, or `no price`, and `troupe config --explain
+models.prices` which file set it. The line under each turn in the terminal UI is priced the same way.
 `TROUPE_MODEL_PRICES` takes the same map as JSON, which is how a profile's `llm.prices`
 reaches its pods.
 
@@ -448,6 +448,34 @@ approvals: deny
 max_turns: 20
 wall_clock_ms: 600000
 ```
+
+## What each provider caches
+
+One thing you type can take an agent many model calls, and each call sends the whole
+conversation again. A provider that caches the prompt bills what it has seen before at a
+fraction of the input price, which on a long turn is most of what was sent. There is
+nothing to set; what happens depends on the provider.
+
+- **Anthropic** (`provider: anthropic`, or a provider of `type: anthropic`) caches only
+  what a request asks it to, and every call an agent makes asks: the tool definitions,
+  the system prompt and the conversation so far are marked, and the next call reads them
+  back. The cache lasts five minutes from its last use, so the calls of a turn keep it
+  warm and a reply after a long pause starts it again. A prompt shorter than the model's
+  minimum (512 to 4096 tokens, by model) is not cached. The agent's task list is sent
+  after the cached system prompt, so rewriting it leaves the tools and the system prompt
+  cached; the conversation is written to the cache again on the next call. A gateway that
+  speaks Anthropic's API passes the marks on or drops them.
+- **OpenAI** caches a long enough prompt by itself, with nothing to ask.
+- **An OpenAI-compatible gateway or server** (`provider: openai` with a `base_url`, such as
+  LiteLLM, vLLM or Ollama) caches whatever it and the model behind it do, which may be
+  nothing. Troupe sends no marks this way; a LiteLLM deployment can be configured to add
+  them for the Anthropic models it serves.
+
+Whichever it is, the provider's own figures say whether it happened: each model call's
+`cache_read` in the session's log, and the terminal UI's token detail, which says how
+much of the prompt came from the cache. A call priced from the catalog or `models.prices`
+is priced at its `cache_read` and `cache_write` rates, or at the input price where those
+are not set.
 
 ## Every key
 
@@ -494,7 +522,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `models.prices.<model>.cache_write` | number ≥ 0 |  | any |  | Dollars per million prompt tokens written to the cache. Unset: the input price. |
 | `max_tokens` | integer ≥ 1 | `8192` | any |  | The most output tokens one model call asks for. |
 | `context_window` | integer ≥ 1 | `200000` | any | context window | The window, in tokens, assumed when neither a provider nor the catalog says; compaction is planned against it. |
-| `compact_at` | number, 0 to 1 | `0.75` | any | compact at | The share of the window at which an agent summarises older turns. |
+| `compact_at` | number, 0 to 1 | `0.75` | any | compact at | The share of the window at which an agent summarises older turns. A tool result over 16 KiB it read before then is sent from then on as a stub `read_output` expands. |
 | `llm_timeout_ms` | integer ≥ 1 | `300000` | any |  | How long one model call may take before it is given up on. |
 
 ### Budget
