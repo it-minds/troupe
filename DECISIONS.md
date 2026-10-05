@@ -5332,4 +5332,13 @@ citation keeps meaning what it meant.
        a named provider of `type: anthropic` carries adaptive thinking at the configured
        effort for Opus 5.5, and a budget for a model the catalog says takes one. On the
        chunk's tip nine of these failed: the newest models were sent a budget, a refusal
-       read as a map, and every write over the OpenAI wire was fresh input.
+       read as a map, and every write over the OpenAI wire was fresh input. And the
+       installed daemon, with scratch homes, against a loopback stand-in that records each
+       body and answers both model listings: over the protocol, `claude-opus-5-5` at `high`
+       went out as adaptive thinking at `high`, `claude-haiku-4-5` at `medium` as a budget
+       of 8192, a `house-model` at 12000 that the stand-in's list says takes adaptive
+       thinking (the catalog refreshed itself after the first session) at `high`, and a
+       LiteLLM-shaped answer logged 1500 written, 3000 read and 500 fresh, priced at 5450
+       micro-dollars by the catalog's rates. The build installed before sent the first and
+       third a budget, and logged the gateway's call as 2000 fresh and nothing written, at
+       4700.
