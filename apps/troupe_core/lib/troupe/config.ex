@@ -324,6 +324,9 @@ defmodule Troupe.Config do
   @doc "`troupe config trust --list`: `Troupe.Config.Trust.list/1`."
   defdelegate list_trusted(opts \\ []), to: Trust, as: :list
 
+  @doc "`troupe models --json`: `Troupe.Config.Models.json/2`, what `describe/2` says as data."
+  defdelegate models_json(config, opts \\ []), to: Troupe.Config.Models, as: :json
+
   @doc """
   `text` as `command` would put it: every quoted `troupe config` command it names is
   `command`'s `config` command instead. What loading warns about is written once, naming
