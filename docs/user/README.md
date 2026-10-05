@@ -113,8 +113,11 @@ session is created on one; with only one, you never have to name it.
 
 **Session.** One agent working in one directory, with a durable log of everything that
 happened: `active`, `dormant` (stopped, log kept, can be woken), `read_only`, or `erased`.
-A private session you erase reads `erasure_pending` until the plane has destroyed its key,
-and the copy on your machine goes the next time your client signs your daemon in.
+A private session you erase reads `erasure_pending` until the plane has destroyed its key.
+Erased on your machine, it is erased at the plane too and goes from your machine once the
+key is gone; erased elsewhere, the copy on your machine goes the next time your client
+signs your daemon in. Erasing one on your machine needs that sign-in: without it the
+daemon erases nothing and says which plane it is sealed at.
 
 **Private session.** A session on your machine that is sealed under your own key, listed
 by the plane and opened from another device: `troupe --private`, or *Keep it private* in

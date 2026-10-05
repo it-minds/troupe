@@ -660,7 +660,24 @@ at rest: the session is `dormant` afterwards, as one that went to sleep is.
 
 #### `session.pin` / `session.unpin` → exempt from retention.
 
-#### `session.erase` → tombstone; irreversible.
+#### `session.erase` → `{"session_id", "erased", "state"}`; irreversible.
+
+A private session is sealed at the plane as well, and the daemon erases it there first, as
+an erasure started at the plane goes (Decision 789): it asks the plane's `session.erase`,
+which destroys the key. Once the key is gone the session's sealer stops, the copy here is
+erased, and the plane is told (`session.erased`), which is when it deletes the objects:
+`erased: true`, `state: "erased"`. Where the plane has not destroyed the key yet,
+`erased: false`, `state: "erasure_pending"`: the sealer and the session stop, the copy here
+stays and is listed with `sync: "erasure_pending"`, and it goes when the plane has
+destroyed the key, at the next link with a token or the next `session.erase`, which tries
+again. A private session the plane has no row for was never sealed, and is erased here.
+
+Nothing is erased where the plane cannot be asked: `unavailable` with `reason: "unlinked"`
+where no client has handed the daemon a plane token, `"not_owner"` where the daemon is
+linked to somebody other than the person the session belongs to (Decision 784), or the
+reason the plane did not answer; `plane_url` names the plane the daemon was last linked
+to, where the session is sealed and can be erased. A local session is erased here and
+answers `erased: true`, `state: "erased"`.
 
 #### `session.claim`
 ```json
@@ -1633,7 +1650,8 @@ session's key itself, every version, and answers `{session_id, erased, state, he
 case asking again tries again. The objects and the copy on the owner's machine go when
 the owner's daemon next connects: it asks `session.erasures`, drops its sealer and its copy
 of each session named, and answers `session.erased`, on which the plane deletes every
-version under the session's prefix.
+version under the session's prefix. A daemon erasing one of its own (its `session.erase`,
+Decision 789) asks the plane's first and does the same at once for the session it named.
 
 ### `auth.expiring` (notification, server → client)
 
@@ -1890,7 +1908,7 @@ than an admin uses them:
 | `me.client_defaults` | observe | anybody | `{}` → `{configured, provider, base_url, auth, models: {default, cheap, expensive}}` — what an administrator says people's own machines should talk to (the *Client defaults* settings), for a client to pre-fill its model settings with. **Never a key**: anybody signed in may ask, so each person supplies their own. `configured` is false, and the rest null, until a provider is set |
 | `me.connections.list` | observe | anybody | the MCP servers on the caller's profiles that act as *them*, each with its `slot` and whether they have `connected` it. Whether, never what: the plane can see that a slot has a version and cannot read one |
 | `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own name at the key manager (`name`, the segment of `path` under `troupe/people/`, not always their subject: Decision 755). The client exchanges it with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
-| `session.register` | control | anybody, for their own private sessions | `{session_id, device, epoch, head_hash, last_seq, object_bytes, workspace_bytes, title, claim}` → the session row. Idempotent on the id: the first call mints epoch 1, a later one is a seal report. A seal carries the `epoch` the device holds and is refused with `stale_version` if another device has moved past it; `last_seq` never goes backwards. `claim: true` takes the session over on this device, bumping the epoch conditionally — two devices sending the same `epoch` produce one winner, and the loser learns it lost on its next seal rather than by being told |
+| `session.register` | control | anybody, for their own private sessions | `{session_id, device, epoch, head_hash, last_seq, object_bytes, workspace_bytes, title, claim}` → the session row. Idempotent on the id: the first call mints epoch 1, a later one is a seal report. A seal carries the `epoch` the device holds and is refused with `stale_version` if another device has moved past it; `last_seq` never goes backwards. `claim: true` takes the session over on this device, bumping the epoch conditionally — two devices sending the same `epoch` produce one winner, and the loser learns it lost on its next seal rather than by being told, and stops sealing (issue #433) |
 | `session.presign` | control | anybody, for their own private sessions | `{session_id, method (`get`/`put`), keys}` → `{expires_in, urls}`, one signed URL per key, good for five minutes. Every key must be under `sessions/<session_id>/` and at most 64 per call. **The bytes never cross the plane**: it holds an object-storage credential scoped to signing and no key for what it signs for, which is the narrowest revision of `DECISIONS.md` 90 that lets a laptop seal at all |
 | `session.objects` | observe | anybody, for their own private sessions | `{session_id, prefix}` → `{keys}` under `sessions/<session_id>/`. A caller with no object-storage credential cannot list — a listing is signed against the bucket, not against a key it does not yet know — so the plane lists for it. A `prefix` may narrow the listing and may not widen it; one that is not under the session's own is ignored |
 | `session.assertion` | control | anybody, for their own private sessions | `{session_id}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`, the same shape `me.connections.grant` answers and for the same reason. The path is `troupe/people/<name>/sessions/<session_id>`; the person policy covers their own subtree and no pod role covers any of it. A daemon makes or finds the session's key under `name`, and under the subject it is linked as only where a plane from before Decision 755 answers none. The session must already be registered, which is what makes this a statement about a session the plane agrees is theirs |

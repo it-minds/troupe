@@ -39,7 +39,8 @@ defmodule Troupe.Gateway.Private do
   does not delete the objects while this device may still be writing them. So when the
   daemon connects it asks what was erased while it was away, drops its sealer and its copy
   of each, and says so, and that is when the plane deletes the objects
-  (`apply_erasures/1`, Decision 756).
+  (`apply_erasures/1`, Decision 756). Erasing one here goes the same way, with the plane
+  asked first (`erase/2`, Decision 789): nothing is erased where it cannot be.
 
   ## When the daemon restarted
 
@@ -122,10 +123,18 @@ defmodule Troupe.Gateway.Private do
         :ok
 
       pid ->
-        _ = Sealer.seal_now(pid)
+        _ = seal_now(pid)
         DynamicSupervisor.terminate_child(__MODULE__.Sealers, pid)
         :ok
     end
+  end
+
+  # A sealer may have stopped on its own since it was looked up: another device holds the
+  # session, and it had nothing more to write.
+  defp seal_now(pid) do
+    Sealer.seal_now(pid)
+  catch
+    :exit, _gone -> {:error, :gone}
   end
 
   @doc "Whether this session is being sealed here. A local session is not."
@@ -335,6 +344,67 @@ defmodule Troupe.Gateway.Private do
   end
 
   @doc """
+  Erase a private session from here, as `session.erase` does (Decision 789): at the plane
+  first, the way an erasure started there goes.
+
+  The plane destroys the key, and until it has the session is `erasure_pending`. Once it
+  has, this is `apply_erasures/1` for one session: the sealer stops, the copy on this disk
+  is erased, and the plane is told, which is when it deletes the objects; one the plane
+  could not be told about it names again at the next link. Until it has, the sealer and
+  the session stop and the copy stays, listed as waiting to be erased, until the next link
+  or the next erase finds the key gone. One the plane has no row for was never sealed, and
+  the copy here is all there is.
+
+  Nothing changes where the plane cannot be asked: no token, no answer, or a token that is
+  not the owner's, with which it is asked nothing about the session (Decision 784). The
+  sealed copy and its key are there, and erasing only this one would leave nothing here to
+  finish them.
+
+  Answers `"erased"` or `"erasure_pending"`.
+  """
+  @spec erase(%{id: String.t()}, keyword()) :: {:ok, String.t()} | {:error, term()}
+  def erase(%{id: session_id} = session, opts \\ []) do
+    plane = Keyword.get(opts, :plane, Plane)
+
+    with :ok <- owned(session, plane) do
+      erase_at_plane(session_id, plane, opts)
+    end
+  end
+
+  defp owned(session, plane) do
+    owner = Map.get(session, :owner)
+    subject = Plane.subject(plane)
+    if owner in [nil, subject] or subject == nil, do: :ok, else: {:error, :not_owner}
+  end
+
+  defp erase_at_plane(session_id, plane, opts) do
+    case Plane.call("session.erase", %{"session_id" => session_id}, plane) do
+      {:ok, %{"erased" => true}} ->
+        carry_out(session_id, plane, device(opts), opts)
+        {:ok, "erased"}
+
+      {:ok, %{"state" => "erasure_pending"}} ->
+        stop_sealer(session_id)
+        Troupe.stop_session(session_id)
+        hear(session_id, :erasure_pending)
+        {:ok, "erasure_pending"}
+
+      {:ok, answer} ->
+        {:error, {:unexpected_answer, answer}}
+
+      {:error, {:rpc, %{"message" => "not_found"} = error}} ->
+        if erased?(error),
+          do: carry_out(session_id, plane, device(opts), opts),
+          else: drop(session_id, opts)
+
+        {:ok, "erased"}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
   Seal again what this device was sealing before the daemon stopped, and for the first
   time what it made while it could not.
 
@@ -470,13 +540,7 @@ defmodule Troupe.Gateway.Private do
   # seal on the way down is refused by the plane, and anything that got through before is
   # under the prefix the plane then deletes.
   defp carry_out(session_id, plane, device, opts) do
-    case Registry.whereis_name({__MODULE__.Registry, session_id}) do
-      :undefined -> :ok
-      pid -> DynamicSupervisor.terminate_child(__MODULE__.Sealers, pid)
-    end
-
-    :ok = Keyword.get(opts, :erase, &Troupe.erase_session/1).(session_id)
-    forget(session_id)
+    drop(session_id, opts)
 
     case Plane.call("session.erased", %{"session_id" => session_id, "device" => device}, plane) do
       {:ok, _done} ->
@@ -489,6 +553,13 @@ defmodule Troupe.Gateway.Private do
 
         []
     end
+  end
+
+  # This copy, the sealer first.
+  defp drop(session_id, opts) do
+    stop_sealer(session_id)
+    :ok = Keyword.get(opts, :erase, &Troupe.erase_session/1).(session_id)
+    forget(session_id)
   end
 
   @doc """
@@ -611,17 +682,22 @@ defmodule Troupe.Gateway.Private do
     session_id = context.session_id
     read = Keyword.get(opts, :backfill, &Troupe.replay_from/2)
 
+    # Started again after a crash, and not after a report refused as stale, which is this
+    # device's instruction to stop (issue #433).
     child =
-      {Sealer,
-       [
-         context: context,
-         name: {:via, Registry, {__MODULE__.Registry, session_id}},
-         subscribe: Keyword.get(opts, :subscribe, &Troupe.subscribe/1),
-         report: report(plane, context),
-         sealed_through: Keyword.get(opts, :sealed_through, 0),
-         object_bytes: Keyword.get(opts, :object_bytes, 0),
-         backfill: fn after_seq -> read.(session_id, after_seq) end
-       ]}
+      Supervisor.child_spec(
+        {Sealer,
+         [
+           context: context,
+           name: {:via, Registry, {__MODULE__.Registry, session_id}},
+           subscribe: Keyword.get(opts, :subscribe, &Troupe.subscribe/1),
+           report: report(plane, context),
+           sealed_through: Keyword.get(opts, :sealed_through, 0),
+           object_bytes: Keyword.get(opts, :object_bytes, 0),
+           backfill: fn after_seq -> read.(session_id, after_seq) end
+         ]},
+        restart: :transient
+      )
 
     case DynamicSupervisor.start_child(Keyword.get(opts, :supervisor, __MODULE__.Sealers), child) do
       {:ok, pid} -> {:ok, pid}
