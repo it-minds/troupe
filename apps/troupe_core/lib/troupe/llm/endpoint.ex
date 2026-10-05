@@ -82,4 +82,17 @@ defmodule Troupe.LLM.Endpoint do
       :error -> nil
     end
   end
+
+  @doc """
+  Whether a provider of this type at `base_url` is the vendor's own API rather than a
+  gateway or a server of somebody else's; `false` for a type no vendor has.
+
+      iex> Troupe.LLM.Endpoint.vendor_api?(:anthropic, nil)
+      true
+
+      iex> Troupe.LLM.Endpoint.vendor_api?(:openai, "https://llm-gw.example/v1")
+      false
+  """
+  @spec vendor_api?(atom() | String.t(), String.t() | nil) :: boolean()
+  def vendor_api?(type, base_url), do: vendor_key_var(type, base_url) != nil
 end

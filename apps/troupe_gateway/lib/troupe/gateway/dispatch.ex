@@ -50,14 +50,17 @@ defmodule Troupe.Gateway.Dispatch do
     @moduledoc "Who is calling, and what they are allowed to do."
 
     @enforce_keys [:principal, :scopes, :connection]
-    defstruct [:principal, :scopes, :connection, :next_subscription_id, :activate]
+    defstruct [:principal, :scopes, :connection, :next_subscription_id, :activate, :client]
 
+    # `client`: which client this connection is, a word from `Troupe.LLM.Identify.clients/0`;
+    # a session it creates or wakes names it to the provider (Decision 787).
     @type t :: %__MODULE__{
             principal: map(),
             scopes: [:observe | :control | :admin],
             connection: pid(),
             next_subscription_id: String.t() | nil,
-            activate: (String.t() -> {:ok, pid()} | {:error, term()}) | nil
+            activate: (String.t() -> {:ok, pid()} | {:error, term()}) | nil,
+            client: String.t() | nil
           }
   end
 
@@ -766,17 +769,19 @@ defmodule Troupe.Gateway.Dispatch do
 
   # -- lifecycle --------------------------------------------------------------
 
-  defp handle("session.create", params, _context) do
+  defp handle("session.create", params, context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          {:ok, parent} <- parent_of(params),
          {:ok, resolved} <- Worktrees.resolve(workspace, Map.get(params, "worktree", "auto")) do
       private? = Map.get(params, "private", false) == true
       {profile, task} = workflow_of(params, workspace)
 
+      # The client that asked is the one the session names to the provider (Decision 787).
+      config = [client: context.client] ++ List.wrap(overrides(Map.get(params, "config")))
+
       opts =
-        [workspace: resolved.path, agent: profile]
+        [workspace: resolved.path, agent: profile, config_overrides: config]
         |> maybe_put(:task, task)
-        |> maybe_put(:config_overrides, overrides(Map.get(params, "config")))
         |> maybe_put(:parent, parent)
         |> maybe_private(private?)
 
@@ -1346,8 +1351,8 @@ defmodule Troupe.Gateway.Dispatch do
   # Through the endpoint's own activation where it has one. On a pod only the plane brings
   # a session back, so there `not_found` is the answer for one with no tree running, and
   # the client asks the plane where the session is (PROTOCOL.md §6, "A session that moves").
-  defp activate(session_id, %Context{activate: activate}) do
-    case (activate || (&Troupe.activate/1)).(session_id) do
+  defp activate(session_id, %Context{activate: activate} = context) do
+    case (activate || (&Troupe.activate(&1, client: context.client))).(session_id) do
       {:ok, _pid} -> :ok
       {:error, :not_found} -> {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
       {:error, reason} -> {:error, Error.new(:unavailable, %{reason: inspect(reason)})}

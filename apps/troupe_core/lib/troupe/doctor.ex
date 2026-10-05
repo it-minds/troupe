@@ -15,6 +15,9 @@ defmodule Troupe.Doctor do
     * `model default`, `model cheap`, `model expensive` — each model the config names,
       among what its provider listed: one it does not serve fails, naming the ones
       nearest it that it does (Decision 778). No line when the provider listed nothing.
+    * `identify` — what a session's model calls say about Troupe to the default model's
+      provider, header by header as they go out, or `off` (Decision 787): the terminal
+      UI's through `troupe`, the desktop app's through the daemon.
     * `key storage` — where the key is kept: the user's `config.yaml`, there being no
       keychain in this build.
     * `reaper` — the helper every command runs under starts (`reaper --version`). One
@@ -27,12 +30,13 @@ defmodule Troupe.Doctor do
     * `plane <url>` — for every plane the caller names, and the one the daemon is
       linked to: its discovery document answers.
 
-  Both programs print the same lines; the one difference is which command a line names
-  as the next step, `troupe config` through `troupe` and the file through the daemon.
+  Both programs print the same lines; the differences are which command a line names
+  as the next step, `troupe config` through `troupe` and the file through the daemon, and
+  which client the `identify` line names.
   """
 
   alias Troupe.{Config, Reaper}
-  alias Troupe.LLM.Catalog
+  alias Troupe.LLM.{Catalog, Identify}
   alias Troupe.LLM.Catalog.Store
   alias Troupe.Protocol.{Daemon, Endpoint}
 
@@ -57,6 +61,7 @@ defmodule Troupe.Doctor do
     [config_check(resolved), provider_check(resolved, command)] ++
       key_checks(resolved, live?) ++
       [
+        identify_check(resolved, client(command)),
         storage_check(),
         reaper_check(workspace),
         daemon_check(),
@@ -246,6 +251,31 @@ defmodule Troupe.Doctor do
         :warn,
         "not confirmed: #{target.provider} would not list its models (#{reason})"
       )
+
+  # Built by the function the adapters build their headers with, so the two cannot differ.
+  defp identify_check({:error, _error}, _client),
+    do: check("identify", :fail, "not checked: the config files do not load")
+
+  defp identify_check({:ok, config, _layers}, client) do
+    target = Config.target(config, nil)
+
+    case target.provider do
+      "fake" ->
+        check("identify", :ok, "nothing goes out: the fake provider asks nobody")
+
+      type ->
+        check(
+          "identify",
+          :ok,
+          Identify.describe(config.identify != false, client, type, target.base_url)
+        )
+    end
+  end
+
+  # The client a session started through this program is: `troupe` is the terminal UI,
+  # and `troupe-daemon` the desktop app's daemon.
+  defp client("troupe"), do: "tui"
+  defp client(_command), do: "desktop"
 
   defp storage_check do
     check(

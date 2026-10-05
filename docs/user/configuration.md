@@ -502,6 +502,29 @@ word and a budget for a number. Either way the output cap is raised to hold the 
 A model that refuses what it was sent fails the call with a message that names
 `reasoning_effort` and what to set it to.
 
+## What Troupe tells the provider
+
+Every model call names the software that made it, so whoever runs the gateway can see
+which of their spend is Troupe's, from which client and on which version:
+
+- **Everywhere**, a User-Agent such as `troupe/0.8.4-beta (tui; windows/x86_64)`. The
+  client is `tui`, `headless` (`troupe run --headless`), `desktop`, `acp` (an editor over
+  ACP), `worker` (a session on a plane's pod) or `other`.
+- **To a gateway** (a `base_url` that is neither Anthropic's nor OpenAI's own API, nor
+  OpenRouter), LiteLLM's `x-litellm-tags` (`troupe`, `troupe-<client>`,
+  `troupe-<version>`) and `x-litellm-spend-logs-metadata` with the session's id. An
+  OpenAI-compatible request's `metadata` carries the session's id, the client and the
+  version too. A server that is not LiteLLM ignores them.
+- **To OpenRouter**, `HTTP-Referer` (the project's page) and `X-Title: Troupe`.
+
+A session on your machine names nobody: no person, no path, no repository, no host name.
+A session on a plane's pod also carries what the plane attributes it with (its owner, its
+team, its worker profile and the agent), as it always has.
+
+`identify: false` turns all of it off, and the User-Agent is the HTTP client's own.
+`troupe doctor` prints, on its `identify` line, exactly the headers the default model's
+provider is sent, or `off`.
+
 ## Every key
 
 `Set by` says which files may set a key. "user; project if trusted" keys are read from a
@@ -549,6 +572,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `context_window` | integer ≥ 1 | `200000` | any | context window | The window, in tokens, assumed when neither a provider nor the catalog says; compaction is planned against it. |
 | `compact_at` | number, 0 to 1 | `0.75` | any | compact at | The share of the window at which an agent summarises older turns. A tool result over 16 KiB it read before then is sent from then on as a stub `read_output` expands. |
 | `llm_timeout_ms` | integer ≥ 1 | `300000` | any |  | How long one model call may take before it is given up on. |
+| `identify` | boolean | `true` | user; project if trusted |  | Every model call names Troupe: a User-Agent with the version and the client, LiteLLM's tags and the session's id to a gateway, OpenRouter's app headers to OpenRouter; never a person, a path or a repository. `false` sends none of it. `troupe doctor` prints what goes out. |
 
 ### Budget
 

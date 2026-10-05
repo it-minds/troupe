@@ -130,6 +130,11 @@ with `not_initialized` and the connection closes.
 | `tools` | the client can serve `tool.invoke` requests (§8) |
 | `blobs` | the client will fetch truncated payloads with `blob.get` |
 
+`params.client_info.name` says which client this is, and a daemon names the sessions a
+connection creates or wakes to the model provider by it (Decision 787): `troupe` is the
+terminal UI, `troupe-headless` its headless run, `troupe-gui` the desktop app, and any
+other name is `other`. The name itself never leaves the daemon.
+
 The response:
 
 ```json
