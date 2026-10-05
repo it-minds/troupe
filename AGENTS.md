@@ -11,6 +11,13 @@ this adds only what an agent working in the repository must not miss.
   (triage, the queue, the chunk) and a fixer role (one issue).
 - **Defects found in passing** go in [docs/developer/defects.md](docs/developer/defects.md)
   (where, what, severity, who found it). Read it before touching code it names.
+- **Decisions.** Before changing a file, run `mix troupe.decisions --for <path>` at the
+  repository root: it lists the decisions that govern the path, number and one-line gist,
+  superseded ones marked. Read the ones that bear on the change in
+  [docs/decisions/](docs/decisions/README.md) and do not undo one without saying so. A
+  decision you make is a new file there, one per decision
+  (`docs/decisions/<four-digit number>-<slug>.md`, the TUI's under `tui/`), never an entry
+  appended to a shared file; `mix troupe.decisions --check` checks its front matter.
 - **No attribution** in commits or pull requests: no `Co-Authored-By:` trailer, no
   "Generated with ..." line.
 - **Sign off** every commit (`git commit -s`): the DCO, which CI checks

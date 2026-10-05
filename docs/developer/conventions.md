@@ -54,12 +54,17 @@ apps in the same pull request as the client change that needs it. A LiveView cal
 
 - **Comments say why.** Every module opens with a `@moduledoc` that argues for the design
   rather than restating the code. When behaviour changes, the moduledoc moves with it.
-- **`DECISIONS.md`** records the judgment calls that still hold and that a reader could
-  have made differently, numbered, newest at the bottom: a bold one-sentence decision, then
-  the reasoning. Code cites decisions by number. One that is superseded, or whose reasoning
-  the code's own comments now carry, is deleted, and its number is never reused.
-  `clients/tui/DECISIONS.md` and `apps/troupe_daemon/DECISIONS.md` hold those two
-  projects' own.
+- **[`docs/decisions/`](../decisions/README.md)** records the judgment calls that still
+  hold and that a reader could have made differently, one file per decision
+  (`0790-one-file-per-decision.md`): a front matter with the decision's `number`, `title`
+  (the one-sentence decision), `date`, `status`, `paths` (globs of what it governs) and
+  `gist` (what someone changing those paths must not undo), then the reasoning. Code cites
+  decisions by number. One that is superseded, or whose reasoning the code's own comments
+  now carry, is deleted or marked `superseded`, and its number is never reused.
+  `docs/decisions/tui/` and `docs/decisions/daemon/` hold those two projects' own, numbered
+  on their own. `mix troupe.decisions --for <path>` lists the decisions that govern a path,
+  and `--check`, which CI runs, fails on a duplicate number, a missing field or a `paths`
+  glob that matches nothing (Decision 790).
 - **Commit messages and pull request titles** state the behaviour that is now true, in
   plain prose — "A session's listing says what it has actually spent" — with a body saying
   what was wrong, what changed and why. No conventional-commit prefixes, no ticket numbers,

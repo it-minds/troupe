@@ -46,8 +46,9 @@ and the desktop app, shows what it is about to do, and asks before doing it; `--
 alone when neither is named. The copy attached to a release installs that release.
 
 The Windows release builds the harness's zstd NIF (`ezstd`) from an it-minds fork that
-compiles it with Zig ([DECISIONS.md](DECISIONS.md) 5); the release itself needs nothing
-beyond what the tarball carries.
+compiles it with Zig
+([the daemon's Decision 5](../../docs/decisions/daemon/0005-windows-is-back-in-the-matrix-on-a-fork-of-ezstd.md));
+the release itself needs nothing beyond what the tarball carries.
 
 The release unpacks to `~/.local/lib/troupe-daemon` (`%LOCALAPPDATA%\Programs\troupe-daemon`)
 with `troupe-daemon` linked into `~/.local/bin` (a `.cmd` shim in
@@ -60,7 +61,8 @@ keep the previous release beside the new one for rollback, and take `--uninstall
 `troupe-daemon login on` has the daemon start every time you log in, and `login off` takes
 that back; `login status` says which. The first run's questions ask the same thing, in the
 desktop app and in `troupe config`. Each platform gets its own per-user entry, and none
-needs an administrator ([DECISIONS.md](../../DECISIONS.md) 762):
+needs an administrator
+([Decision 762](../../docs/decisions/0762-the-daemon-starts-at-login-when-a-person-says-so.md)):
 
 | Platform | The entry |
 |---|---|
@@ -171,4 +173,5 @@ the daemon — and smokes each (unpack, `version`, `status`, `run`, `status`, `e
 Windows `version`, `status` and a zstd round trip in `eval`). A release attaches the
 tarballs to the GitHub release with everything else it ships.
 
-[`DECISIONS.md`](DECISIONS.md) says why a release and not a Burrito binary, and the rest.
+[The daemon's decisions](../../docs/decisions/daemon/README.md) say why a release and not a
+Burrito binary, and the rest.

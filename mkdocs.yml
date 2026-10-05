@@ -15,6 +15,10 @@ strict: true
 exclude_docs: |
   /overrides/
   /requirements.txt
+# A decision is a page of its own and is reached from its log's index, which the nav names
+# and the hook fills in; three hundred of them in the nav would be a list nobody reads.
+not_in_nav: |
+  /decisions/**/[0-9]*.md
 
 theme:
   name: material
@@ -127,9 +131,9 @@ nav:
       - Fixing issues: developer/fixing-issues.md
       - Known defects: developer/defects.md
       - Decisions:
-          - The repository's: DECISIONS.md
-          - The TUI's: clients/tui/DECISIONS.md
-          - The daemon's: apps/troupe_daemon/DECISIONS.md
+          - decisions/README.md
+          - The TUI's: decisions/tui/README.md
+          - The daemon's: decisions/daemon/README.md
       - The GUI:
           - The graphical client: clients/gui/README.md
           - End to end: clients/gui/docs/e2e.md
