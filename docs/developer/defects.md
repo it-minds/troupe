@@ -523,9 +523,6 @@ Found by the chunk 17 fixers, 2026-10-04.
 
 ### D66 - Compaction and cut tool output: small leftovers (medium)
 
-- `:compacting` has no clause for `{:llm_timeout, ref}` (`agent/server.ex`), so `common/4`
-  drops it: a summariser call that hangs keeps the agent in `:compacting` past
-  `llm_timeout_ms`, where `:thinking` turns the same message into an `llm_error`.
 - The `explore`, `answer`, `ask` and `librarian` profiles don't offer `read_output`, but
   `grep`, `git_read` and `web_fetch` cut long output with a marker naming a `read_output`
   call: those agents are told to make a call they can't. #389's stubs are skipped for such

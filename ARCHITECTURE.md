@@ -87,7 +87,7 @@ only synchronous calls out are to `Session.Log`, which never calls back.
 | thinking | refusal, model error | done (`refused`); a root's failed request rests it idle, a subagent's is done (`llm_error`) and hands its parent what it has; a context overflow compacts once and retries |
 | acting | each call | allowlist and permission check → error result, approval request, or a task |
 | acting | approval, answer, tool result, child result, a task's `DOWN` | record it, and stop a child that has reported; when none are outstanding, the next turn |
-| compacting | summary | carry on the interrupted turn, or come to rest |
+| compacting | summary, model error, timeout | carry on the interrupted turn, or come to rest; without a summary the conversation is unchanged |
 | done | input | a root agent that finished takes it as a new turn; one out of budget stays done |
 | any | cancel | kill tasks and children, close their calls as errors → idle (`cancelled`) |
 
@@ -106,7 +106,9 @@ turn before the next request and asks, whatever the budget says (Decision 687).
 **Compaction** is planned against the whole prompt including cache reads, keeps the recent
 turns without ever cutting between a tool call and its results, and logs the replacement
 conversation, large results as blobs, so replay is faithful; a summary that fails changes
-nothing (Decision 774). A tool result over
+nothing (Decision 774). The summariser's request defines no tools, so the calls and
+results it summarises are written out as text, and it is given up on after
+`llm_timeout_ms` like any model call (Decision 779). A tool result over
 16 KiB in the turns it kept, once the model has answered it, is sent from then on as one
 line naming the `read_output` call that returns it; the conversation and the log keep it
 whole (Decision 771).
