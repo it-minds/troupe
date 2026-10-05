@@ -1129,7 +1129,8 @@ defmodule Troupe.Gateway.PrivateTest do
       assert {:ok, %{"subject" => "bob@example.test"}} = Client.call(client, "identity.link", bob)
       assert eventually(fn -> asked_for_erasures(ctx.plane.state, asked) != [] end)
 
-      assert {:error, %{message: "unavailable", data: %{"session_id" => ^id, "reason" => "not_owner"}}} =
+      assert {:error,
+              %{message: "unavailable", data: %{"session_id" => ^id, "reason" => "not_owner"}}} =
                erase(client, id)
 
       assert %{"kind" => "private"} = listed(client, id)
