@@ -47,7 +47,8 @@ defmodule Troupe do
         workspace: workspace.root_real,
         profile: profile,
         parent: Keyword.get(session_opts, :parent),
-        kind: kind_of(previously, session_opts)
+        kind: kind_of(previously, session_opts),
+        owner: owner_of(previously, session_opts)
       })
 
       # The event that says what this session is, so a listing can be rebuilt from the
@@ -123,6 +124,15 @@ defmodule Troupe do
     case Enum.find(previously, &(&1.type == "session_created")) do
       %{data: %{"kind" => kind}} when is_binary(kind) -> kind
       _ -> session_opts |> Keyword.get(:kind, :local) |> to_string()
+    end
+  end
+
+  # Whose it is, the same way: the first `session_created`'s `owner`, or for a new session
+  # the one `created_data/1` is about to write.
+  defp owner_of(previously, session_opts) do
+    case Enum.find(previously, &(&1.type == "session_created")) do
+      %{data: data} when is_map(data) -> data["owner"]
+      _ -> Keyword.get(session_opts, :owner) || linked_owner()
     end
   end
 
