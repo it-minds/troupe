@@ -230,6 +230,16 @@ defmodule Troupe.Config.Schema do
         spec("llm_timeout_ms", {:integer, 1}, "How long one model call may take before it is given up on.",
           default: 300_000,
           field: :llm_timeout_ms
+        ),
+        spec(
+          "identify",
+          :boolean,
+          "Every model call names Troupe: a User-Agent with the version and the client, LiteLLM's tags and the session's id to a gateway, " <>
+            "OpenRouter's app headers to OpenRouter; never a person, a path or a repository. `false` sends none of it. " <>
+            "`troupe doctor` prints what goes out.",
+          default: true,
+          scope: :trusted,
+          field: :identify
         )
       ]),
       group("Budget", [

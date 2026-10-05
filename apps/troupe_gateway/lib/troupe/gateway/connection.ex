@@ -20,6 +20,7 @@ defmodule Troupe.Gateway.Connection do
 
   alias Troupe.Gateway.{ACP, Daemon, Dispatch, Presence, Session, Transport, Writer}
   alias Troupe.Gateway.Session.Subscription
+  alias Troupe.LLM.Identify
   alias Troupe.Protocol
   alias Troupe.Protocol.{Error, Event, JSONRPC}
 
@@ -755,7 +756,8 @@ defmodule Troupe.Gateway.Connection do
       scopes: state.scopes,
       connection: self(),
       next_subscription_id: "sub-#{state.next_subscription}",
-      activate: state.endpoint.activate
+      activate: state.endpoint.activate,
+      client: Identify.client(state.protocol, state.client_info)
     }
   end
 

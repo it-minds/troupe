@@ -55,6 +55,11 @@ defmodule Troupe.LLM.Request do
     # The owner, not the caller: a collaborator's input is billed to the owner's team
     # budget, because the budget belongs to the session and a session has one owner.
     attribution: %{},
+    # What the call says about Troupe itself (Decision 787, `Troupe.LLM.Identify`): whether
+    # it says anything, and which client the session is, a word from
+    # `Identify.clients/0`.
+    identify: true,
+    client: nil,
     extra: %{}
   ]
 
@@ -77,6 +82,8 @@ defmodule Troupe.LLM.Request do
           timeout_ms: pos_integer(),
           max_retries: non_neg_integer(),
           attribution: map(),
+          identify: boolean(),
+          client: String.t() | nil,
           extra: map()
         }
 
