@@ -896,8 +896,12 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle("identity.link", params, context) do
     with {:ok, subject} <- fetch(params, "subject") do
+      linked = Plane.subject()
+
       case Identity.link(Map.put(params, "subject", subject)) do
         {:ok, identity} ->
+          linked_over(linked, subject)
+
           # `plane_token`, if the client sent one, goes to the process that holds it
           # and nowhere near the file: `identity.json` records a label, and a token is
           # not a label. A client that sends none links the name alone, which is what a
@@ -916,9 +920,12 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # The token goes with the link, and the sealing with the token, as at a sign-out (issue
+  # #386): a sealer left running would seal with the token of whoever links next.
   defp handle("identity.unlink", _params, context) do
     Identity.unlink()
     :ok = Plane.unlink()
+    Private.suspend()
     user = System.get_env("USER") || System.get_env("USERNAME") || "local"
     send(context.connection, {:principal_changed, Identity.principal(user)})
     {:ok, Identity.to_json(nil)}
@@ -1136,6 +1143,14 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   defp erasures(_params), do: :ok
+
+  # Somebody else linking over the person before stops that person's sealing first, as an
+  # unlink would: a sealer seals with whatever token the daemon holds, and the one this link
+  # brings is not theirs (issue #386). The same person again, as at every renewal, stops
+  # nothing.
+  defp linked_over(nil, _subject), do: :ok
+  defp linked_over(subject, subject), do: :ok
+  defp linked_over(_before, _subject), do: Private.suspend()
 
   # -- helpers ----------------------------------------------------------------
 

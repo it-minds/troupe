@@ -213,6 +213,15 @@ defmodule Troupe.Sessions.Sealer do
         |> maybe_snapshot()
         |> report(segment)
 
+      # A daemon's store when nobody is linked, or the person signed out: nobody to seal for
+      # yet, which is a state and not a fault. Kept, as below, for the link that comes.
+      {:error, :unlinked} ->
+        Logger.info(
+          "troupe: #{context.session_id} is not sealed while nobody is linked; its events are kept"
+        )
+
+        state
+
       {:error, reason} ->
         # Keep them. The next interval tries again, and until it succeeds this session's
         # tail is only on the pod's disk — which is exactly what the seal interval
