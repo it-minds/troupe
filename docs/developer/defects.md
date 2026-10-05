@@ -499,10 +499,6 @@ Found by the chunk 16 fixers, 2026-10-04.
 
 ### D65 - What a turn costs: what #389 left (medium)
 
-- A LiteLLM gateway serving an Anthropic model over the OpenAI wire reports cache writes as
-  `cache_creation_input_tokens` (and `prompt_tokens_details.cache_creation_tokens`). The
-  OpenAI reader (`apps/troupe_core/lib/troupe/llm/providers/openai.ex`) reads
-  `cached_tokens` only, so those writes are priced as fresh input.
 - The task list goes after the system prompt's cache mark, before the messages
   (`Request.system_tail`, Decision 770). Each `todo_write` changes it, and the provider
   writes the conversation's cache again: in a 30-call turn with about ten list updates the

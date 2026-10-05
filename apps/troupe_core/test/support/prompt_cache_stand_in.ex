@@ -10,7 +10,10 @@ defmodule Troupe.Test.PromptCacheStandIn do
   found by looking back from each of its own marks at most 20 blocks, as Anthropic does.
   `POST /v1/chat/completions` is an OpenAI-compatible server's: every prompt is cached
   without being asked, and a later request reads the longest run of leading messages it
-  repeats.
+  repeats. With `gateway: :litellm` it is a LiteLLM gateway in front of an Anthropic model
+  instead, set to mark the prompt up to the last message: what it writes it reports as
+  Anthropic does, in Anthropic's names and in `prompt_tokens_details`, all three input
+  figures counted in `prompt_tokens` (D65, Decision 780).
 
   A token here is four bytes of a block's JSON with its mark taken out. The numbers are
   no model's, but they add up the way a provider's do, which is all the tests read. Every
@@ -21,12 +24,13 @@ defmodule Troupe.Test.PromptCacheStandIn do
 
   @lookback 20
 
-  @doc "Start one. Options: `script` (required), `test` (the caller)."
+  @doc "Start one. Options: `script` (required), `test` (the caller), `gateway`."
   @spec start(keyword()) :: map()
   def start(opts) do
     context = %{
       test: Keyword.get(opts, :test, self()),
-      script: Keyword.fetch!(opts, :script)
+      script: Keyword.fetch!(opts, :script),
+      gateway: Keyword.get(opts, :gateway, :openai)
     }
 
     {:ok, listener} =
@@ -81,7 +85,7 @@ defmodule Troupe.Test.PromptCacheStandIn do
   defp serve(socket, context) do
     with {:ok, raw} <- read_request(socket, ""),
          {:ok, path, body} when path in ["/v1/messages", "/v1/chat/completions"] <- parse(raw) do
-      {n, usage} = Agent.get_and_update(context.agent, &charge(&1, path, body))
+      {n, usage} = Agent.get_and_update(context.agent, &charge(&1, path, body, context.gateway))
       send(context.test, {:prompt_cache_stand_in, n, path, body, usage})
 
       answer = context.script.(n, body)
@@ -136,10 +140,15 @@ defmodule Troupe.Test.PromptCacheStandIn do
 
   # -- the cache ----------------------------------------------------------------
 
-  defp charge(state, path, body) do
+  defp charge(state, path, body, gateway) do
     n = state.calls + 1
     prefixes = prefixes(positions(path, body), body["model"])
-    {usage, cached} = usage(path, prefixes, state.cached)
+
+    {usage, cached} =
+      if path == "/v1/chat/completions" and gateway == :litellm,
+        do: litellm_usage(prefixes, state.cached),
+        else: usage(path, prefixes, state.cached)
+
     {{n, usage}, %{state | calls: n, cached: cached}}
   end
 
@@ -225,6 +234,35 @@ defmodule Troupe.Test.PromptCacheStandIn do
     }
 
     {usage, Enum.reduce(prefixes, cached, &MapSet.put(&2, &1.hash))}
+  end
+
+  # A LiteLLM gateway's, in front of an Anthropic model it marks up to the last message:
+  # the longest marked prefix it repeats is read, the rest up to the mark is written, and
+  # the last message is fresh input. `prompt_tokens` counts all three, as LiteLLM's does.
+  defp litellm_usage(prefixes, cached) do
+    marked = Enum.drop(prefixes, -1)
+
+    read =
+      marked
+      |> Enum.filter(&MapSet.member?(cached, &1.hash))
+      |> Enum.map(& &1.length)
+      |> Enum.max(fn -> 0 end)
+
+    written = max(total(marked) - read, 0)
+    fresh = total(prefixes) - read - written
+
+    usage = %{
+      "prompt_tokens" => total(prefixes),
+      "prompt_tokens_details" => %{
+        "cached_tokens" => read,
+        "cache_creation_tokens" => written,
+        "text_tokens" => fresh
+      },
+      "cache_creation_input_tokens" => written,
+      "cache_read_input_tokens" => read
+    }
+
+    {usage, Enum.reduce(marked, cached, &MapSet.put(&2, &1.hash))}
   end
 
   # How much one Anthropic mark reads: the longest cached prefix at it or at most 20

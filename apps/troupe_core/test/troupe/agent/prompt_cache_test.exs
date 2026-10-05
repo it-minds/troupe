@@ -11,7 +11,7 @@ defmodule Troupe.Agent.PromptCacheTest do
 
   use Troupe.SessionCase, async: true
 
-  alias Troupe.LLM.Usage
+  alias Troupe.LLM.{Catalog, Usage}
   alias Troupe.Test.PromptCacheStandIn
 
   @moduletag timeout: 120_000
@@ -122,6 +122,59 @@ defmodule Troupe.Agent.PromptCacheTest do
     assert Enum.all?(rest, &(&1 > 0))
   end
 
+  test "a gateway's cache writes for an Anthropic model are logged as writes and priced at the write rate",
+       context do
+    calls = 6
+
+    # What a LiteLLM gateway's `/model_group/info` says of the model group: Sonnet 5's
+    # prices, a write a quarter dearer than fresh input and a read a tenth of it.
+    catalog =
+      :litellm
+      |> Catalog.parse(%{
+        "data" => [
+          %{
+            "model_group" => "claude-sonnet-5",
+            "mode" => "chat",
+            "max_input_tokens" => 1_000_000.0,
+            "max_output_tokens" => 128_000.0,
+            "input_cost_per_token" => 2.0e-6,
+            "output_cost_per_token" => 1.0e-5,
+            "cache_read_input_token_cost" => 2.0e-7,
+            "cache_creation_input_token_cost" => 2.5e-6
+          }
+        ]
+      })
+      |> Map.new(&{&1.id, &1})
+
+    stand_in =
+      start_stand_in(fn n, _body -> if n < calls, do: read(n + 1), else: {:text, "done"} end, gateway: :litellm)
+
+    sid = start_turn(context, stand_in, provider: "openai", model: "claude-sonnet-5", catalog: catalog)
+
+    requests = PromptCacheStandIn.drain()
+    responses = events_of_type(sid, :llm_response)
+    assert length(responses) == calls
+
+    for {{_n, "/v1/chat/completions", _body, reported}, response} <- Enum.zip(requests, responses) do
+      usage = Usage.from_json(response.data["usage"])
+
+      assert usage.cache_write == reported["cache_creation_input_tokens"]
+      assert usage.cache_read == reported["prompt_tokens_details"]["cached_tokens"]
+      assert usage.input_tokens == reported["prompt_tokens_details"]["text_tokens"]
+      assert Usage.total_input(usage) == reported["prompt_tokens"]
+
+      # Micro-dollars: a token written costs 2.5, read 0.2, fresh 2, and output 10.
+      expected =
+        usage.input_tokens * 2 + usage.cache_read * 0.2 + usage.cache_write * 2.5 +
+          usage.output_tokens * 10
+
+      assert_in_delta response.data["gateway"]["cost_micros"], expected, 1
+    end
+
+    writes = Enum.map(responses, & &1.data["usage"]["cache_write"])
+    assert Enum.all?(writes, &(&1 > 0)), "every call wrote what was new: #{inspect(writes)}"
+  end
+
   # -- helpers ------------------------------------------------------------------
 
   defp script(1), do: {:tool, "todo_write", %{"items" => todos(1)}}
@@ -143,8 +196,8 @@ defmodule Troupe.Agent.PromptCacheTest do
   defp status(n, _from, to) when n < to, do: "in_progress"
   defp status(_n, _from, _to), do: "completed"
 
-  defp start_stand_in(script) do
-    stand_in = PromptCacheStandIn.start(script: script)
+  defp start_stand_in(script, opts \\ []) do
+    stand_in = PromptCacheStandIn.start([script: script] ++ opts)
     on_exit(fn -> PromptCacheStandIn.stop(stand_in) end)
     stand_in
   end

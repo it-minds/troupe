@@ -177,7 +177,9 @@ defmodule Troupe.LLM.ProvidersTest do
 
       [sent] = FakeTransport.drain_requests()
       body = FakeTransport.body(sent)
-      assert body["thinking"] == %{"type" => "enabled", "budget_tokens" => 8_192}
+      # Sonnet 5 takes adaptive thinking; the forms per model are `ThinkingTest`'s.
+      assert body["thinking"] == %{"type" => "adaptive", "display" => "summarized"}
+      assert body["output_config"] == %{"effort" => "medium"}
       assert body["max_tokens"] == 8_192 + 4_096, "the cap grows to hold the thinking"
 
       [_user, assistant, _results] = body["messages"]
@@ -310,6 +312,46 @@ defmodule Troupe.LLM.ProvidersTest do
       # `prompt_tokens` counted the cached ones too; the three input figures are disjoint.
       assert usage == %Usage{input_tokens: 1_000, output_tokens: 9, cache_read: 149_000, cache_write: 0}
       assert Usage.total_input(usage) == 150_000
+    end
+
+    test "a gateway's cache writes for an Anthropic model are cache writes, not fresh input" do
+      # The last chunk of a LiteLLM stream for an Anthropic model it marked for caching:
+      # Anthropic's three input figures, all counted in `prompt_tokens`, reported both in
+      # `prompt_tokens_details` and in Anthropic's own names beside it.
+      chunk =
+        ~s(data: {"id":"chatcmpl-1","object":"chat.completion.chunk","model":"claude-sonnet-5","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"completion_tokens":9,"prompt_tokens":150000,"total_tokens":150009,"prompt_tokens_details":{"cached_tokens":120000,"cache_creation_tokens":29000,"text_tokens":1000},"cache_creation_input_tokens":29000,"cache_read_input_tokens":120000}}\n\ndata: [DONE]\n\n)
+
+      text =
+        ~s(data: {"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello."}}]}\n\n)
+
+      assert {:ok, %Response{usage: usage}} = run(OpenAI, request(chunks: [text, chunk]))
+
+      assert usage == %Usage{
+               input_tokens: 1_000,
+               output_tokens: 9,
+               cache_read: 120_000,
+               cache_write: 29_000
+             }
+
+      assert Usage.total_input(usage) == 150_000
+
+      # Either spelling alone is enough.
+      for details <- [
+            ~s("prompt_tokens_details":{"cached_tokens":0,"cache_creation_tokens":4000}),
+            ~s("prompt_tokens_details":{"cached_tokens":0},"cache_creation_input_tokens":4000)
+          ] do
+        chunk =
+          ~s(data: {"choices":[{"delta":{"content":"Hi."},"finish_reason":"stop"}],"usage":{"prompt_tokens":5000,"completion_tokens":2,#{details}}}\n\ndata: [DONE]\n\n)
+
+        assert {:ok, %Response{usage: usage}} = run(OpenAI, request(chunks: [chunk]))
+
+        assert usage == %Usage{
+                 input_tokens: 1_000,
+                 output_tokens: 2,
+                 cache_read: 0,
+                 cache_write: 4_000
+               }
+      end
     end
 
     test "accumulates reasoning_content beside a tool call and hands it back as a sibling of content" do
