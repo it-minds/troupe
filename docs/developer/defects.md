@@ -497,6 +497,77 @@ Found by the chunk 15 fixers of slots A15, B15 and C15 (PRs #374, #372, #370), 2
 
 Found by the chunk 16 fixers, 2026-10-04.
 
+### D65 - What a turn costs: what #389 left (medium)
+
+- A LiteLLM gateway serving an Anthropic model over the OpenAI wire reports cache writes as
+  `cache_creation_input_tokens` (and `prompt_tokens_details.cache_creation_tokens`). The
+  OpenAI reader (`apps/troupe_core/lib/troupe/llm/providers/openai.ex`) reads
+  `cached_tokens` only, so those writes are priced as fresh input.
+- The task list goes after the system prompt's cache mark, before the messages
+  (`Request.system_tail`, Decision 770). Each `todo_write` changes it, and the provider
+  writes the conversation's cache again: in a 30-call turn with about ten list updates the
+  saving is about 2x where it could be about 8x. Keeping the list as it was for the whole
+  turn (refreshed on new input or after a compaction), or sending it as a message, would
+  keep the cache.
+- Unchecked: whether a gateway speaking Anthropic's API passes `cache_control` on.
+- Subagent spend is added to the parent's turn live only. A cancel or a parent restart in
+  the middle of the turn loses what the subagents reported; the delegation's own
+  `tool_call_completed` could carry it.
+- The headless printer doesn't print the per-turn line, and the desktop app shows no turn
+  cost: `@troupe/client`'s fold reads neither `turn` (on `turn_ended`, `cancelled`,
+  `agent_done`) nor `compacted.usage`.
+- `Troupe.Bench.Model.measure/2` counts `request.system` only, so the offline bench's
+  `system_bytes` leaves out the task list the log counts; `Request.system_text/1` has both.
+
+Found by the chunk 17 fixers, 2026-10-04.
+
+### D66 - Compaction and cut tool output: small leftovers (medium)
+
+- `:compacting` has no clause for `{:llm_timeout, ref}` (`agent/server.ex`), so `common/4`
+  drops it: a summariser call that hangs keeps the agent in `:compacting` past
+  `llm_timeout_ms`, where `:thinking` turns the same message into an `llm_error`.
+- The `explore`, `answer`, `ask` and `librarian` profiles don't offer `read_output`, but
+  `grep`, `git_read` and `web_fetch` cut long output with a marker naming a `read_output`
+  call: those agents are told to make a call they can't. #389's stubs are skipped for such
+  profiles (Decision 771); the markers are not.
+- `Troupe.SessionCase` could turn the stand-in provider's strict tool-call pairing on by
+  default: the whole core suite passes with it (Decision 774).
+
+Found by the chunk 17 fixers, 2026-10-04.
+
+### D67 - Model discovery: what #410 left (low)
+
+- Discovery asks no provider when the key comes from `ANTHROPIC_API_KEY` or
+  `OPENAI_API_KEY` only: `Store.targets` (`llm/catalog/store.ex`) checks the config's
+  `api_key`, so `troupe models` says "catalog: no provider to ask".
+- A named provider without `models:` entries shows a `name/` row reading "no price".
+- A changed key alone doesn't trigger a refresh (Decision 778's triggers are the provider,
+  the base URL, the age, a failed provider and a missing configured model).
+- A model lookup that misses during a session waits for the next session's start to
+  refresh.
+
+Found by the #410 fixer, 2026-10-04.
+
+### D68 - Small leftovers from the 0.8.2 work (low)
+
+- `troupe run ... --watch`, and `watch: true` in the config, show "watch: off" in the
+  TUI's status line: either watch mode isn't on for run sessions or it isn't reported.
+- The TUI's "session created as build" note is drawn after the first turn's lines.
+- On Windows, killing `troupe.exe` (the Burrito launcher) leaves its VM (`erl.exe`)
+  running and holding the pipe.
+- `troupe bench --live` prints the history path with mixed separators on Windows;
+  `Troupe.Paths.display/1` would print it the platform's way.
+- The embedded daemon on Windows with `TROUPE_DAEMON_SOCKET` set but empty fails with
+  `{:listen_failed, "unix:", :eafnosupport}`; an empty value should count as unset.
+- A daemon started with only the `TROUPE_*_HOME` variables pointing at scratch still
+  writes `%LOCALAPPDATA%\troupe\daemon.json`, which then names a daemon that is gone.
+- `scripts/dev-check` doesn't run `mix troupe.bench` (about 10 s), so a change past a
+  budget shows only on the chunk's pull request into `main`.
+- Two `scripts/ci` runs from different worktrees share the toolbox's Docker volumes and
+  can break each other.
+
+Found by the chunk 17 fixers and the coordinator, 2026-10-04.
+
 ## Taken
 
 | Defect | Taken by |
