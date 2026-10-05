@@ -70,4 +70,9 @@ each rewrite.
   read 3,418 tokens, the tools). With the scripted model: a compaction in the middle of a
   turn shows the list as it is now, where the calls before it showed none, which is what
   the turn began with; and an agent killed in the middle of a turn shows the list the
-  turn began with after the restart. All six fail on the tip.
+  turn began with after the restart. All six fail on the tip. And the installed daemon
+  release, with scratch homes, driven over the protocol against a stand-in like the
+  test's with `provider: anthropic`: one input, thirty calls, ten rewrites, every call
+  after the first reading all of the one before and the last list in each request the
+  current one; the build installed before it read 3,501 tokens on each of the ten calls
+  after a rewrite.
