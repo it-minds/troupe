@@ -998,6 +998,8 @@ defmodule Troupe.Remote.Worker do
   def session_state("active"), do: :active
   def session_state("dormant"), do: :dormant
   def session_state("read_only"), do: :read_only
+  # A private session somebody erased whose key is not destroyed yet (root Decision 756).
+  def session_state("erasure_pending"), do: :erasure_pending
   def session_state("erased"), do: :erased
   def session_state(state) when is_atom(state) and not is_nil(state), do: state
   def session_state(_other), do: nil

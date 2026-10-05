@@ -720,6 +720,32 @@ defmodule Troupe.Client.Daemon do
 
   def open_session(_origin, _sid, _mode, _opts), do: {:error, :unsupported}
 
+  # A private session another device sealed last, taken over by this machine's daemon
+  # (root Decision 785). A refusal is said in the words the desktop app says it in.
+  @impl true
+  def claim_session({:local, _workspace}, sid) do
+    case Link.call("session.claim", %{session_id: sid, command_id: Troupe.Remote.RPC.command_id()}) do
+      {:ok, %{} = claimed} -> {:ok, claimed}
+      {:error, reason} -> {:error, claim_refusal(reason)}
+    end
+  end
+
+  def claim_session(_origin, _sid), do: {:error, :unsupported}
+
+  # `Link` says an error as `message: reason`.
+  defp claim_refusal("conflict: diverged"),
+    do:
+      "another device sealed events this computer's copy does not have, so it stays with that device"
+
+  defp claim_refusal("stale_version" <> _), do: "another device claimed it first"
+  defp claim_refusal("not_found: erased"), do: "it has been erased"
+
+  defp claim_refusal("not_found: not_registered"),
+    do: "it is not registered yet; it is once this computer is signed in"
+
+  defp claim_refusal("unavailable: unlinked"), do: "sign in on this computer to claim it"
+  defp claim_refusal(reason), do: message(reason)
+
   @impl true
   def whoami({:local, workspace}) do
     identity =
@@ -1179,7 +1205,11 @@ defmodule Troupe.Client.Daemon do
       origin: origin,
       branches: branches,
       parent: row["parent"],
-      workspace: row["workspace"]
+      workspace: row["workspace"],
+      # A daemon from before 0.8.4 says no kind, and every session it had was local.
+      kind: row["kind"] || "local",
+      sync: row["sync"],
+      device: row["device"]
     }
   end
 

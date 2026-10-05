@@ -36,6 +36,7 @@
     "commands/profile.switch.json",
     "commands/question.answer.json",
     "commands/session.archive.json",
+    "commands/session.claim.json",
     "commands/session.create.json",
     "commands/session.erase.json",
     "commands/session.get.json",

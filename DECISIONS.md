@@ -5537,6 +5537,186 @@ citation keeps meaning what it meant.
        from the cache, a refused key, and a config that does not load said on standard
        error with nothing on standard output.
 
+784. **A daemon carries on, registers and seals a private session only for the person it
+     belongs to: somebody else's link leaves the first person's sessions alone and says
+     so, and unlinking stops the sealing as signing out does.** Issue #386, following 764
+     and 766. `Private.resume/1` carried on every private session the daemon had with
+     whatever token the link carried, and compared no session's `owner` with the subject
+     linked; `identity.unlink` left every sealer running, retrying each minute with an
+     error in the log, and picking up the next person's token when they linked. So a
+     daemon Ada had used, unlinked and Bob then linked registered Ada's sessions that had
+     not reached the plane under Bob's sign-in, and sealed them under his key and in his
+     prefix.
+     - **Whose it is.** The `owner` a session's `session_created` records, the subject the
+       daemon was linked to when the session was made (or first opened, for a resumed
+       one), is in the session index beside `kind`, for a live session and one read from
+       its log. `resume/1` takes the sessions whose owner is the subject linked now, and
+       those with none, and leaves the rest without asking the plane anything about them
+       with this token. It says so once a link, at info, with how many of whose and no
+       token: `private sessions left alone (1 of ada@example.test): this daemon is linked
+       to bob@example.test, and each is sealed when its owner links it again`. The owner's
+       next link carries each on as 764 does, from the row's `last_seq` at its epoch.
+     - **A session with no owner** was made while nobody was linked, and the first link
+       with a token carries it on, as 764 has it: the daemon cannot tell whose it is, and
+       `troupe login` links an unlinked daemon in a task that the first `troupe --private`
+       can overtake. Once it is registered the plane's row is that person's, and the plane
+       answers anybody else's registration of it `forbidden`.
+     - **Unlinking stops the sealing.** `identity.unlink` forgets the token and then stops
+       every sealer (`Private.suspend/1`), as `identity.sign_out` does (766). A link naming
+       somebody other than the subject the daemon held stops them too, before it takes the
+       new token: a sealer seals with whatever token the daemon holds. No shipped client
+       links over somebody else (the desktop app unlinks first, the TUI leaves such a
+       daemon alone), but the protocol allows it. A link naming the same person, as every
+       renewal does, stops nothing.
+     - **A token is the person's it was handed over for.** `Plane.link` kept the token it
+       held when a link brought none, whoever the link named, so Bob linking his name alone
+       over Ada left Ada's token in place, and Bob's next private session was registered
+       with it, under her sign-in. A link naming somebody else now keeps none of the token
+       or its expiry; one naming the same person, or a daemon nobody had named, keeps it
+       as before.
+     - **Nobody linked is not an error.** A seal refused because nobody is linked
+       (`:unlinked`, from the daemon's store) is logged at info and its events kept, as
+       before; any other refusal is still an error.
+     - **Compared as written.** The owner and the linked subject are both the subject a
+       client linked with, the plane's (`me` in the desktop app, `credentials.json`'s `sub`
+       in the TUI). A person moved to another claim (755) links under a new subject, and
+       their sessions made under the old one are left alone; neither client hands a token
+       to a daemon linked under another subject (764), so nothing that carried on before
+       stops here.
+     - **Not in this:** the TUI has no way to unlink a daemon, so a second person on the
+       same account cannot take it over from the terminal (a follow-up).
+     - **Proof:** the gateway's `private_test`, against MinIO and OpenBao with the plane
+       stand-in, four tests failing on the chunk's tip: Ada's session sealed through its
+       first event, the daemon unlinked and Bob linked with his own token, `resume` carries
+       on Bob's and one nobody owns and not Ada's, the plane is asked nothing about hers,
+       the log says `(1 of ada@example.test)` once and no token, and after Bob unlinks and
+       Ada links again hers is sealed from its second event at her epoch; through the
+       daemon, `identity.unlink` stops the sealer, the owner is in the index live and
+       dormant, nothing Bob's link asks names her session, and her next link registers it
+       at its epoch; a link by Bob over Ada stops her sealer and one by Ada again does not;
+       a seal with nobody linked keeps its event and logs at info, not error; and, two
+       more failing on the pull request's first tip, Bob linking his name alone over Ada
+       holds no token, and his private session made then reaches the plane with nothing,
+       where it was registered with Ada's. And the
+       installed daemon, with scratch homes and the fake provider, through the client
+       library, against a plane stand-in for two people that answers each only for their
+       own rows (real assertions through the development OpenBao, real MinIO URLs): Ada
+       linked, made a private session and sealed it through its eleventh event; unlinked,
+       it took a second turn and nothing reached the plane; Bob linked, and his link and
+       his own new session called the plane with his token and named none of hers, before
+       and after a restart of the daemon, which logged `left alone (1 of
+       a19-ada@example.test)`; Ada linked again, and her session was sealed from its
+       twelfth event to its twentieth at epoch 1, every call that named it with her token.
+
+785. **A daemon's `session.list` says a private session is private and how its sealing
+     stands here, and `session.claim` takes one another device sealed last over on this
+     one, where this copy holds what the plane has.** D61's first two items and D59's
+     second, following 756, 764 and 766. The daemon's rows carried no `kind`, so the
+     desktop app listed a private session as a local one, and nothing reached
+     `Private.claim/3`: a session another device sealed last, which 764's `resume` leaves
+     to it, stayed that device's, a renamed machine's own included. A plane's
+     `erasure_pending` row read as dormant in the TUI and as a team session in the
+     desktop app.
+     - **What a row says.** `kind` (`local`, `private`, a pod's `team`), and for a private
+       session `sync` and `device` (`Private.sync/1`): `current`, a sealer with nothing
+       pending; `behind`, one with events pending, or one that does not answer a status
+       within 250 ms because it is uploading; `paused`, no sealer: no token since the
+       daemon started or the person signed out, no plane, or the session archived;
+       `elsewhere`, the row named another device at the last link's `resume`, or a seal
+       was refused `stale_version`, with `device` naming it where the plane did;
+       `erasure_pending`, the row said so at the last link. Five where the slot named
+       four, because not sealing and sealing behind ask different things of the person:
+       the one waits for a sign-in, the other for a moment. What the plane said is kept in
+       an ETS table the sealers' supervisor owns, and forgotten when a sealer starts or the
+       session is erased here. A listing never asks the plane: the desktop app lists every
+       four seconds, and a laptop is offline most of the time it is on.
+     - **`session.claim {session_id}`, `admin`.** Where a session lives is the person's
+       say, as archiving and erasing it are. `Private.take_over/2` reads the row
+       (`session.get`); one that names this device is carried on, a sealer started if none
+       runs, and not claimed again, so a second claim moves nothing; another device's is
+       claimed with the row's `epoch` through `claim/3`, a sealer still here that lost is
+       stopped, and the session is sealed from the row's `last_seq` at the new epoch, as
+       `resume` seals this device's. The answer is the row's `device` and `epoch` and the
+       `sync`. Refusals: `not_found` with `erased` or `not_registered`, `stale_version`
+       where another device claimed first, `unavailable` with `unlinked`, `invalid_params`
+       for a session that is not private. A pod has no private session; a token for one
+       session is refused it as not about that session.
+     - **Only the same history.** The event at the row's `last_seq` must be in this log
+       with the row's `head_hash`, the `Event.hash` a seal reports of its last event; if
+       not, `conflict` with `reason: "diverged"`, and nothing changes. The slot did not
+       say this. Without it a claim on a machine whose copy the other device sealed past
+       would seal this copy's later events after the other's, two histories under one
+       prefix that no restore reads back. Restoring the plane's copy over this one first
+       is what would let such a claim through; it is not done here.
+     - **The clients.** `@troupe/client`: `SyncState` is the five, and `syncState/1`
+       reads one and says null of a value it does not know; `syncWords/2` gives the label
+       and the sentence ("Synced", "Syncing", "Not syncing", "On <device>", "Waiting to be
+       erased"), which the TUI says too; `claimable/1`, `DaemonClient.claimSession/1` and
+       `claimRefusal/1`; `rowFromPlane` reads a plane's `kind`, where it said `team` of
+       every row, and its `erasure_pending` as that sync, and the merge keeps a plane's
+       `erasure_pending` over the daemon's sync, which hears of it only at its next link.
+       The old `SyncState` (`synced`, `pending`, `conflict`, `this-device-only`) was never
+       sent by anything and goes. The desktop list says the sync in those words with the
+       sentence on hover, offers Claim beside a row another device holds (beside, since
+       the row is a button), says a refusal in a banner, and shows no status on a row
+       waiting to be erased, whose sync says it. The TUI: its Decision 146.
+     - **Not in this:** the session view's header, which still says only where a session
+       runs; a sealer refused `stale_version` keeps running until its session stops (it
+       is listed `elsewhere` meanwhile); a claim on a copy that diverged; D61's third item.
+     - **Proof:** the gateway's `private_test.exs` against MinIO and OpenBao, with the
+       plane stand-in: through the daemon, `session.list` and `session.get` say
+       `kind: "private"`, `sync: "paused"` of a private session nobody linked and
+       `kind: "local"` of a local one; one whose row names another device is listed
+       `elsewhere` with that device after a link, and `session.claim` makes the row this
+       device's at the next epoch, answers the same to the same `command_id`, moves
+       nothing on a second claim, and refuses a local session; one whose row is
+       `erasure_pending` is listed so and not claimed; `take_over/2` seals a session
+       another device took from the row's `last_seq` at the new epoch, its events after it
+       in a second segment, and is `current` once sealed; and refuses with `diverged` where
+       the row's `last_seq` is past this copy or its event is another. All five failed on
+       the tip of `development-2026-10-05-2`. `@troupe/client`'s `fleet.test.ts` (a
+       daemon's private row with each sync, an unknown one as null, the words, a plane's
+       private and `erasure_pending` rows, the merge), the desktop app's
+       `private-sessions.test.tsx` against the fake daemon (Private and the sync in words
+       in the list, Claim only beside the row another device holds, the claim sent and the
+       row synced after, a refusal said), and the TUI's `private_sessions_test.exs`,
+       all failing on the tip. And the installed daemon, `troupe` and the desktop app's
+       web build, with scratch homes, linked to a plane stand-in on loopback that keeps
+       rows and signs nothing: `session.list` said `elsewhere` with the other device's
+       name, `erasure_pending`, `paused` and a local session as such; the list showed
+       Private with each, and Claim beside the one another device held; Claim made the
+       stand-in's row this machine's at the next epoch and the row `paused`; and the
+       installed `troupe resume` picker said `[private · on …]`, `c claims it here`, and
+       `waiting to be erased`.
+
+786. **An erasure deletes every version under a session's prefix, however many: the list
+     it deletes from follows S3's markers to the last page.** D59, its first item;
+     Decisions 90 and 756. `ObjectStore.list_versions/2` sent one `GET ?versions&prefix=`
+     and returned what came back, and S3 answers at most a thousand versions at a time,
+     with `IsTruncated` and where the next page starts. `delete_prefix/2`, which a pod's
+     erasure (`Storage.erase/2`) and the plane's of a private session
+     (`Erasure.device_applied/2`) both go through, deleted that page and counted it as
+     everything: on the chunk's tip a private session with 1,040 versions kept the 40 past
+     the first page, a snapshot still listed under its prefix. The key was gone, so they
+     could not be read, but erasure is the one thing the object store has to do exactly.
+     - **Every page, then the deletes.** `list_versions` asks again from `NextKeyMarker`
+       and `NextVersionIdMarker` while `IsTruncated` says there is more, as `list/2`
+       follows its continuation token, and `delete_prefix` deletes from the whole list,
+       as before. Both markers, because one key's versions run across pages and a key
+       marker alone starts after the key. A page that says it was cut short and names no
+       marker is an error, where asking again would get the same page and stopping would
+       leave the rest. Delete markers are versions, listed and deleted as before; the
+       signing, and what a failed request or delete answers, are unchanged.
+     - **`page_size:`**, S3's `max-keys`, on both, for a test that crosses pages with
+       fourteen versions rather than a thousand. Nothing else passes it.
+     - **Proof:** `ObjectStoreTest`: six keys written 175 times each and a delete marker,
+       1,051 versions, every one gone after `delete_prefix` (on the tip a key's oldest
+       version still read back), about three seconds against the development MinIO; and
+       a listing in pages of five that ends inside one key's versions, which reads five
+       when the markers are not followed. The plane's `PrivateErasureTest`: a private
+       session with 1,040 versions, erased and acknowledged by its daemon, has nothing
+       left under its prefix and answers `objects_deleted: 1040`, failing on the tip.
+
 787. **Every model call names Troupe to the provider: a User-Agent with the version, the
      client and the platform everywhere, LiteLLM's tags and spend-log metadata to a
      gateway, OpenRouter's app headers to OpenRouter. A local session names the software
@@ -5626,101 +5806,70 @@ citation keeps meaning what it meant.
        And the installed `troupe run --headless` and `troupe doctor` against a stand-in,
        on the pull request.
 
-784. **A daemon carries on, registers and seals a private session only for the person it
-     belongs to: somebody else's link leaves the first person's sessions alone and says
-     so, and unlinking stops the sealing as signing out does.** Issue #386, following 764
-     and 766. `Private.resume/1` carried on every private session the daemon had with
-     whatever token the link carried, and compared no session's `owner` with the subject
-     linked; `identity.unlink` left every sealer running, retrying each minute with an
-     error in the log, and picking up the next person's token when they linked. So a
-     daemon Ada had used, unlinked and Bob then linked registered Ada's sessions that had
-     not reached the plane under Bob's sign-in, and sealed them under his key and in his
-     prefix.
-     - **Whose it is.** The `owner` a session's `session_created` records, the subject the
-       daemon was linked to when the session was made (or first opened, for a resumed
-       one), is in the session index beside `kind`, for a live session and one read from
-       its log. `resume/1` takes the sessions whose owner is the subject linked now, and
-       those with none, and leaves the rest without asking the plane anything about them
-       with this token. It says so once a link, at info, with how many of whose and no
-       token: `private sessions left alone (1 of ada@example.test): this daemon is linked
-       to bob@example.test, and each is sealed when its owner links it again`. The owner's
-       next link carries each on as 764 does, from the row's `last_seq` at its epoch.
-     - **A session with no owner** was made while nobody was linked, and the first link
-       with a token carries it on, as 764 has it: the daemon cannot tell whose it is, and
-       `troupe login` links an unlinked daemon in a task that the first `troupe --private`
-       can overtake. Once it is registered the plane's row is that person's, and the plane
-       answers anybody else's registration of it `forbidden`.
-     - **Unlinking stops the sealing.** `identity.unlink` forgets the token and then stops
-       every sealer (`Private.suspend/1`), as `identity.sign_out` does (766). A link naming
-       somebody other than the subject the daemon held stops them too, before it takes the
-       new token: a sealer seals with whatever token the daemon holds. No shipped client
-       links over somebody else (the desktop app unlinks first, the TUI leaves such a
-       daemon alone), but the protocol allows it. A link naming the same person, as every
-       renewal does, stops nothing.
-     - **A token is the person's it was handed over for.** `Plane.link` kept the token it
-       held when a link brought none, whoever the link named, so Bob linking his name alone
-       over Ada left Ada's token in place, and Bob's next private session was registered
-       with it, under her sign-in. A link naming somebody else now keeps none of the token
-       or its expiry; one naming the same person, or a daemon nobody had named, keeps it
-       as before.
-     - **Nobody linked is not an error.** A seal refused because nobody is linked
-       (`:unlinked`, from the daemon's store) is logged at info and its events kept, as
-       before; any other refusal is still an error.
-     - **Compared as written.** The owner and the linked subject are both the subject a
-       client linked with, the plane's (`me` in the desktop app, `credentials.json`'s `sub`
-       in the TUI). A person moved to another claim (755) links under a new subject, and
-       their sessions made under the old one are left alone; neither client hands a token
-       to a daemon linked under another subject (764), so nothing that carried on before
-       stops here.
-     - **Not in this:** the TUI has no way to unlink a daemon, so a second person on the
-       same account cannot take it over from the terminal (a follow-up).
-     - **Proof:** the gateway's `private_test`, against MinIO and OpenBao with the plane
-       stand-in, four tests failing on the chunk's tip: Ada's session sealed through its
-       first event, the daemon unlinked and Bob linked with his own token, `resume` carries
-       on Bob's and one nobody owns and not Ada's, the plane is asked nothing about hers,
-       the log says `(1 of ada@example.test)` once and no token, and after Bob unlinks and
-       Ada links again hers is sealed from its second event at her epoch; through the
-       daemon, `identity.unlink` stops the sealer, the owner is in the index live and
-       dormant, nothing Bob's link asks names her session, and her next link registers it
-       at its epoch; a link by Bob over Ada stops her sealer and one by Ada again does not;
-       a seal with nobody linked keeps its event and logs at info, not error; and, two
-       more failing on the pull request's first tip, Bob linking his name alone over Ada
-       holds no token, and his private session made then reaches the plane with nothing,
-       where it was registered with Ada's. And the
-       installed daemon, with scratch homes and the fake provider, through the client
-       library, against a plane stand-in for two people that answers each only for their
-       own rows (real assertions through the development OpenBao, real MinIO URLs): Ada
-       linked, made a private session and sealed it through its eleventh event; unlinked,
-       it took a second turn and nothing reached the plane; Bob linked, and his link and
-       his own new session called the plane with his token and named none of hers, before
-       and after a restart of the daemon, which logged `left alone (1 of
-       a19-ada@example.test)`; Ada linked again, and her session was sealed from its
-       twelfth event to its twentieth at epoch 1, every call that named it with her token.
-
-786. **An erasure deletes every version under a session's prefix, however many: the list
-     it deletes from follows S3's markers to the last page.** D59, its first item;
-     Decisions 90 and 756. `ObjectStore.list_versions/2` sent one `GET ?versions&prefix=`
-     and returned what came back, and S3 answers at most a thousand versions at a time,
-     with `IsTruncated` and where the next page starts. `delete_prefix/2`, which a pod's
-     erasure (`Storage.erase/2`) and the plane's of a private session
-     (`Erasure.device_applied/2`) both go through, deleted that page and counted it as
-     everything: on the chunk's tip a private session with 1,040 versions kept the 40 past
-     the first page, a snapshot still listed under its prefix. The key was gone, so they
-     could not be read, but erasure is the one thing the object store has to do exactly.
-     - **Every page, then the deletes.** `list_versions` asks again from `NextKeyMarker`
-       and `NextVersionIdMarker` while `IsTruncated` says there is more, as `list/2`
-       follows its continuation token, and `delete_prefix` deletes from the whole list,
-       as before. Both markers, because one key's versions run across pages and a key
-       marker alone starts after the key. A page that says it was cut short and names no
-       marker is an error, where asking again would get the same page and stopping would
-       leave the rest. Delete markers are versions, listed and deleted as before; the
-       signing, and what a failed request or delete answers, are unchanged.
-     - **`page_size:`**, S3's `max-keys`, on both, for a test that crosses pages with
-       fourteen versions rather than a thousand. Nothing else passes it.
-     - **Proof:** `ObjectStoreTest`: six keys written 175 times each and a delete marker,
-       1,051 versions, every one gone after `delete_prefix` (on the tip a key's oldest
-       version still read back), about three seconds against the development MinIO; and
-       a listing in pages of five that ends inside one key's versions, which reads five
-       when the markers are not followed. The plane's `PrivateErasureTest`: a private
-       session with 1,040 versions, erased and acknowledged by its daemon, has nothing
-       left under its prefix and answers `objects_deleted: 1040`, failing on the tip.
+788. **A model call the agent gives up on is stopped, at its timeout in a turn or in a
+     compaction and on a cancel alike, and what the provider had reported of it is
+     counted as any call's figures are.** The first item of D69. `llm_timeout_ms` gave a
+     call up and left it running: `clear_llm/1` only demonitored the task streaming it,
+     and Req's `receive_timeout` bounds only the gap between packets, so a reply that kept
+     coming went on being generated, and billed, up to `max_tokens` while the agent went
+     on without it, and nothing of it was counted. A cancel did stop the stream, since it
+     ends every task the agent runs while a call is in flight, but counted nothing either.
+     - **Stopped by ending the task.** The timeout in `:thinking`, the timeout in
+       `:compacting` and a cancel go through one `stop_llm/1`, which ends the task as a
+       cancel did. The HTTP connection is checked out to that process, so the pool closes
+       it when the process ends, and the provider sees the request go. Asking the adapter
+       to stop was the other way, and is not taken: a task waiting between packets cannot
+       hear it, and ending the process is what closes the connection either way.
+     - **Usage as it comes.** The adapters tell the agent what the provider has reported
+       while the reply streams, `{:llm_usage, ref, usage}`, the running total, where it
+       used to reach the agent only in the response. Anthropic reports the prompt's figures
+       in `message_start`, before the first word, and the output in `message_delta` at the
+       end; an OpenAI-compatible server reports usage in its last chunk only. Once the task
+       has ended the agent reads what was already in its mailbox, a later report or an
+       answer that came just as it gave up, so nothing reported before the stop is lost.
+     - **Counted as any call.** The stopped call goes through `count_call/4` as a reply
+       does: the listing, telemetry's `[:troupe, :llm, :stop]` (with `stopped: true`), the
+       budget's tokens (not a turn: `max_turns` counts the agent's replies) and the turn's
+       `turn`. It is priced as a call the gateway did not price is (689), from the catalog
+       or `models.prices`; the summariser's as the cheap model, as its `compacted` is.
+     - **Written on the event that says it stopped.** The timeout's `llm_error`, or the
+       `cancelled`, carries `stopped`: `model`, and `usage` and `gateway` in the words
+       `llm_response` uses, when the provider had reported any. One object rather than
+       the fields flat, because `cancelled` already has the turn's figures beside it; not
+       an event of its own, which an older terminal UI would print as a note (769). The
+       agent's replay charges the budget and counts the turn from it, `Troupe.Log.Fold`
+       adds its tokens, a dormant session's listing its tokens and cost, the ledger
+       (`Troupe.Session.Usage`) makes a row of one that had usage, and `troupe bench
+       --live` adds its cost to what a run has spent. PROTOCOL.md and the schema say so.
+     - **A call that had reported nothing counts as a call, and nothing else.** It is one
+       of the turn's `calls` and one of its `unpriced`, with no tokens and no cost, and
+       its `stopped` has only `model`. Not an estimate: one made from the prompt's bytes
+       or from the text streamed is a second tokenizer that disagrees with the provider's,
+       which 769 declined for the same reason, and it would go into the sums the budget
+       and the plane's ledger read with nothing there to tell it from a provider's count.
+       `unpriced` already says "not known". What is not counted is bounded by the stop:
+       what the model wrote before `llm_timeout_ms` ran out, rather than everything up to
+       `max_tokens`. The same holds for the output an Anthropic reply had written, which
+       its provider reports only at the end.
+     - **A summary given up on** is stopped and counted live, in the turn's figures, the
+       budget and the listing, but is written nowhere: a failed summary never was (774),
+       and the events in that path are ones it must not look like (`llm_error` ends a turn
+       for the desktop app and fails an A2A task). Writing it is a new event type, left for
+       later; until then a restart in the same turn forgets it, and the ledger has no row.
+     - **Proof:** core's `StoppedCallTest`. Against the fake model with a step that streams
+       for ever (`{:endless, ms}`, after reporting the prompt's usage, or `:no_usage`): a
+       turn's call and a compaction's summary still streaming at `llm_timeout_ms` are
+       stopped (the agent's task supervisor is empty), the `llm_error` says what the call
+       reported and the turn counts it (one call and 100 tokens; six calls and 600 with the
+       compaction); one that reported nothing is a call and `unpriced`; a cancel says what
+       it stopped; and a restart charges the budget what the live agent was charged.
+       Against a loopback stand-in speaking Anthropic's and OpenAI's wire, streaming a
+       delta every 100 ms for ever: the connection of a call stopped at its timeout is
+       closed after deltas were sent, Anthropic's `message_start` is counted and priced
+       (6,165 micro-dollars), and the OpenAI-compatible call had reported nothing. All seven
+       fail on the chunk's tip: three still had a stream running after the timeout, the
+       two on the wire a connection still open, and the cancel and the restart counted
+       nothing.
+       `ProvidersTest`: each adapter says usage as it comes, Anthropic's prompt before the
+       first delta; `UsageTest`: a stopped call is a ledger row when it had usage;
+       `FoldTest`: its tokens are the agent's.

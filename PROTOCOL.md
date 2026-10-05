@@ -258,7 +258,7 @@ Durable:
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile`, `prompt_bytes` — what the prompt was made of (see below) |
 | `llm_response` | `message` (`role`, `content`: blocks of type `text`, `tool_use`, `tool_result` or `reasoning` — the last is the model's thinking, `provider`-bound, replayed only to the provider that made it and carried by `Message.text` nowhere), `usage` (`input_tokens`, `cache_read`, `cache_write`, `output_tokens` — disjoint, so the first three sum to the prompt's length), `stop_reason`, `model`, `gateway` |
-| `llm_error` | `reason` — a sentence a person can act on: a blown context window, rejected credentials, an unknown model, a rate limit the backoff outlasted, with the provider's words in brackets; `note` — a root's, the words its conversation was given about the failure, which a replay puts back |
+| `llm_error` | `reason` — a sentence a person can act on: a blown context window, rejected credentials, an unknown model, a rate limit the backoff outlasted, with the provider's words in brackets; `note` — a root's, the words its conversation was given about the failure, which a replay puts back; `stopped` — the call the agent gave up on when it did not answer within `llm_timeout_ms`, and stopped (see below) |
 | `truncated` | `reason` (`max_tokens`: the output cap cut the reply; `empty`: it had neither text nor a tool call), then one of `note` (the model was asked again), `calls` (tool calls cut mid-argument, answered with an error and not run) or `final: true` (asked once already; the agent ends `output_truncated` or `empty_reply`) |
 | `tool_call_started` | `call_id`, `name`, `args`, `identity`, `principal` |
 | `tool_call_completed` | `call_id`, `name`, `ok`, `content` |
@@ -304,7 +304,7 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 `tool_failures` and hands its parent what it found, labelled partial.
 | `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
-| `cancelled` | `turn` — what the cancelled turn had cost (see below) |
+| `cancelled` | `turn` — what the cancelled turn had cost (see below); `stopped` — the model call the cancel stopped, when one was in flight (see below) |
 | `turn_ended` | `reason` — the agent's turn is over and it waits for input: the model answered without asking for a tool, or a root's request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done`. `reason` is there only when the harness ended the turn: `tool_failures`, a tool kept failing and the answer to `tool_failures_ask_started` was `stop`; `agent_failed`, the root agent crashed as often as it may be restarted, `detail` says what it raised, and the session stops after it, to come back dormant (Decision 727). Neither turn is taken up again by a restart. `turn` — what the turn cost (see below); absent from an `agent_failed` one |
 | `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
@@ -368,8 +368,9 @@ turn cost: one input, until the agent rests (Decision 769).
  "output_tokens": 3, "cost_micros": 945, "unpriced": 0}
 ```
 
-`calls` counts the model calls the turn made: its subagents' included, and the one that
-writes a compaction's summary, whose figures are on its `compacted`. The four token figures
+`calls` counts the model calls the turn made: its subagents' included, the one that writes
+a compaction's summary, whose figures are on its `compacted`, and one the agent stopped,
+whose figures are its `stopped` (below). The four token figures
 are those calls' `usage` added up, disjoint as they are there. `cost_micros` adds up the
 `gateway.cost_micros` of the calls that had one, and `unpriced` counts the calls that had
 none, which the sum leaves out rather than counting as free. A subagent's `agent_done` says
@@ -377,6 +378,25 @@ what its task cost, which is part of its parent's turn. A cancel stops a subagen
 reports, so a cancelled turn leaves out what its running subagents had spent; and a restart
 in the middle of a turn reads the agent's own calls back from the log and forgets what its
 subagents had reported, as its budget does.
+
+`stopped`, on `llm_error` and on `cancelled`, is a model call the agent gave up on before
+it answered: one still streaming when `llm_timeout_ms` ran out, or one a cancel stopped
+(Decision 788). The agent stops it, which closes its request, so a reply that keeps coming
+is not generated and billed after that. It says what `llm_response` says of a call, as far
+as the provider had said it: `model`, and `usage` and `gateway` when the provider had
+reported usage by then. Anthropic's API does as the reply starts; an OpenAI-compatible one
+says it only at the end.
+
+```json
+{"model": "claude-sonnet-5",
+ "usage": {"input_tokens": 2000, "cache_read": 500, "cache_write": 0, "output_tokens": 1},
+ "gateway": {"cost_micros": 6165, "priced_locally": true}}
+```
+
+What the reply had written by then and the provider had not reported is not counted. A
+call that had reported nothing is one of the turn's `calls` and one of its `unpriced`, not
+a free one. A compaction's summary given up on at its timeout is counted in its turn's
+`turn` and written nowhere else.
 
 `prompt_bytes`, on `llm_request` and on `compacted` for the summariser's call, is what that
 call's prompt was made of, in UTF-8 bytes, as the log writes it:
@@ -580,9 +600,26 @@ that cannot yet — no token, or no plane answering — makes the session anyway
 ```
 → `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
 "failed", "pending_approvals", "pending_questions", "unseen", "tokens", "cost", "created_at",
-"last_active_at", "pinned"}]}`
+"last_active_at", "pinned", "kind", "sync", "device"}]}`
 
 `filter.parent` selects the branches of one session.
+
+`kind` is where the session is kept: `local`, `private` (sealed under its person's key,
+see `private` above), or a pod's `team`. A private session's `sync` says how its sealing
+stands on this machine, so a client can list it as private and say whether its copy
+elsewhere is current (Decision 785); it is `null` for any other session:
+
+| `sync` | meaning |
+| --- | --- |
+| `current` | sealing here, with nothing waiting to be sealed |
+| `behind` | sealing here, with events not sealed yet |
+| `paused` | not sealing: no client has handed the daemon a plane token since it started or since the person signed out, the plane was not there, or the session was archived; the next link with a token carries it on (`identity.link`) |
+| `elsewhere` | another device sealed it last, and it is that device's until it is claimed here (`session.claim`); `device` names it where the plane did |
+| `erasure_pending` | somebody erased it and the plane has not yet destroyed its key (Decision 756) |
+
+`elsewhere` and `erasure_pending` are what the plane said when the daemon last asked, at a
+link with a token or a seal; a listing does not ask it. `device` is `null` but for
+`elsewhere`.
 
 `pending_approvals` counts the approvals still open (see `approval_requested` for when one
 ends), `pending_questions` the questions (see `question_asked`: the agent's `ask_user`, the
@@ -624,6 +661,30 @@ at rest: the session is `dormant` afterwards, as one that went to sleep is.
 #### `session.pin` / `session.unpin` → exempt from retention.
 
 #### `session.erase` → tombstone; irreversible.
+
+#### `session.claim`
+```json
+{"command_id": "c-4", "session_id": "s-9f"}
+```
+→ `{"session_id", "device", "epoch", "sync"}`
+
+Takes a private session another device sealed last over on this one, the daemon's only
+(Decision 785): a pod holds no private session. The daemon reads the plane's row, claims
+it with the row's `epoch` (`session.register` with `claim`), and seals it from here from
+the row's `last_seq`. The answer is the row as it now stands, this device's `device` and
+the next `epoch`, and the session's `sync` here. The other device is not told; its next
+seal is refused, and it stops. A row that already names this device is carried on, not
+claimed again.
+
+Only where this machine's copy holds what the plane has: the event at the row's
+`last_seq` is in the log here with the row's `head_hash`. Otherwise it is `conflict` with
+`reason: "diverged"`, and nothing changes: the other device sealed events this copy does
+not have, and sealing this copy after them would make the session two histories. Also
+`not_found` with `reason: "erased"` for a session somebody erased or is erasing, or
+`"not_registered"` for one the plane has no row for (a link with a token registers it);
+`stale_version` where another device claimed it first; `unavailable` with `reason:
+"unlinked"` where no client has handed the daemon a plane token; and `invalid_params`
+for a session that is not private.
 
 ### Steering
 
@@ -793,7 +854,8 @@ were erased while it was away, and drops its copy of each (Decision 756), and th
 on sealing each private session it has no sealer for: from the row's `last_seq`, at the
 epoch the row says, registered with that epoch so a claim made meanwhile refuses it, for
 one this device sealed last; from its first event for one the plane has never heard of;
-not at all for one another device sealed last, until it is claimed here. Only the linked
+not at all for one another device sealed last, until it is claimed here
+(`session.claim`), and `session.list` says `sync: "elsewhere"` of it meanwhile. Only the linked
 person's are carried on: those whose `session_created` names `subject` as their `owner`,
 and those made while nobody was linked, which name none. Somebody else's, made while they
 were linked here, is left alone with this token, the daemon's log says how many of whose,
@@ -1483,7 +1545,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or

@@ -418,9 +418,6 @@ Found by the chunk 14 fixer of slot E14 (PR #359), 2026-10-03.
 
 ### D59 - Private sessions and MCP sessions: small leftovers of 0.7.4 (low)
 
-- How the desktop app and the TUI show a session in the new `erasure_pending` state is
-  untested: the client library types a state as an open string, and the TUI's remote
-  worker reads a state it doesn't know as none.
 - `Troupe.Session.MCP`, reloading after a server left `mcp.json`, stops the server but
   leaves its HTTP sessions in the local session's table and open at the server until the
   local session stops (`Sessions.retain/2` would end them, as `put_servers` now does on a
@@ -430,10 +427,6 @@ Found by the chunk 14 fixers of slots A14 and B14 (PRs #364, #363), 2026-10-03.
 
 ### D61 - Private sessions after #365: what is left (medium)
 
-- The daemon's `session.list` rows carry no `kind` or `sync`, so the desktop app lists a
-  private session as a local one ("Here only").
-- A private session whose plane row names another device is left alone on resume
-  (Decision 764), but no client offers `claim`, which a renamed machine needs too.
 - A private session sealed before PR #373 lacks its first events (`session_created`): the
   sealer subscribed after the session started.
 
@@ -558,12 +551,8 @@ Found by the #410 fixer, 2026-10-04.
 
 Found by the chunk 17 fixers and the coordinator, 2026-10-04.
 
-### D69 - A model call past its timeout, and thinking the agent never asked for (medium)
+### D69 - Thinking the agent never asked for (medium)
 
-- A model call that times out is never stopped, in `:thinking` or `:compacting`:
-  `clear_llm/1` (`agent/server.ex`) only demonitors the stream. Req's `receive_timeout`
-  limits only the gap between packets, so a stream that keeps producing goes on generating,
-  and is billed, up to `max_tokens`, and none of it is counted.
 - With no `reasoning_effort`, Anthropic's newest models (Opus 5 and 5.5, Fable, Sonnet 5.5)
   think anyway, adaptively. The adapter sends no `thinking` field, so `keep_thinking?` is
   false and their thinking blocks are dropped when the conversation is sent again, and

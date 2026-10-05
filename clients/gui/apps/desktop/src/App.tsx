@@ -197,6 +197,11 @@ export function App(): JSX.Element {
     return <FirstRun client={daemon.client} appearance={appearance} onDone={setupDone} />;
   }
 
+  // A private session another device holds, taken over by this computer's daemon, and the
+  // list asked again so its row says how it stands now (troupe Decision 785).
+  const thisComputer = daemon.client;
+  const claim = thisComputer ? (id: string) => thisComputer.claimSession(id).then(() => refresh()) : undefined;
+
   if (auth && !chosen && !hasChosen(auth.me?.subject)) {
     return (
       <Onboarding
@@ -325,7 +330,14 @@ export function App(): JSX.Element {
         )}
 
         {where.screen === "sessions" && (
-          <Sessions rows={snapshot.rows} loading={snapshot.loading} error={planeError} onOpen={(id) => setWhere({ screen: "session", id })} onStart={() => setWhere({ screen: "new" })} />
+          <Sessions
+            rows={snapshot.rows}
+            loading={snapshot.loading}
+            error={planeError}
+            onOpen={(id) => setWhere({ screen: "session", id })}
+            onStart={() => setWhere({ screen: "new" })}
+            onClaim={claim}
+          />
         )}
 
         {where.screen === "new" && (

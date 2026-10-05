@@ -179,7 +179,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
   # -- streaming events -------------------------------------------------------
 
   defp apply_event(acc, %{"choices" => choices} = event, sink) do
-    acc = Collector.add_usage(acc, usage(event["usage"]))
+    acc = add_usage(acc, event["usage"], sink)
 
     Enum.reduce(choices, acc, fn choice, acc ->
       acc
@@ -188,8 +188,17 @@ defmodule Troupe.LLM.Providers.OpenAI do
     end)
   end
 
-  defp apply_event(acc, %{"usage" => usage}, _sink), do: Collector.add_usage(acc, usage(usage))
+  defp apply_event(acc, %{"usage" => usage}, sink), do: add_usage(acc, usage, sink)
   defp apply_event(acc, _event, _sink), do: acc
+
+  # What the provider has reported so far goes to the agent as it comes, so a call the
+  # agent stops before it answers is counted for what it used (Decision 788). Most say it
+  # only in the last chunk, so a call stopped before then has reported nothing.
+  defp add_usage(acc, reported, %{reply_to: reply_to, ref: ref}) do
+    added = Collector.add_usage(acc, usage(reported))
+    if added.usage != acc.usage, do: send(reply_to, {:llm_usage, ref, added.usage})
+    added
+  end
 
   defp apply_delta(acc, delta, sink) do
     acc

@@ -316,6 +316,10 @@ defmodule Troupe.Client.Remote do
 
   def open_session(_origin, _sid, _mode, _opts), do: {:error, :unsupported}
 
+  # A private session is claimed by the daemon that would seal it, not through a plane.
+  @impl true
+  def claim_session(_origin, _sid), do: {:error, :unsupported}
+
   @impl true
   def whoami({:remote, plane}) do
     case call(plane, "me") do
@@ -481,7 +485,10 @@ defmodule Troupe.Client.Remote do
       origin: origin,
       branches: [],
       parent: nil,
-      workspace: nil
+      workspace: nil,
+      kind: nil,
+      sync: nil,
+      device: nil
     }
   end
 
@@ -620,7 +627,12 @@ defmodule Troupe.Client.Remote do
       origin: origin,
       branches: [],
       parent: nil,
-      workspace: nil
+      workspace: nil,
+      kind: session["kind"] || "team",
+      # A plane cannot say how this machine's copy of a private session stands, only that
+      # it is waiting to be erased (root Decision 756).
+      sync: if(session["state"] == "erasure_pending", do: "erasure_pending"),
+      device: session["device"]
     }
   end
 

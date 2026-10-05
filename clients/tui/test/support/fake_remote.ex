@@ -88,6 +88,14 @@ defmodule Troupe.FakeRemote do
   @spec registered(pid()) :: %{String.t() => map()}
   def registered(remote), do: GenServer.call(remote, :registered)
 
+  @doc """
+  Change a registered private session's row as the plane would: `%{"device" => ...,
+  "epoch" => ...}` as another device carrying it on, `%{"state" => "erasure_pending"}` as
+  an erasure whose key is not destroyed yet.
+  """
+  @spec hold(pid(), String.t(), map()) :: map()
+  def hold(remote, session_id, attrs), do: GenServer.call(remote, {:hold, session_id, attrs})
+
   @doc "Every plane token `/auth/exchange` has minted."
   @spec plane_tokens(pid()) :: MapSet.t()
   def plane_tokens(remote), do: GenServer.call(remote, :plane_tokens)
@@ -172,7 +180,9 @@ defmodule Troupe.FakeRemote do
       cost: Keyword.get(fields, :cost, 0.42),
       updated_at: Keyword.get(fields, :updated_at, 1_700_000_000_000),
       worker: Keyword.get(fields, :worker, "w1"),
-      events: Keyword.get(fields, :events, [])
+      events: Keyword.get(fields, :events, []),
+      kind: Keyword.get(fields, :kind, "team"),
+      device: Keyword.get(fields, :device)
     }
   end
 
@@ -282,6 +292,12 @@ defmodule Troupe.FakeRemote do
 
   def handle_call(:calls, _from, state), do: {:reply, Enum.reverse(state.calls), state}
   def handle_call(:registered, _from, state), do: {:reply, state.private, state}
+
+  def handle_call({:hold, session_id, attrs}, _from, state) do
+    row = Map.merge(Map.fetch!(state.private, session_id), attrs)
+    {:reply, row, %{state | private: Map.put(state.private, session_id, row)}}
+  end
+
   def handle_call(:plane_tokens, _from, state), do: {:reply, state.plane_tokens, state}
 
   def handle_call(:kill_workers, _from, state) do
@@ -655,6 +671,30 @@ defmodule Troupe.FakeRemote do
     {{:ok, %{"path" => params["path"], "bytes" => byte_size(params["content"])}}, state}
   end
 
+  # A daemon taking a private session over from another device (root Decision 785): one
+  # epoch on, under its name, where the epoch it read is still the row's.
+  defp dispatch(
+         state,
+         :plane,
+         "session.register",
+         %{"session_id" => id, "claim" => true} = params,
+         _pid
+       ) do
+    held = params["epoch"]
+
+    case state.private[id] do
+      %{"epoch" => ^held} = row ->
+        taken = %{row | "epoch" => held + 1, "device" => params["device"]}
+        {{:ok, taken}, %{state | private: Map.put(state.private, id, taken)}}
+
+      nil ->
+        {{:error, -32_005, "not_found"}, state}
+
+      _passed ->
+        {{:error, -32_007, "stale_version"}, state}
+    end
+  end
+
   # A daemon registering a private session it runs (issue #365): a row at epoch 1 the
   # first time, the same row after, as the plane keeps one.
   defp dispatch(state, :plane, "session.register", %{"session_id" => id} = params, _pid) do
@@ -669,6 +709,12 @@ defmodule Troupe.FakeRemote do
 
     {{:ok, row}, %{state | private: Map.put(state.private, id, row)}}
   end
+
+  # A registered private session's row, as its owner reads it. One nobody registered is
+  # left to the fall-through, as before this answered anything.
+  defp dispatch(%{private: private} = state, :plane, "session.get", %{"session_id" => id}, _pid)
+       when is_map_key(private, id),
+       do: {{:ok, private[id]}, state}
 
   defp dispatch(state, _kind, "blob.get", params, _pid) do
     bytes = "the whole blob"
@@ -845,7 +891,10 @@ defmodule Troupe.FakeRemote do
       "last_active_at" => session.updated_at,
       "cost_micros" => session.cost && round(session.cost * 1_000_000),
       "pending_approvals" => 0,
-      "your_role" => "owner"
+      "your_role" => "owner",
+      # One of the person's own private sessions, listed beside the team's.
+      "kind" => Map.get(session, :kind, "team"),
+      "device" => Map.get(session, :device)
     }
   end
 

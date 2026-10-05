@@ -55,6 +55,14 @@ defmodule Troupe.Gateway.Private do
   sealer stops (`suspend/1`), leaving the daemon as a restart would: nothing is sealed
   until a link with a token carries each session on (issue #381).
 
+  ## What a listing says, and claiming
+
+  `session.list` says how each private session's sealing stands here (`sync/1`), from
+  its sealer and from what the plane last said of it when the daemon asked, which it does
+  at a link and at every seal: another device sealed it last, or it is waiting to be
+  erased. A session another device holds is sealed here once the person claims it
+  (`take_over/2`, `session.claim`; Decision 785).
+
   ## When somebody else links
 
   The daemon is unlinked (`identity.unlink`) and every sealer stops, as at a sign-out; a
@@ -68,9 +76,18 @@ defmodule Troupe.Gateway.Private do
   alias Troupe.Gateway.Plane
   alias Troupe.KMS
   alias Troupe.ObjectStore.Signed
+  alias Troupe.Protocol.Event
   alias Troupe.Sessions.{Context, Sealer}
 
   require Logger
+
+  # What the plane last said of a session that is not being sealed here, by id:
+  # `:erasure_pending`, or `{:elsewhere, device}`. Owned by `Private.Sealers`.
+  @heard __MODULE__.Heard
+
+  # How long a listing waits for a sealer to say how far it has got. A sealer answers
+  # between seals; one that does not answer in this long is uploading what it holds.
+  @status_timeout 250
 
   @doc """
   Make a local session private: register it, take its key, and start sealing.
@@ -137,6 +154,161 @@ defmodule Troupe.Gateway.Private do
       },
       plane
     )
+  end
+
+  @doc """
+  How a private session's sealing stands here, as `session.list` says it, with the device
+  that holds it where that is another one.
+
+  * `"erasure_pending"`: somebody erased it and the plane has not yet destroyed its key.
+  * `"elsewhere"`: another device sealed it last, and it is that device's until it is
+    claimed here (`take_over/2`).
+  * `"current"`: sealing here, with nothing waiting to be sealed.
+  * `"behind"`: sealing here, with events not sealed yet.
+  * `"paused"`: not sealing: no client has handed the daemon a token since it started or
+    since the person signed out, the plane was not there, or the session was archived. A
+    link with a token carries it on.
+
+  The first two are what the plane said when the daemon last asked, at a link or a seal,
+  and not asked again for a listing.
+  """
+  @spec sync(String.t()) :: {String.t(), String.t() | nil}
+  def sync(session_id) do
+    case heard(session_id) do
+      :erasure_pending -> {"erasure_pending", nil}
+      {:elsewhere, device} -> {"elsewhere", device}
+      nil -> {sealing(session_id), nil}
+    end
+  end
+
+  defp sealing(session_id) do
+    case Registry.whereis_name({__MODULE__.Registry, session_id}) do
+      :undefined -> "paused"
+      pid -> pid |> pending() |> sealing_word()
+    end
+  end
+
+  defp sealing_word(0), do: "current"
+  defp sealing_word(:gone), do: "paused"
+  defp sealing_word(_waiting), do: "behind"
+
+  defp pending(pid) do
+    Sealer.status(pid, @status_timeout).pending
+  catch
+    :exit, {:timeout, _call} -> :sealing
+    :exit, _gone -> :gone
+  end
+
+  @doc """
+  Take a private session over on this device, and seal it from here: what `session.claim`
+  does, for one another device sealed last, which `resume/1` leaves to it, and for one this
+  machine sealed under a name it no longer has.
+
+  Only where this copy holds what the plane has: the event at the row's `last_seq` is
+  here, with the row's `head_hash`, so what is sealed from here follows on from it. One
+  whose plane copy went further, or elsewhere, is refused with `:diverged`: sealing this
+  copy after it would make the session two histories. The claim names the epoch the row
+  had, so two devices claiming at once make one winner, and the other learns it lost at
+  its next seal. A row that names this device already is carried on, not claimed again.
+
+  Answers the row as it now stands.
+  """
+  @spec take_over(%{id: String.t(), workspace: String.t() | nil}, keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def take_over(%{id: session_id} = session, opts \\ []) do
+    plane = Keyword.get(opts, :plane, Plane)
+    device = device(opts)
+
+    with {:ok, row} <- plane_row(plane, session_id) do
+      cond do
+        row["device"] == device and sealing?(session_id) -> {:ok, row}
+        row["device"] == device -> seal_from(session, row, plane, opts)
+        true -> claim_from(session, row, plane, opts)
+      end
+    end
+  end
+
+  defp claim_from(session, row, plane, opts) do
+    with :ok <- holds(session.id, row, opts),
+         {:ok, taken} <- claim(session.id, row["epoch"], Keyword.put(opts, :plane, plane)) do
+      # A sealer still here is one that lost: its epoch is behind the row's.
+      stop_sealer(session.id)
+      seal_from(session, taken, plane, opts)
+    end
+  end
+
+  defp plane_row(plane, session_id) do
+    case Plane.call("session.get", %{"session_id" => session_id}, plane) do
+      {:ok, %{"state" => state}} when state in ["erasure_pending", "erased"] ->
+        hear(session_id, :erasure_pending)
+        {:error, :erased}
+
+      {:ok, row} ->
+        {:ok, row}
+
+      {:error, {:rpc, %{"message" => "not_found"} = error}} ->
+        if erased?(error), do: {:error, :erased}, else: {:error, :not_registered}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # The event the row's `last_seq` names, as this disk holds it, hashed as a seal hashes
+  # the last event it sealed. A row nothing was sealed into asks for nothing.
+  defp holds(session_id, row, opts) do
+    last_seq = row["last_seq"] || 0
+    read = Keyword.get(opts, :backfill, &Troupe.replay_from/2)
+
+    with true <- last_seq > 0,
+         %Event{} = event <- Enum.find(read.(session_id, last_seq - 1), &(&1.seq == last_seq)) do
+      if row["head_hash"] in [nil, Event.hash(event)], do: :ok, else: {:error, :diverged}
+    else
+      false -> :ok
+      nil -> {:error, :diverged}
+    end
+  end
+
+  defp seal_from(session, row, plane, opts) do
+    forget(session.id)
+
+    started?(
+      session,
+      plane,
+      Keyword.merge(opts,
+        epoch: row["epoch"],
+        sealed_through: row["last_seq"] || 0,
+        object_bytes: row["object_bytes"] || 0
+      )
+    )
+
+    {:ok, row}
+  end
+
+  defp stop_sealer(session_id) do
+    case Registry.whereis_name({__MODULE__.Registry, session_id}) do
+      :undefined -> :ok
+      pid -> DynamicSupervisor.terminate_child(__MODULE__.Sealers, pid)
+    end
+  end
+
+  # What the plane said of a session, for `sync/1`. A daemon with no sealers running has
+  # no table, and nothing to say.
+  defp hear(session_id, what) do
+    if :ets.whereis(@heard) != :undefined, do: :ets.insert(@heard, {session_id, what})
+    :ok
+  end
+
+  defp forget(session_id) do
+    if :ets.whereis(@heard) != :undefined, do: :ets.delete(@heard, session_id)
+    :ok
+  end
+
+  defp heard(session_id) do
+    case :ets.whereis(@heard) != :undefined and :ets.lookup(@heard, session_id) do
+      [{^session_id, what}] -> what
+      _none -> nil
+    end
   end
 
   @doc """
@@ -247,6 +419,7 @@ defmodule Troupe.Gateway.Private do
   defp carry_on(session, plane, device, opts) do
     case Plane.call("session.get", %{"session_id" => session.id}, plane) do
       {:ok, %{"state" => state}} when state in ["erasure_pending", "erased"] ->
+        hear(session.id, :erasure_pending)
         false
 
       {:ok, %{"device" => ^device} = row} ->
@@ -261,6 +434,8 @@ defmodule Troupe.Gateway.Private do
         )
 
       {:ok, row} ->
+        hear(session.id, {:elsewhere, row["device"]})
+
         Logger.info(
           "troupe: #{session.id} was sealed last by #{inspect(row["device"])}; it is sealed here once it is claimed here"
         )
@@ -282,6 +457,7 @@ defmodule Troupe.Gateway.Private do
   defp started?(session, plane, opts) do
     case start(session.id, Keyword.merge(opts, plane: plane, workspace: session.workspace)) do
       {:ok, _sealer, _context} ->
+        forget(session.id)
         true
 
       {:error, reason} ->
@@ -300,6 +476,7 @@ defmodule Troupe.Gateway.Private do
     end
 
     :ok = Keyword.get(opts, :erase, &Troupe.erase_session/1).(session_id)
+    forget(session_id)
 
     case Plane.call("session.erased", %{"session_id" => session_id, "device" => device}, plane) do
       {:ok, _done} ->
@@ -473,6 +650,8 @@ defmodule Troupe.Gateway.Private do
           :ok
 
         {:error, {:rpc, %{"message" => "stale_version"}}} ->
+          hear(context.session_id, {:elsewhere, nil})
+
           Logger.warning(
             "troupe: #{context.session_id} is held by another device; this one has stopped sealing"
           )
@@ -515,6 +694,10 @@ defmodule Troupe.Gateway.Private.Sealers do
 
   @impl Supervisor
   def init(_opts) do
+    # What the plane last said of a session not sealing here (`Private.sync/1`), kept as
+    # long as the sealers are: a restart forgets it, and the next link asks again.
+    :ets.new(Troupe.Gateway.Private.Heard, [:named_table, :public, :set])
+
     children = [
       {Registry, keys: :unique, name: Troupe.Gateway.Private.Registry},
       {DynamicSupervisor, strategy: :one_for_one, name: Troupe.Gateway.Private.Sealers}

@@ -6,12 +6,15 @@ import { describe, it } from "node:test";
 import {
   awaitingApproval,
   awaitingYou,
+  claimable,
   describeUnseen,
   filterRows,
   FleetStore,
   hasUnseen,
   rowFromDaemon,
   rowFromPlane,
+  syncState,
+  syncWords,
   totalCostMicros,
   unseenSummary,
 } from "../src/index.js";
@@ -113,7 +116,7 @@ describe("the fleet store", () => {
     const plane = new StubSource("plane", "team");
     const daemon = new StubSource("daemon", "private");
     plane.rows = [row("p", "private", { source: "plane", title: null, status: null, sync: null })];
-    daemon.rows = [row("p", "private", { source: "daemon", title: "a private thing", status: "thinking", sync: "pending" })];
+    daemon.rows = [row("p", "private", { source: "daemon", title: "a private thing", status: "thinking", sync: "behind" })];
 
     const store = new FleetStore([plane, daemon]);
     await store.refresh();
@@ -121,7 +124,7 @@ describe("the fleet store", () => {
     const merged = store.current.rows[0]!;
     assert.equal(merged.title, "a private thing");
     assert.equal(merged.status, "thinking");
-    assert.equal(merged.sync, "pending");
+    assert.equal(merged.sync, "behind");
   });
 
   it("applies live news onto a row without a round trip", async () => {
@@ -182,6 +185,75 @@ describe("the fleet store", () => {
     assert.deepEqual(rowFromPlane(planeRow("g", { state: "dormant", failed_reason: "agent_failed" })).failed, { reason: "agent_failed", detail: null });
     assert.equal(rowFromPlane(planeRow("h", { failed_reason: null })).failed, null);
     assert.equal(rowFromPlane(planeRow("i")).failed, null, "a plane from before the column says nothing failed");
+  });
+});
+
+// D61 and D59: a private session as the daemon's `session.list` says it (troupe Decision
+// 785), and one waiting to be erased as a plane's row says it (Decision 756).
+describe("a private session", () => {
+  const daemonRow = (over: Record<string, unknown> = {}) =>
+    rowFromDaemon({ id: "p", workspace: "/home/ada/diary", branch: null, profile: null, state: "active", status: "idle", created_at: null, last_active_at: null, ...over });
+
+  it("is private, with how its sealing stands, where the daemon says so", () => {
+    const sealed = daemonRow({ kind: "private", sync: "current", device: null });
+    assert.equal(sealed.kind, "private");
+    assert.equal(sealed.sync, "current");
+    assert.equal(claimable(sealed), false);
+
+    for (const sync of ["behind", "paused", "erasure_pending"] as const) {
+      assert.equal(daemonRow({ kind: "private", sync }).sync, sync);
+    }
+
+    // A daemon from before it says nothing, which is a local session, and a state this
+    // client does not know is said as nothing rather than as something it is not.
+    assert.equal(daemonRow().kind, "local");
+    assert.equal(daemonRow().sync, null);
+    assert.equal(daemonRow({ kind: "private", sync: "being-shipped" }).sync, null);
+    assert.equal(daemonRow({ kind: "local", sync: "current" }).sync, null, "a local session has no sync");
+  });
+
+  it("another device holds is named, and claimable here", () => {
+    const held = daemonRow({ kind: "private", sync: "elsewhere", device: "ada-laptop" });
+    assert.equal(held.sync, "elsewhere");
+    assert.equal(held.device, "ada-laptop");
+    assert.equal(claimable(held), true);
+    assert.deepEqual(syncWords("elsewhere", "ada-laptop"), {
+      label: "On ada-laptop",
+      detail: "ada-laptop sealed it last; claim it to seal it from this computer",
+    });
+    assert.equal(syncWords("elsewhere", null).label, "On another device");
+  });
+
+  it("is said in the same words wherever it is listed", () => {
+    assert.deepEqual(
+      (["current", "behind", "paused", "erasure_pending"] as const).map((s) => syncWords(s).label),
+      ["Synced", "Syncing", "Not syncing", "Waiting to be erased"],
+    );
+    assert.equal(syncState("erasure_pending"), "erasure_pending");
+    assert.equal(syncState(undefined), null);
+  });
+
+  it("a plane lists as private, and as waiting to be erased where it is", () => {
+    const pending = rowFromPlane(planeRow("p", { kind: "private", state: "erasure_pending", device: "ada-laptop" }));
+    assert.equal(pending.kind, "private");
+    assert.equal(pending.state, "erasure_pending");
+    assert.equal(pending.sync, "erasure_pending");
+    assert.equal(claimable(pending), false);
+    // The plane cannot say how this computer's copy stands, only that it is private.
+    assert.equal(rowFromPlane(planeRow("q", { kind: "private" })).sync, null);
+    assert.equal(rowFromPlane(planeRow("t", { kind: "team", state: "erasure_pending" })).sync, null);
+  });
+
+  it("waiting to be erased is believed from the plane before the daemon has heard", async () => {
+    const plane = new StubSource("plane", "team");
+    const daemon = new StubSource("daemon", "local");
+    plane.rows = [rowFromPlane(planeRow("p", { kind: "private", state: "erasure_pending" }))];
+    daemon.rows = [daemonRow({ kind: "private", sync: "paused" })];
+    const store = new FleetStore([plane, daemon]);
+    await store.refresh();
+    const [merged] = store.current.rows;
+    assert.equal(merged!.kind, "private");
+    assert.equal(merged!.sync, "erasure_pending");
   });
 });
 

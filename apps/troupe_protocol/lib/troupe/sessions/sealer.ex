@@ -77,9 +77,14 @@ defmodule Troupe.Sessions.Sealer do
   @spec seal_now(GenServer.server(), timeout()) :: {:ok, map()} | {:error, term()}
   def seal_now(server, timeout \\ 60_000), do: GenServer.call(server, :seal_now, timeout)
 
-  @doc "How far this session is sealed, for tests and for the heartbeat."
-  @spec status(GenServer.server()) :: map()
-  def status(server), do: GenServer.call(server, :status)
+  @doc """
+  How far this session is sealed, for tests, the heartbeat and a daemon's listing.
+
+  A sealer answers between seals, so a listing that must not wait out an upload passes a
+  short `timeout` and reads the exit as a seal under way.
+  """
+  @spec status(GenServer.server(), timeout()) :: map()
+  def status(server, timeout \\ 5_000), do: GenServer.call(server, :status, timeout)
 
   @impl GenServer
   def init(opts) do

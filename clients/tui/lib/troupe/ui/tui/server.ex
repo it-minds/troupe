@@ -1178,7 +1178,44 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # `c` takes a private session another device sealed last over on this machine (root
+  # Decision 785), and the list is taken again so its row says how it stands now.
+  defp sessions_key(%Key{code: "c"}, state) do
+    {entries, cursor} = View.sessions_view(state)
+
+    case Enum.at(entries, cursor) do
+      nil ->
+        state
+
+      entry ->
+        if View.claimable?(entry),
+          do: claim(state, entry),
+          else: notice(state, "#{entry.id} is not held by another device; nothing to claim")
+    end
+  end
+
   defp sessions_key(_key, state), do: state
+
+  defp claim(%{sessions: s} = state, entry) do
+    case Client.claim_session(entry.origin, entry.id) do
+      {:ok, _claimed} ->
+        state = open_sessions(state)
+        entries = state.sessions.entries
+
+        state = %{
+          state
+          | sessions: %{state.sessions | cursor: min(s.cursor, max(length(entries) - 1, 0))}
+        }
+
+        notice(state, "claimed #{entry.id}: this computer holds it now")
+
+      {:error, reason} ->
+        notice(state, "could not claim #{entry.id}: #{claim_reason(reason)}")
+    end
+  end
+
+  defp claim_reason(reason) when is_binary(reason), do: reason
+  defp claim_reason(reason), do: inspect(reason)
 
   # `/resume 2` (the row's number) or `/resume MU0W4A78` (an id or the start of one).
   defp resume_by_arg(state, arg) do

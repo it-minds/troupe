@@ -16,8 +16,49 @@ import type { Unseen } from "./types.js";
 /** Where a session runs, which is the one thing a person must be able to see at a glance. */
 export type SessionKind = "team" | "local" | "private";
 
-/** Only private sessions have one; it is about the copy, not the session. */
-export type SyncState = "synced" | "pending" | "conflict" | "this-device-only";
+/**
+ * How a private session's sealing stands, as the daemon's `session.list` says it (troupe
+ * Decision 785); only private sessions have one, and it is about the copy, not the
+ * session. `current` is sealed through its last event, `behind` is sealing with events
+ * still to seal, `paused` is not sealing until this computer is handed a sign-in again,
+ * `elsewhere` is another device's until it is claimed here (`device` names it), and
+ * `erasure_pending` is erased, with its key not destroyed yet.
+ */
+export type SyncState = "current" | "behind" | "paused" | "elsewhere" | "erasure_pending";
+
+const SYNC_STATES: readonly SyncState[] = ["current", "behind", "paused", "elsewhere", "erasure_pending"];
+
+/** A source's `sync`, or null for one this client does not know: it says nothing rather than something wrong. */
+export function syncState(value: unknown): SyncState | null {
+  return SYNC_STATES.includes(value as SyncState) ? (value as SyncState) : null;
+}
+
+/**
+ * A sync state in words: the label a list shows and the sentence behind it. The desktop
+ * app and the terminal client say the same.
+ */
+export function syncWords(state: SyncState, device?: string | null): { label: string; detail: string } {
+  switch (state) {
+    case "current":
+      return { label: "Synced", detail: "Sealed under your key through its last event" };
+    case "behind":
+      return { label: "Syncing", detail: "Being sealed; its latest events are not sealed yet" };
+    case "paused":
+      return { label: "Not syncing", detail: "Nothing is sealed until this computer is signed in again" };
+    case "elsewhere":
+      return {
+        label: device ? `On ${device}` : "On another device",
+        detail: `${device ?? "Another device"} sealed it last; claim it to seal it from this computer`,
+      };
+    case "erasure_pending":
+      return { label: "Waiting to be erased", detail: "Erased; its key is not destroyed yet" };
+  }
+}
+
+/** Whether this computer can take the session over: a private one another device holds, which only this computer's daemon says. */
+export function claimable(row: Pick<FleetRow, "kind" | "sync">): boolean {
+  return row.kind === "private" && row.sync === "elsewhere";
+}
 
 export interface FleetRow {
   id: string;
@@ -41,6 +82,8 @@ export interface FleetRow {
   origin: { kind?: string; trigger?: string; [k: string]: unknown } | null;
   reviewedBy: string | null;
   sync: SyncState | null;
+  /** The other device that holds a private session, where `sync` is `elsewhere` and the daemon heard its name. */
+  device?: string | null;
   /**
    * What happened while nobody was reading the session, where the source counts it — a
    * daemon since #119; a plane's rows and an older daemon's say nothing.
@@ -65,10 +108,16 @@ export interface FleetSource {
   list(): Promise<FleetRow[]>;
 }
 
+/**
+ * A plane's row. A private session is one of the person's own the plane lists beside the
+ * team's (`kind`); the plane cannot say how this computer's copy stands, only that one is
+ * waiting to be erased (troupe Decision 756).
+ */
 export function rowFromPlane(row: SessionRow, source = "plane"): FleetRow {
+  const kind = row.kind === "private" ? "private" : "team";
   return {
     id: row.id,
-    kind: "team",
+    kind,
     source,
     title: row.title ?? null,
     profile: row.profile ?? null,
@@ -84,7 +133,7 @@ export function rowFromPlane(row: SessionRow, source = "plane"): FleetRow {
     yourRole: row.your_role ?? null,
     origin: row.origin ?? null,
     reviewedBy: row.reviewed_by ?? null,
-    sync: null,
+    sync: kind === "private" && row.state === "erasure_pending" ? "erasure_pending" : null,
     failed: row.failed_reason ? { reason: row.failed_reason, detail: null } : null,
     raw: row,
   };
@@ -242,7 +291,7 @@ export class FleetStore {
       for (const source of this.sources.filter((s) => s.kind === kind)) {
         for (const row of this.bySource.get(source.id) ?? []) {
           const existing = merged.get(row.id);
-          merged.set(row.id, existing ? { ...existing, ...row, raw: row.raw } : row);
+          merged.set(row.id, existing ? joined(existing, row) : row);
         }
       }
     }
@@ -254,6 +303,16 @@ export class FleetStore {
     this.snapshot = s;
     for (const l of this.listeners) l(s);
   }
+}
+
+/**
+ * The daemon's row over the plane's, but for one thing the plane knows first: a session
+ * somebody erased is waiting to be erased whatever the daemon says, since the daemon hears
+ * it only when it is next linked (troupe Decision 756).
+ */
+function joined(existing: FleetRow, row: FleetRow): FleetRow {
+  const next = { ...existing, ...row, raw: row.raw };
+  return existing.sync === "erasure_pending" ? { ...next, sync: "erasure_pending" } : next;
 }
 
 /** Pinned first, then most recently active; a row with no activity sorts last. */

@@ -80,6 +80,29 @@ defmodule Troupe.Session.UsageTest do
              row
   end
 
+  # Decision 788: a call the agent stopped was billed for what it had used, and is on the
+  # `llm_error` or `cancelled` that gave it up.
+  test "a call the agent stopped is a row when it had reported what it used, and not when not" do
+    stopped = %{
+      "model" => "claude-sonnet-5",
+      "usage" => %{"input_tokens" => 2_000, "output_tokens" => 1, "cache_read" => 500},
+      "gateway" => %{"cost_micros" => 6_165, "priced_locally" => true}
+    }
+
+    late = "the model did not answer in time"
+    timed_out = event(5, %{"reason" => late, "stopped" => stopped}, "llm_error")
+    cancelled = event(6, %{"turn" => %{}, "stopped" => stopped}, "cancelled")
+    silent = event(7, %{"reason" => late, "stopped" => %{"model" => "gpt-test"}}, "llm_error")
+    refused = event(8, %{"reason" => "the provider answered 400"}, "llm_error")
+    plain = event(9, %{"turn" => %{}}, "cancelled")
+
+    assert [timed, cancel] = Usage.records("s-1", [timed_out, cancelled, silent, refused, plain])
+
+    assert %{seq: 5, request_id: "seq:s-1:5", model: "claude-sonnet-5"} = timed
+    assert %{input_tokens: 2_000, output_tokens: 1, cost_micros: 6_165} = timed
+    assert %{seq: 6, input_tokens: 2_000, cost_micros: 6_165} = cancel
+  end
+
   test "rows come back in sequence order however the events arrived" do
     assert [%{seq: 2}, %{seq: 5}, %{seq: 9}] =
              Usage.records("s-1", [metered(9, 1), metered(2, 1), metered(5, 1)])

@@ -25,6 +25,8 @@ defmodule Troupe.LLM.Fake do
           | {:reasoning, String.t(), step() | nil}
           | {:stop, atom(), step()}
           | {:delay, non_neg_integer(), step()}
+          | {:endless, pos_integer()}
+          | {:endless, pos_integer(), :no_usage}
           | {:error, term()}
           | map()
 
@@ -45,7 +47,11 @@ defmodule Troupe.LLM.Fake do
 
   Options:
     * `:steps` — the script, consumed one step per request; `{:delay, ms, step}` answers
-      `step` after `ms`, which is how a test makes one call outlast `llm_timeout_ms`
+      `step` after `ms`, which is how a test makes one call outlast `llm_timeout_ms`;
+      `{:endless, ms}` never answers but streams a delta every `ms` for as long as it is
+      let, after reporting the prompt's usage as Anthropic's `message_start` does, and
+      `{:endless, ms, :no_usage}` reports none, as an OpenAI-compatible stream says its
+      usage only at the end
     * `:routes` — per-agent scripts, `%{"root" => [...], "explore" => [...]}`, keyed by
       agent name. Several agents run concurrently, so one shared list cannot say which
       answer belongs to whom; a route can. Falls back to `:steps` for agents with no
@@ -152,7 +158,9 @@ defmodule Troupe.LLM.Fake do
 
   @doc "Take the next scripted step for a request, recording the request."
   @spec next(GenServer.server(), Troupe.LLM.Request.t()) ::
-          {:ok, Response.t(), non_neg_integer()} | {:error, term()}
+          {:ok, Response.t(), non_neg_integer()}
+          | {:endless, pos_integer(), Usage.t() | nil}
+          | {:error, term()}
   def next(server, request), do: GenServer.call(server, {:next, request}, 30_000)
 
   @doc "Every request the fake has seen, oldest first."
@@ -310,6 +318,13 @@ defmodule Troupe.LLM.Fake do
     end
   end
 
+  # A reply that keeps coming, as a model does that writes up to its output cap: what the
+  # prompt used is reported up front, as Anthropic's `message_start` reports it.
+  defp render({:endless, ms}, %__MODULE__{cache_read: cache_read}),
+    do: {:endless, ms, %Usage{input_tokens: 100, output_tokens: 1, cache_read: cache_read}}
+
+  defp render({:endless, ms, :no_usage}, _state), do: {:endless, ms, nil}
+
   # Thinking in front of an answer, or on its own: the shape of a reasoning model's turn,
   # so a test can watch it reach the log and stay out of the prose.
   defp render({:reasoning, reasoning, nil}, state) do
@@ -416,9 +431,20 @@ defmodule Troupe.LLM.Providers.Fake do
         Enum.each(response.content, &emit_delta(&1, reply_to, ref))
         send(reply_to, {:llm_done, ref, response})
 
+      {:endless, ms, usage} ->
+        if usage, do: send(reply_to, {:llm_usage, ref, usage})
+        trickle(ms, reply_to, ref)
+
       {:error, reason} ->
         send(reply_to, {:llm_error, ref, reason})
     end
+  end
+
+  # Until the task is stopped: the call nobody gives up on goes on for ever.
+  defp trickle(ms, reply_to, ref) do
+    Process.sleep(ms)
+    send(reply_to, {:llm_delta, ref, Delta.text("and more ")})
+    trickle(ms, reply_to, ref)
   end
 
   # Deltas are emitted in a few chunks rather than one, so tests exercise the

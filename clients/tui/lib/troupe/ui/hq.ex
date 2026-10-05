@@ -311,10 +311,10 @@ defmodule Troupe.UI.HQ do
     [
       marker,
       String.pad_trailing(label(session.origin), 8),
-      String.pad_trailing(to_string(session.state), 10),
+      String.pad_trailing(state_word(session.state), 10),
       String.pad_trailing(to_string(session.profile || "—"), 10),
       String.pad_trailing(to_string(session.team || session.owner || ""), 10),
-      Model.one_line(session.title || session.id)
+      kept_title(session)
     ]
     |> Enum.join(" ")
     |> String.trim_trailing()
@@ -328,6 +328,18 @@ defmodule Troupe.UI.HQ do
 
   defp label({:remote, _plane}), do: "remote"
   defp label(_origin), do: "local"
+
+  # `erasure_pending` (root Decision 756) in the column's width; its title says it whole.
+  defp state_word(:erasure_pending), do: "erasing"
+  defp state_word(state), do: to_string(state)
+
+  # A private session says so before its title, as the session picker does.
+  defp kept_title(session) do
+    case View.kept(session) do
+      "" -> Model.one_line(session.title || session.id)
+      kept -> "[" <> kept <> "] " <> Model.one_line(session.title || session.id)
+    end
+  end
 
   defp highlight(hq, column) do
     if hq.column == column,
@@ -573,6 +585,7 @@ defmodule Troupe.UI.HQ do
       "active" -> :active
       "dormant" -> :dormant
       "read_only" -> :read_only
+      "erasure_pending" -> :erasure_pending
       "erased" -> :erased
       other -> String.to_atom(other)
     end
