@@ -100,5 +100,57 @@ defmodule Troupe.ObjectStoreTest do
       assert {:ok, []} = ObjectStore.list(store, prefix)
       assert {:ok, []} = ObjectStore.list_versions(store, prefix)
     end
+
+    # S3 lists at most a thousand versions at a time and says the rest is there with
+    # `IsTruncated`. An erasure that read one page deleted a thousand versions of a long
+    # session and left the others, which a key destroyed later is all that kept unread.
+    test "deleting a prefix removes every version past the first thousand", context do
+      %{store: store, prefix: prefix} = requires_store(context)
+
+      # A few keys overwritten many times, which is how a long session's manifest piles
+      # up versions and quicker to write than as many keys. Each key's versions in order,
+      # so its oldest is known: the last of them a one-page listing reaches.
+      oldest =
+        1..6
+        |> Task.async_stream(
+          fn n ->
+            key = "#{prefix}segments/#{n}.seg"
+            for v <- 1..175, do: elem(ObjectStore.put(store, key, "ciphertext #{v}"), 1)
+          end,
+          timeout: 60_000
+        )
+        |> Enum.map(fn {:ok, [first | _]} -> first end)
+
+      # A delete marker is a version too: one left behind still lists its key.
+      :ok = ObjectStore.delete(store, hd(oldest).key)
+
+      assert {:ok, removed} = ObjectStore.delete_prefix(store, prefix)
+
+      for put <- oldest do
+        assert {:error, :not_found} = ObjectStore.get(store, put.key, version_id: put.version_id)
+      end
+
+      assert {:ok, []} = ObjectStore.list_versions(store, prefix)
+      assert {:ok, []} = ObjectStore.list(store, prefix)
+      assert removed == 6 * 175 + 1
+    end
+
+    test "a listing of versions follows S3's markers from page to page", context do
+      %{store: store, prefix: prefix} = requires_store(context)
+      key = prefix <> "manifest.json"
+
+      for n <- 1..12, do: {:ok, _} = ObjectStore.put(store, key, ~s({"last_seq":#{n}}))
+      :ok = ObjectStore.delete(store, key)
+      {:ok, _} = ObjectStore.put(store, prefix <> "snapshots/40.snap", "a snapshot")
+
+      # Pages of five end inside one key's versions, so the next page has to start after
+      # a version of a key and not just after the key.
+      assert {:ok, versions} = ObjectStore.list_versions(store, prefix, page_size: 5)
+      assert length(versions) == 14
+      assert versions |> Enum.uniq() |> length() == 14
+
+      assert {:ok, 14} = ObjectStore.delete_prefix(store, prefix, page_size: 5)
+      assert {:ok, []} = ObjectStore.list_versions(store, prefix)
+    end
   end
 end

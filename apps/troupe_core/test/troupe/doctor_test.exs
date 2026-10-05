@@ -11,6 +11,7 @@ defmodule Troupe.DoctorTest do
   use ExUnit.Case, async: false
 
   alias Troupe.Doctor
+  alias Troupe.LLM.Identify
   alias Troupe.Test.FakeGateway
 
   @vars ~w(TROUPE_CONFIG_HOME TROUPE_STATE_HOME TROUPE_OPENCODE_CONFIG TROUPE_OPENCODE_AUTH TROUPE_API_KEY
@@ -108,6 +109,49 @@ defmodule Troupe.DoctorTest do
 
     assert %{state: :fail, detail: "not checked: the config files do not load"} =
              Enum.find(checks, &(&1.name == "provider"))
+
+    assert %{state: :fail, detail: "not checked: the config files do not load"} =
+             Enum.find(checks, &(&1.name == "identify"))
+  end
+
+  describe "the identify line (Decision 787)" do
+    @gateway "http://127.0.0.1:4000/v1"
+
+    test "says header by header what a gateway is sent, naming the client of the program asked",
+         ctx do
+      File.write!(
+        ctx.config_file,
+        "provider: openai\nbase_url: #{@gateway}\napi_key: k\nmodels: {default: m}\n"
+      )
+
+      through_troupe = Doctor.run(workspace: ctx.base, command: "troupe", live: false)
+      assert %{state: :ok, detail: detail} = Enum.find(through_troupe, &(&1.name == "identify"))
+      assert detail == Identify.describe(true, "tui", "openai", @gateway)
+      assert detail =~ "user-agent: troupe/#{Troupe.Version.version()} (tui; "
+      assert detail =~ "x-litellm-tags: troupe,troupe-tui,troupe-#{Troupe.Version.version()}"
+
+      through_daemon = Doctor.run(workspace: ctx.base, command: "troupe-daemon", live: false)
+      assert %{detail: detail} = Enum.find(through_daemon, &(&1.name == "identify"))
+      assert detail =~ "(desktop; "
+
+      assert Doctor.format(through_troupe) =~
+               ~r/^ok    identify              user-agent: troupe\//m
+    end
+
+    test "says off when the config turns it off, and nothing for the fake provider", ctx do
+      File.write!(
+        ctx.config_file,
+        "provider: openai\nbase_url: #{@gateway}\napi_key: k\nidentify: false\n"
+      )
+
+      assert %{state: :ok, detail: "off"} =
+               ctx.base |> run_live_free() |> Enum.find(&(&1.name == "identify"))
+
+      File.write!(ctx.config_file, "provider: fake\n")
+
+      assert %{state: :ok, detail: "nothing goes out: the fake provider asks nobody"} =
+               ctx.base |> run_live_free() |> Enum.find(&(&1.name == "identify"))
+    end
   end
 
   test "each plane the caller names is asked for its discovery document", ctx do

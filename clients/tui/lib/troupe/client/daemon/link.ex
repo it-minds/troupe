@@ -218,7 +218,7 @@ defmodule Troupe.Client.Daemon.Link do
              port: port,
              token: state.endpoint.token,
              owner: self(),
-             client_info: %{"name" => "troupe", "version" => version()},
+             client_info: client_info(),
              capabilities: %{"blobs" => true}
            ) do
         {:ok, client} ->
@@ -307,6 +307,16 @@ defmodule Troupe.Client.Daemon.Link do
   end
 
   defp version, do: to_string(Application.spec(:troupe, :vsn) || "dev")
+
+  @doc """
+  What this VM tells the daemon it is when it connects: `troupe`, the terminal UI, or
+  `troupe-headless` once the runner has said this is a headless run (`:client_name`). The
+  daemon names the sessions a connection creates to the provider by it (root Decision 787;
+  Decision 147 here).
+  """
+  @spec client_info() :: map()
+  def client_info,
+    do: %{"name" => Application.get_env(:troupe, :client_name, "troupe"), "version" => version()}
 
   defp error_message(%{message: message, data: %{"reason" => reason}}) when is_binary(reason),
     do: "#{message}: #{reason}"

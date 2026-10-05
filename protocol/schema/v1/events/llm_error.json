@@ -8,6 +8,9 @@
     },
     "reason": {
       "type": "string"
+    },
+    "stopped": {
+      "type": "object"
     }
   },
   "required": [

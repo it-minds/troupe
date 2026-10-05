@@ -50,14 +50,17 @@ defmodule Troupe.Gateway.Dispatch do
     @moduledoc "Who is calling, and what they are allowed to do."
 
     @enforce_keys [:principal, :scopes, :connection]
-    defstruct [:principal, :scopes, :connection, :next_subscription_id, :activate]
+    defstruct [:principal, :scopes, :connection, :next_subscription_id, :activate, :client]
 
+    # `client`: which client this connection is, a word from `Troupe.LLM.Identify.clients/0`;
+    # a session it creates or wakes names it to the provider (Decision 787).
     @type t :: %__MODULE__{
             principal: map(),
             scopes: [:observe | :control | :admin],
             connection: pid(),
             next_subscription_id: String.t() | nil,
-            activate: (String.t() -> {:ok, pid()} | {:error, term()}) | nil
+            activate: (String.t() -> {:ok, pid()} | {:error, term()}) | nil,
+            client: String.t() | nil
           }
   end
 
@@ -769,17 +772,19 @@ defmodule Troupe.Gateway.Dispatch do
 
   # -- lifecycle --------------------------------------------------------------
 
-  defp handle("session.create", params, _context) do
+  defp handle("session.create", params, context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          {:ok, parent} <- parent_of(params),
          {:ok, resolved} <- Worktrees.resolve(workspace, Map.get(params, "worktree", "auto")) do
       private? = Map.get(params, "private", false) == true
       {profile, task} = workflow_of(params, workspace)
 
+      # The client that asked is the one the session names to the provider (Decision 787).
+      config = [client: context.client] ++ List.wrap(overrides(Map.get(params, "config")))
+
       opts =
-        [workspace: resolved.path, agent: profile]
+        [workspace: resolved.path, agent: profile, config_overrides: config]
         |> maybe_put(:task, task)
-        |> maybe_put(:config_overrides, overrides(Map.get(params, "config")))
         |> maybe_put(:parent, parent)
         |> maybe_private(private?)
 
@@ -919,8 +924,12 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle("identity.link", params, context) do
     with {:ok, subject} <- fetch(params, "subject") do
+      linked = Plane.subject()
+
       case Identity.link(Map.put(params, "subject", subject)) do
         {:ok, identity} ->
+          linked_over(linked, subject)
+
           # `plane_token`, if the client sent one, goes to the process that holds it
           # and nowhere near the file: `identity.json` records a label, and a token is
           # not a label. A client that sends none links the name alone, which is what a
@@ -939,9 +948,12 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # The token goes with the link, and the sealing with the token, as at a sign-out (issue
+  # #386): a sealer left running would seal with the token of whoever links next.
   defp handle("identity.unlink", _params, context) do
     Identity.unlink()
     :ok = Plane.unlink()
+    Private.suspend()
     user = System.get_env("USER") || System.get_env("USERNAME") || "local"
     send(context.connection, {:principal_changed, Identity.principal(user)})
     {:ok, Identity.to_json(nil)}
@@ -1160,6 +1172,14 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp erasures(_params), do: :ok
 
+  # Somebody else linking over the person before stops that person's sealing first, as an
+  # unlink would: a sealer seals with whatever token the daemon holds, and the one this link
+  # brings is not theirs (issue #386). The same person again, as at every renewal, stops
+  # nothing.
+  defp linked_over(nil, _subject), do: :ok
+  defp linked_over(subject, subject), do: :ok
+  defp linked_over(_before, _subject), do: Private.suspend()
+
   # -- helpers ----------------------------------------------------------------
 
   # A client cannot see this machine's filesystem, so "it did not work" is useless to
@@ -1374,8 +1394,8 @@ defmodule Troupe.Gateway.Dispatch do
   # Through the endpoint's own activation where it has one. On a pod only the plane brings
   # a session back, so there `not_found` is the answer for one with no tree running, and
   # the client asks the plane where the session is (PROTOCOL.md §6, "A session that moves").
-  defp activate(session_id, %Context{activate: activate}) do
-    case (activate || (&Troupe.activate/1)).(session_id) do
+  defp activate(session_id, %Context{activate: activate} = context) do
+    case (activate || (&Troupe.activate(&1, client: context.client))).(session_id) do
       {:ok, _pid} -> :ok
       {:error, :not_found} -> {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
       {:error, reason} -> {:error, Error.new(:unavailable, %{reason: inspect(reason)})}

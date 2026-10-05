@@ -47,7 +47,9 @@ defmodule Troupe.Gateway.Plane do
   Record where the plane is and how to speak to it.
 
   Called from `identity.link`, and called again whenever the client refreshes — a token
-  has a lifetime and the daemon is not the thing that can extend it.
+  has a lifetime and the daemon is not the thing that can extend it. A link without a
+  token keeps the one held, if it names the same person; one naming somebody else keeps
+  none.
   """
   @spec link(map(), GenServer.server()) :: :ok
   def link(attrs, server \\ @name) do
@@ -104,12 +106,15 @@ defmodule Troupe.Gateway.Plane do
 
   @impl GenServer
   def handle_call({:link, attrs}, _from, state) do
+    subject = trim(attrs["subject"] || attrs[:subject]) || state.subject
+    kept = held_for(state, subject)
+
     {:reply, :ok,
      %__MODULE__{
        url: trim(attrs["plane_url"] || attrs[:plane_url]) || state.url,
-       token: trim(attrs["plane_token"] || attrs[:plane_token]) || state.token,
-       subject: trim(attrs["subject"] || attrs[:subject]) || state.subject,
-       expires_at: attrs["expires_at"] || attrs[:expires_at] || state.expires_at
+       token: trim(attrs["plane_token"] || attrs[:plane_token]) || kept.token,
+       subject: subject,
+       expires_at: attrs["expires_at"] || attrs[:expires_at] || kept.expires_at
      }}
   end
 
@@ -173,6 +178,13 @@ defmodule Troupe.Gateway.Plane do
 
   defp trim(value) when is_binary(value) and value != "", do: value
   defp trim(_value), do: nil
+
+  # A token is the person's it was handed over for: a link naming somebody else keeps none
+  # of the one before, and seals nothing until it brings its own (issue #386).
+  defp held_for(%__MODULE__{subject: held} = state, subject) when held in [nil, subject],
+    do: state
+
+  defp held_for(_state, _subject), do: %__MODULE__{}
 
   # The same plane however its URL was spelled: the clients agree on all but a trailing
   # slash.

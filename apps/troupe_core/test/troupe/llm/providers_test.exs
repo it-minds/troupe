@@ -83,6 +83,11 @@ defmodule Troupe.LLM.ProvidersTest do
       assert usage == %Usage{input_tokens: 12, output_tokens: 40, cache_read: 180_000, cache_write: 2_000}
       assert Usage.billed_input(usage) == 2_012
       assert Usage.total_input(usage) == 182_012
+
+      # And each figure reached the agent as it came, the prompt's before the reply's first
+      # word, so a call stopped part-way is counted for what it used (Decision 788).
+      prompt = %Usage{input_tokens: 12, output_tokens: 1, cache_read: 180_000, cache_write: 2_000}
+      assert reported() == [{:llm_usage, prompt}, :llm_delta, {:llm_usage, usage}]
     end
 
     test "a cached request marks the last tool, the system prompt and the last two user messages" do
@@ -312,6 +317,9 @@ defmodule Troupe.LLM.ProvidersTest do
       # `prompt_tokens` counted the cached ones too; the three input figures are disjoint.
       assert usage == %Usage{input_tokens: 1_000, output_tokens: 9, cache_read: 149_000, cache_write: 0}
       assert Usage.total_input(usage) == 150_000
+
+      # Reported to the agent when it came, which on this wire is at the end (Decision 788).
+      assert reported() == [:llm_delta, {:llm_usage, usage}]
     end
 
     test "a gateway's cache writes for an Anthropic model are cache writes, not fresh input" do
@@ -565,6 +573,16 @@ defmodule Troupe.LLM.ProvidersTest do
       {:llm_error, ^ref, reason} -> {:error, reason}
     after
       15_000 -> {:error, :timeout}
+    end
+  end
+
+  # What the stream told the agent before its answer, in order: each usage report, and that
+  # a delta came between them.
+  defp reported do
+    {:messages, messages} = Process.info(self(), :messages)
+
+    for {kind, _ref, payload} when kind in [:llm_usage, :llm_delta] <- messages do
+      if kind == :llm_usage, do: {kind, payload}, else: kind
     end
   end
 

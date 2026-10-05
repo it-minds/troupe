@@ -899,3 +899,16 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      for a registered row: the picker says `[private · on ada-laptop]` and `c` makes the row
      this machine's; `[private · waiting to be erased]`, and `c` has nothing to claim; a
      plane's private row `erasure_pending` with no input; all three failing on the tip.
+
+147. **A headless run tells the daemon it is one: the link connects as `troupe-headless`,
+     and the terminal UI as `troupe`.** Issue #419, root Decision 787: the daemon names a
+     session's model calls by what the connection that created it called itself, and a
+     headless run and the terminal UI are one binary on one link. `Runner.run/1` puts
+     `client_name/1` in the application's `:client_name` before it creates the session,
+     and `Link.client_info/0` reads it when the link connects, which in a headless run is
+     that first call. Only the link: a headless run's session is created there and runs
+     its task to the end, and the session's per-session connection, which still says
+     `troupe`, wakes nothing in it. `troupe doctor` prints the root's `identify` line with
+     no change here. Proof: `test/troupe/cli_test.exs` ("a headless run tells the daemon
+     it is one"), and the installed `troupe run --headless` against a stand-in, whose
+     User-Agent said `headless`.

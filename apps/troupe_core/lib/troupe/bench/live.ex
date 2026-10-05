@@ -497,8 +497,9 @@ defmodule Troupe.Bench.Live do
   # (Decision 769), and costs what any other does.
   defp note(acc, %Event{type: "compacted", data: data}, _at), do: spent(acc, data)
 
-  defp note(acc, %Event{type: "llm_error", agent: agent}, _at),
-    do: %{acc | pending: Map.delete(acc.pending, agent)}
+  # A call the agent gave up on costs what it had reported (Decision 788).
+  defp note(acc, %Event{type: "llm_error", agent: agent, data: data}, _at),
+    do: spent(%{acc | pending: Map.delete(acc.pending, agent)}, data["stopped"] || %{})
 
   # A tool call by its agent as well as its id: a provider that gives no ids gets
   # `call_0`, `call_1`, ... from the harness, in every agent alike.
