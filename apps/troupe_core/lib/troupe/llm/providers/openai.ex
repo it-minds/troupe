@@ -29,7 +29,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
     Usage
   }
 
-  alias Troupe.LLM.Endpoint
+  alias Troupe.LLM.{Endpoint, Identify}
   alias Troupe.LLM.Providers.OpenAI.Collector
 
   @default_base_url "https://api.openai.com"
@@ -135,7 +135,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
   end
 
   defp headers(request) do
-    base = [{"accept", "text/event-stream"}]
+    base = [{"accept", "text/event-stream"} | Identify.headers(request, :openai)]
 
     # A local vLLM or Ollama often needs no key at all, so a missing one is not an
     # error here the way it is for a hosted API.
@@ -277,20 +277,12 @@ defmodule Troupe.LLM.Providers.OpenAI do
     # Who this call is for. `user` is the OpenAI-compatible field every gateway
     # understands; `metadata` is what LiteLLM records alongside its own request id, which
     # is what lets the plane's ledger and the gateway's spend records be reconciled
-    # against each other rather than compared by timestamp.
+    # against each other rather than compared by timestamp. A local session has nobody
+    # to bill and names nobody: its `metadata` is the session and the software
+    # (Decision 787), and a `user` naming the software would make every person one end
+    # user at the gateway, under one end user's budget.
     |> maybe_put(:user, request.attribution[:owner])
-    |> maybe_put(:metadata, metadata(request))
-  end
-
-  defp metadata(%Request{attribution: attribution}) when map_size(attribution) == 0, do: nil
-
-  defp metadata(%Request{attribution: attribution}) do
-    attribution
-    |> Enum.flat_map(fn
-      {_key, nil} -> []
-      {key, value} -> [{"troupe_" <> to_string(key), to_string(value)}]
-    end)
-    |> Map.new()
+    |> maybe_put(:metadata, Identify.metadata(request))
   end
 
   defp stream_options(%Request{}), do: %{include_usage: true}

@@ -47,7 +47,8 @@ defmodule Troupe do
         workspace: workspace.root_real,
         profile: profile,
         parent: Keyword.get(session_opts, :parent),
-        kind: kind_of(previously, session_opts)
+        kind: kind_of(previously, session_opts),
+        owner: owner_of(previously, session_opts)
       })
 
       # The event that says what this session is, so a listing can be rebuilt from the
@@ -123,6 +124,15 @@ defmodule Troupe do
     case Enum.find(previously, &(&1.type == "session_created")) do
       %{data: %{"kind" => kind}} when is_binary(kind) -> kind
       _ -> session_opts |> Keyword.get(:kind, :local) |> to_string()
+    end
+  end
+
+  # Whose it is, the same way: the first `session_created`'s `owner`, or for a new session
+  # the one `created_data/1` is about to write.
+  defp owner_of(previously, session_opts) do
+    case Enum.find(previously, &(&1.type == "session_created")) do
+      %{data: data} when is_map(data) -> data["owner"]
+      _ -> Keyword.get(session_opts, :owner) || linked_owner()
     end
   end
 
@@ -478,9 +488,11 @@ defmodule Troupe do
   listing it, replaying it, subscribing to it — deliberately does not come through
   here: a dormant session that woke up because someone looked at it would never stay
   dormant.
+
+  `:client` is the client that woke it, which its model calls name (Decision 787).
   """
-  @spec activate(String.t()) :: {:ok, pid()} | {:error, :not_found | term()}
-  def activate(session_id) do
+  @spec activate(String.t(), keyword()) :: {:ok, pid()} | {:error, :not_found | term()}
+  def activate(session_id, opts \\ []) do
     case Registry.whereis({:session, session_id}) do
       pid when is_pid(pid) ->
         {:ok, pid}
@@ -488,13 +500,17 @@ defmodule Troupe do
       nil ->
         case Index.get(session_id) do
           nil -> {:error, :not_found}
-          meta -> restore(session_id, meta)
+          meta -> restore(session_id, meta, Keyword.take(opts, [:client]))
         end
     end
   end
 
-  defp restore(session_id, meta) do
-    case resume(session_id, workspace: meta.workspace, agent: meta.profile) do
+  defp restore(session_id, meta, overrides) do
+    case resume(session_id,
+           workspace: meta.workspace,
+           agent: meta.profile,
+           config_overrides: overrides
+         ) do
       {:ok, session} ->
         Log.append(session_id, Session.root_path(), :session_activated, %{
           "epoch" => DateTime.utc_now() |> DateTime.to_iso8601(),

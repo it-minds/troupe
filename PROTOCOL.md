@@ -130,6 +130,11 @@ with `not_initialized` and the connection closes.
 | `tools` | the client can serve `tool.invoke` requests (§8) |
 | `blobs` | the client will fetch truncated payloads with `blob.get` |
 
+`params.client_info.name` says which client this is, and a daemon names the sessions a
+connection creates or wakes to the model provider by it (Decision 787): `troupe` is the
+terminal UI, `troupe-headless` its headless run, `troupe-gui` the desktop app, and any
+other name is `other`. The name itself never leaves the daemon.
+
 The response:
 
 ```json
@@ -808,10 +813,19 @@ were erased while it was away, and drops its copy of each (Decision 756), and th
 on sealing each private session it has no sealer for: from the row's `last_seq`, at the
 epoch the row says, registered with that epoch so a claim made meanwhile refuses it, for
 one this device sealed last; from its first event for one the plane has never heard of;
-not at all for one another device sealed last, until it is claimed here.
+not at all for one another device sealed last, until it is claimed here. Only the linked
+person's are carried on: those whose `session_created` names `subject` as their `owner`,
+and those made while nobody was linked, which name none. Somebody else's, made while they
+were linked here, is left alone with this token, the daemon's log says how many of whose,
+and it carries on at that person's next link (Decision 784). A link naming somebody other
+than the person the daemon was linked to stops every sealer first, as `identity.unlink`
+does, and keeps none of that person's token: a link without `plane_token` keeps the one
+the daemon holds only when it names the same person.
 
 #### `identity.unlink` → `{"linked": false}`. The events already written keep the actor
-they were written with.
+they were written with. The plane token goes with the link, and every private session's
+sealer stops, as at `identity.sign_out`: nothing is sealed until a client links with a
+token again, and then only the sessions of the person it links (issue #386).
 
 #### `identity.sign_out`
 ```json

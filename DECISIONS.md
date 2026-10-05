@@ -5537,6 +5537,194 @@ citation keeps meaning what it meant.
        from the cache, a refused key, and a config that does not load said on standard
        error with nothing on standard output.
 
+784. **A daemon carries on, registers and seals a private session only for the person it
+     belongs to: somebody else's link leaves the first person's sessions alone and says
+     so, and unlinking stops the sealing as signing out does.** Issue #386, following 764
+     and 766. `Private.resume/1` carried on every private session the daemon had with
+     whatever token the link carried, and compared no session's `owner` with the subject
+     linked; `identity.unlink` left every sealer running, retrying each minute with an
+     error in the log, and picking up the next person's token when they linked. So a
+     daemon Ada had used, unlinked and Bob then linked registered Ada's sessions that had
+     not reached the plane under Bob's sign-in, and sealed them under his key and in his
+     prefix.
+     - **Whose it is.** The `owner` a session's `session_created` records, the subject the
+       daemon was linked to when the session was made (or first opened, for a resumed
+       one), is in the session index beside `kind`, for a live session and one read from
+       its log. `resume/1` takes the sessions whose owner is the subject linked now, and
+       those with none, and leaves the rest without asking the plane anything about them
+       with this token. It says so once a link, at info, with how many of whose and no
+       token: `private sessions left alone (1 of ada@example.test): this daemon is linked
+       to bob@example.test, and each is sealed when its owner links it again`. The owner's
+       next link carries each on as 764 does, from the row's `last_seq` at its epoch.
+     - **A session with no owner** was made while nobody was linked, and the first link
+       with a token carries it on, as 764 has it: the daemon cannot tell whose it is, and
+       `troupe login` links an unlinked daemon in a task that the first `troupe --private`
+       can overtake. Once it is registered the plane's row is that person's, and the plane
+       answers anybody else's registration of it `forbidden`.
+     - **Unlinking stops the sealing.** `identity.unlink` forgets the token and then stops
+       every sealer (`Private.suspend/1`), as `identity.sign_out` does (766). A link naming
+       somebody other than the subject the daemon held stops them too, before it takes the
+       new token: a sealer seals with whatever token the daemon holds. No shipped client
+       links over somebody else (the desktop app unlinks first, the TUI leaves such a
+       daemon alone), but the protocol allows it. A link naming the same person, as every
+       renewal does, stops nothing.
+     - **A token is the person's it was handed over for.** `Plane.link` kept the token it
+       held when a link brought none, whoever the link named, so Bob linking his name alone
+       over Ada left Ada's token in place, and Bob's next private session was registered
+       with it, under her sign-in. A link naming somebody else now keeps none of the token
+       or its expiry; one naming the same person, or a daemon nobody had named, keeps it
+       as before.
+     - **Nobody linked is not an error.** A seal refused because nobody is linked
+       (`:unlinked`, from the daemon's store) is logged at info and its events kept, as
+       before; any other refusal is still an error.
+     - **Compared as written.** The owner and the linked subject are both the subject a
+       client linked with, the plane's (`me` in the desktop app, `credentials.json`'s `sub`
+       in the TUI). A person moved to another claim (755) links under a new subject, and
+       their sessions made under the old one are left alone; neither client hands a token
+       to a daemon linked under another subject (764), so nothing that carried on before
+       stops here.
+     - **Not in this:** the TUI has no way to unlink a daemon, so a second person on the
+       same account cannot take it over from the terminal (a follow-up).
+     - **Proof:** the gateway's `private_test`, against MinIO and OpenBao with the plane
+       stand-in, four tests failing on the chunk's tip: Ada's session sealed through its
+       first event, the daemon unlinked and Bob linked with his own token, `resume` carries
+       on Bob's and one nobody owns and not Ada's, the plane is asked nothing about hers,
+       the log says `(1 of ada@example.test)` once and no token, and after Bob unlinks and
+       Ada links again hers is sealed from its second event at her epoch; through the
+       daemon, `identity.unlink` stops the sealer, the owner is in the index live and
+       dormant, nothing Bob's link asks names her session, and her next link registers it
+       at its epoch; a link by Bob over Ada stops her sealer and one by Ada again does not;
+       a seal with nobody linked keeps its event and logs at info, not error; and, two
+       more failing on the pull request's first tip, Bob linking his name alone over Ada
+       holds no token, and his private session made then reaches the plane with nothing,
+       where it was registered with Ada's. And the
+       installed daemon, with scratch homes and the fake provider, through the client
+       library, against a plane stand-in for two people that answers each only for their
+       own rows (real assertions through the development OpenBao, real MinIO URLs): Ada
+       linked, made a private session and sealed it through its eleventh event; unlinked,
+       it took a second turn and nothing reached the plane; Bob linked, and his link and
+       his own new session called the plane with his token and named none of hers, before
+       and after a restart of the daemon, which logged `left alone (1 of
+       a19-ada@example.test)`; Ada linked again, and her session was sealed from its
+       twelfth event to its twentieth at epoch 1, every call that named it with her token.
+
+786. **An erasure deletes every version under a session's prefix, however many: the list
+     it deletes from follows S3's markers to the last page.** D59, its first item;
+     Decisions 90 and 756. `ObjectStore.list_versions/2` sent one `GET ?versions&prefix=`
+     and returned what came back, and S3 answers at most a thousand versions at a time,
+     with `IsTruncated` and where the next page starts. `delete_prefix/2`, which a pod's
+     erasure (`Storage.erase/2`) and the plane's of a private session
+     (`Erasure.device_applied/2`) both go through, deleted that page and counted it as
+     everything: on the chunk's tip a private session with 1,040 versions kept the 40 past
+     the first page, a snapshot still listed under its prefix. The key was gone, so they
+     could not be read, but erasure is the one thing the object store has to do exactly.
+     - **Every page, then the deletes.** `list_versions` asks again from `NextKeyMarker`
+       and `NextVersionIdMarker` while `IsTruncated` says there is more, as `list/2`
+       follows its continuation token, and `delete_prefix` deletes from the whole list,
+       as before. Both markers, because one key's versions run across pages and a key
+       marker alone starts after the key. A page that says it was cut short and names no
+       marker is an error, where asking again would get the same page and stopping would
+       leave the rest. Delete markers are versions, listed and deleted as before; the
+       signing, and what a failed request or delete answers, are unchanged.
+     - **`page_size:`**, S3's `max-keys`, on both, for a test that crosses pages with
+       fourteen versions rather than a thousand. Nothing else passes it.
+     - **Proof:** `ObjectStoreTest`: six keys written 175 times each and a delete marker,
+       1,051 versions, every one gone after `delete_prefix` (on the tip a key's oldest
+       version still read back), about three seconds against the development MinIO; and
+       a listing in pages of five that ends inside one key's versions, which reads five
+       when the markers are not followed. The plane's `PrivateErasureTest`: a private
+       session with 1,040 versions, erased and acknowledged by its daemon, has nothing
+       left under its prefix and answers `objects_deleted: 1040`, failing on the tip.
+
+787. **Every model call names Troupe to the provider: a User-Agent with the version, the
+     client and the platform everywhere, LiteLLM's tags and spend-log metadata to a
+     gateway, OpenRouter's app headers to OpenRouter. A local session names the software
+     and nobody, and `identify: false` sends none of it.** Issue #419; TUI Decision 147. A
+     gateway recorded our calls under `req/0.7.4`, the HTTP client's default, with nothing
+     else in the headers, and a local session's body carried its id and its agent's name
+     in `metadata` and nothing that said Troupe. So a LiteLLM dashboard labelled the other
+     coding agents and not us, and nobody could split our spend by client or version.
+     - **What goes out**, built in one place (`Troupe.LLM.Identify`) for both adapters:
+       - `User-Agent: troupe/<version> (<client>; <os>/<arch>)` on every call to every
+         endpoint, product first so a prefix match on `troupe/` holds. The version is the
+         build's (`Troupe.Version`); the os is `windows`, `macos` or `linux` and the arch
+         the VM's `system_architecture` (`x86_64`, `aarch64`).
+       - To a gateway, a `base_url` that is neither the vendor's own API nor OpenRouter:
+         `x-litellm-tags: troupe,troupe-<client>,troupe-<version>` and
+         `x-litellm-spend-logs-metadata`, JSON, the session's id and, only where the plane
+         attributes the session, its `team`, worker `profile` and `agent`. "The vendor's
+         own API" is the test that decides where a vendor's key may go
+         (`Endpoint.vendor_api?/2`), so the two cannot disagree. A gateway in front of
+         Anthropic's API (LiteLLM's `/v1/messages`) is a gateway too. A server that is not
+         LiteLLM ignores both. A vendor's own API gets the User-Agent alone: neither has a
+         convention beyond it, and the session's id is nothing it needs.
+       - To OpenRouter (`openrouter.ai` or a subdomain of it), `HTTP-Referer:
+         https://github.com/it-minds/troupe` and `X-Title: Troupe`, and nothing of
+         LiteLLM's. Only there: they are OpenRouter's convention and nobody else reads
+         them, `HTTP-Referer` is a browser's header a proxy or a firewall may act on, and a
+         LiteLLM gateway in front of OpenRouter does not pass a client's headers on (its
+         operator names the app there). The URL is the repository's, not a deployment's
+         nor the docs site's, because OpenRouter keys an app by it and it must not move.
+       - In an OpenAI-compatible body, `troupe_client` and `troupe_version` in `metadata`.
+     - **A local session names nobody.** Its `metadata` is `troupe_session_id`,
+       `troupe_client` and `troupe_version`, and its spend-log metadata the id alone. It
+       no longer sends `troupe_agent`: an agent's name is its definition's, and a
+       repository's `.troupe/agents/` can name one after itself. No `user`: one value for
+       every person would make them one end user at a LiteLLM gateway, under one end
+       user's budget, which stops all of them at once. The Anthropic adapter sends a local
+       session no `metadata.user_id` for the same reason at Anthropic, which treats it as
+       the person to act on. Paths, repository names, host names and email addresses are
+       not in reach of the code that builds any of this.
+     - **A pod session keeps what the plane attributes it with:** `user` is the owner, and
+       `metadata` has `troupe_owner`, `troupe_team`, `troupe_session_id` and `troupe_agent`
+       as before, and now `troupe_profile`, which the worker puts in the attribution beside
+       owner and team. That is an arrangement the operator made with their gateway, older
+       than this, and `identify: false` leaves it as it is.
+     - **The client has one source: the connection.** Every client names itself in
+       `initialize` (`client_info.name`); the daemon maps the name to a word from a fixed
+       list (`Identify.client/2`): `troupe` is `tui`, `troupe-headless` is `headless`,
+       `troupe-gui` is `desktop`, an ACP connection is `acp`, anything else is `other`, so
+       what a client calls itself never reaches a provider. The connection that creates a
+       session puts its word in the session's config (`Config.client`, never from a file,
+       like `attribution`), and so does the one whose command wakes a dormant session
+       (`Troupe.activate/2`'s `:client`); a session already running keeps the word of the
+       client that brought it up. A worker sets `worker` whatever is attached, and a
+       session nobody named (`troupe bench --live`, a test) is `other`. Not by the process:
+       the terminal UI embeds a daemon that the desktop app uses when it finds it first,
+       and the desktop app's `troupe-daemon` serves the terminal UI the same way, so a word
+       per process would name the wrong client whenever both are open. A headless run says
+       `troupe-headless` (TUI Decision 147); the desktop app already said `troupe-gui`.
+     - **The switch.** `identify`, a boolean on the config ladder, default `true`, trusted
+       scope like `base_url`, since it decides what goes out with every request: `false`
+       sends no header of ours and no client in the body, and the User-Agent is the HTTP
+       client's own (`req/<version>`), which is what went out before. Not a bare `troupe`,
+       which would still name the software.
+     - **`troupe doctor`** has an `identify` line, made by the function that makes the
+       headers: each header as it goes to the default model's provider, a session's id
+       standing as `<session id>`, or `off`, or nothing for the fake provider. Through
+       `troupe` it names the terminal UI, through `troupe-daemon` the desktop app.
+     - **Not in this:** the model listing and the catalog refresh (`/v1/models`, LiteLLM's
+       `/model_group/info`) still go with the HTTP client's User-Agent; a `WorkerProfile`
+       field that turns `identify` off for a profile's pods; a documented set of our own
+       `x-troupe-*` headers for LiteLLM's `extra_spend_tag_headers`.
+     - **Proof:** `Troupe.LLM.IdentifyTest`, against a stand-in gateway on a loopback port
+       that records each request's headers and body (on the chunk's tip it saw
+       `user-agent: req/0.7.4`, no tags, and `metadata` of the session's id and its agent
+       only): the User-Agent, the tags and the spend-log metadata of a local session and a
+       pod's through the OpenAI-compatible adapter, the same through the Anthropic one with
+       no end user, a client not on the list sent as `other`, nothing of a person, a
+       repository's agent, the host or the user in a local session's call, `identify:
+       false` for both, and a vendor's own API and OpenRouter told apart through a
+       recording transport; `Troupe.Agent.IdentifyTest`, the session's client and switch
+       on every request and the key on the ladder, a project's file only where trusted;
+       `Troupe.Gateway.IdentifyTest`, a session the desktop app creates naming `desktop`, a
+       headless run's `headless`, and the terminal UI that wakes it `tui`;
+       `Troupe.Worker.IdentifyTest`, a pod session's call naming the worker with its
+       owner, team and profile; `Troupe.DoctorTest`, the line for a gateway through both
+       programs, `off` and the fake; TUI `cli_test.exs`, what a headless run calls itself.
+       And the installed `troupe run --headless` and `troupe doctor` against a stand-in,
+       on the pull request.
+
 788. **A model call the agent gives up on is stopped, at its timeout in a turn or in a
      compaction and on a cancel alike, and what the provider had reported of it is
      counted as any call's figures are.** The first item of D69. `llm_timeout_ms` gave a

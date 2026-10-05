@@ -418,8 +418,6 @@ Found by the chunk 14 fixer of slot E14 (PR #359), 2026-10-03.
 
 ### D59 - Private sessions and MCP sessions: small leftovers of 0.7.4 (low)
 
-- `ObjectStore.list_versions/2` reads one page, so an erasure (a pod's, and since PR #364
-  a private session's) of a session with more than 1000 object versions leaves the rest.
 - How the desktop app and the TUI show a session in the new `erasure_pending` state is
   untested: the client library types a state as an open string, and the TUI's remote
   worker reads a state it doesn't know as none.

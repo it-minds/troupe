@@ -22,7 +22,7 @@ defmodule Troupe.LLM.Providers.Anthropic do
     ToolUse
   }
 
-  alias Troupe.LLM.{Catalog, Endpoint}
+  alias Troupe.LLM.{Catalog, Endpoint, Identify}
   alias Troupe.LLM.Providers.Anthropic.Collector
 
   @default_base_url "https://api.anthropic.com"
@@ -59,11 +59,12 @@ defmodule Troupe.LLM.Providers.Anthropic do
       url: Endpoint.build(base_url(request), "/v1/messages"),
       method: :post,
       json: body(request, thinking),
-      headers: [
-        auth_header(request, key),
-        {"anthropic-version", @api_version},
-        {"accept", "text/event-stream"}
-      ],
+      headers:
+        [
+          auth_header(request, key),
+          {"anthropic-version", @api_version},
+          {"accept", "text/event-stream"}
+        ] ++ Identify.headers(request, :anthropic),
       receive_timeout: request.timeout_ms,
       # Retries are handled by `Provider.with_retries/2` so that one policy covers
       # both adapters and a retried request re-emits nothing to the agent.
@@ -248,7 +249,9 @@ defmodule Troupe.LLM.Providers.Anthropic do
     |> maybe_put(:tools, request.tools |> encode_tools() |> mark_last(request.cache))
     # Anthropic takes one opaque end-user id and nothing else, so the session's owner
     # goes there. Everything else a gateway wants is carried by the OpenAI-compatible
-    # adapter, which is what a LiteLLM deployment actually speaks.
+    # adapter, which is what a LiteLLM deployment actually speaks. A local session sends
+    # none: one id for every person would be one user to Anthropic, and the User-Agent
+    # already names the software (Decision 787).
     |> maybe_put(:metadata, metadata(request))
     |> put_thinking(thinking)
   end
