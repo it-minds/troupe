@@ -11,7 +11,7 @@
   },
   "cut_output": {
     "model_calls": 3,
-    "cut_result_bytes": 61000
+    "cut_result_bytes": 36000
   },
   "compaction": {
     "compactions": 2,

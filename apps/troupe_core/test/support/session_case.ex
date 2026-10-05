@@ -59,6 +59,9 @@ defmodule Troupe.SessionCase do
          # A model that refuses a tool result without its call, as Anthropic's and
          # OpenAI's APIs do.
          strict_pairs: Keyword.get(opts, :strict_pairs, false),
+         # And one that refuses a tool call or result in a request that defines no tools,
+         # as Anthropic's does.
+         strict_tools: Keyword.get(opts, :strict_tools, false),
          # `nil` is a gateway that reports no cost, which is every gateway on a streamed
          # response.
          cost_micros: Keyword.get(opts, :cost_micros, :derived)},

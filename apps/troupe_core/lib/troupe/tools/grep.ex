@@ -10,7 +10,7 @@ defmodule Troupe.Tools.Grep do
 
   @behaviour Troupe.Tool
 
-  alias Troupe.{Gitignore, Paths, Reaper, Tool, Workspace}
+  alias Troupe.{Config, Gitignore, Paths, Reaper, Tool, Workspace}
   alias Troupe.Tools.Output
 
   @max_matches 200
@@ -238,6 +238,6 @@ defmodule Troupe.Tools.Grep do
   defp plural(1, noun), do: "1 #{noun}"
   defp plural(n, noun), do: "#{n} #{noun}s"
 
-  defp cap(%{config: nil}), do: 60_000
+  defp cap(%{config: nil}), do: %Config{}.tool_output_limit
   defp cap(%{config: config}), do: config.tool_output_limit
 end

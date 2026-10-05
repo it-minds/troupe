@@ -72,7 +72,7 @@ defmodule Troupe.Config.Schema do
       spec(
         "reasoning_effort",
         :effort,
-        "How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or a thinking budget in tokens."
+        "How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a thinking budget in tokens. An Anthropic model gets it in the form it takes."
       )
     ]
   end
@@ -306,8 +306,11 @@ defmodule Troupe.Config.Schema do
           field: :shell_timeout_ms,
           label: "shell timeout (ms)"
         ),
-        spec("tool_output_limit", {:integer, 1}, "Bytes of a tool's output the model sees; the rest is kept as a blob.",
-          default: 60_000,
+        spec(
+          "tool_output_limit",
+          {:integer, 1},
+          "Bytes of a tool's output the model sees; the rest is kept, and read_output pages it back.",
+          default: 32_768,
           field: :tool_output_limit,
           label: "tool output limit"
         ),

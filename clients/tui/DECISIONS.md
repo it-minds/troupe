@@ -870,3 +870,13 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      `6.0e3k`; the tile and the side panel count that way too. Proof:
      `test/troupe/cli_test.exs` ("prints what a turn cost when it ends", "prints each
      ended turn's line in the window's words"), both failing on the chunk's tip.
+
+145. **`troupe models --json` is the same run as `troupe models`, printed as the harness's
+     object.** Root Decision 783. The runner refreshes as 143 says, then hands `asked` to
+     `Troupe.Config.models_json/2` instead of `describe/2` and prints the object with
+     `Jason`, so `mix troupe.xref` has no new door: the object is built in `Troupe.Config`,
+     which it already allowed. `--workspace` and `--refresh` mean what they mean without
+     `--json`, and a config that does not load is the reason on standard error and exit 1,
+     with nothing on standard output for a program to mistake for an answer. Its own line
+     in the command table, so `troupe --help` and the reference list it. Proof:
+     `test/troupe/models_cli_test.exs`, against a stand-in gateway.

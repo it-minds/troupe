@@ -384,14 +384,23 @@ defmodule Troupe.LLM.Providers.OpenAI do
   # three input figures stay disjoint (Decision 657). `completion_tokens` includes the
   # reasoning tokens of a model that reasons — DeepSeek and the OpenAI reasoning models
   # bill them as output, and so does the budget.
+  #
+  # A gateway serving an Anthropic model this way (LiteLLM) also reports what Anthropic
+  # wrote to its cache, which it bills above fresh input: `cache_creation_tokens` in
+  # `prompt_tokens_details` and `cache_creation_input_tokens` beside it, counted in
+  # `prompt_tokens` like the reads. Those come out of it as writes, priced at the write
+  # rate (Decision 780); OpenAI's own API reports neither.
   defp usage(map) do
+    details = if is_map(map["prompt_tokens_details"]), do: map["prompt_tokens_details"], else: %{}
     prompt = count(map["prompt_tokens"])
-    cached = count(get_in(map, ["prompt_tokens_details", "cached_tokens"]))
+    cached = count(details["cached_tokens"] || map["cache_read_input_tokens"])
+    written = count(details["cache_creation_tokens"] || map["cache_creation_input_tokens"])
 
     %Usage{
-      input_tokens: max(prompt - cached, 0),
+      input_tokens: max(prompt - cached - written, 0),
       output_tokens: count(map["completion_tokens"]),
-      cache_read: cached
+      cache_read: cached,
+      cache_write: written
     }
   end
 

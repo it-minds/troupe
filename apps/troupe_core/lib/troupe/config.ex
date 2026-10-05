@@ -113,7 +113,9 @@ defmodule Troupe.Config do
             tool_failures_note_at: 5,
             tool_failures_stop_at: 10,
             shell_timeout_ms: 120_000,
-            tool_output_limit: 60_000,
+            # Bytes of a tool's result the model is sent; the rest is one `read_output`
+            # call away. 32 KiB, from a live bench's numbers (Decision 781).
+            tool_output_limit: 32_768,
             watch: false,
             watch_debounce_ms: 300,
             watch_poll_interval_ms: 1_000,
@@ -323,6 +325,9 @@ defmodule Troupe.Config do
 
   @doc "`troupe config trust --list`: `Troupe.Config.Trust.list/1`."
   defdelegate list_trusted(opts \\ []), to: Trust, as: :list
+
+  @doc "`troupe models --json`: `Troupe.Config.Models.json/2`, what `describe/2` says as data."
+  defdelegate models_json(config, opts \\ []), to: Troupe.Config.Models, as: :json
 
   @doc """
   `text` as `command` would put it: every quoted `troupe config` command it names is
@@ -678,6 +683,30 @@ defmodule Troupe.Config do
       {:ok, %Catalog{context: context}} -> context
       :error -> nil
     end
+  end
+
+  @doc """
+  The thinking form the provider's own model list says `model` takes, `:adaptive` or
+  `:budget`, else `nil` (Decision 780). Looked for under the id `model` is addressed by,
+  then under the id its provider lists it by when a `models:` entry renamed it.
+  """
+  @spec thinking(t(), String.t() | nil) :: Catalog.thinking() | nil
+  def thinking(%__MODULE__{} = config, model) do
+    model = resolve_model(config, model || config.model)
+    wire = target(config, model).model
+
+    listed =
+      case split_model(config, model) do
+        {nil, _bare} -> wire
+        {_provider, _bare} -> hd(String.split(model, "/", parts: 2)) <> "/" <> wire
+      end
+
+    Enum.find_value(Enum.uniq([model, listed]), fn name ->
+      case Map.get(config.catalog, name) do
+        %Catalog{thinking: form} -> form
+        _ -> nil
+      end
+    end)
   end
 
   @doc """

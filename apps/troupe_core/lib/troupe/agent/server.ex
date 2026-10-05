@@ -43,6 +43,7 @@ defmodule Troupe.Agent.Server do
     Provider,
     Request,
     Response,
+    Text,
     ToolResult,
     ToolUse,
     Usage
@@ -841,6 +842,13 @@ defmodule Troupe.Agent.Server do
     resume_after_compaction(clear_llm(state))
   end
 
+  # A summary that never comes fails as one refused does, after as long as any other
+  # model call is given (Decision 779).
+  def compacting(:info, {:llm_timeout, ref}, %State{llm_ref: ref} = state) do
+    {:keep_state_and_data,
+     [{:next_event, :info, {:llm_error, ref, {:timeout, state.config.llm_timeout_ms}}}]}
+  end
+
   def compacting(:info, :cancel, state), do: cancel_everything(state)
 
   def compacting(:info, {:input, _source, _content, _actor, _meta} = event, state),
@@ -1201,7 +1209,8 @@ defmodule Troupe.Agent.Server do
   # Where the request goes. A model spelled `<provider>/<model>` names a provider of its
   # own — its URL, its key, its auth scheme, the wire id it renamed the model to, possibly
   # an output cap smaller than the session's and how hard it should think — and the
-  # adapter for it; a bare id goes to the session's provider with the session's key.
+  # adapter for it; a bare id goes to the session's provider with the session's key. The
+  # catalog may say which form the model takes thinking in (Decision 780).
   defp aim(%Request{} = request, %State{config: config} = state, model) do
     target = Config.target(config, model)
 
@@ -1213,6 +1222,7 @@ defmodule Troupe.Agent.Server do
         auth: target.auth,
         max_tokens: min(request.max_tokens, target.max_output || request.max_tokens),
         reasoning_effort: target.reasoning_effort,
+        thinking: Config.thinking(config, model),
         provider: adapter_for(target.provider, state),
         timeout_ms: config.llm_timeout_ms
     }
@@ -2648,7 +2658,7 @@ defmodule Troupe.Agent.Server do
       request =
         %Request{
           model: nil,
-          messages: drop ++ [Message.user(summarizer_instruction())],
+          messages: written_out(drop) ++ [Message.user(summarizer_instruction())],
           system: summarizer_system(),
           max_tokens: @summarizer_max_tokens,
           attribution: attribution(state),
@@ -2714,6 +2724,37 @@ defmodule Troupe.Agent.Server do
 
   defp tool_results?(%Message{content: blocks}), do: Enum.any?(blocks, &match?(%ToolResult{}, &1))
 
+  # What the summariser reads: the stretch it replaces, with each tool call and result
+  # written out as text (Decision 779). Its request defines no tools, and Anthropic's API
+  # refuses a tool block in a request that defines none (#404). A result's tool is named
+  # by the calls in the message before it, as `Output.stub_behind/3` names it.
+  defp written_out(messages) do
+    {written, _calls} =
+      Enum.map_reduce(messages, %{}, fn %Message{content: blocks} = message, calls ->
+        {%{message | content: Enum.map(blocks, &as_text(&1, calls))},
+         Map.new(Message.tool_uses(message), &{&1.id, &1.name})}
+      end)
+
+    written
+  end
+
+  defp as_text(%ToolUse{name: name, input: input}, _calls),
+    do: %Text{text: "[called #{name} #{call_input(input)}]"}
+
+  defp as_text(%ToolResult{tool_use_id: id, content: content, error?: error?}, calls) do
+    tool = Map.get(calls, id, "an earlier tool call")
+    %Text{text: "[#{tool} #{if error?, do: "failed", else: "returned"}]\n#{content}"}
+  end
+
+  defp as_text(block, _calls), do: block
+
+  defp call_input(input) do
+    case Jason.encode(input) do
+      {:ok, json} -> json
+      {:error, _reason} -> inspect(input)
+    end
+  end
+
   defp summarizer_system do
     """
     You compress a coding session's history so work can continue without it.
@@ -2721,8 +2762,11 @@ defmodule Troupe.Agent.Server do
     Write a dense summary that preserves: what the user asked for, what was
     discovered about the codebase (files, functions, shapes, gotchas), what was
     changed and where, what failed and why, and what remains. Keep file paths and
-    identifiers exact. Drop pleasantries, tool mechanics, and anything already
-    reflected in the current state of the files.
+    identifiers exact. Tool calls are written as [called <tool> <arguments>], each
+    followed by what it returned or why it failed: say what the calls that matter
+    did (the tool, the arguments that matter, the gist of the result), not their
+    output. Drop pleasantries and anything already reflected in the current state
+    of the files.
     """
     |> String.trim()
   end

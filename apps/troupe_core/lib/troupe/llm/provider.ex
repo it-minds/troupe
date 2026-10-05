@@ -192,6 +192,10 @@ defmodule Troupe.LLM.Provider do
 
   defp sentence({:retries_exhausted, inner}), do: "gave up after retrying: " <> inspect(inner)
   defp sentence({:http_status, status, detail}), do: "the provider answered #{status}" <> detail(detail)
+
+  # A 400 about the thinking a reasoning effort asked for, already said by the adapter in
+  # words that name the setting (Decision 780).
+  defp sentence({:thinking_refused, what, detail}), do: what <> detail(detail)
   defp sentence({:api_error, message}), do: "the provider reported an error" <> detail(message)
   defp sentence(:missing_api_key), do: "no API key is configured for the provider"
   defp sentence({:refused, why}) when is_binary(why), do: why

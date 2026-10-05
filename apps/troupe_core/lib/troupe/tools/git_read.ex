@@ -12,6 +12,7 @@ defmodule Troupe.Tools.GitRead do
 
   @behaviour Troupe.Tool
 
+  alias Troupe.Config
   alias Troupe.Reaper
   alias Troupe.Tool
   alias Troupe.Tools.Output
@@ -115,6 +116,6 @@ defmodule Troupe.Tools.GitRead do
     end
   end
 
-  defp cap(%{config: nil}), do: 60_000
+  defp cap(%{config: nil}), do: %Config{}.tool_output_limit
   defp cap(%{config: config}), do: config.tool_output_limit
 end

@@ -469,13 +469,38 @@ nothing to set; what happens depends on the provider.
 - **An OpenAI-compatible gateway or server** (`provider: openai` with a `base_url`, such as
   LiteLLM, vLLM or Ollama) caches whatever it and the model behind it do, which may be
   nothing. Troupe sends no marks this way; a LiteLLM deployment can be configured to add
-  them for the Anthropic models it serves.
+  them for the Anthropic models it serves, and then reports what Anthropic wrote to the
+  cache as well as what it read.
 
 Whichever it is, the provider's own figures say whether it happened: each model call's
-`cache_read` in the session's log, and the terminal UI's token detail, which says how
-much of the prompt came from the cache. A call priced from the catalog or `models.prices`
-is priced at its `cache_read` and `cache_write` rates, or at the input price where those
-are not set.
+`cache_read` and `cache_write` in the session's log, and the terminal UI's token detail,
+which says how much of the prompt came from the cache. A call priced from the catalog or
+`models.prices` is priced at its `cache_read` and `cache_write` rates (a LiteLLM gateway's
+catalog quotes both), or at the input price where those are not set.
+
+## How hard a model thinks
+
+`reasoning_effort` on a model's `models:` entry asks a model that reasons to think before
+it answers: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a number of
+tokens. An OpenAI-compatible provider is sent the word as it is, and the model decides
+what it means.
+
+Anthropic's models take it in one of two forms, and refuse the other:
+
+- **Claude Opus 4.7 and later, Sonnet 5 and later, Fable and Mythos** take adaptive
+  thinking with an effort level, and refuse a budget. A word is the level of that name
+  (`minimal` is `low`); a number is the level whose budget below would hold it, and
+  more than 32768 is `max`.
+- **The models before them** (Opus 4.6, Sonnet 4.6, Haiku 4.5 and older) are sent a
+  thinking budget: 1024 tokens for `minimal`, 4096 for `low`, 8192 for `medium`, 16384
+  for `high`, 32768 for `xhigh` and `max`, or the number given.
+
+Which form a model takes is what Anthropic's model list says of it (`troupe models`
+fetches it), else what its name says, found inside a gateway's renaming such as
+`eu.anthropic.claude-opus-5`. A model neither describes is sent adaptive thinking for a
+word and a budget for a number. Either way the output cap is raised to hold the thinking.
+A model that refuses what it was sent fails the call with a message that names
+`reasoning_effort` and what to set it to.
 
 ## Every key
 
@@ -509,7 +534,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `providers.<name>.models.<model>.id` | string |  | user; project if trusted |  | The id that goes on the wire, when the gateway renamed the model. Unset: the name. |
 | `providers.<name>.models.<model>.context` | integer ≥ 1 |  | user; project if trusted |  | The model's context window, in tokens. |
 | `providers.<name>.models.<model>.max_output` | integer ≥ 1 |  | user; project if trusted |  | The most output tokens to ask for. |
-| `providers.<name>.models.<model>.reasoning_effort` | string or integer |  | user; project if trusted |  | How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or a thinking budget in tokens. |
+| `providers.<name>.models.<model>.reasoning_effort` | string or integer |  | user; project if trusted |  | How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a thinking budget in tokens. An Anthropic model gets it in the form it takes. |
 | `models` | settings |  | any |  | Which model each role uses. |
 | `models.default` | string | `claude-sonnet-5` | any | model | The model every agent uses unless its definition names one. A bare id goes to the session-wide provider; `<provider>/<model>` goes to a named one, from `providers` or opencode. `troupe models` lists what this machine can address. |
 | `models.cheap` | string |  | any | cheap model | The model for small jobs, compaction summaries among them. Unset: the default model. |
@@ -552,7 +577,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 | Key | Type | Default | Set by | Shown as | What it does |
 |---|---|---|---|---|---|
 | `shell_timeout_ms` | integer ≥ 1 | `120000` | any | shell timeout (ms) | How long a shell command may run before it, and everything it started, is stopped. |
-| `tool_output_limit` | integer ≥ 1 | `60000` | any | tool output limit | Bytes of a tool's output the model sees; the rest is kept as a blob. |
+| `tool_output_limit` | integer ≥ 1 | `32768` | any | tool output limit | Bytes of a tool's output the model sees; the rest is kept, and read_output pages it back. |
 | `tool_failures_note_at` | integer ≥ 0 | `5` | any |  | Failures of one tool in a row after which the model is told to stop and reconsider; 0 never. |
 | `tool_failures_stop_at` | integer ≥ 0 | `10` | any |  | Failures of one tool in a row that stop the turn and ask whether it goes on, budget or not; 0 never. |
 | `read_roots` | list of strings |  | user; project if trusted |  | Directories outside the workspace the read tools may reach. |
