@@ -5609,5 +5609,11 @@ citation keeps meaning what it meant.
        `private-sessions.test.tsx` against the fake daemon (Private and the sync in words
        in the list, Claim only beside the row another device holds, the claim sent and the
        row synced after, a refusal said), and the TUI's `private_sessions_test.exs`,
-       all failing on the tip. And the installed daemon and `troupe`, with scratch homes,
-       on the pull request.
+       all failing on the tip. And the installed daemon, `troupe` and the desktop app's
+       web build, with scratch homes, linked to a plane stand-in on loopback that keeps
+       rows and signs nothing: `session.list` said `elsewhere` with the other device's
+       name, `erasure_pending`, `paused` and a local session as such; the list showed
+       Private with each, and Claim beside the one another device held; Claim made the
+       stand-in's row this machine's at the next epoch and the row `paused`; and the
+       installed `troupe resume` picker said `[private · on …]`, `c claims it here`, and
+       `waiting to be erased`.
