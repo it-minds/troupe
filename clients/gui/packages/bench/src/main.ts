@@ -11,7 +11,7 @@
 //                                and let the plane place the session and mint the pod token.
 //
 // One session per client on purpose: many clients on one session measures the model's
-// serialisation, not the transport (DECISIONS.md on the five-client harness).
+// serialisation, not the transport (Decision 196, the five-client harness).
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { PlaneClient, SessionView, TroupeConnection, createLocalSession, normalizeEndpoint, turnCompleted } from "@troupe/client";

@@ -1,0 +1,11 @@
+---
+number: 84
+title: The prompt is split into a stable half that is cached and a volatile block that is not, and cache breakpoints exist only in the request builder
+date: 2026-09-17
+status: accepted
+paths:
+  - apps/troupe_core/lib/troupe/agent/server.ex
+gist: The prompt is split into a stable half that is cached and a volatile block that is not, and cache breakpoints exist only in the request builder
+---
+
+A cache entry is a prefix match over tools, then system, then messages, so the live task list sitting at the bottom of the system prompt was the most expensive line in the harness: every `todo_write` changed the system prompt and re-billed the entire conversation at full price. `Agent.Prompt.system/3` now holds only what is fixed for an agent's life and `Agent.Prompt.volatile/1` carries the per-turn state, appended to the last user message *after* the final breakpoint — content past a breakpoint is never cached, so it costs its own tokens and a block that differs every turn invalidates nothing. Tool order comes from the module list rather than `Map.keys/1`, which has no ordering contract, because tools render at position 0. The markers themselves are placed in `LLM.Anthropic.encode/2` and stored nowhere: a request may carry at most four, and three are used — the system block (which caches tools and system together), the last stable block of the final message, and the block that carried the second one in the previous request, since a lookup only scans about twenty positions back and a turn that appended a lot would otherwise miss the entry it just wrote. That third position is a property of the last request, so it lives in `Agent.Server`'s `Data` and is reset by compaction, which is the one thing here that rewrites history. A compaction request gets no markers at all: a different model and a different system prompt mean a write nothing can read back. `config.cache.ttl` (`TROUPE_CACHE_TTL`) picks `5m` or `1h` for every breakpoint in a request, because a longer-lived entry has to appear before a shorter-lived one and one setting per session is the only shape that cannot get that wrong. `Troupe.LLM.UsageLog` logs the four token classes, the hit ratio and the cost-weighted input (`input + 1.25 × write + 0.1 × read`) on every call, because a caching regression is silent — requests keep succeeding and only the bill moves.

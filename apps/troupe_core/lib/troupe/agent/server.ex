@@ -325,7 +325,10 @@ defmodule Troupe.Agent.Server do
   defp fold_event(%Event{type: type, data: data}, state) do
     case type do
       "user_input" ->
-        %{state | conversation: state.conversation ++ [Message.user(data["text"])]}
+        fold_input(
+          %{state | conversation: state.conversation ++ [Message.user(data["text"])]},
+          data
+        )
 
       "llm_response" ->
         message = Message.from_json(data["message"])
@@ -368,6 +371,12 @@ defmodule Troupe.Agent.Server do
     end
   end
 
+  # An input starts a turn, whose prompt shows the task list as it was then (Decision 792).
+  # A note from the harness is a `user_input` too, but one written in the middle of a turn,
+  # which left the list the prompt shows alone when it was written, and does so here.
+  defp fold_input(state, %{"source" => "harness"}), do: state
+  defp fold_input(state, _data), do: show_todos(state)
+
   # Being finished is not visible in the conversation — a subagent's last message is
   # the tool_results of its own `finish` call, which looks exactly like owing the model
   # a turn. Without folding `agent_done`, a restarted `:done` agent would resume, spend
@@ -381,6 +390,7 @@ defmodule Troupe.Agent.Server do
     conversation = Enum.map(data["conversation"], &resolve_results(state, &1))
 
     %{state | conversation: conversation, compacted_through: compacted_through(conversation)}
+    |> show_todos()
     |> fold_summary_call(data)
   end
 
@@ -1066,7 +1076,10 @@ defmodule Troupe.Agent.Server do
 
       state = %{state | queued: MapSet.delete(state.queued, meta.command_id)}
       brief_attempted(state)
-      apply_input(state, source, content, actor, meta.command_id)
+
+      state
+      |> apply_input(source, content, actor, meta.command_id)
+      |> show_todos()
     else
       Logger.debug("troupe: ignoring #{inspect(source)} input of #{inspect(content)}")
       state
@@ -1212,7 +1225,7 @@ defmodule Troupe.Agent.Server do
       model: nil,
       messages: sent_conversation(state, tools, ctx),
       system: system_prompt(state, definition),
-      system_tail: todo_section(state),
+      system_tail: todo_section(state.prompt_todos),
       cache: true,
       tools: tools,
       max_tokens: state.config.max_tokens,
@@ -1293,8 +1306,9 @@ defmodule Troupe.Agent.Server do
   # The goal comes after everything that describes the agent and its surroundings and
   # before the task list: it is what the list is for, and it changes less often than the
   # list does, which keeps more of the prompt the same from one request to the next. The
-  # list itself, which the agent rewrites within a turn, is the request's `system_tail`:
-  # still the end of the system prompt, but behind the prompt cache's mark (Decision 770).
+  # list itself is the request's `system_tail`: still the end of the system prompt, but
+  # behind the prompt cache's mark (Decision 770), and the list as the turn began, so a
+  # rewrite within the turn leaves the cached conversation after it alone (Decision 792).
   defp system_prompt(state, definition) do
     [
       definition.prompt,
@@ -1356,11 +1370,21 @@ defmodule Troupe.Agent.Server do
     |> String.trim()
   end
 
-  defp todo_section(%State{todos: []}), do: ""
+  # The list the turn began with (Decision 792). A `todo_write` since then says the whole
+  # list in its result, and the line in front of the items says that one is the list now.
+  defp todo_section([]), do: ""
 
-  defp todo_section(%State{todos: todos}) do
-    "<task_list>\n" <> Todo.render(todos) <> "\n</task_list>"
+  defp todo_section(todos) do
+    """
+    <task_list>
+    Your task list when this turn began. If you have called todo_write since, its latest \
+    result is the list now.
+    #{Todo.render(todos)}
+    </task_list>\
+    """
   end
+
+  defp show_todos(%State{} = state), do: %{state | prompt_todos: state.todos}
 
   defp record_response(state, %Response{} = response) do
     message = Response.to_message(response)
@@ -2839,12 +2863,14 @@ defmodule Troupe.Agent.Server do
 
     state = count_call(state, response.usage, gateway, %{summariser: true})
 
-    %{
+    # The call that wrote the task list may be in the summary now, and the conversation
+    # behind the system prompt is new anyway, so the prompt shows the list as it is.
+    show_todos(%{
       state
       | conversation: conversation,
         compacted_through: compacted_through(conversation),
         last_input_tokens: 0
-    }
+    })
   end
 
   # What a compaction leaves behind it ends at the model's last reply in what it kept

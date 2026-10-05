@@ -1,0 +1,12 @@
+---
+number: 87
+title: "A workflow is an orchestration, not one agent working through a list: the `workflow` agent is expensive, cannot write, and owns only the decisions"
+date: 2026-09-17
+status: accepted
+paths:
+  - apps/troupe_core/lib/troupe/workflow.ex
+  - apps/troupe_core/priv/agents/workflow.md
+gist: "A workflow is an orchestration, not one agent working through a list: the `workflow` agent is expensive, cannot write, and owns only the decisions"
+---
+
+The pipeline already existed as an ordered step list, but the agent that received it did every step itself — so the most expensive context in the session was the one holding every file it had read, and "each step has an owner" was a sentence in a prompt rather than a property of the run. A step now names the subagent responsible for it (`{"name", "agent", "prompt", "parallel"}` in `.troupe/workflows/<name>.json`; `agent` omitted means the orchestrator's own step, which is what `plan` is), `Workflow.plan/2` renders that ownership into the prompt as `[`agent`]` / `[you]`, and `priv/agents/workflow.md` denies `write_file`, `edit_file` and `shell` outright — the orchestrator delegates or it does nothing, and that is enforced by the tool allowlist rather than by asking it nicely. Two subagents were added for the two responsibilities the roster had no owner for: `implementer` (all tools, does one step and verifies it) and `reviewer` (read-only plus `shell`, runs the build/tests/lint and reports problems it is not allowed to fix, so a green claim and the command that proves it never come from the same agent). Nothing new was needed underneath: children already inherit the parent's worktree as their workspace, `max_delegation_depth` already lets them delegate further, and the worktree is still committed by the harness on `finish`, not by the agent — which is why denying `shell` to the orchestrator does not cost it the commit. `models.expensive` (`TROUPE_EXPENSIVE_MODEL`, a settings field) is a third alias beside `default` and `cheap`, and it falls back to `models.default` when unset so a provider with no premium tier still runs the profile. One bug fell out of the change and is fixed with it: the rendered plan begins `Task: <task>`, and `/workflow` is worktree-isolated, so `worktree_target/4` was reading `Task` as a Troupe-managed worktree name — every workflow run landed in one shared worktree called `Task`. A generated prompt is not something to parse, so the dispatch passes `parse_target: false` and the branch takes its automatic `<agent>-<n>` worktree.

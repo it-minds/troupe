@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { modelsPending } from "../../src/models.js";
 import { parseExplain, rows, type Row } from "../../src/settings.js";
 
 // The shape `troupe config --explain --json` prints (apps/troupe_core/lib/troupe/config/
@@ -52,9 +53,18 @@ const explain = {
   refusals: [],
 };
 
-const shown = rows(parseExplain(JSON.stringify(explain)));
+// The Models group is models.ts's (models.test.ts); here, where it goes.
+const shown = rows(parseExplain(JSON.stringify(explain)), modelsPending());
 const group = (label: string) => shown.find((r) => r.label === label)?.children ?? [];
 const row = (rows: Row[], label: string) => rows.find((r) => r.label === label);
+
+test("the groups: the model, the models to choose from beside it, then the rest", () => {
+  assert.deepEqual(
+    shown.map((r) => r.label),
+    ["Model", "Models", "Changed from the defaults", "Files", "Problems", "All settings"],
+  );
+  assert.equal(row(shown, "Models")?.context, "troupe.models");
+});
 
 test("the model: provider, endpoint, whether there is a key, and the three models, from where they were set", () => {
   const model = group("Model");
@@ -119,7 +129,7 @@ test("every setting, collapsed, values as a person reads them", () => {
 });
 
 test("nothing changed is said, not left empty; nothing to complain of has no Problems", () => {
-  const plain = rows(parseExplain(JSON.stringify({ ...explain, keys: [], warnings: [] })));
+  const plain = rows(parseExplain(JSON.stringify({ ...explain, keys: [], warnings: [] })), modelsPending());
   assert.deepEqual(plain.find((r) => r.label === "Changed from the defaults")?.children?.map((r) => r.label), [
     "Nothing else: Troupe's defaults",
   ]);

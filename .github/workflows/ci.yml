@@ -717,7 +717,8 @@ jobs:
   # read it; a copy nobody checks is how four numbers came to have no relation. And a
   # Markdown link goes dead when any file moves, whatever the change was, so it is checked
   # here too, as is a deployment's own name finding its way back into the product
-  # (Decision 734). All cheap, so this runs whatever the change touched.
+  # (Decision 734), and a decision whose `paths` no longer match (Decision 790). All cheap,
+  # so this runs whatever the change touched.
   versions:
     name: every copy of the version agrees, every doc link resolves, no deployment is named
     runs-on: ubuntu-latest
@@ -730,6 +731,14 @@ jobs:
       - run: elixir scripts/version.exs check
       - run: elixir scripts/doc-links.exs
       - run: elixir scripts/check-neutral.exs
+      # Every decision file: its front matter, a number of its own, and every `paths` glob
+      # still matching (Decision 790). Here and not in `lint`, which runs only when an app
+      # changed, because a glob breaks when any file moves. The task needs no dependency,
+      # so a bare `elixir` runs it and nothing is compiled.
+      - name: Every decision is well formed and governs paths that exist
+        run: >-
+          elixir -r apps/troupe_protocol/lib/mix/tasks/troupe.decisions.ex
+          -e 'Mix.Tasks.Troupe.Decisions.run(System.argv())' -- --check
 
   # Without macOS: a macOS runner costs about ten Linux ones, and the nightly and every
   # release build both macOS targets anyway.

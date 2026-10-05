@@ -18,10 +18,20 @@ const work = path.join(base, "w");
 const bin = path.join(work, "bin");
 
 // `troupe config --explain --json` prints explain.json, and is not one of the calls the
-// tests count.
+// tests count; while there is an explain.fail it prints `errors` and fails, as a config that
+// does not load does. `troupe models` writes its arguments to models.log and prints
+// models.json, or fails with a reason while there is a models.fail.
 const posixFake = `#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
-[ "$1" = config ] && { cat "$here/explain.json"; exit 0; }
+if [ "$1" = config ]; then
+  [ -f "$here/explain.fail" ] && { echo '{"errors":[]}'; exit 1; }
+  cat "$here/explain.json"; exit 0
+fi
+if [ "$1" = models ]; then
+  printf '%s\\n' "$*" >> "$here/models.log"
+  [ -f "$here/models.fail" ] && { echo "troupe: the fake was told not to list its models" >&2; exit 1; }
+  cat "$here/models.json"; exit 0
+fi
 { printf 'call\\t%s' "$(pwd -P)"; for a in "$@"; do printf '\\t%s' "$a"; done; printf '\\n'; } >> "$here/calls.log"
 case "$(cat "$here/mode" 2>/dev/null)" in
   exit0) exit 0 ;;
@@ -35,13 +45,24 @@ exec sleep 600
 // `bin\\troupe`, and only the `.cmd` may be what that finds.
 const windowsFake = [
   "@echo off",
-  'if "%~1"=="config" (type "%~dp0explain.json" & exit /b 0)',
+  'if "%~1"=="config" goto config',
+  'if "%~1"=="models" goto models',
   '>>"%~dp0calls.log" echo call\t%CD%\t%*',
   "set mode=",
   'set /p mode=<"%~dp0mode"',
   'if "%mode%"=="exit0" exit /b 0',
   'if "%mode%"=="exit1" (echo troupe: could not start: the fake was told to fail 1>&2 & exit /b 1)',
   "ping -n 600 127.0.0.1 >nul",
+  "exit /b 0",
+  ":config",
+  'if exist "%~dp0explain.fail" (echo {"errors":[]} & exit /b 1)',
+  'type "%~dp0explain.json"',
+  "exit /b 0",
+  ":models",
+  '>>"%~dp0models.log" echo(%*',
+  'if exist "%~dp0models.fail" (echo troupe: the fake was told not to list its models 1>&2 & exit /b 1)',
+  'type "%~dp0models.json"',
+  "exit /b 0",
   "",
 ].join("\r\n");
 
@@ -86,6 +107,42 @@ async function main() {
     refusals: [],
   };
   fs.writeFileSync(path.join(bin, "explain.json"), JSON.stringify(explain));
+
+  // What the Models group is shown (Decision 783's shape): the provider's list, fetched three
+  // hours ago so the suite reads the same "3 hours ago" however long it takes, the default
+  // that is also the expensive model, the cheap one, and one the provider does not serve,
+  // with Troupe's fallback window, which the group must not show.
+  const fetched = new Date(Date.now() - 3 * 3_600_000).toISOString();
+  const listed = (id: string, context: number, input: number, output: number) => ({
+    id,
+    provider: null,
+    model: id,
+    context,
+    input,
+    output,
+    price_source: "catalog",
+    source: "catalog",
+    key: true,
+    served: true,
+    nearest: [],
+  });
+  const models = {
+    models: [
+      listed("fake-large", 200_000, 3, 15),
+      { ...listed("fake-retired", 200_000, 0, 0), input: null, output: null, price_source: null, source: "config", served: false, nearest: ["fake-large", "fake-small"] },
+      listed("fake-small", 128_000, 0.25, 1.25),
+    ],
+    roles: { default: "fake-large", cheap: "fake-small", expensive: "fake-large" },
+    catalog: {
+      path: path.join(bin, "catalog.json"),
+      fetched_at: fetched,
+      sources: [
+        { provider: null, type: "openai", base_url: "http://127.0.0.1:9/v1", url: "http://127.0.0.1:9/v1/models", models: 2, fetched_at: fetched, status: "cached", error: null, failed_at: null },
+      ],
+    },
+    providers: [],
+  };
+  fs.writeFileSync(path.join(bin, "models.json"), JSON.stringify(models));
 
   const workspace = path.join(work, "four.code-workspace");
   fs.writeFileSync(workspace, JSON.stringify({ folders: folders.map((p) => ({ path: p })) }, null, 2));

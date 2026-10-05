@@ -55,7 +55,8 @@ defmodule Troupe.Test.FakeTransport do
         {request, %Req.TransportError{reason: :closed}}
 
       attempt < transport_errors + status_errors ->
-        {request, error_response(Map.get(config, :fail_status, 429), Map.get(config, :fail_body, "slow down"))}
+        status = Map.get(config, :fail_status, 429)
+        error_response(request, status, Map.get(config, :fail_body, "slow down"))
 
       true ->
         stream(request, Map.get(config, :chunks, []))
@@ -79,22 +80,25 @@ defmodule Troupe.Test.FakeTransport do
 
   defp stream(request, chunks) do
     response = Req.Response.new(status: 200, headers: %{"content-type" => ["text/event-stream"]})
+    feed(request, response, chunks)
+  end
 
-    # Exactly what the real transport does with `into: fun`: hand it one chunk at a
-    # time and thread the returned {request, response} pair forward.
+  # An error's body goes to `into: fun` too, as the real transport sends it whatever the
+  # status, and not into the response (#436, Decision 791).
+  defp error_response(request, status, message) do
+    headers = %{"content-type" => ["application/json"]}
+    response = Req.Response.new(status: status, headers: headers)
+    feed(request, response, [Jason.encode!(%{"error" => %{"message" => message}})])
+  end
+
+  # Exactly what the real transport does with `into: fun`: hand it one chunk at a time
+  # and thread the returned {request, response} pair forward.
+  defp feed(request, response, chunks) do
     Enum.reduce_while(chunks, {request, response}, fn chunk, {req, resp} ->
       case request.into.({:data, chunk}, {req, resp}) do
         {:cont, pair} -> {:cont, pair}
         {:halt, pair} -> {:halt, pair}
       end
     end)
-  end
-
-  defp error_response(status, message) do
-    Req.Response.new(
-      status: status,
-      headers: %{"content-type" => ["application/json"]},
-      body: %{"error" => %{"message" => message}}
-    )
   end
 end

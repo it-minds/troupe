@@ -56,6 +56,12 @@ Arrows point at what an app depends on; a change flows back along them. So:
 | `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | |
 | anything else (docs) | — | only `versions` |
 
+`versions` runs whatever changed, because a moved file can break any of what it checks:
+every copy of the version agrees, every Markdown link resolves, no deployment is named,
+and every decision in `docs/decisions/` has its fields, a number of its own and `paths`
+that match something (`mix troupe.decisions --check`, run there with a bare `elixir`;
+Decision 790).
+
 Each umbrella app is its own parallel leg (`test <app>`), and one `lint` job compiles the whole umbrella with warnings as errors and runs format, credo, the generated-asset checks, the boundaries and the bench ([bench.md](bench.md): a turn's cost and shape held to budgets, its table in the run's summary) whenever any app is under test.
 
 ```mermaid
@@ -130,7 +136,7 @@ A failure is a harness regression until shown otherwise: the step prints the run
 | workflow | what | called by |
 |---|---|---|
 | `ci.yml` | every check; focused or full | pull requests into `main`, pushes to `main`, `nightly.yml`, `release.yml` |
-| `dev-check.yml` | compile, credo, schema, client builds (the VS Code extension's `.vsix` kept as the run's artifact); no tests | every other pull request: into a `development-*` chunk ([fixing-issues.md](fixing-issues.md)), or stacked on another branch |
+| `dev-check.yml` | compile, credo, schema, client builds (the VS Code extension's `.vsix` kept as the run's artifact), and the decisions' check whatever changed; no tests | every other pull request: into a `development-*` chunk ([fixing-issues.md](fixing-issues.md)), or stacked on another branch |
 | `licences.yml` | every locked package's licence against the policy in `scripts/licences.exs`, and `docs/third-party-licences.md`, `THIRD-PARTY-NOTICES.txt` and the chart's LICENSE and NOTICE current | every pull request |
 | `pages.yml` | the documentation site (`mkdocs.yml`), strict: a broken link, a nav entry to a missing page or a page left out of the nav fails it; on `main`, published to GitHub Pages | every pull request, pushes to `main` |
 | `dco.yml` | every commit authored from 2026-09-27 has its author's `Signed-off-by:` ([CONTRIBUTING.md](../../CONTRIBUTING.md)) | pull requests into `main` and `development-*` |

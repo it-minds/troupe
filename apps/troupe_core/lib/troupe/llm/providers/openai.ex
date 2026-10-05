@@ -57,6 +57,8 @@ defmodule Troupe.LLM.Providers.OpenAI do
       headers: headers(request),
       receive_timeout: request.timeout_ms,
       retry: false,
+      # An error's body is read here, JSON or not (Decision 791).
+      decode_body: false,
       into: fn {:data, chunk}, {req, resp} ->
         {:cont, {req, handle_chunk(resp, chunk, reply_to, ref)}}
       end
@@ -80,10 +82,10 @@ defmodule Troupe.LLM.Providers.OpenAI do
       # with the other field, once, instead of every user discovering this and
       # configuring it (Decision 658).
       {:ok, %Req.Response{status: 400, body: refused}} ->
-        refused(request, body, describe(refused), reply_to, ref, pass)
+        refused(request, body, detail(refused, request), reply_to, ref, pass)
 
       {:ok, %Req.Response{status: status, body: refused}} ->
-        {:error, {:http_status, status, describe(refused)}}
+        {:error, {:http_status, status, detail(refused, request)}}
 
       {:error, %Req.TransportError{reason: reason}} ->
         {:retry, {:transport, reason}}
@@ -144,6 +146,13 @@ defmodule Troupe.LLM.Providers.OpenAI do
       key -> [{"authorization", "Bearer " <> key} | base]
     end
   end
+
+  # Req hands `into` the body of every response, whatever its status. Only a 200's is the
+  # event stream; any other's is the provider's error, kept for `post/5` to read rather
+  # than fed to the parser, where it was lost (Decision 791).
+  defp handle_chunk(%Req.Response{status: status} = resp, chunk, _reply_to, _ref)
+       when status != 200,
+       do: Provider.collect_error(resp, chunk)
 
   defp handle_chunk(resp, chunk, reply_to, ref) do
     state = resp.private[:troupe] || %{acc: Collector.new(), sse: SSE.new()}
@@ -426,8 +435,21 @@ defmodule Troupe.LLM.Providers.OpenAI do
     if var = Endpoint.vendor_key_var(:openai, url), do: System.get_env(var)
   end
 
-  defp describe(%{"error" => %{"message" => message}}), do: message
-  defp describe(body) when is_binary(body), do: String.slice(body, 0, 400)
+  # What an error response said, as a person reads it: no key in it (Decision 791).
+  defp detail(body, request), do: body |> describe() |> Provider.error_text(api_key(request))
+
+  # OpenAI's error is `{"error": {"message": …}}`, and so is most compatible servers';
+  # vLLM puts `message` at the top. It arrives as the text `into` collected.
+  defp describe(%{"error" => %{"message" => message}}) when is_binary(message), do: message
+  defp describe(%{"message" => message}) when is_binary(message), do: message
+
+  defp describe(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{} = decoded} -> describe(decoded)
+      _not_json -> String.slice(body, 0, 400)
+    end
+  end
+
   defp describe(body), do: body |> inspect() |> String.slice(0, 400)
 end
 

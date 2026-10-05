@@ -645,8 +645,8 @@ TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT="$PWD/fixtures/fake_scripts/smoke.json" 
 
 The harness itself — `troupe_core`, `troupe_gateway`, `troupe_protocol` — is a path
 dependency on `../../apps/`, the umbrella this project sits in, at the same commit: there
-is no pin to bump, and a change to the harness is made there, with `PROTOCOL.md` and the
-root `DECISIONS.md`, in the same pull request as the TUI change that needs it. A package
+is no pin to bump, and a change to the harness is made there, with `PROTOCOL.md` and a
+decision in `docs/decisions/`, in the same pull request as the TUI change that needs it. A package
 both this project and the umbrella lock must be at one version in both `mix.lock` files;
 `elixir scripts/locks-agree.exs` at the repository root checks the 25 they share, and CI
 runs it. The version is the root `VERSION`. `troupe_core`'s compile cross-compiles the
@@ -659,7 +659,8 @@ give a deterministic model; so do `provider: fake` and `fake_script:` in a works
 The harness is the root [ARCHITECTURE.md](../../ARCHITECTURE.md); this client's boundary,
 its supervision tree and its remote client are
 [architecture.md §6](../../docs/developer/architecture.md#6-the-tui-clientstui); and
-[DECISIONS.md](DECISIONS.md) here has every deviation from the original specification.
+[its decisions](../../docs/decisions/tui/README.md) are every deviation from the original
+specification.
 
 ## Out of scope (for now)
 
