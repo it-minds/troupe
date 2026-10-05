@@ -447,7 +447,7 @@ defmodule Troupe.BenchLiveTest do
 
     test "each tool call is in the run's record, a cut one says so (#406), and --keep keeps the run",
          %{tmp_dir: dir} do
-      # 3,000 lines of 40 bytes: a read returns 2,000 of them, cut at the 60,000-byte limit.
+      # 3,000 lines of 40 bytes: a read returns 2,000 of them, cut at the 32 KiB default.
       big = Enum.map_join(1..3_000, fn i -> String.pad_trailing("line #{i}", 39, ".") <> "\n" end)
 
       scenario = %Scenario{
@@ -489,7 +489,7 @@ defmodule Troupe.BenchLiveTest do
 
       assert is_integer(ms)
       # Kept as a blob in the log, measured as the text the model was given.
-      assert bytes > 59_000 and bytes < 61_000
+      assert bytes > 32_000 and bytes < 33_000
       assert run["largest_tool_result_bytes"] == bytes
       assert metric(scenario(report, "big_read"), "median_largest_tool_result") == bytes
 

@@ -113,7 +113,9 @@ defmodule Troupe.Config do
             tool_failures_note_at: 5,
             tool_failures_stop_at: 10,
             shell_timeout_ms: 120_000,
-            tool_output_limit: 60_000,
+            # Bytes of a tool's result the model is sent; the rest is one `read_output`
+            # call away. 32 KiB, from a live bench's numbers (Decision 781).
+            tool_output_limit: 32_768,
             watch: false,
             watch_debounce_ms: 300,
             watch_poll_interval_ms: 1_000,
@@ -323,6 +325,9 @@ defmodule Troupe.Config do
 
   @doc "`troupe config trust --list`: `Troupe.Config.Trust.list/1`."
   defdelegate list_trusted(opts \\ []), to: Trust, as: :list
+
+  @doc "`troupe models --json`: `Troupe.Config.Models.json/2`, what `describe/2` says as data."
+  defdelegate models_json(config, opts \\ []), to: Troupe.Config.Models, as: :json
 
   @doc """
   `text` as `command` would put it: every quoted `troupe config` command it names is

@@ -423,8 +423,8 @@
       "minimum": 1
     },
     "tool_output_limit": {
-      "description": "Bytes of a tool's output the model sees; the rest is kept as a blob.",
-      "default": 60000,
+      "description": "Bytes of a tool's output the model sees; the rest is kept, and read_output pages it back.",
+      "default": 32768,
       "type": [
         "integer",
         "null"

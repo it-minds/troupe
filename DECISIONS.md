@@ -5247,6 +5247,61 @@ citation keeps meaning what it meant.
        fresh one alone. TUI `ModelsCLITest`: `troupe models` on its first run, from the
        cache, with `--refresh`, with a refused key, and with no provider to ask.
 
+779. **The compaction summariser reads the tool calls it summarises as text, and a summary
+     that does not come within `llm_timeout_ms` is given up on.** Issue #404 and the first
+     item of D66. The summariser's request defines no tools, while the stretch it
+     summarises holds tool calls and results, and Anthropic's Messages API refuses a
+     request with tool blocks and no tool definitions. So every summary of a stretch with
+     a tool call in it failed there, which since 774 changes nothing: a session on that
+     API, or on a gateway in front of it, never compacted and grew until it overflowed.
+     OpenAI's API takes such a request, which is how it went unnoticed. And `:compacting`
+     had no clause for `{:llm_timeout, ref}`, so a summariser call that hung kept the agent
+     there past `llm_timeout_ms`, where `:thinking` gives the same call up.
+     - **Written out, not defined.** Each call in what is summarised goes to the summariser
+       as `[called read_file {"path":"notes.txt"}]` and each result as `[read_file
+       returned]` or `[read_file failed]` with its output, whole (771: the summariser
+       condenses results rather than sending them again). Carrying the definitions of the
+       tools the calls used was the other way, and loses on each count: their bytes on
+       every summary (the build profile's are about 12 kB) with no cache to read them from,
+       since the summariser runs on the small model with a system prompt of its own and the
+       agent's prompt cache does not carry over; a definition wanted for a tool the session
+       no longer has (an MCP server gone, another profile's tool); and a summariser offered
+       tools may answer with a call rather than a summary, which `tool_choice` would have
+       to forbid on every provider. Text is valid on every provider, and `tools` stays
+       empty, which is how the bench tells the summariser's call apart (772).
+     - **The summariser is told how a call reads**, and asked for what the calls that
+       matter did (the tool, the arguments that matter, the gist of the result) rather
+       than their output, where its prompt said to drop "tool mechanics".
+     - **A result's tool is named by the calls in the message before it**, as 771's stub
+       names it: a gateway that numbers its calls repeats ids across responses.
+     - **Only the summariser's request changes.** The conversation, the log, the split
+       (774) and the counting (769) are as they were. `compact_prompt` measures the request
+       as sent, so the summariser's `tool_results` bytes read 0 now: its results are text
+       in `conversation`. Against the chunk's tip, the bench's summary call is 22 bytes
+       shorter (206 more of system prompt, 228 fewer of conversation), and no budgeted
+       measure moves.
+     - **A summary that does not come** is given up on after `llm_timeout_ms`, as any model
+       call is: `:compacting` turns the timeout into the `llm_error` `:thinking` makes of
+       it, and that fails as a refused summary does, leaving the conversation as it was
+       (774) and going on to the interrupted turn or to rest.
+     - **A stand-in that refuses what Anthropic's API refuses.** The fake model takes
+       `strict_tools`: a request whose messages hold a tool call or result and that defines
+       no tools gets the `400`, in Anthropic's words, and takes no step from the script.
+       Opt-in, beside `strict_pairs`, since OpenAI's API takes such a request; the whole
+       core suite passed with it on for every session, so nothing else in core sends one.
+       A step
+       `{:delay, ms, step}` answers late, as the bench's model's does, which is how a test
+       outlasts `llm_timeout_ms`.
+     - **Proof:** `CompactionTest`, against the stand-in with both checks on: a turn of a
+       `read_file` and three `todo_read`s that overflows compacts once and finishes, and
+       the summariser's request holds no tool block and carries `read_file
+       {"path":"notes.txt"}` and the file's text, which failed on the chunk's tip (no
+       `compacted`: the summary request was refused); and with `llm_timeout_ms` at a second,
+       a summariser that would answer after a minute ends the compaction, the turn finishes
+       and the conversation is whole, which on the tip was still in `:compacting` ten
+       seconds on. `FakeScriptTest`: the stand-in refuses tool blocks without tools, takes
+       text alone and the same blocks with tools, and answers a delayed step late.
+
 780. **A reasoning effort reaches an Anthropic model in the form the model takes: adaptive
      thinking with an effort level from Claude Opus 4.7 on, a thinking budget before it.
      And a gateway's cache writes over the OpenAI wire are cache writes, priced as such.**
@@ -5342,3 +5397,102 @@ citation keeps meaning what it meant.
        micro-dollars by the catalog's rates. The build installed before sent the first and
        third a budget, and logged the gateway's call as 2000 fresh and nothing written, at
        4700.
+
+781. **A tool's result is cut at 32 KiB by default, not 60,000 bytes: what is cut is one
+     `read_output` call away, and what is sent goes out again with every call after it.**
+     Issue #407, the other half of #389's slice 3, whose number Decision 771 left for a
+     measurement. The first live bench against a real model (`qwen3-235b`, three runs of
+     each task) had one `fix_test` run cost $0.103 where the other two cost $0.041 and
+     $0.018: a `shell` call returned more than 60 kB, it was cut at the limit, and the four
+     calls after it, which carried it again, were 100,574 of the run's 133,073 input
+     tokens. That gateway caches nothing, so each call paid for it in full, and 771's stub
+     applies only behind a compaction, which no run came near.
+     - **Why 32 KiB (32,768 bytes).** The maintainer's choice between the old 60,000 and
+       the issue's candidate, 16 KiB, the blob inline limit where 771's stub floor sits.
+       32 KiB still sends whole what an agent ordinarily asks for: a `grep` of 200
+       matching lines of up to about 160 bytes, and a file of `precise_edit`'s size (1,560
+       lines, 31,042 bytes as `read_file` numbers them) in one read. At 16 KiB that file
+       is cut, and so is such a `grep` past about 80 bytes a line, and each cut the model
+       needs the rest of is a round trip; a number below 32 KiB needs measurements of its
+       own.
+     - **What a cut costs.** The model is sent the first 32 KiB and the marker, and
+       `read_output` pages the rest back, 200 lines a call: one round trip, the whole
+       prompt again with the page, when the model needs the rest, and nothing when it
+       does not. Against that, every later call carries up to 27,232 bytes less, until a
+       compaction summarises the result away; in #407's dear run, four calls. Offline,
+       `cut_output`, whose script does read the rest back, sends 39,649 tokens (four bytes
+       each, 772) over its three calls where it sent 46,422: the call with the page
+       carries the whole result either way, and the call before it 27 kB less.
+     - **One default.** `grep`, `git_read`, `read_file`, `shell` and `web_fetch` each kept
+       a copy of 60,000 for a context with no config; they read `%Config{}`'s now, so the
+       next move is one line. The key table says `read_output` pages the rest back, where
+       it said the rest is kept as a blob.
+     - **The bench.** Offline, `cut_output`'s cut result is 32,869 bytes (59,892 before),
+       and its budget 36,000 (61,000), a tenth over (772); every other measure is as it
+       was. The live scenarios still test what they say, so none changed: `large_log`'s
+       480 kB log is more than a read returns at either limit, `precise_edit`'s file still
+       arrives whole in one read, and the other tasks' files are under 1 kB each. The live
+       bench's `fix_test` worst cost and median input, before and after, are on the pull
+       request.
+     - **Not here:** D66's markers naming `read_output` to the profiles that do not offer
+       it (`explore`, `answer`, `ask`, `librarian`), which a lower limit makes those agents
+       meet more often; the stub floor of 771. A `tool_output_limit` a person has set
+       holds as before.
+     - **Proof:** `ConfigTest`: the default is 32,768 in the struct and in the key table,
+       and a tool with no config cuts a 60 kB read at it, both failing on the chunk's tip
+       (60,000, and 59,966 bytes); `BenchLiveTest`'s read cut at the new limit in a run's
+       `tool_calls`; `ExplainTest` against the regenerated reference; the offline bench
+       within its budgets; and the installed `troupe bench` and `troupe config --explain
+       tool_output_limit`, on the pull request.
+
+783. **`troupe models --json` prints what `troupe models` says as one JSON object for a
+     program: the models with their prices as numbers, the roles, what the catalog fetched
+     from where and when, and the named providers; never a key.** Issue #387, in part: the
+     VS Code extension's Models group that reads it is a follow-up in `clients/vscode`.
+     The report was words only, so a program that wanted the models, their windows and
+     prices (the extension's Settings view first, Decision 765) had to scrape what was
+     written for a person.
+     - **Built beside the text.** `Troupe.Config.Models.json/2`, reached as
+       `Config.models_json/2` beside `explain/3`, takes the config and `asked` as
+       `describe/2` does and is built from the calls the text is: `Config.models/1`,
+       `resolve_model/2`, `price/2`, and the catalog's record (`Store.sources/0`,
+       `providers/1`, `source/2`, `served/3`). The wording stays `describe/2`'s; the JSON
+       says the same facts as values. A test holds the two together: every model the JSON
+       lists is a line of the text, each of its sources a `catalog:` line, and a role's
+       model it says is not served is NOT SERVED there.
+     - **The shape.** `models`, one object for each of `Config.models/1`: `id`, `provider`
+       (the named one, `null` for the session-wide), `model`, `context`, `input` and
+       `output` in dollars per million tokens (to four places, as the desktop app's list)
+       or `null`, `price_source` (`catalog`, `config` or `null`), `source` (where its
+       facts came from, 778: `catalog`, `config`, `yaml` or `opencode`), `key`, and
+       `served`: `true`, `false` with the five `nearest` ids the provider does list, or
+       `null` when that provider never answered. `served` is said of every model, where
+       the text marks only a role's: the text is loud about what would fail a turn, and a
+       program decides for itself what to mark. `roles`: `default`, `cheap` and
+       `expensive`, each the id `resolve_model/2` resolves it to, so an unset role is the
+       default's. `catalog`: the cache's `path` and `fetched_at`, and `sources`, one for
+       each provider a refresh asks, as the `catalog:` lines are: `provider`, `type`,
+       `base_url`, the listing's `url`, how many `models` it listed, `fetched_at`, and
+       `status`, `fetched` by this run, `cached`, `failed` (with `error` and `failed_at`)
+       or `not_asked`; `null` when there is no cache. `providers`: the named ones as
+       `troupe config` lists them, `name`, `type`, `base_url`, `auth`, `source`, `key`
+       and the `models` each declares.
+     - **No key.** `key` is `true` or `false`, never the key, masked or not, as the
+       extension's view shows it (765). It is what `Config.models/1` decided for each
+       model; a named provider's is its models', so it is decided in one place.
+     - **The command.** `troupe models --json [--workspace DIR] [--refresh]` refreshes as
+       `troupe models` does (778), prints the object and exits 0. A config that does not
+       load exits 1 with the reason on standard error, as `troupe models` does, rather
+       than as an `errors` object on standard output as `config --explain --json` does: a
+       program that asks for the models has nothing to show of a config that does not
+       load but the reason. It has its own line in `troupe --help` and the reference.
+     - **Not in this:** the extension's Models group; `troupe-daemon models --json`; cache
+       prices and `max_output`, which `Config.models/1` does not carry.
+     - **Proof:** `Troupe.Config.ModelsTest`, against the stand-in gateway: the shape
+       before anything was fetched (no catalog, `served` null, a `models.prices` price as
+       the config's), after a refresh (each source's status, the prices, a role's model
+       not served with what is nearest), a key the gateway refuses (`failed`, the error,
+       the cached count), the JSON and the text agreeing, and neither key, raw or masked,
+       anywhere in it. TUI `ModelsCLITest`: `troupe models --json` decoded, a second run
+       from the cache, a refused key, and a config that does not load said on standard
+       error with nothing on standard output.

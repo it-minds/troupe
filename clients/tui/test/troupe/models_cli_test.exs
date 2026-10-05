@@ -97,6 +97,96 @@ defmodule Troupe.ModelsCLITest do
     assert out =~ ~r/^  qwen3-235b +131k ctx, \$0\.22\/\$0\.88, from the cache  <- cheap$/m
   end
 
+  # Issue #387, root Decision 783: the same report as one JSON object, for a program.
+  test "--json prints one JSON object: the models with numbers for prices, the roles, the catalog and the providers",
+       ctx do
+    out = capture_io(fn -> assert Runner.main(["models", "--json"]) == 0 end)
+
+    assert {:ok, json} = Jason.decode(out)
+    assert json |> Map.keys() |> Enum.sort() == ~w(catalog models providers roles)
+
+    assert %{"default" => "qwen3.5", "cheap" => "qwen3-235b", "expensive" => "qwen3.5"} =
+             json["roles"]
+
+    cheap = Enum.find(json["models"], &(&1["id"] == "qwen3-235b"))
+
+    assert %{
+             "provider" => nil,
+             "model" => "qwen3-235b",
+             "context" => 131_072,
+             "input" => 0.22,
+             "output" => 0.88,
+             "price_source" => "catalog",
+             "source" => "catalog",
+             "key" => true,
+             "served" => true
+           } = cheap
+
+    assert %{"served" => false, "nearest" => ["qwen3.6-35b", "qwen3-235b" | _]} =
+             Enum.find(json["models"], &(&1["id"] == "qwen3.5"))
+
+    assert %{
+             "path" => path,
+             "fetched_at" => fetched_at,
+             "sources" => [
+               %{
+                 "provider" => nil,
+                 "type" => "openai",
+                 "url" => url,
+                 "models" => 4,
+                 "status" => "fetched",
+                 "error" => nil
+               }
+             ]
+           } = json["catalog"]
+
+    assert url == ctx.gateway.url <> "/model_group/info"
+    assert path == Troupe.Paths.display(Store.path())
+    assert {:ok, _at, 0} = DateTime.from_iso8601(fetched_at)
+    assert json["providers"] == []
+
+    refute out =~ FakeGateway.key()
+    refute out =~ Troupe.Config.mask(FakeGateway.key())
+
+    # The second run reads the cache, and says so.
+    out = capture_io(fn -> assert Runner.main(["models", "--json", "--workspace", "."]) == 0 end)
+    assert %{"catalog" => %{"sources" => [%{"status" => "cached"}]}} = Jason.decode!(out)
+  end
+
+  test "--json says a refused key's failure, and a refused config exits 1 with the reason on stderr",
+       ctx do
+    capture_io(fn -> assert Runner.main(["models", "--json"]) == 0 end)
+    refused = "sk-refused-0000000000"
+    File.write!(ctx.user, String.replace(File.read!(ctx.user), FakeGateway.key(), refused))
+
+    out = capture_io(fn -> assert Runner.main(["models", "--json", "--refresh"]) == 0 end)
+
+    assert %{
+             "catalog" => %{
+               "sources" => [
+                 %{
+                   "status" => "failed",
+                   "error" => "401 unauthorized: the key was refused",
+                   "models" => 4
+                 }
+               ]
+             }
+           } = Jason.decode!(out)
+
+    refute out =~ refused
+    refute out =~ Troupe.Config.mask(refused)
+
+    File.write!(ctx.user, "version: 1\nmax_turns: many\n")
+
+    {out, err} =
+      with_io(:stderr, fn ->
+        capture_io(fn -> assert Runner.main(["models", "--json"]) == 1 end)
+      end)
+
+    assert out == ""
+    assert err =~ "max_turns"
+  end
+
   test "with no provider that can be asked, the named providers line says none are configured",
        ctx do
     File.write!(ctx.user, "version: 1\nprovider: anthropic\n")

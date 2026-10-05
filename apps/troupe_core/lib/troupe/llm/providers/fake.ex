@@ -24,6 +24,7 @@ defmodule Troupe.LLM.Fake do
           | {:text_and_tools, String.t(), [{String.t(), map()}]}
           | {:reasoning, String.t(), step() | nil}
           | {:stop, atom(), step()}
+          | {:delay, non_neg_integer(), step()}
           | {:error, term()}
           | map()
 
@@ -34,7 +35,8 @@ defmodule Troupe.LLM.Fake do
             delay_ms: 0,
             cost_micros: :derived,
             cache_read: 0,
-            strict_pairs: false
+            strict_pairs: false,
+            strict_tools: false
 
   # -- client -----------------------------------------------------------------
 
@@ -42,7 +44,8 @@ defmodule Troupe.LLM.Fake do
   Start a scripted model.
 
   Options:
-    * `:steps` — the script, consumed one step per request
+    * `:steps` — the script, consumed one step per request; `{:delay, ms, step}` answers
+      `step` after `ms`, which is how a test makes one call outlast `llm_timeout_ms`
     * `:routes` — per-agent scripts, `%{"root" => [...], "explore" => [...]}`, keyed by
       agent name. Several agents run concurrently, so one shared list cannot say which
       answer belongs to whom; a route can. Falls back to `:steps` for agents with no
@@ -61,6 +64,9 @@ defmodule Troupe.LLM.Fake do
       request in which a tool result does not answer a call in the message before it, or
       a call is not answered in the message after it (default `false`). A refused request
       takes no step from the script
+    * `:strict_tools` — refuse, as Anthropic's Messages API does, a request whose
+      messages hold a tool call or result when it defines no tools (default `false`).
+      OpenAI's takes such a request. A refused request takes no step from the script
     * `:name` — registered name (tests usually pass one)
   """
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -179,7 +185,8 @@ defmodule Troupe.LLM.Fake do
        delay_ms: Keyword.get(opts, :delay_ms, 0),
        cost_micros: Keyword.get(opts, :cost_micros, :derived),
        cache_read: Keyword.get(opts, :cache_read, 0),
-       strict_pairs: Keyword.get(opts, :strict_pairs, false)
+       strict_pairs: Keyword.get(opts, :strict_pairs, false),
+       strict_tools: Keyword.get(opts, :strict_tools, false)
      }}
   end
 
@@ -187,7 +194,8 @@ defmodule Troupe.LLM.Fake do
   def handle_call({:next, request}, _from, state) do
     state = %{state | requests: [request | state.requests]}
 
-    case state.strict_pairs && unpaired(request.messages) do
+    case (state.strict_pairs && unpaired(request.messages)) ||
+           (state.strict_tools && undefined_tools(request)) do
       reason when is_binary(reason) ->
         {:reply, {:error, {:http_status, 400, reason}}, state}
 
@@ -263,6 +271,18 @@ defmodule Troupe.LLM.Fake do
   defp result_ids(%Message{content: blocks}),
     do: for(%ToolResult{tool_use_id: id} <- blocks, do: id)
 
+  # What Anthropic's Messages API checks of a request that defines no tools: it may not
+  # hold a tool call or a result either.
+  defp undefined_tools(%{tools: []} = request) do
+    if Enum.any?(request.messages, &tool_blocks?/1),
+      do: "Requests which include `tool_use` or `tool_result` blocks must define tools."
+  end
+
+  defp undefined_tools(_request), do: nil
+
+  defp tool_blocks?(%Message{content: blocks}),
+    do: Enum.any?(blocks, &(match?(%ToolUse{}, &1) or match?(%ToolResult{}, &1)))
+
   # The agent's profile name, which is what a route is keyed by. `root` is special:
   # the root agent answers to its position, not its profile, so a test can script it
   # without knowing which profile it happens to be running.
@@ -279,6 +299,13 @@ defmodule Troupe.LLM.Fake do
   defp render({:stop, stop_reason, step}, state) do
     case render(step, state) do
       {:ok, response, delay} -> {:ok, %{response | stop_reason: stop_reason}, delay}
+      other -> other
+    end
+  end
+
+  defp render({:delay, ms, step}, state) do
+    case render(step, state) do
+      {:ok, response, _delay} -> {:ok, response, ms}
       other -> other
     end
   end
