@@ -95,6 +95,17 @@ defmodule Troupe.CLITest do
     assert %{private: false} = Runner.run_params(args)
   end
 
+  # Root Decision 787, Decision 147: the daemon names a session's model calls by what the
+  # connection that created it called itself.
+  test "a headless run tells the daemon it is one, and the terminal UI is troupe" do
+    {:ok, headless} = CLI.parse(["run", "x", "--headless"])
+    {:ok, run} = CLI.parse(["run", "x"])
+
+    assert Runner.client_name(headless) == "troupe-headless"
+    assert Runner.client_name(run) == "troupe"
+    assert %{"name" => "troupe"} = Troupe.Client.Daemon.Link.client_info()
+  end
+
   test "parses the config command lines" do
     assert {:ok, %{mode: :config}} = CLI.parse(["config"])
 

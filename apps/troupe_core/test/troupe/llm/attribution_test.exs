@@ -62,10 +62,17 @@ defmodule Troupe.LLM.AttributionTest do
     assert body["metadata"]["user_id"] == "ada@example.test"
   end
 
+  # What it does send, the software's name, is `Troupe.LLM.IdentifyTest`'s (Decision 787).
   test "a local session with nobody to bill sends no attribution at all", context do
     request = %{request(context) | attribution: %{}}
 
     Task.start(fn -> OpenAI.stream(request, self(), make_ref()) end)
+
+    body = assert_request()
+    refute Map.has_key?(body, "user")
+    assert Map.keys(body["metadata"]) -- ["troupe_client", "troupe_version"] == []
+
+    Task.start(fn -> OpenAI.stream(%{request | identify: false}, self(), make_ref()) end)
 
     body = assert_request()
     refute Map.has_key?(body, "metadata")

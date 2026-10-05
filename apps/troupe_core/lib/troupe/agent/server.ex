@@ -1235,7 +1235,9 @@ defmodule Troupe.Agent.Server do
   # own — its URL, its key, its auth scheme, the wire id it renamed the model to, possibly
   # an output cap smaller than the session's and how hard it should think — and the
   # adapter for it; a bare id goes to the session's provider with the session's key. The
-  # catalog may say which form the model takes thinking in (Decision 780).
+  # catalog may say which form the model takes thinking in (Decision 780). Wherever it
+  # goes, it names Troupe and the session's client unless the config says not to
+  # (Decision 787).
   defp aim(%Request{} = request, %State{config: config} = state, model) do
     target = Config.target(config, model)
 
@@ -1249,7 +1251,9 @@ defmodule Troupe.Agent.Server do
         reasoning_effort: target.reasoning_effort,
         thinking: Config.thinking(config, model),
         provider: adapter_for(target.provider, state),
-        timeout_ms: config.llm_timeout_ms
+        timeout_ms: config.llm_timeout_ms,
+        identify: config.identify != false,
+        client: config.client
     }
   end
 

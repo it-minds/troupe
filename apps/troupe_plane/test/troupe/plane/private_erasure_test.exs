@@ -215,6 +215,36 @@ defmodule Troupe.Plane.PrivateErasureTest do
       assert {:ok, %{"erasures" => []}} = erasures(ada, "ada-desktop")
     end
 
+    # S3 lists a thousand versions at a time, and the deletion read the first page only:
+    # a session sealed for long enough kept the rest of its ciphertext.
+    test "has every version of its objects deleted, past the first thousand",
+         %{ada: ada, root: root} do
+      id = registered(ada, "ada-laptop")
+      write_key(root, KMS.path({:person, User.kms_name(ada)}, id))
+
+      store = ObjectStore.from_env()
+      names = ~w(manifest.json segments/e1-a.seg segments/e1-b.seg snapshots/1.snap)
+
+      names
+      |> Task.async_stream(
+        fn name ->
+          for n <- 1..260, do: {:ok, _} = ObjectStore.put(store, "sessions/#{id}/#{name}", "#{n}")
+        end,
+        timeout: 60_000
+      )
+      |> Stream.run()
+
+      assert {:ok, %{"erased" => true}} =
+               Harness.call("session.erase", %{"session_id" => id}, as(ada))
+
+      assert {:ok, %{"erasures" => [%{"session_id" => ^id}]}} = erasures(ada, "ada-laptop")
+      assert {:ok, done} = erased(ada, id, "ada-laptop")
+
+      assert {:ok, []} = ObjectStore.list(store, "sessions/#{id}/")
+      assert versions(id) == []
+      assert done["objects_deleted"] == 4 * 260
+    end
+
     test "is not sealed, keyed or signed for once erased", %{ada: ada, root: root} do
       id = registered(ada, "ada-laptop")
       path = KMS.path({:person, User.kms_name(ada)}, id)
