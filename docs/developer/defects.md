@@ -551,12 +551,8 @@ Found by the #410 fixer, 2026-10-04.
 
 Found by the chunk 17 fixers and the coordinator, 2026-10-04.
 
-### D69 - Thinking the agent never asked for (medium)
+### D69 - Anthropic thinking: what #396 left (low)
 
-- With no `reasoning_effort`, Anthropic's newest models (Opus 5 and 5.5, Fable, Sonnet 5.5)
-  think anyway, adaptively. The adapter sends no `thinking` field, so `keep_thinking?` is
-  false and their thinking blocks are dropped when the conversation is sent again, and
-  since `display` defaults to omitted, nothing streams either.
 - Unchecked: reasoning blocks go to the compaction summariser unchanged, so when the small
   model is a different Anthropic model it receives another model's signed thinking blocks.
 - Opus 4 and 4.1 cap output at 32K tokens, but `xhigh` (and now `max`) asks for
@@ -576,10 +572,6 @@ Found by the chunk 18 fixers, 2026-10-05.
 - With `provider: openai` and no named providers, `troupe bench --live --model
   openai/qwen3-235b` runs against `openai/openai/qwen3-235b`; `--model qwen3-235b` works.
   `docs/user/bench.md` shows `--model gateway/model-b` for a named provider only.
-- On `qwen3-235b`, `follow_steps` did its work in all three runs (every check held) and
-  still failed each on the 12-call cap: four of its twelve calls were `todo_write` in a
-  response of its own, though Decision 777 asks for the update to go with the call doing
-  the work.
 - `troupe models --json` gives a model nobody serves `context: 200000`, `Config.models/1`'s
   fallback to `context_window`, beside `served: false`; `nil` would say there is none.
 - `troupe-daemon models` has no `--json`, so an install without the TUI has no JSON form.
@@ -594,6 +586,63 @@ Found by the chunk 18 fixers, 2026-10-05.
   could creep to about 35 kB unnoticed; the old budget had about 2% headroom.
 
 Found by the chunk 18 fixers and the coordinator, 2026-10-05.
+
+### D71 - Private sessions after 0.8.4: what is left (medium)
+
+- `ObjectStore.delete_prefix` ignores each version's `DELETE` answer and counts every
+  listed version as deleted, so a delete refused with a 403 or a 5xx is reported as erased.
+- The plane deletes a session's versions inline in the `session.erased` request, one
+  `DELETE` each in turn: 1,040 took seconds, so tens of thousands could outlast the daemon's
+  call timeout. S3's batch `DeleteObjects` (1,000 keys a request) or a background job would
+  not.
+- The TUI has no way to unlink a daemon, so a second person on the same OS account can't
+  take it over from the terminal.
+- A person moved to another subject claim (Decision 755) has the sessions made under their
+  old subject left alone at their next link (Decision 784); no client hands a daemon a
+  token under another subject today.
+- A claim on a copy that diverged from the plane's is refused (`diverged`), with no way to
+  restore the plane's copy over the local one first.
+- The desktop app's session view header says where a session runs, not how its sealing
+  stands; only the list says it.
+
+Found by the chunk 19 fixers, 2026-10-05.
+
+### D72 - Model calls, naming Troupe, and what a stopped call leaves: small leftovers (low)
+
+- A pod can't turn `identify` off: no `WorkerProfile` field and no environment variable
+  carries it.
+- The model listing and the catalog's refresh (`/v1/models`, LiteLLM's `/model_group/info`)
+  and `troupe doctor`'s key check still send Req's own User-Agent.
+- `troupe bench --live` sessions name their client `other` (the bench starts sessions in
+  the VM, with no connection); `bench` would say what they are.
+- #419's documented set of `x-troupe-*` headers for LiteLLM's `extra_spend_tag_headers` is
+  not there.
+- A summary that fails (refused, timed out or crashed) is never written to the log, so a
+  stopped summariser's usage is counted live only (Decision 788).
+- `Session.Summary.fold` counts tokens and cost from `llm_response` only, leaving out the
+  summariser's call on `compacted` and a stopped call's `stopped`, so a session summary's
+  totals disagree with the listing.
+- Unchecked: `cancel_everything` doesn't reset `compact_reason`, `compact_prompt` or
+  `compact_resume`, so a threshold compaction after a cancel while compacting could log a
+  stale reason.
+- `Provider.start_stream/4` monitors the stream task and drops the reference, and the agent
+  monitors it again: every call leaves a `DOWN` that `common/4` drops.
+- A stopped call's ledger row gets a made-up request id, since only `finish/1` reads the
+  gateway's headers, so it can't be joined to the gateway's record of the request.
+
+Found by the chunk 19 fixers, 2026-10-05.
+
+### D73 - Test hygiene from the 0.8.4 work (low)
+
+- The gateway's `RestartTest` waits 30 s for the daemon it launches, which took 28 s to
+  listen on `/mnt/c` under load: the known flake. The wait could be longer.
+- A gateway loopback test logs a `FunctionClauseError` from `Troupe.LLM.Fake.render(%{text:
+  "done"}, ...)`; it fails nothing.
+- The TUI tests' `FakeRemote` HTTP `/rpc` can only answer errors without `data`.
+- `Private.resume/1` now always asks `Plane.subject`, so a link's resume task that outlives
+  a daemon test's teardown logs a task exit.
+
+Found by the chunk 19 fixers, 2026-10-05.
 
 ## Taken
 
@@ -670,6 +719,11 @@ Found by the chunk 18 fixers and the coordinator, 2026-10-05.
 | D61's first item - `troupe logout` left the daemon holding the plane token | #381, PR #385 |
 | D65's first item - cache writes over an OpenAI-compatible gateway were priced as fresh input | #396, PR #420 |
 | D65's fifth item - neither the desktop app nor a headless run showed what a turn cost | PR #418 |
+| D59's first item - an erasure left the object versions past the first 1,000 | PR #429 |
+| D59's second item and D61's first two - the clients showed a private session as a local one, and none could claim one | PR #431 |
+| D69's first item - a model call past its timeout was never stopped, and its usage not counted | PR #435 |
+| D69's second item - Anthropic's newest models think unasked, and that thinking is dropped on replay | #427 |
+| D70's third item - the task list takes model calls of its own on `qwen3-235b` | #428 |
 | D66's first item - a summariser call that never answered kept the agent compacting | #404, PR #421 |
 
 ## Checked and not a defect
