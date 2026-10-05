@@ -139,6 +139,25 @@ defmodule Troupe.Log.FoldTest do
       assert Fold.hash(old) != Fold.hash(noted)
     end
 
+    # Decision 788: the agent's replay counts a call it stopped, so the witness does too.
+    test "a stopped call's usage is the agent's, on an llm_error or a cancelled" do
+      stopped = %{"model" => "fake", "usage" => %{"input_tokens" => 100, "output_tokens" => 1}}
+      late = "the model did not answer in time"
+      asked = event(1, :user_input, %{"source" => "user", "text" => "hello"})
+      plain = [asked, event(2, :llm_error, %{"reason" => late})]
+      timed_out = [asked, event(2, :llm_error, %{"reason" => late, "stopped" => stopped})]
+      cancelled = [asked, event(2, :cancelled, %{"turn" => %{}, "stopped" => stopped})]
+
+      assert Fold.state(plain)["agents"]["root"]["input_tokens"] == 0
+
+      for log <- [timed_out, cancelled] do
+        root = Fold.state(log)["agents"]["root"]
+        assert {root["input_tokens"], root["output_tokens"]} == {100, 1}
+      end
+
+      assert Fold.hash(plain) != Fold.hash(timed_out)
+    end
+
     test "the hash does not depend on key order" do
       one = [event(1, :user_input, %{"source" => "user", "text" => "a"})]
       two = [event(1, :user_input, %{"text" => "a", "source" => "user"})]

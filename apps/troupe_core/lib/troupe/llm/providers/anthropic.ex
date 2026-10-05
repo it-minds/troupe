@@ -22,7 +22,7 @@ defmodule Troupe.LLM.Providers.Anthropic do
     ToolUse
   }
 
-  alias Troupe.LLM.{Catalog, Endpoint}
+  alias Troupe.LLM.{Catalog, Endpoint, Identify}
   alias Troupe.LLM.Providers.Anthropic.Collector
 
   @default_base_url "https://api.anthropic.com"
@@ -59,11 +59,12 @@ defmodule Troupe.LLM.Providers.Anthropic do
       url: Endpoint.build(base_url(request), "/v1/messages"),
       method: :post,
       json: body(request, thinking),
-      headers: [
-        auth_header(request, key),
-        {"anthropic-version", @api_version},
-        {"accept", "text/event-stream"}
-      ],
+      headers:
+        [
+          auth_header(request, key),
+          {"anthropic-version", @api_version},
+          {"accept", "text/event-stream"}
+        ] ++ Identify.headers(request, :anthropic),
       receive_timeout: request.timeout_ms,
       # Retries are handled by `Provider.with_retries/2` so that one policy covers
       # both adapters and a retried request re-emits nothing to the agent.
@@ -148,8 +149,8 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
   # -- streaming events -------------------------------------------------------
 
-  defp apply_event(acc, %{"type" => "message_start", "message" => message}, _collector) do
-    Collector.merge_usage(acc, message["usage"])
+  defp apply_event(acc, %{"type" => "message_start", "message" => message}, collector) do
+    merge_usage(acc, message["usage"], collector)
   end
 
   defp apply_event(acc, %{"type" => "content_block_start"} = event, collector) do
@@ -203,12 +204,12 @@ defmodule Troupe.LLM.Providers.Anthropic do
     end
   end
 
-  defp apply_event(acc, %{"type" => "message_delta"} = event, _collector) do
+  defp apply_event(acc, %{"type" => "message_delta"} = event, collector) do
     # `message_delta` reports running totals for the message, not increments, so each
     # figure it carries replaces the one from `message_start` rather than adding to it.
     acc
     |> Collector.put_stop_reason(stop_reason(get_in(event, ["delta", "stop_reason"])))
-    |> Collector.merge_usage(event["usage"])
+    |> merge_usage(event["usage"], collector)
   end
 
   defp apply_event(acc, %{"type" => "error", "error" => error}, _collector) do
@@ -219,6 +220,14 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
   defp emit(%{reply_to: reply_to, ref: ref}, delta) do
     send(reply_to, {:llm_delta, ref, delta})
+  end
+
+  # What the provider has reported so far goes to the agent as it comes, so a call the
+  # agent stops before it answers is counted for what it used (Decision 788).
+  defp merge_usage(acc, reported, %{reply_to: reply_to, ref: ref}) do
+    merged = Collector.merge_usage(acc, reported)
+    if merged.usage != acc.usage, do: send(reply_to, {:llm_usage, ref, merged.usage})
+    merged
   end
 
   # -- request shaping --------------------------------------------------------
@@ -240,7 +249,9 @@ defmodule Troupe.LLM.Providers.Anthropic do
     |> maybe_put(:tools, request.tools |> encode_tools() |> mark_last(request.cache))
     # Anthropic takes one opaque end-user id and nothing else, so the session's owner
     # goes there. Everything else a gateway wants is carried by the OpenAI-compatible
-    # adapter, which is what a LiteLLM deployment actually speaks.
+    # adapter, which is what a LiteLLM deployment actually speaks. A local session sends
+    # none: one id for every person would be one user to Anthropic, and the User-Agent
+    # already names the software (Decision 787).
     |> maybe_put(:metadata, metadata(request))
     |> put_thinking(thinking)
   end

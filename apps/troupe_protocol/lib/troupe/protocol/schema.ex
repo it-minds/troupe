@@ -113,7 +113,13 @@ defmodule Troupe.Protocol.Schema do
       },
       # `reason` is a sentence a person can act on (Decision 659), not a term. `note` is a
       # root's: what its conversation was told, which a replay puts back (Decision 693).
-      "llm_error" => %{"reason" => required(:string), "note" => optional(:string)},
+      # `stopped` is the call the agent gave up on at its timeout and stopped: `model`, and
+      # `usage` and `gateway` when it had reported what it used (Decision 788).
+      "llm_error" => %{
+        "reason" => required(:string),
+        "note" => optional(:string),
+        "stopped" => optional(:object)
+      },
       # A reply the output cap cut (`max_tokens`) or that said nothing (`empty`): `note`
       # when the model was asked again, `calls` when tool calls cut mid-argument were
       # answered with an error, `final` when it had been asked once already and the agent
@@ -287,7 +293,8 @@ defmodule Troupe.Protocol.Schema do
       # the difference between "the user said nothing" and "the user said something and
       # nobody was listening".
       "input_after_done" => %{"source" => required(:string)},
-      "cancelled" => %{"turn" => optional(:object)},
+      # `stopped`: the model call the cancel stopped, as on `llm_error` (Decision 788).
+      "cancelled" => %{"turn" => optional(:object), "stopped" => optional(:object)},
       "approval_requested" => %{
         "call_id" => required(:string),
         "tool" => required(:string),

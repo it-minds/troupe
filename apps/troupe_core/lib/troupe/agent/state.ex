@@ -75,6 +75,11 @@ defmodule Troupe.Agent.State do
     instructions: nil,
     llm_text: "",
     llm_tool_names: %{},
+    # What the provider has reported so far of the call in flight, and whether that call is
+    # the compaction summariser's: what a call the agent gives up on is counted and priced
+    # as (Decision 788).
+    llm_usage: nil,
+    llm_summariser: false,
     pending: %{},
     call_order: [],
     monitors: %{},
@@ -159,6 +164,8 @@ defmodule Troupe.Agent.State do
           loop: String.t() | nil,
           llm_text: String.t(),
           llm_tool_names: %{optional(String.t()) => String.t()},
+          llm_usage: Troupe.LLM.Usage.t() | nil,
+          llm_summariser: boolean(),
           pending: %{optional(String.t()) => Call.t()},
           call_order: [String.t()],
           monitors: %{optional(reference()) => term()},

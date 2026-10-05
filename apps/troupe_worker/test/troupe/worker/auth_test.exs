@@ -33,6 +33,7 @@ defmodule Troupe.Worker.AuthTest do
   # What the daemon serves about itself, its paths and its machine.
   @daemon_level [
     "session.create",
+    "session.claim",
     "config.get",
     "config.models",
     "config.set",
@@ -171,7 +172,10 @@ defmodule Troupe.Worker.AuthTest do
     |> Kernel.--(@connection_own)
   end
 
-  defp its_own?(method), do: about_the_session?(method) and method not in @plane_level
+  # `session.claim` names a session, but a private session lives on a daemon: a pod has none
+  # to take over (Decision 785).
+  defp its_own?(method),
+    do: about_the_session?(method) and method not in @plane_level and method not in @daemon_level
 
   defp about_the_session?(method) do
     method in @connection_level or

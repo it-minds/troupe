@@ -128,6 +128,12 @@ defmodule Troupe.Config do
             # `%{owner:, team:}`. Set by the worker when the plane places the session,
             # empty for a local one where there is nobody to bill. Never from a file.
             attribution: %{},
+            # Whether a model call names Troupe, its client and its version to the provider
+            # (Decision 787), and which client this session is: a word from
+            # `Troupe.LLM.Identify.clients/0`, set by whoever starts the session — the
+            # connection that created or woke it, the worker on a pod. Never from a file.
+            identify: true,
+            client: nil,
             # The limits the plane's terms set for a session on a pod, by the budget's
             # name for them (`max_turns`, `wall_clock`): a ceiling the session may not
             # raise itself past when its budget asks (Decision 699). `nil` on a laptop;

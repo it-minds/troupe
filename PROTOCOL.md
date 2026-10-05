@@ -130,6 +130,11 @@ with `not_initialized` and the connection closes.
 | `tools` | the client can serve `tool.invoke` requests (§8) |
 | `blobs` | the client will fetch truncated payloads with `blob.get` |
 
+`params.client_info.name` says which client this is, and a daemon names the sessions a
+connection creates or wakes to the model provider by it (Decision 787): `troupe` is the
+terminal UI, `troupe-headless` its headless run, `troupe-gui` the desktop app, and any
+other name is `other`. The name itself never leaves the daemon.
+
 The response:
 
 ```json
@@ -253,7 +258,7 @@ Durable:
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile`, `prompt_bytes` — what the prompt was made of (see below) |
 | `llm_response` | `message` (`role`, `content`: blocks of type `text`, `tool_use`, `tool_result` or `reasoning` — the last is the model's thinking, `provider`-bound, replayed only to the provider that made it and carried by `Message.text` nowhere), `usage` (`input_tokens`, `cache_read`, `cache_write`, `output_tokens` — disjoint, so the first three sum to the prompt's length), `stop_reason`, `model`, `gateway` |
-| `llm_error` | `reason` — a sentence a person can act on: a blown context window, rejected credentials, an unknown model, a rate limit the backoff outlasted, with the provider's words in brackets; `note` — a root's, the words its conversation was given about the failure, which a replay puts back |
+| `llm_error` | `reason` — a sentence a person can act on: a blown context window, rejected credentials, an unknown model, a rate limit the backoff outlasted, with the provider's words in brackets; `note` — a root's, the words its conversation was given about the failure, which a replay puts back; `stopped` — the call the agent gave up on when it did not answer within `llm_timeout_ms`, and stopped (see below) |
 | `truncated` | `reason` (`max_tokens`: the output cap cut the reply; `empty`: it had neither text nor a tool call), then one of `note` (the model was asked again), `calls` (tool calls cut mid-argument, answered with an error and not run) or `final: true` (asked once already; the agent ends `output_truncated` or `empty_reply`) |
 | `tool_call_started` | `call_id`, `name`, `args`, `identity`, `principal` |
 | `tool_call_completed` | `call_id`, `name`, `ok`, `content` |
@@ -299,7 +304,7 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 `tool_failures` and hands its parent what it found, labelled partial.
 | `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
-| `cancelled` | `turn` — what the cancelled turn had cost (see below) |
+| `cancelled` | `turn` — what the cancelled turn had cost (see below); `stopped` — the model call the cancel stopped, when one was in flight (see below) |
 | `turn_ended` | `reason` — the agent's turn is over and it waits for input: the model answered without asking for a tool, or a root's request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done`. `reason` is there only when the harness ended the turn: `tool_failures`, a tool kept failing and the answer to `tool_failures_ask_started` was `stop`; `agent_failed`, the root agent crashed as often as it may be restarted, `detail` says what it raised, and the session stops after it, to come back dormant (Decision 727). Neither turn is taken up again by a restart. `turn` — what the turn cost (see below); absent from an `agent_failed` one |
 | `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
@@ -363,8 +368,9 @@ turn cost: one input, until the agent rests (Decision 769).
  "output_tokens": 3, "cost_micros": 945, "unpriced": 0}
 ```
 
-`calls` counts the model calls the turn made: its subagents' included, and the one that
-writes a compaction's summary, whose figures are on its `compacted`. The four token figures
+`calls` counts the model calls the turn made: its subagents' included, the one that writes
+a compaction's summary, whose figures are on its `compacted`, and one the agent stopped,
+whose figures are its `stopped` (below). The four token figures
 are those calls' `usage` added up, disjoint as they are there. `cost_micros` adds up the
 `gateway.cost_micros` of the calls that had one, and `unpriced` counts the calls that had
 none, which the sum leaves out rather than counting as free. A subagent's `agent_done` says
@@ -372,6 +378,25 @@ what its task cost, which is part of its parent's turn. A cancel stops a subagen
 reports, so a cancelled turn leaves out what its running subagents had spent; and a restart
 in the middle of a turn reads the agent's own calls back from the log and forgets what its
 subagents had reported, as its budget does.
+
+`stopped`, on `llm_error` and on `cancelled`, is a model call the agent gave up on before
+it answered: one still streaming when `llm_timeout_ms` ran out, or one a cancel stopped
+(Decision 788). The agent stops it, which closes its request, so a reply that keeps coming
+is not generated and billed after that. It says what `llm_response` says of a call, as far
+as the provider had said it: `model`, and `usage` and `gateway` when the provider had
+reported usage by then. Anthropic's API does as the reply starts; an OpenAI-compatible one
+says it only at the end.
+
+```json
+{"model": "claude-sonnet-5",
+ "usage": {"input_tokens": 2000, "cache_read": 500, "cache_write": 0, "output_tokens": 1},
+ "gateway": {"cost_micros": 6165, "priced_locally": true}}
+```
+
+What the reply had written by then and the provider had not reported is not counted. A
+call that had reported nothing is one of the turn's `calls` and one of its `unpriced`, not
+a free one. A compaction's summary given up on at its timeout is counted in its turn's
+`turn` and written nowhere else.
 
 `prompt_bytes`, on `llm_request` and on `compacted` for the summariser's call, is what that
 call's prompt was made of, in UTF-8 bytes, as the log writes it:
@@ -830,10 +855,19 @@ on sealing each private session it has no sealer for: from the row's `last_seq`,
 epoch the row says, registered with that epoch so a claim made meanwhile refuses it, for
 one this device sealed last; from its first event for one the plane has never heard of;
 not at all for one another device sealed last, until it is claimed here
-(`session.claim`), and `session.list` says `sync: "elsewhere"` of it meanwhile.
+(`session.claim`), and `session.list` says `sync: "elsewhere"` of it meanwhile. Only the linked
+person's are carried on: those whose `session_created` names `subject` as their `owner`,
+and those made while nobody was linked, which name none. Somebody else's, made while they
+were linked here, is left alone with this token, the daemon's log says how many of whose,
+and it carries on at that person's next link (Decision 784). A link naming somebody other
+than the person the daemon was linked to stops every sealer first, as `identity.unlink`
+does, and keeps none of that person's token: a link without `plane_token` keeps the one
+the daemon holds only when it names the same person.
 
 #### `identity.unlink` → `{"linked": false}`. The events already written keep the actor
-they were written with.
+they were written with. The plane token goes with the link, and every private session's
+sealer stops, as at `identity.sign_out`: nothing is sealed until a client links with a
+token again, and then only the sessions of the person it links (issue #386).
 
 #### `identity.sign_out`
 ```json

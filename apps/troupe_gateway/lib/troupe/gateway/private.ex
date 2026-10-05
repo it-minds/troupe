@@ -63,6 +63,15 @@ defmodule Troupe.Gateway.Private do
   at a link and at every seal: another device sealed it last, or it is waiting to be
   erased. A session another device holds is sealed here once the person claims it
   (`take_over/2`, `session.claim`; Decision 785).
+
+  ## When somebody else links
+
+  The daemon is unlinked (`identity.unlink`) and every sealer stops, as at a sign-out; a
+  link naming somebody else stops them too. That person's link carries on only their own
+  sessions, and those nobody owns: a session made while one person was linked is theirs,
+  and registering it with another person's token would put it under that person's name at
+  the plane and their key at the key manager. It waits for its owner's next link (issue
+  #386, Decision 784).
   """
 
   alias Troupe.Gateway.Plane
@@ -346,15 +355,29 @@ defmodule Troupe.Gateway.Private do
   or the next erase finds the key gone. One the plane has no row for was never sealed, and
   the copy here is all there is.
 
-  Nothing changes where the plane cannot be asked: no token, or no answer. The sealed copy
-  and its key are there, and erasing only this one would leave nothing here to finish them.
+  Nothing changes where the plane cannot be asked: no token, no answer, or a token that is
+  not the owner's, with which it is asked nothing about the session (Decision 784). The
+  sealed copy and its key are there, and erasing only this one would leave nothing here to
+  finish them.
 
   Answers `"erased"` or `"erasure_pending"`.
   """
-  @spec erase(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
-  def erase(session_id, opts \\ []) do
+  @spec erase(%{id: String.t()}, keyword()) :: {:ok, String.t()} | {:error, term()}
+  def erase(%{id: session_id} = session, opts \\ []) do
     plane = Keyword.get(opts, :plane, Plane)
 
+    with :ok <- owned(session, plane) do
+      erase_at_plane(session_id, plane, opts)
+    end
+  end
+
+  defp owned(session, plane) do
+    owner = Map.get(session, :owner)
+    subject = Plane.subject(plane)
+    if owner in [nil, subject] or subject == nil, do: :ok, else: {:error, :not_owner}
+  end
+
+  defp erase_at_plane(session_id, plane, opts) do
     case Plane.call("session.erase", %{"session_id" => session_id}, plane) do
       {:ok, %{"erased" => true}} ->
         carry_out(session_id, plane, device(opts), opts)
@@ -394,17 +417,28 @@ defmodule Troupe.Gateway.Private do
   sealed last is that device's until somebody claims it back, which is not done here. One
   being erased is `apply_erasures/1`'s.
 
+  Only the linked person's: a session whose `owner` is somebody else is left alone, the
+  plane is asked nothing about it, and the log says how many of whose. One with no owner
+  was made while nobody was linked, and is carried on by the link that comes.
+
   Answers the sessions now sealing here.
   """
   @spec resume(keyword()) :: {:ok, [String.t()]}
   def resume(opts \\ []) do
     plane = Keyword.get(opts, :plane, Plane)
     device = device(opts)
+    subject = Plane.subject(plane)
 
-    resumed =
+    {theirs, others} =
       opts
       |> Keyword.get_lazy(:sessions, &private_sessions/0)
       |> Enum.reject(&sealing?(&1.id))
+      |> Enum.split_with(&(Map.get(&1, :owner) in [nil, subject]))
+
+    left_alone(others, subject)
+
+    resumed =
+      theirs
       |> Enum.filter(&carry_on(&1, plane, device, opts))
       |> Enum.map(& &1.id)
 
@@ -415,10 +449,12 @@ defmodule Troupe.Gateway.Private do
   Stop sealing anything, until a link with a token carries on (`resume/1`).
 
   Called when the person signs out at the client that handed the daemon its token
-  (`identity.sign_out`), after the token is forgotten. Each sealer goes, and with it the
-  key it held; its last seal on the way down finds no token and keeps nothing, because the
-  log on this disk already has every event, and the next link carries the session on from
-  the row's `last_seq`. Answers the sessions that stopped.
+  (`identity.sign_out`) or the daemon is unlinked (`identity.unlink`), after the token is
+  forgotten, and when somebody else links it, before their token is taken. Each sealer
+  goes, and with it the key it held. Its last seal on the way down finds no token, or the
+  token of the person it seals for; what it could not seal is in the log on this disk, and
+  that person's next link carries the session on from the row's `last_seq`. Answers the
+  sessions that stopped.
   """
   @spec suspend(keyword()) :: [String.t()]
   def suspend(opts \\ []) do
@@ -433,6 +469,21 @@ defmodule Troupe.Gateway.Private do
 
   defp private_sessions do
     for %{kind: "private"} = session <- Troupe.list_live_sessions(), do: session
+  end
+
+  # Once a link, and only where there is something to say: how many of whose, and never a
+  # token. The plane is asked nothing about them with this one.
+  defp left_alone([], _subject), do: :ok
+
+  defp left_alone(others, subject) do
+    whose =
+      others
+      |> Enum.frequencies_by(& &1.owner)
+      |> Enum.map_join(", ", fn {owner, count} -> "#{count} of #{owner}" end)
+
+    Logger.info(
+      "troupe: private sessions left alone (#{whose}): this daemon is linked to #{subject}, and each is sealed when its owner links it again"
+    )
   end
 
   defp carry_on(session, plane, device, opts) do
