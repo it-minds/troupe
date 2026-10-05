@@ -819,10 +819,19 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("session.pin", params, _context), do: pin(params, true)
   defp handle("session.unpin", params, _context), do: pin(params, false)
 
+  # A private session is sealed at the plane as well, and erased there first, as one erased
+  # from elsewhere is; `state` says whether the plane has destroyed its key yet (Decision
+  # 789).
   defp handle("session.erase", params, _context) do
     with {:ok, session_id} <- fetch(params, "session_id") do
-      Troupe.erase_session(session_id)
-      {:ok, %{"session_id" => session_id, "erased" => true}}
+      case Troupe.get_session(session_id) do
+        %{kind: "private"} ->
+          erase_private(session_id)
+
+        _local ->
+          Troupe.erase_session(session_id)
+          {:ok, %{"session_id" => session_id, "erased" => true, "state" => "erased"}}
+      end
     end
   end
 
@@ -1584,6 +1593,27 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp claim_error(session_id, reason),
     do: Error.new(:unavailable, %{session_id: session_id, reason: inspect(reason)})
+
+  defp erase_private(session_id) do
+    case Private.erase(session_id) do
+      {:ok, state} ->
+        {:ok, %{"session_id" => session_id, "erased" => state == "erased", "state" => state}}
+
+      {:error, reason} ->
+        {:error, erase_error(session_id, reason)}
+    end
+  end
+
+  # Nothing was erased: the plane could not be asked, and the sealed copy is there, at the
+  # plane this daemon was last linked to, which is where it is erased, or here once a client
+  # links again.
+  defp erase_error(session_id, reason) do
+    Error.new(:unavailable, %{
+      session_id: session_id,
+      reason: if(reason == :unlinked, do: "unlinked", else: inspect(reason)),
+      plane_url: with(%{plane_url: url} <- Identity.get(), do: url)
+    })
+  end
 
   defp unseen_json(nil), do: unseen_json(Unseen.none())
   defp unseen_json(unseen), do: Map.new(unseen, fn {key, value} -> {Atom.to_string(key), value} end)

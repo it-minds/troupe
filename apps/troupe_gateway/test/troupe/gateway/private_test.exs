@@ -172,20 +172,44 @@ defmodule Troupe.Gateway.PrivateTest do
       assert manifest["key_path"] == "troupe/people/ada@example.test/sessions/#{session_id}"
     end
 
-    test "a device that lost the session stops sealing", ctx do
+    # Issue #433: it was refused and carried on, uploading at its old epoch beside the
+    # device that held the session now.
+    test "a device that lost the session stops sealing, and uploads nothing more at its epoch",
+         ctx do
       session_id = unique("p")
       {:ok, sealer, context} = start_private(session_id, ctx)
+      ref = Process.monitor(sealer)
 
       # Another device takes it. This one is not told: it is holding epoch 1 and the row
       # has moved to 2, and it finds out the next time it tries to say anything.
       taken = FakePlane.steal(ctx.plane.state, session_id)
       assert taken["epoch"] == context.epoch + 1
 
+      # Its next seal goes up and is then reported, which is how it finds out.
       send_event(context, sealer, 1)
-      assert {:ok, _} = Sealer.seal_now(sealer)
+      refused = Sealer.seal_now(sealer)
 
       assert {"session.register", %{"epoch" => 1}} =
                ctx.plane.state |> FakePlane.calls() |> List.last()
+
+      assert {:ok, [sealed]} = Storage.list_segments(context.store, session_id)
+
+      # The session goes on here: a turn writes another event, and the interval comes round.
+      send_event(context, sealer, 2)
+      send(sealer, :interval)
+      settle(sealer)
+
+      # Nothing more went up at the old epoch, on its way down included, and nothing more
+      # was reported.
+      assert {:ok, [^sealed]} = Storage.list_segments(context.store, session_id)
+      assert [_refused] = seal_reports(ctx.plane.state, session_id)
+      assert {:error, :stale_version} = refused
+      assert_receive {:DOWN, ^ref, :process, ^sealer, {:shutdown, :stale_version}}
+
+      # Not started again, and listed as the other device's until it is claimed back here.
+      assert %{active: 0} = DynamicSupervisor.count_children(Private.Sealers)
+      assert eventually(fn -> not Private.sealing?(session_id) end)
+      assert Private.sync(session_id) == {"elsewhere", nil}
 
       # The row is unchanged: the loser's report was refused, not merged.
       assert FakePlane.row(ctx.plane.state, session_id)["device"] == "the other one"
@@ -774,6 +798,106 @@ defmodule Troupe.Gateway.PrivateTest do
       assert FakePlane.row(ctx.plane.state, id)["state"] == "erasure_pending"
     end
 
+    # Issue #432: `session.erase` of a private session erased this copy and nothing else,
+    # leaving its sealer running and the sealed copy at the plane under a live key.
+    test "erasing a private session here erases it at the plane, stops its sealer, and its objects go",
+         ctx do
+      requires_services(ctx)
+      {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: ctx.endpoint, spawn: false)
+      on_exit(fn -> if Process.alive?(client), do: Client.close(client) end)
+
+      assert {:ok, _identity} = Client.call(client, "identity.link", link_params(ctx))
+      id = create(client, ctx, private: true)
+      sealer = seal_here(id, ctx)
+      ref = Process.monitor(sealer)
+      store = ObjectStore.from_env()
+      assert {:ok, [_ | _]} = ObjectStore.list_versions(store, "sessions/#{id}/")
+
+      assert {:ok, %{"session_id" => ^id, "erased" => true, "state" => "erased"}} =
+               erase(client, id)
+
+      # The sealer first, the key at the plane, this copy, and the objects once the plane
+      # was told this device had stopped.
+      assert_receive {:DOWN, ^ref, :process, ^sealer, _reason}
+      refute Private.sealing?(id)
+      assert FakePlane.row(ctx.plane.state, id)["state"] == "erased"
+      assert [_once] = acknowledgements(ctx.plane.state, id)
+      assert {:ok, []} = ObjectStore.list_versions(store, "sessions/#{id}/")
+      assert Troupe.get_session(id) == nil
+      assert listed(client, id) == nil
+
+      # The next link has nothing left to do.
+      asked = length(asked_for_erasures(ctx.plane.state))
+      assert {:ok, _identity} = Client.call(client, "identity.link", link_params(ctx))
+      assert eventually(fn -> length(asked_for_erasures(ctx.plane.state)) > asked end)
+      assert [_once] = acknowledgements(ctx.plane.state, id)
+    end
+
+    # Decision 756's `erasure_pending`, reached from here: the key goes first, and this copy
+    # after it, as an erasure started at the plane has it.
+    test "a private session whose key the plane has not destroyed is listed waiting to be erased, until it has",
+         ctx do
+      requires_services(ctx)
+      {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: ctx.endpoint, spawn: false)
+      on_exit(fn -> if Process.alive?(client), do: Client.close(client) end)
+
+      assert {:ok, _identity} = Client.call(client, "identity.link", link_params(ctx))
+      id = create(client, ctx, private: true)
+      sealer = seal_here(id, ctx)
+      ref = Process.monitor(sealer)
+      store = ObjectStore.from_env()
+
+      FakePlane.refuse_keys(ctx.plane.state, true)
+
+      assert {:ok, %{"session_id" => ^id, "erased" => false, "state" => "erasure_pending"}} =
+               erase(client, id)
+
+      assert_receive {:DOWN, ^ref, :process, ^sealer, _reason}
+      assert FakePlane.row(ctx.plane.state, id)["state"] == "erasure_pending"
+      assert %{"kind" => "private", "sync" => "erasure_pending"} = listed(client, id)
+      assert {:ok, [_ | _]} = ObjectStore.list_versions(store, "sessions/#{id}/")
+      assert acknowledgements(ctx.plane.state, id) == []
+
+      # Erasing again tries again.
+      assert {:ok, %{"erased" => false, "state" => "erasure_pending"}} = erase(client, id)
+
+      # The key manager is back, and the next link finishes it: this copy, and the objects.
+      FakePlane.refuse_keys(ctx.plane.state, false)
+      assert {:ok, _identity} = Client.call(client, "identity.link", link_params(ctx))
+      assert eventually(fn -> acknowledgements(ctx.plane.state, id) != [] end)
+      assert FakePlane.row(ctx.plane.state, id)["state"] == "erased"
+      assert {:ok, []} = ObjectStore.list_versions(store, "sessions/#{id}/")
+      assert listed(client, id) == nil
+    end
+
+    test "a daemon with no plane token erases nothing of a private session, and says where it is sealed",
+         ctx do
+      requires_services(ctx)
+      {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: ctx.endpoint, spawn: false)
+      on_exit(fn -> if Process.alive?(client), do: Client.close(client) end)
+
+      assert {:ok, _identity} = Client.call(client, "identity.link", link_params(ctx))
+      id = create(client, ctx, private: true)
+      store = ObjectStore.from_env()
+      {:ok, _} = ObjectStore.put(store, "sessions/#{id}/manifest.json", "{}")
+
+      # The person signed out: the token went, and the label stayed.
+      assert {:ok, %{"signed_out" => true}} = sign_out(client, ctx.plane.url, "ada@example.test")
+      plane_url = ctx.plane.url
+
+      assert {:error,
+              %{
+                message: "unavailable",
+                data: %{"session_id" => ^id, "reason" => "unlinked", "plane_url" => ^plane_url}
+              }} = erase(client, id)
+
+      # Nothing went: this copy, the row and the objects are as they were.
+      assert %{"kind" => "private"} = listed(client, id)
+      refute Enum.any?(FakePlane.calls(ctx.plane.state), &match?({"session.erase", _}, &1))
+      refute FakePlane.row(ctx.plane.state, id)["state"]
+      assert {:ok, [_]} = ObjectStore.list_versions(store, "sessions/#{id}/")
+    end
+
     test "a local session has no sealer, and stopping one is a no-op", ctx do
       {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: ctx.endpoint, spawn: false)
       on_exit(fn -> if Process.alive?(client), do: Client.close(client) end)
@@ -922,6 +1046,25 @@ defmodule Troupe.Gateway.PrivateTest do
     }
   end
 
+  defp erase(client, session_id) do
+    Client.call(client, "session.erase", %{
+      "command_id" => Client.command_id(),
+      "session_id" => session_id
+    })
+  end
+
+  # A sealer for a private session the daemon made, its key from the stand-in the other
+  # tests use (this plane signs no assertion), with what the session's log holds sealed.
+  defp seal_here(session_id, ctx) do
+    {:ok, sealer, _context} =
+      Private.start(session_id, workspace: ctx.workspace, key_manager: &fake_key_manager/2)
+
+    on_exit(fn -> stop(sealer) end)
+    assert {:ok, %{sealed_through: sealed}} = Sealer.seal_now(sealer)
+    assert sealed > 0
+    sealer
+  end
+
   defp sign_out(client, plane_url, subject) do
     Client.call(client, "identity.sign_out", %{
       "command_id" => Client.command_id(),
@@ -960,6 +1103,21 @@ defmodule Troupe.Gateway.PrivateTest do
     for {"session.register", %{"session_id" => ^session_id} = params} <- FakePlane.calls(state),
         not Map.has_key?(params, "last_seq"),
         do: params
+  end
+
+  # And the progress reports.
+  defp seal_reports(state, session_id) do
+    for {"session.register", %{"session_id" => ^session_id, "last_seq" => _} = params} <-
+          FakePlane.calls(state),
+        do: params
+  end
+
+  # Once the sealer has handled what was sent to it before this, or has gone.
+  defp settle(sealer) do
+    _ = :sys.get_state(sealer)
+    :ok
+  catch
+    :exit, _gone -> :ok
   end
 
   defp event(seq), do: %Event{seq: seq, type: "message", agent: ["root"], data: %{"n" => seq}}
