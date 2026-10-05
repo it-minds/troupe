@@ -56,6 +56,12 @@
         "title": "Refresh Settings",
         "category": "Troupe",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "troupe.refreshModels",
+        "title": "Ask the Providers for Their Models",
+        "category": "Troupe",
+        "icon": "$(cloud-download)"
       }
     ],
     "menus": {
@@ -71,6 +77,13 @@
           "command": "troupe.refreshSettings",
           "group": "navigation",
           "when": "view == troupe.settings"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "troupe.refreshModels",
+          "group": "inline",
+          "when": "view == troupe.settings && viewItem == troupe.models"
         }
       ]
     },

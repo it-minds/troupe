@@ -234,6 +234,95 @@ it("the side bar's Settings is what troupe config --explain says of the folder w
   assert.equal((await calls(0)).length, before);
 });
 
+it("beside the model, the Models group is what troupe models --json says, asked without --refresh", async () => {
+  await edit("delta");
+  const shown = await vscode.commands.executeCommand<Shown>("troupe.refreshSettings");
+  assert.ok("folder" in shown, "a folder is shown");
+
+  assert.deepEqual(shown.rows.slice(0, 2).map((r) => r.label), ["Model", "Models"]);
+  const models = shown.rows[1]?.children ?? [];
+  assert.deepEqual(
+    models.map((r) => [r.label, r.description, r.icon]),
+    [
+      ["openai's list", "2 models, fetched 3 hours ago", "cloud"],
+      ["fake-large", "default, expensive · 200k window · $3.00/$15 · from openai's list", "star-full"],
+      // The 200,000 the JSON gives it is Troupe's fallback: no window is shown.
+      ["fake-retired", "not served by openai", "warning"],
+      ["fake-small", "cheap · 128k window · $0.25/$1.25 · from openai's list", "star-full"],
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify(shown), /sk-t/);
+
+  const asked = modelsCalls();
+  assert.ok(asked.length > 0, "troupe models was asked");
+  for (const line of asked) {
+    assert.match(line, /^models --json --workspace /);
+    assert.doesNotMatch(line, /--refresh/);
+  }
+  samePath(asked.at(-1)?.replace(/^models --json --workspace /, "").replace(/^"(.*)"$/, "$1") ?? "", folder("delta"));
+});
+
+it("the Models group's button asks the providers again: --refresh, and only from it", async () => {
+  const before = modelsCalls().length;
+  const shown = await vscode.commands.executeCommand<Shown>("troupe.refreshModels");
+  assert.ok("folder" in shown, "a folder is shown");
+  assert.equal(shown.rows[1]?.label, "Models");
+
+  const since = modelsCalls().slice(before);
+  assert.equal(since.filter((line) => line.includes("--refresh")).length, 1, since.join("\n"));
+});
+
+it("a troupe models that fails is one line in the group, and the settings are still shown", async () => {
+  const fail = path.join(work, "bin", "models.fail");
+  fs.writeFileSync(fail, "");
+
+  try {
+    const shown = await vscode.commands.executeCommand<Shown>("troupe.refreshSettings");
+    assert.ok("folder" in shown, "a folder is shown");
+    assert.equal(shown.rows[0]?.label, "Model");
+    assert.deepEqual(
+      shown.rows[1]?.children?.map((r) => [r.label, r.description, r.icon]),
+      [["Troupe could not list its models", "troupe: the fake was told not to list its models", "error"]],
+    );
+  } finally {
+    fs.rmSync(fail, { force: true });
+  }
+});
+
+it("a config that does not load: the settings could not be read, and the Models group says why", async () => {
+  const fails = ["explain.fail", "models.fail"].map((name) => path.join(work, "bin", name));
+  for (const file of fails) fs.writeFileSync(file, "");
+
+  try {
+    const shown = await vscode.commands.executeCommand<Shown>("troupe.refreshSettings");
+    assert.ok("folder" in shown, "a folder is shown");
+    assert.deepEqual(
+      shown.rows.map((r) => [r.label, r.icon]),
+      [
+        ["Troupe could not say what its settings are", "error"],
+        ["Models", "library"],
+      ],
+    );
+    assert.deepEqual(shown.rows[1]?.children?.map((r) => [r.label, r.description]), [
+      ["Troupe could not list its models", "troupe: the fake was told not to list its models"],
+    ]);
+  } finally {
+    for (const file of fails) fs.rmSync(file, { force: true });
+  }
+});
+
+it("a missing troupe is the one sentence in the Settings view", async () => {
+  const nowhere = path.join(work, "nowhere", "troupe");
+
+  await setting("path", nowhere, async () => {
+    const shown = await vscode.commands.executeCommand<Shown>("troupe.refreshSettings");
+    assert.ok("folder" in shown, "a folder is shown");
+    assert.deepEqual(shown.rows, [
+      { label: `There is no troupe to run at ${nowhere}, which troupe.path names, on this computer.`, icon: "error" },
+    ]);
+  });
+});
+
 async function open() {
   return vscode.commands.executeCommand<Opened>("troupe.open");
 }
@@ -296,6 +385,12 @@ async function calls(count: number) {
 
   await until(() => read().length >= count, `${count} call(s) of the fake troupe`, 60_000);
   return read();
+}
+
+// The fake's `troupe models` calls, each its arguments as one line.
+function modelsCalls() {
+  const file = path.join(work, "bin", "models.log");
+  return (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "").split(/\r?\n/).filter((line) => line.trim() !== "").map((line) => line.trim());
 }
 
 function samePath(actual: string, expected: string) {

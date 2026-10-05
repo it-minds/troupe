@@ -5,7 +5,7 @@ Code terminal rooted at the folder you are working in: by default a tab in the e
 which you split and tile beside your files as you would a file's. It is a door to the TUI
 and nothing more: the sessions, the approvals and the settings are the TUI's, and the TUI
 is the same program it is in any other terminal. Its side bar shows the folder's settings
-as Troupe resolves them.
+as Troupe resolves them, and the models there are to choose from.
 
 ## Installing it
 
@@ -120,6 +120,8 @@ layers merged and untrusted keys left out as Troupe decides
 - **Model**: the provider, the endpoint, whether a key is set, the default, cheap and
   expensive models, and the named providers. Each says which layer set it: `default`,
   `user`, `project`, `local` or the environment.
+- **Models**: the [models there are to choose from](#the-models-group), with their
+  windows and prices, from `troupe models --json`.
 - **Changed from the defaults**: every other key a file or the environment sets.
 - **Files**: the user file, the project's `.troupe/config.yaml` and the local
   `.troupe/config.local.yaml`. A click opens one; one that is not there opens as a new file,
@@ -136,8 +138,32 @@ working in changes, when one of those files is saved in VS Code, and on **Refres
 title bar; never while it is hidden. **A key is never shown**, masked or not: the view says
 only whether one is set.
 
-The models there are to choose from, with their windows and prices, are not in the view
-yet: they wait on a JSON form of `troupe models` (#387).
+### The Models group
+
+Under the model in use, **Models** is what `troupe models --json --workspace <folder>`
+says that folder's configuration can address (Decision 794): what each named provider
+declares, the models the config names or prices, and what each provider's own list has.
+
+- **Each model** with its window and its price in dollars a million tokens, in/out, as
+  `troupe models` prints them, and where they came from: the provider's list, your config
+  (a price from `models.prices` says so) or opencode. `no key` when its provider has none.
+- **The default, cheap and expensive models** are starred and say which they are. A role
+  you have not set is the default model's, so that one says all three.
+- **A model its provider does not serve** has a warning and says so, with what the
+  provider does serve on hover. It shows no window: the number Troupe keeps for it is a
+  fallback, not a window anyone said. A turn on it would fail.
+- **Each provider's list**: how many models it listed and when, or, when it did not
+  answer, why, and what is still kept from before.
+
+Hover a row for the whole of it. Long lists (more than 20 models) start folded.
+
+The group asks with the rest of the view, without `--refresh`: `troupe models` asks the
+providers again itself when what it keeps is stale (a day old, or not from the providers
+the config now names). The button on the group's own row,
+**Ask the Providers for Their Models**, runs `troupe models --refresh`, which asks every
+provider now, with your keys. When `troupe models` fails (a config that does not load, a
+`troupe` older than 0.8.3, which has no `--json`), the group is one line saying why, the
+rest on hover; a key is never in it, even where a reason would quote one.
 
 ## Finding `troupe`
 
@@ -188,7 +214,9 @@ Install it on that host with `install.sh` and press **Troupe: Open** again.
 **It collects nothing and sends nothing anywhere**: no telemetry, no network request of
 its own. It reads its three settings, looks for `troupe` on the disk, types one line into
 a terminal, and runs `troupe config --explain --json` on the same machine for the
-Settings view, which reads the config files and sends nothing.
+Settings view, which reads the config files and sends nothing, and `troupe models --json`
+for its Models group, which asks your providers what they serve when its list is stale,
+or when you press the group's button, as `troupe models` does in a terminal.
 
 Not yet, and tracked in #378: commands for `troupe resume`, `troupe run`, `troupe doctor`
 and `troupe config`; explorer and editor menu items that open Troupe with a file's path in
@@ -207,16 +235,20 @@ policy like every other package ([third-party-licences.md](../third-party-licenc
 - `pnpm test`: unit tests for the folder choice, the search for `troupe` (on Linux and
   Windows file systems, the extensionless file included), the message, the line for each
   shell, the Settings view's rows (never a key, a repository's ignored value and why, the
-  files and the trust), and the manifest (no Windows key on Ctrl+Alt, every icon in the
-  package). The line is also put through each shell the machine has (sh, bash, zsh, dash,
+  files and the trust), its Models group (each model's window, price and where they came
+  from, the three roles, a model not served shown without a window, each provider's list,
+  a failure as one line with no key in it), and the manifest (no Windows key on Ctrl+Alt,
+  every icon in the package). The line is also put through each shell the machine has (sh, bash, zsh, dash,
   fish, Windows PowerShell, PowerShell 7, cmd.exe), with a folder name full of quotes,
   `$`, `&` and backticks, and has to arrive as the arguments it was meant to be; so is the
   call a `.cmd` gets through cmd.exe for the Settings view.
 - `pnpm test:vscode`: the extension inside a real VS Code, against a fake `troupe` that
   writes down the directory and arguments it was started with and then waits, quits or
-  fails as it is told, and answers `config --explain --json` with settings of its own, on a
-  workspace of four folders: the editor tab, `beside` and `panel`, the editor title bar's
-  file, the side bar's list and the activity bar, and the Settings view. It is downloaded,
+  fails as it is told, and answers `config --explain --json` and `models --json` with
+  settings and models of its own, on a workspace of four folders: the editor tab, `beside`
+  and `panel`, the editor title bar's file, the side bar's list and the activity bar, the
+  Settings view, and its Models group (`--refresh` only from the group's button, a failing
+  `troupe models`, a config that does not load, a missing `troupe`). It is downloaded,
   or `TROUPE_VSCODE_EXECUTABLE` names one, and runs with its own user data and extensions
   directories under `.vscode-test/`, so nobody's own profile is read or changed. On Linux
   without a display, run it under `xvfb-run -a`.

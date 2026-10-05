@@ -1,4 +1,5 @@
-// The side bar's Settings: what `troupe config --explain --json` says of a folder, as rows.
+// The side bar's Settings: what `troupe config --explain --json` says of a folder, as rows,
+// with the models there are to choose from (models.ts) beside the model in use.
 //
 // Troupe merges its layers itself (its defaults, the user's file, the repository's, the
 // local one, the environment) and decides which of a repository's keys it trusts; the
@@ -14,6 +15,8 @@ export interface Row {
   icon?: string;
   /** A file to open on a click, at a line; one that is not there opens as a new file. */
   open?: { path: string; line?: number; exists: boolean };
+  /** The tree item's `contextValue`, which the buttons on a row are chosen by. */
+  context?: string;
   children?: Row[];
   expanded?: boolean;
 }
@@ -86,7 +89,8 @@ const MODEL: [key: string, label: string][] = [
 
 const SECRET = /(^|[._])(api_key|token|secret|password)$/;
 
-export function rows(explain: Explain): Row[] {
+/** The rows, with `models`, the Models group (models.ts), beside the model in use. */
+export function rows(explain: Explain, models: Row): Row[] {
   const byKey = new Map(explain.keys.map((k) => [k.key, k]));
   const modelKeys = new Set([...MODEL.map(([key]) => key), "providers"]);
 
@@ -102,6 +106,7 @@ export function rows(explain: Explain): Row[] {
 
   const out: Row[] = [
     { label: "Model", icon: "sparkle", expanded: true, children: model },
+    models,
     {
       label: "Changed from the defaults",
       icon: "settings-gear",
@@ -216,6 +221,32 @@ function trustRow(trusted: boolean): Row {
         tooltip:
           "Until the workspace is trusted, its own files cannot set the provider, endpoints and keys, approvals, MCP servers or paths; the rest of them applies. `troupe config trust` in the folder trusts it.",
       };
+}
+
+/**
+ * What `troupe` said when it could not answer: the first line, the rest on hover. A key is
+ * taken out first, should a reason ever quote one: the rows show none.
+ */
+export function failure(label: string, message: string, hint?: string): Row {
+  const said = unkeyed(message);
+  return {
+    label,
+    description: said.split(/\r?\n/)[0] ?? "",
+    tooltip: "```\n" + said + "\n```" + (hint === undefined ? "" : `\n\n${hint}`),
+    icon: "error",
+  };
+}
+
+// What a key could be: the value after `api_key:`, a bearer token, a vendor's `sk-…`. In
+// that order, so one is taken out once.
+const KEYS: [RegExp, string][] = [
+  [/\b(api[_-]?key|token|secret|password)(["']?\s*[:=]\s*)("[^"]*"|'[^']*'|\S+)/gi, "$1$2(a key)"],
+  [/\b(bearer\s+)\S+/gi, "$1(a key)"],
+  [/\b(sk|pk|rk)-[\w.*-]{3,}/gi, "(a key)"],
+];
+
+function unkeyed(text: string): string {
+  return KEYS.reduce((t, [pattern, to]) => t.replace(pattern, to), text);
 }
 
 function issueRow(i: Issue, icon: "error" | "warning"): Row {
