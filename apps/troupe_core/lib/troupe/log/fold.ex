@@ -185,8 +185,8 @@ defmodule Troupe.Log.Fold do
   # A cancel ends the turn it stopped, and what the next one costs is counted from nothing
   # (Decision 769). Present only once there has been one, as the goal is, so a log without
   # a cancel folds to the map it always did.
-  defp agent_fold(agent, %Event{type: "cancelled"}),
-    do: Map.update(agent, "cancels", 1, &(&1 + 1))
+  defp agent_fold(agent, %Event{type: "cancelled", data: data}),
+    do: agent |> Map.update("cancels", 1, &(&1 + 1)) |> add_stopped(data)
 
   # Compaction replaces the conversation rather than appending to it, which is the one
   # place the message count can go *down* — and therefore the one place a fold that
@@ -207,10 +207,12 @@ defmodule Troupe.Log.Fold do
   # The note a root's failed request left in its conversation (Decision 693), a message
   # like the rest. An `llm_error` written before it was has none, so every recorded
   # fixture folds as it did.
-  defp agent_fold(agent, %Event{type: "llm_error", data: %{"note" => note}})
+  defp agent_fold(agent, %Event{type: "llm_error", data: %{"note" => note} = data})
        when is_binary(note) do
-    %{agent | "messages" => agent["messages"] + 1, "last_role" => "user"}
+    add_stopped(%{agent | "messages" => agent["messages"] + 1, "last_role" => "user"}, data)
   end
+
+  defp agent_fold(agent, %Event{type: "llm_error", data: data}), do: add_stopped(agent, data)
 
   defp agent_fold(agent, %Event{type: "agent_done", data: data}) do
     %{agent | "done_reason" => data["reason"]}
@@ -229,4 +231,17 @@ defmodule Troupe.Log.Fold do
   end
 
   defp agent_fold(agent, %Event{}), do: agent
+
+  # A call the agent gave up on, on the `llm_error` or `cancelled` that says so (Decision
+  # 788): what it had reported is the agent's, as a reply's is. One written before it says
+  # nothing, so no recorded fixture's hash moves.
+  defp add_stopped(agent, %{"stopped" => %{"usage" => %{} = usage}}) do
+    %{
+      agent
+      | "input_tokens" => agent["input_tokens"] + (usage["input_tokens"] || 0),
+        "output_tokens" => agent["output_tokens"] + (usage["output_tokens"] || 0)
+    }
+  end
+
+  defp add_stopped(agent, _data), do: agent
 end

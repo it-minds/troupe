@@ -5,7 +5,9 @@ defmodule Troupe.Session.Usage do
   A projection, not a record. Every model call a session makes is already a durable
   `llm_response` event carrying the tokens, the model and — where a gateway sat in front
   of the provider — that gateway's request id and price; the summariser's call says the
-  same on the `compacted` that took its answer (Decision 769). Turning those events into
+  same on the `compacted` that took its answer (Decision 769), and a call the agent
+  stopped before it answered on the `llm_error` or `cancelled` that says so, as
+  `stopped` (Decision 788). Turning those events into
   ledger rows is therefore a fold, and the fold is the only place the two shapes meet.
 
   That it is a fold is the whole point. A pod that could not reach the plane for an hour
@@ -70,7 +72,8 @@ defmodule Troupe.Session.Usage do
 
   @doc """
   One record from one `llm_response`, or from the `compacted` that took the summariser's
-  answer, which says what that call used in the same words (Decision 769).
+  answer, which says what that call used in the same words (Decision 769), or from the
+  `stopped` on the `llm_error` or `cancelled` that gave a call up (Decision 788).
 
   Public because the live path folds a single event as it arrives and the catch-up path
   folds a list; both must produce the same row for the same event, and the way to
@@ -78,7 +81,8 @@ defmodule Troupe.Session.Usage do
   """
   @spec record(String.t(), Event.t()) :: t()
   def record(session_id, %Event{type: type, seq: seq, data: data} = event)
-      when type in ["llm_response", "compacted"] do
+      when type in ["llm_response", "compacted", "llm_error", "cancelled"] do
+    data = call(type, data)
     usage = data["usage"] || %{}
     gateway = data["gateway"] || %{}
 
@@ -122,10 +126,20 @@ defmodule Troupe.Session.Usage do
   end
 
   # A model call: every `llm_response`, and a `compacted` that says what the summariser's
-  # call used. One written before it did says nothing, and is no call of anybody's.
+  # call used. One written before it did says nothing, and is no call of anybody's. A call
+  # the agent stopped is the `stopped` on the `llm_error` or `cancelled` that says so
+  # (Decision 788), a row when it had reported what it used.
   defp billed?(%Event{type: "llm_response"}), do: true
   defp billed?(%Event{type: "compacted", data: %{"usage" => %{}}}), do: true
+
+  defp billed?(%Event{type: type, data: %{"stopped" => %{"usage" => %{}}}})
+       when type in ["llm_error", "cancelled"],
+       do: true
+
   defp billed?(_event), do: false
+
+  defp call(type, data) when type in ["llm_error", "cancelled"], do: data["stopped"] || %{}
+  defp call(_type, data), do: data
 
   @doc "The wire shape of a record, as `usage.batch` carries it."
   @spec to_json(t()) :: map()

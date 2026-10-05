@@ -148,8 +148,8 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
   # -- streaming events -------------------------------------------------------
 
-  defp apply_event(acc, %{"type" => "message_start", "message" => message}, _collector) do
-    Collector.merge_usage(acc, message["usage"])
+  defp apply_event(acc, %{"type" => "message_start", "message" => message}, collector) do
+    merge_usage(acc, message["usage"], collector)
   end
 
   defp apply_event(acc, %{"type" => "content_block_start"} = event, collector) do
@@ -203,12 +203,12 @@ defmodule Troupe.LLM.Providers.Anthropic do
     end
   end
 
-  defp apply_event(acc, %{"type" => "message_delta"} = event, _collector) do
+  defp apply_event(acc, %{"type" => "message_delta"} = event, collector) do
     # `message_delta` reports running totals for the message, not increments, so each
     # figure it carries replaces the one from `message_start` rather than adding to it.
     acc
     |> Collector.put_stop_reason(stop_reason(get_in(event, ["delta", "stop_reason"])))
-    |> Collector.merge_usage(event["usage"])
+    |> merge_usage(event["usage"], collector)
   end
 
   defp apply_event(acc, %{"type" => "error", "error" => error}, _collector) do
@@ -219,6 +219,14 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
   defp emit(%{reply_to: reply_to, ref: ref}, delta) do
     send(reply_to, {:llm_delta, ref, delta})
+  end
+
+  # What the provider has reported so far goes to the agent as it comes, so a call the
+  # agent stops before it answers is counted for what it used (Decision 788).
+  defp merge_usage(acc, reported, %{reply_to: reply_to, ref: ref}) do
+    merged = Collector.merge_usage(acc, reported)
+    if merged.usage != acc.usage, do: send(reply_to, {:llm_usage, ref, merged.usage})
+    merged
   end
 
   # -- request shaping --------------------------------------------------------

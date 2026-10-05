@@ -645,11 +645,17 @@ defmodule Troupe.Sessions.Index do
   defp get_data(%Event{data: data}, key, default), do: Map.get(data, key, default)
 
   # A model call's figures are on its `llm_response`, and the summariser's on the
-  # `compacted` that took its answer (Decision 769), as the running total counted them.
+  # `compacted` that took its answer (Decision 769), and a call the agent stopped on the
+  # `llm_error` or `cancelled` that says so (Decision 788), as the running total counted
+  # them.
   defp total_tokens(events) do
     Enum.reduce(events, 0, fn
       %Event{type: type, data: %{"usage" => %{} = usage}}, acc
       when type in ["llm_response", "compacted"] ->
+        acc + Map.get(usage, "input_tokens", 0) + Map.get(usage, "output_tokens", 0)
+
+      %Event{type: type, data: %{"stopped" => %{"usage" => %{} = usage}}}, acc
+      when type in ["llm_error", "cancelled"] ->
         acc + Map.get(usage, "input_tokens", 0) + Map.get(usage, "output_tokens", 0)
 
       _event, acc ->
@@ -664,6 +670,10 @@ defmodule Troupe.Sessions.Index do
     Enum.reduce(events, 0.0, fn
       %Event{type: type, data: %{"gateway" => %{"cost_micros" => micros}}}, acc
       when type in ["llm_response", "compacted"] and is_integer(micros) ->
+        acc + micros / 1_000_000
+
+      %Event{type: type, data: %{"stopped" => %{"gateway" => %{"cost_micros" => micros}}}}, acc
+      when type in ["llm_error", "cancelled"] and is_integer(micros) ->
         acc + micros / 1_000_000
 
       _event, acc ->
