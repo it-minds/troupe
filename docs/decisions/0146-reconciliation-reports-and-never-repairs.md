@@ -4,7 +4,8 @@ title: Reconciliation reports and never repairs
 date: 2026-09-11
 status: accepted
 paths:
-  - apps/troupe_operator
+  - apps/troupe_plane/lib/troupe/plane/reconcile.ex
+  - apps/troupe_plane/lib/mix/tasks/troupe.ledger.reconcile.ex
 gist: Reconciliation reports and never repairs
 ---
 

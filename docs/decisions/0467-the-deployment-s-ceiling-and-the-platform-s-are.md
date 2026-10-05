@@ -4,7 +4,7 @@ title: The deployment's ceiling and the platform's are one rung
 date: 2026-09-16
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/*budget.ex
 gist: The deployment's ceiling and the platform's are one rung
 ---
 

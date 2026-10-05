@@ -4,7 +4,8 @@ title: "`usage.batch` is a request, not a notification, and its answer is the wa
 date: 2026-09-13
 status: accepted
 paths:
-  - apps/troupe_worker
+  - apps/troupe_plane/lib/troupe/plane/control/connection.ex
+  - apps/troupe_worker/lib/troupe/worker/usage.ex
 gist: "`usage.batch` is a request, not a notification, and its answer is the watermark"
 ---
 

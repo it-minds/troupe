@@ -4,7 +4,7 @@ title: A principal's spend counts against its sponsor
 date: 2026-09-16
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/*budget.ex
 gist: A principal's spend counts against its sponsor
 ---
 

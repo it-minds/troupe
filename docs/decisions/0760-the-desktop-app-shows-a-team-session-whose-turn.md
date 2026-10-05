@@ -5,7 +5,7 @@ date: 2026-10-03
 status: accepted
 issue: 354
 paths:
-  - apps/troupe_core
+  - clients/gui
 gist: The desktop app shows a team session whose turn the harness stopped as failed, and says why in words
 ---
 

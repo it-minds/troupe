@@ -4,7 +4,8 @@ title: Reservations are not spending
 date: 2026-09-11
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/ledger.ex
+  - apps/troupe_plane/lib/troupe/plane/ledger/
 gist: Reservations are not spending
 ---
 

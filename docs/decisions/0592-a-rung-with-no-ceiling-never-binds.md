@@ -4,7 +4,7 @@ title: A rung with no ceiling never binds
 date: 2026-09-17
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/*budget.ex
 gist: A rung with no ceiling never binds
 ---
 

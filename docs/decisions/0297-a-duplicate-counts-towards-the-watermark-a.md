@@ -4,7 +4,9 @@ title: A duplicate counts towards the watermark; a failed insert stops it
 date: 2026-09-13
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/team_budget.ex
+  - apps/troupe_plane/lib/troupe/plane/ledger.ex
+  - apps/troupe_plane/lib/troupe/plane/ledger/
 gist: A duplicate counts towards the watermark; a failed insert stops it
 ---
 

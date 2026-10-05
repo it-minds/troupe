@@ -4,7 +4,8 @@ title: No rollup pipeline
 date: 2026-09-13
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/ledger.ex
+  - apps/troupe_plane/lib/troupe/plane/ledger/
 gist: No rollup pipeline
 ---
 

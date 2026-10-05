@@ -4,7 +4,7 @@ title: "`kms.assertion` refuses a deactivated owner, and that is the door that m
 date: 2026-09-15
 status: accepted
 paths:
-  - apps/troupe_worker
+  - apps/troupe_plane/lib/troupe/plane/connections.ex
 gist: "`kms.assertion` refuses a deactivated owner, and that is the door that mattered"
 ---
 

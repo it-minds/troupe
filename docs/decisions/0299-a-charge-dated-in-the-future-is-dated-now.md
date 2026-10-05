@@ -4,7 +4,8 @@ title: A charge dated in the future is dated now
 date: 2026-09-13
 status: accepted
 paths:
-  - apps/troupe_worker
+  - apps/troupe_plane/lib/troupe/plane/ledger.ex
+  - apps/troupe_plane/lib/troupe/plane/ledger/
 gist: A charge dated in the future is dated now
 ---
 

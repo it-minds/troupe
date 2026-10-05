@@ -4,7 +4,8 @@ title: Every reservation is written before it is granted
 date: 2026-09-11
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/ledger/reservation.ex
+  - apps/troupe_plane/lib/troupe/plane/team_budget.ex
 gist: Every reservation is written before it is granted
 ---
 

@@ -4,7 +4,7 @@ title: A session's slice is trimmed against the tightest ceiling, not only the t
 date: 2026-09-16
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/*budget.ex
 gist: A session's slice is trimmed against the tightest ceiling, not only the team's
 ---
 

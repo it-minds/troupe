@@ -4,7 +4,7 @@ title: A person's cap follows them between teams
 date: 2026-09-16
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/*budget.ex
 gist: A person's cap follows them between teams
 ---
 

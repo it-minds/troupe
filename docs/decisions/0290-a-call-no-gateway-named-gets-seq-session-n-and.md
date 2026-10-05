@@ -4,7 +4,8 @@ title: A call no gateway named gets `seq:<session>:<n>`, and reconciliation call
 date: 2026-09-13
 status: accepted
 paths:
-  - apps/troupe_gateway
+  - apps/troupe_core/lib/troupe/session/usage.ex
+  - apps/troupe_plane/lib/troupe/plane/reconcile.ex
 gist: A call no gateway named gets `seq:<session>:<n>`, and reconciliation calls it `unmetered`
 ---
 

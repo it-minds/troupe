@@ -4,7 +4,7 @@ title: One promise is one row, written by the ladder after every rung agrees
 date: 2026-09-16
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/*budget.ex
 gist: One promise is one row, written by the ladder after every rung agrees
 ---
 

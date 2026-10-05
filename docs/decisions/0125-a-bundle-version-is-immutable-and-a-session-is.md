@@ -4,7 +4,7 @@ title: A bundle version is immutable and a session is pinned at creation
 date: 2026-09-11
 status: accepted
 paths:
-  - apps/troupe_core
+  - apps/troupe_plane/lib/troupe/plane/bundles.ex
 gist: A bundle version is immutable and a session is pinned at creation
 ---
 

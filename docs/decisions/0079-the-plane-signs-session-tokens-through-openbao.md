@@ -4,7 +4,8 @@ title: The plane signs session tokens through OpenBao transit and never holds a 
 date: 2026-09-11
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/tokens.ex
+  - apps/troupe_protocol/lib/troupe/protocol/token.ex
 gist: The plane signs session tokens through OpenBao transit and never holds a key
 ---
 

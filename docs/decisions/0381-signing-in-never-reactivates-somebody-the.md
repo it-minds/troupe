@@ -4,7 +4,7 @@ title: Signing in never reactivates somebody the provider deactivated
 date: 2026-09-15
 status: accepted
 paths:
-  - apps/troupe_core
+  - apps/troupe_plane/lib/troupe/plane/login.ex
 gist: Signing in never reactivates somebody the provider deactivated
 ---
 

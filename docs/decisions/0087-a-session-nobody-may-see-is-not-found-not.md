@@ -4,7 +4,8 @@ title: A session nobody may see is `not_found`, not `forbidden`
 date: 2026-09-11
 status: accepted
 paths:
-  - apps
+  - apps/troupe_plane/lib/troupe/plane/sessions.ex
+  - apps/troupe_plane/lib/troupe/plane/sessions/
 gist: A session nobody may see is `not_found`, not `forbidden`
 ---
 

@@ -4,7 +4,7 @@ title: A rung that refuses unwinds the rungs that had already agreed
 date: 2026-09-16
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/*budget.ex
 gist: A rung that refuses unwinds the rungs that had already agreed
 ---
 

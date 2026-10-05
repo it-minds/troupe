@@ -4,7 +4,8 @@ title: A service principal's secret is a salted SHA-256, not argon2id
 date: 2026-09-13
 status: accepted
 paths:
-  - apps/troupe_plane
+  - apps/troupe_plane/lib/troupe/plane/principals.ex
+  - apps/troupe_plane/lib/troupe/plane/identity/service_principal.ex
 gist: A service principal's secret is a salted SHA-256, not argon2id
 ---
 

@@ -4,7 +4,7 @@ title: The harness checks on every call, not only at sign-in
 date: 2026-09-15
 status: accepted
 paths:
-  - apps/troupe_core
+  - apps/troupe_worker/lib/troupe/worker/auth.ex
 gist: The harness checks on every call, not only at sign-in
 ---
 
