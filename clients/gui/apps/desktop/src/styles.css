@@ -1167,6 +1167,10 @@ main {
 .stream > .note + .note {
   margin-top: calc(-1 * var(--space-4));
 }
+/* What a turn cost belongs to the turn, so it sits close under the answer. */
+.stream > .turn + .note.turn-cost {
+  margin-top: calc(-1 * var(--space-4));
+}
 
 /* A turn: who, over what they said. A person's words sit on the pit behind an edge in
    their colour; the troupe's stand on the void with nothing around them. */

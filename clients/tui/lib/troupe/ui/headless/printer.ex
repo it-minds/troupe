@@ -3,6 +3,7 @@ defmodule Troupe.UI.Headless.Printer do
   Headless renderer: prints the event stream as plain lines prefixed by
   `agent_path`, for CI and scripting. Notifies `:on_rest` once, with an exit code,
   when the target branch rests. Pending approvals are denied (use `--auto-approve`).
+  When a turn ends, what it cost is one line, the window's (`Model.turn_line/1`).
 
   The target rests when its turn ends (`turn_ended`), when the turn is cancelled, or
   when it is done (`agent_done`). All three are read from the log, never from the live
@@ -47,6 +48,7 @@ defmodule Troupe.UI.Headless.Printer do
   alias Troupe.Client
   alias Troupe.Client.Message
   alias Troupe.UI.ModelError
+  alias Troupe.UI.TUI.Model
 
   @reconnect_ms 60_000
   @queued_ms 60_000
@@ -382,6 +384,17 @@ defmodule Troupe.UI.Headless.Printer do
 
   defp print(%{type: :branch_spawned, agent_path: p, data: d}, state),
     do: say(state, p, "spawned /#{d.name} (#{d.isolation})")
+
+  # What the turn cost, in the line the window puts under it (Decisions 139 and 144): the
+  # event that ends a turn carries it and a live `agent_state` never does, so it is printed
+  # once, after the turn's reply and before the line saying why the run ended. A turn that
+  # made no call says nothing.
+  defp print(
+         %{type: :agent_state, agent_path: p, seq: seq, data: %{turn: %{calls: n} = turn}},
+         state
+       )
+       when is_integer(seq) and n > 0,
+       do: say(state, p, Model.turn_line(turn))
 
   defp print(_event, state), do: state
 

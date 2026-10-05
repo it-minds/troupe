@@ -72,7 +72,7 @@ defmodule Troupe.Config.Schema do
       spec(
         "reasoning_effort",
         :effort,
-        "How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or a thinking budget in tokens."
+        "How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a thinking budget in tokens. An Anthropic model gets it in the form it takes."
       )
     ]
   end

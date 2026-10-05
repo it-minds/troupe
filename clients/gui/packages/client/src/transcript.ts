@@ -88,6 +88,11 @@ export type Entry =
       closed: boolean;
     }
   | { kind: "todo"; seq: number; agent: string[]; items: TodoItem[]; source: string }
+  /**
+   * What a turn cost, under it once it ended (troupe-remote Decision 769): `text` is the
+   * line, in the terminal client's words (`turnLine`). A subagent's is its task's.
+   */
+  | { kind: "turn"; seq: number; agent: string[]; turn: TurnCost; text: string }
   /** Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors. */
   | { kind: "system"; seq: number; agent: string[]; type: string; text: string };
 
@@ -107,6 +112,29 @@ export interface LoopState {
   /** The evidence `goal_complete` gave. */
   summary: string | undefined;
   iterations: number | undefined;
+}
+
+/**
+ * Tokens one model call or several used, as `llm_response.usage` says them: disjoint, so
+ * the first three add up to what was sent.
+ */
+export interface TokenUsage {
+  input_tokens: number;
+  cache_read: number;
+  cache_write: number;
+  output_tokens: number;
+}
+
+/**
+ * What a turn cost, from the `turn` on the event that ends it (`turn_ended`, `cancelled`,
+ * `agent_done`): its model calls, its subagents' and a compaction's summariser's among
+ * them, their tokens, and the money of those that were priced. `unpriced` counts the
+ * calls nobody priced, which `cost_micros` leaves out rather than counting as free.
+ */
+export interface TurnCost extends TokenUsage {
+  calls: number;
+  cost_micros: number;
+  unpriced: number;
 }
 
 /** An input this client sent that the server has not yet echoed back. */
@@ -142,8 +170,13 @@ export interface TranscriptState {
    * 727). Cleared by the next turn's input.
    */
   failed: { reason: string; detail: string | undefined } | undefined;
-  /** Summed from every `llm_response.gateway.cost_micros`; undefined if none said. */
+  /**
+   * Summed from every `llm_response.gateway.cost_micros` and a compaction's summariser's
+   * (`compacted.gateway`); undefined if none said.
+   */
   costMicros: number | undefined;
+  /** The session's tokens: every `llm_response.usage`, and a compaction's summariser's. */
+  usage: TokenUsage | undefined;
   /** The session's goal from `goal_set`, until `goal_cleared`: what every turn works towards. */
   goal: string | undefined;
   /** The latest loop towards the goal, running or how it ended; undefined before the first. */
@@ -171,6 +204,7 @@ export const emptyTranscript: TranscriptState = {
   doneReason: undefined,
   failed: undefined,
   costMicros: undefined,
+  usage: undefined,
   goal: undefined,
   loop: undefined,
 };
@@ -247,6 +281,47 @@ export function loopEnding(loop: LoopState): string {
   return `loop stopped after ${iterations}: ${LOOP_REASONS[loop.reason ?? ""] ?? loop.reason ?? "it stopped"}${said(loop.detail)}`;
 }
 
+/**
+ * What a turn cost, in the terminal client's words (its Decision 139): its model calls,
+ * what was sent and billed in full (`↑`), what the provider's prompt cache served, what
+ * came back, and the money — `no price` when no call was priced, and how many were not
+ * when some were. The figures are worked out in whole numbers, as that client does it, so
+ * the two say the same to the cent.
+ */
+export function turnLine(turn: TurnCost): string {
+  const calls = turn.calls === 1 ? "1 call" : `${turn.calls} calls`;
+  return (
+    `turn: ${calls} · ↑ ${short(turn.input_tokens + turn.cache_write)} sent · ${short(turn.cache_read)} cached · ` +
+    `↓ ${short(turn.output_tokens)} received · ${money(turn)}`
+  );
+}
+
+function money(turn: TurnCost): string {
+  if (turn.unpriced === turn.calls) return "no price";
+  if (turn.unpriced === 0) return dollars(turn.cost_micros);
+  return `${dollars(turn.cost_micros)}, ${turn.unpriced === 1 ? "1 call" : `${turn.unpriced} calls`} unpriced`;
+}
+
+function dollars(micros: number): string {
+  if (micros === 0) return "$0.00";
+  if (micros < 10_000) return "under a cent";
+  const cents = Math.floor((micros + 5_000) / 10_000);
+  return `$${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
+}
+
+/** A count of tokens, in thousands or millions to one decimal past a thousand. */
+function short(n: number): string {
+  if (n >= 1_000_000) return `${tenths(n, 1_000_000)}M`;
+  if (n >= 1_000) return `${tenths(n, 1_000)}k`;
+  return String(n);
+}
+
+/** `n / unit` to one decimal, rounded half up. */
+function tenths(n: number, unit: number): string {
+  const t = Math.floor((n * 10 + unit / 2) / unit);
+  return `${Math.floor(t / 10)}.${t % 10}`;
+}
+
 /** A root's turn that `agent_failed` ended, in the transcript's words, with what it raised. */
 function failedText(detail: string | undefined): string {
   return `the agent kept crashing and the session stopped${detail ? `: ${detail}` : ""}`;
@@ -257,6 +332,54 @@ function contentOf(v: unknown): string | BlobRef | undefined {
   if (v === undefined || v === null) return undefined;
   if (isBlobRef(v)) return v;
   return typeof v === "string" ? v : JSON.stringify(v);
+}
+
+/** A count the event gives, or nothing for one it does not. */
+function count(v: unknown): number {
+  return typeof v === "number" && Number.isInteger(v) && v > 0 ? v : 0;
+}
+
+/** `gateway.cost_micros`, when the gateway said one. */
+function costOf(gateway: unknown): number | undefined {
+  const cost = (gateway as { cost_micros?: unknown } | undefined)?.cost_micros;
+  return typeof cost === "number" ? cost : undefined;
+}
+
+function usageOf(v: unknown): TokenUsage | undefined {
+  if (typeof v !== "object" || v === null) return undefined;
+  const u = v as Record<string, unknown>;
+  return {
+    input_tokens: count(u["input_tokens"]),
+    cache_read: count(u["cache_read"]),
+    cache_write: count(u["cache_write"]),
+    output_tokens: count(u["output_tokens"]),
+  };
+}
+
+function addUsage(sum: TokenUsage | undefined, more: TokenUsage | undefined): TokenUsage | undefined {
+  if (!more) return sum;
+  if (!sum) return more;
+  return {
+    input_tokens: sum.input_tokens + more.input_tokens,
+    cache_read: sum.cache_read + more.cache_read,
+    cache_write: sum.cache_write + more.cache_write,
+    output_tokens: sum.output_tokens + more.output_tokens,
+  };
+}
+
+/**
+ * The line under a turn the event ends, as the entries to add after the event's own: one
+ * when it carries a `turn` that made a call, none for a turn that made none or a log
+ * written before turns were counted.
+ */
+function spent(base: { seq: number; agent: string[] }, d: DurableEvent): Entry[] {
+  const raw = d.data["turn"];
+  const usage = usageOf(raw);
+  const calls = count((raw as { calls?: unknown } | undefined)?.calls);
+  if (!usage || calls === 0) return [];
+  const t = raw as Record<string, unknown>;
+  const turn: TurnCost = { calls, ...usage, cost_micros: count(t["cost_micros"]), unpriced: count(t["unpriced"]) };
+  return [{ kind: "turn", ...base, turn, text: turnLine(turn) }];
 }
 
 function systemText(d: DurableEvent): string {
@@ -388,25 +511,37 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
       };
     }
 
-    // A turn ends as a rest, and says nothing, unless the harness ended it. `agent_failed`
-    // is a root that crashed as often as it may be restarted: the turn is over, with what
-    // it raised, and the session stops after it (Decision 727). Nothing more reaches the
-    // screen from that agent, so it is at rest here, whatever it last said it was doing.
+    // A turn ends as a rest, and says only what it cost (troupe-remote Decision 769),
+    // unless the harness ended it. `agent_failed` is a root that crashed as often as it
+    // may be restarted: the turn is over, with what it raised, and the session stops after
+    // it (Decision 727). Nothing more reaches the screen from that agent, so it is at rest
+    // here, whatever it last said it was doing.
     case "turn_ended": {
-      if (!isRoot(d.agent) || str(d.data["reason"]) !== "agent_failed") return next;
+      if (!isRoot(d.agent) || str(d.data["reason"]) !== "agent_failed") return { ...next, entries: [...state.entries, ...spent(base, d)] };
       const detail = str(d.data["detail"]) || undefined;
       return {
         ...next,
         failed: { reason: "agent_failed", detail },
         agentState: { ...next.agentState, [pathKey(d.agent)]: "idle" },
-        entries: [...state.entries, { kind: "system", ...base, type: "agent_failed", text: failedText(detail) }],
+        entries: [...state.entries, { kind: "system", ...base, type: "agent_failed", text: failedText(detail) }, ...spent(base, d)],
+      };
+    }
+
+    // The call that wrote the summary is billed as a reply is, and is the session's spend
+    // as a reply's is (troupe-remote Decision 769). A log from before it said nothing of it.
+    case "compacted": {
+      const cost = costOf(d.data["gateway"]);
+      return {
+        ...next,
+        usage: addUsage(next.usage, usageOf(d.data["usage"])),
+        costMicros: cost === undefined ? next.costMicros : (next.costMicros ?? 0) + cost,
+        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }],
       };
     }
 
     case "llm_response": {
       const text = textOf(d.data["message"]);
-      const gateway = d.data["gateway"] as { cost_micros?: number } | undefined;
-      const cost = typeof gateway?.cost_micros === "number" ? gateway.cost_micros : undefined;
+      const cost = costOf(d.data["gateway"]);
       const entries = text
         ? [
             ...state.entries,
@@ -421,6 +556,7 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
         thinking: isRoot(d.agent) ? "" : next.thinking,
         error: undefined,
         costMicros: cost === undefined ? next.costMicros : (next.costMicros ?? 0) + cost,
+        usage: addUsage(next.usage, usageOf(d.data["usage"])),
       };
     }
 
@@ -462,13 +598,14 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
     // never logs another word, so an approval or a question anywhere in that subtree ends
     // here — the rule the TUI keeps. That includes the budget's and the failure guard's
     // question, which no call closes. The entry saying the turn was cancelled goes in as
-    // before.
+    // before, and what the turn had cost under it.
     case "cancelled":
       return {
         ...next,
         entries: [
           ...state.entries.map((en) => ((en.kind === "approval" || en.kind === "question") && within(en.agent, d.agent) ? closeUnanswered(en) : en)),
           { kind: "system", ...base, type: d.type, text: systemText(d) },
+          ...spent(base, d),
         ],
       };
 
@@ -670,12 +807,13 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
 
     // The session is finished when its root agent is: a subagent reporting, or one a
     // restore ended `interrupted`, is its own agent's state and a note, and nothing more.
+    // Either says what its last turn cost, a subagent's being its whole task.
     case "agent_done":
       return {
         ...next,
         doneReason: isRoot(d.agent) ? str(d.data["reason"], "finished") : next.doneReason,
         agentState: { ...next.agentState, [pathKey(d.agent)]: "done" },
-        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }],
+        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }, ...spent(base, d)],
       };
 
     case "llm_error":

@@ -686,6 +686,30 @@ defmodule Troupe.Config do
   end
 
   @doc """
+  The thinking form the provider's own model list says `model` takes, `:adaptive` or
+  `:budget`, else `nil` (Decision 780). Looked for under the id `model` is addressed by,
+  then under the id its provider lists it by when a `models:` entry renamed it.
+  """
+  @spec thinking(t(), String.t() | nil) :: Catalog.thinking() | nil
+  def thinking(%__MODULE__{} = config, model) do
+    model = resolve_model(config, model || config.model)
+    wire = target(config, model).model
+
+    listed =
+      case split_model(config, model) do
+        {nil, _bare} -> wire
+        {_provider, _bare} -> hd(String.split(model, "/", parts: 2)) <> "/" <> wire
+      end
+
+    Enum.find_value(Enum.uniq([model, listed]), fn name ->
+      case Map.get(config.catalog, name) do
+        %Catalog{thinking: form} -> form
+        _ -> nil
+      end
+    end)
+  end
+
+  @doc """
   What a model costs, and who said so: `{entry, :catalog}` when the provider's own
   catalog prices it, else `{entry, :config}` when `models.prices` does, else `nil`
   (Decision 689). The entry is priced per token, as the catalog's are.

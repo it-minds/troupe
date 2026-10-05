@@ -22,7 +22,7 @@ defmodule Troupe.LLM.Providers.Anthropic do
     ToolUse
   }
 
-  alias Troupe.LLM.Endpoint
+  alias Troupe.LLM.{Catalog, Endpoint}
   alias Troupe.LLM.Providers.Anthropic.Collector
 
   @default_base_url "https://api.anthropic.com"
@@ -53,10 +53,12 @@ defmodule Troupe.LLM.Providers.Anthropic do
   end
 
   defp post(request, key, reply_to, ref) do
+    thinking = thinking(request)
+
     options = [
       url: Endpoint.build(base_url(request), "/v1/messages"),
       method: :post,
-      json: body(request),
+      json: body(request, thinking),
       headers: [
         auth_header(request, key),
         {"anthropic-version", @api_version},
@@ -84,6 +86,9 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
       {:ok, %Req.Response{status: status}} when status >= 500 ->
         {:retry, {:http_status, status}}
+
+      {:ok, %Req.Response{status: 400, body: body}} ->
+        refused(describe(body), thinking, request)
 
       {:ok, %Req.Response{status: status, body: body}} ->
         {:error, {:http_status, status, describe(body)}}
@@ -218,8 +223,8 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
   # -- request shaping --------------------------------------------------------
 
-  defp body(%Request{} = request) do
-    keep_thinking? = thinking_budget(request.reasoning_effort) != nil
+  defp body(%Request{} = request, thinking) do
+    keep_thinking? = thinking != nil
 
     %{
       model: request.model,
@@ -237,38 +242,124 @@ defmodule Troupe.LLM.Providers.Anthropic do
     # goes there. Everything else a gateway wants is carried by the OpenAI-compatible
     # adapter, which is what a LiteLLM deployment actually speaks.
     |> maybe_put(:metadata, metadata(request))
-    |> put_thinking(request.reasoning_effort)
+    |> put_thinking(thinking)
   end
 
-  # Anthropic takes a thinking budget in tokens where an OpenAI-compatible provider takes
-  # an effort level, so a configured effort becomes a budget. The budget has to fit inside
-  # `max_tokens`, so enabling thinking raises the output cap along with it rather than
-  # failing the request (Decision 658).
-  defp put_thinking(body, effort) do
-    case thinking_budget(effort) do
+  # Anthropic's models take thinking in one of two forms, and refuse the other with a 400
+  # (Decision 780). Those before Claude Opus 4.7 take a budget in tokens; from Opus 4.7 on
+  # a budget is refused and they take adaptive thinking with an effort level. Which one a
+  # model takes is what the provider's own model list says (`Request.thinking`), else what
+  # its name says (`Catalog.thinking/1`), else — a model nothing describes — the newer form
+  # for a level and a budget for a number of tokens, which is what a number asks for.
+  #
+  # Either way the configured effort sets how much room the thinking gets: a budget is it,
+  # and adaptive thinking spends from `max_tokens` just the same, so the output cap is
+  # raised to hold it rather than the request failing or the reply being cut (Decision
+  # 658). Adaptive thinking asks for a summary of the thinking, which is what the newest
+  # models otherwise leave out, so it still streams as reasoning.
+  defp thinking(%Request{reasoning_effort: effort} = request) do
+    case room(effort) do
       nil ->
-        body
+        nil
 
-      budget ->
-        body
-        |> Map.put(:thinking, %{type: "enabled", budget_tokens: budget})
-        |> Map.put(:max_tokens, max(body.max_tokens, budget + 4_096))
+      room ->
+        {form, why} = form(request)
+        %{form: form, why: why, effort: effort, room: room, level: level(effort, room)}
     end
   end
 
-  defp thinking_budget(effort) when effort in [nil, "none", "off"], do: nil
-  defp thinking_budget("minimal"), do: 1_024
-  defp thinking_budget("low"), do: 4_096
-  defp thinking_budget("medium"), do: 8_192
-  defp thinking_budget("high"), do: 16_384
-  defp thinking_budget("xhigh"), do: 32_768
+  defp form(%Request{thinking: listed}) when listed in [:adaptive, :budget], do: {listed, :listed}
 
-  defp thinking_budget(other) when is_binary(other) do
+  defp form(%Request{model: model, reasoning_effort: effort}) do
+    case Catalog.thinking(model) do
+      nil -> if number?(effort), do: {:budget, :effort}, else: {:adaptive, :effort}
+      named -> {named, :name}
+    end
+  end
+
+  defp put_thinking(body, nil), do: body
+
+  defp put_thinking(body, %{form: :budget, room: budget}) do
+    body
+    |> Map.put(:thinking, %{type: "enabled", budget_tokens: budget})
+    |> Map.put(:max_tokens, max(body.max_tokens, budget + 4_096))
+  end
+
+  defp put_thinking(body, %{form: :adaptive, room: room, level: level}) do
+    body
+    |> Map.put(:thinking, %{type: "adaptive", display: "summarized"})
+    |> Map.put(:output_config, %{effort: level})
+    |> Map.put(:max_tokens, max(body.max_tokens, room + 4_096))
+  end
+
+  # The tokens a configured effort gives the thinking: the budget itself, for a model that
+  # takes one.
+  defp room(effort) when effort in [nil, "none", "off"], do: nil
+  defp room("minimal"), do: 1_024
+  defp room("low"), do: 4_096
+  defp room("medium"), do: 8_192
+  defp room("high"), do: 16_384
+  defp room(level) when level in ["xhigh", "max"], do: 32_768
+
+  defp room(other) when is_binary(other) do
     case Integer.parse(other) do
       {n, ""} when n >= 1_024 -> n
       _ -> nil
     end
   end
+
+  # Anthropic's five levels. A word is the level of the same name (`minimal`, which it
+  # has none of, is `low`); a number of tokens is the level whose budget above would hold
+  # it, and more than `xhigh`'s is `max`.
+  defp level(word, _room) when word in ["low", "medium", "high", "xhigh", "max"], do: word
+  defp level("minimal", _room), do: "low"
+  defp level(_number, room) when room <= 4_096, do: "low"
+  defp level(_number, room) when room <= 8_192, do: "medium"
+  defp level(_number, room) when room <= 16_384, do: "high"
+  defp level(_number, room) when room <= 32_768, do: "xhigh"
+  defp level(_number, _room), do: "max"
+
+  defp number?(effort), do: match?({_n, ""}, Integer.parse(effort))
+
+  # A 400 that is about the thinking this request carried is said in words that name the
+  # setting behind it; any other 400 goes as the provider put it. What the provider says
+  # differs by model and form ("thinking.type.enabled" is not supported…, an `adaptive`
+  # tag it does not expect, `output_config` it does not take), and all of it names one
+  # of these.
+  @thinking_words ["thinking.type", "budget_tokens", "adaptive", "output_config", "effort"]
+
+  defp refused(detail, thinking, request) do
+    if thinking && is_binary(detail) && String.contains?(detail, @thinking_words),
+      do: {:error, {:thinking_refused, refusal(thinking, request), detail}},
+      else: {:error, {:http_status, 400, detail}}
+  end
+
+  defp refusal(thinking, %Request{model: model}) do
+    sent =
+      case thinking.form do
+        :adaptive -> "adaptive thinking at effort #{thinking.level}"
+        :budget -> "a thinking budget of #{thinking.room} tokens"
+      end
+
+    "#{model} refused #{sent}, which reasoning_effort #{thinking.effort} asks for; " <>
+      change(thinking)
+  end
+
+  # For a model Troupe knows, the form is the model's and only the effort can go; for one
+  # it does not, the kind of value picks the form, so the other kind may be the answer.
+  defp change(%{why: :effort, form: :adaptive}),
+    do:
+      "for a model Troupe has no listing for, a number of tokens sends a thinking budget " <>
+        "instead: set reasoning_effort in the model's models: entry to one, such as 16384, " <>
+        "or remove it to send no thinking"
+
+  defp change(%{why: :effort, form: :budget}),
+    do:
+      "for a model Troupe has no listing for, a level sends adaptive thinking instead: set " <>
+        "reasoning_effort in the model's models: entry to low, medium, high, xhigh or max, " <>
+        "or remove it to send no thinking"
+
+  defp change(_known), do: "remove reasoning_effort from the model's models: entry to send no thinking"
 
   defp metadata(%Request{attribution: %{owner: owner}}) when is_binary(owner) do
     %{user_id: owner}
@@ -397,6 +488,9 @@ defmodule Troupe.LLM.Providers.Anthropic do
   defp auth_header(%Request{auth: :bearer}, key), do: {"authorization", "Bearer " <> key}
   defp auth_header(_request, key), do: {"x-api-key", key}
 
+  # An error response is `{"type": "error", "error": {"type": …, "message": …}}`; an error
+  # inside the stream is the inner object alone.
+  defp describe(%{"error" => %{"message" => message}}), do: message
   defp describe(%{"message" => message}), do: message
   defp describe(body) when is_binary(body), do: String.slice(body, 0, 400)
   defp describe(body), do: inspect(body) |> String.slice(0, 400)

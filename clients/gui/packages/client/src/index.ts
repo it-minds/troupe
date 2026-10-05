@@ -40,9 +40,21 @@ export {
   openQuestions,
   loopEnding,
   settleLoop,
+  turnLine,
   LEGACY_BUDGET_OPTIONS,
 } from "./transcript.js";
-export type { Entry, TranscriptState, PendingInput, BlobRef, TodoItem, PresenceMember, QuestionOption, LoopState } from "./transcript.js";
+export type {
+  Entry,
+  TranscriptState,
+  PendingInput,
+  BlobRef,
+  TodoItem,
+  PresenceMember,
+  QuestionOption,
+  LoopState,
+  TokenUsage,
+  TurnCost,
+} from "./transcript.js";
 export {
   FleetStore,
   PlaneSource,

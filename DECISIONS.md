@@ -5247,6 +5247,244 @@ citation keeps meaning what it meant.
        fresh one alone. TUI `ModelsCLITest`: `troupe models` on its first run, from the
        cache, with `--refresh`, with a refused key, and with no provider to ask.
 
+779. **The compaction summariser reads the tool calls it summarises as text, and a summary
+     that does not come within `llm_timeout_ms` is given up on.** Issue #404 and the first
+     item of D66. The summariser's request defines no tools, while the stretch it
+     summarises holds tool calls and results, and Anthropic's Messages API refuses a
+     request with tool blocks and no tool definitions. So every summary of a stretch with
+     a tool call in it failed there, which since 774 changes nothing: a session on that
+     API, or on a gateway in front of it, never compacted and grew until it overflowed.
+     OpenAI's API takes such a request, which is how it went unnoticed. And `:compacting`
+     had no clause for `{:llm_timeout, ref}`, so a summariser call that hung kept the agent
+     there past `llm_timeout_ms`, where `:thinking` gives the same call up.
+     - **Written out, not defined.** Each call in what is summarised goes to the summariser
+       as `[called read_file {"path":"notes.txt"}]` and each result as `[read_file
+       returned]` or `[read_file failed]` with its output, whole (771: the summariser
+       condenses results rather than sending them again). Carrying the definitions of the
+       tools the calls used was the other way, and loses on each count: their bytes on
+       every summary (the build profile's are about 12 kB) with no cache to read them from,
+       since the summariser runs on the small model with a system prompt of its own and the
+       agent's prompt cache does not carry over; a definition wanted for a tool the session
+       no longer has (an MCP server gone, another profile's tool); and a summariser offered
+       tools may answer with a call rather than a summary, which `tool_choice` would have
+       to forbid on every provider. Text is valid on every provider, and `tools` stays
+       empty, which is how the bench tells the summariser's call apart (772).
+     - **The summariser is told how a call reads**, and asked for what the calls that
+       matter did (the tool, the arguments that matter, the gist of the result) rather
+       than their output, where its prompt said to drop "tool mechanics".
+     - **A result's tool is named by the calls in the message before it**, as 771's stub
+       names it: a gateway that numbers its calls repeats ids across responses.
+     - **Only the summariser's request changes.** The conversation, the log, the split
+       (774) and the counting (769) are as they were. `compact_prompt` measures the request
+       as sent, so the summariser's `tool_results` bytes read 0 now: its results are text
+       in `conversation`. Against the chunk's tip, the bench's summary call is 22 bytes
+       shorter (206 more of system prompt, 228 fewer of conversation), and no budgeted
+       measure moves.
+     - **A summary that does not come** is given up on after `llm_timeout_ms`, as any model
+       call is: `:compacting` turns the timeout into the `llm_error` `:thinking` makes of
+       it, and that fails as a refused summary does, leaving the conversation as it was
+       (774) and going on to the interrupted turn or to rest.
+     - **A stand-in that refuses what Anthropic's API refuses.** The fake model takes
+       `strict_tools`: a request whose messages hold a tool call or result and that defines
+       no tools gets the `400`, in Anthropic's words, and takes no step from the script.
+       Opt-in, beside `strict_pairs`, since OpenAI's API takes such a request; the whole
+       core suite passed with it on for every session, so nothing else in core sends one.
+       A step
+       `{:delay, ms, step}` answers late, as the bench's model's does, which is how a test
+       outlasts `llm_timeout_ms`.
+     - **Proof:** `CompactionTest`, against the stand-in with both checks on: a turn of a
+       `read_file` and three `todo_read`s that overflows compacts once and finishes, and
+       the summariser's request holds no tool block and carries `read_file
+       {"path":"notes.txt"}` and the file's text, which failed on the chunk's tip (no
+       `compacted`: the summary request was refused); and with `llm_timeout_ms` at a second,
+       a summariser that would answer after a minute ends the compaction, the turn finishes
+       and the conversation is whole, which on the tip was still in `:compacting` ten
+       seconds on. `FakeScriptTest`: the stand-in refuses tool blocks without tools, takes
+       text alone and the same blocks with tools, and answers a delayed step late.
+
+780. **A reasoning effort reaches an Anthropic model in the form the model takes: adaptive
+     thinking with an effort level from Claude Opus 4.7 on, a thinking budget before it.
+     And a gateway's cache writes over the OpenAI wire are cache writes, priced as such.**
+     Issue #396 and the first item of D65. The adapter sent `thinking: {type: "enabled",
+     budget_tokens: N}` for every effort (658), which Anthropic's newest models refuse
+     with a 400, so a `reasoning_effort` on one of them failed every call: on the chunk's
+     tip a request for `claude-opus-5-5` at `high` went out with `budget_tokens: 16384`.
+     - **What Anthropic takes**, as its API documentation had it when read on 2026-10-05
+       (the Claude API reference, model tables of 2026-09-25): a budget is refused with a
+       400 by Opus 4.7, 4.8, 5 and 5.5, Sonnet 5 and 5.5, Fable 5 and 5.1 and Mythos
+       (`"thinking.type.enabled" is not supported for this model. Use
+       "thinking.type.adaptive" and "output_config.effort" ...`); Opus 4.6 and Sonnet 4.6
+       take both, the budget deprecated; Haiku 4.5 and everything older take only the
+       budget. Adaptive thinking is `thinking: {type: "adaptive"}` with
+       `output_config: {effort: ...}`, one of `low`, `medium`, `high`, `xhigh`, `max`
+       (4.6 has no `xhigh`). From 4.7 on a thinking block streams empty unless the request
+       asks for a summary. The documentation is not fetched by anything at run or test
+       time.
+     - **Which form.** What the provider's own list says, else the model's name, else the
+       kind of value. Anthropic's `GET /v1/models` lists `capabilities.thinking.types`
+       with `supported` on each form: `enabled` means the budget, else `adaptive` the
+       newer form, and the catalog keeps it (`Catalog.thinking`, `"thinking"` in
+       `models.json`); `Config.thinking/2` finds it under the id a model is addressed by,
+       then the id its provider lists it by, and the agent puts it on the request
+       (`Request.thinking`). With no list, `Catalog.thinking/1` reads the name, found
+       inside a gateway's renaming (`eu.anthropic.claude-opus-5`,
+       `claude-sonnet-4-5@20250929`): the Claude 3 family and Opus, Sonnet and Haiku before
+       4.7 take a budget; 4.7 and later, Fable and Mythos the newer form. A name that is
+       none of those, a gateway's own alias, is sent the newer form for a word and a
+       budget for a number, which is what the key's documentation already said a number
+       is. A model that takes both keeps the budget: Opus 4.6 and Sonnet 4.6 go on as they
+       did, and every model that gets the newer form has all five levels, so no level has
+       to be moved down for one that lacks it.
+     - **Levels.** A word is Anthropic's level of the same name; `minimal`, which it has no
+       level for, is `low`. A number is the lowest level whose budget below would hold it
+       (4096 `low`, 8192 `medium`, 16384 `high`, 32768 `xhigh`), and more is `max`; under
+       1024 it is nothing, as before. `max` is a word now too: the newer form's top level,
+       and for a model that takes a budget the same 32768 as `xhigh`, the most the older
+       models' output caps hold. Both forms raise `max_tokens` to the budget's size and
+       4096 more, as 658 had it: adaptive thinking spends from the output cap just as a
+       budget does. The newer form asks for `display: "summarized"`, so the newest models'
+       thinking still streams as reasoning (658) instead of as empty blocks; it is billed
+       the same.
+     - **A refusal.** A 400 to a request that carried thinking, whose message names
+       `thinking.type`, `budget_tokens`, `adaptive`, `output_config` or `effort`, is
+       `{:thinking_refused, sentence, detail}`, and the sentence names the setting:
+       `house-model refused adaptive thinking at effort high, which reasoning_effort high
+       asks for; for a model Troupe has no listing for, a number of tokens sends a thinking
+       budget instead: set reasoning_effort in the model's models: entry to one, such as
+       16384, or remove it to send no thinking`, then what the provider said. For a model
+       the list or the name decided, it says to remove the effort. Not answered by sending
+       the other form, as 658 does for the output cap's field: a level and a budget do not
+       ask for the same thing, and which one was meant is the person's to say. Any other
+       400 is as before, and Anthropic's error message is now read out of its `error`
+       object rather than printed as a map.
+     - **Cache writes over the OpenAI wire.** LiteLLM, serving an Anthropic model it marks
+       for caching, reports Anthropic's figures in two spellings: writes as
+       `prompt_tokens_details.cache_creation_tokens` and `cache_creation_input_tokens`,
+       reads as `cached_tokens` and `cache_read_input_tokens`, with all three input
+       figures counted in `prompt_tokens` (its `calculate_usage`, the same in v1.55 and on
+       main as of 2026-10-05). The reader took `cached_tokens` only, so a write was fresh
+       input, priced at the input rate rather than the write rate a quarter above it, and
+       the log showed no write at all. It now reads either spelling of each, takes both
+       out of `prompt_tokens`, and a call is priced at the catalog's
+       `cache_creation_input_token_cost`, or `models.prices.<model>.cache_write`, as an
+       Anthropic call already was (689, 770). OpenAI's own API reports neither field.
+     - **Not in this:** a model that thinks with no `thinking` field (Opus 5.5, Fable,
+       Sonnet 5.5) and no `reasoning_effort` set is sent nothing and its thinking blocks
+       are not replayed, as before; Sonnet 5.5's `between_tools`; levels a future model
+       lacks; the hour-long cache's own write rate.
+     - **Proof:** `Troupe.LLM.ThinkingTest`, against request bodies written out in full:
+       Opus 5.5 at `high` is adaptive thinking at `high` with a cap of 20480, Haiku 4.5 at
+       `medium` a budget of 8192 as before; eleven of the newest names (two of them a
+       gateway's renaming) adaptive and ten older ones (dated, Bedrock's and Vertex's
+       spellings) a budget; the levels and numbers mapped; `none`, `off` and 500 sending
+       nothing; a model nothing describes; each refusal's sentence, and a 400 about
+       something else left alone; Anthropic's listing parsed and kept through the cache
+       file; the list over the name over the kind of value. `ProvidersTest`: a LiteLLM
+       chunk's writes are `cache_write`, in either spelling. `PromptCacheTest`: the
+       stand-in as a LiteLLM gateway that marks up to the last message, six calls each
+       writing, each logged and priced at the write rate of a catalog parsed from a
+       `/model_group/info` body. `Troupe.Agent.ThinkingFormTest`: an agent's call through
+       a named provider of `type: anthropic` carries adaptive thinking at the configured
+       effort for Opus 5.5, and a budget for a model the catalog says takes one. On the
+       chunk's tip nine of these failed: the newest models were sent a budget, a refusal
+       read as a map, and every write over the OpenAI wire was fresh input. And the
+       installed daemon, with scratch homes, against a loopback stand-in that records each
+       body and answers both model listings: over the protocol, `claude-opus-5-5` at `high`
+       went out as adaptive thinking at `high`, `claude-haiku-4-5` at `medium` as a budget
+       of 8192, a `house-model` at 12000 that the stand-in's list says takes adaptive
+       thinking (the catalog refreshed itself after the first session) at `high`, and a
+       LiteLLM-shaped answer logged 1500 written, 3000 read and 500 fresh, priced at 5450
+       micro-dollars by the catalog's rates. The build installed before sent the first and
+       third a budget, and logged the gateway's call as 2000 fresh and nothing written, at
+       4700.
+
+781. **A tool's result is cut at 32 KiB by default, not 60,000 bytes: what is cut is one
+     `read_output` call away, and what is sent goes out again with every call after it.**
+     Issue #407, the other half of #389's slice 3, whose number Decision 771 left for a
+     measurement. The first live bench against a real model (`qwen3-235b`, three runs of
+     each task) had one `fix_test` run cost $0.103 where the other two cost $0.041 and
+     $0.018: a `shell` call returned more than 60 kB, it was cut at the limit, and the four
+     calls after it, which carried it again, were 100,574 of the run's 133,073 input
+     tokens. That gateway caches nothing, so each call paid for it in full, and 771's stub
+     applies only behind a compaction, which no run came near.
+     - **Why 32 KiB (32,768 bytes).** The maintainer's choice between the old 60,000 and
+       the issue's candidate, 16 KiB, the blob inline limit where 771's stub floor sits.
+       32 KiB still sends whole what an agent ordinarily asks for: a `grep` of 200
+       matching lines of up to about 160 bytes, and a file of `precise_edit`'s size (1,560
+       lines, 31,042 bytes as `read_file` numbers them) in one read. At 16 KiB that file
+       is cut, and so is such a `grep` past about 80 bytes a line, and each cut the model
+       needs the rest of is a round trip; a number below 32 KiB needs measurements of its
+       own.
+     - **What a cut costs.** The model is sent the first 32 KiB and the marker, and
+       `read_output` pages the rest back, 200 lines a call: one round trip, the whole
+       prompt again with the page, when the model needs the rest, and nothing when it
+       does not. Against that, every later call carries up to 27,232 bytes less, until a
+       compaction summarises the result away; in #407's dear run, four calls. Offline,
+       `cut_output`, whose script does read the rest back, sends 39,649 tokens (four bytes
+       each, 772) over its three calls where it sent 46,422: the call with the page
+       carries the whole result either way, and the call before it 27 kB less.
+     - **One default.** `grep`, `git_read`, `read_file`, `shell` and `web_fetch` each kept
+       a copy of 60,000 for a context with no config; they read `%Config{}`'s now, so the
+       next move is one line. The key table says `read_output` pages the rest back, where
+       it said the rest is kept as a blob.
+     - **The bench.** Offline, `cut_output`'s cut result is 32,869 bytes (59,892 before),
+       and its budget 36,000 (61,000), a tenth over (772); every other measure is as it
+       was. The live scenarios still test what they say, so none changed: `large_log`'s
+       480 kB log is more than a read returns at either limit, `precise_edit`'s file still
+       arrives whole in one read, and the other tasks' files are under 1 kB each. The live
+       bench's `fix_test` worst cost and median input, before and after, are on the pull
+       request.
+     - **Not here:** D66's markers naming `read_output` to the profiles that do not offer
+       it (`explore`, `answer`, `ask`, `librarian`), which a lower limit makes those agents
+       meet more often; the stub floor of 771. A `tool_output_limit` a person has set
+       holds as before.
+     - **Proof:** `ConfigTest`: the default is 32,768 in the struct and in the key table,
+       and a tool with no config cuts a 60 kB read at it, both failing on the chunk's tip
+       (60,000, and 59,966 bytes); `BenchLiveTest`'s read cut at the new limit in a run's
+       `tool_calls`; `ExplainTest` against the regenerated reference; the offline bench
+       within its budgets; and the installed `troupe bench` and `troupe config --explain
+       tool_output_limit`, on the pull request.
+
+782. **The desktop app and a headless run say what a turn cost, in the terminal UI's line,
+     and `@troupe/client` writes the line.** Issue #389, the rest of slice 4; Decision 769,
+     TUI Decisions 139 and 144. The harness writes `turn` on the event that ends a turn and
+     the terminal UI draws one line under the turn from it, but the client library's fold
+     read neither `turn` nor a compaction's `usage`, so the desktop app said nothing of
+     what a turn cost, and `troupe run --headless` printed nothing of it either (D65).
+     - **One line, written once.** The fold makes a `turn` entry of the `turn` on
+       `turn_ended`, `cancelled` and `agent_done`, after the event's own (`turn cancelled`,
+       `done: …`), with its `text` from `turnLine/1` in the terminal UI's words: `turn: 3
+       calls · ↑ 300 sent · 3.0k cached · ↓ 3 received · $0.04`, `no price` when no call
+       was priced, `, 2 calls unpriced` when some were not. The desktop app draws the
+       text as a note close under the turn, a subagent's with its path in front, and
+       formats nothing itself, so any client of the library says the same. Nothing for a
+       turn that made no call, a log from before turns were counted, or a root's turn
+       that `agent_failed` ended, which carries no `turn`.
+     - **The same to the cent.** The terminal UI rounded floats, and a float at an exact
+       half goes either way by how it is held: `$1.045` printed `$1.04` there and `$0.045`
+       printed `$0.05`, which a copy in JavaScript could not be sure of matching. Past a
+       million tokens Elixir printed the float as `1.0e3`, so the 9-million-token turn the
+       issue is about read `9.0e3k sent`. Both clients now work the figures out in whole
+       numbers, rounded half up, and a million is `M`, as `Troupe.Agent.Headroom` already
+       wrote it: `6.0M sent`. The terminal UI's tile and side panel count the same way.
+     - **The summariser's call is the session's spend.** The fold adds a `compacted`'s
+       `usage` and `gateway.cost_micros` to the session's `usage` (new) and `costMicros`,
+       as the terminal UI's window adds them (139), so the desktop app's "Cost so far"
+       has it. The desktop app shows no session token total and gets none here.
+     - **Headless.** One line per ended turn, prefixed with its agent like every other,
+       after the reply and before `exit N:`, and once whether it was printed live or read
+       back from the journal. It is on standard output with the rest of the transcript:
+       the printer has no other stream and no `--json`, and a script that wants the
+       figures as data reads them from the session's log.
+     - **Proof:** client `turn-cost.test.ts` (six of its first seven tests fail on the
+       chunk's tip: no line from `turn_ended`, `cancelled` or `agent_done`, and the
+       summariser's call missing from the session's cost), the figures at their halves and
+       past a million; desktop `turn-cost.test.tsx`, the line under the turn and the cost so
+       far with the summariser's call; TUI `cli_test.exs`, a run's line after its reply and
+       each ended turn's in the window's words (both fail on the tip); and the installed
+       `troupe run --headless` and the desktop app against a scratch daemon, on the pull
+       request.
+
 783. **`troupe models --json` prints what `troupe models` says as one JSON object for a
      program: the models with their prices as numbers, the roles, what the catalog fetched
      from where and when, and the named providers; never a key.** Issue #387, in part: the
@@ -5298,50 +5536,3 @@ citation keeps meaning what it meant.
        anywhere in it. TUI `ModelsCLITest`: `troupe models --json` decoded, a second run
        from the cache, a refused key, and a config that does not load said on standard
        error with nothing on standard output.
-
-781. **A tool's result is cut at 32 KiB by default, not 60,000 bytes: what is cut is one
-     `read_output` call away, and what is sent goes out again with every call after it.**
-     Issue #407, the other half of #389's slice 3, whose number Decision 771 left for a
-     measurement. The first live bench against a real model (`qwen3-235b`, three runs of
-     each task) had one `fix_test` run cost $0.103 where the other two cost $0.041 and
-     $0.018: a `shell` call returned more than 60 kB, it was cut at the limit, and the four
-     calls after it, which carried it again, were 100,574 of the run's 133,073 input
-     tokens. That gateway caches nothing, so each call paid for it in full, and 771's stub
-     applies only behind a compaction, which no run came near.
-     - **Why 32 KiB (32,768 bytes).** The maintainer's choice between the old 60,000 and
-       the issue's candidate, 16 KiB, the blob inline limit where 771's stub floor sits.
-       32 KiB still sends whole what an agent ordinarily asks for: a `grep` of 200
-       matching lines of up to about 160 bytes, and a file of `precise_edit`'s size (1,560
-       lines, 31,042 bytes as `read_file` numbers them) in one read. At 16 KiB that file
-       is cut, and so is such a `grep` past about 80 bytes a line, and each cut the model
-       needs the rest of is a round trip; a number below 32 KiB needs measurements of its
-       own.
-     - **What a cut costs.** The model is sent the first 32 KiB and the marker, and
-       `read_output` pages the rest back, 200 lines a call: one round trip, the whole
-       prompt again with the page, when the model needs the rest, and nothing when it
-       does not. Against that, every later call carries up to 27,232 bytes less, until a
-       compaction summarises the result away; in #407's dear run, four calls. Offline,
-       `cut_output`, whose script does read the rest back, sends 39,649 tokens (four bytes
-       each, 772) over its three calls where it sent 46,422: the call with the page
-       carries the whole result either way, and the call before it 27 kB less.
-     - **One default.** `grep`, `git_read`, `read_file`, `shell` and `web_fetch` each kept
-       a copy of 60,000 for a context with no config; they read `%Config{}`'s now, so the
-       next move is one line. The key table says `read_output` pages the rest back, where
-       it said the rest is kept as a blob.
-     - **The bench.** Offline, `cut_output`'s cut result is 32,869 bytes (59,892 before),
-       and its budget 36,000 (61,000), a tenth over (772); every other measure is as it
-       was. The live scenarios still test what they say, so none changed: `large_log`'s
-       480 kB log is more than a read returns at either limit, `precise_edit`'s file still
-       arrives whole in one read, and the other tasks' files are under 1 kB each. The live
-       bench's `fix_test` worst cost and median input, before and after, are on the pull
-       request.
-     - **Not here:** D66's markers naming `read_output` to the profiles that do not offer
-       it (`explore`, `answer`, `ask`, `librarian`), which a lower limit makes those agents
-       meet more often; the stub floor of 771. A `tool_output_limit` a person has set
-       holds as before.
-     - **Proof:** `ConfigTest`: the default is 32,768 in the struct and in the key table,
-       and a tool with no config cuts a 60 kB read at it, both failing on the chunk's tip
-       (60,000, and 59,966 bytes); `BenchLiveTest`'s read cut at the new limit in a run's
-       `tool_calls`; `ExplainTest` against the regenerated reference; the offline bench
-       within its budgets; and the installed `troupe bench` and `troupe config --explain
-       tool_output_limit`, on the pull request.

@@ -27,9 +27,14 @@ defmodule Troupe.LLM.Request do
     max_tokens: 8192,
     temperature: nil,
     # How hard a reasoning model should think, verbatim from the model's `models:` entry
-    # (Decision 658): an OpenAI-compatible provider takes the word, Anthropic a budget
-    # made from it. `nil` asks for no reasoning and gets the plain output cap.
+    # (Decision 658): an OpenAI-compatible provider takes the word, Anthropic a budget or
+    # an effort level made from it. `nil` asks for no reasoning and gets the plain output
+    # cap.
     reasoning_effort: nil,
+    # The form the model takes thinking in, `:adaptive` or `:budget`, when the provider's
+    # own model list says (Decision 780). `nil` leaves it to the adapter, which goes by the
+    # model's name.
+    thinking: nil,
     base_url: nil,
     # `{:refused, why}` when the provider may not be used — a `{env:VAR}` its key or URL
     # reads is not set — which the adapter answers with that error and no request.
@@ -64,6 +69,7 @@ defmodule Troupe.LLM.Request do
           max_tokens: pos_integer(),
           temperature: float() | nil,
           reasoning_effort: String.t() | nil,
+          thinking: :adaptive | :budget | nil,
           base_url: String.t() | nil,
           api_key: String.t() | {:refused, String.t()} | nil,
           auth: :api_key | :bearer,

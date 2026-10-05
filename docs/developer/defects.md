@@ -499,10 +499,6 @@ Found by the chunk 16 fixers, 2026-10-04.
 
 ### D65 - What a turn costs: what #389 left (medium)
 
-- A LiteLLM gateway serving an Anthropic model over the OpenAI wire reports cache writes as
-  `cache_creation_input_tokens` (and `prompt_tokens_details.cache_creation_tokens`). The
-  OpenAI reader (`apps/troupe_core/lib/troupe/llm/providers/openai.ex`) reads
-  `cached_tokens` only, so those writes are priced as fresh input.
 - The task list goes after the system prompt's cache mark, before the messages
   (`Request.system_tail`, Decision 770). Each `todo_write` changes it, and the provider
   writes the conversation's cache again: in a 30-call turn with about ten list updates the
@@ -513,9 +509,6 @@ Found by the chunk 16 fixers, 2026-10-04.
 - Subagent spend is added to the parent's turn live only. A cancel or a parent restart in
   the middle of the turn loses what the subagents reported; the delegation's own
   `tool_call_completed` could carry it.
-- The headless printer doesn't print the per-turn line, and the desktop app shows no turn
-  cost: `@troupe/client`'s fold reads neither `turn` (on `turn_ended`, `cancelled`,
-  `agent_done`) nor `compacted.usage`.
 - `Troupe.Bench.Model.measure/2` counts `request.system` only, so the offline bench's
   `system_bytes` leaves out the task list the log counts; `Request.system_text/1` has both.
 
@@ -523,9 +516,6 @@ Found by the chunk 17 fixers, 2026-10-04.
 
 ### D66 - Compaction and cut tool output: small leftovers (medium)
 
-- `:compacting` has no clause for `{:llm_timeout, ref}` (`agent/server.ex`), so `common/4`
-  drops it: a summariser call that hangs keeps the agent in `:compacting` past
-  `llm_timeout_ms`, where `:thinking` turns the same message into an `llm_error`.
 - The `explore`, `answer`, `ask` and `librarian` profiles don't offer `read_output`, but
   `grep`, `git_read` and `web_fetch` cut long output with a marker naming a `read_output`
   call: those agents are told to make a call they can't. #389's stubs are skipped for such
