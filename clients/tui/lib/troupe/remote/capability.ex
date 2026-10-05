@@ -27,6 +27,7 @@ defmodule Troupe.Remote.Capability do
     {can?, reason} =
       cond do
         state == :read_only -> {false, "this session is read-only"}
+        state == :erasure_pending -> {false, "this session is waiting to be erased"}
         state == :erased -> {false, "this session has been erased"}
         match?({:lost, _why}, error) -> {false, "lost the session: #{elem(error, 1)}"}
         not up? -> {false, "reconnecting to the worker"}

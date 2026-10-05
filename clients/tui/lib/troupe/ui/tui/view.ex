@@ -487,14 +487,63 @@ defmodule Troupe.UI.TUI.View do
       }
     }
 
+    entry = Enum.at(entries, cursor)
+
     detail = %Paragraph{
-      text: session_detail(Enum.at(entries, cursor), state, max(detail_rect.width - 2, 20)),
+      text: session_detail(entry, state, max(detail_rect.width - 2, 20)),
       wrap: true,
-      block: %Block{title: " detail — Enter resumes this session ", borders: [:all]}
+      block: %Block{title: detail_title(entry), borders: [:all]}
     }
 
     [{list, list_rect}, {detail, detail_rect}]
   end
+
+  defp detail_title(entry) do
+    if claimable?(entry),
+      do: " detail — Enter resumes · c claims it here ",
+      else: " detail — Enter resumes this session "
+  end
+
+  @doc """
+  Whether `c` takes the session over here: a private one another device sealed last, as
+  this machine's daemon says it (root Decision 785).
+  """
+  @spec claimable?(map() | nil) :: boolean()
+  def claimable?(%{kind: "private", sync: "elsewhere"}), do: true
+  def claimable?(_entry), do: false
+
+  @doc """
+  Where a private session is kept and how its sealing stands, `private · synced`, in the
+  desktop app's words (`@troupe/client`'s `syncWords`); empty for any other session.
+  """
+  @spec kept(map()) :: String.t()
+  def kept(entry) do
+    case {Map.get(entry, :kind), Map.get(entry, :sync)} do
+      {"private", nil} -> "private"
+      {"private", sync} -> "private · " <> elem(sync_words(sync, Map.get(entry, :device)), 0)
+      _other -> ""
+    end
+  end
+
+  @doc "A private session's sync state in words: the label, and the sentence behind it."
+  @spec sync_words(String.t(), String.t() | nil) :: {String.t(), String.t()}
+  def sync_words("current", _device), do: {"synced", "sealed under your key through its last event"}
+
+  def sync_words("behind", _device),
+    do: {"syncing", "being sealed; its latest events are not sealed yet"}
+
+  def sync_words("paused", _device),
+    do: {"not syncing", "nothing is sealed until this computer is signed in again"}
+
+  def sync_words("elsewhere", device) do
+    holder = device || "another device"
+    {"on " <> holder, holder <> " sealed it last; claim it to seal it from this computer"}
+  end
+
+  def sync_words("erasure_pending", _device),
+    do: {"waiting to be erased", "erased; its key is not destroyed yet"}
+
+  def sync_words(other, _device), do: {other, other}
 
   defp sessions_title(entries, state, width) do
     count = "#{length(entries)} session(s)"
@@ -523,9 +572,17 @@ defmodule Troupe.UI.TUI.View do
 
     room = max(width - Model.cell_width(head) - 1, 8)
 
-    (head <> " " <> clip(Model.one_line(entry.title), room))
+    (head <> " " <> clip(kept_title(entry), room))
     |> String.trim_trailing()
     |> needs_you_line(needs_you?(entry))
+  end
+
+  # A private session says so before its title, and how its sealing stands.
+  defp kept_title(entry) do
+    case kept(entry) do
+      "" -> Model.one_line(entry.title)
+      kept -> "[" <> kept <> "] " <> Model.one_line(entry.title)
+    end
   end
 
   # A row in a list that says a person is needed is drawn in the reserved colour, whole,
@@ -625,9 +682,25 @@ defmodule Troupe.UI.TUI.View do
        field("owner", entry.owner || "you"),
        field("profile", entry.profile || "—"),
        field("branches", "#{length(branches)}")
-     ] ++ branch_block(branches, width))
+     ] ++ private_block(entry) ++ branch_block(branches, width))
     |> Enum.join("\n")
   end
+
+  # A private session's sealing, in a sentence, and what `c` does where another device
+  # holds it.
+  defp private_block(%{kind: "private", sync: sync} = entry) when is_binary(sync) do
+    {label, detail} = sync_words(sync, Map.get(entry, :device))
+    said = [field("private", label <> " — " <> detail)]
+
+    if claimable?(entry),
+      do:
+        said ++
+          ["", "c claims it for this computer: it is sealed from here, and the other device stops."],
+      else: said
+  end
+
+  defp private_block(%{kind: "private"}), do: [field("private", "yes")]
+  defp private_block(_entry), do: []
 
   defp where(%{id: sid}, %{session_id: sid}), do: "this session"
   defp where(%{origin: {:remote, _plane}} = entry, _state), do: "on the plane — #{entry.state}"

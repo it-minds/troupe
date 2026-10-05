@@ -420,9 +420,6 @@ Found by the chunk 14 fixer of slot E14 (PR #359), 2026-10-03.
 
 - `ObjectStore.list_versions/2` reads one page, so an erasure (a pod's, and since PR #364
   a private session's) of a session with more than 1000 object versions leaves the rest.
-- How the desktop app and the TUI show a session in the new `erasure_pending` state is
-  untested: the client library types a state as an open string, and the TUI's remote
-  worker reads a state it doesn't know as none.
 - `Troupe.Session.MCP`, reloading after a server left `mcp.json`, stops the server but
   leaves its HTTP sessions in the local session's table and open at the server until the
   local session stops (`Sessions.retain/2` would end them, as `put_servers` now does on a
@@ -432,10 +429,6 @@ Found by the chunk 14 fixers of slots A14 and B14 (PRs #364, #363), 2026-10-03.
 
 ### D61 - Private sessions after #365: what is left (medium)
 
-- The daemon's `session.list` rows carry no `kind` or `sync`, so the desktop app lists a
-  private session as a local one ("Here only").
-- A private session whose plane row names another device is left alone on resume
-  (Decision 764), but no client offers `claim`, which a renamed machine needs too.
 - A private session sealed before PR #373 lacks its first events (`session_created`): the
   sealer subscribed after the session started.
 

@@ -11,10 +11,11 @@
 // into a transcript is the same function. A second implementation of any of that for
 // the local case is how the local case and the remote case start disagreeing.
 
-import { TroupeConnection } from "./connection.js";
+import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { ConnectOptions, ConnectionHooks } from "./connection.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
+import { syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
 import type { ConfigChanged, EventEnvelope, Principal, SessionCreateResult, ToolInvoke, TroupeEvent } from "./types.js";
@@ -48,7 +49,12 @@ export interface DaemonSessionRow {
   created_at: string | null;
   last_active_at: string | null;
   pinned?: boolean;
+  /** `local` or `private`; absent from a daemon before 0.8.4, which listed every session as local. */
   kind?: string;
+  /** How a private session's sealing stands here (`SyncState`); null for a local one. */
+  sync?: string | null;
+  /** The other device that holds a private session, where `sync` is `elsewhere`. */
+  device?: string | null;
   owner?: string;
   pending_approvals?: number;
   pending_questions?: number;
@@ -57,6 +63,14 @@ export interface DaemonSessionRow {
   /** How the root's last turn failed (`agent_failed`, Decision 727); absent from a daemon before 0.7.1. */
   failed?: { reason: string; detail?: string | null } | null;
   [k: string]: unknown;
+}
+
+/** What `session.claim` answers: the plane's row as it now stands, and how sealing stands here. */
+export interface ClaimResult {
+  session_id: string;
+  device: string;
+  epoch: number;
+  sync: string;
 }
 
 export interface Worktree {
@@ -542,6 +556,15 @@ export class DaemonClient {
     return this.command("session.erase", { session_id: sessionId });
   }
 
+  /**
+   * Take a private session another device sealed last over on this computer (troupe
+   * Decision 785): the daemon claims it at the plane and seals it from here. Refused with
+   * `conflict` where the other device sealed events this computer's copy does not hold.
+   */
+  claimSession(sessionId: string): Promise<ClaimResult> {
+    return this.command<ClaimResult>("session.claim", { session_id: sessionId });
+  }
+
   recentWorkspaces(): Promise<{ workspaces: RecentWorkspace[] }> {
     return this.call("workspace.recent");
   }
@@ -725,7 +748,8 @@ export class DaemonClient {
  *
  * `kind` comes from the daemon's own row where it says one and is `local` otherwise: a
  * session created before the daemon knew about kinds is a local session, because there
- * was nothing else it could have been.
+ * was nothing else it could have been. A private one carries its `sync`, and the device
+ * that holds it where that is another one.
  */
 export class DaemonSource implements FleetSource {
   readonly id: string;
@@ -742,6 +766,22 @@ export class DaemonSource implements FleetSource {
     const { sessions } = await this.daemon.listSessions();
     return sessions.map((s) => rowFromDaemon(s, this.id));
   }
+}
+
+/**
+ * Why `session.claim` was refused, in words a person can act on; the terminal client says
+ * the same. Anything else is said as the error says it.
+ */
+export function claimRefusal(e: unknown): string {
+  if (e instanceof TroupeRpcError) {
+    const reason = e.data?.["reason"];
+    if (reason === "diverged") return "Another device sealed events this computer's copy does not have, so it stays with that device";
+    if (e.code === -32007) return "Another device claimed it first";
+    if (reason === "erased") return "It has been erased";
+    if (reason === "not_registered") return "It is not registered yet; it is once this computer is signed in";
+    if (reason === "unlinked") return "Sign in on this computer to claim it";
+  }
+  return e instanceof Error ? e.message : String(e);
 }
 
 export function rowFromDaemon(row: DaemonSessionRow, source = "daemon"): FleetRow {
@@ -768,7 +808,8 @@ export function rowFromDaemon(row: DaemonSessionRow, source = "daemon"): FleetRo
     yourRole: "owner",
     origin: null,
     reviewedBy: null,
-    sync: kind === "private" ? ((row["sync"] as FleetRow["sync"]) ?? "this-device-only") : null,
+    sync: kind === "private" ? syncState(row.sync) : null,
+    device: kind === "private" ? (row.device ?? null) : null,
     unseen: row.unseen ?? null,
     failed: row.failed ? { reason: row.failed.reason, detail: row.failed.detail ?? null } : null,
     raw: row,

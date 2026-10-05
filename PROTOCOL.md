@@ -575,9 +575,26 @@ that cannot yet — no token, or no plane answering — makes the session anyway
 ```
 → `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
 "failed", "pending_approvals", "pending_questions", "unseen", "tokens", "cost", "created_at",
-"last_active_at", "pinned"}]}`
+"last_active_at", "pinned", "kind", "sync", "device"}]}`
 
 `filter.parent` selects the branches of one session.
+
+`kind` is where the session is kept: `local`, `private` (sealed under its person's key,
+see `private` above), or a pod's `team`. A private session's `sync` says how its sealing
+stands on this machine, so a client can list it as private and say whether its copy
+elsewhere is current (Decision 785); it is `null` for any other session:
+
+| `sync` | meaning |
+| --- | --- |
+| `current` | sealing here, with nothing waiting to be sealed |
+| `behind` | sealing here, with events not sealed yet |
+| `paused` | not sealing: no client has handed the daemon a plane token since it started or since the person signed out, the plane was not there, or the session was archived; the next link with a token carries it on (`identity.link`) |
+| `elsewhere` | another device sealed it last, and it is that device's until it is claimed here (`session.claim`); `device` names it where the plane did |
+| `erasure_pending` | somebody erased it and the plane has not yet destroyed its key (Decision 756) |
+
+`elsewhere` and `erasure_pending` are what the plane said when the daemon last asked, at a
+link with a token or a seal; a listing does not ask it. `device` is `null` but for
+`elsewhere`.
 
 `pending_approvals` counts the approvals still open (see `approval_requested` for when one
 ends), `pending_questions` the questions (see `question_asked`: the agent's `ask_user`, the
@@ -619,6 +636,30 @@ at rest: the session is `dormant` afterwards, as one that went to sleep is.
 #### `session.pin` / `session.unpin` → exempt from retention.
 
 #### `session.erase` → tombstone; irreversible.
+
+#### `session.claim`
+```json
+{"command_id": "c-4", "session_id": "s-9f"}
+```
+→ `{"session_id", "device", "epoch", "sync"}`
+
+Takes a private session another device sealed last over on this one, the daemon's only
+(Decision 785): a pod holds no private session. The daemon reads the plane's row, claims
+it with the row's `epoch` (`session.register` with `claim`), and seals it from here from
+the row's `last_seq`. The answer is the row as it now stands, this device's `device` and
+the next `epoch`, and the session's `sync` here. The other device is not told; its next
+seal is refused, and it stops. A row that already names this device is carried on, not
+claimed again.
+
+Only where this machine's copy holds what the plane has: the event at the row's
+`last_seq` is in the log here with the row's `head_hash`. Otherwise it is `conflict` with
+`reason: "diverged"`, and nothing changes: the other device sealed events this copy does
+not have, and sealing this copy after them would make the session two histories. Also
+`not_found` with `reason: "erased"` for a session somebody erased or is erasing, or
+`"not_registered"` for one the plane has no row for (a link with a token registers it);
+`stale_version` where another device claimed it first; `unavailable` with `reason:
+"unlinked"` where no client has handed the daemon a plane token; and `invalid_params`
+for a session that is not private.
 
 ### Steering
 
@@ -788,7 +829,8 @@ were erased while it was away, and drops its copy of each (Decision 756), and th
 on sealing each private session it has no sealer for: from the row's `last_seq`, at the
 epoch the row says, registered with that epoch so a claim made meanwhile refuses it, for
 one this device sealed last; from its first event for one the plane has never heard of;
-not at all for one another device sealed last, until it is claimed here.
+not at all for one another device sealed last, until it is claimed here
+(`session.claim`), and `session.list` says `sync: "elsewhere"` of it meanwhile.
 
 #### `identity.unlink` → `{"linked": false}`. The events already written keep the actor
 they were written with.
@@ -1469,7 +1511,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or

@@ -489,6 +489,9 @@ defmodule Troupe.Protocol.Schema do
       "session.pin" => %{"command_id" => required(:string), "session_id" => required(:string)},
       "session.unpin" => %{"command_id" => required(:string), "session_id" => required(:string)},
       "session.erase" => %{"command_id" => required(:string), "session_id" => required(:string)},
+      # A private session another device sealed last, taken over on this one (Decision 785):
+      # the daemon's only, since a pod holds no private session.
+      "session.claim" => %{"command_id" => required(:string), "session_id" => required(:string)},
       "input.send" => %{
         "command_id" => required(:string),
         "session_id" => required(:string),

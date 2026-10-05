@@ -92,6 +92,42 @@ defmodule Troupe.Gateway.FakePlane do
     end)
   end
 
+  @doc """
+  Erase the session where the key manager would not destroy its key: the row is
+  `erasure_pending`, listed as it is, and not yet named to any device (Decision 756).
+  """
+  @spec pend_erasure(pid(), String.t()) :: map()
+  def pend_erasure(state, session_id) do
+    Agent.get_and_update(state, fn %{sessions: sessions} = s ->
+      row = Map.get(sessions, session_id, %{"session_id" => session_id, "kind" => "private"})
+      pending = Map.put(row, "state", "erasure_pending")
+      {pending, %{s | sessions: Map.put(sessions, session_id, pending)}}
+    end)
+  end
+
+  @doc """
+  A row another device registered and sealed, as if the session had been carried on there:
+  `device`, `epoch`, `last_seq` and `head_hash` from `attrs`, over a first registration's.
+  """
+  @spec put(pid(), String.t(), map()) :: map()
+  def put(state, session_id, attrs) do
+    row =
+      Map.merge(
+        %{
+          "session_id" => session_id,
+          "kind" => "private",
+          "epoch" => 1,
+          "device" => "the other one",
+          "last_seq" => 0,
+          "head_hash" => nil
+        },
+        attrs
+      )
+
+    Agent.update(state, &%{&1 | sessions: Map.put(&1.sessions, session_id, row)})
+    row
+  end
+
   # -- the methods ------------------------------------------------------------
 
   @doc false

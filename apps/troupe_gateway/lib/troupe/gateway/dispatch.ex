@@ -111,6 +111,9 @@ defmodule Troupe.Gateway.Dispatch do
     "session.pin" => :admin,
     "session.unpin" => :admin,
     "session.erase" => :admin,
+    # Taking a private session over from another device, which then stops sealing it, is
+    # the person's own say about where their session lives, like archiving or erasing it.
+    "session.claim" => :admin,
     "worktree.remove" => :admin,
     # Both change the user's own checkout — a merge lands a branch on it, a discard
     # throws work away — so they take the scope everything else that does takes.
@@ -823,6 +826,31 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # A private session another device sealed last is that device's until the person claims
+  # it here (Decision 764), which a machine whose name changed needs too. Answered once the
+  # plane has said: the row as it now stands, and how sealing stands here.
+  defp handle("session.claim", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, session} <- lookup(session_id),
+         :ok <- private_session(session) do
+      case Private.take_over(session) do
+        {:ok, row} ->
+          {sync, _device} = Private.sync(session_id)
+
+          {:ok,
+           %{
+             "session_id" => session_id,
+             "device" => row["device"],
+             "epoch" => row["epoch"],
+             "sync" => sync
+           }}
+
+        {:error, reason} ->
+          {:error, claim_error(session_id, reason)}
+      end
+    end
+  end
+
   defp handle("worktree.remove", params, _context) do
     with {:ok, path} <- fetch(params, "path") do
       case Worktrees.remove(path, Map.get(params, "force", false)) do
@@ -1514,7 +1542,48 @@ defmodule Troupe.Gateway.Dispatch do
       "last_active_at" => Map.get(session, :last_active_at),
       "pinned" => Map.get(session, :pinned, false)
     }
+    |> Map.merge(kept_json(session))
   end
+
+  # Where a session is kept, `local` or `private` (a pod's are `team`), and for a private
+  # one how its sealing stands here (`Private.sync/1`): a client lists it as private, says
+  # whether its copy elsewhere is current, and offers `session.claim` for one another
+  # device holds, which `device` names. A local session has no sync to speak of.
+  defp kept_json(%{kind: "private", id: session_id}) do
+    {sync, device} = Private.sync(session_id)
+    %{"kind" => "private", "sync" => sync, "device" => device}
+  end
+
+  defp kept_json(session),
+    do: %{"kind" => Map.get(session, :kind) || "local", "sync" => nil, "device" => nil}
+
+  defp private_session(%{kind: "private"}), do: :ok
+
+  defp private_session(%{id: session_id}),
+    do:
+      {:error,
+       Error.new(:invalid_params, %{session_id: session_id, reason: "not a private session"})}
+
+  # Each way a claim is refused, in the protocol's words: not yet a session the plane
+  # knows, erased, held by another history than this copy's, lost to another device that
+  # claimed it first, or no plane to ask.
+  defp claim_error(session_id, :erased),
+    do: Error.new(:not_found, %{session_id: session_id, reason: "erased"})
+
+  defp claim_error(session_id, :not_registered),
+    do: Error.new(:not_found, %{session_id: session_id, reason: "not_registered"})
+
+  defp claim_error(session_id, :diverged),
+    do: Error.new(:conflict, %{session_id: session_id, reason: "diverged"})
+
+  defp claim_error(session_id, {:rpc, %{"message" => "stale_version"}}),
+    do: Error.new(:stale_version, %{session_id: session_id})
+
+  defp claim_error(session_id, :unlinked),
+    do: Error.new(:unavailable, %{session_id: session_id, reason: "unlinked"})
+
+  defp claim_error(session_id, reason),
+    do: Error.new(:unavailable, %{session_id: session_id, reason: inspect(reason)})
 
   defp unseen_json(nil), do: unseen_json(Unseen.none())
   defp unseen_json(unseen), do: Map.new(unseen, fn {key, value} -> {Atom.to_string(key), value} end)

@@ -51,6 +51,12 @@ interface Session {
   seen?: number | null;
   /** How many subscriptions name the session now; `unseen` is empty while any does. */
   readers?: number;
+  /** `private` for one sealed under the person's key (troupe Decision 785); local otherwise. */
+  kind?: "local" | "private";
+  /** How a private session's sealing stands here, as `session.list` says it. */
+  sync?: "current" | "behind" | "paused" | "elsewhere" | "erasure_pending";
+  /** The other device that holds a private one, where `sync` is `elsewhere`. */
+  device?: string | null;
 }
 
 interface Client {
@@ -202,6 +208,10 @@ export class FakeDaemon {
   readonly planeTokens: string[] = [];
   /** The private sessions `session.create` was asked for, by id. */
   readonly privateSessions = new Set<string>();
+  /** The sessions `session.claim` took over, oldest first. */
+  readonly claims: string[] = [];
+  /** Refuse every claim as the daemon does one whose plane copy went further than this one. */
+  claimsDiverge = false;
   /** The settings file, as `config.set` last wrote it. Nothing is saved until then. */
   settings: FakeModelSettings = {
     exists: false,
@@ -345,7 +355,7 @@ export class FakeDaemon {
       workspace,
       profile: session.profile,
       visibility: "private",
-      kind: "local",
+      kind: session.kind ?? "local",
       ...(this.linked ? { owner: this.linked.subject } : {}),
     });
     this.sessions.set(id, session);
@@ -543,10 +553,13 @@ export class FakeDaemon {
         const workspace = String(params["workspace"] ?? "");
         if (!workspace) return reply(ws, id, null, { code: -32602, message: "invalid_params" });
         const config = (params["config"] ?? {}) as { watch?: boolean };
-        const created = this.seed(workspace, { watch: Boolean(config.watch) });
         // `private` beside `workspace`, as the daemon reads it; one inside `config` is a
         // setting no client may choose, and is not asked for.
         const asked = params["private"] === true;
+        const created = this.seed(workspace, {
+          watch: Boolean(config.watch),
+          ...(asked ? { kind: "private" as const, sync: this.planeToken !== null ? ("current" as const) : ("paused" as const) } : {}),
+        });
         if (asked) this.privateSessions.add(created.id);
         return reply(ws, id, {
           session_id: created.id,
@@ -555,6 +568,25 @@ export class FakeDaemon {
           branch: null,
           syncing: asked && this.planeToken !== null,
         });
+      }
+
+      // A private session another device holds, taken over here (troupe Decision 785).
+      case "session.claim": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        if (session.kind !== "private") {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { session_id: sessionId, reason: "not a private session" } });
+        }
+        if (session.sync === "erasure_pending") {
+          return reply(ws, id, null, { code: -32005, message: "not_found", data: { session_id: sessionId, reason: "erased" } });
+        }
+        // The other device sealed events this copy does not have.
+        if (this.claimsDiverge) {
+          return reply(ws, id, null, { code: -32006, message: "conflict", data: { session_id: sessionId, reason: "diverged" } });
+        }
+        this.claims.push(sessionId);
+        session.sync = "current";
+        session.device = null;
+        return reply(ws, id, { session_id: sessionId, device: "this-laptop", epoch: 2, sync: "current" });
       }
 
       case "subscribe": {
@@ -1302,7 +1334,9 @@ export class FakeDaemon {
       created_at: s.createdAt,
       last_active_at: s.lastActiveAt,
       pinned: false,
-      kind: "local",
+      kind: s.kind ?? "local",
+      sync: s.kind === "private" ? (s.sync ?? "paused") : null,
+      device: s.kind === "private" && s.sync === "elsewhere" ? (s.device ?? null) : null,
       ...(this.linked ? { owner: this.linked.subject } : {}),
       pending_approvals: s.pendingApprovals,
       pending_questions: s.pendingQuestions,

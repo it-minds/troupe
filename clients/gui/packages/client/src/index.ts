@@ -66,6 +66,9 @@ export {
   hasUnseen,
   describeUnseen,
   unseenSummary,
+  syncState,
+  syncWords,
+  claimable,
 } from "./fleet.js";
 export type { FleetRow, FleetSource, FleetFilter, FleetSnapshot, SessionKind, SyncState } from "./fleet.js";
 export { AdminApi, bundleErrors, requiredRole } from "./admin.js";
@@ -94,8 +97,9 @@ export type {
   Trigger,
   TriggerRun,
 } from "./admin.js";
-export { DaemonClient, DaemonSource, daemonUrl, rowFromDaemon } from "./daemon.js";
+export { DaemonClient, DaemonSource, claimRefusal, daemonUrl, rowFromDaemon } from "./daemon.js";
 export type {
+  ClaimResult,
   CreateLocalParams,
   DaemonEndpoint,
   DaemonHooks,
