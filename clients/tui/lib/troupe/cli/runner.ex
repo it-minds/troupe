@@ -324,7 +324,8 @@ defmodule Troupe.CLI.Runner do
   # `troupe models`: what the providers serve, asked first when the cache is stale or
   # for another provider (root Decision 778), and always with `--refresh`; the report
   # says which it was. A session never waits for this: the daemon refreshes in the
-  # background when one starts.
+  # background when one starts. `--json` is the same report as one object, for a program
+  # (root Decision 783).
   defp models_report(args) do
     case Troupe.Config.resolve(args.workspace) do
       {:ok, cfg, _layers} -> {:ok, models_report(args, cfg)}
@@ -335,7 +336,10 @@ defmodule Troupe.CLI.Runner do
   defp models_report(args, cfg) do
     %{asked: asked, reason: reason} = Troupe.LLM.Catalog.Store.ensure(cfg, force: args.refresh)
     cfg = if reason, do: Troupe.Config.load(args.workspace), else: cfg
-    Troupe.Config.describe(cfg, command: "troupe", asked: asked)
+
+    if args.json,
+      do: Jason.encode!(Troupe.Config.models_json(cfg, asked: asked), pretty: true),
+      else: Troupe.Config.describe(cfg, command: "troupe", asked: asked)
   end
 
   defp print({text, code}) do

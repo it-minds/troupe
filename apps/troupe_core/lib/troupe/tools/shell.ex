@@ -17,7 +17,7 @@ defmodule Troupe.Tools.Shell do
 
   @behaviour Troupe.Tool
 
-  alias Troupe.{Reaper, Sandbox, Tool}
+  alias Troupe.{Config, Reaper, Sandbox, Tool}
   alias Troupe.Tools.Output
 
   @impl Troupe.Tool
@@ -251,6 +251,6 @@ defmodule Troupe.Tools.Shell do
   defp unavailable(reason),
     do: "The shell tool could not run the command: #{Reaper.explain(reason)}."
 
-  defp cap(%{config: nil}), do: 60_000
+  defp cap(%{config: nil}), do: %Config{}.tool_output_limit
   defp cap(%{config: config}), do: config.tool_output_limit
 end
