@@ -1,14 +1,15 @@
 defmodule Troupe.LLM.Catalog do
   @moduledoc """
-  What a provider says about its own models: context window, output cap and price.
-  Pure — `Troupe.LLM.Catalog.Store` fetches and owns the cache file; nothing here
-  touches disk or the network.
+  What a provider says about its own models: context window, output cap, price, and the
+  form a model takes thinking in. Pure — `Troupe.LLM.Catalog.Store` fetches and owns the
+  cache file; nothing here touches disk or the network.
 
   Three response shapes are understood, because no two providers agree and only one
   of them prices anything:
 
     * `:anthropic` — `GET /v1/models` gives `max_input_tokens` and `max_tokens` per
-      model. There is no pricing endpoint, so those entries carry no price.
+      model, and under `capabilities` which thinking it takes. There is no pricing
+      endpoint, so those entries carry no price.
     * `:litellm` — a LiteLLM proxy's `GET /model_group/info` gives windows *and*
       per-token cost, keyed by model group, which is the name you address. This is
       the one source that has prices.
@@ -19,6 +20,13 @@ defmodule Troupe.LLM.Catalog do
   and prices, it does not overrule what the user wrote.
   """
 
+  @typedoc """
+  How a model takes thinking (Decision 780): `:budget` is `thinking.budget_tokens`, the
+  form of Anthropic's models before Claude Opus 4.7; `:adaptive` is adaptive thinking with
+  an effort level, which the later ones take and a budget is refused by.
+  """
+  @type thinking :: :adaptive | :budget
+
   @type t :: %__MODULE__{
           id: String.t(),
           context: pos_integer() | nil,
@@ -26,10 +34,11 @@ defmodule Troupe.LLM.Catalog do
           input: float() | nil,
           output: float() | nil,
           cache_read: float() | nil,
-          cache_write: float() | nil
+          cache_write: float() | nil,
+          thinking: thinking() | nil
         }
 
-  defstruct [:id, :context, :max_output, :input, :output, :cache_read, :cache_write]
+  defstruct [:id, :context, :max_output, :input, :output, :cache_read, :cache_write, :thinking]
 
   @doc """
   Parses one provider's model listing. Unknown or malformed entries are dropped rather
@@ -47,7 +56,14 @@ defmodule Troupe.LLM.Catalog do
   def parse(_shape, _body), do: []
 
   defp entry(:anthropic, %{"id" => id} = m) when is_binary(id) do
-    [%__MODULE__{id: id, context: pos_int(m["max_input_tokens"]), max_output: pos_int(m["max_tokens"])}]
+    [
+      %__MODULE__{
+        id: id,
+        context: pos_int(m["max_input_tokens"]),
+        max_output: pos_int(m["max_tokens"]),
+        thinking: listed_thinking(m["capabilities"])
+      }
+    ]
   end
 
   # `mode` separates chat models from embeddings and transcription, and the wildcard
@@ -86,6 +102,55 @@ defmodule Troupe.LLM.Catalog do
   end
 
   defp entry(_shape, _m), do: []
+
+  # `capabilities.thinking.types` says `supported` of each form. A model that takes both
+  # (Opus 4.6, Sonnet 4.6) keeps the budget it was sent before; one that takes only
+  # adaptive thinking gets that; a listing that says neither says nothing.
+  defp listed_thinking(%{"thinking" => %{"types" => %{} = types}}) do
+    cond do
+      supported?(types["enabled"]) -> :budget
+      supported?(types["adaptive"]) -> :adaptive
+      true -> nil
+    end
+  end
+
+  defp listed_thinking(_capabilities), do: nil
+
+  defp supported?(%{"supported" => true}), do: true
+  defp supported?(_), do: false
+
+  @doc """
+  The thinking form a model takes, by its name, when no listing says (Decision 780):
+  `:budget` for Anthropic's models before Claude Opus 4.7 — the Claude 3 family and 4.0 to
+  4.6 of Opus, Sonnet and Haiku — and `:adaptive` for those from Opus 4.7 on, Fable and
+  Mythos among them. The name is found inside whatever a gateway made of it
+  (`eu.anthropic.claude-opus-5`, `claude-sonnet-4-5@20250929`). `nil` for a name that is
+  none of Anthropic's.
+  """
+  @spec thinking(String.t() | nil) :: thinking() | nil
+  def thinking(model) when is_binary(model) do
+    cond do
+      model =~ ~r/claude-3([^0-9]|$)/ ->
+        :budget
+
+      match = Regex.run(~r/claude-(?:opus|sonnet|haiku)-(\d+)(?:-(\d{1,2}))?(?![0-9])/, model) ->
+        if before_adaptive?(match), do: :budget, else: :adaptive
+
+      model =~ ~r/claude-(?:fable|mythos)/ ->
+        :adaptive
+
+      true ->
+        nil
+    end
+  end
+
+  def thinking(_model), do: nil
+
+  defp before_adaptive?([_whole, major]), do: String.to_integer(major) < 5
+  defp before_adaptive?([_whole, major, ""]), do: String.to_integer(major) < 5
+
+  defp before_adaptive?([_whole, major, minor]),
+    do: {String.to_integer(major), String.to_integer(minor)} < {4, 7}
 
   # LiteLLM reports token limits as floats (250000.0).
   defp pos_int(n) when is_integer(n) and n > 0, do: n
@@ -183,7 +248,8 @@ defmodule Troupe.LLM.Catalog do
       "input" => e.input,
       "output" => e.output,
       "cache_read" => e.cache_read,
-      "cache_write" => e.cache_write
+      "cache_write" => e.cache_write,
+      "thinking" => e.thinking && Atom.to_string(e.thinking)
     }
     |> Map.reject(fn {_k, v} -> is_nil(v) end)
   end
@@ -197,7 +263,12 @@ defmodule Troupe.LLM.Catalog do
       input: price(m["input"]),
       output: price(m["output"]),
       cache_read: price(m["cache_read"]),
-      cache_write: price(m["cache_write"])
+      cache_write: price(m["cache_write"]),
+      thinking: thinking_form(m["thinking"])
     }
   end
+
+  defp thinking_form("adaptive"), do: :adaptive
+  defp thinking_form("budget"), do: :budget
+  defp thinking_form(_), do: nil
 end

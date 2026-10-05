@@ -70,6 +70,32 @@ defmodule Troupe.LLM.FakeScriptTest do
              Fake.next(fake, request.([Message.user("go"), call, result]))
   end
 
+  # What Anthropic's API alone refuses (#404), which the summariser's request runs into.
+  test "a strict model refuses tool blocks in a request that defines no tools" do
+    fake = start_supervised!({Fake, steps: [{:text, "answered"}], strict_tools: true})
+    call = Message.assistant([%ToolUse{id: "call_1", name: "todo_read", input: %{}}])
+    result = Message.tool_results([%ToolResult{tool_use_id: "call_1", content: "[]"}])
+    messages = [Message.user("go"), call, result]
+    todo_read = %{name: "todo_read", description: "Read the list.", schema: %{"type" => "object"}}
+
+    assert {:error, {:http_status, 400, "Requests which include `tool_use`" <> _}} =
+             Fake.next(fake, %Request{model: "fake-model", messages: messages})
+
+    # Text alone needs no tools, and the same blocks with tools defined are taken.
+    assert {:ok, %{content: [%{text: "answered"}]}, _delay} =
+             Fake.next(fake, %Request{model: "fake-model", messages: [Message.user("go")]})
+
+    assert {:ok, %{content: [%{text: "done"}]}, _delay} =
+             Fake.next(fake, %Request{model: "fake-model", messages: messages, tools: [todo_read]})
+  end
+
+  test "a step can be answered late" do
+    fake = start_supervised!({Fake, steps: [{:delay, 60_000, {:text, "too late"}}]})
+
+    assert {:ok, %{content: [%{text: "too late"}]}, 60_000} =
+             Fake.next(fake, %Request{model: "fake-model", messages: [Message.user("go")]})
+  end
+
   test "a workspace config names the script, and a subagent answers from its own route",
        context do
     script = Path.join(context.base, "script.json")

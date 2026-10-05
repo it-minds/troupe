@@ -499,10 +499,6 @@ Found by the chunk 16 fixers, 2026-10-04.
 
 ### D65 - What a turn costs: what #389 left (medium)
 
-- A LiteLLM gateway serving an Anthropic model over the OpenAI wire reports cache writes as
-  `cache_creation_input_tokens` (and `prompt_tokens_details.cache_creation_tokens`). The
-  OpenAI reader (`apps/troupe_core/lib/troupe/llm/providers/openai.ex`) reads
-  `cached_tokens` only, so those writes are priced as fresh input.
 - The task list goes after the system prompt's cache mark, before the messages
   (`Request.system_tail`, Decision 770). Each `todo_write` changes it, and the provider
   writes the conversation's cache again: in a 30-call turn with about ten list updates the
@@ -513,9 +509,6 @@ Found by the chunk 16 fixers, 2026-10-04.
 - Subagent spend is added to the parent's turn live only. A cancel or a parent restart in
   the middle of the turn loses what the subagents reported; the delegation's own
   `tool_call_completed` could carry it.
-- The headless printer doesn't print the per-turn line, and the desktop app shows no turn
-  cost: `@troupe/client`'s fold reads neither `turn` (on `turn_ended`, `cancelled`,
-  `agent_done`) nor `compacted.usage`.
 - `Troupe.Bench.Model.measure/2` counts `request.system` only, so the offline bench's
   `system_bytes` leaves out the task list the log counts; `Request.system_text/1` has both.
 
@@ -523,15 +516,14 @@ Found by the chunk 17 fixers, 2026-10-04.
 
 ### D66 - Compaction and cut tool output: small leftovers (medium)
 
-- `:compacting` has no clause for `{:llm_timeout, ref}` (`agent/server.ex`), so `common/4`
-  drops it: a summariser call that hangs keeps the agent in `:compacting` past
-  `llm_timeout_ms`, where `:thinking` turns the same message into an `llm_error`.
 - The `explore`, `answer`, `ask` and `librarian` profiles don't offer `read_output`, but
   `grep`, `git_read` and `web_fetch` cut long output with a marker naming a `read_output`
   call: those agents are told to make a call they can't. #389's stubs are skipped for such
-  profiles (Decision 771); the markers are not.
+  profiles (Decision 771); the markers are not. Cuts come sooner since the default limit
+  became 32 KiB (Decision 781).
 - `Troupe.SessionCase` could turn the stand-in provider's strict tool-call pairing on by
-  default: the whole core suite passes with it (Decision 774).
+  default, and its refusal of tool blocks in a request without tools too: the whole core
+  suite passes with both (Decisions 774 and 779).
 
 Found by the chunk 17 fixers, 2026-10-04.
 
@@ -567,6 +559,54 @@ Found by the #410 fixer, 2026-10-04.
   can break each other.
 
 Found by the chunk 17 fixers and the coordinator, 2026-10-04.
+
+### D69 - A model call past its timeout, and thinking the agent never asked for (medium)
+
+- A model call that times out is never stopped, in `:thinking` or `:compacting`:
+  `clear_llm/1` (`agent/server.ex`) only demonitors the stream. Req's `receive_timeout`
+  limits only the gap between packets, so a stream that keeps producing goes on generating,
+  and is billed, up to `max_tokens`, and none of it is counted.
+- With no `reasoning_effort`, Anthropic's newest models (Opus 5 and 5.5, Fable, Sonnet 5.5)
+  think anyway, adaptively. The adapter sends no `thinking` field, so `keep_thinking?` is
+  false and their thinking blocks are dropped when the conversation is sent again, and
+  since `display` defaults to omitted, nothing streams either.
+- Unchecked: reasoning blocks go to the compaction summariser unchanged, so when the small
+  model is a different Anthropic model it receives another model's signed thinking blocks.
+- Opus 4 and 4.1 cap output at 32K tokens, but `xhigh` (and now `max`) asks for
+  `max_tokens` 36,864 (`put_thinking`), which they refuse.
+- The catalog records each model's thinking form, not which effort levels it takes: a
+  model that lacks one would refuse it (Decision 780's refusal words name the setting).
+- Unchecked: whether a gateway speaking Anthropic's API passes `output_config` on.
+
+Found by the chunk 18 fixers, 2026-10-05.
+
+### D70 - The live bench and the model list: small leftovers (low)
+
+- A live run that fails before its first model call reports `FAILED, 0 model calls` with
+  `error` and `stop_reason` both null: nothing says why. A model nothing lists or prices
+  (here `--model openai/qwen3-235b`) still ran all 30 runs; it could be refused before the
+  first, as `troupe doctor` does since #412.
+- With `provider: openai` and no named providers, `troupe bench --live --model
+  openai/qwen3-235b` runs against `openai/openai/qwen3-235b`; `--model qwen3-235b` works.
+  `docs/user/bench.md` shows `--model gateway/model-b` for a named provider only.
+- On `qwen3-235b`, `follow_steps` did its work in all three runs (every check held) and
+  still failed each on the 12-call cap: four of its twelve calls were `todo_write` in a
+  response of its own, though Decision 777 asks for the update to go with the call doing
+  the work.
+- `troupe models --json` gives a model nobody serves `context: 200000`, `Config.models/1`'s
+  fallback to `context_window`, beside `served: false`; `nil` would say there is none.
+- `troupe-daemon models` has no `--json`, so an install without the TUI has no JSON form.
+- The summariser's `prompt_bytes.tool_results` now reads 0: its results are text inside
+  `conversation` (Decision 779).
+- `Troupe.Agent.Headroom.tokens/1` formats with floats and prints `1.0e3k` for 999,950 to
+  999,999 tokens and `1.0e3M` at a billion (the TUI's own figures were fixed in #418).
+- The fake worker behind `pnpm fake` and the desktop tests
+  (`clients/gui/packages/client/test/support/worker.ts`) ends a turn without `turn`, so the
+  fake deployment never shows the turn line.
+- `cut_output`'s budget (36,000 bytes) is a tenth over the measured cut, so the limit
+  could creep to about 35 kB unnoticed; the old budget had about 2% headroom.
+
+Found by the chunk 18 fixers and the coordinator, 2026-10-05.
 
 ## Taken
 
@@ -641,6 +681,9 @@ Found by the chunk 17 fixers and the coordinator, 2026-10-04.
 | D53's first item - the desktop app showed a team turn that failed on the plane as finished | #354, PR #359 |
 | D60 - A checkout that built the previous version kept reporting it | #380, PR #382 |
 | D61's first item - `troupe logout` left the daemon holding the plane token | #381, PR #385 |
+| D65's first item - cache writes over an OpenAI-compatible gateway were priced as fresh input | #396, PR #420 |
+| D65's fifth item - neither the desktop app nor a headless run showed what a turn cost | PR #418 |
+| D66's first item - a summariser call that never answered kept the agent compacting | #404, PR #421 |
 
 ## Checked and not a defect
 

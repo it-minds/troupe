@@ -1,7 +1,7 @@
 defmodule Troupe.Agent.CompactionTest do
   use Troupe.SessionCase, async: true
 
-  alias Troupe.LLM.{Message, Text, ToolResult}
+  alias Troupe.LLM.{Message, Text, ToolResult, ToolUse}
   alias Troupe.Session.Blobs
 
   @overflow {:error, {:http_status, 400, "prompt is too long: 250000 tokens > 200000 maximum"}}
@@ -265,6 +265,64 @@ defmodule Troupe.Agent.CompactionTest do
 
       restart(session.id)
       assert Troupe.snapshot(session.id).conversation == in_memory
+    end
+  end
+
+  describe "the summariser's call" do
+    # #404. Anthropic's API refuses a request whose messages hold tool calls or results
+    # when it defines no tools, and the summariser's defines none.
+    test "summarises tool calls for a model that refuses tool blocks without tools", context do
+      write_file(context, "notes.txt", "the parser reads a tab as two spaces\n")
+
+      steps =
+        [{:tools, [{"read_file", %{"path" => "notes.txt"}}]}] ++
+          List.duplicate({:tools, [{"todo_read", %{}}]}, 3) ++
+          [@overflow, {:text, "summary of the reads"}, {:text, "done"}]
+
+      %{session: session, fake: fake} =
+        start_session(context, steps: steps, strict_pairs: true, strict_tools: true)
+
+      Troupe.subscribe(session.id)
+      turn(session.id, "read the notes, then the list three times")
+
+      assert [%{data: %{"reason" => "context_overflow"}}] =
+               events_of_type(session.id, "compacted")
+
+      assert summaries_asked(fake) == 1
+      assert Message.text(List.last(Troupe.snapshot(session.id).conversation)) == "done"
+
+      # What the call did reaches the summariser as text: the tool, its arguments and what
+      # it returned.
+      summariser = fake |> Fake.requests() |> Enum.find(&(&1.system =~ "compress a coding"))
+      blocks = Enum.flat_map(summariser.messages, & &1.content)
+
+      assert summariser.tools == []
+      refute Enum.any?(blocks, &(match?(%ToolUse{}, &1) or match?(%ToolResult{}, &1)))
+
+      read = Enum.map_join(summariser.messages, "\n", &Message.text/1)
+      assert read =~ ~s(read_file {"path":"notes.txt"})
+      assert read =~ "the parser reads a tab as two spaces"
+    end
+
+    # D66. As an agent's own call is given up on after `llm_timeout_ms`; the summary then
+    # fails as a refused one does, and changes nothing (Decision 774).
+    test "one that never answers is given up on after llm_timeout_ms", context do
+      steps =
+        List.duplicate({:tools, [{"todo_read", %{}}]}, 4) ++
+          [@overflow, {:delay, 60_000, {:text, "too late"}}, {:text, "done"}]
+
+      %{session: session} =
+        start_session(context, steps: steps, config_overrides: [llm_timeout_ms: 1_000])
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "read the list four times")
+      await_state(session.id, [:compacting])
+      await_state(session.id, [:idle], 10_000)
+
+      assert events_of_type(session.id, "compacted") == []
+      conversation = Troupe.snapshot(session.id).conversation
+      assert length(conversation) == 10
+      assert Message.text(List.last(conversation)) == "done"
     end
   end
 

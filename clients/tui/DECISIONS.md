@@ -857,3 +857,26 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      is the harness's, the one `troupe-daemon models` prints. The failure notes it used
      to append (`! (session): {:http, 401}`) are the report's own `catalog:` line now.
      Proof: `test/troupe/models_cli_test.exs`, against a stand-in gateway.
+
+144. **A headless run prints what each turn cost when it ends, the window's line, and the
+     line's figures are worked out in whole numbers, a million as `M`.** Issue #389, root
+     Decision 782. `Troupe.UI.Headless.Printer` prints `Model.turn_line/1` of the `turn` a
+     durable `agent_state` carries (139), prefixed with its agent like every other line:
+     after the turn's reply, before `exit N:`, once whether read live or back from the
+     journal, and nothing for a turn that made no call. It goes to standard output with the
+     transcript; the printer has no `--json`. `short/1` and `dollars/1` round half up in
+     integers, as `@troupe/client`'s `turnLine` does, so the desktop app says the same to
+     the cent, and a count past a million is `6.0M`, where `Float.round/2` printed
+     `6.0e3k`; the tile and the side panel count that way too. Proof:
+     `test/troupe/cli_test.exs` ("prints what a turn cost when it ends", "prints each
+     ended turn's line in the window's words"), both failing on the chunk's tip.
+
+145. **`troupe models --json` is the same run as `troupe models`, printed as the harness's
+     object.** Root Decision 783. The runner refreshes as 143 says, then hands `asked` to
+     `Troupe.Config.models_json/2` instead of `describe/2` and prints the object with
+     `Jason`, so `mix troupe.xref` has no new door: the object is built in `Troupe.Config`,
+     which it already allowed. `--workspace` and `--refresh` mean what they mean without
+     `--json`, and a config that does not load is the reason on standard error and exit 1,
+     with nothing on standard output for a program to mistake for an answer. Its own line
+     in the command table, so `troupe --help` and the reference list it. Proof:
+     `test/troupe/models_cli_test.exs`, against a stand-in gateway.

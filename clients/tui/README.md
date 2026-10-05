@@ -248,7 +248,8 @@ terminal at the folder you are working in, by default a tab beside your files
 
 `troupe run --headless` prints the transcript, one line per event prefixed with the agent
 that wrote it, the harness's notes among them as the window shows them (`done:` and the
-summary, a compaction, a reply cut or empty), and exits when the agent comes to rest: when
+summary, a compaction, a reply cut or empty) and the line saying what each turn cost when
+it ends (`turn: 3 calls · ↑ 300 sent · ...`), and exits when the agent comes to rest: when
 its turn ends, whether or not the model called `finish`. Nobody is there to answer an approval, so it is refused; pass
 `--auto-approve` for a task that writes files or runs commands, or set `auto_approve` in
 the config, which `--auto-approve`, `--watch` and `--full-send` beat only when given. A

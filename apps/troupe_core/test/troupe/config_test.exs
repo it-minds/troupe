@@ -10,6 +10,10 @@ defmodule Troupe.ConfigTest do
   use ExUnit.Case, async: true
 
   alias Troupe.Config
+  alias Troupe.Config.Schema
+  alias Troupe.Tool.Ctx
+  alias Troupe.Tools.ReadFile
+  alias Troupe.Workspace
 
   describe "{env:VAR} interpolation" do
     setup do
@@ -159,6 +163,38 @@ defmodule Troupe.ConfigTest do
 
       assert Config.context_window(config, "cheap") == 32_000
       assert Config.context_window(config, "default") == 400_000
+    end
+  end
+
+  # Issue #407: a `shell` result cut at the old default, 60,000 bytes, went out again with
+  # every later call of a live run and was three quarters of what the run sent. What a
+  # cut leaves out is one `read_output` call away (Decision 781).
+  describe "tool_output_limit" do
+    test "is 32 KiB by default, in the struct and in the key table" do
+      assert %Config{}.tool_output_limit == 32_768
+      assert Schema.at(["tool_output_limit"]).default == 32_768
+    end
+
+    test "a tool run with no config caps at the default" do
+      root = Path.join(System.tmp_dir!(), "troupe-limit-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      on_exit(fn -> File.rm_rf!(root) end)
+      # 600 lines of 100 bytes: what the old default sent nearly whole.
+      line = String.duplicate("x", 99) <> "\n"
+      File.write!(Path.join(root, "big.txt"), String.duplicate(line, 600))
+      {:ok, workspace} = Workspace.new(root)
+
+      ctx = %Ctx{
+        session_id: "test",
+        agent_path: ["root"],
+        workspace: workspace,
+        call_id: "call_1",
+        agent_pid: self()
+      }
+
+      assert {:ok, output} = ReadFile.run(%{"path" => "big.txt"}, ctx)
+      assert output =~ "[truncated:"
+      assert byte_size(output) <= 32_768 + 100
     end
   end
 end
