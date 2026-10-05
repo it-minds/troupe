@@ -19,6 +19,14 @@ the site, to that page; any link to a file or directory the site does not carry 
 code, the chart, `LICENSE`), to it on GitHub at `main`. A link to something that is not
 in the repository at all is a warning, which `strict: true` makes a failed build, as
 MkDocs does for a broken link between two pages of `docs/`.
+
+The decisions. `docs/decisions/` holds one file per decision, its front matter first
+(Decision 790). `on_files` reads every one's front matter, and `on_page_markdown` puts a
+heading, a line of what the front matter says and the paths it governs on each decision's
+page, and the index, newest first, where a log's README has `<!-- decisions:index -->`.
+The index is made here, as the site is built, and is not a file in the repository: a
+committed index would be the one file every pull request that decides something changes,
+which is the conflict one file per decision is for.
 """
 
 import logging
@@ -27,13 +35,20 @@ import re
 from pathlib import Path
 
 from mkdocs.structure.files import File
+from mkdocs.utils import meta as front_matter
 
 log = logging.getLogger("mkdocs.plugins.troupe")
 
 BRANCH = "main"
 
 # Recomputed by on_files on every build, so `mkdocs serve` sees a nav that changed.
-_state = {"root": Path("."), "docs": "docs", "mirrored": set(), "repo_url": ""}
+_state = {"root": Path("."), "docs": "docs", "mirrored": set(), "repo_url": "", "decisions": {}}
+
+# A decision's page, `decisions/<log>/<number>-<slug>.md`; the repository's log has no
+# directory of its own.
+_DECISION = re.compile(r"^decisions/(?:(?P<log>[^/]+)/)?(?P<number>\d{4,})-[^/]+\.md$")
+_INDEX = "<!-- decisions:index -->"
+_LOG_NAMES = {"": "Decision", "tui": "TUI decision", "daemon": "Daemon decision"}
 
 _SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 _FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
@@ -59,14 +74,97 @@ def on_files(files, *, config):
             files.append(File.generated(config, path, abs_src_path=str(source)))
             mirrored.add(path)
 
-    _state.update(root=root, docs=docs, mirrored=mirrored, repo_url=config.repo_url.rstrip("/"))
+    _state.update(
+        root=root,
+        docs=docs,
+        mirrored=mirrored,
+        repo_url=config.repo_url.rstrip("/"),
+        decisions=_decisions(files),
+    )
     return files
 
 
 def on_page_markdown(markdown, *, page, config, files):
     src = page.file.src_uri
     here = src if src in _state["mirrored"] else f"{_state['docs']}/{src}"
+    markdown = decision_page(markdown, src, page.meta, _state["decisions"])
     return rewrite(markdown, lambda target: _site_target(target, here, src, files))
+
+
+def _decisions(files):
+    """Every decision's front matter, by log ("" for the repository's), with its page."""
+    found = {}
+    for file in files:
+        match = _DECISION.match(file.src_uri)
+        if match and file.abs_src_path:
+            _body, data = front_matter.get_data(Path(file.abs_src_path).read_text(encoding="utf-8"))
+            log = match.group("log") or ""
+            found.setdefault(log, []).append({**data, "page": posixpath.basename(file.src_uri)})
+    return found
+
+
+def decision_page(markdown, src, meta, decisions):
+    """`markdown` for the page `src`, with what the decisions add to it.
+
+    A decision's page gets its title as the heading, a line with its number, status, date
+    and issue, a note naming what superseded it, and the paths it governs at the end. A
+    log's README gets the index of that log in place of `<!-- decisions:index -->`.
+    """
+    match = _DECISION.match(src)
+    if match:
+        log = match.group("log") or ""
+        return _decision(markdown, log, meta, decisions.get(log, []))
+
+    index = re.match(r"^decisions/(?:(?P<log>[^/]+)/)?README\.md$", src)
+    if index and _INDEX in markdown:
+        return markdown.replace(_INDEX, _index(decisions.get(index.group("log") or "", [])))
+
+    return markdown
+
+
+def _decision(markdown, log, meta, same_log):
+    number = meta.get("number")
+    facts = [f"{_LOG_NAMES.get(log, log + ' decision')} {number}", str(meta.get("status", ""))]
+    if meta.get("date"):
+        facts.append(str(meta["date"]))
+    if meta.get("issue"):
+        facts.append(f"issue [#{meta['issue']}]({_state['repo_url']}/issues/{meta['issue']})")
+    replaced = _numbered(meta.get("supersedes"), same_log)
+    if replaced:
+        facts.append(f"supersedes {replaced}")
+
+    head = [f"# {meta.get('title', number)}", "", "*" + " · ".join(facts) + "*", ""]
+
+    by = _numbered([d.get("number") for d in same_log if number in _list(d.get("supersedes"))], same_log)
+    if str(meta.get("status", "")).startswith("superseded"):
+        head += ['!!! warning "Superseded"', "", f"    Superseded{' by ' + by if by else ''}.", ""]
+    elif by:
+        head += ['!!! note "Superseded in part"', "", f"    In part by {by}.", ""]
+
+    paths = ", ".join(f"`{path}`" for path in _list(meta.get("paths")))
+    return "\n".join(head) + "\n" + markdown.strip("\n") + f"\n\n**Governs:** {paths}\n"
+
+
+def _index(same_log):
+    rows = ["| No. | Decision | Date |", "|---:|---|---|"]
+    for decision in sorted(same_log, key=lambda d: d.get("number") or 0, reverse=True):
+        title = str(decision.get("title", "")).replace("|", "\\|")
+        if str(decision.get("status", "")).startswith("superseded"):
+            title += " *(superseded)*"
+        rows.append(f"| [{decision.get('number')}]({decision['page']}) | {title} | {decision.get('date', '')} |")
+    return "\n".join(rows)
+
+
+def _numbered(numbers, same_log):
+    """`numbers` as links to their pages in the same log, where they have one."""
+    pages = {d.get("number"): d["page"] for d in same_log}
+    return ", ".join(f"[{n}]({pages[n]})" if n in pages else str(n) for n in _list(numbers))
+
+
+def _list(value):
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
 
 
 def rewrite(markdown, target_for):

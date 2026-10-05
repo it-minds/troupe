@@ -60,8 +60,8 @@ You contribute to Troupe itself.
 3. [ARCHITECTURE.md](../ARCHITECTURE.md) — the design, and why the log is the session.
 4. [developer/](developer/README.md) — setup, testing, conventions, the build, CI and
    releases, and the code's own map.
-5. [DECISIONS.md](../DECISIONS.md) — the judgment calls that still hold, by number, as
-   the code cites them.
+5. [decisions/](decisions/README.md) — the judgment calls that still hold, a file each,
+   by number, as the code cites them.
 
 ## Writing a client
 
