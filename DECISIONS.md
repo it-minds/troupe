@@ -5590,5 +5590,12 @@ citation keeps meaning what it meant.
        dormant, nothing Bob's link asks names her session, and her next link registers it
        at its epoch; a link by Bob over Ada stops her sealer and one by Ada again does not;
        and a seal with nobody linked keeps its event and logs at info, not error. And the
-       installed daemon, with scratch homes, against the plane stand-in, on the pull
-       request.
+       installed daemon, with scratch homes and the fake provider, through the client
+       library, against a plane stand-in for two people that answers each only for their
+       own rows (real assertions through the development OpenBao, real MinIO URLs): Ada
+       linked, made a private session and sealed it through its eleventh event; unlinked,
+       it took a second turn and nothing reached the plane; Bob linked, and his link and
+       his own new session called the plane with his token and named none of hers, before
+       and after a restart of the daemon, which logged `left alone (1 of
+       a19-ada@example.test)`; Ada linked again, and her session was sealed from its
+       twelfth event to its twentieth at epoch 1, every call that named it with her token.
