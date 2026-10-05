@@ -10,7 +10,7 @@ defmodule Troupe.Tools.WebFetch do
 
   @behaviour Troupe.Tool
 
-  alias Troupe.Tool
+  alias Troupe.{Config, Tool}
   alias Troupe.Tools.Output
 
   @download_cap 5_000_000
@@ -120,7 +120,7 @@ defmodule Troupe.Tools.WebFetch do
     end
   end
 
-  defp cap(%{config: nil}), do: 60_000
+  defp cap(%{config: nil}), do: %Config{}.tool_output_limit
   defp cap(%{config: config}), do: config.tool_output_limit
 
   defp text(body, type, uri) do
