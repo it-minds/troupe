@@ -16,6 +16,7 @@ defmodule Troupe.LLM.Provider do
   request.
   """
 
+  alias Troupe.Config
   alias Troupe.LLM.Request
 
   @callback stream(Request.t(), reply_to :: pid(), ref :: reference()) :: :ok
@@ -138,6 +139,38 @@ defmodule Troupe.LLM.Provider do
       if String.downcase(to_string(name)) == "retry-after", do: value |> List.wrap() |> List.first()
     end)
   end
+
+  # More than any provider's error, and a bound on a proxy's page.
+  @error_body_limit 65_536
+
+  @doc """
+  Keep a piece of a response that is not the event stream, for the adapter to read as the
+  provider's error once it has all of it (Decision 791).
+
+  Req hands the body of every response to an adapter's `into` function, whatever its
+  status, so that is where an error's body arrives; fed to the event-stream parser, it was
+  lost, and a context overflow read as a bare 400.
+  """
+  @spec collect_error(Req.Response.t(), binary()) :: Req.Response.t()
+  def collect_error(%Req.Response{body: body} = response, chunk)
+      when is_binary(body) and byte_size(body) < @error_body_limit,
+      do: %{response | body: body <> chunk}
+
+  def collect_error(%Req.Response{} = response, _chunk), do: response
+
+  @doc """
+  What a provider said about a failed request, as the sentence a person reads carries it
+  (Decision 791): trimmed, and with the key the request was sent with masked. A provider,
+  or a gateway in front of one, may say a key it refused back in its message, and the
+  sentence goes into the session's log and into the conversation, and so to the provider
+  again. A key shorter than eight characters is a placeholder a local server takes, such
+  as vLLM's `EMPTY`, and masking it would only garble the message.
+  """
+  @spec error_text(String.t(), String.t() | nil) :: String.t()
+  def error_text(text, key) when is_binary(key) and byte_size(key) >= 8,
+    do: text |> String.replace(key, Config.mask(key)) |> String.trim()
+
+  def error_text(text, _key), do: String.trim(text)
 
   @doc """
   Names what a provider failure actually was, so the agent can act on it (Decision 659).
