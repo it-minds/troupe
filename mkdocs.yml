@@ -15,6 +15,10 @@ strict: true
 exclude_docs: |
   /overrides/
   /requirements.txt
+# A decision is a page of its own and is reached from its log's index, which the nav names
+# and the hook fills in; three hundred of them in the nav would be a list nobody reads.
+not_in_nav: |
+  /decisions/**/[0-9]*.md
 
 theme:
   name: material
