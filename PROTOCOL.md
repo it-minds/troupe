@@ -794,7 +794,8 @@ and those made while nobody was linked, which name none. Somebody else's, made w
 were linked here, is left alone with this token, the daemon's log says how many of whose,
 and it carries on at that person's next link (Decision 784). A link naming somebody other
 than the person the daemon was linked to stops every sealer first, as `identity.unlink`
-does.
+does, and keeps none of that person's token: a link without `plane_token` keeps the one
+the daemon holds only when it names the same person.
 
 #### `identity.unlink` → `{"linked": false}`. The events already written keep the actor
 they were written with. The plane token goes with the link, and every private session's

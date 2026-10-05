@@ -104,6 +104,20 @@ defmodule Troupe.Gateway.PrivateTest do
       assert Plane.sign_out(plane.url, nil, name)
       refute Plane.linked?(name)
     end
+
+    # Issue #386: a token is for the person it was handed over for. A link naming somebody
+    # else keeps none of the one before; the same person linking a label alone keeps theirs.
+    test "a link naming somebody else without a token keeps none of the token before",
+         %{name: name} do
+      :ok = Plane.link(%{"subject" => "bob@example.test"}, name)
+      refute Plane.linked?(name)
+      assert Plane.subject(name) == "bob@example.test"
+      assert {:error, :unlinked} = Plane.call("session.register", %{}, name)
+
+      :ok = Plane.link(%{"subject" => "bob@example.test", "plane_token" => "bob-token"}, name)
+      :ok = Plane.link(%{"subject" => "bob@example.test"}, name)
+      assert Plane.linked?(name)
+    end
   end
 
   describe "sealing" do
@@ -774,6 +788,35 @@ defmodule Troupe.Gateway.PrivateTest do
                |> calls_about(id, asked)
                |> Enum.any?(&match?({"session.register", %{"epoch" => 1}}, &1))
              end)
+    end
+
+    # Bob links over Ada with his name and no token: his private session is made here and
+    # registered nowhere, rather than with the token Ada handed over.
+    test "a link naming somebody else without a token registers nothing with the token before",
+         ctx do
+      {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: ctx.endpoint, spawn: false)
+      on_exit(fn -> if Process.alive?(client), do: Client.close(client) end)
+
+      ada = linking("ada@example.test", "plane-token", ctx)
+      assert {:ok, _identity} = Client.call(client, "identity.link", ada)
+      assert eventually(fn -> asked_for_erasures(ctx.plane.state) != [] end)
+
+      bob = %{"subject" => "bob@example.test", "plane_url" => ctx.plane.url}
+      assert {:ok, %{"subject" => "bob@example.test"}} = Client.call(client, "identity.link", bob)
+      asked = length(FakePlane.calls(ctx.plane.state))
+
+      assert {:ok, %{"session_id" => id, "syncing" => false}} =
+               Client.call(client, "session.create", %{
+                 "command_id" => Client.command_id(),
+                 "workspace" => ctx.workspace,
+                 "private" => true,
+                 "config" => %{"auto_approve" => true}
+               })
+
+      on_exit(fn -> Troupe.stop_session(id) end)
+      assert calls_about(ctx.plane.state, id, asked) == []
+      assert FakePlane.row(ctx.plane.state, id) == nil
+      refute Plane.linked?()
     end
 
     # The same, linked over without unlinking first: a link naming somebody else stops

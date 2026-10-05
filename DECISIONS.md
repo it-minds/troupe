@@ -5568,6 +5568,12 @@ citation keeps meaning what it meant.
        links over somebody else (the desktop app unlinks first, the TUI leaves such a
        daemon alone), but the protocol allows it. A link naming the same person, as every
        renewal does, stops nothing.
+     - **A token is the person's it was handed over for.** `Plane.link` kept the token it
+       held when a link brought none, whoever the link named, so Bob linking his name alone
+       over Ada left Ada's token in place, and Bob's next private session was registered
+       with it, under her sign-in. A link naming somebody else now keeps none of the token
+       or its expiry; one naming the same person, or a daemon nobody had named, keeps it
+       as before.
      - **Nobody linked is not an error.** A seal refused because nobody is linked
        (`:unlinked`, from the daemon's store) is logged at info and its events kept, as
        before; any other refusal is still an error.
@@ -5578,8 +5584,7 @@ citation keeps meaning what it meant.
        to a daemon linked under another subject (764), so nothing that carried on before
        stops here.
      - **Not in this:** the TUI has no way to unlink a daemon, so a second person on the
-       same account cannot take it over from the terminal (a follow-up); a link with no
-       token that names somebody else keeps the token the daemon held (a follow-up).
+       same account cannot take it over from the terminal (a follow-up).
      - **Proof:** the gateway's `private_test`, against MinIO and OpenBao with the plane
        stand-in, four tests failing on the chunk's tip: Ada's session sealed through its
        first event, the daemon unlinked and Bob linked with his own token, `resume` carries
@@ -5589,7 +5594,10 @@ citation keeps meaning what it meant.
        daemon, `identity.unlink` stops the sealer, the owner is in the index live and
        dormant, nothing Bob's link asks names her session, and her next link registers it
        at its epoch; a link by Bob over Ada stops her sealer and one by Ada again does not;
-       and a seal with nobody linked keeps its event and logs at info, not error. And the
+       a seal with nobody linked keeps its event and logs at info, not error; and, two
+       more failing on the pull request's first tip, Bob linking his name alone over Ada
+       holds no token, and his private session made then reaches the plane with nothing,
+       where it was registered with Ada's. And the
        installed daemon, with scratch homes and the fake provider, through the client
        library, against a plane stand-in for two people that answers each only for their
        own rows (real assertions through the development OpenBao, real MinIO URLs): Ada
