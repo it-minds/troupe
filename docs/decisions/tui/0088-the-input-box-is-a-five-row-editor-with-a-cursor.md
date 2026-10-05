@@ -1,0 +1,12 @@
+---
+number: 88
+title: The input box is a five-row editor with a cursor in it, not a string things get appended to
+date: 2026-09-17
+status: accepted
+paths:
+  - clients/tui/lib/troupe/ui/tui/server.ex
+  - clients/tui/lib/troupe/ui/tui/view.ex
+gist: The input box is a five-row editor with a cursor in it, not a string things get appended to
+---
+
+Every key that touched the command line or a window's input box did `text <> code` and backspace did `String.slice(text, 0..-2//1)`: there was no cursor, so ←/→ did nothing, Alt-← did nothing, and a typo six words back could only be fixed by deleting everything after it. The box also grew with what was typed (to four content rows) and then showed the *tail* only, which is the wrong half once an input is long enough to want re-reading. `Troupe.UI.TUI.Input` is now the editor: a pure `{text, pos}` pair (`pos` a grapheme index) with the motions a terminal reader owes — ←/→ by grapheme, Alt or Ctrl on them by word, ↑/↓ between the input's own lines keeping the column, Home/End and Ctrl-A/Ctrl-E, Backspace/Delete plus their word forms, Ctrl-W/Ctrl-U/Ctrl-K — and `key/2` returns `:pass` for everything else, so it sits *last* in `command_key/2` and `window_key/3` and every existing binding (Enter, Tab, Esc, a digit that picks a window or an option, the `x`/`d` arming of Decision 83) still wins. `TUI.Server` holds `cmd_pos`/`win_pos` beside the two strings and changes both through `put_cmd/put_win`, which clamp; a bare string means "cursor at the end", which is what a completion or a clear wants. Typing and pasting insert *at the cursor* rather than at the end. Two bindings had to be narrowed to make room: Home/End in a window scroll the transcript only while the box is empty (PgUp/PgDn always do), and the `y`/`n`/`a` approval clause now requires no modifier, because it matched any and would have answered an approval on Ctrl-A. The box is a fixed `@input_rows` (five content rows plus borders) instead of growing, so it never jumps under the typist, and past five rows it **scrolls**: the view folds the whole input to the inner width, splices the cursor marker in at `pos`, and draws the window of rows centred on the cursor's row and pinned at both ends — so the start of a long input is reachable, which the old tail-only box made impossible. Only the focused box is five rows; the pages (settings, sessions, files, HQ) keep their one-row footer, and on a terminal too short for both the box gives way so the strip, the status line and two pane rows still fit.
