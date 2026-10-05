@@ -5262,13 +5262,13 @@ citation keeps meaning what it meant.
        formats nothing itself, so any client of the library says the same. Nothing for a
        turn that made no call, a log from before turns were counted, or a root's turn
        that `agent_failed` ended, which carries no `turn`.
-     - **The same to the cent.** The terminal UI rounded floats, and JavaScript rounds a
-       float at an exact half the other way often enough (1,150 tokens was `1.1k` there
-       and `1.2k` with `toFixed`); past a million tokens Elixir printed the float as
-       `1.0e3`, so the 9-million-token turn the issue is about read `9.0e3k sent`. Both
-       clients now work the figures out in whole numbers, rounded half up, and a million
-       is `M`, as `Troupe.Agent.Headroom` already wrote it: `6.0M sent`. The terminal UI's
-       tile and side panel count the same way.
+     - **The same to the cent.** The terminal UI rounded floats, and a float at an exact
+       half goes either way by how it is held: `$1.045` printed `$1.04` there and `$0.045`
+       printed `$0.05`, which a copy in JavaScript could not be sure of matching. Past a
+       million tokens Elixir printed the float as `1.0e3`, so the 9-million-token turn the
+       issue is about read `9.0e3k sent`. Both clients now work the figures out in whole
+       numbers, rounded half up, and a million is `M`, as `Troupe.Agent.Headroom` already
+       wrote it: `6.0M sent`. The terminal UI's tile and side panel count the same way.
      - **The summariser's call is the session's spend.** The fold adds a `compacted`'s
        `usage` and `gateway.cost_micros` to the session's `usage` (new) and `costMicros`,
        as the terminal UI's window adds them (139), so the desktop app's "Cost so far"
