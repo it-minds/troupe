@@ -600,6 +600,57 @@ defmodule Troupe.CLITest do
     assert contents(io) =~ "root> context compacted"
   end
 
+  # Issue #389: what a turn cost is the line the window puts under it (Decision 139), and
+  # a headless run prints the same line when the turn ends, after its reply.
+  test "headless printer prints what a turn cost when it ends" do
+    script = [{:tools, [{"todo_read", %{}}]}, {:text_and_tools, "Read it.", []}]
+    {sid, _, _} = start_session!(script: script)
+    {io, _} = printer!(sid)
+
+    say!(sid, "go")
+    assert_receive {:rest, 0}, 15_000
+    out = contents(io)
+
+    assert [[line]] = Regex.scan(~r/^root> turn: .*$/m, out)
+
+    assert line =~
+             ~r/^root> turn: 2 calls · ↑ [\d.]+k? sent · 0 cached · ↓ [\d.]+k? received · (under a cent|\$\d+\.\d\d)$/
+
+    assert out =~ "root> Read it.\n" <> line
+  end
+
+  test "headless printer prints each ended turn's line in the window's words, and nothing for a turn without calls" do
+    {sid, _, _} = start_session!(script: [])
+    {io, pid} = printer!(sid)
+
+    turn = %{
+      calls: 3,
+      usage: %{input: 300, output: 3, cache_read: 3_000, cache_write: 0},
+      cost_micros: 37_500,
+      unpriced: 0
+    }
+
+    send(pid, {:troupe_event, durable(sid, 1_000_001, :agent_state, %{to: :idle, turn: turn})})
+    assert_receive {:rest, 0}, 5_000
+
+    big = %{turn | calls: 40, usage: %{turn.usage | input: 6_000_000, cache_read: 999_999}}
+    cancelled = %{to: :idle, reason: "cancelled", turn: %{big | unpriced: 2}}
+    send(pid, {:troupe_event, durable(sid, 1_000_002, :agent_state, cancelled)})
+    none = %{turn | calls: 0}
+    send(pid, {:troupe_event, durable(sid, 1_000_003, :agent_state, %{to: :idle, turn: none})})
+    send(pid, {:troupe_event, durable(sid, 1_000_004, :agent_state, %{to: :idle})})
+    # Answered once the four before it are handled.
+    :sys.get_state(pid)
+
+    assert Regex.scan(~r/^root> turn: .*$/m, contents(io)) == [
+             ["root> turn: 3 calls · ↑ 300 sent · 3.0k cached · ↓ 3 received · $0.04"],
+             [
+               "root> turn: 40 calls · ↑ 6.0M sent · 1000.0k cached · ↓ 3 received · " <>
+                 "$0.04, 2 calls unpriced"
+             ]
+           ]
+  end
+
   test "headless printer exits 1 when the agent ends short of finishing" do
     {sid, _, _} = start_session!(script: [%{"stop" => "refusal", "text" => "I will not."}])
     {io, _} = printer!(sid)
@@ -622,8 +673,10 @@ defmodule Troupe.CLITest do
     assert %{data: %{decision: "deny"}} = await_event("root", :budget_ask_answered, 5_000)
     out = contents(io)
     assert [_once] = Regex.scan(~r/budget exhausted.*; headless mode stops here/, out)
-    # The harness's own word on it, as the window shows it, before the run ends (D42).
-    assert out =~ "root> done (budget_exhausted)\nroot> exit 1: the agent ended budget_exhausted"
+    # The harness's own word on it, as the window shows it, before the run ends (D42), and
+    # what the turn cost between the two.
+    assert out =~
+             ~r/root> done \(budget_exhausted\)\nroot> turn: 1 call · .*\nroot> exit 1: the agent ended budget_exhausted/
   end
 
   # A librarian on a repository with no brief is a branch of its own, window `librarian-1`,

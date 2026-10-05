@@ -527,6 +527,16 @@ function StreamEntry({
     case "question":
       return entry.answer === undefined ? null : <AnswerRecord entry={entry} />;
 
+    // What the turn cost, under it, in the client library's words (issue #389). A
+    // subagent's says whose it is, as its answers do.
+    case "turn":
+      return (
+        <p className="note turn-cost">
+          {entry.agent.length > 1 && `${entry.agent.slice(1).join(" › ")} · `}
+          {entry.text}
+        </p>
+      );
+
     case "system": {
       const step = local && entry.type === "llm_error" ? modelErrorStep(entry.text) : null;
       return (

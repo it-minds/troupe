@@ -1184,16 +1184,30 @@ defmodule Troupe.UI.TUI.Model do
   defp money(%{cost_micros: micros, unpriced: 1}), do: dollars(micros) <> ", 1 call unpriced"
   defp money(%{cost_micros: micros, unpriced: n}), do: dollars(micros) <> ", #{n} calls unpriced"
 
+  # In whole numbers, rounded half up, as `@troupe/client`'s `turnLine` works it out, so the
+  # desktop app says the same to the cent (Decision 144).
   defp dollars(0), do: "$0.00"
   defp dollars(micros) when micros < 10_000, do: "under a cent"
-  defp dollars(micros), do: "$" <> :erlang.float_to_binary(micros / 1_000_000, decimals: 2)
+
+  defp dollars(micros) do
+    cents = div(micros + 5_000, 10_000)
+    "$#{div(cents, 100)}." <> String.pad_leading("#{rem(cents, 100)}", 2, "0")
+  end
 
   @doc "Every token a window or agent has accounted for, cached input included."
   @spec total_tokens(%{usage: usage()}) :: non_neg_integer()
   def total_tokens(%{usage: u}), do: u.input + u.output + u.cache_read + u.cache_write
 
-  defp short(n) when n >= 1000, do: "#{Float.round(n / 1000, 1)}k"
+  # A float printed `1.0e3` past a thousand thousands; millions are `M`, and the tenth is
+  # worked out in whole numbers, rounded half up, as `@troupe/client` does (Decision 144).
+  defp short(n) when n >= 1_000_000, do: tenths(n, 1_000_000) <> "M"
+  defp short(n) when n >= 1000, do: tenths(n, 1000) <> "k"
   defp short(n), do: "#{n}"
+
+  defp tenths(n, unit) do
+    t = div(n * 10 + div(unit, 2), unit)
+    "#{div(t, 10)}.#{rem(t, 10)}"
+  end
 
   ## Transcript lines
 

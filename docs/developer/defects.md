@@ -513,9 +513,6 @@ Found by the chunk 16 fixers, 2026-10-04.
 - Subagent spend is added to the parent's turn live only. A cancel or a parent restart in
   the middle of the turn loses what the subagents reported; the delegation's own
   `tool_call_completed` could carry it.
-- The headless printer doesn't print the per-turn line, and the desktop app shows no turn
-  cost: `@troupe/client`'s fold reads neither `turn` (on `turn_ended`, `cancelled`,
-  `agent_done`) nor `compacted.usage`.
 - `Troupe.Bench.Model.measure/2` counts `request.system` only, so the offline bench's
   `system_bytes` leaves out the task list the log counts; `Request.system_text/1` has both.
 

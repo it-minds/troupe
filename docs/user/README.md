@@ -155,8 +155,9 @@ and the others still ask. Apart from the budget, a tool that fails ten times in 
 stops the turn and asks whether to go on, even with every limit lifted.
 
 **Cost.** One thing you type is often many model calls, each sending the whole
-conversation again. When a turn ends, the terminal UI says what it cost in one line under
-it: `turn: 12 calls · ↑ 48.2k sent · 610.4k cached · ↓ 6.3k received · $0.41`, its
+conversation again. When a turn ends, the terminal UI and the desktop app say what it
+cost in one line under it, and `troupe run --headless` prints the same line:
+`turn: 12 calls · ↑ 48.2k sent · 610.4k cached · ↓ 6.3k received · $0.41`, its
 subagents' calls included, and the one that summarises the conversation when it is
 compacted. `sent` is input billed in full, `cached` what the provider's
 prompt cache served at a fraction of the price, and the money is what the gateway said or
