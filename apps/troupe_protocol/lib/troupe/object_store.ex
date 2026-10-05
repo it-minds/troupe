@@ -201,23 +201,65 @@ defmodule Troupe.ObjectStore do
   end
 
   @doc """
-  Every version of every object under a prefix.
+  Every version of every object under a prefix, delete markers included.
 
   What erasure has to enumerate. In a versioned bucket a plain delete adds a marker and
   leaves the content where it was, so "delete the prefix" means this list, not the
-  ordinary one.
+  ordinary one. Complete rather than a first page, as `list/2` is: S3 answers at most a
+  thousand versions at a time, and an erasure that read one page of a long session
+  deleted those and left the rest of its ciphertext where it was.
+
+  `page_size:` asks for fewer at a time (S3's `max-keys`), which is for tests.
   """
-  @spec list_versions(t(), String.t()) :: {:ok, [%{key: String.t(), version_id: String.t()}]} | {:error, term()}
-  def list_versions(%__MODULE__{} = store, prefix) do
-    case request(store, :get, nil, [{"versions", ""}, {"prefix", prefix}], "", []) do
+  @spec list_versions(t(), String.t(), keyword()) ::
+          {:ok, [%{key: String.t(), version_id: String.t()}]} | {:error, term()}
+  def list_versions(%__MODULE__{} = store, prefix, opts \\ []) do
+    page = [{"versions", ""}, {"prefix", prefix}] ++ page_size_query(opts)
+    collect_versions(store, page, [], [])
+  end
+
+  defp collect_versions(store, page, marker, acc) do
+    case request(store, :get, nil, page ++ marker, "", []) do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
-        {:ok, extract_versions(body)}
+        versions = extract_versions(body)
+
+        case next_version_marker(body) do
+          nil -> {:ok, Enum.reverse(acc) ++ versions}
+          {:error, _} = error -> error
+          next -> collect_versions(store, page, next, Enum.reverse(versions) ++ acc)
+        end
 
       {:ok, response} ->
         {:error, {:unexpected_status, response.status, response.body}}
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # The next page starts after a version of a key, not after the key: one key's versions
+  # run across pages, and a key marker alone would skip the rest of them. S3 sends both
+  # markers when it says the listing is cut short; one that says so and sends neither
+  # would have the next request ask for this page again, so that is an error rather than
+  # a loop or a listing that stops early.
+  defp next_version_marker(body) do
+    case {extract(body, "IsTruncated"), extract(body, "NextKeyMarker"),
+          extract(body, "NextVersionIdMarker")} do
+      {"true", key, version} when is_binary(key) and is_binary(version) ->
+        [{"key-marker", key}, {"version-id-marker", version}]
+
+      {"true", _, _} ->
+        {:error, {:truncated_without_marker, body}}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp page_size_query(opts) do
+    case opts[:page_size] do
+      nil -> []
+      size -> [{"max-keys", Integer.to_string(size)}]
     end
   end
 
@@ -237,10 +279,12 @@ defmodule Troupe.ObjectStore do
   Erasure's first act on storage. What makes it final is that the session's key is
   destroyed too — this removes the ciphertext, and destroying the key removes the
   possibility of reading any copy that survives in a backup.
+
+  Lists every version before it deletes one, with `list_versions/3`'s options.
   """
-  @spec delete_prefix(t(), String.t()) :: {:ok, non_neg_integer()} | {:error, term()}
-  def delete_prefix(%__MODULE__{} = store, prefix) do
-    with {:ok, versions} <- list_versions(store, prefix) do
+  @spec delete_prefix(t(), String.t(), keyword()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def delete_prefix(%__MODULE__{} = store, prefix, opts \\ []) do
+    with {:ok, versions} <- list_versions(store, prefix, opts) do
       Enum.each(versions, &delete(store, &1.key, version_id: &1.version_id))
       {:ok, length(versions)}
     end
