@@ -21,7 +21,7 @@ looked things up in.
 | [defects.md](defects.md) | Defects found in passing and not fixed yet |
 
 The design: [../../ARCHITECTURE.md](../../ARCHITECTURE.md),
-[../../DECISIONS.md](../../DECISIONS.md), [../../PROTOCOL.md](../../PROTOCOL.md). The
+[the decisions](../decisions/README.md), [../../PROTOCOL.md](../../PROTOCOL.md). The
 clients: [clients/tui](../../clients/tui/README.md) (and its
-[decisions](../../clients/tui/DECISIONS.md)), [clients/gui](../../clients/gui/README.md),
-and the daemon's [decisions](../../apps/troupe_daemon/DECISIONS.md).
+[decisions](../decisions/tui/README.md)), [clients/gui](../../clients/gui/README.md),
+and the daemon's [decisions](../decisions/daemon/README.md).

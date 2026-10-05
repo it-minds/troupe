@@ -168,7 +168,9 @@ installed (`%LOCALAPPDATA%\Programs\erlang\bin\erl.exe`, `...\elixir\bin\mix.ps1
 cut the chunk: `git fetch origin && git push origin origin/main:refs/heads/development-<date>`.
 
 For each issue, in order: hand it to a fixer with the issue number, the chunk's branch,
-its triage row, the slice for an epic, and anything the person said about it. Fixers that do not install can
+its triage row, the slice for an epic, a decision number reserved for it (one past the
+highest in `docs/decisions/`, counting those reserved for the chunk's other fixers), and
+anything the person said about it. Fixers that do not install can
 start at once; one that installs takes the lock (see above). Tell the person
 `#N -> <status> <pr url>` as each report arrives. Then, by status:
 
@@ -215,8 +217,11 @@ your worktree; never touch the main checkout or another worktree.
    `mixw xref callers Some.Module` from inside the owning `apps/<app>`.
 5. Read the pages of this track you have not read for the part you touch
    ([testing.md](testing.md), [conventions.md](conventions.md), [build.md](build.md)).
-   `DECISIONS.md` says why things are the way they are; do not undo a numbered decision
-   without saying so.
+6. Before changing a file, `mix troupe.decisions --for <path>` at the repository root
+   lists the decisions that govern it, newest first, each with its number and a one-line
+   gist; read the ones that bear on the change in [docs/decisions/](../decisions/README.md).
+   They say why things are the way they are; do not undo a numbered decision without
+   saying so.
 
 If the coordinator's triage and the issue disagree, the issue wins, and the report says so.
 
@@ -234,8 +239,18 @@ does not reproduce it, stop with `cannot-reproduce` and what was tried.
 - A test that starts a session, directly or through a flow that ends in one, stops it in
   `on_exit`. A session left running is still there for every later test in the VM, and
   the failure lands in someone else's test at random.
-- A design choice the issue does not settle and neither the code nor `DECISIONS.md`
+- A design choice the issue does not settle and neither the code nor `docs/decisions/`
   answers: stop with `needs-decision`, the options and a recommendation.
+- A judgment call the fix makes is a decision, and a decision is a new file:
+  `docs/decisions/<number, four digits>-<slug>.md` (`docs/decisions/tui/` for the TUI's
+  own), under the number the coordinator reserved, never an entry appended to a shared
+  file, so two fixes that each decide something do not conflict. Its front matter has
+  `number`, `title` (the decision in one sentence), `date`, `status: accepted`, `issue`,
+  `paths` (globs of the files it governs, each matching something) and `gist` (at most
+  about 150 characters: what someone changing those paths must not undo), optionally
+  `supersedes:` and `symbols:`; the body is the reasoning, the choices and the proof.
+  `mix troupe.decisions --check` checks it, as CI does
+  ([decisions/README.md](../decisions/README.md) has an example).
 
 ### 2.4 Verify, by area
 

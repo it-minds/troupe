@@ -490,12 +490,6 @@ Found by the chunk 16 fixers, 2026-10-04.
 
 ### D65 - What a turn costs: what #389 left (medium)
 
-- The task list goes after the system prompt's cache mark, before the messages
-  (`Request.system_tail`, Decision 770). Each `todo_write` changes it, and the provider
-  writes the conversation's cache again: in a 30-call turn with about ten list updates the
-  saving is about 2x where it could be about 8x. Keeping the list as it was for the whole
-  turn (refreshed on new input or after a compaction), or sending it as a message, would
-  keep the cache.
 - Unchecked: whether a gateway speaking Anthropic's API passes `cache_control` on.
 - Subagent spend is added to the parent's turn live only. A cancel or a parent restart in
   the middle of the turn loses what the subagents reported; the delegation's own

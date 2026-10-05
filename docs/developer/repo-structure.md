@@ -4,7 +4,6 @@
 .
 ├── AGENTS.md                notes for coding agents; points at fixing-issues.md
 ├── ARCHITECTURE.md          the design, and the contract between daemon, plane and clients
-├── DECISIONS.md             the judgment calls that still hold, numbered, newest at the bottom
 ├── PROTOCOL.md              the normative wire document for client authors
 ├── README.md                the front door
 ├── VERSION                  the one version of everything released (Decision 668)
@@ -18,7 +17,7 @@
 ├── config/                  config.exs (compile time) and runtime.exs (prod only)
 ├── dev/                     docker-compose.yml, kind/ (dependencies, values), toolbox/
 ├── docker/Dockerfile        the four server images
-├── docs/                    the user, admin and developer tracks, design/, plans/; overrides/ is the site's theme and hooks
+├── docs/                    the user, admin and developer tracks, decisions/ (a file per decision), design/, plans/; overrides/ is the site's theme and hooks
 ├── fixtures/sample_repo/    a small Mix project the core's workspace tests read
 ├── install.sh, install.ps1  install troupe and troupe-daemon from a release
 ├── mix.exs, mix.lock        the umbrella: the check alias, four releases, credo
@@ -54,7 +53,7 @@ and `priv/` where it ships data, and shares the root's `_build`, `deps`, `mix.lo
 | `apps/troupe_plane/lib/troupe/plane/admin/api.ex` | the admin method table |
 | `apps/troupe_operator/lib/mix/tasks/troupe.e2e.ex` | the cluster suite |
 | `apps/troupe_gateway/test/conformance/` | the Python conformance client, a test fixture |
-| `apps/troupe_daemon/` | its own `config/runtime.exs`, README and DECISIONS |
+| `apps/troupe_daemon/` | its own `config/runtime.exs` and README |
 | `charts/troupe/crds/` | `WorkerProfile`, `TeamVolume`, `TroupePolicy`, `Trigger`, hand-written; the admission policy is a template |
 | `docs/design/admin/tokens.json` | the console's design tokens |
 | `clients/gui/docs/design/themes/*.tokens.json` | the four themes: the GUI's, the front page's (Signal) and the TUI's (Afterglow), one copy |

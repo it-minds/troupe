@@ -13,10 +13,10 @@ defmodule Troupe.LLM.Request do
     :model,
     :messages,
     system: nil,
-    # The end of the system prompt that changes from one call to the next — the task
-    # list — kept apart so a provider's prompt cache can stop in front of it (Decision
-    # 770). `system_text/1` is the two as one prompt, which is what a provider without
-    # cache marks is sent.
+    # The end of the system prompt that changes from one turn to the next — the task list,
+    # held as the turn began (Decision 792) — kept apart so a provider's prompt cache can
+    # stop in front of it (Decision 770). `system_text/1` is the two as one prompt, which
+    # is what a provider without cache marks is sent.
     system_tail: nil,
     # Whether the provider is asked to cache the prompt for the next call. An agent's own
     # calls are, since each sends the one before's prompt again with a little more; a

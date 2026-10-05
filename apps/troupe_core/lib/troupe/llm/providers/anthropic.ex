@@ -397,8 +397,8 @@ defmodule Troupe.LLM.Providers.Anthropic do
   # to call (Decision 770):
   #
   #   * the last tool, so the tools stay cached when the system prompt changes;
-  #   * the system prompt, without the tail that changes within a turn — the task list,
-  #     which goes after the mark as a block of its own;
+  #   * the system prompt, without the tail that changes from one turn to the next — the
+  #     task list (Decision 792), which goes after the mark as a block of its own;
   #   * the last block of each of the last two user messages: the newest one writes the
   #     whole conversation for the next call, and the one before is where the previous
   #     call's mark was, so that call's cache is read whatever came in between.

@@ -93,7 +93,7 @@ A tool is a module implementing `Troupe.Tool`, in `apps/troupe_core/lib/troupe/t
 
 Nothing on the wire changes: a call arrives at every client as `tool_call_started`,
 `tool_call_completed` and `tool_results`, whatever the tool. A judgment call a reader
-could have made differently goes in [DECISIONS.md](../../DECISIONS.md).
+could have made differently is a file of its own in [decisions/](../decisions/README.md).
 
 ## 4. How the event log works
 

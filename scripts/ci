@@ -64,6 +64,9 @@ step "format --check-formatted"     box mix format --check-formatted
 step "credo --strict"               ./scripts/credo
 step "generated assets are current" box bash -c 'MIX_ENV=test mix troupe.admin.assets --check && MIX_ENV=test mix troupe.admin.tokens --check && MIX_ENV=test mix troupe.theme --check && MIX_ENV=test mix troupe.config.schema --check'
 step "boundaries"                   box bash -c 'MIX_ENV=test mix troupe.boundaries'
+# Every decision file in docs/decisions/: its fields, a number of its own, and `paths`
+# globs that match something (Decision 790).
+step "decisions hold"               box bash -c 'MIX_ENV=test mix troupe.decisions --check'
 # `troupe bench`'s offline suite (Decision 772): a scenario past a budget in
 # apps/troupe_core/priv/bench/budgets.json, or a check that does not hold, fails it.
 step "bench within its budgets"     box bash -c 'MIX_ENV=test mix troupe.bench'
