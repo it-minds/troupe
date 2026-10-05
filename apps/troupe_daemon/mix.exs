@@ -50,7 +50,7 @@ defmodule Troupe.Daemon.MixProject do
   #
   # A plain Mix release with the build host's ERTS, one per platform, as a tarball — not a
   # Burrito binary, because a daemon must not have Burrito's launcher halting the VM when
-  # the arguments are handled (DECISIONS.md here, 1). Three steps between `:assemble` and
+  # the arguments are handled (the daemon's Decision 1). Three steps between `:assemble` and
   # `:tar`: the reaper for the build host's triple into `troupe_core`'s `priv/`, the
   # `troupe-daemon` wrapper into `bin/`, and LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt
   # into the root, which the archive must carry. Its runtime configuration is its own

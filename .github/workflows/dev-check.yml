@@ -4,7 +4,7 @@
 #
 # It catches what breaks the chunk for the next fixer. That means code that does not
 # compile, a credo failure, a protocol schema nobody regenerated, a client that no longer
-# builds. It runs no test suite: the fixer ran the tests on its own machine, and
+# builds, a decision file that does not hold. It runs no test suite: the fixer ran the tests on its own machine, and
 # `ci.yml` runs the whole gate once, on the chunk's pull request into `main`, with every
 # issue of the run together. That is what `main` is protected by.
 name: dev-check
@@ -104,6 +104,23 @@ jobs:
           git diff --exit-code protocol/schema/v1 \
             || { echo "protocol/schema/v1 is stale: run mix troupe.schema.gen and commit"; exit 1; }
 
+  # A chunk's pull requests are where decisions are added, a file each (Decision 790): its
+  # front matter, a number used once, and every `paths` glob matching something. Whatever
+  # changed, because a file that moves breaks a glob; a bare `elixir`, nothing compiled.
+  decisions:
+    name: the decisions - front matter and paths
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - name: Every decision is well formed and governs paths that exist
+        run: >-
+          elixir -r apps/troupe_protocol/lib/mix/tasks/troupe.decisions.ex
+          -e 'Mix.Tasks.Troupe.Decisions.run(System.argv())' -- --check
+
   tui:
     name: the TUI - compile
     needs: [changes]
@@ -194,11 +211,11 @@ jobs:
   dev-ok:
     name: dev-ok
     if: always()
-    needs: [changes, elixir, tui, gui, vscode]
+    needs: [changes, elixir, decisions, tui, gui, vscode]
     runs-on: ubuntu-latest
     steps:
       - name: Every job that ran passed
         run: |
-          for r in "${{ needs.changes.result }}" "${{ needs.elixir.result }}" "${{ needs.tui.result }}" "${{ needs.gui.result }}" "${{ needs.vscode.result }}"; do
+          for r in "${{ needs.changes.result }}" "${{ needs.elixir.result }}" "${{ needs.decisions.result }}" "${{ needs.tui.result }}" "${{ needs.gui.result }}" "${{ needs.vscode.result }}"; do
             case "$r" in success|skipped) ;; *) echo "a job ended $r"; exit 1 ;; esac
           done

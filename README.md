@@ -86,7 +86,7 @@ plane adds. CI runs its commands against the latest release every night.
 
 This repository is all of it: the platform, the daemon and both clients, with one
 `VERSION` and one release ([docs/developer/ci.md](docs/developer/ci.md)). [ARCHITECTURE.md](ARCHITECTURE.md)
-is the design and [DECISIONS.md](DECISIONS.md) why it is that way.
+is the design and [docs/decisions/](docs/decisions/README.md) why it is that way.
 
 ## Licence
 

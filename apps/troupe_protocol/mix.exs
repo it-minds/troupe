@@ -43,7 +43,7 @@ defmodule Troupe.Protocol.MixProject do
       {:jose, "~> 1.11"},
       # For the key manager and the object store, which are contracts both the plane
       # and the workers hold and therefore have to live where both can see them. See
-      # DECISIONS.md.
+      # Decision 56.
       {:req, "~> 0.7"},
       # SigV4 only. The HTTP is Req's, which the rest of Troupe already uses, and an S3
       # client with its own opinions about retries and streaming would be a second HTTP
@@ -53,7 +53,7 @@ defmodule Troupe.Protocol.MixProject do
       # session log is highly repetitive and the ratio is what keeps the object tier
       # affordable. The it-minds fork of ezstd 1.2.4 adds the Windows build (a `win32`
       # rebar hook that compiles the NIF with Zig); upstream has hooks for Linux and
-      # macOS only, and the daemon is released for Windows too. See DECISIONS.md 643.
+      # macOS only, and the daemon is released for Windows too. See Decision 643.
       {:ezstd,
        git: "https://github.com/it-minds/ezstd.git",
        ref: "e3c9239fc1ead0fab110e82a9c3cf4ffb5add88d"},
