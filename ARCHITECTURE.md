@@ -10,7 +10,7 @@ index of logs and never their content.
 
 Read this before changing `apps/troupe_core`, `troupe_gateway`, `troupe_protocol` or a
 client. Where things are in the code: [docs/developer/architecture.md](docs/developer/architecture.md).
-Why each choice was made: [DECISIONS.md](DECISIONS.md), by number.
+Why each choice was made: [docs/decisions/](docs/decisions/README.md), one file per decision, by number.
 
 ## 1. Shape
 

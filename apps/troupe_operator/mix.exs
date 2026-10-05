@@ -34,7 +34,7 @@ defmodule Troupe.Operator.MixProject do
       {:troupe_protocol, in_umbrella: true},
       # Bonny over the k8s client. Spiked on Elixir 1.20 / OTP 28 first, as the spec
       # asks: both compile and run there, so the fallback of hand-written
-      # watch-and-reconcile GenServers was not needed. See DECISIONS.md.
+      # watch-and-reconcile GenServers was not needed. See Decision 37.
       {:bonny, "~> 1.5"},
       {:k8s, "~> 2.8"},
       {:jason, "~> 1.4"},
