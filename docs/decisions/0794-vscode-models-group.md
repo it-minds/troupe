@@ -80,7 +80,8 @@ from waited on it.
   under sh, dash and bash in WSL. And the `.vsix` in a scratch VS Code profile, against the
   installed `troupe.exe` 0.8.3 with scratch homes and the core suite's stand-in gateway on
   a loopback port: six models, the default and cheap starred, the expensive one and a
-  priced `house-model` not served, neither with the 200k `troupe models` prints for them;
+  priced `house-model` not served and without a window (the text prints `200k ctx` for
+  `house-model`);
   the button refreshed the cache (its `fetched_at` moved, the group said "listed just
   now"), the view's own asks had not; a project file of broken YAML gave the group the
   reason `troupe models` printed.
