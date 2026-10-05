@@ -3,7 +3,7 @@ defmodule Troupe.Tools.ReadFile do
 
   @behaviour Troupe.Tool
 
-  alias Troupe.{Tool, Workspace}
+  alias Troupe.{Config, Tool, Workspace}
   alias Troupe.Tools.Output
 
   @default_limit 2_000
@@ -76,6 +76,6 @@ defmodule Troupe.Tools.ReadFile do
     end
   end
 
-  defp cap(nil), do: 60_000
+  defp cap(nil), do: %Config{}.tool_output_limit
   defp cap(config), do: config.tool_output_limit
 end
