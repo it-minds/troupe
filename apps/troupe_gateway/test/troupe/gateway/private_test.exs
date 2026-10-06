@@ -189,9 +189,11 @@ defmodule Troupe.Gateway.PrivateTest do
     end
 
     # Issue #433: it was refused and carried on, uploading at its old epoch beside the
-    # device that held the session now.
+    # device that held the session now. Against a plane that signs a write whatever epoch
+    # it names, as one from before Decision 800 does: the report is the fence there.
     test "a device that lost the session stops sealing, and uploads nothing more at its epoch",
          ctx do
+      FakePlane.sign_any_epoch(ctx.plane.state)
       session_id = unique("p")
       {:ok, sealer, context} = start_private(session_id, ctx)
       ref = Process.monitor(sealer)
@@ -229,6 +231,80 @@ defmodule Troupe.Gateway.PrivateTest do
 
       # The row is unchanged: the loser's report was refused, not merged.
       assert FakePlane.row(ctx.plane.state, session_id)["device"] == "the other one"
+    end
+
+    # Issue #441. A seal wrote its segment and its manifest, and only its report after them
+    # was refused: a device that had lost the session overwrote the manifest of the device
+    # holding it, and a restore read the loser's until the holder sealed again.
+    test "a device that loses the session between a seal's segment and its manifest writes no manifest after it",
+         ctx do
+      session_id = unique("p")
+      {:ok, sealer, context} = start_private(session_id, ctx)
+      ref = Process.monitor(sealer)
+      send_event(context, sealer, 1)
+      assert {:ok, %{sealed_through: 1}} = Sealer.seal_now(sealer)
+
+      # This laptop seals its second event. The segment is up, and before the plane signs
+      # the manifest the desktop claims the session and seals its own second event.
+      pause_before_put(ctx.plane.state, session_id, "/manifest.json")
+      send_event(context, sealer, 2)
+      send(sealer, :interval)
+      assert_receive {:paused, answering}, 5_000
+
+      held = claim_elsewhere(session_id, context, ctx)
+      written = versions(session_id)
+      send(answering, :go)
+
+      assert_receive {:DOWN, ^ref, :process, ^sealer, {:shutdown, :stale_version}}, 5_000
+
+      # Nothing more under the prefix after the claim, and nothing more reported.
+      assert versions(session_id) == written
+      assert [%{"last_seq" => 1}] = seal_reports(ctx.plane.state, session_id)
+
+      # A restore after it reads the desktop's manifest, and the desktop's history.
+      restore = Private.store(session_id, ctx.name)
+      assert {:ok, manifest} = Storage.get_manifest(restore, session_id)
+      assert %{"epoch" => 2, "last_seq" => 2} = manifest
+      assert manifest["latest_segment"] == held
+
+      assert {:ok, all} = Storage.list_segments(restore, session_id)
+      assert [%{epoch: 1, last_seq: 1}, %{key: ^held}] = Storage.live_segments(all)
+
+      assert {:ok, [%{"data" => %{"on" => "desktop"}}]} =
+               Storage.read_segment(restore, session_id, context.data_key, held)
+
+      # Stopped, not started again, and listed as the other device's.
+      assert %{active: 0} = DynamicSupervisor.count_children(Private.Sealers)
+      assert eventually(fn -> not Private.sealing?(session_id) end)
+      assert Private.sync(session_id) == {"elsewhere", nil}
+    end
+
+    test "a device that loses the session before a seal's segment writes nothing at all", ctx do
+      session_id = unique("p")
+      {:ok, sealer, context} = start_private(session_id, ctx)
+      ref = Process.monitor(sealer)
+      send_event(context, sealer, 1)
+      assert {:ok, %{sealed_through: 1}} = Sealer.seal_now(sealer)
+
+      # The desktop claims it as this laptop asks the plane to sign its second segment.
+      pause_before_put(ctx.plane.state, session_id, "/segments/")
+      send_event(context, sealer, 2)
+      send(sealer, :interval)
+      assert_receive {:paused, answering}, 5_000
+
+      held = claim_elsewhere(session_id, context, ctx)
+      written = versions(session_id)
+      send(answering, :go)
+
+      assert_receive {:DOWN, ^ref, :process, ^sealer, {:shutdown, :stale_version}}, 5_000
+      assert versions(session_id) == written
+      assert [%{"last_seq" => 1}] = seal_reports(ctx.plane.state, session_id)
+
+      restore = Private.store(session_id, ctx.name)
+      assert {:ok, %{"epoch" => 2, "last_seq" => 2}} = Storage.get_manifest(restore, session_id)
+      assert {:ok, all} = Storage.list_segments(restore, session_id)
+      assert [{1, 1}, {2, 2}] = Enum.map(all, &{&1.epoch, &1.first_seq})
+      assert List.last(all).key == held
     end
 
     # Decision 755. The key is under the person's name at the key manager, which the plane
@@ -1364,6 +1440,63 @@ defmodule Troupe.Gateway.PrivateTest do
     for {"session.register", %{"session_id" => ^session_id, "last_seq" => _} = params} <-
           FakePlane.calls(state),
         do: params
+  end
+
+  # Have the plane wait, before it answers the next request to sign a write of a key of this
+  # session's that contains `part`, until the test says `:go`: a moment in the middle of a
+  # seal, held open.
+  defp pause_before_put(plane, session_id, part) do
+    test = self()
+
+    FakePlane.before(
+      plane,
+      fn method, params ->
+        method == "session.presign" and params["session_id"] == session_id and
+          params["method"] == "put" and Enum.any?(params["keys"], &String.contains?(&1, part))
+      end,
+      fn ->
+        send(test, {:paused, self()})
+
+        receive do
+          :go -> :ok
+        after
+          10_000 -> :ok
+        end
+      end
+    )
+  end
+
+  # Another of Ada's devices claims the session at the epoch this one holds, and seals its
+  # own next event from the row's `last_seq`, as `Private.take_over/2` there would: with a
+  # sealer of its own, since `Private`'s registry is this daemon's. Answers its segment's key.
+  defp claim_elsewhere(session_id, context, ctx) do
+    desktop = link_as("ada@example.test", ctx)
+
+    assert {:ok, %{"epoch" => epoch, "last_seq" => last_seq}} =
+             Private.claim(session_id, context.epoch, plane: desktop, device: "desktop")
+
+    {:ok, sealer} =
+      Sealer.start_link(
+        context: %{context | epoch: epoch, store: Private.store(session_id, desktop)},
+        sealed_through: last_seq
+      )
+
+    seq = last_seq + 1
+    event = %Event{seq: seq, type: "message", agent: ["root"], data: %{"on" => "desktop"}}
+    send(sealer, {:troupe_event, session_id, event})
+    assert {:ok, %{sealed_through: ^seq}} = Sealer.seal_now(sealer)
+    GenServer.stop(sealer)
+
+    Storage.segment_key(session_id, epoch, seq, seq)
+  end
+
+  # Every version of every object under the session's prefix, read with the store's own
+  # credential: what was written there, overwrites included.
+  defp versions(session_id) do
+    {:ok, versions} =
+      ObjectStore.list_versions(ObjectStore.from_env(), Storage.prefix(session_id))
+
+    Enum.sort_by(versions, &{&1.key, &1.version_id})
   end
 
   # Once the sealer has handled what was sent to it before this, or has gone.

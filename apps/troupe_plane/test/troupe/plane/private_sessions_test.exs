@@ -166,6 +166,36 @@ defmodule Troupe.Plane.PrivateSessionsTest do
       assert sealed["last_seq"] == 9
     end
 
+    # Issue #441, Decision 800. The loser hears it at the write it asks to have signed, not
+    # at the report after the write, so it writes nothing under the prefix once it has lost.
+    test "a write naming an epoch another device claimed past is signed nothing", %{ada: ada} do
+      id = "20260923T000000-priv13"
+      {:ok, _} = register(ada, %{"session_id" => id, "device" => "laptop", "last_seq" => 5})
+      manifest = "sessions/#{id}/manifest.json"
+      segment = "sessions/#{id}/segments/000000000001-000000000006-000000000006.seg"
+
+      assert {:ok, %{"urls" => %{^manifest => _}}} =
+               presign(ada, id, "put", [manifest], %{"epoch" => 1})
+
+      {:ok, %{"epoch" => 2}} =
+        register(ada, %{"session_id" => id, "claim" => true, "epoch" => 1, "device" => "desktop"})
+
+      for method <- ["put", "get"], keys <- [[manifest], [segment]] do
+        assert {:error, stale} = presign(ada, id, method, keys, %{"epoch" => 1})
+        assert stale.message == "stale_version"
+        assert stale.data.reason == "another device holds this session"
+      end
+
+      # The holder is signed for, and so is a restore, which names no epoch.
+      assert {:ok, %{"urls" => %{^segment => _}}} =
+               presign(ada, id, "put", [segment], %{"epoch" => 2})
+
+      assert {:ok, %{"urls" => %{^manifest => _}}} = presign(ada, id, "get", [manifest])
+
+      assert {:error, invalid} = presign(ada, id, "put", [manifest], %{"epoch" => "2"})
+      assert invalid.message == "invalid_params"
+    end
+
     test "a claim on somebody else's session is refused, not fenced", %{ada: ada, bob: bob} do
       {:ok, _} = register(ada, %{"session_id" => "20260923T000000-priv05"})
 
@@ -395,10 +425,10 @@ defmodule Troupe.Plane.PrivateSessionsTest do
 
   defp register(user, params), do: Harness.call("session.register", params, as(user))
 
-  defp presign(user, session_id, method, keys) do
+  defp presign(user, session_id, method, keys, extra \\ %{}) do
     Harness.call(
       "session.presign",
-      %{"session_id" => session_id, "method" => method, "keys" => keys},
+      Map.merge(%{"session_id" => session_id, "method" => method, "keys" => keys}, extra),
       as(user)
     )
   end

@@ -606,9 +606,16 @@ defmodule Troupe.Plane.Harness do
   # key for five minutes; the key must be under this session's prefix, which is checked
   # here rather than trusted, because a signer that signs whatever it is handed is an
   # object-storage credential with extra steps.
+  #
+  # A daemon sealing names the `epoch` it holds, and one another device has claimed past
+  # is refused `stale_version` before anything is signed: the device that lost the session
+  # learns it before it writes under the prefix, not at the report after (Decision 800).
+  # Naming none signs as before, for a restore, which holds no epoch, and a daemon from
+  # before this.
   defp handle("session.presign", params, %{user: user}) do
     with {:ok, session_id} <- required_string(params, "session_id"),
          {:ok, session} <- own_private(session_id, user),
+         :ok <- held(session, params["epoch"]),
          {:ok, method} <- presign_method(params["method"]),
          {:ok, keys} <- presign_keys(params, session) do
       store = ObjectStore.from_env()
@@ -1144,6 +1151,11 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp suffix_of(_given, prefix), do: prefix
+
+  defp held(_session, nil), do: :ok
+  defp held(%Session{epoch: epoch}, epoch), do: :ok
+  defp held(%Session{id: id}, epoch) when is_integer(epoch), do: {:error, stale(id)}
+  defp held(_session, _epoch), do: invalid("epoch is an integer")
 
   defp presign_method("get"), do: {:ok, :get}
   defp presign_method("put"), do: {:ok, :put}
