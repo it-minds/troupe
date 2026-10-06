@@ -676,20 +676,6 @@ Found by the #437 fixer, 2026-10-06.
 
 Found by the chunk 20 fixer of slot E20, 2026-10-06.
 
-### D77 - CI on GitHub's hosted runners (low)
-
-- The native build jobs (`.github/workflows/native.yml`) set no `timeout-minutes`, so a
-  job whose runner hangs waits GitHub's six hours: the 0.8.4 release's macOS TUI build sat
-  in "Build the release" for over half an hour until it was cancelled and run again (it
-  then took six minutes).
-- `ubuntu-latest` moves to Ubuntu 26 on 2026-10-19 (GitHub's notice on every run). Nothing
-  has checked that `erlef/setup-beam`, Zig and the builds work there; pinning
-  `ubuntu-24.04`, or a trial run, before then would.
-- `Troupe.Agent.ACPAgentTest` ("a subprocess that exits is reported as partial") fails one
-  or two runs in twelve on a loaded machine and passes alone.
-
-Found by the coordinator, 2026-10-06.
-
 ## Taken
 
 | Defect | Taken by |

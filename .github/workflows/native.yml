@@ -62,7 +62,8 @@ jobs:
   # `macos`, the macOS rows are filtered out before any runner starts.
   targets:
     name: which targets
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
     outputs:
       daemon: ${{ steps.pick.outputs.daemon }}
       tui: ${{ steps.pick.outputs.tui }}
@@ -71,28 +72,31 @@ jobs:
       - id: pick
         env:
           MACOS: ${{ inputs.macos }}
+          # `timeout` is each target's own, about three times what its build takes (Decision
+          # 796): a runner that hangs fails the build in minutes rather than holding a
+          # release for GitHub's six hours, and a target slow by nature is not cut short.
           DAEMON: >-
-            [{"os": "ubuntu-24.04", "target": "linux_x86_64"},
-             {"os": "ubuntu-24.04-arm", "target": "linux_aarch64"},
-             {"os": "macos-15-intel", "target": "macos_x86_64"},
-             {"os": "macos-14", "target": "macos_aarch64"},
-             {"os": "windows-2022", "target": "windows_x86_64"}]
+            [{"os": "ubuntu-24.04", "target": "linux_x86_64", "timeout": 10},
+             {"os": "ubuntu-24.04-arm", "target": "linux_aarch64", "timeout": 10},
+             {"os": "macos-15-intel", "target": "macos_x86_64", "timeout": 25},
+             {"os": "macos-14", "target": "macos_aarch64", "timeout": 10},
+             {"os": "windows-2022", "target": "windows_x86_64", "timeout": 15}]
           TUI: >-
-            [{"os": "ubuntu-24.04", "target": "linux_x86_64", "target_abi": "musl"},
-             {"os": "ubuntu-24.04-arm", "target": "linux_aarch64", "target_abi": "musl"},
-             {"os": "macos-15-intel", "target": "macos_x86_64"},
-             {"os": "macos-14", "target": "macos_aarch64"},
-             {"os": "windows-2022", "target": "windows_x86_64"}]
+            [{"os": "ubuntu-24.04", "target": "linux_x86_64", "target_abi": "musl", "timeout": 20},
+             {"os": "ubuntu-24.04-arm", "target": "linux_aarch64", "target_abi": "musl", "timeout": 15},
+             {"os": "macos-15-intel", "target": "macos_x86_64", "timeout": 40},
+             {"os": "macos-14", "target": "macos_aarch64", "timeout": 20},
+             {"os": "windows-2022", "target": "windows_x86_64", "timeout": 25}]
           # Linux on 22.04 is the glibc floor: the oldest Ubuntu that carries
           # libwebkit2gtk-4.1-dev. Building on 24.04 raises the required glibc and
           # silently breaks every 22.04 user. Do not "modernise" it.
           DESKTOP: >-
             [{"name": "macOS (universal)", "os": "macos-14", "target": "universal-apple-darwin",
-              "rust-targets": "aarch64-apple-darwin,x86_64-apple-darwin"},
+              "rust-targets": "aarch64-apple-darwin,x86_64-apple-darwin", "timeout": 30},
              {"name": "Windows (x64)", "os": "windows-latest", "target": "x86_64-pc-windows-msvc",
-              "rust-targets": "x86_64-pc-windows-msvc"},
+              "rust-targets": "x86_64-pc-windows-msvc", "timeout": 20},
              {"name": "Linux (x64)", "os": "ubuntu-22.04", "target": "x86_64-unknown-linux-gnu",
-              "rust-targets": "x86_64-unknown-linux-gnu"}]
+              "rust-targets": "x86_64-unknown-linux-gnu", "timeout": 20}]
         # `macos` is empty when nothing passed it, which means the default: build it.
         run: |
           if [ "$MACOS" = false ]; then
@@ -111,7 +115,7 @@ jobs:
     name: troupe-daemon ${{ matrix.target }}
     needs: [targets]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: ${{ matrix.timeout }}
     env:
       MIX_ENV: prod
     strategy:
@@ -209,7 +213,7 @@ jobs:
     name: troupe ${{ matrix.target }}
     needs: [targets]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: ${{ matrix.timeout }}
     env:
       MIX_ENV: prod
       TROUPE_REAPER_TARGETS: all
@@ -307,8 +311,9 @@ jobs:
     runs-on: ubuntu-24.04
     # A binary that hangs in a container must fail this job, not hold a runner for six
     # hours: the first run of this job on GitHub did exactly that, with no log to show
-    # for it until the job ended.
-    timeout-minutes: 20
+    # for it until the job ended. Each command below has its own `timeout` as well, which
+    # names the command that hung, so this is longer than the longest of them.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -358,7 +363,7 @@ jobs:
     name: desktop ${{ matrix.name }}
     needs: [targets]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ matrix.timeout }}
     strategy:
       fail-fast: false
       matrix:
@@ -486,7 +491,8 @@ jobs:
     name: attach to ${{ inputs.tag }}
     needs: [daemon, tui, tui-containers, desktop]
     if: inputs.tag != ''
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     # No `permissions:` of its own: it inherits the caller's, and the release job in
     # `ci.yml` calls this with `contents: write`. Declaring it here would make every other
     # caller — a pull request's `native` job — fail validation for a job it never runs.
