@@ -2,7 +2,7 @@
   "name": "troupe",
   "displayName": "Troupe",
   "description": "Opens Troupe's terminal client in VS Code's terminal, at the workspace folder.",
-  "version": "0.8.4",
+  "version": "0.8.5",
   "publisher": "objective-mj",
   "license": "Apache-2.0",
   "private": true,
