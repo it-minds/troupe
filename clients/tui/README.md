@@ -227,6 +227,7 @@ the same lines.
 ```
 troupe                                  # TUI in the current directory
 troupe --workspace DIR                  # TUI rooted at DIR, wherever it is started
+troupe --prompt "@src/app.ts "          # TUI with that in its input, not yet sent
 troupe --watch                          # TUI with watch mode on
 troupe --no-mouse                       # TUI without mouse reporting (terminal selection works)
 troupe --private                        # a private session, sealed to the plane you signed in to
@@ -243,7 +244,8 @@ troupe --version
 ```
 
 In VS Code, the extension's **Troupe: Open** runs `troupe --workspace <folder>` in a
-terminal at the folder you are working in, by default a tab beside your files
+terminal at the folder you are working in, by default a tab beside your files, and
+**Ask Troupe About This File** adds `--prompt` with the file's path
 ([vscode.md](../../docs/user/vscode.md)).
 
 `troupe run --headless` prints the transcript, one line per event prefixed with the agent

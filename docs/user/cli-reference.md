@@ -15,6 +15,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | --- | --- |
 | `troupe` | open the TUI in the current directory |
 | `troupe --workspace DIR` | open the TUI rooted at DIR, wherever it is started |
+| `troupe --prompt "TEXT" [--workspace DIR]` | open the TUI with TEXT in its input, the cursor after it, not yet sent |
 | `troupe --watch` | TUI with watch mode on |
 | `troupe --no-mouse` | TUI without mouse reporting, so the terminal's own selection works |
 | `troupe --full-send` | start with every budget/token limit lifted for the session |

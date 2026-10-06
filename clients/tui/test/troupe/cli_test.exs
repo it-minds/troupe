@@ -2,7 +2,9 @@ defmodule Troupe.CLITest do
   use ExUnit.Case, async: true
 
   import Troupe.TestHelpers
-  import Troupe.TUIHelpers, only: [start_tui: 1, user_state: 1]
+
+  import Troupe.TUIHelpers,
+    only: [start_tui: 1, start_tui: 2, user_state: 1, screen_text: 2, type: 2]
 
   alias Troupe.{CLI, Client}
   alias Troupe.CLI.Runner
@@ -61,6 +63,47 @@ defmodule Troupe.CLITest do
     assert user_state(pid).model.workspace == ws
     assert {:ok, listed} = Client.sessions({:local, ws})
     assert sid in Enum.map(listed, & &1.id)
+  end
+
+  # Issue #378: the VS Code extension's "Ask Troupe About This File" runs `troupe --workspace
+  # DIR --prompt "@path "`. The TUI opens with the text in its input and the cursor after it,
+  # for the question to be typed, and nothing is sent until Enter.
+  test "--prompt opens the TUI with TEXT in its input, cursor at the end, nothing sent" do
+    ws = Path.expand(tmp_workspace())
+    text = ~s(@"docs/my notes.md" )
+
+    assert {:ok, %{mode: :tui, prompt: ^text, workspace: ^ws} = args} =
+             CLI.parse(["--workspace", ws, "--prompt", text])
+
+    assert {:ok, %{mode: :tui, prompt: nil}} = CLI.parse([])
+
+    assert {:ok, %{mode: :tui, prompt: "x", mouse: false}} =
+             CLI.parse(["--prompt", "x", "--no-mouse"])
+
+    {sid, _, _} =
+      start_session!(
+        workspace: args.workspace,
+        params: %{config: CLI.session_config(args), private: args.private}
+      )
+
+    {pid, session} = start_tui(sid, Runner.window_opts(args))
+    state = user_state(pid)
+    assert {state.focus, state.cmd_text, state.cmd_pos} == {:command, text, String.length(text)}
+    assert screen_text(pid, session) =~ ~s(@"docs/my notes.md")
+
+    # Typed after it, as a person would type the question.
+    type(pid, "why?")
+    assert user_state(pid).cmd_text == text <> "why?"
+    refute Enum.any?(Client.events(sid), &(&1.type == :input))
+  end
+
+  # The task after `--`, as the extension types it: a task that starts with a dash is the
+  # task, not a switch.
+  test "a task after -- is the task, whatever it starts with" do
+    assert {:ok, %{mode: :run, task: "-v is broken", workspace: ws}} =
+             CLI.parse(["run", "--workspace", ".", "--no-mouse", "--", "-v is broken"])
+
+    assert ws == File.cwd!()
   end
 
   # The config files' `auto_approve`, `watch` and `full_send` apply to a session `troupe`

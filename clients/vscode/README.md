@@ -4,8 +4,9 @@ Opens Troupe's terminal client, `troupe`, in a VS Code terminal rooted at the wo
 folder you are working in: by default a tab in the editor area, to split and tile beside
 your files. The terminal client is the product; this extension is a door to it, so that
 reaching Troupe from VS Code is one click or one key rather than a terminal opened by hand
-and a `cd`. Beside it, the Troupe side bar shows that folder's settings as Troupe itself
-resolves them, and the models there are to choose from.
+and a `cd`, and asking it about a file is two clicks. Beside it, the Troupe side bar shows
+that folder's settings as Troupe itself resolves them, and the models there are to choose
+from.
 
 ## Troupe: Open
 
@@ -41,6 +42,37 @@ How it behaves:
   On Windows only a `.exe`, `.cmd` or `.bat` is run, never a file without an extension.
 - **When it is not there**, one sentence says so and which machine it looked on, with a
   link to the install instructions, and no terminal is opened.
+
+## Troupe's other commands
+
+From the command palette, each typed into the same folder's terminal, `Troupe: <folder>`:
+
+| Command | Types |
+|---|---|
+| **Troupe: Resume Last Session Here** | `troupe resume --workspace <folder>` |
+| **Troupe: Run a Task…** | asks for the task, then `troupe run --workspace <folder> -- "<task>"` |
+| **Troupe: Doctor** | `troupe doctor --workspace <folder>` |
+| **Troupe: Open Settings** | `troupe config --workspace <folder>` |
+
+The folder is chosen as for **Troupe: Open**. The task is quoted for the terminal's
+shell, quotes and all. Doctor's and Open Settings' terminal stays open when they finish,
+for the report to be read; the others close it when the TUI quits, as Open does. When
+something already runs in the folder's terminal, the TUI most likely, a command shows it
+and types nothing into it, and says so.
+
+## Ask Troupe about a file
+
+Right-click a file in the explorer, in an editor, or on its tab: **Ask Troupe About This
+File** opens Troupe at the file's folder with the file's path in its prompt, not yet sent,
+for you to type the question after it:
+
+```
+troupe --workspace <folder> --prompt "@src/app.ts "
+```
+
+A folder in the explorer has **Ask Troupe About This Folder** (`@src/`). From the command
+palette, the file is the one in the active editor. When Troupe already runs in that
+folder's terminal, it is shown, and the message says what to type into it.
 
 ## The Troupe side bar
 
@@ -99,7 +131,7 @@ The `.vsix` by itself installs with **Extensions: Install from VSIX…** or
 ## No telemetry
 
 The extension collects nothing and sends nothing anywhere. It reads its three settings,
-looks for `troupe` on the disk, types one line into a terminal, and runs
+looks for `troupe` on the disk, types a `troupe` command line into a terminal, and runs
 `troupe config --explain --json` and `troupe models --json` on the same machine for the
 Settings view. What Troupe itself sends, and to whom (`troupe models` asks your providers
 what they serve), is in its own documentation.

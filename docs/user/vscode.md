@@ -102,6 +102,53 @@ directory. `troupe --workspace DIR` does the same from any terminal.
   Windows) gets a terminal that runs `troupe` directly instead, which closes when `troupe`
   exits, whatever its status.
 
+## Troupe's other commands
+
+Four more commands in the command palette type one of `troupe`'s other command lines into
+the same terminal, `Troupe: <folder>`, for the folder chosen as above (Decision 808):
+
+| Command | Types |
+|---|---|
+| **Troupe: Resume Last Session Here** | `troupe resume --workspace <folder>`: the session last worked in there, with the session picker open |
+| **Troupe: Run a Task…** | asks for the task, then `troupe run --workspace <folder> -- "<task>"`: a session started on it, in the TUI |
+| **Troupe: Doctor** | `troupe doctor --workspace <folder>`: the setup checked, one line a check |
+| **Troupe: Open Settings** | `troupe config --workspace <folder>`: the providers and models resolved there, or their setup on a first run |
+
+- **The terminal.** When there is none, it is opened as **Troupe: Open** opens it. When
+  one is there and idle (a report ended, or the TUI failed to start), the line is typed
+  into it. When something runs in it, the TUI most likely, it is shown and nothing is typed
+  into it, since the keys would go to the TUI, and a message says so. Telling idle from
+  busy takes the shell's integration, as above; without it, a terminal that has had a line
+  is taken for busy.
+- **Which close it.** Resume and Run open the TUI, and `troupe.args` is added to them as to
+  Open; quitting the TUI closes the terminal. Doctor's and Open Settings' line has no
+  `exit`: the terminal stays with the report in it, the shell's prompt under it.
+- **The task** comes after `--`, so a task that starts with a dash is the task. It is
+  quoted for the terminal's shell, quotes, `&`, `%` and `$` included. A key bound to
+  `troupe.run` can give the task as its `args`. A line break goes through as one in
+  PowerShell, bash, zsh, sh and fish; Command Prompt cannot carry one in a command line,
+  and a space stands for it there.
+
+## Ask Troupe about a file
+
+**Ask Troupe About This File** is on a file's menu in the explorer, in an editor (a
+right-click in the text) and on its tab. It opens Troupe at the folder the file is in, as
+**Troupe: Open** would, with the file's path in the TUI's prompt and the cursor after it,
+not yet sent:
+
+```
+troupe --workspace <folder> --prompt "@src/app.ts "
+```
+
+Type the question and press Enter. The path is written as the TUI's own `@` completion
+writes it: from the folder, with forward slashes. One with a space in it is put in double
+quotes (`@"docs/release notes.md"`). A folder in the explorer has **Ask Troupe About This
+Folder** instead, which writes `@src/`. In the command palette, the file is the one in the
+active editor.
+
+When Troupe already runs in that folder's terminal, nothing can be typed into it from
+outside: the terminal is shown, and the message says what to type into it.
+
 ## The Troupe side bar
 
 The Troupe mask in the activity bar opens Troupe, as above, and a side bar of two views.
@@ -217,18 +264,16 @@ Install it on that host with `install.sh` and press **Troupe: Open** again.
 ## What it does not do
 
 **It collects nothing and sends nothing anywhere**: no telemetry, no network request of
-its own. It reads its three settings, looks for `troupe` on the disk, types one line into
-a terminal, and runs `troupe config --explain --json` on the same machine for the
+its own. It reads its three settings, looks for `troupe` on the disk, types a `troupe`
+command line into a terminal, and runs `troupe config --explain --json` on the same machine for the
 Settings view, which reads the config files and sends nothing, and `troupe models --json`
 for its Models group, which asks your providers what they serve when its list is stale,
 or when you press the group's button, as `troupe models` does in a terminal.
 
-Not yet, and tracked in #378: commands for `troupe resume`, `troupe run`, `troupe doctor`
-and `troupe config`; explorer and editor menu items that open Troupe with a file's path in
-the prompt; opening Troupe when a folder opens; choosing the terminal profile; changing a
-setting, or trusting the workspace, from the Settings view; and a version check against
-the TUI. The panel that would show a session inside VS Code over the daemon's Agent Client
-Protocol is a later version.
+Not yet, and tracked in #378: opening Troupe when a folder opens; choosing the terminal
+profile; changing a setting, or trusting the workspace, from the Settings view; and a
+version check against the TUI. The panel that would show a session inside VS Code over the
+daemon's Agent Client Protocol is a later version.
 
 ## How it is built and tested
 
@@ -243,18 +288,23 @@ policy like every other package ([third-party-licences.md](../third-party-licenc
   files and the trust, a config that does not load as the errors a failing `troupe`
   printed), its Models group (each model's window, price and where they came
   from, the three roles, a model not served shown without a window, each provider's list,
-  a failure as one line with no key in it), and the manifest (no Windows key on Ctrl+Alt,
-  every icon in the package). The line is also put through each shell the machine has (sh, bash, zsh, dash,
-  fish, Windows PowerShell, PowerShell 7, cmd.exe), with a folder name full of quotes,
-  `$`, `&` and backticks, and has to arrive as the arguments it was meant to be; so is the
-  call a `.cmd` gets through cmd.exe for the Settings view.
+  a failure as one line with no key in it), the line each command types and the path
+  "Ask Troupe" writes, and the manifest (the commands and the menus, no Windows key on
+  Ctrl+Alt, every icon in the package). The line is also put through each shell the
+  machine has (sh, bash, zsh, dash, fish, Windows PowerShell, PowerShell 7, cmd.exe), with
+  a folder name full of quotes, `$`, `&` and backticks, and a task and a prompt with double
+  quotes, a line break, `%PATH%` and backslashes, and has to arrive as the arguments it was
+  meant to be; so is the call a `.cmd` gets through cmd.exe for the Settings view.
 - `pnpm test:vscode`: the extension inside a real VS Code, against a fake `troupe` that
   writes down the directory and arguments it was started with and then waits, quits or
   fails as it is told, and answers `config --explain --json` and `models --json` with
   settings and models of its own, on a workspace of four folders: the editor tab, `beside`
   and `panel`, the editor title bar's file, the side bar's list and the activity bar, the
   Settings view, and its Models group (`--refresh` only from the group's button, a failing
-  `troupe models`, a config that does not load and its errors, a missing `troupe`). It is downloaded,
+  `troupe models`, a config that does not load and its errors, a missing `troupe`), the
+  four commands (a busy terminal left alone, Doctor's kept open and Open Settings typed into
+  it, a task's question dismissed), and "Ask Troupe" on a file, a folder, the active
+  editor's file and none. It is downloaded,
   or `TROUPE_VSCODE_EXECUTABLE` names one, and runs with its own user data and extensions
   directories under `.vscode-test/`, so nobody's own profile is read or changed. On Linux
   without a display, run it under `xvfb-run -a`.

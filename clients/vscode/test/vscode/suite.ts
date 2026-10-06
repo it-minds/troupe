@@ -336,6 +336,159 @@ it("a missing troupe is the one sentence in the Settings view", async () => {
   });
 });
 
+// Issue #378: troupe's other command lines, each into the folder's terminal.
+
+it("Troupe: Resume Last Session Here types troupe resume into the folder's terminal", async () => {
+  await closeAll();
+  mode("stay");
+  await edit("beta");
+  const before = (await calls(0)).length;
+
+  const opened = await vscode.commands.executeCommand<Opened>("troupe.resume");
+  assert.deepEqual(opened, { opened: vscode.Uri.file(folder("beta")).fsPath, terminal: "Troupe: beta", reused: false });
+
+  const call = (await calls(before + 1))[before];
+  assert.ok(call);
+  samePath(call.cwd, folder("beta"));
+  assert.deepEqual([call.args[0], call.args[1]], ["resume", "--workspace"]);
+  samePath(call.args[2] ?? "", folder("beta"));
+  assert.equal(call.args.length, 3);
+});
+
+it("a command into a terminal Troupe runs in shows it, types nothing and says so", async () => {
+  const before = (await calls(0)).length;
+  const opened = await vscode.commands.executeCommand<Opened>("troupe.doctor");
+
+  assert.ok("busy" in opened, JSON.stringify(opened));
+  assert.match(opened.busy, /^Troupe: beta is in use, so nothing was typed into it/);
+  await wait(2000);
+  assert.equal((await calls(0)).length, before);
+  assert.equal(named("Troupe: beta").length, 1);
+});
+
+it("Troupe: Run a Task… types troupe run with the task after --, as one argument", async () => {
+  await closeAll();
+  await edit("gamma");
+  const before = (await calls(0)).length;
+
+  // The task as a key's `args` gives it; from the palette it is asked for.
+  const opened = await vscode.commands.executeCommand<Opened>("troupe.run", "tidy the README, then stop");
+  assert.deepEqual(opened, { opened: vscode.Uri.file(folder("gamma")).fsPath, terminal: "Troupe: gamma", reused: false });
+
+  const call = (await calls(before + 1))[before];
+  assert.ok(call);
+  samePath(call.cwd, folder("gamma"));
+  assert.deepEqual([call.args[0], call.args[1]], ["run", "--workspace"]);
+  samePath(call.args[2] ?? "", folder("gamma"));
+  assert.deepEqual(call.args.slice(3), ["--", "tidy the README, then stop"]);
+});
+
+it("Troupe: Run a Task… asks for the task, and a question dismissed types nothing", async () => {
+  await closeAll();
+  await edit("gamma");
+  const before = (await calls(0)).length;
+
+  const asked = vscode.commands.executeCommand<Opened>("troupe.run");
+  await wait(1000);
+  await vscode.commands.executeCommand("workbench.action.closeQuickOpen");
+
+  assert.deepEqual(await asked, { cancelled: true });
+  await wait(1000);
+  assert.equal((await calls(0)).length, before);
+  assert.equal(named("Troupe: gamma").length, 0);
+});
+
+it("Troupe: Doctor's report stays to be read, and Open Settings is typed into the same terminal", async () => {
+  await closeAll();
+  mode("exit0");
+  await edit("delta");
+  const before = (await calls(0)).length;
+
+  assert.deepEqual(await vscode.commands.executeCommand<Opened>("troupe.doctor"), {
+    opened: vscode.Uri.file(folder("delta")).fsPath,
+    terminal: "Troupe: delta",
+    reused: false,
+  });
+  const doctor = (await calls(before + 1))[before];
+  assert.ok(doctor);
+  assert.equal(doctor.args[0], "doctor");
+  samePath(doctor.args[2] ?? "", folder("delta"));
+
+  // It ended with 0, and the terminal is still there: no `exit` after a report.
+  await wait(5000);
+  const [terminal] = named("Troupe: delta");
+  assert.ok(terminal, "delta's terminal is still there");
+  assert.equal(terminal.exitStatus, undefined);
+
+  if (terminal.shellIntegration !== undefined) {
+    assert.deepEqual(await vscode.commands.executeCommand<Opened>("troupe.config"), {
+      opened: vscode.Uri.file(folder("delta")).fsPath,
+      terminal: "Troupe: delta",
+      reused: true,
+    });
+    const config = (await calls(before + 2))[before + 1];
+    assert.deepEqual(config?.args.slice(0, 2), ["config", "--workspace"]);
+    assert.equal(named("Troupe: delta").length, 1);
+  } else {
+    console.log("  (no shell integration in this terminal: the second line is not checked)");
+  }
+});
+
+// Issue #378: "ask about this file" in two clicks.
+
+it("Ask Troupe About This File opens Troupe at its folder with its path in the prompt", async () => {
+  await closeAll();
+  mode("stay");
+  await edit("beta");
+  const before = (await calls(0)).length;
+
+  // What the explorer's and an editor's menus hand the command: the file's URI.
+  const file = vscode.Uri.file(path.join(folder("alpha"), "src", "b.txt"));
+  const opened = await vscode.commands.executeCommand<Opened>("troupe.askAboutFile", file);
+  assert.deepEqual(opened, { opened: vscode.Uri.file(folder("alpha")).fsPath, terminal: "Troupe: alpha", reused: false });
+
+  const call = (await calls(before + 1))[before];
+  assert.ok(call);
+  samePath(call.cwd, folder("alpha"));
+  assert.equal(call.args[0], "--workspace");
+  samePath(call.args[1] ?? "", folder("alpha"));
+  assert.deepEqual(call.args.slice(2), ["--prompt", "@src/b.txt "]);
+});
+
+it("Ask Troupe About This Folder puts the folder's path in the prompt", async () => {
+  await closeAll();
+  const before = (await calls(0)).length;
+
+  await vscode.commands.executeCommand<Opened>("troupe.askAboutFolder", vscode.Uri.file(path.join(folder("alpha"), "src")));
+  assert.deepEqual((await calls(before + 1))[before]?.args.slice(2), ["--prompt", "@src/ "]);
+});
+
+it("from the palette, Ask Troupe About This File asks about the active editor's file", async () => {
+  await closeAll();
+  await edit("delta");
+  const before = (await calls(0)).length;
+
+  const opened = await vscode.commands.executeCommand<Opened>("troupe.askAboutFile");
+  assert.deepEqual(opened, { opened: vscode.Uri.file(folder("delta")).fsPath, terminal: "Troupe: delta", reused: false });
+  assert.deepEqual((await calls(before + 1))[before]?.args.slice(2), ["--prompt", "@a.txt "]);
+
+  // With Troupe running there, it says what to type into it, and types nothing. Troupe's
+  // tab is the editor in front now, so the file is handed over as the explorer hands it.
+  const busy = await vscode.commands.executeCommand<Opened>("troupe.askAboutFile", vscode.Uri.file(path.join(folder("delta"), "a.txt")));
+  assert.ok("busy" in busy, JSON.stringify(busy));
+  assert.match(busy.busy, /type @a\.txt into Troupe there/);
+  await wait(1000);
+  assert.equal((await calls(0)).length, before + 1);
+});
+
+it("with no file to ask about, it says so and opens nothing", async () => {
+  await closeAll();
+  const count = vscode.window.terminals.length;
+  const asked = await vscode.commands.executeCommand<Opened>("troupe.askAboutFile");
+  assert.ok("noFile" in asked, JSON.stringify(asked));
+  assert.equal(vscode.window.terminals.length, count);
+});
+
 async function open() {
   return vscode.commands.executeCommand<Opened>("troupe.open");
 }
@@ -391,13 +544,39 @@ async function calls(count: number) {
       .filter((line) => line.startsWith("call\t"))
       .map((line) => {
         const [, cwd = "", ...rest] = line.split("\t");
-        // The Windows fake writes its arguments as cmd.exe got them, in one field.
-        const args = rest.join(" ").split(/\s+/).filter((a) => a !== "").map((a) => a.replace(/^"(.*)"$/, "$1"));
+        // The Windows fake writes its arguments as cmd.exe got them, in one field, split here
+        // at the spaces outside quotes; the POSIX fake writes each in a field of its own.
+        const args = process.platform === "win32" ? split(rest.join("\t").trim()) : rest;
         return { cwd: cwd.trim(), args };
       });
 
   await until(() => read().length >= count, `${count} call(s) of the fake troupe`, 60_000);
   return read();
+}
+
+// A command line as a program splits it, for the words these tests type: no backslash
+// before a quote.
+function split(line: string) {
+  const words: string[] = [];
+  let word = "";
+  let quoted = false;
+  let started = false;
+
+  for (const ch of line) {
+    if (ch === '"') {
+      quoted = !quoted;
+      started = true;
+    } else if (/\s/.test(ch) && !quoted) {
+      if (started) words.push(word);
+      word = "";
+      started = false;
+    } else {
+      word += ch;
+      started = true;
+    }
+  }
+  if (started) words.push(word);
+  return words;
 }
 
 // The fake's `troupe models` calls, each its arguments as one line.
