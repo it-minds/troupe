@@ -267,13 +267,18 @@ an edit takes effect on the next turn:
 
 Every file applies. A file in a directory below the root is about the work under that
 directory, and where two disagree, the nearer wins. In one directory `AGENTS.md`,
-`CLAUDE.md`, `GEMINI.md` and `.github/copilot-instructions.md` are the same file under
-other tools' names: the first that exists is read and the rest are skipped, and the
-session's log and `/context` say which, so nobody debugs a file that was never loaded.
-So a repository with only a `CLAUDE.md` works as it is. A file that is a link to
-somewhere outside the repository (outside `<config>`, for your own `AGENTS.md`) is not
-read; `context.get` and the session's log list it as `outside`. The same goes for
-`.troupe/memory.md`, which is then neither read nor written.
+`CLAUDE.md` and `GEMINI.md` are the same file under other tools' names, and at the
+repository root so is `.github/copilot-instructions.md`: the first that exists is read
+and the rest are skipped, and the session's log and `/context` say which and why, so
+nobody debugs a file that was never loaded. So a repository with only a `CLAUDE.md`
+works as it is. Copilot reads its file at the repository root and nowhere else, and so
+does Troupe: a `.github/copilot-instructions.md` in a directory below the root is not
+read, and is listed as skipped, saying so. A file that is a link to somewhere outside
+the repository (outside `<config>`, for your own `AGENTS.md`) is not read; `context.get`
+and the session's log list it as `outside`. The same goes for `.troupe/memory.md`, which
+is then neither read nor written. Every file left out comes with a `reason`, in words,
+which `/context` prints: `not read: outside the repository`, `skipped: AGENTS.md is used
+in this directory`, `not read: Copilot's file counts only at the root`.
 
 A file can pull in another with `@path/to/file.md` on a line of its own or in a
 sentence, as Claude Code's do. The path is taken from the importing file's directory
@@ -283,7 +288,8 @@ comes back round. An `@` inside a code span or a fenced block is not an import. 
 repository's files import only from inside the repository, and your own `AGENTS.md`
 only from inside `<config>`; an import that is not followed (`missing`, `outside`,
 `depth`, `cycle`) is named on the file that asked for it in `context.get` and the
-session's log. Not read yet: `.cursor/rules/*.mdc`.
+session's log, and `/context` prints it after that file (`@docs/gone.md (root) import not
+followed: missing`). Not read yet: `.cursor/rules/*.mdc`.
 
 The files share one budget, `instructions_max_chars` (16,000 characters), a file and
 what it imports counting as one scope. The nearest scope is kept whole first; a file the
@@ -307,7 +313,7 @@ things:
 | Troupe's built-in agents, a profile's bundle, `<config>/agents/*.md`, `<workspace>/.troupe/agents/*.md` | agents | the agents a session may run | a file at a higher layer replaces the same name below it |
 | `<config>/commands/*.md`, `<workspace>/.troupe/commands/*.md` | commands | the slash commands you and the repository define | one name, the workspace's; a built-in's or an agent's name is theirs |
 | `<workspace>/.troupe/workflows/<name>.json` | workflows | the steps `workflows.list` offers | one name, one file |
-| `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on (aliases `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, first found wins), and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out |
+| `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on (aliases `CLAUDE.md`, `GEMINI.md`, and `.github/copilot-instructions.md` at the root only, first found wins), and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out |
 | `<workspace>/.troupe/memory.md` | instructions | the project brief Troupe's agents write | read after the instruction files; never authoritative, `read_file` and `grep` are |
 
 ## Old spellings

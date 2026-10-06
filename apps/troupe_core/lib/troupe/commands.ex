@@ -225,8 +225,10 @@ defmodule Troupe.Commands do
           "The files the next turn's system prompt is read from: your own AGENTS.md, the " <>
             "repository's, one in each directory down to the workspace and to the files " <>
             "the conversation worked on, the files they import with @path, and the " <>
-            "project brief, each with its scope, size and share of the budget, and the " <>
-            "aliases (CLAUDE.md, GEMINI.md, copilot-instructions.md) it hid."
+            "project brief, each with its scope, size and share of the budget; and every " <>
+            "file left out, with why: an alias (CLAUDE.md, GEMINI.md, " <>
+            "copilot-instructions.md) another name hid, a Copilot file below the root, a " <>
+            "file outside the repository, an import not followed."
       ),
       entry("watch", "workspace", "Toggle watch mode: act on AI! and AI? comments",
         usage: "/watch",

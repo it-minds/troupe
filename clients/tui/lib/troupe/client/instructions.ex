@@ -7,6 +7,9 @@ defmodule Troupe.Client.Instructions do
   Paths under the workspace are shown from it; the person's own file, which is not,
   is shown whole. A file the budget cut or left out says so, and so does an alias the
   file hid in its directory, so nobody debugs a `CLAUDE.md` that was never loaded.
+  Every file left out says why in words (Decision 148): the `reason` `context.get` gives
+  it (outside the repository, an alias another name hid, a Copilot file below the root,
+  the budget), and each import that was not followed, after the file that names it.
   """
 
   @doc "The line for an answer to `context.get`; `workspace` is `nil` when unknown."
@@ -23,10 +26,17 @@ defmodule Troupe.Client.Instructions do
           "context: #{number(answer["used"])} of #{number(answer["budget"])} chars"
       end
 
-    Enum.join([head | Enum.map(instructions ++ briefs, &file(&1, workspace))], " · ")
+    Enum.join([head | Enum.flat_map(instructions ++ briefs, &file(&1, workspace))], " · ")
   end
 
-  defp file(%{"scope" => "brief"} = f, workspace) do
+  defp file(f, workspace), do: [entry(f, workspace) | unfollowed(f)]
+
+  # A file left out says why, in `context.get`'s words; an older daemon's answer has no
+  # `reason`, and its line is as it was.
+  defp entry(%{"reason" => reason} = f, workspace) when is_binary(reason),
+    do: "#{show(f["path"], workspace)} (#{f["scope"]}) #{reason}"
+
+  defp entry(%{"scope" => "brief"} = f, workspace) do
     case f["status"] do
       "absent" ->
         "#{show(f["path"], workspace)} (brief) absent"
@@ -39,7 +49,7 @@ defmodule Troupe.Client.Instructions do
     end
   end
 
-  defp file(f, workspace) do
+  defp entry(f, workspace) do
     "#{show(f["path"], workspace)} (#{f["scope"]}) #{number(f["chars"])}#{cut(f)}#{skipped(f)}"
   end
 
@@ -47,8 +57,26 @@ defmodule Troupe.Client.Instructions do
   defp cut(%{"status" => "dropped"}), do: ", left out"
   defp cut(_file), do: ""
 
+  # A daemon that gives a `reason` lists each alias a file hid on its own, saying why; an
+  # older one names them only here.
+  defp skipped(%{"reason" => _}), do: ""
   defp skipped(%{"skipped" => [_ | _] = names}), do: ", #{Enum.join(names, " and ")} skipped"
   defp skipped(_file), do: ""
+
+  # Each import the file names that was not read, as the file wrote it, after the file.
+  defp unfollowed(%{"unfollowed" => [_ | _] = imports} = f) do
+    for %{"import" => spec, "reason" => reason} <- imports,
+        do: "@#{spec} (#{f["scope"]}) import not followed: #{why(reason, f["scope"])}"
+  end
+
+  defp unfollowed(_file), do: []
+
+  defp why("missing", _scope), do: "missing"
+  defp why("depth", _scope), do: "too deep"
+  defp why("cycle", _scope), do: "a cycle"
+  defp why("outside", "user"), do: "outside the config directory"
+  defp why("outside", _scope), do: "outside the repository"
+  defp why(other, _scope), do: to_string(other)
 
   defp show(path, nil), do: path
 

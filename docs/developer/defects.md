@@ -661,9 +661,6 @@ Found by the #437 fixer, 2026-10-06.
 
 ### D78 - Instruction files and the brief: what #123's slice left (low)
 
-- `.github/copilot-instructions.md` is taken as an alias in every directory, not only at
-  the repository root, where Copilot reads it (Decision 706's behaviour, kept by 798);
-  changing it needs a decision.
 - A nested instruction file reaches the turn after its directory is first opened, not the
   same turn; attaching it to the tool result that opened the directory would, as some
   tools do.
@@ -672,8 +669,6 @@ Found by the #437 fixer, 2026-10-06.
 - `context.get` reads `Path.expand(session.workspace)` where the prompt uses the
   workspace's real root, so on a workspace reached through a link (macOS `/tmp`) the two
   name different paths.
-- The TUI's `/context` shows a file left out as `outside` as "AGENTS.md (root) 0", with no
-  reason.
 - A brief left out as outside the repository reads as absent in `memory.get`, so a client
   with `memory_auto_refresh` may start a librarian whose writes are then refused; the run
   counts as a try and holds the next off for `memory_max_age_days`.

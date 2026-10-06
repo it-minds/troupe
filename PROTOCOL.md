@@ -1034,11 +1034,16 @@ client to say why it started none. `memory.forget` forgets that try with the bri
 ```
 → `{"budget": 16000, "used": 1234, "searched": ["/home/me/.config/troupe", "/home/me/project"],
 "files": [{"scope": "root", "path": "/home/me/project/AGENTS.md", "size": 812, "chars": 800,
-"budget": 16000, "share": 0.05, "status": "whole", "trimmed": 0, "skipped": ["CLAUDE.md"],
-"imported_by": null, "unfollowed": [{"import": "docs/gone.md", "reason": "missing"}],
-"hash": "sha256:…"}, {"scope": "brief", "path": "/home/me/project/.troupe/memory.md",
-"size": 0, "chars": 0, "budget": 6000, "share": 0.0, "status": "absent", "trimmed": 0,
-"skipped": [], "imported_by": null, "unfollowed": [], "hash": null}]}`
+"budget": 16000, "share": 0.05, "status": "whole", "reason": null, "trimmed": 0,
+"skipped": ["CLAUDE.md"], "imported_by": null,
+"unfollowed": [{"import": "docs/gone.md", "reason": "missing"}], "hash": "sha256:…"},
+{"scope": "root", "path": "/home/me/project/CLAUDE.md", "size": 0, "chars": 0,
+"budget": 16000, "share": 0.0, "status": "skipped",
+"reason": "skipped: AGENTS.md is used in this directory", "trimmed": 0, "skipped": [],
+"imported_by": null, "unfollowed": [], "hash": null},
+{"scope": "brief", "path": "/home/me/project/.troupe/memory.md",
+"size": 0, "chars": 0, "budget": 6000, "share": 0.0, "status": "absent", "reason": null,
+"trimmed": 0, "skipped": [], "imported_by": null, "unfollowed": [], "hash": null}]}`
 
 The **provenance of the prompt**: every file the session's next system prompt is read
 from, in the order it is read — the person's own `<config>/AGENTS.md` (`user`), the
@@ -1056,12 +1061,21 @@ nearest wins where two disagree. `status` is `whole`; `trimmed`, with `trimmed` 
 how many characters were cut, the nearest scope (a file and what it imports) being kept
 whole first; `dropped`, the budget was spent before it; `outside`, the file found (the brief
 too) is really outside the repository (or, for the person's own, the config directory),
-through a link, and was not read, its `size` and `chars` 0 and its `hash` null; or, for the
-brief, `absent` or `disabled` as `memory.get` has it. `skipped` names the aliases the
-file hid in its directory: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and
-`.github/copilot-instructions.md` are the same file under other tools' names, the first
-that exists is read and the rest are skipped, so nobody debugs a file that was never
-loaded. `searched` is every directory looked in. Read from disk when asked, as the next
+through a link, and was not read, its `size` and `chars` 0 and its `hash` null; `skipped`,
+found and not read, with `size` and `chars` 0 and `hash` null too; or, for the brief,
+`absent` or `disabled` as `memory.get` has it. `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`
+are the same file under other tools' names, and at the repository root so is
+`.github/copilot-instructions.md`: in one directory the first that exists is read, its
+`skipped` names the others, and each of them is listed after it as `skipped`, so nobody
+debugs a file that was never loaded. Copilot reads its file at the repository root only,
+so one in any other directory is listed as `skipped` and hides nothing (Decision 806).
+`reason` says in words why a file is left out, the same words `/context` prints, and is
+null for a file that reached the prompt and for a brief `absent` or `disabled`: `not
+read: outside the repository` (`outside
+the config directory` for the person's own), `skipped: AGENTS.md is used in this
+directory` (`comes first`, when that file was itself not read), `not read: Copilot's
+file counts only at the root`, or `left out: the budget was spent on nearer files`.
+`searched` is every directory looked in. Read from disk when asked, as the next
 turn reads it, so it says what an edit will do; what a past turn read is its
 `instructions_loaded` event. Nothing reaches the prompt from a file without appearing
 here. Reading it wakes nothing: a session that is asleep is answered for its workspace

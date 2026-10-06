@@ -1,7 +1,7 @@
 defmodule Troupe.Instructions do
   @moduledoc """
   The instruction files a repository already carries for coding agents, read into every
-  agent's system prompt (Decisions 706 and 798).
+  agent's system prompt (Decisions 706, 798 and 806).
 
   `AGENTS.md` is the file the tools settled on, and a repository that has one has told
   agents how to work in it. Troupe reads it the way the others do: the person's own
@@ -11,10 +11,12 @@ defmodule Troupe.Instructions do
   of every file its conversation has read, edited or written (`focus/1`), so a
   `frontend/AGENTS.md` applies once the agent has opened something under `frontend/`.
   Every one applies; where two disagree the nearer wins, which is why the nearer comes
-  later in the prompt. In one directory `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and
-  `.github/copilot-instructions.md` are the same file under other tools' names: the
-  first that exists is read and the rest are named as skipped, so nobody debugs a file
-  that was never loaded.
+  later in the prompt. In one directory `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` are the
+  same file under other tools' names, and at the repository root so is
+  `.github/copilot-instructions.md`, which Copilot reads there and nowhere else: the
+  first that exists is read and the rest are listed as skipped, each saying why, so
+  nobody debugs a file that was never loaded. A Copilot file below the root is listed as
+  skipped too, saying it counts only at the root.
 
   A file may import another with `@path/to/file.md`, as Claude Code's do: resolved from
   the importing file's directory, followed five deep, each file read once, and never
@@ -45,7 +47,9 @@ defmodule Troupe.Instructions do
 
   require Logger
 
-  @aliases ["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md"]
+  @copilot ".github/copilot-instructions.md"
+  @aliases ["AGENTS.md", "CLAUDE.md", "GEMINI.md", @copilot]
+  @copilot_reason "not read: Copilot's file counts only at the root"
   @default_max_chars 16_000
 
   # How many imports deep a file may reach: an instruction file's own imports are the
@@ -74,13 +78,16 @@ defmodule Troupe.Instructions do
   @typedoc """
   One file in force. `size` is its bytes on disk; `chars` what reached the prompt, which
   counts against `budget`; `status` is `whole`, `trimmed` (`trimmed` characters cut),
-  `dropped`, or `outside` (a file that is really outside the repository, not read) for
+  `dropped`, `outside` (a file that is really outside the repository, not read) or
+  `skipped` (an alias another name hid, or a Copilot file below the root, not read) for
   an instruction file, and for the brief what `Troupe.Session.Memory` says of it, or
-  `outside` too. `skipped` names the aliases the file hid in its directory; `where` is
-  the directory's path from the repository root, for the prompt to name it by.
-  `imported_by` is the file whose `@` import brought this one in, and `unfollowed` the
-  imports this file names that were not read, with why: `missing`, `outside` the
-  directory imports may come from, `depth` past five, or a `cycle`.
+  `outside` too. `reason` says in words why a file was left out (`nil` for one read):
+  what `context.get` answers and `/context` prints. `skipped` names the aliases the file
+  hid in its directory; `where` is the directory's path from the repository root, for
+  the prompt to name it by. `imported_by` is the file whose `@` import brought this one
+  in, and `unfollowed` the imports this file names that were not read, with why:
+  `missing`, `outside` the directory imports may come from, `depth` past five, or a
+  `cycle`.
   """
   @type file :: %{
           scope: scope(),
@@ -92,6 +99,7 @@ defmodule Troupe.Instructions do
           budget: pos_integer(),
           hash: String.t() | nil,
           status: atom(),
+          reason: String.t() | nil,
           trimmed: non_neg_integer(),
           skipped: [String.t()],
           imported_by: Path.t() | nil,
@@ -107,7 +115,10 @@ defmodule Troupe.Instructions do
           digest: String.t()
         }
 
-  @doc "The names one directory may carry, in the order the first of them is taken."
+  @doc """
+  The names one directory may carry, in the order the first of them is taken; the last,
+  Copilot's, at the repository root only.
+  """
   @spec aliases() :: [String.t()]
   def aliases, do: @aliases
 
@@ -142,9 +153,16 @@ defmodule Troupe.Instructions do
     bounds = %{user: key(Paths.config_dir()), repository: key(root)}
     found = Enum.flat_map(directories, &find(&1, bounds))
 
+    # A skipped file is not in the prompt, so an import may still bring it in.
+    seen =
+      for file <- found,
+          not match?(%{status: :skipped}, file),
+          into: MapSet.new(),
+          do: key(file.path)
+
     files =
       found
-      |> Enum.map_reduce(MapSet.new(found, &key(&1.path)), &imports(&1, &2, bounds))
+      |> Enum.map_reduce(seen, &imports(&1, &2, bounds))
       |> elem(0)
       |> allot(budget)
       |> Kernel.++([brief(workspace, config)])
@@ -260,20 +278,36 @@ defmodule Troupe.Instructions do
 
   ## Reading
 
+  # The first name found in a directory is read, and each other one is listed after it as
+  # skipped, naming the first. Copilot reads its file at the repository root and nowhere
+  # else (Decision 806), so in any other directory it is no alias: it hides nothing, and
+  # is listed as skipped, saying so.
   defp find({scope, dir, where}, bounds) do
-    case Enum.filter(@aliases, &File.regular?(Path.join(dir, &1))) do
-      [] -> []
-      [name | skipped] -> read(scope, dir, where, name, skipped, bound(scope, bounds))
-    end
+    names = if scope == :root, do: @aliases, else: List.delete(@aliases, @copilot)
+    fields = %{scope: scope, where: where}
+
+    found =
+      case Enum.filter(names, &File.regular?(Path.join(dir, &1))) do
+        [] ->
+          []
+
+        [name | skipped] ->
+          read = read(dir, name, skipped, fields, bound(scope, bounds))
+          read ++ Enum.map(skipped, &hidden(dir, &1, name, read, fields))
+      end
+
+    if scope != :root and File.regular?(Path.join(dir, @copilot)),
+      do: found ++ [unread(Path.join(dir, @copilot), dir, fields, :skipped, @copilot_reason)],
+      else: found
   end
 
   # A file found in a directory is confined as an import is: one that is really somewhere
   # outside the repository (or, for the person's own, the config directory), a link out
   # or a directory linked out, is not read, and is listed as `outside` with nothing of it
   # in the prompt, not even its size.
-  defp read(scope, dir, where, name, skipped, bound) do
+  defp read(dir, name, skipped, fields, bound) do
     path = Path.join(dir, name)
-    fields = %{scope: scope, where: where, skipped: skipped}
+    fields = Map.put(fields, :skipped, skipped)
 
     if under?(key(path), bound) do
       case entry(path, fields) do
@@ -281,23 +315,45 @@ defmodule Troupe.Instructions do
         :error -> []
       end
     else
-      [Map.merge(outside(path, dir), fields)]
+      [unread(path, dir, fields, :outside, outside_reason(fields.scope))]
     end
   end
 
-  defp outside(path, dir) do
-    %{
-      path: path,
-      directory: dir,
-      size: 0,
-      hash: nil,
-      skipped: [],
-      imported_by: nil,
-      unfollowed: [],
-      text: "",
-      status: :outside
-    }
+  # An alias the first name hid. Read, the first is "used"; a link out, it was not, and
+  # still came first (Decision 798).
+  defp hidden(dir, name, first, read, fields) do
+    reason =
+      case read do
+        [%{status: :outside}] -> "skipped: #{first} comes first in this directory"
+        [_file] -> "skipped: #{first} is used in this directory"
+        [] -> "skipped: #{first} comes first in this directory"
+      end
+
+    unread(Path.join(dir, name), dir, fields, :skipped, reason)
   end
+
+  # A file found and not read: listed with nothing of it in the prompt, not even its size,
+  # and with why in words.
+  defp unread(path, dir, fields, status, reason) do
+    Map.merge(
+      %{
+        path: path,
+        directory: dir,
+        size: 0,
+        hash: nil,
+        skipped: [],
+        imported_by: nil,
+        unfollowed: [],
+        text: "",
+        status: status,
+        reason: reason
+      },
+      fields
+    )
+  end
+
+  defp outside_reason(:user), do: "not read: outside the config directory"
+  defp outside_reason(_scope), do: "not read: outside the repository"
 
   defp bound(:user, bounds), do: bounds.user
   defp bound(_scope, bounds), do: bounds.repository
@@ -312,6 +368,7 @@ defmodule Troupe.Instructions do
              directory: Path.dirname(path),
              size: byte_size(content),
              hash: hash(content),
+             reason: nil,
              skipped: [],
              imported_by: nil,
              unfollowed: [],
@@ -443,7 +500,7 @@ defmodule Troupe.Instructions do
     allotted |> Enum.reverse() |> Enum.concat()
   end
 
-  defp fit(%{status: :outside} = file, budget, _left),
+  defp fit(%{status: status} = file, budget, _left) when status in [:outside, :skipped],
     do: Map.merge(file, %{chars: 0, trimmed: 0, budget: budget})
 
   defp fit(file, budget, left) do
@@ -454,7 +511,14 @@ defmodule Troupe.Instructions do
         Map.merge(file, %{chars: chars, trimmed: 0, status: :whole, budget: budget})
 
       left == 0 ->
-        Map.merge(file, %{chars: 0, trimmed: chars, status: :dropped, budget: budget, text: ""})
+        Map.merge(file, %{
+          chars: 0,
+          trimmed: chars,
+          status: :dropped,
+          reason: "left out: the budget was spent on nearer files",
+          budget: budget,
+          text: ""
+        })
 
       true ->
         Map.merge(file, %{
@@ -475,16 +539,12 @@ defmodule Troupe.Instructions do
     path = Brief.path(workspace)
     max = memory_max_chars(config)
 
-    if Brief.inside?(path),
-      do: brief(path, max, config),
-      else:
-        Map.merge(outside(path, Path.dirname(path)), %{
-          scope: :brief,
-          where: nil,
-          chars: 0,
-          budget: max,
-          trimmed: 0
-        })
+    if Brief.inside?(path) do
+      brief(path, max, config)
+    else
+      fields = %{scope: :brief, where: nil, chars: 0, budget: max, trimmed: 0}
+      unread(path, Path.dirname(path), fields, :outside, outside_reason(:brief))
+    end
   end
 
   defp brief(path, max, config) do
@@ -511,6 +571,7 @@ defmodule Troupe.Instructions do
       budget: max,
       hash: hash,
       status: status,
+      reason: nil,
       trimmed: if(status == :trimmed, do: overflow, else: 0),
       skipped: [],
       imported_by: nil,
@@ -574,6 +635,7 @@ defmodule Troupe.Instructions do
       "share" => Float.round(f.chars / f.budget, 3),
       "hash" => f.hash,
       "status" => to_string(f.status),
+      "reason" => f.reason,
       "trimmed" => f.trimmed,
       "skipped" => f.skipped,
       "imported_by" => f.imported_by,
