@@ -299,6 +299,39 @@ over the protocol, list every file in force with its scope, its size, what reach
 prompt and its share of the budget; the session's `instructions_loaded` event records
 the same, what was cut included, whenever what was read changed.
 
+`troupe instructions check [--workspace DIR] [--json]` checks those files, every one a
+session in the workspace would read wherever it worked, nested ones and imports
+included. It prints one line for each finding, with the file and the line:
+
+```
+frontend/AGENTS.md:3: contradiction: how to run the tests: `pnpm test` here, `npm test` in AGENTS.md:3
+AGENTS.md:12: path: `docs/setup.md` does not exist
+AGENTS.md:20: command: `mise` is not on the PATH (`mise exec -- mix test`)
+frontend/AGENTS.md:9: duplicate: the same rule as AGENTS.md:5
+```
+
+- **contradiction**: two files, one of which applies inside the other, name different
+  commands for the same job (test, build, lint, format, run) in the same ecosystem, and
+  no command in common. A root's `mix test` and `frontend/`'s `pnpm test` are two parts
+  of one repository, not a contradiction, and two sibling directories never are.
+- **path**: a path in a code span or a link that is not there, from the file's own
+  directory or from the repository root, and an `@` import that names no file. A span
+  counts as a path when it starts with `./` or `../`, or has a slash and ends in one,
+  names a file with an extension, or starts with a directory that is there; a bare file
+  name, a branch like `origin/main` and a URL are not checked.
+- **command**: a command in a code span, or in a fenced block marked as a shell (or with
+  no language), whose program is not on the `PATH`. A span counts as a command when it
+  starts with a known build tool (`npm`, `pnpm`, `mix`, `cargo`, `go`, `pytest`, `mise`,
+  `make` and their like); the shell's own commands and the platform's package managers
+  are not looked for.
+- **duplicate**: a paragraph or list item said again in another file.
+
+It would rather miss a finding than make a false one. It exits 0 when it finds nothing, 1
+on a finding and 2 when it cannot read the workspace, so a repository can run it in CI on
+its own instruction files; `--json` prints the same as one object, with `files` and
+`findings`. Your own `<config>/AGENTS.md` is checked with the rest, except for paths,
+which it names for every repository.
+
 ## Every file Troupe reads
 
 In one table, in the order each kind is read, and what happens when two say different
