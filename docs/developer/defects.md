@@ -37,8 +37,6 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
 
 - The root `.formatter.exs` has no `subdirectories`, so `mix format --check-formatted`
   never checks `apps/`. Running `mix format` on an app file reflows unrelated lines.
-- `Troupe.Gateway.RestartTest` sometimes fails under load ("the daemon never came up",
-  a second VM with a 30 s limit).
 - Load-dependent: core `Troupe.Watch.WatcherTest` "poll backend five writes inside the
   debounce window produce one trigger", and the plane's `UsageTest` `enrolled/1`
   (`{:error, :closed}`, probably a shared-database deadlock inside the control connection).
@@ -626,8 +624,6 @@ Found by the chunk 19 fixers, 2026-10-05.
 
 ### D73 - Test hygiene from the 0.8.4 work (low)
 
-- The gateway's `RestartTest` waits 30 s for the daemon it launches, which took 28 s to
-  listen on `/mnt/c` under load: the known flake. The wait could be longer.
 - A gateway loopback test logs a `FunctionClauseError` from `Troupe.LLM.Fake.render(%{text:
   "done"}, ...)`; it fails nothing.
 - The TUI tests' `FakeRemote` HTTP `/rpc` can only answer errors without `data`.
@@ -707,10 +703,6 @@ Found by the chunk 21 fixers, 2026-10-06.
   --ref <branch>` after changing its label tries it).
 - A Windows daemon build once spent 29 minutes in `mlugg/setup-zig` and passed; the new
   15-minute timeout would fail such a run.
-- `RestartTest` and `AutospawnTest` start `elixir` with a `-pa` for every build directory
-  (`restart_test.exs:242`, `autospawn_test.exs:134`), which is slow on `/mnt/c` and likely
-  why the daemon "never came up" in time under load (0 of 2 alone once); the ACP test's
-  same fix (Decision 796) may apply.
 
 Found by the chunk 21 fixers, 2026-10-06.
 

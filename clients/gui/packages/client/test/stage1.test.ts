@@ -309,6 +309,9 @@ describe("stage 1, done item 5: a pod token running out", () => {
     // is good for twenty. The gap is deliberately wide: what this test is about is that
     // a refresh happens on the open socket, not how close to `exp` it cuts it, and a
     // machine that stalls for a second should fail it for the first reason only.
+    //
+    // Every token it is handed is warned about two seconds in too, so the turn can end
+    // with a second refresh in flight, `refreshing` until the plane has minted for it.
     const h = await startHarness({
       worker: { sendAuthExpiring: true, expiringLeadMs: 18_000, deltaDelayMs: 30 },
       plane: { podTokenLifetime: 20 },
@@ -317,7 +320,11 @@ describe("stage 1, done item 5: a pod token running out", () => {
       const auth = await h.signIn();
       const row = h.plane.seed("alice@example.com");
       const box = transcriptOf();
-      const a = await h.attach(auth, row.id, { hooks: { onEvent: box.onEvent } });
+      const statuses: string[] = [];
+      const a = await h.attach(auth, row.id, {
+        hooks: { onEvent: box.onEvent },
+        onStatus: (status, detail) => statuses.push(detail ? `${status}: ${detail}` : status),
+      });
       const firstToken = a.attachment?.token;
 
       // A turn long enough to still be running when the warning arrives.
@@ -329,10 +336,17 @@ describe("stage 1, done item 5: a pod token running out", () => {
       assert.equal(result.endType.startsWith("agent_state") || result.endType === "agent_done", true);
       assert.ok(result.text.includes("word"), "the turn did not finish");
 
-      // On the same socket: the pod never saw a second `initialize`.
+      // On the same socket: the pod never saw a second `initialize`, and the attachment
+      // went from live to refreshing and back, never through a reconnection, and every
+      // refresh it began handed a token over.
+      await until(() => a.status === "live", 5_000, "the refresh in flight to finish");
       assert.equal(h.worker.calls.filter((c) => c.method === "initialize").length, 1);
       assert.notEqual(a.attachment?.token, firstToken, "the token was not replaced");
-      assert.equal(a.status, "live");
+      assert.deepEqual(statuses.slice(0, 3), ["connecting", "live", "refreshing"]);
+      assert.ok(
+        statuses.slice(1).every((s) => s === "live" || s === "refreshing"),
+        `the socket did not stay open: ${statuses.join(", ")}`,
+      );
       await a.close();
     } finally {
       await h.stop();
