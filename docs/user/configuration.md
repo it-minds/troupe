@@ -252,29 +252,43 @@ prompt, which goes through the session's approvals like anything typed.
 
 A repository that carries an `AGENTS.md` has told coding agents how to work in it, and
 Troupe reads it the way the other tools do, with no setup of its own. Every agent's
-system prompt opens with these, in this order, each read from disk at every turn so an
-edit takes effect on the next one:
+system prompt opens with these, in this order, each read from disk as a turn begins, so
+an edit takes effect on the next turn:
 
 1. `<config>/AGENTS.md` — your own, for every repository.
 2. `AGENTS.md` at the repository root (the nearest directory with a `.git`; a worktree
    reads its own checkout's).
-3. `AGENTS.md` in each directory between the root and the directory the session works
-   in, the nearest last.
+3. `AGENTS.md` in each directory between the root and where the session works, parents
+   before their children. Where the session works is the directory it was started in
+   and the directory of every file its conversation has read, edited or written, so
+   `frontend/AGENTS.md` applies from the turn after the agent first opened something
+   under `frontend/`.
 4. `.troupe/memory.md`, the project brief Troupe's own agents write.
 
-Every file applies. Where two disagree, the nearer wins. In one directory `AGENTS.md`,
+Every file applies. A file in a directory below the root is about the work under that
+directory, and where two disagree, the nearer wins. In one directory `AGENTS.md`,
 `CLAUDE.md`, `GEMINI.md` and `.github/copilot-instructions.md` are the same file under
 other tools' names: the first that exists is read and the rest are skipped, and the
 session's log and `/context` say which, so nobody debugs a file that was never loaded.
-Not read yet: `.cursor/rules/*.mdc`, `@path` imports inside a file, and a nested
-`AGENTS.md` below the directory the session works in.
+So a repository with only a `CLAUDE.md` works as it is.
 
-The files share one budget, `instructions_max_chars` (16,000 characters). The nearest is
-kept whole first; a file the remainder cannot hold is cut, or left out, and the prompt
-says so where it happened. The brief has its own, `memory_max_chars`. `/context` in the
-terminal UI, and `context.get` over the protocol, list every file in force with its
-scope, its size, what reached the prompt and its share of the budget; the session's
-`instructions_loaded` event records the same whenever what was read changed.
+A file can pull in another with `@path/to/file.md` on a line of its own or in a
+sentence, as Claude Code's do. The path is taken from the importing file's directory
+(`~/` is your home), the imported file is read right after the one that names it, and
+an import can import again, five deep. Each file is read once, so a cycle ends where it
+comes back round. An `@` inside a code span or a fenced block is not an import. A
+repository's files import only from inside the repository, and your own `AGENTS.md`
+only from inside `<config>`; an import that is not followed (`missing`, `outside`,
+`depth`, `cycle`) is named on the file that asked for it in `context.get` and the
+session's log. Not read yet: `.cursor/rules/*.mdc`.
+
+The files share one budget, `instructions_max_chars` (16,000 characters), a file and
+what it imports counting as one scope. The nearest scope is kept whole first; a file the
+remainder cannot hold is cut, or left out, and the prompt says so where it happened. The
+brief has its own, `memory_max_chars`. `/context` in the terminal UI, and `context.get`
+over the protocol, list every file in force with its scope, its size, what reached the
+prompt and its share of the budget; the session's `instructions_loaded` event records
+the same, what was cut included, whenever what was read changed.
 
 ## Every file Troupe reads
 
@@ -290,7 +304,7 @@ things:
 | Troupe's built-in agents, a profile's bundle, `<config>/agents/*.md`, `<workspace>/.troupe/agents/*.md` | agents | the agents a session may run | a file at a higher layer replaces the same name below it |
 | `<config>/commands/*.md`, `<workspace>/.troupe/commands/*.md` | commands | the slash commands you and the repository define | one name, the workspace's; a built-in's or an agent's name is theirs |
 | `<workspace>/.troupe/workflows/<name>.json` | workflows | the steps `workflows.list` offers | one name, one file |
-| `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace (aliases `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, first found wins) | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out |
+| `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on (aliases `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, first found wins), and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out |
 | `<workspace>/.troupe/memory.md` | instructions | the project brief Troupe's agents write | read after the instruction files; never authoritative, `read_file` and `grep` are |
 
 ## Old spellings

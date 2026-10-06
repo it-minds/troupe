@@ -404,7 +404,7 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, session} <- lookup(session_id),
          workspace = Path.expand(session.workspace),
          {:ok, config} <- workspace_config(workspace) do
-      {:ok, Troupe.Instructions.provenance(workspace, config)}
+      {:ok, Troupe.Instructions.provenance(workspace, config, instruction_focus(session_id))}
     end
   end
 
@@ -1261,6 +1261,18 @@ defmodule Troupe.Gateway.Dispatch do
       Troupe.pin_session(session_id, pinned?)
       {:ok, %{"session_id" => session_id, "pinned" => pinned?}}
     end
+  end
+
+  # The files the root agent's conversation worked on, whose directories the next turn
+  # reads instruction files in too (Decision 798). A session that is asleep has no agent
+  # to ask, and asking wakes nothing: it is answered for its workspace alone.
+  defp instruction_focus(session_id) do
+    case Troupe.snapshot(session_id) do
+      %{conversation: conversation} -> Troupe.Instructions.focus(conversation)
+      _no_agent -> []
+    end
+  catch
+    :exit, _reason -> []
   end
 
   defp workspace_config(workspace) do

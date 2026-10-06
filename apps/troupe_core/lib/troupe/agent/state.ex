@@ -74,10 +74,13 @@ defmodule Troupe.Agent.State do
     # last said. Not folded: that process says it again whenever either of them restarts.
     loop: nil,
     # The instruction files and the brief the last prompt was read from (Decision 706),
-    # as `Troupe.Instructions.load/2` gave them: read again at every turn, and the digest
-    # in here is what says whether that read is news worth an `instructions_loaded`
-    # event. Not replayed: a restart reads afresh and says so once.
+    # as `Troupe.Instructions.load/3` gave them: read again as each turn begins and held
+    # for the rest of it (Decision 798), and the digest in here is what says whether that
+    # read is news worth an `instructions_loaded` event. Not replayed: a restart reads
+    # afresh and says so once. `instructions_due` says the next call reads them again: an
+    # input was taken or the conversation compacted since they were read.
     instructions: nil,
+    instructions_due: true,
     llm_text: "",
     llm_tool_names: %{},
     # What the provider has reported so far of the call in flight, and whether that call is

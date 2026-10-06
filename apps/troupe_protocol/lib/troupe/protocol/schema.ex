@@ -157,9 +157,10 @@ defmodule Troupe.Protocol.Schema do
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
       "profile_switched" => %{"from" => optional(:string), "to" => required(:string)},
       # What the agent's system prompt was read from at this turn (Decision 706): the
-      # instruction files and the brief, as `context.get` lists them, each with `scope`,
-      # `path`, `size`, `chars`, `budget`, `share`, `status`, `trimmed`, `skipped` and
-      # `hash`. Written when the set or a file changed since the agent's last turn.
+      # instruction files, what they import, and the brief, as `context.get` lists them,
+      # each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`,
+      # `trimmed`, `skipped`, `imported_by`, `unfollowed` and `hash` (Decision 798).
+      # Written when the set or a file changed since the agent's last turn.
       "instructions_loaded" => %{
         "budget" => required(:integer),
         "used" => required(:integer),
