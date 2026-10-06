@@ -135,16 +135,6 @@ jobs:
           cat > notes.md <<NOTES
           **Untested.** \`${REF}\` at \`${SHA::7}\`, built without running the test suite — for trying out, not for production. A release (\`scripts/release\`) runs the full suite; this did not.
 
-          **Try it in one line** — this pre-release's installer, downloaded whole and then run: the daemon, the TUI and the VS Code extension (leave out \`--vscode\` where there is no VS Code). It shows its plan and asks before it changes anything.
-
-          \`\`\`sh
-          curl -fsSLO https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.sh && sh install.sh --tui --vscode
-          \`\`\`
-
-          \`\`\`powershell
-          irm https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.ps1 -OutFile install.ps1; if (\$?) { powershell -ExecutionPolicy Bypass -File .\\install.ps1 -Tui -VSCode }
-          \`\`\`
-
           **On a machine** — download the installer attached below, read it if you like, and run it. It installs this pre-release: the daemon always, and it asks about the TUI and the desktop app.
 
           Linux and macOS:
