@@ -31,7 +31,11 @@ defmodule Troupe.Gateway.Private do
   exactly as a local one, and the next attempt is somebody signing in.
 
   The one error that is not transient is `stale_version`: another device has taken the
-  session, and this one must stop. It does, and says so.
+  session, and this one must stop. It does, and says so. It hears it before it writes:
+  every write it asks the plane to sign names the epoch it holds, and the plane signs
+  nothing for an epoch another device has claimed past, so a device that lost the
+  session writes nothing more under its prefix (issue #441, Decision 800). A plane from
+  before that signs whatever epoch it is named, and refuses the report after the write.
 
   ## When the session is erased
 
@@ -565,24 +569,26 @@ defmodule Troupe.Gateway.Private do
   @doc """
   The store a private session writes through: signatures from the plane, bytes direct.
 
+  A sealer's names the `epoch` it holds in every request to sign a write, and one the
+  plane refuses as stale answers `{:error, :stale_version}`: another device has claimed
+  the session, and this one is told before it writes rather than after (Decision 800).
+  Reading is not fenced, and a restore's store names no epoch, holding none.
+
   Exposed because a restore needs one before there is a session to seal, and because a
   test that built its own would be testing its own idea of the arrangement.
   """
-  @spec store(String.t(), GenServer.server()) :: Signed.t()
-  def store(session_id, plane \\ Plane) do
+  @spec store(String.t(), GenServer.server(), pos_integer() | nil) :: Signed.t()
+  def store(session_id, plane \\ Plane, epoch \\ nil) do
     %Signed{
       session_id: session_id,
       presign: fn method, keys ->
-        case Plane.call(
-               "session.presign",
-               %{
-                 "session_id" => session_id,
-                 "method" => Atom.to_string(method),
-                 "keys" => keys
-               },
-               plane
-             ) do
+        params =
+          %{"session_id" => session_id, "method" => Atom.to_string(method), "keys" => keys}
+          |> then(&if(epoch && method == :put, do: Map.put(&1, "epoch", epoch), else: &1))
+
+        case Plane.call("session.presign", params, plane) do
           {:ok, %{"urls" => urls}} -> {:ok, urls}
+          {:error, {:rpc, %{"message" => "stale_version"}}} -> lost(session_id)
           {:error, reason} -> {:error, reason}
         end
       end,
@@ -621,15 +627,18 @@ defmodule Troupe.Gateway.Private do
     Plane.call("session.register", params, plane)
   end
 
+  # The store names the row's epoch in every request to sign a write, which is the fence a
+  # sealer meets before it writes (Decision 800).
   defp context(plane, subject, session_id, row, opts, exchange) do
     with {:ok, key_manager} <- exchange.(plane, session_id) do
       {name, kms_options} = Keyword.pop(key_manager, :name)
+      epoch = row["epoch"] || 1
 
       Context.open(session_id,
         team: {:person, name || subject},
-        epoch: row["epoch"] || 1,
+        epoch: epoch,
         owner_subject: subject,
-        store: Keyword.get_lazy(opts, :store, fn -> store(session_id, plane) end),
+        store: Keyword.get_lazy(opts, :store, fn -> store(session_id, plane, epoch) end),
         state_dir: opts[:state_dir],
         workspace: opts[:workspace],
         kms: Keyword.get(opts, :kms, KMS.adapter()),
@@ -682,8 +691,8 @@ defmodule Troupe.Gateway.Private do
     session_id = context.session_id
     read = Keyword.get(opts, :backfill, &Troupe.replay_from/2)
 
-    # Started again after a crash, and not after a report refused as stale, which is this
-    # device's instruction to stop (issue #433).
+    # Started again after a crash, and not after a write or a report refused as stale,
+    # which is this device's instruction to stop (issues #433 and #441).
     child =
       Supervisor.child_spec(
         {Sealer,
@@ -726,13 +735,7 @@ defmodule Troupe.Gateway.Private do
           :ok
 
         {:error, {:rpc, %{"message" => "stale_version"}}} ->
-          hear(context.session_id, {:elsewhere, nil})
-
-          Logger.warning(
-            "troupe: #{context.session_id} is held by another device; this one has stopped sealing"
-          )
-
-          {:error, :stale_version}
+          lost(context.session_id)
 
         {:error, reason} ->
           # Not an error worth raising: the segment is in storage either way, and an
@@ -741,6 +744,18 @@ defmodule Troupe.Gateway.Private do
           :ok
       end
     end
+  end
+
+  # The plane refused a write or a report as stale: listed as another device's, said once,
+  # and the sealer's instruction to stop.
+  defp lost(session_id) do
+    hear(session_id, {:elsewhere, nil})
+
+    Logger.warning(
+      "troupe: #{session_id} is held by another device; this one has stopped sealing"
+    )
+
+    {:error, :stale_version}
   end
 
   # What the person will see in a list of their devices when two of them have a session.
