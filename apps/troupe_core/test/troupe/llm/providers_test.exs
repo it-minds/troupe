@@ -209,7 +209,17 @@ defmodule Troupe.LLM.ProvidersTest do
         ]
       end
 
-      assert {:ok, _} = run(Anthropic, request(chunks: anthropic_text_only(), messages: turn.(thought)))
+      # Off is a model that does not think unless asked; Sonnet 5 does (Decision 805).
+      assert {:ok, _} =
+               run(
+                 Anthropic,
+                 request(
+                   chunks: anthropic_text_only(),
+                   messages: turn.(thought),
+                   model: "claude-opus-4-8"
+                 )
+               )
+
       [sent] = FakeTransport.drain_requests()
       body = FakeTransport.body(sent)
       refute Map.has_key?(body, "thinking")
@@ -261,9 +271,17 @@ defmodule Troupe.LLM.ProvidersTest do
     end
 
     test "gives up after the retry budget and reports an error" do
-      request = request(chunks: [], fail_first: 99, fail_status: 503, max_retries: 1)
+      request =
+        request(
+          chunks: [],
+          fail_first: 99,
+          fail_status: 503,
+          fail_body: " busy\n",
+          max_retries: 1
+        )
 
-      assert {:error, {:retries_exhausted, {:http_status, 503}}} = run(Anthropic, request)
+      # With what the provider said the last time (Decision 805).
+      assert {:error, {:retries_exhausted, {:http_status, 503, "busy"}}} = run(Anthropic, request)
       assert length(FakeTransport.drain_requests()) == 2
     end
 
@@ -598,7 +616,7 @@ defmodule Troupe.LLM.ProvidersTest do
       )
 
     %Request{
-      model: "claude-sonnet-5",
+      model: Keyword.get(opts, :model, "claude-sonnet-5"),
       messages: Keyword.get(opts, :messages, [Message.user("hello")]),
       system: "You are a test.",
       tools: [
