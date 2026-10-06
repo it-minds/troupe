@@ -107,5 +107,12 @@ not open.
   gone from the address, and a load with nothing after the address connects again (both
   failing on the tip, which read the fragment and left it there); *Disconnect* forgets
   it; a socket that will not open names this page's origin and `troupe-daemon open`. And
-  the installed daemon, with scratch homes, against the GUI's web build on a loopback
-  port, on the pull request.
+  the installed daemon on Windows, with scratch homes, against the GUI's web build served
+  on `127.0.0.1` and on `[::1]`, `BROWSER` recording what it was handed and a headless
+  Chromium loading it: with no daemon running, `open --url` started one, printed no
+  token, and the page showed the session on this computer with nothing after its
+  address, and again after a reload; a page on `[::1]` was refused, said its origin,
+  and the daemon logged one warning for it, until `open --url` for it admitted it;
+  after the daemon was stopped, `open` again started a new one and the page connected at
+  the new pair; linked to a plane at `[::1]`, `open` alone opened its `/app/`, with the
+  daemon running and with none.
