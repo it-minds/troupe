@@ -61,10 +61,14 @@ same as the TCP one.
 
 The upgrade also checks `Origin`, which is a second fence rather than the first — a page
 on another origin cannot read the token out of a user-only file. By default the daemon
-admits `http://localhost:*`, `http://127.0.0.1:*` and a desktop shell's own origin;
-`TROUPE_ALLOWED_ORIGINS` replaces that list, the same mechanism and the same variable a
-worker uses. The wildcard applies to the port and nothing else, so a rule written for
-`http://localhost:*` does not admit `http://localhost.evil.example`.
+admits `http://localhost:*`, `http://127.0.0.1:*`, a desktop shell's own origin, the
+origin of the plane it is linked to (`identity.link`'s `plane_url`), and any origin in
+`ws.origins`, which `troupe-daemon open` adds for the page it opens and which goes with
+the entry when the daemon stops; both are read at each upgrade. `TROUPE_ALLOWED_ORIGINS`
+replaces that list, the same mechanism and the same variable a worker uses. The wildcard
+applies to the port and nothing else, so a rule written for `http://localhost:*` does not
+admit `http://localhost.evil.example`. A refused upgrade is answered 403, which a browser
+does not show the page, so the daemon logs it as a warning naming the origin.
 
 ### WebSocket (remote)
 

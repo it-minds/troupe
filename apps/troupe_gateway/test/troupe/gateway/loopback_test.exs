@@ -9,11 +9,13 @@ defmodule Troupe.Gateway.LoopbackTest do
 
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Troupe.Gateway.Daemon
   alias Troupe.Identity
   alias Troupe.Protocol.{Client, Endpoint}
 
-  setup do
+  setup context do
     base = Path.join(System.tmp_dir!(), "troupe-loopback-#{System.unique_integer([:positive])}")
     workspace = Path.join(base, "workspace")
     state_dir = Path.join(base, "state")
@@ -24,11 +26,21 @@ defmodule Troupe.Gateway.LoopbackTest do
 
     # `daemon.json` lives wherever the platform puts runtime files, which on a
     # developer's machine is their real one. Both names are redirected so a test run
-    # cannot tell a running daemon it has moved.
-    previous = for k <- ~w(TROUPE_STATE_HOME XDG_RUNTIME_DIR LOCALAPPDATA), into: %{}, do: {k, System.get_env(k)}
+    # cannot tell a running daemon it has moved. The origin list is the test's own, read
+    # as the daemon starts: a developer's would decide what these tests see.
+    previous =
+      for k <- ~w(TROUPE_STATE_HOME XDG_RUNTIME_DIR LOCALAPPDATA TROUPE_ALLOWED_ORIGINS),
+          into: %{},
+          do: {k, System.get_env(k)}
+
     System.put_env("TROUPE_STATE_HOME", state_dir)
     System.put_env("XDG_RUNTIME_DIR", run_dir)
     System.put_env("LOCALAPPDATA", run_dir)
+
+    case context[:allowed_origins] do
+      nil -> System.delete_env("TROUPE_ALLOWED_ORIGINS")
+      origins -> System.put_env("TROUPE_ALLOWED_ORIGINS", origins)
+    end
 
     endpoint = %Endpoint{kind: :unix, path: Path.join(base, "daemon.sock")}
 
@@ -94,6 +106,61 @@ defmodule Troupe.Gateway.LoopbackTest do
 
       # The wildcard is on the port and nowhere else.
       assert status(context.ws, "http://localhost.evil.example") == 403
+    end
+  end
+
+  # Issue #449 (Decision 797): the web app on the plane this daemon is linked to, and a page
+  # `troupe-daemon open --url` named, attach with no environment variable.
+  describe "the pages troupe-daemon open sends here" do
+    test "the plane the daemon is linked to is admitted, by its origin, while it is linked", context do
+      assert status(context.ws, "https://plane.example.test") == 403
+
+      {:ok, _} = Identity.link(%{"subject" => "ada@example.test", "plane_url" => "https://plane.example.test/"})
+      refute status(context.ws, "https://plane.example.test") == 403
+
+      # The origin, and not the host on another scheme or port.
+      assert status(context.ws, "http://plane.example.test") == 403
+      assert status(context.ws, "https://plane.example.test:8443") == 403
+
+      Identity.unlink()
+      assert status(context.ws, "https://plane.example.test") == 403
+    end
+
+    test "an origin published beside the token is admitted, and no other", context do
+      assert status(context.ws, "https://gui.example.test") == 403
+
+      assert Endpoint.admit_ws_origin("https://gui.example.test") == :ok
+      assert Endpoint.admit_ws_origin("https://gui.example.test") == :ok
+      assert Endpoint.ws_origins() == ["https://gui.example.test"]
+      refute status(context.ws, "https://gui.example.test") == 403
+      assert status(context.ws, "https://other.example.test") == 403
+
+      # Beside the port and token, which a client still reads as before.
+      assert {:ok, %{port: port, token: token}} = Endpoint.discover_ws()
+      assert {port, token} == {context.ws.port, context.ws.token}
+    end
+
+    @tag allowed_origins: "https://only.example.test"
+    test "TROUPE_ALLOWED_ORIGINS still replaces the whole list", context do
+      {:ok, _} = Identity.link(%{"subject" => "ada@example.test", "plane_url" => "https://plane.example.test"})
+      :ok = Endpoint.admit_ws_origin("https://gui.example.test")
+
+      refute status(context.ws, "https://only.example.test") == 403
+      assert status(context.ws, "https://plane.example.test") == 403
+      assert status(context.ws, "https://gui.example.test") == 403
+      assert status(context.ws, "http://localhost:5173") == 403
+    end
+
+    # A browser shows a page no 403, so the daemon's log is where the reason is.
+    test "a refused upgrade is logged at warning level, with the origin and the fix", context do
+      log = capture_log([level: :warning], fn -> assert status(context.ws, "https://refused.example.test") == 403 end)
+
+      assert log =~ "[warning]"
+      assert log =~ "https://refused.example.test"
+      assert log =~ "troupe-daemon open --url"
+
+      # Once a minute for one origin: a page left open dials again every few seconds.
+      assert capture_log(fn -> status(context.ws, "https://refused.example.test") end) == ""
     end
   end
 

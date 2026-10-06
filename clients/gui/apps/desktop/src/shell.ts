@@ -7,8 +7,8 @@
 //
 // 1. The OS credential store, so the refresh token is not sitting in `localStorage`.
 // 2. (Stage 2) the local daemon: reading `daemon.json` for its loopback port and token,
-//    and starting it on demand. A browser can be *told* those by hand but cannot find
-//    them, which is why the browser build offers a dialog instead.
+//    and starting it on demand. A browser cannot find them and has to be *told*:
+//    `troupe-daemon open` puts them on the address it opens, or a person types them.
 
 import { memoryTokenStore, webTokenStore } from "@troupe/client";
 import type { TokenStore } from "@troupe/client";
@@ -107,8 +107,8 @@ export function capabilities(): Capabilities {
   })();
   return {
     secrets: s?.secretStore ? "os-keychain" : hasStorage ? "browser-storage" : "memory",
-    // A shell finds the daemon; a browser build in development may have been told where
-    // it is (`daemonHint`). Either way there are local sessions to show.
+    // A shell finds the daemon; a browser build may have been told where it is
+    // (`daemonHint`). Either way there are local sessions to show.
     localSessions: Boolean(s?.findDaemon) || daemonHint() !== null,
     shellName: s?.name ?? null,
   };
@@ -157,21 +157,69 @@ export function likelyPlaneUrl(): string {
   return mounted ? origin : "";
 }
 
+/** Where a browser build keeps the daemon's port and token between loads (Decision 797). */
+const DAEMON_KEY = "troupe.daemon";
+
 /**
- * A daemon endpoint the environment named, for a browser build in development.
+ * The daemon endpoint a browser build was told.
  *
- * A page cannot read `daemon.json`, but the person running `pnpm dev` can paste what it
- * says once — `VITE_TROUPE_DAEMON=<port>:<token>` in `apps/desktop/.env.local`, or
- * `#daemon=<port>:<token>` on the URL — instead of into the form at every reload. The
- * token goes where the form's would: memory, for this tab. The rule that the GUI
- * persists exactly one secret has no exception for a local one, and a `.env.local` is
- * the developer's file, not the app's storage.
+ * A page cannot read `daemon.json`, so it is told. `troupe-daemon open` opens the app at
+ * `#daemon=<port>:<token>` (troupe #449): read here once, taken off the address bar so it
+ * is neither bookmarked nor left on screen, and kept in `localStorage`, so a reload or a
+ * new tab connects again. That is the one exception to the rule that the GUI persists
+ * exactly one secret (Decision 797): the token changes every time the daemon starts, and
+ * a stale one fails and the page says to run `troupe-daemon open` again. In development
+ * `VITE_TROUPE_DAEMON=<port>:<token>` in `apps/desktop/.env.local` names one too, and wins:
+ * it is the developer's file, not the app's storage.
  */
 export function daemonHint(): DaemonEndpoint | null {
-  const fromEnv = (import.meta.env["VITE_TROUPE_DAEMON"] as string | undefined) ?? null;
-  const hash = (globalThis as { location?: { hash?: string } }).location?.hash ?? "";
-  const fromHash = new URLSearchParams(hash.replace(/^#/, "")).get("daemon");
-  return parseEndpoint(fromEnv) ?? parseEndpoint(fromHash);
+  const told = adoptFragment();
+  const fromEnv = parseEndpoint((import.meta.env["VITE_TROUPE_DAEMON"] as string | undefined) ?? null);
+  return fromEnv ?? told ?? storedDaemon();
+}
+
+/** `#daemon=` off the address bar and into this browser's storage, once. */
+function adoptFragment(): DaemonEndpoint | null {
+  const at = (globalThis as { location?: Location }).location;
+  if (!at?.hash) return null;
+  const params = new URLSearchParams(at.hash.replace(/^#/, ""));
+  if (!params.has("daemon")) return null;
+  const told = parseEndpoint(params.get("daemon"));
+  params.delete("daemon");
+  const rest = params.toString();
+  try {
+    globalThis.history?.replaceState(globalThis.history.state, "", `${at.pathname}${at.search}${rest ? `#${rest}` : ""}`);
+  } catch {
+    /* an address that cannot be rewritten keeps it; the connection is the same */
+  }
+  if (told) rememberDaemon(told);
+  return told;
+}
+
+/** Keep where the daemon is for the next load, in a browser build. */
+export function rememberDaemon(endpoint: DaemonEndpoint): void {
+  try {
+    globalThis.localStorage?.setItem(DAEMON_KEY, `${endpoint.port}:${endpoint.token}`);
+  } catch {
+    /* kept for this load only */
+  }
+}
+
+/** Disconnecting forgets it, for this load and the next. */
+export function forgetDaemon(): void {
+  try {
+    globalThis.localStorage?.removeItem(DAEMON_KEY);
+  } catch {
+    /* nothing was kept */
+  }
+}
+
+function storedDaemon(): DaemonEndpoint | null {
+  try {
+    return parseEndpoint(globalThis.localStorage?.getItem(DAEMON_KEY) ?? null);
+  } catch {
+    return null;
+  }
 }
 
 function parseEndpoint(value: string | null): DaemonEndpoint | null {
