@@ -566,8 +566,6 @@ Found by the chunk 18 fixers, 2026-10-05.
 - With `provider: openai` and no named providers, `troupe bench --live --model
   openai/qwen3-235b` runs against `openai/openai/qwen3-235b`; `--model qwen3-235b` works.
   `docs/user/bench.md` shows `--model gateway/model-b` for a named provider only.
-- `troupe models --json` gives a model nobody serves `context: 200000`, `Config.models/1`'s
-  fallback to `context_window`, beside `served: false`; `nil` would say there is none.
 - `troupe-daemon models` has no `--json`, so an install without the TUI has no JSON form.
 - The summariser's `prompt_bytes.tool_results` now reads 0: its results are text inside
   `conversation` (Decision 779).
@@ -675,6 +673,20 @@ Found by the #437 fixer, 2026-10-06.
   role's model reads NOT SERVED (the JSON's `context` for one is D70's item).
 
 Found by the chunk 20 fixer of slot E20, 2026-10-06.
+
+### D77 - CI on GitHub's hosted runners (low)
+
+- The native build jobs (`.github/workflows/native.yml`) set no `timeout-minutes`, so a
+  job whose runner hangs waits GitHub's six hours: the 0.8.4 release's macOS TUI build sat
+  in "Build the release" for over half an hour until it was cancelled and run again (it
+  then took six minutes).
+- `ubuntu-latest` moves to Ubuntu 26 on 2026-10-19 (GitHub's notice on every run). Nothing
+  has checked that `erlef/setup-beam`, Zig and the builds work there; pinning
+  `ubuntu-24.04`, or a trial run, before then would.
+- `Troupe.Agent.ACPAgentTest` ("a subprocess that exits is reported as partial") fails one
+  or two runs in twelve on a loaded machine and passes alone.
+
+Found by the coordinator, 2026-10-06.
 
 ## Taken
 

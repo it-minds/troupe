@@ -105,8 +105,9 @@ export function modelsFailed(failure: Row): Row {
 
 // One model: its roles, then its window, its price and where they came from, as
 // `troupe models` prints them. One its provider does not list is said to be not served,
-// and has no window: the number in the JSON is Troupe's fallback, which nothing said. A
-// price the config gives it is still said: someone wrote it down.
+// and has no window: the JSON gives it none (Decision 799), and a `troupe` before 0.8.6
+// gave Troupe's fallback, which nothing said. A price the config gives it is still said:
+// someone wrote it down.
 function modelRow(model: Model, roles: Models["roles"], sessionType: string | undefined, now: Date, catalog: Models["catalog"]): Row {
   const its = ROLES.filter((r) => roles[r] === model.id);
   const who = model.provider ?? sessionType ?? "its provider";
