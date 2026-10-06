@@ -169,7 +169,11 @@ defmodule Troupe.Plane.WebTest do
       # The suite's diagrams are Mermaid, which renders in the browser from a CDN. This
       # page may not: the root of a plane has to render on a network that reaches the
       # plane and nothing else, so every picture here is SVG already in the document.
-      refute body =~ "<script"
+      # The one script is the plane's own file that switches the webfonts on, which was
+      # an `onload` attribute until the origin stopped running inline script (Decision 803).
+      assert List.flatten(Regex.scan(~r/<script[^>]*>/, body)) ==
+               [~s(<script defer src="/static/webfonts.js">)]
+
       assert body =~ "<svg viewBox="
     end
 

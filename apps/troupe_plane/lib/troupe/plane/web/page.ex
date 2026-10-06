@@ -18,7 +18,9 @@ defmodule Troupe.Plane.Web.Page do
   in `Troupe.Plane.Web.Diagrams` are hand-authored SVG for that reason. The webfonts are
   the one exception and they are `optional` — Figtree and DM Mono are what the design
   specifies, the fallback stack is a real one, and a plane with no route to Google
-  renders in the system's own sans and mono rather than waiting for it.
+  renders in the system's own sans and mono rather than waiting for it. Their stylesheet
+  is switched on by `/static/webfonts.js`, this plane's own file, rather than an `onload`
+  attribute: the origin runs no inline script (Decision 803).
 
   **No colour of its own.** Every value here is a custom property from `theme.css`, which
   `mix troupe.theme` generates from `clients/gui/docs/design/themes/signal.tokens.json`:
@@ -83,9 +85,10 @@ defmodule Troupe.Plane.Web.Page do
     <link rel="apple-touch-icon" href="#{@brand}/apple-touch-icon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Figtree:wght@400;600;800;900&display=swap">
+    <link rel="stylesheet" media="print" data-webfonts href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Figtree:wght@400;600;800;900&display=swap">
     <link rel="stylesheet" href="#{@static}/theme.css">
     <style>#{css()}#{extra_css}</style>
+    <script defer src="#{@static}/webfonts.js"></script>
     </head>
     <body>
 

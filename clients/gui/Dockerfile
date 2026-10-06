@@ -64,6 +64,9 @@ FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
 # capability to bind a port and no root in the container.
 COPY --from=build /src/apps/desktop/dist /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+# Outside `conf.d`, which nginx reads whole at the `http` level: this is included by the
+# server and its locations, where the headers belong (Decision 803).
+COPY docker/headers.conf /etc/nginx/troupe/headers.conf
 COPY --from=licences LICENSE NOTICE THIRD-PARTY-NOTICES.txt /usr/share/doc/troupe/
 
 EXPOSE 8080
