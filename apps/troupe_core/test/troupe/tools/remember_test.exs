@@ -195,6 +195,38 @@ defmodule Troupe.Tools.RememberTest do
     refute File.exists?(Path.join(worktree, ".troupe/memory.md"))
   end
 
+  # Decision 798: a brief that is really somewhere else on the machine, through a link to
+  # the file or to `.troupe`, is neither read, nor copied into the repository by a write,
+  # nor written or deleted where the link points.
+  test "a brief that is a link to outside the repository is not read, written or forgotten",
+       context do
+    elsewhere = Path.join(context.base, "elsewhere")
+    File.mkdir_p!(elsewhere)
+    outside = Path.join(elsewhere, "memory.md")
+    File.write!(outside, "## Overview\na stand-in for a private key\n")
+    linked = Path.join(context.workspace, ".troupe/memory.md")
+    File.mkdir_p!(Path.dirname(linked))
+    File.ln_s!(outside, linked)
+
+    assert Memory.brief(context.workspace) == nil
+    assert {:error, "not written: " <> _} = Memory.note(context.workspace, "root", "a note")
+    assert {:error, _} = Memory.put_section(context.workspace, "commands", "mix test")
+    assert :ok = Memory.forget(context.workspace)
+    assert {:ok, _target} = File.read_link(linked)
+    assert File.read!(outside) == "## Overview\na stand-in for a private key\n"
+
+    # A `.troupe` that is itself a link out: nothing is written or deleted in it.
+    other = Path.join(context.base, "other")
+    File.mkdir_p!(other)
+    File.ln_s!(elsewhere, Path.join(other, ".troupe"))
+
+    assert Memory.brief(other) == nil
+    assert {:error, _} = Memory.note(other, "root", "a note")
+    assert :ok = Memory.forget(other)
+    assert File.ls!(elsewhere) == ["memory.md"]
+    assert File.read!(outside) == "## Overview\na stand-in for a private key\n"
+  end
+
   test "remember refuses an unknown section and empty text", context do
     %{session: session} = start_session(context, steps: [])
     ctx = ctx(session, context)

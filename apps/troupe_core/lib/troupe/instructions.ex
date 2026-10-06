@@ -75,8 +75,9 @@ defmodule Troupe.Instructions do
   One file in force. `size` is its bytes on disk; `chars` what reached the prompt, which
   counts against `budget`; `status` is `whole`, `trimmed` (`trimmed` characters cut),
   `dropped`, or `outside` (a file that is really outside the repository, not read) for
-  an instruction file, and for the brief what `Troupe.Session.Memory` says of it. `skipped` names the aliases the file hid in its directory; `where` is the
-  directory's path from the repository root, for the prompt to name it by.
+  an instruction file, and for the brief what `Troupe.Session.Memory` says of it, or
+  `outside` too. `skipped` names the aliases the file hid in its directory; `where` is
+  the directory's path from the repository root, for the prompt to name it by.
   `imported_by` is the file whose `@` import brought this one in, and `unfollowed` the
   imports this file names that were not read, with why: `missing`, `outside` the
   directory imports may come from, `depth` past five, or a `cycle`.
@@ -468,10 +469,25 @@ defmodule Troupe.Instructions do
 
   # The brief as `Troupe.Session.Memory` puts it in the prompt, with its own budget and
   # status: listed here so one table says everything a prompt was read from. Its path is
-  # asked for once, since that is a `git` call and this runs at every turn.
+  # asked for once, since that is a `git` call and this runs at every turn. A brief that is
+  # a link out of its repository is `outside`, as an instruction file is, and not read.
   defp brief(workspace, config) do
     path = Brief.path(workspace)
     max = memory_max_chars(config)
+
+    if Brief.inside?(path),
+      do: brief(path, max, config),
+      else:
+        Map.merge(outside(path, Path.dirname(path)), %{
+          scope: :brief,
+          where: nil,
+          chars: 0,
+          budget: max,
+          trimmed: 0
+        })
+  end
+
+  defp brief(path, max, config) do
     {size, hash} = stat(path)
     brief = Brief.read(path)
     text = Brief.to_prompt(brief, config)

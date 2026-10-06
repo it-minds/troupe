@@ -262,7 +262,8 @@ defmodule Troupe.InstructionsTest do
              hd(Instructions.provenance(loaded)["files"])
   end
 
-  test "an instruction file that is a link to outside the repository is not read, and says so",
+  test "an instruction file or a brief that is a link to outside the repository is not read, " <>
+         "and says so",
        %{base: base, repo: repo} do
     write!(base, "key", "a stand-in for a private key")
     File.ln_s!(Path.join(base, "key"), Path.join(repo, "AGENTS.md"))
@@ -272,6 +273,9 @@ defmodule Troupe.InstructionsTest do
     write!(repo, "docs/rules.md", "linked from inside")
     File.mkdir_p!(Path.join(repo, "web"))
     File.ln_s!(Path.join(repo, "docs/rules.md"), Path.join(repo, "web/AGENTS.md"))
+    write!(base, "brief.md", "## Overview\na stand-in for a private key in a brief\n")
+    File.mkdir_p!(Path.join(repo, ".troupe"))
+    File.ln_s!(Path.join(base, "brief.md"), Path.join(repo, ".troupe/memory.md"))
 
     loaded = Instructions.load(repo, config(), ["lib/a.ex", "web/b.ts"])
 
@@ -286,7 +290,7 @@ defmodule Troupe.InstructionsTest do
              },
              %{scope: :nested, where: "lib", status: :outside, chars: 0},
              %{scope: :nested, where: "web", status: :whole, text: "linked from inside"},
-             %{scope: :brief}
+             %{scope: :brief, status: :outside, size: 0, chars: 0, hash: nil, text: ""}
            ] = loaded.files
 
     assert loaded.used == String.length("linked from inside")
