@@ -1,32 +1,44 @@
 defmodule Mix.Tasks.Troupe.Palette do
   @moduledoc """
-  Generate `lib/troupe/ui/tui/palette.ex` from Afterglow's design tokens.
+  Generate `lib/troupe/ui/tui/palette.ex` from the design tokens of every theme.
 
       mix troupe.palette
       mix troupe.palette --check
 
-  The design is one file, `clients/gui/docs/design/themes/afterglow.tokens.json`: the
-  GUI's stylesheet and mask are generated from it by `pnpm tokens`, the plane's front page
+  The design is the theme files in `clients/gui/docs/design/themes/`, one
+  `<theme>.tokens.json` each — Afterglow, Signal, Footlight and Limelight: the GUI's
+  stylesheet and mask are generated from them by `pnpm tokens`, the plane's front page
   by `mix troupe.theme`, and the TUI's colours and its mask by this. A colour typed into
   the TUI by hand is how the two clients stop being one product, the way the app icon
   once did (root Decision 703), so the palette is generated and committed, and
-  `--check` (in `mix check`, which CI runs) fails when it is not what the tokens say.
+  `--check` (in `mix check`, which CI runs) fails when it is not what the tokens say. A
+  theme file added there is a theme here at the next run.
 
   ## What it writes
 
+  **The themes, in the order the desktop app offers them**, Afterglow first, since it is
+  the default (`theme.ts`), and any other theme file after those four by name. Each
+  with the name it gives itself and its description, for the settings page's menu.
+
   **Roles, not colour names.** The view asks for `:needs_you` or `:muted`, never for
   pink or grey; the table below says which token each role is and which of the sixteen
-  named colours stands in for it on a terminal that has no more. For every role the
-  module carries the token's dark and light values, and the nearest colour in the
-  xterm-256 palette to each (`Troupe.UI.TUI.Theme.nearest256/1`): the cube and the grey
-  ramp only, because 0 to 15 are whatever the person's terminal theme made them. A token
-  with an alpha channel is laid over `bg.canvas`, as it is in the GUI.
+  named colours stands in for it on a terminal that has no more. For every role in every
+  theme the module carries the token's dark and light values, and the nearest colour in
+  the xterm-256 palette to each (`Troupe.UI.TUI.Theme.nearest256/1`): the cube and the
+  grey ramp only, because 0 to 15 are whatever the person's terminal theme made them. A
+  token with an alpha channel is laid over the theme's `bg.canvas`, as it is in the GUI.
 
-  **The reserved colour means one thing.** `status.waiting` is pink in Afterglow and
+  **The reserved colour means one thing.** `status.waiting` is each theme's reserved
+  colour — Afterglow's pink, Signal's magenta, Footlight's amber, Limelight's lime — and
   means a person is needed. Two roles carry it for that — `:needs_you` and its border
   — and `:brand` carries it for the one other use the design allows, the mask's lit
-  half (`views/brand.tsx`). Magenta in the sixteen goes to those three and nothing
-  else, so the rule holds at every depth.
+  half (`views/brand.tsx`). No other role takes it: a role whose token is the reserved
+  colour in some theme names a second token for there (Limelight's focus ring is its
+  lime, so the accent is its link blue), and at 256 a role whose nearest is the reserved
+  colour's takes its next nearest. Magenta in the sixteen goes to those three and nothing
+  else, in every theme: with sixteen colours the terminal's own theme decides what each
+  looks like, so a stand-in is chosen for what the role means, not for the hue a theme
+  gives it, and the rule holds at every depth.
 
   **The mask**, rasterised from `mark.path` and the two eyes: one character per pixel
   (`o` the edge, `f` the lit half, `e` an eye on the hollow half, `c` an eye cut out of
@@ -35,7 +47,9 @@ defmodule Mix.Tasks.Troupe.Palette do
   lit; an eye on the lit half is cut out of it and one on the hollow half is solid; no
   mouth, because there is none in the path; never mirrored. At these sizes the design
   drops the seam and lets the colour change be the seam, and draws the edge at its
-  small stroke.
+  small stroke. The mark is the same in every theme file (`pnpm tokens` refuses one
+  whose structure differs), so it is drawn once, from the first; this refuses a theme
+  whose mark is not that one too.
   """
 
   use Mix.Task
@@ -44,10 +58,18 @@ defmodule Mix.Tasks.Troupe.Palette do
 
   @shortdoc "Generate the TUI's palette and mask from the design tokens"
 
-  @source Path.join(~w(.. gui docs design themes afterglow.tokens.json))
+  @source Path.join(~w(.. gui docs design themes))
   @output Path.join(~w(lib troupe ui tui palette.ex))
 
-  # {role, token, the sixteen-colour stand-in, what it is for}
+  # The order the desktop app's appearance screen offers them in (`theme.ts`).
+  @order ~w(afterglow signal footlight limelight)
+
+  # {role, token, the sixteen-colour stand-in, what it is for}. A token may be a list:
+  # the first that is not the theme's reserved colour, for a role that is not one of
+  # the three that carry it — Limelight's focus ring is its lime, and the TUI's accent
+  # is on every heading, so there it is the link blue, as the theme's own `accent` is.
+  @reserved_roles [:needs_you, :needs_you_edge, :brand]
+
   @roles [
     {:needs_you, "status.waiting.fg", :magenta,
      "a person is needed: an approval, a question, the budget question, the window and status that say so"},
@@ -57,7 +79,7 @@ defmodule Mix.Tasks.Troupe.Palette do
     {:working, "status.running.fg", :cyan,
      "the machine working: the activity line, a running tool"},
     {:working_edge, "status.running.border", :cyan, "the border of a window that is working"},
-    {:accent, "border.focus", :cyan,
+    {:accent, ["border.focus", "text.link"], :cyan,
      "the light that is not a status: headings, bullets, code labels, your marker, the selected row"},
     {:ok, "status.allowed.fg", :green, "a tool that succeeded, a window done and not yet read"},
     {:error, "status.error.fg", :red, "a tool that failed, a window that failed"},
@@ -80,7 +102,7 @@ defmodule Mix.Tasks.Troupe.Palette do
   @impl Mix.Task
   def run(argv) do
     {opts, _rest, _invalid} = OptionParser.parse(argv, strict: [check: :boolean])
-    source = render(read!(@source))
+    source = render(read_all!())
     if opts[:check], do: check(source), else: write(source)
   end
 
@@ -88,17 +110,62 @@ defmodule Mix.Tasks.Troupe.Palette do
   @spec read!(Path.t()) :: map()
   def read!(path), do: path |> File.read!() |> Jason.decode!()
 
-  @doc "The generated module's source, formatted, for a tokens document."
-  @spec render(map()) :: String.t()
-  def render(tokens) do
-    roles = Enum.map(@roles, &role(&1, tokens))
-    masks = Enum.map(@cuts, fn {cut, cols} -> {cut, mask(tokens["mark"], cols)} end)
+  @doc "Every theme's tokens in `dir`, in the order the desktop app offers them."
+  @spec read_all!(Path.t()) :: [map()]
+  def read_all!(dir \\ @source) do
+    dir
+    |> Path.join("*.tokens.json")
+    |> Path.wildcard()
+    |> Enum.map(&read!/1)
+    |> Enum.sort_by(fn tokens ->
+      id = tokens["$meta"]["id"]
+      {Enum.find_index(@order, &(&1 == id)) || length(@order), id}
+    end)
+  end
 
-    tokens
-    |> module(roles, masks)
+  @doc "The generated module's source, formatted, for the themes' tokens documents."
+  @spec render([map()]) :: String.t()
+  def render([first | _] = themes) do
+    for tokens <- themes, tokens["mark"] != first["mark"] do
+      Mix.raise("#{id(tokens)}'s mark is not #{id(first)}'s: the mark is one in every theme")
+    end
+
+    themes = Enum.map(themes, &theme/1)
+    masks = Enum.map(@cuts, fn {cut, cols} -> {cut, mask(first["mark"], cols)} end)
+
+    themes
+    |> module(masks)
     |> Code.format_string!(line_length: 100)
     |> IO.iodata_to_binary()
     |> Kernel.<>("\n")
+  end
+
+  defp id(tokens), do: tokens["$meta"]["id"]
+
+  # A theme as the module carries it: what it calls itself, and its roles.
+  defp theme(tokens) do
+    meta = tokens["$meta"]
+    {reserved, others} = Enum.split_with(@roles, &(elem(&1, 0) in @reserved_roles))
+    reserved = Enum.map(reserved, &role(&1, tokens, []))
+    roles = reserved ++ Enum.map(others, &role(&1, tokens, reserved))
+
+    %{
+      id: String.to_atom(id(tokens)),
+      name: meta["name"] |> String.split(" — ") |> List.last(),
+      description: meta["description"],
+      reserved: reserved(meta["reservedColour"]),
+      roles:
+        Enum.sort_by(roles, fn role -> Enum.find_index(@roles, &(elem(&1, 0) == role.name)) end)
+    }
+  end
+
+  # The word for the reserved colour: "status.waiting — stage amber #FFB43D / ..." says
+  # "stage amber".
+  defp reserved(text) do
+    case Regex.run(~r/—\s*([^#]+?)\s*#/u, text || "") do
+      [_, word] -> word
+      nil -> Mix.raise("$meta.reservedColour does not name the reserved colour: #{inspect(text)}")
+    end
   end
 
   defp write(source) do
@@ -121,20 +188,37 @@ defmodule Mix.Tasks.Troupe.Palette do
 
   ## Roles
 
-  defp role({name, path, x16, use}, tokens) do
+  # The role's values from the first of its tokens whose values are not the reserved
+  # roles' (`reserved`, empty for those three themselves); the last when none is free.
+  # At 256 a role that is not reserved never lands on the reserved colour's index either:
+  # two near colours can share their nearest, and then it takes its next nearest.
+  defp role({name, paths, x16, use}, tokens, reserved) do
+    candidates = Enum.map(List.wrap(paths), &{&1, modes(&1, tokens, reserved)})
+
+    {path, modes} =
+      Enum.find(candidates, List.last(candidates), fn {_path, modes} -> free?(modes, reserved) end)
+
+    %{name: name, token: path, use: use, dark: modes.dark, light: modes.light, x16: x16}
+  end
+
+  defp free?(modes, reserved) do
+    Enum.all?([:dark, :light], fn mode ->
+      modes[mode].rgb not in Enum.map(reserved, & &1[mode].rgb)
+    end)
+  end
+
+  defp modes(path, tokens, reserved) do
     token = get_in(tokens, ["color" | String.split(path, ".")])
     canvas = get_in(tokens, ~w(color bg canvas))
 
     unless is_map(token) and is_binary(token["dark"]) and is_binary(token["light"]),
-      do: Mix.raise("#{path} is not a colour token with a dark and a light value")
+      do: Mix.raise("#{id(tokens)}: #{path} is not a colour token with a dark and a light value")
 
-    modes =
-      for mode <- ~w(dark light), into: %{} do
-        rgb = over(parse(token[mode]), parse(canvas[mode]))
-        {String.to_atom(mode), %{rgb: rgb, x256: Theme.nearest256(rgb)}}
-      end
-
-    %{name: name, token: path, use: use, dark: modes.dark, light: modes.light, x16: x16}
+    for mode <- [:dark, :light], into: %{} do
+      rgb = over(parse(token[to_string(mode)]), parse(canvas[to_string(mode)]))
+      except = reserved |> Enum.map(& &1[mode].x256) |> Enum.uniq() |> Enum.sort()
+      {mode, %{rgb: rgb, x256: Theme.nearest256(rgb, except)}}
+    end
   end
 
   defp parse("#" <> hex) when byte_size(hex) == 6 do
@@ -300,35 +384,54 @@ defmodule Mix.Tasks.Troupe.Palette do
 
   ## The module
 
-  defp module(tokens, roles, masks) do
-    name = tokens["$meta"]["name"]
+  defp module([default | _] = themes, masks) do
+    names = Enum.map_join(themes, ", ", & &1.name)
+    files = Enum.map_join(themes, "\n", &"#   #{&1.id}.tokens.json")
+    uses = Enum.map_join(default.roles, "\n    ", &"* `#{inspect(&1.name)}` — #{&1.use}")
 
     """
-    # Generated from clients/gui/docs/design/themes/afterglow.tokens.json by
-    # `mix troupe.palette`. Do not edit by hand: change the tokens, or the role table in
+    # Generated from clients/gui/docs/design/themes/
+    #{files}
+    # by `mix troupe.palette`. Do not edit by hand: change the tokens, or the role table in
     # lib/mix/tasks/troupe.palette.ex, and run it again. `mix troupe.palette --check`
     # fails when this file is not what they say.
     defmodule Troupe.UI.TUI.Palette do
       @moduledoc \"\"\"
-      #{name}, for a terminal: every colour the TUI draws, by role, and the mask.
+      The themes for a terminal — #{names}: every colour the TUI
+      draws, by role, in each theme, and the mask.
 
       `Troupe.UI.TUI.Theme` chooses from this what a terminal can show. Generated by
       `mix troupe.palette`; see that task for what each part is.
       \"\"\"
 
-      @typedoc "What a colour is for. The view names a role, never a colour."
-      @type role :: #{Enum.map_join(roles, " | ", &inspect(&1.name))}
+      @typedoc "A theme, by the id its tokens file gives it."
+      @type theme :: #{Enum.map_join(themes, " | ", &inspect(&1.id))}
+
+      @typedoc \"\"\"
+      What a colour is for. The view names a role, never a colour:
+
+        #{uses}
+      \"\"\"
+      @type role :: #{Enum.map_join(default.roles, " | ", &inspect(&1.name))}
 
       @typedoc "A pixel of the mask: `?o` edge, `?f` lit half, `?e` solid eye, `?c` cut eye, `?.` none."
       @type mask :: [String.t()]
 
+      @themes [
+        #{Enum.map_join(themes, ",\n", &theme_source/1)}
+      ]
+
       @roles %{
-        #{Enum.map_join(roles, ",\n", &role_source/1)}
+        #{Enum.map_join(themes, ",\n", &roles_source/1)}
       }
 
-      @doc "Every role: its token, dark and light values with their xterm-256 nearest, and its stand-in among the sixteen."
-      @spec roles() :: %{role() => map()}
-      def roles, do: @roles
+      @doc "Every theme, in the order the desktop app offers them; the first is the default."
+      @spec themes() :: [%{id: theme(), name: String.t(), description: String.t(), reserved: String.t()}]
+      def themes, do: @themes
+
+      @doc "A theme's roles: each one's token, dark and light values with their xterm-256 nearest, and its stand-in among the sixteen."
+      @spec roles(theme()) :: %{role() => map()}
+      def roles(theme \\\\ #{inspect(default.id)}), do: Map.fetch!(@roles, theme)
 
       @doc "The mask at a cut: `:large` is #{@cuts[:large]} cells wide, `:small` #{@cuts[:small]}."
       @spec mask(:large | :small) :: mask()
@@ -337,9 +440,29 @@ defmodule Mix.Tasks.Troupe.Palette do
     """
   end
 
+  defp theme_source(theme) do
+    """
+    %{
+      id: #{inspect(theme.id)},
+      name: #{inspect(theme.name)},
+      description: #{inspect(theme.description)},
+      reserved: #{inspect(theme.reserved)}
+    }
+    """
+    |> String.trim_trailing()
+  end
+
+  defp roles_source(theme) do
+    """
+    #{theme.id}: %{
+      #{Enum.map_join(theme.roles, ",\n", &role_source/1)}
+    }
+    """
+    |> String.trim_trailing()
+  end
+
   defp role_source(role) do
     """
-    # #{role.use}
     #{role.name}: %{
       token: #{inspect(role.token)},
       dark: #{mode_source(role.dark)},

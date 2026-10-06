@@ -1003,7 +1003,7 @@ defmodule Troupe.UI.TUI.View do
   end
 
   # The menu for a setting that has one: every model Troupe found, plus a way out
-  # to typing one it did not.
+  # to typing one it did not; or every theme there is.
   defp picker_list(%{settings: %{picker: p}}, rect) do
     # "▸ " takes two columns of the block's interior, and a note that would not fit
     # drops back a form rather than being clipped mid-word.
@@ -1014,7 +1014,7 @@ defmodule Troupe.UI.TUI.View do
     items =
       Enum.map(p.choices, fn c ->
         String.trim_trailing(String.pad_trailing(c.label, label_w) <> "  " <> note(c, room))
-      end) ++ ["type one instead…"]
+      end) ++ if(p.typed?, do: ["type one instead…"], else: [])
 
     %ExRatatui.Widgets.List{
       items: items,
@@ -1022,11 +1022,14 @@ defmodule Troupe.UI.TUI.View do
       highlight_symbol: "▸ ",
       highlight_style: selected(),
       block: %Block{
-        title: " #{length(p.choices)} models detected — Enter picks · Esc back ",
+        title: " #{picker_count(p)} — Enter picks · Esc back ",
         borders: [:all]
       }
     }
   end
+
+  defp picker_count(%{typed?: true, choices: choices}), do: "#{length(choices)} models detected"
+  defp picker_count(%{choices: choices}), do: "#{length(choices)} themes"
 
   defp note(choice, room),
     do: Enum.find(choice.notes, "", &(Model.cell_width(&1) <= room))
@@ -1244,9 +1247,13 @@ defmodule Troupe.UI.TUI.View do
   defp availability_word("plane"), do: "needs a plane"
   defp availability_word(other), do: other
 
-  defp settings_command_line(%{settings: %{picker: p} = s}) when p != nil do
+  defp settings_command_line(%{settings: %{picker: %{typed?: true}} = s}) do
     {s.status || "",
      " choose a model — ↑↓ move · Enter picks · Esc back · `troupe config` lists them all "}
+  end
+
+  defp settings_command_line(%{settings: %{picker: p} = s}) when p != nil do
+    {s.status || "", " choose a theme — ↑↓ move · Enter picks · Esc back "}
   end
 
   defp settings_command_line(%{settings: %{editing: nil} = s}) do
@@ -1254,6 +1261,7 @@ defmodule Troupe.UI.TUI.View do
       case Enum.at(Settings.fields(), s.cursor) do
         %{type: :bool} -> "Enter/Space toggles"
         %{type: :model} -> "Enter opens the model menu"
+        %{type: :theme} -> "Enter opens the theme menu"
         _ -> "Enter edits"
       end
 
@@ -1388,8 +1396,11 @@ defmodule Troupe.UI.TUI.View do
       wrap: false,
       style: text_style(w),
       block: %Block{
-        title: tile_title(w, n, state, inner_w),
+        # The mark takes the top border's right end, three cells with its spaces; the
+        # title fits in what is left.
+        title: tile_title(w, n, state, inner_w - 3),
         title_style: title_style(w),
+        titles: [%Title{content: mark(w, state), alignment: :right}],
         borders: [:all],
         border_type: if(focused?, do: :double, else: :rounded),
         border_style: border_style(w, state)
@@ -1408,17 +1419,36 @@ defmodule Troupe.UI.TUI.View do
       " #{n} #{w.path} · #{w.state}#{badge}#{blink}#{stats} ",
       " #{n} #{w.path} · #{w.state}#{badge}#{blink} ",
       " #{n} #{w.path} · #{w.state}#{badge} ",
-      " #{n} #{w.path} · #{state_glyph(w, state)}#{badge} ",
-      " #{n} #{state_glyph(w, state)}#{badge} "
+      " #{n} #{w.path} ",
+      " #{n} "
     ]
     |> fit(inner_w)
   end
 
-  # The tray's tiles are narrow; a glyph still says whether a branch wants you.
-  defp state_glyph(%{state: :needs_input}, _state), do: "▶"
-  defp state_glyph(%{state: :done_unread}, _state), do: "✓"
-  defp state_glyph(%{state: :failed_unread}, _state), do: "✗"
-  defp state_glyph(_w, state), do: Enum.at(Model.spinner_glyphs(), rem(state.tick, 10))
+  @doc """
+  The mark in a window's corner (#228): one glyph, one meaning — fill is what the agent
+  did alone, hollow is what waits on you. ◐ ◓ ◑ ◒ turning while its agent works; ◑, the
+  mark itself, in the reserved colour while it needs a person, blinking with its border;
+  ⏺ done and not yet read; ○ at rest; ✗ failed. It is always the glyph and the word in
+  the title and the colour together, never the colour alone, so it reads with none.
+  """
+  @spec mark(map(), map()) :: Span.t()
+  def mark(%{state: :needs_input}, state) do
+    style = if blink?(state), do: Theme.style(:needs_you, [:bold]), else: Theme.style(:rail)
+    Span.new(" ◑ ", style: style)
+  end
+
+  def mark(%{state: :done_unread, badge: true}, _state),
+    do: Span.new(" ⏺︎ ", style: Theme.style(:ok, [:bold]))
+
+  def mark(%{state: :done_unread}, _state), do: Span.new(" ○ ", style: Theme.style(:muted))
+
+  def mark(%{state: :failed_unread, badge: true}, _state),
+    do: Span.new(" ✗ ", style: Theme.style(:error, [:bold]))
+
+  def mark(%{state: :failed_unread}, _state), do: Span.new(" ✗ ", style: Theme.style(:muted))
+
+  def mark(_w, state), do: Span.new(" #{Model.spinner(state.now)} ", style: Theme.style(:working))
 
   # The widest candidate that fits, or the narrowest when none does.
   defp fit(candidates, width) do
@@ -1443,8 +1473,9 @@ defmodule Troupe.UI.TUI.View do
   defp title_style(%{state: :needs_input}), do: Theme.style(:needs_you, [:bold])
   defp title_style(_w), do: nil
 
-  # On for half a second and off for half: about once a second, whatever the tick's pace.
-  defp blink?(%{now: now}), do: rem(div(now, 500), 2) == 0
+  # On for half a second and off for half: about once a second, whatever the tick's pace;
+  # lit throughout when the person turned blinking off (`ui.blink`).
+  defp blink?(%{now: now} = state), do: Theme.lit?(Map.get(state, :theme, %{}), now)
 
   defp text_style(%{state: s}) when s in [:done_unread, :failed_unread],
     do: Theme.style(nil, [:dim])

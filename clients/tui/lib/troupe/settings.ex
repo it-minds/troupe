@@ -6,22 +6,26 @@ defmodule Troupe.Settings do
   The desktop app's settings come from the same table, so the two clients describe one
   setting one way, and `docs/user/configuration.md` is generated from it too.
 
-  The `ui` keys are the desktop app's (its theme, light or dark, its notifications): the
-  terminal has none of those, so its page leaves them out.
+  The `ui` keys follow a person from one client to the other. The page shows the two the
+  terminal acts on: `ui.theme`, the palette both clients draw in, offered as a menu of
+  the themes there are, and `ui.blink`, whether what waits on you blinks (#228). Light or
+  dark and notifications are the desktop app's own; a terminal's light or dark is its
+  background's.
 
   What a setting is set to is the daemon's to say: `config.get` answers every key with
   its value and the layer and file that set it, and `view/1` makes that the page's view.
   A change is `config.set` with the scope it is written to, which `target/3` picks: the
   one the person chose on the page, else the file the value on screen came from, else the
   user's own. Nothing here writes a file. `watch` is the one setting a session takes live,
-  through the protocol (`Troupe.Client.put_setting/4`); everything else is for the next
-  session.
+  through the protocol (`Troupe.Client.put_setting/4`), and the theme and blinking are
+  the TUI's own, which it takes the moment the daemon says they changed; everything else
+  is for the next session.
   """
 
   alias Troupe.Config
   alias Troupe.Config.Schema
 
-  @type type :: :bool | :int | :float | :string | :model
+  @type type :: :bool | :int | :float | :string | :model | :theme
   @type effect :: :now | :next_run
 
   @type field :: %{
@@ -30,6 +34,7 @@ defmodule Troupe.Settings do
           type: type(),
           path: atom() | nil,
           yaml: [String.t()],
+          default: term(),
           effect: effect(),
           help: String.t()
         }
@@ -46,12 +51,15 @@ defmodule Troupe.Settings do
           files: %{String.t() => String.t()}
         }
 
-  # The one setting a running session takes at once.
-  @live ["watch"]
+  # The one setting a running session takes at once, and the two the TUI takes itself.
+  @live ["watch", "ui.theme", "ui.blink"]
+
+  # The `ui` keys the terminal acts on; the rest are the desktop app's.
+  @terminal_ui [["ui", "theme"], ["ui", "blink"]]
 
   @spec fields() :: [field()]
   def fields do
-    for {path, spec} <- Schema.settings(), hd(path) != "ui" do
+    for {path, spec} <- Schema.settings(), hd(path) != "ui" or path in @terminal_ui do
       key = Enum.join(path, ".")
 
       %{
@@ -60,6 +68,7 @@ defmodule Troupe.Settings do
         type: type(path, spec.type),
         path: spec.field,
         yaml: path,
+        default: spec.default,
         effect: if(key in @live, do: :now, else: :next_run),
         help: spec.doc
       }
@@ -67,6 +76,7 @@ defmodule Troupe.Settings do
   end
 
   defp type(["models" | _], :string), do: :model
+  defp type(["ui", "theme"], :string), do: :theme
   defp type(_path, :boolean), do: :bool
   defp type(_path, {:integer, _min}), do: :int
   defp type(_path, :fraction), do: :float
@@ -92,13 +102,16 @@ defmodule Troupe.Settings do
 
   def view(_answer), do: %{served?: false, keys: %{}, files: %{}}
 
-  @doc "The current value of a setting: the daemon's, or the config's for an old daemon."
-  @spec value(view(), Config.t(), String.t()) :: term()
+  @doc """
+  The current value of a setting: the daemon's, or the config's for an old daemon, which
+  keeps no `ui` key, so one of those reads as its default.
+  """
+  @spec value(view(), Config.t() | nil, String.t()) :: term()
   def value(%{served?: true, keys: keys}, _config, key), do: get_in(keys, [key, "value"])
 
   def value(_view, %Config{} = config, key) do
     {:ok, field} = fetch(key)
-    Map.get(config, field.path)
+    if field.path, do: Map.get(config, field.path), else: field.default
   end
 
   @doc "Which layer set a setting's value (`user`, `project`, `default`, ...), when the daemon said."
@@ -188,7 +201,7 @@ defmodule Troupe.Settings do
     end
   end
 
-  def parse(%{type: type, key: key}, text) when type in [:string, :model] do
+  def parse(%{type: type, key: key}, text) when type in [:string, :model, :theme] do
     case String.trim(text) do
       "" -> {:error, "#{key} cannot be empty"}
       value -> {:ok, value}
@@ -201,7 +214,7 @@ defmodule Troupe.Settings do
   @doc """
   The values a setting offers as a menu, or `[]` when it is free text. Model settings
   offer every model `Troupe.Config.models/1` detected, with `current`, the value in use,
-  first.
+  first; the theme every theme the design tokens define, in the desktop app's order.
   """
   @spec choices(field(), Config.t(), term()) :: [choice()]
   def choices(%{type: :model}, %Config{} = cfg, current) do
@@ -219,6 +232,16 @@ defmodule Troupe.Settings do
       }
     end)
     |> Enum.sort_by(&(&1.value != current))
+  end
+
+  def choices(%{type: :theme}, _cfg, _current) do
+    for theme <- Troupe.UI.TUI.Palette.themes() do
+      %{
+        value: Atom.to_string(theme.id),
+        label: theme.name,
+        notes: [theme.description, "#{theme.reserved} when you are needed", theme.reserved]
+      }
+    end
   end
 
   def choices(_field, _cfg, _current), do: []

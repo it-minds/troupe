@@ -772,10 +772,18 @@
       ],
       "properties": {
         "theme": {
-          "description": "The desktop app's palette: `afterglow`, `signal`, `footlight` or `limelight`. One it does not know reads as `afterglow`.",
+          "description": "The palette the desktop app and the terminal UI draw in: `afterglow`, `signal`, `footlight` or `limelight`. One a client does not know reads as `afterglow`.",
           "default": "afterglow",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "blink": {
+          "description": "What waits on you blinks: the terminal UI's mark and border of a window that needs you. Off holds them lit.",
+          "default": true,
+          "type": [
+            "boolean",
             "null"
           ]
         },

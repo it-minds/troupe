@@ -691,7 +691,8 @@ shows a key by, in the desktop app and the terminal UI alike.
 |---|---|---|---|---|---|
 | `mouse` | boolean | `true` | any | mouse | The terminal UI captures the mouse: a click activates a window and the wheel scrolls. Off keeps the terminal's own click-and-drag selection; `troupe --no-mouse` turns it off for one run. |
 | `ui` | settings |  | any |  | What follows a person from one client to the other. The daemon keeps it and acts on none of it. |
-| `ui.theme` | string | `afterglow` | any | theme | The desktop app's palette: `afterglow`, `signal`, `footlight` or `limelight`. One it does not know reads as `afterglow`. |
+| `ui.theme` | string | `afterglow` | any | theme | The palette the desktop app and the terminal UI draw in: `afterglow`, `signal`, `footlight` or `limelight`. One a client does not know reads as `afterglow`. |
+| `ui.blink` | boolean | `true` | any | blink | What waits on you blinks: the terminal UI's mark and border of a window that needs you. Off holds them lit. |
 | `ui.mode` | `system` \| `light` \| `dark` | `system` | any | light or dark | Light or dark in the desktop app, or `system` to follow the computer. |
 | `ui.notifications` | boolean | `true` | any | notifications | The desktop app says when a session nobody is reading finishes a turn or waits for you. |
 <!-- config-keys:end -->
