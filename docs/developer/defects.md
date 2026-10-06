@@ -700,6 +700,63 @@ Found by the chunk 21 fixers, 2026-10-06.
 
 Found by the chunk 21 fixers, 2026-10-06.
 
+### D82 - Thinking on Anthropic's newest models: what #427 left (low)
+
+- With no `reasoning_effort`, `max_tokens` (8,192 by default) isn't raised for a model that
+  thinks unasked, and its thinking counts against it, so a long reply can be cut short.
+- With no effort, those models' thinking reaches no client: `display` defaults to omitted.
+  Sending `display: "summarized"` would show it, at the same cost, but adds a field nobody
+  asked for (Decision 805).
+- A gateway's own name for one of these models isn't known to think unasked (the model
+  listing has no field for it), so its thinking blocks are still dropped unless an effort
+  is set.
+- Unchecked: whether Troupe ever sends a forced `tool_choice` (`any` or a named tool),
+  which Opus 5.5, Sonnet 5.5 and Fable 5.1 refuse.
+- The conversation-prefix binding of thinking blocks is #465.
+
+Found by the #427 fixer, 2026-10-06.
+
+### D83 - The plane host's policy: what #460 left (low)
+
+- The app's `connect-src` allows any `https:` and `wss:` address, because sign-in reaches
+  the identity provider and remote sessions reach each worker's host, both known only at
+  run time. A chart option naming the deployment's provider and workers domain could narrow
+  it (Decision 803).
+- Plane pages keep `style-src 'unsafe-inline'` and Google's font hosts: the front page's
+  `<style>`, the sign-in pages' style attributes and LiveView's patched styles need it.
+  Moving the page CSS to a file, attributes to classes, and the fonts onto the plane would
+  drop both.
+- Phoenix's own error page, for a request refused before the endpoint's plugs run (a body
+  the parser rejects), goes out without the header; it carries no script.
+- The GUI image's nginx configuration is only exercised when the image is built on `main`;
+  a `RUN nginx -t` in the Dockerfile's runtime stage would catch a broken one at build.
+
+Found by the #460 fixer, 2026-10-06.
+
+### D84 - Erasures and the daemon's start: small leftovers of 0.8.7 (low)
+
+- A team session whose pod couldn't finish an erasure, or that had no healthy pod, is tried
+  again only when a pod of its profile next enrols; erasing it again returns the existing
+  tombstone. Private sessions are retried on every link.
+- Two acknowledgements of the same private session at once run two background deletions of
+  its prefix (harmless: the second finds what is left).
+- On Windows, a program the VM starts through `System.shell` inherits the VM's handles: a
+  client other than `troupe-daemon open` that starts a daemon could hand it a caller's
+  output pipe (Decision 802 fixed it for `open`).
+- `troupe-daemon open` waits 15 s for the daemon it started, too short on a loaded Windows
+  machine (one came up after 41 s).
+- `open` opens `<plane>/app/` when the plane says it has no app (`plane.app: null`), a 404;
+  it could say so instead.
+- `ReaderLogTest`'s "a read whose reader meets an activation as it writes" still awaits 5 s
+  behind the same lock and backoff Decision 801 measured; `Restore.with_log/2`
+  (`:global.trans`) can leave a waiting reader asleep up to 8 s after the lock frees.
+- `/context` prints on the TUI's single status line, clipped at the terminal's width; a
+  repository with several files left out won't fit (TUI Decision 148).
+- An instruction file that exists but can't be read only logs a warning and is missing from
+  `context.get`, so clients can't see it was dropped.
+
+Found by the chunk 22 fixers, 2026-10-06.
+
 ## Taken
 
 | Defect | Taken by |
@@ -784,6 +841,11 @@ Found by the chunk 21 fixers, 2026-10-06.
 | D70's fourth item and D76 - the model list gave a window for a model nobody serves, and the editor hid a configuration's errors | PR #455 |
 | D77 - CI on GitHub's hosted runners (the native builds had timeouts already; every build job has one now, and the runners are Ubuntu 26) | PR #456 |
 | D66's first item - a summariser call that never answered kept the agent compacting | #404, PR #421 |
+| D71's first two items - an erasure counted a refused delete as done, and a large one timed out the daemon's call | PR #467 |
+| D74's first two items - a 5xx past its retries said only its status, and an Anthropic stream error showed unmasked | #427, PR #464 |
+| D78's first and fifth items - the Copilot file counted in every directory, and `/context` gave no reason for a file left out | PR #471 |
+| D79's first two items and its fifth - a Windows daemon died with its terminal, `open` guessed the app's address, and the plane host had no policy | PR #468; #460, PR #466 |
+| D81's last item, D73's first and D8's second - `RestartTest` and `AutospawnTest` started slowly enough to fail | PR #469 |
 
 ## Checked and not a defect
 
