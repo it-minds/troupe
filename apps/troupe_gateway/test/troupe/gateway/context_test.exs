@@ -1,10 +1,11 @@
 defmodule Troupe.Gateway.ContextTest do
   @moduledoc """
-  The provenance of a session's prompt over the protocol (Decisions 706, 798 and 806):
-  `context.get` lists every instruction file and the brief with its scope, size and share
-  of the budget, lists the aliases it skipped and a nested Copilot file with why, includes
-  the nested files on the way to what the session worked on and the files imported, is
-  `observe`, and refuses a session that is not there.
+  The provenance of a session's prompt over the protocol (Decisions 706, 798, 806 and
+  809): `context.get` lists every instruction file and the brief with its scope, size and
+  share of the budget, lists the aliases it skipped and a nested Copilot file with why,
+  includes the nested files on the way to what the session worked on and the files
+  imported, lists each Cursor rule with why it applies or not, is `observe`, and refuses
+  a session that is not there.
   """
 
   use ExUnit.Case, async: false
@@ -205,6 +206,71 @@ defmodule Troupe.Gateway.ContextTest do
            ] = answer["files"]
 
     assert answer["used"] == String.length("Root.")
+  end
+
+  # Decision 809: each Cursor rule is listed with why it applies or why not, and a glob
+  # rule applies once the session has read a file it matches.
+  test "context.get lists each Cursor rule with why it applies, or why not",
+       %{workspace: ws, client: client} = context do
+    ws = Path.expand(ws)
+    File.mkdir_p!(Path.join(ws, ".cursor/rules"))
+    File.mkdir_p!(Path.join(ws, "src"))
+    File.write!(Path.join(ws, ".cursor/rules/always.mdc"), "---\nalwaysApply: true\n---\nTabs.\n")
+    File.write!(Path.join(ws, ".cursor/rules/ts.mdc"), "---\nglobs: src/*.ts\n---\nStrict.\n")
+    File.write!(Path.join(ws, ".cursor/rules/db.mdc"), "---\ndescription: Migrations\n---\nUp.\n")
+    File.write!(Path.join(ws, "src/a.ts"), "a\n")
+
+    session =
+      start_session(context, [{:tools, [{"read_file", %{"path" => "src/a.ts"}}]}, {:text, "hi"}])
+
+    rule = &Path.join(ws, ".cursor/rules/#{&1}")
+    [always, db, ts] = Enum.map(["always.mdc", "db.mdc", "ts.mdc"], rule)
+
+    assert {:ok, before} = Client.call(client, "context.get", %{"session_id" => session.id})
+
+    assert [
+             %{"path" => ^always, "status" => "whole", "applies" => "always applied"},
+             %{
+               "path" => ^db,
+               "status" => "listed",
+               "chars" => 10,
+               "reason" => "requested by description only: listed in the prompt, not joined",
+               "rule" => %{"apply" => "requested", "description" => "Migrations"}
+             },
+             %{
+               "path" => ^ts,
+               "status" => "inactive",
+               "chars" => 0,
+               "applies" => nil,
+               "reason" => "applies when a file matching src/*.ts is read or edited"
+             },
+             %{"scope" => "brief"}
+           ] = before["files"]
+
+    :ok = Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "hello")
+    await_turn_ended(session.id)
+
+    assert {:ok, answer} = Client.call(client, "context.get", %{"session_id" => session.id})
+
+    assert [
+             %{"path" => ^always, "status" => "whole"},
+             %{"path" => ^db, "status" => "listed"},
+             %{
+               "path" => ^ts,
+               "status" => "whole",
+               "reason" => nil,
+               "applies" => "applied: src/a.ts matches src/*.ts",
+               "rule" => %{"apply" => "globs", "globs" => ["src/*.ts"], "matched" => "src/a.ts"}
+             },
+             %{"scope" => "brief"}
+           ] = answer["files"]
+
+    assert answer["used"] ==
+             String.length("Tabs.") + String.length("Migrations") +
+               String.length("Strict.")
+
+    assert answer == Troupe.Instructions.provenance(ws, Troupe.Config.load(ws), ["src/a.ts"])
   end
 
   test "the budget is the workspace's, and an unknown session is not found",

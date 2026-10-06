@@ -26,6 +26,17 @@ defmodule Troupe.Instructions do
   directories are held to the same edge: one that is really elsewhere, through a link,
   is listed as `outside` and not read.
 
+  Cursor's rules are read as Cursor reads them (Decision 809): each `.cursor/rules/*.mdc`
+  in the repository root, and in a directory on the way to where the session works, comes
+  after that directory's instruction file, its front matter saying when it applies. A
+  rule with `alwaysApply: true` is in every prompt, as is the legacy root `.cursorrules`;
+  one with `globs` joins once the session has worked on a file one of them matches, the
+  globs taken from the directory that holds `.cursor`; one with only a `description` is
+  listed in the prompt by it, for the agent to read when it applies, its body not
+  joined; one with none of them is not joined. Each says why it applies (`applies`) or
+  why not (`reason`), and is held to the repository's edge as every other file is. A
+  rule's `@` is not followed as an import.
+
   Read from disk when asked, which the agent does as a turn begins, so an edit takes
   effect on the next turn. What was read is summed up in a digest, and the agent writes
   an `instructions_loaded` event when the digest changes and nothing while it does not:
@@ -50,7 +61,15 @@ defmodule Troupe.Instructions do
   @copilot ".github/copilot-instructions.md"
   @aliases ["AGENTS.md", "CLAUDE.md", "GEMINI.md", @copilot]
   @copilot_reason "not read: Copilot's file counts only at the root"
+  @budget_reason "left out: the budget was spent on nearer files"
   @default_max_chars 16_000
+
+  # Where Cursor keeps its rules, and the single file it read before them, which counts at
+  # the repository root only.
+  @rules_dir ".cursor/rules"
+  @legacy_rules ".cursorrules"
+  @requested_reason "requested by description only: listed in the prompt, not joined"
+  @manual_reason "not joined: no alwaysApply, globs or description"
 
   # How many imports deep a file may reach: an instruction file's own imports are the
   # first, as Claude Code counts its hops.
@@ -88,6 +107,12 @@ defmodule Troupe.Instructions do
   in, and `unfollowed` the imports this file names that were not read, with why:
   `missing`, `outside` the directory imports may come from, `depth` past five, or a
   `cycle`.
+
+  A Cursor rule has its front matter in `rule` (`nil` for every other file) and a
+  `status` of its own while it is not joined: `inactive` (a `globs` rule no file worked
+  on matches yet, or one with nothing that says when it applies), or `listed` (one with
+  only a `description`, which is its `text`, listed in the prompt by it). One that is
+  joined says why in `applies` (`nil` for every other file and every rule not joined).
   """
   @type file :: %{
           scope: scope(),
@@ -104,7 +129,22 @@ defmodule Troupe.Instructions do
           skipped: [String.t()],
           imported_by: Path.t() | nil,
           unfollowed: [%{import: String.t(), reason: :missing | :outside | :depth | :cycle}],
+          rule: rule() | nil,
+          applies: String.t() | nil,
           text: String.t()
+        }
+
+  @typedoc """
+  A Cursor rule's front matter, and when it applies: `always` (`alwaysApply: true`, or
+  the legacy `.cursorrules`), `globs`, `requested` (only a `description`) or `manual`
+  (none of them). `matched` is the file worked on that a glob matched, from the
+  directory that holds `.cursor`, while the rule is joined by it.
+  """
+  @type rule :: %{
+          apply: :always | :globs | :requested | :manual,
+          globs: [String.t()],
+          description: String.t() | nil,
+          matched: String.t() | nil
         }
 
   @type t :: %{
@@ -141,22 +181,24 @@ defmodule Troupe.Instructions do
   Reads every instruction file in force for a workspace, farthest scope first, and the
   brief after them. `focus` is the files the session is working on (`focus/1`), relative
   to the workspace or absolute: the directories on the way to each are read as well as
-  those on the way to the workspace. `searched` is every directory looked in, whether or
-  not it had one.
+  those on the way to the workspace, and they are what a Cursor rule's globs match.
+  `searched` is every directory looked in, whether or not it had one.
   """
   @spec load(Path.t(), Config.t() | nil, [Path.t()]) :: t()
   def load(workspace, config, focus \\ []) do
     workspace = Path.expand(workspace)
     budget = max_chars(config)
     {root, directories} = directories(workspace, focus)
+    worked_on = Enum.map(focus, &Path.expand(&1, workspace))
 
     bounds = %{user: key(Paths.config_dir()), repository: key(root)}
-    found = Enum.flat_map(directories, &find(&1, bounds))
+    found = Enum.flat_map(directories, &(find(&1, bounds) ++ rules(&1, bounds, worked_on)))
 
-    # A skipped file is not in the prompt, so an import may still bring it in.
+    # A file skipped, or a rule not joined, is not in the prompt, so an import may still
+    # bring it in.
     seen =
       for file <- found,
-          not match?(%{status: :skipped}, file),
+          not match?(%{status: status} when status in [:skipped, :inactive, :listed], file),
           into: MapSet.new(),
           do: key(file.path)
 
@@ -207,7 +249,9 @@ defmodule Troupe.Instructions do
   @doc """
   What `context.get` answers and the `instructions_loaded` event carries: every file, in
   the order it is read, with its scope, size, the characters that reached the prompt,
-  the budget they count against and its share of it. Wire-shaped, string keys.
+  the budget they count against and its share of it, and for a Cursor rule its front
+  matter (`rule`) and why it applies (`applies`) or not (`reason`). Wire-shaped, string
+  keys.
   """
   @spec provenance(t()) :: map()
   def provenance(%{} = loaded) do
@@ -344,6 +388,8 @@ defmodule Troupe.Instructions do
         skipped: [],
         imported_by: nil,
         unfollowed: [],
+        rule: nil,
+        applies: nil,
         text: "",
         status: status,
         reason: reason
@@ -372,6 +418,8 @@ defmodule Troupe.Instructions do
              skipped: [],
              imported_by: nil,
              unfollowed: [],
+             rule: nil,
+             applies: nil,
              text: content |> String.replace("\r\n", "\n") |> String.trim()
            },
            fields
@@ -383,11 +431,276 @@ defmodule Troupe.Instructions do
     end
   end
 
+  ## Cursor's rules
+
+  # A directory's `.cursor/rules/*.mdc`, in name order, after its instruction file, and at
+  # the repository root the legacy `.cursorrules` before them (Decision 809). Not in the
+  # person's own directory: Cursor keeps a person's rules in its settings, not in files.
+  defp rules({:user, _dir, _where}, _bounds, _worked_on), do: []
+
+  defp rules({scope, dir, where}, bounds, worked_on) do
+    fields = %{scope: scope, where: where}
+    path = Path.join(dir, @legacy_rules)
+
+    legacy =
+      if scope == :root and File.regular?(path),
+        do: rule(path, dir, fields, bounds.repository, worked_on),
+        else: []
+
+    legacy ++ cursor_rules(dir, fields, bounds.repository, worked_on)
+  end
+
+  # A `.cursor/rules` that is really outside the repository is listed once, as `outside`,
+  # and not looked into, so not even the names of what is there reach the log.
+  defp cursor_rules(dir, fields, bound, worked_on) do
+    rules_dir = Path.join(dir, @rules_dir)
+
+    cond do
+      not File.dir?(rules_dir) ->
+        []
+
+      not under?(key(rules_dir), bound) ->
+        [unread(rules_dir, dir, fields, :outside, outside_reason(fields.scope))]
+
+      true ->
+        rules_dir
+        |> File.ls()
+        |> case do
+          {:ok, names} -> names
+          {:error, _reason} -> []
+        end
+        |> Enum.filter(&(String.downcase(Path.extname(&1)) == ".mdc"))
+        |> Enum.sort()
+        |> Enum.map(&Path.join(rules_dir, &1))
+        |> Enum.filter(&File.regular?/1)
+        |> Enum.flat_map(&rule(&1, dir, fields, bound, worked_on))
+    end
+  end
+
+  # One rule, confined as a found file is, then read and judged against the files the
+  # session worked on. A rule's globs are taken from `dir`, the directory that holds its
+  # `.cursor` (the repository root's, as Cursor has it).
+  defp rule(path, dir, fields, bound, worked_on) do
+    if under?(key(path), bound) do
+      case entry(path, fields) do
+        {:ok, file} ->
+          {rule, body} = front_matter(file)
+          [judge(%{file | directory: dir}, rule, body, worked_on)]
+
+        :error ->
+          []
+      end
+    else
+      [unread(path, dir, fields, :outside, outside_reason(fields.scope))]
+    end
+  end
+
+  defp judge(file, %{apply: :always} = rule, body, _worked_on),
+    do: %{file | text: body, rule: rule, applies: "always applied"}
+
+  defp judge(file, %{apply: :globs, globs: globs} = rule, body, worked_on) do
+    case matched(globs, file.directory, worked_on) do
+      {relative, glob} ->
+        applies = "applied: #{shown(relative, file)} matches #{glob}#{under(file)}"
+        %{file | text: body, rule: %{rule | matched: relative}, applies: applies}
+
+      nil ->
+        reason =
+          "applies when a file#{under(file)} matching #{Enum.join(globs, " or ")} " <>
+            "is read or edited"
+
+        Map.merge(file, %{text: "", rule: rule, status: :inactive, reason: reason})
+    end
+  end
+
+  # Listed by its description, the line the prompt shows, and not joined: Cursor's agent
+  # asks for such a rule when the description fits the work, and here the agent reads it.
+  defp judge(file, %{apply: :requested, description: description} = rule, _body, _worked_on) do
+    line = description |> String.split() |> Enum.join(" ")
+    Map.merge(file, %{text: line, rule: rule, status: :listed, reason: @requested_reason})
+  end
+
+  defp judge(file, rule, _body, _worked_on),
+    do: Map.merge(file, %{text: "", rule: rule, status: :inactive, reason: @manual_reason})
+
+  defp under(%{scope: :nested, where: where}), do: " under #{where}/"
+  defp under(_file), do: ""
+
+  defp shown(relative, %{scope: :nested, where: where}), do: "#{where}/#{relative}"
+  defp shown(relative, _file), do: relative
+
+  # The first file worked on that one of the globs matches, as its path from `base`, and
+  # that glob; `nil` when none does.
+  defp matched(globs, base, worked_on) do
+    patterns = for glob <- globs, {:ok, regex} <- [glob_regex(glob)], do: {glob, regex}
+
+    Enum.find_value(worked_on, fn path ->
+      relative = from_base(path, base)
+      relative && first_glob(patterns, relative)
+    end)
+  end
+
+  defp first_glob(patterns, relative) do
+    case Enum.find(patterns, fn {_glob, regex} -> Regex.match?(regex, relative) end) do
+      {glob, _regex} -> {relative, glob}
+      nil -> nil
+    end
+  end
+
+  defp from_base(path, base) do
+    case Path.relative_to(path, base) do
+      ^path -> nil
+      "." -> nil
+      relative -> relative
+    end
+  end
+
+  # A glob as Cursor writes one: `**` crosses directories, `*` and `?` do not, `{a,b}` is
+  # either. One without a `/` matches a file's name in any directory (`*.tsx`), one with a
+  # `/` matches the path from `base`; one ending in `/` everything under it. A glob that
+  # does not compile matches nothing. Without case on Windows, as its paths compare.
+  defp glob_regex(glob) do
+    glob = glob |> String.trim_leading("./") |> String.trim_leading("/")
+    glob = if String.ends_with?(glob, "/"), do: glob <> "**", else: glob
+    prefix = if String.contains?(glob, "/"), do: "\\A", else: "\\A(?:.*/)?"
+    options = if match?({:win32, _}, :os.type()), do: "iu", else: "u"
+    Regex.compile(prefix <> translate(glob, 0) <> "\\z", options)
+  end
+
+  defp translate("", _depth), do: ""
+  defp translate("**/" <> rest, depth), do: "(?:.*/)?" <> translate(rest, depth)
+  defp translate("**" <> rest, depth), do: ".*" <> translate(rest, depth)
+  defp translate("*" <> rest, depth), do: "[^/]*" <> translate(rest, depth)
+  defp translate("?" <> rest, depth), do: "[^/]" <> translate(rest, depth)
+  defp translate("{" <> rest, depth), do: "(?:" <> translate(rest, depth + 1)
+  defp translate("}" <> rest, depth) when depth > 0, do: ")" <> translate(rest, depth - 1)
+  defp translate("," <> rest, depth) when depth > 0, do: "|" <> translate(rest, depth)
+
+  defp translate(<<char::utf8, rest::binary>>, depth),
+    do: Regex.escape(<<char::utf8>>) <> translate(rest, depth)
+
+  # A rule's front matter and its body. The legacy `.cursorrules` is all body and always
+  # applies. An `.mdc`'s front matter is read a line per key, as Cursor writes it and YAML
+  # would not always read it (`globs: *.ts` is an alias to YAML): `globs` a
+  # comma-separated string, a `[...]` list or a list of `- ` lines.
+  defp front_matter(%{path: path, text: text}) do
+    if Path.basename(path) == @legacy_rules do
+      {rule_from(true, [], nil), text}
+    else
+      text = String.trim_leading(text, "\uFEFF")
+      text |> String.split("\n") |> split_front_matter(text)
+    end
+  end
+
+  defp split_front_matter([first | rest], text) do
+    with "---" <- String.trim(first),
+         {front, [_close | body]} <- Enum.split_while(rest, &(String.trim(&1) != "---")) do
+      fields = keys(front)
+      always = String.downcase(scalar(fields["alwaysApply"])) == "true"
+
+      description =
+        case scalar(fields["description"]) do
+          "" -> nil
+          description -> description
+        end
+
+      rule = rule_from(always, globs(fields["globs"]), description)
+      {rule, body |> Enum.join("\n") |> String.trim()}
+    else
+      _no_front_matter -> {rule_from(false, [], nil), text}
+    end
+  end
+
+  defp rule_from(always, globs, description) do
+    apply =
+      cond do
+        always -> :always
+        globs != [] -> :globs
+        description != nil -> :requested
+        true -> :manual
+      end
+
+    %{apply: apply, globs: globs, description: description, matched: nil}
+  end
+
+  # Each `key:` line and the lines after it that are indented or a list's `-`, trimmed.
+  defp keys(lines) do
+    lines
+    |> Enum.reduce({%{}, nil}, fn line, {fields, key} ->
+      case Regex.run(~r/^([A-Za-z][\w-]*)\s*:\s*(.*)$/, line) do
+        [_line, name, value] -> {Map.put(fields, name, [String.trim(value)]), name}
+        nil when key != nil -> {continue(fields, key, line), key}
+        nil -> {fields, nil}
+      end
+    end)
+    |> elem(0)
+  end
+
+  defp continue(fields, key, line) do
+    if line =~ ~r/^(\s+\S|-)/,
+      do: Map.update!(fields, key, &(&1 ++ [String.trim(line)])),
+      else: fields
+  end
+
+  defp scalar(nil), do: ""
+
+  defp scalar([block | lines]) when block in ["|", ">", "|-", ">-"],
+    do: lines |> Enum.join(" ") |> unquote_value()
+
+  defp scalar(lines), do: lines |> Enum.join(" ") |> unquote_value()
+
+  defp globs(nil), do: []
+
+  defp globs(["" | lines]) do
+    for "-" <> item <- lines, item = unquote_value(item), item != "", do: item
+  end
+
+  defp globs(lines) do
+    value = lines |> Enum.join(" ") |> String.trim()
+
+    value =
+      if String.starts_with?(value, "[") and String.ends_with?(value, "]"),
+        do: String.slice(value, 1..-2//1),
+        else: value
+
+    for item <- split_globs(value), item = unquote_value(item), item != "", do: item
+  end
+
+  # On the commas outside braces, so `**/*.{ts,tsx}` stays one glob.
+  defp split_globs(value) do
+    {items, current, _depth} =
+      value
+      |> String.graphemes()
+      |> Enum.reduce({[], "", 0}, fn
+        ",", {items, current, 0} -> {[current | items], "", 0}
+        "{", {items, current, depth} -> {items, current <> "{", depth + 1}
+        "}", {items, current, depth} -> {items, current <> "}", max(depth - 1, 0)}
+        char, {items, current, depth} -> {items, current <> char, depth}
+      end)
+
+    Enum.reverse([current | items])
+  end
+
+  defp unquote_value(value) do
+    value = String.trim(value)
+
+    case value do
+      <<q, rest::binary>> when q in [?", ?'] and byte_size(rest) > 0 ->
+        if String.ends_with?(rest, <<q>>), do: String.slice(rest, 0..-2//1), else: value
+
+      _other ->
+        value
+    end
+  end
+
   ## Imports
 
   # A file and what it imports, depth first, each import right after the file that names
   # it. `seen` is every file already in the prompt, so each is read once; the person's
-  # own file imports from the config directory, every other from the repository.
+  # own file imports from the config directory, every other from the repository. A
+  # Cursor rule's `@` names a file for Cursor's context, not an import, and is left alone.
+  defp imports(%{rule: %{}} = file, seen, _bounds), do: {[file], seen}
+
   defp imports(file, seen, bounds),
     do: follow(file, [key(file.path)], seen, bound(file.scope, bounds), 1)
 
@@ -486,22 +799,43 @@ defmodule Troupe.Instructions do
 
   # Scope by scope, the nearest first: each takes what it needs from what is left, so the
   # farthest is the one cut or left out when the files together outrun the budget. Within
-  # a scope the file comes before what it imports.
+  # a scope the file comes before what it imports. What is left is what was not taken, so
+  # a rule's description left out whole leaves its room to the files farther out.
   defp allot(scopes, budget) do
     {allotted, _left} =
       scopes
       |> Enum.reverse()
       |> Enum.map_reduce(budget, fn files, left ->
         Enum.map_reduce(files, left, fn file, left ->
-          {fit(file, budget, left), max(left - String.length(file.text), 0)}
+          fitted = fit(file, budget, left)
+          {fitted, left - fitted.chars}
         end)
       end)
 
     allotted |> Enum.reverse() |> Enum.concat()
   end
 
-  defp fit(%{status: status} = file, budget, _left) when status in [:outside, :skipped],
-    do: Map.merge(file, %{chars: 0, trimmed: 0, budget: budget})
+  defp fit(%{status: status} = file, budget, _left)
+       when status in [:outside, :skipped, :inactive],
+       do: Map.merge(file, %{chars: 0, trimmed: 0, budget: budget})
+
+  # A rule listed by its description is listed whole or not at all.
+  defp fit(%{status: :listed} = file, budget, left) do
+    case String.length(file.text) do
+      chars when chars <= left ->
+        Map.merge(file, %{chars: chars, trimmed: 0, budget: budget})
+
+      chars ->
+        Map.merge(file, %{
+          chars: 0,
+          trimmed: chars,
+          status: :dropped,
+          reason: @budget_reason,
+          budget: budget,
+          text: ""
+        })
+    end
+  end
 
   defp fit(file, budget, left) do
     chars = String.length(file.text)
@@ -515,7 +849,7 @@ defmodule Troupe.Instructions do
           chars: 0,
           trimmed: chars,
           status: :dropped,
-          reason: "left out: the budget was spent on nearer files",
+          reason: @budget_reason,
           budget: budget,
           text: ""
         })
@@ -576,6 +910,8 @@ defmodule Troupe.Instructions do
       skipped: [],
       imported_by: nil,
       unfollowed: [],
+      rule: nil,
+      applies: nil,
       text: text
     }
   end
@@ -596,7 +932,7 @@ defmodule Troupe.Instructions do
     |> Enum.map_join("\n", fn f ->
       unfollowed = Enum.map(f.unfollowed, &"#{&1.import}:#{&1.reason}")
       fields = [f.path, f.hash || "", f.status, f.chars, f.trimmed, f.imported_by || ""]
-      Enum.join(fields ++ f.skipped ++ unfollowed, "\t")
+      Enum.join(fields ++ [f.applies || ""] ++ f.skipped ++ unfollowed, "\t")
     end)
     |> then(&:crypto.hash(:sha256, &1))
     |> Base.encode16(case: :lower)
@@ -614,10 +950,19 @@ defmodule Troupe.Instructions do
       "characters of this file did not fit the instructions budget)"
   end
 
+  # A rule with only a description: the agent reads the file when the description fits.
+  defp block(%{status: :listed} = f),
+    do: "Rule #{f.path} (#{scope_label(f)}), to read when it applies: #{f.text}"
+
   defp block(f), do: "Contents of #{f.path} (#{label(f)}):\n#{f.text}"
 
   defp label(%{imported_by: by} = f) when is_binary(by),
     do: "#{scope_label(f)}, imported by #{by}"
+
+  defp label(%{rule: %{apply: :always}} = f), do: "#{scope_label(f)}, a rule that always applies"
+
+  defp label(%{rule: %{apply: :globs, globs: globs}} = f),
+    do: "#{scope_label(f)}, a rule for files matching #{Enum.join(globs, " or ")}"
 
   defp label(f), do: scope_label(f)
 
@@ -640,7 +985,20 @@ defmodule Troupe.Instructions do
       "skipped" => f.skipped,
       "imported_by" => f.imported_by,
       "unfollowed" =>
-        Enum.map(f.unfollowed, &%{"import" => &1.import, "reason" => to_string(&1.reason)})
+        Enum.map(f.unfollowed, &%{"import" => &1.import, "reason" => to_string(&1.reason)}),
+      "rule" => rule_json(f.rule),
+      "applies" => f.applies
+    }
+  end
+
+  defp rule_json(nil), do: nil
+
+  defp rule_json(rule) do
+    %{
+      "apply" => to_string(rule.apply),
+      "globs" => rule.globs,
+      "description" => rule.description,
+      "matched" => rule.matched
     }
   end
 

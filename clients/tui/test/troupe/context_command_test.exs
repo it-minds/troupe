@@ -3,7 +3,8 @@ defmodule Troupe.ContextCommandTest do
   `/context` (Decision 124): the provenance of the session's prompt, read through the
   daemon's `context.get`, on the notice line — every instruction file with its scope and
   share of the budget, the aliases it hid, and the brief; and every file left out, or
-  import not followed, with why (Decision 148).
+  import not followed, with why (Decision 148); and each Cursor rule with why it applies
+  or not (root Decision 809).
   """
 
   use ExUnit.Case, async: false
@@ -192,5 +193,49 @@ defmodule Troupe.ContextCommandTest do
     assert line =~ "AGENTS.md (root) not read: outside the repository"
     assert line =~ "CLAUDE.md (root) skipped: AGENTS.md comes first in this directory"
     refute line =~ "AGENTS.md (root) 0"
+  end
+
+  # Root Decision 809: a Cursor rule says why it is in the prompt, or why it is not.
+  test "/context says why each Cursor rule applies, or why not" do
+    ws =
+      tmp_workspace(%{
+        ".cursor/rules/always.mdc" => "---\nalwaysApply: true\n---\nUse tabs.\n",
+        ".cursor/rules/db.mdc" => "---\ndescription: Migrations\n---\nUp and down.\n",
+        ".cursor/rules/ts.mdc" => "---\nglobs: src/**/*.ts\n---\nStrict.\n"
+      })
+
+    {sid, _, _} = start_session!(workspace: ws, script: [])
+
+    assert {:ok, line} = Client.instructions(sid)
+
+    assert line =~
+             ".cursor/rules/always.mdc (root) 9, always applied · " <>
+               ".cursor/rules/db.mdc (root) requested by description only: listed in the " <>
+               "prompt, not joined · " <>
+               ".cursor/rules/ts.mdc (root) applies when a file matching src/**/*.ts is read " <>
+               "or edited"
+
+    answer = %{
+      "budget" => 16_000,
+      "used" => 7,
+      "searched" => ["/home/me/repo"],
+      "files" => [
+        %{
+          "scope" => "root",
+          "path" => "/home/me/repo/.cursor/rules/ts.mdc",
+          "chars" => 7,
+          "status" => "whole",
+          "trimmed" => 0,
+          "skipped" => [],
+          "unfollowed" => [],
+          "reason" => nil,
+          "applies" => "applied: src/a.ts matches src/**/*.ts"
+        }
+      ]
+    }
+
+    assert Instructions.line(answer, "/home/me/repo") ==
+             "context: 7 of 16,000 chars · .cursor/rules/ts.mdc (root) 7, " <>
+               "applied: src/a.ts matches src/**/*.ts"
   end
 end
