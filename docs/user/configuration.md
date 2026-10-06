@@ -270,7 +270,9 @@ directory, and where two disagree, the nearer wins. In one directory `AGENTS.md`
 `CLAUDE.md`, `GEMINI.md` and `.github/copilot-instructions.md` are the same file under
 other tools' names: the first that exists is read and the rest are skipped, and the
 session's log and `/context` say which, so nobody debugs a file that was never loaded.
-So a repository with only a `CLAUDE.md` works as it is.
+So a repository with only a `CLAUDE.md` works as it is. A file that is a link to
+somewhere outside the repository (outside `<config>`, for your own `AGENTS.md`) is not
+read; `context.get` and the session's log list it as `outside`.
 
 A file can pull in another with `@path/to/file.md` on a line of its own or in a
 sentence, as Claude Code's do. The path is taken from the importing file's directory

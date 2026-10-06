@@ -181,6 +181,35 @@ defmodule Troupe.InstructionsPromptTest do
            ] = event.data["files"]
   end
 
+  test "an instruction file that is a link to outside the repository, or outside your " <>
+         "config directory, reaches no prompt and is named in the event",
+       context do
+    outside = Path.join(context.base, "key")
+    File.write!(outside, "a stand-in for a private key\n")
+    File.ln_s!(outside, Path.join(context.workspace, "AGENTS.md"))
+
+    mine = Path.join(Paths.config_dir(), "AGENTS.md")
+    File.ln_s!(outside, mine)
+    on_exit(fn -> File.rm(mine) end)
+
+    %{session: session, fake: fake} = start_session(context, steps: [{:text, "ok"}])
+    :ok = Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "hello")
+    await_event(session.id, :turn_ended)
+
+    [request] = Fake.requests(fake)
+    refute request.system =~ "private key"
+    refute request.system =~ "# Instruction files"
+
+    assert [event] = events_of_type(session.id, :instructions_loaded)
+
+    assert [
+             %{"scope" => "user", "status" => "outside", "chars" => 0},
+             %{"scope" => "root", "status" => "outside", "chars" => 0, "hash" => nil},
+             %{"scope" => "brief"}
+           ] = event.data["files"]
+  end
+
   test "your own AGENTS.md may import from your config directory", context do
     mine = Path.join(Paths.config_dir(), "AGENTS.md")
     extra = Path.join(Paths.config_dir(), "mine/extra.md")

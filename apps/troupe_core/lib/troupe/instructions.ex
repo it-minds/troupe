@@ -20,7 +20,9 @@ defmodule Troupe.Instructions do
   the importing file's directory, followed five deep, each file read once, and never
   from outside the repository (or, for the person's own file, the config directory). An
   import is read right after the file that names it and belongs to that file's scope;
-  one that is not followed is named on its importer, with why.
+  one that is not followed is named on its importer, with why. The files found in the
+  directories are held to the same edge: one that is really elsewhere, through a link,
+  is listed as `outside` and not read.
 
   Read from disk when asked, which the agent does as a turn begins, so an edit takes
   effect on the next turn. What was read is summed up in a digest, and the agent writes
@@ -71,9 +73,9 @@ defmodule Troupe.Instructions do
 
   @typedoc """
   One file in force. `size` is its bytes on disk; `chars` what reached the prompt, which
-  counts against `budget`; `status` is `whole`, `trimmed` (`trimmed` characters cut) or
-  `dropped` for an instruction file, and for the brief what `Troupe.Session.Memory`
-  says of it. `skipped` names the aliases the file hid in its directory; `where` is the
+  counts against `budget`; `status` is `whole`, `trimmed` (`trimmed` characters cut),
+  `dropped`, or `outside` (a file that is really outside the repository, not read) for
+  an instruction file, and for the brief what `Troupe.Session.Memory` says of it. `skipped` names the aliases the file hid in its directory; `where` is the
   directory's path from the repository root, for the prompt to name it by.
   `imported_by` is the file whose `@` import brought this one in, and `unfollowed` the
   imports this file names that were not read, with why: `missing`, `outside` the
@@ -136,8 +138,8 @@ defmodule Troupe.Instructions do
     budget = max_chars(config)
     {root, directories} = directories(workspace, focus)
 
-    found = Enum.flat_map(directories, &find/1)
     bounds = %{user: key(Paths.config_dir()), repository: key(root)}
+    found = Enum.flat_map(directories, &find(&1, bounds))
 
     files =
       found
@@ -257,19 +259,47 @@ defmodule Troupe.Instructions do
 
   ## Reading
 
-  defp find({scope, dir, where}) do
+  defp find({scope, dir, where}, bounds) do
     case Enum.filter(@aliases, &File.regular?(Path.join(dir, &1))) do
       [] -> []
-      [name | skipped] -> read(scope, dir, where, name, skipped)
+      [name | skipped] -> read(scope, dir, where, name, skipped, bound(scope, bounds))
     end
   end
 
-  defp read(scope, dir, where, name, skipped) do
-    case entry(Path.join(dir, name), %{scope: scope, where: where, skipped: skipped}) do
-      {:ok, file} -> [%{file | directory: dir}]
-      :error -> []
+  # A file found in a directory is confined as an import is: one that is really somewhere
+  # outside the repository (or, for the person's own, the config directory), a link out
+  # or a directory linked out, is not read, and is listed as `outside` with nothing of it
+  # in the prompt, not even its size.
+  defp read(scope, dir, where, name, skipped, bound) do
+    path = Path.join(dir, name)
+    fields = %{scope: scope, where: where, skipped: skipped}
+
+    if under?(key(path), bound) do
+      case entry(path, fields) do
+        {:ok, file} -> [%{file | directory: dir}]
+        :error -> []
+      end
+    else
+      [Map.merge(outside(path, dir), fields)]
     end
   end
+
+  defp outside(path, dir) do
+    %{
+      path: path,
+      directory: dir,
+      size: 0,
+      hash: nil,
+      skipped: [],
+      imported_by: nil,
+      unfollowed: [],
+      text: "",
+      status: :outside
+    }
+  end
+
+  defp bound(:user, bounds), do: bounds.user
+  defp bound(_scope, bounds), do: bounds.repository
 
   defp entry(path, fields) do
     case File.read(path) do
@@ -300,10 +330,8 @@ defmodule Troupe.Instructions do
   # A file and what it imports, depth first, each import right after the file that names
   # it. `seen` is every file already in the prompt, so each is read once; the person's
   # own file imports from the config directory, every other from the repository.
-  defp imports(file, seen, bounds) do
-    bound = if file.scope == :user, do: bounds.user, else: bounds.repository
-    follow(file, [key(file.path)], seen, bound, 1)
-  end
+  defp imports(file, seen, bounds),
+    do: follow(file, [key(file.path)], seen, bound(file.scope, bounds), 1)
 
   defp follow(file, stack, seen, bound, depth) do
     {imported, unfollowed, seen} =
@@ -413,6 +441,9 @@ defmodule Troupe.Instructions do
 
     allotted |> Enum.reverse() |> Enum.concat()
   end
+
+  defp fit(%{status: :outside} = file, budget, _left),
+    do: Map.merge(file, %{chars: 0, trimmed: 0, budget: budget})
 
   defp fit(file, budget, left) do
     chars = String.length(file.text)

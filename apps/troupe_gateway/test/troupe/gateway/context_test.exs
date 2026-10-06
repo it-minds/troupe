@@ -140,6 +140,22 @@ defmodule Troupe.Gateway.ContextTest do
     end
   end
 
+  test "context.get names an instruction file that links outside the repository as not read",
+       %{workspace: ws, state_dir: state_dir, client: client} = context do
+    outside = Path.join(Path.dirname(state_dir), "elsewhere.md")
+    File.write!(outside, "not the repository's\n")
+    File.ln_s!(outside, Path.join(ws, "AGENTS.md"))
+    session = start_session(context)
+
+    assert {:ok, %{"used" => 0, "files" => [root, %{"scope" => "brief"}]}} =
+             Client.call(client, "context.get", %{"session_id" => session.id})
+
+    assert %{"scope" => "root", "status" => "outside", "size" => 0, "chars" => 0, "hash" => nil} =
+             root
+
+    assert root["path"] == Path.join(Path.expand(ws), "AGENTS.md")
+  end
+
   test "the budget is the workspace's, and an unknown session is not found",
        %{workspace: ws, client: client} = context do
     File.mkdir_p!(Path.join(ws, ".troupe"))

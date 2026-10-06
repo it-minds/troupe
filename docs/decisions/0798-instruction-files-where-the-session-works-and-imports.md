@@ -16,7 +16,7 @@ paths:
 symbols:
   - Troupe.Instructions.focus/1
   - Troupe.Instructions.load/3
-gist: Instructions are read as a turn begins and held for it; nested files follow the files the conversation touched; imports stay in the repository or config dir
+gist: Read as a turn begins, held for it; nested files follow the files worked on; found files and imports must really be inside the repo (or config dir)
 ---
 
 Issue #123, the parity slice after Decision 706: a nested `AGENTS.md` on the path to
@@ -70,6 +70,20 @@ and `context.get` were already there and stay as 706 made them.
   and within a scope the file comes before its imports. What was cut or left out is in
   the `instructions_loaded` event and `context.get` with the prompt saying so, as
   before; never a silent drop.
+- **A found file has the imports' edge too.** A repository's instruction file can no
+  longer bring in a file from outside the repository. 706 read the file it found in a
+  directory wherever that file really was, so an `AGENTS.md` that is a link (or sits
+  in a directory that is a link) to a file elsewhere on the machine put that file into
+  the prompt, and nested files on the way to every file worked on widen where that can
+  happen. Now a file found under one of the four names is judged where it really is,
+  as an import is: outside the repository root (outside `<config>` for the person's own
+  `AGENTS.md`), it is not read, and it is listed with `status: outside`, its `size`,
+  `chars` and `hash` empty, in the `instructions_loaded` event and `context.get`, with
+  nothing of it in the prompt. It still hides the other names in its directory, as the
+  first name found does. A link that stays inside the repository (`CLAUDE.md` pointing
+  at `AGENTS.md`) is read as before. What this costs: the person's own `AGENTS.md`
+  kept as a link into a dotfiles directory outside `<config>` is held to the same edge
+  and not read, nor can it be imported from there; it has to be a file in `<config>`.
 - **`context.get`** answers with the focus of the root agent's conversation, asked of
   the agent; a session that is asleep has none to ask and is answered for its
   workspace alone, since reading it wakes nothing. The TUI's `/context` prints the new
@@ -81,11 +95,15 @@ and `context.get` were already there and stay as 706 made them.
   files on its way and not others, the focus is the three calls' paths, imports in
   order and from their directory, outside a code span or fence, each once; five deep,
   a cycle, outside the repository, missing; a file and its imports one scope in the
-  budget), `Troupe.InstructionsPromptTest` (a repository with only a `CLAUDE.md`, a
+  budget; a root and a nested `AGENTS.md` linked to a file outside are `outside` and
+  not read, one linked inside is read), `Troupe.InstructionsPromptTest` (a repository with only a `CLAUDE.md`, a
   `GEMINI.md` or a copilot file needs no setup and an edit reaches the next turn; a
   nested file on the way to a file the turn read is in the next turn's prompt, and the
   system prompt is the same on every call of a turn in which the agent rewrote
   `AGENTS.md`; an import reaches the prompt and the budget's cut is in the event; the
-  person's own file imports from `<config>`) and `Troupe.Gateway.ContextTest` (the
-  nested file and the import, with scope and size, in `context.get`). All but the
-  aliases fail on the chunk's tip.
+  person's own file imports from `<config>`; the repository's and the person's own
+  `AGENTS.md` linked outside reach no prompt and are `outside` in the event) and
+  `Troupe.Gateway.ContextTest` (the nested file and the import, with scope and size,
+  in `context.get`; a linked-out `AGENTS.md` listed as `outside`). All but the aliases
+  fail on the chunk's tip; the three on linked-out files failed on this branch before
+  the edge was added, the file's contents in the prompt.
