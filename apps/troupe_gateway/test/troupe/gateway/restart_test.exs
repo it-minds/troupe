@@ -237,12 +237,15 @@ defmodule Troupe.Gateway.RestartTest do
   end
 
   # A real daemon in a real OS process, because `kill -9` is the whole point.
+  #
+  # The build goes on its code path from inside, cached, rather than as a `-pa` for each
+  # directory: no `-pa` directory is cached, so every module the daemon loaded, OTP's too,
+  # was looked for in each of them first, and on `/mnt/c` that took 23 seconds before it
+  # listened, and 36 to 45 under load (Decision 801). A first `-e` of its own, because the
+  # boot names a struct, which is expanded before any of the boot runs.
   defp launch(context, opts \\ []) do
-    paths =
-      [Mix.Project.build_path(), "lib", "*", "ebin"]
-      |> Path.join()
-      |> Path.wildcard()
-      |> Enum.map_join(" ", &("-pa " <> &1))
+    code_path =
+      ~s|Code.prepend_paths(Path.wildcard("#{Mix.Project.build_path()}/lib/*/ebin"), cache: true)|
 
     boot = """
     System.put_env("TROUPE_STATE_HOME", "#{context.state_dir}")
@@ -266,7 +269,8 @@ defmodule Troupe.Gateway.RestartTest do
     File.write!(script, """
     #!/bin/sh
     echo $$ > #{context.pidfile}
-    exec #{System.find_executable("elixir")} --erl "-noinput" #{paths} -e #{shell_quote(boot)} \
+    exec #{System.find_executable("elixir")} --erl "-noinput" \
+      -e #{shell_quote(code_path)} -e #{shell_quote(boot)} \
       >> #{Path.join(context.base, "daemon.log")} 2>&1
     """)
 

@@ -128,13 +128,13 @@ defmodule Troupe.Gateway.AutospawnTest do
   # there is no binary — and it lets the test count launches from outside the VM.
   defp write_launcher(base, endpoint, counter, pidfile) do
     path = Path.join(base, "launch-daemon.sh")
-    # One `-pa` per directory: the flag takes a single argument, so a glob left for
-    # the shell to expand would silently turn the rest into script arguments.
-    paths =
-      [Mix.Project.build_path(), "lib", "*", "ebin"]
-      |> Path.join()
-      |> Path.wildcard()
-      |> Enum.map_join(" ", &("-pa " <> &1))
+    # The build goes on the code path from inside the daemon, cached, rather than as a
+    # `-pa` for each directory, which is never cached and made every module load look in
+    # each of them first: on `/mnt/c` the daemon took 23 seconds to listen (Decision 801).
+    # A first `-e` of its own, because the boot names a struct, which is expanded before
+    # any of the boot runs.
+    code_path =
+      ~s|Code.prepend_paths(Path.wildcard("#{Mix.Project.build_path()}/lib/*/ebin"), cache: true)|
 
     boot = """
     System.put_env("TROUPE_STATE_HOME", "#{Path.join(base, "state")}")
@@ -153,7 +153,7 @@ defmodule Troupe.Gateway.AutospawnTest do
     #!/bin/sh
     echo launched >> #{counter}
     echo $$ > #{pidfile}
-    exec #{System.find_executable("elixir")} --erl "-noinput" #{paths} -e #{shell_quote(boot)} >> #{Path.join(base, "daemon.log")} 2>&1
+    exec #{System.find_executable("elixir")} --erl "-noinput" -e #{shell_quote(code_path)} -e #{shell_quote(boot)} >> #{Path.join(base, "daemon.log")} 2>&1
     """)
 
     File.chmod!(path, 0o700)

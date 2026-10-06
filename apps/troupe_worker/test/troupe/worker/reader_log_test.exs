@@ -275,8 +275,12 @@ defmodule Troupe.Worker.ReaderLogTest do
     refute Task.yield(task, 500)
     refute File.exists?(log_path(context))
 
+    # Let go, the lock is the restore's at its next try, which is not at once:
+    # `:global.trans/3` tries a taken lock again after a random pause that doubles from
+    # 125 ms to at most 8 seconds, so the restore can sleep that long after the reader has
+    # gone (Decision 801).
     send(holder, :release)
-    assert {:ok, _log} = Task.await(task)
+    assert {:ok, _log} = Task.await(task, 15_000)
     assert File.exists?(log_path(context))
   end
 
