@@ -46,6 +46,7 @@ defmodule Troupe.Gateway.Web do
         |> halt()
 
       false ->
+        refused(conn)
         conn |> send_resp(403, "origin not allowed") |> halt()
     end
   end
@@ -95,11 +96,22 @@ defmodule Troupe.Gateway.Web do
 
   # Configured per listener where there is one — a daemon serves a person's own browser
   # and a pod serves whatever its deployment says — and from the application environment
-  # otherwise, which is how a worker has always been told.
+  # otherwise, which is how a worker has always been told. A function is asked at each
+  # upgrade: a daemon's list grows when it is linked to a plane or a page is opened at it.
   defp allowed_origins(conn) do
     case conn.private[:troupe_allowed_origins] do
       nil -> Application.get_env(:troupe_gateway, :allowed_origins)
+      list when is_function(list, 0) -> list.()
       configured -> configured
+    end
+  end
+
+  # Told to the listener that asked, which is where the reason can go: a browser does not
+  # let the page see a 403, only that its socket did not open.
+  defp refused(conn) do
+    with told when is_function(told, 1) <- conn.private[:troupe_on_refused],
+         [origin | _] <- Plug.Conn.get_req_header(conn, "origin") do
+      told.(origin)
     end
   end
 
@@ -120,6 +132,8 @@ defmodule Troupe.Gateway.Web do
   `:endpoint` is the `Troupe.Protocol.Endpoint` every upgraded connection is created
   with — its authenticator and guard are what decide who may attach. `:ready` is a
   zero-arity function answering `:ok` or `{:error, reason}` for the readiness probe.
+  `:allowed_origins` is a list, or a zero-arity function asked at each upgrade, and
+  `:on_refused` a function given the origin of an upgrade the list refused.
   """
   @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
@@ -127,7 +141,12 @@ defmodule Troupe.Gateway.Web do
     endpoint = Keyword.fetch!(opts, :endpoint)
     ready = Keyword.get(opts, :ready)
 
-    plug = {__MODULE__, endpoint: endpoint, ready: ready, allowed_origins: Keyword.get(opts, :allowed_origins)}
+    plug =
+      {__MODULE__,
+       endpoint: endpoint,
+       ready: ready,
+       allowed_origins: Keyword.get(opts, :allowed_origins),
+       on_refused: Keyword.get(opts, :on_refused)}
 
     # A frame is a whole message, and the connection refuses a message over 64 MiB with
     # `payload_too_large` — but only once it has the whole thing in memory, and before
@@ -160,6 +179,7 @@ defmodule Troupe.Gateway.Web do
     |> Plug.Conn.put_private(:troupe_endpoint, Keyword.fetch!(opts, :endpoint))
     |> Plug.Conn.put_private(:troupe_ready, Keyword.get(opts, :ready))
     |> Plug.Conn.put_private(:troupe_allowed_origins, Keyword.get(opts, :allowed_origins))
+    |> Plug.Conn.put_private(:troupe_on_refused, Keyword.get(opts, :on_refused))
     |> super(opts)
   end
 end

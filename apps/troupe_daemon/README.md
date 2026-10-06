@@ -10,6 +10,7 @@ Unix socket, loopback TCP or a loopback WebSocket, and emits the same events a p
 ```
 troupe-daemon [run]               serve on this machine until idle or stopped
 troupe-daemon status              say whether one is running, and where
+troupe-daemon open [--url URL]    start it if need be, and open the web app connected to it
 troupe-daemon config              the resolved providers and models (keys masked)
 troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
 troupe-daemon config validate [PATH]   check the config files, or one; exits 1 on any problem
@@ -76,6 +77,23 @@ The entry runs `troupe-daemon run` — the one on the `PATH`, as a client finds 
 rather than exiting when idle. Turning it on takes effect at the next login and starts
 nothing now; turning it off removes the file and stops nothing that is running.
 
+### The web app
+
+A page in a browser cannot read `daemon.json` or start a program, so `troupe-daemon open`
+does both for it: it starts the daemon if none is answering, then opens your browser at
+the web app with the loopback WebSocket's port and token after a `#`. The page connects,
+takes them off its address bar and keeps them in the browser, so a reload or a new tab
+connects again; the token changes every time the daemon starts, and running `open` again
+hands over the new one. Nothing printed names the token.
+
+The web app is the one on the plane the daemon is linked to, at its `/app/`, or `--url`'s,
+which is needed when the daemon is not linked or the app is served somewhere else. The
+daemon admits that page's origin by itself, as it admits the linked plane's
+([Decision 797](../../docs/decisions/0797-troupe-daemon-open-connects-the-web-app.md)); an
+upgrade it refuses is a warning in its log, naming the origin. `BROWSER`, where it is set,
+is what the address is opened with; on Linux and macOS the browser is given a page that
+only you can read, which sends it on, so the token is never on a command line.
+
 ## Configuration
 
 `~/.config/troupe/config.yaml` (`%APPDATA%\troupe\config.yaml` on Windows), then the
@@ -116,7 +134,8 @@ background (root Decision 778).
 | `TROUPE_DAEMON_LOG` | `file` (default: `daemon.log` in the state directory, beside the TUI's `troupe.log`) or `stderr` |
 | `TROUPE_LOG_LEVEL` | `debug`, `info`, `warning`, `error` |
 | `TROUPE_STATE_HOME`, `TROUPE_CONFIG_HOME` | where sessions and config live |
-| `TROUPE_ALLOWED_ORIGINS` | origins admitted at the loopback WebSocket, beyond localhost and the desktop shell |
+| `TROUPE_ALLOWED_ORIGINS` | the origins admitted at the loopback WebSocket, in place of localhost, the desktop shell, the linked plane and the pages `open` opened |
+| `BROWSER` | what `troupe-daemon open` opens the web app with, in place of the system's default browser |
 
 The daemon is not a distributed Erlang node (`rel/env.sh.eex` sets
 `RELEASE_DISTRIBUTION=none`): no name, no `epmd`, no port beyond its own two.

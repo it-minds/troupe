@@ -199,6 +199,41 @@ defmodule Troupe.Protocol.Endpoint do
     merge!(%{"ws" => %{"port" => port, "token" => token}})
   end
 
+  @doc """
+  Admit `origin` at the WebSocket this daemon published, for as long as that entry lasts.
+
+  What `troupe-daemon open` does for the page it opens, so a web app served from an
+  origin the daemon would not otherwise admit can attach (Decision 797). Kept in the `ws`
+  entry beside the token rather than in a file of its own: it lives exactly as long as
+  the token does, a daemon that starts again publishing a fresh entry without it, and
+  whoever can write this file can already read the token, so it grants nothing new.
+  """
+  @spec admit_ws_origin(String.t()) :: :ok | {:error, :not_running}
+  def admit_ws_origin(origin) when is_binary(origin) do
+    path = discovery_path()
+
+    with {:ok, contents} <- File.read(path),
+         {:ok, %{"ws" => %{} = ws} = json} <- Jason.decode(contents) do
+      origins = Enum.uniq(List.wrap(ws["origins"]) ++ [origin])
+      File.write!(path, Jason.encode!(Map.put(json, "ws", Map.put(ws, "origins", origins))))
+      File.chmod!(path, 0o600)
+      :ok
+    else
+      _ -> {:error, :not_running}
+    end
+  end
+
+  @doc "The origins `admit_ws_origin/1` added to the WebSocket entry, read now."
+  @spec ws_origins() :: [String.t()]
+  def ws_origins do
+    with {:ok, contents} <- File.read(discovery_path()),
+         {:ok, %{"ws" => %{"origins" => origins}}} when is_list(origins) <- Jason.decode(contents) do
+      Enum.filter(origins, &is_binary/1)
+    else
+      _ -> []
+    end
+  end
+
   @doc "Remove the WebSocket entry, leaving the primary transport's alone."
   @spec retract_ws() :: :ok
   def retract_ws do

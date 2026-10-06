@@ -8,9 +8,9 @@
 // what differs is here.
 //
 // The connect panel is the honest part. A desktop shell finds the daemon by reading the
-// file it publishes and can start it; a browser tab can do neither, so it is given the
-// two fields it would otherwise have to guess and told plainly why. Nothing pretends the
-// two hosts are the same.
+// file it publishes and can start it; a browser tab can do neither, so it is told the one
+// command that hands it over, `troupe-daemon open`, and given the two fields it would
+// otherwise have to guess. Nothing pretends the two hosts are the same.
 
 import { useCallback, useState } from "react";
 import type { JSX } from "react";
@@ -148,11 +148,10 @@ function Connect({ daemon }: { daemon: DaemonState }): JSX.Element {
         <>
           <p className="copy">
             A page cannot read the file the daemon publishes itself in, and cannot start a program. So it has to be told where the daemon
-            is. Run <code className="mono">troupe-daemon run</code> and read the port and token out of{" "}
-            <code className="mono">daemon.json</code> — the desktop application does this part for you. In development,{" "}
-            <code className="mono">pnpm dev:local</code> starts a daemon of its own and fills this in, and{" "}
-            <code className="mono">VITE_TROUPE_DAEMON=&lt;port&gt;:&lt;token&gt;</code> in <code className="mono">apps/desktop/.env.local</code>{" "}
-            does the same for one you started yourself.
+            is: run <code className="mono">troupe-daemon open</code> on this computer, which starts the daemon if need be and opens this
+            app connected to it (<code className="mono">--url</code> with this address, where the daemon is not linked to the plane that
+            serves it). Or type the port and token from <code className="mono">daemon.json</code> here — the desktop application does
+            this part for you. In development, <code className="mono">pnpm dev:local</code> starts a daemon of its own and fills this in.
           </p>
           <form
             className="inline-form"
@@ -177,8 +176,8 @@ function Connect({ daemon }: { daemon: DaemonState }): JSX.Element {
             </button>
           </form>
           <p className="note">
-            The token stays in this tab and is never written down. Closing the tab means typing it again — which is the same rule the
-            sign-in screen follows, for the same reason.
+            This browser keeps the port and token, so a reload or a new tab connects again, until you disconnect. They change every time
+            the daemon starts; <code className="mono">troupe-daemon open</code> hands over the new ones.
           </p>
         </>
       )}

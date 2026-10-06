@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addPending,
   AdminApi,
+  daemonUrl,
   dropPending,
   emptyTranscript,
   fold,
@@ -16,9 +17,10 @@ import {
   PlaneSource,
   ServerOffer,
   SessionAttachment,
+  TroupeRpcError,
 } from "@troupe/client";
 import { noticeEvent } from "./notify";
-import { daemonHint, shell } from "./shell";
+import { daemonHint, forgetDaemon, rememberDaemon, shell } from "./shell";
 import type {
   AttachStatus,
   AuthSession,
@@ -116,16 +118,38 @@ async function handOver(client: DaemonClient, auth: AuthSession | null, who: Dae
 }
 
 /**
+ * Why a browser build could not reach the daemon it was told about, in words a person can
+ * act on. A browser shows a page no 403, so a daemon that is not running, one that started
+ * again somewhere else, and one that refuses this page's origin all look the same: a socket
+ * that did not open. So all three are said, with the origin the daemon has to admit, and
+ * the one command that mends each (troupe #449, Decision 797).
+ */
+function unreachable(endpoint: DaemonEndpoint, e: unknown): string {
+  if (e instanceof TroupeRpcError && e.method !== "initialize") return e.message;
+  const at = (globalThis as { location?: Location }).location;
+  const origin = at?.origin ?? "this page";
+  const page = at ? `${at.origin}${at.pathname}` : "URL";
+  return (
+    `The daemon at ${daemonUrl(endpoint)} did not let this page in. Either it is not running, it started again since ` +
+    `this page was told where it was, or it does not admit pages from ${origin}; a browser does not say which. ` +
+    `Run troupe-daemon open on this computer: it starts the daemon if need be and opens this app connected to it, ` +
+    `admitting the plane the daemon is linked to. For this address in particular: troupe-daemon open --url ${page}`
+  );
+}
+
+/**
  * The daemon on this computer, if there is one and this host can find it.
  *
  * Three hosts, three answers. A desktop shell reads `daemon.json` and can start the
- * daemon; a browser cannot do either and is given a dialog to type a port and token
- * into; and a browser that has been told nothing has no local sessions, which is a
- * fact about the host rather than a failure and is rendered as one.
+ * daemon; a browser cannot do either and is told, by `troupe-daemon open` or by hand;
+ * and a browser that has been told nothing has no local sessions, which is a fact about
+ * the host rather than a failure and is rendered as one.
  *
- * The token stays in memory. It is a credential, and the rule that the GUI persists
- * exactly one secret — the identity provider's refresh token, in the OS store — has no
- * exception for a local one.
+ * A browser keeps what it was told in `localStorage`, so a reload or a new tab connects
+ * again: the one exception to the rule that the GUI persists exactly one secret (the
+ * identity provider's refresh token, in the OS store), because the daemon's token changes
+ * at every start and a stale one only fails (Decision 797). A shell keeps nothing; it reads
+ * `daemon.json` again.
  *
  * Signed in to a plane (`auth`), it hands a daemon linked to the person their plane token
  * when it links, when it reaches the daemon, again when the token is renewed, and again
@@ -239,7 +263,7 @@ export function useDaemon(auth: AuthSession | null = null): {
       .catch((e: unknown) => {
         if (!live) return;
         setStatus("error");
-        setError(e instanceof Error ? e.message : String(e));
+        setError(locate ? (e instanceof Error ? e.message : String(e)) : unreachable(endpoint, e));
       });
 
     return () => {
@@ -279,9 +303,11 @@ export function useDaemon(auth: AuthSession | null = null): {
     canFind,
     connectTo: useCallback((e: DaemonEndpoint) => {
       setError(null);
+      if (!shell()?.findDaemon) rememberDaemon(e);
       setEndpoint(e);
     }, []),
     forget: useCallback(() => {
+      forgetDaemon();
       setEndpoint(null);
       setReached(null);
       setIdentity(null);

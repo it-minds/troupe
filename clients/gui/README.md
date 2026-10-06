@@ -137,18 +137,17 @@ cat > ~/demo/.troupe/script.json <<'JSON'
 ]}}
 JSON
 troupe-daemon config trust ~/demo
-# 3. run it, and read where it listens
-troupe-daemon run &
-cat "${XDG_RUNTIME_DIR:-$HOME/.troupe/run}/troupe/daemon.json"   # %LOCALAPPDATA%\troupe\daemon.json on Windows
-# 4. tell the browser build once, then the usual two
-echo 'VITE_TROUPE_DAEMON=<ws.port>:<ws.token>' > apps/desktop/.env.local
-pnpm fake && pnpm dev      # sign in to the fake plane; "This computer" is already connected
+# 3. the usual two, and sign in to the fake plane
+pnpm fake && pnpm dev
+# 4. start the daemon and hand the page its port and token
+troupe-daemon open --url http://localhost:5173/
 ```
 
 Then *New session* in `~/demo`. The desktop application skips step 4: it reads
 `daemon.json` itself and starts `troupe-daemon run` when nothing is listening, and reads
 it again before it dials a daemon that went away, since one that restarts serves a new port
-with a new token. A browser build told by hand dials where it was told. Steps are
+with a new token. A browser build dials where it was told, and keeps that for a reload or a
+new tab; after a restart, `troupe-daemon open` tells it again. Steps are
 the daemon's `Troupe.LLM.Fake` script: `text`, `tools`, `reasoning`, `stop`
 (`max_tokens` / `refusal`) and `error`, one step per model call, per agent under `routes`.
 

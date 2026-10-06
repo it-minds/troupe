@@ -38,7 +38,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe bench [--json [FILE]] [--md FILE]` | measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one |
 | `troupe bench --live [--suite smoke\|standard] [--scenario NAME,...] [--repeat N] [--model M] [--yes] [--keep DIR] [--json [FILE]] [--md FILE]` | tasks against your own provider, under a cap it prints and asks about first; scored, and kept in a history |
 | `troupe bench --compare [VERSION\|MODEL]` | the last live bench against the one before it, or against a version's or a model's |
-| `troupe daemon [ARGS]` | the local daemon: `run` (default), `status`, `config`, `models`, `login on\|off`, `version` |
+| `troupe daemon [ARGS]` | the local daemon: `run` (default), `status`, `open` (the web app, connected to it), `config`, `models`, `login on\|off`, `version` |
 | `troupe --version` | print the version |
 | `troupe --help` | print the command lines and the commands inside a session |
 <!-- cli-commands:end -->
