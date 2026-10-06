@@ -56,7 +56,8 @@ views:
   which layer, the config files (a click opens one, or starts it when it is not there),
   whether the workspace is trusted, the file's warnings, and every setting. Hover a row for
   each layer that had a say. It asks again when one of those files is saved, and on
-  **Refresh**. A key is never shown, masked or not: only whether one is set.
+  **Refresh**. A key is never shown, masked or not: only whether one is set. A config
+  that does not load is shown as its errors, each opening its file at its line.
 - **Models**, in the Settings view under the model in use: what `troupe models --json`
   lists for the folder. Each model with its window and price and where they came from,
   the default, cheap and expensive ones starred, and one its provider does not serve

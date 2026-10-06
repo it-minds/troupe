@@ -6,6 +6,8 @@
 // panel shows that answer and reads no config file of its own. A key is never shown: the
 // command masks secrets, and the panel says only whether one is set.
 
+import { Failed } from "./run.js";
+
 export interface Row {
   label: string;
   description?: string;
@@ -235,6 +237,41 @@ export function failure(label: string, message: string, hint?: string): Row {
     tooltip: "```\n" + said + "\n```" + (hint === undefined ? "" : `\n\n${hint}`),
     icon: "error",
   };
+}
+
+/**
+ * The settings when `troupe config --explain --json` failed. A config that does not load
+ * exits 1 with its `errors` on standard output and nothing on standard error: those are
+ * shown, each as the Problems group shows a refusal, opening its file at its line, with no
+ * key in them. Anything else is what `troupe` said, as one line.
+ */
+export function settingsFailed(error: unknown): Row {
+  const errors = error instanceof Failed ? parseErrors(error.stdout) : [];
+  if (errors.length === 0)
+    return failure("Troupe could not say what its settings are", error instanceof Error ? error.message : String(error));
+
+  return {
+    label: "The configuration did not load",
+    description: errors.length === 1 ? "1 error" : `${errors.length} errors`,
+    tooltip: "Troupe refuses this folder's configuration for these reasons, as `troupe config --explain` reports them. A click on one opens its file at its line.",
+    icon: "error",
+    expanded: true,
+    children: errors.map((i) => issueRow({ ...i, message: unkeyed(i.message) }, "error")),
+  };
+}
+
+// The `errors` a config that does not load prints, or none when the output is not those.
+function parseErrors(text: string): Issue[] {
+  let o: unknown;
+  try {
+    o = JSON.parse(text);
+  } catch {
+    return [];
+  }
+
+  const errors = (o as { errors?: unknown } | null)?.errors;
+  if (!Array.isArray(errors)) return [];
+  return errors.filter((i): i is Issue => i !== null && typeof i === "object" && typeof i.message === "string");
 }
 
 // What a key could be: the value after `api_key:`, a bearer token, a vendor's `sk-…`. In
