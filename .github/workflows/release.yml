@@ -153,16 +153,6 @@ jobs:
           cat > notes.md <<NOTES
           Everything in this repository at \`${GITHUB_SHA::7}\`, as one release, after the full suite.
 
-          **Try it in one line** — this release's installer, downloaded whole and then run: the daemon, the TUI and the VS Code extension (leave out \`--vscode\` where there is no VS Code). It shows its plan and asks before it changes anything.
-
-          \`\`\`sh
-          curl -fsSLO https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.sh && sh install.sh --tui --vscode
-          \`\`\`
-
-          \`\`\`powershell
-          irm https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.ps1 -OutFile install.ps1; if (\$?) { powershell -ExecutionPolicy Bypass -File .\\install.ps1 -Tui -VSCode }
-          \`\`\`
-
           **On a cluster** — the chart, whose images are this version, from the registry:
 
               helm upgrade --install troupe oci://ghcr.io/${owner}/charts/troupe --version ${VERSION} \\
