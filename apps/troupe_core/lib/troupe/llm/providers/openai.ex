@@ -69,12 +69,14 @@ defmodule Troupe.LLM.Providers.OpenAI do
         finish(response)
 
       # A rate limit says how long to wait, when it says anything; the retry policy
-      # takes the hint (Decision 659).
-      {:ok, %Req.Response{status: 429} = response} ->
-        {:retry, {:http_status, 429}, Provider.retry_after_ms(response.headers)}
+      # takes the hint (Decision 659). What the server said goes with the status, so one
+      # the retries outlast says it (Decision 805).
+      {:ok, %Req.Response{status: 429, body: refused} = response} ->
+        {:retry, {:http_status, 429, detail(refused, request)},
+         Provider.retry_after_ms(response.headers)}
 
-      {:ok, %Req.Response{status: status}} when status >= 500 ->
-        {:retry, {:http_status, status}}
+      {:ok, %Req.Response{status: status, body: refused}} when status >= 500 ->
+        {:retry, {:http_status, status, detail(refused, request)}}
 
       # A reasoning model refuses `max_tokens` and asks for `max_completion_tokens` by
       # name; a plain compatible server knows only the first. Nothing in a model id says

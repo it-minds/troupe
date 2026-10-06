@@ -9,7 +9,7 @@ exporter, Prometheus endpoint or ServiceMonitor exists** anywhere in the reposit
 | Component | Endpoint | Answer | Probe in chart |
 |---|---|---|---|
 | plane | `GET /healthz` | always 200 while up; touches nothing | none |
-| plane | `GET /.well-known/troupe` | discovery: issuer, client id, endpoints, scopes, plane name, protocol version and build (commit, time, version) | startup 2 s × 30, readiness 5 s, liveness 10 s |
+| plane | `GET /.well-known/troupe` | discovery: issuer, client id, endpoints, scopes, plane name, the web app's address, protocol version and build (commit, time, version) | startup 2 s × 30, readiness 5 s, liveness 10 s |
 | plane | `GET /.well-known/jwks.json` | the signing keys, or **503** when OpenBao or its credential is unreachable — the quickest OpenBao check | none |
 | worker | `GET /health/live`, `GET /health/ready` | `ok`; `ready`, or **503 `draining`** so its Service stops routing | liveness and readiness every 5 s |
 | a2a | `GET /healthz` | 200 | startup, readiness, liveness |

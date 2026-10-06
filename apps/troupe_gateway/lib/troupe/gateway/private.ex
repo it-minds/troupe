@@ -550,9 +550,12 @@ defmodule Troupe.Gateway.Private do
       {:ok, _done} ->
         [session_id]
 
+      # Not reached, or reached and its objects not all deleted (Decision 804): either way
+      # the plane names the session again at the next link.
       {:error, reason} ->
         Logger.info(
-          "troupe: #{session_id} is erased here and the plane was not told: #{inspect(reason)}"
+          "troupe: #{session_id} is erased here, and the plane has not deleted its objects " <>
+            "yet: #{inspect(reason)}"
         )
 
         []

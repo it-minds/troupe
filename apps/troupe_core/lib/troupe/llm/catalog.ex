@@ -146,6 +146,22 @@ defmodule Troupe.LLM.Catalog do
 
   def thinking(_model), do: nil
 
+  @doc """
+  Whether a model thinks when the request has no `thinking` field, by its name (Decision
+  805): Anthropic's Opus and Sonnet from 5 on, Fable and Mythos, found inside a gateway's
+  renaming as `thinking/1` finds them. Opus 4.7 and 4.8 take adaptive thinking but think
+  only when asked; Haiku has no model that thinks unasked.
+  """
+  @spec thinks_unasked?(String.t() | nil) :: boolean()
+  def thinks_unasked?(model) when is_binary(model) do
+    case Regex.run(~r/claude-(?:opus|sonnet)-(\d+)(?![0-9])/, model) do
+      [_whole, major] -> String.to_integer(major) >= 5
+      nil -> model =~ ~r/claude-(?:fable|mythos)/
+    end
+  end
+
+  def thinks_unasked?(_model), do: false
+
   defp before_adaptive?([_whole, major]), do: String.to_integer(major) < 5
   defp before_adaptive?([_whole, major, ""]), do: String.to_integer(major) < 5
 

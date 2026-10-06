@@ -687,14 +687,29 @@ defmodule Troupe.Plane.Harness do
 
   # The device has stopped and dropped its copy, so nothing more is coming: the plane
   # deletes every version under the prefix. Only for an erased session of the caller's
-  # own, since saying a session is erased is not how one is erased.
+  # own, since saying a session is erased is not how one is erased. What the answer says
+  # is what happened (Decision 804): how many went, or that they are still going, or
+  # `unavailable` with how many the store kept, and then the device is told again.
   defp handle("session.erased", params, %{user: user}) do
     with {:ok, session_id} <- required_string(params, "session_id"),
          {:ok, device} <- required_string(params, "device"),
          {:ok, session} <- own_erased(session_id, user) do
+      done = %{"session_id" => session.id, "device" => device}
+
       case Erasure.device_applied(session, device) do
+        {:ok, :deleting} ->
+          {:ok, Map.put(done, "deleting", true)}
+
         {:ok, deleted} ->
-          {:ok, %{"session_id" => session.id, "device" => device, "objects_deleted" => deleted}}
+          {:ok, Map.merge(done, %{"deleting" => false, "objects_deleted" => deleted})}
+
+        {:error, {:not_deleted, %{deleted: deleted, left: left, reason: reason}}} ->
+          {:error,
+           Error.new(:unavailable, %{
+             reason: inspect(reason),
+             objects_deleted: deleted,
+             objects_left: length(left)
+           })}
 
         {:error, reason} ->
           {:error, Error.new(:unavailable, %{reason: inspect(reason)})}

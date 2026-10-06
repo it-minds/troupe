@@ -15,6 +15,8 @@ defmodule Troupe.Worker.ErasureTest do
 
   use Troupe.Worker.SessionCase, async: false
 
+  import Troupe.ObjectStoreCase, only: [locked_bucket: 1, hold: 2, hold: 3]
+
   alias Ecto.Adapters.SQL.Sandbox
   alias Troupe.KMS
   alias Troupe.Plane.Control.{Connections, Listener}
@@ -177,6 +179,59 @@ defmodule Troupe.Worker.ErasureTest do
 
     # And the plane records that this pod has done it, so it is not asked again.
     eventually(fn -> Erasure.tombstone_for(context.session_id).applied_by != [] end)
+    assert Erasure.pending_for("dev", "troupe-w-dev-0") == []
+  end
+
+  # D71: the pod's objects went through a delete whose answers were dropped, and it
+  # answered the erasure carried out whatever the store said, so the plane recorded it and
+  # no pod was ever told again.
+  test "a pod the store refuses an object is not recorded, and its next enrolment finishes it",
+       context do
+    locked = locked_bucket(context.store)
+    context = %{context | store: locked}
+    prefix = Storage.prefix(context.session_id)
+    _link = attach_pod(context)
+
+    {:ok, key} = KMS.adapter().create(context.team, context.session_id)
+
+    {:ok, _} =
+      Storage.seal_segment(locked, context.session_id, key, %{
+        events: [%{"seq" => 1, "type" => "user_input", "data" => %{"text" => @marker}}],
+        epoch: 1,
+        first_seq: 1,
+        last_seq: 1,
+        head_hash: "sha256:whatever"
+      })
+
+    {:ok, _} = Storage.put_manifest(locked, context.session_id, %{team: context.team, epoch: 1})
+    {:ok, versions} = ObjectStore.list_versions(locked, prefix)
+    held = Enum.find(versions, &String.contains?(&1.key, "/segments/"))
+    :ok = hold(locked, held)
+
+    session = PlaneSessions.get(context.session_id)
+
+    assert {:ok, tombstone} =
+             Erasure.erase(session, actor: "ada@example.test", reason: "requested")
+
+    # The key went and the manifest with it; the held object did not, so this pod has not
+    # carried the erasure out, and the plane goes on handing it out.
+    refute KMS.adapter().exists?(context.team, context.session_id)
+    assert {:ok, [%{version_id: version}]} = ObjectStore.list_versions(locked, prefix)
+    assert version == held.version_id
+    assert tombstone.applied_by == []
+    assert [%{"session_id" => pending}] = Erasure.pending_for("dev", "troupe-w-dev-0")
+    assert pending == context.session_id
+
+    # Once the store lets it go, the pod's next enrolment finishes it and is recorded.
+    :ok = hold(locked, held, false)
+    stop_supervised!(Link)
+    _link = attach_pod(context)
+
+    eventually(fn ->
+      Erasure.tombstone_for(context.session_id).applied_by == ["troupe-w-dev-0"]
+    end)
+
+    assert {:ok, []} = ObjectStore.list_versions(locked, prefix)
     assert Erasure.pending_for("dev", "troupe-w-dev-0") == []
   end
 

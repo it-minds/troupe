@@ -37,8 +37,6 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
 
 - The root `.formatter.exs` has no `subdirectories`, so `mix format --check-formatted`
   never checks `apps/`. Running `mix format` on an app file reflows unrelated lines.
-- `Troupe.Gateway.RestartTest` sometimes fails under load ("the daemon never came up",
-  a second VM with a 30 s limit).
 - Load-dependent: core `Troupe.Watch.WatcherTest` "poll backend five writes inside the
   debounce window produce one trigger", and the plane's `UsageTest` `enrolled/1`
   (`{:error, :closed}`, probably a shared-database deadlock inside the control connection).
@@ -581,12 +579,6 @@ Found by the chunk 18 fixers and the coordinator, 2026-10-05.
 
 ### D71 - Private sessions after 0.8.4: what is left (medium)
 
-- `ObjectStore.delete_prefix` ignores each version's `DELETE` answer and counts every
-  listed version as deleted, so a delete refused with a 403 or a 5xx is reported as erased.
-- The plane deletes a session's versions inline in the `session.erased` request, one
-  `DELETE` each in turn: 1,040 took seconds, so tens of thousands could outlast the daemon's
-  call timeout. S3's batch `DeleteObjects` (1,000 keys a request) or a background job would
-  not.
 - The TUI has no way to unlink a daemon, so a second person on the same OS account can't
   take it over from the terminal.
 - A person moved to another subject claim (Decision 755) has the sessions made under their
@@ -626,8 +618,6 @@ Found by the chunk 19 fixers, 2026-10-05.
 
 ### D73 - Test hygiene from the 0.8.4 work (low)
 
-- The gateway's `RestartTest` waits 30 s for the daemon it launches, which took 28 s to
-  listen on `/mnt/c` under load: the known flake. The wait could be longer.
 - A gateway loopback test logs a `FunctionClauseError` from `Troupe.LLM.Fake.render(%{text:
   "done"}, ...)`; it fails nothing.
 - The TUI tests' `FakeRemote` HTTP `/rpc` can only answer errors without `data`.
@@ -638,11 +628,6 @@ Found by the chunk 19 fixers, 2026-10-05.
 
 ### D74 - Model calls: what the 0.8.5 work left (low)
 
-- A 5xx or 429 that outlasts its retries still says only its status:
-  `Provider.describe_error` prints `{:retries_exhausted, {:http_status, 503}}` as
-  "gave up after retrying: {:http_status, 503}", since `with_retries` carries no body.
-- An error event inside an Anthropic stream (`{:api_error, msg}`) is shown as it came,
-  neither trimmed nor masked, unlike an error response since Decision 791.
 - `qwen3-235b` never puts two tool calls in one response (179 of 179 in the live bench), so
   `build.md`'s "one `delegate` call per item, all in the same turn, so they run
   concurrently" can't happen on it. The OpenAI-compatible adapter sets no
@@ -666,9 +651,6 @@ Found by the #437 fixer, 2026-10-06.
 
 ### D78 - Instruction files and the brief: what #123's slice left (low)
 
-- `.github/copilot-instructions.md` is taken as an alias in every directory, not only at
-  the repository root, where Copilot reads it (Decision 706's behaviour, kept by 798);
-  changing it needs a decision.
 - A nested instruction file reaches the turn after its directory is first opened, not the
   same turn; attaching it to the tool result that opened the directory would, as some
   tools do.
@@ -677,8 +659,6 @@ Found by the #437 fixer, 2026-10-06.
 - `context.get` reads `Path.expand(session.workspace)` where the prompt uses the
   workspace's real root, so on a workspace reached through a link (macOS `/tmp`) the two
   name different paths.
-- The TUI's `/context` shows a file left out as `outside` as "AGENTS.md (root) 0", with no
-  reason.
 - A brief left out as outside the repository reads as absent in `memory.get`, so a client
   with `memory_auto_refresh` may start a librarian whose writes are then refused; the run
   counts as a try and holds the next off for `memory_max_age_days`.
@@ -687,18 +667,10 @@ Found by the #123 fixer, 2026-10-06.
 
 ### D79 - `troupe-daemon open` and the loopback: what #449 left (medium)
 
-- On Windows the daemon `open` starts goes through `Troupe.Protocol.Daemon.detach_line`
-  (`start "" /b`), sharing the terminal's console: closing that terminal or pressing Ctrl-C
-  in it can end the daemon. `start /min`, as the login entry starts it (Decision 762),
-  would not.
-- `open` assumes the chart's `/app/` mount, since the plane's discovery document
-  (`/.well-known/troupe`) doesn't say where its app is.
 - The GUI reads `#daemon=` only when the page loads; a fragment set in an open tab is not
   taken (`open` always opens a new one).
 - The loopback admits an upgrade that carries no `Origin` header (the token is still
   required).
-- The token kept in `localStorage` and the plane's origin admitted by default make any
-  script on the plane's host able to drive the local daemon while it runs: #460.
 
 Found by the #449 fixer, 2026-10-06.
 
@@ -725,12 +697,65 @@ Found by the chunk 21 fixers, 2026-10-06.
   --ref <branch>` after changing its label tries it).
 - A Windows daemon build once spent 29 minutes in `mlugg/setup-zig` and passed; the new
   15-minute timeout would fail such a run.
-- `RestartTest` and `AutospawnTest` start `elixir` with a `-pa` for every build directory
-  (`restart_test.exs:242`, `autospawn_test.exs:134`), which is slow on `/mnt/c` and likely
-  why the daemon "never came up" in time under load (0 of 2 alone once); the ACP test's
-  same fix (Decision 796) may apply.
 
 Found by the chunk 21 fixers, 2026-10-06.
+
+### D82 - Thinking on Anthropic's newest models: what #427 left (low)
+
+- With no `reasoning_effort`, `max_tokens` (8,192 by default) isn't raised for a model that
+  thinks unasked, and its thinking counts against it, so a long reply can be cut short.
+- With no effort, those models' thinking reaches no client: `display` defaults to omitted.
+  Sending `display: "summarized"` would show it, at the same cost, but adds a field nobody
+  asked for (Decision 805).
+- A gateway's own name for one of these models isn't known to think unasked (the model
+  listing has no field for it), so its thinking blocks are still dropped unless an effort
+  is set.
+- Unchecked: whether Troupe ever sends a forced `tool_choice` (`any` or a named tool),
+  which Opus 5.5, Sonnet 5.5 and Fable 5.1 refuse.
+- The conversation-prefix binding of thinking blocks is #465.
+
+Found by the #427 fixer, 2026-10-06.
+
+### D83 - The plane host's policy: what #460 left (low)
+
+- The app's `connect-src` allows any `https:` and `wss:` address, because sign-in reaches
+  the identity provider and remote sessions reach each worker's host, both known only at
+  run time. A chart option naming the deployment's provider and workers domain could narrow
+  it (Decision 803).
+- Plane pages keep `style-src 'unsafe-inline'` and Google's font hosts: the front page's
+  `<style>`, the sign-in pages' style attributes and LiveView's patched styles need it.
+  Moving the page CSS to a file, attributes to classes, and the fonts onto the plane would
+  drop both.
+- Phoenix's own error page, for a request refused before the endpoint's plugs run (a body
+  the parser rejects), goes out without the header; it carries no script.
+- The GUI image's nginx configuration is only exercised when the image is built on `main`;
+  a `RUN nginx -t` in the Dockerfile's runtime stage would catch a broken one at build.
+
+Found by the #460 fixer, 2026-10-06.
+
+### D84 - Erasures and the daemon's start: small leftovers of 0.8.7 (low)
+
+- A team session whose pod couldn't finish an erasure, or that had no healthy pod, is tried
+  again only when a pod of its profile next enrols; erasing it again returns the existing
+  tombstone. Private sessions are retried on every link.
+- Two acknowledgements of the same private session at once run two background deletions of
+  its prefix (harmless: the second finds what is left).
+- On Windows, a program the VM starts through `System.shell` inherits the VM's handles: a
+  client other than `troupe-daemon open` that starts a daemon could hand it a caller's
+  output pipe (Decision 802 fixed it for `open`).
+- `troupe-daemon open` waits 15 s for the daemon it started, too short on a loaded Windows
+  machine (one came up after 41 s).
+- `open` opens `<plane>/app/` when the plane says it has no app (`plane.app: null`), a 404;
+  it could say so instead.
+- `ReaderLogTest`'s "a read whose reader meets an activation as it writes" still awaits 5 s
+  behind the same lock and backoff Decision 801 measured; `Restore.with_log/2`
+  (`:global.trans`) can leave a waiting reader asleep up to 8 s after the lock frees.
+- `/context` prints on the TUI's single status line, clipped at the terminal's width; a
+  repository with several files left out won't fit (TUI Decision 148).
+- An instruction file that exists but can't be read only logs a warning and is missing from
+  `context.get`, so clients can't see it was dropped.
+
+Found by the chunk 22 fixers, 2026-10-06.
 
 ## Taken
 
@@ -816,6 +841,11 @@ Found by the chunk 21 fixers, 2026-10-06.
 | D70's fourth item and D76 - the model list gave a window for a model nobody serves, and the editor hid a configuration's errors | PR #455 |
 | D77 - CI on GitHub's hosted runners (the native builds had timeouts already; every build job has one now, and the runners are Ubuntu 26) | PR #456 |
 | D66's first item - a summariser call that never answered kept the agent compacting | #404, PR #421 |
+| D71's first two items - an erasure counted a refused delete as done, and a large one timed out the daemon's call | PR #467 |
+| D74's first two items - a 5xx past its retries said only its status, and an Anthropic stream error showed unmasked | #427, PR #464 |
+| D78's first and fifth items - the Copilot file counted in every directory, and `/context` gave no reason for a file left out | PR #471 |
+| D79's first two items and its fifth - a Windows daemon died with its terminal, `open` guessed the app's address, and the plane host had no policy | PR #468; #460, PR #466 |
+| D81's last item, D73's first and D8's second - `RestartTest` and `AutospawnTest` started slowly enough to fail | PR #469 |
 
 ## Checked and not a defect
 

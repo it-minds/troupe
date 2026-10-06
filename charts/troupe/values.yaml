@@ -92,7 +92,8 @@ plane:
   # What the plane calls itself in the links it hands out — device-flow pages, the
   # panel. Defaults to https://<host>.
   baseUrl: ""
-  # Where the index page at `/` links to the graphical client. Empty means the GUI this
+  # Where the index page at `/` links to the graphical client, and where `troupe-daemon
+  # open` opens it (`/.well-known/troupe` says, as `plane.app`). Empty means the GUI this
   # chart serves (`gui:` below) when it is enabled, and no door at all when it is not —
   # never a link to a 404. A cluster whose people bring their own client points this at
   # it.

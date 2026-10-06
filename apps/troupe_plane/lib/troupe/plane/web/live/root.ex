@@ -11,7 +11,9 @@ defmodule Troupe.Plane.Web.Live.Root do
 
   The webfonts are the one exception and they are `optional`: IBM Plex is what the design
   specifies, and the fallback stack is a real one, so a console with no route to Google
-  renders in the system's own sans and mono rather than waiting.
+  renders in the system's own sans and mono rather than waiting. The front page's
+  `/static/webfonts.js` switches their stylesheet on, rather than an `onload` attribute:
+  the origin runs no inline script (Decision 803).
 
   The theme is the reader's. Dark is the default because the design was drawn in dark
   first, and `data-theme` on the root element is what a light choice sets.
@@ -35,12 +37,14 @@ defmodule Troupe.Plane.Web.Live.Root do
         <link
           rel="stylesheet"
           media="print"
-          onload="this.media='all'"
+          data-webfonts
           href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
         />
 
         <link rel="stylesheet" href={static("/admin/static/tokens.css")} />
         <link rel="stylesheet" href={static("/admin/static/console.css")} />
+        <script defer src={static("/static/webfonts.js")}>
+        </script>
         <script defer src={static("/admin/static/app.js")}>
         </script>
       </head>

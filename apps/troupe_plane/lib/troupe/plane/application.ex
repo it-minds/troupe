@@ -60,6 +60,10 @@ defmodule Troupe.Plane.Application do
       # The plane's OpenBao credential, exchanged once per lease rather than per token
       # minted. Before the endpoint, which is what mints them.
       Troupe.Plane.Tokens.Credential,
+      # A private session's objects, deleted past the daemon's call when they take longer
+      # than it waits (`Erasure.device_applied/2`, Decision 804). Before the endpoint,
+      # which is where that call arrives.
+      {Task.Supervisor, name: Troupe.Plane.Erasure.Tasks},
       Troupe.Plane.Web.Endpoint
     ] ++ cluster()
   end

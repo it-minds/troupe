@@ -98,18 +98,21 @@ defmodule Troupe.Gateway.AutospawnTest do
   end
 
   # `start "C:\Program Files\...\troupe-daemon.cmd"` is a window titled with the path, and
-  # nothing started: on Windows the program goes after an empty title, quoted, and the
-  # line through `cmd /s /c`, which leaves the quotes where they are.
-  test "on Windows a program in a directory with a space starts after an empty title", context do
+  # nothing started: on Windows the program goes after a title, quoted, and the line
+  # through `cmd /s /c`, which leaves the quotes where they are. And in a console of its
+  # own, minimised, under `cmd /c`: one started `/b` shared the terminal's, and closing
+  # the terminal ended it (Decision 802).
+  test "on Windows a program in a directory with a space starts in its own console", context do
     dir = Path.join(Path.dirname(context.script), "with space")
     File.mkdir_p!(dir)
     program = Path.join(dir, "troupe-daemon.cmd")
     File.write!(program, "")
 
-    assert Daemon.detach_line(program, {:win32, :nt}) == {:shell, ~s("start "" /b "#{program}" >NUL 2>&1")}
+    assert Daemon.detach_line(program, {:win32, :nt}) ==
+             {:shell, ~s("start "troupe-daemon" /min cmd /c ""#{program}""")}
 
     assert Daemon.detach_line("troupe-daemon run", {:win32, :nt}) ==
-             {:shell, ~s("start "" /b troupe-daemon run >NUL 2>&1")}
+             {:shell, ~s("start "troupe-daemon" /min cmd /c "troupe-daemon run"")}
 
     assert {:exec, "/bin/sh", ["-c", "nohup troupe-daemon >/dev/null 2>&1 &"]} =
              Daemon.detach_line("troupe-daemon", {:unix, :linux})
@@ -128,13 +131,13 @@ defmodule Troupe.Gateway.AutospawnTest do
   # there is no binary — and it lets the test count launches from outside the VM.
   defp write_launcher(base, endpoint, counter, pidfile) do
     path = Path.join(base, "launch-daemon.sh")
-    # One `-pa` per directory: the flag takes a single argument, so a glob left for
-    # the shell to expand would silently turn the rest into script arguments.
-    paths =
-      [Mix.Project.build_path(), "lib", "*", "ebin"]
-      |> Path.join()
-      |> Path.wildcard()
-      |> Enum.map_join(" ", &("-pa " <> &1))
+    # The build goes on the code path from inside the daemon, cached, rather than as a
+    # `-pa` for each directory, which is never cached and made every module load look in
+    # each of them first: on `/mnt/c` the daemon took 23 seconds to listen (Decision 801).
+    # A first `-e` of its own, because the boot names a struct, which is expanded before
+    # any of the boot runs.
+    code_path =
+      ~s|Code.prepend_paths(Path.wildcard("#{Mix.Project.build_path()}/lib/*/ebin"), cache: true)|
 
     boot = """
     System.put_env("TROUPE_STATE_HOME", "#{Path.join(base, "state")}")
@@ -153,7 +156,7 @@ defmodule Troupe.Gateway.AutospawnTest do
     #!/bin/sh
     echo launched >> #{counter}
     echo $$ > #{pidfile}
-    exec #{System.find_executable("elixir")} --erl "-noinput" #{paths} -e #{shell_quote(boot)} >> #{Path.join(base, "daemon.log")} 2>&1
+    exec #{System.find_executable("elixir")} --erl "-noinput" -e #{shell_quote(code_path)} -e #{shell_quote(boot)} >> #{Path.join(base, "daemon.log")} 2>&1
     """)
 
     File.chmod!(path, 0o700)

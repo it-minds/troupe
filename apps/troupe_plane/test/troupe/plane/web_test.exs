@@ -169,7 +169,11 @@ defmodule Troupe.Plane.WebTest do
       # The suite's diagrams are Mermaid, which renders in the browser from a CDN. This
       # page may not: the root of a plane has to render on a network that reaches the
       # plane and nothing else, so every picture here is SVG already in the document.
-      refute body =~ "<script"
+      # The one script is the plane's own file that switches the webfonts on, which was
+      # an `onload` attribute until the origin stopped running inline script (Decision 803).
+      assert List.flatten(Regex.scan(~r/<script[^>]*>/, body)) ==
+               [~s(<script defer src="/static/webfonts.js">)]
+
       assert body =~ "<svg viewBox="
     end
 
@@ -218,6 +222,31 @@ defmodule Troupe.Plane.WebTest do
       assert body["device_authorization_endpoint"] =~ "/device"
       assert body["plane"]["rpc"] == "/rpc"
       assert body["plane"]["protocol_version"] == Troupe.Protocol.version()
+    end
+
+    # `troupe-daemon open` takes the web app from here rather than assuming the chart's
+    # mount (Decision 802): an address it can open, wherever the app is, and null where
+    # none is mounted.
+    test "says where the web app is", context do
+      on_exit(fn ->
+        Application.delete_env(:troupe_plane, :base_url)
+        Application.delete_env(:troupe_plane, :app_url)
+      end)
+
+      assert {:ok, %{body: body}} = get(context, "/.well-known/troupe")
+      assert body["plane"]["app"] == context.url <> "/app"
+
+      Application.put_env(:troupe_plane, :base_url, "https://plane.example.test/")
+      assert {:ok, %{body: body}} = get(context, "/.well-known/troupe")
+      assert body["plane"]["app"] == "https://plane.example.test/app"
+
+      Application.put_env(:troupe_plane, :app_url, "https://gui.example.test/troupe/")
+      assert {:ok, %{body: body}} = get(context, "/.well-known/troupe")
+      assert body["plane"]["app"] == "https://gui.example.test/troupe/"
+
+      Application.put_env(:troupe_plane, :app_url, "")
+      assert {:ok, %{body: %{"plane" => plane}}} = get(context, "/.well-known/troupe")
+      assert Map.fetch(plane, "app") == {:ok, nil}
     end
 
     test "says which build is answering, so a deploy can be checked without a browser",

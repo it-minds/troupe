@@ -1034,11 +1034,16 @@ client to say why it started none. `memory.forget` forgets that try with the bri
 ```
 → `{"budget": 16000, "used": 1234, "searched": ["/home/me/.config/troupe", "/home/me/project"],
 "files": [{"scope": "root", "path": "/home/me/project/AGENTS.md", "size": 812, "chars": 800,
-"budget": 16000, "share": 0.05, "status": "whole", "trimmed": 0, "skipped": ["CLAUDE.md"],
-"imported_by": null, "unfollowed": [{"import": "docs/gone.md", "reason": "missing"}],
-"hash": "sha256:…"}, {"scope": "brief", "path": "/home/me/project/.troupe/memory.md",
-"size": 0, "chars": 0, "budget": 6000, "share": 0.0, "status": "absent", "trimmed": 0,
-"skipped": [], "imported_by": null, "unfollowed": [], "hash": null}]}`
+"budget": 16000, "share": 0.05, "status": "whole", "reason": null, "trimmed": 0,
+"skipped": ["CLAUDE.md"], "imported_by": null,
+"unfollowed": [{"import": "docs/gone.md", "reason": "missing"}], "hash": "sha256:…"},
+{"scope": "root", "path": "/home/me/project/CLAUDE.md", "size": 0, "chars": 0,
+"budget": 16000, "share": 0.0, "status": "skipped",
+"reason": "skipped: AGENTS.md is used in this directory", "trimmed": 0, "skipped": [],
+"imported_by": null, "unfollowed": [], "hash": null},
+{"scope": "brief", "path": "/home/me/project/.troupe/memory.md",
+"size": 0, "chars": 0, "budget": 6000, "share": 0.0, "status": "absent", "reason": null,
+"trimmed": 0, "skipped": [], "imported_by": null, "unfollowed": [], "hash": null}]}`
 
 The **provenance of the prompt**: every file the session's next system prompt is read
 from, in the order it is read — the person's own `<config>/AGENTS.md` (`user`), the
@@ -1056,12 +1061,21 @@ nearest wins where two disagree. `status` is `whole`; `trimmed`, with `trimmed` 
 how many characters were cut, the nearest scope (a file and what it imports) being kept
 whole first; `dropped`, the budget was spent before it; `outside`, the file found (the brief
 too) is really outside the repository (or, for the person's own, the config directory),
-through a link, and was not read, its `size` and `chars` 0 and its `hash` null; or, for the
-brief, `absent` or `disabled` as `memory.get` has it. `skipped` names the aliases the
-file hid in its directory: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and
-`.github/copilot-instructions.md` are the same file under other tools' names, the first
-that exists is read and the rest are skipped, so nobody debugs a file that was never
-loaded. `searched` is every directory looked in. Read from disk when asked, as the next
+through a link, and was not read, its `size` and `chars` 0 and its `hash` null; `skipped`,
+found and not read, with `size` and `chars` 0 and `hash` null too; or, for the brief,
+`absent` or `disabled` as `memory.get` has it. `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`
+are the same file under other tools' names, and at the repository root so is
+`.github/copilot-instructions.md`: in one directory the first that exists is read, its
+`skipped` names the others, and each of them is listed after it as `skipped`, so nobody
+debugs a file that was never loaded. Copilot reads its file at the repository root only,
+so one in any other directory is listed as `skipped` and hides nothing (Decision 806).
+`reason` says in words why a file is left out, the same words `/context` prints, and is
+null for a file that reached the prompt and for a brief `absent` or `disabled`: `not
+read: outside the repository` (`outside
+the config directory` for the person's own), `skipped: AGENTS.md is used in this
+directory` (`comes first`, when that file was itself not read), `not read: Copilot's
+file counts only at the root`, or `left out: the budget was spent on nearer files`.
+`searched` is every directory looked in. Read from disk when asked, as the next
 turn reads it, so it says what an edit will do; what a past turn read is its
 `instructions_loaded` event. Nothing reaches the prompt from a file without appearing
 here. Reading it wakes nothing: a session that is asleep is answered for its workspace
@@ -1664,8 +1678,9 @@ session's key itself, every version, and answers `{session_id, erased, state, he
 case asking again tries again. The objects and the copy on the owner's machine go when
 the owner's daemon next connects: it asks `session.erasures`, drops its sealer and its copy
 of each session named, and answers `session.erased`, on which the plane deletes every
-version under the session's prefix. A daemon erasing one of its own (its `session.erase`,
-Decision 789) asks the plane's first and does the same at once for the session it named.
+version under the session's prefix, and is named the session again until none is left
+(Decision 804). A daemon erasing one of its own (its `session.erase`, Decision 789) asks
+the plane's first and does the same at once for the session it named.
 
 ### `auth.expiring` (notification, server → client)
 
@@ -1927,7 +1942,7 @@ than an admin uses them:
 | `session.objects` | observe | anybody, for their own private sessions | `{session_id, prefix}` → `{keys}` under `sessions/<session_id>/`. A caller with no object-storage credential cannot list — a listing is signed against the bucket, not against a key it does not yet know — so the plane lists for it. A `prefix` may narrow the listing and may not widen it; one that is not under the session's own is ignored |
 | `session.assertion` | control | anybody, for their own private sessions | `{session_id}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`, the same shape `me.connections.grant` answers and for the same reason. The path is `troupe/people/<name>/sessions/<session_id>`; the person policy covers their own subtree and no pod role covers any of it. A daemon makes or finds the session's key under `name`, and under the subject it is linked as only where a plane from before Decision 755 answers none. The session must already be registered, which is what makes this a statement about a session the plane agrees is theirs |
 | `session.erasures` | control | anybody, for their own private sessions | `{device}` → `{erasures: [{session_id, erased_at}]}`: the caller's private sessions whose key is destroyed and whose erasure this `device` has not acknowledged. A daemon asks when a client links it with a plane token. A session whose key is not yet destroyed is tried again first and is not listed until it is (Decision 756) |
-| `session.erased` | control | anybody, for their own erased private sessions | `{session_id, device}` → `{session_id, device, objects_deleted}`: this device has stopped sealing the session and erased its copy, and the plane deletes every version of every object under `sessions/<session_id>/` and records the device. `not_found` for a session that is not the caller's, not private or not erased: saying a session is erased does not erase it |
+| `session.erased` | control | anybody, for their own erased private sessions | `{session_id, device}` → `{session_id, device, deleting, objects_deleted}`: this device has stopped sealing the session and erased its copy, and the plane deletes every version of every object under `sessions/<session_id>/` and records the device once none is left. `deleting: false` with how many went when that is done within the call; `deleting: true` and no count when it takes longer than the call waits (five seconds), and the plane carries on and records the device when it is done. `unavailable` with `objects_deleted` and `objects_left` where the object store refused or failed some: the device is not recorded, and `session.erasures` names the session to it again, which tries again (Decision 804). `not_found` for a session that is not the caller's, not private or not erased: saying a session is erased does not erase it |
 
 `session.register`, `session.presign`, `session.objects` and `session.assertion` answer
 `not_found` with `reason: "erased"` for a session that is erased or `erasure_pending`: a

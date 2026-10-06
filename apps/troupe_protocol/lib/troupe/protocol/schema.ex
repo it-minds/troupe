@@ -159,7 +159,8 @@ defmodule Troupe.Protocol.Schema do
       # What the agent's system prompt was read from at this turn (Decision 706): the
       # instruction files, what they import, and the brief, as `context.get` lists them,
       # each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`,
-      # `trimmed`, `skipped`, `imported_by`, `unfollowed` and `hash` (Decision 798).
+      # `trimmed`, `skipped`, `imported_by`, `unfollowed` and `hash` (Decision 798), and
+      # `reason`, in words, for a file left out (Decision 806).
       # Written when the set or a file changed since the agent's last turn.
       "instructions_loaded" => %{
         "budget" => required(:integer),

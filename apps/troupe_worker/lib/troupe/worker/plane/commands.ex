@@ -211,15 +211,31 @@ defmodule Troupe.Worker.Plane.Commands do
     Sessions.fence(session_id, 1_000_000_000)
 
     key = destroy_key(team, session_id)
-    objects = erase_objects(session_id)
 
-    {:ok,
-     %{
-       "session_id" => session_id,
-       "key_destroyed" => key,
-       "objects_deleted" => objects,
-       "pod" => System.get_env("HOSTNAME")
-     }}
+    # Carried out only when every version is gone. One the store kept is an error, so the
+    # plane does not record this pod and the next pod to enrol is told again (Decision 804).
+    case erase_objects(session_id) do
+      {:ok, objects} ->
+        {:ok,
+         %{
+           "session_id" => session_id,
+           "key_destroyed" => key,
+           "objects_deleted" => objects,
+           "pod" => System.get_env("HOSTNAME")
+         }}
+
+      {:error, {:not_deleted, %{deleted: deleted, left: left, reason: reason}}} ->
+        {:error,
+         Error.new(:unavailable, %{
+           reason: inspect(reason),
+           key_destroyed: key,
+           objects_deleted: deleted,
+           objects_left: length(left)
+         })}
+
+      {:error, reason} ->
+        {:error, Error.new(:unavailable, %{reason: inspect(reason), key_destroyed: key})}
+    end
   end
 
   # A new config bundle. The pod fetches it by hash, checks it, writes it to disk and
@@ -478,18 +494,19 @@ defmodule Troupe.Worker.Plane.Commands do
   defp erase_objects(session_id) do
     store = Keyword.get_lazy(defaults(), :store, &ObjectStore.from_env/0)
 
-    case Storage.erase(store, session_id) do
-      {:ok, count} ->
-        count
+    with {:error, reason} = error <- Storage.erase(store, session_id) do
+      Logger.error(
+        "troupe worker: could not erase objects for #{session_id}: #{describe(reason)}"
+      )
 
-      {:error, reason} ->
-        Logger.error(
-          "troupe worker: could not erase objects for #{session_id}: #{inspect(reason)}"
-        )
-
-        0
+      error
     end
   end
+
+  defp describe({:not_deleted, %{deleted: deleted, left: left, reason: reason}}),
+    do: "#{deleted} deleted, #{length(left)} left: #{inspect(reason)}"
+
+  defp describe(reason), do: inspect(reason)
 
   defp apply_inline_servers(params) do
     servers = params["mcp_servers"] || []

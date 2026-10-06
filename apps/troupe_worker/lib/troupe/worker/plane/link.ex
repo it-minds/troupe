@@ -337,13 +337,23 @@ defmodule Troupe.Worker.Plane.Link do
   defp apply_pending_erasures(result) do
     pending = Map.get(result, "pending_erasures") || []
 
-    Enum.each(pending, fn erasure ->
-      Commands.handle("session.erase", erasure)
-      report(self(), %{"type" => "session.erased", "session_id" => erasure["session_id"]})
-    end)
+    # Reported only once carried out: one the store refused in part stays the plane's to
+    # hand out, to the next pod to enrol (Decision 804).
+    applied =
+      Enum.count(pending, fn erasure ->
+        case Commands.handle("session.erase", erasure) do
+          {:ok, _done} ->
+            report(self(), %{"type" => "session.erased", "session_id" => erasure["session_id"]})
+            true
+
+          {:error, _not_yet} ->
+            false
+        end
+      end)
 
     if pending != [],
-      do: Logger.info("troupe worker: applied #{length(pending)} pending erasure(s)")
+      do:
+        Logger.info("troupe worker: applied #{applied} of #{length(pending)} pending erasure(s)")
   end
 
   # Once per enrolment and off this process, which must not wait on storage: a pod that

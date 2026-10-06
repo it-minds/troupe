@@ -152,5 +152,32 @@ defmodule Troupe.ObjectStoreTest do
       assert {:ok, 14} = ObjectStore.delete_prefix(store, prefix, page_size: 5)
       assert {:ok, []} = ObjectStore.list_versions(store, prefix)
     end
+
+    # D71: each version's `DELETE` was sent and its answer dropped, so a refused one was
+    # counted with the rest and an erasure said it was done while the version stayed.
+    test "a version the store refuses to delete is said to be left, and the rest go", context do
+      %{store: store, prefix: prefix} = requires_store(context)
+      locked = locked_bucket(store)
+
+      {:ok, held} = ObjectStore.put(locked, prefix <> "segments/e1-1-2.seg", "ciphertext")
+      {:ok, _} = ObjectStore.put(locked, prefix <> "manifest.json", ~s({"last_seq":1}))
+      {:ok, _} = ObjectStore.put(locked, prefix <> "manifest.json", ~s({"last_seq":2}))
+      :ok = hold(locked, held)
+
+      assert {:error, {:not_deleted, %{deleted: 2, left: [left], reason: reason}}} =
+               ObjectStore.delete_prefix(locked, prefix)
+
+      assert {left.key, left.version_id} == {held.key, held.version_id}
+      assert reason
+
+      # Only that one: a refusal of one version stops nothing else.
+      assert {:ok, [%{key: key, version_id: version}]} = ObjectStore.list_versions(locked, prefix)
+      assert {key, version} == {held.key, held.version_id}
+
+      # And once the store allows it, asking again finishes it.
+      :ok = hold(locked, held, false)
+      assert {:ok, 1} = ObjectStore.delete_prefix(locked, prefix)
+      assert {:ok, []} = ObjectStore.list_versions(locked, prefix)
+    end
   end
 end

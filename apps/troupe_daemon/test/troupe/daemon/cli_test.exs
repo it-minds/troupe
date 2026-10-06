@@ -273,8 +273,24 @@ defmodule Troupe.Daemon.CLITest do
       {:ok, _} =
         Troupe.Identity.link(%{"subject" => "ada@example.test", "plane_url" => "https://plane.example.test/"})
 
-      opts = [ensure: &start_daemon/0, browse: &browsed/1, os_type: {:win32, :nt}]
+      # A plane that does not answer is taken to serve its app where the chart mounts it.
+      offline = fn "https://plane.example.test" ->
+        send(self(), :asked)
+        {:error, :econnrefused}
+      end
+
+      started = fn ->
+        send(self(), :started)
+        start_daemon()
+      end
+
+      opts = [ensure: started, browse: &browsed/1, discover: offline, os_type: {:win32, :nt}]
       out = capture_io(fn -> assert CLI.open(nil, opts) == 0 end)
+
+      # The plane is asked once the daemon is up: asked first, on Windows, the daemon kept
+      # the output of whatever ran `open` (Decision 802).
+      {:messages, messages} = Process.info(self(), :messages)
+      assert Enum.filter(messages, &(&1 in [:started, :asked])) == [:started, :asked]
 
       {:ok, endpoint} = Endpoint.discover()
       {:ok, ws} = Endpoint.discover_ws()
@@ -286,6 +302,89 @@ defmodule Troupe.Daemon.CLITest do
       refute out =~ ws.token
       if endpoint.token, do: refute(out =~ endpoint.token)
       assert "https://plane.example.test" in Loopback.admitted()
+    end
+
+    # D79, Decision 802: the plane's discovery document says where its web app is, and
+    # `open` went to `/app/` whatever it said. Asked of a plane on this machine, over HTTP.
+    test "linked, it opens the web app the plane's discovery document names" do
+      plane =
+        serve_discovery(%{
+          "plane" => %{"name" => "a plane", "app" => "https://gui.example.test/troupe/"}
+        })
+
+      {:ok, _} =
+        Troupe.Identity.link(%{"subject" => "ada@example.test", "plane_url" => plane <> "/"})
+
+      opts = [ensure: &start_daemon/0, browse: &browsed/1, os_type: {:win32, :nt}]
+      out = capture_io(fn -> assert CLI.open(nil, opts) == 0 end)
+
+      {:ok, ws} = Endpoint.discover_ws()
+      assert_received {:browsed, address}
+      assert address == "https://gui.example.test/troupe/#daemon=#{ws.port}:#{ws.token}"
+      assert out =~ "opened https://gui.example.test/troupe/ in your browser"
+      assert "https://gui.example.test" in Loopback.admitted()
+    end
+
+    test "linked to a plane that does not answer, it opens the plane's /app/" do
+      {:ok, closed} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}])
+      {:ok, port} = :inet.port(closed)
+      :gen_tcp.close(closed)
+      plane = "http://127.0.0.1:#{port}"
+      {:ok, _} = Troupe.Identity.link(%{"subject" => "ada@example.test", "plane_url" => plane})
+
+      opts = [ensure: &start_daemon/0, browse: &browsed/1, os_type: {:win32, :nt}]
+      capture_io(fn -> assert CLI.open(nil, opts) == 0 end)
+
+      assert_received {:browsed, address}
+      assert String.starts_with?(address, plane <> "/app/#daemon=")
+    end
+
+    test "a path the plane names is on the plane; a plane that names none, or nothing to open, is taken at /app/" do
+      {:ok, _} =
+        Troupe.Identity.link(%{
+          "subject" => "ada@example.test",
+          "plane_url" => "https://plane.example.test/"
+        })
+
+      {:ok, _} = start_daemon()
+      running = fn -> Troupe.Protocol.Daemon.ensure_running(spawn: false) end
+
+      opened = fn document ->
+        discover = fn "https://plane.example.test" -> document end
+        opts = [ensure: running, browse: &browsed/1, discover: discover, os_type: {:win32, :nt}]
+        capture_io(fn -> assert CLI.open(nil, opts) == 0 end)
+        assert_received {:browsed, address}
+        address |> String.split("#") |> hd()
+      end
+
+      assert opened.({:ok, %{"plane" => %{"app" => "/elsewhere/"}}}) ==
+               "https://plane.example.test/elsewhere/"
+
+      assert opened.({:ok, %{"plane" => %{"rpc" => "/rpc"}}}) == "https://plane.example.test/app/"
+      assert opened.({:ok, %{"plane" => %{"app" => nil}}}) == "https://plane.example.test/app/"
+
+      assert opened.({:ok, %{"plane" => %{"app" => "javascript:alert(1)"}}}) ==
+               "https://plane.example.test/app/"
+
+      assert opened.({:error, :timeout}) == "https://plane.example.test/app/"
+    end
+
+    test "--url is opened without asking the plane" do
+      {:ok, _} =
+        Troupe.Identity.link(%{
+          "subject" => "ada@example.test",
+          "plane_url" => "https://plane.example.test/"
+        })
+
+      opts = [
+        ensure: &start_daemon/0,
+        browse: &browsed/1,
+        discover: fn _ -> flunk("asked the plane") end,
+        os_type: {:win32, :nt}
+      ]
+
+      capture_io(fn -> assert CLI.open("http://127.0.0.1:4173/", opts) == 0 end)
+      assert_received {:browsed, _}
     end
 
     test "--url's origin is admitted beside the token, and elsewhere than Windows the browser is given a private page" do
@@ -344,6 +443,33 @@ defmodule Troupe.Daemon.CLITest do
   defp browsed(target) do
     send(self(), {:browsed, target})
     :ok
+  end
+
+  # A plane on this machine that answers `/.well-known/troupe` with `document` and nothing
+  # else; its address, without a trailing slash.
+  defp serve_discovery(document) do
+    plug = {__MODULE__.Discovery, document}
+
+    server =
+      start_supervised!(
+        {Bandit, plug: plug, scheme: :http, ip: {127, 0, 0, 1}, port: 0, startup_log: false}
+      )
+
+    {:ok, {_address, port}} = ThousandIsland.listener_info(server)
+    "http://127.0.0.1:#{port}"
+  end
+
+  defmodule Discovery do
+    @moduledoc false
+    import Plug.Conn
+
+    def init(document), do: document
+
+    def call(%Plug.Conn{request_path: "/.well-known/troupe"} = conn, document) do
+      conn |> put_resp_content_type("application/json") |> send_resp(200, Jason.encode!(document))
+    end
+
+    def call(conn, _document), do: send_resp(conn, 404, "")
   end
 
   test "config describes providers with keys masked" do

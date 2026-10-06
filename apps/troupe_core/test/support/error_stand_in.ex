@@ -11,7 +11,11 @@ defmodule Troupe.Test.ErrorStandIn do
   server's. Every request reaches the test process as `{:error_stand_in, n, path, body}`;
   what it is answered with is the test's `script`, a function of the call's number and its
   decoded body returning `{:text, text}`, `{:tool, name, input}` or `{:status, status,
-  body}`, the last sent as JSON in two chunks.
+  body}`, the last sent as JSON in two chunks. On Anthropic's path it may also return
+  `{:thinking_tool, signature, name, input}`, a tool call after a thinking block with
+  nothing in it but its signature, as the newest models stream one when no summary was
+  asked for, and `{:stream_error, error}`, an `error` event inside a stream that began
+  with a 200 (#427, Decision 805).
   """
 
   @doc "Start one. Options: `script` (required), `test` (the caller)."
@@ -152,6 +156,44 @@ defmodule Troupe.Test.ErrorStandIn do
 
   defp chunk(part), do: [Integer.to_string(byte_size(part), 16), "\r\n", part, "\r\n"]
 
+  defp stream("/v1/messages", n, {:thinking_tool, signature, name, input}) do
+    [
+      message_start(),
+      event("content_block_start", %{
+        "type" => "content_block_start",
+        "index" => 0,
+        "content_block" => %{"type" => "thinking", "thinking" => ""}
+      }),
+      event("content_block_delta", %{
+        "type" => "content_block_delta",
+        "index" => 0,
+        "delta" => %{"type" => "signature_delta", "signature" => signature}
+      }),
+      event("content_block_stop", %{"type" => "content_block_stop", "index" => 0}),
+      event("content_block_start", %{
+        "type" => "content_block_start",
+        "index" => 1,
+        "content_block" => %{
+          "type" => "tool_use",
+          "id" => "toolu_#{n}",
+          "name" => name,
+          "input" => %{}
+        }
+      }),
+      event("content_block_delta", %{
+        "type" => "content_block_delta",
+        "index" => 1,
+        "delta" => %{"type" => "input_json_delta", "partial_json" => Jason.encode!(input)}
+      }),
+      event("content_block_stop", %{"type" => "content_block_stop", "index" => 1}),
+      message_end("tool_use")
+    ]
+  end
+
+  defp stream("/v1/messages", _n, {:stream_error, error}) do
+    [message_start(), event("error", %{"type" => "error", "error" => error})]
+  end
+
   defp stream("/v1/messages", n, answer) do
     {block, delta, stop_reason} =
       case answer do
@@ -213,6 +255,24 @@ defmodule Troupe.Test.ErrorStandIn do
         "usage" => %{"prompt_tokens" => 100, "completion_tokens" => 10}
       }),
       "data: [DONE]\n\n"
+    ]
+  end
+
+  defp message_start do
+    event("message_start", %{
+      "type" => "message_start",
+      "message" => %{"usage" => %{"input_tokens" => 100, "output_tokens" => 1}}
+    })
+  end
+
+  defp message_end(stop_reason) do
+    [
+      event("message_delta", %{
+        "type" => "message_delta",
+        "delta" => %{"stop_reason" => stop_reason},
+        "usage" => %{"output_tokens" => 10}
+      }),
+      event("message_stop", %{"type" => "message_stop"})
     ]
   end
 

@@ -1,8 +1,9 @@
 defmodule Troupe.InstructionsTest do
   @moduledoc """
-  The instruction files a repository carries (Decisions 706 and 798): which are read and
-  in what order, the directories the conversation worked in, which alias wins in a
-  directory and which are named as skipped, what an `@import` brings and where it stops,
+  The instruction files a repository carries (Decisions 706, 798 and 806): which are read
+  and in what order, the directories the conversation worked in, which alias wins in a
+  directory and which are listed as skipped and why, Copilot's file at the root only,
+  what an `@import` brings and where it stops,
   how the budget is shared with the nearest kept whole, where the repository root is,
   and how the digest follows the content. The loader alone; a real session's prompt is
   `instructions_prompt_test.exs`.
@@ -52,26 +53,42 @@ defmodule Troupe.InstructionsTest do
     refute prompt =~ "not on the path"
   end
 
-  test "in one directory the first alias is read and the rest are named as skipped", %{repo: repo} do
+  test "in one directory the first alias is read and the rest are listed as skipped, saying why",
+       %{repo: repo} do
     write!(repo, "CLAUDE.md", "claude's")
     write!(repo, "AGENTS.md", "agents'")
     write!(repo, ".github/copilot-instructions.md", "copilot's")
     write!(repo, "lib/GEMINI.md", "gemini's")
-    write!(repo, "lib/.github/copilot-instructions.md", "copilot's again")
-    write!(repo, "lib/x/.github/copilot-instructions.md", "copilot's alone")
+    write!(repo, "lib/CLAUDE.md", "nested claude")
 
-    loaded = Instructions.load(Path.join(repo, "lib/x"), config())
+    loaded = Instructions.load(Path.join(repo, "lib"), config())
+    agents = "skipped: AGENTS.md is used in this directory"
 
     assert [
              %{
                scope: :root,
                text: "agents'",
+               reason: nil,
                skipped: ["CLAUDE.md", ".github/copilot-instructions.md"]
              },
-             %{scope: :nested, text: "gemini's", skipped: [".github/copilot-instructions.md"]},
-             %{scope: :nested, text: "copilot's alone", skipped: []},
+             %{scope: :root, status: :skipped, chars: 0, text: "", reason: ^agents},
+             %{scope: :root, status: :skipped, chars: 0, text: "", reason: ^agents},
+             %{scope: :nested, text: "nested claude", skipped: ["GEMINI.md"]},
+             %{
+               scope: :nested,
+               status: :skipped,
+               reason: "skipped: CLAUDE.md is used in this directory"
+             },
              %{scope: :brief}
            ] = loaded.files
+
+    assert files(loaded, repo) == [
+             {:root, "AGENTS.md"},
+             {:root, "CLAUDE.md"},
+             {:root, ".github/copilot-instructions.md"},
+             {:nested, "lib/CLAUDE.md"},
+             {:nested, "lib/GEMINI.md"}
+           ]
 
     assert Instructions.aliases() == [
              "AGENTS.md",
@@ -81,8 +98,73 @@ defmodule Troupe.InstructionsTest do
            ]
 
     prompt = Instructions.to_prompt(loaded)
+    assert prompt =~ "agents'"
+    assert prompt =~ "nested claude"
     refute prompt =~ "claude's"
-    assert prompt =~ "gemini's"
+    refute prompt =~ "copilot's"
+    refute prompt =~ "gemini's"
+
+    assert %{"status" => "skipped", "reason" => ^agents, "size" => 0, "hash" => nil} =
+             Enum.at(Instructions.provenance(loaded)["files"], 1)
+  end
+
+  # Decision 806: Copilot reads `.github/copilot-instructions.md` at the repository root
+  # and nowhere else, so a nested one is not read, and is listed saying why.
+  test "Copilot's file is read at the root only; a nested one is listed as skipped, with why", %{
+    repo: repo
+  } do
+    write!(repo, ".github/copilot-instructions.md", "copilot's at the root")
+    write!(repo, "lib/.github/copilot-instructions.md", "copilot's nested")
+    write!(repo, "lib/x/AGENTS.md", "agents' nested")
+    write!(repo, "lib/x/.github/copilot-instructions.md", "copilot's beside it")
+
+    loaded = Instructions.load(Path.join(repo, "lib/x"), config())
+    reason = "not read: Copilot's file counts only at the root"
+
+    assert [
+             %{scope: :root, status: :whole, text: "copilot's at the root", reason: nil},
+             %{
+               scope: :nested,
+               where: "lib",
+               status: :skipped,
+               size: 0,
+               chars: 0,
+               hash: nil,
+               text: "",
+               reason: ^reason
+             },
+             %{
+               scope: :nested,
+               where: "lib/x",
+               status: :whole,
+               text: "agents' nested",
+               skipped: []
+             },
+             %{scope: :nested, where: "lib/x", status: :skipped, chars: 0, reason: ^reason},
+             %{scope: :brief}
+           ] = loaded.files
+
+    assert files(loaded, repo) == [
+             {:root, ".github/copilot-instructions.md"},
+             {:nested, "lib/.github/copilot-instructions.md"},
+             {:nested, "lib/x/AGENTS.md"},
+             {:nested, "lib/x/.github/copilot-instructions.md"}
+           ]
+
+    assert loaded.used == String.length("copilot's at the root") + String.length("agents' nested")
+
+    prompt = Instructions.to_prompt(loaded)
+    assert prompt =~ "copilot's at the root"
+    refute prompt =~ "copilot's nested"
+    refute prompt =~ "copilot's beside it"
+
+    assert [
+             %{"status" => "whole", "reason" => nil},
+             %{"status" => "skipped", "reason" => ^reason, "chars" => 0, "hash" => nil},
+             %{"status" => "whole", "reason" => nil},
+             %{"status" => "skipped", "reason" => ^reason},
+             %{"scope" => "brief", "reason" => nil}
+           ] = Instructions.provenance(loaded)["files"]
   end
 
   test "the budget keeps the nearest whole first and says what it cut", %{repo: repo} do
@@ -93,8 +175,15 @@ defmodule Troupe.InstructionsTest do
     loaded = Instructions.load(Path.join(repo, "a/b"), config(instructions_max_chars: 150))
 
     assert [
-             %{scope: :root, status: :dropped, chars: 0, trimmed: 100, text: ""},
-             %{scope: :nested, status: :trimmed, chars: 50, trimmed: 50, text: text},
+             %{
+               scope: :root,
+               status: :dropped,
+               chars: 0,
+               trimmed: 100,
+               text: "",
+               reason: "left out: the budget was spent on nearer files"
+             },
+             %{scope: :nested, status: :trimmed, chars: 50, trimmed: 50, text: text, reason: nil},
              %{scope: :nested, status: :whole, chars: 100, trimmed: 0},
              %{scope: :brief}
            ] = loaded.files
@@ -279,6 +368,8 @@ defmodule Troupe.InstructionsTest do
 
     loaded = Instructions.load(repo, config(), ["lib/a.ex", "web/b.ts"])
 
+    outside = "not read: outside the repository"
+
     assert [
              %{
                scope: :root,
@@ -286,11 +377,26 @@ defmodule Troupe.InstructionsTest do
                size: 0,
                chars: 0,
                hash: nil,
-               skipped: ["CLAUDE.md"]
+               skipped: ["CLAUDE.md"],
+               reason: ^outside
              },
-             %{scope: :nested, where: "lib", status: :outside, chars: 0},
+             %{
+               scope: :root,
+               status: :skipped,
+               chars: 0,
+               reason: "skipped: AGENTS.md comes first in this directory"
+             },
+             %{scope: :nested, where: "lib", status: :outside, chars: 0, reason: ^outside},
              %{scope: :nested, where: "web", status: :whole, text: "linked from inside"},
-             %{scope: :brief, status: :outside, size: 0, chars: 0, hash: nil, text: ""}
+             %{
+               scope: :brief,
+               status: :outside,
+               size: 0,
+               chars: 0,
+               hash: nil,
+               text: "",
+               reason: ^outside
+             }
            ] = loaded.files
 
     assert loaded.used == String.length("linked from inside")
@@ -300,7 +406,7 @@ defmodule Troupe.InstructionsTest do
     refute prompt =~ "an alias the link hid"
     refute prompt =~ "Contents of #{Path.join(repo, "AGENTS.md")}"
 
-    assert [%{"status" => "outside", "size" => 0, "hash" => nil} | _] =
+    assert [%{"status" => "outside", "size" => 0, "hash" => nil, "reason" => ^outside} | _] =
              Instructions.provenance(loaded)["files"]
   end
 

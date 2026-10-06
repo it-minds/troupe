@@ -121,6 +121,8 @@ defmodule Troupe.Plane.Web.Router do
         "name" => config(:plane_name, "troupe"),
         "rpc" => "/rpc",
         "jwks" => "/.well-known/jwks.json",
+        # Where the web app is, for `troupe-daemon open` (Decision 802): null without one.
+        "app" => app_address(conn),
         "protocol_version" => Troupe.Protocol.version(),
       # The same facts the footer shows, so a deploy check and a browser cannot disagree.
       "build" => Build.to_json()
@@ -438,6 +440,15 @@ defmodule Troupe.Plane.Web.Router do
     case Application.get_env(:troupe_plane, :app_url, "/app") do
       "" -> nil
       url -> url
+    end
+  end
+
+  # The same, as an address a program can open: resolved against this plane's own URL, as
+  # a browser resolves the index's door.
+  defp app_address(conn) do
+    case app_url() do
+      nil -> nil
+      url -> URI.to_string(URI.merge(base_url(conn) <> "/", url))
     end
   end
 
