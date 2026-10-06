@@ -41,6 +41,9 @@ defmodule Troupe.Plane.Erasure do
 
   require Logger
 
+  # Where a private session's objects are deleted, past the call that asked for it.
+  @tasks __MODULE__.Tasks
+
   @doc """
   Erase a session.
 
@@ -240,22 +243,54 @@ defmodule Troupe.Plane.Erasure do
 
   @doc """
   A device has dropped its copy of an erased private session: delete every version of
-  every object under the session's prefix, and record the device.
+  every object under the session's prefix, and record the device once they are gone.
 
   After the device says so rather than at the erasure, because the device is the only
   writer and a deletion before it had stopped could be followed by the segment it was
   uploading. The key is gone by then, so what waited was unreadable, and a device that
   never comes back leaves objects nobody can read (Decision 756). Done again for each
   device that says so, which finds nothing the second time.
+
+  Recorded only once nothing is left: a deletion the store refused in part, or that did
+  not finish, leaves the device to be told again at its next connection, which tries
+  again (Decision 804). In a task, waited for as long as the daemon's call can be
+  answered within (`:erasure_answer_ms`, five seconds): tens of thousands of versions
+  can take longer, and then the answer is `:deleting` and the task carries on, recording
+  the device when it is done.
   """
-  @spec device_applied(Session.t(), String.t()) :: {:ok, non_neg_integer()} | {:error, term()}
+  @spec device_applied(Session.t(), String.t()) ::
+          {:ok, non_neg_integer() | :deleting} | {:error, term()}
   def device_applied(%Session{kind: "private", state: "erased"} = session, device) do
-    with {:ok, deleted} <-
-           ObjectStore.delete_prefix(ObjectStore.from_env(), "sessions/#{session.id}/") do
-      applied(session.id, device)
-      {:ok, deleted}
+    task = Task.Supervisor.async_nolink(@tasks, fn -> delete_objects(session.id, device) end)
+
+    case Task.yield(task, Application.get_env(:troupe_plane, :erasure_answer_ms, 5_000)) ||
+           Task.ignore(task) do
+      {:ok, result} -> result
+      {:exit, reason} -> {:error, {:exit, reason}}
+      nil -> {:ok, :deleting}
     end
   end
+
+  defp delete_objects(session_id, device) do
+    case ObjectStore.delete_prefix(ObjectStore.from_env(), "sessions/#{session_id}/") do
+      {:ok, deleted} ->
+        applied(session_id, device)
+        {:ok, deleted}
+
+      {:error, reason} = error ->
+        Logger.warning(
+          "troupe plane: the objects of erased session #{session_id} are not all deleted, " <>
+            "and #{device} is told again: #{describe(reason)}"
+        )
+
+        error
+    end
+  end
+
+  defp describe({:not_deleted, %{deleted: deleted, left: left, reason: reason}}),
+    do: "#{deleted} deleted, #{length(left)} left: #{inspect(reason)}"
+
+  defp describe(reason), do: inspect(reason)
 
   @doc """
   Erasures a pod has not yet carried out.

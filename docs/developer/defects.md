@@ -579,12 +579,6 @@ Found by the chunk 18 fixers and the coordinator, 2026-10-05.
 
 ### D71 - Private sessions after 0.8.4: what is left (medium)
 
-- `ObjectStore.delete_prefix` ignores each version's `DELETE` answer and counts every
-  listed version as deleted, so a delete refused with a 403 or a 5xx is reported as erased.
-- The plane deletes a session's versions inline in the `session.erased` request, one
-  `DELETE` each in turn: 1,040 took seconds, so tens of thousands could outlast the daemon's
-  call timeout. S3's batch `DeleteObjects` (1,000 keys a request) or a background job would
-  not.
 - The TUI has no way to unlink a daemon, so a second person on the same OS account can't
   take it over from the terminal.
 - A person moved to another subject claim (Decision 755) has the sessions made under their

@@ -1678,8 +1678,9 @@ session's key itself, every version, and answers `{session_id, erased, state, he
 case asking again tries again. The objects and the copy on the owner's machine go when
 the owner's daemon next connects: it asks `session.erasures`, drops its sealer and its copy
 of each session named, and answers `session.erased`, on which the plane deletes every
-version under the session's prefix. A daemon erasing one of its own (its `session.erase`,
-Decision 789) asks the plane's first and does the same at once for the session it named.
+version under the session's prefix, and is named the session again until none is left
+(Decision 804). A daemon erasing one of its own (its `session.erase`, Decision 789) asks
+the plane's first and does the same at once for the session it named.
 
 ### `auth.expiring` (notification, server → client)
 
@@ -1941,7 +1942,7 @@ than an admin uses them:
 | `session.objects` | observe | anybody, for their own private sessions | `{session_id, prefix}` → `{keys}` under `sessions/<session_id>/`. A caller with no object-storage credential cannot list — a listing is signed against the bucket, not against a key it does not yet know — so the plane lists for it. A `prefix` may narrow the listing and may not widen it; one that is not under the session's own is ignored |
 | `session.assertion` | control | anybody, for their own private sessions | `{session_id}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`, the same shape `me.connections.grant` answers and for the same reason. The path is `troupe/people/<name>/sessions/<session_id>`; the person policy covers their own subtree and no pod role covers any of it. A daemon makes or finds the session's key under `name`, and under the subject it is linked as only where a plane from before Decision 755 answers none. The session must already be registered, which is what makes this a statement about a session the plane agrees is theirs |
 | `session.erasures` | control | anybody, for their own private sessions | `{device}` → `{erasures: [{session_id, erased_at}]}`: the caller's private sessions whose key is destroyed and whose erasure this `device` has not acknowledged. A daemon asks when a client links it with a plane token. A session whose key is not yet destroyed is tried again first and is not listed until it is (Decision 756) |
-| `session.erased` | control | anybody, for their own erased private sessions | `{session_id, device}` → `{session_id, device, objects_deleted}`: this device has stopped sealing the session and erased its copy, and the plane deletes every version of every object under `sessions/<session_id>/` and records the device. `not_found` for a session that is not the caller's, not private or not erased: saying a session is erased does not erase it |
+| `session.erased` | control | anybody, for their own erased private sessions | `{session_id, device}` → `{session_id, device, deleting, objects_deleted}`: this device has stopped sealing the session and erased its copy, and the plane deletes every version of every object under `sessions/<session_id>/` and records the device once none is left. `deleting: false` with how many went when that is done within the call; `deleting: true` and no count when it takes longer than the call waits (five seconds), and the plane carries on and records the device when it is done. `unavailable` with `objects_deleted` and `objects_left` where the object store refused or failed some: the device is not recorded, and `session.erasures` names the session to it again, which tries again (Decision 804). `not_found` for a session that is not the caller's, not private or not erased: saying a session is erased does not erase it |
 
 `session.register`, `session.presign`, `session.objects` and `session.assertion` answer
 `not_found` with `reason: "erased"` for a session that is erased or `erasure_pending`: a

@@ -302,22 +302,35 @@ defmodule Troupe.Gateway.FakePlane do
 
   defp dispatch(state, "session.erased", %{"session_id" => id, "device" => device}) do
     case row(state, id) do
-      %{"state" => "erased"} ->
-        {:ok, deleted} = ObjectStore.delete_prefix(ObjectStore.from_env(), "sessions/#{id}/")
+      %{"state" => "erased"} -> delete_objects(state, id, device)
+      _other -> {:error, "not_found"}
+    end
+  end
 
+  defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
+
+  # The device is recorded once every version is gone, and told again otherwise, as the
+  # plane's is (Decision 804); this one deletes within the call.
+  defp delete_objects(state, id, device) do
+    case ObjectStore.delete_prefix(ObjectStore.from_env(), "sessions/#{id}/") do
+      {:ok, deleted} ->
         Agent.update(state, fn %{sessions: sessions} = s ->
           acknowledged = Map.update!(sessions[id], "applied_by", &[device | &1])
           %{s | sessions: Map.put(sessions, id, acknowledged)}
         end)
 
-        {:ok, %{"session_id" => id, "device" => device, "objects_deleted" => deleted}}
+        {:ok,
+         %{
+           "session_id" => id,
+           "device" => device,
+           "deleting" => false,
+           "objects_deleted" => deleted
+         }}
 
-      _other ->
-        {:error, "not_found"}
+      {:error, _not_deleted} ->
+        {:error, "unavailable"}
     end
   end
-
-  defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
 
   defp seal(s, sessions, id, %{"epoch" => epoch} = row, params) do
     if is_integer(params["epoch"]) and params["epoch"] != epoch do

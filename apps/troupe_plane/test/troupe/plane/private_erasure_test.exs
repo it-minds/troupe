@@ -15,6 +15,8 @@ defmodule Troupe.Plane.PrivateErasureTest do
 
   use Troupe.Plane.DataCase, async: false
 
+  import Troupe.ObjectStoreCase, only: [locked_bucket: 1, hold: 2, hold: 3]
+
   alias Troupe.KMS
   alias Troupe.KMS.Policy
   alias Troupe.ObjectStore
@@ -25,6 +27,9 @@ defmodule Troupe.Plane.PrivateErasureTest do
   alias Troupe.Protocol.SessionId
 
   @moduletag timeout: 60_000
+
+  # How long a daemon waits for the plane's answer (`Troupe.Gateway.Plane`).
+  @daemon_waits_ms 15_000
 
   setup_all do
     cond do
@@ -52,6 +57,7 @@ defmodule Troupe.Plane.PrivateErasureTest do
     start_supervised!(Connections)
     start_supervised!(Troupe.Plane.Singleton)
     start_supervised!({Listener, port: 0, verify: &FakePod.verify/1})
+    start_supervised!({Task.Supervisor, name: Erasure.Tasks})
 
     # The plane's credential, for the length of each test: the plane's policy and the
     # signing policy, which is what an installation gives the `troupe-plane` role. The
@@ -243,6 +249,108 @@ defmodule Troupe.Plane.PrivateErasureTest do
       assert {:ok, []} = ObjectStore.list(store, "sessions/#{id}/")
       assert versions(id) == []
       assert done["objects_deleted"] == 4 * 260
+      assert done["deleting"] == false
+    end
+
+    # D71: one `DELETE` a version, inside the call. A thousand took seconds, so twenty
+    # thousand outlasted the fifteen seconds a daemon waits for its answer
+    # (`Troupe.Gateway.Plane`), which then said the plane had not been told.
+    @tag timeout: 600_000
+    test "has twenty thousand versions deleted without its daemon's call timing out",
+         %{ada: ada, root: root} do
+      id = registered(ada, "ada-laptop")
+      write_key(root, KMS.path({:person, User.kms_name(ada)}, id))
+      written = write_versions(ObjectStore.from_env(), id, 400, 50)
+      assert length(versions(id)) == written
+
+      assert {:ok, %{"erased" => true}} =
+               Harness.call("session.erase", %{"session_id" => id}, as(ada))
+
+      assert {:ok, %{"erasures" => [%{"session_id" => ^id}]}} = erasures(ada, "ada-laptop")
+
+      {took, answer} = :timer.tc(fn -> erased(ada, id, "ada-laptop") end, :millisecond)
+      assert {:ok, %{"session_id" => ^id}} = answer
+      assert took < @daemon_waits_ms, "answered after #{took} ms"
+
+      # Gone, and the device recorded, whether within the call or after it.
+      eventually(fn -> versions(id) == [] and acknowledged?(id, "ada-laptop") end)
+      assert {:ok, %{"erasures" => []}} = erasures(ada, "ada-laptop")
+    end
+
+    # D71: each version's answer was dropped, so a version the store refused was counted
+    # as deleted, the device recorded, and nothing ever tried again.
+    test "keeps telling its daemon while the store refuses a version, until it is gone",
+         %{ada: ada, root: root} do
+      locked = plane_store_locked()
+      id = registered(ada, "ada-laptop")
+      write_key(root, KMS.path({:person, User.kms_name(ada)}, id))
+
+      {:ok, held} = ObjectStore.put(locked, "sessions/#{id}/segments/e1-1-2.seg", "x")
+      {:ok, _} = ObjectStore.put(locked, "sessions/#{id}/manifest.json", ~s({"last_seq":2}))
+      :ok = hold(locked, held)
+
+      assert {:ok, %{"erased" => true}} =
+               Harness.call("session.erase", %{"session_id" => id}, as(ada))
+
+      assert {:ok, %{"erasures" => [%{"session_id" => ^id}]}} = erasures(ada, "ada-laptop")
+
+      assert {:error, refused} = erased(ada, id, "ada-laptop")
+      assert refused.message == "unavailable"
+      assert %{objects_deleted: 1, objects_left: 1} = refused.data
+
+      # Not recorded, so told again, and the rest of it went meanwhile.
+      refute acknowledged?(id, "ada-laptop")
+      assert {:ok, %{"erasures" => [%{"session_id" => ^id}]}} = erasures(ada, "ada-laptop")
+
+      assert {:ok, [%{version_id: version}]} =
+               ObjectStore.list_versions(locked, "sessions/#{id}/")
+
+      assert version == held.version_id
+
+      # Once the store lets it go, the next acknowledgement finishes it.
+      :ok = hold(locked, held, false)
+      assert {:ok, done} = erased(ada, id, "ada-laptop")
+      assert %{"objects_deleted" => 1, "deleting" => false} = done
+      assert {:ok, []} = ObjectStore.list_versions(locked, "sessions/#{id}/")
+      assert {:ok, %{"erasures" => []}} = erasures(ada, "ada-laptop")
+    end
+
+    # Decision 804: past what the call can wait, the answer says the deletion is still
+    # going, and the device is recorded when it has gone, or told again when it has not.
+    test "answers before a deletion that outlasts the call, and records the device after it",
+         %{ada: ada, root: root} do
+      Application.put_env(:troupe_plane, :erasure_answer_ms, 0)
+      on_exit(fn -> Application.delete_env(:troupe_plane, :erasure_answer_ms) end)
+
+      locked = plane_store_locked()
+      id = registered(ada, "ada-laptop")
+      write_key(root, KMS.path({:person, User.kms_name(ada)}, id))
+      write_versions(locked, id, 10, 3)
+      {:ok, held} = ObjectStore.put(locked, "sessions/#{id}/manifest.json", ~s({"last_seq":9}))
+      :ok = hold(locked, held)
+
+      assert {:ok, %{"erased" => true}} =
+               Harness.call("session.erase", %{"session_id" => id}, as(ada))
+
+      assert {:ok, answer} = erased(ada, id, "ada-laptop")
+      assert answer["deleting"] == true
+      refute Map.has_key?(answer, "objects_deleted")
+
+      # The task's deletion is refused one version, so the device is told again.
+      eventually(fn -> Task.Supervisor.children(Erasure.Tasks) == [] end)
+
+      assert {:ok, [%{version_id: version}]} =
+               ObjectStore.list_versions(locked, "sessions/#{id}/")
+
+      assert version == held.version_id
+      refute acknowledged?(id, "ada-laptop")
+      assert {:ok, %{"erasures" => [%{"session_id" => ^id}]}} = erasures(ada, "ada-laptop")
+
+      :ok = hold(locked, held, false)
+      assert {:ok, %{"deleting" => true}} = erased(ada, id, "ada-laptop")
+      eventually(fn -> acknowledged?(id, "ada-laptop") end)
+      assert {:ok, []} = ObjectStore.list_versions(locked, "sessions/#{id}/")
+      assert {:ok, %{"erasures" => []}} = erasures(ada, "ada-laptop")
     end
 
     test "is not sealed, keyed or signed for once erased", %{ada: ada, root: root} do
@@ -416,6 +524,49 @@ defmodule Troupe.Plane.PrivateErasureTest do
   defp versions(id) do
     {:ok, versions} = ObjectStore.list_versions(ObjectStore.from_env(), "sessions/#{id}/")
     versions
+  end
+
+  # `objects` keys written `times` times each, as a long session's segments and manifest
+  # pile up versions; many keys rather than many versions of one, which is quicker.
+  defp write_versions(store, id, objects, times) do
+    1..objects
+    |> Task.async_stream(
+      fn n ->
+        for v <- 1..times,
+            do: {:ok, _} = ObjectStore.put(store, "sessions/#{id}/segments/e1-#{n}.seg", "#{v}")
+      end,
+      max_concurrency: 32,
+      timeout: :infinity
+    )
+    |> Stream.run()
+
+    objects * times
+  end
+
+  # A bucket of the test's own with object lock on, which the plane's erasures go to for
+  # the length of the test: how a real store is made to refuse a delete.
+  defp plane_store_locked do
+    locked = locked_bucket(ObjectStore.from_env())
+    config = Application.get_env(:troupe_protocol, :object_store, [])
+
+    Application.put_env(
+      :troupe_protocol,
+      :object_store,
+      Keyword.put(config, :bucket, locked.bucket)
+    )
+
+    on_exit(fn -> Application.put_env(:troupe_protocol, :object_store, config) end)
+    locked
+  end
+
+  defp acknowledged?(id, device), do: device in Erasure.tombstone_for(id).applied_by
+
+  defp eventually(check, tries \\ 300) do
+    cond do
+      check.() -> :ok
+      tries == 0 -> flunk("never happened")
+      true -> Process.sleep(100) && eventually(check, tries - 1)
+    end
   end
 
   # -- the key manager, as an operator and a daemon reach it ------------------
