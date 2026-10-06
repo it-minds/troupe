@@ -1,6 +1,6 @@
 {
   "name": "@troupe/desktop",
-  "version": "0.8.6-beta",
+  "version": "0.8.7-beta",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
