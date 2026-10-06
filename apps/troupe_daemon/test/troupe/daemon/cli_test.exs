@@ -8,6 +8,7 @@ defmodule Troupe.Daemon.CLITest do
   use ExUnit.Case, async: false
 
   alias Troupe.Daemon.CLI
+  alias Troupe.Gateway.Loopback
   alias Troupe.Protocol.{Client, Endpoint}
 
   import ExUnit.CaptureIO
@@ -244,6 +245,105 @@ defmodule Troupe.Daemon.CLITest do
     out = capture_io(fn -> assert CLI.announce() == :ok end)
     assert out =~ "listening at"
     assert_where_not_tokens(out)
+  end
+
+  # Issue #449 (Decision 797): the web app, connected to this daemon, in one command.
+  describe "open" do
+    test "the grammar" do
+      assert CLI.parse(["open"]) == {:open, nil}
+      assert CLI.parse(["open", "--url", "http://127.0.0.1:4173/"]) == {:open, "http://127.0.0.1:4173/"}
+      assert {:error, _} = CLI.parse(["open", "--url"])
+      assert {:error, _} = CLI.parse(["open", "--url", "--now"])
+      assert {:error, _} = CLI.parse(["open", "now"])
+      assert CLI.usage() =~ "troupe-daemon open [--url URL]"
+    end
+
+    test "with no link and no --url it says to name one, and starts and opens nothing" do
+      opts = [ensure: fn -> flunk("started a daemon") end, browse: fn _ -> flunk("opened a browser") end]
+
+      err = capture_io(:stderr, fn -> assert CLI.open(nil, opts) == 1 end)
+      assert err =~ "troupe-daemon is not linked to a plane"
+      assert err =~ "troupe-daemon open --url URL"
+
+      err = capture_io(:stderr, fn -> assert CLI.open("ftp://example.test/", opts) == 1 end)
+      assert err =~ "--url wants the web app's address"
+    end
+
+    test "linked, it starts the daemon and opens the plane's web app with the WebSocket's port and token, printing neither" do
+      {:ok, _} =
+        Troupe.Identity.link(%{"subject" => "ada@example.test", "plane_url" => "https://plane.example.test/"})
+
+      opts = [ensure: &start_daemon/0, browse: &browsed/1, os_type: {:win32, :nt}]
+      out = capture_io(fn -> assert CLI.open(nil, opts) == 0 end)
+
+      {:ok, endpoint} = Endpoint.discover()
+      {:ok, ws} = Endpoint.discover_ws()
+      assert_received {:browsed, address}
+      assert address == "https://plane.example.test/app/#daemon=#{ws.port}:#{ws.token}"
+
+      assert out =~ "troupe-daemon is running at #{Endpoint.describe(endpoint)}"
+      assert out =~ "opened https://plane.example.test/app/ in your browser"
+      refute out =~ ws.token
+      if endpoint.token, do: refute(out =~ endpoint.token)
+      assert "https://plane.example.test" in Loopback.admitted()
+    end
+
+    test "--url's origin is admitted beside the token, and elsewhere than Windows the browser is given a private page" do
+      opts = [ensure: &start_daemon/0, browse: &browsed/1, os_type: {:unix, :linux}]
+      out = capture_io(fn -> assert CLI.open("https://gui.example.test/troupe/#stale", opts) == 0 end)
+
+      {:ok, ws} = Endpoint.discover_ws()
+      assert_received {:browsed, page}
+      assert page == Path.join(Path.dirname(Endpoint.discovery_path()), "open.html")
+      assert File.read!(page) =~ ~s(content="0;url=https://gui.example.test/troupe/#daemon=#{ws.port}:#{ws.token}")
+      refute File.read!(page) =~ "stale"
+      assert Bitwise.band(File.stat!(page).mode, 0o777) == 0o600
+
+      assert Endpoint.ws_origins() == ["https://gui.example.test"]
+      assert "https://gui.example.test" in Loopback.admitted()
+      assert out =~ "opened https://gui.example.test/troupe/ in your browser"
+      refute out =~ ws.token
+    end
+
+    # A daemon that was killed leaves its entry in `daemon.json`; until the one starting now
+    # has written its own, that pair names nothing, and the page is not sent to it.
+    test "a WebSocket entry whose port does not answer is not handed to the browser" do
+      {:ok, closed} = :gen_tcp.listen(0, [:binary, ip: {127, 0, 0, 1}])
+      {:ok, port} = :inet.port(closed)
+      :gen_tcp.close(closed)
+      File.mkdir_p!(Path.dirname(Endpoint.discovery_path()))
+      File.write!(Endpoint.discovery_path(), Jason.encode!(%{"ws" => %{"port" => port, "token" => "stale"}}))
+
+      opts = [ensure: fn -> {:ok, Endpoint.tcp(port)} end, browse: fn _ -> flunk("opened a browser") end]
+      err = capture_io(:stderr, fn -> assert CLI.open("http://127.0.0.1:4173/", opts) == 1 end)
+      assert err =~ "serves no WebSocket for a browser"
+    end
+
+    test "how the browser is started, and BROWSER where it is set" do
+      assert CLI.browse_line("https://a.test/#daemon=1:t", {:win32, :nt}, nil) ==
+               {:shell, ~s("start "" "https://a.test/#daemon=1:t"")}
+
+      assert CLI.browse_line("/run/open.html", {:unix, :darwin}, nil) == {:exec, "open", ["/run/open.html"]}
+      assert CLI.browse_line("/run/open.html", {:unix, :linux}, "") == {:exec, "xdg-open", ["/run/open.html"]}
+
+      assert CLI.browse_line("/run/open.html", {:unix, :linux}, "firefox --new-tab") ==
+               {:exec, "/bin/sh", ["-c", ~s(firefox --new-tab "$1"), "sh", "/run/open.html"]}
+
+      assert CLI.browse_line("u", {:win32, :nt}, ~S"C:\b\rec.cmd") == {:shell, ~S(""C:\b\rec.cmd" "u"")}
+    end
+  end
+
+  defp start_daemon do
+    start_supervised!(
+      {Troupe.Gateway.Daemon, Keyword.put(CLI.run_opts(), :idle_shutdown_ms, :timer.hours(1))}
+    )
+
+    Troupe.Protocol.Daemon.ensure_running(spawn: false)
+  end
+
+  defp browsed(target) do
+    send(self(), {:browsed, target})
+    :ok
   end
 
   test "config describes providers with keys masked" do

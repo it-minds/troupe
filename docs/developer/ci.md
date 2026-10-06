@@ -148,6 +148,15 @@ A failure is a harness regression until shown otherwise: the step prints the run
 | `live.yml` | three headless runs against the real gateway | `nightly.yml` |
 | `quick-start.yml` | the blocks `docs/quick-start.md` marks, from the latest release's installers, on Ubuntu (`sh`) and Windows (PowerShell), with the scripted model; that the README's quick start is the page's and its protocol badge PROTOCOL.md's version | schedule; pull requests that change the page, the README, PROTOCOL.md or it; by hand, with a release to install |
 
+## Runners and timeouts
+
+Every job names its runner image instead of taking `ubuntu-latest`, and stops at about three
+times its usual length (Decision 796): Ubuntu 26.04 for most; 24.04 for the cluster suite,
+the TUI's jobs and the native Linux builds; 22.04 for the desktop app's Linux build, the
+glibc floor. A new job does the same. A native target's timeout is the `timeout` beside it
+in `native.yml`'s target lists, and a timeout that fires on a healthy but slow run is a
+re-run, not a reason to raise it.
+
 ## Secrets and variables
 
 The images and the chart need none: the workflow's own token pushes them.

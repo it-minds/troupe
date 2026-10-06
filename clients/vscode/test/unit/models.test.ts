@@ -108,6 +108,11 @@ test("a model its provider does not serve is flagged, with what it does serve, a
   assert.deepEqual(said(priced), ["house-model", "not served by openai · $0.50/$1.50 (models.prices)"]);
   assert.match(priced?.tooltip ?? "", /Price: \$0\.50 in, \$1\.50 out, a million tokens, from models\.prices in your config\./);
   assert.doesNotMatch(JSON.stringify(priced), /200|window/);
+
+  // A `troupe` from 0.8.6 gives such a model no window at all (Decision 799): the same rows.
+  const unwindowed = json.models.map((m) => (m.served === false ? { ...m, context: null } : m));
+  const corrected = modelsGroup(parseModels(JSON.stringify({ ...json, models: unwindowed })), now);
+  for (const id of ["qwen3.5", "house-model"]) assert.deepEqual(corrected.children?.find((r) => r.label === id), row(id));
 });
 
 test("a model with no key and no answer yet says so; a window past a million in millions", () => {

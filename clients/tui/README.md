@@ -381,12 +381,14 @@ model's context window, where it came from, and whether a key was found.
 answer in `models.json` next to the config, so windows and prices are theirs
 rather than typed by hand. It says what it fetched, from where and when, and a
 model the config names that its provider does not serve is said loudly
-(root Decision 778):
+(root Decision 778). Any other model it does not serve says so where its window
+would be, and `--json` gives it a `context` of `null` (root Decision 799):
 
 ```
 catalog: 4 models from openai at https://gateway.example.com/model_group/info, fetched just now
 models Troupe can address (use one as models.default; prices are $ per million tokens in/out):
   gpt-oss-120b                                 131k ctx, $0.10/$0.50, from the provider
+  house-model                                  not served by openai, $0.50/$1.50 (models.prices), from your config
   qwen3-235b                                   131k ctx, $0.22/$0.88, from the provider  <- cheap
   qwen3.5                                      NOT SERVED by openai; it serves qwen3.6-35b, qwen3-235b, gpt-oss-120b  <- default
   qwen3.6-35b                                  262k ctx, $0.20/$0.80, from the provider

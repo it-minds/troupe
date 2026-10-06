@@ -164,8 +164,9 @@ defmodule Troupe.CLI do
      "the last live bench against the one before it, or against a version's or a model's",
      [["bench", "--compare"], ["bench", "--compare", "0.8.1-beta"]]},
     {"troupe daemon [ARGS]",
-     "the local daemon: `run` (default), `status`, `config`, `models`, `login on|off`, `version`",
-     [["daemon"], ["daemon", "status"]]},
+     "the local daemon: `run` (default), `status`, `open` (the web app, connected to it), " <>
+       "`config`, `models`, `login on|off`, `version`",
+     [["daemon"], ["daemon", "status"], ["daemon", "open"]]},
     {"troupe --version", "print the version", [["--version"]]},
     {"troupe --help", "print the command lines and the commands inside a session", [["--help"]]}
   ]

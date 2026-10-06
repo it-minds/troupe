@@ -60,6 +60,33 @@ defmodule Troupe.ModelsCLITest do
     refute out =~ "named providers"
   end
 
+  # Defects D70 and D76, root Decision 799: a model nobody serves has no window, in the text
+  # whether or not a role names it, and in the JSON.
+  test "a model the gateway does not serve that no role names says so, in place of a window",
+       ctx do
+    prices = "  prices:\n    house-model:\n      input: 0.5\n      output: 1.5\n"
+    File.write!(ctx.user, File.read!(ctx.user) <> prices)
+
+    out = capture_io(fn -> assert Runner.main(["models"]) == 0 end)
+
+    assert out =~
+             ~r/^  house-model +not served by openai, \$0\.50\/\$1\.50 \(models\.prices\), from your config$/m
+
+    refute out =~ ~r/^  house-model .*ctx/m
+    assert out =~ ~r/^  qwen3\.5 +NOT SERVED by openai; /m
+
+    out = capture_io(fn -> assert Runner.main(["models", "--json"]) == 0 end)
+    models = Jason.decode!(out)["models"]
+
+    assert %{"served" => false, "context" => nil, "input" => 0.5} =
+             Enum.find(models, &(&1["id"] == "house-model"))
+
+    assert %{"served" => false, "context" => nil} = Enum.find(models, &(&1["id"] == "qwen3.5"))
+
+    assert %{"served" => true, "context" => 131_072} =
+             Enum.find(models, &(&1["id"] == "qwen3-235b"))
+  end
+
   test "a second run reads the cache and says how old it is; --refresh asks again", ctx do
     capture_io(fn -> assert Runner.main(["models"]) == 0 end)
     asked = length(FakeGateway.requests(ctx.gateway))

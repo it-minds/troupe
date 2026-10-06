@@ -28,7 +28,8 @@ concurrency:
 jobs:
   version:
     name: is this a new version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
     outputs:
       cut: ${{ steps.version.outputs.cut }}
       version: ${{ steps.version.outputs.version }}
@@ -97,7 +98,8 @@ jobs:
   cut:
     name: tag ${{ needs.version.outputs.tag }}
     needs: [version, images]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -210,7 +212,8 @@ jobs:
   publish:
     name: publish ${{ needs.version.outputs.tag }}
     needs: [version, native]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     permissions:
       contents: write
       packages: write

@@ -1,15 +1,17 @@
 defmodule Troupe.InstructionsTest do
   @moduledoc """
-  The instruction files a repository carries (Decision 706): which are read and in what
-  order, which alias wins in a directory and which are named as skipped, how the budget
-  is shared with the nearest kept whole, where the repository root is, and how the
-  digest follows the content. The loader alone; a real session's prompt is
+  The instruction files a repository carries (Decisions 706 and 798): which are read and
+  in what order, the directories the conversation worked in, which alias wins in a
+  directory and which are named as skipped, what an `@import` brings and where it stops,
+  how the budget is shared with the nearest kept whole, where the repository root is,
+  and how the digest follows the content. The loader alone; a real session's prompt is
   `instructions_prompt_test.exs`.
   """
 
   use ExUnit.Case, async: true
 
   alias Troupe.Instructions
+  alias Troupe.LLM.{Message, ToolResult, ToolUse}
 
   setup do
     base = Path.join(System.tmp_dir!(), "troupe-instr-#{System.unique_integer([:positive])}")
@@ -120,6 +122,204 @@ defmodule Troupe.InstructionsTest do
                {"whole", 100, 0, 0.667},
                {"absent", 0, 0, 0.0}
              ]
+  end
+
+  # Decision 798: where the session works is its workspace and the directory of every file
+  # its conversation read, edited or wrote.
+  test "a file the conversation worked on brings the file of each directory on its way", %{
+    repo: repo
+  } do
+    write!(repo, "AGENTS.md", "root rule")
+    write!(repo, "frontend/AGENTS.md", "frontend rule")
+    write!(repo, "frontend/app/CLAUDE.md", "app rule")
+    write!(repo, "backend/AGENTS.md", "backend rule")
+    write!(repo, "docs/AGENTS.md", "not worked in")
+
+    focus = [
+      "frontend/app/main.ts",
+      Path.join(repo, "backend/lib/server.ex"),
+      "../elsewhere/AGENTS.md"
+    ]
+
+    loaded = Instructions.load(repo, config(), focus)
+
+    assert files(loaded, repo) == [
+             {:root, "AGENTS.md"},
+             {:nested, "backend/AGENTS.md"},
+             {:nested, "frontend/AGENTS.md"},
+             {:nested, "frontend/app/CLAUDE.md"}
+           ]
+
+    assert Path.join(repo, "backend/lib") in loaded.searched
+    refute Path.expand(Path.join(repo, "../elsewhere")) in loaded.searched
+
+    prompt = Instructions.to_prompt(loaded)
+    assert prompt =~ "(nearer: frontend/app/):\napp rule"
+    refute prompt =~ "not worked in"
+    assert Instructions.load(repo, config()).digest != loaded.digest
+  end
+
+  test "the conversation's focus is the files it read, edited or wrote" do
+    conversation = [
+      Message.user("go"),
+      Message.assistant([
+        %ToolUse{id: "1", name: "read_file", input: %{"path" => "a/x.ex"}},
+        %ToolUse{id: "2", name: "grep", input: %{"pattern" => "x", "path" => "b"}}
+      ]),
+      Message.tool_results([
+        %ToolResult{tool_use_id: "1", content: "x"},
+        %ToolResult{tool_use_id: "2", content: "y"}
+      ]),
+      Message.assistant([
+        %ToolUse{id: "3", name: "edit_file", input: %{"path" => "c/y.ex"}},
+        %ToolUse{id: "4", name: "write_file", input: %{"path" => "a/x.ex"}}
+      ])
+    ]
+
+    assert Instructions.focus(conversation) == ["a/x.ex", "c/y.ex"]
+    assert Instructions.focus([]) == []
+  end
+
+  test "an @import is read right after the file that names it, from its directory, once", %{
+    repo: repo
+  } do
+    write!(repo, "AGENTS.md", """
+    # Rules
+    See @docs/style.md, then @docs/style.md again, and @.github/review.md.
+    Mail someone@example.com or ask @alice.
+    `@docs/quoted.md` is code, and so is this:
+    ```
+    @docs/fenced.md
+    ```
+    """)
+
+    write!(repo, "docs/style.md", "Style: tabs. See @../docs/terms.md")
+    write!(repo, "docs/terms.md", "Terms.")
+    write!(repo, ".github/review.md", "Review.")
+    write!(repo, "docs/quoted.md", "never read")
+    write!(repo, "docs/fenced.md", "never read")
+
+    loaded = Instructions.load(repo, config())
+    root = Path.join(repo, "AGENTS.md")
+    style = Path.join(repo, "docs/style.md")
+
+    assert [
+             %{scope: :root, path: ^root, imported_by: nil, unfollowed: []},
+             %{
+               scope: :root,
+               path: ^style,
+               imported_by: ^root,
+               text: "Style: tabs. See @../docs/terms.md"
+             },
+             %{scope: :root, text: "Terms.", imported_by: ^style},
+             %{scope: :root, text: "Review.", imported_by: ^root},
+             %{scope: :brief}
+           ] = loaded.files
+
+    prompt = Instructions.to_prompt(loaded)
+    assert prompt =~ "Contents of #{style} (repository root, imported by #{root}):\nStyle: tabs."
+    refute prompt =~ "never read"
+
+    assert [_root, %{"imported_by" => ^root, "scope" => "root", "size" => 34} | _] =
+             Instructions.provenance(loaded)["files"]
+  end
+
+  test "imports stop five deep, at a cycle and at the repository's edge, and say so", %{
+    base: base,
+    repo: repo
+  } do
+    write!(repo, "AGENTS.md", "@one.md @gone/missing.md @../outside.md @~/secret.md")
+    write!(repo, "one.md", "@two.md")
+    write!(repo, "two.md", "@three.md")
+    write!(repo, "three.md", "@four.md")
+    write!(repo, "four.md", "@five.md")
+    write!(repo, "five.md", "@six.md @one.md")
+    write!(repo, "six.md", "too deep")
+    write!(base, "outside.md", "the world outside")
+
+    loaded = Instructions.load(repo, config())
+    [agents | imported] = Enum.reject(loaded.files, &(&1.scope == :brief))
+
+    assert agents.unfollowed == [
+             %{import: "gone/missing.md", reason: :missing},
+             %{import: "../outside.md", reason: :outside},
+             %{import: "~/secret.md", reason: :outside}
+           ]
+
+    assert Enum.map(imported, &Path.basename(&1.path)) ==
+             ["one.md", "two.md", "three.md", "four.md", "five.md"]
+
+    assert List.last(imported).unfollowed == [
+             %{import: "six.md", reason: :depth},
+             %{import: "one.md", reason: :cycle}
+           ]
+
+    prompt = Instructions.to_prompt(loaded)
+    refute prompt =~ "too deep"
+    refute prompt =~ "the world outside"
+
+    assert %{"unfollowed" => [%{"import" => "gone/missing.md", "reason" => "missing"} | _]} =
+             hd(Instructions.provenance(loaded)["files"])
+  end
+
+  test "an instruction file or a brief that is a link to outside the repository is not read, " <>
+         "and says so",
+       %{base: base, repo: repo} do
+    write!(base, "key", "a stand-in for a private key")
+    File.ln_s!(Path.join(base, "key"), Path.join(repo, "AGENTS.md"))
+    write!(repo, "CLAUDE.md", "an alias the link hid")
+    File.mkdir_p!(Path.join(repo, "lib"))
+    File.ln_s!(Path.join(base, "key"), Path.join(repo, "lib/AGENTS.md"))
+    write!(repo, "docs/rules.md", "linked from inside")
+    File.mkdir_p!(Path.join(repo, "web"))
+    File.ln_s!(Path.join(repo, "docs/rules.md"), Path.join(repo, "web/AGENTS.md"))
+    write!(base, "brief.md", "## Overview\na stand-in for a private key in a brief\n")
+    File.mkdir_p!(Path.join(repo, ".troupe"))
+    File.ln_s!(Path.join(base, "brief.md"), Path.join(repo, ".troupe/memory.md"))
+
+    loaded = Instructions.load(repo, config(), ["lib/a.ex", "web/b.ts"])
+
+    assert [
+             %{
+               scope: :root,
+               status: :outside,
+               size: 0,
+               chars: 0,
+               hash: nil,
+               skipped: ["CLAUDE.md"]
+             },
+             %{scope: :nested, where: "lib", status: :outside, chars: 0},
+             %{scope: :nested, where: "web", status: :whole, text: "linked from inside"},
+             %{scope: :brief, status: :outside, size: 0, chars: 0, hash: nil, text: ""}
+           ] = loaded.files
+
+    assert loaded.used == String.length("linked from inside")
+
+    prompt = Instructions.to_prompt(loaded)
+    refute prompt =~ "private key"
+    refute prompt =~ "an alias the link hid"
+    refute prompt =~ "Contents of #{Path.join(repo, "AGENTS.md")}"
+
+    assert [%{"status" => "outside", "size" => 0, "hash" => nil} | _] =
+             Instructions.provenance(loaded)["files"]
+  end
+
+  test "a file and its imports are one scope: the nearer scope is kept whole first", %{
+    repo: repo
+  } do
+    write!(repo, "AGENTS.md", "@a.md " <> String.duplicate("r", 94))
+    write!(repo, "a.md", String.duplicate("a", 100))
+    write!(repo, "x/AGENTS.md", String.duplicate("n", 100))
+
+    loaded = Instructions.load(repo, config(instructions_max_chars: 150), ["x/f.ex"])
+    root = Path.join(repo, "AGENTS.md")
+
+    assert [
+             %{scope: :root, status: :trimmed, chars: 50, trimmed: 50},
+             %{scope: :root, status: :dropped, chars: 0, trimmed: 100, imported_by: ^root},
+             %{scope: :nested, status: :whole, chars: 100},
+             %{scope: :brief}
+           ] = loaded.files
   end
 
   test "without a .git the workspace is the root; a .git file, a worktree's, is one too", %{

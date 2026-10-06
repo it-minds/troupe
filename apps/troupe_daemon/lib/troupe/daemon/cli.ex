@@ -4,6 +4,7 @@ defmodule Troupe.Daemon.CLI do
 
       troupe-daemon [run]               serve on this machine until idle or stopped
       troupe-daemon status              say whether one is running, and where
+      troupe-daemon open [--url URL]    start it if need be, and open the web app connected to it
       troupe-daemon config              the resolved providers and models (keys masked)
       troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
       troupe-daemon config validate [PATH]   check the config files, or one; exits 1 on any problem
@@ -32,6 +33,7 @@ defmodule Troupe.Daemon.CLI do
 
   alias Troupe.Config
   alias Troupe.Config.ModelSettings
+  alias Troupe.Gateway.Loopback
   alias Troupe.LLM.Catalog
   alias Troupe.Protocol.Daemon
   alias Troupe.Protocol.Endpoint
@@ -42,6 +44,7 @@ defmodule Troupe.Daemon.CLI do
 
   @type command ::
           :status
+          | {:open, String.t() | nil}
           | :config
           | {:config_explain, String.t() | nil, boolean()}
           | {:config_validate, String.t() | nil}
@@ -86,6 +89,9 @@ defmodule Troupe.Daemon.CLI do
 
   @spec parse([String.t()]) :: command()
   def parse(["status"]), do: :status
+  def parse(["open"]), do: {:open, nil}
+  def parse(["open", "--url", "-" <> _ = flag]), do: unknown(["open", "--url", flag])
+  def parse(["open", "--url", url]), do: {:open, url}
   def parse(["config"]), do: :config
   def parse(["config", "import-opencode"]), do: :config_import_opencode
   def parse(["config", "validate"]), do: {:config_validate, nil}
@@ -145,6 +151,8 @@ defmodule Troupe.Daemon.CLI do
         1
     end
   end
+
+  def main({:open, url}), do: open(url)
 
   def main(:config) do
     case Config.resolve(File.cwd!()) do
@@ -276,6 +284,193 @@ defmodule Troupe.Daemon.CLI do
   end
 
   @doc """
+  `open`: the web app, in the person's browser, connected to this daemon (issue #449,
+  Decision 797).
+
+  Starts the daemon if none is answering, as a client does, then opens
+  `<web app>#daemon=<port>:<token>` with the loopback WebSocket's port and token, which
+  the page reads, takes off its address bar and keeps. The web app is `url`, or the one
+  on the plane this daemon is linked to, at `/app/` where the chart serves it; its origin
+  is admitted for as long as this token lasts. Nothing printed names the token.
+
+  `opts` are for tests: `:ensure` finds or starts the daemon (`{:ok, endpoint}` or
+  `{:error, reason}`), `:browse` is given what the browser should open, and `:os_type`.
+  """
+  @spec open(String.t() | nil, keyword()) :: non_neg_integer()
+  def open(url, opts \\ []) do
+    os = Keyword.get(opts, :os_type, :os.type())
+    ensure = Keyword.get(opts, :ensure, &ensure_running/0)
+    browse = Keyword.get(opts, :browse, &browse(&1, os))
+
+    with {:ok, app} <- web_app(url),
+         {:ok, endpoint} <- ensure.(),
+         {:ok, ws} <- await_ws(),
+         :ok <- admit(app),
+         :ok <- browse.(browser_target(app <> "#daemon=#{ws.port}:#{ws.token}", os)) do
+      IO.puts("troupe-daemon is running at #{Endpoint.describe(endpoint)}")
+      IO.puts("opened #{app} in your browser, connected to this daemon")
+      0
+    else
+      {:error, message} ->
+        IO.puts(:stderr, message)
+        1
+    end
+  end
+
+  # `--url` as given, without a fragment of its own, or the web app the plane this daemon
+  # is linked to serves at `/app/` (Decision 670); a plane whose app is elsewhere is
+  # `--url`'s.
+  defp web_app(nil) do
+    case Troupe.Identity.get() do
+      %{plane_url: plane} when is_binary(plane) and plane != "" ->
+        web_app(String.trim_trailing(plane, "/") <> "/app/")
+
+      _ ->
+        {:error,
+         "troupe-daemon is not linked to a plane, so there is no web app to open by default.\n" <>
+           "Name the address that serves it: troupe-daemon open --url URL"}
+    end
+  end
+
+  defp web_app(url) do
+    if Loopback.origin(url) do
+      {:ok, URI.to_string(%URI{URI.parse(url) | fragment: nil})}
+    else
+      {:error, "--url wants the web app's address, starting http:// or https://, not #{inspect(url)}"}
+    end
+  end
+
+  # As a client starts it, detached; with this release's own wrapper where there is one,
+  # so `open` starts the daemon it belongs to rather than whichever is on the `PATH`.
+  defp ensure_running do
+    case Daemon.ensure_running(start_command()) do
+      {:ok, endpoint} ->
+        {:ok, endpoint}
+
+      {:error, :no_daemon_command} ->
+        {:error, "troupe-daemon is not running, and there is no troupe-daemon on the PATH to start"}
+
+      {:error, reason} ->
+        {:error,
+         "troupe-daemon did not start (#{inspect(reason)}); see the log under " <>
+           Troupe.Paths.display(Troupe.Paths.state_dir())}
+    end
+  end
+
+  defp start_command do
+    wrapper = if match?({:win32, _}, :os.type()), do: "troupe-daemon.cmd", else: "troupe-daemon"
+
+    with root when is_binary(root) <- System.get_env("RELEASE_ROOT"),
+         path = Path.join([root, "bin", wrapper]),
+         true <- File.regular?(path) do
+      [command: path]
+    else
+      _ -> []
+    end
+  end
+
+  # The WebSocket entry is written as the daemon starts, just after the transport a
+  # client probes, so a daemon that has only now answered may not have written it yet,
+  # and the entry in the file may still be the one a daemon that was killed left. One
+  # whose port answers is this daemon's, written before it listened.
+  defp await_ws(attempts \\ 100) do
+    with {:ok, ws} <- Endpoint.discover_ws(),
+         {:ok, socket} <- :gen_tcp.connect({127, 0, 0, 1}, ws.port, [:binary, active: false], 1_000) do
+      :gen_tcp.close(socket)
+      {:ok, ws}
+    else
+      _ when attempts > 0 ->
+        Process.sleep(50)
+        await_ws(attempts - 1)
+
+      _ ->
+        {:error,
+         "troupe-daemon is running but serves no WebSocket for a browser; see the log under " <>
+           Troupe.Paths.display(Troupe.Paths.state_dir())}
+    end
+  end
+
+  defp admit(app) do
+    case Endpoint.admit_ws_origin(Loopback.origin(app)) do
+      :ok -> :ok
+      {:error, :not_running} -> {:error, "troupe-daemon stopped before the web app could be admitted"}
+    end
+  end
+
+  @doc """
+  What the browser is given to open `address`, which carries the token, on `os_type`.
+
+  On Windows the address itself. Elsewhere a page that sends the browser on to it, in a
+  file only this user can read beside `daemon.json`: a program's arguments are readable
+  by every user of a Linux machine for as long as it runs, a browser's included, and the
+  token admits whoever holds it to everything this daemon does as this user. Windows
+  shows one user's command lines to no other, and a `.html` file there may open in
+  something that is not the browser.
+  """
+  @spec browser_target(String.t(), {atom(), atom()}) :: String.t()
+  def browser_target(address, {:win32, _}), do: address
+
+  def browser_target(address, _os_type) do
+    path = Path.join(Path.dirname(Endpoint.discovery_path()), "open.html")
+    File.mkdir_p!(Path.dirname(path))
+    # Made private before the token is written into it.
+    File.write!(path, "")
+    File.chmod!(path, 0o600)
+
+    File.write!(path, """
+    <!doctype html>
+    <meta charset="utf-8">
+    <meta http-equiv="refresh" content="0;url=#{html(address)}">
+    <title>Troupe</title>
+    <p><a href="#{html(address)}">Open Troupe</a></p>
+    """)
+
+    path
+  end
+
+  defp html(text) do
+    text
+    |> String.replace("&", "&amp;")
+    |> String.replace("\"", "&quot;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+  end
+
+  # Nothing the browser printed is repeated: on Windows it is handed the address itself.
+  defp browse(target, os_type) do
+    {program, result} =
+      case browse_line(target, os_type, System.get_env("BROWSER")) do
+        {:shell, line} -> {"start", System.shell(line, stderr_to_stdout: true)}
+        {:exec, program, args} -> {program, System.cmd(program, args, stderr_to_stdout: true)}
+      end
+
+    case result do
+      {_output, 0} -> :ok
+      {_output, status} -> {:error, "could not open a browser: #{program} exited with #{status}; set BROWSER"}
+    end
+  rescue
+    error in ErlangError -> {:error, "could not open a browser (#{inspect(error.original)}); set BROWSER"}
+  end
+
+  @doc """
+  How `target` is opened on `os_type`: with `BROWSER` where it is set, as other tools
+  read it; otherwise `start` in `cmd.exe`, `open` on macOS and `xdg-open` elsewhere.
+  `start` takes its first quoted argument as a window's title, so it is given an empty
+  one, as `Troupe.Protocol.Daemon.detach_line/2` does.
+  """
+  @spec browse_line(String.t(), {atom(), atom()}, String.t() | nil) ::
+          {:shell, String.t()} | {:exec, String.t(), [String.t()]}
+  def browse_line(target, {:win32, _}, browser) when browser not in [nil, ""],
+    do: {:shell, ~s(""#{browser}" "#{target}"")}
+
+  def browse_line(target, _os_type, browser) when browser not in [nil, ""],
+    do: {:exec, "/bin/sh", ["-c", browser <> ~s( "$1"), "sh", target]}
+
+  def browse_line(target, {:win32, _}, _browser), do: {:shell, ~s("start "" "#{target}"")}
+  def browse_line(target, {:unix, :darwin}, _browser), do: {:exec, "open", [target]}
+  def browse_line(target, _os_type, _browser), do: {:exec, "xdg-open", [target]}
+
+  @doc """
   Say where the daemon that has just started is listening.
 
   Runs in the daemon's own tree, after the daemon. A daemon started by a client is
@@ -365,6 +560,7 @@ defmodule Troupe.Daemon.CLI do
     """
     troupe-daemon [run]               serve on this machine until idle or stopped
     troupe-daemon status              say whether one is running, and where
+    troupe-daemon open [--url URL]    start it if need be, and open the web app connected to it
     troupe-daemon config              the resolved providers and models (keys masked)
     troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
     troupe-daemon config validate [PATH]   check the config files, or one; exits 1 on any problem
@@ -379,7 +575,7 @@ defmodule Troupe.Daemon.CLI do
 
     Environment: TROUPE_DAEMON_IDLE_MINUTES (10; 0 = never), TROUPE_DAEMON_LOG (file|stderr),
     TROUPE_LOG_LEVEL, TROUPE_STATE_HOME, TROUPE_CONFIG_HOME, TROUPE_PROVIDER, TROUPE_MODEL,
-    TROUPE_API_KEY / TROUPE_AUTH_TOKEN, TROUPE_ALLOWED_ORIGINS.
+    TROUPE_API_KEY / TROUPE_AUTH_TOKEN, TROUPE_ALLOWED_ORIGINS, BROWSER (what open opens with).
     """
   end
 end

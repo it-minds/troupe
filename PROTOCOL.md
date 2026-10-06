@@ -61,10 +61,14 @@ same as the TCP one.
 
 The upgrade also checks `Origin`, which is a second fence rather than the first — a page
 on another origin cannot read the token out of a user-only file. By default the daemon
-admits `http://localhost:*`, `http://127.0.0.1:*` and a desktop shell's own origin;
-`TROUPE_ALLOWED_ORIGINS` replaces that list, the same mechanism and the same variable a
-worker uses. The wildcard applies to the port and nothing else, so a rule written for
-`http://localhost:*` does not admit `http://localhost.evil.example`.
+admits `http://localhost:*`, `http://127.0.0.1:*`, a desktop shell's own origin, the
+origin of the plane it is linked to (`identity.link`'s `plane_url`), and any origin in
+`ws.origins`, which `troupe-daemon open` adds for the page it opens and which goes with
+the entry when the daemon stops; both are read at each upgrade. `TROUPE_ALLOWED_ORIGINS`
+replaces that list, the same mechanism and the same variable a worker uses. The wildcard
+applies to the port and nothing else, so a rule written for `http://localhost:*` does not
+admit `http://localhost.evil.example`. A refused upgrade is answered 403, which a browser
+does not show the page, so the daemon logs it as a warning naming the origin.
 
 ### WebSocket (remote)
 
@@ -265,7 +269,7 @@ Durable:
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to` |
-| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `trimmed`, `skipped` and `hash`. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
+| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `trimmed`, `skipped`, `imported_by`, `unfollowed` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
 | `goal_set` | `text`, `command_id` — the session's goal, written by the root agent under the actor who set it (`session.goal.set`) |
 | `goal_cleared` | `command_id` |
 | `loop_started` | `loop_id` (`loop-<n>`), `max_iterations`, `max_failures`, `goal`, `command_id` — a loop towards the goal, written by the session under the actor who started it (`session.loop.start`) |
@@ -690,8 +694,8 @@ Takes a private session another device sealed last over on this one, the daemon'
 it with the row's `epoch` (`session.register` with `claim`), and seals it from here from
 the row's `last_seq`. The answer is the row as it now stands, this device's `device` and
 the next `epoch`, and the session's `sync` here. The other device is not told; its next
-seal is refused, and it stops. A row that already names this device is carried on, not
-claimed again.
+seal is refused before it writes anything under the session's prefix, and it stops
+(Decision 800). A row that already names this device is carried on, not claimed again.
 
 Only where this machine's copy holds what the plane has: the event at the row's
 `last_seq` is in the log here with the row's `head_hash`. Otherwise it is `conflict` with
@@ -1031,19 +1035,28 @@ client to say why it started none. `memory.forget` forgets that try with the bri
 → `{"budget": 16000, "used": 1234, "searched": ["/home/me/.config/troupe", "/home/me/project"],
 "files": [{"scope": "root", "path": "/home/me/project/AGENTS.md", "size": 812, "chars": 800,
 "budget": 16000, "share": 0.05, "status": "whole", "trimmed": 0, "skipped": ["CLAUDE.md"],
+"imported_by": null, "unfollowed": [{"import": "docs/gone.md", "reason": "missing"}],
 "hash": "sha256:…"}, {"scope": "brief", "path": "/home/me/project/.troupe/memory.md",
 "size": 0, "chars": 0, "budget": 6000, "share": 0.0, "status": "absent", "trimmed": 0,
-"skipped": [], "hash": null}]}`
+"skipped": [], "imported_by": null, "unfollowed": [], "hash": null}]}`
 
 The **provenance of the prompt**: every file the session's next system prompt is read
 from, in the order it is read — the person's own `<config>/AGENTS.md` (`user`), the
-repository root's (`root`), one in each directory between the root and the workspace
-(`nested`, the nearest last) and the project brief (`brief`) — with its `size` on disk,
-the `chars` that reach the prompt, the `budget` those count against
-(`instructions_max_chars` for the files together, `memory_max_chars` for the brief) and
-its `share` of it. Every file applies and the nearest wins where two disagree. `status`
-is `whole`; `trimmed`, with `trimmed` saying how many characters were cut, the nearest
-files being kept whole first; `dropped`, the budget was spent before it; or, for the
+repository root's (`root`), one in each directory between the root and where the
+session works (`nested`, parents before their children): the workspace and the
+directory of each file the root agent's conversation has read, edited or written — and
+the project brief (`brief`). A file one of them imports with `@path` comes right after
+it, in its scope, with `imported_by` naming the importer; `unfollowed` lists the imports
+a file names that were not read, each with its `reason`: `missing`, `outside` the
+repository (the config directory for the person's own file), `depth` past five, or
+`cycle`. Each file comes with its `size` on disk, the `chars` that reach the prompt, the
+`budget` those count against (`instructions_max_chars` for the files together,
+`memory_max_chars` for the brief) and its `share` of it. Every file applies and the
+nearest wins where two disagree. `status` is `whole`; `trimmed`, with `trimmed` saying
+how many characters were cut, the nearest scope (a file and what it imports) being kept
+whole first; `dropped`, the budget was spent before it; `outside`, the file found (the brief
+too) is really outside the repository (or, for the person's own, the config directory),
+through a link, and was not read, its `size` and `chars` 0 and its `hash` null; or, for the
 brief, `absent` or `disabled` as `memory.get` has it. `skipped` names the aliases the
 file hid in its directory: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and
 `.github/copilot-instructions.md` are the same file under other tools' names, the first
@@ -1051,7 +1064,8 @@ that exists is read and the rest are skipped, so nobody debugs a file that was n
 loaded. `searched` is every directory looked in. Read from disk when asked, as the next
 turn reads it, so it says what an edit will do; what a past turn read is its
 `instructions_loaded` event. Nothing reaches the prompt from a file without appearing
-here. Reading it wakes nothing.
+here. Reading it wakes nothing: a session that is asleep is answered for its workspace
+alone, without the directories its conversation worked in.
 
 #### `mcp.status`
 ```json
@@ -1909,7 +1923,7 @@ than an admin uses them:
 | `me.connections.list` | observe | anybody | the MCP servers on the caller's profiles that act as *them*, each with its `slot` and whether they have `connected` it. Whether, never what: the plane can see that a slot has a version and cannot read one |
 | `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own name at the key manager (`name`, the segment of `path` under `troupe/people/`, not always their subject: Decision 755). The client exchanges it with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
 | `session.register` | control | anybody, for their own private sessions | `{session_id, device, epoch, head_hash, last_seq, object_bytes, workspace_bytes, title, claim}` → the session row. Idempotent on the id: the first call mints epoch 1, a later one is a seal report. A seal carries the `epoch` the device holds and is refused with `stale_version` if another device has moved past it; `last_seq` never goes backwards. `claim: true` takes the session over on this device, bumping the epoch conditionally — two devices sending the same `epoch` produce one winner, and the loser learns it lost on its next seal rather than by being told, and stops sealing (issue #433) |
-| `session.presign` | control | anybody, for their own private sessions | `{session_id, method (`get`/`put`), keys}` → `{expires_in, urls}`, one signed URL per key, good for five minutes. Every key must be under `sessions/<session_id>/` and at most 64 per call. **The bytes never cross the plane**: it holds an object-storage credential scoped to signing and no key for what it signs for, which is the narrowest revision of Decision 90 that lets a laptop seal at all |
+| `session.presign` | control | anybody, for their own private sessions | `{session_id, method (`get`/`put`/`head`), keys, epoch}` → `{expires_in, urls}`, one signed URL per key, good for five minutes. Every key must be under `sessions/<session_id>/` and at most 64 per call. **The bytes never cross the plane**: it holds an object-storage credential scoped to signing and no key for what it signs for, which is the narrowest revision of Decision 90 that lets a laptop seal at all. `epoch`, optional, is the one the caller holds: a daemon sealing names it on every `put`, and one another device has claimed past is refused with `stale_version` and signed nothing, so the device that lost the session learns it before it writes under the prefix rather than at the report after (issue #441, Decision 800). Without one it signs as before, for a restore and a daemon from before 0.8.6 |
 | `session.objects` | observe | anybody, for their own private sessions | `{session_id, prefix}` → `{keys}` under `sessions/<session_id>/`. A caller with no object-storage credential cannot list — a listing is signed against the bucket, not against a key it does not yet know — so the plane lists for it. A `prefix` may narrow the listing and may not widen it; one that is not under the session's own is ignored |
 | `session.assertion` | control | anybody, for their own private sessions | `{session_id}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`, the same shape `me.connections.grant` answers and for the same reason. The path is `troupe/people/<name>/sessions/<session_id>`; the person policy covers their own subtree and no pod role covers any of it. A daemon makes or finds the session's key under `name`, and under the subject it is linked as only where a plane from before Decision 755 answers none. The session must already be registered, which is what makes this a statement about a session the plane agrees is theirs |
 | `session.erasures` | control | anybody, for their own private sessions | `{device}` → `{erasures: [{session_id, erased_at}]}`: the caller's private sessions whose key is destroyed and whose erasure this `device` has not acknowledged. A daemon asks when a client links it with a plane token. A session whose key is not yet destroyed is tried again first and is not listed until it is (Decision 756) |

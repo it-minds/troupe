@@ -68,7 +68,8 @@ env:
 jobs:
   changes:
     name: what changed
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
@@ -237,7 +238,8 @@ jobs:
     name: compile, format, credo, boundaries
     needs: [changes]
     if: needs.changes.outputs.server == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -320,7 +322,10 @@ jobs:
     name: test ${{ matrix.app }}
     needs: [changes]
     if: needs.changes.outputs.server == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    # One pass of the slowest suite is a few minutes; a full run's ten passes of the
+    # worker's take about twenty.
+    timeout-minutes: ${{ inputs.soak > 0 && 60 || 25 }}
     strategy:
       fail-fast: false
       matrix:
@@ -395,7 +400,8 @@ jobs:
     name: helm lint, render, kubeconform
     needs: [changes]
     if: needs.changes.outputs.chart == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
@@ -479,7 +485,8 @@ jobs:
     name: schema compatibility and the Python client
     needs: [changes]
     if: needs.changes.outputs.protocol == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -530,6 +537,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.tui == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: clients/tui
@@ -573,7 +581,8 @@ jobs:
     name: the GUI — tokens, typecheck, build, test
     needs: [changes]
     if: needs.changes.outputs.gui == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: clients/gui
@@ -615,8 +624,10 @@ jobs:
     name: the GUI against a plane built from this commit
     needs: [changes]
     if: needs.changes.outputs.gui_e2e == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
+    runs-on: ubuntu-26.04
+    # Three minutes as a rule; above the stack's own ten-minute wait, so a plane that never
+    # comes up still reaches the step that prints its log.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -671,9 +682,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.full && '["ubuntu-latest", "windows-latest", "macos-latest"]' || '["ubuntu-latest", "windows-latest"]') }}
+        os: ${{ fromJSON(inputs.full && '["ubuntu-26.04", "windows-latest", "macos-latest"]' || '["ubuntu-26.04", "windows-latest"]') }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: clients/vscode
@@ -721,7 +732,8 @@ jobs:
   # so this runs whatever the change touched.
   versions:
     name: every copy of the version agrees, every doc link resolves, no deployment is named
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: erlef/setup-beam@v1
@@ -751,12 +763,14 @@ jobs:
       macos: false
 
   # Twenty minutes on a kind cluster, so it is not a pull request's to wait for: the
-  # nightly and a release ask for it.
+  # nightly and a release ask for it. On Ubuntu 24.04 while the rest is on 26.04: kind and
+  # Cilium lean on the kernel more than anything else here, and the trial that moved the
+  # rest did not run this (Decision 796).
   cluster:
     name: the suite that needs a cluster
     needs: [lint, test, chart]
     if: inputs.cluster
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -823,7 +837,8 @@ jobs:
     name: ci-ok
     if: always()
     needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, vscode, native, cluster]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
     steps:
       - name: Every job that ran passed
         env:

@@ -233,7 +233,12 @@ export function SignIn({
       <footer>
         {discovery && <p>You will sign in with {hostOf(discovery.issuer)}.</p>}
         <p>{SECRETS[caps.secrets]}</p>
-        {!caps.localSessions && <p>Sessions running on this computer are not available in the browser version.</p>}
+        {!caps.localSessions && (
+          <p>
+            Sessions running on this computer show here once <code className="mono">troupe-daemon open</code> has connected this page to
+            them.
+          </p>
+        )}
       </footer>
     </main>
   );

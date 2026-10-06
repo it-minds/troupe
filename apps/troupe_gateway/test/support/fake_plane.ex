@@ -11,7 +11,8 @@ defmodule Troupe.Gateway.FakePlane do
   Two of the four are *real*: `session.presign` signs against the same MinIO the daemon
   then writes to, and `session.objects` lists it. Faking those would leave the test
   proving that the daemon can talk to a mock. `session.register` keeps rows in an Agent
-  and implements the one behaviour the daemon has to cope with — the epoch fence — and
+  and implements the one behaviour the daemon has to cope with — the epoch fence, which
+  `session.presign` keeps too for a write naming an epoch (Decision 800) — and
   `session.assertion` is not implemented here at all, because minting an assertion is
   signing, and signing is the plane's job. The tests pass `:key_manager` instead and the
   exchange is proven where it can be, in the plane's own suite.
@@ -37,7 +38,17 @@ defmodule Troupe.Gateway.FakePlane do
   def start_link(opts \\ []) do
     token = Keyword.get(opts, :token, "plane-token")
 
-    Agent.start_link(fn -> %{sessions: %{}, calls: [], token: token, refuse_keys: false} end,
+    Agent.start_link(
+      fn ->
+        %{
+          sessions: %{},
+          calls: [],
+          token: token,
+          refuse_keys: false,
+          before: nil,
+          any_epoch: false
+        }
+      end,
       name: Keyword.get(opts, :name)
     )
   end
@@ -118,6 +129,13 @@ defmodule Troupe.Gateway.FakePlane do
   def refuse_keys(state, refuse?), do: Agent.update(state, &%{&1 | refuse_keys: refuse?})
 
   @doc """
+  Sign a write whatever epoch it names, as a plane from before Decision 800 does: a device
+  that lost the session then hears so at the report after its write, not before it.
+  """
+  @spec sign_any_epoch(pid()) :: :ok
+  def sign_any_epoch(state), do: Agent.update(state, &%{&1 | any_epoch: true})
+
+  @doc """
   A row another device registered and sealed, as if the session had been carried on there:
   `device`, `epoch`, `last_seq` and `head_hash` from `attrs`, over a first registration's.
   """
@@ -142,10 +160,33 @@ defmodule Troupe.Gateway.FakePlane do
 
   # -- the methods ------------------------------------------------------------
 
+  @doc """
+  Run `fun` once, before the plane answers the next call `match?` accepts (a function of
+  the method and its params): how a test has something happen at the plane at one moment
+  of what the daemon is doing, such as another device claiming a session in the middle of
+  a seal. `fun` runs in the process answering that call, which waits for it.
+  """
+  @spec before(pid(), (String.t(), map() -> boolean()), (-> any())) :: :ok
+  def before(state, match?, fun), do: Agent.update(state, &%{&1 | before: {match?, fun}})
+
   @doc false
   def call(state, method, params) do
     Agent.update(state, fn s -> %{s | calls: [{method, params} | s.calls]} end)
+    run_before(state, method, params)
     dispatch(state, method, params)
+  end
+
+  defp run_before(state, method, params) do
+    hook =
+      Agent.get_and_update(state, fn
+        %{before: {match?, fun}} = s ->
+          if match?.(method, params), do: {fun, %{s | before: nil}}, else: {nil, s}
+
+        s ->
+          {nil, s}
+      end)
+
+    if hook, do: hook.()
   end
 
   defp dispatch(state, "session.register", %{"claim" => true} = params) do
@@ -199,8 +240,11 @@ defmodule Troupe.Gateway.FakePlane do
     end)
   end
 
+  # An epoch named is the one the caller holds, and one the row has moved past is signed
+  # nothing (Decision 800). None named signs as before: a restore holds none.
   defp dispatch(state, "session.presign", params) do
-    with :ok <- known(state, params["session_id"]) do
+    with :ok <- known(state, params["session_id"]),
+         :ok <- holds(state, params["session_id"], params["epoch"]) do
       store = ObjectStore.from_env()
       method = String.to_existing_atom(params["method"])
       prefix = "sessions/#{params["session_id"]}/"
@@ -302,6 +346,16 @@ defmodule Troupe.Gateway.FakePlane do
 
   defp known(state, session_id) do
     if row(state, session_id), do: :ok, else: {:error, "not_found"}
+  end
+
+  defp holds(_state, _session_id, nil), do: :ok
+
+  defp holds(state, session_id, epoch) do
+    case Agent.get(state, &{&1.any_epoch, &1.sessions[session_id]["epoch"]}) do
+      {true, _held} -> :ok
+      {false, ^epoch} -> :ok
+      {false, _passed} -> {:error, "stale_version"}
+    end
   end
 
   defmodule Router do

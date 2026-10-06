@@ -26,7 +26,8 @@ env:
 jobs:
   changes:
     name: what changed
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
     permissions:
       contents: read
       pull-requests: read
@@ -70,7 +71,8 @@ jobs:
     name: umbrella - compile, credo, schema
     needs: [changes]
     if: needs.changes.outputs.elixir == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: erlef/setup-beam@v1
@@ -109,7 +111,8 @@ jobs:
   # changed, because a file that moves breaks a glob; a bare `elixir`, nothing compiled.
   decisions:
     name: the decisions - front matter and paths
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: erlef/setup-beam@v1
@@ -126,6 +129,7 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.tui == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: clients/tui
@@ -161,7 +165,8 @@ jobs:
     name: the GUI - build and typecheck
     needs: [changes]
     if: needs.changes.outputs.gui == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: clients/gui
@@ -185,7 +190,8 @@ jobs:
     name: the VS Code extension - typecheck and package
     needs: [changes]
     if: needs.changes.outputs.vscode == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: clients/vscode
@@ -212,7 +218,8 @@ jobs:
     name: dev-ok
     if: always()
     needs: [changes, elixir, decisions, tui, gui, vscode]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
     steps:
       - name: Every job that ran passed
         run: |

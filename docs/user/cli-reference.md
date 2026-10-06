@@ -38,7 +38,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe bench [--json [FILE]] [--md FILE]` | measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one |
 | `troupe bench --live [--suite smoke\|standard] [--scenario NAME,...] [--repeat N] [--model M] [--yes] [--keep DIR] [--json [FILE]] [--md FILE]` | tasks against your own provider, under a cap it prints and asks about first; scored, and kept in a history |
 | `troupe bench --compare [VERSION\|MODEL]` | the last live bench against the one before it, or against a version's or a model's |
-| `troupe daemon [ARGS]` | the local daemon: `run` (default), `status`, `config`, `models`, `login on\|off`, `version` |
+| `troupe daemon [ARGS]` | the local daemon: `run` (default), `status`, `open` (the web app, connected to it), `config`, `models`, `login on\|off`, `version` |
 | `troupe --version` | print the version |
 | `troupe --help` | print the command lines and the commands inside a session |
 <!-- cli-commands:end -->
@@ -81,7 +81,7 @@ run right now is shown greyed with the reason; the desktop app's palette lists t
 | `/upload <path>` | Send a local file into the session's own mount. The file is read on this machine and written to session:/&lt;name&gt;; a worker never sees this machine's disk. For example `/upload notes.md`. |  |
 | `/copy [window]` | Copy a transcript to the clipboard. The activated window's transcript, or tile n's; a mouse selection in the pane copies on release. For example `/copy 2`. | a window: the activated one, or one named |
 | `/memory [refresh \| forget]` | The project brief: show, refresh or forget it. The brief in .troupe/memory.md is read into every agent's prompt. /memory says what it holds, /memory refresh asks the librarian to rewrite it, /memory forget deletes it. For example `/memory refresh`. | a session on this machine |
-| `/context` | Every instruction file in the prompt, and its share of the budget. The files the next turn's system prompt is read from: your own AGENTS.md, the repository's, one in each directory down to the workspace, and the project brief, each with its scope, size and share of the budget, and the aliases (CLAUDE.md, GEMINI.md, copilot-instructions.md) it hid. |  |
+| `/context` | Every instruction file in the prompt, and its share of the budget. The files the next turn's system prompt is read from: your own AGENTS.md, the repository's, one in each directory down to the workspace and to the files the conversation worked on, the files they import with @path, and the project brief, each with its scope, size and share of the budget, and the aliases (CLAUDE.md, GEMINI.md, copilot-instructions.md) it hid. |  |
 | `/watch` | Toggle watch mode: act on AI! and AI? comments. A comment ending in AI! starts a change and AI? starts an answer. One session per workspace watches at a time. | a session on this machine |
 
 ### Setup

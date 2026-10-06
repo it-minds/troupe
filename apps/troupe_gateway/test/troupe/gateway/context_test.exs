@@ -1,9 +1,10 @@
 defmodule Troupe.Gateway.ContextTest do
   @moduledoc """
-  The provenance of a session's prompt over the protocol (Decision 706): `context.get`
-  lists every instruction file and the brief with its scope, size and share of the
-  budget, names the aliases it skipped, is `observe`, and refuses a session that is not
-  there.
+  The provenance of a session's prompt over the protocol (Decisions 706 and 798):
+  `context.get` lists every instruction file and the brief with its scope, size and share
+  of the budget, names the aliases it skipped, includes the nested files on the way to
+  what the session worked on and the files imported, is `observe`, and refuses a session
+  that is not there.
   """
 
   use ExUnit.Case, async: false
@@ -40,10 +41,10 @@ defmodule Troupe.Gateway.ContextTest do
     %{workspace: workspace, state_dir: state_dir, client: client}
   end
 
-  defp start_session(context) do
+  defp start_session(context, steps \\ [{:text, "hi"}]) do
     fake =
       start_supervised!(
-        {Troupe.LLM.Fake, [steps: [{:text, "hi"}]]},
+        {Troupe.LLM.Fake, [steps: steps]},
         id: {Troupe.LLM.Fake, System.unique_integer([:positive])}
       )
 
@@ -94,6 +95,65 @@ defmodule Troupe.Gateway.ContextTest do
 
     # The same answer the loader gives the agent: nothing reaches the prompt without it.
     assert answer == Troupe.Instructions.provenance(Path.expand(ws), Troupe.Config.load(ws))
+  end
+
+  # Decision 798: the next turn reads the directories the conversation worked in, and the
+  # files an instruction file imports, and context.get says so as it will.
+  test "context.get lists a nested file on the way to what the session read, and an import",
+       %{workspace: ws, client: client} = context do
+    ws = Path.expand(ws)
+    File.mkdir_p!(Path.join(ws, "docs"))
+    File.mkdir_p!(Path.join(ws, "lib"))
+    File.write!(Path.join(ws, "AGENTS.md"), "Root. @docs/style.md\n")
+    File.write!(Path.join(ws, "docs/style.md"), "Style.\n")
+    File.write!(Path.join(ws, "lib/AGENTS.md"), "Lib.\n")
+    File.write!(Path.join(ws, "lib/a.ex"), "a\n")
+
+    session =
+      start_session(context, [{:tools, [{"read_file", %{"path" => "lib/a.ex"}}]}, {:text, "hi"}])
+
+    :ok = Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "hello")
+    await_turn_ended(session.id)
+
+    assert {:ok, answer} = Client.call(client, "context.get", %{"session_id" => session.id})
+    root = Path.join(ws, "AGENTS.md")
+
+    assert [
+             %{"scope" => "root", "path" => ^root, "imported_by" => nil, "size" => 21},
+             %{"scope" => "root", "path" => style, "imported_by" => ^root, "size" => 7},
+             %{"scope" => "nested", "path" => lib, "imported_by" => nil, "size" => 5},
+             %{"scope" => "brief"}
+           ] = answer["files"]
+
+    assert style == Path.join(ws, "docs/style.md")
+    assert lib == Path.join(ws, "lib/AGENTS.md")
+    assert answer == Troupe.Instructions.provenance(ws, Troupe.Config.load(ws), ["lib/a.ex"])
+  end
+
+  # Generous: on a loaded machine a two-call turn has taken longer than five seconds here.
+  defp await_turn_ended(session_id) do
+    receive do
+      {:troupe_event, ^session_id, %{type: "turn_ended"}} -> :ok
+    after
+      15_000 -> flunk("the turn did not end")
+    end
+  end
+
+  test "context.get names an instruction file that links outside the repository as not read",
+       %{workspace: ws, state_dir: state_dir, client: client} = context do
+    outside = Path.join(Path.dirname(state_dir), "elsewhere.md")
+    File.write!(outside, "not the repository's\n")
+    File.ln_s!(outside, Path.join(ws, "AGENTS.md"))
+    session = start_session(context)
+
+    assert {:ok, %{"used" => 0, "files" => [root, %{"scope" => "brief"}]}} =
+             Client.call(client, "context.get", %{"session_id" => session.id})
+
+    assert %{"scope" => "root", "status" => "outside", "size" => 0, "chars" => 0, "hash" => nil} =
+             root
+
+    assert root["path"] == Path.join(Path.expand(ws), "AGENTS.md")
   end
 
   test "the budget is the workspace's, and an unknown session is not found",

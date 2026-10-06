@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { test } from "node:test";
 import { modelsPending } from "../../src/models.js";
-import { parseExplain, rows, type Row } from "../../src/settings.js";
+import { invocation, run } from "../../src/run.js";
+import { parseExplain, rows, settingsFailed, type Row } from "../../src/settings.js";
 
 // The shape `troupe config --explain --json` prints (apps/troupe_core/lib/troupe/config/
 // explain.ex), cut down: a user file that sets the model, a project file that would set
@@ -139,4 +143,65 @@ test("nothing changed is said, not left empty; nothing to complain of has no Pro
 test("output that is not settings is an error, not an empty panel", () => {
   assert.throws(() => parseExplain("troupe: could not start"));
   assert.throws(() => parseExplain(JSON.stringify({ hello: 1 })), /something other than settings/);
+});
+
+// A `troupe` that prints `out` and `err` and exits 1, run as the view runs one, and what it
+// failed with.
+async function failing(out: string, err = "") {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "troupe fails "));
+  fs.writeFileSync(path.join(dir, "out.txt"), out);
+  fs.writeFileSync(path.join(dir, "err.txt"), err);
+
+  const windows = process.platform === "win32";
+  const program = path.join(dir, windows ? "troupe.cmd" : "troupe");
+  if (windows) fs.writeFileSync(program, '@echo off\r\ntype "%~dp0out.txt"\r\ntype "%~dp0err.txt" 1>&2\r\nexit /b 1\r\n');
+  else fs.writeFileSync(program, '#!/bin/sh\nhere=$(dirname "$0")\ncat "$here/out.txt"; cat "$here/err.txt" >&2; exit 1\n', { mode: 0o755 });
+
+  try {
+    const how = invocation(program, ["config", "--explain", "--json", "--workspace", dir], process.platform, process.env["ComSpec"]);
+    await run(how, dir, 30_000);
+    throw new Error("the fake troupe answered");
+  } catch (error) {
+    return error;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Defects D76, Decision 799: a config that does not load is `config --explain --json`
+// exiting 1 with `errors` on standard output and nothing on standard error.
+test("a config that does not load shows its errors as troupe reports them, each opening its file at its line", async () => {
+  const errors = [
+    { level: "error", source: project, line: 3, key: "max_turns", message: 'max_turns must be a whole number, at least 1, not "many"' },
+    { level: "error", source: user, line: null, key: "api_key", message: "api_key: sk-live-0123456789 is not a string" },
+  ];
+
+  const shown = settingsFailed(await failing(JSON.stringify({ errors }, null, 2)));
+  assert.doesNotMatch(JSON.stringify(shown), /Command failed/);
+
+  assert.equal(shown.label, "The configuration did not load");
+  assert.equal(shown.icon, "error");
+  assert.equal(shown.expanded, true);
+  assert.deepEqual(
+    shown.children?.map((r) => [r.label, r.description, r.icon]),
+    [
+      ['max_turns must be a whole number, at least 1, not "many"', `${project}:3`, "error"],
+      ["api_key: (a key) is not a string", user, "error"],
+    ],
+  );
+  assert.deepEqual(shown.children?.[0]?.open, { path: project, line: 3, exists: true });
+  // A key is not shown even where an error quotes one.
+  assert.doesNotMatch(JSON.stringify(shown), /sk-live/);
+});
+
+test("a troupe that fails without errors to show is one line: what it said on standard error", async () => {
+  // An older `troupe`, or one that fails before it reads the config.
+  for (const out of ["", JSON.stringify({ errors: [] }), "not json"]) {
+    const shown = settingsFailed(await failing(out, "troupe: the fake was told to fail\nmore of it"));
+    assert.deepEqual([shown.label, shown.description, shown.icon], [
+      "Troupe could not say what its settings are",
+      "troupe: the fake was told to fail",
+      "error",
+    ]);
+  }
 });

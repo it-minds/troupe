@@ -29,7 +29,10 @@ on:
 jobs:
   image:
     name: image ${{ matrix.image }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    # Under a minute from the cache and a few without it; a build that hangs fails here
+    # rather than holding a release (Decision 796).
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write

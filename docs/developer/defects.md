@@ -566,8 +566,6 @@ Found by the chunk 18 fixers, 2026-10-05.
 - With `provider: openai` and no named providers, `troupe bench --live --model
   openai/qwen3-235b` runs against `openai/openai/qwen3-235b`; `--model qwen3-235b` works.
   `docs/user/bench.md` shows `--model gateway/model-b` for a named provider only.
-- `troupe models --json` gives a model nobody serves `context: 200000`, `Config.models/1`'s
-  fallback to `context_window`, beside `served: false`; `nil` would say there is none.
 - `troupe-daemon models` has no `--json`, so an install without the TUI has no JSON form.
 - The summariser's `prompt_bytes.tool_results` now reads 0: its results are text inside
   `conversation` (Decision 779).
@@ -666,29 +664,73 @@ Found by the chunk 20 fixers, 2026-10-06.
 
 Found by the #437 fixer, 2026-10-06.
 
-### D76 - Models in the clients: small leftovers (low)
+### D78 - Instruction files and the brief: what #123's slice left (low)
 
-- The VS Code extension's Settings view says "Command failed: <path> config --explain
-  --json ..." for a config that doesn't load: that command exits 1 with an `errors` object
-  on standard output and nothing on standard error, and the view reads standard error only.
-- `troupe models` prints "200k ctx" for a model nobody serves that no role names; only a
-  role's model reads NOT SERVED (the JSON's `context` for one is D70's item).
+- `.github/copilot-instructions.md` is taken as an alias in every directory, not only at
+  the repository root, where Copilot reads it (Decision 706's behaviour, kept by 798);
+  changing it needs a decision.
+- A nested instruction file reaches the turn after its directory is first opened, not the
+  same turn; attaching it to the tool result that opened the directory would, as some
+  tools do.
+- `context.get` for a sleeping session lacks the conversation's focus (asking the agent
+  would wake it), so it lists fewer nested files than the prompt had.
+- `context.get` reads `Path.expand(session.workspace)` where the prompt uses the
+  workspace's real root, so on a workspace reached through a link (macOS `/tmp`) the two
+  name different paths.
+- The TUI's `/context` shows a file left out as `outside` as "AGENTS.md (root) 0", with no
+  reason.
+- A brief left out as outside the repository reads as absent in `memory.get`, so a client
+  with `memory_auto_refresh` may start a librarian whose writes are then refused; the run
+  counts as a try and holds the next off for `memory_max_age_days`.
 
-Found by the chunk 20 fixer of slot E20, 2026-10-06.
+Found by the #123 fixer, 2026-10-06.
 
-### D77 - CI on GitHub's hosted runners (low)
+### D79 - `troupe-daemon open` and the loopback: what #449 left (medium)
 
-- The native build jobs (`.github/workflows/native.yml`) set no `timeout-minutes`, so a
-  job whose runner hangs waits GitHub's six hours: the 0.8.4 release's macOS TUI build sat
-  in "Build the release" for over half an hour until it was cancelled and run again (it
-  then took six minutes).
-- `ubuntu-latest` moves to Ubuntu 26 on 2026-10-19 (GitHub's notice on every run). Nothing
-  has checked that `erlef/setup-beam`, Zig and the builds work there; pinning
-  `ubuntu-24.04`, or a trial run, before then would.
-- `Troupe.Agent.ACPAgentTest` ("a subprocess that exits is reported as partial") fails one
-  or two runs in twelve on a loaded machine and passes alone.
+- On Windows the daemon `open` starts goes through `Troupe.Protocol.Daemon.detach_line`
+  (`start "" /b`), sharing the terminal's console: closing that terminal or pressing Ctrl-C
+  in it can end the daemon. `start /min`, as the login entry starts it (Decision 762),
+  would not.
+- `open` assumes the chart's `/app/` mount, since the plane's discovery document
+  (`/.well-known/troupe`) doesn't say where its app is.
+- The GUI reads `#daemon=` only when the page loads; a fragment set in an open tab is not
+  taken (`open` always opens a new one).
+- The loopback admits an upgrade that carries no `Origin` header (the token is still
+  required).
+- The token kept in `localStorage` and the plane's origin admitted by default make any
+  script on the plane's host able to drive the local daemon while it runs: #460.
 
-Found by the coordinator, 2026-10-06.
+Found by the #449 fixer, 2026-10-06.
+
+### D80 - Small leftovers from the 0.8.6 work (low)
+
+- A write signed just before another device claims a private session and sent after it
+  still lands: a presigned URL can't be withdrawn (Decision 800). The window is one object.
+- Nothing tests that `Private.take_over/2` stopping a sealer still running at the old
+  epoch has that sealer's last seal refused.
+- The TUI's model menu (`Troupe.Settings.choices/3`) still shows the default window for a
+  model nobody serves; it doesn't read the catalog's record of what each provider serves.
+- The VS Code Settings view, opened on a configuration that doesn't load, doesn't ask again
+  when the file is saved; only Refresh does.
+
+Found by the chunk 21 fixers, 2026-10-06.
+
+### D81 - CI after the move to Ubuntu 26 (low)
+
+- `windows-latest` and `macos-latest` are still unpinned in the VS Code matrix and the
+  desktop Windows build.
+- The desktop Linux build stays on `ubuntu-22.04` as the glibc floor; it needs a new answer
+  when GitHub retires that image.
+- The cluster suite stays on `ubuntu-24.04`, untried on 26 (`gh workflow run nightly.yml
+  --ref <branch>` after changing its label tries it).
+- A Windows daemon build once spent 29 minutes in `mlugg/setup-zig` and passed; the new
+  15-minute timeout would fail such a run.
+- `RestartTest` and `AutospawnTest` start `elixir` with a `-pa` for every build directory
+  (`restart_test.exs:242`, `autospawn_test.exs:134`), which is slow on `/mnt/c` and likely
+  why the daemon "never came up" in time under load (0 of 2 alone once); the ACP test's
+  same fix (Decision 796) may apply.
+
+Found by the chunk 21 fixers, 2026-10-06.
 
 ## Taken
 
@@ -771,6 +813,8 @@ Found by the coordinator, 2026-10-06.
 | D69's second item - Anthropic's newest models think unasked, and that thinking is dropped on replay | #427 |
 | D70's third item - the task list takes model calls of its own on `qwen3-235b` | #428, PR #445 |
 | D65's first item - a rewritten task list made the next call write the conversation to the cache again | #389, PR #447 |
+| D70's fourth item and D76 - the model list gave a window for a model nobody serves, and the editor hid a configuration's errors | PR #455 |
+| D77 - CI on GitHub's hosted runners (the native builds had timeouts already; every build job has one now, and the runners are Ubuntu 26) | PR #456 |
 | D66's first item - a summariser call that never answered kept the agent compacting | #404, PR #421 |
 
 ## Checked and not a defect

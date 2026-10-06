@@ -289,20 +289,33 @@ it("a troupe models that fails is one line in the group, and the settings are st
   }
 });
 
-it("a config that does not load: the settings could not be read, and the Models group says why", async () => {
-  const fails = ["explain.fail", "models.fail"].map((name) => path.join(work, "bin", name));
-  for (const file of fails) fs.writeFileSync(file, "");
+it("a config that does not load: its errors, each opening its file at its line, and the Models group says why", async () => {
+  const explainFail = path.join(work, "bin", "explain.fail");
+  const modelsFail = path.join(work, "bin", "models.fail");
+  const fails = [explainFail, modelsFail];
+  // What `troupe config --explain --json` prints on standard output for such a config, and
+  // nothing on standard error (Decision 799).
+  const userFile = path.join(work, "bin", "config.yaml");
+  const message = 'max_turns must be a whole number, at least 1, not "many"';
+  fs.writeFileSync(explainFail, JSON.stringify({ errors: [{ level: "error", source: userFile, line: 5, key: "max_turns", message }] }, null, 2));
+  fs.writeFileSync(modelsFail, "");
 
   try {
     const shown = await vscode.commands.executeCommand<Shown>("troupe.refreshSettings");
     assert.ok("folder" in shown, "a folder is shown");
     assert.deepEqual(
-      shown.rows.map((r) => [r.label, r.icon]),
+      shown.rows.map((r) => [r.label, r.description, r.icon]),
       [
-        ["Troupe could not say what its settings are", "error"],
-        ["Models", "library"],
+        ["The configuration did not load", "1 error", "error"],
+        ["Models", undefined, "library"],
       ],
     );
+    assert.doesNotMatch(JSON.stringify(shown), /Command failed/);
+
+    const [error] = shown.rows[0]?.children ?? [];
+    assert.deepEqual([error?.label, error?.description, error?.icon], [message, `${userFile}:5`, "error"]);
+    assert.deepEqual(error?.open, { path: userFile, line: 5, exists: true });
+
     assert.deepEqual(shown.rows[1]?.children?.map((r) => [r.label, r.description]), [
       ["Troupe could not list its models", "troupe: the fake was told not to list its models"],
     ]);

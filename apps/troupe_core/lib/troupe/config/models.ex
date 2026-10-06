@@ -21,7 +21,8 @@ defmodule Troupe.Config.Models do
   The report as a map, ready for `Jason.encode!/2`:
 
     * `models` - `Config.models/1`, one object per model: `id`, `provider` (the named
-      provider, `nil` for the session-wide one), `model`, `context`, `input` and `output`
+      provider, `nil` for the session-wide one), `model`, `context` (`nil` for a model its
+      provider does not serve, Decision 799), `input` and `output`
       in dollars per million tokens (`nil` where nothing prices it), `price_source`
       (`catalog`, `config` or `nil`), `source` (where its facts came from: `catalog`,
       `config`, `yaml` or `opencode`), `key` (whether one is set), and `served`: `true`
@@ -60,7 +61,7 @@ defmodule Troupe.Config.Models do
       "id" => choice.id,
       "provider" => choice.provider,
       "model" => choice.model,
-      "context" => choice.context,
+      "context" => window(choice, served),
       "input" => input,
       "output" => output,
       "price_source" => string(choice.price_source),
@@ -70,6 +71,12 @@ defmodule Troupe.Config.Models do
       "nearest" => nearest
     }
   end
+
+  # A model its provider does not serve has no window, as the text gives it none: the one
+  # `Config.models/1` has for it is `context_window`'s fallback, which nobody said
+  # (Decision 799). A session's compaction still plans against that fallback.
+  defp window(_choice, false), do: nil
+  defp window(choice, _served), do: choice.context
 
   # The price `Config.models/1` described, as the numbers it was described from.
   defp prices(config, id) do
@@ -83,9 +90,9 @@ defmodule Troupe.Config.Models do
   defp per_million(nil), do: nil
   defp per_million(per_token), do: Float.round(per_token * 1_000_000, 4)
 
-  # What `troupe models` marks NOT SERVED for a role's model, for every model: whether its
-  # provider's list has it, by the cache. A named provider that declares no models is in
-  # the list as `name/`, which names no model to look for.
+  # What `troupe models` says of each model, a role's loudly: whether its provider's list
+  # has it, by the cache. A named provider that declares no models is in the list as
+  # `name/`, which names no model to look for.
   defp served(_config, %{model: nil}, _sources), do: {nil, []}
 
   defp served(config, choice, sources) do

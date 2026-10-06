@@ -39,11 +39,16 @@ defmodule Troupe.Sessions.Sealer do
 
   ## When another device has the session
 
-  A report is where the plane fences a session: one it refuses as stale, which `:report`
-  answers as `{:error, :stale_version}`, means another device claimed it at a newer
-  epoch. The sealer seals nothing more, not even on its way down, and stops with
-  `{:shutdown, :stale_version}`, so a host restarts it only after a crash (issue #433).
-  A pod's reports are queued and answer nothing, so this is a daemon's.
+  The plane fences a session at two places, and either refusal means another device
+  claimed it at a newer epoch. A write the store refuses as stale, `{:error,
+  :stale_version}` from `Storage`, is the first: a daemon's store asks the plane to sign
+  each write and names the epoch it holds, so it learns before it writes anything under
+  the session's prefix, the segment or the manifest (issue #441, Decision 800). A report
+  `:report` answers `{:error, :stale_version}` is the second, for a plane from before that
+  signs whatever epoch it is named. Either way the sealer writes and reports nothing
+  more, not even on its way down, and stops with `{:shutdown, :stale_version}`, so a host
+  restarts it only after a crash (issue #433). A pod's store and reports answer neither,
+  so this is a daemon's.
   """
 
   use GenServer
@@ -212,13 +217,13 @@ defmodule Troupe.Sessions.Sealer do
     |> Enum.reverse()
   end
 
-  # After a seal, carry on, or stop where the plane refused its report as stale.
+  # After a seal, carry on, or stop where the plane refused a write or the report as stale.
   defp sealed(%__MODULE__{fenced: true} = state), do: {:stop, {:shutdown, :stale_version}, state}
   defp sealed(state), do: {:noreply, state}
 
   # -- sealing ----------------------------------------------------------------
 
-  # Nothing after a stale report: what this device would write now is beside the epoch
+  # Nothing after a stale refusal: what this device would write now is beside the epoch
   # another device holds.
   defp seal(%__MODULE__{fenced: true} = state), do: state
   defp seal(%__MODULE__{pending: []} = state), do: state
@@ -242,6 +247,10 @@ defmodule Troupe.Sessions.Sealer do
         |> write_manifest()
         |> maybe_snapshot()
         |> report(segment)
+
+      # Another device holds the session, and the plane would not sign this write.
+      {:error, :stale_version} ->
+        %{state | fenced: true}
 
       # A daemon's store when nobody is linked, or the person signed out: nobody to seal for
       # yet, which is a state and not a fault. Kept, as below, for the link that comes.
@@ -273,11 +282,13 @@ defmodule Troupe.Sessions.Sealer do
   end
 
   # Rewritten on every seal, because it is what a rebuild reads and a rebuild has to
-  # find the session where it actually got to.
+  # find the session where it actually got to. Not where another device claimed the
+  # session since the segment went up: the manifest is then the holder's.
   defp write_manifest(state) do
     context = state.context
 
-    Storage.put_manifest(context.store, context.session_id, %{
+    context.store
+    |> Storage.put_manifest(context.session_id, %{
       kind: Context.kind(context),
       team: Context.team_name(context),
       owner_subject: context.owner_subject,
@@ -289,10 +300,15 @@ defmodule Troupe.Sessions.Sealer do
       object_bytes: state.object_bytes,
       latest_segment: state.segments |> List.first() |> then(& &1.key)
     })
-
-    state
+    |> fence(state)
   end
 
+  # A write refused as stale is the plane's fence, as a refused report is; anything else
+  # a write answers is the next seal's to put right.
+  defp fence({:error, :stale_version}, state), do: %{state | fenced: true}
+  defp fence(_written, state), do: state
+
+  defp maybe_snapshot(%__MODULE__{fenced: true} = state), do: state
   defp maybe_snapshot(%__MODULE__{snapshot: nil} = state), do: state
 
   defp maybe_snapshot(state) do
@@ -303,9 +319,12 @@ defmodule Troupe.Sessions.Sealer do
         {:ok, fold} ->
           # Stamped with the format and the build that computed it, so a later Troupe
           # can tell a fold it can use from one it merely recognises the shape of.
-          wrapped = Snapshot.wrap(fold, state.sealed_through)
-          Storage.put_snapshot(context.store, context.session_id, context.data_key, state.sealed_through, wrapped)
-          %{state | last_snapshot_at: state.sealed_through}
+          seq = state.sealed_through
+          wrapped = Snapshot.wrap(fold, seq)
+
+          context.store
+          |> Storage.put_snapshot(context.session_id, context.data_key, seq, wrapped)
+          |> fence(%{state | last_snapshot_at: seq})
 
         _ ->
           state
@@ -317,7 +336,10 @@ defmodule Troupe.Sessions.Sealer do
 
   # Upload first, then report. A segment the plane has been told about but that is not
   # in storage would make a rebuild claim history it cannot produce. A report refused as
-  # stale is another device holding the session, and the last one this sealer makes.
+  # stale is another device holding the session, and the last one this sealer makes; one
+  # whose manifest was refused so is not made, since the plane would refuse it too.
+  defp report(%__MODULE__{fenced: true} = state, _segment), do: state
+
   defp report(state, segment) do
     reported =
       state.report.(%{
