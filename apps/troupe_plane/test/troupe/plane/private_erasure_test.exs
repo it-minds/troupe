@@ -15,6 +15,7 @@ defmodule Troupe.Plane.PrivateErasureTest do
 
   use Troupe.Plane.DataCase, async: false
 
+  import ExUnit.CaptureLog
   import Troupe.ObjectStoreCase, only: [locked_bucket: 1, hold: 2, hold: 3]
 
   alias Troupe.KMS
@@ -392,11 +393,12 @@ defmodule Troupe.Plane.PrivateErasureTest do
     end
   end
 
-  # Issue #348 is about private sessions. A team session's erasure is a pod's, and stays
-  # exactly what it was: pushed to a healthy pod of its profile, or left for the next one
-  # to enrol, and its key is never the plane's to touch.
+  # A team session's key is the plane's to destroy too (Decision 811): a pod's credential
+  # may destroy none, so a pod asked to left every one behind (issue #470). The pod is
+  # still told at once, for its copy and the objects, and recorded once the key is gone.
   describe "a team session" do
-    test "is still erased by a pod of its profile", %{root: root, port: port} do
+    test "has its key destroyed by the plane and its objects by a pod of its profile",
+         %{root: root, port: port} do
       team_with_grant("engineering", "dev", name: "engineering")
       owner = person("owner-#{unique()}@example.test", ["engineering"])
       FakePod.enrol(port, "dev-token", "troupe-w-dev-0")
@@ -407,16 +409,162 @@ defmodule Troupe.Plane.PrivateErasureTest do
       path = KMS.path("engineering", id)
       write_key(root, path)
 
+      assert {:ok, %{"erased" => true, "state" => "erased"}} =
+               Harness.call("session.erase", %{"session_id" => id}, as(owner))
+
+      assert_receive {:pushed, "session.erase", %{"session_id" => ^id}}, 5_000
+
+      refute key_present?(root, path)
+      assert Sessions.get(id).state == "erased"
+      assert Erasure.tombstone_for(id).applied_by == ["troupe-w-dev-0"]
+      assert Erasure.tombstone_for(id).key_destroyed_at
+    end
+
+    test "whose key the key manager refuses is pending and refused everything but a look " <>
+           "and another erase, until a later pass destroys it",
+         %{root: root, port: port} = context do
+      team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("owner-#{unique()}@example.test", ["engineering"])
+      bea = person("bea-#{unique()}@example.test", [])
+      FakePod.enrol(port, "dev-token", "troupe-w-dev-0")
+
+      assert {:ok, %{"session_id" => id}} =
+               Harness.call("session.create", %{"profile" => "dev"}, as(owner))
+
+      path = KMS.path("engineering", id)
+      write_key(root, path)
+
+      # A link made before the erasure, which outlives it.
+      share = %{"session_id" => id, "role" => "observe"}
+      assert {:ok, %{"secret" => secret}} = Harness.call("session.share", share, as(owner))
+
+      without_delete(context, fn ->
+        assert {:ok, %{"erased" => false, "state" => "erasure_pending"}} =
+                 Harness.call("session.erase", %{"session_id" => id}, as(owner))
+
+        # The pod is told at once all the same, and not recorded while the key is there.
+        assert_receive {:pushed, "session.erase", %{"session_id" => ^id}}, 5_000
+        assert Erasure.tombstone_for(id).applied_by == []
+        assert key_present?(root, path)
+        assert Sessions.get(id).state == "erasure_pending"
+
+        # Listed and looked at as what it is, and erasing again tries again.
+        assert {:ok, %{"sessions" => listed}} = Harness.call("sessions.list", %{}, as(owner))
+        assert %{"state" => "erasure_pending"} = Enum.find(listed, &(&1["id"] == id))
+
+        assert {:ok, %{"state" => "erasure_pending"}} =
+                 Harness.call("session.get", %{"session_id" => id}, as(owner))
+
+        assert {:ok, %{"state" => "erasure_pending"}} =
+                 Harness.call("session.erase", %{"session_id" => id}, as(owner))
+
+        # Nothing reads it, wakes it, mints for it, copies it or links to it.
+        for {method, params, user} <- [
+              {"session.open", %{"session_id" => id}, owner},
+              {"session.open", %{"session_id" => id, "mode" => "activate"}, owner},
+              {"token.mint", %{"session_id" => id}, owner},
+              {"session.fork", %{"session_id" => id}, owner},
+              {"session.spawn", %{"parent" => id, "prompt" => "go on"}, owner},
+              {"session.share", %{"session_id" => id, "role" => "observe"}, owner},
+              {"session.redeem", %{"secret" => secret}, bea}
+            ] do
+          assert {:error, error} = Harness.call(method, params, as(user)), "#{method} answered"
+          assert error.message == "not_found", "#{method}: #{inspect(error)}"
+          assert error.data.reason == "erased"
+        end
+
+        # A pod's late report of a dormancy does not bring it back.
+        assert {:error, :parked} = Sessions.dormant(id)
+        assert Sessions.get(id).state == "erasure_pending"
+
+        # Another pod enrolling drops its copy, and is not recorded for it yet either.
+        assert [%{"session_id" => ^id}] = Erasure.pending_for("dev", "troupe-w-dev-1")
+        Erasure.applied(id, "troupe-w-dev-1")
+        assert Erasure.tombstone_for(id).applied_by == []
+      end)
+
+      # The key manager answers again.
+      assert %{destroyed: 1, failed: 0} = Erasure.retry()
+
+      refute key_present?(root, path)
+      assert Sessions.get(id).state == "erased"
+      assert_receive {:pushed, "session.erase", %{"session_id" => ^id}}, 5_000
+      assert Erasure.tombstone_for(id).applied_by == ["troupe-w-dev-0"]
+
+      assert {:error, %{message: "not_found"}} =
+               Harness.call("session.redeem", %{"secret" => secret}, as(bea))
+    end
+
+    test "whose pod could not delete every object is erased, and the pod told again",
+         %{root: root, port: port} do
+      team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("owner-#{unique()}@example.test", ["engineering"])
+
+      FakePod.enrol(port, "dev-token", "troupe-w-dev-0",
+        refuse: %{
+          "session.erase" => %{
+            "code" => -32_010,
+            "message" => "unavailable",
+            "data" => %{"reason" => "held", "objects_deleted" => 1, "objects_left" => 1}
+          }
+        }
+      )
+
+      assert {:ok, %{"session_id" => id}} =
+               Harness.call("session.create", %{"profile" => "dev"}, as(owner))
+
+      path = KMS.path("engineering", id)
+      write_key(root, path)
+
       assert {:ok, %{"erased" => true}} =
                Harness.call("session.erase", %{"session_id" => id}, as(owner))
 
-      assert_receive {:pushed, "session.erase", %{"session_id" => ^id, "team" => "engineering"}},
-                     5_000
+      refute key_present?(root, path)
+      assert Erasure.tombstone_for(id).applied_by == []
+      assert [%{"session_id" => ^id}] = Erasure.pending_for("dev", "troupe-w-dev-0")
+    end
 
-      assert Sessions.get(id).state == "erased"
+    # The upgrade: a team session an earlier release erased still has its key, since the pod
+    # it asked could not destroy one, and the pass that runs as the plane starts destroys it.
+    test "left with its key by an earlier release has it destroyed by the pass the plane " <>
+           "starts with",
+         %{root: root} do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("owner-#{unique()}@example.test", ["engineering"])
+      id = SessionId.generate()
+
+      {:ok, _} =
+        Sessions.create(%{
+          id: id,
+          owner_id: owner.id,
+          owner_subject: owner.subject,
+          team_id: team.id,
+          profile: "dev",
+          state: "erased"
+        })
+
+      Repo.insert!(%Tombstone{
+        session_id: id,
+        reason: "requested",
+        actor: owner.subject,
+        erased_at: DateTime.utc_now(),
+        applied_by: ["troupe-w-dev-0"]
+      })
+
+      path = KMS.path("engineering", id)
+      write_key(root, path)
+
+      log =
+        capture_log(fn ->
+          assert {:ok, pass} = Erasure.Retry.ensure()
+          # Its first pass is the first thing in its mailbox.
+          :sys.get_state(pass, 30_000)
+        end)
+
+      refute key_present?(root, path)
+      assert Erasure.tombstone_for(id).key_destroyed_at
       assert Erasure.tombstone_for(id).applied_by == ["troupe-w-dev-0"]
-      # The pod destroys it; the plane does not.
-      assert key_present?(root, path)
+      assert log =~ "erasure pass destroyed 1 session key(s)"
     end
 
     test "is never handed to a person's daemon", %{port: port} do
@@ -435,7 +583,8 @@ defmodule Troupe.Plane.PrivateErasureTest do
       assert refused.message == "not_found"
     end
 
-    test "with no healthy pod is erased and left for the next one to enrol", %{root: root} do
+    test "with no healthy pod has its key destroyed and is left for the next one to enrol",
+         %{root: root} do
       team = team_with_grant("engineering", "dev", name: "engineering")
       owner = person("owner-#{unique()}@example.test", ["engineering"])
       id = SessionId.generate()
@@ -457,7 +606,7 @@ defmodule Troupe.Plane.PrivateErasureTest do
                Harness.call("session.erase", %{"session_id" => id}, as(owner))
 
       assert Sessions.get(id).state == "erased"
-      assert key_present?(root, path)
+      refute key_present?(root, path)
 
       assert [%{"session_id" => ^id, "team" => "engineering"}] =
                Erasure.pending_for("dev", "troupe-w-dev-0")

@@ -139,7 +139,7 @@ Rendered by `Troupe.KMS.Policy`, so the tested string and the installed one are 
 | Policy | Grants |
 |---|---|
 | `troupe-worker-<profile>` | create, read, update on `<mount>/data/troupe/teams/<team>/sessions/*` and read, list on the metadata path, per granted team; never delete |
-| `troupe-plane` | delete, list, read on `<mount>/metadata/troupe/teams/+/sessions/*` and `<mount>/metadata/troupe/people/+/sessions/*`, and nothing on the data path: it can destroy a key (erasure; a private session's it destroys itself, Decision 756) and read none |
+| `troupe-plane` | delete, list, read on `<mount>/metadata/troupe/teams/+/sessions/*` and `<mount>/metadata/troupe/people/+/sessions/*`, and nothing on the data path: it destroys an erased session's key, a team's or a person's (Decisions 756 and 811), and reads none |
 | signing | create, update on `transit/sign/troupe-session-tokens`, read on its key; not exportable |
 | `troupe-worker-mcp-identity` | update on `transit/sign/<the pod's namespace>.*`, templated on the namespace Kubernetes auth vouched for (`Policy.mcp_identity/2`, Decision 747): a pod signs its profile's MCP assertions with the keys named after its own namespace and with no other, never the session-token key |
 

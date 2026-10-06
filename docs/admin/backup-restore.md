@@ -42,12 +42,14 @@ kubectl -n troupe-system exec deploy/troupe-plane -- /app/bin/troupe_plane eval 
 gateway and never repairs ([integrations.md §5](integrations.md#5-llm-gateway)).
 
 **Erasure is ordered so a restore cannot bring a session back**: a tombstone first (the
-session goes read-only), then a healthy pod of the profile destroys the key's metadata —
-every version — and then deletes the objects. A pod that was offline applies pending
-erasures when it enrols. A private session has no pod: the plane destroys its key itself,
-and deletes its objects when the owner's daemon next connects. Because the key goes first,
-old object versions and backup copies are unreadable. That holds only with **bucket
-versioning on**.
+session goes read-only), then the plane destroys the key's metadata — every version — and
+then a healthy pod of the profile deletes the objects. A pod that was offline applies
+pending erasures when it enrols. A private session has no pod: the plane deletes its objects
+when the owner's daemon next connects. Because the key goes first, old object versions and
+backup copies are unreadable. That holds only with **bucket versioning on**, and only once
+the key is gone: a session the key manager refused is `erasure_pending` until a retry
+destroys it (Decision 811), and keys left by team-session erasures before 0.9.0 are
+destroyed once on upgrade.
 
 ## 3. What it does not provide
 

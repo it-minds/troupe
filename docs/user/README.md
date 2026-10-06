@@ -113,7 +113,7 @@ session is created on one; with only one, you never have to name it.
 
 **Session.** One agent working in one directory, with a durable log of everything that
 happened: `active`, `dormant` (stopped, log kept, can be woken), `read_only`, or `erased`.
-A private session you erase reads `erasure_pending` until the plane has destroyed its key.
+A session you erase reads `erasure_pending` until the plane has destroyed its key.
 Erased on your machine, it is erased at the plane too and goes from your machine once the
 key is gone; erased elsewhere, the copy on your machine goes the next time your client
 signs your daemon in. Erasing one on your machine needs that sign-in: without it the
