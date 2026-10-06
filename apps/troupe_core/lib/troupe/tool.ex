@@ -23,6 +23,9 @@ defmodule Troupe.Tool.Ctx do
     # The `/loop` this turn is an iteration of, or `nil`: what offers `goal_complete`.
     :loop,
     todos: [],
+    # The model calls this agent's turn has made so far, its subagents' included: what
+    # offers the task list to a profile that did not ask for it by name (Decision 793).
+    turn_calls: 0,
     depth: 0,
     max_depth: 3,
     budget: nil,
@@ -42,6 +45,7 @@ defmodule Troupe.Tool.Ctx do
           bundle: map() | nil,
           loop: String.t() | nil,
           todos: [Troupe.Todo.t()],
+          turn_calls: non_neg_integer(),
           depth: non_neg_integer(),
           max_depth: pos_integer(),
           budget: Troupe.Budget.t() | nil,

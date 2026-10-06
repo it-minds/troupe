@@ -65,8 +65,12 @@ defmodule Troupe.Agent.PromptCacheTest do
 
     # Every call reads all the call before it sent, the ten after a rewritten task list
     # among them: the list the system prompt shows is the one the turn began with, so a
-    # rewrite changes nothing in front of the conversation's marks (Decision 792).
-    for n <- 2..@calls do
+    # rewrite changes nothing in front of the conversation's marks (Decision 792). All but
+    # the second: the list's tools are offered once there is a list (Decision 793), so it
+    # is the first call to carry them, in front of everything the first wrote.
+    assert Enum.at(reads, 1) == 0
+
+    for n <- 3..@calls do
       assert Enum.at(reads, n - 1) == Usage.total_input(Enum.at(usages, n - 2)),
              "call #{n} reads all of call #{n - 1}'s prompt: #{inspect(reads)}"
     end
@@ -151,8 +155,11 @@ defmodule Troupe.Agent.PromptCacheTest do
 
     # The list joins the system message there (Decision 770), the prompt's first message:
     # rewritten within the turn, it left only the tools to read. Held for the turn, it
-    # leaves the whole of the call before.
-    for {{_n, _path, _body, previous}, {n, _, _, current}} <- Enum.zip(requests, tl(requests)) do
+    # leaves the whole of the call before, from the third call: the second is the first to
+    # offer the list's tools (Decision 793).
+    later = tl(requests)
+
+    for {{_n, _path, _body, previous}, {n, _, _, current}} <- Enum.zip(later, tl(later)) do
       assert current["prompt_tokens_details"]["cached_tokens"] == previous["prompt_tokens"],
              "call #{n} reads all of call #{n - 1}'s prompt"
     end

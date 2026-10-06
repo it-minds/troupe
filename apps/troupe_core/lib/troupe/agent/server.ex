@@ -1922,6 +1922,7 @@ defmodule Troupe.Agent.Server do
       watcher: state.watcher || Registry.watcher_pid(state.session_id),
       bundle: state.bundle,
       todos: state.todos,
+      turn_calls: state.turn.calls,
       depth: State.depth(state),
       max_depth: state.config.max_depth,
       budget: state.budget,
