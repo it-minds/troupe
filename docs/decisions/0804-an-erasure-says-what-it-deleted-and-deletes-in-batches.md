@@ -104,4 +104,8 @@ the fifteen seconds a daemon waits for one (`Troupe.Gateway.Plane`).
   the device to be told again, and after the hold is lifted it is recorded. The worker's
   `ErasureTest`: a pod refused one object is not recorded, the erasure is still pending
   for the profile, and the pod's next enrolment finishes it and is recorded (on the tip it
-  was recorded at once).
+  was recorded at once). And the installed daemon's own `troupe_protocol`, loaded by its
+  own erts against the development MinIO: 20,000 versions under one prefix deleted in 2.8
+  seconds, none left (107 seconds with the build installed before it), and with one
+  version held `{:error, {:not_deleted, ...}}` with two deleted and that one left, MinIO
+  refusing it per key as `InvalidRequest` (`{:ok, 3}` before).
