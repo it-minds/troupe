@@ -17,7 +17,9 @@ defmodule Troupe.Agent.ACPAgentTest do
   alias Troupe.Agent.ACPAgent
   alias Troupe.{Mounts, Workspace}
 
-  @moduletag timeout: 30_000
+  # Above the longest wait a test here declares (30 s for a result, then 5 and 3 more), so a
+  # subprocess that is slow fails the assertion that waited for it, not the test's clock.
+  @moduletag timeout: 60_000
 
   setup do
     base = Path.join(System.tmp_dir!(), "troupe-acp-#{System.unique_integer([:positive])}")
@@ -47,7 +49,8 @@ defmodule Troupe.Agent.ACPAgentTest do
 
   # A real subprocess that speaks enough ACP to be a delegate. Elixir rather than a shell
   # script or Python: it is the one interpreter every machine that runs this suite has, and
-  # a fake agent that cannot start is a test about the fixture.
+  # a fake agent that cannot start is a test about the fixture. It speaks JSON through the
+  # standard library's `JSON`, so it needs nothing on its code path.
   #
   # It takes the path to ask for as its argument, which is how one script covers both the
   # path that resolves and the path that does not.
@@ -74,7 +77,7 @@ defmodule Troupe.Agent.ACPAgentTest do
       defp handle("", _asking_for), do: :ok
 
       defp handle(line, asking_for) do
-        case Jason.decode(line) do
+        case JSON.decode(line) do
           {:ok, %{"method" => "initialize", "id" => id}} ->
             send_json(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"protocolVersion" => 1}})
 
@@ -98,7 +101,7 @@ defmodule Troupe.Agent.ACPAgentTest do
           "params" => %{"path" => asking_for}
         })
 
-        answer = IO.read(:stdio, :line) |> String.trim() |> Jason.decode!()
+        answer = IO.read(:stdio, :line) |> String.trim() |> JSON.decode!()
 
         text =
           case answer do
@@ -125,7 +128,7 @@ defmodule Troupe.Agent.ACPAgentTest do
       end
 
       defp send_json(message) do
-        IO.puts(Jason.encode!(message))
+        IO.puts(JSON.encode!(message))
       end
     end
 
@@ -139,20 +142,13 @@ defmodule Troupe.Agent.ACPAgentTest do
     %{
       name: "gemini",
       command: System.find_executable("elixir"),
-      # The subprocess is a bare `elixir`, so it has no dependencies unless it is told
-      # where they are. One `-pa` per directory: the flag takes a single argument, and a
-      # glob left for a shell to expand would turn the rest into script arguments — which
-      # is why there is no shell here at all.
-      args: code_paths() ++ [fake_agent(base), asking_for],
+      # A bare `elixir` and no `-pa`. Each `-pa` directory is looked in first for every
+      # module the script's compile loads, and with one for each of the build's fifty-odd
+      # apps the subprocess took seconds to start instead of half of one, and over twenty
+      # on a loaded machine, where "a subprocess that exits" ran out of time.
+      args: [fake_agent(base), asking_for],
       hash: nil
     }
-  end
-
-  defp code_paths do
-    [Mix.Project.build_path(), "lib", "*", "ebin"]
-    |> Path.join()
-    |> Path.wildcard()
-    |> Enum.flat_map(&["-pa", &1])
   end
 
   defp delegate_to(context, asking_for) do
@@ -324,7 +320,7 @@ defmodule Troupe.Agent.ACPAgentTest do
       end
 
       defp handle(line) do
-        case Jason.decode(line) do
+        case JSON.decode(line) do
           {:ok, %{"method" => "initialize", "id" => id}} ->
             reply(id, %{"protocolVersion" => 1})
 
@@ -341,7 +337,7 @@ defmodule Troupe.Agent.ACPAgentTest do
       end
 
       defp reply(id, result) do
-        IO.puts(Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result}))
+        IO.puts(JSON.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result}))
       end
     end
 
@@ -363,7 +359,7 @@ defmodule Troupe.Agent.ACPAgentTest do
       entry = %{
         name: "quitter",
         command: System.find_executable("elixir"),
-        args: code_paths() ++ [quitting_agent(context.base, starts)],
+        args: [quitting_agent(context.base, starts)],
         hash: nil
       }
 
