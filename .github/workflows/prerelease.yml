@@ -41,7 +41,8 @@ concurrency:
 jobs:
   plan:
     name: name it
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.name.outputs.version }}
       tag: ${{ steps.name.outputs.tag }}
@@ -80,7 +81,8 @@ jobs:
   draft:
     name: tag ${{ needs.plan.outputs.tag }}
     needs: [plan]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -182,7 +184,8 @@ jobs:
     needs: [plan, draft, images, native]
     # Whatever was asked for has to have worked; what was not asked for was skipped.
     if: ${{ !cancelled() && needs.draft.result == 'success' && !contains(needs.*.result, 'failure') }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
     permissions:
       contents: write
       packages: write

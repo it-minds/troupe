@@ -664,6 +664,16 @@ Found by the chunk 20 fixers, 2026-10-06.
 
 Found by the #437 fixer, 2026-10-06.
 
+### D76 - Models in the clients: small leftovers (low)
+
+- The VS Code extension's Settings view says "Command failed: <path> config --explain
+  --json ..." for a config that doesn't load: that command exits 1 with an `errors` object
+  on standard output and nothing on standard error, and the view reads standard error only.
+- `troupe models` prints "200k ctx" for a model nobody serves that no role names; only a
+  role's model reads NOT SERVED (the JSON's `context` for one is D70's item).
+
+Found by the chunk 20 fixer of slot E20, 2026-10-06.
+
 ### D77 - CI on GitHub's hosted runners (low)
 
 - The native build jobs (`.github/workflows/native.yml`) set no `timeout-minutes`, so a
