@@ -638,6 +638,58 @@ Found by the chunk 19 fixers, 2026-10-05.
 
 Found by the chunk 19 fixers, 2026-10-05.
 
+### D74 - Model calls: what the 0.8.5 work left (low)
+
+- A 5xx or 429 that outlasts its retries still says only its status:
+  `Provider.describe_error` prints `{:retries_exhausted, {:http_status, 503}}` as
+  "gave up after retrying: {:http_status, 503}", since `with_retries` carries no body.
+- An error event inside an Anthropic stream (`{:api_error, msg}`) is shown as it came,
+  neither trimmed nor masked, unlike an error response since Decision 791.
+- `qwen3-235b` never puts two tool calls in one response (179 of 179 in the live bench), so
+  `build.md`'s "one `delegate` call per item, all in the same turn, so they run
+  concurrently" can't happen on it. The OpenAI-compatible adapter sets no
+  `parallel_tool_calls`.
+
+Found by the chunk 20 fixers, 2026-10-06.
+
+### D75 - Decision files: small leftovers (low)
+
+- `symbols:` in a decision's front matter is type-checked but not checked against the code,
+  as #437 had it optionally.
+- Gists were drafted from titles: a long title gives a gist cut off with "…", which reads
+  badly in `mix troupe.decisions --for`.
+- Several migrated bodies run a `- ` list straight on from a paragraph with no blank line
+  (683 and 789 among them): GitHub renders it, the docs site's Markdown probably doesn't.
+- Twelve root decisions govern a component directory rather than files (92, 112, 253, 256,
+  257, 289, 461, 497, 498, 675, 708, 730), and the 51 TUI decisions no citation pointed
+  at govern `clients/tui` as a whole.
+
+Found by the #437 fixer, 2026-10-06.
+
+### D76 - Models in the clients: small leftovers (low)
+
+- The VS Code extension's Settings view says "Command failed: <path> config --explain
+  --json ..." for a config that doesn't load: that command exits 1 with an `errors` object
+  on standard output and nothing on standard error, and the view reads standard error only.
+- `troupe models` prints "200k ctx" for a model nobody serves that no role names; only a
+  role's model reads NOT SERVED (the JSON's `context` for one is D70's item).
+
+Found by the chunk 20 fixer of slot E20, 2026-10-06.
+
+### D77 - CI on GitHub's hosted runners (low)
+
+- The native build jobs (`.github/workflows/native.yml`) set no `timeout-minutes`, so a
+  job whose runner hangs waits GitHub's six hours: the 0.8.4 release's macOS TUI build sat
+  in "Build the release" for over half an hour until it was cancelled and run again (it
+  then took six minutes).
+- `ubuntu-latest` moves to Ubuntu 26 on 2026-10-19 (GitHub's notice on every run). Nothing
+  has checked that `erlef/setup-beam`, Zig and the builds work there; pinning
+  `ubuntu-24.04`, or a trial run, before then would.
+- `Troupe.Agent.ACPAgentTest` ("a subprocess that exits is reported as partial") fails one
+  or two runs in twelve on a loaded machine and passes alone.
+
+Found by the coordinator, 2026-10-06.
+
 ## Taken
 
 | Defect | Taken by |
@@ -717,7 +769,8 @@ Found by the chunk 19 fixers, 2026-10-05.
 | D59's second item and D61's first two - the clients showed a private session as a local one, and none could claim one | PR #431 |
 | D69's first item - a model call past its timeout was never stopped, and its usage not counted | PR #435 |
 | D69's second item - Anthropic's newest models think unasked, and that thinking is dropped on replay | #427 |
-| D70's third item - the task list takes model calls of its own on `qwen3-235b` | #428 |
+| D70's third item - the task list takes model calls of its own on `qwen3-235b` | #428, PR #445 |
+| D65's first item - a rewritten task list made the next call write the conversation to the cache again | #389, PR #447 |
 | D66's first item - a summariser call that never answered kept the agent compacting | #404, PR #421 |
 
 ## Checked and not a defect
