@@ -98,18 +98,21 @@ defmodule Troupe.Gateway.AutospawnTest do
   end
 
   # `start "C:\Program Files\...\troupe-daemon.cmd"` is a window titled with the path, and
-  # nothing started: on Windows the program goes after an empty title, quoted, and the
-  # line through `cmd /s /c`, which leaves the quotes where they are.
-  test "on Windows a program in a directory with a space starts after an empty title", context do
+  # nothing started: on Windows the program goes after a title, quoted, and the line
+  # through `cmd /s /c`, which leaves the quotes where they are. And in a console of its
+  # own, minimised, under `cmd /c`: one started `/b` shared the terminal's, and closing
+  # the terminal ended it (Decision 802).
+  test "on Windows a program in a directory with a space starts in its own console", context do
     dir = Path.join(Path.dirname(context.script), "with space")
     File.mkdir_p!(dir)
     program = Path.join(dir, "troupe-daemon.cmd")
     File.write!(program, "")
 
-    assert Daemon.detach_line(program, {:win32, :nt}) == {:shell, ~s("start "" /b "#{program}" >NUL 2>&1")}
+    assert Daemon.detach_line(program, {:win32, :nt}) ==
+             {:shell, ~s("start "troupe-daemon" /min cmd /c ""#{program}""")}
 
     assert Daemon.detach_line("troupe-daemon run", {:win32, :nt}) ==
-             {:shell, ~s("start "" /b troupe-daemon run >NUL 2>&1")}
+             {:shell, ~s("start "troupe-daemon" /min cmd /c "troupe-daemon run"")}
 
     assert {:exec, "/bin/sh", ["-c", "nohup troupe-daemon >/dev/null 2>&1 &"]} =
              Daemon.detach_line("troupe-daemon", {:unix, :linux})

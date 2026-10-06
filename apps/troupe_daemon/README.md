@@ -27,7 +27,11 @@ troupe-daemon version
 `start`, everything else is `eval` in a second short-lived VM that starts no daemon.
 Clients start it themselves: `Troupe.Protocol.Daemon` (Elixir) and the desktop shell find
 `troupe-daemon` on the `PATH` and spawn `run` when nothing answers. `run` is idempotent —
-a second one on a machine with a daemon already up says where it is and exits 0.
+a second one on a machine with a daemon already up says where it is and exits 0. On
+Windows a daemon a client starts runs in a console window of its own, minimised to the
+taskbar, as one started at login does: closing the terminal it was started from leaves it
+running, and closing its own window stops it
+([Decision 802](../../docs/decisions/0802-a-started-daemon-has-its-own-console-and-open-asks-the-plane.md)).
 
 ## Install
 
@@ -86,8 +90,9 @@ takes them off its address bar and keeps them in the browser, so a reload or a n
 connects again; the token changes every time the daemon starts, and running `open` again
 hands over the new one. Nothing printed names the token.
 
-The web app is the one on the plane the daemon is linked to, at its `/app/`, or `--url`'s,
-which is needed when the daemon is not linked or the app is served somewhere else. The
+The web app is `--url`'s, or the one the plane the daemon is linked to says it serves (its
+`/.well-known/troupe`), or, from a plane that does not say or does not answer, the one at
+its `/app/`; `--url` is needed when the daemon is not linked. The
 daemon admits that page's origin by itself, as it admits the linked plane's
 ([Decision 797](../../docs/decisions/0797-troupe-daemon-open-connects-the-web-app.md)); an
 upgrade it refuses is a warning in its log, naming the origin. `BROWSER`, where it is set,

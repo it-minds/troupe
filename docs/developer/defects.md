@@ -687,12 +687,6 @@ Found by the #123 fixer, 2026-10-06.
 
 ### D79 - `troupe-daemon open` and the loopback: what #449 left (medium)
 
-- On Windows the daemon `open` starts goes through `Troupe.Protocol.Daemon.detach_line`
-  (`start "" /b`), sharing the terminal's console: closing that terminal or pressing Ctrl-C
-  in it can end the daemon. `start /min`, as the login entry starts it (Decision 762),
-  would not.
-- `open` assumes the chart's `/app/` mount, since the plane's discovery document
-  (`/.well-known/troupe`) doesn't say where its app is.
 - The GUI reads `#daemon=` only when the page loads; a fragment set in an open tab is not
   taken (`open` always opens a new one).
 - The loopback admits an upgrade that carries no `Origin` header (the token is still

@@ -290,20 +290,25 @@ defmodule Troupe.Daemon.CLI do
   Starts the daemon if none is answering, as a client does, then opens
   `<web app>#daemon=<port>:<token>` with the loopback WebSocket's port and token, which
   the page reads, takes off its address bar and keeps. The web app is `url`, or the one
-  on the plane this daemon is linked to, at `/app/` where the chart serves it; its origin
-  is admitted for as long as this token lasts. Nothing printed names the token.
+  the plane this daemon is linked to says it serves, or that plane's `/app/` where it says
+  nothing; its origin is admitted for as long as this token lasts. Nothing printed names
+  the token.
 
   `opts` are for tests: `:ensure` finds or starts the daemon (`{:ok, endpoint}` or
-  `{:error, reason}`), `:browse` is given what the browser should open, and `:os_type`.
+  `{:error, reason}`), `:browse` is given what the browser should open, `:discover` is
+  given the plane's address and answers with its discovery document (`{:ok, map}`, or
+  anything else for none), and `:os_type`.
   """
   @spec open(String.t() | nil, keyword()) :: non_neg_integer()
   def open(url, opts \\ []) do
     os = Keyword.get(opts, :os_type, :os.type())
     ensure = Keyword.get(opts, :ensure, &ensure_running/0)
     browse = Keyword.get(opts, :browse, &browse(&1, os))
+    discover = Keyword.get(opts, :discover, &discover/1)
 
-    with {:ok, app} <- web_app(url),
+    with {:ok, target} <- target(url),
          {:ok, endpoint} <- ensure.(),
+         {:ok, app} <- web_app(target, discover),
          {:ok, ws} <- await_ws(),
          :ok <- admit(app),
          :ok <- browse.(browser_target(app <> "#daemon=#{ws.port}:#{ws.token}", os)) do
@@ -317,13 +322,12 @@ defmodule Troupe.Daemon.CLI do
     end
   end
 
-  # `--url` as given, without a fragment of its own, or the web app the plane this daemon
-  # is linked to serves at `/app/` (Decision 670); a plane whose app is elsewhere is
-  # `--url`'s.
-  defp web_app(nil) do
+  # What `open` opens, settled before anything is started: `--url`, or the plane this
+  # daemon is linked to, which `web_app/2` asks.
+  defp target(nil) do
     case Troupe.Identity.get() do
       %{plane_url: plane} when is_binary(plane) and plane != "" ->
-        web_app(String.trim_trailing(plane, "/") <> "/app/")
+        {:ok, {:plane, String.trim_trailing(plane, "/")}}
 
       _ ->
         {:error,
@@ -332,12 +336,56 @@ defmodule Troupe.Daemon.CLI do
     end
   end
 
-  defp web_app(url) do
+  defp target(url), do: address(url)
+
+  # The web app the plane says it serves (`plane.app` in its discovery document, Decision
+  # 802), or, from a plane that does not say or does not answer, the one at its `/app/`,
+  # where the chart mounts it (Decision 670). Asked once the daemon is up, not before: on
+  # Windows, asked first, it left the daemon holding the output of whatever ran `open`, and
+  # a script reading that output waited for as long as the daemon ran.
+  defp web_app({:plane, plane}, discover),
+    do: address(advertised_app(plane, discover) || plane <> "/app/")
+
+  defp web_app(app, _discover), do: {:ok, app}
+
+  # `url` without a fragment of its own, when it is a web address.
+  defp address(url) do
     if Loopback.origin(url) do
       {:ok, URI.to_string(%URI{URI.parse(url) | fragment: nil})}
     else
       {:error, "--url wants the web app's address, starting http:// or https://, not #{inspect(url)}"}
     end
+  end
+
+  # Where the plane says its web app is, resolved against the plane's own address, as a
+  # path or a URL elsewhere; `nil` for anything but an http(s) address.
+  defp advertised_app(plane, discover) do
+    with {:ok, %{"plane" => %{"app" => app}}} when is_binary(app) and app != "" <-
+           discover.(plane),
+         address = URI.to_string(URI.merge(plane <> "/", app)),
+         origin when is_binary(origin) <- Loopback.origin(address) do
+      address
+    else
+      _ -> nil
+    end
+  rescue
+    # A linked address with no scheme, which nothing can be resolved against.
+    ArgumentError -> nil
+  end
+
+  # The plane's discovery document, asked briefly: `open` works offline, and a plane that
+  # does not answer is taken to serve its app where the chart mounts it.
+  defp discover(plane) do
+    case Req.get(plane <> "/.well-known/troupe",
+           receive_timeout: 5_000,
+           connect_options: [timeout: 5_000],
+           retry: false
+         ) do
+      {:ok, %Req.Response{status: 200, body: %{} = body}} -> {:ok, body}
+      other -> {:error, other}
+    end
+  rescue
+    error -> {:error, error}
   end
 
   # As a client starts it, detached; with this release's own wrapper where there is one,
@@ -456,7 +504,7 @@ defmodule Troupe.Daemon.CLI do
   How `target` is opened on `os_type`: with `BROWSER` where it is set, as other tools
   read it; otherwise `start` in `cmd.exe`, `open` on macOS and `xdg-open` elsewhere.
   `start` takes its first quoted argument as a window's title, so it is given an empty
-  one, as `Troupe.Protocol.Daemon.detach_line/2` does.
+  one first, as `Troupe.Protocol.Daemon.detach_line/2` gives it one.
   """
   @spec browse_line(String.t(), {atom(), atom()}, String.t() | nil) ::
           {:shell, String.t()} | {:exec, String.t(), [String.t()]}
