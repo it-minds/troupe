@@ -243,6 +243,16 @@ more specific path. The GUI's Ingress uses the plane's `tlsSecretName` and asks
 cert-manager for nothing — two Ingresses on one host share one certificate — and the
 chart refuses `gui.basePath: /`, because the root of that host is the plane's.
 
+### Its Content-Security-Policy
+
+nginx sends the app's policy, and the headers beside it, on every response, from
+[`docker/headers.conf`](docker/headers.conf) (root Decision 803): scripts from the bundle
+only, no inline script and no `eval`, nothing may frame it, and connections to its own
+origin, the daemon at `127.0.0.1` on any port, and other hosts over TLS only. The app
+keeps the local daemon's token in `localStorage`, so this is what keeps any other script
+off its origin; the plane sends its own policy on everything else on the host. Whatever
+serves the bundle anywhere else should send the same header.
+
 ### Check the digest, not the tag
 
 A tag that already exists in the registry plus `imagePullPolicy: IfNotPresent` means the

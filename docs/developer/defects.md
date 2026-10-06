@@ -692,8 +692,6 @@ Found by the #123 fixer, 2026-10-06.
   taken (`open` always opens a new one).
 - The loopback admits an upgrade that carries no `Origin` header (the token is still
   required).
-- The token kept in `localStorage` and the plane's origin admitted by default make any
-  script on the plane's host able to drive the local daemon while it runs: #460.
 
 Found by the #449 fixer, 2026-10-06.
 

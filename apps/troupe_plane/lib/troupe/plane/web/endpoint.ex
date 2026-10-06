@@ -30,6 +30,10 @@ defmodule Troupe.Plane.Web.Endpoint do
     websocket: [connect_info: [session: @session_options], max_frame_size: 1_048_576]
   )
 
+  # Before anything that answers, so a static file, the API and the console all carry it:
+  # nothing but this release's own files runs on this origin (Decision 803).
+  plug(Troupe.Plane.Web.CSP)
+
   # `tokens.css` is generated from the design tokens and `app.js` is vendored from the
   # Phoenix dependencies; both by a mix task, both committed. The allowlist named only
   # `app.css` — a file that has never existed — while the document asked for `app.js`,
@@ -49,11 +53,12 @@ defmodule Troupe.Plane.Web.Endpoint do
   # sign in — a stylesheet behind the console's door would 404 for exactly that reader.
   # `theme.css` is generated from the Signal kit by `mix troupe.theme`; `brand/` is the
   # mask, as SVG for the page and as the two bitmap formats a favicon cannot avoid.
+  # `webfonts.js` switches the webfonts on, for the front page and the console alike.
   plug(Plug.Static,
     at: "/static",
     from: :troupe_plane,
     gzip: false,
-    only: ~w(theme.css brand),
+    only: ~w(theme.css brand webfonts.js),
     cache_control_for_etags: "public, max-age=31536000, immutable"
   )
 
