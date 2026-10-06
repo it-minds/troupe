@@ -272,10 +272,16 @@ defmodule Troupe.Protocol.Daemon do
 
   @doc """
   How `command` is started detached on `os_type`: through `nohup` in a Unix shell, or
-  `start /b` in `cmd.exe`.
+  `start /min` in `cmd.exe`.
 
-  `start` reads its first quoted argument as the title of a window, so it is given an
-  empty one: without it, a program found on the `PATH` in a directory with a space in its
+  On Windows the daemon gets a console of its own, minimised to the taskbar, as the
+  login entry's does (Decision 762): one started with `start /b` shared the console of the
+  terminal it was started from, and closing that terminal ended it (Decision 802). It
+  runs under `cmd /c`, so its window goes when the daemon does; `start` would run a batch
+  file under `cmd /k`, which keeps the window open after.
+
+  `start` reads its first quoted argument as the title of a window, so the title comes
+  first: without one, a program found on the `PATH` in a directory with a space in its
   name — quoted, as it has to be — was the title, and nothing started. The line goes
   through `System.shell/2`, which is `cmd /s /c` there and takes the outer pair of
   quotes off, leaving the rest as written, as the TUI's `troupe daemon` does. A `command`
@@ -286,7 +292,7 @@ defmodule Troupe.Protocol.Daemon do
           {:shell, String.t()} | {:exec, String.t(), [String.t()]}
   def detach_line(command, {:win32, _}) do
     program = if File.regular?(command), do: ~s("#{command}"), else: command
-    {:shell, ~s("start "" /b #{program} >NUL 2>&1")}
+    {:shell, ~s("start "troupe-daemon" /min cmd /c "#{program}"")}
   end
 
   def detach_line(command, _os_type),

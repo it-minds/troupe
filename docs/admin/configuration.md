@@ -62,7 +62,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_HTTP_PORT` | `4000` | listen port | `plane.httpPort` |
 | `TROUPE_HOST` | `localhost` | endpoint host; issuer fallback | `plane.host` |
 | `TROUPE_BASE_URL` | unset | public URL: console redirect URI, MCP resource and scope, token issuer. Effectively required; the chart always renders it | `plane.baseUrl`, default `https://<plane.host>` |
-| `TROUPE_APP_URL` | `/app` | where `/` links to the GUI; empty says no GUI is mounted | `plane.appUrl`, default `gui.basePath` when `gui.enabled` |
+| `TROUPE_APP_URL` | `/app` | where `/` links to the GUI, and the `plane.app` address `/.well-known/troupe` gives `troupe-daemon open`; empty says no GUI is mounted | `plane.appUrl`, default `gui.basePath` when `gui.enabled` |
 | `TROUPE_CLI_URL` | empty | where `/` links to the TUI; empty says to ask an administrator | `plane.cliUrl` |
 | `TROUPE_CORS_ORIGINS` | CORS off | exact origins answered on `/rpc`, `/auth/exchange`, `/.well-known/*` | `plane.corsOrigins` |
 | `TROUPE_LOG_FORMAT` | text | `"json"`: one object per line with `request_id`, `session_id` | none |
