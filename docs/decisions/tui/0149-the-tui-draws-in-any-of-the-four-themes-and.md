@@ -40,7 +40,7 @@ the settings page now shows two of the `ui` keys.
 - **The reserved colour stays reserved in every theme, at every depth.** The roles are
   the same in all four and each theme keeps its own reserved colour for them (Signal's
   magenta, Footlight's amber, Limelight's lime). Two things in the tokens would have
-  broken that, and the generator now refuses both. Limelight's focus ring is its lime,
+  broken that, and the generator now steers round both. Limelight's focus ring is its lime,
   and the TUI's accent (126's "focus cyan") is on every heading, so a role may name a
   second token for where its first is the reserved colour: the accent there is
   `text.link`, the link blue, which is what Limelight's own `accent` token is. And two
@@ -91,5 +91,7 @@ the settings page now shows two of the `ui` keys.
   theme the desktop app sets drawn by the running TUI, one picked on its page reaching
   the desktop app, an unknown one said once). The reproductions — Footlight drawn in
   Afterglow's pink, a working window with no ◐, the running TUI not following the
-  desktop app's `ui.theme` — failed on the chunk's tip. `mix check`, and the installed
-  TUI in two themes with a working and a waiting window, on the pull request.
+  desktop app's `ui.theme` — failed on the chunk's tip. `mix check`; and the installed
+  TUI in Windows Terminal on scratch homes with the fake provider, in Footlight and in
+  Limelight, its window working (◐ turning in the corner and the activity line) and then
+  waiting on a question (◑ in the theme's reserved colour, blinking with the border).
