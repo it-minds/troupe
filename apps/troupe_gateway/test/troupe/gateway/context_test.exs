@@ -1,10 +1,10 @@
 defmodule Troupe.Gateway.ContextTest do
   @moduledoc """
-  The provenance of a session's prompt over the protocol (Decisions 706 and 798):
+  The provenance of a session's prompt over the protocol (Decisions 706, 798 and 806):
   `context.get` lists every instruction file and the brief with its scope, size and share
-  of the budget, names the aliases it skipped, includes the nested files on the way to
-  what the session worked on and the files imported, is `observe`, and refuses a session
-  that is not there.
+  of the budget, lists the aliases it skipped and a nested Copilot file with why, includes
+  the nested files on the way to what the session worked on and the files imported, is
+  `observe`, and refuses a session that is not there.
   """
 
   use ExUnit.Case, async: false
@@ -76,7 +76,7 @@ defmodule Troupe.Gateway.ContextTest do
     assert answer["used"] == String.length(String.trim(rules))
     assert Path.expand(ws) in answer["searched"]
 
-    assert [root, brief] = answer["files"]
+    assert [root, claude, brief] = answer["files"]
     assert root["scope"] == "root"
     assert root["path"] == Path.join(Path.expand(ws), "AGENTS.md")
     assert root["size"] == byte_size(rules)
@@ -84,9 +84,22 @@ defmodule Troupe.Gateway.ContextTest do
     assert root["budget"] == 16_000
     assert root["share"] == Float.round(root["chars"] / 16_000, 3)
     assert root["status"] == "whole"
+    assert root["reason"] == nil
     assert root["trimmed"] == 0
     assert root["skipped"] == ["CLAUDE.md"]
     assert "sha256:" <> _ = root["hash"]
+
+    # The alias it hid is listed after it, saying why (Decision 806).
+    assert %{
+             "scope" => "root",
+             "status" => "skipped",
+             "chars" => 0,
+             "size" => 0,
+             "hash" => nil,
+             "reason" => "skipped: AGENTS.md is used in this directory"
+           } = claude
+
+    assert claude["path"] == Path.join(Path.expand(ws), "CLAUDE.md")
 
     assert brief["scope"] == "brief"
     assert brief["path"] == Path.join(Path.expand(ws), ".troupe/memory.md")
@@ -154,6 +167,44 @@ defmodule Troupe.Gateway.ContextTest do
              root
 
     assert root["path"] == Path.join(Path.expand(ws), "AGENTS.md")
+    assert root["reason"] == "not read: outside the repository"
+  end
+
+  # Decision 806: Copilot's file counts at the repository root only; one on the way to what
+  # the session read is listed as skipped, with why, and not read.
+  test "context.get names a nested Copilot file as skipped, saying why",
+       %{workspace: ws, client: client} = context do
+    ws = Path.expand(ws)
+    File.mkdir_p!(Path.join(ws, "lib/.github"))
+    File.write!(Path.join(ws, "AGENTS.md"), "Root.\n")
+    File.write!(Path.join(ws, "lib/.github/copilot-instructions.md"), "Nested copilot.\n")
+    File.write!(Path.join(ws, "lib/a.ex"), "a\n")
+
+    session =
+      start_session(context, [{:tools, [{"read_file", %{"path" => "lib/a.ex"}}]}, {:text, "hi"}])
+
+    :ok = Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "hello")
+    await_turn_ended(session.id)
+
+    assert {:ok, answer} = Client.call(client, "context.get", %{"session_id" => session.id})
+    copilot = Path.join(ws, "lib/.github/copilot-instructions.md")
+
+    assert [
+             %{"scope" => "root", "status" => "whole", "reason" => nil},
+             %{
+               "scope" => "nested",
+               "path" => ^copilot,
+               "status" => "skipped",
+               "size" => 0,
+               "chars" => 0,
+               "hash" => nil,
+               "reason" => "not read: Copilot's file counts only at the root"
+             },
+             %{"scope" => "brief"}
+           ] = answer["files"]
+
+    assert answer["used"] == String.length("Root.")
   end
 
   test "the budget is the workspace's, and an unknown session is not found",
