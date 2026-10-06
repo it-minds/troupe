@@ -7,8 +7,9 @@ machine, or a plane's worker pod — and talks to over `PROTOCOL.md`. The harnes
 itself (`troupe_core`, `troupe_gateway`, `troupe_protocol`) is a path dependency on
 `../../apps/` — the umbrella this project sits in, at the same commit. Read the root
 `ARCHITECTURE.md` (the harness, and §6 of `docs/developer/architecture.md` for this
-client) and `DECISIONS.md` here (every deviation, numbered; append one line per new
-deviation) before changing behaviour.
+client) and this client's decisions in `docs/decisions/tui/` (every deviation, numbered,
+a file each; `mix troupe.decisions --for <path>` lists the ones that govern a file, and a
+new deviation is a new file) before changing behaviour.
 
 ## Toolchain and commands
 
@@ -63,7 +64,7 @@ Read skills in the .skills repo
 - **Anything under `Troupe.UI` may call `Troupe.Client` and nothing else** in the harness (bar the pure data modules `Config`, `Settings`, `Event`, `Client.Message`, `Codec`). `mix troupe.xref` reads the BEAM import tables and fails the build otherwise; it is in the `check` alias and in CI.
 - **The whole TUI may call into the harness apps only through their doors**: `Troupe.Protocol.{Client,Daemon,Endpoint}`, `Troupe.Config`, `Troupe.Paths`, `Troupe.Reaper`, `Troupe.LLM.Catalog.Store` (root Decision 673). The harness is a path dependency, so everything in it is one `alias` away; `mix troupe.xref` fails on a call to anything else. Something new the TUI needs from a session goes through the protocol, not around it.
 - A remote session must be indistinguishable from a local one on screen: translate at the edge (`Troupe.Remote.Translate`), never branch on "is this remote?" in the model or the view.
-- The harness is not edited from here. A missing method or event is a change to `PROTOCOL.md` and the umbrella's apps first (the root `DECISIONS.md`), in the same pull request as the TUI change that needs it; the TUI's own deviations still go in this directory's `DECISIONS.md`.
+- The harness is not edited from here. A missing method or event is a change to `PROTOCOL.md` and the umbrella's apps first (a decision in `docs/decisions/`), in the same pull request as the TUI change that needs it; the TUI's own deviations still go in `docs/decisions/tui/`.
 - Every OS process goes through `Troupe.OS.Process` (reaper). Never `System.cmd` in lib code.
 - A session has one agent, the window `"root"`; a line that does not start with `/` is input to it (Decision 101). `/<agent> prompt` opens a **branch**: a session of its own with `parent` set, shown as the window `<agent>-N`; its worker publishes under that name (`Troupe.Remote.Branch`), the parent's journal records the windows (Decision 103).
 - Tests: `assert_receive` on events, never `Process.sleep` to wait. A test arranges the fake through the workspace (`start_session!(script: …)`), never by handing the harness a process; a text-only step ends the turn, so helpers append `finish` to it.

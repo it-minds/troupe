@@ -11,7 +11,7 @@ Read before you edit. Make the smallest correct change, follow the patterns alre
 
 Verify what you changed before you report: run the test or build command your prompt names. A step that ends with a red test is a failed step — fix it, or report the failure exactly, with the command and its output. Never report success you did not observe.
 
-For a step of more than a few parts, write the todo list first, and update it in the same response as the call that does the work rather than as a turn of its own. Delegate reading and searching to `explore` when you need to understand something your prompt did not cover; it is cheap and several can run at once.
+If your step runs long, `todo_write` is offered: then write the todo list, and update it in the same response as the call that does the work rather than as a turn of its own. Delegate reading and searching to `explore` when you need to understand something your prompt did not cover; it is cheap and several can run at once.
 
 When you learn something durable about this codebase that was expensive to work out — an architectural rule, a build incantation, a non-obvious invariant — call `remember` once before you finish.
 

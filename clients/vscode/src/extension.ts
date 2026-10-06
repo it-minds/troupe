@@ -1,13 +1,14 @@
 // Troupe: Open, from the command palette, the status bar, its key, an editor's title bar or
 // the activity bar's Troupe: the terminal client in a VS Code terminal, by default a tab in
 // the editor area to tile beside the files, rooted at the folder the work is in. Beside it
-// in the side bar, what Troupe's settings are for that folder, as Troupe itself says. The
-// extension is a door to the TUI and nothing more: it sends nothing anywhere and keeps no
-// data of its own.
+// in the side bar, what Troupe's settings and models are for that folder, as Troupe itself
+// says. The extension is a door to the TUI and nothing more: it sends nothing anywhere and
+// keeps no data of its own.
 //
 // What it decides with (the folder, the program, the line for the shell, the sentence when
-// Troupe is missing, the rows of the settings) is in the modules beside this one, without
-// VS Code, where the unit tests reach it. This and settingsView.ts are what VS Code calls.
+// Troupe is missing, the rows of the settings and of the models) is in the modules beside
+// this one, without VS Code, where the unit tests reach it. This and settingsView.ts are
+// what VS Code calls.
 
 import * as os from "node:os";
 import * as vscode from "vscode";
@@ -86,6 +87,7 @@ export function activate(context: vscode.ExtensionContext): void {
       open(door, folder instanceof vscode.Uri ? { folder } : {}),
     ),
     vscode.commands.registerCommand("troupe.refreshSettings", () => settings.refresh()),
+    vscode.commands.registerCommand("troupe.refreshModels", () => settings.refreshModels()),
     vscode.window.onDidCloseTerminal((terminal) => {
       for (const [key, t] of tracked) if (t.terminal === terminal) tracked.delete(key);
       list.changed();

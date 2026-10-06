@@ -461,10 +461,8 @@ nothing to set; what happens depends on the provider.
   the system prompt and the conversation so far are marked, and the next call reads them
   back. The cache lasts five minutes from its last use, so the calls of a turn keep it
   warm and a reply after a long pause starts it again. A prompt shorter than the model's
-  minimum (512 to 4096 tokens, by model) is not cached. The agent's task list is sent
-  after the cached system prompt, so rewriting it leaves the tools and the system prompt
-  cached; the conversation is written to the cache again on the next call. A gateway that
-  speaks Anthropic's API passes the marks on or drops them.
+  minimum (512 to 4096 tokens, by model) is not cached. A gateway that speaks Anthropic's
+  API passes the marks on or drops them.
 - **OpenAI** caches a long enough prompt by itself, with nothing to ask.
 - **An OpenAI-compatible gateway or server** (`provider: openai` with a `base_url`, such as
   LiteLLM, vLLM or Ollama) caches whatever it and the model behind it do, which may be
@@ -477,6 +475,12 @@ Whichever it is, the provider's own figures say whether it happened: each model 
 which says how much of the prompt came from the cache. A call priced from the catalog or
 `models.prices` is priced at its `cache_read` and `cache_write` rates (a LiteLLM gateway's
 catalog quotes both), or at the input price where those are not set.
+
+The agent's task list ends the system prompt, as it stood when the turn began. A rewrite
+within the turn reaches the model in the `todo_write` call's result and leaves the cached
+prompt as it was, whatever the provider. A list the turn before changed is new at the
+next turn's first call, which writes the conversation to the cache again; Anthropic still
+reads the tools and the system prompt in front of the list.
 
 ## How hard a model thinks
 

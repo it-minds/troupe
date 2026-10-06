@@ -5,7 +5,7 @@ folder you are working in: by default a tab in the editor area, to split and til
 your files. The terminal client is the product; this extension is a door to it, so that
 reaching Troupe from VS Code is one click or one key rather than a terminal opened by hand
 and a `cd`. Beside it, the Troupe side bar shows that folder's settings as Troupe itself
-resolves them.
+resolves them, and the models there are to choose from.
 
 ## Troupe: Open
 
@@ -57,6 +57,12 @@ views:
   whether the workspace is trusted, the file's warnings, and every setting. Hover a row for
   each layer that had a say. It asks again when one of those files is saved, and on
   **Refresh**. A key is never shown, masked or not: only whether one is set.
+- **Models**, in the Settings view under the model in use: what `troupe models --json`
+  lists for the folder. Each model with its window and price and where they came from,
+  the default, cheap and expensive ones starred, and one its provider does not serve
+  marked as such, with no window. The button on the group asks the providers again
+  (`troupe models --refresh`); otherwise `troupe models` asks them only when its list is
+  stale. When it cannot list them, the group says why in one line.
 
 ## Settings
 
@@ -93,8 +99,9 @@ The `.vsix` by itself installs with **Extensions: Install from VSIX…** or
 
 The extension collects nothing and sends nothing anywhere. It reads its three settings,
 looks for `troupe` on the disk, types one line into a terminal, and runs
-`troupe config --explain --json` on the same machine for the Settings view. What Troupe
-itself sends, and to whom, is in its own documentation.
+`troupe config --explain --json` and `troupe models --json` on the same machine for the
+Settings view. What Troupe itself sends, and to whom (`troupe models` asks your providers
+what they serve), is in its own documentation.
 
 More, and how it is built and tested:
 [docs/user/vscode.md](https://github.com/it-minds/troupe/blob/main/docs/user/vscode.md).
