@@ -523,6 +523,12 @@ word and a budget for a number. Either way the output cap is raised to hold the 
 A model that refuses what it was sent fails the call with a message that names
 `reasoning_effort` and what to set it to.
 
+Claude Opus 5 and later, Sonnet 5 and later, Fable and Mythos think whether or not
+`reasoning_effort` is set. With none (or `none`) they are sent no thinking settings and
+think at their own default effort, and what they thought is handed back to them on the
+next call, as it is when an effort is set, so a turn of tool calls goes on from the
+reasoning it started with.
+
 ## What Troupe tells the provider
 
 Every model call names the software that made it, so whoever runs the gateway can see

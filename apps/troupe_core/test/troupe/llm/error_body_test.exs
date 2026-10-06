@@ -95,6 +95,48 @@ defmodule Troupe.LLM.ErrorBodyTest do
              "the provider rejected the credentials (Incorrect API key provided: sk-s...ef.)"
   end
 
+  # What the retries outlast and what fails inside a stream are said the same way (D74,
+  # Decision 805): the provider's words, trimmed, with the key masked.
+  describe "an error the retries outlast" do
+    test "Anthropic's 529 says Overloaded, not only its status", context do
+      body = %{
+        "type" => "error",
+        "error" => %{"type" => "overloaded_error", "message" => "Overloaded"}
+      }
+
+      assert failed(context, "anthropic", "claude-sonnet-5", {:status, 529, body}) ==
+               "gave up after retrying: the provider answered 529 (Overloaded)"
+
+      # The first call and the four retries a request gets.
+      assert length(ErrorStandIn.drain()) == 5
+    end
+
+    test "an OpenAI-compatible server's 503 likewise, trimmed and without the key", context do
+      body = %{
+        "error" => %{
+          "message" => " The server is overloaded for key #{@key}; try again later.\n",
+          "type" => "server_error"
+        }
+      }
+
+      reason = failed(context, "openai", "gpt-test", {:status, 503, body})
+
+      refute reason =~ @key
+
+      assert reason ==
+               "gave up after retrying: the provider answered 503 " <>
+                 "(The server is overloaded for key sk-s...ef; try again later.)"
+    end
+  end
+
+  test "an error event inside an Anthropic stream is trimmed and masked", context do
+    error = %{"type" => "api_error", "message" => "  upstream refused key #{@key}\n"}
+    reason = failed(context, "anthropic", "claude-sonnet-5", {:stream_error, error})
+
+    refute reason =~ @key
+    assert reason == "the provider reported an error (upstream refused key sk-s...ef)"
+  end
+
   # Four reads make a conversation long enough to compact; the fifth call is refused as too
   # long, and a conversation with the summary in it is answered.
   defp assert_compacts(context, provider, model, overflow) do

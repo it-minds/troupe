@@ -48,17 +48,25 @@ defmodule Troupe.LLM.Providers.Anthropic do
     case api_key(request) do
       nil -> {:error, :missing_api_key}
       {:refused, _why} = refused -> {:error, refused}
-      key -> post(request, key, reply_to, ref)
+      key -> post_kept(request, key, reply_to, ref)
     end
   end
 
-  defp post(request, key, reply_to, ref) do
+  # A thinking block the conversation no longer vouches for is answered by the same call
+  # with no thinking in it, once (Decision 805).
+  defp post_kept(request, key, reply_to, ref) do
+    with :bound_elsewhere <- post(request, key, reply_to, ref, :first),
+         do: post(request, key, reply_to, ref, :without_thinking)
+  end
+
+  defp post(request, key, reply_to, ref, pass) do
     thinking = thinking(request)
+    keep_thinking? = pass == :first and keep_thinking?(request, thinking)
 
     options = [
       url: Endpoint.build(base_url(request), "/v1/messages"),
       method: :post,
-      json: body(request, thinking),
+      json: body(request, thinking, keep_thinking?),
       headers:
         [
           auth_header(request, key),
@@ -80,18 +88,20 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
     case options |> Req.new() |> with_transport(request) |> Req.request() do
       {:ok, %Req.Response{status: 200} = response} ->
-        finish(response)
+        finish(response, key)
 
       # A rate limit says how long to wait, when it says anything; the retry policy
-      # takes the hint (Decision 659).
-      {:ok, %Req.Response{status: 429} = response} ->
-        {:retry, {:http_status, 429}, Provider.retry_after_ms(response.headers)}
+      # takes the hint (Decision 659). What the provider said goes with the status, so
+      # one the retries outlast says it (Decision 805).
+      {:ok, %Req.Response{status: 429, body: body} = response} ->
+        {:retry, {:http_status, 429, detail(body, key)},
+         Provider.retry_after_ms(response.headers)}
 
-      {:ok, %Req.Response{status: status}} when status >= 500 ->
-        {:retry, {:http_status, status}}
+      {:ok, %Req.Response{status: status, body: body}} when status >= 500 ->
+        {:retry, {:http_status, status, detail(body, key)}}
 
       {:ok, %Req.Response{status: 400, body: body}} ->
-        refused(detail(body, key), thinking, request)
+        refused(detail(body, key), thinking, request, keep_thinking?)
 
       {:ok, %Req.Response{status: status, body: body}} ->
         {:error, {:http_status, status, detail(body, key)}}
@@ -139,13 +149,15 @@ defmodule Troupe.LLM.Providers.Anthropic do
     Req.Response.put_private(resp, :troupe, %{acc: acc, sse: sse})
   end
 
-  defp finish(%Req.Response{} = response) do
+  defp finish(%Req.Response{} = response, key) do
     case response.private[:troupe] do
       nil ->
         {:error, :no_stream_received}
 
+      # An error inside the stream is said as an error response is: trimmed, and with no
+      # key in it (Decisions 791 and 805).
       %{acc: %Collector{error: error}} when is_binary(error) ->
-        {:error, {:api_error, error}}
+        {:error, {:api_error, Provider.error_text(error, key)}}
 
       %{acc: acc} ->
         # The gateway's headers are read here rather than in the collector because they
@@ -241,9 +253,7 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
   # -- request shaping --------------------------------------------------------
 
-  defp body(%Request{} = request, thinking) do
-    keep_thinking? = thinking != nil
-
+  defp body(%Request{} = request, thinking, keep_thinking?) do
     %{
       model: request.model,
       max_tokens: request.max_tokens,
@@ -341,6 +351,14 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
   defp number?(effort), do: match?({_n, ""}, Integer.parse(effort))
 
+  # Whether the model's own thinking goes back to it (Decision 805): when the request
+  # turns thinking on, and when the model thinks with no `thinking` field at all, as
+  # Anthropic's newest do, most of them with no way to be told not to. Their thinking,
+  # signed, is how a tool-use turn keeps the reasoning it started with; dropped, the model
+  # went on without it.
+  defp keep_thinking?(_request, thinking) when thinking != nil, do: true
+  defp keep_thinking?(%Request{model: model}, nil), do: Catalog.thinks_unasked?(model)
+
   # A 400 that is about the thinking this request carried is said in words that name the
   # setting behind it; any other 400 goes as the provider put it. What the provider says
   # differs by model and form ("thinking.type.enabled" is not supported…, an `adaptive`
@@ -348,10 +366,25 @@ defmodule Troupe.LLM.Providers.Anthropic do
   # of these.
   @thinking_words ["thinking.type", "budget_tokens", "adaptive", "output_config", "effort"]
 
-  defp refused(detail, thinking, request) do
-    if thinking && is_binary(detail) && String.contains?(detail, @thinking_words),
-      do: {:error, {:thinking_refused, refusal(thinking, request), detail}},
-      else: {:error, {:http_status, 400, detail}}
+  # The newest models check a thinking block sent back against the conversation it was
+  # made in, for accounts the check is enforced for, and refuse one that conversation no
+  # longer vouches for — after an edit to the system prompt, say — with a 400 that says
+  # so. The API's documented way on is the request again with no thinking in it, which is
+  # what every one of these requests was before Decision 805: `:bound_elsewhere` asks for
+  # it.
+  @bound_elsewhere "Invalid `signature` in `thinking` block"
+
+  defp refused(detail, thinking, request, keep_thinking?) do
+    cond do
+      keep_thinking? and String.contains?(detail, @bound_elsewhere) ->
+        :bound_elsewhere
+
+      thinking && String.contains?(detail, @thinking_words) ->
+        {:error, {:thinking_refused, refusal(thinking, request), detail}}
+
+      true ->
+        {:error, {:http_status, 400, detail}}
+    end
   end
 
   defp refusal(thinking, %Request{model: model}) do
@@ -460,10 +493,10 @@ defmodule Troupe.LLM.Providers.Anthropic do
   end
 
   # Which reasoning may go back out. Another provider's thinking carries no signature
-  # Anthropic can verify, and a thinking block is only legal on a request that has
-  # thinking enabled — so with thinking off, or for anything that came from an
-  # OpenAI-compatible provider, the block is dropped and the rest of the turn goes
-  # unchanged.
+  # Anthropic can verify, and a thinking block is only legal on a request the model thinks
+  # on — one with thinking enabled, or to a model that thinks unasked (Decision 805) — so
+  # with thinking off, or for anything that came from an OpenAI-compatible provider, the
+  # block is dropped and the rest of the turn goes unchanged.
   defp drop_reasoning?(%Reasoning{provider: :anthropic}, keep_thinking?), do: not keep_thinking?
   defp drop_reasoning?(%Reasoning{}, _keep_thinking?), do: true
   defp drop_reasoning?(_block, _keep_thinking?), do: false

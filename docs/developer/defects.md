@@ -638,11 +638,6 @@ Found by the chunk 19 fixers, 2026-10-05.
 
 ### D74 - Model calls: what the 0.8.5 work left (low)
 
-- A 5xx or 429 that outlasts its retries still says only its status:
-  `Provider.describe_error` prints `{:retries_exhausted, {:http_status, 503}}` as
-  "gave up after retrying: {:http_status, 503}", since `with_retries` carries no body.
-- An error event inside an Anthropic stream (`{:api_error, msg}`) is shown as it came,
-  neither trimmed nor masked, unlike an error response since Decision 791.
 - `qwen3-235b` never puts two tool calls in one response (179 of 179 in the live bench), so
   `build.md`'s "one `delegate` call per item, all in the same turn, so they run
   concurrently" can't happen on it. The OpenAI-compatible adapter sets no

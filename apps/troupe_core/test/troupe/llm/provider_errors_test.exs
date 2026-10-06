@@ -18,14 +18,34 @@ defmodule Troupe.LLM.ProviderErrorsTest do
     assert {:auth, _} = Provider.classify({:http_status, 401, "invalid x-api-key"})
     assert {:auth, _} = Provider.classify({:http_status, 403, "forbidden"})
     assert {:model_not_found, _} = Provider.classify({:http_status, 404, "model: not_a_model"})
-    assert {:rate_limited, _} = Provider.classify({:retries_exhausted, {:http_status, 429}})
+    assert {:rate_limited, _} = Provider.classify({:retries_exhausted, {:http_status, 429, ""}})
+  end
+
+  # What the provider said with its last 429 or 5xx is what the person reads (D74,
+  # Decision 805), where it once said only "gave up after retrying: {:http_status, 503}".
+  test "a 429 or a 5xx the retries outlast says what the provider said with it" do
+    limit = "Number of request tokens has exceeded your per-minute rate limit"
+
+    assert Provider.describe_error({:retries_exhausted, {:http_status, 429, limit}}) ==
+             "rate limited, and the backoff ran out before the limit lifted (#{limit})"
+
+    assert Provider.describe_error(
+             {:retries_exhausted, {:http_status, 503, "upstream connect error"}}
+           ) ==
+             "gave up after retrying: the provider answered 503 (upstream connect error)"
+
+    assert Provider.describe_error({:retries_exhausted, {:http_status, 502, ""}}) ==
+             "gave up after retrying: the provider answered 502"
+
+    assert Provider.describe_error({:retries_exhausted, {:transport, :econnrefused}}) ==
+             "gave up after retrying: {:transport, :econnrefused}"
   end
 
   test "describe_error says what happened in words a person can act on" do
     assert Provider.describe_error({:http_status, 404, "no such model"}) =~ "does not know that model"
     assert Provider.describe_error({:http_status, 401, ""}) == "the provider rejected the credentials"
     assert Provider.describe_error({:http_status, 400, "prompt is too long"}) =~ "no longer fits"
-    assert Provider.describe_error({:retries_exhausted, {:http_status, 503}}) =~ "gave up after retrying"
+    assert Provider.describe_error({:retries_exhausted, {:http_status, 503, ""}}) =~ "gave up after retrying"
     assert Provider.describe_error(:missing_api_key) =~ "no API key"
     assert Provider.describe_error({:timeout, 300_000}) =~ "did not answer in time"
     assert Provider.describe_error({:api_error, "overloaded"}) == "the provider reported an error (overloaded)"
@@ -44,14 +64,17 @@ defmodule Troupe.LLM.ProviderErrorsTest do
 
     limited = fn ->
       :counters.add(counter, 1, 1)
-      if :counters.get(counter, 1) <= 3, do: {:retry, {:http_status, 429}, 1}, else: {:ok, :answered}
+
+      if :counters.get(counter, 1) <= 3,
+        do: {:retry, {:http_status, 429, "slow down"}, 1},
+        else: {:ok, :answered}
     end
 
     assert {:ok, :answered} = Provider.with_retries(limited, 0)
     assert :counters.get(counter, 1) == 4
 
     # A 5xx keeps the ordinary budget.
-    assert {:error, {:retries_exhausted, {:http_status, 503}}} =
-             Provider.with_retries(fn -> {:retry, {:http_status, 503}} end, 0)
+    assert {:error, {:retries_exhausted, {:http_status, 503, "busy"}}} =
+             Provider.with_retries(fn -> {:retry, {:http_status, 503, "busy"}} end, 0)
   end
 end

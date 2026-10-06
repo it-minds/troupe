@@ -49,7 +49,8 @@ defmodule Troupe.LLM.Provider do
   Retries on 429 and 5xx with exponential backoff and full jitter, which spreads a
   thundering herd of parallel subagents hitting the same rate limit. `fun` answers
   `{:retry, reason}` or `{:retry, reason, hint_ms}`; the hint is what a `retry-after`
-  header said.
+  header said. A status's reason is `{:http_status, status, detail}`, with what the
+  provider said, so the failure the retries outlast is said in its words (Decision 805).
 
   A rate limit is a wait, not a failure, so it is not treated like one (Decision 659): a
   429 gets more attempts than anything else, and when the response said how long to wait
@@ -97,7 +98,9 @@ defmodule Troupe.LLM.Provider do
     end
   end
 
-  defp retries_for(max_retries, {:http_status, 429}), do: max(max_retries, @rate_limit_retries)
+  defp retries_for(max_retries, {:http_status, 429, _said}),
+    do: max(max_retries, @rate_limit_retries)
+
   defp retries_for(max_retries, _reason), do: max_retries
 
   @doc false
@@ -187,7 +190,8 @@ defmodule Troupe.LLM.Provider do
           | {:model_not_found, String.t()}
           | {:rate_limited, String.t()}
           | term()
-  def classify({:retries_exhausted, {:http_status, 429}}), do: {:rate_limited, ""}
+  def classify({:retries_exhausted, {:http_status, 429, detail}}),
+    do: {:rate_limited, text(detail)}
 
   def classify({:http_status, 400, detail}) do
     text = text(detail)
@@ -228,7 +232,9 @@ defmodule Troupe.LLM.Provider do
   defp sentence({:rate_limited, detail}),
     do: "rate limited, and the backoff ran out before the limit lifted" <> detail(detail)
 
-  defp sentence({:retries_exhausted, inner}), do: "gave up after retrying: " <> inspect(inner)
+  # The last failure, said as it would be had it not been retried: a status with the
+  # provider's words, a transport error as it came (Decision 805).
+  defp sentence({:retries_exhausted, inner}), do: "gave up after retrying: " <> sentence(inner)
   defp sentence({:http_status, status, detail}), do: "the provider answered #{status}" <> detail(detail)
 
   # A 400 about the thinking a reasoning effort asked for, already said by the adapter in

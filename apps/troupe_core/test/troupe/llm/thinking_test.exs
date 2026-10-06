@@ -11,7 +11,7 @@ defmodule Troupe.LLM.ThinkingTest do
 
   use ExUnit.Case, async: true
 
-  alias Troupe.LLM.{Catalog, Message, Provider, Request}
+  alias Troupe.LLM.{Catalog, Message, Provider, Reasoning, Request, Response, ToolResult, ToolUse}
   alias Troupe.LLM.Providers.Anthropic
   alias Troupe.Test.FakeTransport
 
@@ -39,6 +39,118 @@ defmodule Troupe.LLM.ThinkingTest do
     "thinking": {"type": "enabled", "budget_tokens": 8192}
   }
   """
+
+  # The second request of a tool-use turn to Claude Opus 5.5 with no `reasoning_effort`
+  # (#427, Decision 805): the thinking the first call streamed goes back as it came, its
+  # text empty as the newest models send it unless asked for a summary, with its signature,
+  # and the request still asks for nothing.
+  @opus_5_5_tool_turn ~S"""
+  {
+    "model": "claude-opus-5-5",
+    "max_tokens": 8192,
+    "stream": true,
+    "system": "You are a test.",
+    "messages": [
+      {"role": "user", "content": [{"type": "text", "text": "read notes.txt"}]},
+      {"role": "assistant", "content": [
+        {"type": "thinking", "thinking": "", "signature": "sig-opus-1"},
+        {"type": "tool_use", "id": "toolu_1", "name": "read_file", "input": {"path": "notes.txt"}}
+      ]},
+      {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "toolu_1", "content": "a tab is two spaces", "is_error": false}
+      ]}
+    ]
+  }
+  """
+
+  # What the API answers a request whose thinking block a changed conversation no longer
+  # vouches for, as its documentation had it on 2026-10-06.
+  @bound_elsewhere "messages.1.content.0: Invalid `signature` in `thinking` block. The block " <>
+                     "is bound to a different conversation. Remove the block, or set " <>
+                     "`thinking.block_binding.prefix_mismatch_behavior` to \"drop_block\"."
+
+  describe "a model that thinks without being asked" do
+    test "a tool-use turn with no reasoning_effort sends the previous call's thinking back" do
+      assert {:ok, response} =
+               run(request("claude-opus-5-5", nil, chunks: thinking_then_tool("sig-opus-1")))
+
+      assert [%Reasoning{provider: :anthropic, text: "", signature: "sig-opus-1"}, %ToolUse{}] =
+               response.content
+
+      FakeTransport.drain_requests()
+
+      second = %{request("claude-opus-5-5", nil) | messages: tool_turn(response)}
+      assert sent(second) == Jason.decode!(@opus_5_5_tool_turn)
+    end
+
+    test "every model that thinks unasked keeps its thinking, and one that does not drops it" do
+      for model <- [
+            "claude-opus-5-5",
+            "claude-opus-5",
+            "claude-sonnet-5-5",
+            "claude-sonnet-5",
+            "claude-fable-5-1",
+            "claude-fable-5",
+            "claude-mythos-5-1",
+            "eu.anthropic.claude-opus-5",
+            "anthropic/claude-sonnet-5-5"
+          ] do
+        body = sent(%{request(model, nil) | messages: tool_turn(thought())})
+        assert replayed(body) == ["thinking", "tool_use"], model
+        refute Map.has_key?(body, "thinking"), model
+      end
+
+      for model <- [
+            "claude-opus-4-8",
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5",
+            "claude-3-7-sonnet-20250219",
+            "house-model"
+          ] do
+        assert replayed(sent(%{request(model, nil) | messages: tool_turn(thought())})) ==
+                 ["tool_use"],
+               model
+      end
+    end
+
+    test "an effort of none sends no thinking field, and the thinking the model did goes back" do
+      for effort <- ["none", "off"] do
+        body = sent(%{request("claude-opus-5-5", effort) | messages: tool_turn(thought())})
+        assert replayed(body) == ["thinking", "tool_use"], effort
+        refute Map.has_key?(body, "thinking"), effort
+      end
+    end
+
+    test "a block bound to another conversation sends the call once more, without the thinking" do
+      for effort <- [nil, "high"] do
+        refused_once =
+          request("claude-opus-5-5", effort, fail: @bound_elsewhere, fail_first: 1)
+
+        assert {:ok, _response} = run(%{refused_once | messages: tool_turn(thought())})
+        [refused, resent] = Enum.map(FakeTransport.drain_requests(), &FakeTransport.body/1)
+
+        assert replayed(refused) == ["thinking", "tool_use"], inspect(effort)
+        assert replayed(resent) == ["tool_use"], inspect(effort)
+        assert Map.delete(refused, "messages") == Map.delete(resent, "messages")
+      end
+
+      # Once: a second refusal is the turn's error, said in the provider's words.
+      refused = request("claude-opus-5-5", nil, fail: @bound_elsewhere)
+      assert {:error, reason} = run(%{refused | messages: tool_turn(thought())})
+      assert length(FakeTransport.drain_requests()) == 2
+      assert Provider.describe_error(reason) =~ "the provider answered 400 (messages.1.content.0"
+
+      # And a 400 about anything else is not sent again.
+      refused = request("claude-opus-5-5", nil, fail: "tools.0: bad schema")
+
+      assert {:error, {:http_status, 400, "tools.0: bad schema"}} =
+               run(%{refused | messages: tool_turn(thought())})
+
+      assert length(FakeTransport.drain_requests()) == 1
+    end
+  end
 
   describe "Anthropic's newest models" do
     test "a reasoning effort sends adaptive thinking and the effort, not a budget" do
@@ -274,11 +386,12 @@ defmodule Troupe.LLM.ThinkingTest do
     transport =
       case Keyword.get(opts, :fail) do
         nil ->
-          FakeTransport.adapter(chunks: text_only(), record: self())
+          FakeTransport.adapter(chunks: Keyword.get(opts, :chunks, text_only()), record: self())
 
         refusal ->
           FakeTransport.adapter(
-            fail_first: 99,
+            chunks: text_only(),
+            fail_first: Keyword.get(opts, :fail_first, 99),
             fail_status: 400,
             fail_body: refusal,
             record: self()
@@ -295,6 +408,43 @@ defmodule Troupe.LLM.ThinkingTest do
       timeout_ms: 10_000,
       extra: %{req_adapter: transport}
     }
+  end
+
+  # The call before the tool's result, and the result, as the agent sends them next.
+  defp tool_turn(%Response{} = response), do: tool_turn(Response.to_message(response))
+
+  defp tool_turn(%Message{} = assistant) do
+    [
+      Message.user("read notes.txt"),
+      assistant,
+      Message.tool_results([
+        %ToolResult{tool_use_id: "toolu_1", content: "a tab is two spaces", error?: false}
+      ])
+    ]
+  end
+
+  defp thought do
+    Message.assistant([
+      %Reasoning{provider: :anthropic, text: "", signature: "sig-opus-1"},
+      %ToolUse{id: "toolu_1", name: "read_file", input: %{"path" => "notes.txt"}}
+    ])
+  end
+
+  # The kinds of block the assistant message went out with.
+  defp replayed(body), do: Enum.map(Enum.at(body["messages"], 1)["content"], & &1["type"])
+
+  # One of the newest models' answers with no thinking asked for: a thinking block with
+  # nothing in it but its signature (no summary was asked for), then a tool call.
+  defp thinking_then_tool(signature) do
+    [
+      ~s(event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":1}}}\n\n),
+      ~s(event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n\n),
+      ~s(event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"#{signature}"}}\n\n),
+      ~s(event: content_block_stop\ndata: {"type":"content_block_stop","index":0}\n\n),
+      ~s(event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"read_file","input":{}}}\n\n),
+      ~s(event: content_block_delta\ndata: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\": \\"notes.txt\\"}"}}\n\n),
+      ~s(event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":20}}\n\n)
+    ]
   end
 
   defp text_only do
