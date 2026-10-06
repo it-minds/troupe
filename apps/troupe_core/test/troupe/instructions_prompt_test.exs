@@ -181,12 +181,16 @@ defmodule Troupe.InstructionsPromptTest do
            ] = event.data["files"]
   end
 
-  test "an instruction file that is a link to outside the repository, or outside your " <>
-         "config directory, reaches no prompt and is named in the event",
+  test "an instruction file or a brief that is a link to outside the repository, or outside " <>
+         "your config directory, reaches no prompt and is named in the event",
        context do
     outside = Path.join(context.base, "key")
     File.write!(outside, "a stand-in for a private key\n")
     File.ln_s!(outside, Path.join(context.workspace, "AGENTS.md"))
+    brief = Path.join(context.base, "brief.md")
+    File.write!(brief, "## Overview\na stand-in for a private key in a brief\n")
+    File.mkdir_p!(Path.join(context.workspace, ".troupe"))
+    File.ln_s!(brief, Path.join(context.workspace, ".troupe/memory.md"))
 
     mine = Path.join(Paths.config_dir(), "AGENTS.md")
     File.ln_s!(outside, mine)
@@ -200,13 +204,14 @@ defmodule Troupe.InstructionsPromptTest do
     [request] = Fake.requests(fake)
     refute request.system =~ "private key"
     refute request.system =~ "# Instruction files"
+    refute request.system =~ "# Project brief"
 
     assert [event] = events_of_type(session.id, :instructions_loaded)
 
     assert [
              %{"scope" => "user", "status" => "outside", "chars" => 0},
              %{"scope" => "root", "status" => "outside", "chars" => 0, "hash" => nil},
-             %{"scope" => "brief"}
+             %{"scope" => "brief", "status" => "outside", "size" => 0, "hash" => nil}
            ] = event.data["files"]
   end
 

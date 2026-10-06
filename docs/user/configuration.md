@@ -272,7 +272,8 @@ other tools' names: the first that exists is read and the rest are skipped, and 
 session's log and `/context` say which, so nobody debugs a file that was never loaded.
 So a repository with only a `CLAUDE.md` works as it is. A file that is a link to
 somewhere outside the repository (outside `<config>`, for your own `AGENTS.md`) is not
-read; `context.get` and the session's log list it as `outside`.
+read; `context.get` and the session's log list it as `outside`. The same goes for
+`.troupe/memory.md`, which is then neither read nor written.
 
 A file can pull in another with `@path/to/file.md` on a line of its own or in a
 sentence, as Claude Code's do. The path is taken from the importing file's directory

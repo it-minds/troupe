@@ -10,13 +10,16 @@ paths:
   - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/agent/state.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
+  - apps/troupe_core/lib/troupe/session/memory.ex
   - apps/troupe_core/test/troupe/instructions_test.exs
   - apps/troupe_core/test/troupe/instructions_prompt_test.exs
+  - apps/troupe_core/test/troupe/tools/remember_test.exs
   - apps/troupe_gateway/test/troupe/gateway/context_test.exs
 symbols:
   - Troupe.Instructions.focus/1
   - Troupe.Instructions.load/3
-gist: Read as a turn begins, held for it; nested files follow the files worked on; found files and imports must really be inside the repo (or config dir)
+  - Troupe.Session.Memory.inside?/1
+gist: Read as a turn begins, held for it; nested files follow files worked on; found files, imports and the brief must really be inside the repo (or config dir)
 ---
 
 Issue #123, the parity slice after Decision 706: a nested `AGENTS.md` on the path to
@@ -84,6 +87,17 @@ and `context.get` were already there and stay as 706 made them.
   at `AGENTS.md`) is read as before. What this costs: the person's own `AGENTS.md`
   kept as a link into a dotfiles directory outside `<config>` is held to the same edge
   and not read, nor can it be imported from there; it has to be a file in `<config>`.
+- **The brief has the same edge, for reading and for writing.** `.troupe/memory.md` is
+  the last scope of the load, and a repository can carry it as a link too. A brief that
+  is really outside its repository (the main checkout `Troupe.Session.Memory.path/1`
+  names), through a link to the file or to `.troupe`, is not read
+  (`Troupe.Session.Memory.inside?/1`): `Instructions` lists it as `outside`, as it
+  does an instruction file, and `memory.get`'s brief is absent. Nor is it written or
+  deleted: `remember`, the librarian (which writes through `remember`), a run's stamp
+  and `memory.forget` all go through `Troupe.Session.Memory`, whose writes would
+  otherwise read the linked file and write it back into the repository in place of the
+  link, or, through a linked `.troupe`, write and delete where it points. Such a write
+  is refused with an error that says so.
 - **`context.get`** answers with the focus of the root agent's conversation, asked of
   the agent; a session that is asleep has none to ask and is answered for its
   workspace alone, since reading it wakes nothing. The TUI's `/context` prints the new
@@ -106,4 +120,9 @@ and `context.get` were already there and stay as 706 made them.
   `Troupe.Gateway.ContextTest` (the nested file and the import, with scope and size,
   in `context.get`; a linked-out `AGENTS.md` listed as `outside`). All but the aliases
   fail on the chunk's tip; the three on linked-out files failed on this branch before
-  the edge was added, the file's contents in the prompt.
+  the edge was added, the file's contents in the prompt. The brief: the loader's and
+  the session's tests above carry a `.troupe/memory.md` linked out too, listed as
+  `outside` and not in the prompt, and `Troupe.Tools.RememberTest` has a brief linked
+  out, and a `.troupe` linked out, neither read, nor written by a note or a section,
+  nor deleted by `forget`, the file pointed at unchanged. Those three failed on this
+  branch before the brief's edge, the linked file's contents in the prompt.

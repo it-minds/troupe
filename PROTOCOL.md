@@ -1054,9 +1054,9 @@ repository (the config directory for the person's own file), `depth` past five, 
 `memory_max_chars` for the brief) and its `share` of it. Every file applies and the
 nearest wins where two disagree. `status` is `whole`; `trimmed`, with `trimmed` saying
 how many characters were cut, the nearest scope (a file and what it imports) being kept
-whole first; `dropped`, the budget was spent before it; `outside`, the file found is
-really outside the repository (or, for the person's own, the config directory), through
-a link, and was not read, its `size` and `chars` 0 and its `hash` null; or, for the
+whole first; `dropped`, the budget was spent before it; `outside`, the file found (the brief
+too) is really outside the repository (or, for the person's own, the config directory),
+through a link, and was not read, its `size` and `chars` 0 and its `hash` null; or, for the
 brief, `absent` or `disabled` as `memory.get` has it. `skipped` names the aliases the
 file hid in its directory: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and
 `.github/copilot-instructions.md` are the same file under other tools' names, the first

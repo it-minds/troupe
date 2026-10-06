@@ -34,20 +34,45 @@ defmodule Troupe.Session.Memory do
 
   @doc """
   The parsed brief at a path `path/1` gave, or `nil`: for a caller that needs the path
-  as well, since finding the repository's main checkout is a `git` call.
+  as well, since finding the repository's main checkout is a `git` call. A brief that is
+  not `inside?/1` its repository is `nil` too.
   """
   @spec read(Path.t()) :: Memory.t() | nil
   def read(path) do
-    with {:ok, content} <- File.read(path),
+    with true <- inside?(path),
+         {:ok, content} <- File.read(path),
          {:ok, brief} <- Memory.parse(content) do
       brief
     else
+      false ->
+        nil
+
       {:error, :enoent} ->
         nil
 
       {:error, reason} ->
         Logger.warning("memory: ignoring unreadable #{path}: #{inspect(reason)}")
         nil
+    end
+  end
+
+  @doc """
+  Whether the brief at a path `path/1` gave is really in its repository (Decision 798): a
+  `.troupe/memory.md`, or a `.troupe`, that is a link to somewhere else on the machine is
+  not, and is neither read, written nor deleted, so a repository cannot have its brief
+  stand for a file elsewhere. One that does not exist yet is inside.
+  """
+  @spec inside?(Path.t()) :: boolean()
+  def inside?(path) do
+    root = path |> Path.dirname() |> Path.dirname()
+
+    with {:ok, real} <- Workspace.real_path(path),
+         {:ok, real_root} <- Workspace.real_path(root) do
+      key = Workspace.compare_key(real)
+      root_key = Workspace.compare_key(real_root)
+      key == root_key or String.starts_with?(key, root_key <> "/")
+    else
+      _error -> false
     end
   end
 
@@ -154,7 +179,7 @@ defmodule Troupe.Session.Memory do
   @spec forget(Path.t(), Path.t() | nil) :: :ok
   def forget(workspace, state_dir \\ nil) do
     path = path(workspace)
-    _ = File.rm(path)
+    _ = if inside?(path), do: File.rm(path)
     _ = update_attempts(state_dir, &Map.delete(&1, attempt_key(path)))
     :ok
   end
@@ -219,10 +244,21 @@ defmodule Troupe.Session.Memory do
   end
 
   # Re-read before merging, inside a transaction on the path: another session in this
-  # daemon, or the person's editor, may have touched the file since anyone looked.
+  # daemon, or the person's editor, may have touched the file since anyone looked. A brief
+  # that is a link out is not written: the write would copy what it points at into the
+  # repository, or, through a linked `.troupe`, write elsewhere.
   defp mutate(workspace, fun) do
     path = path(workspace)
 
+    if inside?(path), do: transact(path, fun), else: refuse_outside(path)
+  end
+
+  defp refuse_outside(path) do
+    Logger.warning("memory: not writing #{path}: it is a link to outside its repository")
+    {:error, "not written: #{path} is a link to outside its repository"}
+  end
+
+  defp transact(path, fun) do
     :global.trans({{__MODULE__, path}, self()}, fn ->
       brief = fun.(read(path) || Memory.empty())
 
