@@ -1027,8 +1027,9 @@ defmodule Troupe.Config do
   from: how many models, from which URL and when, fetched by this run or from the cache,
   or why the provider did not answer (Decision 778). `asked` names the providers this run
   refreshed (`Troupe.LLM.Catalog.Store.ensure/2`), `nil` being the session-wide one, whose
-  models' facts are then "from the provider" rather than "from the cache". A model a role
-  names that its provider does not list says so, and what the provider does serve.
+  models' facts are then "from the provider" rather than "from the cache". A model its
+  provider does not list says so in place of a window, and one a role names says it loudly,
+  with what the provider does serve (Decision 799).
   """
   @spec describe(t(), command: String.t(), asked: [String.t() | nil]) :: String.t()
   def describe(%__MODULE__{} = config, opts \\ []) do
@@ -1214,13 +1215,21 @@ defmodule Troupe.Config do
   end
 
   defp describe_choice(config, choice, roles, sources, answered) do
-    with true <- choice.id in roles,
-         {:not_served, source, nearest} <- Store.served(config, choice.id, sources) do
-      not_served(source, nearest)
-    else
-      _served_or_unknown -> describe_model(choice, answered)
+    case served(config, choice, sources) do
+      {:not_served, source, nearest} ->
+        if choice.id in roles,
+          do: not_served(source, nearest),
+          else: unserved(choice, source, answered)
+
+      _served_or_unknown ->
+        describe_model(choice, answered)
     end
   end
+
+  # A named provider that declares no models is in the list as `name/`, which names no
+  # model to look for.
+  defp served(_config, %{model: nil}, _sources), do: :unknown
+  defp served(config, choice, sources), do: Store.served(config, choice.id, sources)
 
   # Loud, and with what to use instead: a model the provider does not list cannot run a
   # turn, and its default window and missing price were the only hint there was (#410).
@@ -1229,6 +1238,20 @@ defmodule Troupe.Config do
 
     "NOT SERVED by #{source_label(source)}; it serves #{Enum.join(nearest, ", ")}" <>
       if(more > 0, do: " and #{more} more", else: "")
+  end
+
+  # Any other model the provider does not list says so where its window would be: the one
+  # it has is `context_window`'s fallback, which nobody said (Decision 799). A price the
+  # config gives it is still said: someone wrote it down.
+  defp unserved(choice, source, answered) do
+    [
+      "not served by #{source_label(source)}",
+      choice.price && describe_price(choice),
+      facts_from(choice, answered),
+      if(choice.key?, do: nil, else: "no key")
+    ]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.join(", ")
   end
 
   # Plain commas, as `mask/1` has plain dots: this is printed to a console.

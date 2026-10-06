@@ -132,6 +132,11 @@ layers merged and untrusted keys left out as Troupe decides
   file at the line.
 - **All settings**, folded: every key and the layer it came from.
 
+When the configuration does not load, the view says so in place of those groups,
+**The configuration did not load**, with each error `troupe config --explain` reports under
+it: what is wrong and the file and line it is at, which a click opens. The Models group
+is still there, saying why `troupe models` could not list them.
+
 Hover a row for the value each layer gave it, and why a repository's value was ignored. A
 click on a row opens the file that set it. The view asks again when the folder you are
 working in changes, when one of those files is saved in VS Code, and on **Refresh** in its
@@ -150,8 +155,8 @@ declares, the models the config names or prices, and what each provider's own li
 - **The default, cheap and expensive models** are starred and say which they are. A role
   you have not set is the default model's, so that one says all three.
 - **A model its provider does not serve** has a warning and says so, with what the
-  provider does serve on hover. It shows no window: the number Troupe keeps for it is a
-  fallback, not a window anyone said. A turn on it would fail.
+  provider does serve on hover. It shows no window: `troupe models` gives it none, and
+  before 0.8.6 gave it Troupe's fallback, which no provider said. A turn on it would fail.
 - **Each provider's list**: how many models it listed and when, or, when it did not
   answer, why, and what is still kept from before.
 
@@ -235,7 +240,8 @@ policy like every other package ([third-party-licences.md](../third-party-licenc
 - `pnpm test`: unit tests for the folder choice, the search for `troupe` (on Linux and
   Windows file systems, the extensionless file included), the message, the line for each
   shell, the Settings view's rows (never a key, a repository's ignored value and why, the
-  files and the trust), its Models group (each model's window, price and where they came
+  files and the trust, a config that does not load as the errors a failing `troupe`
+  printed), its Models group (each model's window, price and where they came
   from, the three roles, a model not served shown without a window, each provider's list,
   a failure as one line with no key in it), and the manifest (no Windows key on Ctrl+Alt,
   every icon in the package). The line is also put through each shell the machine has (sh, bash, zsh, dash,
@@ -248,7 +254,7 @@ policy like every other package ([third-party-licences.md](../third-party-licenc
   settings and models of its own, on a workspace of four folders: the editor tab, `beside`
   and `panel`, the editor title bar's file, the side bar's list and the activity bar, the
   Settings view, and its Models group (`--refresh` only from the group's button, a failing
-  `troupe models`, a config that does not load, a missing `troupe`). It is downloaded,
+  `troupe models`, a config that does not load and its errors, a missing `troupe`). It is downloaded,
   or `TROUPE_VSCODE_EXECUTABLE` names one, and runs with its own user data and extensions
   directories under `.vscode-test/`, so nobody's own profile is read or changed. On Linux
   without a display, run it under `xvfb-run -a`.

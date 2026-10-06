@@ -18,13 +18,14 @@ const work = path.join(base, "w");
 const bin = path.join(work, "bin");
 
 // `troupe config --explain --json` prints explain.json, and is not one of the calls the
-// tests count; while there is an explain.fail it prints `errors` and fails, as a config that
-// does not load does. `troupe models` writes its arguments to models.log and prints
+// tests count; while there is an explain.fail it prints what that holds (a config's
+// `errors`) and fails, as a config that does not load does, with nothing on standard error.
+// `troupe models` writes its arguments to models.log and prints
 // models.json, or fails with a reason while there is a models.fail.
 const posixFake = `#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
 if [ "$1" = config ]; then
-  [ -f "$here/explain.fail" ] && { echo '{"errors":[]}'; exit 1; }
+  [ -f "$here/explain.fail" ] && { cat "$here/explain.fail"; exit 1; }
   cat "$here/explain.json"; exit 0
 fi
 if [ "$1" = models ]; then
@@ -55,7 +56,7 @@ const windowsFake = [
   "ping -n 600 127.0.0.1 >nul",
   "exit /b 0",
   ":config",
-  'if exist "%~dp0explain.fail" (echo {"errors":[]} & exit /b 1)',
+  'if exist "%~dp0explain.fail" (type "%~dp0explain.fail" & exit /b 1)',
   'type "%~dp0explain.json"',
   "exit /b 0",
   ":models",

@@ -4,12 +4,11 @@
 // answer was read from is saved, and on Refresh; never while hidden. Only the Models
 // group's own button adds `--refresh`, which asks every provider what it serves.
 
-import { execFile } from "node:child_process";
 import * as vscode from "vscode";
 import type { Found } from "./binary.js";
 import { modelsFailed, modelsGroup, modelsPending, parseModels } from "./models.js";
-import { invocation, type Invocation } from "./run.js";
-import { failure, parseExplain, rows, type Row } from "./settings.js";
+import { invocation, run } from "./run.js";
+import { failure, parseExplain, rows, settingsFailed, type Row } from "./settings.js";
 
 /** What `troupe.refreshSettings` shows. `executeCommand` returns it, which is what the tests read. */
 export type Shown = { folder: string; rows: Row[] } | { noFolder: true };
@@ -98,7 +97,7 @@ export class SettingsView implements vscode.TreeDataProvider<Row>, vscode.Dispos
       this.files = new Set(explain.files.map((f) => normal(f.path)));
       settings = (models) => rows(explain, models);
     } catch (error) {
-      const failed = failure("Troupe could not say what its settings are", message(error));
+      const failed = settingsFailed(error);
       settings = (models) => [failed, models];
     }
     meanwhile(settings(modelsPending()));
@@ -146,21 +145,6 @@ function opener(open: NonNullable<Row["open"]>): vscode.Command {
 
   const at = open.line === undefined ? {} : { selection: new vscode.Range(open.line - 1, 0, open.line - 1, 0) };
   return { command: "vscode.open", title: "Open", arguments: [uri, at] };
-}
-
-function run(how: Invocation, cwd: string, timeout: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      how.file,
-      how.args,
-      { cwd, timeout, maxBuffer: 16 * 1024 * 1024, windowsHide: true, windowsVerbatimArguments: how.verbatim },
-      (error, stdout, stderr) => {
-        if (error === null) return resolve(String(stdout));
-        if (error.killed) return reject(new Error(`troupe did not answer within ${timeout / 1000} seconds`));
-        reject(new Error(String(stderr).trim() || error.message));
-      },
-    );
-  });
 }
 
 function message(error: unknown) {

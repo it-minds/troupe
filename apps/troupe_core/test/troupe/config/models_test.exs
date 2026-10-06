@@ -169,6 +169,29 @@ defmodule Troupe.Config.ModelsTest do
     assert nearest == ["qwen3.6-35b", "qwen3-235b", "gpt-oss-120b", "mistral-small-3.2"]
   end
 
+  # Defects D70, Decision 799: what `Config.models/1` gives a model no window is said for is
+  # `context_window`'s fallback, and a model its provider does not serve has no window.
+  test "a model its provider does not serve has no window, whether a role names it or not",
+       ctx do
+    find = fn json, id -> Enum.find(json["models"], &(&1["id"] == id)) end
+
+    # Before any provider has answered, the fallback is the window a session would plan
+    # against, and nothing says the model is not served.
+    unasked = Config.models_json(ctx.config)
+    assert %{"served" => nil, "context" => 200_000} = find.(unasked, "house-model")
+
+    Store.ensure(ctx.config)
+    json = Config.models_json(%{ctx.config | catalog: Store.load()}, asked: ["gw", nil])
+
+    assert %{"served" => false, "context" => nil} = find.(json, "qwen3.5")
+
+    # A price the config gives it is still said: someone wrote it down.
+    assert %{"served" => false, "context" => nil, "input" => 0.5, "output" => 1.5} =
+             find.(json, "house-model")
+
+    assert %{"served" => true, "context" => 131_072} = find.(json, "gw/qwen3-235b")
+  end
+
   test "a provider that did not answer says why, with what the cache still has", ctx do
     Store.ensure(ctx.config)
     refused = %{ctx.config | api_key: "sk-refused-000000000000"}
@@ -201,8 +224,15 @@ defmodule Troupe.Config.ModelsTest do
     assert length(json["catalog"]["sources"]) ==
              text |> String.split("\n") |> Enum.count(&String.starts_with?(&1, "catalog: "))
 
-    for %{"id" => id, "served" => false} <- json["models"], id in Map.values(json["roles"]) do
-      assert text =~ ~r/^  #{Regex.escape(id)} +NOT SERVED/m
+    # A model not served is said to be, a role's loudly, and none of them has a window.
+    roles = Map.values(json["roles"])
+    unserved = for %{"id" => id, "served" => false} <- json["models"], do: id
+    assert "house-model" in unserved
+
+    for id <- unserved do
+      said = if id in roles, do: "NOT SERVED by openai; ", else: "not served by openai"
+      assert text =~ ~r/^  #{Regex.escape(id)} +#{said}/m
+      refute text =~ ~r/^  #{Regex.escape(id)} .*ctx/m
     end
 
     assert text =~ "catalog cache: #{json["catalog"]["path"]}\n"
