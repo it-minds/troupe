@@ -273,21 +273,159 @@ defmodule Troupe.ObjectStore do
     end
   end
 
+  # The most S3's `DeleteObjects` takes in one request.
+  @batch 1_000
+
+  @typedoc """
+  What a delete of many versions did not do: how many went, the versions still there, and
+  the first reason one of them is.
+  """
+  @type not_deleted :: %{
+          deleted: non_neg_integer(),
+          left: [%{key: String.t(), version_id: String.t()}],
+          reason: term()
+        }
+
   @doc """
-  Delete everything under a prefix, every version.
+  Delete everything under a prefix, every version, and say whether it did.
 
   Erasure's first act on storage. What makes it final is that the session's key is
   destroyed too — this removes the ciphertext, and destroying the key removes the
   possibility of reading any copy that survives in a backup.
 
-  Lists every version before it deletes one, with `list_versions/3`'s options.
+  Lists every version before it deletes one, with `list_versions/3`'s options, then
+  deletes them a thousand to a request with S3's `DeleteObjects` (`POST ?delete`), quiet,
+  so the answer names only the versions it did not delete. One request per version took
+  seconds for a thousand, and a session with tens of thousands outlasted the call that
+  asked for it. A store with no batch delete answers `NotImplemented`, and its versions
+  go one `DELETE` at a time (Decision 804).
+
+  `{:ok, count}` only when every version is gone; otherwise `{:error, {:not_deleted,
+  %{deleted:, left:, reason:}}}`. Every answer is read, because an erasure that counted
+  what it sent said a refused version was gone. A version the store says it no longer
+  has is gone. One it refuses is left and the rest go on, since a hold or a policy on
+  one version says nothing of the next. A request it does not answer, or fails as a
+  whole, stops the deleting, and what was not sent is left too: the next request would
+  fare the same, and each could take a request's whole time to say so.
   """
-  @spec delete_prefix(t(), String.t(), keyword()) :: {:ok, non_neg_integer()} | {:error, term()}
+  @spec delete_prefix(t(), String.t(), keyword()) ::
+          {:ok, non_neg_integer()} | {:error, {:not_deleted, not_deleted()} | term()}
   def delete_prefix(%__MODULE__{} = store, prefix, opts \\ []) do
     with {:ok, versions} <- list_versions(store, prefix, opts) do
-      Enum.each(versions, &delete(store, &1.key, version_id: &1.version_id))
-      {:ok, length(versions)}
+      versions
+      |> Enum.chunk_every(@batch)
+      |> delete_batches(store, :batch, %{deleted: 0, left: [], reason: nil})
     end
+  end
+
+  defp delete_batches([], _store, _how, %{left: []} = outcome), do: {:ok, outcome.deleted}
+
+  defp delete_batches([], _store, _how, outcome),
+    do: {:error, {:not_deleted, %{outcome | left: Enum.reverse(outcome.left)}}}
+
+  defp delete_batches([batch | rest], store, how, outcome) do
+    case delete_batch(store, batch, how) do
+      :unsupported ->
+        delete_batches([batch | rest], store, :single, outcome)
+
+      {:ok, refused} ->
+        delete_batches(rest, store, how, tally(outcome, batch, refused))
+
+      {:stopped, refused} ->
+        outcome = tally(outcome, batch, refused)
+        unsent = Enum.reverse(List.flatten(rest), outcome.left)
+        delete_batches([], store, how, %{outcome | left: unsent})
+    end
+  end
+
+  # `refused` pairs each version of the batch that is still there with why.
+  defp tally(outcome, batch, refused) do
+    %{
+      deleted: outcome.deleted + length(batch) - length(refused),
+      left: Enum.reverse(Enum.map(refused, &elem(&1, 0)), outcome.left),
+      reason: outcome.reason || Enum.find_value(refused, &elem(&1, 1))
+    }
+  end
+
+  defp delete_batch(store, batch, :batch) do
+    body = delete_request(batch)
+    md5 = :md5 |> :crypto.hash(body) |> Base.encode64()
+    headers = [{"content-type", "application/xml"}, {"content-md5", md5}]
+
+    case request(store, :post, nil, [{"delete", ""}], body, headers) do
+      {:ok, %{status: status, body: answer}} when status in 200..299 ->
+        if answer =~ "<DeleteResult",
+          do: {:ok, refusals(batch, answer)},
+          else: stopped(batch, {:unexpected_answer, status, answer})
+
+      {:ok, %{status: status, body: answer}} ->
+        if status in [405, 501] or extract(answer, "Code") == "NotImplemented",
+          do: :unsupported,
+          else: stopped(batch, {:unexpected_status, status, answer})
+
+      {:error, reason} ->
+        stopped(batch, reason)
+    end
+  end
+
+  defp delete_batch(store, batch, :single), do: delete_singly(batch, store, [])
+
+  # A 4xx is about that version; anything else is about the store.
+  defp delete_singly([], _store, refused), do: {:ok, Enum.reverse(refused)}
+
+  defp delete_singly([version | rest] = unsent, store, refused) do
+    case delete(store, version.key, version_id: version.version_id) do
+      :ok ->
+        delete_singly(rest, store, refused)
+
+      {:error, {:unexpected_status, status, _body} = reason} when status in 400..499 ->
+        delete_singly(rest, store, [{version, reason} | refused])
+
+      {:error, reason} ->
+        {:stopped, Enum.reverse(refused, Enum.map(unsent, &{&1, reason}))}
+    end
+  end
+
+  defp stopped(batch, reason), do: {:stopped, Enum.map(batch, &{&1, reason})}
+
+  defp delete_request(batch) do
+    objects =
+      Enum.map(batch, fn version ->
+        [
+          "<Object><Key>",
+          escape(version.key),
+          "</Key><VersionId>",
+          escape(version.version_id),
+          "</VersionId></Object>"
+        ]
+      end)
+
+    IO.iodata_to_binary([
+      ~s(<?xml version="1.0" encoding="UTF-8"?>),
+      ~s(<Delete xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Quiet>true</Quiet>),
+      objects,
+      "</Delete>"
+    ])
+  end
+
+  # A quiet answer names only what it did not delete, each with S3's code. One the store
+  # no longer has is gone, as a single delete's 404 is. An error naming a key and no
+  # version leaves every version of that key in the batch, rather than none of them.
+  defp refusals(batch, answer) do
+    refused =
+      for [_, entry] <- Regex.scan(~r/<Error>(.*?)<\/Error>/s, answer),
+          extract(entry, "Code") not in ["NoSuchKey", "NoSuchVersion"],
+          into: %{} do
+        {{extract(entry, "Key"), extract(entry, "VersionId")},
+         {:refused, extract(entry, "Code"), extract(entry, "Message")}}
+      end
+
+    Enum.flat_map(batch, fn version ->
+      case refused[{version.key, version.version_id}] || refused[{version.key, nil}] do
+        nil -> []
+        reason -> [{version, reason}]
+      end
+    end)
   end
 
   # -- signing and transport --------------------------------------------------
@@ -415,6 +553,17 @@ defmodule Troupe.ObjectStore do
     |> String.replace("&quot;", "\"")
     |> String.replace("&apos;", "'")
     |> String.replace("&amp;", "&")
+  end
+
+  # The other way, for the one request that carries keys in XML: `&` first, or the `&`
+  # of every escape written before it would be escaped again.
+  defp escape(value) do
+    value
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+    |> String.replace("\"", "&quot;")
+    |> String.replace("'", "&apos;")
   end
 
   defp extract_versions(xml) do

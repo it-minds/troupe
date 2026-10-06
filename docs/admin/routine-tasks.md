@@ -132,14 +132,16 @@ after the last pod runs on the new one.
 `admin.session.erase.preview`, then `admin.session.erase {session_id}`. Irreversible: the
 key is destroyed first, then every object version; the owner is not told; spend stays in
 the ledger; the audit row keeps your name. With no healthy pod of the profile the erasure is
-pending until one enrols.
+pending until one enrols, and so is one whose objects the object store would not all
+delete; the pod's log says how many were left and why (Decision 804).
 
 A person's private session has no pod. The plane destroys its key itself, and the answer's
 `state` says whether it did: `erased`, or `erasure_pending` when OpenBao refused or could
 not be reached, which also shows in the session list. Erase it again to retry; the owner's
 daemon retries it too the next time it is signed in. Its objects go once the owner's
 daemon has connected and dropped its own copy; until then they are unreadable, because the
-key is gone (Decision 756).
+key is gone (Decision 756). Any the object store refuses to delete are tried again at that
+daemon's next connection, and the plane's log says how many were left and why (Decision 804).
 
 ## Decommission a profile
 
