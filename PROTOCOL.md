@@ -265,7 +265,7 @@ Durable:
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to` |
-| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `trimmed`, `skipped` and `hash`. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
+| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `trimmed`, `skipped`, `imported_by`, `unfollowed` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
 | `goal_set` | `text`, `command_id` — the session's goal, written by the root agent under the actor who set it (`session.goal.set`) |
 | `goal_cleared` | `command_id` |
 | `loop_started` | `loop_id` (`loop-<n>`), `max_iterations`, `max_failures`, `goal`, `command_id` — a loop towards the goal, written by the session under the actor who started it (`session.loop.start`) |
@@ -1031,19 +1031,28 @@ client to say why it started none. `memory.forget` forgets that try with the bri
 → `{"budget": 16000, "used": 1234, "searched": ["/home/me/.config/troupe", "/home/me/project"],
 "files": [{"scope": "root", "path": "/home/me/project/AGENTS.md", "size": 812, "chars": 800,
 "budget": 16000, "share": 0.05, "status": "whole", "trimmed": 0, "skipped": ["CLAUDE.md"],
+"imported_by": null, "unfollowed": [{"import": "docs/gone.md", "reason": "missing"}],
 "hash": "sha256:…"}, {"scope": "brief", "path": "/home/me/project/.troupe/memory.md",
 "size": 0, "chars": 0, "budget": 6000, "share": 0.0, "status": "absent", "trimmed": 0,
-"skipped": [], "hash": null}]}`
+"skipped": [], "imported_by": null, "unfollowed": [], "hash": null}]}`
 
 The **provenance of the prompt**: every file the session's next system prompt is read
 from, in the order it is read — the person's own `<config>/AGENTS.md` (`user`), the
-repository root's (`root`), one in each directory between the root and the workspace
-(`nested`, the nearest last) and the project brief (`brief`) — with its `size` on disk,
-the `chars` that reach the prompt, the `budget` those count against
-(`instructions_max_chars` for the files together, `memory_max_chars` for the brief) and
-its `share` of it. Every file applies and the nearest wins where two disagree. `status`
-is `whole`; `trimmed`, with `trimmed` saying how many characters were cut, the nearest
-files being kept whole first; `dropped`, the budget was spent before it; or, for the
+repository root's (`root`), one in each directory between the root and where the
+session works (`nested`, parents before their children): the workspace and the
+directory of each file the root agent's conversation has read, edited or written — and
+the project brief (`brief`). A file one of them imports with `@path` comes right after
+it, in its scope, with `imported_by` naming the importer; `unfollowed` lists the imports
+a file names that were not read, each with its `reason`: `missing`, `outside` the
+repository (the config directory for the person's own file), `depth` past five, or
+`cycle`. Each file comes with its `size` on disk, the `chars` that reach the prompt, the
+`budget` those count against (`instructions_max_chars` for the files together,
+`memory_max_chars` for the brief) and its `share` of it. Every file applies and the
+nearest wins where two disagree. `status` is `whole`; `trimmed`, with `trimmed` saying
+how many characters were cut, the nearest scope (a file and what it imports) being kept
+whole first; `dropped`, the budget was spent before it; `outside`, the file found is
+really outside the repository (or, for the person's own, the config directory), through
+a link, and was not read, its `size` and `chars` 0 and its `hash` null; or, for the
 brief, `absent` or `disabled` as `memory.get` has it. `skipped` names the aliases the
 file hid in its directory: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and
 `.github/copilot-instructions.md` are the same file under other tools' names, the first
@@ -1051,7 +1060,8 @@ that exists is read and the rest are skipped, so nobody debugs a file that was n
 loaded. `searched` is every directory looked in. Read from disk when asked, as the next
 turn reads it, so it says what an edit will do; what a past turn read is its
 `instructions_loaded` event. Nothing reaches the prompt from a file without appearing
-here. Reading it wakes nothing.
+here. Reading it wakes nothing: a session that is asleep is answered for its workspace
+alone, without the directories its conversation worked in.
 
 #### `mcp.status`
 ```json

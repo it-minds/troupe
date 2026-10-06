@@ -1080,6 +1080,7 @@ defmodule Troupe.Agent.Server do
       state
       |> apply_input(source, content, actor, meta.command_id)
       |> show_todos()
+      |> instructions_due()
     else
       Logger.debug("troupe: ignoring #{inspect(source)} input of #{inspect(content)}")
       state
@@ -1300,8 +1301,8 @@ defmodule Troupe.Agent.Server do
   # The repository's instruction files and the project brief come right after the
   # profile's own words and before the environment: what the people who work here wrote
   # for agents, and what earlier agents learned, are the first things a new one should
-  # read. Both are read fresh at every prompt, so an edit to `AGENTS.md` and a
-  # `remember` made in this session reach the next turn (Decision 706).
+  # read. Both are read fresh as each turn begins, so an edit to `AGENTS.md` and a
+  # `remember` made in this session reach the next turn (Decisions 706 and 798).
   #
   # The goal comes after everything that describes the agent and its surroundings and
   # before the task list: it is what the list is for, and it changes less often than the
@@ -1321,19 +1322,27 @@ defmodule Troupe.Agent.Server do
     |> Enum.join("\n\n")
   end
 
-  # Read from disk at every turn, so an edit takes effect on the next one; the digest is
-  # the cache. An `instructions_loaded` event is written when what reached the prompt
-  # changed since this agent's last turn, and never when it did not, so the log says
-  # which files each turn was read from without saying so every turn.
+  # Read from disk as a turn begins, so an edit takes effect on the next one, and held for
+  # the rest of the turn, so the system prompt in front of the cached conversation is the
+  # same on every call of it (Decision 798, as 792 holds the task list). The directories
+  # read are the workspace's and those of the files the conversation worked on. The
+  # digest is the cache: an `instructions_loaded` event is written when what reached the
+  # prompt changed since this agent's last turn, and never when it did not, so the log
+  # says which files each turn was read from without saying so every turn.
+  defp load_instructions(%State{instructions: %{}, instructions_due: false} = state), do: state
+
   defp load_instructions(%State{} = state) do
-    loaded = Instructions.load(state.workspace.root_real, state.config)
+    focus = Instructions.focus(state.conversation)
+    loaded = Instructions.load(state.workspace.root_real, state.config, focus)
 
     if state.instructions == nil or loaded.digest != state.instructions.digest do
       log(state, :instructions_loaded, Instructions.provenance(loaded))
     end
 
-    %{state | instructions: loaded}
+    %{state | instructions: loaded, instructions_due: false}
   end
+
+  defp instructions_due(%State{} = state), do: %{state | instructions_due: true}
 
   defp environment_section(state) do
     """
@@ -2864,13 +2873,16 @@ defmodule Troupe.Agent.Server do
     state = count_call(state, response.usage, gateway, %{summariser: true})
 
     # The call that wrote the task list may be in the summary now, and the conversation
-    # behind the system prompt is new anyway, so the prompt shows the list as it is.
-    show_todos(%{
+    # behind the system prompt is new anyway, so the prompt shows the list as it is, and
+    # the instruction files as they are.
+    %{
       state
       | conversation: conversation,
         compacted_through: compacted_through(conversation),
         last_input_tokens: 0
-    })
+    }
+    |> show_todos()
+    |> instructions_due()
   end
 
   # What a compaction leaves behind it ends at the model's last reply in what it kept

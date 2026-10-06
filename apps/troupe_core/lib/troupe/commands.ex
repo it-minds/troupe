@@ -223,9 +223,10 @@ defmodule Troupe.Commands do
         usage: "/context",
         detail:
           "The files the next turn's system prompt is read from: your own AGENTS.md, the " <>
-            "repository's, one in each directory down to the workspace, and the project " <>
-            "brief, each with its scope, size and share of the budget, and the aliases " <>
-            "(CLAUDE.md, GEMINI.md, copilot-instructions.md) it hid."
+            "repository's, one in each directory down to the workspace and to the files " <>
+            "the conversation worked on, the files they import with @path, and the " <>
+            "project brief, each with its scope, size and share of the budget, and the " <>
+            "aliases (CLAUDE.md, GEMINI.md, copilot-instructions.md) it hid."
       ),
       entry("watch", "workspace", "Toggle watch mode: act on AI! and AI? comments",
         usage: "/watch",
