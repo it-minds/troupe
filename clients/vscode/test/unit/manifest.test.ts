@@ -23,6 +23,42 @@ test("every command contributed is registered, and every one registered is contr
   for (const m of source.matchAll(/\.command = "([^"]+)"/g)) assert.ok(contributed.includes(m[1]), m[1]);
 });
 
+// Issue #378: troupe's other command lines from the palette, and a file's or a folder's
+// path put into the TUI's prompt from the explorer, an editor and its tab.
+test("the palette has troupe's command lines, and the explorer and the editor ask about a file", () => {
+  const { commands, menus } = manifest.contributes;
+  const shown = (id: string) => {
+    const c = commands.find((c: { command: string }) => c.command === id);
+    return c && (c.category ? `${c.category}: ${c.title}` : c.title);
+  };
+
+  assert.deepEqual(
+    ["troupe.resume", "troupe.run", "troupe.doctor", "troupe.config", "troupe.askAboutFile", "troupe.askAboutFolder"].map(shown),
+    [
+      "Troupe: Resume Last Session Here",
+      "Troupe: Run a Task…",
+      "Troupe: Doctor",
+      "Troupe: Open Settings",
+      "Ask Troupe About This File",
+      "Ask Troupe About This Folder",
+    ],
+  );
+
+  const items = (menu: string) => (menus[menu] ?? []) as { command: string; when?: string }[];
+  const when = (menu: string, command: string) => items(menu).find((m) => m.command === command)?.when ?? "";
+
+  assert.match(when("explorer/context", "troupe.askAboutFile"), /!explorerResourceIsFolder/);
+  assert.match(when("explorer/context", "troupe.askAboutFolder"), /(^|[^!])explorerResourceIsFolder/);
+  for (const menu of ["editor/context", "editor/title/context"]) {
+    assert.ok(items(menu).some((m) => m.command === "troupe.askAboutFile"), menu);
+    // Not on a Troupe terminal's own tab, nor a file that is no file on a disk.
+    assert.match(when(menu, "troupe.askAboutFile"), /resourceScheme == file/);
+    assert.match(when(menu, "troupe.askAboutFile"), /resourceScheme == vscode-remote/);
+  }
+  // A folder is asked about from the explorer only: the palette has no folder to give it.
+  assert.equal(when("commandPalette", "troupe.askAboutFolder"), "false");
+});
+
 // The activity bar's icon and the terminal tab's are files in media/, which the .vsix keeps.
 test("every icon named is a file the package keeps", () => {
   const { viewsContainers, views, commands } = manifest.contributes;

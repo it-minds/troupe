@@ -52,6 +52,34 @@
         }
       },
       {
+        "command": "troupe.resume",
+        "title": "Resume Last Session Here",
+        "category": "Troupe"
+      },
+      {
+        "command": "troupe.run",
+        "title": "Run a Task…",
+        "category": "Troupe"
+      },
+      {
+        "command": "troupe.doctor",
+        "title": "Doctor",
+        "category": "Troupe"
+      },
+      {
+        "command": "troupe.config",
+        "title": "Open Settings",
+        "category": "Troupe"
+      },
+      {
+        "command": "troupe.askAboutFile",
+        "title": "Ask Troupe About This File"
+      },
+      {
+        "command": "troupe.askAboutFolder",
+        "title": "Ask Troupe About This Folder"
+      },
+      {
         "command": "troupe.refreshSettings",
         "title": "Refresh Settings",
         "category": "Troupe",
@@ -65,6 +93,42 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "troupe.askAboutFile",
+          "when": "workspaceFolderCount != 0 && resourceScheme == file || workspaceFolderCount != 0 && resourceScheme == vscode-remote"
+        },
+        {
+          "command": "troupe.askAboutFolder",
+          "when": "false"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "troupe.askAboutFile",
+          "group": "navigation",
+          "when": "!explorerResourceIsFolder"
+        },
+        {
+          "command": "troupe.askAboutFolder",
+          "group": "navigation",
+          "when": "explorerResourceIsFolder"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "troupe.askAboutFile",
+          "group": "troupe",
+          "when": "workspaceFolderCount != 0 && resourceScheme == file || workspaceFolderCount != 0 && resourceScheme == vscode-remote"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "troupe.askAboutFile",
+          "group": "troupe",
+          "when": "workspaceFolderCount != 0 && resourceScheme == file || workspaceFolderCount != 0 && resourceScheme == vscode-remote"
+        }
+      ],
       "editor/title": [
         {
           "command": "troupe.open",

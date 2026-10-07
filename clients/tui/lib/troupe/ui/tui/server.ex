@@ -167,14 +167,17 @@ defmodule Troupe.UI.TUI.Server do
     :ok = Client.subscribe(sid)
     :ok = Client.subscribe_settings()
     model = rebuild(sid)
+    # `troupe --prompt TEXT`: the command line opens holding it, the cursor after it, and
+    # nothing is sent until Enter (Decision 150).
+    prompt = Keyword.get(opts, :prompt) || ""
 
     state = %{
       session_id: sid,
       workspace: model.workspace,
       model: model,
       focus: :command,
-      cmd_text: "",
-      cmd_pos: 0,
+      cmd_text: prompt,
+      cmd_pos: String.length(prompt),
       win_text: "",
       win_pos: 0,
       agents: Client.commands(sid),
