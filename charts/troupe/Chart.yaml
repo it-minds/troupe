@@ -2,8 +2,8 @@ apiVersion: v2
 name: troupe
 description: Troupe's control plane, operator, and the policy that bounds them
 type: application
-version: 0.8.7-beta
-appVersion: "0.8.7-beta"
+version: 0.9.0-beta
+appVersion: "0.9.0-beta"
 keywords:
   - troupe
   - coding-agent
