@@ -1482,7 +1482,7 @@ while its session is working.
 | `active` | running | everything |
 | `dormant` | stopped | read it; an activating command brings the tree back |
 | `read_only` | stopped | read it; activating commands return `forbidden`. A session is parked here when its team lost the grant — running, dormant or still `pending` — or its profile is gone, and when a pod could not put its tree back because the directory it was recorded in is gone (Decision 661). A running one is put to sleep on its pod, as an archive does (§7) |
-| `erasure_pending` | none | a private session somebody erased whose key the plane has not yet destroyed: listed as such; sealing, keying and signing for it answer `not_found` with `reason: "erased"`; `session.erase` again tries again (Decision 756) |
+| `erasure_pending` | none | a session somebody erased whose key the plane has not yet destroyed: listed as such and answered by `session.get`; `session.erase` again tries again, and so does the plane every five minutes; opening, minting, redeeming a link to, forking, spawning from, sharing, sealing, keying and signing for it answer `not_found` with `reason: "erased"` (Decisions 756 and 811) |
 | `erased` | gone | `not_found` |
 
 `pending` is a remote state and a short one. A `session.create` on a profile that is full
@@ -1667,15 +1667,20 @@ seals it, uploads its workspace, deletes its own copy and reports it dormant, gi
 its slot and its budget slice; the answer is the session's row, `dormant`, and the next
 activating command brings it back on whichever pod has room. A session that is not
 running is answered as it stands, one still `pending` is refused with `conflict`, and one
-whose pod does not answer stays as it was, with `unavailable`. The plane's erasure reaches
-the pod over the same control channel and deletes the pod's copy along with the key and
-the objects.
+whose pod does not answer stays as it was, with `unavailable`. The plane's erasure destroys
+the session's key itself, as it does a private session's (below), and reaches the pod over
+the same control channel, which stops the session there and deletes the pod's copy and
+the objects (Decision 811). The answer has the private session's shape: `erased: true`
+with `state: "erased"` once the key is gone, and `erased: false` with `state:
+"erasure_pending"` where the key manager refused or could not be reached, in which case
+asking again tries again, and so does the plane every five minutes.
 
 **Erasing a private session** (Decision 756) has no pod to reach. The plane destroys the
 session's key itself, every version, and answers `{session_id, erased, state, head_hash}`:
 `erased: true` with `state: "erased"` once the key is gone, and `erased: false` with
 `state: "erasure_pending"` where the key manager refused or could not be reached, in which
-case asking again tries again. The objects and the copy on the owner's machine go when
+case asking again tries again, as the plane does every five minutes (Decision 811). The
+objects and the copy on the owner's machine go when
 the owner's daemon next connects: it asks `session.erasures`, drops its sealer and its copy
 of each session named, and answers `session.erased`, on which the plane deletes every
 version under the session's prefix, and is named the session again until none is left

@@ -1349,8 +1349,8 @@ defmodule Troupe.Plane.Admin do
   @doc """
   Erase a session, for an administrator entitled to.
 
-  `state` is `erased`, or `erasure_pending` for a person's private session whose key the
-  key manager did not destroy; erasing it again tries again (Decision 756).
+  `state` is `erased`, or `erasure_pending` for a session whose key the key manager did not
+  destroy; erasing it again tries again (Decisions 756 and 811).
   """
   @spec session_erase(actor(), String.t()) :: result()
   def session_erase(actor, session_id) do

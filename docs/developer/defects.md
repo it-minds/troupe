@@ -735,9 +735,10 @@ Found by the #460 fixer, 2026-10-06.
 
 ### D84 - Erasures and the daemon's start: small leftovers of 0.8.7 (low)
 
-- A team session whose pod couldn't finish an erasure, or that had no healthy pod, is tried
-  again only when a pod of its profile next enrols; erasing it again returns the existing
-  tombstone. Private sessions are retried on every link.
+- A team session whose key is gone but whose pod couldn't delete every object, or that had
+  no healthy pod, has its objects tried again only when a pod of its profile next enrols;
+  erasing it again returns the existing tombstone (its key is retried every five minutes
+  since Decision 811).
 - Two acknowledgements of the same private session at once run two background deletions of
   its prefix (harmless: the second finds what is left).
 - On Windows, a program the VM starts through `System.shell` inherits the VM's handles: a

@@ -171,10 +171,6 @@ defmodule Troupe.Worker.Plane.Commands do
     end)
   end
 
-  # The key first, then the objects. Once the key is gone nothing under the session's
-  # prefix decrypts — not the current objects, not the prior versions a versioned bucket
-  # keeps, not a copy in a backup — so the deletion that follows is tidiness rather than
-  # the security property.
   # A capability over this session was minted or ended. The pod's part is the durable
   # event: the plane holds the row, checks it at redemption and mints the token, and none
   # of that is in a log anybody replays — so a session whose transcript did not say it had
@@ -202,15 +198,16 @@ defmodule Troupe.Worker.Plane.Commands do
     end
   end
 
+  # This pod's part of an erasure: the session's copy here and its objects. The key is the
+  # plane's, which destroys it before it asks (Decision 811); this pod's credential may
+  # destroy none (`Troupe.KMS.Policy.worker/2`), and once the key is gone nothing under the
+  # prefix decrypts, so the deletion here is tidiness rather than the security property.
   defp dispatch("session.erase", params) do
     session_id = params["session_id"]
-    team = params["team"]
 
     # Anything still running for this session stops first, so nothing writes a new
     # segment behind the erasure.
     Sessions.fence(session_id, 1_000_000_000)
-
-    key = destroy_key(team, session_id)
 
     # Carried out only when every version is gone. One the store kept is an error, so the
     # plane does not record this pod and the next pod to enrol is told again (Decision 804).
@@ -219,7 +216,6 @@ defmodule Troupe.Worker.Plane.Commands do
         {:ok,
          %{
            "session_id" => session_id,
-           "key_destroyed" => key,
            "objects_deleted" => objects,
            "pod" => System.get_env("HOSTNAME")
          }}
@@ -228,13 +224,12 @@ defmodule Troupe.Worker.Plane.Commands do
         {:error,
          Error.new(:unavailable, %{
            reason: inspect(reason),
-           key_destroyed: key,
            objects_deleted: deleted,
            objects_left: length(left)
          })}
 
       {:error, reason} ->
-        {:error, Error.new(:unavailable, %{reason: inspect(reason), key_destroyed: key})}
+        {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
     end
   end
 
@@ -473,22 +468,6 @@ defmodule Troupe.Worker.Plane.Commands do
     :troupe_worker
     |> Application.get_env(:session_defaults, [])
     |> Keyword.put_new_lazy(:report, &reporter/0)
-  end
-
-  defp destroy_key(nil, _session_id), do: false
-
-  defp destroy_key(team, session_id) do
-    case Troupe.KMS.adapter().destroy(team, session_id, []) do
-      :ok ->
-        true
-
-      {:error, reason} ->
-        Logger.error(
-          "troupe worker: could not destroy the key for #{session_id}: #{inspect(reason)}"
-        )
-
-        false
-    end
   end
 
   defp erase_objects(session_id) do

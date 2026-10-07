@@ -64,6 +64,10 @@ defmodule Troupe.Plane.Application do
       # than it waits (`Erasure.device_applied/2`, Decision 804). Before the endpoint,
       # which is where that call arrives.
       {Task.Supervisor, name: Troupe.Plane.Erasure.Tasks},
+      # Every five minutes, the keys erasures have not yet destroyed, and at start the
+      # team sessions' keys earlier releases left (Decision 811). A `:global` singleton
+      # with a keeper, for the scheduler's reasons; after the credential it destroys with.
+      Troupe.Plane.Erasure.Retry.Keeper,
       Troupe.Plane.Web.Endpoint
     ] ++ cluster()
   end

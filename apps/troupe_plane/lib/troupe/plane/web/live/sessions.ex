@@ -92,7 +92,7 @@ defmodule Troupe.Plane.Web.Live.Sessions do
     end
   end
 
-  # Not "erased" while a person's private session still has its key (Decision 756).
+  # Not "erased" while the session still has its key (Decisions 756 and 811).
   defp erased_message(id, %{state: "erasure_pending"}),
     do: "erasure of #{id} is pending: its key was not destroyed; erase it again to retry"
 

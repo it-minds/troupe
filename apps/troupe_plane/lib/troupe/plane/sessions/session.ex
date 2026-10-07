@@ -22,9 +22,10 @@ defmodule Troupe.Plane.Sessions.Session do
   # `pending` is a session that exists and has no worker yet: the profile is full but
   # growing, and the plane has asked for another. It is not a failure and not a queue
   # entry — it is the session, waiting for the room somebody is already bringing up.
-  # `erasure_pending` is a private session somebody erased whose key the plane has not yet
-  # destroyed: nothing seals, keys or signs for it, and it is not called erased until the
-  # one step that makes an erasure final has happened (Decision 756).
+  # `erasure_pending` is a session somebody erased whose key the plane has not yet
+  # destroyed: nothing seals, keys, signs, reads, wakes or mints for it, and it is not
+  # called erased until the one step that makes an erasure final has happened (Decisions
+  # 756 and 811).
   @states ~w(pending active dormant read_only erasure_pending erased)
   # Whose session it is, which decides where it can run. A team session is placed on a
   # pod of a profile; a private one runs on its owner's machine and is never placed at
