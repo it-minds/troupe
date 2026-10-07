@@ -35,6 +35,7 @@ defmodule Mix.Tasks.Troupe.Xref do
       Troupe.Reaper                                 the helper every OS process runs under
       Troupe.LLM.Catalog.Store                      the model catalog, refreshed when stale or asked
       Troupe.Doctor                                 the checks `troupe doctor` prints, read from the files
+      Troupe.Instructions.Check                     what `troupe instructions check` finds in the instruction files
       Troupe.Bench                                  the offline suite `troupe bench` runs on this binary's harness
 
   A new call into, say, the agent tree or the session log fails here, and the way to add
@@ -73,6 +74,7 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Reaper,
     Troupe.LLM.Catalog.Store,
     Troupe.Doctor,
+    Troupe.Instructions.Check,
     Troupe.Bench
   ]
 

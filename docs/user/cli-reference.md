@@ -36,6 +36,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe models [--refresh]` | what each provider serves, its window and its price; asked again when stale, or now with --refresh |
 | `troupe models --json [--workspace DIR] [--refresh]` | the same as one JSON object for a program: models, roles, catalog, providers; never a key |
 | `troupe doctor` | check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure |
+| `troupe instructions check [--workspace DIR] [--json]` | check the instruction files a session here reads: contradictions, missing paths and programs, repeats; exits 1 on one |
 | `troupe bench [--json [FILE]] [--md FILE]` | measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one |
 | `troupe bench --live [--suite smoke\|standard] [--scenario NAME,...] [--repeat N] [--model M] [--yes] [--keep DIR] [--json [FILE]] [--md FILE]` | tasks against your own provider, under a cap it prints and asks about first; scored, and kept in a history |
 | `troupe bench --compare [VERSION\|MODEL]` | the last live bench against the one before it, or against a version's or a model's |

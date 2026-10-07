@@ -25,6 +25,7 @@ defmodule Troupe.CLI do
           | :config_pull
           | :models
           | :doctor
+          | :instructions_check
           | :bench
           | :login
           | :logout
@@ -154,6 +155,9 @@ defmodule Troupe.CLI do
     {"troupe doctor",
      "check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure",
      [["doctor"]]},
+    {"troupe instructions check [--workspace DIR] [--json]",
+     "check the instruction files a session here reads: contradictions, missing paths and programs, repeats; exits 1 on one",
+     [["instructions", "check"], ["instructions", "check", "--workspace", ".", "--json"]]},
     {"troupe bench [--json [FILE]] [--md FILE]",
      "measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one",
      [["bench"], ["bench", "--json"], ["bench", "--json", "bench.json", "--md", "bench.md"]]},
@@ -321,6 +325,10 @@ defmodule Troupe.CLI do
 
   defp parse_rest(["models"], base), do: {:ok, %{base | mode: :models}}
   defp parse_rest(["doctor"], base), do: {:ok, %{base | mode: :doctor}}
+
+  defp parse_rest(["instructions", "check"], base),
+    do: {:ok, %{base | mode: :instructions_check}}
+
   defp parse_rest(["bench"], base), do: {:ok, %{base | mode: :bench}}
   defp parse_rest(["resume"], base), do: {:ok, %{base | mode: :resume}}
   defp parse_rest(["resume", sid], base), do: {:ok, %{base | mode: :resume, session_id: sid}}
