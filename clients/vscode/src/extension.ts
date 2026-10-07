@@ -1,9 +1,11 @@
 // Troupe: Open, from the command palette, the status bar, its key, an editor's title bar or
 // the activity bar's Troupe: the terminal client in a VS Code terminal, by default a tab in
-// the editor area to tile beside the files, rooted at the folder the work is in. Beside it
-// in the side bar, what Troupe's settings and models are for that folder, as Troupe itself
-// says. The extension is a door to the TUI and nothing more: it sends nothing anywhere and
-// keeps no data of its own.
+// the editor area to tile beside the files, rooted at the folder the work is in. Troupe's
+// other command lines from the palette (resume, run, doctor, config), and "Ask Troupe About
+// This File" from the explorer and the editor, each typed into that folder's terminal.
+// Beside it in the side bar, what Troupe's settings and models are for that folder, as
+// Troupe itself says. The extension is a door to the TUI and nothing more: it sends nothing
+// anywhere and keeps no data of its own.
 //
 // What it decides with (the folder, the program, the line for the shell, the sentence when
 // Troupe is missing, the rows of the settings and of the models) is in the modules beside
@@ -15,15 +17,22 @@ import * as vscode from "vscode";
 import { findTroupe, type Missing } from "./binary.js";
 import { chooseFolder } from "./folder.js";
 import { INSTALL_URL, machineName, missingMessage } from "./host.js";
+import { mention, typed, type Command } from "./lines.js";
 import { SettingsView } from "./settingsView.js";
 import { commandLine, shellOf } from "./shell.js";
 
-/** What `troupe.open` did. `executeCommand` returns it, which is what the tests read. */
+/**
+ * What a command did. `executeCommand` returns it, which is what the tests read. `busy`:
+ * something runs in the folder's terminal, which was shown and had nothing typed into it,
+ * and the sentence said so. `noFile`: there was no file to ask about, and the sentence why.
+ */
 export type Opened =
   | { opened: string; terminal: string; reused: boolean }
   | { missing: string }
   | { noFolder: true }
-  | { cancelled: true };
+  | { cancelled: true }
+  | { busy: string }
+  | { noFile: string };
 
 // One terminal per folder. `busy` is whether something runs in it: set when the line is
 // sent, and kept by shell integration's start and end events where the shell has them.
@@ -74,7 +83,7 @@ export function activate(context: vscode.ExtensionContext): void {
     list,
     settings,
     view.onDidChangeVisibility(({ visible }) => {
-      if (visible) void open(door, { quiet: true });
+      if (visible) void open(door, { quiet: true }, { open: true });
     }),
     settings.view.onDidChangeVisibility(follow),
     vscode.window.onDidChangeActiveTextEditor(follow),
@@ -84,8 +93,19 @@ export function activate(context: vscode.ExtensionContext): void {
     // From a row of the list, the folder's URI; from an editor's title bar, the file's;
     // from anywhere else, nothing.
     vscode.commands.registerCommand("troupe.open", (folder?: unknown) =>
-      open(door, folder instanceof vscode.Uri ? { folder } : {}),
+      open(door, folder instanceof vscode.Uri ? { folder } : {}, { open: true }),
     ),
+    vscode.commands.registerCommand("troupe.resume", () => open(door, {}, { resume: true })),
+    // The task from a key's `args`, or asked for.
+    vscode.commands.registerCommand("troupe.run", (task?: unknown) =>
+      open(door, {}, typeof task === "string" && task.trim() !== "" ? { run: task } : askTask),
+    ),
+    vscode.commands.registerCommand("troupe.doctor", () => open(door, {}, { doctor: true })),
+    vscode.commands.registerCommand("troupe.config", () => open(door, {}, { config: true })),
+    // From the explorer, an editor or its tab, the file's or the folder's URI; from the
+    // palette, nothing, and the active editor's file is the one.
+    vscode.commands.registerCommand("troupe.askAboutFile", (target?: unknown) => ask(door, target)),
+    vscode.commands.registerCommand("troupe.askAboutFolder", (target?: unknown) => ask(door, target)),
     vscode.commands.registerCommand("troupe.refreshSettings", () => settings.refresh()),
     vscode.commands.registerCommand("troupe.refreshModels", () => settings.refreshModels()),
     vscode.window.onDidCloseTerminal((terminal) => {
@@ -101,7 +121,13 @@ export function deactivate(): void {}
 
 // `folder`: the one asked for. `quiet`: opened by showing the side bar, which says itself
 // that there is no folder, and whose list is the question when there are several.
-async function open(door: Door, how: { folder?: vscode.Uri; quiet?: boolean }): Promise<Opened> {
+// `command`: what to type, or how to ask for it (a task), once the folder is known, its
+// terminal is free and `troupe` is there.
+async function open(
+  door: Door,
+  how: { folder?: vscode.Uri; quiet?: boolean },
+  command: Command | ((folder: vscode.WorkspaceFolder) => Thenable<Command | undefined>),
+): Promise<Opened> {
   const { tracked } = door;
   const folders = vscode.workspace.workspaceFolders ?? [];
   const document = vscode.window.activeTextEditor?.document.uri;
@@ -134,9 +160,13 @@ async function open(door: Door, how: { folder?: vscode.Uri; quiet?: boolean }): 
   const key = folder.uri.toString();
   const existing = tracked.get(key) ?? adopt(door, folder, name);
 
+  // Something runs in it, the TUI most likely: Open shows it, which is what was asked for.
+  // Any other line typed now would be keys in the TUI, so it is shown, and said (Decision
+  // 808).
   if (existing?.busy) {
     existing.terminal.show();
-    return { opened: folder.uri.fsPath, terminal: name, reused: true };
+    if (typeof command !== "function" && "open" in command) return { opened: folder.uri.fsPath, terminal: name, reused: true };
+    return { busy: inUse(name, typeof command !== "function" && "ask" in command ? command.ask : undefined) };
   }
 
   const config = vscode.workspace.getConfiguration("troupe");
@@ -144,12 +174,16 @@ async function open(door: Door, how: { folder?: vscode.Uri; quiet?: boolean }): 
 
   if ("missing" in found) return { missing: tell(found) };
 
-  const args = ["--workspace", folder.uri.fsPath, ...words(config.get<unknown>("args"))];
+  const what = typeof command === "function" ? await command(folder) : command;
+  if (what === undefined) return { cancelled: true };
+
+  const line = typed(what, folder.uri.fsPath, words(config.get<unknown>("args")));
   const shell = shellOf(vscode.env.shell, process.platform);
 
-  // An idle shell: the TUI quit with an error, or was quit from, and the terminal stayed.
+  // An idle shell: the TUI quit with an error, or was quit from, or a report ended, and the
+  // terminal stayed.
   if (existing !== undefined && shell !== undefined) {
-    existing.terminal.sendText(commandLine(shell, found.path, args));
+    existing.terminal.sendText(commandLine(shell, found.path, line.args, line.exit));
     existing.busy = true;
     existing.terminal.show();
     return { opened: folder.uri.fsPath, terminal: name, reused: true };
@@ -160,15 +194,51 @@ async function open(door: Door, how: { folder?: vscode.Uri; quiet?: boolean }): 
   // A shell this does not know how to quote for runs `troupe` as the terminal's program.
   const terminal =
     shell === undefined
-      ? vscode.window.createTerminal({ ...where, shellPath: found.path, shellArgs: args })
+      ? vscode.window.createTerminal({ ...where, shellPath: found.path, shellArgs: line.args })
       : vscode.window.createTerminal(where);
 
-  if (shell !== undefined) terminal.sendText(commandLine(shell, found.path, args));
+  if (shell !== undefined) terminal.sendText(commandLine(shell, found.path, line.args, line.exit));
   terminal.show();
   tracked.set(key, { folder, terminal, busy: true });
   door.list.changed();
 
   return { opened: folder.uri.fsPath, terminal: name, reused: false };
+}
+
+// "Ask Troupe About This File" (or Folder): Troupe at the folder `target` is in, its path in
+// the TUI's prompt and not sent (`troupe --prompt`), for the question to be typed after it.
+async function ask(door: Door, target: unknown): Promise<Opened> {
+  const uri = target instanceof vscode.Uri ? target : vscode.window.activeTextEditor?.document.uri;
+  const say = (noFile: string) => (void vscode.window.showInformationMessage(noFile), { noFile });
+
+  if (uri === undefined) return say("Ask Troupe about which file? Open it, or right-click it in the Explorer.");
+
+  const folder = vscode.workspace.getWorkspaceFolder(uri);
+  if (folder === undefined) return say(`${uri.fsPath} is in no folder of this workspace, and Troupe opens in a folder.`);
+
+  const directory = await vscode.workspace.fs.stat(uri).then(
+    (stat) => (stat.type & vscode.FileType.Directory) !== 0,
+    () => false,
+  );
+
+  return open(door, { folder: uri }, { ask: mention(folder.uri.fsPath, uri.fsPath, directory) });
+}
+
+// Troupe: Run a Task…: the task, asked for once the folder is known.
+function askTask(folder: vscode.WorkspaceFolder) {
+  return vscode.window
+    .showInputBox({ title: "Troupe: Run a Task", prompt: `troupe run, in ${folder.name}`, placeHolder: "What the agent is to do", ignoreFocusOut: true })
+    .then((task) => (task === undefined || task.trim() === "" ? undefined : { run: task }));
+}
+
+// The sentence for a terminal something runs in; for a question, the path to type into it.
+function inUse(name: string, prompt: string | undefined) {
+  const message =
+    `${name} is in use, so nothing was typed into it: ` +
+    (prompt === undefined ? "quit what runs there, then try again." : `type ${prompt.trimEnd()} into Troupe there, or quit it and ask again.`);
+
+  void vscode.window.showInformationMessage(message);
+  return message;
 }
 
 // The folder being worked in, for the side bar's Settings: the active editor's, then the

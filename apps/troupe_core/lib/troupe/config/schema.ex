@@ -453,9 +453,16 @@ defmodule Troupe.Config.Schema do
              spec(
                "theme",
                :string,
-               "The desktop app's palette: `afterglow`, `signal`, `footlight` or `limelight`. One it does not know reads as `afterglow`.",
+               "The palette the desktop app and the terminal UI draw in: `afterglow`, `signal`, `footlight` or `limelight`. One a client does not know reads as `afterglow`.",
                default: "afterglow",
                label: "theme"
+             ),
+             spec(
+               "blink",
+               :boolean,
+               "What waits on you blinks: the terminal UI's mark and border of a window that needs you. Off holds them lit.",
+               default: true,
+               label: "blink"
              ),
              spec("mode", {:enum, ~w(system light dark)}, "Light or dark in the desktop app, or `system` to follow the computer.",
                default: "system",

@@ -353,7 +353,7 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp handle("session.get", params, %{user: user}) do
-    with {:ok, session} <- visible(params["session_id"], user) do
+    with {:ok, session} <- visible(params["session_id"], user, :erasing) do
       {:ok, session_json(session, user)}
     end
   end
@@ -803,10 +803,11 @@ defmodule Troupe.Plane.Harness do
   defp handle("session.pin", params, context), do: pin(params, context, true)
   defp handle("session.unpin", params, context), do: pin(params, context, false)
 
-  # `erased` is true once the erasure is final, which for a private session is once its key
-  # is destroyed; until then `state` says `erasure_pending` (Decision 756).
+  # `erased` is true once the erasure is final, which is once the plane has destroyed the
+  # session's key; until then `state` says `erasure_pending`, and erasing again tries again
+  # (Decisions 756 and 811).
   defp handle("session.erase", params, %{user: user}) do
-    with {:ok, session} <- visible(params["session_id"], user),
+    with {:ok, session} <- visible(params["session_id"], user, :erasing),
          :ok <- must_administer(user, session) do
       case Erasure.erase(session, actor: user.subject, reason: "requested") do
         {:ok, tombstone} ->
@@ -1219,6 +1220,12 @@ defmodule Troupe.Plane.Harness do
   # again gets the same shape rather than an error it has to special-case — and gets a
   # token the moment there is somewhere to use one.
   defp minted(%Session{state: "pending"} = session, _user, _role), do: {:ok, waiting_for(session)}
+
+  # A link outlives the erasure of the session it was made for, and redeeming one comes
+  # here without `visible/3`: no token for a session that is erased or on its way.
+  defp minted(%Session{state: state} = session, _user, _role)
+       when state in ["erasure_pending", "erased"],
+       do: {:error, gone(session.id)}
 
   defp minted(%Session{} = session, user, role) do
     with {:ok, worker} <- worker_of(session) do
@@ -2106,22 +2113,36 @@ defmodule Troupe.Plane.Harness do
 
   defp agent_within(_parent, _other), do: invalid("agent is a name, or absent")
 
-  defp visible(nil, _user), do: {:error, Error.new(:invalid_params, %{missing: "session_id"})}
+  # A session whose erasure is pending is looked at and erased again, and nothing else: it
+  # is not read, woken, minted for, forked, spawned from or shared while its key may still
+  # be there (Decisions 756 and 811). `:erasing` is what `session.get` and `session.erase`
+  # pass to see it.
+  defp visible(session_id, user, erasing \\ :refused)
 
-  defp visible(session_id, user) do
+  defp visible(nil, _user, _erasing),
+    do: {:error, Error.new(:invalid_params, %{missing: "session_id"})}
+
+  defp visible(session_id, user, erasing) do
     case Sessions.get(session_id) do
       nil ->
         {:error, Error.new(:not_found, %{session_id: session_id})}
 
       %{state: "erased"} ->
-        {:error, Error.new(:not_found, %{session_id: session_id, reason: "erased"})}
+        {:error, gone(session_id)}
 
       session ->
         # Not-found rather than forbidden: whether a session exists is itself something
         # a person who cannot see it should not learn.
-        if Sessions.role_for(user, session),
-          do: {:ok, session},
-          else: {:error, Error.new(:not_found, %{session_id: session_id})}
+        cond do
+          is_nil(Sessions.role_for(user, session)) ->
+            {:error, Error.new(:not_found, %{session_id: session_id})}
+
+          session.state == "erasure_pending" and erasing != :erasing ->
+            {:error, gone(session_id)}
+
+          true ->
+            {:ok, session}
+        end
     end
   end
 

@@ -289,7 +289,23 @@ repository's files import only from inside the repository, and your own `AGENTS.
 only from inside `<config>`; an import that is not followed (`missing`, `outside`,
 `depth`, `cycle`) is named on the file that asked for it in `context.get` and the
 session's log, and `/context` prints it after that file (`@docs/gone.md (root) import not
-followed: missing`). Not read yet: `.cursor/rules/*.mdc`.
+followed: missing`).
+
+Cursor's rules are read as Cursor reads them. Each `.cursor/rules/*.mdc` at the
+repository root, and in a directory on the way to where the session works, comes right
+after that directory's own file, in name order, and its front matter says when it
+applies: `alwaysApply: true` puts it in every prompt, and so does the legacy
+`.cursorrules` at the root; `globs` (`src/**/*.ts, *.tsx`, or a list) put it in the
+prompt from the turn after the agent first read, edited or wrote a file one of them
+matches, for as long as the conversation holds that call; a rule with only a
+`description` is listed in the prompt by it, and the agent reads the file when the
+description fits the work; a rule with none of them is not used. A glob is taken from
+the directory that holds `.cursor` (the repository root, for the root's rules), and one
+without a `/` matches a file's name in any directory. `/context` says of each rule why it
+applies (`always applied`, `applied: src/a.ts matches src/**/*.ts`) or why not (`applies
+when a file matching src/**/*.ts is read or edited`, `requested by description only:
+listed in the prompt, not joined`). Rules share the budget below and are held to the
+repository's edge as every other file is; an `@` in a rule is not followed.
 
 The files share one budget, `instructions_max_chars` (16,000 characters), a file and
 what it imports counting as one scope. The nearest scope is kept whole first; a file the
@@ -298,6 +314,39 @@ brief has its own, `memory_max_chars`. `/context` in the terminal UI, and `conte
 over the protocol, list every file in force with its scope, its size, what reached the
 prompt and its share of the budget; the session's `instructions_loaded` event records
 the same, what was cut included, whenever what was read changed.
+
+`troupe instructions check [--workspace DIR] [--json]` checks those files, every one a
+session in the workspace would read wherever it worked, nested ones and imports
+included. It prints one line for each finding, with the file and the line:
+
+```
+frontend/AGENTS.md:3: contradiction: how to run the tests: `pnpm test` here, `npm test` in AGENTS.md:3
+AGENTS.md:12: path: `docs/setup.md` does not exist
+AGENTS.md:20: command: `mise` is not on the PATH (`mise exec -- mix test`)
+frontend/AGENTS.md:9: duplicate: the same rule as AGENTS.md:5
+```
+
+- **contradiction**: two files, one of which applies inside the other, name different
+  commands for the same job (test, build, lint, format, run) in the same ecosystem, and
+  no command in common. A root's `mix test` and `frontend/`'s `pnpm test` are two parts
+  of one repository, not a contradiction, and two sibling directories never are.
+- **path**: a path in a code span or a link that is not there, from the file's own
+  directory or from the repository root, and an `@` import that names no file. A span
+  counts as a path when it starts with `./` or `../`, or has a slash and ends in one,
+  names a file with an extension, or starts with a directory that is there; a bare file
+  name, a branch like `origin/main` and a URL are not checked.
+- **command**: a command in a code span, or in a fenced block marked as a shell (or with
+  no language), whose program is not on the `PATH`. A span counts as a command when it
+  starts with a known build tool (`npm`, `pnpm`, `mix`, `cargo`, `go`, `pytest`, `mise`,
+  `make` and their like); the shell's own commands and the platform's package managers
+  are not looked for.
+- **duplicate**: a paragraph or list item said again in another file.
+
+It would rather miss a finding than make a false one. It exits 0 when it finds nothing, 1
+on a finding and 2 when it cannot read the workspace, so a repository can run it in CI on
+its own instruction files; `--json` prints the same as one object, with `files` and
+`findings`. Your own `<config>/AGENTS.md` is checked with the rest, except for paths,
+which it names for every repository.
 
 ## Every file Troupe reads
 
@@ -691,7 +740,8 @@ shows a key by, in the desktop app and the terminal UI alike.
 |---|---|---|---|---|---|
 | `mouse` | boolean | `true` | any | mouse | The terminal UI captures the mouse: a click activates a window and the wheel scrolls. Off keeps the terminal's own click-and-drag selection; `troupe --no-mouse` turns it off for one run. |
 | `ui` | settings |  | any |  | What follows a person from one client to the other. The daemon keeps it and acts on none of it. |
-| `ui.theme` | string | `afterglow` | any | theme | The desktop app's palette: `afterglow`, `signal`, `footlight` or `limelight`. One it does not know reads as `afterglow`. |
+| `ui.theme` | string | `afterglow` | any | theme | The palette the desktop app and the terminal UI draw in: `afterglow`, `signal`, `footlight` or `limelight`. One a client does not know reads as `afterglow`. |
+| `ui.blink` | boolean | `true` | any | blink | What waits on you blinks: the terminal UI's mark and border of a window that needs you. Off holds them lit. |
 | `ui.mode` | `system` \| `light` \| `dark` | `system` | any | light or dark | Light or dark in the desktop app, or `system` to follow the computer. |
 | `ui.notifications` | boolean | `true` | any | notifications | The desktop app says when a session nobody is reading finishes a turn or waits for you. |
 <!-- config-keys:end -->

@@ -217,8 +217,8 @@ administers — are checked once per method.
 
 A remote session also has `pending`, created on a profile that is full but may still grow,
 with no endpoint until a worker has room ([PROTOCOL.md](PROTOCOL.md#session-states-dormancy-and-activation)),
-and a private session somebody erased is `erasure_pending` until the plane has destroyed
-its key (Decision 756).
+and a session somebody erased is `erasure_pending` until the plane has destroyed its key
+(Decisions 756 and 811).
 Nothing brings a session back from `read_only` or `erased`:
 
 ```mermaid
@@ -388,12 +388,14 @@ the grace period, and the plane checks its own index before agreeing the pod is 
 scale-down lowers the count only past pods drained that way, and a pod stopped by anything
 else drains itself on SIGTERM.
 **Disk pressure** evicts caches, least recently used, never an active workspace. **Erasure**
-is driven by the plane and done by a pod, since only a pod holds the key and storage
-credentials: the key is destroyed **first**, so nothing under the prefix decrypts — not
-old object versions, not backups — and the deletion after it is tidiness. An offline pod
-applies pending erasures when it enrols. A private session has no pod: the plane destroys
-its key itself, with the metadata `delete` its policy has for this, and the objects go
-when the owner's daemon next connects and says it has stopped (Decision 756).
+is driven by the plane, which destroys the session's key **first**, with the metadata
+`delete` its policy has for this and nothing on the data path, so nothing under the prefix
+decrypts — not old object versions, not backups — and the deletion after it is tidiness.
+A team session's pod is told at once: it stops the session, drops its copy and deletes the
+objects, and an offline pod applies pending erasures when it enrols. A private session has
+no pod: its objects go when the owner's daemon next connects and says it has stopped
+(Decision 756). A key the key manager refused leaves the session `erasure_pending`, and the
+plane tries it again every five minutes (Decision 811).
 
 ### 6.3 The operator
 

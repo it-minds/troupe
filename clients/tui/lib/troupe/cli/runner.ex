@@ -127,6 +127,10 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :doctor} = args} ->
         Troupe.CLI.Doctor.run(args.workspace)
 
+      # Read here too: the files a session would read, and this machine's PATH.
+      {:ok, %{mode: :instructions_check} = args} ->
+        print(Troupe.Instructions.Check.run(args.workspace, json: args.json))
+
       {:ok, %{mode: :bench} = args} ->
         Troupe.CLI.Bench.run(args)
 
@@ -149,11 +153,6 @@ defmodule Troupe.CLI.Runner do
         Troupe.CLI.Daemon.run(args.daemon_args)
 
       {:ok, %{mode: :tui} = args} ->
-        # `--remote` opens on HQ. The local session still starts behind it, so
-        # the page can list local sessions next to the plane's and Esc lands
-        # somewhere real.
-        page = if args.remote, do: [page: :hq, plane: plane(args)], else: []
-
         # A first run meets the setup before a session it could not use: `troupe config`'s
         # own questions on a machine with no settings and no key, and nothing otherwise.
         unless args.remote, do: Troupe.CLI.ConfigSetup.before_session(args.workspace)
@@ -163,7 +162,7 @@ defmodule Troupe.CLI.Runner do
                config: CLI.session_config(args),
                private: args.private
              }) do
-          {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
+          {:ok, sid} -> tui(sid, window_opts(args))
           {:error, reason} -> fail("troupe: could not start: " <> reason(reason))
         end
 
@@ -206,6 +205,19 @@ defmodule Troupe.CLI.Runner do
     do: mode in [:daemon, :login, :logout, :whoami, :models, :doctor, :bench, :config_pull]
 
   def interruptible?(_parsed), do: false
+
+  @doc """
+  What the terminal UI that `troupe` opens starts with. `--remote` opens on HQ: the local
+  session still starts behind it, so the page can list local sessions next to the plane's
+  and Esc lands somewhere real. `--prompt` is the text its input opens with (Decision 150).
+  Then the mouse.
+  """
+  @spec window_opts(CLI.args()) :: keyword()
+  def window_opts(args) do
+    page = if args.remote, do: [page: :hq, plane: plane(args)], else: []
+    prompt = if args.prompt, do: [prompt: args.prompt], else: []
+    page ++ prompt ++ mouse_opts(args)
+  end
 
   # `troupe --remote https://plane…` beats the plane last logged in to.
   defp plane(%{plane_url: url}) when is_binary(url), do: url

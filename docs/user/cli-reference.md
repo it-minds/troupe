@@ -15,6 +15,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | --- | --- |
 | `troupe` | open the TUI in the current directory |
 | `troupe --workspace DIR` | open the TUI rooted at DIR, wherever it is started |
+| `troupe --prompt "TEXT" [--workspace DIR]` | open the TUI with TEXT in its input, the cursor after it, not yet sent |
 | `troupe --watch` | TUI with watch mode on |
 | `troupe --no-mouse` | TUI without mouse reporting, so the terminal's own selection works |
 | `troupe --full-send` | start with every budget/token limit lifted for the session |
@@ -35,6 +36,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe models [--refresh]` | what each provider serves, its window and its price; asked again when stale, or now with --refresh |
 | `troupe models --json [--workspace DIR] [--refresh]` | the same as one JSON object for a program: models, roles, catalog, providers; never a key |
 | `troupe doctor` | check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure |
+| `troupe instructions check [--workspace DIR] [--json]` | check the instruction files a session here reads: contradictions, missing paths and programs, repeats; exits 1 on one |
 | `troupe bench [--json [FILE]] [--md FILE]` | measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one |
 | `troupe bench --live [--suite smoke\|standard] [--scenario NAME,...] [--repeat N] [--model M] [--yes] [--keep DIR] [--json [FILE]] [--md FILE]` | tasks against your own provider, under a cap it prints and asks about first; scored, and kept in a history |
 | `troupe bench --compare [VERSION\|MODEL]` | the last live bench against the one before it, or against a version's or a model's |
@@ -81,7 +83,7 @@ run right now is shown greyed with the reason; the desktop app's palette lists t
 | `/upload <path>` | Send a local file into the session's own mount. The file is read on this machine and written to session:/&lt;name&gt;; a worker never sees this machine's disk. For example `/upload notes.md`. |  |
 | `/copy [window]` | Copy a transcript to the clipboard. The activated window's transcript, or tile n's; a mouse selection in the pane copies on release. For example `/copy 2`. | a window: the activated one, or one named |
 | `/memory [refresh \| forget]` | The project brief: show, refresh or forget it. The brief in .troupe/memory.md is read into every agent's prompt. /memory says what it holds, /memory refresh asks the librarian to rewrite it, /memory forget deletes it. For example `/memory refresh`. | a session on this machine |
-| `/context` | Every instruction file in the prompt, and its share of the budget. The files the next turn's system prompt is read from: your own AGENTS.md, the repository's, one in each directory down to the workspace and to the files the conversation worked on, the files they import with @path, and the project brief, each with its scope, size and share of the budget; and every file left out, with why: an alias (CLAUDE.md, GEMINI.md, copilot-instructions.md) another name hid, a Copilot file below the root, a file outside the repository, an import not followed. |  |
+| `/context` | Every instruction file and Cursor rule, why each is in or left out, and its share of the budget. The files the next turn's system prompt is read from: your own AGENTS.md, the repository's, one in each directory down to the workspace and to the files the conversation worked on, the files they import with @path, the repository's Cursor rules (always, or once a matching file is read or edited), and the project brief, each with its scope, size and share of the budget; and every file left out, with why: an alias (CLAUDE.md, GEMINI.md, copilot-instructions.md) another name hid, a Copilot file below the root, a file outside the repository, an import not followed, a rule whose files haven't been touched or that only describes itself. |  |
 | `/watch` | Toggle watch mode: act on AI! and AI? comments. A comment ending in AI! starts a change and AI? starts an answer. One session per workspace watches at a time. | a session on this machine |
 
 ### Setup

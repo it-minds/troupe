@@ -735,9 +735,10 @@ Found by the #460 fixer, 2026-10-06.
 
 ### D84 - Erasures and the daemon's start: small leftovers of 0.8.7 (low)
 
-- A team session whose pod couldn't finish an erasure, or that had no healthy pod, is tried
-  again only when a pod of its profile next enrols; erasing it again returns the existing
-  tombstone. Private sessions are retried on every link.
+- A team session whose key is gone but whose pod couldn't delete every object, or that had
+  no healthy pod, has its objects tried again only when a pod of its profile next enrols;
+  erasing it again returns the existing tombstone (its key is retried every five minutes
+  since Decision 811).
 - Two acknowledgements of the same private session at once run two background deletions of
   its prefix (harmless: the second finds what is left).
 - On Windows, a program the VM starts through `System.shell` inherits the VM's handles: a
@@ -756,6 +757,76 @@ Found by the #460 fixer, 2026-10-06.
   `context.get`, so clients can't see it was dropped.
 
 Found by the chunk 22 fixers, 2026-10-06.
+
+### D85 - Instruction files and Cursor rules: what the 0.9.0 slices of #123 left (low)
+
+- `.cursor/rules` is read as far as Decision 809 goes: not `.mdc` files in subdirectories of
+  `.cursor/rules`, not `.md` rules, not a rule's `@` file references, and a glob's `[...]`
+  character class is taken literally. Whether Cursor takes a nested rule's globs from its
+  own directory (809's choice) or from the root is unchecked.
+- `troupe instructions check` takes every file under the workspace as its focus; how that
+  attaches glob-scoped Cursor rules, and how a root rule compares with the root's
+  `AGENTS.md`, is untried now that the loader reads them (Decision 810 predates 809).
+- Left out of the check by its rule of preferring a missed finding to a false one: an
+  `install` subject, whether a command's subcommand exists (#123's item 14), and files so
+  long the budget will cut them (the loader already marks them `trimmed` or `dropped`).
+  `troupe-daemon` has no `instructions check` of its own.
+- On this repository the check flags `clients/tui/CLAUDE.md`'s lines 39 and 83 (example
+  paths it reads as real ones) and, on Windows, line 20 (`mise` lives in WSL here);
+  rewording the two examples would let it run quiet in this repository's CI.
+
+Found by the chunk 23 fixers, 2026-10-07.
+
+### D86 - The TUI's themes and mark: small leftovers (low)
+
+- Limelight's `border.focus` token is its reserved lime, so the desktop app's focus ring in
+  Limelight uses the colour that should mean only "a person is needed" (the TUI falls back
+  to `text.link`, Decision 807). The themes' `$meta` is stale: Footlight's description says
+  it is the default, and Signal still has `default: true`.
+- The status line says "idle" while a window's mark turns, because `attention_summary`
+  counts only needs-you, done and failed.
+- Needs-you has two glyphs: the window title's blinking "▶ needs input" and the observer
+  page's "▶ you", against the corner's ◑.
+- A session on a plane has no settings door (`Client.settings/1` returns an error), so it
+  always draws in Afterglow; it could read the local daemon's `config.get`.
+- The fake provider's JSON scripts can't express `delay` or `endless` steps, so a packaged
+  smoke test can hold a window "working" only with a slow shell tool.
+
+Found by the #228 fixer, 2026-10-07.
+
+### D87 - The VS Code extension after #378's commands (low)
+
+- The extension passes `--workspace` as `folder.uri.fsPath`, with a lowercase drive letter
+  on Windows (`c:\`), where a hand-typed terminal gives `C:\`; if a session's workspace is
+  matched case-sensitively, Resume Last Session Here misses a session started by hand.
+  Untested.
+- "Ask Troupe About This File" with Troupe already running in the folder's terminal only
+  reveals it and says what to type; putting the path into a running TUI would need a way in
+  through the daemon.
+- With a shell the extension can't quote for (nushell, or WSL's launcher as the Windows
+  default), Doctor's and Open Settings' output closes with their terminal; a `.cmd` troupe
+  under PowerShell 7 gets the batch file's quoting.
+- `scripts/licences.exs --check` crashes with a `File.Error` unless `clients/gui`'s
+  `node_modules` are installed, even for a change that doesn't touch the GUI.
+
+Found by the #378 fixer, 2026-10-07.
+
+### D88 - Erasure after #470: small leftovers (low)
+
+- `session.redeem` records the redemption in the audit log and marks the share redeemed
+  before it refuses an erased session, so a refused redemption still leaves both.
+- A tombstone whose session row was deleted outright is skipped by the erasure pass, which
+  joins on sessions.
+- The plane names a team session's key by the team's current name; if a team could be
+  renamed, the session's manifest would be the safer source. Unchecked whether renames
+  exist.
+- Tests of the key manager other than the erasure tests still run under OpenBao's root
+  token, which hides every policy refusal; Decision 811's tests use the credentials
+  `Troupe.KMS.Policy` writes for each component.
+- `InstructionsPromptTest`'s `await_event` waits 5 s and times out under load (2 runs in 6),
+  and `LocalPricingTest` failed once in a full core run; both pass alone.
+
+Found by the chunk 23 fixers, 2026-10-07.
 
 ## Taken
 
@@ -846,6 +917,7 @@ Found by the chunk 22 fixers, 2026-10-06.
 | D78's first and fifth items - the Copilot file counted in every directory, and `/context` gave no reason for a file left out | PR #471 |
 | D79's first two items and its fifth - a Windows daemon died with its terminal, `open` guessed the app's address, and the plane host had no policy | PR #468; #460, PR #466 |
 | D81's last item, D73's first and D8's second - `RestartTest` and `AutospawnTest` started slowly enough to fail | PR #469 |
+| D84's first item, the key half - a pod could never destroy a team session's key, and the plane marked the erasure done (what is left of it stays in D84) | #470, PR #480 |
 
 ## Checked and not a defect
 

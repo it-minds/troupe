@@ -269,7 +269,7 @@ Durable:
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to` |
-| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `trimmed`, `skipped`, `imported_by`, `unfollowed` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
+| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases, and Cursor's rules) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `reason`, `trimmed`, `skipped`, `imported_by`, `unfollowed`, `rule`, `applies` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
 | `goal_set` | `text`, `command_id` — the session's goal, written by the root agent under the actor who set it (`session.goal.set`) |
 | `goal_cleared` | `command_id` |
 | `loop_started` | `loop_id` (`loop-<n>`), `max_iterations`, `max_failures`, `goal`, `command_id` — a loop towards the goal, written by the session under the actor who started it (`session.loop.start`) |
@@ -1075,6 +1075,18 @@ read: outside the repository` (`outside
 the config directory` for the person's own), `skipped: AGENTS.md is used in this
 directory` (`comes first`, when that file was itself not read), `not read: Copilot's
 file counts only at the root`, or `left out: the budget was spent on nearer files`.
+A Cursor rule (Decision 809), each `.cursor/rules/*.mdc` in the root and in a directory on
+the way to where the session works, and the legacy root `.cursorrules`, comes after that
+directory's file and its imports, in name order, in the directory's scope, with its front
+matter in `rule`: `apply` (`always`, `globs`, `requested` for a rule with only a
+`description`, or `manual` for one with none), `globs`, `description`, and `matched`, the
+file worked on that a glob matched, from the directory that holds `.cursor`. One that
+reached the prompt says why in `applies` (`always applied`, `applied: src/a.ts matches
+src/**/*.ts`). One that did not is `inactive`, `chars` 0, with `reason` `applies when a
+file matching src/**/*.ts is read or edited` or `not joined: no alwaysApply, globs or
+description`; or `listed`, its `description` alone in the prompt and counted in `chars`,
+with `reason` `requested by description only: listed in the prompt, not joined`. `rule`
+and `applies` are null for every other file.
 `searched` is every directory looked in. Read from disk when asked, as the next
 turn reads it, so it says what an edit will do; what a past turn read is its
 `instructions_loaded` event. Nothing reaches the prompt from a file without appearing
@@ -1482,7 +1494,7 @@ while its session is working.
 | `active` | running | everything |
 | `dormant` | stopped | read it; an activating command brings the tree back |
 | `read_only` | stopped | read it; activating commands return `forbidden`. A session is parked here when its team lost the grant — running, dormant or still `pending` — or its profile is gone, and when a pod could not put its tree back because the directory it was recorded in is gone (Decision 661). A running one is put to sleep on its pod, as an archive does (§7) |
-| `erasure_pending` | none | a private session somebody erased whose key the plane has not yet destroyed: listed as such; sealing, keying and signing for it answer `not_found` with `reason: "erased"`; `session.erase` again tries again (Decision 756) |
+| `erasure_pending` | none | a session somebody erased whose key the plane has not yet destroyed: listed as such and answered by `session.get`; `session.erase` again tries again, and so does the plane every five minutes; opening, minting, redeeming a link to, forking, spawning from, sharing, sealing, keying and signing for it answer `not_found` with `reason: "erased"` (Decisions 756 and 811) |
 | `erased` | gone | `not_found` |
 
 `pending` is a remote state and a short one. A `session.create` on a profile that is full
@@ -1667,15 +1679,20 @@ seals it, uploads its workspace, deletes its own copy and reports it dormant, gi
 its slot and its budget slice; the answer is the session's row, `dormant`, and the next
 activating command brings it back on whichever pod has room. A session that is not
 running is answered as it stands, one still `pending` is refused with `conflict`, and one
-whose pod does not answer stays as it was, with `unavailable`. The plane's erasure reaches
-the pod over the same control channel and deletes the pod's copy along with the key and
-the objects.
+whose pod does not answer stays as it was, with `unavailable`. The plane's erasure destroys
+the session's key itself, as it does a private session's (below), and reaches the pod over
+the same control channel, which stops the session there and deletes the pod's copy and
+the objects (Decision 811). The answer has the private session's shape: `erased: true`
+with `state: "erased"` once the key is gone, and `erased: false` with `state:
+"erasure_pending"` where the key manager refused or could not be reached, in which case
+asking again tries again, and so does the plane every five minutes.
 
 **Erasing a private session** (Decision 756) has no pod to reach. The plane destroys the
 session's key itself, every version, and answers `{session_id, erased, state, head_hash}`:
 `erased: true` with `state: "erased"` once the key is gone, and `erased: false` with
 `state: "erasure_pending"` where the key manager refused or could not be reached, in which
-case asking again tries again. The objects and the copy on the owner's machine go when
+case asking again tries again, as the plane does every five minutes (Decision 811). The
+objects and the copy on the owner's machine go when
 the owner's daemon next connects: it asks `session.erasures`, drops its sealer and its copy
 of each session named, and answers `session.erased`, on which the plane deletes every
 version under the session's prefix, and is named the session again until none is left

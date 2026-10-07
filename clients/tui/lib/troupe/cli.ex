@@ -25,6 +25,7 @@ defmodule Troupe.CLI do
           | :config_pull
           | :models
           | :doctor
+          | :instructions_check
           | :bench
           | :login
           | :logout
@@ -43,6 +44,7 @@ defmodule Troupe.CLI do
           private: boolean(),
           mouse: boolean() | nil,
           workspace: String.t(),
+          prompt: String.t() | nil,
           session_id: String.t() | nil,
           refresh: boolean(),
           remote: boolean(),
@@ -77,6 +79,7 @@ defmodule Troupe.CLI do
     private: :boolean,
     mouse: :boolean,
     workspace: :string,
+    prompt: :string,
     version: :boolean,
     help: :boolean,
     refresh: :boolean,
@@ -105,6 +108,9 @@ defmodule Troupe.CLI do
     {"troupe", "open the TUI in the current directory", [[]]},
     {"troupe --workspace DIR", "open the TUI rooted at DIR, wherever it is started",
      [["--workspace", "."]]},
+    {~s(troupe --prompt "TEXT" [--workspace DIR]),
+     "open the TUI with TEXT in its input, the cursor after it, not yet sent",
+     [["--prompt", "@lib/app.ex "], ["--prompt", "x", "--workspace", "."]]},
     {"troupe --watch", "TUI with watch mode on", [["--watch"]]},
     {"troupe --no-mouse", "TUI without mouse reporting, so the terminal's own selection works",
      [["--no-mouse"]]},
@@ -149,6 +155,9 @@ defmodule Troupe.CLI do
     {"troupe doctor",
      "check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure",
      [["doctor"]]},
+    {"troupe instructions check [--workspace DIR] [--json]",
+     "check the instruction files a session here reads: contradictions, missing paths and programs, repeats; exits 1 on one",
+     [["instructions", "check"], ["instructions", "check", "--workspace", ".", "--json"]]},
     {"troupe bench [--json [FILE]] [--md FILE]",
      "measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one",
      [["bench"], ["bench", "--json"], ["bench", "--json", "bench.json", "--md", "bench.md"]]},
@@ -220,6 +229,8 @@ defmodule Troupe.CLI do
       # nil, not false: no flag means "whatever the `mouse` setting says".
       mouse: Keyword.get(opts, :mouse),
       workspace: Path.expand(Keyword.get(opts, :workspace, File.cwd!())),
+      # What the TUI's input opens with (Decision 150); the TUI mode alone reads it.
+      prompt: Keyword.get(opts, :prompt),
       session_id: nil,
       refresh: Keyword.get(opts, :refresh, false),
       remote: Keyword.get(opts, :remote, false),
@@ -314,6 +325,10 @@ defmodule Troupe.CLI do
 
   defp parse_rest(["models"], base), do: {:ok, %{base | mode: :models}}
   defp parse_rest(["doctor"], base), do: {:ok, %{base | mode: :doctor}}
+
+  defp parse_rest(["instructions", "check"], base),
+    do: {:ok, %{base | mode: :instructions_check}}
+
   defp parse_rest(["bench"], base), do: {:ok, %{base | mode: :bench}}
   defp parse_rest(["resume"], base), do: {:ok, %{base | mode: :resume}}
   defp parse_rest(["resume", sid], base), do: {:ok, %{base | mode: :resume, session_id: sid}}

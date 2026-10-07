@@ -223,12 +223,13 @@ defmodule Troupe.Plane.Sessions do
   release happened to land. Every reader of `worker_id` filters on `state == "active"`,
   which is why it took a test asserting the row directly to see it.
 
-  A read-only or erased session is left as it is, and `{:error, :parked}` says so. The
-  plane parks and erases without waiting for the pod, so the pod's report of a dormancy
-  can arrive afterwards, and `dormant` is a state the next activation starts from — and
-  one that takes an erased session off the list a pod carries out when it enrols. The
-  state is read under the row's lock, so a park or an erasure landing at the same moment
-  is wholly before this or wholly after it (Decision 697).
+  A read-only or erased session, or one whose erasure is pending, is left as it is, and
+  `{:error, :parked}` says so. The plane parks and erases without waiting for the pod, so
+  the pod's report of a dormancy can arrive afterwards, and `dormant` is a state the next
+  activation starts from — and one that takes an erased session off the list a pod
+  carries out when it enrols. The state is read under the row's lock, so a park or an
+  erasure landing at the same moment is wholly before this or wholly after it (Decisions
+  697 and 811).
   """
   @spec dormant(String.t(), map()) :: {:ok, Session.t()} | {:error, :parked | term()}
   def dormant(session_id, attrs \\ %{}) do
@@ -651,16 +652,17 @@ defmodule Troupe.Plane.Sessions do
     end
   end
 
-  # A write that applies only while the session is neither read-only nor erased, the two
-  # states nothing brings a session back from. The row is locked while the state is read,
-  # so the write cannot land on top of a park or an erasure that committed in between.
+  # A write that applies only while the session is neither read-only nor erased, nor on its
+  # way to erased, the states nothing brings a session back from. The row is locked while
+  # the state is read, so the write cannot land on top of a park or an erasure that
+  # committed in between.
   defp unless_parked(session_id, write) do
     Repo.transaction(fn ->
       case Repo.one(from(s in Session, where: s.id == ^session_id, lock: "FOR UPDATE")) do
         nil ->
           Repo.rollback(:not_found)
 
-        %Session{state: state} when state in ["read_only", "erased"] ->
+        %Session{state: state} when state in ["read_only", "erasure_pending", "erased"] ->
           Repo.rollback(:parked)
 
         %Session{} ->

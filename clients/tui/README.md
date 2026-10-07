@@ -227,6 +227,7 @@ the same lines.
 ```
 troupe                                  # TUI in the current directory
 troupe --workspace DIR                  # TUI rooted at DIR, wherever it is started
+troupe --prompt "@src/app.ts "          # TUI with that in its input, not yet sent
 troupe --watch                          # TUI with watch mode on
 troupe --no-mouse                       # TUI without mouse reporting (terminal selection works)
 troupe --private                        # a private session, sealed to the plane you signed in to
@@ -243,7 +244,8 @@ troupe --version
 ```
 
 In VS Code, the extension's **Troupe: Open** runs `troupe --workspace <folder>` in a
-terminal at the folder you are working in, by default a tab beside your files
+terminal at the folder you are working in, by default a tab beside your files, and
+**Ask Troupe About This File** adds `--prompt` with the file's path
 ([vscode.md](../../docs/user/vscode.md)).
 
 `troupe run --headless` prints the transcript, one line per event prefixed with the agent
@@ -322,16 +324,23 @@ agent read is shown as numbered source, its line numbers in their own column
 and its indentation intact. The same colours run through diffs and tool calls,
 by outcome.
 
-Colours are Afterglow's, the GUI's design, generated from the same design tokens: cyan
-is the machine working, and pink is for one thing only, a window that needs you — its
-border and title (blinking, about once a second), the approval or question waiting in
-it, and the status line's count. Troupe uses as many colours as the terminal says it
-has: exact colours where `COLORTERM` is `truecolor` or `24bit` and in Windows Terminal,
-the nearest of 256 where `TERM` names `256color`, the terminal's own sixteen otherwise,
-and none under `NO_COLOR`. It never paints the background, so it sits on whatever theme
-the terminal already has; a light background reported in `COLORFGBG` gets the light
-values. `TROUPE_COLORS` overrides what the terminal says: `truecolor`, `256`, `16` or
-`none`, and `light` or `dark` (`TROUPE_COLORS=256,light`).
+Colours are the GUI's themes, generated from the same design tokens: Afterglow by
+default, or Signal, Footlight or Limelight — the `theme` setting in `/settings`, which is
+the desktop app's appearance setting too, so a theme picked in either is the one both
+draw in, at once. In Afterglow cyan is the machine working, and pink is for one thing
+only, a window that needs you — its border and title (blinking, about once a second;
+the `blink` setting turns that off), the approval or question waiting in it, and the
+status line's count; each theme keeps its own reserved colour (Signal's magenta,
+Footlight's amber, Limelight's lime) for the same thing. Every window carries the mark in
+its top right corner: ◐ ◓ ◑ ◒ turning while its agent works, ◑ in the reserved colour
+while it needs you, ⏺ done and not yet read, ○ at rest, ✗ failed. Troupe uses as many
+colours as the terminal says it has: exact colours where `COLORTERM` is `truecolor` or
+`24bit` and in Windows Terminal, the nearest of 256 where `TERM` names `256color`, the
+terminal's own sixteen otherwise, and none under `NO_COLOR`. It never paints the
+background, so it sits on whatever theme the terminal already has; a light background
+reported in `COLORFGBG` gets the light values. `TROUPE_COLORS` overrides what the
+terminal says: `truecolor`, `256`, `16` or `none`, and `light` or `dark`
+(`TROUPE_COLORS=256,light`).
 
 The activated pane follows the tail until you scroll —
 PgUp/PgDn, Home/End, ↑/↓ (while nothing is typed) or the mouse wheel; the

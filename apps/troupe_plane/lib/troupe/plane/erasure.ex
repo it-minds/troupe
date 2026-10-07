@@ -10,23 +10,29 @@ defmodule Troupe.Plane.Erasure do
   in which the ciphertext was gone but the key was not, which protects nobody, and a
   failure halfway would leave readable data behind.
 
-  The plane drives this but does not do it. It holds no credential that can read a
-  session key and no credential for object storage; a pod of the session's profile has
-  both, so the plane asks one. That is the Forbidden list working as intended rather
-  than an inconvenience: the component that decides *whether* to erase is not the
-  component that can read what it is erasing.
+  **The plane destroys the key**, a team session's as a private one's (Decisions 756 and
+  811), with the `delete` on key metadata its policy has for exactly this and nothing at
+  all on the data path, so it still cannot read what it destroys: the component that
+  decides *whether* to erase is not the component that can read what it is erasing. A
+  pod's credential may destroy no key (`Troupe.KMS.Policy.worker/2`), which is why asking
+  a pod to, as this did before 811, left every team session's key behind. Until the key
+  is gone the session is `erasure_pending`, not `erased`, and nothing reads, wakes or
+  mints for it.
 
-  A pod that was offline when this ran applies the erasure when it enrols, before
-  serving anything, which is what `pending_for/2` is for.
+  The rest is the copies. A team session's pod is told at once, whatever the key manager
+  said, so a running session stops: it drops its copy and deletes every version of the
+  objects, and is recorded in the tombstone once the key is gone and nothing is left. A
+  pod that was offline applies the erasure when it enrols, before serving anything, which
+  is what `pending_for/2` is for. A private session has no pod: its objects, and the copy
+  on the owner's machine, go when the owner's daemon next connects. It is told the
+  tombstone, as a pod is on enrol, drops its copy and says so, and the plane then deletes
+  every version under the prefix with the object-storage credential it signs a daemon's
+  URLs with (Decision 390; `pending_for_owner/2`, `device_applied/2`).
 
-  A private session has no profile and so no pod to ask (Decision 756). The plane
-  destroys its key itself, with the `delete` on key metadata its policy has for exactly
-  this and nothing at all on the data path, so it still cannot read what it destroys.
-  Until the key is gone the session is `erasure_pending`, not `erased`. The objects, and
-  the copy on the owner's machine, go when the owner's daemon next connects: it is told
-  the tombstone, as a pod is on enrol, drops its copy and says so, and the plane then
-  deletes every version under the prefix with the object-storage credential it signs a
-  daemon's URLs with (Decision 390; `pending_for_owner/2`, `device_applied/2`).
+  A key the key manager refused, or could not be reached for, is tried again by erasing
+  again, by `retry/0` every five minutes (`Troupe.Plane.Erasure.Retry`), and for a
+  private session when its owner's daemon connects. `retry/0` also destroys, once, the key
+  of every team session erased before 811.
   """
 
   import Ecto.Query
@@ -38,6 +44,7 @@ defmodule Troupe.Plane.Erasure do
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.{Session, Tombstone}
   alias Troupe.Plane.Tokens.Credential
+  alias Troupe.Sessions.Storage
 
   require Logger
 
@@ -49,8 +56,8 @@ defmodule Troupe.Plane.Erasure do
 
   Idempotent: a session that is already erased has its tombstone returned rather than a
   second one written, because erasure is the sort of thing a retry must not make worse.
-  A private session whose key is not yet destroyed has it tried again, which is what a
-  retry is for.
+  A session whose key is not yet destroyed has it tried again, which is what a retry is
+  for.
   """
   @spec erase(Session.t() | String.t(), keyword()) :: {:ok, Tombstone.t()} | {:error, term()}
   def erase(session_id, opts) when is_binary(session_id) do
@@ -62,15 +69,20 @@ defmodule Troupe.Plane.Erasure do
 
   def erase(%Session{} = session, opts) do
     case tombstone_for(session.id) do
-      nil -> do_erase(session, opts)
-      existing -> if unfinished?(session), do: finish(session, existing), else: {:ok, existing}
+      nil ->
+        do_erase(session, opts)
+
+      existing ->
+        if unfinished?(session, existing),
+          do: {:ok, again(session, existing)},
+          else: {:ok, existing}
     end
   end
 
   # No slot, no budget slice and no pod to give back or to ask: the plane does the one
   # part that makes it final, here and now.
   defp do_erase(%Session{kind: "private"} = session, opts) do
-    with {:ok, tombstone} <- write_tombstone(session, opts), do: finish(session, tombstone)
+    with {:ok, tombstone} <- write_tombstone(session, opts), do: {:ok, finish(session, tombstone)}
   end
 
   defp do_erase(session, opts) do
@@ -81,24 +93,87 @@ defmodule Troupe.Plane.Erasure do
       # Off its pod, giving back its slot and its budget slice. The pod's `session.erase`
       # stops a running session without reporting it dormant, so nothing else would.
       Drain.park(session)
-      destroy(session, tombstone)
+      tombstone = finish(session, tombstone)
+
+      # The pod at once, whatever the key manager said: a running session stops, and its
+      # copy and its objects go. Recorded only once the key is gone too.
+      {:ok, on_pod(session, tombstone)}
     end
   end
 
-  defp destroy(session, tombstone) do
-    case apply_on_pod(session) do
-      {:ok, applied} ->
+  # Pending until the key is gone, and erased once it is. A key manager that refused or
+  # could not be reached has destroyed nothing, and the session says so rather than that
+  # it is done.
+  defp finish(session, tombstone, opts \\ []) do
+    Sessions.put_state(session.id, "erasure_pending")
+    destroy(session, tombstone, opts)
+  end
+
+  defp destroy(session, tombstone, opts) do
+    case destroy_key(session) do
+      :ok ->
         Sessions.put_state(session.id, "erased")
-        {:ok, record_applied(tombstone, applied)}
+
+        {:ok, destroyed} =
+          tombstone
+          |> Tombstone.changeset(%{key_destroyed_at: DateTime.utc_now()})
+          |> Repo.update()
+
+        destroyed
 
       {:error, reason} ->
-        # Nothing has been destroyed yet, and the tombstone stays as the instruction to
-        # do it. The next pod of this profile to enrol carries it out.
-        Logger.warning("troupe plane: erasure of #{session.id} is pending: #{inspect(reason)}")
-        Sessions.put_state(session.id, "erased")
-        {:ok, tombstone}
+        if Keyword.get(opts, :log, true) do
+          Logger.warning(
+            "troupe plane: erasure of #{session.id} is pending: its key was not destroyed: " <>
+              inspect(reason)
+          )
+        end
+
+        tombstone
     end
   end
+
+  # Erasing again, or the pass: the key, and then, once it is gone, a pod that has not yet
+  # been recorded. A pod told while the key was still there is told again, and finds
+  # nothing left. A team session an earlier plane erased is already `erased` and stays so:
+  # only its key was left.
+  defp again(session, tombstone, opts \\ [])
+
+  defp again(%Session{kind: "private"} = session, tombstone, opts),
+    do: finish(session, tombstone, opts)
+
+  defp again(%Session{state: "erased"} = session, tombstone, opts),
+    do: session |> destroy(tombstone, opts) |> then(&pod_after_key(session, &1))
+
+  defp again(session, tombstone, opts),
+    do: session |> finish(tombstone, opts) |> then(&pod_after_key(session, &1))
+
+  defp pod_after_key(session, %Tombstone{key_destroyed_at: at, applied_by: []} = tombstone)
+       when not is_nil(at),
+       do: on_pod(session, tombstone)
+
+  defp pod_after_key(_session, tombstone), do: tombstone
+
+  defp on_pod(session, tombstone) do
+    case apply_on_pod(session) do
+      {:ok, applied} ->
+        if key_gone?(session, tombstone), do: record_applied(tombstone, applied), else: tombstone
+
+      {:error, reason} ->
+        # The tombstone stays as the instruction to do it: the next pod of this profile to
+        # enrol carries it out.
+        Logger.warning(
+          "troupe plane: erasure of #{session.id} waits for a pod: #{inspect(reason)}"
+        )
+
+        tombstone
+    end
+  end
+
+  # A private session's key is gone once it is `erased` (Decision 756); a team session's
+  # once the plane has destroyed it, which a session an earlier plane erased is not.
+  defp key_gone?(%Session{kind: "private", state: state}, _tombstone), do: state == "erased"
+  defp key_gone?(_session, %Tombstone{key_destroyed_at: at}), do: not is_nil(at)
 
   defp write_tombstone(session, opts) do
     %Tombstone{}
@@ -112,9 +187,8 @@ defmodule Troupe.Plane.Erasure do
     |> Repo.insert()
   end
 
-  # Any healthy pod of the profile will do: the key path and the object prefix are
-  # properties of the session, not of the pod, and every pod of a profile is allowed
-  # both for the teams that profile is granted to.
+  # The pod the session was on, which holds its copy, or else any healthy pod of the
+  # profile: the object prefix is a property of the session, not of the pod.
   defp apply_on_pod(session) do
     workers = session.profile |> Fleet.list_workers() |> Enum.filter(& &1.healthy)
 
@@ -147,49 +221,30 @@ defmodule Troupe.Plane.Erasure do
     updated
   end
 
-  # -- a private session --------------------------------------------------------
+  # -- the key -----------------------------------------------------------------
 
-  # Pending until the key is gone, and erased once it is. A key manager that refused or
-  # could not be reached has destroyed nothing, and the session says so rather than that
-  # it is done; erasing it again finishes it, and so does its owner's daemon connecting.
-  defp finish(session, tombstone) do
-    Sessions.put_state(session.id, "erasure_pending")
-
-    case destroy_key(session) do
-      :ok ->
-        Sessions.put_state(session.id, "erased")
-        {:ok, tombstone}
-
-      {:error, reason} ->
-        Logger.warning(
-          "troupe plane: erasure of #{session.id} is pending: its key was not destroyed: " <>
-            inspect(reason)
-        )
-
-        {:ok, tombstone}
-    end
-  end
-
-  # A tombstone with the key still there: `erasure_pending`, or a row a plane from before
-  # Decision 756 tombstoned and then failed on.
-  defp unfinished?(%Session{kind: "private", state: state}), do: state != "erased"
-  defp unfinished?(_session), do: false
+  # A tombstone with the key still there: `erasure_pending`, a private row a plane from
+  # before Decision 756 tombstoned and then failed on, or a team session a plane from
+  # before Decision 811 erased and left the key of.
+  defp unfinished?(%Session{kind: "private", state: state}, _tombstone), do: state != "erased"
+  defp unfinished?(_session, %Tombstone{key_destroyed_at: at}), do: is_nil(at)
 
   # With the plane's own credential, whose policy has `delete` on the metadata of every
-  # person's session keys and no rule for the data path (`Troupe.KMS.Policy.plane/1`):
-  # every version goes, and none could have been read. Under the owner's name at the key
-  # manager, which is not their subject once they have been moved (Decision 755).
+  # session key, a team's and a person's, and no rule for the data path
+  # (`Troupe.KMS.Policy.plane/1`): every version goes, and none could have been read. A key
+  # already gone is destroyed.
   defp destroy_key(session) do
     config = Application.get_env(:troupe_plane, :transit, [])
 
-    with {:ok, token} <- Credential.fetch(config) do
+    with {:ok, owner} <- key_owner(session),
+         {:ok, token} <- Credential.fetch(config) do
       options = [
         token: token,
         address: config[:address],
         mount: Application.get_env(:troupe_plane, :kms_mount, "secret")
       ]
 
-      case KMS.adapter().destroy({:person, owner_name(session)}, session.id, options) do
+      case KMS.adapter().destroy(owner, session.id, options) do
         # A login OpenBao has stopped honouring is exchanged at the next attempt.
         {:error, {:unexpected_status, 403}} = refused ->
           Credential.forget(config, token)
@@ -201,11 +256,61 @@ defmodule Troupe.Plane.Erasure do
     end
   end
 
+  # A person's under their name at the key manager, which is not their subject once they
+  # have been moved (Decision 755). A team's under the team: the row's, or, once the team
+  # is gone and the column with it, the one the session's manifest names, which says where
+  # the key is and nothing else (`Troupe.Sessions.Storage`).
+  defp key_owner(%Session{kind: "private"} = session), do: {:ok, {:person, owner_name(session)}}
+
+  defp key_owner(session) do
+    case team_name(session) || manifest_team(session.id) do
+      nil -> {:error, :no_team}
+      team -> {:ok, team}
+    end
+  end
+
+  defp manifest_team(session_id) do
+    case Storage.get_manifest(ObjectStore.from_env(), session_id) do
+      {:ok, %{"team" => team}} when is_binary(team) and team != "" -> team
+      _none -> nil
+    end
+  end
+
   defp owner_name(session) do
     case Identity.get_user(session.owner_subject) do
       %User{} = user -> User.kms_name(user)
       nil -> session.owner_subject
     end
+  end
+
+  @doc """
+  Try again every key an erasure has not yet destroyed, and say how many went.
+
+  Every session whose erasure is pending, and, once, every team session a plane from
+  before Decision 811 erased: its key was a pod's to destroy, and a pod's credential may
+  destroy none. A key that goes takes its session to `erased`, and a team session no pod
+  has yet been recorded for is pushed to one. Run every five minutes by
+  `Troupe.Plane.Erasure.Retry`, which says what this answers; each session's refusal is
+  not logged again here.
+  """
+  @spec retry() :: %{destroyed: non_neg_integer(), failed: non_neg_integer()}
+  def retry do
+    Repo.all(
+      from t in Tombstone,
+        join: s in Session,
+        on: s.id == t.session_id,
+        where:
+          (s.kind == "private" and s.state != "erased") or
+            (s.kind == "team" and is_nil(t.key_destroyed_at)),
+        order_by: t.erased_at,
+        select: {s, t}
+    )
+    |> Enum.reduce(%{destroyed: 0, failed: 0}, fn {session, tombstone}, counts ->
+      case again(session, tombstone, log: false) do
+        %Tombstone{key_destroyed_at: nil} -> %{counts | failed: counts.failed + 1}
+        _destroyed -> %{counts | destroyed: counts.destroyed + 1}
+      end
+    end)
   end
 
   @doc """
@@ -297,19 +402,22 @@ defmodule Troupe.Plane.Erasure do
 
   Sent on enrol, and applied before the pod serves anything: a pod that was offline
   during an erasure is holding an encrypted cache of a session that no longer exists,
-  and it must not answer a single read from it.
+  and it must not answer a single read from it. A session whose key is not yet destroyed
+  is on the list too, so its copy goes now; the pod is recorded for it once the key is.
   """
   @spec pending_for(String.t(), String.t()) :: [map()]
   def pending_for(profile, pod_name) do
-    # The team travels with it: the key path is `troupe/teams/<team>/sessions/<id>`, and
-    # a pod told to erase without one would delete the objects and leave the key.
+    # The team travels with it still, for a pod from before Decision 811, which destroyed
+    # the key itself where its credential let it. A pod now leaves the key to the plane.
     Repo.all(
       from t in Tombstone,
         join: s in Session,
         on: s.id == t.session_id,
         left_join: team in Team,
         on: team.id == s.team_id,
-        where: s.profile == ^profile and s.state == "erased" and not (^pod_name in t.applied_by),
+        where:
+          s.profile == ^profile and s.state in ["erasure_pending", "erased"] and
+            not (^pod_name in t.applied_by),
         select: %{
           "session_id" => t.session_id,
           "team" => team.name,
@@ -318,20 +426,19 @@ defmodule Troupe.Plane.Erasure do
     )
   end
 
-  @doc "Record that a pod has carried out an erasure on its own disk."
+  @doc """
+  Record that a pod has carried out an erasure on its own disk, or a device on its own,
+  once the session's key is gone; before that it is told again.
+  """
   @spec applied(String.t(), String.t()) :: :ok
   def applied(session_id, pod_name) do
-    case tombstone_for(session_id) do
-      nil ->
-        :ok
-
-      tombstone ->
-        tombstone
-        |> Tombstone.changeset(%{applied_by: Enum.uniq([pod_name | tombstone.applied_by])})
-        |> Repo.update()
-
-        :ok
+    with %Tombstone{} = tombstone <- tombstone_for(session_id),
+         %Session{} = session <- Sessions.get(session_id),
+         true <- key_gone?(session, tombstone) do
+      record_applied(tombstone, %{"pod" => pod_name})
     end
+
+    :ok
   end
 
   @doc "One session's tombstone, or `nil`."

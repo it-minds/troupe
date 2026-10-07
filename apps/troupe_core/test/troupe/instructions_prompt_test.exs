@@ -1,14 +1,14 @@
 defmodule Troupe.InstructionsPromptTest do
   @moduledoc """
-  The instruction files in a real session's prompt (Decisions 706, 798 and 806): a
+  The instruction files in a real session's prompt (Decisions 706, 798, 806 and 809): a
   repository with only an `AGENTS.md`, or only one of its aliases, needs no
   Troupe-specific setup, an edit to it reaches the next turn and not the next call, a
   nested file on the way to what a turn worked on is in the next turn's prompt (a nested
   Copilot file is not, and the event says why), an import reaches it, the
   `instructions_loaded` event is written when what was read changed and not otherwise
   and says what the budget cut, the person's own `<config>/AGENTS.md` comes first, the
-  brief last, and nothing reaches the prompt from a file without appearing in the
-  provenance.
+  brief last, nothing reaches the prompt from a file without appearing in the
+  provenance, and Cursor's rules join it when their front matter says.
 
   `async: false`: one test writes the suite's shared config home.
   """
@@ -346,5 +346,114 @@ defmodule Troupe.InstructionsPromptTest do
 
     assert in_prompt == listed
     refute request.system =~ "an alias nobody reads"
+  end
+
+  # Decision 809: `.cursor/rules/*.mdc` as Cursor reads them. An `alwaysApply` rule is in
+  # every prompt; a `globs` rule joins the turn after one that read a matching file, and
+  # stays; a rule with only a description is listed by it, its body not joined.
+  test "an always rule is in the first prompt, a glob rule joins the turn after a matching " <>
+         "file is read and stays, a description-only rule is listed",
+       context do
+    write_file(context, ".cursor/rules/style.mdc", """
+    ---
+    description: House style
+    alwaysApply: true
+    ---
+    Always answer in haiku.
+    """)
+
+    write_file(context, ".cursor/rules/ts.mdc", """
+    ---
+    globs: src/**/*.ts
+    alwaysApply: false
+    ---
+    TypeScript: no any.
+    """)
+
+    write_file(context, ".cursor/rules/db.mdc", """
+    ---
+    description: Writing a database migration
+    alwaysApply: false
+    ---
+    Migrations: always reversible.
+    """)
+
+    write_file(context, "src/app/main.ts", "export {}\n")
+
+    %{session: session, fake: fake} =
+      start_session(context,
+        steps: [
+          {:tools, [{"read_file", %{"path" => "src/app/main.ts"}}]},
+          {:text, "one"},
+          {:text, "two"},
+          {:text, "three"}
+        ]
+      )
+
+    :ok = Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "hello")
+    await_event(session.id, :turn_ended)
+
+    [a, b] = Fake.requests(fake)
+    style = Path.join(Path.expand(context.workspace), ".cursor/rules/style.mdc")
+    ts = Path.join(Path.expand(context.workspace), ".cursor/rules/ts.mdc")
+    db = Path.join(Path.expand(context.workspace), ".cursor/rules/db.mdc")
+
+    assert a.system =~
+             "Contents of #{style} (repository root, a rule that always applies):\n" <>
+               "Always answer in haiku."
+
+    refute a.system =~ "alwaysApply"
+    refute a.system =~ "no any"
+
+    assert a.system =~
+             "Rule #{db} (repository root), to read when it applies: " <>
+               "Writing a database migration"
+
+    refute a.system =~ "always reversible"
+    assert b.system == a.system
+
+    Troupe.send_input(session.id, "again")
+    await_event(session.id, :turn_ended)
+    Troupe.send_input(session.id, "once more")
+    await_event(session.id, :turn_ended)
+
+    [_a, _b, c, d] = Fake.requests(fake)
+
+    assert c.system =~
+             "Contents of #{ts} (repository root, a rule for files matching src/**/*.ts):\n" <>
+               "TypeScript: no any."
+
+    assert d.system == c.system
+    refute c.system =~ "always reversible"
+
+    assert [first, second] = events_of_type(session.id, :instructions_loaded)
+
+    assert [
+             %{"path" => ^db, "status" => "listed", "reason" => db_reason},
+             %{"path" => ^style, "status" => "whole", "applies" => "always applied"},
+             %{
+               "path" => ^ts,
+               "status" => "inactive",
+               "chars" => 0,
+               "reason" => "applies when a file matching src/**/*.ts is read or edited"
+             },
+             %{"scope" => "brief"}
+           ] = first.data["files"]
+
+    assert db_reason =~ "requested by description only"
+
+    assert [
+             %{"path" => ^db, "status" => "listed"},
+             %{"path" => ^style, "status" => "whole"},
+             %{
+               "path" => ^ts,
+               "status" => "whole",
+               "reason" => nil,
+               "applies" => "applied: src/app/main.ts matches src/**/*.ts",
+               "rule" => %{"apply" => "globs", "globs" => ["src/**/*.ts"]}
+             },
+             %{"scope" => "brief"}
+           ] = second.data["files"]
   end
 end

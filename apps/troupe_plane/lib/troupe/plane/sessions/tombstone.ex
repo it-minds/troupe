@@ -11,6 +11,10 @@ defmodule Troupe.Plane.Sessions.Tombstone do
   `applied_by` is the list of pods that have carried the erasure out on their own disk.
   A pod that was offline when it ran applies it on enrol, before serving anything, and
   this is how it learns what to apply.
+
+  `key_destroyed_at` is when the plane destroyed the session's key, empty until it has
+  (Decision 811). A tombstone from before the plane destroyed a team session's key has it
+  empty too, and the plane's erasure pass destroys that key once.
   """
 
   use Ecto.Schema
@@ -26,13 +30,14 @@ defmodule Troupe.Plane.Sessions.Tombstone do
     field :actor, :string
     field :erased_at, :utc_datetime_usec
     field :applied_by, {:array, :string}, default: []
+    field :key_destroyed_at, :utc_datetime_usec
 
     timestamps(type: :utc_datetime_usec)
   end
 
   @type t :: %__MODULE__{}
 
-  @fields [:session_id, :head_hash, :reason, :actor, :erased_at, :applied_by]
+  @fields [:session_id, :head_hash, :reason, :actor, :erased_at, :applied_by, :key_destroyed_at]
 
   @doc false
   @spec changeset(t(), map()) :: Ecto.Changeset.t()

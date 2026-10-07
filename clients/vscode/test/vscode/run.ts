@@ -21,10 +21,11 @@ const bin = path.join(work, "bin");
 // tests count; while there is an explain.fail it prints what that holds (a config's
 // `errors`) and fails, as a config that does not load does, with nothing on standard error.
 // `troupe models` writes its arguments to models.log and prints
-// models.json, or fails with a reason while there is a models.fail.
+// models.json, or fails with a reason while there is a models.fail. Anything else, `troupe
+// config` (Open Settings) and `troupe doctor` among them, is a call.
 const posixFake = `#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
-if [ "$1" = config ]; then
+if [ "$1" = config ] && [ "$2" = --explain ]; then
   [ -f "$here/explain.fail" ] && { cat "$here/explain.fail"; exit 1; }
   cat "$here/explain.json"; exit 0
 fi
@@ -46,7 +47,7 @@ exec sleep 600
 // `bin\\troupe`, and only the `.cmd` may be what that finds.
 const windowsFake = [
   "@echo off",
-  'if "%~1"=="config" goto config',
+  'if "%~1"=="config" if "%~2"=="--explain" goto config',
   'if "%~1"=="models" goto models',
   '>>"%~dp0calls.log" echo call\t%CD%\t%*',
   "set mode=",
@@ -75,6 +76,9 @@ async function main() {
     fs.mkdirSync(folder, { recursive: true });
     fs.writeFileSync(path.join(folder, "a.txt"), `a file in ${path.basename(folder)}\n`);
   }
+  // What "Ask Troupe About This File" (and Folder) is asked about, a folder down.
+  fs.mkdirSync(path.join(work, "alpha", "src"));
+  fs.writeFileSync(path.join(work, "alpha", "src", "b.txt"), "a file a folder down\n");
 
   fs.mkdirSync(bin, { recursive: true });
   if (process.platform === "win32") {

@@ -12,7 +12,7 @@ themes/
 
 Open any of the three kits in a browser. Each one shows the same mark, status glyphs, cast, live fragments and palette in its own theme, with a light/dark toggle in the header. `afterglow.dc.html` is not a kit but the comp the app is drawn to — the launcher, the session list, a new session and a session — and it is dark only.
 
-These four files are the only copy in the repository, and three generators read them: `pnpm tokens` (the GUI's `tokens.css` and `mark.ts`), `mix troupe.theme` at the root (the plane's front page, in Signal) and `mix troupe.palette` in `clients/tui` (the TUI's colours and its mask, from Afterglow). Each has a check CI runs, so a token changed here without regenerating fails the build of every client that wears it.
+These four files are the only copy in the repository, and three generators read them: `pnpm tokens` (the GUI's `tokens.css` and `mark.ts`), `mix troupe.theme` at the root (the plane's front page, in Signal) and `mix troupe.palette` in `clients/tui` (the TUI's colours in every theme, and its mask). Each has a check CI runs, so a token changed here without regenerating fails the build of every client that wears it.
 
 ---
 
