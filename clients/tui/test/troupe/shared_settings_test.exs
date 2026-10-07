@@ -82,6 +82,73 @@ defmodule Troupe.SharedSettingsTest do
              Protocol.call(ctx.desktop, "config.get", %{})
   end
 
+  # #228: the theme is the one the desktop app's appearance screen sets, `ui.theme`.
+  test "a theme the desktop app picks is the one the running terminal draws in, with nothing pressed",
+       ctx do
+    {pid, _session} = start_tui(ctx.sid)
+    desktop_set(ctx.desktop, "ui.theme", "footlight")
+    eventually(fn -> theme_of(pid) == :footlight end)
+  end
+
+  test "a theme picked on the terminal's settings page is drawn at once and reaches the desktop app",
+       ctx do
+    {pid, session} = start_tui(ctx.sid)
+    type(pid, "settings")
+    press(pid, "enter")
+    eventually(fn -> screen_text(pid, session) =~ "settings —" end)
+    to_setting(pid, "ui.theme")
+    press(pid, "enter")
+
+    # A menu of the four, and no "type one instead": a theme is one of them or none.
+    assert %{choices: choices, cursor: cursor, typed?: false} = user_state(pid).settings.picker
+    assert Enum.map(choices, & &1.value) == ~w(afterglow signal footlight limelight)
+    assert screen_text(pid, session) =~ "4 themes"
+    refute screen_text(pid, session) =~ "type one instead"
+
+    target = Enum.find_index(choices, &(&1.value == "limelight"))
+    for _ <- 1..(target - cursor)//1, do: press(pid, "down")
+    press(pid, "enter")
+
+    assert theme_of(pid) == :limelight
+    assert_receive {:troupe_notification, "config.changed", %{"keys" => keys}}, 5_000
+    assert "ui.theme" in keys
+
+    # What the desktop app's appearance screen reads.
+    assert {:ok, %{"keys" => served}} = Protocol.call(ctx.desktop, "config.get", %{})
+    assert %{"value" => "limelight"} = Enum.find(served, &(&1["key"] == "ui.theme"))
+  end
+
+  test "a theme the terminal does not know is drawn as Afterglow and said so once", ctx do
+    {pid, _session} = start_tui(ctx.sid)
+    set = fn key, value -> desktop_set(ctx.desktop, key, value) end
+
+    set.("ui.theme", "signal")
+    eventually(fn -> theme_of(pid) == :signal end)
+
+    set.("ui.theme", "neon-noir")
+    eventually(fn -> theme_of(pid) == :afterglow end)
+
+    # Another `ui` key read again with the same unknown theme: nothing said twice.
+    set.("ui.blink", false)
+    eventually(fn -> user_state(pid).theme.blink == false end)
+
+    said = Enum.filter(user_state(pid).model.notices, &(&1 =~ "neon-noir"))
+    assert [notice] = said
+    assert notice =~ "afterglow"
+  end
+
+  defp desktop_set(desktop, key, value) do
+    assert {:ok, _} =
+             Protocol.call(desktop, "config.set", %{
+               "command_id" => "gui-#{System.unique_integer([:positive])}",
+               "key" => key,
+               "value" => value,
+               "scope" => "user"
+             })
+  end
+
+  defp theme_of(pid), do: pid |> user_state() |> Map.get(:theme, %{}) |> Map.get(:name)
+
   # The desktop app: a client of its own on the same daemon, which hears what it is sent.
   defp desktop do
     {:ok, endpoint} = Link.ensure()

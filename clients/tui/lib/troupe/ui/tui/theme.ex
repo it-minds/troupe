@@ -1,11 +1,19 @@
 defmodule Troupe.UI.TUI.Theme do
   @moduledoc """
-  Afterglow at whatever depth the terminal can draw, from `Troupe.UI.TUI.Palette`.
+  The person's theme — Afterglow, Signal, Footlight or Limelight — at whatever depth the
+  terminal can draw, from `Troupe.UI.TUI.Palette`.
+
+  Which theme is the person's choice, and it is the desktop app's choice too: the
+  `ui.theme` setting, which the daemon keeps and serves to both clients (root Decision
+  761). `choose/2` reads it; one this Troupe does not know is drawn as Afterglow, the
+  default, and the server says so once. The server reads it again whenever the daemon
+  says a `ui` key changed, so a theme picked in either client is the one drawn, without
+  a restart. `ui.blink` (on by default) says whether what waits on you blinks.
 
   The view never names a colour. It asks for a role — `style(:needs_you, [:bold])` —
   and gets a style whose colour is a placeholder; `paint/2` replaces every placeholder
-  in a frame's widgets with what this terminal can show, once, as the frame is handed
-  over. So the choice is made in one function and each depth is tested there:
+  in a frame's widgets with what this terminal can show in the theme, once, as the frame
+  is handed over. So the choice is made in one function and each depth is tested there:
 
     * `:truecolor` — the token's exact value, `{:rgb, r, g, b}`.
     * `:x256` — the nearest of xterm's fixed 240, chosen when the palette was generated.
@@ -19,11 +27,14 @@ defmodule Troupe.UI.TUI.Theme do
   colours come from follows the background the terminal reports, dark when it says
   nothing.
 
-  **The pink means one thing.** `:needs_you` and `:needs_you_edge` are for a person
-  being needed and `:brand` for the mask's lit half; the view uses them for nothing
-  else, and a test reads every tag the model draws to hold it to that.
+  **The reserved colour means one thing.** `:needs_you` and `:needs_you_edge` are for a
+  person being needed and `:brand` for the mask's lit half — Afterglow's pink, Signal's
+  magenta, Footlight's amber, Limelight's lime; the view uses them for nothing else, and
+  a test reads every tag the model draws to hold it to that.
 
-  What the terminal can draw comes from its environment, read once (`detect/1`):
+  What the terminal can draw comes from its environment, read once (`detect/1`); light
+  or dark is the terminal's background, not the desktop app's `ui.mode`, which is about
+  a window:
 
     * `TROUPE_COLORS` — `truecolor`, `256`, `16` or `none`, and `light` or `dark`, in
       any order (`TROUPE_COLORS=256,light`): what to use, whatever the terminal says.
@@ -39,7 +50,12 @@ defmodule Troupe.UI.TUI.Theme do
 
   @type depth :: :truecolor | :x256 | :x16 | :none
   @type mode :: :dark | :light
-  @type t :: %{depth: depth(), mode: mode()}
+  @typedoc "What the terminal can draw."
+  @type terminal :: %{depth: depth(), mode: mode()}
+  @typedoc "What a frame is drawn in: a theme, at the terminal's depth and mode, blinking or not."
+  @type t :: %{name: Palette.theme(), depth: depth(), mode: mode(), blink: boolean()}
+
+  @default :afterglow
 
   @depths %{
     "truecolor" => :truecolor,
@@ -51,22 +67,63 @@ defmodule Troupe.UI.TUI.Theme do
     "off" => :none
   }
 
-  @doc "The theme for this terminal, read from the environment the first time it is asked."
+  @doc """
+  The default theme for this terminal, its depth and mode read from the environment the
+  first time it is asked; `choose/2` lays the person's choice over it.
+  """
   @spec current() :: t()
   def current do
-    case :persistent_term.get({__MODULE__, :current}, nil) do
-      nil ->
-        theme = detect(System.get_env())
-        :persistent_term.put({__MODULE__, :current}, theme)
-        theme
+    terminal =
+      case :persistent_term.get({__MODULE__, :current}, nil) do
+        nil ->
+          terminal = detect(System.get_env())
+          :persistent_term.put({__MODULE__, :current}, terminal)
+          terminal
 
-      theme ->
-        theme
+        terminal ->
+          terminal
+      end
+
+    Map.merge(%{name: @default, blink: true}, terminal)
+  end
+
+  @doc """
+  The theme the `ui.theme` setting names, over `theme`: `{:ok, theme}`, or `{:unknown,
+  theme}` in the default when the value is not a theme this Troupe knows (a newer
+  desktop app's, or a typo), which is drawn rather than refused. `nil`, a setting nobody
+  set, is the default.
+  """
+  @spec choose(t(), String.t() | nil) :: {:ok, t()} | {:unknown, t()}
+  def choose(theme, nil), do: {:ok, Map.put(theme, :name, @default)}
+
+  def choose(theme, value) when is_binary(value) do
+    wanted = value |> String.trim() |> String.downcase()
+
+    case Enum.find(Palette.themes(), &(Atom.to_string(&1.id) == wanted)) do
+      nil -> {:unknown, Map.put(theme, :name, @default)}
+      %{id: name} -> {:ok, Map.put(theme, :name, name)}
     end
   end
 
+  def choose(theme, _other), do: {:unknown, Map.put(theme, :name, @default)}
+
+  @doc "The themes there are, the default first: the values `ui.theme` takes."
+  @spec names() :: [Palette.theme()]
+  def names, do: Enum.map(Palette.themes(), & &1.id)
+
+  @doc "Whether what waits on a person blinks: `ui.blink`, on unless it is `false`."
+  @spec blinking(t(), term()) :: t()
+  def blinking(theme, value), do: Map.put(theme, :blink, value != false)
+
+  @doc """
+  Whether what blinks is lit at `now`: on for half a second and off for half, about once
+  a second, off the clock rather than the frame rate; always, with blinking off.
+  """
+  @spec lit?(map(), integer()) :: boolean()
+  def lit?(theme, now), do: Map.get(theme, :blink, true) == false or rem(div(now, 500), 2) == 0
+
   @doc "What a terminal with this environment can draw; see the moduledoc for the order."
-  @spec detect(%{optional(String.t()) => String.t()}) :: t()
+  @spec detect(%{optional(String.t()) => String.t()}) :: terminal()
   def detect(env) do
     words =
       env
@@ -115,18 +172,24 @@ defmodule Troupe.UI.TUI.Theme do
   def style(nil, modifiers), do: %Style{modifiers: modifiers}
   def style(role, modifiers), do: %Style{fg: {:role, role}, modifiers: modifiers}
 
-  @doc "The colour a role is drawn in at a theme's depth and mode; `nil` is the terminal default."
-  @spec color(Palette.role(), t()) :: Style.color() | nil
+  @doc """
+  The colour a role is drawn in, in a theme at its depth and mode; `nil` is the terminal
+  default. A theme with no name is the default one.
+  """
+  @spec color(Palette.role(), map()) :: Style.color() | nil
   def color(_role, %{depth: :none}), do: nil
-  def color(role, %{depth: :x16}), do: Map.fetch!(Palette.roles(), role).x16
+  def color(role, %{depth: :x16} = theme), do: role(role, theme).x16
 
-  def color(role, %{depth: :x256, mode: mode}),
-    do: {:indexed, Palette.roles() |> Map.fetch!(role) |> Map.fetch!(mode) |> Map.fetch!(:x256)}
+  def color(role, %{depth: :x256, mode: mode} = theme),
+    do: {:indexed, role |> role(theme) |> Map.fetch!(mode) |> Map.fetch!(:x256)}
 
-  def color(role, %{depth: :truecolor, mode: mode}) do
-    {r, g, b} = Palette.roles() |> Map.fetch!(role) |> Map.fetch!(mode) |> Map.fetch!(:rgb)
+  def color(role, %{depth: :truecolor, mode: mode} = theme) do
+    {r, g, b} = role |> role(theme) |> Map.fetch!(mode) |> Map.fetch!(:rgb)
     {:rgb, r, g, b}
   end
+
+  defp role(role, theme),
+    do: theme |> Map.get(:name, @default) |> Palette.roles() |> Map.fetch!(role)
 
   @doc """
   Every colour in a frame's widgets resolved for a theme. Walks whatever it is given —
@@ -177,20 +240,23 @@ defmodule Troupe.UI.TUI.Theme do
 
   @doc """
   The nearest of xterm's 240 fixed colours — the 6x6x6 cube and the grey ramp — to an
-  sRGB colour, by CIELAB distance; ties go to the lower index. 0 to 15 are never the
-  answer: they are whatever the terminal's own theme made them. `mix troupe.palette`
-  uses this for the roles, and `paint/2` for a colour that arrives as a value, remembered
-  per process since a frame repeats the few a highlighter uses.
+  sRGB colour, by CIELAB distance, other than those in `except`; ties go to the lower
+  index. 0 to 15 are never the answer: they are whatever the terminal's own theme made
+  them. `mix troupe.palette` uses this for the roles, with the reserved colour's own
+  index kept from every other role, and `paint/2` for a colour that arrives as a value,
+  remembered per process since a frame repeats the few a highlighter uses.
   """
-  @spec nearest256({0..255, 0..255, 0..255}) :: 16..255
-  def nearest256(rgb) do
-    key = {__MODULE__, :nearest256, rgb}
+  @spec nearest256({0..255, 0..255, 0..255}, [16..255]) :: 16..255
+  def nearest256(rgb, except \\ []) do
+    key = {__MODULE__, :nearest256, rgb, except}
 
     with nil <- Process.get(key) do
       {l, a, b} = lab(rgb)
 
       {n, _lab} =
-        Enum.min_by(xterm_lab(), fn {_n, {l2, a2, b2}} ->
+        xterm_lab()
+        |> Enum.reject(fn {n, _lab} -> n in except end)
+        |> Enum.min_by(fn {_n, {l2, a2, b2}} ->
           (l - l2) * (l - l2) + (a - a2) * (a - a2) + (b - b2) * (b - b2)
         end)
 

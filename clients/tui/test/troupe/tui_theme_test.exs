@@ -1,11 +1,13 @@
 defmodule Troupe.TUIThemeTest do
   @moduledoc """
-  Afterglow in the TUI (issue #228): the palette generated from the design tokens, the
-  depth a terminal gets, the reserved pink kept to what needs a person, and the mask.
+  The design's themes in the TUI (issue #228): the palette generated from the design
+  tokens of all four — Afterglow, Signal, Footlight and Limelight — the depth a terminal
+  gets, the reserved colour kept to what needs a person, the mark in each window's
+  corner, and the mask.
 
   The screens are drawn the way the server draws them — `View.render/2` into a headless
-  `CellSession` — from a model folded out of the worker's events, at each depth, and read
-  back cell by cell with their colours.
+  `CellSession` — from a model folded out of the worker's events, in each theme at each
+  depth, light and dark, and read back cell by cell with their colours.
   """
 
   use ExUnit.Case, async: true
@@ -17,14 +19,15 @@ defmodule Troupe.TUIThemeTest do
   alias Troupe.Remote.Translate
   alias Troupe.UI.TUI.{Model, Palette, Theme, View}
 
-  @tokens Path.join(~w(.. gui docs design themes afterglow.tokens.json))
+  @themes Path.join(~w(.. gui docs design themes))
   @reserved [:needs_you, :needs_you_edge, :brand]
+  @names [:afterglow, :signal, :footlight, :limelight]
 
   ## The palette is the tokens
 
   test "the committed palette is what the generator makes of the tokens" do
     committed = String.split(File.read!("lib/troupe/ui/tui/palette.ex"), "\n")
-    generated = String.split(Generate.render(Generate.read!(@tokens)), "\n")
+    generated = String.split(Generate.render(Generate.read_all!()), "\n")
 
     first =
       committed
@@ -36,26 +39,100 @@ defmodule Troupe.TUIThemeTest do
              "run `mix troupe.palette` and commit it"
   end
 
-  test "each role carries its token's two values, and the reserved one is the tokens' pink" do
-    tokens = Generate.read!(@tokens)
+  test "every theme the tokens define is in it, in the desktop app's order, Afterglow first" do
+    files = @themes |> Path.join("*.tokens.json") |> Path.wildcard() |> length()
 
-    for {role, %{token: path, dark: dark, light: light}} <- Palette.roles() do
-      token = get_in(tokens, ["color" | String.split(path, ".")])
+    assert Enum.map(Palette.themes(), & &1.id) == @names
+    assert length(Palette.themes()) == files
+    assert Enum.map(Palette.themes(), & &1.name) == ~w(Afterglow Signal Footlight Limelight)
+    assert Theme.names() == @names
+    assert Palette.roles() == Palette.roles(:afterglow)
+  end
 
-      for {mode, %{rgb: rgb}} <- [dark: dark, light: light],
-          String.starts_with?(token[to_string(mode)], "#") do
-        assert hex(rgb) == String.upcase(token[to_string(mode)]), "#{role} #{mode}"
+  test "each role carries its token's two values, and the reserved one is each theme's own" do
+    for %{id: name} <- Palette.themes() do
+      tokens = Generate.read!(Path.join(@themes, "#{name}.tokens.json"))
+
+      for {role, %{token: path, dark: dark, light: light}} <- Palette.roles(name) do
+        token = get_in(tokens, ["color" | String.split(path, ".")])
+
+        for {mode, %{rgb: rgb}} <- [dark: dark, light: light],
+            String.starts_with?(token[to_string(mode)], "#") do
+          assert hex(rgb) == String.upcase(token[to_string(mode)]), "#{name} #{role} #{mode}"
+        end
       end
+
+      assert Palette.roles(name).needs_you.token == "status.waiting.fg"
     end
 
-    assert Palette.roles().needs_you.token == "status.waiting.fg"
-    assert Palette.roles().needs_you.dark.rgb == {255, 0, 128}
+    assert Palette.roles(:afterglow).needs_you.dark.rgb == {255, 0, 128}
+    assert Palette.roles(:signal).needs_you.dark.rgb == {255, 127, 198}
+    assert Palette.roles(:footlight).needs_you.dark.rgb == {255, 180, 61}
+    assert Palette.roles(:limelight).needs_you.dark.rgb == {220, 244, 112}
   end
 
   test "no role falls back to one of the terminal's own sixteen at 256, and magenta is reserved" do
-    for {role, %{dark: dark, light: light, x16: x16}} <- Palette.roles() do
-      assert dark.x256 in 16..255 and light.x256 in 16..255, "#{role}"
-      assert x16 == :magenta == role in @reserved, "#{role} is #{x16} in sixteen colours"
+    for %{id: name} <- Palette.themes(),
+        {role, %{dark: dark, light: light, x16: x16}} <- Palette.roles(name) do
+      assert dark.x256 in 16..255 and light.x256 in 16..255, "#{name} #{role}"
+      assert x16 == :magenta == role in @reserved, "#{name}: #{role} is #{x16} in sixteen colours"
+    end
+  end
+
+  # Limelight's focus ring is its lime: the accent, on every heading, takes the theme's link
+  # blue there instead, which is what the theme's own `accent` token is.
+  test "no role but the reserved three is the reserved colour, in any theme, at truecolor or 256" do
+    for %{id: name} <- Palette.themes(), mode <- [:dark, :light], depth <- [:rgb, :x256] do
+      roles = Palette.roles(name)
+      reserved = for r <- @reserved, uniq: true, do: roles[r][mode][depth]
+
+      for {role, values} <- roles, role not in @reserved do
+        refute values[mode][depth] in reserved,
+               "#{name} #{mode}: #{role} is the reserved colour at #{depth}"
+      end
+    end
+
+    assert Palette.roles(:limelight).accent.token == "text.link"
+    assert Palette.roles(:afterglow).accent.token == "border.focus"
+  end
+
+  ## The person's choice
+
+  describe "choose/2" do
+    test "a theme the setting names, whatever its case" do
+      base = Theme.current()
+
+      for name <- @names do
+        assert {:ok, %{name: ^name}} = Theme.choose(base, Atom.to_string(name))
+      end
+
+      assert {:ok, %{name: :footlight}} = Theme.choose(base, " Footlight ")
+      assert {:ok, %{name: :afterglow}} = Theme.choose(base, nil)
+    end
+
+    test "one it does not know is drawn as Afterglow, and said to be unknown" do
+      base = %{Theme.current() | name: :signal}
+
+      assert {:unknown, %{name: :afterglow}} = Theme.choose(base, "neon-noir")
+      assert {:unknown, %{name: :afterglow}} = Theme.choose(base, 42)
+      assert {:unknown, %{name: :afterglow}} = Theme.choose(base, "../signal")
+    end
+
+    test "the depth and mode stay the terminal's, whichever theme" do
+      base = %{name: :afterglow, depth: :x256, mode: :light, blink: true}
+
+      assert {:ok, %{name: :limelight, depth: :x256, mode: :light}} =
+               Theme.choose(base, "limelight")
+    end
+
+    test "blinking is on unless the setting says false" do
+      base = Theme.current()
+
+      assert Theme.blinking(base, nil).blink
+      assert Theme.blinking(base, true).blink
+      refute Theme.blinking(base, false).blink
+      assert Theme.lit?(%{blink: true}, 0) and not Theme.lit?(%{blink: true}, 500)
+      assert Theme.lit?(%{blink: false}, 500)
     end
   end
 
@@ -325,7 +402,141 @@ defmodule Troupe.TUIThemeTest do
     end
   end
 
+  ## The four themes, and the mark in each window's corner
+
+  test "the theme the setting names is the one drawn: Footlight's amber on what waits on you" do
+    cells = draw(approval_model(), %{name: :footlight, depth: :truecolor, mode: :dark})
+    rows = Enum.group_by(cells, & &1.row)
+
+    assert at(rows, row_containing(rows, "APPROVAL: edit_file"), "APPROVAL").fg ==
+             {:rgb, 255, 180, 61}
+  end
+
+  # Every theme at every depth, light and dark: what waits on you is in the theme's reserved
+  # colour and nothing below the window's tile is, the other lights are the theme's, the
+  # corner says ◑, and with no colour the words and the glyph are still there.
+  for name <- [:afterglow, :signal, :footlight, :limelight],
+      depth <- [:truecolor, :x256, :x16, :none],
+      mode <- [:dark, :light] do
+    test "an approval in #{name} at #{depth}, #{mode}" do
+      theme = %{name: unquote(name), depth: unquote(depth), mode: unquote(mode)}
+      cells = draw(approval_model(), theme)
+      rows = Enum.group_by(cells, & &1.row)
+      ink = &ink(&1, theme)
+
+      assert at(rows, row_containing(rows, "APPROVAL: edit_file"), "APPROVAL").fg ==
+               ink.(:needs_you)
+
+      assert at(rows, row_containing(rows, "to answer"), "1 need input").fg == ink.(:needs_you)
+      assert at(rows, row_containing(rows, "The plan"), "The plan").fg == ink.(:accent)
+      assert at(rows, row_containing(rows, "+def parse"), "+def").fg == ink.(:added)
+      assert %{symbol: "◑"} = mark = corner(cells)
+      assert mark.fg == ink.(:needs_you)
+      reserved_only(cells, theme)
+    end
+  end
+
+  defp reserved_only(cells, %{depth: :none}),
+    do: assert(Enum.all?(cells, &(&1.fg == :reset and &1.bg == :reset)))
+
+  defp reserved_only(cells, theme) do
+    allowed = [
+      "APPROVAL: edit_file (y allow / n deny / a allow for session)",
+      "approval: edit_file (y / n / a)",
+      "1 need input · press 1 (or Enter, or click the window) to answer"
+    ]
+
+    for {row, text} <- pink_runs(cells, ink(:needs_you, theme)), row > 2 do
+      assert Enum.any?(allowed, &String.contains?(&1, String.trim(text))),
+             "#{inspect(text)} on row #{row} is the reserved colour"
+    end
+  end
+
+  test "a working window's corner turns through ◐ ◓ ◑ ◒, a quarter at a time" do
+    theme = %{depth: :truecolor, mode: :dark}
+
+    corners =
+      for now <- [0, 250, 500, 750, 1000] do
+        working() |> draw(theme, focus: :command, now: now) |> corner()
+      end
+
+    assert Enum.map(corners, & &1.symbol) == ~w(◐ ◓ ◑ ◒ ◐)
+    assert Enum.all?(corners, &(&1.fg == Theme.color(:working, theme)))
+  end
+
+  test "the activity line turns with it, at the same pace" do
+    [w] = Model.windows(working())
+
+    assert for(now <- [0, 250, 500, 750], do: w |> Model.activity_line(0, now) |> String.first()) ==
+             ~w(◐ ◓ ◑ ◒)
+
+    # The frame rate does not move it: the tick is not the clock.
+    assert Model.activity_line(w, 7, 0) == Model.activity_line(w, 0, 0)
+  end
+
+  test "a window that needs you: ◑ in the reserved colour, blinking with its border, steady with blinking off" do
+    theme = %{name: :footlight, depth: :truecolor, mode: :dark, blink: true}
+    amber = {:rgb, 255, 180, 61}
+
+    lit = approval_model() |> draw(theme, now: 0) |> corner()
+    out = approval_model() |> draw(theme, now: 500) |> corner()
+    steady = approval_model() |> draw(%{theme | blink: false}, now: 500) |> corner()
+
+    assert {lit.symbol, lit.fg} == {"◑", amber}
+    assert {out.symbol, out.fg} == {"◑", Theme.color(:rail, theme)}
+    assert {steady.symbol, steady.fg} == {"◑", amber}
+  end
+
+  test "a window done and not yet read: ⏺ in one cell; read, ○; failed, ✗" do
+    theme = %{name: :signal, depth: :truecolor, mode: :dark}
+    done = fold(started() ++ [{"turn_ended", %{}}])
+    failed = fold(started() ++ [{"turn_ended", %{"reason" => "tool_failures"}}])
+    mark = fn model -> model |> draw(theme, focus: :command) |> corner() end
+
+    assert %{symbol: "⏺︎"} = unread = mark.(done)
+    assert unread.fg == Theme.color(:ok, theme)
+    assert %{symbol: "○"} = read = mark.(Model.seen(done, "root"))
+    assert read.fg == Theme.color(:muted, theme)
+    assert %{symbol: "✗"} = broke = mark.(failed)
+    assert broke.fg == Theme.color(:error, theme)
+
+    # The text-presentation selector keeps ⏺ one cell wide, here and in the terminal.
+    assert Model.cell_width("⏺︎") == 1
+    assert Model.cell_width("◐ ◓ ◑ ◒ ○ ✗") == 11
+  end
+
+  test "with no colour the mark still says which: the glyph and the word, never the colour alone" do
+    cells = draw(approval_model(), %{depth: :none, mode: :dark}, focus: :command)
+    top = cells |> Enum.filter(&(&1.row == 0)) |> line()
+
+    assert corner(cells).symbol == "◑"
+    assert top =~ "needs_input"
+  end
+
   ## Drawing
+
+  # The colour a cell in a role reads back as: the terminal's own (`:reset`) with none.
+  defp ink(_role, %{depth: :none}), do: :reset
+  defp ink(role, theme), do: Theme.color(role, theme)
+
+  # A window whose agent has its task and has not finished it.
+  defp working, do: fold(started())
+
+  defp started do
+    [
+      {"session_created", %{"kind" => "local", "profile" => "build"}},
+      {"user_input", %{"source" => "user", "text" => "fix the failing test"}}
+    ]
+  end
+
+  @marks ~w(◐ ◓ ◑ ◒ ⏺︎ ○ ✗)
+
+  # The mark in the first window's corner: the one cell of its top border that is a mark.
+  defp corner(cells) do
+    top = cells |> Enum.map(& &1.row) |> Enum.min()
+    [mark] = Enum.filter(cells, &(&1.row == top and &1.symbol in @marks))
+    mark
+  end
 
   defp draw(model, theme, opts \\ []) do
     {width, height} = {120, 40}
@@ -342,8 +553,8 @@ defmodule Troupe.TUIThemeTest do
       agents: ["code", "plan"],
       commands: [],
       palette: nil,
-      tick: 0,
-      now: 0,
+      tick: Keyword.get(opts, :tick, 0),
+      now: Keyword.get(opts, :now, 0),
       quit_armed: false,
       win_armed: nil,
       expanded: true,

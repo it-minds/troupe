@@ -919,11 +919,19 @@ defmodule Troupe.UI.TUI.Model do
     "#{String.pad_leading(Integer.to_string(div(s, 60)), 2, "0")}:#{String.pad_leading(Integer.to_string(rem(s, 60)), 2, "0")}"
   end
 
-  @spinner ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+  # The mark, turning (#228): the lit half goes round clockwise, a quarter every quarter
+  # second, off the clock rather than the frame rate, so it turns at one calm pace however
+  # often the screen is drawn. The same glyph sits in the corner of a working window.
+  @spinner ~w(◐ ◓ ◑ ◒)
+  @turn_ms 250
 
-  @doc "The spinner glyphs the activity line cycles through."
+  @doc "The glyphs the mark turns through while an agent works."
   @spec spinner_glyphs() :: [String.t()]
   def spinner_glyphs, do: @spinner
+
+  @doc "The turning mark at `now`, in milliseconds: a quarter turn every #{@turn_ms} ms."
+  @spec spinner(integer()) :: String.t()
+  def spinner(now), do: Enum.at(@spinner, Integer.mod(div(now, @turn_ms), length(@spinner)))
 
   @doc "One line describing what the branch is doing right now, or nil when resting."
   @spec activity_line(window(), non_neg_integer(), integer()) :: String.t() | nil
@@ -945,13 +953,13 @@ defmodule Troupe.UI.TUI.Model do
     end
   end
 
-  def activity_line(w, path, tick, now) do
+  def activity_line(w, path, _tick, now) do
     agent = Map.get(w.agents, path, new_agent())
 
     if path != w.path and agent.ended_at != nil do
       nil
     else
-      spinner = Enum.at(@spinner, rem(tick, 10))
+      spinner = spinner(now)
       since = elapsed(%{w | started_at: w.activity_since, ended_at: nil}, now)
       state = Map.get(w.activity, path)
       tools = running_tools(agent)
@@ -1713,8 +1721,12 @@ defmodule Troupe.UI.TUI.Model do
 
   defp grapheme_width(_), do: 1
 
+  # Both variation selectors: VS16 asks for an emoji, VS15 (after ⏺, the done mark) for
+  # text, and neither takes a cell of its own.
   defp combining?(cp),
-    do: cp in 0x0300..0x036F or cp in 0x200B..0x200F or cp in 0x20D0..0x20FF or cp == 0xFE0F
+    do:
+      cp in 0x0300..0x036F or cp in 0x200B..0x200F or cp in 0x20D0..0x20FF or
+        cp in [0xFE0E, 0xFE0F]
 
   defp wide?(cp) do
     cp in 0x1100..0x115F or cp in 0x2E80..0x303E or cp in 0x3041..0x33FF or

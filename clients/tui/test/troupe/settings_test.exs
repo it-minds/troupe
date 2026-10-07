@@ -13,17 +13,29 @@ defmodule Troupe.SettingsTest do
   @own %{"max_turns" => 40, "context_window" => 200_000}
 
   describe "schema" do
-    # One key table (#57): the page's keys are the schema's, with its help.
+    # One key table (#57): the page's keys are the schema's, with its help. Of the `ui`
+    # keys, the two the terminal acts on (#228).
     test "the page shows the schema's settings, by their labels and with their docs, but not the desktop app's" do
       expected =
         for {path, spec} <- Schema.settings(),
-            hd(path) != "ui",
+            hd(path) != "ui" or path in [~w(ui theme), ~w(ui blink)],
             do: {Enum.join(path, "."), spec.label, spec.doc}
 
       assert Enum.map(Settings.fields(), &{&1.key, &1.label, &1.help}) == expected
-      refute Enum.any?(Settings.fields(), &String.starts_with?(&1.key, "ui."))
+      refute Enum.any?(Settings.fields(), &(&1.key in ["ui.mode", "ui.notifications"]))
       assert {:ok, %{type: :model}} = Settings.fetch("models.default")
       assert {:ok, %{type: :bool, effect: :now}} = Settings.fetch("watch")
+      assert {:ok, %{type: :theme, effect: :now}} = Settings.fetch("ui.theme")
+      assert {:ok, %{type: :bool, effect: :now}} = Settings.fetch("ui.blink")
+    end
+
+    test "the theme is a menu of every theme the tokens define, in the desktop app's order" do
+      {:ok, field} = Settings.fetch("ui.theme")
+      choices = Settings.choices(field, %Config{}, "footlight")
+
+      assert Enum.map(choices, & &1.value) == ~w(afterglow signal footlight limelight)
+      assert Enum.map(choices, & &1.label) == ~w(Afterglow Signal Footlight Limelight)
+      assert Enum.all?(choices, &(length(&1.notes) == 3))
     end
 
     test "every field reads back out of a default config and formats" do

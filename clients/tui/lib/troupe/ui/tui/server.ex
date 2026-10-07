@@ -15,7 +15,7 @@ defmodule Troupe.UI.TUI.Server do
   alias Troupe.Protocol.Glob
   alias Troupe.Settings
   alias Troupe.UI.HQ
-  alias Troupe.UI.TUI.{Input, Model, View}
+  alias Troupe.UI.TUI.{Input, Model, Theme, View}
 
   @tick_ms 33
   @mailbox_threshold 50
@@ -58,6 +58,8 @@ defmodule Troupe.UI.TUI.Server do
           files: files() | nil,
           mcp_cursor: non_neg_integer(),
           hq: HQ.t() | nil,
+          theme: Theme.t(),
+          theme_warned: String.t() | nil,
           slow_render_ms: non_neg_integer(),
           on_quit: (-> any())
         }
@@ -112,8 +114,11 @@ defmodule Troupe.UI.TUI.Server do
           picker: picker() | nil
         }
 
-  @typedoc "An open menu: the choices offered and where the cursor sits (past the end means type one)."
-  @type picker :: %{choices: [Settings.choice()], cursor: non_neg_integer()}
+  @typedoc """
+  An open menu: the choices offered, where the cursor sits, and whether one may be typed
+  instead (past the end, for a model; a theme is one of the choices).
+  """
+  @type picker :: %{choices: [Settings.choice()], cursor: non_neg_integer(), typed?: boolean()}
 
   @typedoc """
   Command-palette state (Decision 119): the filter typed so far, the cursor over the
@@ -203,6 +208,10 @@ defmodule Troupe.UI.TUI.Server do
       # full for a person whose browser did not open (troupe-remote Decision 741).
       mcp_sign_in: nil,
       hq: nil,
+      # The person's theme, from `ui.theme` (`read_appearance/1`), and the value last said
+      # to be one this Troupe does not know, so that is said once.
+      theme: Theme.current(),
+      theme_warned: nil,
       quitting: false,
       size: initial_size(opts),
       slow_render_ms: Keyword.get(opts, :slow_render_ms, 0),
@@ -218,7 +227,7 @@ defmodule Troupe.UI.TUI.Server do
         _ -> state
       end
 
-    {:ok, state |> recheck_loop() |> schedule_tick()}
+    {:ok, state |> read_appearance() |> recheck_loop() |> schedule_tick()}
   end
 
   @impl true
@@ -287,14 +296,19 @@ defmodule Troupe.UI.TUI.Server do
     do: {:noreply, state, render?: false}
 
   # A settings file changed, here or in another client (#57): an open settings page reads
-  # them again, so a model picked in the desktop app is on it without a key pressed.
-  def handle_info({:troupe_settings_changed, _changed}, %{settings: s} = state) when s != nil do
-    state = %{refresh_settings(state) | dirty: true}
-    {:noreply, schedule_tick(state), render?: false}
-  end
+  # them again, so a model picked in the desktop app is on it without a key pressed, and a
+  # changed `ui` key is read again, so a theme picked there is the one drawn here (#228).
+  def handle_info({:troupe_settings_changed, changed}, state) do
+    ui? = changed |> Map.get("keys") |> List.wrap() |> Enum.any?(&String.starts_with?(&1, "ui."))
 
-  def handle_info({:troupe_settings_changed, _changed}, state),
-    do: {:noreply, state, render?: false}
+    if ui? or state.settings != nil do
+      state = if ui?, do: read_appearance(state), else: state
+      state = if state.settings, do: refresh_settings(state), else: state
+      {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
+    else
+      {:noreply, state, render?: false}
+    end
+  end
 
   def handle_info(:force_render, state),
     do: {:noreply, %{state | now: System.system_time(:millisecond), dirty: false}, render?: true}
@@ -515,7 +529,7 @@ defmodule Troupe.UI.TUI.Server do
 
       :settings when state.settings.picker != nil ->
         p = state.settings.picker
-        cursor = p.cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(length(p.choices))
+        cursor = p.cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(picker_last(p))
         {:noreply, put_settings(state, picker: %{p | cursor: cursor})}
 
       :settings ->
@@ -1807,6 +1821,39 @@ defmodule Troupe.UI.TUI.Server do
   defp refresh_settings(%{settings: s} = state),
     do: %{state | settings: Map.merge(s, read_settings(state.session_id))}
 
+  # The person's theme, and whether what waits on them blinks: `ui.theme` and `ui.blink`,
+  # which the daemon keeps for this client and the desktop app alike (#228, root Decision
+  # 761). Read as the TUI starts and whenever the daemon says a `ui` key changed. A daemon
+  # that does not answer, or answers no keys, leaves them as they were.
+  defp read_appearance(state) do
+    case Client.settings(state.session_id) do
+      {:ok, answer} -> appearance(state, Settings.view(answer))
+      {:error, _reason} -> state
+    end
+  end
+
+  defp appearance(state, %{served?: true} = view) do
+    value = Settings.value(view, nil, "ui.theme")
+    theme = Theme.blinking(state.theme, Settings.value(view, nil, "ui.blink"))
+
+    case Theme.choose(theme, value) do
+      {:ok, theme} -> %{state | theme: theme}
+      {:unknown, theme} -> unknown_theme(%{state | theme: theme}, value)
+    end
+  end
+
+  defp appearance(state, _old_daemon), do: state
+
+  # Said once for each value, not at every frame or every change of another key.
+  defp unknown_theme(%{theme_warned: value} = state, value), do: state
+
+  defp unknown_theme(state, value) do
+    known = Enum.map_join(Theme.names(), ", ", &Atom.to_string/1)
+
+    %{state | theme_warned: value}
+    |> notice("theme #{inspect(value)} is not one this troupe has (#{known}): drawing afterglow")
+  end
+
   # `/models` is `/settings` opened on the default model, with its menu up.
   defp open_models(state) do
     state = open_settings(state)
@@ -1814,17 +1861,28 @@ defmodule Troupe.UI.TUI.Server do
     open_picker(put_settings(state, cursor: cursor))
   end
 
+  # The cursor starts on the value in use. A model may be one no config mentions, so its
+  # menu ends in "type one instead"; a theme is one of the menu's or none.
   defp open_picker(%{settings: s} = state) do
     field = Enum.at(Settings.fields(), s.cursor)
     current = Settings.value(s.view, s.config, field.key)
 
     case Settings.choices(field, s.config, current) do
-      [] -> put_settings(state, editing: shown(s, field.key), status: nil)
-      choices -> put_settings(state, picker: %{choices: choices, cursor: 0}, status: nil)
+      [] ->
+        put_settings(state, editing: shown(s, field.key), status: nil)
+
+      choices ->
+        cursor = Enum.find_index(choices, &(&1.value == current)) || 0
+        picker = %{choices: choices, cursor: cursor, typed?: field.type == :model}
+        put_settings(state, picker: picker, status: nil)
     end
   end
 
   defp shown(s, key), do: Settings.format(s.view, s.config, key)
+
+  # The last row the cursor may sit on: "type one instead", past the choices, when there is one.
+  defp picker_last(%{choices: choices, typed?: true}), do: length(choices)
+  defp picker_last(%{choices: choices}), do: length(choices) - 1
 
   defp settings_key(%Key{code: "esc"}, %{settings: %{picker: p}} = state) when p != nil,
     do: put_settings(state, picker: nil)
@@ -1835,7 +1893,7 @@ defmodule Troupe.UI.TUI.Server do
 
   defp settings_key(%Key{code: code}, %{settings: %{picker: p}} = state)
        when p != nil and code in ["down", "j"],
-       do: put_settings(state, picker: %{p | cursor: min(p.cursor + 1, length(p.choices))})
+       do: put_settings(state, picker: %{p | cursor: min(p.cursor + 1, picker_last(p))})
 
   # The entry past the last choice is "type one instead", for a model no config mentions.
   defp settings_key(%Key{code: "enter"}, %{settings: %{picker: p} = s} = state) when p != nil do
@@ -1899,7 +1957,7 @@ defmodule Troupe.UI.TUI.Server do
 
     case field.type do
       :bool -> apply_setting(state, field.key, Settings.value(s.view, s.config, field.key) != true)
-      :model -> open_picker(state)
+      type when type in [:model, :theme] -> open_picker(state)
       _ -> put_settings(state, editing: shown(s, field.key), status: nil)
     end
   end
@@ -1929,7 +1987,10 @@ defmodule Troupe.UI.TUI.Server do
           view = Settings.view(answer)
           path = get_in(answer, ["written", "path"])
 
-          put_settings(state,
+          # A theme picked here is drawn at once, before the daemon's `config.changed`.
+          state
+          |> appearance(view)
+          |> put_settings(
             view: view,
             config: config,
             editing: nil,
