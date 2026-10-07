@@ -269,7 +269,7 @@ Durable:
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to` |
-| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `trimmed`, `skipped`, `imported_by`, `unfollowed` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
+| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases, and Cursor's rules) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `reason`, `trimmed`, `skipped`, `imported_by`, `unfollowed`, `rule`, `applies` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
 | `goal_set` | `text`, `command_id` — the session's goal, written by the root agent under the actor who set it (`session.goal.set`) |
 | `goal_cleared` | `command_id` |
 | `loop_started` | `loop_id` (`loop-<n>`), `max_iterations`, `max_failures`, `goal`, `command_id` — a loop towards the goal, written by the session under the actor who started it (`session.loop.start`) |
@@ -1075,6 +1075,18 @@ read: outside the repository` (`outside
 the config directory` for the person's own), `skipped: AGENTS.md is used in this
 directory` (`comes first`, when that file was itself not read), `not read: Copilot's
 file counts only at the root`, or `left out: the budget was spent on nearer files`.
+A Cursor rule (Decision 809), each `.cursor/rules/*.mdc` in the root and in a directory on
+the way to where the session works, and the legacy root `.cursorrules`, comes after that
+directory's file and its imports, in name order, in the directory's scope, with its front
+matter in `rule`: `apply` (`always`, `globs`, `requested` for a rule with only a
+`description`, or `manual` for one with none), `globs`, `description`, and `matched`, the
+file worked on that a glob matched, from the directory that holds `.cursor`. One that
+reached the prompt says why in `applies` (`always applied`, `applied: src/a.ts matches
+src/**/*.ts`). One that did not is `inactive`, `chars` 0, with `reason` `applies when a
+file matching src/**/*.ts is read or edited` or `not joined: no alwaysApply, globs or
+description`; or `listed`, its `description` alone in the prompt and counted in `chars`,
+with `reason` `requested by description only: listed in the prompt, not joined`. `rule`
+and `applies` are null for every other file.
 `searched` is every directory looked in. Read from disk when asked, as the next
 turn reads it, so it says what an edit will do; what a past turn read is its
 `instructions_loaded` event. Nothing reaches the prompt from a file without appearing

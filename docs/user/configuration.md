@@ -289,7 +289,23 @@ repository's files import only from inside the repository, and your own `AGENTS.
 only from inside `<config>`; an import that is not followed (`missing`, `outside`,
 `depth`, `cycle`) is named on the file that asked for it in `context.get` and the
 session's log, and `/context` prints it after that file (`@docs/gone.md (root) import not
-followed: missing`). Not read yet: `.cursor/rules/*.mdc`.
+followed: missing`).
+
+Cursor's rules are read as Cursor reads them. Each `.cursor/rules/*.mdc` at the
+repository root, and in a directory on the way to where the session works, comes right
+after that directory's own file, in name order, and its front matter says when it
+applies: `alwaysApply: true` puts it in every prompt, and so does the legacy
+`.cursorrules` at the root; `globs` (`src/**/*.ts, *.tsx`, or a list) put it in the
+prompt from the turn after the agent first read, edited or wrote a file one of them
+matches, for as long as the conversation holds that call; a rule with only a
+`description` is listed in the prompt by it, and the agent reads the file when the
+description fits the work; a rule with none of them is not used. A glob is taken from
+the directory that holds `.cursor` (the repository root, for the root's rules), and one
+without a `/` matches a file's name in any directory. `/context` says of each rule why it
+applies (`always applied`, `applied: src/a.ts matches src/**/*.ts`) or why not (`applies
+when a file matching src/**/*.ts is read or edited`, `requested by description only:
+listed in the prompt, not joined`). Rules share the budget below and are held to the
+repository's edge as every other file is; an `@` in a rule is not followed.
 
 The files share one budget, `instructions_max_chars` (16,000 characters), a file and
 what it imports counting as one scope. The nearest scope is kept whole first; a file the

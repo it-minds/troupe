@@ -9,7 +9,9 @@ defmodule Troupe.Client.Instructions do
   file hid in its directory, so nobody debugs a `CLAUDE.md` that was never loaded.
   Every file left out says why in words (Decision 148): the `reason` `context.get` gives
   it (outside the repository, an alias another name hid, a Copilot file below the root,
-  the budget), and each import that was not followed, after the file that names it.
+  the budget), and each import that was not followed, after the file that names it. A
+  Cursor rule says why it applies, as `context.get`'s `applies` puts it, or why it does
+  not, as its `reason` does (root Decision 809).
   """
 
   @doc "The line for an answer to `context.get`; `workspace` is `nil` when unknown."
@@ -50,8 +52,13 @@ defmodule Troupe.Client.Instructions do
   end
 
   defp entry(f, workspace) do
-    "#{show(f["path"], workspace)} (#{f["scope"]}) #{number(f["chars"])}#{cut(f)}#{skipped(f)}"
+    "#{show(f["path"], workspace)} (#{f["scope"]}) #{number(f["chars"])}#{cut(f)}#{skipped(f)}" <>
+      applies(f)
   end
+
+  # A Cursor rule in the prompt, and why: `always applied`, or the file a glob matched.
+  defp applies(%{"applies" => applies}) when is_binary(applies), do: ", #{applies}"
+  defp applies(_file), do: ""
 
   defp cut(%{"status" => "trimmed", "trimmed" => n}), do: ", #{number(n)} cut"
   defp cut(%{"status" => "dropped"}), do: ", left out"
