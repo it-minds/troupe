@@ -219,16 +219,19 @@ defmodule Troupe.Commands do
             "deletes it.",
         example: "/memory refresh"
       ),
-      entry("context", "workspace", "Every instruction file in the prompt, and its share of the budget",
+      entry("context", "workspace", "Every instruction file and Cursor rule, why each is in or left out, and its share of the budget",
         usage: "/context",
         detail:
           "The files the next turn's system prompt is read from: your own AGENTS.md, the " <>
             "repository's, one in each directory down to the workspace and to the files " <>
-            "the conversation worked on, the files they import with @path, and the " <>
-            "project brief, each with its scope, size and share of the budget; and every " <>
+            "the conversation worked on, the files they import with @path, the " <>
+            "repository's Cursor rules (always, or once a matching file is read or " <>
+            "edited), and the project brief, each with its scope, size and share of the " <>
+            "budget; and every " <>
             "file left out, with why: an alias (CLAUDE.md, GEMINI.md, " <>
             "copilot-instructions.md) another name hid, a Copilot file below the root, a " <>
-            "file outside the repository, an import not followed."
+            "file outside the repository, an import not followed, a rule whose files " <>
+            "haven't been touched or that only describes itself."
       ),
       entry("watch", "workspace", "Toggle watch mode: act on AI! and AI? comments",
         usage: "/watch",
