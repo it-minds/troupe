@@ -46,6 +46,8 @@ defmodule Troupe.ResumeCLITest do
     assert line =~ ~r/^root> turn: 2 calls · /
     refute out =~ "first answer"
     refute out =~ "first question"
+    # Nor what this client wrote in the journal when it opened the session before.
+    refute out =~ "spawned /"
   end
 
   test "troupe resume ID --headless and latest --headless run the turn and exit 0" do
@@ -107,6 +109,9 @@ defmodule Troupe.ResumeCLITest do
 
     assert refused(["resume", "--private", "--headless", "hi", "--workspace", ws]) =~
              "no private session to resume in"
+
+    assert refused(["resume", "not-an-id", "--headless", "hi", "--workspace", ws]) =~
+             "troupe: not-an-id is not a session id"
 
     # Another device of hers sealed it last; the daemon hears so at its next link.
     {remote, sid, ws} = private_session!()

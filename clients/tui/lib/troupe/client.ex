@@ -370,6 +370,7 @@ defmodule Troupe.Client do
   """
   @spec open_refusal(session_id(), term()) :: String.t()
   def open_refusal(sid, "not_found: erased"), do: erased(sid)
+  def open_refusal(sid, "invalid_params: not a session id"), do: "#{sid} is not a session id"
 
   def open_refusal(sid, "not_found" <> _) do
     "#{sid} is not a session here: it was erased, or never on this machine; " <>
