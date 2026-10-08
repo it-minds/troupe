@@ -58,6 +58,7 @@ defmodule Troupe.UI.TUI.Server do
           files: files() | nil,
           mcp_cursor: non_neg_integer(),
           hq: HQ.t() | nil,
+          shell: shell() | nil,
           theme: Theme.t(),
           theme_warned: String.t() | nil,
           slow_render_ms: non_neg_integer(),
@@ -162,6 +163,13 @@ defmodule Troupe.UI.TUI.Server do
           version: non_neg_integer()
         }
 
+  @typedoc """
+  The command this screen ran with `!` and that has not ended (Decision 152): what
+  Esc and Ctrl-C kill. Its block is the model's, from the session's events; this is only
+  which run is this screen's to kill, so a command another client ran is left alone.
+  """
+  @type shell :: %{run_id: String.t(), command: String.t()}
+
   def via(sid), do: {:via, Registry, {Troupe.Client.Registry, {:tui, sid}}}
 
   ## ExRatatui.App
@@ -208,6 +216,7 @@ defmodule Troupe.UI.TUI.Server do
       # full for a person whose browser did not open (troupe-remote Decision 741).
       mcp_sign_in: nil,
       hq: nil,
+      shell: nil,
       # The person's theme, from `ui.theme` (`read_appearance/1`), and the value last said
       # to be one this Troupe does not know, so that is said once.
       theme: Theme.current(),
@@ -344,6 +353,11 @@ defmodule Troupe.UI.TUI.Server do
 
   @impl true
   def handle_event(%Key{kind: "release"}, state), do: {:noreply, state, render?: false}
+
+  # While a command this screen ran with `!` runs, Ctrl-C kills it and arms nothing, as it
+  # would in a terminal (Decision 152).
+  def handle_event(%Key{code: "c", modifiers: ["ctrl"]}, %{shell: %{} = run} = state),
+    do: {:noreply, kill_shell(%{state | quit_armed: false}, run)}
 
   def handle_event(%Key{code: "c", modifiers: ["ctrl"]}, %{quit_armed: true} = state) do
     state.on_quit.()
@@ -622,6 +636,8 @@ defmodule Troupe.UI.TUI.Server do
 
   ## Command line keys
 
+  # Esc kills the command this screen ran while it runs, and leaves what is typed.
+  defp command_key(%Key{code: "esc"}, %{shell: %{} = run} = state), do: kill_shell(state, run)
   defp command_key(%Key{code: "esc"}, state), do: put_cmd(state, "")
 
   defp command_key(%Key{code: "tab"}, state),
@@ -712,6 +728,11 @@ defmodule Troupe.UI.TUI.Server do
   @spec builtins() :: [String.t()]
   def builtins, do: @builtins
 
+  # `!cmd` is the person's own command, run where the session runs, in its workspace, and
+  # never sent to the agent as text; `!!cmd` keeps it from the agent (Decision 152,
+  # root Decision 813).
+  defp run_command(state, "!" <> command), do: state |> put_cmd("") |> run_shell(command)
+
   defp run_command(state, text) do
     sid = state.session_id
     slash? = String.starts_with?(text, "/")
@@ -786,6 +807,42 @@ defmodule Troupe.UI.TUI.Server do
 
   defp defined?(state, name),
     do: Enum.any?(state.commands, &(&1["name"] == name and &1["source"] in ["user", "project"]))
+
+  ## Shell mode (Decision 152)
+
+  defp run_shell(state, "!" <> command), do: start_shell(state, String.trim(command), false)
+  defp run_shell(state, command), do: start_shell(state, String.trim(command), true)
+
+  @shell_usage "type a command after ! to run it in the session's workspace; !! keeps it from the agent"
+
+  defp start_shell(state, "", _agent?), do: notice(state, @shell_usage)
+
+  defp start_shell(%{shell: %{command: running}} = state, _command, _agent?),
+    do: notice(state, "`#{running}` is still running: Esc kills it")
+
+  # The harness's refusal is the sentence: a collaborator is not the session's owner, a
+  # platform that allows only its own rules turns it off.
+  defp start_shell(state, command, agent?) do
+    case Client.shell_run(state.session_id, command, agent?) do
+      {:ok, run_id} -> %{state | shell: %{run_id: run_id, command: command}}
+      {:error, reason} -> notice(state, "! " <> to_message(reason))
+    end
+  end
+
+  # A command that ended as the kill went out is not news.
+  defp kill_shell(state, %{run_id: run_id}) do
+    case Client.shell_cancel(state.session_id, run_id) do
+      :ok -> state
+      {:error, "not found" <> _} -> %{state | shell: nil}
+      {:error, reason} -> notice(state, to_message(reason))
+    end
+  end
+
+  # The run this screen started has ended: Esc and Ctrl-C are theirs again.
+  defp shell_ended(%{shell: %{run_id: id}} = state, %{type: :user_shell, data: %{run_id: id}}),
+    do: %{state | shell: nil}
+
+  defp shell_ended(state, _event), do: state
 
   defp builtin("quit", _args, _state, _target), do: :quit
   defp builtin("settings", _args, _state, _target), do: :settings
@@ -2505,7 +2562,7 @@ defmodule Troupe.UI.TUI.Server do
         _ -> model
       end
 
-    state = %{state | model: model}
+    state = shell_ended(%{state | model: model}, event)
     if event.type == :remote_status, do: recheck_loop(state), else: state
   end
 

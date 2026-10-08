@@ -86,7 +86,10 @@ defmodule Troupe.Worker.AuthTest do
     "fs.upload",
     "blob.get",
     "context.get",
-    "presence.set"
+    "presence.set",
+    # The person's own command (`!cmd`, the TUI's; Decision 813).
+    "shell.run",
+    "shell.cancel"
   ]
 
   setup do

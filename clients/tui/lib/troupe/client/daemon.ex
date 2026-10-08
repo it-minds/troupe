@@ -168,6 +168,20 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def run_command(sid, name, arguments), do: describe(Worker.run_command(sid, name, arguments))
 
+  # The person's own command runs in the daemon, in the session's workspace, as the agent's
+  # shell does (root Decision 813); this session's, whatever window is activated.
+  @impl true
+  def shell_run(sid, command, agent?) do
+    case Worker.shell_run(sid, command, agent?) do
+      {:ok, %{"run_id" => run_id}} -> {:ok, run_id}
+      {:ok, other} -> {:error, "unexpected shell.run answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  @impl true
+  def shell_cancel(sid, run_id), do: describe(Worker.shell_cancel(sid, run_id))
+
   @impl true
   def approve(sid, call_id, decision),
     do: describe(Worker.approve(call_target(sid, call_id), call_id, decision))
@@ -581,10 +595,12 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def has_session?(sid), do: Worker.whereis(sid) != nil
 
-  # The scratch session `troupe` opens is idle until somebody has typed into it.
+  # The scratch session `troupe` opens is idle until somebody has typed into it, a `!`
+  # command included.
   @impl true
   def idle?(sid) do
-    has_session?(sid) and not Enum.any?(Journal.all(sid), &(&1.type in [:input, :user_input]))
+    has_session?(sid) and
+      not Enum.any?(Journal.all(sid), &(&1.type in [:input, :user_input, :user_shell]))
   end
 
   ## Fleet-scoped

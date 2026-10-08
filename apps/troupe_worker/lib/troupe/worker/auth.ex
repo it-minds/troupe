@@ -43,6 +43,7 @@ defmodule Troupe.Worker.Auth do
     subscribe unsubscribe session.list fleet.get
     session.get commands.list commands.run
     input.send turn.cancel profile.switch approval.respond question.answer todo.edit
+    shell.run shell.cancel
     session.goal.set session.goal.get session.goal.clear
     session.loop.start session.loop.stop session.loop.get
     fs.list fs.read fs.upload blob.get mcp.status context.get presence.set

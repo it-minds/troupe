@@ -37,6 +37,10 @@ defmodule Troupe.Registry do
   @spec loop(String.t()) :: GenServer.name()
   def loop(session_id), do: via({:loop, session_id})
 
+  @doc "Where a person's own commands run, one task each (`!cmd`, Decision 813)."
+  @spec shell(String.t()) :: GenServer.name()
+  def shell(session_id), do: via({:shell, session_id})
+
   @doc "The process that turns filesystem changes into durable `fs_changed` events."
   @spec files(String.t()) :: GenServer.name()
   def files(session_id), do: via({:files, session_id})
@@ -102,6 +106,10 @@ defmodule Troupe.Registry do
       {:error, {:already_registered, _pid}} -> false
     end
   end
+
+  @doc "Give up a key the calling process claimed with `first?/1`, before it is done."
+  @spec release(tuple()) :: :ok
+  def release(key), do: Registry.unregister(@registry, key)
 
   @spec agent_pid(String.t(), agent_path()) :: pid() | nil
   def agent_pid(session_id, path), do: whereis({:agent, session_id, path})

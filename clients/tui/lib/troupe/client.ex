@@ -95,6 +95,8 @@ defmodule Troupe.Client do
               {:ok, String.t()} | {:error, term()}
   @callback send_input(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
+  @callback shell_run(session_id(), String.t(), boolean()) :: {:ok, String.t()} | {:error, term()}
+  @callback shell_cancel(session_id(), String.t()) :: :ok | {:error, term()}
   @callback approve(session_id(), String.t(), decision()) :: :ok | {:error, term()}
   @callback answer(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback edit_todo(session_id(), String.t(), term()) :: :ok | {:error, term()}
@@ -213,6 +215,18 @@ defmodule Troupe.Client do
   """
   @spec run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   def run_command(sid, name, arguments), do: impl(sid).run_command(sid, name, arguments)
+
+  @doc """
+  Runs a command the person typed (`!cmd`) where the session runs, in its workspace
+  (`shell.run`, root Decision 813); `agent?` false keeps it from the agent (`!!cmd`). The
+  answer is the run's id: what it prints and how it ends arrive as the session's events.
+  """
+  @spec shell_run(session_id(), String.t(), boolean()) :: {:ok, String.t()} | {:error, term()}
+  def shell_run(sid, command, agent?), do: impl(sid).shell_run(sid, command, agent?)
+
+  @doc "Kills a command `shell_run/3` started, and everything it started."
+  @spec shell_cancel(session_id(), String.t()) :: :ok | {:error, term()}
+  def shell_cancel(sid, run_id), do: impl(sid).shell_cancel(sid, run_id)
 
   @spec approve(session_id(), String.t(), decision()) :: :ok | {:error, term()}
   def approve(sid, call_id, decision), do: impl(sid).approve(sid, call_id, decision)

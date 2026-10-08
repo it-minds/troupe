@@ -55,6 +55,16 @@ Every command starts with `/`. In the terminal client `/` on an empty line, Ctrl
 `/help` opens them as a palette, filtered as you type, and a command the session cannot
 run right now is shown greyed with the reason; the desktop app's palette lists the same.
 
+A line that starts with `!` is a shell command of your own. In the terminal client
+`!git status` runs `git status` where the session runs, in its workspace (the pod's
+working copy for a session on a plane), and shows what it printed and how it ended as your
+command. The agent is given the command and its output before its next model call; `!!`
+runs one without giving it to the agent. Esc or Ctrl-C kills one that runs, and the
+session's `shell_timeout_ms` kills one that runs too long. There is no stdin and each
+command is a fresh shell, so nothing interactive works and `cd` does not carry over to
+the next. Only the session's owner may run one, and a platform that forbids the agent's
+shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-runs-where-the-session-runs.md)).
+
 <!-- slash-commands:begin -->
 ### Session
 

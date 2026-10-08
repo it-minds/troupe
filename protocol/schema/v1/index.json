@@ -51,6 +51,8 @@
     "commands/session.unpin.json",
     "commands/setup.answer.json",
     "commands/setup.get.json",
+    "commands/shell.cancel.json",
+    "commands/shell.run.json",
     "commands/skills.add.json",
     "commands/skills.list.json",
     "commands/skills.remove.json",
@@ -119,6 +121,8 @@
     "events/session_tainted.json",
     "events/share_created.json",
     "events/share_revoked.json",
+    "events/shell_output.json",
+    "events/shell_started.json",
     "events/summary_diff.json",
     "events/todo_updated.json",
     "events/tool_call_completed.json",
@@ -132,6 +136,7 @@
     "events/truncated.json",
     "events/turn_ended.json",
     "events/user_input.json",
+    "events/user_shell.json",
     "events/watch_notice.json"
   ],
   "version": "1"

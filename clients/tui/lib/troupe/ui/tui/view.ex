@@ -1950,6 +1950,24 @@ defmodule Troupe.UI.TUI.View do
     end
   end
 
+  # Shell mode says, in one line, what the command it runs does not have: there is no
+  # terminal behind it and no shell kept between commands (Decision 152).
+  defp command_title(state) do
+    cond do
+      multiline?(state.cmd_text) ->
+        pasted_title(state.cmd_text)
+
+      run = Map.get(state, :shell) ->
+        " ! #{run.command} — running · Esc or Ctrl-C kills it "
+
+      String.starts_with?(state.cmd_text, "!") ->
+        " shell — runs in the session's workspace · no stdin · cd does not carry over · !! keeps it from the agent "
+
+      true ->
+        " command "
+    end
+  end
+
   defp command_line(state, rect), do: command_line(state, rect, @cmd_rows)
 
   defp command_line(state, rect, box_rows) do
@@ -1957,11 +1975,12 @@ defmodule Troupe.UI.TUI.View do
       case state.focus do
         :command ->
           # The box shows the slash; a line that carries its own (one the palette put
-          # there, or a typed one) is not shown with two.
-          prompt = if String.starts_with?(state.cmd_text, "/"), do: "", else: "/"
+          # there, or a typed one) is not shown with two. A line that starts with `!` is
+          # shell mode, whose `!` is its prompt (Decision 152).
+          prompt = if String.starts_with?(state.cmd_text, ["/", "!"]), do: "", else: "/"
 
           {{:edit, {prompt <> state.cmd_text, state.cmd_pos + String.length(prompt)}},
-           if(multiline?(state.cmd_text), do: pasted_title(state.cmd_text), else: " command ")}
+           command_title(state)}
 
         :palette ->
           query = state.palette.query
