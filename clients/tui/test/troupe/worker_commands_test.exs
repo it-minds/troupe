@@ -157,7 +157,7 @@ defmodule Troupe.WorkerCommandsTest do
       File.write!(path, "from this machine")
 
       {pid, session} = start_tui(sid)
-      type(pid, "upload " <> path)
+      type(pid, "/upload " <> path)
       press(pid, "enter")
 
       eventually(fn -> screen_text(pid, session) =~ "uploaded" end)

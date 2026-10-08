@@ -80,7 +80,7 @@ defmodule Troupe.ClipboardTest do
 
       # /copy from the command line, naming the tile.
       press(pid, "esc")
-      type(pid, "copy 1")
+      type(pid, "/copy 1")
       press(pid, "enter")
       assert File.read!(path) =~ "the reply worth keeping"
       assert screen_text(pid, session) =~ "copied"
@@ -91,7 +91,8 @@ defmodule Troupe.ClipboardTest do
       {sid, _, _} = start_session!(workspace: ws)
       {pid, session} = start_tui(sid)
 
-      type(pid, "copy")
+      # The palette's Space puts the command on the line, where Enter runs it.
+      type(pid, "/copy ")
       press(pid, "enter")
       assert screen_text(pid, session) =~ "no window given"
     end

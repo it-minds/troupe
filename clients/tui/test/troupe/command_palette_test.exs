@@ -150,7 +150,9 @@ defmodule Troupe.CommandPaletteTest do
     {pid, _session} = start_tui(sid)
     eventually(fn -> user_state(pid).commands != [] end)
 
-    type(pid, "help")
+    # Typed on the line (the palette's Space puts it there), so it is `/help` that opens it.
+    type(pid, "/help ")
+    assert user_state(pid).focus == :command
     press(pid, "enter")
     assert user_state(pid).focus == :palette
     press(pid, "esc")
@@ -230,7 +232,7 @@ defmodule Troupe.CommandPaletteTest do
     eventually(fn -> user_state(pid).commands != [] end)
 
     for name <- Server.builtins() -- ["quit", "worktree"] do
-      type(pid, name)
+      type(pid, "/#{name} ")
       press(pid, "enter")
       assert Process.alive?(pid), name
       # Whatever page the command opened, Esc is the way back; twice for a menu.

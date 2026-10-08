@@ -93,7 +93,7 @@ defmodule Troupe.RemoteUITest do
       eventually(fn -> Client.capability(sid).up? end)
 
       {pid, screen} = start_tui(sid)
-      type(pid, "files")
+      type(pid, "/files")
       press(pid, "enter")
 
       assert user_state(pid).focus == :files
@@ -128,7 +128,7 @@ defmodule Troupe.RemoteUITest do
       on_exit(fn -> File.rm(path) end)
 
       {pid, screen} = start_tui(sid)
-      type(pid, "upload " <> path)
+      type(pid, "/upload " <> path)
       press(pid, "enter")
 
       eventually(fn -> screen_text(pid, screen) =~ "uploaded" end)
