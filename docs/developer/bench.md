@@ -177,8 +177,14 @@ the scripted model's requests, and their budgets are the script's.
 | `precise_edit` | change `[database]`'s `max_connections` in a 1,560-line file (`settings_conf/1`) where `[cache]` has the same line | the file is `settings_conf(250)` | no `write_file` of it |
 | `follow_steps` | the three steps of `TASK.md` | `out/done.txt` lists the two files | each step's file holds what it should |
 | `answer_only` | a sum, with no tool | | the reply has 391; no tool was called |
+| `follow_up` | two turns: write step 1 of `docs/plan.txt`, then step 2 under `docs/` | `docs/next.txt` holds step 2 under `AGENTS.md`'s and `docs/AGENTS.md`'s rules | `out/first.txt` keeps the root's rule; both turns were taken |
 
-The first four are the `smoke` suite, the default; all ten are `standard` (Decision 775).
+The first four are the `smoke` suite, the default; the next six with them are `standard`
+(Decision 775). `follow_up` is in neither, and runs when named: it is issue #465's
+(Decision 815), whose second turn begins with an instruction file the first brought in,
+and [prompt-prefix.md](prompt-prefix.md) says how it is run with each of that issue's
+settings. A scenario's `follow_ups` are typed one after another, each once the turn
+before has ended by itself, under the run's one deadline and cap.
 `LiveScenarios.select/2` takes a suite or a list of names, which may come from either, and
 answers them in report order; `--suite` and `--scenario` reach it through `plan/1`'s
 `:suite` and `:only`. A task added to `standard` needs a script in `fake_openai.exs`, so
@@ -236,6 +242,8 @@ Schema 1, with `"mode": "live"`, and these added:
 |---|---|---|
 | the report | `model`, `repeat`, `cap_micros`, `started_at`, `skipped[]` | what ran against what, how often, under what cap; the scenarios left out, `{name, why}` |
 | the report | `live_suite`, `kept_in` | `smoke`, `standard`, or `only` for scenarios named; where `--keep` left the runs, else `null` (Decision 775) |
+| the report, a history line | `experiment` | issue #465's two settings the runs had, `thinking_binding` and `system_prompt`, from the person's configuration or `TROUPE_THINKING_BINDING` and `TROUPE_SYSTEM_PROMPT` (Decision 815) |
+| a run, the `summary` | `prefix` | `Troupe.Bench.Prefix.count/1` of the run's log, added up in the summary: `model_calls`, `system_changes`, `tools_changes`, `inferred`, `thinking_resent`, `thinking_dropped`, `calls_dropping`, `turn_contexts` ([prompt-prefix.md](prompt-prefix.md)) |
 | the report | `summary` | every run together: `scenarios`, `runs`, `succeeded`, `success_rate`, `success_low`, `success_high` (the 95% Wilson interval), `cost_micros`, `cost_per_run_micros`, `cost_per_success_micros`, `model_calls`, `input_tokens`, `cached_tokens`, `output_tokens`, `tokens_per_success`, `wall_ms`, `median_wall_ms` |
 | a scenario | `metrics[]` | taken over its runs, with no budget: `success_rate` with `success_low` and `success_high`, `median_cost`, `worst_cost` and `cost_per_success` (in dollars), and the medians `median_wall_ms`, `median_call_ms`, `median_first_token_ms`, `median_model_calls`, `median_input_tokens`, `median_cached_tokens`, `median_output_tokens`, `median_largest_tool_result` (bytes) |
 | a scenario | `outcome.held` | how many runs it held in; `passed` is every one |
@@ -263,7 +271,11 @@ runs the plan, the runs, the limits and the history against it, and the TUI's
 `bench_cli_test.exs` the command line, with a config file naming it. It needs only OTP and
 Elixir's `JSON`, so `elixir -r apps/troupe_core/test/support/fake_openai.exs -e
 "Troupe.Test.FakeOpenAI.serve(port: 18080)"` runs one for an installed `troupe` to be
-pointed at.
+pointed at. On the same port it answers Anthropic's `/v1/messages` as the newest models do
+(Decision 815): each answer after an empty thinking block signed over the conversation it
+was made in, a 400 for a block sent back after that changed, or with the thinking-binding
+beta and `drop_block` the block dropped, and a prompt cache read where a mark wrote it; a
+provider of `type: anthropic` with its URL is one.
 
 ## What is not here yet
 

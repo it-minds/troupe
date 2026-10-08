@@ -6,6 +6,8 @@ defmodule Troupe.Bench.Scenario do
     * `name` — the key the report and `priv/bench/budgets.json` know it by
     * `title` — one line saying what it shows
     * `prompt` — what is typed, once, as a person's input
+    * `follow_ups` — what is typed after it, each once the turn before has ended by
+      itself; a live scenario's only (Decision 815)
     * `files` — the workspace before the run, `%{relative_path => content}`
     * `config` — settings the scenario needs beside the bench's own, as config overrides
     * `script` — the offline model's steps (`Troupe.Bench.Model`); a run against a real
@@ -27,6 +29,7 @@ defmodule Troupe.Bench.Scenario do
     :title,
     :prompt,
     :measure,
+    follow_ups: [],
     files: %{},
     config: [],
     script: [],
@@ -43,6 +46,7 @@ defmodule Troupe.Bench.Scenario do
           title: String.t(),
           prompt: String.t(),
           measure: (map() -> {[metric()], [check()]}),
+          follow_ups: [String.t()],
           files: %{String.t() => iodata()},
           config: keyword(),
           script: [Troupe.Bench.Model.step()],

@@ -92,13 +92,19 @@ defmodule Troupe.Protocol.Schema do
       },
       # `prompt_bytes`: what the prompt was made of, in bytes — `system` (`brief` a part of
       # it), `tools`, `conversation` (`tool_results` a part of it) and `total` (Decision
-      # 769). Absent from a log written before it.
+      # 769). Absent from a log written before it. `system_changed` and `tools_changed`:
+      # whether the system prompt and the tools differ from the agent's call before, absent
+      # on its first and on the first after a restart; `turn_context`: the sections a stable
+      # system prompt sent with this call (issue #465, Decision 815).
       "llm_request" => %{
         "model" => required(:string),
         "message_count" => required(:integer),
         "tools" => required({:array, :string}),
         "profile" => required(:string),
-        "prompt_bytes" => optional(:object)
+        "prompt_bytes" => optional(:object),
+        "system_changed" => optional(:boolean),
+        "tools_changed" => optional(:boolean),
+        "turn_context" => optional({:array, :string})
       },
       "llm_response" => %{
         "message" => required(:object),
@@ -109,7 +115,12 @@ defmodule Troupe.Protocol.Schema do
         # `request_id` and `cost_micros`. Optional because an event written before there
         # was a gateway to ask carries neither, and because a gateway may answer with
         # one and not the other.
-        "gateway" => optional(:object)
+        "gateway" => optional(:object),
+        # What became of the thinking the call handed back, present only when anything
+        # did: refused as bound to another conversation and the call sent again without it
+        # (Decision 805), or the blocks the thinking-binding beta dropped (Decision 815).
+        "thinking_resent" => optional(:boolean),
+        "thinking_dropped" => optional(:integer)
       },
       # `reason` is a sentence a person can act on (Decision 659), not a term. `note` is a
       # root's: what its conversation was told, which a replay puts back (Decision 693).

@@ -152,6 +152,88 @@ defmodule Troupe.LLM.ThinkingTest do
     end
   end
 
+  # Issue #465's first option (Decision 815): Anthropic's thinking-binding beta, sent only
+  # when `thinking_binding` asks for it, and then only on a request that hands thinking back.
+  describe "the thinking-binding beta" do
+    @drop_block %{"prefix_mismatch_behavior" => "drop_block"}
+
+    test "is not sent unless asked for, whatever the model and the effort" do
+      for model <- ["claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-4-8"],
+          effort <- [nil, "high"],
+          binding <- [nil, "default"] do
+        sent = sent_request(bound(model, effort, binding))
+        assert Req.Request.get_header(sent, "anthropic-beta") == [], "#{model} #{inspect(effort)}"
+        refute get_in(FakeTransport.body(sent), ["thinking", "block_binding"])
+      end
+    end
+
+    test "asked for, a request that hands thinking back carries the header and drop_block" do
+      sent = sent_request(bound("claude-opus-5-5", nil, "drop_block"))
+      body = FakeTransport.body(sent)
+
+      assert Req.Request.get_header(sent, "anthropic-beta") == [
+               "thinking-binding-controls-2026-08-01"
+             ]
+
+      # With no effort the model thinks as it would with no field; the field is there to
+      # carry the binding, and asks for no summary and no effort.
+      assert body["thinking"] == %{"type" => "adaptive", "block_binding" => @drop_block}
+      refute Map.has_key?(body, "output_config")
+      assert body["max_tokens"] == 8_192
+      assert replayed(body) == ["thinking", "tool_use"]
+
+      # Beside the thinking an effort asks for, in either form.
+      body = FakeTransport.body(sent_request(bound("claude-opus-5-5", "high", "drop_block")))
+
+      assert body["thinking"] == %{
+               "type" => "adaptive",
+               "display" => "summarized",
+               "block_binding" => @drop_block
+             }
+
+      assert body["output_config"] == %{"effort" => "high"}
+
+      body = FakeTransport.body(sent_request(bound("claude-haiku-4-5", "medium", "drop_block")))
+
+      assert body["thinking"] == %{
+               "type" => "enabled",
+               "budget_tokens" => 8_192,
+               "block_binding" => @drop_block
+             }
+
+      # A request that hands no thinking back has nothing to bind.
+      sent = sent_request(bound("claude-opus-4-8", nil, "drop_block"))
+      assert Req.Request.get_header(sent, "anthropic-beta") == []
+      refute Map.has_key?(FakeTransport.body(sent), "thinking")
+    end
+
+    test "the blocks the API dropped are on the response, and so is a call sent again without them" do
+      dropped = [
+        ~s({"type":"thinking_dropped","path":"messages.1.content.0","reason":"prefix_binding_mismatch"}),
+        ~s({"type":"thinking_dropped","path":"messages.3.content.0","reason":"prefix_binding_mismatch"}),
+        ~s({"type":"thinking_mismatch_allowed","path":"messages.5.content.0","reason":"prefix_binding_mismatch"})
+      ]
+
+      start =
+        ~s(event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":1},"input_transformations":[#{Enum.join(dropped, ",")}]}}\n\n)
+
+      request = bound("claude-opus-5-5", nil, "drop_block", chunks: [start | tl(text_only())])
+      assert {:ok, response} = run(request)
+      assert Map.get(response, :thinking_dropped) == 2
+      refute Map.get(response, :thinking_resent)
+
+      # The no-beta way on (Decision 805): refused once, and sent again with no thinking.
+      refused_once = request("claude-opus-5-5", nil, fail: @bound_elsewhere, fail_first: 1)
+      assert {:ok, response} = run(%{refused_once | messages: tool_turn(thought())})
+      assert Map.get(response, :thinking_resent) == true
+      assert Map.get(response, :thinking_dropped) == 0
+
+      assert {:ok, plain} = run(request("claude-opus-5-5", nil))
+      assert Map.get(plain, :thinking_resent) == false
+      assert Map.get(plain, :thinking_dropped) == 0
+    end
+  end
+
   describe "Anthropic's newest models" do
     test "a reasoning effort sends adaptive thinking and the effort, not a budget" do
       assert sent("claude-opus-5-5", "high") == Jason.decode!(@opus_5_5_high)
@@ -360,6 +442,21 @@ defmodule Troupe.LLM.ThinkingTest do
         }
       }
     }
+  end
+
+  # A tool-use turn's second request with `thinking_binding` set, as the agent makes one
+  # (`Map.put`, so a build without the field sends what it always did).
+  defp bound(model, effort, binding, opts \\ []) do
+    model
+    |> request(effort, opts)
+    |> Map.put(:thinking_binding, binding)
+    |> Map.put(:messages, tool_turn(thought()))
+  end
+
+  defp sent_request(%Request{} = request) do
+    assert {:ok, _response} = run(request)
+    [sent] = FakeTransport.drain_requests()
+    sent
   end
 
   defp sent(model, effort), do: sent(request(model, effort))

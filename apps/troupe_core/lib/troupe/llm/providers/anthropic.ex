@@ -53,26 +53,29 @@ defmodule Troupe.LLM.Providers.Anthropic do
   end
 
   # A thinking block the conversation no longer vouches for is answered by the same call
-  # with no thinking in it, once (Decision 805).
+  # with no thinking in it, once (Decision 805), and the response says it was, for the log
+  # to count (Decision 815).
   defp post_kept(request, key, reply_to, ref) do
     with :bound_elsewhere <- post(request, key, reply_to, ref, :first),
-         do: post(request, key, reply_to, ref, :without_thinking)
+         {:ok, response} <- post(request, key, reply_to, ref, :without_thinking),
+         do: {:ok, %{response | thinking_resent: true}}
   end
 
   defp post(request, key, reply_to, ref, pass) do
     thinking = thinking(request)
     keep_thinking? = pass == :first and keep_thinking?(request, thinking)
+    bind? = bind?(request, keep_thinking?)
 
     options = [
       url: Endpoint.build(base_url(request), "/v1/messages"),
       method: :post,
-      json: body(request, thinking, keep_thinking?),
+      json: request |> body(thinking, keep_thinking?) |> bind_blocks(bind?),
       headers:
         [
           auth_header(request, key),
           {"anthropic-version", @api_version},
           {"accept", "text/event-stream"}
-        ] ++ Identify.headers(request, :anthropic),
+        ] ++ binding_header(bind?) ++ Identify.headers(request, :anthropic),
       receive_timeout: request.timeout_ms,
       # Retries are handled by `Provider.with_retries/2` so that one policy covers
       # both adapters and a retried request re-emits nothing to the agent.
@@ -170,8 +173,12 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
   # -- streaming events -------------------------------------------------------
 
+  # With the thinking-binding beta the message says which kept blocks the API dropped
+  # (Decision 815); without it the field is absent.
   defp apply_event(acc, %{"type" => "message_start", "message" => message}, collector) do
-    merge_usage(acc, message["usage"], collector)
+    acc
+    |> Collector.put_transformations(message["input_transformations"])
+    |> merge_usage(message["usage"], collector)
   end
 
   defp apply_event(acc, %{"type" => "content_block_start"} = event, collector) do
@@ -358,6 +365,34 @@ defmodule Troupe.LLM.Providers.Anthropic do
   # went on without it.
   defp keep_thinking?(_request, thinking) when thinking != nil, do: true
   defp keep_thinking?(%Request{model: model}, nil), do: Catalog.thinks_unasked?(model)
+
+  # Issue #465's first option, when `thinking_binding: drop_block` asks for it (Decision
+  # 815): Anthropic's beta, and in the thinking field the API's leave to drop a kept block
+  # whose conversation changed since it was made — and every thinking block after it — in
+  # place of the 400 that `post_kept/4` answers by sending the call again. A request that
+  # hands no thinking back has nothing to bind and goes as it would. With no effort the
+  # field is adaptive thinking with nothing else in it, which is what a model that thinks
+  # unasked does with no field at all; with one, the binding goes beside what it asks for.
+  @binding_beta "thinking-binding-controls-2026-08-01"
+
+  defp bind?(%Request{thinking_binding: "drop_block"}, keep_thinking?), do: keep_thinking?
+  defp bind?(_request, _keep_thinking?), do: false
+
+  defp binding_header(false), do: []
+  defp binding_header(true), do: [{"anthropic-beta", @binding_beta}]
+
+  defp bind_blocks(body, false), do: body
+
+  defp bind_blocks(body, true) do
+    binding = %{prefix_mismatch_behavior: "drop_block"}
+
+    Map.update(
+      body,
+      :thinking,
+      %{type: "adaptive", block_binding: binding},
+      &Map.put(&1, :block_binding, binding)
+    )
+  end
 
   # A 400 that is about the thinking this request carried is said in words that name the
   # setting behind it; any other 400 goes as the provider put it. What the provider says
@@ -570,12 +605,23 @@ defmodule Troupe.LLM.Providers.Anthropic.Collector do
 
   alias Troupe.LLM.{Reasoning, Response, Text, ToolUse, Usage}
 
-  defstruct blocks: %{}, usage: %Usage{}, stop_reason: :end_turn, error: nil
+  defstruct blocks: %{}, usage: %Usage{}, stop_reason: :end_turn, error: nil, dropped: 0
 
   @type t :: %__MODULE__{}
 
   @spec new() :: t()
   def new, do: %__MODULE__{}
+
+  @doc """
+  How many thinking blocks the API says it dropped (`input_transformations` entries of
+  type `thinking_dropped`, the thinking-binding beta's, Decision 815). Entries of a type
+  nobody here knows are not counted, as the API asks.
+  """
+  @spec put_transformations(t(), [map()] | nil) :: t()
+  def put_transformations(acc, entries) when is_list(entries),
+    do: %{acc | dropped: Enum.count(entries, &match?(%{"type" => "thinking_dropped"}, &1))}
+
+  def put_transformations(acc, _absent), do: acc
 
   @spec open_text(t(), non_neg_integer()) :: t()
   def open_text(acc, index) do
@@ -680,7 +726,12 @@ defmodule Troupe.LLM.Providers.Anthropic.Collector do
       |> Enum.sort_by(fn {index, _} -> index end)
       |> Enum.flat_map(fn {_index, block} -> materialise(block) end)
 
-    %Response{content: content, stop_reason: acc.stop_reason, usage: acc.usage}
+    %Response{
+      content: content,
+      stop_reason: acc.stop_reason,
+      usage: acc.usage,
+      thinking_dropped: acc.dropped
+    }
   end
 
   defp materialise({:text, ""}), do: []
