@@ -184,6 +184,18 @@
         "contents": "Troupe's settings are a folder's: open one to see them."
       }
     ],
+    "terminal": {
+      "profiles": [
+        {
+          "id": "troupe.tui",
+          "title": "Troupe",
+          "icon": {
+            "light": "media/troupe-light.svg",
+            "dark": "media/troupe.svg"
+          }
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "troupe.open",
@@ -225,6 +237,12 @@
           "default": "editor",
           "scope": "machine",
           "markdownDescription": "Where Troupe's terminal opens. One that is open already stays where it is."
+        },
+        "troupe.openOnFolderOpen": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "markdownDescription": "Open Troupe, as **Troupe: Open** does, when VS Code opens a folder or a workspace. Not in a workspace that is not trusted, until it is, and not again when the window reloads with Troupe's terminal still there. A user or remote setting only: a repository cannot start Troupe as it is opened."
         }
       }
     }

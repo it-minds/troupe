@@ -59,11 +59,27 @@ test("the palette has troupe's command lines, and the explorer and the editor as
   assert.equal(when("commandPalette", "troupe.askAboutFolder"), "false");
 });
 
+// Issue #378, the rest of v1: Troupe opened as a folder opens, by a setting that is off until
+// the person turns it on, and "Troupe" in the terminal's profile menu (Decision 816).
+test("a setting opens Troupe as a folder opens, off by default, and Troupe is a terminal profile", () => {
+  const { configuration, terminal } = manifest.contributes;
+  const setting = configuration.properties["troupe.openOnFolderOpen"];
+  assert.ok(setting, "troupe.openOnFolderOpen is contributed");
+  assert.equal(setting.type, "boolean");
+  assert.equal(setting.default, false);
+
+  const profiles: { id: string; title: string }[] = terminal?.profiles ?? [];
+  assert.deepEqual(profiles.map((p) => [p.id, p.title]), [["troupe.tui", "Troupe"]]);
+  // VS Code activates the extension for the profile (onTerminalProfile, which it derives from
+  // the contribution) and asks the provider registered under the same id.
+  for (const p of profiles) assert.ok(source.includes(`registerTerminalProfileProvider("${p.id}"`), p.id);
+});
+
 // The activity bar's icon and the terminal tab's are files in media/, which the .vsix keeps.
 test("every icon named is a file the package keeps", () => {
-  const { viewsContainers, views, commands } = manifest.contributes;
+  const { viewsContainers, views, commands, terminal } = manifest.contributes;
   const named: string[] = [...viewsContainers.activitybar, ...Object.values(views).flat()].map((v: any) => v.icon);
-  for (const c of commands) if (typeof c.icon === "object") named.push(c.icon.light, c.icon.dark);
+  for (const c of [...commands, ...(terminal?.profiles ?? [])]) if (typeof c.icon === "object") named.push(c.icon.light, c.icon.dark);
   for (const m of source.matchAll(/media\("([^"]+)"\)/g)) named.push(`media/${m[1]}`);
 
   assert.ok(named.length >= 5);
@@ -88,7 +104,7 @@ test("no key on Windows is a Ctrl+Alt key", () => {
 // to the person's user settings and the remote host's.
 test("every setting read is contributed, and only a user or remote setting", () => {
   const properties = manifest.contributes.configuration.properties;
-  const read = [...source.matchAll(/config\.get<[^>]+>\("([^"]+)"/g)].map((m) => `troupe.${m[1]}`).sort();
+  const read = [...new Set([...source.matchAll(/config\.get<[^>]+>\("([^"]+)"/g)].map((m) => `troupe.${m[1]}`))].sort();
 
   assert.deepEqual(read, Object.keys(properties).sort());
   for (const key of read) assert.equal(properties[key].scope, "machine", key);
