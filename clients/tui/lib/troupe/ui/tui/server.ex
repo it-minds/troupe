@@ -760,15 +760,16 @@ defmodule Troupe.UI.TUI.Server do
         name == "" ->
           :palette
 
-        name in @builtins ->
-          builtin(name, args, state, target)
-
-        # A line with no slash is what the person wants to say to the session's agent:
-        # one agent per session, so there is one place for it to go. A slash names a
-        # command, and one this table does not know is asked of the client (a profile
-        # to dispatch, where the client supports that).
+        # A line with no slash is what the person wants to say to the session's agent,
+        # whatever its first word (Decision 101): "help me fix the test" is a request, not
+        # `/help`. One agent per session, so there is one place for it to go. A slash
+        # names a command, and one this table does not know is asked of the client (a
+        # profile to dispatch, where the client supports that).
         not slash? ->
           Client.send_input(sid, "root", typed)
+
+        name in @builtins ->
+          builtin(name, args, state, target)
 
         # A command a markdown file defines is the harness's to run (Decision 763): it
         # sends the file's prompt, and the line comes back as the session's own input.

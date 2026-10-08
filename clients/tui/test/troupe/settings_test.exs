@@ -137,7 +137,7 @@ defmodule Troupe.SettingsTest do
       {sid, _fake, ws} = start_session!(config: @own)
       {pid, session} = start_tui(sid)
 
-      type(pid, "settings")
+      type(pid, "/settings")
       press(pid, "enter")
 
       text = screen_text(pid, session)
@@ -155,7 +155,7 @@ defmodule Troupe.SettingsTest do
       {sid, _fake, ws} = start_session!(auto_approve: false, config: @own)
       {pid, session} = start_tui(sid)
 
-      type(pid, "settings")
+      type(pid, "/settings")
       press(pid, "enter")
       to_setting(pid, "auto_approve")
       assert screen_text(pid, session) =~ "auto approve"
@@ -170,7 +170,7 @@ defmodule Troupe.SettingsTest do
       {sid, _fake, ws} = start_session!(config: @own)
       {pid, session} = start_tui(sid)
 
-      type(pid, "settings")
+      type(pid, "/settings")
       press(pid, "enter")
       to_setting(pid, "max_turns")
 
@@ -196,7 +196,7 @@ defmodule Troupe.SettingsTest do
       {sid, _fake, ws} = start_session!(config: @own)
       {pid, session} = start_tui(sid)
 
-      type(pid, "settings")
+      type(pid, "/settings")
       press(pid, "enter")
       to_setting(pid, "context_window")
       assert screen_text(pid, session) =~ "a change goes to project:"

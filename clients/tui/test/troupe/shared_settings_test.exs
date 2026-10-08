@@ -34,7 +34,7 @@ defmodule Troupe.SharedSettingsTest do
 
   test "a default model the desktop app saves shows on the terminal's open settings page", ctx do
     {pid, session} = start_tui(ctx.sid)
-    type(pid, "settings")
+    type(pid, "/settings")
     press(pid, "enter")
     eventually(fn -> screen_text(pid, session) =~ "settings —" end)
     refute screen_text(pid, session) =~ "desktop-pick"
@@ -53,7 +53,7 @@ defmodule Troupe.SharedSettingsTest do
 
   test "a default model picked on the terminal's settings page reaches the desktop app", ctx do
     {pid, session} = start_tui(ctx.sid)
-    type(pid, "settings")
+    type(pid, "/settings")
     press(pid, "enter")
     eventually(fn -> screen_text(pid, session) =~ "settings —" end)
     to_setting(pid, "models.default")
@@ -93,7 +93,7 @@ defmodule Troupe.SharedSettingsTest do
   test "a theme picked on the terminal's settings page is drawn at once and reaches the desktop app",
        ctx do
     {pid, session} = start_tui(ctx.sid)
-    type(pid, "settings")
+    type(pid, "/settings")
     press(pid, "enter")
     eventually(fn -> screen_text(pid, session) =~ "settings —" end)
     to_setting(pid, "ui.theme")
