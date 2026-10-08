@@ -70,8 +70,9 @@ the command line meant entering it.
 - **`--headless "message"`** runs one turn and exits with the codes `troupe run
   --headless` exits with. The session is named (an id, `latest`, or `--private` alone),
   since there is no picker, and a lone word after `resume` is refused rather than guessed
-  at. The printer is the same, with `:since`: a durable event stamped before the run is
-  the session's history, neither printed nor taken for the turn's end (TUI Decision 110
+  at. The printer is the same, with `:since`: an event stamped before the run is the
+  session's history, neither printed nor taken for the turn's end, by its stamp alone,
+  since the lines a client wrote in the journal carry no `seq` (TUI Decision 110
   reads the journal back so a quick run's rest is not missed; this keeps that and does not
   end on the last turn's rest). Its client name is `troupe-headless` (Decision 787).
 - **What is refused, and what is not.** Refused, in one sentence that says why and offers
@@ -94,5 +95,11 @@ the command line meant entering it.
   (one turn printed alone with its turn line; `ID --headless` and `--resume latest
   --headless` exit 0 on the right session past a newer empty one; `--private`; a session
   not here, one another device holds and one being erased refused, against the
-  `FakeRemote` stand-in as `private_sessions_test.exs` uses it). Not tried against a
-  plane: a held session there, and the plane's own `session.fork` beyond its stand-in.
+  `FakeRemote` stand-in as `private_sessions_test.exs` uses it). And the installed
+  `troupe-daemon` and `troupe.exe` on scratch homes with the fake provider: `run`, then
+  `resume ID --headless` and `--resume latest --headless`, each printing its own turn and
+  its turn line; `session.fork` over the daemon's loopback socket, the fork's first event
+  `session_forked` naming the parent at its head, the parent's lines in its log, and the
+  parent never hearing the line sent to the fork; an archived session resumed and woken;
+  an erased one, an unknown id and a malformed one refused. Not tried against a plane: a
+  held session there, and the plane's own `session.fork` beyond its stand-in.

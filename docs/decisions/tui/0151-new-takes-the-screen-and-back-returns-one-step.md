@@ -53,5 +53,7 @@ or a tab bar.
   reply while the parent never hears the line typed in the fork; `/new --private` is
   listed private; `/new --remote code` and `/new --branch` on it against `FakeRemote`
   (which now answers `session.fork`), and `/sessions <id>` home from there; `/back` to a
-  session erased meanwhile is refused with the sentence and the screen stays. Not tried
-  against a plane.
+  session erased meanwhile is refused with the sentence and the screen stays; `mix check`.
+  Not tried against a plane, and the installed TUI's keys were not pressed: nothing that
+  checked this types into a running terminal UI. The daemon's half of `--branch` was run
+  against the installed daemon (root Decision 812).
