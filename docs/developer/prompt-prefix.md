@@ -11,8 +11,8 @@ conversation behind them to the cache again.
 The issue names two ways out and asks for numbers before one is chosen. Both are built,
 each behind a setting that is off unless set (Decision 815), so a live bench can run each
 and the log of any session can say how often it would have mattered. This page says what
-each does and costs, gives the offline numbers, answers the gateway question, and keeps a
-place for the live numbers with the commands that produce them.
+each does and costs, gives the offline numbers, answers the gateway question, and gives
+the numbers from a live run on Claude Opus 5.5 with the commands that produce them.
 
 ## What changes today
 
@@ -221,16 +221,58 @@ From Anthropic's documentation as read on 2026-10-08, none of it tried against t
   accepted beside `adaptive` and `enabled`, and that Sonnet 5.5 refuses it only beside its
   `between_tools`, which Troupe never sends);
 - whether the account the live run uses is enforced: with the baseline, refusals mean it
-  is; none, while `drop_block` drops blocks, means it is not.
+  is; none, while `drop_block` drops blocks, means it is not. (The live run below answers
+  it: not enforced.)
 
 ## Live numbers
 
-<!-- LIVE NUMBERS: the coordinator's run on a real Claude model goes here, a table like the
-offline one per configuration, and what follow_up's success rate said about instructions. -->
+Claude Opus 5.5 on Anthropic's API, with this branch's installed build, on Windows,
+2026-10-08. Each configuration ran `follow_up` five times. The bench's config carried Opus
+5.5's list prices: $4 in, $20 out, $0.20 for a cache read and $5 for a cache write, per
+million tokens. The 20 runs cost $0.52 in all. The smoke suite, with and without
+`stable`, was not run: each of those two runs had a cap of $17.76, and that did not fit
+the run's $30 limit.
 
-To be filled from a run on a real Claude model that caches and binds its thinking (Claude
-Opus 5.5, and Sonnet 5.5 if the cap allows), with the installed build. In PowerShell, where
-`$m` is the model as `troupe models` addresses it:
+| | baseline | `drop_block` | `stable` | both |
+|---|---:|---:|---:|---:|
+| model calls (five runs) | 25 | 25 | 25 | 25 |
+| refused, and sent again without thinking | 0 | 0 | 0 | 0 |
+| thinking blocks dropped | 0 | 4 (in 4 calls) | 0 | 0 |
+| calls whose system prompt changed | 5 | 5 | 0 | 0 |
+| turn contexts sent | 0 | 0 | 10 | 10 |
+| tokens sent uncached (fresh, or written to the cache) | 18,140 | 13,843 | 9,882 | 9,892 |
+| tokens read from the cache | 121,060 | 125,376 | 133,877 | 133,864 |
+| the second turn's first call, uncached / read (mean) | 1,463 / 4,319 | 1,458 / 4,319 | 614 / 5,535 | 620 / 5,533 |
+| output tokens | 1,716 | 1,800 | 1,793 | 1,828 |
+| cost of the five runs | $0.149 | $0.130 | $0.112 | $0.113 |
+| median wall clock | 12.2 s | 10.8 s | 10.8 s | 13.0 s |
+| outcome and both checks held | 5 of 5 | 5 of 5 | 5 of 5 | 5 of 5 |
+
+What they say:
+
+- **The account was not enforced.** The baseline was never refused. `drop_block` dropped
+  4 blocks, one call in each of four runs, and without the field those blocks reach the
+  model. On an account like this, created before 2026-08-31, option 1 saves no requests.
+  It costs reasoning instead.
+- **Option 2 kept the cache whole.** In the baseline the system prompt changed once in
+  every run: the second turn's instruction file joined it. That turn's first call then
+  sent 1,463 tokens uncached and read 4,319 from the cache. With `stable` it sent 614 and
+  read 5,535. Over the five runs, `stable` sent 46% fewer uncached tokens and cost 25%
+  less ($0.112 against $0.149).
+- **Instructions were followed in every run.** `follow_up`'s checks held in every run of
+  every configuration, including the root's rule after `docs/AGENTS.md` joined. Moving
+  the instruction files into `<turn_context>` did not make Opus 5.5 miss either file in
+  this scenario. That is one scenario and five runs: a signal, not a measure of
+  instruction following in general.
+- **Both together behaved as `stable`.** Nothing went stale, so the beta had nothing to
+  drop.
+- **Not measured live:**
+  - an enforced account, where the baseline would be refused and sent again;
+  - Sonnet 5.5 and Fable 5.1;
+  - tasks with no instruction files (the smoke suite);
+  - a session longer than two turns.
+
+To run it again, in PowerShell, where `$m` is the model as `troupe models` addresses it:
 
 ```powershell
 $m = "anthropic/claude-opus-5-5"
