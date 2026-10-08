@@ -7,7 +7,9 @@
 // workspace, no limit for the session, or stop, from the options the harness offers, or
 // an amount typed in. Both arrive as `question_asked`, both are answered with
 // `question.answer`, and both sit where the approval panel sits — the one place on the
-// screen a person is waited on.
+// screen a person is waited on. A question about a text carries it as `preview`, shown as
+// it is under the question: the harness asks so before a workspace's command is first
+// sent while `auto_approve` is on, with the prompt it would send (troupe Decision 814).
 
 import { useState } from "react";
 import type { JSX } from "react";
@@ -72,6 +74,12 @@ export function QuestionPanel({
         <h2>{budget ? "A limit is reached. How much more, and for how long?" : "The session has a question"}</h2>
       </header>
       <p className="consequence">{entry.question}</p>
+      {/* What the question is about, as it is: the prompt a workspace's command would send (troupe Decision 814). */}
+      {entry.preview !== undefined && (
+        <pre className="evidence" aria-label="What it would send">
+          {entry.preview}
+        </pre>
+      )}
       {error && <p className="also error">{error}</p>}
 
       {!canAnswer ? (

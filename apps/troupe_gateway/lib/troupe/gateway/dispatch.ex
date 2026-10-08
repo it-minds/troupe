@@ -485,6 +485,8 @@ defmodule Troupe.Gateway.Dispatch do
   # the file's prompt, with what was typed after the name for `$ARGUMENTS`, goes to the
   # session exactly as `input.send` would send it, under the same `command_id`. Only a
   # name the session's table lists as defined runs; a built-in is the client's to run.
+  # A workspace's command asks once first while the session approves everything itself
+  # (Decision 814), and the answer names the question it asked.
   defp handle("commands.run", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, name} <- fetch(params, "name"),
@@ -492,11 +494,19 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, session} <- lookup(session_id),
          {:ok, command} <- defined_command(session_id, session, name),
          :ok <- activate(session_id, context) do
-      text = Troupe.Commands.expand(command, arguments)
       command_id = Map.get(params, "command_id")
 
-      Troupe.send_input(session_id, text, :user, actor(context), command_opts(params))
-      {:ok, %{"accepted" => true, "command_id" => command_id}}
+      opts =
+        [actor: actor(context), workspace: Path.expand(session.workspace)] ++
+          command_opts(params)
+
+      case Troupe.Commands.run(session_id, command, arguments, opts) do
+        {:ok, :sent} ->
+          {:ok, %{"accepted" => true, "command_id" => command_id}}
+
+        {:ok, {:asking, call_id}} ->
+          {:ok, %{"accepted" => true, "command_id" => command_id, "question" => call_id}}
+      end
     end
   end
 

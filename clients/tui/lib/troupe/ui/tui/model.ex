@@ -477,7 +477,8 @@ defmodule Troupe.UI.TUI.Model do
           agent_path: path,
           question: one_line(d.question),
           options: question_options(d),
-          multiple: d[:multiple] == true
+          multiple: d[:multiple] == true,
+          preview: d[:preview]
         })
 
       # The budget question (Decision 120): its words and options come from the question
@@ -1710,9 +1711,11 @@ defmodule Troupe.UI.TUI.Model do
               | (preview || "") |> sanitize() |> String.split("\n") |> Enum.map(&diff_line/1)
             ]
 
+          # A question about a text — the prompt a workspace's command would send (troupe
+          # Decision 814) — has it under the question, line for line, before the answers.
           %{kind: :question, question: q} ->
             [{:blank, ""}, {:pending, "#{who}QUESTION: #{q}"}] ++
-              question_lines(item, selection)
+              preview_lines(item) ++ question_lines(item, selection)
 
           # The budget question is drawn as the question it rides on (Decision 120): the
           # harness's words, its options numbered, and an amount typed.
@@ -1732,6 +1735,13 @@ defmodule Troupe.UI.TUI.Model do
   # A daemon from before the question carried its words sends the limit alone.
   defp budget_words(%{question: question}) when is_binary(question) and question != "", do: question
   defp budget_words(item), do: "#{Map.get(item, :detail, "a limit is reached")} — continue?"
+
+  defp preview_lines(%{preview: preview}) when is_binary(preview) and preview != "" do
+    lines = preview |> sanitize() |> String.split("\n") |> Enum.map(&{:body, "  │ " <> &1})
+    lines ++ [{:blank, ""}]
+  end
+
+  defp preview_lines(_item), do: []
 
   # A question with no options is still just an input box.
   defp question_lines(%{options: []}, _selection),

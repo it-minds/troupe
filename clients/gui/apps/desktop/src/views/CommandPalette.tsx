@@ -7,9 +7,11 @@
 // The list is the harness's and nothing here is one: this file holds only what running
 // each command means in this app, and which ones it cannot run yet. A command a markdown
 // file defines (`source` `user` or `project`, Decision 763) is the harness's to run: it
-// sends the file's prompt as the session's input. It uses the theme's tokens and
-// restyles nothing around it, so the app's coming re-skin (#52) can take it as a
-// component.
+// sends the file's prompt as the session's input, and its detail shows that prompt
+// (Decision 814), since a description is only what the file says of itself; a
+// workspace's may ask first, in the session, with the prompt in view. It uses the
+// theme's tokens and restyles nothing around it, so the app's coming re-skin (#52) can
+// take it as a component.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
@@ -137,6 +139,30 @@ function reasonFor(entry: CommandEntry, local: boolean): string | null {
   if (defined(entry)) return null;
   if (!(entry.name in RUNNERS)) return NOT_HERE[entry.name] ?? "not in the desktop app yet";
   return null;
+}
+
+/** How many of a command's lines its detail shows before it counts the rest. */
+const BODY_LINES = 8;
+
+/**
+ * What a command a file defines sends, as its file has it (troupe Decision 814): its
+ * description is the file's say-so, so the detail shows the prompt itself — its first
+ * lines, and how many more the file holds.
+ */
+function Sends({ body }: { body: string }): JSX.Element {
+  const lines = body.split("\n");
+  const more = lines.length - BODY_LINES;
+  return (
+    <div className="sends">
+      <p className="micro muted">sends:</p>
+      <pre aria-label="What it sends">{lines.slice(0, BODY_LINES).join("\n")}</pre>
+      {more > 0 && (
+        <p className="micro muted">
+          … {more} more {more === 1 ? "line" : "lines"} in the file
+        </p>
+      )}
+    </div>
+  );
 }
 
 /** The first word filters; the rest is the command's argument. */
@@ -338,6 +364,7 @@ export function CommandPalette({
             <span className="usage">{selected.entry.usage}</span>
             {selected.entry.aliases.length > 0 && <span className="micro muted"> also {selected.entry.aliases.map((a) => `/${a}`).join(", ")}</span>}
             <p>{selected.entry.detail}</p>
+            {typeof selected.entry.body === "string" && <Sends body={selected.entry.body} />}
             {selected.entry.example && (
               <p className="micro muted">
                 for example: <span className="mono">{selected.entry.example}</span>

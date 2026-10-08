@@ -309,6 +309,39 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.equal(needsYou(answered), false);
   });
 
+  // A workspace's command asks before it is first sent while auto_approve is on (troupe
+  // Decision 814): the prompt rides as the question's preview, and one not sent says why.
+  it("keeps a question's preview, and says a command was not sent in the harness's words", () => {
+    seq = 0;
+    const asked = foldAll([
+      durable("question_asked", {
+        call_id: "command-1",
+        agent_path: ["root"],
+        question: "/review comes with this workspace, in .troupe/commands/review.md, and auto_approve is on: nothing will ask before the tools its prompt leads to run. Send the prompt below?",
+        options: [{ label: "deny" }, { label: "once" }, { label: "allow" }],
+        multiple: false,
+        preview: "Review the change.\n\nLook hardest at the parser.",
+      }),
+    ]);
+
+    const [q] = openQuestions(asked);
+    assert.ok(q);
+    assert.equal(q.asked, "agent");
+    assert.equal(q.preview, "Review the change.\n\nLook hardest at the parser.");
+
+    const declined = foldAll([
+      durable("question_answered", { call_id: "command-1", text: "deny" }),
+      durable("command_declined", { name: "review", command_id: "c-1", reason: "/review was not sent. Run /review again to be asked again." }),
+    ], asked);
+    const last = declined.entries.at(-1);
+    assert.equal(last?.kind, "system");
+    assert.equal(last?.kind === "system" ? last.text : "", "/review was not sent. Run /review again to be asked again.");
+
+    // A question without one has none.
+    const plain = foldAll([durable("question_asked", { call_id: "q9", agent_path: ["root"], question: "Which?", options: [], multiple: false })]);
+    assert.equal(openQuestions(plain)[0]?.preview, undefined);
+  });
+
   it("ends a question with its call, or with a cancel of the agent that asked or of one above it", () => {
     seq = 0;
     const ask = (call_id: string, agent: string[]) => durable("question_asked", { call_id, agent_path: agent, question: `${call_id}?`, options: [], multiple: false }, agent);

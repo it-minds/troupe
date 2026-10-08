@@ -314,8 +314,9 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
 | `approval_resolved` | `call_id`, `resolved_by` |
-| `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple` — the agent's `ask_user`; answered with `question.answer`. Open until its `question_answered`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no answer), or a `cancelled` on the agent that asked or on one above it. The budget's and the failure guard's question have no call; each also ends with its `budget_ask_answered` or `tool_failures_ask_answered`, the only word there is when nobody is there to ask, and one a cancel ended is asked again at the next turn with another `question_asked` under the same `call_id` |
+| `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple`, `preview` — the agent's `ask_user`; answered with `question.answer`. `preview`, where there is one, is text the question is about, for a client to show as it is beneath it: the prompt a workspace's command would send, when it asks before it is first sent (`commands.run`). Open until its `question_answered`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no answer), or a `cancelled` on the agent that asked or on one above it. The budget's and the failure guard's question have no call; each also ends with its `budget_ask_answered` or `tool_failures_ask_answered`, the only word there is when nobody is there to ask, and one a cancel ended is asked again at the next turn with another `question_asked` under the same `call_id` |
 | `question_answered` | `call_id`, `text`, `actor` |
+| `command_declined` | `name`, `reason`, `command_id` — a workspace's command that asked before it was first sent (see `commands.run`) and was not: `reason` says why and how to run it later, and `command_id` is the `commands.run` that asked |
 | `session_dormant` | `last_seq` |
 | `session_activated` | `epoch`, `pod` |
 | `session_resumed` | `dormant_ms`, `moved` |
@@ -758,6 +759,19 @@ without one has `arguments`, when there are any, added as a paragraph of its own
 built-in's, an agent's, or nobody's — is `not_found` with `kind: "command"`: a built-in
 is the client's to run.
 
+A workspace's command (`source: "project"`) asks once before it is first sent while the
+session approves every tool call itself (`auto_approve`), since nothing else would ask
+before what its prompt says is done (Decision 814). The answer is then `{"accepted":
+true, "command_id": "c-2", "question": "command-3f0a…"}`, and nothing is sent yet: the
+session asks a `question_asked` under that `call_id`, its `preview` the prompt as it
+would be sent, with the options `deny`, `once` and `allow`, answered with
+`question.answer` like an `ask_user`, so any client can. `allow` sends it and is
+remembered per checkout in the daemon's state directory, never in the repository, beside
+a hash of the file's prompt, so an edited command asks again and the `arguments` do not;
+`once` sends it; any other answer, or a session nobody can answer in (`approvals:
+deny`), sends nothing and writes `command_declined` saying how to run it later. A
+person's own commands never ask, and neither does a workspace on `trusted_workspaces`.
+
 #### `turn.cancel` → `{"command_id", "session_id"}`. Valid from any state.
 
 Each tool call the cancel stops is closed before `cancelled` is written: a
@@ -1053,7 +1067,9 @@ The `custom` section is the commands markdown files define: `<config>/commands/<
 (`source: "user"`) and the workspace's `.troupe/commands/<name>.md` (`source:
 "project"`), the workspace's winning a name both have. The file name is the command, the
 frontmatter's `description` its summary (the prompt's first line without one) and its
-`argument-hint` what `usage` says follows the name; `detail` names the file. A name a
+`argument-hint` what `usage` says follows the name; `detail` names the file, and `body`,
+which only these entries carry, is the prompt it sends as the file has it, `$ARGUMENTS`
+and all, for a palette to show before it runs (Decision 814). A name a
 built-in, an alias or one of the session's agents has stays theirs, and the file is
 skipped. The files are read when the table is asked for, so one written a moment ago is
 listed. A client runs one with `commands.run` (Steering, above) and needs no code of its

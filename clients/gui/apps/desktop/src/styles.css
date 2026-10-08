@@ -1532,6 +1532,12 @@ details.advanced > summary {
   font: var(--t-code-small);
   color: var(--text-secondary);
 }
+/* What a question is about, the prompt a workspace's command would send (Decision 814):
+   it keeps its own height and scrolls, and the panel scrolls around it, rather than the
+   column squeezing it to a line. */
+.approval.question .evidence {
+  flex-shrink: 0;
+}
 .approval .evidence .command {
   font: var(--t-code);
   color: var(--text-primary);
@@ -2819,6 +2825,18 @@ button.danger {
 }
 .palette .detail p {
   margin: var(--space-1) 0 0;
+}
+/* What a command a file defines sends (Decision 814): the prompt itself, set off as code,
+   and never so tall in a short window that the list above it has no room. */
+.palette .detail .sends pre {
+  max-height: 25vh;
+  overflow: auto;
+  margin: var(--space-1) 0 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-sunken);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  font: var(--t-code-small);
+  color: var(--text-primary);
 }
 .palette .notice {
   color: var(--text-primary);
