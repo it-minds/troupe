@@ -236,6 +236,20 @@ defmodule Troupe do
     with_root(session_id, &Agent.input(&1, source, content, actor, opts))
   end
 
+  @doc """
+  Run a command the person typed (`!cmd`) in the session's workspace, through the runner
+  the agent's `shell` uses (Decision 813). Answers the run's id at once; it streams as
+  `shell_output` and ends as `user_shell`. `opts`: `:actor`, `:agent` (`false` keeps it
+  from the agent), `:timeout_ms`, `:command_id`.
+  """
+  @spec shell_run(String.t(), String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, :no_session | {:forbidden, String.t(), String.t()}}
+  defdelegate shell_run(session_id, command, opts \\ []), to: Troupe.Session.Shell, as: :run
+
+  @doc "Kill a running `shell_run/3` command and everything it started."
+  @spec shell_cancel(String.t(), String.t()) :: :ok | {:error, :not_running}
+  defdelegate shell_cancel(session_id, run_id), to: Troupe.Session.Shell, as: :cancel
+
   @doc "Cancel whatever the root agent is doing. Valid from any state."
   @spec cancel(String.t()) :: :ok | {:error, :no_session}
   def cancel(session_id), do: with_root(session_id, &Agent.cancel/1)

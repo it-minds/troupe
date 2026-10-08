@@ -13,6 +13,9 @@ defmodule Troupe.Tools.Shell do
   another on the `PATH` that is not WSL's launcher (`windows_bash/2`), otherwise `pwsh`,
   otherwise `powershell.exe` — and the tool's description tells the model which one it
   got.
+
+  `execute/3` is the runner, and a person's own command (`!cmd`, `Troupe.Session.Shell`)
+  runs through it too: one runner, not a second one that drifts (Decision 813).
   """
 
   @behaviour Troupe.Tool
@@ -66,58 +69,130 @@ defmodule Troupe.Tools.Shell do
 
   @impl Troupe.Tool
   def run(args, ctx) do
-    with {:ok, command} <- Tool.fetch_string(args, "command"),
-         :ok <- Sandbox.check() do
+    with {:ok, command} <- Tool.fetch_string(args, "command") do
       timeout = Tool.fetch_int(args, "timeout_ms", ctx.timeout_ms) || 120_000
+
+      case execute(command, ctx.workspace, timeout_ms: timeout) do
+        {:ok, output, status} -> {:ok, render(output, status, ctx)}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  @typedoc "How a command ended: its exit status, the timeout, or `kill/1`."
+  @type ending :: non_neg_integer() | :timeout | :killed
+
+  @doc """
+  Run `command` in the workspace's root and read it to its end: the one runner the
+  agent's `shell` and a person's own command (`Troupe.Session.Shell`, Decision 813) share,
+  so the two cannot drift. The same shell, the same reaper, the same sandbox over the
+  same mount table, the same timeout and kill.
+
+  `timeout_ms` is required. `on_output`, when given, is called with the output as it
+  arrives, at most once every `flush_ms` (100) and once more at the end; the whole of it
+  is the answer either way. The process running this is killed out of it by `kill/1`,
+  which closes the port as the timeout does.
+  """
+  @spec execute(String.t(), Troupe.Workspace.t(), keyword()) ::
+          {:ok, binary(), ending()} | {:error, String.t()}
+  def execute(command, workspace, opts) do
+    with :ok <- Sandbox.check() do
       {shell, flag} = shell()
 
       # Path checks are not the enforcement here and cannot be: a shell command can do
       # anything a process can. The mount table the file tools resolve against is also
       # the bind list for the sandbox, so a read-only team volume is read-only to the
       # kernel and another team's volume is absent from the namespace entirely.
-      argv =
-        Sandbox.wrap([shell, flag, command], ctx.workspace.mounts, cwd: ctx.workspace.root_real)
+      argv = Sandbox.wrap([shell, flag, command], workspace.mounts, cwd: workspace.root_real)
 
-      case Reaper.open(ctx.workspace.root_real, argv) do
-        {:ok, port} -> collect(port, timeout, ctx)
+      case Reaper.open(workspace.root_real, argv) do
+        {:ok, port} -> collect(port, opts)
         {:error, reason} -> {:error, unavailable(reason)}
       end
     end
   end
 
-  # Reading the port to completion is the only thing this function does; the timeout
-  # simply stops reading and closes the port, which reaps the tree.
-  defp collect(port, timeout, ctx) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    do_collect(port, deadline, [], ctx)
+  @kill :troupe_shell_kill
+
+  @doc "Stop the command `execute/3` is running in `pid`, and everything it started."
+  @spec kill(pid()) :: :ok
+  def kill(pid) do
+    send(pid, @kill)
+    :ok
   end
 
-  defp do_collect(port, deadline, acc, ctx) do
-    remaining = deadline - System.monotonic_time(:millisecond)
+  # Reading the port to completion is the only thing this function does; the timeout
+  # simply stops reading and closes the port, which reaps the tree.
+  defp collect(port, opts) do
+    deadline = System.monotonic_time(:millisecond) + Keyword.fetch!(opts, :timeout_ms)
+
+    stream = %{
+      fun: Keyword.get(opts, :on_output),
+      every: Keyword.get(opts, :flush_ms, 100),
+      pending: [],
+      at: System.monotonic_time(:millisecond)
+    }
+
+    do_collect(port, deadline, [], stream)
+  end
+
+  defp do_collect(port, deadline, acc, stream) do
+    now = System.monotonic_time(:millisecond)
+    remaining = deadline - now
 
     if remaining <= 0 do
-      close(port)
-      {:ok, render(acc, :timeout, ctx)}
+      ended(port, acc, stream, :timeout)
     else
       receive do
         {^port, {:data, {:eol, line}}} ->
-          do_collect(port, deadline, ["\n", line | acc], ctx)
+          more(port, deadline, acc, stream, [line, "\n"])
 
         {^port, {:data, {:noeol, chunk}}} ->
-          do_collect(port, deadline, [chunk | acc], ctx)
+          more(port, deadline, acc, stream, chunk)
 
         {^port, {:data, data}} when is_binary(data) ->
-          do_collect(port, deadline, [data | acc], ctx)
+          more(port, deadline, acc, stream, data)
 
         {^port, {:exit_status, status}} ->
-          {:ok, render(acc, status, ctx)}
+          flush(stream)
+          {:ok, output(acc), status}
+
+        @kill ->
+          ended(port, acc, stream, :killed)
       after
-        remaining ->
-          close(port)
-          {:ok, render(acc, :timeout, ctx)}
+        wait(remaining, stream, now) -> do_collect(port, deadline, acc, flush(stream))
       end
     end
   end
+
+  defp more(port, deadline, acc, %{fun: nil} = stream, data),
+    do: do_collect(port, deadline, [data | acc], stream)
+
+  defp more(port, deadline, acc, stream, data) do
+    stream = %{stream | pending: [data | stream.pending]}
+    due? = System.monotonic_time(:millisecond) - stream.at >= stream.every
+    do_collect(port, deadline, [data | acc], if(due?, do: flush(stream), else: stream))
+  end
+
+  # Output waiting to be streamed is sent when its interval is up even if nothing more
+  # comes, so a command that prints and then sleeps is seen to have printed.
+  defp wait(remaining, %{pending: []}, _now), do: remaining
+  defp wait(remaining, stream, now), do: min(remaining, max(stream.at + stream.every - now, 0))
+
+  defp flush(%{pending: []} = stream), do: stream
+
+  defp flush(stream) do
+    stream.fun.(stream.pending |> Enum.reverse() |> IO.iodata_to_binary())
+    %{stream | pending: [], at: System.monotonic_time(:millisecond)}
+  end
+
+  defp ended(port, acc, stream, ending) do
+    close(port)
+    flush(stream)
+    {:ok, output(acc), ending}
+  end
+
+  defp output(acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
 
   defp close(port) do
     if Port.info(port), do: Port.close(port)
@@ -128,13 +203,14 @@ defmodule Troupe.Tools.Shell do
 
   # The tail is what a person reads first — the failure is at the end — and the whole
   # run is kept for `read_output`, because running it again is the expensive thing.
-  defp render(acc, status, ctx) do
-    output = acc |> Enum.reverse() |> IO.iodata_to_binary() |> Output.cap_tail(cap(ctx), ctx)
+  defp render(output, status, ctx) do
+    output = Output.cap_tail(output, cap(ctx), ctx)
     body = if String.trim(output) == "", do: "(no output)", else: output
 
     case status do
       0 -> body
       :timeout -> body <> "\n\n[timed out; the command and everything it started were killed]"
+      :killed -> body <> "\n\n[stopped; the command and everything it started were killed]"
       code -> body <> "\n\n[exit status #{code}]"
     end
   end

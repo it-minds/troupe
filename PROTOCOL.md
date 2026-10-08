@@ -257,7 +257,8 @@ Durable:
 | `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
-| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails), `text`, `command_id` — the send it was taken from, as its `input_accepted` names it; absent from a `harness` note, which nobody sent, and from a log written before 0.5.2 |
+| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness`/`shell` — `loop` is an iteration of `session.loop.start`, `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails, and `shell` what the agent was given of the person's own commands, each of which a client draws from its `user_shell` instead), `text`, `command_id` — the send it was taken from, as its `input_accepted` names it; absent from a `harness` or `shell` note, which nobody sent, and from a log written before 0.5.2 |
+| `user_shell` | `run_id`, `command`, `output`, `ended`, `agent`, `exit_status`, `reason`, `timeout_ms`, `duration_ms`, `command_id` — a command the person ran with `shell.run`, written by the root agent under their actor when it ended. `output` is its combined stdout and stderr, the tail capped at `tool_output_limit` with the `read_output` marker when it was cut; `ended` is `exited` (with `exit_status`), `timeout`, `killed` (`shell.cancel`) or `failed` (it could not start, `reason` says why); `agent: false` is one kept from the agent (Decision 813) |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile`, `prompt_bytes` — what the prompt was made of (see below) |
@@ -322,7 +323,8 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `fs_changed` | `path`, `hash`, `size` |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
-Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`.
+Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`, and `shell_started` and
+`shell_output` while a person's command runs (`shell.run`).
 
 `budget_warning` — `dimension` (`turns`, `input`, `output`, `wall`, `context`), `used`,
 `limit`, `fraction`, `detail` (`input tokens 4.9M/6.0M (82%)`) — is written once per
@@ -741,6 +743,44 @@ Each tool call the cancel stops is closed before `cancelled` is written: a
 `tool_call_completed` with `ok: false`, then the turn's `tool_results`. A restart takes
 up nothing a cancel stopped: no call runs again, no approval is asked for again, and no
 model call is made for the cancelled turn.
+
+#### `shell.run`
+```json
+{"command_id": "c-4", "session_id": "s-9f", "command": "git status", "agent": true}
+```
+→ `{"accepted": true, "run_id": "sh-Qx3…", "command_id": "c-4"}`. Runs a command the
+person typed (the TUI's `!cmd`) where the session runs, in its workspace: the local
+daemon's checkout or worktree, or the pod's working copy. It goes through the runner the
+agent's `shell` tool uses — the same shell, reaper, sandbox over the mount table, timeout
+and kill — as a fresh `bash -c` (Git bash, then `pwsh`, on Windows) with stdin at the null
+device: no terminal, nothing interactive, and no `cd` or `export` carried to the next one.
+`timeout_ms` is optional, a positive number of milliseconds, the session's
+`shell_timeout_ms` when absent. There is no approval prompt; the authority is the scope
+(Decision 813):
+
+* `control`, as `input.send` takes, **and** the session's owner or an `admin`. A
+  collaborator holding `control` is refused `forbidden` with `required_scope: "admin"`
+  and `reason: "only the session's owner can run commands on it"`: the agent's own shell
+  asks before it runs, and this does not.
+* What forbids the agent's shell forbids this: `managed_permission_rules_only` (`forbidden`,
+  `setting: "managed_permission_rules_only"`), and agent definitions none of whose
+  primary profiles may run `shell` (`setting: "permissions"`). Each `reason` is a
+  sentence a client shows as it is.
+
+Activating, as input is. While it runs the session publishes the ephemeral `shell_started`
+(`run_id`, `command`, `agent`) and `shell_output` (`run_id`, `text`, at most every 100 ms,
+the first MiB of it); when it ends, the root agent writes the durable `user_shell` under
+the actor who ran it. Its output **does not start a turn**: unless `agent` is `false`
+(the TUI's `!!cmd`), the agent is given the command and its capped output before its next
+model call, as one `user_input` from `shell` — before the input that starts a turn, or
+after a tool exchange and its results, never between a call and its result. A replayed
+`command_id` answers the same `run_id` and runs nothing again.
+
+#### `shell.cancel` → `{"command_id", "session_id", "run_id"}`
+
+Kills a `shell.run` command and everything it started, as its timeout does; its
+`user_shell` says `ended: "killed"`. The same scope as `shell.run`, and not activating. A
+run that has ended, or was never this session's, is `not_found` with `kind: "run"`.
 
 #### `profile.switch` → `{"command_id", "session_id", "profile": "plan"}`. Applied at
 the next turn boundary.
@@ -1520,7 +1560,7 @@ way back), which it may show or ignore.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
 `session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`,
-`question.answer`, `todo.edit` and `tools.register`. Each brings a dormant session's tree
+`question.answer`, `todo.edit`, `tools.register` and `shell.run`. Each brings a dormant session's tree
 back by folding its log before taking effect, and the session logs `session_activated`.
 
 On a pod only the plane brings a session back: it places the session, bumps its epoch and
@@ -1601,7 +1641,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | scope | grants |
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
-| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
+| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
@@ -1657,7 +1697,7 @@ ACL of each session a request names.
 require `session_id` (§6) but the four below: `session.get`, `input.send`, `turn.cancel`,
 `profile.switch`, `session.goal.*`, `session.loop.*`, `approval.respond`,
 `question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
-`mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
+`mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register`, `tools.unregister`, `shell.run` and `shell.cancel`. Everything else a
 worker serves is about the pod or a path on it — `session.create`, `agents.list`,
 `workflows.list`, `memory.get`, `memory.forget`, `workspace.recent`, `workspace.search`,
 `worktree.*`, `watch.set`, `identity.*`, `config.*`, `skills.*` and the `mcp.*` methods

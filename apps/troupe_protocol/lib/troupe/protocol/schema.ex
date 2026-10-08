@@ -81,6 +81,23 @@ defmodule Troupe.Protocol.Schema do
         "text" => required(:string),
         "command_id" => optional(:string)
       },
+      # A command the person ran in the session's workspace (`shell.run`, Decision 813),
+      # written by the root agent under its actor when it ends. `output` is the tail capped
+      # at the session's `tool_output_limit`, with the `read_output` marker when it was cut;
+      # `ended` is `exited` (with `exit_status`), `timeout`, `killed` or `failed` (with
+      # `reason`); `agent` says whether the next model call is given it.
+      "user_shell" => %{
+        "run_id" => required(:string),
+        "command" => required(:string),
+        "output" => required(:string),
+        "ended" => required(:string),
+        "agent" => required(:boolean),
+        "exit_status" => optional(:integer),
+        "reason" => optional(:string),
+        "timeout_ms" => optional(:integer),
+        "duration_ms" => optional(:integer),
+        "command_id" => optional(:string)
+      },
       "input_queued" => %{
         "command_id" => required(:string),
         "author" => required(:string),
@@ -449,7 +466,15 @@ defmodule Troupe.Protocol.Schema do
         "agent" => optional({:array, :string})
       },
       "summary_diff" => %{"changed" => required(:object)},
-      "watch_notice" => %{"message" => required(:string)}
+      "watch_notice" => %{"message" => required(:string)},
+      # A person's command while it runs (Decision 813): started, then its output as it
+      # comes. Its end is the durable `user_shell`, which carries the tail either way.
+      "shell_started" => %{
+        "run_id" => required(:string),
+        "command" => required(:string),
+        "agent" => required(:boolean)
+      },
+      "shell_output" => %{"run_id" => required(:string), "text" => required(:string)}
     }
   end
 
@@ -509,6 +534,21 @@ defmodule Troupe.Protocol.Schema do
       "turn.cancel" => %{
         "command_id" => required(:string),
         "session_id" => required(:string)
+      },
+      # A command the person typed, run in the session's workspace (Decision 813): `control`,
+      # and the session's owner or an `admin`. `agent: false` keeps it from the agent.
+      # Activating, as input is. `shell.cancel` kills one that runs.
+      "shell.run" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "command" => required(:string),
+        "agent" => optional(:boolean),
+        "timeout_ms" => optional(:integer)
+      },
+      "shell.cancel" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "run_id" => required(:string)
       },
       "profile.switch" => %{
         "command_id" => required(:string),

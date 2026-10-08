@@ -1,0 +1,46 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/user_shell.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "agent": {
+      "type": "boolean"
+    },
+    "command": {
+      "type": "string"
+    },
+    "command_id": {
+      "type": "string"
+    },
+    "duration_ms": {
+      "type": "integer"
+    },
+    "ended": {
+      "type": "string"
+    },
+    "exit_status": {
+      "type": "integer"
+    },
+    "output": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "timeout_ms": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "agent",
+    "command",
+    "ended",
+    "output",
+    "run_id"
+  ],
+  "title": "user_shell",
+  "type": "object"
+}

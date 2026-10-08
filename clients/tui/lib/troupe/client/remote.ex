@@ -83,6 +83,19 @@ defmodule Troupe.Client.Remote do
   @impl true
   def run_command(sid, name, arguments), do: describe(Worker.run_command(sid, name, arguments))
 
+  # On the worker pod, in its working copy: where the session runs (root Decision 813).
+  @impl true
+  def shell_run(sid, command, agent?) do
+    case Worker.shell_run(sid, command, agent?) do
+      {:ok, %{"run_id" => run_id}} -> {:ok, run_id}
+      {:ok, other} -> {:error, "unexpected shell.run answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  @impl true
+  def shell_cancel(sid, run_id), do: describe(Worker.shell_cancel(sid, run_id))
+
   @impl true
   def approve(sid, call_id, decision), do: describe(Worker.approve(sid, call_id, decision))
 

@@ -88,6 +88,11 @@ defmodule Troupe.Gateway.Dispatch do
     "worktree.list" => :observe,
     "input.send" => :control,
     "turn.cancel" => :control,
+    # A command the person typed, run in the session's workspace at once (Decision 813):
+    # `control`, as input is, and on top of it the session's owner or an `admin`, which the
+    # handler asks, since a collaborator's `control` steers an agent whose shell asks first.
+    "shell.run" => :control,
+    "shell.cancel" => :control,
     "profile.switch" => :control,
     # The goal steers every later turn, so setting and clearing it take what input does;
     # reading it is reading the log.
@@ -577,6 +582,51 @@ defmodule Troupe.Gateway.Dispatch do
          :ok <- activate(session_id, context) do
       Troupe.cancel(session_id)
       {:ok, %{"accepted" => true}}
+    end
+  end
+
+  # A command the person typed (`!cmd`, Decision 813), run where the session runs, in its
+  # workspace, through the agent's own runner. Activating, as input is. The answer names
+  # the run; what it prints comes as `shell_output` and its end as `user_shell`. A replayed
+  # `command_id` answers the same run and runs nothing again.
+  defp handle("shell.run", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, command} <- fetch(params, "command"),
+         {:ok, timeout} <- shell_timeout(params),
+         :ok <- session_owner(context),
+         :ok <- activate(session_id, context) do
+      opts =
+        [actor: actor(context), agent: Map.get(params, "agent") != false, timeout_ms: timeout] ++
+          command_opts(params)
+
+      case Troupe.shell_run(session_id, command, opts) do
+        {:ok, run_id} ->
+          {:ok,
+           %{
+             "accepted" => true,
+             "run_id" => run_id,
+             "command_id" => Map.get(params, "command_id")
+           }}
+
+        {:error, {:forbidden, setting, reason}} ->
+          {:error, Error.new(:forbidden, %{setting: setting, reason: reason})}
+
+        {:error, :no_session} ->
+          {:error, Error.new(:unavailable, %{reason: "the session is not running"})}
+      end
+    end
+  end
+
+  # Not activating: a dormant session runs no command.
+  defp handle("shell.cancel", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, run_id} <- fetch(params, "run_id"),
+         :ok <- session_owner(context),
+         {:ok, _session} <- lookup(session_id) do
+      case Troupe.shell_cancel(session_id, run_id) do
+        :ok -> {:ok, %{"accepted" => true, "run_id" => run_id}}
+        {:error, :not_running} -> {:error, Error.new(:not_found, %{kind: "run", run_id: run_id})}
+      end
     end
   end
 
@@ -1308,6 +1358,34 @@ defmodule Troupe.Gateway.Dispatch do
       n when is_integer(n) and n > 0 -> {:ok, n}
       _ -> {:error, Error.new(:invalid_params, %{field: "max_iterations", reason: "a positive integer"})}
     end
+  end
+
+  # Absent is the session's `shell_timeout_ms`; present, a positive number of milliseconds.
+  defp shell_timeout(params) do
+    case Map.get(params, "timeout_ms") do
+      nil ->
+        {:ok, nil}
+
+      ms when is_integer(ms) and ms > 0 ->
+        {:ok, ms}
+
+      _ ->
+        {:error, Error.new(:invalid_params, %{field: "timeout_ms", reason: "a positive integer"})}
+    end
+  end
+
+  # A person's command runs at once, with no approval asked, on the owner's pod or machine
+  # (Decision 813). A plane's owner holds `admin` on their session and a collaborator
+  # `control`; on a daemon every local connection is the person and holds all three.
+  defp session_owner(%Context{scopes: scopes}) do
+    if :admin in scopes,
+      do: :ok,
+      else:
+        {:error,
+         Error.new(:forbidden, %{
+           required_scope: "admin",
+           reason: "only the session's owner can run commands on it"
+         })}
   end
 
   defp command_opts(params) do

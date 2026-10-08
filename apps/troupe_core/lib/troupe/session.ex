@@ -61,6 +61,10 @@ defmodule Troupe.Session do
       [
         {Troupe.Session.Log,
          session_id: session_id, workspace_root: workspace.root_real, state_dir: config.state_dir},
+        # A person's own commands (`!cmd`, Decision 813): right under the log, so nothing
+        # below that restarts — an agent, an MCP server — kills a command someone is
+        # watching, and gone with the session, which takes every command it runs with it.
+        {Troupe.Session.Shell, session_id: session_id},
         {Troupe.Session.Approvals,
          session_id: session_id,
          auto_approve: config.auto_approve,
