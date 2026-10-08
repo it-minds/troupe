@@ -187,9 +187,10 @@ defmodule Troupe.UI.TUI.View do
         inner_w = max(left.width - 2, 1)
         inner_h = max(left.height - 2, 1)
         agent = viewed_agent(w, state.pane.agent)
-        entries = length(Map.get(w.agents, agent, %{transcript: []}).transcript)
+        transcript = Map.get(w.agents, agent, %{transcript: []}).transcript
+        entries = length(transcript)
         blocks = Model.pane_blocks(w, agent, state.expanded, state.tick, state.now, state.answer)
-        heights = Enum.map(blocks, &Model.row_count(&1, inner_w))
+        heights = block_heights(transcript, blocks, inner_w, state.expanded)
         total = Enum.sum(heights)
         max_off = max(total - inner_h, 0)
 
@@ -228,6 +229,37 @@ defmodule Troupe.UI.TUI.View do
       _ -> max_off
     end
   end
+
+  # Measuring every block is the part of a frame that grows with the session, and a
+  # finished entry does not change: its height is remembered per process, beside the
+  # entry it was measured from, and only an entry that is new or changed, and the live
+  # blocks after the transcript, are measured again. An unchanged entry is the very term
+  # remembered, so matching it is a pointer check, not a walk of its text.
+  defp block_heights(transcript, blocks, width, expanded?) do
+    key = {__MODULE__, :heights}
+
+    known =
+      case Process.get(key) do
+        {^width, ^expanded?, pairs} -> pairs
+        _ -> []
+      end
+
+    {entry_blocks, live} = Enum.split(blocks, length(transcript))
+    pairs = measure(transcript, entry_blocks, known, width)
+    Process.put(key, {width, expanded?, pairs})
+    Enum.map(pairs, &elem(&1, 1)) ++ Enum.map(live, &Model.row_count(&1, width))
+  end
+
+  defp measure([], _blocks, _known, _width), do: []
+
+  defp measure([entry | entries], [_block | blocks], [{entry, h} | known], width),
+    do: [{entry, h} | measure(entries, blocks, known, width)]
+
+  defp measure([entry | entries], [block | blocks], known, width),
+    do: [{entry, Model.row_count(block, width)} | measure(entries, blocks, drop1(known), width)]
+
+  defp drop1([]), do: []
+  defp drop1([_ | rest]), do: rest
 
   defp viewed_agent(w, nil), do: w.path
   defp viewed_agent(w, agent), do: if(Map.has_key?(w.agents, agent), do: agent, else: w.path)
@@ -1487,10 +1519,15 @@ defmodule Troupe.UI.TUI.View do
   defp pane(g, state) do
     w = g.window
 
+    # Only the blocks from the one at the top of the view are wrapped: the heights
+    # already say where the view starts, so nothing above it is measured again.
+    {first, row} = block_at(g.heights, g.offset)
+
     rows =
       g.blocks
+      |> Enum.drop(first)
       |> Enum.concat()
-      |> Model.rows(g.inner_w, g.offset, g.inner_h)
+      |> Model.rows(g.inner_w, row, g.inner_h)
       |> highlight(g, Map.get(state, :selection))
 
     transcript = %Paragraph{

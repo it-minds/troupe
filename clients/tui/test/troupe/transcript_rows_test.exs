@@ -191,6 +191,29 @@ defmodule Troupe.TranscriptRowsTest do
            ] = read_rows(cut, args)
   end
 
+  # The pane remembers each entry's height between frames; a call that completes
+  # above the last entry changes its height, and the remembered heights must say so
+  # exactly as a first measure, in a process that remembers nothing, does.
+  test "remembered row heights follow an entry that changes above the last one" do
+    call = fn id ->
+      {"tool_call_started", %{"call_id" => id, "name" => "shell", "args" => %{"command" => id}}}
+    end
+
+    done = fn id ->
+      {"tool_call_completed",
+       %{"call_id" => id, "name" => "shell", "ok" => true, "content" => "one\ntwo\nthree"}}
+    end
+
+    started = [call.("c1"), call.("c2")]
+    before = geometry(fold(started), 80)
+    after_ = geometry(fold(started ++ [done.("c1")]), 80)
+    fresh = Task.async(fn -> geometry(fold(started ++ [done.("c1")]), 80) end) |> Task.await()
+
+    assert after_.heights == fresh.heights
+    assert after_.heights != before.heights
+    assert geometry(fold(started ++ [done.("c1")]), 40).heights == fresh.heights
+  end
+
   describe "Model.markdown/1" do
     test "drops the blank lines beside a fence and at the ends of a message, keeps a paragraph break" do
       kinds = fn text -> text |> Model.markdown() |> Enum.map(&elem(&1, 0)) end
