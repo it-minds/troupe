@@ -18,6 +18,9 @@ defmodule Troupe.BenchLiveTest do
 
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureIO
+
+  alias Mix.Tasks.Troupe.Prefix, as: PrefixTask
   alias Troupe.Bench
   alias Troupe.Bench.{History, Live, LiveScenarios, Scenario}
   alias Troupe.Protocol.Event
@@ -317,6 +320,151 @@ defmodule Troupe.BenchLiveTest do
       assert {:ok, table} = Bench.compare(history: path, ref: "0.7.0-beta")
       assert table =~ "| write_file | runs | none earlier | 2, 0.8.2-beta, openai/a |  |"
     end
+  end
+
+  # Issue #465's two options against the stand-in as Anthropic (Decision 815): a model that
+  # thinks unasked, binds each thinking block to the conversation it was made in and
+  # refuses one sent back after that changed, as Claude Opus 5.5 does for an account the
+  # check is enforced for; and caches what is marked. `follow_up`'s second turn begins
+  # with docs/AGENTS.md among the instruction files, which its first brought in.
+  describe "issue #465's experiments" do
+    test "by default the second turn's calls are each refused once and sent again without thinking",
+         %{tmp_dir: dir} do
+      fake = start_fake()
+      keep = Path.join(dir, "kept")
+
+      {:ok, plan} =
+        Bench.plan(config: anthropic(fake), only: ["follow_up"], keep: keep, history: nil)
+
+      refute Bench.describe_plan(plan) =~ "issue #465"
+
+      report = Bench.live(plan)
+      assert Bench.passed?(report), Bench.markdown(report)
+
+      assert report["experiment"] == %{
+               "thinking_binding" => "default",
+               "system_prompt" => "per_turn"
+             }
+
+      [run] = scenario(report, "follow_up")["runs"]
+      assert run["model_calls"] == 5
+
+      assert %{
+               "model_calls" => 5,
+               "system_changes" => 1,
+               "tools_changes" => 0,
+               "inferred" => 0,
+               "thinking_resent" => 2,
+               "thinking_dropped" => 0,
+               "turn_contexts" => 0
+             } = run["prefix"]
+
+      assert report["summary"]["prefix"]["thinking_resent"] == 2
+
+      # Two refusals, each followed by the same call with no thinking in it.
+      assert [200, 200, 200, 400, 200, 400, 200] =
+               Enum.map(FakeOpenAI.requests(fake), & &1.status)
+
+      # The counter over the kept session log says what the run's record says.
+      output = capture_io(fn -> PrefixTask.run(["--json", keep]) end)
+      assert %{"total" => %{"sessions" => 1} = total} = Jason.decode!(output)
+      assert Map.delete(total, "sessions") == run["prefix"]
+    end
+
+    test "with thinking_binding: drop_block nothing is refused, and the stale blocks are dropped" do
+      fake = start_fake()
+
+      {:ok, plan} =
+        Bench.plan(
+          config: anthropic(fake, thinking_binding: "drop_block"),
+          only: ["follow_up"],
+          history: nil
+        )
+
+      assert Bench.describe_plan(plan) =~
+               "With issue #465's experiments: thinking_binding drop_block, system_prompt per_turn."
+
+      report = Bench.live(plan)
+      assert Bench.passed?(report), Bench.markdown(report)
+
+      # The second turn's first call drops the first turn's three blocks, and its second
+      # those and the one the first made: a block after a dropped one goes too.
+      [run] = scenario(report, "follow_up")["runs"]
+
+      assert %{
+               "system_changes" => 1,
+               "thinking_resent" => 0,
+               "thinking_dropped" => 7,
+               "calls_dropping" => 2
+             } = run["prefix"]
+
+      requests = FakeOpenAI.requests(fake)
+      assert Enum.all?(requests, &(&1.status == 200))
+      assert Enum.all?(requests, &(&1.beta == "thinking-binding-controls-2026-08-01"))
+      thinking = Enum.map(requests, & &1.thinking)
+      assert thinking == [:kept, :kept, :kept, {:dropped, 3}, {:dropped, 4}]
+    end
+
+    test "with system_prompt: stable nothing changes in front of what was sent, and the cache reads it" do
+      runs =
+        for system_prompt <- ["per_turn", "stable"], into: %{} do
+          fake = start_fake()
+
+          {:ok, plan} =
+            Bench.plan(
+              config: anthropic(fake, system_prompt: system_prompt),
+              only: ["follow_up"],
+              history: nil
+            )
+
+          report = Bench.live(plan)
+          assert Bench.passed?(report), Bench.markdown(report)
+          [run] = scenario(report, "follow_up")["runs"]
+          {system_prompt, {run, FakeOpenAI.requests(fake)}}
+        end
+
+      {stable, requests} = runs["stable"]
+
+      assert %{
+               "system_changes" => 0,
+               "tools_changes" => 0,
+               "thinking_resent" => 0,
+               "thinking_dropped" => 0,
+               "turn_contexts" => 2
+             } = stable["prefix"]
+
+      assert Enum.all?(requests, &(&1.status == 200 and &1.thinking == :kept))
+      assert [_one] = requests |> Enum.map(& &1.system) |> Enum.uniq()
+
+      # Every call after the first reads all of the one before from the cache; by default
+      # the second turn's first reads only the tools, behind a system prompt that changed.
+      [_ | later] = stable["calls"]
+      assert Enum.all?(later, &(&1["cached_tokens"] > 0))
+      {per_turn, _requests} = runs["per_turn"]
+      assert stable["cached_tokens"] > per_turn["cached_tokens"]
+      assert stable["input_tokens"] < per_turn["input_tokens"]
+    end
+  end
+
+  # The stand-in as Anthropic's API, serving Claude Opus 5.5 at its price.
+  defp anthropic(fake, extra \\ []) do
+    Troupe.Config.load(
+      nil,
+      [
+        provider: "anthropic",
+        base_url: fake.url,
+        api_key: @key,
+        model: "claude-opus-5-5",
+        prices: %{
+          "claude-opus-5-5" => %{
+            "input" => 4,
+            "output" => 20,
+            "cache_read" => 0.2,
+            "cache_write" => 5
+          }
+        }
+      ] ++ extra
+    )
   end
 
   describe "a benchmark (Decision 775)" do

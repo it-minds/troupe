@@ -15,6 +15,12 @@
     "stop_reason": {
       "type": "string"
     },
+    "thinking_dropped": {
+      "type": "integer"
+    },
+    "thinking_resent": {
+      "type": "boolean"
+    },
     "usage": {
       "type": "object"
     }

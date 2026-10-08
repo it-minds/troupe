@@ -123,6 +123,7 @@ nav:
       - Local setup: developer/local-setup.md
       - Testing: developer/testing.md
       - The bench: developer/bench.md
+      - What changes in front of a prompt: developer/prompt-prefix.md
       - Conventions: developer/conventions.md
       - Build: developer/build.md
       - CI and releases: developer/ci.md

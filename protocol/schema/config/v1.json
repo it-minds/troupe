@@ -317,6 +317,24 @@
         "null"
       ]
     },
+    "thinking_binding": {
+      "description": "An experiment, Anthropic only: `drop_block` sends the `thinking-binding-controls-2026-08-01` beta and asks the API to drop a thinking block whose conversation changed since it was made, instead of refusing the call.",
+      "default": "default",
+      "enum": [
+        "default",
+        "drop_block",
+        null
+      ]
+    },
+    "system_prompt": {
+      "description": "An experiment: `stable` keeps the system prompt the same for the whole session, and sends the instruction files, the brief, the goal and the task list with the turn instead, each again only when it changed.",
+      "default": "per_turn",
+      "enum": [
+        "per_turn",
+        "stable",
+        null
+      ]
+    },
     "max_turns": {
       "description": "Model calls an agent may make before its budget stops it.",
       "default": 40,

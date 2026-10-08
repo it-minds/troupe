@@ -15,7 +15,19 @@
     "prompt_bytes": {
       "type": "object"
     },
+    "system_changed": {
+      "type": "boolean"
+    },
     "tools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tools_changed": {
+      "type": "boolean"
+    },
+    "turn_context": {
       "items": {
         "type": "string"
       },
