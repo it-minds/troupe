@@ -137,6 +137,49 @@ defmodule Troupe.Worker.HarnessAuthTest do
       assert error.message == "forbidden"
       assert error.data["reason"] == "access revoked"
     end
+
+    # A person's own command runs at once on the pod (Decision 813): its owner's, and a
+    # collaborator's `control`, which steers an agent whose shell asks first, is not enough.
+    test "the owner runs a command in the pod's working copy; a collaborator is refused",
+         context do
+      assert {:ok, _} = activate(context)
+
+      {:ok, owner} =
+        connect(context, token(context, role: "owner", session_id: context.session_id))
+
+      assert {:ok, _} = Client.subscribe(owner, "session:" <> context.session_id)
+
+      assert {:ok, %{"run_id" => run_id}} =
+               Client.call(owner, "shell.run", %{
+                 "session_id" => context.session_id,
+                 "command" => "pwd; echo on-the-pod"
+               })
+
+      ended = await_user_shell(context.session_id, run_id)
+      assert ended.data["ended"] == "exited"
+      assert ended.data["exit_status"] == 0
+      assert ended.data["output"] =~ "on-the-pod"
+      assert ended.actor.subject == "owner@example.test"
+
+      {:ok, mate} =
+        connect(
+          context,
+          token(context,
+            role: "collaborator",
+            session_id: context.session_id,
+            sub: "mate@example.test"
+          )
+        )
+
+      assert {:error, error} =
+               Client.call(mate, "shell.run", %{
+                 "session_id" => context.session_id,
+                 "command" => "echo not-yours"
+               })
+
+      assert error.message == "forbidden"
+      assert error.data["reason"] == "only the session's owner can run commands on it"
+    end
   end
 
   describe "one session per token" do
@@ -399,6 +442,18 @@ defmodule Troupe.Worker.HarnessAuthTest do
 
     assert {:ok, _} = activate(%{context | session_id: other, team: team, workspace: workspace})
     other
+  end
+
+  defp await_user_shell(session_id, run_id) do
+    topic = "session:" <> session_id
+
+    receive do
+      {:troupe_event, ^topic, _session_id,
+       %{type: "user_shell", data: %{"run_id" => ^run_id}} = event} ->
+        event
+    after
+      15_000 -> flunk("no user_shell for #{run_id}")
+    end
   end
 
   defp refused?({:error, %{message: "forbidden", data: %{"field" => field}}}, field), do: true

@@ -1,5 +1,7 @@
 // How `troupe` is run for an answer rather than in a terminal: the side bar's Settings
 // asks `troupe config --explain --json` and `troupe models --json` and reads what they print.
+// And how the "Troupe" terminal profile starts it as its terminal's program, with no shell
+// of the person's to type a line into.
 //
 // A `.exe` is run as it is, with its arguments as a list. A `.cmd` or `.bat` is a script
 // for cmd.exe, which Node runs only through a shell; the line is quoted for cmd as the

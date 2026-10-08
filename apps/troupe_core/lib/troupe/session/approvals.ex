@@ -86,6 +86,15 @@ defmodule Troupe.Session.Approvals do
     GenServer.call(Troupe.Registry.approvals(session_id), {:auto_approve, value})
   end
 
+  @doc """
+  Whether every request is answered yes on the spot, as `--auto-approve` asks: then
+  nothing asks before a tool runs, which is what a workspace's command asks about first
+  (Decision 814).
+  """
+  @spec auto_approve?(String.t()) :: boolean()
+  def auto_approve?(session_id),
+    do: GenServer.call(Troupe.Registry.approvals(session_id), :auto_approve?)
+
   @doc "Requests waiting for a decision, for the UI to render."
   @spec pending(String.t()) :: [map()]
   def pending(session_id), do: GenServer.call(Troupe.Registry.approvals(session_id), :pending)
@@ -222,6 +231,8 @@ defmodule Troupe.Session.Approvals do
   def handle_call(:pending, _from, state) do
     {:reply, Enum.map(state.pending, fn {_id, entry} -> entry.req end), state}
   end
+
+  def handle_call(:auto_approve?, _from, state), do: {:reply, state.auto_approve, state}
 
   @impl GenServer
   def handle_cast({:decide, call_id, decision, actor}, state) do

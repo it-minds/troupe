@@ -234,6 +234,8 @@ troupe --private                        # a private session, sealed to the plane
 troupe run build "make the tests pass" --headless --auto-approve
 troupe run plan "how should we split billing" --worktree
 troupe resume [SESSION_ID]              # no id: reopen the last session here, picker open
+troupe resume latest                    # the newest session here, straight in (--private: the newest private one)
+troupe resume ID --headless "go on"     # one turn on that session, printed as run --headless, then exit
 troupe models [--refresh]               # every model, its window and its price
 troupe doctor                           # check the setup, one line per check; exits 1 on a failure
 troupe login PLANE_URL                  # sign in to a Troupe Remote plane (device flow)
@@ -269,6 +271,14 @@ code says how the run ended, for scripts and CI:
 | `2` | never started: the command line did not parse |
 | `3` | was refused an approval, with nobody to ask. Run it again with `--auto-approve`, or `troupe resume` the session to carry on by hand |
 | `130` | was interrupted with Ctrl-C |
+
+`troupe resume ID --headless "message"` (or `latest`, or `--private`, in place of the id)
+does the same for one turn of a session that already has a history: it prints that turn
+alone, its turn line included, and exits with the same codes. `troupe --resume` is
+`troupe resume`. A session another device holds (it sealed it last, and it is that
+device's until you claim it here), or one that is erased or being erased, is refused in a
+sentence that says so and suggests `/new`; a dormant one, asleep or archived, is opened,
+and the next line wakes it.
 
 The terminal UI needs a terminal: `troupe`, `troupe resume` and `troupe run` without
 `--headless`, with standard output sent to a file or a pipe, say so in one line and exit
@@ -632,6 +642,15 @@ id) lists what *this* directory has — each session that said something to a
 model or started a branch, when it was last touched, its branches and which of
 them need you or have stopped — and Enter replays the one you pick into the
 window you are already looking at.
+
+`/new` starts another session in the same directory without leaving the TUI, and
+the one you were in carries on: it stays in `/resume`'s list, and `/back` returns
+to it (and `/back` again comes back, one step either way). `/new --private` makes
+a private session, `/new --remote PROFILE` one on that profile of the plane you
+are signed in to, and `/new --branch` a fork of the session on screen: a session
+of its own whose log starts as a copy of this one's, so its agent goes on from the
+conversation as it stands while the first carries on as it was. The new session's
+command line is where its first line goes.
 
 `troupe`'s own log is `troupe.log` in the same state directory, beside the
 daemon's `daemon.log`: `~/.local/state/troupe/troupe.log` (`$XDG_STATE_HOME/troupe`

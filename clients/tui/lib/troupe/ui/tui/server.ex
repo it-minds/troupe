@@ -23,6 +23,8 @@ defmodule Troupe.UI.TUI.Server do
   @type state :: %{
           session_id: String.t(),
           workspace: String.t(),
+          home: String.t(),
+          back: String.t() | nil,
           model: Model.t(),
           focus:
             :command
@@ -58,6 +60,7 @@ defmodule Troupe.UI.TUI.Server do
           files: files() | nil,
           mcp_cursor: non_neg_integer(),
           hq: HQ.t() | nil,
+          shell: shell() | nil,
           theme: Theme.t(),
           theme_warned: String.t() | nil,
           slow_render_ms: non_neg_integer(),
@@ -162,6 +165,13 @@ defmodule Troupe.UI.TUI.Server do
           version: non_neg_integer()
         }
 
+  @typedoc """
+  The command this screen ran with `!` and that has not ended (Decision 152): what
+  Esc and Ctrl-C kill. Its block is the model's, from the session's events; this is only
+  which run is this screen's to kill, so a command another client ran is left alone.
+  """
+  @type shell :: %{run_id: String.t(), command: String.t()}
+
   def via(sid), do: {:via, Registry, {Troupe.Client.Registry, {:tui, sid}}}
 
   ## ExRatatui.App
@@ -179,6 +189,10 @@ defmodule Troupe.UI.TUI.Server do
     state = %{
       session_id: sid,
       workspace: model.workspace,
+      # The directory this window was opened in, where `/new` starts a session while a
+      # plane's is on screen, and the session `/back` returns to (TUI Decision 151).
+      home: model.workspace,
+      back: nil,
       model: model,
       focus: :command,
       cmd_text: prompt,
@@ -208,6 +222,7 @@ defmodule Troupe.UI.TUI.Server do
       # full for a person whose browser did not open (troupe-remote Decision 741).
       mcp_sign_in: nil,
       hq: nil,
+      shell: nil,
       # The person's theme, from `ui.theme` (`read_appearance/1`), and the value last said
       # to be one this Troupe does not know, so that is said once.
       theme: Theme.current(),
@@ -344,6 +359,11 @@ defmodule Troupe.UI.TUI.Server do
 
   @impl true
   def handle_event(%Key{kind: "release"}, state), do: {:noreply, state, render?: false}
+
+  # While a command this screen ran with `!` runs, Ctrl-C kills it and arms nothing, as it
+  # would in a terminal (Decision 152).
+  def handle_event(%Key{code: "c", modifiers: ["ctrl"]}, %{shell: %{} = run} = state),
+    do: {:noreply, kill_shell(%{state | quit_armed: false}, run)}
 
   def handle_event(%Key{code: "c", modifiers: ["ctrl"]}, %{quit_armed: true} = state) do
     state.on_quit.()
@@ -622,6 +642,8 @@ defmodule Troupe.UI.TUI.Server do
 
   ## Command line keys
 
+  # Esc kills the command this screen ran while it runs, and leaves what is typed.
+  defp command_key(%Key{code: "esc"}, %{shell: %{} = run} = state), do: kill_shell(state, run)
   defp command_key(%Key{code: "esc"}, state), do: put_cmd(state, "")
 
   defp command_key(%Key{code: "tab"}, state),
@@ -705,12 +727,17 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(cancel dismiss merge discard goal loop sessions hq observer files
+  @builtins ~w(new cancel dismiss merge discard goal loop sessions back hq observer files
                upload copy memory context watch settings models mcp skills help agents worktree quit)
 
   @doc false
   @spec builtins() :: [String.t()]
   def builtins, do: @builtins
+
+  # `!cmd` is the person's own command, run where the session runs, in its workspace, and
+  # never sent to the agent as text; `!!cmd` keeps it from the agent (Decision 152,
+  # root Decision 813).
+  defp run_command(state, "!" <> command), do: state |> put_cmd("") |> run_shell(command)
 
   defp run_command(state, text) do
     sid = state.session_id
@@ -767,6 +794,8 @@ defmodule Troupe.UI.TUI.Server do
       :observer -> %{put_cmd(state, "") | focus: :observer, observer: %{cursor: 0}}
       {:sessions, ""} -> open_sessions(state)
       {:sessions, arg} -> resume_by_arg(state, arg)
+      {:new, arg} -> new_session(state, arg)
+      :back -> go_back(state)
       {:ok, _} -> state
       :ok -> state
       {:notice, text} -> notice(state, text)
@@ -787,6 +816,42 @@ defmodule Troupe.UI.TUI.Server do
   defp defined?(state, name),
     do: Enum.any?(state.commands, &(&1["name"] == name and &1["source"] in ["user", "project"]))
 
+  ## Shell mode (Decision 152)
+
+  defp run_shell(state, "!" <> command), do: start_shell(state, String.trim(command), false)
+  defp run_shell(state, command), do: start_shell(state, String.trim(command), true)
+
+  @shell_usage "type a command after ! to run it in the session's workspace; !! keeps it from the agent"
+
+  defp start_shell(state, "", _agent?), do: notice(state, @shell_usage)
+
+  defp start_shell(%{shell: %{command: running}} = state, _command, _agent?),
+    do: notice(state, "`#{running}` is still running: Esc kills it")
+
+  # The harness's refusal is the sentence: a collaborator is not the session's owner, a
+  # platform that allows only its own rules turns it off.
+  defp start_shell(state, command, agent?) do
+    case Client.shell_run(state.session_id, command, agent?) do
+      {:ok, run_id} -> %{state | shell: %{run_id: run_id, command: command}}
+      {:error, reason} -> notice(state, "! " <> to_message(reason))
+    end
+  end
+
+  # A command that ended as the kill went out is not news.
+  defp kill_shell(state, %{run_id: run_id}) do
+    case Client.shell_cancel(state.session_id, run_id) do
+      :ok -> state
+      {:error, "not found" <> _} -> %{state | shell: nil}
+      {:error, reason} -> notice(state, to_message(reason))
+    end
+  end
+
+  # The run this screen started has ended: Esc and Ctrl-C are theirs again.
+  defp shell_ended(%{shell: %{run_id: id}} = state, %{type: :user_shell, data: %{run_id: id}}),
+    do: %{state | shell: nil}
+
+  defp shell_ended(state, _event), do: state
+
   defp builtin("quit", _args, _state, _target), do: :quit
   defp builtin("settings", _args, _state, _target), do: :settings
   defp builtin("help", _args, _state, _target), do: :palette
@@ -799,6 +864,8 @@ defmodule Troupe.UI.TUI.Server do
     do: sources_command(state, "skills", String.trim(args))
 
   defp builtin("sessions", args, _state, _target), do: {:sessions, args}
+  defp builtin("new", args, _state, _target), do: {:new, args}
+  defp builtin("back", _args, _state, _target), do: :back
   defp builtin("hq", args, _state, _target), do: {:hq, args}
 
   defp builtin("watch", _args, state, _target),
@@ -1149,11 +1216,15 @@ defmodule Troupe.UI.TUI.Server do
   # Sessions this window offers to switch to: the ones the daemon has for the directory
   # the TUI was opened in that did something, spoke to a model or started a branch, plus
   # the session on screen (which may still be empty) so the list always says where you
-  # are. A branch is not one of them: it is a window of its parent's, counted on its row.
+  # are, and the one `/back` returns to, which `/new` left. A branch is not one of them: it
+  # is a window of its parent's, counted on its row.
   defp pickable_sessions(state) do
-    case Client.sessions({:local, state.workspace}) do
+    case Client.sessions({:local, here(state)}) do
       {:ok, sessions} ->
-        Enum.filter(sessions, &(&1.id == state.session_id or (&1.parent == nil and worked?(&1))))
+        Enum.filter(
+          sessions,
+          &(&1.id in [state.session_id, state.back] or (&1.parent == nil and worked?(&1)))
+        )
 
       {:error, _reason} ->
         []
@@ -1253,13 +1324,15 @@ defmodule Troupe.UI.TUI.Server do
   defp switch_to(%{session_id: sid} = state, %{id: sid}),
     do: notice(%{state | focus: :command, sessions: nil}, "already in this session")
 
+  # One another device holds, or one being erased, is not carried on here (root Decision
+  # 812): the sentence says why and what to do instead.
   defp switch_to(state, entry) do
-    case ensure_running(state, entry) do
-      {:ok, sid} ->
-        adopt(state, sid)
-
-      {:error, reason} ->
-        notice(state, "could not resume #{entry.id}: #{inspect(reason)}")
+    with nil <- Client.resume_refusal(entry),
+         {:ok, sid} <- ensure_running(state, entry) do
+      adopt(state, sid)
+    else
+      refusal when is_binary(refusal) -> notice(state, refusal)
+      {:error, reason} -> notice(state, Client.open_refusal(entry.id, reason))
     end
   end
 
@@ -1273,8 +1346,8 @@ defmodule Troupe.UI.TUI.Server do
   # Swaps the session this window shows: unsubscribe, subscribe, and rebuild every
   # window by folding the other log — the same function a restart uses, so there is
   # nothing session-specific left in the process but the name it is registered
-  # under, which follows (Decision 65).
-  defp adopt(state, sid) do
+  # under, which follows (Decision 65). The session left is the one `/back` returns to.
+  defp adopt(state, sid, said \\ nil) do
     previous = state.session_id
     :ok = Client.unsubscribe(previous)
     :ok = Client.subscribe(sid)
@@ -1283,6 +1356,7 @@ defmodule Troupe.UI.TUI.Server do
     state = %{
       state
       | session_id: sid,
+        back: previous,
         model: rebuild(sid),
         workspace: workspace_of(sid),
         agents: Client.commands(sid),
@@ -1303,7 +1377,68 @@ defmodule Troupe.UI.TUI.Server do
     }
 
     retire(previous)
-    state |> recheck_loop() |> notice("resumed #{sid}")
+    state |> recheck_loop() |> notice(said || "resumed #{sid}")
+  end
+
+  ## New sessions and the way back
+
+  # `/new` (root Decision 812, TUI Decision 151): a fresh session takes the screen, and the
+  # one that was on it carries on in the daemon, in the picker, and behind `/back`. Its
+  # command line is where its first line is typed.
+  defp new_session(state, args) do
+    with {:ok, kind} <- new_kind(String.split(args)),
+         {:ok, sid} <- open_new(state, kind) do
+      adopt(state, sid, "new session #{sid}; /back returns to #{state.session_id}")
+    else
+      :usage -> notice(state, "usage: /new [--private | --remote PROFILE | --branch]")
+      {:error, reason} -> notice(state, "no new session: " <> to_message(reason))
+    end
+  end
+
+  defp new_kind([]), do: {:ok, :local}
+  defp new_kind(["--private"]), do: {:ok, :private}
+  defp new_kind(["--branch"]), do: {:ok, :branch}
+  defp new_kind(["--remote", profile]), do: {:ok, {:remote, profile}}
+  defp new_kind(_words), do: :usage
+
+  # Here: the session on screen's directory, or with a plane's on screen the one this
+  # window was opened in, which is also the directory the picker lists. A branch is a fork
+  # of the session on screen, wherever it is.
+  defp open_new(state, :local), do: create_here(state, false)
+  defp open_new(state, :private), do: create_here(state, true)
+  defp open_new(state, :branch), do: Client.fork_session(state.session_id)
+
+  defp open_new(_state, {:remote, profile}) do
+    case ensure_plane(Client.default_plane()) do
+      nil -> {:error, "no plane; run troupe login <plane-url> first"}
+      origin -> Client.create_session(origin, %{profile: profile})
+    end
+  end
+
+  defp create_here(state, private?),
+    do: Client.create_session({:local, here(state)}, %{worktree: "never", private: private?})
+
+  defp here(state), do: if(Client.remote?(state.session_id), do: state.home, else: state.workspace)
+
+  # `/back` goes to the session focused before this one, and this one becomes the way
+  # back, as `cd -` does: one step, not a stack. One the daemon let go of is opened again,
+  # unless it can no longer be carried on here.
+  defp go_back(%{back: nil} = state),
+    do: notice(state, "no session to go back to; /sessions lists this directory's")
+
+  defp go_back(%{back: sid} = state) do
+    if Client.remote?(sid), do: adopt(state, sid), else: reopen(state, sid)
+  end
+
+  defp reopen(state, sid) do
+    with {:ok, row} <- Client.get_session({:local, here(state)}, sid),
+         nil <- Client.resume_refusal(row),
+         {:ok, sid} <- ensure_running(state, row) do
+      adopt(state, sid)
+    else
+      refusal when is_binary(refusal) -> notice(state, refusal)
+      {:error, reason} -> notice(state, Client.open_refusal(sid, reason))
+    end
   end
 
   defp rename(previous, sid) do
@@ -2505,7 +2640,7 @@ defmodule Troupe.UI.TUI.Server do
         _ -> model
       end
 
-    state = %{state | model: model}
+    state = shell_ended(%{state | model: model}, event)
     if event.type == :remote_status, do: recheck_loop(state), else: state
   end
 

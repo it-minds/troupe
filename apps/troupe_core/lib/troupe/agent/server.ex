@@ -51,7 +51,7 @@ defmodule Troupe.Agent.Server do
 
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
-  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions}
+  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions, Shell}
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Tools.{Output, ReadOutput}
@@ -168,6 +168,26 @@ defmodule Troupe.Agent.Server do
   @doc "A snapshot for the UI and for tests. Read-only; never used inside the loop."
   @spec snapshot(pid()) :: map()
   def snapshot(pid), do: :gen_statem.call(pid, :snapshot, 5_000)
+
+  @doc """
+  What a person's own command in this session runs with (Decision 813): the workspace and
+  its mount table, the config, and the definitions its policy is read from. Answered in
+  every state.
+  """
+  @spec shell_setup(pid()) :: %{
+          workspace: Troupe.Workspace.t(),
+          config: Config.t(),
+          definitions: Definitions.t()
+        }
+  def shell_setup(pid), do: :gen_statem.call(pid, :shell_setup, 5_000)
+
+  @doc """
+  A person's own command has ended. The root writes it as `user_shell` under `actor`, in
+  any state, and unless it was kept from the agent holds its note for the next model call
+  (Decision 813): it starts no turn.
+  """
+  @spec shell_ran(pid(), map(), Event.Actor.t() | nil) :: :ok
+  def shell_ran(pid, data, actor), do: :gen_statem.call(pid, {:shell_ran, data, actor}, 5_000)
 
   # -- init and replay --------------------------------------------------------
 
@@ -317,6 +337,10 @@ defmodule Troupe.Agent.Server do
 
   defp fold_event(%Event{type: "llm_error", data: data}, state), do: fold_stopped(state, data)
 
+  # A person's own command, which the next model call is given unless it was kept from the
+  # agent (Decision 813); the `user_input` from `shell` that gave it clears it below.
+  defp fold_event(%Event{type: "user_shell", data: data}, state), do: hold_shell(state, data)
+
   # A turn ends cancelled as well as at rest, and the next one counts what it costs from
   # nothing (Decision 769).
   defp fold_event(%Event{type: "cancelled", data: data}, state),
@@ -375,6 +399,11 @@ defmodule Troupe.Agent.Server do
   # A note from the harness is a `user_input` too, but one written in the middle of a turn,
   # which left the list the prompt shows alone when it was written, and does so here.
   defp fold_input(state, %{"source" => "harness"}), do: state
+
+  # The person's commands, given to the model before a call (Decision 813): written before
+  # the input that starts a turn, or between a tool exchange and the call after it, and the
+  # list the prompt shows is the turn's either way.
+  defp fold_input(state, %{"source" => "shell"}), do: %{state | shell_notes: []}
   defp fold_input(state, _data), do: show_todos(state)
 
   # Being finished is not visible in the conversation — a subagent's last message is
@@ -973,6 +1002,18 @@ defmodule Troupe.Agent.Server do
     {:keep_state_and_data, [{:reply, from, state.definitions}]}
   end
 
+  # A person's own command (Decision 813), in every state: what it runs with, and its end,
+  # written here so the log and what the next call is given agree.
+  defp common({:call, from}, :shell_setup, _state_name, state) do
+    setup = %{workspace: state.workspace, config: state.config, definitions: state.definitions}
+    {:keep_state_and_data, [{:reply, from, setup}]}
+  end
+
+  defp common({:call, from}, {:shell_ran, data, actor}, _state_name, state) do
+    log(state, :user_shell, data, actor)
+    {:keep_state, hold_shell(state, data), [{:reply, from, :ok}]}
+  end
+
   defp common(:info, message, state_name, state) do
     Logger.debug(
       "troupe agent #{State.label(state)} dropped #{inspect(message)} in #{state_name}"
@@ -1065,6 +1106,10 @@ defmodule Troupe.Agent.Server do
 
   defp accept_input(state, source, content, actor, meta) do
     if acceptable?(source, content) do
+      # The person's commands since the last call come first, in the order they happened:
+      # "the tests fail, fix them" after `!mix test` reads after the run it is about.
+      state = fold_shell(state)
+
       # Before the content, and carrying the author and the command id, which is what a
       # client's optimistic render reconciles against.
       log(
@@ -1158,6 +1203,24 @@ defmodule Troupe.Agent.Server do
     }
   end
 
+  # -- the person's own commands (Decision 813) -------------------------------
+
+  defp hold_shell(state, %{"agent" => true} = data),
+    do: %{state | shell_notes: state.shell_notes ++ [Shell.note(data)]}
+
+  defp hold_shell(state, _kept_from_the_agent), do: state
+
+  # Before a model call, and only there: never between a tool call and its results, since
+  # a call is only ever made with every result in. One user message for whatever ran since
+  # the last call, written as `user_input` from `shell` so a replay puts it back.
+  defp fold_shell(%State{shell_notes: []} = state), do: state
+
+  defp fold_shell(state) do
+    text = Enum.join(state.shell_notes, "\n\n")
+    log(state, :user_input, %{"source" => "shell", "text" => text})
+    %{state | conversation: state.conversation ++ [Message.user(text)], shell_notes: []}
+  end
+
   # -- turns ------------------------------------------------------------------
 
   defp start_turn(state) do
@@ -1166,7 +1229,8 @@ defmodule Troupe.Agent.Server do
         gate_halt(halt)
 
       :ok ->
-        {state, attached} = state |> load_instructions() |> attach_turn_context()
+        {state, attached} =
+          state |> fold_shell() |> load_instructions() |> attach_turn_context()
         definition = effective_definition(state)
         request = build_request(state, definition)
         {prefix, changed} = prefix_changes(state.prefix, request)

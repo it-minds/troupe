@@ -151,6 +151,10 @@ defmodule Troupe.Agent.State do
     # `thinking -> acting` is a state change: without this, one queued input would be
     # announced once per transition until the agent finally took it.
     queued: MapSet.new(),
+    # The person's own commands (`user_shell`, Decision 813) the root has not yet given
+    # its model, as the notes it will give it before its next call. Folded: a `user_shell`
+    # adds one, the `user_input` from `shell` that carried them clears them.
+    shell_notes: [],
     # How often this agent may start again within how many milliseconds before its Node
     # gives up (Decision 727), for a crash to tell whether it is the one that ends it.
     restart_limit: {3, 6_000}
@@ -210,6 +214,7 @@ defmodule Troupe.Agent.State do
           finish_summary: String.t() | nil,
           fake: pid() | atom() | nil,
           queued: MapSet.t(String.t()),
+          shell_notes: [String.t()],
           restart_limit: {pos_integer(), pos_integer()}
         }
 

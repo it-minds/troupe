@@ -24,7 +24,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
-import { COMMANDS, expandDefined } from "./commands.js";
+import { COMMANDS, DEFINED, expandDefined } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 
 interface Session {
@@ -91,6 +91,20 @@ export interface FakeDaemonOptions {
    * `config.set` with no `provider` is the model panel's, as an old one reads it.
    */
   servesKeys?: boolean;
+  /**
+   * The machine's config says `auto_approve: true`, so every session it starts approves
+   * every tool call itself, and a workspace's command asks before it is first sent
+   * (troupe Decision 814).
+   */
+  autoApprove?: boolean;
+}
+
+/** A workspace's command waiting on its question (troupe Decision 814). */
+interface AskedCommand {
+  sessionId: string;
+  name: string;
+  text: string;
+  commandId: string;
 }
 
 /** The `ui` keys the fake keeps (troupe #57), with their defaults: the daemon acts on none of them. */
@@ -192,6 +206,23 @@ function notify(ws: WebSocket, method: string, params: unknown): void {
   ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
 }
 
+/** The question a workspace's command asks before it is first sent, in the daemon's words (troupe Decision 814). */
+function commandQuestion(callId: string, name: string, text: string): Record<string, unknown> {
+  const file = `.troupe/commands/${name}.md`;
+  return {
+    call_id: callId,
+    agent_path: ["root"],
+    question: `/${name} comes with this workspace, in ${file}, and auto_approve is on: nothing will ask before the tools its prompt leads to run. Send the prompt below?`,
+    options: [
+      { label: "deny", description: `send nothing; /${name} asks again the next time it runs` },
+      { label: "once", description: "send it this time only" },
+      { label: "allow", description: `send it, and don't ask again in this workspace until ${file} changes` },
+    ],
+    multiple: false,
+    preview: text,
+  };
+}
+
 export class FakeDaemon {
   /** The token it serves with now; a `restart` draws a new one, as a daemon does. */
   token: string;
@@ -246,6 +277,15 @@ export class FakeDaemon {
   directories: string[] = ["/home/ada/project", "/home/ada/notes", "/home/ada/repo"];
   /** How long `subscribe` takes to answer: a busy machine, where a screen is up before its view is. */
   subscribeDelayMs = 0;
+  /** Whether sessions approve every tool call themselves, as `auto_approve: true` in the machine's config does. */
+  autoApprove: boolean;
+  /**
+   * The workspace's commands somebody answered `allow` for, as `<workspace> /<name>` beside
+   * the prompt its file had then (troupe Decision 814): another prompt asks again.
+   */
+  readonly commandsAllowed = new Map<string, string>();
+  /** Workspace commands waiting on their question, by the question's `call_id`. */
+  private readonly askedCommands = new Map<string, AskedCommand>();
 
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -269,6 +309,7 @@ export class FakeDaemon {
     this.env = opts.env ?? {};
     this.opencode = opts.opencode ?? { providers: [], default: null };
     this.servesKeys = opts.servesKeys ?? true;
+    this.autoApprove = opts.autoApprove ?? false;
     this.setupCompleted = opts.firstRun ? null : { completed_at: "2026-09-01T08:00:00Z", choice: "local", subject: null };
   }
 
@@ -366,6 +407,35 @@ export class FakeDaemon {
   ask(sessionId: string, question: Record<string, unknown>): LoggedEvent {
     const session = this.sessions.get(sessionId)!;
     return session.log.append("question_asked", { agent_path: ["root"], options: [], multiple: false, ...question });
+  }
+
+  /** A command's prompt, sent as the session's input under the `commands.run` that asked. */
+  private sendCommand(session: Session, text: string, commandId: string): void {
+    const actor = { kind: "user", subject: this.principal.subject };
+    session.log.append("input_queued", { command_id: commandId, author: this.principal.subject, text }, actor);
+    session.log.append("input_accepted", { command_id: commandId, author: this.principal.subject }, actor);
+    session.log.append("user_input", { command_id: commandId, text, source: "user" }, actor);
+  }
+
+  /**
+   * The answer to a workspace's command's question, read as the daemon reads it (troupe
+   * Decision 814): `allow` sends it and remembers its prompt, `once` sends it, and anything
+   * else sends nothing and says how to run it later.
+   */
+  private answerCommand(session: Session, asked: AskedCommand, text: string): void {
+    const answer = text.trim().toLowerCase();
+    const allow = ["allow", "always", "a"].includes(answer);
+    if (allow || ["once", "o", "yes", "y", "send"].includes(answer)) {
+      if (allow) this.commandsAllowed.set(`${session.workspace} /${asked.name}`, DEFINED[asked.name] ?? "");
+      this.sendCommand(session, asked.text, asked.commandId);
+      return;
+    }
+    const name = asked.name;
+    session.log.append("command_declined", {
+      name,
+      command_id: asked.commandId,
+      reason: `/${name} was not sent. Run /${name} again to be asked again; allow sends it from then on without asking, until .troupe/commands/${name}.md changes.`,
+    });
   }
 
   /** Make a session say something, so a test can watch it arrive on the right view. */
@@ -637,6 +707,12 @@ export class FakeDaemon {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         const actor = { kind: "user", subject: this.principal.subject };
         session.log.append("question_answered", { call_id: params["call_id"], text: params["text"] ?? "" }, actor);
+        const callId = String(params["call_id"] ?? "");
+        const asked = this.askedCommands.get(callId);
+        if (asked) {
+          this.askedCommands.delete(callId);
+          this.answerCommand(session, asked, String(params["text"] ?? ""));
+        }
         return reply(ws, id, { accepted: true });
       }
 
@@ -710,10 +786,16 @@ export class FakeDaemon {
         const text = expandDefined(name, String(params["arguments"] ?? ""));
         if (text === null) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "command", name } });
         const commandId = String(params["command_id"] ?? "");
-        const actor = { kind: "user", subject: this.principal.subject };
-        session.log.append("input_queued", { command_id: commandId, author: this.principal.subject, text }, actor);
-        session.log.append("input_accepted", { command_id: commandId, author: this.principal.subject }, actor);
-        session.log.append("user_input", { command_id: commandId, text, source: "user" }, actor);
+        // A workspace's command asks first while every tool call is approved unasked,
+        // unless its prompt, as the file has it now, was allowed before (troupe Decision 814).
+        const project = COMMANDS.find((c) => c.name === name)?.source === "project";
+        if (this.autoApprove && project && this.commandsAllowed.get(`${session.workspace} /${name}`) !== DEFINED[name]) {
+          const callId = `command-${this.nextId++}`;
+          this.askedCommands.set(callId, { sessionId: session.id, name, text, commandId });
+          session.log.append("question_asked", commandQuestion(callId, name, text));
+          return reply(ws, id, { accepted: true, command_id: commandId, question: callId });
+        }
+        this.sendCommand(session, text, commandId);
         return reply(ws, id, { accepted: true, command_id: commandId });
       }
 

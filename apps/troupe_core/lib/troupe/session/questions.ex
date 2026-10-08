@@ -17,12 +17,16 @@ defmodule Troupe.Session.Questions do
 
   alias Troupe.Session.Log
 
+  # `preview` is optional: text the question is about, which a client shows as it is
+  # beneath the question, such as the prompt a workspace's command would send (Decision
+  # 814).
   @type question :: %{
-          call_id: String.t(),
-          agent_path: [String.t()],
-          question: String.t(),
-          options: [%{label: String.t(), description: String.t() | nil}],
-          multiple: boolean()
+          required(:call_id) => String.t(),
+          required(:agent_path) => [String.t()],
+          required(:question) => String.t(),
+          required(:options) => [%{label: String.t(), description: String.t() | nil}],
+          required(:multiple) => boolean(),
+          optional(:preview) => String.t()
         }
 
   # `asked` is what the log says was asked and never answered, read back at start-up: the
@@ -176,7 +180,7 @@ defmodule Troupe.Session.Questions do
   def handle_info(_message, state), do: {:noreply, state}
 
   defp describe(question) do
-    %{
+    described = %{
       "call_id" => question.call_id,
       "agent_path" => question.agent_path,
       "question" => question.question,
@@ -186,5 +190,10 @@ defmodule Troupe.Session.Questions do
         end),
       "multiple" => question.multiple
     }
+
+    case question do
+      %{preview: preview} when is_binary(preview) -> Map.put(described, "preview", preview)
+      _ -> described
+    end
   end
 end

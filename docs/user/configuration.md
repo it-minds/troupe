@@ -242,11 +242,23 @@ you would change before changing anything.
 `/review the parser` sends that prompt with `the parser` in place of `$ARGUMENTS`, as if
 you had typed it; a prompt without the placeholder gets what you typed as a paragraph
 of its own. Both the terminal UI's and the desktop app's palettes list the commands in a
-Custom section, each with its description and the file it came from. The repository's
+Custom section, each with its description, the file it came from and what it sends: the
+detail under the list shows the prompt's first lines and how many more the file holds,
+since a description is only what the file says of itself. The repository's
 command wins over yours of the same name. A built-in's name, or an agent's, stays
 theirs: a file named `merge.md` is skipped, and the daemon's log says so. A repository's
 commands are read whether or not the workspace is trusted, since a command only sends a
 prompt, which goes through the session's approvals like anything typed.
+
+With `auto_approve` on, nothing asks before the tools a prompt leads to run, so a
+repository's command asks once before it is first sent: the session shows the question
+with the prompt under it, in either client, and you answer `deny` (nothing is sent, and
+the next `/review` asks again), `once` (send it this time) or `allow` (send it, and do not
+ask again in this workspace until the file changes). `allow` is kept in the daemon's
+state directory (`command-trust.json`), never in the repository, beside a hash of the
+prompt, so an edited command asks again and what you type after its name does not. Your
+own commands never ask, and neither does a repository on `trusted_workspaces`, whose
+config could turn `auto_approve` on by itself.
 
 ## Instruction files
 

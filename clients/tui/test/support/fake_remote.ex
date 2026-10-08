@@ -455,7 +455,8 @@ defmodule Troupe.FakeRemote do
   # Every method whose schema requires `session_id` on the worker (`Troupe.Protocol.Schema`).
   @addressed ~w(approval.respond blob.get fs.list fs.read fs.upload input.send presence.set
                 profile.switch session.archive session.erase session.get session.pin
-                session.unpin todo.edit tools.register tools.unregister turn.cancel)
+                session.unpin todo.edit tools.register tools.unregister turn.cancel
+                shell.run shell.cancel)
 
   # What `Troupe.Gateway.Dispatch` refuses a command without, beyond `session_id`, for the
   # commands this client sends. Accepting any spelling is how `profile.switch`,
@@ -568,6 +569,28 @@ defmodule Troupe.FakeRemote do
       }}, state}
   end
 
+  # The plane's fork (root Decision 812): a session of the parent's team and profile, whose
+  # stream starts with the parent's events, as a pod that copied them would serve it.
+  defp dispatch(state, _kind, "session.fork", params, _pid) do
+    case Map.fetch(state.sessions, params["session_id"]) do
+      {:ok, parent} ->
+        id = "s-" <> Base.encode16(:crypto.strong_rand_bytes(3), case: :lower)
+        child = %{parent | id: id, title: "fork of " <> parent.title, state: "active"}
+        state = put_in(state.sessions[id], child)
+
+        {{:ok,
+          %{
+            "session_id" => id,
+            "endpoint" => endpoint(state, child.worker),
+            "token" => token(id),
+            "state" => "active"
+          }}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
   defp dispatch(state, _kind, "session.open", params, _pid) do
     id = params["session_id"]
 
@@ -637,6 +660,29 @@ defmodule Troupe.FakeRemote do
 
     {{:ok, %{"accepted" => true}}, state}
   end
+
+  # A pod runs the person's command in its working copy (root Decision 813): here as if it
+  # printed one line and exited, which is all a client draws from.
+  defp dispatch(state, :worker, "shell.run", params, pid) do
+    id = session_of(state, pid)
+    run_id = "sh-#{length(state.calls)}"
+
+    data = %{
+      "run_id" => run_id,
+      "command" => params["command"],
+      "output" => "ran on the pod\n",
+      "ended" => "exited",
+      "exit_status" => 0,
+      "agent" => params["agent"] != false
+    }
+
+    {event, state} = append(state, id, "user_shell", data, command_id: params["command_id"])
+    push(state, id, notification(id, event))
+    {{:ok, %{"accepted" => true, "run_id" => run_id}}, state}
+  end
+
+  defp dispatch(state, :worker, "shell.cancel", params, _pid),
+    do: {{:ok, %{"accepted" => true, "run_id" => params["run_id"]}}, state}
 
   defp dispatch(state, _kind, "fs.list", params, pid) do
     _ = pid

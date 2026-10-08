@@ -489,8 +489,83 @@ it("with no file to ask about, it says so and opens nothing", async () => {
   assert.equal(vscode.window.terminals.length, count);
 });
 
+// Issue #378: "Troupe" in the terminal's profile menu (Decision 816).
+
+it("the Troupe profile is a terminal whose program is troupe, at the active editor's folder", async () => {
+  await closeAll();
+  mode("stay");
+  await edit("beta");
+  const before = (await calls(0)).length;
+
+  await profile();
+  const call = (await calls(before + 1))[before];
+  assert.ok(call);
+  samePath(call.cwd, folder("beta"));
+  assert.equal(call.args[0], "--workspace");
+  samePath(call.args[1] ?? "", folder("beta"));
+  assert.equal(call.args.length, 2);
+
+  // No shell with a line typed into it: troupe is what the terminal runs, a .cmd through
+  // cmd.exe as the Settings view runs it, never the extensionless file beside it.
+  await until(() => named("Troupe: beta").length === 1, "beta's terminal from the profile");
+  const options = named("Troupe: beta")[0]?.creationOptions as vscode.TerminalOptions;
+  if (process.platform === "win32") {
+    assert.match(options.shellPath ?? "", /cmd(\.exe)?$/i);
+    assert.match(String(options.shellArgs), /^\/d \/s \/c ".*troupe\.cmd --workspace /i);
+  } else {
+    samePath(options.shellPath ?? "", path.join(work, "bin", "troupe"));
+  }
+  samePath(options.cwd instanceof vscode.Uri ? options.cwd.fsPath : String(options.cwd), folder("beta"));
+});
+
+it("a profile is a new terminal, and Troupe: Open then shows the folder's first", async () => {
+  const before = (await calls(0)).length;
+
+  await profile();
+  await calls(before + 1);
+  await until(() => named("Troupe: beta").length === 2, "a second terminal from the profile");
+
+  assert.deepEqual(await open(), { opened: vscode.Uri.file(folder("beta")).fsPath, terminal: "Troupe: beta", reused: true });
+  await wait(2000);
+  assert.equal((await calls(0)).length, before + 1);
+  assert.equal(named("Troupe: beta").length, 2);
+});
+
+it("the profile's terminal closes when troupe exits", async () => {
+  await closeAll();
+  mode("exit0");
+  await edit("gamma");
+  const before = (await calls(0)).length;
+
+  await profile();
+  samePath((await calls(before + 1))[before]?.cwd ?? "", folder("gamma"));
+  await until(() => named("Troupe: gamma").length === 0, "gamma's terminal closed");
+});
+
+it("with no troupe, the profile opens no terminal", async () => {
+  await closeAll();
+  await edit("gamma");
+  const before = (await calls(0)).length;
+
+  await setting("path", path.join(work, "nowhere", "troupe"), async () => {
+    await profile().catch(() => undefined);
+    await wait(2000);
+    assert.equal(vscode.window.terminals.length, 0);
+    assert.equal((await calls(0)).length, before);
+  });
+});
+
 async function open() {
   return vscode.commands.executeCommand<Opened>("troupe.open");
+}
+
+// What the terminal's profile menu does with "Troupe": a terminal from the extension's
+// profile, where the menu is (here the panel's), with no folder of VS Code's own choosing.
+async function profile() {
+  await vscode.commands.executeCommand("workbench.action.createTerminalEditor", {
+    config: { extensionIdentifier: "objective-mj.troupe", id: "troupe.tui", title: "Troupe" },
+    location: vscode.TerminalLocation.Panel,
+  });
 }
 
 function terminalTab(name: string) {

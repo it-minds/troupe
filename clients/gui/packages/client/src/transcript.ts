@@ -79,6 +79,11 @@ export type Entry =
       multiple: boolean;
       asked: "agent" | "budget";
       /**
+       * Text the question is about, shown as it is beneath it: the prompt a workspace's
+       * command would send, when it asks before it is first sent (troupe Decision 814).
+       */
+      preview?: string;
+      /**
        * The answer's text once given: for the budget question `allow`, `always` or `deny`,
        * and for the failure guard's `stop` or `continue`, which the harness says itself
        * when nobody is there to ask.
@@ -647,6 +652,7 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
         return { ...next, entries: [...state.entries, budgetQuestion(base, callId, question, options)] };
       }
       if (hasQuestion(state, callId)) return { ...next, entries: reopen(state.entries, callId) };
+      const preview = d.data["preview"];
       return {
         ...next,
         entries: [
@@ -659,12 +665,18 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
             options: optionsOf(d.data["options"]),
             multiple: d.data["multiple"] === true,
             asked: "agent",
+            ...(typeof preview === "string" ? { preview } : {}),
             answer: undefined,
             closed: false,
           },
         ],
       };
     }
+
+    // A workspace's command that asked before it was first sent and was not (troupe
+    // Decision 814): the harness's sentence says how to run it later.
+    case "command_declined":
+      return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: str(d.data["reason"], "the command was not sent") }] };
 
     // The harness's own word on its question, beside the person's answer or instead of
     // it: under `approvals: deny` nobody is asked, and the budget says `deny` and the
