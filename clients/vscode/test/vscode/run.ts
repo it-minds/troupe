@@ -1,6 +1,7 @@
 // `pnpm test:vscode`: suite.ts inside a real VS Code, on a workspace of four roots, with a
 // fake `troupe` that writes down where it was started and with what, and then waits, quits
-// or fails as it is told.
+// or fails as it is told. Then startup.ts in two more, on one folder, with
+// troupe.openOnFolderOpen on.
 //
 // The VS Code is downloaded into .vscode-test/ (the latest stable, or
 // TROUPE_VSCODE_VERSION), or is the one TROUPE_VSCODE_EXECUTABLE names. Either way it runs
@@ -152,47 +153,66 @@ async function main() {
   const workspace = path.join(work, "four.code-workspace");
   fs.writeFileSync(workspace, JSON.stringify({ folders: folders.map((p) => ({ path: p })) }, null, 2));
 
-  const userData = path.join(base, "u");
-  fs.rmSync(userData, { recursive: true, force: true });
-  fs.mkdirSync(path.join(userData, "User"), { recursive: true });
-  fs.writeFileSync(
-    path.join(userData, "User", "settings.json"),
-    JSON.stringify(
-      {
-        "troupe.path": path.join(bin, "troupe"),
-        "security.workspace.trust.enabled": false,
-        "terminal.integrated.enablePersistentSessions": false,
-        "telemetry.telemetryLevel": "off",
-        "update.mode": "none",
-        "window.restoreWindows": "none",
-        "workbench.startupEditor": "none",
-      },
-      null,
-      2,
-    ),
-  );
-
   const executable = process.env["TROUPE_VSCODE_EXECUTABLE"];
   const which = executable
     ? { vscodeExecutablePath: executable }
     : { version: process.env["TROUPE_VSCODE_VERSION"] ?? "stable", cachePath: path.join(base, "vscode") };
 
-  await runTests({
-    ...which,
-    extensionDevelopmentPath: root,
-    extensionTestsPath: path.join(__dirname, "suite.js"),
-    extensionTestsEnv: { TROUPE_TEST_WORK: work },
-    launchArgs: [
-      workspace,
-      "--user-data-dir",
-      userData,
-      "--extensions-dir",
-      path.join(base, "x"),
-      "--disable-extensions",
-      "--skip-welcome",
-      "--skip-release-notes",
-    ],
-  });
+  // The VS Code at `open`, with its own user data (`settings` on top of the suite's) and
+  // extensions directories, running `suite` from this directory with `env`.
+  const session = (open: string, data: string, settings: object, suite: string, env: Record<string, string> = {}) => {
+    const userData = path.join(base, data);
+    fs.rmSync(userData, { recursive: true, force: true });
+    fs.mkdirSync(path.join(userData, "User"), { recursive: true });
+    fs.writeFileSync(
+      path.join(userData, "User", "settings.json"),
+      JSON.stringify(
+        {
+          "troupe.path": path.join(bin, "troupe"),
+          "security.workspace.trust.enabled": false,
+          "terminal.integrated.enablePersistentSessions": false,
+          "telemetry.telemetryLevel": "off",
+          "update.mode": "none",
+          "window.restoreWindows": "none",
+          "workbench.startupEditor": "none",
+          ...settings,
+        },
+        null,
+        2,
+      ),
+    );
+
+    return runTests({
+      ...which,
+      extensionDevelopmentPath: root,
+      extensionTestsPath: path.join(__dirname, suite),
+      extensionTestsEnv: { TROUPE_TEST_WORK: work, ...env },
+      launchArgs: [
+        open,
+        "--user-data-dir",
+        userData,
+        "--extensions-dir",
+        path.join(base, "x"),
+        "--disable-extensions",
+        "--skip-welcome",
+        "--skip-release-notes",
+      ],
+    });
+  };
+
+  await session(workspace, "u", {}, "suite.js");
+
+  // One folder, opened with Troupe set to open with it: it opens, and with a Troupe terminal
+  // there before the extension starts, standing in for what a reload leaves, it does not
+  // open again (startup.ts). runTests starts VS Code with --disable-workspace-trust, so the
+  // untrusted folder is the unit tests'.
+  const epsilon = path.join(work, "epsilon");
+  fs.mkdirSync(epsilon, { recursive: true });
+  fs.writeFileSync(path.join(bin, "mode"), "stay");
+  const on = { "troupe.openOnFolderOpen": true };
+
+  await session(epsilon, "v", on, "startup.js", { TROUPE_TEST_STARTUP: "opens" });
+  await session(epsilon, "v", on, "startup.js", { TROUPE_TEST_STARTUP: "reload" });
 }
 
 main().catch((error) => {

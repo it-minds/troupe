@@ -3,9 +3,12 @@
 // the editor area to tile beside the files, rooted at the folder the work is in. Troupe's
 // other command lines from the palette (resume, run, doctor, config), and "Ask Troupe About
 // This File" from the explorer and the editor, each typed into that folder's terminal.
-// Beside it in the side bar, what Troupe's settings and models are for that folder, as
-// Troupe itself says. The extension is a door to the TUI and nothing more: it sends nothing
-// anywhere and keeps no data of its own.
+// "Troupe" in the terminal's profile menu, a terminal whose program is the TUI; and, when
+// the person turns it on, Troupe opened as the window opens a folder. Beside it in the side
+// bar, what Troupe's settings and models are for that folder, as Troupe itself says. The
+// extension is a door to the TUI and nothing more: it sends nothing anywhere and keeps
+// nothing of its own but which terminal is which folder's, by the terminal's process id, in
+// the workspace's storage for a window reload (startup.ts).
 //
 // What it decides with (the folder, the program, the line for the shell, the sentence when
 // Troupe is missing, the rows of the settings and of the models) is in the modules beside
@@ -15,11 +18,13 @@
 import * as os from "node:os";
 import * as vscode from "vscode";
 import { findTroupe, type Missing } from "./binary.js";
-import { chooseFolder } from "./folder.js";
+import { chooseFolder, terminalName } from "./folder.js";
 import { INSTALL_URL, machineName, missingMessage } from "./host.js";
 import { mention, typed, type Command } from "./lines.js";
+import { invocation } from "./run.js";
 import { SettingsView } from "./settingsView.js";
 import { commandLine, shellOf } from "./shell.js";
+import { atStart, fromBefore } from "./startup.js";
 
 /**
  * What a command did. `executeCommand` returns it, which is what the tests read. `busy`:
@@ -43,19 +48,28 @@ interface Tracked {
   busy: boolean;
 }
 
-// What `open` works with: the terminals, the side bar's list to tell when they change, and
-// the icon their tabs carry.
+// What `open` works with: the terminals, the side bar's list to tell when they change, the
+// icon their tabs carry, and the workspace's storage, where each folder's terminal's process
+// id is kept under KEPT.
 interface Door {
   tracked: Map<string, Tracked>;
   list: Folders;
   icon: { light: vscode.Uri; dark: vscode.Uri };
+  state: vscode.Memento;
 }
+
+const KEPT = "troupe.terminals";
 
 export function activate(context: vscode.ExtensionContext): void {
   const tracked = new Map<string, Tracked>();
   const list = new Folders(tracked);
   const media = (file: string) => vscode.Uri.joinPath(context.extensionUri, "media", file);
-  const door: Door = { tracked, list, icon: { light: media("troupe-light.svg"), dark: media("troupe.svg") } };
+  const door: Door = {
+    tracked,
+    list,
+    icon: { light: media("troupe-light.svg"), dark: media("troupe.svg") },
+    state: context.workspaceState,
+  };
 
   // The activity bar's Troupe opens Troupe as it shows its list: the button is the door, and
   // the list is for another folder of the workspace. Where opening would mean a question,
@@ -109,15 +123,128 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("troupe.refreshSettings", () => settings.refresh()),
     vscode.commands.registerCommand("troupe.refreshModels", () => settings.refreshModels()),
     vscode.window.onDidCloseTerminal((terminal) => {
-      for (const [key, t] of tracked) if (t.terminal === terminal) tracked.delete(key);
+      for (const [key, t] of tracked) if (t.terminal === terminal) forget(door, key);
       list.changed();
+    }),
+    // A terminal of Troupe's that `open` did not make: the profile's, which VS Code makes
+    // from what `profile` returns. It is the folder's when the folder has none.
+    vscode.window.onDidOpenTerminal((terminal) => {
+      const folder = vscode.workspace.workspaceFolders?.find((f) => terminal.name === terminalName(f.name));
+      if (folder !== undefined && !tracked.has(folder.uri.toString())) remember(door, folder, terminal);
     }),
     vscode.window.onDidStartTerminalShellExecution((e) => busy(e.terminal, true)),
     vscode.window.onDidEndTerminalShellExecution((e) => busy(e.terminal, false)),
+    vscode.window.registerTerminalProfileProvider("troupe.tui", { provideTerminalProfile: () => profile(door) }),
   );
+
+  void restore(door).then(() => whenFolderOpens(door, context));
 }
 
 export function deactivate(): void {}
+
+// The folders' terminals from before a window reload, which VS Code gives back with their
+// processes and without their names: the one whose process is the one kept for a folder, or
+// one still named for it (startup.ts). Whether anything runs in one is not known, so it is
+// taken as busy, and only shown.
+async function restore(door: Door) {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const terminals = await Promise.all(
+    vscode.window.terminals.map(async (terminal) => ({ terminal, name: terminal.name, pid: await processOf(terminal) })),
+  );
+  const found = fromBefore(
+    folders.map((f) => ({ key: f.uri.toString(), name: f.name })),
+    door.state.get<Record<string, number>>(KEPT, {}),
+    terminals,
+  );
+
+  const kept: Record<string, number> = {};
+  for (const folder of folders) {
+    const key = folder.uri.toString();
+    const terminal = found.get(key);
+    if (terminal === undefined || door.tracked.has(key)) continue;
+    door.tracked.set(key, { folder, terminal, busy: true });
+    const pid = terminals.find((t) => t.terminal === terminal)?.pid;
+    if (pid !== undefined) kept[key] = pid;
+  }
+  await door.state.update(KEPT, kept);
+  door.list.changed();
+}
+
+// A folder's terminal, and its process kept for after a reload.
+function remember(door: Door, folder: vscode.WorkspaceFolder, terminal: vscode.Terminal) {
+  const key = folder.uri.toString();
+  door.tracked.set(key, { folder, terminal, busy: true });
+  door.list.changed();
+
+  void processOf(terminal).then((pid) => {
+    if (pid !== undefined && door.tracked.get(key)?.terminal === terminal)
+      void door.state.update(KEPT, { ...door.state.get<Record<string, number>>(KEPT, {}), [key]: pid });
+  });
+}
+
+function forget(door: Door, key: string) {
+  door.tracked.delete(key);
+  const kept = { ...door.state.get<Record<string, number>>(KEPT, {}) };
+  delete kept[key];
+  void door.state.update(KEPT, kept);
+}
+
+// A terminal's process id; undefined for one whose process has not started in five seconds.
+function processOf(terminal: vscode.Terminal): Promise<number | undefined> {
+  return Promise.race([Promise.resolve(terminal.processId), new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 5000))]);
+}
+
+// `troupe.openOnFolderOpen`: Troupe opened as the window opens, as Troupe: Open opens it, but
+// not in a workspace that is not trusted, and not again after a reload (startup.ts). A
+// workspace trusted later, at VS Code's question as it opens or from Restricted Mode's
+// banner, opens it then.
+function whenFolderOpens(door: Door, context: vscode.ExtensionContext) {
+  const now = () => {
+    const config = vscode.workspace.getConfiguration("troupe");
+    return atStart({
+      enabled: config.get<boolean>("openOnFolderOpen", false),
+      trusted: vscode.workspace.isTrusted,
+      folders: vscode.workspace.workspaceFolders?.length ?? 0,
+      open: door.tracked.size > 0,
+    });
+  };
+
+  const start = now();
+  if ("open" in start) void open(door, {}, { open: true });
+  else if (start.not === "untrusted")
+    context.subscriptions.push(vscode.workspace.onDidGrantWorkspaceTrust(() => "open" in now() && void open(door, {}, { open: true })));
+}
+
+// "Troupe" in the terminal's profile menu: a new terminal whose program is the TUI, at the
+// folder Troupe: Open would choose, `troupe` found as Open finds it and started as the
+// Settings view starts it (a `.cmd` through cmd.exe). VS Code makes the terminal from what
+// this returns, where the menu was, and closes it when the TUI exits. A profile is a new
+// terminal, so this one does not reuse the folder's (Decision 816). With nothing to make (no
+// folder, the question dismissed, no `troupe`), Open's sentence is said, and VS Code is
+// handed an error with no message, which it shows as nothing.
+async function profile(door: Door): Promise<vscode.TerminalProfile> {
+  const folder = await folderFor(door, {});
+  if (!("uri" in folder)) throw new Error("");
+
+  const found = locate();
+  if ("missing" in found) {
+    tell(found);
+    throw new Error("");
+  }
+
+  const config = vscode.workspace.getConfiguration("troupe");
+  const line = typed({ open: true }, folder.uri.fsPath, words(config.get<unknown>("args")));
+  const run = invocation(found.path, line.args, process.platform, process.env["ComSpec"]);
+
+  return new vscode.TerminalProfile({
+    name: terminalName(folder.name),
+    cwd: folder.uri,
+    iconPath: door.icon,
+    shellPath: run.file,
+    // A string is the command line as it is, on Windows, which cmd.exe's `/s` needs.
+    shellArgs: run.verbatim ? run.args.join(" ") : run.args,
+  });
+}
 
 // `folder`: the one asked for. `quiet`: opened by showing the side bar, which says itself
 // that there is no folder, and whose list is the question when there are several.
@@ -129,34 +256,10 @@ async function open(
   command: Command | ((folder: vscode.WorkspaceFolder) => Thenable<Command | undefined>),
 ): Promise<Opened> {
   const { tracked } = door;
-  const folders = vscode.workspace.workspaceFolders ?? [];
-  const document = vscode.window.activeTextEditor?.document.uri;
-  const active = vscode.window.activeTerminal;
+  const folder = await folderFor(door, how);
+  if (!("uri" in folder)) return folder;
 
-  const choice = chooseFolder({
-    given: how.folder && vscode.workspace.getWorkspaceFolder(how.folder),
-    editor: document && vscode.workspace.getWorkspaceFolder(document),
-    terminal: [...tracked.values()].find((t) => t.terminal === active)?.folder,
-    folders,
-  });
-
-  if ("none" in choice) {
-    if (how.quiet) return { noFolder: true };
-    void vscode.window
-      .showInformationMessage("Troupe opens in a folder: open one first.", "Open Folder…")
-      .then((pick) => pick && vscode.commands.executeCommand("workbench.action.files.openFolder"));
-    return { noFolder: true };
-  }
-
-  if ("ask" in choice && how.quiet) return { cancelled: true };
-
-  const folder =
-    "folder" in choice
-      ? choice.folder
-      : await vscode.window.showWorkspaceFolderPick({ placeHolder: "Open Troupe in which folder?" });
-  if (folder === undefined) return { cancelled: true };
-
-  const name = `Troupe: ${folder.name}`;
+  const name = terminalName(folder.name);
   const key = folder.uri.toString();
   const existing = tracked.get(key) ?? adopt(door, folder, name);
 
@@ -199,10 +302,42 @@ async function open(
 
   if (shell !== undefined) terminal.sendText(commandLine(shell, found.path, line.args, line.exit));
   terminal.show();
-  tracked.set(key, { folder, terminal, busy: true });
-  door.list.changed();
+  remember(door, folder, terminal);
 
   return { opened: folder.uri.fsPath, terminal: name, reused: false };
+}
+
+// The folder Troupe opens in (folder.ts), or why there is none: no folder open, which is
+// said unless `quiet`, or the question dismissed, or, when `quiet`, not asked.
+async function folderFor(
+  door: Door,
+  how: { folder?: vscode.Uri; quiet?: boolean },
+): Promise<vscode.WorkspaceFolder | { noFolder: true } | { cancelled: true }> {
+  const document = vscode.window.activeTextEditor?.document.uri;
+  const active = vscode.window.activeTerminal;
+
+  const choice = chooseFolder({
+    given: how.folder && vscode.workspace.getWorkspaceFolder(how.folder),
+    editor: document && vscode.workspace.getWorkspaceFolder(document),
+    terminal: [...door.tracked.values()].find((t) => t.terminal === active)?.folder,
+    folders: vscode.workspace.workspaceFolders ?? [],
+  });
+
+  if ("none" in choice) {
+    if (how.quiet) return { noFolder: true };
+    void vscode.window
+      .showInformationMessage("Troupe opens in a folder: open one first.", "Open Folder…")
+      .then((pick) => pick && vscode.commands.executeCommand("workbench.action.files.openFolder"));
+    return { noFolder: true };
+  }
+
+  if ("ask" in choice && how.quiet) return { cancelled: true };
+
+  const folder =
+    "folder" in choice
+      ? choice.folder
+      : await vscode.window.showWorkspaceFolderPick({ placeHolder: "Open Troupe in which folder?" });
+  return folder ?? { cancelled: true };
 }
 
 // "Ask Troupe About This File" (or Folder): Troupe at the folder `target` is in, its path in
@@ -275,17 +410,14 @@ function location(openIn: string): vscode.TerminalLocation | vscode.TerminalEdit
   return { viewColumn: openIn === "beside" ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active };
 }
 
-// A terminal of ours from before the window reloaded: VS Code keeps it, and its process,
-// across the reload, and this map does not survive one. Whether anything runs in it is not
-// known, so it is only shown.
+// A terminal named as ours that this map does not know, such as one a command finds before
+// `restore` has looked. Whether anything runs in it is not known, so it is only shown.
 function adopt(door: Door, folder: vscode.WorkspaceFolder, name: string) {
   const terminal = vscode.window.terminals.find((t) => t.name === name);
   if (terminal === undefined) return undefined;
 
-  const t = { folder, terminal, busy: true };
-  door.tracked.set(folder.uri.toString(), t);
-  door.list.changed();
-  return t;
+  remember(door, folder, terminal);
+  return door.tracked.get(folder.uri.toString());
 }
 
 // The side bar's list: the workspace's folders, each opening Troupe there, those with a

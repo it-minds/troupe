@@ -1,4 +1,4 @@
-// Which workspace folder Troupe opens in.
+// Which workspace folder Troupe opens in, and the name of its terminal.
 //
 // The one asked for, a row of the side bar's list; then the active editor's folder, which
 // in a multi-root workspace is the one being worked on;
@@ -7,6 +7,14 @@
 // more with nothing to go by is a question, and none at all is nothing to open.
 
 export type Choice<F> = { folder: F } | { ask: readonly F[] } | { none: true };
+
+/**
+ * The name of a folder's Troupe terminal, which the profile's terminal has too, and by
+ * which a terminal Troupe did not open itself is known as Troupe's (startup.ts).
+ */
+export function terminalName(folder: string): string {
+  return `Troupe: ${folder}`;
+}
 
 export function chooseFolder<F>(from: {
   given?: F | undefined;
