@@ -229,9 +229,8 @@ From Anthropic's documentation as read on 2026-10-08, none of it tried against t
 Claude Opus 5.5 on Anthropic's API, with this branch's installed build, on Windows,
 2026-10-08. Each configuration ran `follow_up` five times. The bench's config carried Opus
 5.5's list prices: $4 in, $20 out, $0.20 for a cache read and $5 for a cache write, per
-million tokens. The 20 runs cost $0.52 in all. The smoke suite, with and without
-`stable`, was not run: each of those two runs had a cap of $17.76, and that did not fit
-the run's $30 limit.
+million tokens. The 20 runs cost $0.52 in all. The smoke suite ran afterwards, with and
+without `stable` (below).
 
 | | baseline | `drop_block` | `stable` | both |
 |---|---:|---:|---:|---:|
@@ -269,8 +268,28 @@ What they say:
 - **Not measured live:**
   - an enforced account, where the baseline would be refused and sent again;
   - Sonnet 5.5 and Fable 5.1;
-  - tasks with no instruction files (the smoke suite);
   - a session longer than two turns.
+
+The smoke suite has four one-turn tasks with no instruction files: `write_file`,
+`fix_test`, `delegate` and `recover`. It ran three times each, with and without `stable`,
+on the same model and build. The two runs cost $0.44 together.
+
+| | baseline | `stable` |
+|---|---:|---:|
+| runs that succeeded | 12 of 12 | 12 of 12 |
+| model calls | 42 | 42 |
+| calls whose system prompt changed | 0 | 0 |
+| tokens sent uncached (fresh, or written to the cache) | 22,661 | 16,762 |
+| tokens read from the cache | 173,396 | 179,446 |
+| output tokens | 4,149 | 4,282 |
+| cost | $0.231 | $0.205 |
+| median wall clock | 6.2 s | 5.8 s |
+
+With one turn and no instruction files, the system prompt never changes, so the two
+configurations send almost the same thing. Every task still succeeded under `stable`,
+and it sent 26% fewer uncached tokens and cost 11% less. Most of that difference is in
+`write_file` ($0.045 against $0.024); the other three tasks cost within a few tenths of
+a cent of each other.
 
 To run it again, in PowerShell, where `$m` is the model as `troupe models` addresses it:
 
