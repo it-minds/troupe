@@ -55,6 +55,7 @@ defmodule Troupe.InterruptTest do
   test "the commands that print and may wait are watched, and the ones that read keys not" do
     for argv <- [
           ["run", "x", "--headless"],
+          ["resume", "latest", "--headless", "x"],
           ["daemon", "run"],
           ["daemon"],
           ["login", "https://plane.example"],

@@ -108,6 +108,18 @@ defmodule Troupe.Commands do
   @spec builtins() :: [entry()]
   def builtins do
     [
+      entry("new", "session", "Start a fresh session here, without leaving the client",
+        usage: "/new [--private | --remote PROFILE | --branch]",
+        args: [arg("flags", false, "text")],
+        detail:
+          "Opens a new session in this workspace and takes the screen; the one you left " <>
+            "keeps running, stays in /sessions, and /back returns to it. --private makes " <>
+            "it a private session, --remote PROFILE starts it on that profile of the plane " <>
+            "you are signed in to, and --branch forks the one on screen: a session of its " <>
+            "own that starts from this conversation as it stands. Type its first line on " <>
+            "the command line it opens with.",
+        example: "/new --branch"
+      ),
       entry("cancel", "session", "Stop a branch mid-turn and remove its window",
         usage: "/cancel [window]",
         args: [window()],
@@ -171,6 +183,12 @@ defmodule Troupe.Commands do
         detail:
           "Enter switches the window to one; /resume 2 or /resume <id> goes straight there.",
         example: "/resume 2"
+      ),
+      entry("back", "navigate", "Go back to the session you were in before",
+        usage: "/back",
+        detail:
+          "Returns to the session you left with /new, /resume or HQ; /back again comes " <>
+            "back here. One step: /sessions lists the rest."
       ),
       entry("hq", "navigate", "HQ: a plane's teams, profiles and sessions",
         aliases: ["remote"],

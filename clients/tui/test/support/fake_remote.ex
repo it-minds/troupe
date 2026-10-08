@@ -568,6 +568,28 @@ defmodule Troupe.FakeRemote do
       }}, state}
   end
 
+  # The plane's fork (root Decision 812): a session of the parent's team and profile, whose
+  # stream starts with the parent's events, as a pod that copied them would serve it.
+  defp dispatch(state, _kind, "session.fork", params, _pid) do
+    case Map.fetch(state.sessions, params["session_id"]) do
+      {:ok, parent} ->
+        id = "s-" <> Base.encode16(:crypto.strong_rand_bytes(3), case: :lower)
+        child = %{parent | id: id, title: "fork of " <> parent.title, state: "active"}
+        state = put_in(state.sessions[id], child)
+
+        {{:ok,
+          %{
+            "session_id" => id,
+            "endpoint" => endpoint(state, child.worker),
+            "token" => token(id),
+            "state" => "active"
+          }}, state}
+
+      :error ->
+        {{:error, -32_005, "no such session"}, state}
+    end
+  end
+
   defp dispatch(state, _kind, "session.open", params, _pid) do
     id = params["session_id"]
 

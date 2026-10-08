@@ -184,7 +184,7 @@ defmodule Troupe.CLI.Runner do
   @spec needs_terminal({:ok, CLI.args()} | {:error, String.t()}, boolean()) ::
           {:ok, CLI.args()} | {:error, String.t()} | {:no_terminal, String.t()}
   def needs_terminal({:ok, %{mode: mode} = args}, false)
-      when mode in [:tui, :resume] or (mode == :run and not args.headless) do
+      when mode == :tui or (mode in [:run, :resume] and not args.headless) do
     {:no_terminal,
      "troupe: stdout is not a terminal; run a task with `troupe run \"task\" --headless`, " <>
        "or set up a provider with `troupe config`"}
@@ -199,7 +199,7 @@ defmodule Troupe.CLI.Runner do
   the key themselves, or are over before it could matter.
   """
   @spec interruptible?({:ok, CLI.args()} | term()) :: boolean()
-  def interruptible?({:ok, %{mode: :run} = args}), do: args.headless
+  def interruptible?({:ok, %{mode: mode} = args}) when mode in [:run, :resume], do: args.headless
 
   def interruptible?({:ok, %{mode: mode}}),
     do: mode in [:daemon, :login, :logout, :whoami, :models, :doctor, :bench, :config_pull]
@@ -274,25 +274,106 @@ defmodule Troupe.CLI.Runner do
     }
   end
 
-  # With an id: reopen that session. Without one: reopen the one this directory
-  # last worked in and land on the session picker, so the others are one keypress away.
+  # `troupe resume` (Decision 812). With an id: that session, whichever directory it is in.
+  # With `latest`, or `--private`: the newest (private) session this directory has,
+  # straight in. With neither: the newest on the session picker, so the others are one
+  # keypress away. One that cannot be carried on here is refused in the words the TUI
+  # says it in, and `--headless "message"` runs one turn on it and prints it as
+  # `troupe run --headless` does.
   defp resume(args) do
-    sid = args.session_id || newest(args.workspace)
-    page = if args.session_id, do: [], else: [page: :sessions]
+    # Said before this VM first speaks to the daemon, as `run/1` says it.
+    if args.headless, do: Application.put_env(:troupe, :client_name, client_name(args))
 
-    case sid && Client.open_session({:local, args.workspace}, sid, :read, []) do
-      {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
-      nil -> fail("no session to resume in #{Troupe.Paths.display(args.workspace)}")
-      {:error, reason} -> fail("could not resume: #{inspect(reason)}")
+    with {:ok, row} <- resumable(args),
+         nil <- Client.resume_refusal(row),
+         {:ok, sid} <- open(row) do
+      if args.headless,
+        do: one_turn(sid, args.task),
+        else: tui(sid, resume_page(args) ++ mouse_opts(args))
+    else
+      refusal when is_binary(refusal) -> fail("troupe: " <> refusal)
+      {:error, sentence} -> fail("troupe: " <> sentence)
     end
   end
 
-  # The most recently active session in this directory, as the daemon lists them.
-  defp newest(workspace) do
-    case Client.sessions({:local, workspace}) do
-      {:ok, [entry | _]} -> entry.id
-      _ -> nil
+  defp open(row) do
+    case Client.open_session(row.origin, row.id, :read, []) do
+      {:ok, sid} -> {:ok, sid}
+      {:error, reason} -> {:error, Client.open_refusal(row.id, reason)}
     end
+  end
+
+  defp resume_page(%{session_id: nil, latest: false}), do: [page: :sessions]
+  defp resume_page(_args), do: []
+
+  defp resumable(%{session_id: sid} = args) when is_binary(sid) do
+    case Client.get_session({:local, args.workspace}, sid) do
+      {:ok, row} -> {:ok, row}
+      {:error, reason} -> {:error, Client.open_refusal(sid, reason)}
+    end
+  end
+
+  defp resumable(args) do
+    case newest(args) do
+      nil ->
+        kind = if args.private, do: "private session", else: "session"
+        {:error, "no #{kind} to resume in #{Troupe.Paths.display(args.workspace)}"}
+
+      row ->
+        {:ok, row}
+    end
+  end
+
+  # The most recently active session in this directory, as the daemon lists them: not a
+  # branch, which is a window of its parent's, and one that did something before a scratch
+  # session `troupe` opened and left empty; with `--private`, a private one. The picker
+  # opens on one it can carry on; `latest` names the newest, and is refused if it cannot.
+  defp newest(args) do
+    case Client.sessions({:local, args.workspace}) do
+      {:ok, rows} ->
+        rows =
+          Enum.filter(rows, fn row ->
+            row.parent == nil and (not args.private or row.kind == "private") and
+              (args.latest or Client.resume_refusal(row) == nil)
+          end)
+
+        Enum.find(rows, &worked?/1) || List.first(rows)
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  defp worked?(row), do: row.branches != [] or (row.tokens || 0) > 0
+
+  @doc """
+  One turn on a session that already has a history, printed to `io` as `troupe run
+  --headless` prints its run, and its exit code (Decision 812). The printer starts from
+  now, so what the session did before is neither printed nor taken for the turn's end,
+  and the message goes once it listens.
+  """
+  @spec one_turn(Client.session_id(), String.t(), IO.device()) :: non_neg_integer()
+  def one_turn(sid, message, io \\ :stdio) do
+    me = self()
+
+    spec =
+      {Printer,
+       session_id: sid,
+       target: "root",
+       io: io,
+       since: System.system_time(:millisecond),
+       on_rest: fn code -> send(me, {:quit, code}) end}
+
+    {:ok, printer} = DynamicSupervisor.start_child(Troupe.UI.Windows, spec)
+
+    code =
+      case Client.send_input(sid, "root", message) do
+        :ok -> wait()
+        {:error, reason} -> fail("troupe: could not send the message: " <> reason(reason))
+      end
+
+    _ = DynamicSupervisor.terminate_child(Troupe.UI.Windows, printer)
+    code
   end
 
   # Mouse reporting: `--mouse`/`--no-mouse` beats the `mouse` setting, which

@@ -113,6 +113,11 @@ session is created on one; with only one, you never have to name it.
 
 **Session.** One agent working in one directory, with a durable log of everything that
 happened: `active`, `dormant` (stopped, log kept, can be woken), `read_only`, or `erased`.
+In the terminal UI `/new` starts another one beside it (`--private`, `--remote PROFILE`,
+or `--branch` for a fork that goes on from this one's conversation) and `/back` returns;
+from the command line `troupe resume latest` opens the newest one in the directory, and
+`troupe resume ID --headless "message"` runs one more turn on it and exits
+([command reference](cli-reference.md)).
 A session you erase reads `erasure_pending` until the plane has destroyed its key.
 Erased on your machine, it is erased at the plane too and goes from your machine once the
 key is gone; erased elsewhere, the copy on your machine goes the next time your client

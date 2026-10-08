@@ -501,6 +501,13 @@ defmodule Troupe.Protocol.Schema do
       # A private session another device sealed last, taken over on this one (Decision 785):
       # the daemon's only, since a pod holds no private session.
       "session.claim" => %{"command_id" => required(:string), "session_id" => required(:string)},
+      # A second session from this one's conversation as it stands (Decision 812): the
+      # daemon's; a pod session is forked through the plane's method of the same name.
+      "session.fork" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "config" => optional(:object)
+      },
       "input.send" => %{
         "command_id" => required(:string),
         "session_id" => required(:string),

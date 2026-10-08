@@ -220,6 +220,37 @@ defmodule Troupe.Client.Remote do
   @impl true
   def idle?(_sid), do: false
 
+  # A pod session is forked by the plane (root Decision 812): a new row, key and placement,
+  # whose pod copies the parent's history before it starts. Answered as `session.create`
+  # is, and attached the same way.
+  @impl true
+  def fork_session(sid) do
+    case attachment(sid) do
+      %{plane_url: plane} = info when is_binary(plane) -> fork_on(plane, sid, info)
+      _ -> {:error, message(:not_attached)}
+    end
+  end
+
+  defp fork_on(plane, sid, info) do
+    case call(plane, "session.fork", %{session_id: sid, command_id: RPC.command_id()}) do
+      {:ok, %{"session_id" => child} = result} ->
+        attach({:remote, plane}, child, %{
+          endpoint: result["endpoint"],
+          token: result["token"],
+          state: Worker.session_state(result["state"]) || :active,
+          profile: info[:profile],
+          team: info[:team],
+          title: info[:title]
+        })
+
+      {:ok, other} ->
+        {:error, "unexpected session.fork answer: #{inspect(other)}"}
+
+      {:error, reason} ->
+        {:error, message(reason)}
+    end
+  end
+
   ## Fleet-scoped
 
   @impl true
@@ -260,6 +291,18 @@ defmodule Troupe.Client.Remote do
   end
 
   def sessions(_origin, _filter), do: {:error, :unsupported}
+
+  @impl true
+  def get_session({:remote, _plane} = origin, sid) do
+    with {:ok, rows} <- sessions(origin, %{}) do
+      case Enum.find(rows, &(&1.id == sid)) do
+        nil -> {:error, "not_found"}
+        row -> {:ok, row}
+      end
+    end
+  end
+
+  def get_session(_origin, _sid), do: {:error, :unsupported}
 
   @impl true
   def create_session({:remote, plane} = origin, params) do
