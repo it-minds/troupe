@@ -28,7 +28,7 @@ defmodule Troupe.Bench.Live do
   model are not a rate; what they cost in all and per success; and their tokens.
   """
 
-  alias Troupe.Bench.{History, LiveScenarios, Runner, Scenario}
+  alias Troupe.Bench.{History, LiveScenarios, Prefix, Runner, Scenario}
   alias Troupe.Config
   alias Troupe.LLM.Catalog
   alias Troupe.Protocol.Event
@@ -71,6 +71,9 @@ defmodule Troupe.Bench.Live do
 
   # What a person's configuration says about where a model call goes, and nothing else:
   # the budgets, approvals, agents, skills and instruction files a run has are the bench's.
+  # Beside it, issue #465's two experiments, so a bench can be run with either on
+  # (`TROUPE_THINKING_BINDING`, `TROUPE_SYSTEM_PROMPT`) and say which it ran with
+  # (Decision 815).
   @provider_settings [
     :provider,
     :small_model,
@@ -83,7 +86,9 @@ defmodule Troupe.Bench.Live do
     :prices,
     :catalog,
     :fake_script,
-    :llm_timeout_ms
+    :llm_timeout_ms,
+    :thinking_binding,
+    :system_prompt
   ]
 
   @doc """
@@ -246,7 +251,8 @@ defmodule Troupe.Bench.Live do
         "the shell among them, " <>
         "and may make #{limits[:max_turns]} model calls, send #{thousands(limits[:max_input_tokens])} tokens " <>
         "and receive #{thousands(limits[:max_output_tokens])}, in #{div(limits[:wall_clock_ms], 1000)} s.",
-      cost(plan, runs)
+      cost(plan, runs),
+      experiment_line(plan)
     ]
     |> Kernel.++(Enum.map(plan.skipped, &"#{&1["name"]} is left out: #{&1["why"]}."))
     |> Kernel.++(if plan.history, do: ["Each run is added to #{plan.history}."], else: [])
@@ -257,6 +263,29 @@ defmodule Troupe.Bench.Live do
     )
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
+  end
+
+  # Issue #465's experiments, said only when one is on (Decision 815).
+  defp experiment_line(%Plan{} = plan) do
+    case experiment(plan) do
+      %{"thinking_binding" => "default", "system_prompt" => "per_turn"} ->
+        nil
+
+      %{"thinking_binding" => binding, "system_prompt" => system} ->
+        "With issue #465's experiments: thinking_binding #{binding}, system_prompt #{system}."
+    end
+  end
+
+  @doc """
+  Issue #465's two settings a plan's runs have (Decision 815): `thinking_binding` and
+  `system_prompt`, as the person's configuration or the environment set them.
+  """
+  @spec experiment(Plan.t()) :: map()
+  def experiment(%Plan{settings: settings}) do
+    %{
+      "thinking_binding" => Keyword.get(settings, :thinking_binding, "default"),
+      "system_prompt" => Keyword.get(settings, :system_prompt, "per_turn")
+    }
   end
 
   defp suite_line(%Plan{suite: nil}), do: nil
@@ -332,6 +361,7 @@ defmodule Troupe.Bench.Live do
         "kept_in" => plan.keep && base,
         "cap_micros" => plan.cap_micros,
         "started_at" => started,
+        "experiment" => experiment(plan),
         "skipped" => plan.skipped,
         "passed" => Enum.all?(entries, & &1["passed"]),
         "summary" => summary(Enum.flat_map(entries, & &1["runs"]), length(entries)),
@@ -348,7 +378,8 @@ defmodule Troupe.Bench.Live do
       "bench" => started,
       "version" => plan.version,
       "scenario" => scenario.name,
-      "run" => n
+      "run" => n,
+      "experiment" => experiment(plan)
     })
   end
 
@@ -427,12 +458,28 @@ defmodule Troupe.Bench.Live do
 
     try do
       started = now()
-      :ok = Troupe.send_input(sid, scenario.prompt)
-      {ending, acc} = watch(sid, started + deadline(plan.limits), plan.run_cap_micros, new_acc())
+      prompts = [scenario.prompt | scenario.follow_ups]
+      deadline = started + deadline(plan.limits)
+      {ending, acc} = turns(sid, prompts, deadline, plan.run_cap_micros, new_acc())
       {sid, ending, acc, now() - started, Troupe.events(sid)}
     after
       Troupe.unsubscribe(sid)
       Troupe.stop_session(sid)
+    end
+  end
+
+  # Each prompt once the turn before it has ended by itself: a scenario of more than one
+  # turn is how a run shows what changes between turns (issue #465, Decision 815). The
+  # first turn that ends any other way ends the run, under the run's one deadline and cap.
+  defp turns(sid, [prompt | rest], deadline, cap, acc) do
+    :ok = Troupe.send_input(sid, prompt)
+
+    case watch(sid, deadline, cap, acc) do
+      {{:ended, %Event{type: "turn_ended", data: data}}, acc} = ending when rest != [] ->
+        if data["reason"], do: ending, else: turns(sid, rest, deadline, cap, acc)
+
+      ending ->
+        ending
     end
   end
 
@@ -581,6 +628,9 @@ defmodule Troupe.Bench.Live do
       "tool_calls" => tool_calls,
       "largest_tool_result_bytes" => largest(tool_calls),
       "calls" => calls,
+      # How often the prompt changed in front of what the run had sent, and what became
+      # of the thinking handed back (issue #465, Decision 815).
+      "prefix" => Prefix.count(events),
       "error" => error,
       "checks" => checks,
       "succeeded" => error == nil and ctx.outcome != false and Enum.all?(checks, & &1["passed"])
@@ -610,6 +660,7 @@ defmodule Troupe.Bench.Live do
       "tool_calls" => [],
       "largest_tool_result_bytes" => 0,
       "calls" => [],
+      "prefix" => Prefix.zero(),
       "error" => error,
       "checks" => [],
       "succeeded" => false
@@ -869,7 +920,8 @@ defmodule Troupe.Bench.Live do
       "output_tokens" => sum(runs, "output_tokens"),
       "tokens_per_success" => if(succeeded == 0, do: nil, else: round(tokens / succeeded)),
       "wall_ms" => runs |> numbers("wall_ms") |> Enum.sum(),
-      "median_wall_ms" => median(numbers(runs, "wall_ms"))
+      "median_wall_ms" => median(numbers(runs, "wall_ms")),
+      "prefix" => Enum.reduce(runs, Prefix.zero(), &Prefix.add(&2, &1["prefix"] || Prefix.zero()))
     }
   end
 

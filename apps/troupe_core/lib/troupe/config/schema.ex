@@ -240,6 +240,24 @@ defmodule Troupe.Config.Schema do
           default: true,
           scope: :trusted,
           field: :identify
+        ),
+        # The two ways issue #465 could go, each off until set, so a live bench can measure
+        # them before one is chosen (Decision 815).
+        spec(
+          "thinking_binding",
+          {:enum, ~w(default drop_block)},
+          "An experiment, Anthropic only: `drop_block` sends the `thinking-binding-controls-2026-08-01` beta and asks " <>
+            "the API to drop a thinking block whose conversation changed since it was made, instead of refusing the call.",
+          default: "default",
+          field: :thinking_binding
+        ),
+        spec(
+          "system_prompt",
+          {:enum, ~w(per_turn stable)},
+          "An experiment: `stable` keeps the system prompt the same for the whole session, and sends the instruction " <>
+            "files, the brief, the goal and the task list with the turn instead, each again only when it changed.",
+          default: "per_turn",
+          field: :system_prompt
         )
       ]),
       group("Budget", [

@@ -294,6 +294,23 @@ defmodule Troupe.Bench do
       {"wall clock", "#{s["wall_ms"]} ms in all, the median run #{s["median_wall_ms"]} ms"}
     ]
 
+    # What changed in front of what the runs had sent, and what became of the thinking they
+    # handed back (issue #465, Decision 815); absent from a report written before.
+    rows =
+      case s["prefix"] do
+        %{} = p ->
+          rows ++
+            [
+              {"prompt prefix",
+               "system prompt changed #{p["system_changes"]}, tools #{p["tools_changes"]}; " <>
+                 "#{p["thinking_resent"]} calls sent again without thinking, " <>
+                 "#{p["thinking_dropped"]} thinking blocks dropped"}
+            ]
+
+        _none ->
+          rows
+      end
+
     Enum.join(
       ["| #{s["scenarios"]} scenarios together | |", "| --- | ---: |"] ++
         Enum.map(rows, fn {measure, value} -> "| #{measure} | #{value} |" end),

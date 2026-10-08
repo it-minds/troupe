@@ -69,7 +69,11 @@ defmodule Troupe.Config.Layers do
     # JSON, the shape `models.prices` has in a file: how a profile hands its pods the
     # prices of the models it serves, since a pod has no file of its own.
     {"TROUPE_MODEL_PRICES", {:json, ["models", "prices"]}},
-    {"TROUPE_FAKE_SCRIPT", ["fake_script"]}
+    {"TROUPE_FAKE_SCRIPT", ["fake_script"]},
+    # Issue #465's experiments, which is how a live bench is run with one on without a
+    # file of the person's being changed (Decision 815).
+    {"TROUPE_THINKING_BINDING", ["thinking_binding"]},
+    {"TROUPE_SYSTEM_PROMPT", ["system_prompt"]}
   ]
 
   @env_reference ~r/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/
