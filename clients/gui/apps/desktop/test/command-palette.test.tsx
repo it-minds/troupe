@@ -170,4 +170,72 @@ describe("the command palette", () => {
     await waitFor(() => palette() === null, "the palette to close");
     await waitFor(() => says("Review the change on this branch. Look hardest at the parser."), "its prompt in the transcript");
   });
+
+  // What a command a file defines sends is in its detail (Decision 814): the description is
+  // only what the file says of itself.
+  it("shows what a command a file defines sends: its first lines, and how many more", async () => {
+    const composer = await openSession();
+    key(composer, "/");
+    const dialog = await waitFor(palette, "the palette");
+    await waitFor(() => rowNames().length === COMMANDS.length, "the list");
+    const input = dialog.querySelector<HTMLInputElement>("input")!;
+    const sends = (): string | null => dialog.querySelector(".detail .sends pre")?.textContent ?? null;
+
+    type(input, "review");
+    await waitFor(() => selected() === "/review", "/review selected");
+    expect(sends()).toBe("Review the change on this branch. Look hardest at $ARGUMENTS.");
+
+    // Twelve lines: eight shown, and the rest counted.
+    type(input, "audit");
+    await waitFor(() => selected() === "/audit", "/audit selected");
+    expect(sends()?.split("\n")).toEqual(["Audit the dependencies, one at a time:", ...[1, 2, 3, 4, 5, 6, 7].map((n) => `${n}. check package ${n}`)]);
+    expect(dialog.querySelector(".detail .sends")?.textContent).toContain("… 4 more lines in the file");
+
+    // A built-in sends no prompt of its own, and says nothing of one.
+    type(input, "goal");
+    await waitFor(() => selected() === "/goal", "/goal selected");
+    expect(dialog.querySelector(".detail .sends")).toBeNull();
+  });
+
+  // With auto_approve on, nothing asks before the tools a prompt leads to, so a workspace's
+  // command asks once before it is first sent, its prompt in view (Decision 814).
+  it("with auto_approve on, asks before a workspace's command is first sent, and allow is not asked again", async () => {
+    daemon.autoApprove = true;
+    const composer = await openSession();
+    const inputs = (): string[] =>
+      [...daemon.sessions.values()].flatMap((s) => s.log.from(0)).filter((e) => e.type === "user_input").map((e) => String(e.data["text"]));
+    const run = async (line: string): Promise<void> => {
+      key(composer, "/");
+      const dialog = await waitFor(palette, "the palette");
+      await waitFor(() => rowNames().length === COMMANDS.length, "the list");
+      type(dialog.querySelector<HTMLInputElement>("input")!, line);
+      await waitFor(() => selected() === `/${line.split(" ")[0]}`, "the command selected");
+      key(dialog.querySelector("input")!, "Enter");
+      await waitFor(() => palette() === null, "the palette to close");
+    };
+
+    await run("review the parser");
+    const panel = await waitFor(() => document.querySelector<HTMLElement>(".approval.question"), "the question");
+    expect(panel.querySelector(".consequence")?.textContent).toContain("/review comes with this workspace");
+    expect(panel.querySelector("pre.evidence")?.textContent).toBe("Review the change on this branch. Look hardest at the parser.");
+    expect(inputs()).toEqual([]);
+
+    button("allow", panel)!.click();
+    await waitFor(() => inputs().length === 1, "the prompt sent");
+    expect(inputs()).toEqual(["Review the change on this branch. Look hardest at the parser."]);
+    await waitFor(() => document.querySelector(".approval.question") === null, "the question answered");
+
+    // Allowed: the next run is sent, and nothing asks.
+    await run("review the lexer");
+    await waitFor(() => inputs().length === 2, "the second run sent");
+    expect(document.querySelector(".approval.question")).toBeNull();
+
+    // Another of the workspace's commands asks for itself; deny sends nothing and says how.
+    await run("audit");
+    const audit = await waitFor(() => document.querySelector<HTMLElement>(".approval.question"), "the audit question");
+    expect(audit.querySelector("pre.evidence")?.textContent).toContain("11. check package 11");
+    button("deny", audit)!.click();
+    await waitFor(() => says("/audit was not sent. Run /audit again to be asked again"), "the reason in the transcript");
+    expect(inputs()).toHaveLength(2);
+  });
 });

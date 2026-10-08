@@ -336,13 +336,16 @@ defmodule Troupe.Remote.Translate do
       "truncated" ->
         {[emit.(:remote_note, %{text: truncated(data)})], memory}
 
+      # `preview` is what the question is about, drawn as it is under it: the prompt a
+      # workspace's command would send (troupe Decision 814).
       "question_asked" ->
         {[
            emit.(:question_asked, %{
              call_id: call_id(data),
              question: to_string(data["question"] || ""),
              options: options(data),
-             multiple: data["multiple"] == true
+             multiple: data["multiple"] == true,
+             preview: if(is_binary(data["preview"]), do: data["preview"])
            })
          ], memory}
 
@@ -350,6 +353,12 @@ defmodule Troupe.Remote.Translate do
         {[
            emit.(:question_answered, %{call_id: call_id(data), text: to_string(data["text"] || "")})
          ], memory}
+
+      # A workspace's command that asked first and was not sent: the harness's sentence
+      # says how to run it later (troupe Decision 814).
+      "command_declined" ->
+        {[emit.(:remote_note, %{text: to_string(data["reason"] || "the command was not sent")})],
+         memory}
 
       "approval_resolved" ->
         {[], memory}

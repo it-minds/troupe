@@ -18,6 +18,9 @@
     "options": {
       "type": "array"
     },
+    "preview": {
+      "type": "string"
+    },
     "question": {
       "type": "string"
     }

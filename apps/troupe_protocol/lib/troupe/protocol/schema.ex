@@ -311,12 +311,15 @@ defmodule Troupe.Protocol.Schema do
         "decision" => required(:string)
       },
       # `ask_user` (Decision 651): the agent hands a decision to a person and waits.
+      # `preview` is text the question is about, shown as it is beneath it: the prompt a
+      # workspace's command would send, when it asks before it is first sent (Decision 814).
       "question_asked" => %{
         "call_id" => required(:string),
         "agent_path" => required({:array, :string}),
         "question" => required(:string),
         "options" => required(:array),
-        "multiple" => required(:boolean)
+        "multiple" => required(:boolean),
+        "preview" => optional(:string)
       },
       "question_answered" => %{
         "call_id" => required(:string),
@@ -325,6 +328,14 @@ defmodule Troupe.Protocol.Schema do
       "approval_resolved" => %{
         "call_id" => required(:string),
         "resolved_by" => required(:string)
+      },
+      # A workspace's command that asked before it was first sent and was not (Decision
+      # 814): `reason` says why and how to run it later, a sentence a person can act on;
+      # `command_id` is the `commands.run` that asked.
+      "command_declined" => %{
+        "name" => required(:string),
+        "reason" => required(:string),
+        "command_id" => optional(:string)
       },
       # What the session may touch: `[{name, kind, root, mode}]`. Resolved once, at
       # creation, and recorded so that a replay can tell what was allowed at the time.

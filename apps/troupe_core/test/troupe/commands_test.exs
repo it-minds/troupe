@@ -108,7 +108,7 @@ defmodule Troupe.CommandsTest do
       review = Enum.find(entries, &(&1["name"] == "review"))
 
       assert review, "/review is not in the table"
-      assert Enum.sort(Map.keys(review)) == Enum.sort(@fields)
+      assert Enum.sort(Map.keys(review)) == Enum.sort(["body" | @fields])
       assert review["section"] == "custom"
       assert review["source"] == "project"
       assert review["summary"] == "Review the change on this branch"
@@ -124,6 +124,31 @@ defmodule Troupe.CommandsTest do
       sections = entries |> Enum.map(& &1["section"]) |> Enum.dedup()
       assert sections == Commands.sections()
       assert Enum.take(sections, -3) == ["agents", "custom", "quit"]
+    end
+
+    # What a command sends is in its row (Decision 814), so a palette can show it before it
+    # first runs: its description is the file's say-so, and only the body is what goes.
+    test "a command a file defines carries its body, as the file has it", ctx do
+      File.write!(Path.join(ctx.workspace, ".troupe/commands/review.md"), """
+      ---
+      description: Review the change on this branch
+      ---
+      Review the change on this branch.
+
+      Look hardest at $ARGUMENTS.
+      """)
+
+      File.write!(Path.join(ctx.user_dir, "standup.md"), "Say what changed since yesterday.\n")
+
+      entries = Commands.list(workspace: ctx.workspace, user_dir: ctx.user_dir)
+      review = Enum.find(entries, &(&1["name"] == "review"))
+      standup = Enum.find(entries, &(&1["name"] == "standup"))
+
+      assert review["body"] == "Review the change on this branch.\n\nLook hardest at $ARGUMENTS."
+      assert standup["body"] == "Say what changed since yesterday."
+
+      # A built-in's row has no body: its client runs it, and it sends no prompt.
+      refute Map.has_key?(Enum.find(entries, &(&1["name"] == "merge")), "body")
     end
 
     test "a file without frontmatter is a command too, summarised by its first line", ctx do

@@ -1253,7 +1253,7 @@ defmodule Troupe.UI.TUI.View do
     }
   end
 
-  defp palette_detail(%{entry: entry, status: status}, _state, _rect) do
+  defp palette_detail(%{entry: entry, status: status}, _state, rect) do
     example = if entry["example"], do: ["", "for example: " <> entry["example"]], else: []
     now = if status == :ok, do: [], else: ["", "not now: " <> elem(status, 1)]
 
@@ -1264,11 +1264,46 @@ defmodule Troupe.UI.TUI.View do
         now
 
     %Paragraph{
-      text: Enum.join(lines, "\n"),
+      text: Enum.join(lines ++ body_lines(entry["body"], lines, rect), "\n"),
       wrap: true,
       block: %Block{title: " " <> entry["usage"] <> " ", borders: [:all]}
     }
   end
+
+  # What a command a file defines sends, last in its detail (troupe Decision 814): its
+  # first lines, as many as the pane has room for, and how many more the file holds.
+  defp body_lines(body, head, rect) when is_binary(body) do
+    width = max(rect.width - 2, 1)
+    used = Enum.sum(Enum.map(head, &text_rows(&1, width))) + 2
+    room = rect.height - 2 - used
+    lines = body |> Model.sanitize() |> String.split("\n") |> Enum.map(&("│ " <> &1))
+
+    shown =
+      if Enum.sum(Enum.map(lines, &text_rows(&1, width))) <= room,
+        do: lines,
+        else: fit_rows(lines, room - 1, width)
+
+    case length(lines) - length(shown) do
+      0 -> ["", "sends:" | shown]
+      1 -> ["", "sends:" | shown] ++ ["… 1 more line in the file"]
+      more -> ["", "sends:" | shown] ++ ["… #{more} more lines in the file"]
+    end
+  end
+
+  defp body_lines(_body, _head, _rect), do: []
+
+  defp fit_rows(lines, room, width) do
+    lines
+    |> Enum.reduce_while({[], 0}, fn line, {acc, taken} ->
+      taken = taken + text_rows(line, width)
+      if taken <= room, do: {:cont, {[line | acc], taken}}, else: {:halt, {acc, taken}}
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+  end
+
+  defp text_rows(text, width),
+    do: text |> String.split("\n") |> Enum.map(&Model.height(&1, width, :word)) |> Enum.sum()
 
   defp source_word("builtin"), do: "built-in"
   defp source_word(other), do: other

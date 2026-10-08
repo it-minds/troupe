@@ -83,6 +83,7 @@
     "events/budget_exhausted.json",
     "events/budget_warning.json",
     "events/cancelled.json",
+    "events/command_declined.json",
     "events/compacted.json",
     "events/config_upgraded.json",
     "events/delegation_started.json",
