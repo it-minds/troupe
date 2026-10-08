@@ -183,6 +183,20 @@ defmodule Troupe.Session.Log do
   @spec verify_file(Path.t()) :: :ok | {:error, pos_integer(), atom()}
   def verify_file(path), do: path |> read_file() |> Event.verify()
 
+  @doc """
+  Write a log that does not exist yet, whole: a fork's history, sealed already, which the
+  session's own `Log` then continues (root Decision 812). Never over a log that is there:
+  a session's history is appended to, and only by its own process.
+  """
+  @spec write_new(Path.t(), [Event.t()]) :: :ok | {:error, term()}
+  def write_new(dir, events) do
+    lines = Enum.map(events, &[Jason.encode_to_iodata!(Event.to_json(&1)), ?\n])
+
+    with :ok <- File.mkdir_p(dir) do
+      File.write(Path.join(dir, "events.jsonl"), lines, [:exclusive])
+    end
+  end
+
   @doc "Every session recorded for a workspace, newest first."
   @spec list_sessions(Path.t(), Path.t() | nil) :: [
           %{id: String.t(), path: Path.t(), started_at: String.t() | nil}

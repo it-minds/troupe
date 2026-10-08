@@ -13,7 +13,7 @@ say something the loader does not do.
 | user | `~/.config/troupe/config.yaml`; `%APPDATA%\troupe\config.yaml` on Windows; `$TROUPE_CONFIG_HOME/config.yaml` when that is set | this machine: providers, keys, the models you use |
 | project | `<workspace>/.troupe/config.yaml` | what a repository wants, committed with it |
 | local | `<workspace>/.troupe/config.local.yaml` | one person's settings for one repository, such as a key; add it to `.gitignore` |
-| environment | `TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_AUTH`, `TROUPE_AUTH_TOKEN`, `TROUPE_MODEL`, `TROUPE_SMALL_MODEL`, `TROUPE_EXPENSIVE_MODEL`, `TROUPE_MODEL_PRICES` (`models.prices` as JSON), `TROUPE_FAKE_SCRIPT` | a provider for one shell, or for a pod |
+| environment | `TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_AUTH`, `TROUPE_AUTH_TOKEN`, `TROUPE_MODEL`, `TROUPE_SMALL_MODEL`, `TROUPE_EXPENSIVE_MODEL`, `TROUPE_MODEL_PRICES` (`models.prices` as JSON), `TROUPE_FAKE_SCRIPT`; `TROUPE_THINKING_BINDING` and `TROUPE_SYSTEM_PROMPT`, the two experiments of issue #465 | a provider for one shell, or for a pod; an experiment for one `troupe bench --live` |
 | command line | `--auto-approve`, `--watch`, `--full-send`, and what a client asks for | one session |
 
 Each layer beats the ones above it: the defaults, then the user file, the project file,
@@ -242,11 +242,23 @@ you would change before changing anything.
 `/review the parser` sends that prompt with `the parser` in place of `$ARGUMENTS`, as if
 you had typed it; a prompt without the placeholder gets what you typed as a paragraph
 of its own. Both the terminal UI's and the desktop app's palettes list the commands in a
-Custom section, each with its description and the file it came from. The repository's
+Custom section, each with its description, the file it came from and what it sends: the
+detail under the list shows the prompt's first lines and how many more the file holds,
+since a description is only what the file says of itself. The repository's
 command wins over yours of the same name. A built-in's name, or an agent's, stays
 theirs: a file named `merge.md` is skipped, and the daemon's log says so. A repository's
 commands are read whether or not the workspace is trusted, since a command only sends a
 prompt, which goes through the session's approvals like anything typed.
+
+With `auto_approve` on, nothing asks before the tools a prompt leads to run, so a
+repository's command asks once before it is first sent: the session shows the question
+with the prompt under it, in either client, and you answer `deny` (nothing is sent, and
+the next `/review` asks again), `once` (send it this time) or `allow` (send it, and do not
+ask again in this workspace until the file changes). `allow` is kept in the daemon's
+state directory (`command-trust.json`), never in the repository, beside a hash of the
+prompt, so an edited command asks again and what you type after its name does not. Your
+own commands never ask, and neither does a repository on `trusted_workspaces`, whose
+config could turn `auto_approve` on by itself.
 
 ## Instruction files
 
@@ -655,6 +667,8 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `compact_at` | number, 0 to 1 | `0.75` | any | compact at | The share of the window at which an agent summarises older turns. A tool result over 16 KiB it read before then is sent from then on as a stub `read_output` expands. |
 | `llm_timeout_ms` | integer ≥ 1 | `300000` | any |  | How long one model call may take before it is given up on. |
 | `identify` | boolean | `true` | user; project if trusted |  | Every model call names Troupe: a User-Agent with the version and the client, LiteLLM's tags and the session's id to a gateway, OpenRouter's app headers to OpenRouter; never a person, a path or a repository. `false` sends none of it. `troupe doctor` prints what goes out. |
+| `thinking_binding` | `default` \| `drop_block` | `default` | any |  | An experiment, Anthropic only: `drop_block` sends the `thinking-binding-controls-2026-08-01` beta and asks the API to drop a thinking block whose conversation changed since it was made, instead of refusing the call. |
+| `system_prompt` | `per_turn` \| `stable` | `per_turn` | any |  | An experiment: `stable` keeps the system prompt the same for the whole session, and sends the instruction files, the brief, the goal and the task list with the turn instead, each again only when it changed. |
 
 ### Budget
 

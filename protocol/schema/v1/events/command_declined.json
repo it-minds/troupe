@@ -1,0 +1,22 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/command_declined.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "reason"
+  ],
+  "title": "command_declined",
+  "type": "object"
+}

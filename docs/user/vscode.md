@@ -149,6 +149,59 @@ active editor.
 When Troupe already runs in that folder's terminal, nothing can be typed into it from
 outside: the terminal is shown, and the message says what to type into it.
 
+## Troupe in the terminal's profile menu
+
+**Troupe** is one of the integrated terminal's profiles (Decision 816): in the menu of the
+arrow beside the terminal panel's **+**, and in **Terminal: Create New Terminal (With
+Profile)**. It opens a new terminal named `Troupe: <folder>` whose program is `troupe`
+itself:
+
+```
+troupe --workspace <folder>
+```
+
+with `troupe.args` after it, in the folder.
+
+- **Which folder.** As **Troupe: Open** chooses it: the active editor's, then the folder
+  of the Troupe terminal in front, then the only folder; with several and nothing to go
+  by, it asks which. In a workspace of several folders, **Create New Terminal (With
+  Profile)** asks for a folder of its own first, which VS Code does not hand to an
+  extension's profile, so Troupe still goes by the editor, or asks.
+- **Where it opens.** Where the menu was: the panel from the panel's menu, the editor area
+  from a terminal tab's there. `troupe.openIn` is for **Troupe: Open**.
+- **A new terminal each time.** Picking it opens another Troupe even where the folder has
+  one, as any profile opens another shell. **Troupe: Open** and the other commands go on
+  using the folder's first.
+- **No shell under it.** Quitting the TUI closes the terminal. A TUI that fails to start
+  closes it too, and VS Code says only the exit code: **Troupe: Open** runs the same line
+  in your shell, which keeps the reason.
+- **`troupe` is found** as for **Troupe: Open**, and run as it is. A `.cmd` or `.bat` runs
+  through `cmd.exe`, quoted as the Settings view's call is. When none is found, the same
+  sentence says so, and no terminal opens.
+
+## Opening Troupe with the folder
+
+`troupe.openOnFolderOpen`, off by default, opens Troupe as **Troupe: Open** would when VS
+Code opens a folder or a workspace (Decision 816):
+
+- **The folder** is chosen as for **Troupe: Open**: the file in front, otherwise the only
+  folder; a workspace of several folders with no file open asks which, once.
+- **Not again after a reload.** VS Code keeps a terminal, and the TUI in it, across a
+  window reload, but gives it back under its shell's name (`pwsh`), not `Troupe: <folder>`.
+  So the extension keeps the process id of each folder's terminal in VS Code's storage for
+  the workspace, and knows the terminal by it: when one is there as the window opens,
+  nothing more is opened, and **Troupe: Open** shows it. After VS Code is closed and opened
+  again, the old TUI has ended with it, and Troupe opens afresh.
+- **Not in a workspace you have not trusted.** A program started because a folder was
+  opened is what VS Code's Restricted Mode holds back, as it holds back a task set to run
+  when a folder opens. Trusting the workspace, at VS Code's question as it opens or later,
+  opens Troupe then. **Troupe: Open** works in either.
+- **Only yours to turn on.** Like the other settings it is a user or remote setting, so a
+  repository's `.vscode/settings.json` cannot start Troupe for whoever opens it.
+
+There is no "ask" value: an answer per folder would have to be kept somewhere, and the
+extension keeps nothing. A folder added to the workspace later does not open Troupe.
+
 ## The Troupe side bar
 
 The Troupe mask in the activity bar opens Troupe, as above, and a side bar of two views.
@@ -243,17 +296,24 @@ install instructions, and no terminal is opened. The Settings view says the same
 | `troupe.path` | empty | The `troupe` program to run: a path, or a name looked up on the `PATH`. |
 | `troupe.args` | `[]` | More arguments for `troupe`: `["--no-mouse"]` lets the terminal's own selection work, `["--watch"]` starts in watch mode. |
 | `troupe.openIn` | `editor` | Where the terminal opens: `editor`, a tab in the editor group in front; `beside`, a group beside it; `panel`, the terminal panel. |
+| `troupe.openOnFolderOpen` | `false` | [Open Troupe](#opening-troupe-with-the-folder) when VS Code opens a folder or a workspace. |
 
-All three are user and remote settings only (`machine` scope). A repository's
+All four are user and remote settings only (`machine` scope). A repository's
 `.vscode/settings.json` is not yours to trust, and it cannot choose the program the
-terminal runs, nor add `--auto-approve` or `--full-send` to it.
+terminal runs, add `--auto-approve` or `--full-send` to it, nor start Troupe as it is
+opened.
+
+The shell **Troupe: Open** types into is VS Code's default terminal profile
+(**Terminal: Select Default Profile**); the extension has no setting of its own for it.
 
 ## Remote development
 
 In a WSL, SSH, dev container or Codespaces window, the integrated terminal runs on the
 remote host. So does the extension (it is a workspace extension), and VS Code offers to
 install it there; it then looks for `troupe` on that host, the TUI it opens works on
-that host's files, and the Settings view is that host's configuration. When `troupe` is
+that host's files, and the Settings view is that host's configuration. The Troupe profile
+runs that host's `troupe`, and `troupe.openOnFolderOpen`, as a remote setting, opens it
+there. When `troupe` is
 missing there, the message names the host as VS Code's remote indicator does:
 
 > Troupe isn't installed in WSL: Ubuntu (no troupe on the PATH, nor where the installer
@@ -264,14 +324,15 @@ Install it on that host with `install.sh` and press **Troupe: Open** again.
 ## What it does not do
 
 **It collects nothing and sends nothing anywhere**: no telemetry, no network request of
-its own. It reads its three settings, looks for `troupe` on the disk, types a `troupe`
-command line into a terminal, and runs `troupe config --explain --json` on the same machine for the
+its own. It reads its four settings, looks for `troupe` on the disk, types a `troupe`
+command line into a terminal or starts `troupe` as a terminal's program, keeps the process
+id of each folder's Troupe terminal in VS Code's storage for the workspace (to know it
+after a window reload), and runs `troupe config --explain --json` on the same machine for the
 Settings view, which reads the config files and sends nothing, and `troupe models --json`
 for its Models group, which asks your providers what they serve when its list is stale,
 or when you press the group's button, as `troupe models` does in a terminal.
 
-Not yet, and tracked in #378: opening Troupe when a folder opens; choosing the terminal
-profile; changing a setting, or trusting the workspace, from the Settings view; and a
+Not yet: changing a setting, or trusting the workspace, from the Settings view; and a
 version check against the TUI. The panel that would show a session inside VS Code over the
 daemon's Agent Client Protocol is a later version.
 
@@ -289,8 +350,11 @@ policy like every other package ([third-party-licences.md](../third-party-licenc
   printed), its Models group (each model's window, price and where they came
   from, the three roles, a model not served shown without a window, each provider's list,
   a failure as one line with no key in it), the line each command types and the path
-  "Ask Troupe" writes, and the manifest (the commands and the menus, no Windows key on
-  Ctrl+Alt, every icon in the package). The line is also put through each shell the
+  "Ask Troupe" writes, when opening with the folder opens Troupe (off, no folder, not
+  trusted, a Troupe terminal there from before a reload) and how such a terminal is known
+  (its process kept, whatever its name; or its name), and the manifest (the commands
+  and the menus, the setting and the profile, no Windows key on Ctrl+Alt, every icon in the
+  package). The line is also put through each shell the
   machine has (sh, bash, zsh, dash, fish, Windows PowerShell, PowerShell 7, cmd.exe), with
   a folder name full of quotes, `$`, `&` and backticks, and a task and a prompt with double
   quotes, a line break, `%PATH%` and backslashes, and has to arrive as the arguments it was
@@ -303,8 +367,14 @@ policy like every other package ([third-party-licences.md](../third-party-licenc
   Settings view, and its Models group (`--refresh` only from the group's button, a failing
   `troupe models`, a config that does not load and its errors, a missing `troupe`), the
   four commands (a busy terminal left alone, Doctor's kept open and Open Settings typed into
-  it, a task's question dismissed), and "Ask Troupe" on a file, a folder, the active
-  editor's file and none. It is downloaded,
+  it, a task's question dismissed), "Ask Troupe" on a file, a folder, the active editor's
+  file and none, and the Troupe profile (`troupe` as the terminal's program at the editor's
+  folder, a second pick a second terminal, its terminal closed when `troupe` exits, none
+  without `troupe`). Then two more windows on one folder with `troupe.openOnFolderOpen`
+  on: Troupe opens once, at the folder; and with a terminal named for the folder there as
+  the extension starts, nothing more opens. A test run ends when its window reloads, and
+  runs with workspace trust off, so a real reload and the untrusted case were checked by
+  hand (Decision 816). It is downloaded,
   or `TROUPE_VSCODE_EXECUTABLE` names one, and runs with its own user data and extensions
   directories under `.vscode-test/`, so nobody's own profile is read or changed. On Linux
   without a display, run it under `xvfb-run -a`.

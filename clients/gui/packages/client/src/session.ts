@@ -270,11 +270,12 @@ export class SessionView {
    * `commands.run`: a command a markdown file defines (`source` `user` or `project`). The
    * harness sends the file's prompt as the session's input, with `args` for `$ARGUMENTS`;
    * the answer is the acknowledgement and the input's own events, carrying `commandId`,
-   * are the effect.
+   * are the effect. A workspace's command may ask first (troupe Decision 814): `question`
+   * is then the `call_id` of the `question_asked` it asked, with the prompt as its preview.
    */
-  async runCommand(name: string, args = "", commandId: string = this.conn.nextCommandId()): Promise<{ commandId: string }> {
-    await this.conn.call("commands.run", { command_id: commandId, session_id: this.sessionId, name, arguments: args });
-    return { commandId };
+  async runCommand(name: string, args = "", commandId: string = this.conn.nextCommandId()): Promise<{ commandId: string; question?: string }> {
+    const ran = await this.conn.call<{ question?: string | null }>("commands.run", { command_id: commandId, session_id: this.sessionId, name, arguments: args });
+    return typeof ran?.question === "string" ? { commandId, question: ran.question } : { commandId };
   }
 
   /** `session.goal.get`. Read from the log; wakes nothing. */

@@ -29,11 +29,31 @@ defmodule Troupe.UI.TUI.Model do
           summary: String.t()
         }
 
+  @typedoc """
+  A command the person ran (`!cmd`, Decision 152): what they typed, what it printed
+  (streamed while it runs, then the tail the harness kept), and how it ended. `agent` is
+  false for one kept from the agent (`!!cmd`); `where` names the plane's profile whose
+  pod ran it, and is nil for a session on this machine.
+  """
+  @type shell_entry :: %{
+          id: String.t(),
+          command: String.t(),
+          output: String.t(),
+          lines: [String.t()],
+          status: :running | :exited | :timeout | :killed | :failed,
+          exit_status: integer() | nil,
+          reason: String.t() | nil,
+          timeout_ms: pos_integer() | nil,
+          agent: boolean(),
+          where: String.t() | nil
+        }
+
   @type entry ::
           {:user, String.t()}
           | {:assistant, [line()]}
           | {:reasoning, [line()]}
           | {:tool, tool_entry()}
+          | {:shell, shell_entry()}
           | {:system, String.t()}
 
   @typedoc """
@@ -321,6 +341,25 @@ defmodule Troupe.UI.TUI.Model do
       :remote_note ->
         push(ensure_agent(w, path), path, {:system, d.text})
 
+      # The person's own command (Decision 152): a block of its own, opened when it
+      # starts, filled as it prints, and settled by the durable `user_shell`, which is all a
+      # replay has of it. Whichever of the three comes first opens the block.
+      :shell_started ->
+        shell(w, path, d.run_id, &%{&1 | command: d.command, agent: d.agent, where: d[:where]})
+
+      :shell_output ->
+        shell(w, path, d.run_id, fn s ->
+          if s.status == :running, do: put_output(s, s.output <> d.text), else: s
+        end)
+
+      :user_shell ->
+        shell(w, path, d.run_id, fn s ->
+          s
+          |> Map.merge(Map.take(d, [:command, :status, :exit_status, :reason, :timeout_ms, :agent]))
+          |> Map.put(:where, d[:where])
+          |> put_output(d.output)
+        end)
+
       :llm_delta ->
         w
         |> ensure_agent(path)
@@ -438,7 +477,8 @@ defmodule Troupe.UI.TUI.Model do
           agent_path: path,
           question: one_line(d.question),
           options: question_options(d),
-          multiple: d[:multiple] == true
+          multiple: d[:multiple] == true,
+          preview: d[:preview]
         })
 
       # The budget question (Decision 120): its words and options come from the question
@@ -654,6 +694,51 @@ defmodule Troupe.UI.TUI.Model do
     do: {:tool, %{t | preview: sanitize(d.preview)}}
 
   defp attach_preview(entry, _), do: entry
+
+  # The block for a run, changed by `fun`, or a new one at the end when there is none yet.
+  defp shell(w, path, id, fun) do
+    w = ensure_agent(w, path)
+    transcript = w.agents[path].transcript
+
+    if Enum.any?(transcript, &match?({:shell, %{id: ^id}}, &1)) do
+      update_agent(w, path, fn a ->
+        %{a | transcript: Enum.map(a.transcript, &change_shell(&1, id, fun))}
+      end)
+    else
+      push(w, path, {:shell, fun.(new_shell(id))})
+    end
+  end
+
+  defp change_shell({:shell, %{id: id} = s}, id, fun), do: {:shell, fun.(s)}
+  defp change_shell(entry, _id, _fun), do: entry
+
+  defp new_shell(id) do
+    %{
+      id: id,
+      command: "",
+      output: "",
+      lines: [],
+      status: :running,
+      exit_status: nil,
+      reason: nil,
+      timeout_ms: nil,
+      agent: true,
+      where: nil
+    }
+  end
+
+  # Kept to its tail, like a tool's result: the log has the rest.
+  defp put_output(s, output) do
+    output = output |> sanitize() |> tail(@result_cap)
+    %{s | output: output, lines: output |> String.trim_trailing() |> String.split("\n")}
+  end
+
+  defp tail(text, cap) do
+    case String.length(text) - cap do
+      cut when cut > 0 -> String.slice(text, cut, cap)
+      _ -> text
+    end
+  end
 
   # Options come off the log as maps with atom keys (`Codec` restores them) and
   # from a live event as the same shape, but a session recorded before options
@@ -1337,6 +1422,45 @@ defmodule Troupe.UI.TUI.Model do
     if expanded?, do: [head | t.body], else: [head]
   end
 
+  # The person's command, marked as theirs with its `!`, then what it printed: the last
+  # rows of it, or all with output expanded (`e`), since a person ran it to read it.
+  defp entry_lines({:shell, s}, expanded?) do
+    head = {:user, [{:user_marker, "! "}, {:user, s.command}] ++ shell_notes(s)}
+    [head | shell_body(s.lines, expanded?)]
+  end
+
+  @doc "How a person's command stands, in a few words: running, its exit, a kill."
+  @spec shell_status(shell_entry()) :: String.t()
+  def shell_status(%{status: :running}), do: "running · Esc kills it"
+  def shell_status(%{status: :exited, exit_status: status}), do: "exit #{status}"
+
+  def shell_status(%{status: :timeout, timeout_ms: ms}) when is_integer(ms),
+    do: "timed out after #{Float.round(ms / 1000, 1)} s and was killed"
+
+  def shell_status(%{status: :timeout}), do: "timed out and was killed"
+  def shell_status(%{status: :killed}), do: "killed"
+  def shell_status(%{reason: reason}) when is_binary(reason), do: "could not run: " <> reason
+  def shell_status(_s), do: "could not run"
+
+  defp shell_notes(s) do
+    where = if s.where, do: [{:tool_note, " · on " <> s.where}], else: []
+    kept = if s.agent, do: [], else: [{:tool_note, " · kept from the agent"}]
+    where ++ [{:tool_note, " · " <> shell_status(s)}] ++ kept
+  end
+
+  @shell_rows 20
+
+  defp shell_body([""], _expanded?), do: []
+
+  defp shell_body(lines, false) when length(lines) > @shell_rows do
+    hidden = length(lines) - @shell_rows
+
+    [{:system, "  … #{hidden} earlier #{if hidden == 1, do: "line", else: "lines"}"}] ++
+      plain(Enum.take(lines, -@shell_rows))
+  end
+
+  defp shell_body(lines, _expanded?), do: plain(lines)
+
   defp head_segments(%{status: status, name: name, input: input, summary: summary}) do
     [
       {:tool_glyph, status_glyph(status)},
@@ -1587,9 +1711,11 @@ defmodule Troupe.UI.TUI.Model do
               | (preview || "") |> sanitize() |> String.split("\n") |> Enum.map(&diff_line/1)
             ]
 
+          # A question about a text — the prompt a workspace's command would send (troupe
+          # Decision 814) — has it under the question, line for line, before the answers.
           %{kind: :question, question: q} ->
             [{:blank, ""}, {:pending, "#{who}QUESTION: #{q}"}] ++
-              question_lines(item, selection)
+              preview_lines(item) ++ question_lines(item, selection)
 
           # The budget question is drawn as the question it rides on (Decision 120): the
           # harness's words, its options numbered, and an amount typed.
@@ -1609,6 +1735,13 @@ defmodule Troupe.UI.TUI.Model do
   # A daemon from before the question carried its words sends the limit alone.
   defp budget_words(%{question: question}) when is_binary(question) and question != "", do: question
   defp budget_words(item), do: "#{Map.get(item, :detail, "a limit is reached")} — continue?"
+
+  defp preview_lines(%{preview: preview}) when is_binary(preview) and preview != "" do
+    lines = preview |> sanitize() |> String.split("\n") |> Enum.map(&{:body, "  │ " <> &1})
+    lines ++ [{:blank, ""}]
+  end
+
+  defp preview_lines(_item), do: []
 
   # A question with no options is still just an input box.
   defp question_lines(%{options: []}, _selection),

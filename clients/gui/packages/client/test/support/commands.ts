@@ -10,6 +10,8 @@ import type { CommandEntry } from "../../src/types.js";
 /** The prompts the fakes' defined commands send, by name. */
 export const DEFINED: Record<string, string> = {
   review: "Review the change on this branch. Look hardest at $ARGUMENTS.",
+  // Longer than a palette's detail shows (troupe Decision 814).
+  audit: ["Audit the dependencies, one at a time:", ...Array.from({ length: 11 }, (_, i) => `${i + 1}. check package ${i + 1}`)].join("\n"),
 };
 
 /** What `commands.run` sends for a defined command, or null for a name no file defines. */
@@ -143,6 +145,20 @@ export const COMMANDS: CommandEntry[] = [
     source: "project",
     detail: "Review the change on this branch\n\nFrom .troupe/commands/review.md.",
     example: null,
+    body: DEFINED["review"]!,
+  },
+  {
+    name: "audit",
+    aliases: [],
+    section: "custom",
+    summary: "Check each package in turn",
+    usage: "/audit",
+    args: [],
+    availability: "always",
+    source: "project",
+    detail: "Check each package in turn\n\nFrom .troupe/commands/audit.md.",
+    example: null,
+    body: DEFINED["audit"]!,
   },
   {
     name: "quit",

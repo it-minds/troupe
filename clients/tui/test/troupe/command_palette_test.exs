@@ -150,7 +150,9 @@ defmodule Troupe.CommandPaletteTest do
     {pid, _session} = start_tui(sid)
     eventually(fn -> user_state(pid).commands != [] end)
 
-    type(pid, "help")
+    # Typed on the line (the palette's Space puts it there), so it is `/help` that opens it.
+    type(pid, "/help ")
+    assert user_state(pid).focus == :command
     press(pid, "enter")
     assert user_state(pid).focus == :palette
     press(pid, "esc")
@@ -196,6 +198,10 @@ defmodule Troupe.CommandPaletteTest do
     {rows, cursor} = Troupe.UI.TUI.View.palette_view(user_state(pid))
     assert %{entry: %{"source" => "project"}, status: :ok} = Enum.at(rows, cursor)
 
+    # What it sends is in its detail, not only what its frontmatter says (Decision 814).
+    assert text =~ "sends:"
+    assert text =~ "│ Review the change on this branch."
+
     # Space leaves it on the line, and what follows the name is its argument.
     press(pid, " ")
     assert user_state(pid).cmd_text == "/review "
@@ -205,6 +211,30 @@ defmodule Troupe.CommandPaletteTest do
     input = await_event("root", :input, 10_000)
     assert input.data.content == "Review the change on this branch. Look hardest at the parser."
     assert user_state(pid).focus == :command
+  end
+
+  # A long prompt shows as much of itself as the detail pane has room for, and says how
+  # much more the file holds (Decision 814).
+  test "a long command shows its first lines and how many more there are" do
+    body = Enum.map_join(1..60, "\n", &"step #{&1} of the review")
+
+    ws =
+      tmp_workspace(%{".troupe/commands/audit.md" => "---\ndescription: Audit it\n---\n#{body}\n"})
+
+    {sid, _, _} = start_session!(workspace: ws, script: [])
+    {pid, session} = start_tui(sid)
+    eventually(fn -> user_state(pid).commands != [] end)
+
+    press(pid, "/")
+    type(pid, "audit")
+    text = screen_text(pid, session)
+
+    assert text =~ "│ step 1 of the review"
+    refute text =~ "step 60 of the review"
+    [_, more] = Regex.run(~r/… (\d+) more lines in the file/, text)
+    shown = length(Regex.scan(~r/│ step \d+ of the review/, text))
+    assert shown > 3
+    assert shown + String.to_integer(more) == 60
   end
 
   test "a query nothing matches runs as typed, as an unknown command always did" do
@@ -222,15 +252,15 @@ defmodule Troupe.CommandPaletteTest do
   end
 
   # Every built-in typed in full still runs as it did: the TUI stays up and none of them
-  # was sent to the agent as input. `quit` ends the app and `worktree` starts a branch,
-  # so those two are left out here; the client tests cover them.
+  # was sent to the agent as input. `quit` ends the app, `worktree` starts a branch and
+  # `new` a session, so those three are left out here; the client tests cover them.
   test "every built-in typed in full still runs" do
     {sid, _, _} = start_session!(script: [])
     {pid, _session} = start_tui(sid)
     eventually(fn -> user_state(pid).commands != [] end)
 
-    for name <- Server.builtins() -- ["quit", "worktree"] do
-      type(pid, name)
+    for name <- Server.builtins() -- ["quit", "worktree", "new"] do
+      type(pid, "/#{name} ")
       press(pid, "enter")
       assert Process.alive?(pid), name
       # Whatever page the command opened, Esc is the way back; twice for a menu.

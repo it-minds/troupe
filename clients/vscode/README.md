@@ -74,6 +74,23 @@ A folder in the explorer has **Ask Troupe About This Folder** (`@src/`). From th
 palette, the file is the one in the active editor. When Troupe already runs in that
 folder's terminal, it is shown, and the message says what to type into it.
 
+## Troupe in the terminal's profile menu
+
+**Troupe** is a terminal profile: in the menu beside the terminal panel's **+**, and in
+**Terminal: Create New Terminal (With Profile)**. It opens a new terminal whose program is
+`troupe --workspace <folder>`, with `troupe.args`, at the folder **Troupe: Open** would
+choose. No shell runs under it: quitting the TUI closes the terminal, and so does a TUI
+that fails to start, so **Troupe: Open**, whose shell keeps the reason, is where to see
+why. Each pick is a new terminal, even where the folder has Troupe open already.
+
+## Opening Troupe with the folder
+
+With `troupe.openOnFolderOpen` on, Troupe opens as **Troupe: Open** would when VS Code
+opens a folder or a workspace. It does not open a second time when the window reloads with
+Troupe's terminal still there (Troupe: Open shows that one too), and not in a workspace you
+have not trusted (VS Code's
+Restricted Mode) until you trust it. It is off unless you turn it on.
+
 ## The Troupe side bar
 
 The mask in the activity bar opens Troupe at the folder you are working in, and shows two
@@ -104,16 +121,19 @@ views:
 | `troupe.path` | The `troupe` program to run: a path, or a name looked up on the `PATH`. Empty by default. |
 | `troupe.args` | More arguments for `troupe`, such as `["--no-mouse"]`, so the terminal's own selection works, or `["--watch"]`. |
 | `troupe.openIn` | Where the terminal opens: `editor` (default), `beside` or `panel`. |
+| `troupe.openOnFolderOpen` | Open Troupe when VS Code opens a folder: `false` (default) or `true`. |
 
-All three are user or remote settings only. A repository's `.vscode/settings.json` cannot
-choose the program the terminal runs, nor add `--auto-approve` to it.
+All four are user or remote settings only. A repository's `.vscode/settings.json` cannot
+choose the program the terminal runs, add `--auto-approve` to it, nor start Troupe as it is
+opened.
 
 ## Remote development
 
 In a WSL, SSH, dev container or Codespaces window the terminal runs on the remote host, so
 the extension runs there too, and `troupe` has to be installed there: install the extension
-in the remote window when VS Code offers to. When it is missing, the message names the
-host, "Troupe isn't installed in WSL: Ubuntu", for example.
+in the remote window when VS Code offers to. The Troupe profile and opening with the folder
+use that host's `troupe` as well. When it is missing, the message names the host, "Troupe
+isn't installed in WSL: Ubuntu", for example.
 
 ## Installing
 
@@ -130,8 +150,10 @@ The `.vsix` by itself installs with **Extensions: Install from VSIX…** or
 
 ## No telemetry
 
-The extension collects nothing and sends nothing anywhere. It reads its three settings,
-looks for `troupe` on the disk, types a `troupe` command line into a terminal, and runs
+The extension collects nothing and sends nothing anywhere. It reads its four settings,
+looks for `troupe` on the disk, types a `troupe` command line into a terminal or starts
+`troupe` as one's program, keeps the process id of each folder's Troupe terminal in VS
+Code's storage for the workspace, to know it after a window reload, and runs
 `troupe config --explain --json` and `troupe models --json` on the same machine for the
 Settings view. What Troupe itself sends, and to whom (`troupe models` asks your providers
 what they serve), is in its own documentation.

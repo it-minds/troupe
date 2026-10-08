@@ -81,6 +81,15 @@ defmodule Troupe.Agent.State do
     # input was taken or the conversation compacted since they were read.
     instructions: nil,
     instructions_due: true,
+    # Digests of the system prompt and the tools this agent's last call sent, which its
+    # next call's `llm_request` is compared with (issue #465, Decision 815). Not folded: an
+    # agent restarted says nothing about its first call.
+    prefix: nil,
+    # With `system_prompt: stable` (Decision 815): the turn context put on the
+    # conversation, by the index of the user message it goes after, and each section as
+    # the conversation last carried it. Not folded, and emptied by a compaction.
+    turn_context: %{},
+    context_sent: %{},
     llm_text: "",
     llm_tool_names: %{},
     # What the provider has reported so far of the call in flight, and whether that call is
@@ -142,6 +151,10 @@ defmodule Troupe.Agent.State do
     # `thinking -> acting` is a state change: without this, one queued input would be
     # announced once per transition until the agent finally took it.
     queued: MapSet.new(),
+    # The person's own commands (`user_shell`, Decision 813) the root has not yet given
+    # its model, as the notes it will give it before its next call. Folded: a `user_shell`
+    # adds one, the `user_input` from `shell` that carried them clears them.
+    shell_notes: [],
     # How often this agent may start again within how many milliseconds before its Node
     # gives up (Decision 727), for a crash to tell whether it is the one that ends it.
     restart_limit: {3, 6_000}
@@ -171,6 +184,9 @@ defmodule Troupe.Agent.State do
           prompt_todos: [Troupe.Todo.t()],
           goal: String.t() | nil,
           loop: String.t() | nil,
+          prefix: %{system: binary(), tools: binary()} | nil,
+          turn_context: %{optional(non_neg_integer()) => String.t()},
+          context_sent: %{optional(String.t()) => String.t()},
           llm_text: String.t(),
           llm_tool_names: %{optional(String.t()) => String.t()},
           llm_usage: Troupe.LLM.Usage.t() | nil,
@@ -198,6 +214,7 @@ defmodule Troupe.Agent.State do
           finish_summary: String.t() | nil,
           fake: pid() | atom() | nil,
           queued: MapSet.t(String.t()),
+          shell_notes: [String.t()],
           restart_limit: {pos_integer(), pos_integer()}
         }
 

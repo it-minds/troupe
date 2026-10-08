@@ -614,6 +614,78 @@ defmodule Troupe.RemoteTranslateTest do
              translate(durable("user_input", %{"source" => "loop", "text" => "Loop iteration 2"}))
   end
 
+  test "a person's command is a block of its own, and the note the agent was given of it is not drawn" do
+    memory = Translate.remember(Translate.memory(:remote, "code"), "root")
+
+    {[started], memory} =
+      Translate.ephemeral(
+        "s-1",
+        %{
+          "ephemeral" => true,
+          "type" => "shell_started",
+          "agent" => ["root"],
+          "data" => %{"run_id" => "sh-1", "command" => "git status", "agent" => true}
+        },
+        memory
+      )
+
+    assert {started.type, started.transient?} == {:shell_started, true}
+    assert started.data == %{run_id: "sh-1", command: "git status", agent: true, where: "code"}
+
+    {[output], memory} =
+      Translate.ephemeral(
+        "s-1",
+        %{
+          "ephemeral" => true,
+          "type" => "shell_output",
+          "agent" => ["root"],
+          "data" => %{"run_id" => "sh-1", "text" => "On branch main\n"}
+        },
+        memory
+      )
+
+    ended =
+      durable("user_shell", %{
+        "run_id" => "sh-1",
+        "command" => "git status",
+        "output" => "On branch main\nnothing to commit\n",
+        "ended" => "exited",
+        "exit_status" => 1,
+        "agent" => true
+      })
+
+    {[shell], memory} = Translate.durable("s-1", ended, memory)
+    assert shell.type == :user_shell
+    assert shell.data.status == :exited
+    assert shell.data.exit_status == 1
+    assert shell.data.where == "code"
+
+    note = durable("user_input", %{"source" => "shell", "text" => "The person ran this command"})
+    assert {[], _memory} = Translate.durable("s-1", note, memory)
+
+    # Streamed, then settled: one block, with the tail the harness kept.
+    assert [{:shell, block}] = folded([started, output, shell]).transcript
+    assert block.command == "git status"
+    assert block.status == :exited
+    assert block.lines == ["On branch main", "nothing to commit"]
+    assert Model.shell_status(block) == "exit 1"
+
+    # A replay has only the end, and draws the same block.
+    assert [{:shell, ^block}] = folded([shell]).transcript
+
+    killed =
+      durable("user_shell", %{
+        "run_id" => "sh-2",
+        "command" => "sleep 9",
+        "output" => "",
+        "ended" => "killed",
+        "agent" => false
+      })
+
+    [%{data: data}] = translate(killed)
+    assert {data.status, data.agent, data.where} == {:killed, false, nil}
+  end
+
   # The root window after `events`: its transcript, and the inputs it has drawn and not yet
   # seen taken.
   defp folded(events) do

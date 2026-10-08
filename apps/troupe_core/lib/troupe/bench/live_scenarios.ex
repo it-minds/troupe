@@ -17,6 +17,11 @@ defmodule Troupe.Bench.LiveScenarios do
   files that call it, one written from its documentation, a count found in a log too
   large to read whole, one line changed in a long file, steps followed from a file, and a
   question that needs no tool at all. Each still has an outcome a script checks.
+
+  `follow_up` is in neither suite, and runs when it is named (`--scenario follow_up`): two
+  turns, the second under an instruction file the first brought into the session, which
+  is what changes a prompt between turns and what issue #465's two options are measured
+  on (Decision 815).
   """
 
   alias Troupe.Bench.Scenario
@@ -40,7 +45,8 @@ defmodule Troupe.Bench.LiveScenarios do
       large_log(),
       precise_edit(),
       follow_steps(),
-      answer_only()
+      answer_only(),
+      follow_up()
     ]
   end
 
@@ -524,6 +530,59 @@ defmodule Troupe.Bench.LiveScenarios do
       end
     }
   end
+
+  # -- a second turn under an instruction file the first brought in ---------------------
+
+  @house_rules """
+  # House rules
+
+  Every file you write starts with this line, and then its content:
+  # kept by the bench
+  """
+
+  @docs_rules """
+  # Under docs/
+
+  Every file you write under docs/ ends with this line, after its content:
+  -- end
+  """
+
+  # Issue #465's scenario (Decision 815). The first turn reads a file under docs/, so the
+  # second begins with docs/AGENTS.md among the instruction files (Decision 798): where
+  # those go in the prompt, the second turn's first call is the first whose prompt is not
+  # the one before with something added. The outcome is the second turn's file under both
+  # files' rules, so a run also says whether instructions sent with the turn rather than
+  # in the system prompt were followed; the check says the first file kept the root's.
+  defp follow_up do
+    %Scenario{
+      name: "follow_up",
+      title: "a second turn, under an instruction file the first brought in",
+      prompt: """
+      docs/plan.txt names two steps. Read it, and write the word step 1 names to out/first.txt with write_file. Do nothing else, and say so in one short sentence when it is written.\
+      """,
+      follow_ups: [
+        "Now write the word step 2 of docs/plan.txt names to docs/next.txt with write_file, and say so in one short sentence."
+      ],
+      files: %{
+        "AGENTS.md" => @house_rules,
+        "docs/AGENTS.md" => @docs_rules,
+        "docs/plan.txt" => "step 1: alpha\nstep 2: beta\n"
+      },
+      outcome: {:file, "docs/next.txt", "# kept by the bench\nbeta\n-- end\n"},
+      measure: fn ctx ->
+        {[],
+         [
+           {"first", "out/first.txt keeps the root's rule",
+            Scenario.holds?(ctx.workspace, "out/first.txt", "# kept by the bench\nalpha\n")},
+           {"two_turns", "both turns were taken", typed(ctx.events) == 2}
+         ]}
+      end
+    }
+  end
+
+  # What the run typed, each a turn of its own; a note from the harness is not one.
+  defp typed(events),
+    do: Enum.count(events, &(&1.type == "user_input" and &1.data["source"] == "user"))
 
   # The root agent's last reply, as text.
   defp reply(ctx) do

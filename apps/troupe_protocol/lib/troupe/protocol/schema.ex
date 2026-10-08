@@ -81,6 +81,23 @@ defmodule Troupe.Protocol.Schema do
         "text" => required(:string),
         "command_id" => optional(:string)
       },
+      # A command the person ran in the session's workspace (`shell.run`, Decision 813),
+      # written by the root agent under its actor when it ends. `output` is the tail capped
+      # at the session's `tool_output_limit`, with the `read_output` marker when it was cut;
+      # `ended` is `exited` (with `exit_status`), `timeout`, `killed` or `failed` (with
+      # `reason`); `agent` says whether the next model call is given it.
+      "user_shell" => %{
+        "run_id" => required(:string),
+        "command" => required(:string),
+        "output" => required(:string),
+        "ended" => required(:string),
+        "agent" => required(:boolean),
+        "exit_status" => optional(:integer),
+        "reason" => optional(:string),
+        "timeout_ms" => optional(:integer),
+        "duration_ms" => optional(:integer),
+        "command_id" => optional(:string)
+      },
       "input_queued" => %{
         "command_id" => required(:string),
         "author" => required(:string),
@@ -92,13 +109,19 @@ defmodule Troupe.Protocol.Schema do
       },
       # `prompt_bytes`: what the prompt was made of, in bytes — `system` (`brief` a part of
       # it), `tools`, `conversation` (`tool_results` a part of it) and `total` (Decision
-      # 769). Absent from a log written before it.
+      # 769). Absent from a log written before it. `system_changed` and `tools_changed`:
+      # whether the system prompt and the tools differ from the agent's call before, absent
+      # on its first and on the first after a restart; `turn_context`: the sections a stable
+      # system prompt sent with this call (issue #465, Decision 815).
       "llm_request" => %{
         "model" => required(:string),
         "message_count" => required(:integer),
         "tools" => required({:array, :string}),
         "profile" => required(:string),
-        "prompt_bytes" => optional(:object)
+        "prompt_bytes" => optional(:object),
+        "system_changed" => optional(:boolean),
+        "tools_changed" => optional(:boolean),
+        "turn_context" => optional({:array, :string})
       },
       "llm_response" => %{
         "message" => required(:object),
@@ -109,7 +132,12 @@ defmodule Troupe.Protocol.Schema do
         # `request_id` and `cost_micros`. Optional because an event written before there
         # was a gateway to ask carries neither, and because a gateway may answer with
         # one and not the other.
-        "gateway" => optional(:object)
+        "gateway" => optional(:object),
+        # What became of the thinking the call handed back, present only when anything
+        # did: refused as bound to another conversation and the call sent again without it
+        # (Decision 805), or the blocks the thinking-binding beta dropped (Decision 815).
+        "thinking_resent" => optional(:boolean),
+        "thinking_dropped" => optional(:integer)
       },
       # `reason` is a sentence a person can act on (Decision 659), not a term. `note` is a
       # root's: what its conversation was told, which a replay puts back (Decision 693).
@@ -311,12 +339,15 @@ defmodule Troupe.Protocol.Schema do
         "decision" => required(:string)
       },
       # `ask_user` (Decision 651): the agent hands a decision to a person and waits.
+      # `preview` is text the question is about, shown as it is beneath it: the prompt a
+      # workspace's command would send, when it asks before it is first sent (Decision 814).
       "question_asked" => %{
         "call_id" => required(:string),
         "agent_path" => required({:array, :string}),
         "question" => required(:string),
         "options" => required(:array),
-        "multiple" => required(:boolean)
+        "multiple" => required(:boolean),
+        "preview" => optional(:string)
       },
       "question_answered" => %{
         "call_id" => required(:string),
@@ -325,6 +356,14 @@ defmodule Troupe.Protocol.Schema do
       "approval_resolved" => %{
         "call_id" => required(:string),
         "resolved_by" => required(:string)
+      },
+      # A workspace's command that asked before it was first sent and was not (Decision
+      # 814): `reason` says why and how to run it later, a sentence a person can act on;
+      # `command_id` is the `commands.run` that asked.
+      "command_declined" => %{
+        "name" => required(:string),
+        "reason" => required(:string),
+        "command_id" => optional(:string)
       },
       # What the session may touch: `[{name, kind, root, mode}]`. Resolved once, at
       # creation, and recorded so that a replay can tell what was allowed at the time.
@@ -449,7 +488,15 @@ defmodule Troupe.Protocol.Schema do
         "agent" => optional({:array, :string})
       },
       "summary_diff" => %{"changed" => required(:object)},
-      "watch_notice" => %{"message" => required(:string)}
+      "watch_notice" => %{"message" => required(:string)},
+      # A person's command while it runs (Decision 813): started, then its output as it
+      # comes. Its end is the durable `user_shell`, which carries the tail either way.
+      "shell_started" => %{
+        "run_id" => required(:string),
+        "command" => required(:string),
+        "agent" => required(:boolean)
+      },
+      "shell_output" => %{"run_id" => required(:string), "text" => required(:string)}
     }
   end
 
@@ -501,6 +548,13 @@ defmodule Troupe.Protocol.Schema do
       # A private session another device sealed last, taken over on this one (Decision 785):
       # the daemon's only, since a pod holds no private session.
       "session.claim" => %{"command_id" => required(:string), "session_id" => required(:string)},
+      # A second session from this one's conversation as it stands (Decision 812): the
+      # daemon's; a pod session is forked through the plane's method of the same name.
+      "session.fork" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "config" => optional(:object)
+      },
       "input.send" => %{
         "command_id" => required(:string),
         "session_id" => required(:string),
@@ -509,6 +563,21 @@ defmodule Troupe.Protocol.Schema do
       "turn.cancel" => %{
         "command_id" => required(:string),
         "session_id" => required(:string)
+      },
+      # A command the person typed, run in the session's workspace (Decision 813): `control`,
+      # and the session's owner or an `admin`. `agent: false` keeps it from the agent.
+      # Activating, as input is. `shell.cancel` kills one that runs.
+      "shell.run" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "command" => required(:string),
+        "agent" => optional(:boolean),
+        "timeout_ms" => optional(:integer)
+      },
+      "shell.cancel" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "run_id" => required(:string)
       },
       "profile.switch" => %{
         "command_id" => required(:string),

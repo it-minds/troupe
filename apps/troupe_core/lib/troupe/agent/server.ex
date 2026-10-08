@@ -51,7 +51,7 @@ defmodule Troupe.Agent.Server do
 
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
-  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions}
+  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions, Shell}
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Tools.{Output, ReadOutput}
@@ -168,6 +168,26 @@ defmodule Troupe.Agent.Server do
   @doc "A snapshot for the UI and for tests. Read-only; never used inside the loop."
   @spec snapshot(pid()) :: map()
   def snapshot(pid), do: :gen_statem.call(pid, :snapshot, 5_000)
+
+  @doc """
+  What a person's own command in this session runs with (Decision 813): the workspace and
+  its mount table, the config, and the definitions its policy is read from. Answered in
+  every state.
+  """
+  @spec shell_setup(pid()) :: %{
+          workspace: Troupe.Workspace.t(),
+          config: Config.t(),
+          definitions: Definitions.t()
+        }
+  def shell_setup(pid), do: :gen_statem.call(pid, :shell_setup, 5_000)
+
+  @doc """
+  A person's own command has ended. The root writes it as `user_shell` under `actor`, in
+  any state, and unless it was kept from the agent holds its note for the next model call
+  (Decision 813): it starts no turn.
+  """
+  @spec shell_ran(pid(), map(), Event.Actor.t() | nil) :: :ok
+  def shell_ran(pid, data, actor), do: :gen_statem.call(pid, {:shell_ran, data, actor}, 5_000)
 
   # -- init and replay --------------------------------------------------------
 
@@ -317,6 +337,10 @@ defmodule Troupe.Agent.Server do
 
   defp fold_event(%Event{type: "llm_error", data: data}, state), do: fold_stopped(state, data)
 
+  # A person's own command, which the next model call is given unless it was kept from the
+  # agent (Decision 813); the `user_input` from `shell` that gave it clears it below.
+  defp fold_event(%Event{type: "user_shell", data: data}, state), do: hold_shell(state, data)
+
   # A turn ends cancelled as well as at rest, and the next one counts what it costs from
   # nothing (Decision 769).
   defp fold_event(%Event{type: "cancelled", data: data}, state),
@@ -375,6 +399,11 @@ defmodule Troupe.Agent.Server do
   # A note from the harness is a `user_input` too, but one written in the middle of a turn,
   # which left the list the prompt shows alone when it was written, and does so here.
   defp fold_input(state, %{"source" => "harness"}), do: state
+
+  # The person's commands, given to the model before a call (Decision 813): written before
+  # the input that starts a turn, or between a tool exchange and the call after it, and the
+  # list the prompt shows is the turn's either way.
+  defp fold_input(state, %{"source" => "shell"}), do: %{state | shell_notes: []}
   defp fold_input(state, _data), do: show_todos(state)
 
   # Being finished is not visible in the conversation — a subagent's last message is
@@ -973,6 +1002,18 @@ defmodule Troupe.Agent.Server do
     {:keep_state_and_data, [{:reply, from, state.definitions}]}
   end
 
+  # A person's own command (Decision 813), in every state: what it runs with, and its end,
+  # written here so the log and what the next call is given agree.
+  defp common({:call, from}, :shell_setup, _state_name, state) do
+    setup = %{workspace: state.workspace, config: state.config, definitions: state.definitions}
+    {:keep_state_and_data, [{:reply, from, setup}]}
+  end
+
+  defp common({:call, from}, {:shell_ran, data, actor}, _state_name, state) do
+    log(state, :user_shell, data, actor)
+    {:keep_state, hold_shell(state, data), [{:reply, from, :ok}]}
+  end
+
   defp common(:info, message, state_name, state) do
     Logger.debug(
       "troupe agent #{State.label(state)} dropped #{inspect(message)} in #{state_name}"
@@ -1065,6 +1106,10 @@ defmodule Troupe.Agent.Server do
 
   defp accept_input(state, source, content, actor, meta) do
     if acceptable?(source, content) do
+      # The person's commands since the last call come first, in the order they happened:
+      # "the tests fail, fix them" after `!mix test` reads after the run it is about.
+      state = fold_shell(state)
+
       # Before the content, and carrying the author and the command id, which is what a
       # client's optimistic render reconciles against.
       log(
@@ -1158,6 +1203,24 @@ defmodule Troupe.Agent.Server do
     }
   end
 
+  # -- the person's own commands (Decision 813) -------------------------------
+
+  defp hold_shell(state, %{"agent" => true} = data),
+    do: %{state | shell_notes: state.shell_notes ++ [Shell.note(data)]}
+
+  defp hold_shell(state, _kept_from_the_agent), do: state
+
+  # Before a model call, and only there: never between a tool call and its results, since
+  # a call is only ever made with every result in. One user message for whatever ran since
+  # the last call, written as `user_input` from `shell` so a replay puts it back.
+  defp fold_shell(%State{shell_notes: []} = state), do: state
+
+  defp fold_shell(state) do
+    text = Enum.join(state.shell_notes, "\n\n")
+    log(state, :user_input, %{"source" => "shell", "text" => text})
+    %{state | conversation: state.conversation ++ [Message.user(text)], shell_notes: []}
+  end
+
   # -- turns ------------------------------------------------------------------
 
   defp start_turn(state) do
@@ -1166,22 +1229,30 @@ defmodule Troupe.Agent.Server do
         gate_halt(halt)
 
       :ok ->
-        state = load_instructions(state)
+        {state, attached} =
+          state |> fold_shell() |> load_instructions() |> attach_turn_context()
         definition = effective_definition(state)
         request = build_request(state, definition)
+        {prefix, changed} = prefix_changes(state.prefix, request)
 
-        log(state, :llm_request, %{
-          "model" => request.model,
-          # The count, not the messages: the whole conversation is already in the log
-          # once, and writing it again on every turn makes the log grow with the square
-          # of the turns.
-          "message_count" => length(request.messages),
-          "tools" => Enum.map(request.tools, & &1.name),
-          "profile" => definition.name,
-          # What the prompt was made of, in bytes (Decision 769): which part is the large
-          # one is the question a long turn's bill raises.
-          "prompt_bytes" => prompt_bytes(state, request)
-        })
+        log(
+          state,
+          :llm_request,
+          %{
+            "model" => request.model,
+            # The count, not the messages: the whole conversation is already in the log
+            # once, and writing it again on every turn makes the log grow with the square
+            # of the turns.
+            "message_count" => length(request.messages),
+            "tools" => Enum.map(request.tools, & &1.name),
+            "profile" => definition.name,
+            # What the prompt was made of, in bytes (Decision 769): which part is the large
+            # one is the question a long turn's bill raises.
+            "prompt_bytes" => prompt_bytes(state, request)
+          }
+          |> Map.merge(changed)
+          |> put_attached(attached)
+        )
 
         :telemetry.execute(
           [:troupe, :llm, :start],
@@ -1199,13 +1270,38 @@ defmodule Troupe.Agent.Server do
             llm_model: request.model,
             llm_summariser: false,
             llm_text: "",
-            llm_tool_names: %{}
+            llm_tool_names: %{},
+            prefix: prefix
         }
 
         publish_state(state, :thinking)
         {:next_state, :thinking, state}
     end
   end
+
+  # Whether this call's system prompt and tools are those of the agent's call before it
+  # (issue #465, Decision 815): what a kept thinking block and the cached prefix are bound
+  # to, on the call's `llm_request` for `Troupe.Bench.Prefix` to count. Not on an agent's
+  # first call, nor on the first after a restart, which has no call before it to compare.
+  defp prefix_changes(previous, %Request{} = request) do
+    prefix = %{system: digest(Request.system_text(request)), tools: digest(request.tools)}
+
+    changed =
+      case previous do
+        nil ->
+          %{}
+
+        %{system: system, tools: tools} ->
+          %{"system_changed" => system != prefix.system, "tools_changed" => tools != prefix.tools}
+      end
+
+    {prefix, changed}
+  end
+
+  defp digest(term), do: :crypto.hash(:sha256, :erlang.term_to_binary(term, [:deterministic]))
+
+  defp put_attached(data, []), do: data
+  defp put_attached(data, sections), do: Map.put(data, "turn_context", sections)
 
   # The profile in force for this turn. Normally the agent's own; during an `AI?`
   # watch turn, `plan`, so a question cannot edit files.
@@ -1224,9 +1320,9 @@ defmodule Troupe.Agent.Server do
 
     %Request{
       model: nil,
-      messages: sent_conversation(state, tools, ctx),
+      messages: state |> sent_conversation(tools, ctx) |> with_turn_context(state.turn_context),
       system: system_prompt(state, definition),
-      system_tail: todo_section(state.prompt_todos),
+      system_tail: if(stable?(state), do: nil, else: todo_section(state.prompt_todos)),
       cache: true,
       tools: tools,
       max_tokens: state.config.max_tokens,
@@ -1264,6 +1360,7 @@ defmodule Troupe.Agent.Server do
         max_tokens: min(request.max_tokens, target.max_output || request.max_tokens),
         reasoning_effort: target.reasoning_effort,
         thinking: Config.thinking(config, model),
+        thinking_binding: if(config.thinking_binding == "drop_block", do: "drop_block"),
         provider: adapter_for(target.provider, state),
         timeout_ms: config.llm_timeout_ms,
         identify: config.identify != false,
@@ -1294,9 +1391,12 @@ defmodule Troupe.Agent.Server do
   defp request_extra(%State{fake: fake} = state), do: %{fake: fake, agent_path: state.agent_path}
 
   # What a call's prompt was made of (Decision 769), with the brief `system_prompt/2` put in
-  # it told apart from the rest.
-  defp prompt_bytes(state, %Request{} = request),
-    do: Spend.prompt_bytes(request, Instructions.to_prompt(state.instructions))
+  # it told apart from the rest. A stable system prompt has none in it: it goes with the
+  # turn, and counts in the conversation (Decision 815).
+  defp prompt_bytes(state, %Request{} = request) do
+    brief = if stable?(state), do: "", else: Instructions.to_prompt(state.instructions)
+    Spend.prompt_bytes(request, brief)
+  end
 
   # The repository's instruction files and the project brief come right after the
   # profile's own words and before the environment: what the people who work here wrote
@@ -1310,16 +1410,117 @@ defmodule Troupe.Agent.Server do
   # list itself is the request's `system_tail`: still the end of the system prompt, but
   # behind the prompt cache's mark (Decision 770), and the list as the turn began, so a
   # rewrite within the turn leaves the cached conversation after it alone (Decision 792).
+  #
+  # With `system_prompt: stable` (issue #465's second option, Decision 815) the instruction
+  # files and the brief, the goal and the task list are left out of it, so it is the same
+  # on every call of the session, and go with the turn instead (`attach_turn_context/1`).
   defp system_prompt(state, definition) do
+    stable? = stable?(state)
+
     [
       definition.prompt,
-      Instructions.to_prompt(state.instructions),
+      unless(stable?, do: Instructions.to_prompt(state.instructions)),
       environment_section(state),
       Skills.prompt_section(state.bundle, definition, state.workspace.root_real),
-      goal_section(state)
+      unless(stable?, do: goal_section(state))
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
+  end
+
+  defp stable?(%State{config: config}), do: config.system_prompt == "stable"
+
+  # Issue #465's second option (Decision 815). What the system prompt would have changed
+  # by between turns goes into the conversation instead, as a text block after what the
+  # turn's last user message holds — the person's input as a turn begins, after a tool's
+  # results when a compaction or a goal comes in the middle of one — and stays there,
+  # where it was put, on every later call: a request is then the one before with
+  # something added, which is what keeps a kept thinking block valid and the cached
+  # conversation readable. A section goes again only when it changed since the copy the
+  # conversation already carries; one that emptied says so. Not folded: an agent
+  # restarted sends its next call without the blocks it had put before, which is one
+  # edit of the conversation, and puts the sections again as they are then. A compaction
+  # rewrites the conversation, and they are put again after it.
+  defp attach_turn_context(%State{} = state) do
+    if stable?(state),
+      do: attach_changed(state, last_user_index(state.conversation)),
+      else: {state, []}
+  end
+
+  defp attach_changed(state, nil), do: {state, []}
+
+  defp attach_changed(state, index) do
+    changed =
+      Enum.reject(turn_sections(state), fn {name, text} ->
+        Map.get(state.context_sent, name, "") == text
+      end)
+
+    case changed do
+      [] ->
+        {state, []}
+
+      changed ->
+        block = render_turn_context(changed)
+
+        state = %{
+          state
+          | turn_context: Map.update(state.turn_context, index, block, &(&1 <> "\n\n" <> block)),
+            context_sent: Map.merge(state.context_sent, Map.new(changed))
+        }
+
+        {state, Enum.map(changed, &elem(&1, 0))}
+    end
+  end
+
+  defp turn_sections(state) do
+    [
+      {"instructions", Instructions.to_prompt(state.instructions)},
+      {"goal", goal_section(state)},
+      {"task_list", todo_section(state.prompt_todos)}
+    ]
+  end
+
+  defp render_turn_context(sections) do
+    body =
+      Enum.map_join(sections, "\n\n", fn
+        {"instructions", ""} -> "# Instruction files\nNone apply now."
+        {"goal", ""} -> "<goal>\nNo goal is set now.\n</goal>"
+        {"task_list", ""} -> "<task_list>\nThe task list is empty now.\n</task_list>"
+        {_name, text} -> text
+      end)
+
+    """
+    <turn_context>
+    Part of your instructions, sent with the turn rather than in the system prompt. Each \
+    section here stands until a later turn_context has a section of the same kind.
+
+    #{body}
+    </turn_context>\
+    """
+  end
+
+  defp last_user_index(conversation) do
+    conversation
+    |> Enum.with_index()
+    |> Enum.filter(fn {message, _index} -> message.role == :user end)
+    |> List.last()
+    |> case do
+      nil -> nil
+      {_message, index} -> index
+    end
+  end
+
+  defp with_turn_context(messages, contexts) when map_size(contexts) == 0, do: messages
+
+  defp with_turn_context(messages, contexts) do
+    messages
+    |> Enum.with_index()
+    |> Enum.map(fn {message, index} ->
+      case Map.fetch(contexts, index) do
+        {:ok, text} -> %{message | content: message.content ++ [%Text{text: text}]}
+        :error -> message
+      end
+    end)
   end
 
   # Read from disk as a turn begins, so an edit takes effect on the next one, and held for
@@ -1395,17 +1596,35 @@ defmodule Troupe.Agent.Server do
 
   defp show_todos(%State{} = state), do: %{state | prompt_todos: state.todos}
 
+  # What became of the thinking the call handed back, when anything did (issue #465,
+  # Decision 815): refused as bound to another conversation and the call sent again
+  # without it (Decision 805), or the blocks Anthropic's thinking-binding beta dropped.
+  defp put_thinking_kept(data, %Response{} = response) do
+    data
+    |> then(&if response.thinking_resent, do: Map.put(&1, "thinking_resent", true), else: &1)
+    |> then(fn data ->
+      if response.thinking_dropped > 0,
+        do: Map.put(data, "thinking_dropped", response.thinking_dropped),
+        else: data
+    end)
+  end
+
   defp record_response(state, %Response{} = response) do
     message = Response.to_message(response)
     gateway = gateway_json(response.gateway, state, response)
 
-    log(state, :llm_response, %{
-      "message" => Message.to_json(message),
-      "usage" => Usage.to_json(response.usage),
-      "stop_reason" => Atom.to_string(response.stop_reason),
-      "model" => response.model || state.llm_model,
-      "gateway" => gateway
-    })
+    log(
+      state,
+      :llm_response,
+      %{
+        "message" => Message.to_json(message),
+        "usage" => Usage.to_json(response.usage),
+        "stop_reason" => Atom.to_string(response.stop_reason),
+        "model" => response.model || state.llm_model,
+        "gateway" => gateway
+      }
+      |> put_thinking_kept(response)
+    )
 
     state = count_call(state, response.usage, gateway)
 
@@ -2874,12 +3093,15 @@ defmodule Troupe.Agent.Server do
 
     # The call that wrote the task list may be in the summary now, and the conversation
     # behind the system prompt is new anyway, so the prompt shows the list as it is, and
-    # the instruction files as they are.
+    # the instruction files as they are; a stable system prompt's turn context goes again
+    # with the conversation that is left (Decision 815).
     %{
       state
       | conversation: conversation,
         compacted_through: compacted_through(conversation),
-        last_input_tokens: 0
+        last_input_tokens: 0,
+        turn_context: %{},
+        context_sent: %{}
     }
     |> show_todos()
     |> instructions_due()

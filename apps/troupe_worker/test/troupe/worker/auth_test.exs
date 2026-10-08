@@ -5,8 +5,8 @@ defmodule Troupe.Worker.AuthTest do
   A token for one session is for the methods about that session. Everything else a pod
   serves is about the pod — creating a session in any workspace, a path's brief, the
   workspaces it has seen, the machine's settings and identity — and a token for one session
-  is refused it before anything runs. So are the four about the session that are the
-  plane's to do: archiving, pinning and erasing it. The walk is over the protocol's own
+  is refused it before anything runs. So are the five about the session that are the
+  plane's to do: archiving, pinning, erasing and forking it. The walk is over the protocol's own
   method table, so a method added to it is one somebody has to put on one side of that
   line.
 
@@ -55,8 +55,14 @@ defmodule Troupe.Worker.AuthTest do
 
   # About the session, and done through the plane, which holds a pod session's row, key
   # and retention. The plane's own erasure reaches the pod over the control channel, not
-  # through this guard (`erasure_test.exs`).
-  @plane_level ["session.archive", "session.pin", "session.unpin", "session.erase"]
+  # through this guard (`erasure_test.exs`). A fork is a new row (root Decision 812).
+  @plane_level [
+    "session.archive",
+    "session.pin",
+    "session.unpin",
+    "session.erase",
+    "session.fork"
+  ]
 
   # Every method the clients send a worker today, read from their sources: the TUI's
   # `clients/tui/lib/troupe/remote/worker.ex`, the GUI's
@@ -86,7 +92,10 @@ defmodule Troupe.Worker.AuthTest do
     "fs.upload",
     "blob.get",
     "context.get",
-    "presence.set"
+    "presence.set",
+    # The person's own command (`!cmd`, the TUI's; Decision 813).
+    "shell.run",
+    "shell.cancel"
   ]
 
   setup do

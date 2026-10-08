@@ -35,6 +35,10 @@ defmodule Troupe.LLM.Request do
     # own model list says (Decision 780). `nil` leaves it to the adapter, which goes by the
     # model's name.
     thinking: nil,
+    # `"drop_block"` when the config's `thinking_binding` asks Anthropic to drop a kept
+    # thinking block whose conversation changed rather than refuse the call (issue #465,
+    # Decision 815). Only the Anthropic adapter reads it.
+    thinking_binding: nil,
     base_url: nil,
     # `{:refused, why}` when the provider may not be used — a `{env:VAR}` its key or URL
     # reads is not set — which the adapter answers with that error and no request.
@@ -75,6 +79,7 @@ defmodule Troupe.LLM.Request do
           temperature: float() | nil,
           reasoning_effort: String.t() | nil,
           thinking: :adaptive | :budget | nil,
+          thinking_binding: String.t() | nil,
           base_url: String.t() | nil,
           api_key: String.t() | {:refused, String.t()} | nil,
           auth: :api_key | :bearer,
@@ -164,7 +169,13 @@ defmodule Troupe.LLM.Response do
             stop_reason: :end_turn,
             usage: %Usage{},
             model: nil,
-            gateway: %Gateway{}
+            gateway: %Gateway{},
+            # What became of the thinking the request handed back (issue #465, Decision
+            # 815): refused as bound to another conversation and the call sent again
+            # without it (Decision 805), or how many blocks Anthropic's thinking-binding
+            # beta dropped.
+            thinking_resent: false,
+            thinking_dropped: 0
 
   @type stop_reason :: :end_turn | :tool_use | :max_tokens | :stop_sequence | :refusal | :other
   @type t :: %__MODULE__{
@@ -172,7 +183,9 @@ defmodule Troupe.LLM.Response do
           stop_reason: stop_reason(),
           usage: Usage.t(),
           model: String.t() | nil,
-          gateway: Gateway.t()
+          gateway: Gateway.t(),
+          thinking_resent: boolean(),
+          thinking_dropped: non_neg_integer()
         }
 
   @doc "The response as an assistant message to append to the conversation."

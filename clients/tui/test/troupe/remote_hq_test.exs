@@ -232,7 +232,7 @@ defmodule Troupe.RemoteHQTest do
       assert Client.capability(sid).up?
 
       # and HQ says exactly what is unavailable
-      type(pid, "hq")
+      type(pid, "/hq")
       press(pid, "enter")
       eventually(fn -> user_state(pid).focus == :hq end)
       text = screen_text(pid, screen)
