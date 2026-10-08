@@ -212,8 +212,10 @@ defmodule Troupe.Session.Shell do
       config: setup.config
     }
 
+    # Cut, then replace: a cut can land inside a character, and the part of it kept is
+    # not UTF-8 either (#493).
     output =
-      output |> String.replace_invalid() |> Output.cap_tail(setup.config.tool_output_limit, ctx)
+      output |> Output.cap_tail(setup.config.tool_output_limit, ctx) |> String.replace_invalid()
 
     case ending do
       status when is_integer(status) ->
