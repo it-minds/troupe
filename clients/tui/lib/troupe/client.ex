@@ -127,12 +127,14 @@ defmodule Troupe.Client do
   @callback stop_session(session_id()) :: :ok | {:error, term()}
   @callback has_session?(session_id()) :: boolean()
   @callback idle?(session_id()) :: boolean()
+  @callback fork_session(session_id()) :: {:ok, session_id()} | {:error, term()}
 
   ## Fleet-scoped
 
   @callback teams(origin()) :: {:ok, [map()]} | {:error, term()}
   @callback profiles(origin(), String.t() | nil) :: {:ok, [map()]} | {:error, term()}
   @callback sessions(origin(), map()) :: {:ok, [summary()]} | {:error, term()}
+  @callback get_session(origin(), session_id()) :: {:ok, summary()} | {:error, term()}
   @callback create_session(origin(), map()) :: {:ok, session_id()} | {:error, term()}
   @callback open_session(origin(), session_id(), :read | :activate, keyword()) ::
               {:ok, session_id()} | {:error, term()}
@@ -349,6 +351,51 @@ defmodule Troupe.Client do
   @spec idle?(session_id()) :: boolean()
   def idle?(sid), do: impl(sid).idle?(sid)
 
+  @doc """
+  A second session from this one's conversation as it stands (root Decision 812): the
+  daemon's `session.fork` for a session on this machine, the plane's for a pod's. The new
+  session is attached, as one `create_session/2` makes is.
+  """
+  @spec fork_session(session_id()) :: {:ok, session_id()} | {:error, term()}
+  def fork_session(sid), do: impl(sid).fork_session(sid)
+
+  @doc """
+  Why a session cannot be carried on from here, as a sentence that says what to do
+  instead; `nil` when it can (root Decision 812). Another device holds it, having sealed
+  it last, until it is claimed here; or it is erased, or being erased. A dormant session,
+  asleep or archived, is not refused: the next line wakes it.
+  """
+  @spec resume_refusal(summary()) :: String.t() | nil
+  def resume_refusal(%{id: id, sync: "elsewhere"} = summary) do
+    "#{id} is held on #{summary[:device] || "another device"}, which sealed it last; " <>
+      "claim it here first (c in /sessions), or /new starts a fresh session"
+  end
+
+  def resume_refusal(%{id: id, sync: "erasure_pending"}), do: erased(id)
+
+  def resume_refusal(%{id: id, state: state}) when state in [:erasure_pending, :erased],
+    do: erased(id)
+
+  def resume_refusal(_summary), do: nil
+
+  @doc """
+  What a session that could not be opened, forked or found is said to be, in the words
+  `resume_refusal/1` uses: erased, not on this machine, or the reason as it came.
+  """
+  @spec open_refusal(session_id(), term()) :: String.t()
+  def open_refusal(sid, "not_found: erased"), do: erased(sid)
+  def open_refusal(sid, "invalid_params: not a session id"), do: "#{sid} is not a session id"
+
+  def open_refusal(sid, "not_found" <> _) do
+    "#{sid} is not a session here: it was erased, or never on this machine; " <>
+      "/new starts a fresh session"
+  end
+
+  def open_refusal(sid, reason) when is_binary(reason), do: "could not open #{sid}: #{reason}"
+  def open_refusal(sid, reason), do: "could not open #{sid}: #{inspect(reason)}"
+
+  defp erased(id), do: "#{id} has been erased; /new starts a fresh session"
+
   ## Fleet API
 
   @spec teams(origin()) :: {:ok, [map()]} | {:error, term()}
@@ -359,6 +406,10 @@ defmodule Troupe.Client do
 
   @spec sessions(origin(), map()) :: {:ok, [summary()]} | {:error, term()}
   def sessions(origin, filter \\ %{}), do: impl_for(origin).sessions(origin, filter)
+
+  @doc "One session as a listing row, whichever workspace it is in."
+  @spec get_session(origin(), session_id()) :: {:ok, summary()} | {:error, term()}
+  def get_session(origin, sid), do: impl_for(origin).get_session(origin, sid)
 
   @spec create_session(origin(), map()) :: {:ok, session_id()} | {:error, term()}
   def create_session(origin, params), do: impl_for(origin).create_session(origin, params)

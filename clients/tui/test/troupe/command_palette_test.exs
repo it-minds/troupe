@@ -222,14 +222,14 @@ defmodule Troupe.CommandPaletteTest do
   end
 
   # Every built-in typed in full still runs as it did: the TUI stays up and none of them
-  # was sent to the agent as input. `quit` ends the app and `worktree` starts a branch,
-  # so those two are left out here; the client tests cover them.
+  # was sent to the agent as input. `quit` ends the app, `worktree` starts a branch and
+  # `new` a session, so those three are left out here; the client tests cover them.
   test "every built-in typed in full still runs" do
     {sid, _, _} = start_session!(script: [])
     {pid, _session} = start_tui(sid)
     eventually(fn -> user_state(pid).commands != [] end)
 
-    for name <- Server.builtins() -- ["quit", "worktree"] do
+    for name <- Server.builtins() -- ["quit", "worktree", "new"] do
       type(pid, name)
       press(pid, "enter")
       assert Process.alive?(pid), name

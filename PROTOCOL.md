@@ -709,6 +709,27 @@ not have, and sealing this copy after them would make the session two histories.
 "unlinked"` where no client has handed the daemon a plane token; and `invalid_params`
 for a session that is not private.
 
+#### `session.fork`
+```json
+{"command_id": "c-5", "session_id": "s-9f", "config": {"auto_approve": true}}
+```
+→ `{"session_id", "workspace", "forked_from"}`
+
+A second session from this one's conversation as it stands, the daemon's (Decision 812): a
+pod session is forked through the plane's `session.fork`. The child's log opens with
+`session_forked` (`parent`: the parent's id, the seq forked at and its head hash there;
+`reason: "branch"`) and goes on with every event of the parent's up to its head, each
+given the child's own `seq` and chained again, as a pod's fork is. It runs in the parent's
+workspace, under its profile, with `config` as `session.create` takes it, and is opened as a
+session resuming that log is: its agent starts from the parent's conversation, and the
+next input goes on from there. It is a session of its own and not a branch: no `parent` in
+the listing, its own budget, and erasing either leaves the other. The parent is read off
+disk, running or dormant, and is neither changed nor woken.
+
+`not_found` for a session the daemon does not have, and with `reason: "erased"` for a
+private one being erased; `invalid_params` with `reason: "private"` for any other private
+session, which is not forked here, since its child would be a copy no plane knows of.
+
 ### Steering
 
 #### `input.send`
@@ -1694,7 +1715,7 @@ ACL of each session a request names.
 
 **It calls the methods about its session, and no others.** Those are `subscribe` and
 `unsubscribe` on its own topics, the two listings above, and every command whose params
-require `session_id` (§6) but the four below: `session.get`, `input.send`, `turn.cancel`,
+require `session_id` (§6) but the five below: `session.get`, `input.send`, `turn.cancel`,
 `profile.switch`, `session.goal.*`, `session.loop.*`, `approval.respond`,
 `question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
 `mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register`, `tools.unregister`, `shell.run` and `shell.cancel`. Everything else a
@@ -1708,13 +1729,13 @@ the connection. The plane mints every token for a pod with a `session_id`; one w
 signed only by tooling that runs its own pod (the end-to-end tests, the benchmark), and
 keeps the whole table.
 
-**Archiving, pinning and erasing a pod session are the plane's.** The plane holds the
-session's row, its key, its placement and its retention, so a worker refuses
-`session.archive`, `session.pin`, `session.unpin` and `session.erase` to a token for one
-session with `forbidden`, `data.method` naming it and `data.reason` of
+**Archiving, pinning, erasing and forking a pod session are the plane's.** The plane holds
+the session's row, its key, its placement and its retention, so a worker refuses
+`session.archive`, `session.pin`, `session.unpin`, `session.erase` and `session.fork` to a
+token for one session with `forbidden`, `data.method` naming it and `data.reason` of
 `done through the plane`. A client archives, pins, unpins and erases a pod session with
 the plane's methods of the same names, each `{session_id}` and each for the session's
-owner. The plane's archive pushes `session.dormant` to the pod holding the session, which
+owner, and forks one with the plane's `session.fork` (Decision 812). The plane's archive pushes `session.dormant` to the pod holding the session, which
 seals it, uploads its workspace, deletes its own copy and reports it dormant, giving back
 its slot and its budget slice; the answer is the session's row, `dormant`, and the next
 activating command brings it back on whichever pod has room. A session that is not

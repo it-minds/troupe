@@ -603,6 +603,36 @@ defmodule Troupe.Client.Daemon do
       not Enum.any?(Journal.all(sid), &(&1.type in [:input, :user_input, :user_shell]))
   end
 
+  # The daemon's `session.fork` (root Decision 812): a session of its own whose log starts
+  # as this one's, in the same workspace, attached as a created one is. Its screen is the
+  # daemon's log of it; the windows this session's journal opened are this session's.
+  @impl true
+  def fork_session(sid) do
+    params = %{session_id: sid, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call("session.fork", params) do
+      {:ok, %{"session_id" => child} = result} ->
+        attach({:local, result["workspace"]}, child, %{
+          workspace: result["workspace"],
+          profile: Worker.whereis(sid) && Worker.attachment(sid)[:profile],
+          title: nil
+        })
+
+      {:ok, other} ->
+        {:error, "unexpected session.fork answer: #{inspect(other)}"}
+
+      {:error, "invalid_params: private"} ->
+        {:error,
+         "a private session is not forked on this machine yet; /new --private starts a fresh one"}
+
+      {:error, "method_not_found" <> _} ->
+        {:error, "this daemon cannot fork a session; update it, or /new starts a fresh one"}
+
+      {:error, reason} ->
+        {:error, Troupe.Client.open_refusal(sid, message(reason))}
+    end
+  end
+
   ## Fleet-scoped
 
   @impl true
@@ -659,6 +689,22 @@ defmodule Troupe.Client.Daemon do
   end
 
   def sessions(_origin, _filter), do: {:ok, []}
+
+  @impl true
+  def get_session({:local, workspace}, sid) do
+    case Link.call("session.get", %{session_id: sid}) do
+      {:ok, %{"id" => ^sid} = row} ->
+        {:ok, summary(row, {:local, row["workspace"] || workspace}, [])}
+
+      {:ok, other} ->
+        {:error, "unexpected session.get answer: #{inspect(other)}"}
+
+      {:error, reason} ->
+        {:error, message(reason)}
+    end
+  end
+
+  def get_session(_origin, _sid), do: {:error, :unsupported}
 
   @doc """
   Create a session in a workspace and attach to it.

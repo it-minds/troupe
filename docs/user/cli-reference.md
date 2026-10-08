@@ -21,7 +21,8 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe --full-send` | start with every budget/token limit lifted for the session |
 | `troupe --private` | a private session, sealed to the plane you are signed in to |
 | `troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--private] [--workspace DIR]` | one task: in the TUI, or with --headless printed line by line until the agent rests |
-| `troupe resume [SESSION_ID]` | no id: reopen the last session here, picker open |
+| `troupe resume [SESSION_ID \| latest] [--private]` | no id: the newest session here, picker open; latest, or --private for the newest private one: straight in (troupe --resume is the same) |
+| `troupe resume SESSION_ID\|latest\|--private --headless "message"` | one turn on that session, printed as run --headless prints it, then exit |
 | `troupe --remote [PLANE_URL]` | open HQ: teams, profiles and sessions on a plane |
 | `troupe login PLANE_URL` | sign in to a plane with the device flow |
 | `troupe logout [PLANE_URL]` | forget a plane's credentials and sign this machine's daemon out of it (--all: every plane) |
@@ -70,6 +71,7 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 
 | command | what it does | needs |
 | --- | --- | --- |
+| `/new [--private \| --remote PROFILE \| --branch]` | Start a fresh session here, without leaving the client. Opens a new session in this workspace and takes the screen; the one you left keeps running, stays in /sessions, and /back returns to it. --private makes it a private session, --remote PROFILE starts it on that profile of the plane you are signed in to, and --branch forks the one on screen: a session of its own that starts from this conversation as it stands. Type its first line on the command line it opens with. For example `/new --branch`. |  |
 | `/cancel [window]` | Stop a branch mid-turn and remove its window. Stops the agent in the activated window, or in the one named by its tile number or path, and removes the window; a worktree Troupe made for it goes too. For example `/cancel 2`. | a window: the activated one, or one named |
 | `/dismiss [window]` | Let go of a window. Closes the activated window, or the one named. This session's own window lets go of the session; a branch's window closes for good and its session stays in the daemon, where /sessions still lists it. For example `/dismiss 3`. | a window: the activated one, or one named |
 | `/merge [window]` | Land a worktree branch on the checkout. Commits whatever the branch left uncommitted, merges its branch into the checkout with a merge commit, and removes the worktree and the window. A merge git cannot complete is left for you to resolve. Tab completes the branches that have finished. For example `/merge 2`. | a session on this machine |
@@ -82,6 +84,7 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 | command | what it does | needs |
 | --- | --- | --- |
 | `/sessions [n \| id]`, `/resume` | This directory's sessions, newest first. Enter switches the window to one; /resume 2 or /resume &lt;id&gt; goes straight there. For example `/resume 2`. |  |
+| `/back` | Go back to the session you were in before. Returns to the session you left with /new, /resume or HQ; /back again comes back here. One step: /sessions lists the rest. |  |
 | `/hq [plane]`, `/remote` | HQ: a plane's teams, profiles and sessions. This machine's own sessions are listed alongside. Names a plane by URL; without one, the plane this machine is logged in to. For example `/hq https://troupe.example`. |  |
 | `/observer`, `/agents-tree`, `/tree` | The agent tree: every branch and subagent. Each with its state, worktree and tokens; Enter opens the agent's transcript. |  |
 | `/files` | The session's files, live. Enter opens a file, ← goes up, r reloads; a change the session makes reloads the listing by itself. |  |

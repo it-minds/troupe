@@ -188,8 +188,7 @@ for issue #305.
   live and an atom when `Troupe.Codec` reads them back (nothing reads it yet).
 - The TUI picker: every local row's title is the workspace path (the daemon's
   `session.list` has no title; Decision 65 promised the first prompt); a daemon session's
-  detail says "running in this VM"; `troupe resume` with no id opens the newest row, which
-  may be a branch or an empty scratch session.
+  detail says "running in this VM".
 - `troupe.log` never rotates (`daemon.log` rotates at 5 MB, three files), and the TUI
   release ignores `TROUPE_LOG_LEVEL` (fixed at warning).
 - `Session.Summary.fold/2` crashes on a `todo_updated` whose items aren't a list (only a

@@ -99,7 +99,9 @@ defmodule Troupe.Sessions.Fork do
          {:ok, history} <- history(parent),
          {:ok, kept} <- upto(history, at),
          {:ok, workspace} <- copy_workspace(parent, child, at, opts) do
-      chain = reseal([opening(parent, kept, reason, opts) | Enum.map(kept, &carried/1)])
+      chain =
+        reseal([opening(parent.session_id, kept, reason, opts) | Enum.map(kept, &carried/1)])
+
       head = chain |> List.last() |> Event.hash()
 
       with {:ok, segment} <- seal(child, chain, head) do
@@ -117,6 +119,35 @@ defmodule Troupe.Sessions.Fork do
            head_hash: head
          }}
       end
+    end
+  end
+
+  @doc """
+  The child's history for a parent's, without storage: `session_forked`, then the parent's
+  events up to `seq`, resealed under the child's numbering — the chain `copy/3` seals.
+
+  A daemon keeps a session as a file on its own disk, under no key, so it has no segment
+  to read or seal: it hands the parent's events here and writes what comes back as the
+  child's log (root Decision 812). The same rules either way: the same opening event, the
+  same reseal, the parent untouched. Takes `:seq`, `:reason` and `:actor` as `copy/3` does.
+  """
+  @spec chain(String.t(), [map() | Event.t()], keyword()) ::
+          {:ok, %{events: [Event.t()], parent_seq: non_neg_integer(), head_hash: String.t()}}
+          | {:error, term()}
+  def chain(parent_session_id, history, opts \\ []) when is_binary(parent_session_id) do
+    reason = Keyword.get(opts, :reason, "attempt")
+
+    with :ok <- check_reason(reason),
+         {:ok, kept} <- upto(history, Keyword.get(opts, :seq)) do
+      chain =
+        reseal([opening(parent_session_id, kept, reason, opts) | Enum.map(kept, &carried/1)])
+
+      {:ok,
+       %{
+         events: chain,
+         parent_seq: last_seq(kept),
+         head_hash: chain |> List.last() |> Event.hash()
+       }}
     end
   end
 
@@ -233,13 +264,13 @@ defmodule Troupe.Sessions.Fork do
 
   # -- writing the child ------------------------------------------------------
 
-  defp opening(parent, kept, reason, opts) do
+  defp opening(parent_session_id, kept, reason, opts) do
     %Event{
       type: "session_forked",
       actor: Keyword.get(opts, :actor),
       data: %{
         "parent" => %{
-          "session_id" => parent.session_id,
+          "session_id" => parent_session_id,
           "seq" => last_seq(kept),
           "head_hash" => hash_of(List.last(kept))
         },

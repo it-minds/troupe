@@ -39,6 +39,7 @@
     "commands/session.claim.json",
     "commands/session.create.json",
     "commands/session.erase.json",
+    "commands/session.fork.json",
     "commands/session.get.json",
     "commands/session.goal.clear.json",
     "commands/session.goal.get.json",

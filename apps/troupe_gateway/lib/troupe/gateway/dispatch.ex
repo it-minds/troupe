@@ -122,6 +122,8 @@ defmodule Troupe.Gateway.Dispatch do
     # Taking a private session over from another device, which then stops sealing it, is
     # the person's own say about where their session lives, like archiving or erasing it.
     "session.claim" => :admin,
+    # A fork is a session created, from another's history (Decision 812).
+    "session.fork" => :admin,
     "worktree.remove" => :admin,
     # Both change the user's own checkout — a merge lands a branch on it, a discard
     # throws work away — so they take the scope everything else that does takes.
@@ -915,6 +917,32 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # A second session from this one's conversation as it stands (Decision 812): the child's
+  # log is the parent's, resealed after a `session_forked`, and it runs in the parent's
+  # workspace under its profile. The parent is not changed or woken. A private session is
+  # not forked here: its child would be a copy no plane knows of, sealed nowhere.
+  defp handle("session.fork", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, parent} <- lookup(session_id),
+         :ok <- forkable(parent) do
+      config = [client: context.client] ++ List.wrap(overrides(Map.get(params, "config")))
+
+      case Troupe.fork_session(session_id, config_overrides: config, actor: actor(context)) do
+        {:ok, child} ->
+          {:ok,
+           %{
+             "session_id" => child.id,
+             "workspace" => parent.workspace,
+             "forked_from" => session_id
+           }}
+
+        {:error, reason} ->
+          {:error,
+           Error.new(:invalid_params, %{session_id: session_id, reason: start_error(reason)})}
+      end
+    end
+  end
+
   defp handle("worktree.remove", params, _context) do
     with {:ok, path} <- fetch(params, "path") do
       case Worktrees.remove(path, Map.get(params, "force", false)) do
@@ -1682,6 +1710,20 @@ defmodule Troupe.Gateway.Dispatch do
     do:
       {:error,
        Error.new(:invalid_params, %{session_id: session_id, reason: "not a private session"})}
+
+  # A private session is not forked here (Decision 812), and one being erased is said to be
+  # erased, as `session.claim` says it.
+  defp forkable(%{kind: "private", id: session_id}) do
+    case Private.sync(session_id) do
+      {"erasure_pending", _device} ->
+        {:error, Error.new(:not_found, %{session_id: session_id, reason: "erased"})}
+
+      _sync ->
+        {:error, Error.new(:invalid_params, %{session_id: session_id, reason: "private"})}
+    end
+  end
+
+  defp forkable(_session), do: :ok
 
   # Each way a claim is refused, in the protocol's words: not yet a session the plane
   # knows, erased, held by another history than this copy's, lost to another device that

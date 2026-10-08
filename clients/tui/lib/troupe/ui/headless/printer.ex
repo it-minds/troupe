@@ -92,6 +92,9 @@ defmodule Troupe.UI.Headless.Printer do
       held: nil,
       reconnect_ms: Keyword.get(opts, :reconnect_ms, @reconnect_ms),
       queued_ms: Keyword.get(opts, :queued_ms, @queued_ms),
+      # `troupe resume --headless` (root Decision 812): an event stamped before this (ms) is
+      # the session's history, neither printed nor read as this run's rest.
+      since: Keyword.get(opts, :since),
       # Set while the connection is down: the timer that ends the run if it stays down.
       lost: nil
     }
@@ -140,10 +143,17 @@ defmodule Troupe.UI.Headless.Printer do
 
   defp handle_event(event, state) do
     case first_time(event, state) do
-      {:ok, state} -> react(event, print(event, state))
+      {:ok, state} -> if history?(event, state), do: state, else: react(event, print(event, state))
       :seen -> state
     end
   end
+
+  # By the stamp alone: what this client wrote in the journal when it opened the session
+  # before carries no `seq`, and is history all the same.
+  defp history?(%{ts: ts}, %{since: since}) when is_integer(ts) and is_integer(since),
+    do: ts < since
+
+  defp history?(_event, _state), do: false
 
   # Durable events carry a sequence number, unique within their session's window; a
   # transient event has none and is never replayed anyway. One durable event can become
