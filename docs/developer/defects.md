@@ -67,8 +67,20 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
 - The desktop app's tests time out now and then when the machine is busy (goal-loop,
   local-mode, onboarding, command-palette); local-mode sends before its session is
   attached ("not attached").
+- Under full load, core `SleepTest` ("sleeps on a spent budget's question") and two of the
+  gateway's `PrivateTest` tests ("a seal with nobody linked", "carrying on another
+  person's link") failed now and then, the latter beside `session_ids_test` and
+  `daemon_test`; all pass alone. Core `Session.ShellTest` "a restart puts back a note ...
+  gives it once" is the other way round: it fails alone and passes in the full run.
+- CI's umbrella dev-check job can wait on "Waiting for lock on the build directory" until
+  its 20-minute timeout, the lock held by an orphan `beam.smp` the runner kills at the
+  job's end (PR #495's run 37842248603); a re-run passes.
+- With mise's shims on `PATH` in WSL, the core suite's `FileToolsTest`, `ReadOutputTest`,
+  `ReadRootsTest` and `BenchTest` fail as `BenchCLITest` does: the `rg` shim answers "No
+  version is set" outside a mise directory.
 
-Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23) and in chunks 3 to 7.
+Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23), in chunks 3 to 7, and by
+the chunk 24 fixers (2026-10-08).
 
 ### D23 - Small leftovers (low)
 
@@ -806,9 +818,19 @@ Found by the #228 fixer, 2026-10-07.
   default), Doctor's and Open Settings' output closes with their terminal; a `.cmd` troupe
   under PowerShell 7 gets the batch file's quoting.
 - `scripts/licences.exs --check` crashes with a `File.Error` unless `clients/gui`'s
-  `node_modules` are installed, even for a change that doesn't touch the GUI.
+  `node_modules` are installed, even for a change that doesn't touch the GUI, and it needs
+  `clients/tui`'s deps fetched too.
+- After VS Code is closed and opened again, it brings each Troupe terminal back as an idle
+  shell tab with the old output replayed: a leftover tab, not a second Troupe.
+- When the TUI fails to start from the "Troupe" terminal profile, its own error is lost:
+  no shell runs under it, and VS Code reports only the exit code.
+- In a window of several folders, "Create New Terminal (With Profile)" asks for a folder
+  but does not pass it to an extension's profile, so with no editor open the person is
+  asked twice.
+- `restore` waits up to 5 s for the terminals' process ids before the startup decision,
+  however many terminals there are.
 
-Found by the #378 fixer, 2026-10-07.
+Found by the #378 fixers, 2026-10-07 and 2026-10-08.
 
 ### D88 - Erasure after #470: small leftovers (low)
 
@@ -826,6 +848,94 @@ Found by the #378 fixer, 2026-10-07.
   and `LocalPricingTest` failed once in a full core run; both pass alone.
 
 Found by the chunk 23 fixers, 2026-10-07.
+
+### D89 - Shell mode and tool output after #486 and #493 (low)
+
+- The desktop app doesn't call `shell.run` and doesn't know `user_shell`, so it probably
+  draws the `user_input` from `shell` as a line the person typed (unconfirmed). The A2A
+  facade folds that note into a task's history as a user message, as it does harness
+  notes.
+- `!` typed in a window's input box still goes to that window's agent (TUI Decision 152:
+  an answer may start with `!`). Neither the palette nor the status line mentions `!`;
+  only the CLI reference does.
+- An interactive program (`vim`, `ssh`, `less`) is not detected: it waits on the empty
+  stdin until the timeout or Esc, and the block's title says "no stdin". Untried: whether
+  `!ssh`, or the agent's `shell`, in a TUI serving its own embedded harness on Windows
+  reaches the TUI's console.
+- The TUI has no up-arrow history, so shell lines can't be kept apart from prompts there.
+- `fs_changed` and watch events carry file paths, which on Linux need not be UTF-8; #493
+  replaced invalid bytes in tool results only. The shell tool under PowerShell (no bash on
+  a Windows host) was not tried with invalid bytes.
+
+Found by the #486 and #493 fixers, 2026-10-08.
+
+### D90 - Sessions after `/new` and `troupe resume` (#484) (low)
+
+- The daemon refuses to fork a private session (`invalid_params`, `private`).
+- The desktop app greys `/new` and `/back` as "not in the desktop app yet"; they could map
+  to its New-session flow and session list.
+- While a plane's session is on screen, the TUI's `workspace` is the label `plane/<sid>`.
+  `/sessions` and `/new` use the window's own directory; other features keyed on the
+  workspace may still use the label.
+- The client journal gains a root "spawned /build" line every time a session is opened.
+  Headless resume no longer prints them, but they accumulate.
+- The TUI's `FakeRemote` answers `commands.list` without aliases, so `/resume` on a
+  stand-in remote session is dispatched to the plane as a profile name; a real pod's table
+  has them.
+- `scripts/verify-local.ps1`'s `Stop-OurDaemon` stops every process running from the
+  install directory, which includes a person's own installed daemon if one is running.
+
+Found by the #484 fixer, 2026-10-08.
+
+### D91 - Repository commands after #371 (low)
+
+- The TUI reads the command table only when a session opens (Decision 763), so after a
+  command file is edited its palette shows the old prompt until the session is reopened.
+  The daemon sends the new prompt, and asks again.
+- A harness question with no tool call behind it (the command question, and #60's MCP
+  trust question) is closed in both clients by a `cancelled` on root, but the daemon's
+  asking task keeps waiting: the session row counts a pending question nobody can answer,
+  and if the session sleeps with it open, a later answer is recorded and nothing is sent.
+- The desktop app's approval panel puts `.approval .evidence` in the same scrolling flex
+  column that squeezed a question's preview to one line, so a long approval's evidence
+  probably shrinks the same way in a short window (unconfirmed; only the question's was
+  fixed).
+- `pnpm fake`'s fake worker lists command bodies but doesn't ask the command question;
+  only the fake daemon does.
+
+Found by the #371 fixer, 2026-10-08.
+
+### D92 - Thinking blocks and the prompt prefix, what #465's measurement found (medium)
+
+- Today's resend (Decision 805) and the `drop_block` beta both leave the stale thinking
+  blocks in Troupe's history, so on an enforced account every later call of the session
+  meets the mismatch again until a compaction: two requests a call today, or every block
+  dropped on every call with `drop_block`. Once a call is refused or reports drops,
+  sending the leading run of pre-change blocks no more would end it (Anthropic accepts a
+  leading run removed oldest first).
+- Decision 793 offers the todo tools once a list exists or after 10 calls, which changes
+  `tools` mid-turn: that invalidates every kept block on the newest models and the cache.
+  `llm_request.tools_changed` counts it.
+- Unchecked: whether `split_for_compaction` strips thinking from the tail compaction
+  keeps; Anthropic's documentation says a kept tail breaks the binding unless it does.
+- With `system_prompt: stable`, the turn contexts live in the agent's state, not the log,
+  so an agent restarted mid-session edits its history once.
+- Unchecked: whether LiteLLM carries `anthropic-beta` into Amazon Bedrock's
+  `anthropic_beta` body field.
+
+Found by the #465 fixer and the coordinator's live run, 2026-10-08.
+
+### D93 - Tab completes a command name without its slash (low)
+
+`complete_command/2` in `clients/tui/lib/troupe/ui/tui/server.ex` (TUI Decision 38)
+completes a command name on a line with no slash: "mer" and Tab give "merge ", "hel" and
+Tab give "help ", and "merge 2" and Tab give "merge code-1". Since #496 a line without a
+slash goes to the agent, so Enter then sends those words to the agent instead of running
+the command. The palette's way ("/", "mer", Tab) still gives "/merge " and runs it.
+Putting the slash in when Tab completes a command name, or offering no command names on
+a line without one, would end it.
+
+Found by the #496 fixer, 2026-10-09.
 
 ## Taken
 
@@ -917,6 +1027,7 @@ Found by the chunk 23 fixers, 2026-10-07.
 | D79's first two items and its fifth - a Windows daemon died with its terminal, `open` guessed the app's address, and the plane host had no policy | PR #468; #460, PR #466 |
 | D81's last item, D73's first and D8's second - `RestartTest` and `AutospawnTest` started slowly enough to fail | PR #469 |
 | D84's first item, the key half - a pod could never destroy a team session's key, and the plane marked the erasure done (what is left of it stays in D84) | #470, PR #480 |
+| D43's `troupe resume` item - with no id it opened the newest row, which could be a branch or an empty scratch session | #484, PR #495 |
 
 ## Checked and not a defect
 
