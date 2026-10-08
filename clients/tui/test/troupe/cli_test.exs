@@ -36,6 +36,39 @@ defmodule Troupe.CLITest do
     assert CLI.version() == "troupe " <> (File.read!("../../VERSION") |> String.trim())
   end
 
+  # Issue #484, Decision 812: `latest` is the newest session here, not a session called
+  # `latest`; `--private` the newest private one; `--headless "message"` one turn on it.
+  test "troupe resume takes latest, --private and --headless with a message" do
+    assert {:ok, %{mode: :resume, session_id: nil, latest: true}} =
+             CLI.parse(["resume", "latest"])
+
+    assert {:ok, %{mode: :resume, session_id: nil, latest: false}} = CLI.parse(["resume"])
+    assert {:ok, %{mode: :resume, session_id: "abc", latest: false}} = CLI.parse(["resume", "abc"])
+
+    assert {:ok, %{mode: :resume, session_id: nil, latest: true, private: true}} =
+             CLI.parse(["resume", "--private"])
+
+    assert {:ok, %{mode: :resume, session_id: "abc", headless: true, task: "hello"}} =
+             CLI.parse(["resume", "abc", "--headless", "hello"])
+
+    assert {:ok, %{mode: :resume, latest: true, headless: true, task: "hi"}} =
+             CLI.parse(["resume", "latest", "--headless", "hi"])
+
+    assert {:ok, %{mode: :resume, latest: true, private: true, task: "hi"}} =
+             CLI.parse(["resume", "--private", "--headless", "hi"])
+
+    # Headless names its session: a lone word could be either, and is neither.
+    assert {:error, "usage: troupe resume " <> _} = CLI.parse(["resume", "abc", "--headless"])
+    assert {:error, _} = CLI.parse(["resume", "--headless", "hi"])
+    assert {:error, _} = CLI.parse(["resume", "a", "b"])
+
+    # `--resume` is the same command line, the spelling issue #484 asked for.
+    assert CLI.parse(["--resume", "latest"]) == CLI.parse(["resume", "latest"])
+
+    assert CLI.parse(["--resume", "abc", "--headless", "x"]) ==
+             CLI.parse(["resume", "abc", "--headless", "x"])
+  end
+
   # Issue #378: the VS Code extension runs `troupe --workspace DIR` in a terminal it opens
   # at DIR. The flag is parsed for every mode, and the TUI's session is rooted where it
   # says, not where `troupe` was started; a relative DIR is from the current directory.
@@ -314,7 +347,7 @@ defmodule Troupe.CLITest do
 
   # The terminal UI drawn into a file never ends: nothing can press the key that quits it.
   test "a command line that draws the terminal UI is refused without a terminal" do
-    for argv <- [[], ["resume"], ["run", "x"], ["--remote"], ["--watch"]] do
+    for argv <- [[], ["resume"], ["resume", "latest"], ["run", "x"], ["--remote"], ["--watch"]] do
       assert {:no_terminal, message} = Runner.needs_terminal(CLI.parse(argv), false)
       assert message =~ "`troupe run \"task\" --headless`"
       assert message =~ "`troupe config`"
@@ -322,7 +355,14 @@ defmodule Troupe.CLITest do
       assert {:ok, _args} = Runner.needs_terminal(CLI.parse(argv), true)
     end
 
-    for argv <- [["run", "x", "--headless"], ["config"], ["models"], ["--version"], ["daemon"]] do
+    for argv <- [
+          ["run", "x", "--headless"],
+          ["resume", "id", "--headless", "x"],
+          ["config"],
+          ["models"],
+          ["--version"],
+          ["daemon"]
+        ] do
       assert {:ok, _args} = Runner.needs_terminal(CLI.parse(argv), false)
     end
 

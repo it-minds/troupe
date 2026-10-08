@@ -18,8 +18,9 @@ defmodule Troupe.Commands do
   a person or a repository writes as markdown files (`Troupe.Commands.Local`, Decision
   763), in the `custom` section with `source` `user` or `project`: a client lists them
   like any other row and runs one by asking the harness (`commands.run`), which sends its
-  prompt as the session's input. The maps are keyed by strings because they go on the
-  wire as they are.
+  prompt as the session's input. Their rows carry that prompt as `body`, and a workspace's
+  asks once before it is first sent while `auto_approve` is on (`run/4`, Decision 814).
+  The maps are keyed by strings because they go on the wire as they are.
 
   `availability` is a requirement the client judges, not a verdict: `always`; `window`
   (acts on a window: the activated one, or one named as an argument); `local` (a session
@@ -29,7 +30,8 @@ defmodule Troupe.Commands do
   """
 
   alias Troupe.Agent.Definition
-  alias Troupe.Commands.Local
+  alias Troupe.Commands.{Local, Trust}
+  alias Troupe.Session.{Approvals, Log, Questions}
 
   require Logger
 
@@ -85,6 +87,173 @@ defmodule Troupe.Commands do
   @spec expand(Local.command(), String.t() | nil) :: String.t()
   defdelegate expand(command, arguments), to: Local
 
+  @doc """
+  Run a command a file defines in a session: send its prompt, what was typed after its
+  name for `$ARGUMENTS`, as the session's input under `actor:` and `command_id:` — or ask
+  first (Decision 814).
+
+  A workspace's command asks once before it is first sent while the session answers every
+  approval itself (`auto_approve`): then nothing else would ask before what its body says
+  is done, and its palette row says what its frontmatter says. The question goes through
+  the session's question path with the prompt as its `preview`, so any client shows and
+  answers it: `allow` sends it and remembers the command as its file reads now
+  (`Troupe.Commands.Trust`), `once` sends it this time, and anything else sends nothing and
+  writes a `command_declined` saying how to run it later. A person's own command never
+  asks, since the person wrote it, and neither does a command of a workspace on
+  `trusted_workspaces` (Decision 686), since trusting it already lets its config turn
+  `auto_approve` on and name what runs.
+
+  `workspace:` is the session's; `trusted:` and `state_dir:` are its config's unless given.
+  Answers `{:ok, :sent}`, or `{:ok, {:asking, call_id}}` while the question is out.
+  """
+  @spec run(String.t(), Local.command(), String.t() | nil, keyword()) ::
+          {:ok, :sent} | {:ok, {:asking, String.t()}}
+  def run(session_id, command, arguments, opts) do
+    text = expand(command, arguments)
+
+    case gate(session_id, command, opts) do
+      :send ->
+        send_prompt(session_id, text, opts)
+        {:ok, :sent}
+
+      {:ask, state_dir} ->
+        call_id = "command-" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
+        question = question(call_id, command, text)
+
+        # From a task of its own, so the call that ran the command is answered now and the
+        # question waits for whoever answers it, from whichever client.
+        {:ok, _pid} =
+          Task.start(fn ->
+            answer = Questions.ask(session_id, question)
+            answered(session_id, command, text, answer, Keyword.put(opts, :state_dir, state_dir))
+          end)
+
+        {:ok, {:asking, call_id}}
+    end
+  end
+
+  defp gate(session_id, %{layer: :project} = command, opts) do
+    workspace = Keyword.fetch!(opts, :workspace)
+
+    with true <- Approvals.auto_approve?(session_id),
+         {false, state_dir} <- trust(workspace, opts),
+         false <- Trust.approved?(state_dir, workspace, command) do
+      {:ask, state_dir}
+    else
+      _sent_unasked -> :send
+    end
+  end
+
+  defp gate(_session_id, _command, _opts), do: :send
+
+  # Whether the workspace is trusted and where the answers are kept, as the session's
+  # config says; a caller that knows better says so.
+  defp trust(workspace, opts) do
+    config =
+      case Troupe.Config.resolve(workspace) do
+        {:ok, config, _layers} -> config
+        {:error, _error} -> %Troupe.Config{}
+      end
+
+    trusted? =
+      Keyword.get_lazy(opts, :trusted, fn ->
+        Troupe.Config.Trust.trusted?(workspace, config.trusted_workspaces)
+      end)
+
+    {trusted?, Keyword.get(opts, :state_dir, config.state_dir)}
+  end
+
+  defp question(call_id, %{name: name} = command, text) do
+    file = file_of(command)
+
+    %{
+      call_id: call_id,
+      agent_path: Troupe.Session.root_path(),
+      question:
+        "/#{name} comes with this workspace, in #{file}, and auto_approve is on: nothing " <>
+          "will ask before the tools its prompt leads to run. Send the prompt below?",
+      options: [
+        %{label: "deny", description: "send nothing; /#{name} asks again the next time it runs"},
+        %{label: "once", description: "send it this time only"},
+        %{
+          label: "allow",
+          description: "send it, and don't ask again in this workspace until #{file} changes"
+        }
+      ],
+      multiple: false,
+      preview: text
+    }
+  end
+
+  defp answered(session_id, command, text, answer, opts) do
+    case decision(answer) do
+      :allow ->
+        remember(command, opts)
+        send_prompt(session_id, text, opts)
+
+      :once ->
+        send_prompt(session_id, text, opts)
+
+      :deny ->
+        declined(session_id, command, answer, opts)
+    end
+  catch
+    # The session stopped while the question was out: nothing was sent, and there is no
+    # log left to say so in.
+    :exit, _reason -> :ok
+  end
+
+  # The words `Troupe.Session.MCP` reads for its own question, with `yes` sending this time
+  # rather than remembering: free text is always an answer, and only `allow` is standing.
+  defp decision({:ok, text}) when is_binary(text) do
+    case text |> String.trim() |> String.downcase() do
+      allow when allow in ["allow", "always", "a"] -> :allow
+      once when once in ["once", "o", "yes", "y", "send"] -> :once
+      _other -> :deny
+    end
+  end
+
+  defp decision(_unattended), do: :deny
+
+  defp remember(command, opts) do
+    case Trust.approve(Keyword.get(opts, :state_dir), Keyword.fetch!(opts, :workspace), command) do
+      :ok -> :ok
+      {:error, why} -> Logger.warning("troupe: command /#{command.name}: " <> why)
+    end
+  end
+
+  defp send_prompt(session_id, text, opts) do
+    Troupe.send_input(
+      session_id,
+      text,
+      :user,
+      Keyword.get(opts, :actor),
+      Keyword.take(opts, [:command_id])
+    )
+  end
+
+  defp declined(session_id, %{name: name} = command, answer, opts) do
+    reason =
+      case answer do
+        {:error, :unattended} ->
+          "/#{name} was not sent: nobody can answer in this session, and while auto_approve " <>
+            "is on a workspace's command asks before it is first sent. Run it where somebody " <>
+            "can answer, or with auto_approve off, where each tool call it leads to asks instead."
+
+        _answer ->
+          "/#{name} was not sent. Run /#{name} again to be asked again; allow sends it from " <>
+            "then on without asking, until #{file_of(command)} changes."
+      end
+
+    data =
+      case Keyword.get(opts, :command_id) do
+        nil -> %{"name" => name, "reason" => reason}
+        command_id -> %{"name" => name, "reason" => reason, "command_id" => command_id}
+      end
+
+    Log.append(session_id, Troupe.Session.root_path(), :command_declined, data)
+  end
+
   defp taken(agents) do
     builtins()
     |> Enum.flat_map(&[&1["name"] | &1["aliases"]])
@@ -108,6 +277,18 @@ defmodule Troupe.Commands do
   @spec builtins() :: [entry()]
   def builtins do
     [
+      entry("new", "session", "Start a fresh session here, without leaving the client",
+        usage: "/new [--private | --remote PROFILE | --branch]",
+        args: [arg("flags", false, "text")],
+        detail:
+          "Opens a new session in this workspace and takes the screen; the one you left " <>
+            "keeps running, stays in /sessions, and /back returns to it. --private makes " <>
+            "it a private session, --remote PROFILE starts it on that profile of the plane " <>
+            "you are signed in to, and --branch forks the one on screen: a session of its " <>
+            "own that starts from this conversation as it stands. Type its first line on " <>
+            "the command line it opens with.",
+        example: "/new --branch"
+      ),
       entry("cancel", "session", "Stop a branch mid-turn and remove its window",
         usage: "/cancel [window]",
         args: [window()],
@@ -171,6 +352,12 @@ defmodule Troupe.Commands do
         detail:
           "Enter switches the window to one; /resume 2 or /resume <id> goes straight there.",
         example: "/resume 2"
+      ),
+      entry("back", "navigate", "Go back to the session you were in before",
+        usage: "/back",
+        detail:
+          "Returns to the session you left with /new, /resume or HQ; /back again comes " <>
+            "back here. One step: /sessions lists the rest."
       ),
       entry("hq", "navigate", "HQ: a plane's teams, profiles and sessions",
         aliases: ["remote"],
@@ -323,11 +510,6 @@ defmodule Troupe.Commands do
     summary = first_line(command.description) || first_line(command.body)
     described = if command.description == "", do: summary, else: command.description
 
-    file =
-      if command.layer == :project,
-        do: Path.join([".troupe", "commands", Path.basename(command.path)]),
-        else: command.path
-
     {usage, args} =
       cond do
         command.hint -> {"/#{command.name} #{command.hint}", [arguments()]}
@@ -335,13 +517,24 @@ defmodule Troupe.Commands do
         true -> {"/" <> command.name, []}
       end
 
-    entry(command.name, "custom", summary,
+    command.name
+    |> entry("custom", summary,
       usage: usage,
       args: args,
       source: Atom.to_string(command.layer),
-      detail: "#{described}\n\nFrom #{Troupe.Paths.display(file)}."
+      detail: "#{described}\n\nFrom #{file_of(command)}."
     )
+    # What it sends, as its file has it (Decision 814): its description is the file's
+    # say-so, and a palette shows the prompt itself before it first runs.
+    |> Map.put("body", command.body)
   end
+
+  # Where a command is changed: a workspace's by its place in the repository, a person's
+  # in full.
+  defp file_of(%{layer: :project, path: path}),
+    do: Troupe.Paths.display(Path.join([".troupe", "commands", Path.basename(path)]))
+
+  defp file_of(%{path: path}), do: Troupe.Paths.display(path)
 
   defp first_line(text),
     do: text |> String.split("\n") |> Enum.map(&String.trim/1) |> Enum.find(&(&1 != ""))

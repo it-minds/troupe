@@ -70,7 +70,7 @@ defmodule Troupe.Log.Fold do
       delegation_started
       approval_requested approval_decided
       session_created session_dormant session_activated config_upgraded
-      session_tainted
+      session_tainted user_shell
     )
   end
 
@@ -133,9 +133,22 @@ defmodule Troupe.Log.Fold do
     %{agent | "profile" => data["profile"]}
   end
 
+  # The note of the person's own commands the agent was given (Decision 813) is a message
+  # like the rest, and gives what it held.
+  defp agent_fold(agent, %Event{type: "user_input", data: %{"source" => "shell"}}) do
+    agent
+    |> Map.merge(%{"messages" => agent["messages"] + 1, "last_role" => "user"})
+    |> Map.delete("shell_notes")
+  end
+
   defp agent_fold(agent, %Event{type: "user_input"}) do
     %{agent | "messages" => agent["messages"] + 1, "last_role" => "user"}
   end
+
+  # A person's command the next model call is to be given (Decision 813): held, and present
+  # only while one is, as the goal is, so a log without one folds to the map it always did.
+  defp agent_fold(agent, %Event{type: "user_shell", data: %{"agent" => true}}),
+    do: Map.update(agent, "shell_notes", 1, &(&1 + 1))
 
   defp agent_fold(agent, %Event{type: "llm_response", data: data}) do
     usage = data["usage"] || %{}

@@ -88,6 +88,11 @@ defmodule Troupe.Gateway.Dispatch do
     "worktree.list" => :observe,
     "input.send" => :control,
     "turn.cancel" => :control,
+    # A command the person typed, run in the session's workspace at once (Decision 813):
+    # `control`, as input is, and on top of it the session's owner or an `admin`, which the
+    # handler asks, since a collaborator's `control` steers an agent whose shell asks first.
+    "shell.run" => :control,
+    "shell.cancel" => :control,
     "profile.switch" => :control,
     # The goal steers every later turn, so setting and clearing it take what input does;
     # reading it is reading the log.
@@ -117,6 +122,8 @@ defmodule Troupe.Gateway.Dispatch do
     # Taking a private session over from another device, which then stops sealing it, is
     # the person's own say about where their session lives, like archiving or erasing it.
     "session.claim" => :admin,
+    # A fork is a session created, from another's history (Decision 812).
+    "session.fork" => :admin,
     "worktree.remove" => :admin,
     # Both change the user's own checkout — a merge lands a branch on it, a discard
     # throws work away — so they take the scope everything else that does takes.
@@ -478,6 +485,8 @@ defmodule Troupe.Gateway.Dispatch do
   # the file's prompt, with what was typed after the name for `$ARGUMENTS`, goes to the
   # session exactly as `input.send` would send it, under the same `command_id`. Only a
   # name the session's table lists as defined runs; a built-in is the client's to run.
+  # A workspace's command asks once first while the session approves everything itself
+  # (Decision 814), and the answer names the question it asked.
   defp handle("commands.run", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, name} <- fetch(params, "name"),
@@ -485,11 +494,19 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, session} <- lookup(session_id),
          {:ok, command} <- defined_command(session_id, session, name),
          :ok <- activate(session_id, context) do
-      text = Troupe.Commands.expand(command, arguments)
       command_id = Map.get(params, "command_id")
 
-      Troupe.send_input(session_id, text, :user, actor(context), command_opts(params))
-      {:ok, %{"accepted" => true, "command_id" => command_id}}
+      opts =
+        [actor: actor(context), workspace: Path.expand(session.workspace)] ++
+          command_opts(params)
+
+      case Troupe.Commands.run(session_id, command, arguments, opts) do
+        {:ok, :sent} ->
+          {:ok, %{"accepted" => true, "command_id" => command_id}}
+
+        {:ok, {:asking, call_id}} ->
+          {:ok, %{"accepted" => true, "command_id" => command_id, "question" => call_id}}
+      end
     end
   end
 
@@ -577,6 +594,51 @@ defmodule Troupe.Gateway.Dispatch do
          :ok <- activate(session_id, context) do
       Troupe.cancel(session_id)
       {:ok, %{"accepted" => true}}
+    end
+  end
+
+  # A command the person typed (`!cmd`, Decision 813), run where the session runs, in its
+  # workspace, through the agent's own runner. Activating, as input is. The answer names
+  # the run; what it prints comes as `shell_output` and its end as `user_shell`. A replayed
+  # `command_id` answers the same run and runs nothing again.
+  defp handle("shell.run", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, command} <- fetch(params, "command"),
+         {:ok, timeout} <- shell_timeout(params),
+         :ok <- session_owner(context),
+         :ok <- activate(session_id, context) do
+      opts =
+        [actor: actor(context), agent: Map.get(params, "agent") != false, timeout_ms: timeout] ++
+          command_opts(params)
+
+      case Troupe.shell_run(session_id, command, opts) do
+        {:ok, run_id} ->
+          {:ok,
+           %{
+             "accepted" => true,
+             "run_id" => run_id,
+             "command_id" => Map.get(params, "command_id")
+           }}
+
+        {:error, {:forbidden, setting, reason}} ->
+          {:error, Error.new(:forbidden, %{setting: setting, reason: reason})}
+
+        {:error, :no_session} ->
+          {:error, Error.new(:unavailable, %{reason: "the session is not running"})}
+      end
+    end
+  end
+
+  # Not activating: a dormant session runs no command.
+  defp handle("shell.cancel", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, run_id} <- fetch(params, "run_id"),
+         :ok <- session_owner(context),
+         {:ok, _session} <- lookup(session_id) do
+      case Troupe.shell_cancel(session_id, run_id) do
+        :ok -> {:ok, %{"accepted" => true, "run_id" => run_id}}
+        {:error, :not_running} -> {:error, Error.new(:not_found, %{kind: "run", run_id: run_id})}
+      end
     end
   end
 
@@ -861,6 +923,32 @@ defmodule Troupe.Gateway.Dispatch do
 
         {:error, reason} ->
           {:error, claim_error(session_id, reason)}
+      end
+    end
+  end
+
+  # A second session from this one's conversation as it stands (Decision 812): the child's
+  # log is the parent's, resealed after a `session_forked`, and it runs in the parent's
+  # workspace under its profile. The parent is not changed or woken. A private session is
+  # not forked here: its child would be a copy no plane knows of, sealed nowhere.
+  defp handle("session.fork", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, parent} <- lookup(session_id),
+         :ok <- forkable(parent) do
+      config = [client: context.client] ++ List.wrap(overrides(Map.get(params, "config")))
+
+      case Troupe.fork_session(session_id, config_overrides: config, actor: actor(context)) do
+        {:ok, child} ->
+          {:ok,
+           %{
+             "session_id" => child.id,
+             "workspace" => parent.workspace,
+             "forked_from" => session_id
+           }}
+
+        {:error, reason} ->
+          {:error,
+           Error.new(:invalid_params, %{session_id: session_id, reason: start_error(reason)})}
       end
     end
   end
@@ -1310,6 +1398,34 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Absent is the session's `shell_timeout_ms`; present, a positive number of milliseconds.
+  defp shell_timeout(params) do
+    case Map.get(params, "timeout_ms") do
+      nil ->
+        {:ok, nil}
+
+      ms when is_integer(ms) and ms > 0 ->
+        {:ok, ms}
+
+      _ ->
+        {:error, Error.new(:invalid_params, %{field: "timeout_ms", reason: "a positive integer"})}
+    end
+  end
+
+  # A person's command runs at once, with no approval asked, on the owner's pod or machine
+  # (Decision 813). A plane's owner holds `admin` on their session and a collaborator
+  # `control`; on a daemon every local connection is the person and holds all three.
+  defp session_owner(%Context{scopes: scopes}) do
+    if :admin in scopes,
+      do: :ok,
+      else:
+        {:error,
+         Error.new(:forbidden, %{
+           required_scope: "admin",
+           reason: "only the session's owner can run commands on it"
+         })}
+  end
+
   defp command_opts(params) do
     case Map.get(params, "command_id") do
       command_id when is_binary(command_id) -> [command_id: command_id]
@@ -1604,6 +1720,20 @@ defmodule Troupe.Gateway.Dispatch do
     do:
       {:error,
        Error.new(:invalid_params, %{session_id: session_id, reason: "not a private session"})}
+
+  # A private session is not forked here (Decision 812), and one being erased is said to be
+  # erased, as `session.claim` says it.
+  defp forkable(%{kind: "private", id: session_id}) do
+    case Private.sync(session_id) do
+      {"erasure_pending", _device} ->
+        {:error, Error.new(:not_found, %{session_id: session_id, reason: "erased"})}
+
+      _sync ->
+        {:error, Error.new(:invalid_params, %{session_id: session_id, reason: "private"})}
+    end
+  end
+
+  defp forkable(_session), do: :ok
 
   # Each way a claim is refused, in the protocol's words: not yet a session the plane
   # knows, erased, held by another history than this copy's, lost to another device that

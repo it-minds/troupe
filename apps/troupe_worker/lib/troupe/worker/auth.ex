@@ -33,7 +33,7 @@ defmodule Troupe.Worker.Auth do
   @listings ["session.list", "fleet.get"]
 
   # What a token for one session may ask of a pod: every command that names a session as
-  # `session_id`, which the guard then holds to the token's, but the plane's four below;
+  # `session_id`, which the guard then holds to the token's, but the plane's five below;
   # that session's topics; and the listings, narrowed to it. Everything else a pod serves is
   # about the pod rather than a session — a session created in any workspace, the brief,
   # agents or workflows of a path, the workspaces and worktrees the pod has seen, the
@@ -43,6 +43,7 @@ defmodule Troupe.Worker.Auth do
     subscribe unsubscribe session.list fleet.get
     session.get commands.list commands.run
     input.send turn.cancel profile.switch approval.respond question.answer todo.edit
+    shell.run shell.cancel
     session.goal.set session.goal.get session.goal.clear
     session.loop.start session.loop.stop session.loop.get
     fs.list fs.read fs.upload blob.get mcp.status context.get presence.set
@@ -53,8 +54,9 @@ defmodule Troupe.Worker.Auth do
   # its key, its placement and its retention, so doing any of these here would leave the
   # two disagreeing: the pod's own `session.erase` deletes its copy and leaves the key, the
   # objects and the row. A client asks the plane, whose erasure reaches this pod over the
-  # control channel (`Troupe.Worker.Plane.Commands`), which this guard is not on.
-  @plane_methods ~w(session.archive session.pin session.unpin session.erase)
+  # control channel (`Troupe.Worker.Plane.Commands`), which this guard is not on. A fork
+  # is a new row, key and placement too, so it is the plane's `session.fork` (Decision 812).
+  @plane_methods ~w(session.archive session.pin session.unpin session.erase session.fork)
 
   @enforce_keys [:worker_id]
   defstruct [:worker_id, :issuer, jwks: %{"keys" => []}, acl: %{}, revoked: MapSet.new()]

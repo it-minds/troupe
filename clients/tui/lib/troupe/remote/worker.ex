@@ -45,7 +45,7 @@ defmodule Troupe.Remote.Worker do
   # ones sent again after a pod said it does not hold the session.
   @activating ~w(input.send commands.run approval.respond question.answer todo.edit
                  profile.switch session.goal.set session.goal.clear session.loop.start
-                 fs.upload)
+                 fs.upload shell.run)
 
   @type mode :: :read | :activate
 
@@ -86,6 +86,19 @@ defmodule Troupe.Remote.Worker do
   @spec run_command(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
   def run_command(session_id, name, arguments),
     do: call(session_id, {:run_command, name, arguments})
+
+  @doc """
+  Runs a command the person typed in the session's workspace (`shell.run`, root Decision
+  813), answering `{:ok, %{"run_id" => id}}`; `agent?` false keeps it from the agent.
+  Activating, as input is.
+  """
+  @spec shell_run(String.t(), String.t(), boolean()) :: {:ok, map()} | {:error, term()}
+  def shell_run(session_id, command, agent?), do: call(session_id, {:shell, command, agent?})
+
+  @doc "Kills a command `shell_run/3` started (`shell.cancel`)."
+  @spec shell_cancel(String.t(), String.t()) :: :ok | {:error, term()}
+  def shell_cancel(session_id, run_id),
+    do: call(session_id, {:rpc, "shell.cancel", %{run_id: run_id, command_id: RPC.command_id()}})
 
   @doc "Cancels the current turn."
   @spec cancel(String.t()) :: :ok | {:error, term()}
@@ -314,6 +327,21 @@ defmodule Troupe.Remote.Worker do
     activating(state, from, "commands.run", %{
       name: name,
       arguments: arguments,
+      command_id: RPC.command_id()
+    })
+  end
+
+  def handle_call({:shell, _command, _agent?}, _from, %{session_state: :read_only} = state),
+    do: {:reply, {:error, :read_only}, state}
+
+  # Nothing is drawn ahead of the server: the run's `shell_started` opens its block, and
+  # the answer names the run a kill is sent for.
+  def handle_call({:shell, command, agent?}, from, state) do
+    state = ensure_window(state)
+
+    activating(state, from, "shell.run", %{
+      command: command,
+      agent: agent?,
       command_id: RPC.command_id()
     })
   end
@@ -707,7 +735,9 @@ defmodule Troupe.Remote.Worker do
   defp dispatch(:ignore, state), do: state
 
   # Commands answer `{accepted: true}` and never the effect; the effect arrives
-  # later as an event carrying the same `command_id`.
+  # later as an event carrying the same `command_id`. `shell.run`'s also names the run,
+  # which is what a kill is sent for.
+  defp command_result("shell.run", result), do: {:ok, result}
   defp command_result(_method, %{"accepted" => true}), do: :ok
   defp command_result(_method, result), do: {:ok, result}
 

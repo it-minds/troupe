@@ -46,6 +46,7 @@ defmodule Troupe.CLI do
           workspace: String.t(),
           prompt: String.t() | nil,
           session_id: String.t() | nil,
+          latest: boolean(),
           refresh: boolean(),
           remote: boolean(),
           plane_url: String.t() | nil,
@@ -82,6 +83,7 @@ defmodule Troupe.CLI do
     prompt: :string,
     version: :boolean,
     help: :boolean,
+    resume: :boolean,
     refresh: :boolean,
     remote: :boolean,
     all: :boolean,
@@ -121,8 +123,19 @@ defmodule Troupe.CLI do
     {~s(troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--private] [--workspace DIR]),
      "one task: in the TUI, or with --headless printed line by line until the agent rests",
      [["run", "task"], ["run", "plan", "task", "--headless", "--workspace", "."]]},
-    {"troupe resume [SESSION_ID]", "no id: reopen the last session here, picker open",
-     [["resume"], ["resume", "id"]]},
+    {"troupe resume [SESSION_ID | latest] [--private]",
+     "no id: the newest session here, picker open; latest, or --private for the newest private one: " <>
+       "straight in (troupe --resume is the same)",
+     [
+       ["resume"],
+       ["resume", "id"],
+       ["resume", "latest"],
+       ["resume", "--private"],
+       ["--resume", "id"]
+     ]},
+    {~s(troupe resume SESSION_ID|latest|--private --headless "message"),
+     "one turn on that session, printed as run --headless prints it, then exit",
+     [["resume", "id", "--headless", "hi"], ["resume", "--private", "--headless", "hi"]]},
     {"troupe --remote [PLANE_URL]", "open HQ: teams, profiles and sessions on a plane",
      [["--remote"]]},
     {"troupe login PLANE_URL", "sign in to a plane with the device flow",
@@ -232,6 +245,7 @@ defmodule Troupe.CLI do
       # What the TUI's input opens with (Decision 150); the TUI mode alone reads it.
       prompt: Keyword.get(opts, :prompt),
       session_id: nil,
+      latest: false,
       refresh: Keyword.get(opts, :refresh, false),
       remote: Keyword.get(opts, :remote, false),
       plane_url: nil,
@@ -265,6 +279,10 @@ defmodule Troupe.CLI do
 
       opts[:help] ->
         {:ok, %{base | mode: :help}}
+
+      # `troupe --resume …` is `troupe resume …`, the spelling issue #484 asked for.
+      opts[:resume] ->
+        parse_rest(["resume" | rest], base)
 
       true ->
         parse_rest(rest, base)
@@ -330,9 +348,26 @@ defmodule Troupe.CLI do
     do: {:ok, %{base | mode: :instructions_check}}
 
   defp parse_rest(["bench"], base), do: {:ok, %{base | mode: :bench}}
-  defp parse_rest(["resume"], base), do: {:ok, %{base | mode: :resume}}
-  defp parse_rest(["resume", sid], base), do: {:ok, %{base | mode: :resume, session_id: sid}}
+
+  # `troupe resume` (Decision 812): no word is the picker on the newest session here;
+  # `latest`, or `--private` for the newest private one, goes straight in; an id is that
+  # session. With `--headless` the last word is the message one turn runs with, and the
+  # session is named, there being no picker to choose one on: an id, `latest`, or
+  # `--private` alone.
+  defp parse_rest(["resume" | words], %{headless: true} = base) do
+    case {words, base.private} do
+      {[target, message], _private} -> resume([target], %{base | task: message})
+      {[message], true} -> resume([], %{base | task: message})
+      _ -> {:error, ~s(usage: troupe resume SESSION_ID|latest|--private --headless "message")}
+    end
+  end
+
+  defp parse_rest(["resume" | target], base) when length(target) <= 1, do: resume(target, base)
   defp parse_rest(other, _base), do: {:error, "unknown arguments: #{Enum.join(other, " ")}"}
+
+  defp resume([], base), do: {:ok, %{base | mode: :resume, latest: base.private}}
+  defp resume(["latest"], base), do: {:ok, %{base | mode: :resume, latest: true}}
+  defp resume([sid], base), do: {:ok, %{base | mode: :resume, session_id: sid}}
 
   @doc """
   What the command line asks of a new session's config: only the switches it was given.

@@ -85,6 +85,26 @@ defmodule Troupe.Remote.Translate do
            transient(session_id, agent, :agent_state, %{to: state_atom(data["state"] || "working")})
          ], memory}
 
+      # The person's own command while it runs (root Decision 813), drawn as it streams;
+      # its end is the durable `user_shell`.
+      "shell_started" ->
+        {[
+           transient(session_id, agent, :shell_started, %{
+             run_id: data["run_id"],
+             command: to_string(data["command"] || ""),
+             agent: data["agent"] != false,
+             where: where(memory)
+           })
+         ], memory}
+
+      "shell_output" ->
+        {[
+           transient(session_id, agent, :shell_output, %{
+             run_id: data["run_id"],
+             text: to_string(data["text"] || "")
+           })
+         ], memory}
+
       type when type in ["presence", "summary_diff", "watch_notice"] ->
         {[], memory}
 
@@ -207,6 +227,7 @@ defmodule Troupe.Remote.Translate do
     # anybody typed.
     budget_question? = match?("budget-" <> _, call_id(data))
     harness_note? = data["source"] == "harness"
+    shell_note? = data["source"] == "shell"
 
     # Two spellings of one vocabulary: the worker's (`llm_response`,
     # `tool_call_started` — PROTOCOL.md §4) and the older dotted one the contract's
@@ -216,6 +237,14 @@ defmodule Troupe.Remote.Translate do
       # Decision 659): shown as what it is rather than as the person's words.
       "user_input" when harness_note? ->
         {[emit.(:remote_note, %{text: "harness: " <> text_of(data)})], memory}
+
+      # What the agent was given of the person's own commands (root Decision 813): each is
+      # on screen already as its `user_shell`, the person's command and what it printed.
+      "user_input" when shell_note? ->
+        {[], memory}
+
+      "user_shell" ->
+        {[emit.(:user_shell, user_shell(data, memory))], memory}
 
       # A line sent while the agent works comes back twice, queued and then taken, and both
       # copies name the send's command id; the window draws it once (Decision 117).
@@ -336,13 +365,16 @@ defmodule Troupe.Remote.Translate do
       "truncated" ->
         {[emit.(:remote_note, %{text: truncated(data)})], memory}
 
+      # `preview` is what the question is about, drawn as it is under it: the prompt a
+      # workspace's command would send (troupe Decision 814).
       "question_asked" ->
         {[
            emit.(:question_asked, %{
              call_id: call_id(data),
              question: to_string(data["question"] || ""),
              options: options(data),
-             multiple: data["multiple"] == true
+             multiple: data["multiple"] == true,
+             preview: if(is_binary(data["preview"]), do: data["preview"])
            })
          ], memory}
 
@@ -350,6 +382,12 @@ defmodule Troupe.Remote.Translate do
         {[
            emit.(:question_answered, %{call_id: call_id(data), text: to_string(data["text"] || "")})
          ], memory}
+
+      # A workspace's command that asked first and was not sent: the harness's sentence
+      # says how to run it later (troupe Decision 814).
+      "command_declined" ->
+        {[emit.(:remote_note, %{text: to_string(data["reason"] || "the command was not sent")})],
+         memory}
 
       "approval_resolved" ->
         {[], memory}
@@ -826,6 +864,30 @@ defmodule Troupe.Remote.Translate do
 
   defp because(%{"reason" => reason}) when is_binary(reason), do: ": #{reason}"
   defp because(_data), do: ""
+
+  # How a person's command ended, and where it ran: a session on a plane says which
+  # profile's pod, and is otherwise drawn as a local one is.
+  defp user_shell(data, memory) do
+    %{
+      run_id: data["run_id"],
+      command: to_string(data["command"] || ""),
+      output: to_string(data["output"] || ""),
+      status: shell_status(data["ended"]),
+      exit_status: data["exit_status"],
+      reason: data["reason"],
+      timeout_ms: data["timeout_ms"],
+      agent: data["agent"] != false,
+      where: where(memory)
+    }
+  end
+
+  defp shell_status("exited"), do: :exited
+  defp shell_status("timeout"), do: :timeout
+  defp shell_status("killed"), do: :killed
+  defp shell_status(_failed_or_unknown), do: :failed
+
+  defp where(%{isolation: :remote, profile: profile}) when is_binary(profile), do: profile
+  defp where(_memory), do: nil
 
   # The server's `seq` travels with every event this one durable event becomes,
   # so the journal can tell a replay from something new whatever it unfolds into.

@@ -257,7 +257,8 @@ Durable:
 | `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
-| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails), `text`, `command_id` — the send it was taken from, as its `input_accepted` names it; absent from a `harness` note, which nobody sent, and from a log written before 0.5.2 |
+| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness`/`shell` — `loop` is an iteration of `session.loop.start`, `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails, and `shell` what the agent was given of the person's own commands, each of which a client draws from its `user_shell` instead), `text`, `command_id` — the send it was taken from, as its `input_accepted` names it; absent from a `harness` or `shell` note, which nobody sent, and from a log written before 0.5.2 |
+| `user_shell` | `run_id`, `command`, `output`, `ended`, `agent`, `exit_status`, `reason`, `timeout_ms`, `duration_ms`, `command_id` — a command the person ran with `shell.run`, written by the root agent under their actor when it ended. `output` is its combined stdout and stderr, the tail capped at `tool_output_limit` with the `read_output` marker when it was cut; `ended` is `exited` (with `exit_status`), `timeout`, `killed` (`shell.cancel`) or `failed` (it could not start, `reason` says why); `agent: false` is one kept from the agent (Decision 813) |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile`, `prompt_bytes` — what the prompt was made of (see below) |
@@ -313,8 +314,9 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
 | `approval_resolved` | `call_id`, `resolved_by` |
-| `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple` — the agent's `ask_user`; answered with `question.answer`. Open until its `question_answered`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no answer), or a `cancelled` on the agent that asked or on one above it. The budget's and the failure guard's question have no call; each also ends with its `budget_ask_answered` or `tool_failures_ask_answered`, the only word there is when nobody is there to ask, and one a cancel ended is asked again at the next turn with another `question_asked` under the same `call_id` |
+| `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple`, `preview` — the agent's `ask_user`; answered with `question.answer`. `preview`, where there is one, is text the question is about, for a client to show as it is beneath it: the prompt a workspace's command would send, when it asks before it is first sent (`commands.run`). Open until its `question_answered`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no answer), or a `cancelled` on the agent that asked or on one above it. The budget's and the failure guard's question have no call; each also ends with its `budget_ask_answered` or `tool_failures_ask_answered`, the only word there is when nobody is there to ask, and one a cancel ended is asked again at the next turn with another `question_asked` under the same `call_id` |
 | `question_answered` | `call_id`, `text`, `actor` |
+| `command_declined` | `name`, `reason`, `command_id` — a workspace's command that asked before it was first sent (see `commands.run`) and was not: `reason` says why and how to run it later, and `command_id` is the `commands.run` that asked |
 | `session_dormant` | `last_seq` |
 | `session_activated` | `epoch`, `pod` |
 | `session_resumed` | `dormant_ms`, `moved` |
@@ -322,7 +324,8 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `fs_changed` | `path`, `hash`, `size` |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
-Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`.
+Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`, and `shell_started` and
+`shell_output` while a person's command runs (`shell.run`).
 
 `budget_warning` — `dimension` (`turns`, `input`, `output`, `wall`, `context`), `used`,
 `limit`, `fraction`, `detail` (`input tokens 4.9M/6.0M (82%)`) — is written once per
@@ -707,6 +710,27 @@ not have, and sealing this copy after them would make the session two histories.
 "unlinked"` where no client has handed the daemon a plane token; and `invalid_params`
 for a session that is not private.
 
+#### `session.fork`
+```json
+{"command_id": "c-5", "session_id": "s-9f", "config": {"auto_approve": true}}
+```
+→ `{"session_id", "workspace", "forked_from"}`
+
+A second session from this one's conversation as it stands, the daemon's (Decision 812): a
+pod session is forked through the plane's `session.fork`. The child's log opens with
+`session_forked` (`parent`: the parent's id, the seq forked at and its head hash there;
+`reason: "branch"`) and goes on with every event of the parent's up to its head, each
+given the child's own `seq` and chained again, as a pod's fork is. It runs in the parent's
+workspace, under its profile, with `config` as `session.create` takes it, and is opened as a
+session resuming that log is: its agent starts from the parent's conversation, and the
+next input goes on from there. It is a session of its own and not a branch: no `parent` in
+the listing, its own budget, and erasing either leaves the other. The parent is read off
+disk, running or dormant, and is neither changed nor woken.
+
+`not_found` for a session the daemon does not have, and with `reason: "erased"` for a
+private one being erased; `invalid_params` with `reason: "private"` for any other private
+session, which is not forked here, since its child would be a copy no plane knows of.
+
 ### Steering
 
 #### `input.send`
@@ -735,12 +759,63 @@ without one has `arguments`, when there are any, added as a paragraph of its own
 built-in's, an agent's, or nobody's — is `not_found` with `kind: "command"`: a built-in
 is the client's to run.
 
+A workspace's command (`source: "project"`) asks once before it is first sent while the
+session approves every tool call itself (`auto_approve`), since nothing else would ask
+before what its prompt says is done (Decision 814). The answer is then `{"accepted":
+true, "command_id": "c-2", "question": "command-3f0a…"}`, and nothing is sent yet: the
+session asks a `question_asked` under that `call_id`, its `preview` the prompt as it
+would be sent, with the options `deny`, `once` and `allow`, answered with
+`question.answer` like an `ask_user`, so any client can. `allow` sends it and is
+remembered per checkout in the daemon's state directory, never in the repository, beside
+a hash of the file's prompt, so an edited command asks again and the `arguments` do not;
+`once` sends it; any other answer, or a session nobody can answer in (`approvals:
+deny`), sends nothing and writes `command_declined` saying how to run it later. A
+person's own commands never ask, and neither does a workspace on `trusted_workspaces`.
+
 #### `turn.cancel` → `{"command_id", "session_id"}`. Valid from any state.
 
 Each tool call the cancel stops is closed before `cancelled` is written: a
 `tool_call_completed` with `ok: false`, then the turn's `tool_results`. A restart takes
 up nothing a cancel stopped: no call runs again, no approval is asked for again, and no
 model call is made for the cancelled turn.
+
+#### `shell.run`
+```json
+{"command_id": "c-4", "session_id": "s-9f", "command": "git status", "agent": true}
+```
+→ `{"accepted": true, "run_id": "sh-Qx3…", "command_id": "c-4"}`. Runs a command the
+person typed (the TUI's `!cmd`) where the session runs, in its workspace: the local
+daemon's checkout or worktree, or the pod's working copy. It goes through the runner the
+agent's `shell` tool uses — the same shell, reaper, sandbox over the mount table, timeout
+and kill — as a fresh `bash -c` (Git bash, then `pwsh`, on Windows) with stdin at the null
+device: no terminal, nothing interactive, and no `cd` or `export` carried to the next one.
+`timeout_ms` is optional, a positive number of milliseconds, the session's
+`shell_timeout_ms` when absent. There is no approval prompt; the authority is the scope
+(Decision 813):
+
+* `control`, as `input.send` takes, **and** the session's owner or an `admin`. A
+  collaborator holding `control` is refused `forbidden` with `required_scope: "admin"`
+  and `reason: "only the session's owner can run commands on it"`: the agent's own shell
+  asks before it runs, and this does not.
+* What forbids the agent's shell forbids this: `managed_permission_rules_only` (`forbidden`,
+  `setting: "managed_permission_rules_only"`), and agent definitions none of whose
+  primary profiles may run `shell` (`setting: "permissions"`). Each `reason` is a
+  sentence a client shows as it is.
+
+Activating, as input is. While it runs the session publishes the ephemeral `shell_started`
+(`run_id`, `command`, `agent`) and `shell_output` (`run_id`, `text`, at most every 100 ms,
+the first MiB of it); when it ends, the root agent writes the durable `user_shell` under
+the actor who ran it. Its output **does not start a turn**: unless `agent` is `false`
+(the TUI's `!!cmd`), the agent is given the command and its capped output before its next
+model call, as one `user_input` from `shell` — before the input that starts a turn, or
+after a tool exchange and its results, never between a call and its result. A replayed
+`command_id` answers the same `run_id` and runs nothing again.
+
+#### `shell.cancel` → `{"command_id", "session_id", "run_id"}`
+
+Kills a `shell.run` command and everything it started, as its timeout does; its
+`user_shell` says `ended: "killed"`. The same scope as `shell.run`, and not activating. A
+run that has ended, or was never this session's, is `not_found` with `kind: "run"`.
 
 #### `profile.switch` → `{"command_id", "session_id", "profile": "plan"}`. Applied at
 the next turn boundary.
@@ -992,7 +1067,9 @@ The `custom` section is the commands markdown files define: `<config>/commands/<
 (`source: "user"`) and the workspace's `.troupe/commands/<name>.md` (`source:
 "project"`), the workspace's winning a name both have. The file name is the command, the
 frontmatter's `description` its summary (the prompt's first line without one) and its
-`argument-hint` what `usage` says follows the name; `detail` names the file. A name a
+`argument-hint` what `usage` says follows the name; `detail` names the file, and `body`,
+which only these entries carry, is the prompt it sends as the file has it, `$ARGUMENTS`
+and all, for a palette to show before it runs (Decision 814). A name a
 built-in, an alias or one of the session's agents has stays theirs, and the file is
 skipped. The files are read when the table is asked for, so one written a moment ago is
 listed. A client runs one with `commands.run` (Steering, above) and needs no code of its
@@ -1520,7 +1597,7 @@ way back), which it may show or ignore.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
 `session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`,
-`question.answer`, `todo.edit` and `tools.register`. Each brings a dormant session's tree
+`question.answer`, `todo.edit`, `tools.register` and `shell.run`. Each brings a dormant session's tree
 back by folding its log before taking effect, and the session logs `session_activated`.
 
 On a pod only the plane brings a session back: it places the session, bumps its epoch and
@@ -1601,7 +1678,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | scope | grants |
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
-| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
+| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
@@ -1654,10 +1731,10 @@ ACL of each session a request names.
 
 **It calls the methods about its session, and no others.** Those are `subscribe` and
 `unsubscribe` on its own topics, the two listings above, and every command whose params
-require `session_id` (§6) but the four below: `session.get`, `input.send`, `turn.cancel`,
+require `session_id` (§6) but the five below: `session.get`, `input.send`, `turn.cancel`,
 `profile.switch`, `session.goal.*`, `session.loop.*`, `approval.respond`,
 `question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
-`mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
+`mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register`, `tools.unregister`, `shell.run` and `shell.cancel`. Everything else a
 worker serves is about the pod or a path on it — `session.create`, `agents.list`,
 `workflows.list`, `memory.get`, `memory.forget`, `workspace.recent`, `workspace.search`,
 `worktree.*`, `watch.set`, `identity.*`, `config.*`, `skills.*` and the `mcp.*` methods
@@ -1668,13 +1745,13 @@ the connection. The plane mints every token for a pod with a `session_id`; one w
 signed only by tooling that runs its own pod (the end-to-end tests, the benchmark), and
 keeps the whole table.
 
-**Archiving, pinning and erasing a pod session are the plane's.** The plane holds the
-session's row, its key, its placement and its retention, so a worker refuses
-`session.archive`, `session.pin`, `session.unpin` and `session.erase` to a token for one
-session with `forbidden`, `data.method` naming it and `data.reason` of
+**Archiving, pinning, erasing and forking a pod session are the plane's.** The plane holds
+the session's row, its key, its placement and its retention, so a worker refuses
+`session.archive`, `session.pin`, `session.unpin`, `session.erase` and `session.fork` to a
+token for one session with `forbidden`, `data.method` naming it and `data.reason` of
 `done through the plane`. A client archives, pins, unpins and erases a pod session with
 the plane's methods of the same names, each `{session_id}` and each for the session's
-owner. The plane's archive pushes `session.dormant` to the pod holding the session, which
+owner, and forks one with the plane's `session.fork` (Decision 812). The plane's archive pushes `session.dormant` to the pod holding the session, which
 seals it, uploads its workspace, deletes its own copy and reports it dormant, giving back
 its slot and its budget slice; the answer is the session's row, `dormant`, and the next
 activating command brings it back on whichever pod has room. A session that is not

@@ -18,7 +18,7 @@ defmodule Troupe do
   alias Troupe.LLM.Catalog.Refresher
   alias Troupe.Protocol.Origin
   alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
-  alias Troupe.Sessions.{Index, Unseen}
+  alias Troupe.Sessions.{Fork, Index, Unseen}
 
   @type session :: %{id: String.t(), pid: pid(), workspace: Troupe.Workspace.t()}
 
@@ -235,6 +235,20 @@ defmodule Troupe do
   def send_input(session_id, content, source \\ :user, actor \\ nil, opts \\ []) do
     with_root(session_id, &Agent.input(&1, source, content, actor, opts))
   end
+
+  @doc """
+  Run a command the person typed (`!cmd`) in the session's workspace, through the runner
+  the agent's `shell` uses (Decision 813). Answers the run's id at once; it streams as
+  `shell_output` and ends as `user_shell`. `opts`: `:actor`, `:agent` (`false` keeps it
+  from the agent), `:timeout_ms`, `:command_id`.
+  """
+  @spec shell_run(String.t(), String.t(), keyword()) ::
+          {:ok, String.t()} | {:error, :no_session | {:forbidden, String.t(), String.t()}}
+  defdelegate shell_run(session_id, command, opts \\ []), to: Troupe.Session.Shell, as: :run
+
+  @doc "Kill a running `shell_run/3` command and everything it started."
+  @spec shell_cancel(String.t(), String.t()) :: :ok | {:error, :not_running}
+  defdelegate shell_cancel(session_id, run_id), to: Troupe.Session.Shell, as: :cancel
 
   @doc "Cancel whatever the root agent is doing. Valid from any state."
   @spec cancel(String.t()) :: :ok | {:error, :no_session}
@@ -479,6 +493,38 @@ defmodule Troupe do
   @spec resume(String.t(), keyword()) :: {:ok, session()} | {:error, term()}
   def resume(session_id, opts \\ []) do
     start_session(Keyword.put(opts, :session_id, session_id))
+  end
+
+  @doc """
+  Fork a session on this machine (root Decision 812): a new session in the parent's
+  workspace, under its profile, whose log opens with `session_forked` and goes on with the
+  parent's events resealed under its own numbering — `Troupe.Sessions.Fork.chain/3`, the
+  rule a pod forks a team session by — so its agent starts from the parent's conversation
+  as it stands, and goes somewhere else from there.
+
+  The parent is read off disk, running or not, and is neither changed nor woken. The child
+  is a session of its own, opened as a resume of that log is, and not a branch: it has no
+  `parent` in the listing, which is what puts a branch in its parent's window.
+
+  Options: `:config_overrides`, as `start_session/1` takes them; `:seq`, `:reason` and
+  `:actor`, as the chain takes them, the reason `branch` unless one is given.
+  """
+  @spec fork_session(String.t(), keyword()) :: {:ok, session()} | {:error, term()}
+  def fork_session(parent_id, opts \\ []) do
+    overrides = Keyword.get(opts, :config_overrides, [])
+    chain_opts = Keyword.merge([reason: "branch"], Keyword.take(opts, [:seq, :reason, :actor]))
+
+    with %{} = parent <- get_session(parent_id) || {:error, :not_found},
+         start = [workspace: parent.workspace, agent: parent.profile, config_overrides: overrides],
+         {:ok, session_opts} <- Session.build_opts(start),
+         state_dir = Keyword.fetch!(session_opts, :config).state_dir,
+         history = Log.read_session(parent_id, state_dir),
+         {:ok, %{events: events}} <- Fork.chain(parent_id, history, chain_opts),
+         child_id = Keyword.fetch!(session_opts, :session_id),
+         root = Keyword.fetch!(session_opts, :workspace).root_real,
+         :ok <- Log.write_new(Troupe.Paths.session_dir(root, child_id, state_dir), events) do
+      resume(child_id, start)
+    end
   end
 
   @doc """

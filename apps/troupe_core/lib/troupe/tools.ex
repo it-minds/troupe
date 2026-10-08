@@ -307,10 +307,10 @@ defmodule Troupe.Tools do
     try do
       case Tool.invoke(tool, args, ctx) do
         {:ok, content} ->
-          Result.ok(ctx.call_id, name, content)
+          Result.ok(ctx.call_id, name, text(content))
 
         {:ok, content, updates} ->
-          Result.ok(ctx.call_id, name, content, %{updates: updates})
+          Result.ok(ctx.call_id, name, text(content), %{updates: updates})
 
         {:defer, instruction} ->
           %Result{
@@ -322,7 +322,7 @@ defmodule Troupe.Tools do
           }
 
         {:error, reason} ->
-          Result.error(ctx.call_id, name, reason)
+          Result.error(ctx.call_id, name, text(reason))
       end
     rescue
       error ->
@@ -335,4 +335,11 @@ defmodule Troupe.Tools do
         Result.error(ctx.call_id, name, {:tool_crashed, "exited with #{inspect(reason)}"})
     end
   end
+
+  # A result goes into the log and to the model, both JSON, which holds only UTF-8. Bytes
+  # that are not (what a command printed, a binary file, a cut inside a character) are
+  # replaced here, where every tool's result passes, rather than in each tool: the log
+  # refusing one stopped the session mid-turn (#493).
+  defp text(content) when is_binary(content), do: String.replace_invalid(content)
+  defp text(other), do: other
 end
