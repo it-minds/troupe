@@ -23,7 +23,8 @@ Claude Code's subagents and opencode's agents at every session start (its Decisi
 which never reached `main`); this re-books its mapping as an importer.
 `Troupe.Onboard.AgentsAndCommands` reads the other tools' files and answers proposals in the
 shape `Troupe.Onboard.Source` fixes for `troupe onboard` (Decision 823):
-`%{target: :repo, path:, content:, source:, source_hash:, notes:}`. It writes nothing.
+`%{target: :repo, path:, content:, source:, source_hash:, also_from:, notes:}`, and
+`skipped/2` answers what gave no proposal. It writes nothing.
 
 - **What is read.** Claude Code: `.claude/agents/*.md`, the `permissions` of the shared
   `.claude/settings.json` (not `.claude/settings.local.json`, which is the person's), and
@@ -43,6 +44,11 @@ shape `Troupe.Onboard.Source` fixes for `troupe onboard` (Decision 823):
   `argument-hint`, the only keys `Troupe.Commands.Local` reads (Decision 763), then the body.
   `source` is the other tool's file relative to the workspace, forward slashes, and
   `source_hash` the sha256 of its bytes; an `opencode.json` entry's is the whole file's.
+  `also_from` names every other file the proposal depends on, the same way, so a change
+  there is drift too: `.claude/settings.json` for a Claude Code agent when it has
+  `permissions`; an `opencode.json` or `opencode.jsonc` whose own `permission` or `tools`
+  apply under an agent from another file; each file a prompt's `{file:}` read. A command's
+  is empty.
 - **Tools.** #516's table, with #510's names: `Read` `read_file`, `Write` `write_file`,
   `Edit` and `MultiEdit` `edit_file`, `Bash` and `PowerShell` `shell`, `Grep`, `Glob`, `LS`
   `list_files`, `WebFetch`, `TodoWrite` `todo_write` and `todo_read`, `Agent` and `Task`
@@ -110,19 +116,21 @@ shape `Troupe.Onboard.Source` fixes for `troupe onboard` (Decision 823):
   comes to nothing is not proposed. Two files that give one name: Claude Code's first, then
   `.opencode/agents/` (or `commands/`), `.opencode/agent/` (`command/`), `opencode.json`,
   `opencode.jsonc`, and by path within one place. The winner's proposal names each file it
-  hid, and `survey/2` lists the hidden one. A proposal whose name is a built-in agent's says
+  hid, and `skipped/2` lists the hidden one. A proposal whose name is a built-in agent's says
   that it replaces the built-in in this workspace.
 - **Notes and skips.** One sentence per key left out or changed, with why, in a fixed order,
   so the same files give the same proposals byte for byte: nothing depends on the clock or on
   what `.troupe/` holds, and a test writes the proposals into `.troupe/` and runs again. What
   gave no proposal at all (a file outside the workspace, `disable: true`, an unusable name, a
-  shadowed command) cannot be a proposal's note; `survey/2` answers it beside the proposals,
-  with the reason.
+  shadowed command) cannot be a proposal's note; `skipped/2` answers it, a file and a reason
+  each, the reason starting with the agent's or command's name where there is one, since one
+  `opencode.json` can hold several (`survey/2` answers both lists at once).
 - **Proof:** `Troupe.Onboard.AgentsAndCommandsTest`: the fixture of #516's slice (three
   Claude Code subagents with `.claude/settings.json`, two opencode agents, one in
   `opencode.json` and one in `.opencode/agents/`, three Claude Code commands) gives five
   agent and three command proposals whose tools, permissions and models are the table's,
-  every note asserted; again on the same files, before and after the proposals are written,
+  every note and every `also_from` asserted; again on the same files, before and after the
+  proposals are written,
   the same; `Definitions.load/2` and `Commands.Local.list/2` read the written files back as
   proposed. Then rules for some uses in `tools`, `disallowedTools`, the settings and
   opencode's `permission`; names; a list of nothing Troupe has; frontmatter a line per key;

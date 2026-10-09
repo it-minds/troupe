@@ -151,6 +151,7 @@ defmodule Troupe.Onboard.AgentsAndCommands.ClaudeCode do
              Shared.other_keys(meta, @read, @keys, "it is not a key a Troupe agent reads"),
          source: source,
          source_hash: Shared.hash(bytes),
+         also_from: settings.also_from,
          label: source,
          rank: 0
        }}
@@ -265,18 +266,24 @@ defmodule Troupe.Onboard.AgentsAndCommands.ClaudeCode do
 
   ## .claude/settings.json
 
-  # The shared settings' permission rules, as the approvals they give each tool. The
-  # person's own `.claude/settings.local.json` is theirs, and not a repository's to carry.
+  # The shared settings' permission rules, as the approvals they give each tool, and the
+  # file as one every agent's proposal also comes from when it has any. The person's own
+  # `.claude/settings.local.json` is theirs, and not a repository's to carry.
   defp settings(root) do
     path = Path.join(root, @settings)
-    none = %{permissions: %{}, notes: [], skipped: []}
+    none = %{permissions: %{}, notes: [], skipped: [], also_from: []}
 
     with true <- File.regular?(path),
          {:ok, bytes} <- Shared.read(root, path),
          {:ok, settings} when is_map(settings) <- JSONC.decode(bytes) do
       case settings["permissions"] do
-        permissions when is_map(permissions) -> settings_permissions(permissions)
-        _none -> none
+        permissions when is_map(permissions) ->
+          permissions
+          |> settings_permissions()
+          |> Map.put(:also_from, [%{source: @settings, source_hash: Shared.hash(bytes)}])
+
+        _none ->
+          none
       end
     else
       false ->

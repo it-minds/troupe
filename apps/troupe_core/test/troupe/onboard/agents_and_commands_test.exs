@@ -157,6 +157,31 @@ defmodule Troupe.Onboard.AgentsAndCommandsTest do
       assert proposal(survey, "agents/docs-writer.md").source == ".opencode/agents/docs-writer.md"
       assert proposal(survey, "commands/migrate.md").source == ".claude/commands/migrate.md"
       assert survey.skipped == []
+      assert AgentsAndCommands.skipped(context.workspace) == []
+    end
+
+    test "each proposal names every other file it depends on, hashed as its source is",
+         context do
+      survey = survey(context)
+
+      settings = %{
+        source: ".claude/settings.json",
+        source_hash: sha256(context, ".claude/settings.json")
+      }
+
+      opencode = %{source: "opencode.json", source_hash: sha256(context, "opencode.json")}
+
+      # A Claude Code agent's permissions come from the settings too.
+      for path <- ["agents/reviewer.md", "agents/scout.md", "agents/migrator.md"],
+          do: assert(proposal(survey, path).also_from == [settings])
+
+      # opencode.json's own `permission` is under the markdown agent's; an entry of that
+      # file has it as its source already.
+      assert proposal(survey, "agents/docs-writer.md").also_from == [opencode]
+      assert proposal(survey, "agents/release.md").also_from == []
+
+      for %{path: "commands/" <> _} = command <- survey.proposals,
+          do: assert(command.also_from == [])
     end
 
     test "Claude Code's subagents: tools, permissions and models as #516's table maps them",
@@ -522,6 +547,28 @@ defmodule Troupe.Onboard.AgentsAndCommandsTest do
              )
     end
 
+    test "the other config file is one an entry also comes from when its permission applies",
+         context do
+      write_file(context, "opencode.jsonc", ~s({"permission": {"bash": "ask"}}))
+
+      write_file(
+        context,
+        "opencode.json",
+        ~s({"agent": {"tidy": {"prompt": "Tidies.", "mode": "primary"}}})
+      )
+
+      write_file(context, ".opencode/agents/lint.md", "---\nmode: subagent\n---\nLints.")
+
+      survey = survey(context)
+      jsonc = %{source: "opencode.jsonc", source_hash: sha256(context, "opencode.jsonc")}
+
+      assert definition(proposal(survey, "agents/tidy.md")).permissions == %{"shell" => :ask}
+      assert proposal(survey, "agents/tidy.md").also_from == [jsonc]
+      # opencode.json holds no `permission` or `tools` of its own, so nothing depends on it
+      # but its own entries.
+      assert proposal(survey, "agents/lint.md").also_from == [jsonc]
+    end
+
     test "a prompt's {file:} is that file's text, read from inside the workspace only", context do
       write_file(context, "prompts/review.md", "  You review from a file.\n")
       File.write!(Path.join(context.base, "secret.md"), "not for the prompt")
@@ -545,12 +592,25 @@ defmodule Troupe.Onboard.AgentsAndCommandsTest do
 
       assert Enum.map(survey.proposals, & &1.path) == ["agents/filed.md"]
 
-      assert Enum.sort(Enum.map(skipped(survey, "opencode.json"), &{&1.name, &1.reason})) == [
-               {"escaped",
-                "not proposed: its prompt reads {file:../secret.md}, which is outside the workspace"},
-               {"missing",
-                "not proposed: its prompt reads {file:./prompts/gone.md}, and prompts/gone.md is not there"},
-               {"off", "not proposed: disable is true"}
+      # The file it read is one the proposal also comes from.
+      assert filed.also_from == [
+               %{source: "prompts/review.md", source_hash: sha256(context, "prompts/review.md")}
+             ]
+
+      assert Enum.map(survey.proposals, & &1.path) == ["agents/filed.md"]
+
+      assert AgentsAndCommands.skipped(context.workspace) == [
+               %{
+                 source: "opencode.json",
+                 reason:
+                   "escaped: not proposed: its prompt reads {file:../secret.md}, which is outside the workspace"
+               },
+               %{
+                 source: "opencode.json",
+                 reason:
+                   "missing: not proposed: its prompt reads {file:./prompts/gone.md}, and prompts/gone.md is not there"
+               },
+               %{source: "opencode.json", reason: "off: not proposed: disable is true"}
              ]
     end
 

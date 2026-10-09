@@ -13,12 +13,16 @@ defmodule Troupe.Onboard.AgentsAndCommands.Shared do
   alias Troupe.Protocol.AgentDefinition
   alias Troupe.Workspace
 
+  @typedoc "Another file a proposal depends on, named and hashed as its source is."
+  @type also_from :: %{source: String.t(), source_hash: String.t()}
+
   @typedoc "One agent another tool defined, as Troupe's, and where it came from."
   @type agent :: %{
           definition: Definition.t(),
           notes: [String.t()],
           source: String.t(),
           source_hash: String.t(),
+          also_from: [also_from()],
           label: String.t(),
           rank: non_neg_integer()
         }

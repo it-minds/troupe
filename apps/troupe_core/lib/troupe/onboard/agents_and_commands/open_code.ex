@@ -85,8 +85,16 @@ defmodule Troupe.Onboard.AgentsAndCommands.OpenCode do
           {[Shared.agent()], [Shared.skip()]}
   def agents(root, below) do
     files = Enum.map(@config_files, &config_file(root, &1))
-    configs = for %{config: config} when is_map(config) <- files, do: config
-    shared = Enum.map(configs, &%{tools: &1["tools"], permission: &1["permission"]})
+
+    # Each file's own `tools` and `permission`, under every agent's, and the file they
+    # come from, which a proposal they shaped also comes from.
+    shared =
+      for %{config: config} = file when is_map(config) <- files,
+          do: %{
+            tools: config["tools"],
+            permission: config["permission"],
+            from: %{source: file.name, source_hash: Shared.hash(file.bytes)}
+          }
 
     entries =
       for %{config: %{"agent" => agents}} = file when is_map(agents) <- files,
@@ -182,7 +190,7 @@ defmodule Troupe.Onboard.AgentsAndCommands.OpenCode do
   defp agent(root, origin, name, entry, prompt, shared, below) do
     with :ok <- enabled(entry),
          {:ok, name, name_notes} <- Shared.name(name, nil),
-         {:ok, prompt, prompt_notes} <- prompt(root, origin.dir, prompt) do
+         {:ok, prompt, prompt_notes, prompt_files} <- prompt(root, origin.dir, prompt) do
       {mode, mode_notes} = mode(entry["mode"])
       {model, model_notes} = Shared.model(entry["model"], :opencode)
       {max_turns, turn_notes} = Shared.max_turns("steps", entry["steps"] || entry["maxSteps"])
@@ -198,10 +206,12 @@ defmodule Troupe.Onboard.AgentsAndCommands.OpenCode do
       }
 
       {definition, base_notes} = definition(below[name], prompt, fields, access)
+      layers = for %{from: from} = layer <- shared, layer.tools || layer.permission, do: from
 
       {:ok,
        Map.merge(Map.delete(origin, :dir), %{
          definition: definition,
+         also_from: layers ++ prompt_files,
          notes:
            name_notes ++
              base_notes ++
@@ -442,23 +452,27 @@ defmodule Troupe.Onboard.AgentsAndCommands.OpenCode do
        ]}
 
   # The prompt as written, or with each `{file:path}` replaced by that file's text, read
-  # from the config's directory and only from inside the workspace.
-  defp prompt(_root, _dir, nil), do: {:ok, nil, []}
+  # from the config's directory and only from inside the workspace; each such file is one
+  # the proposal also comes from.
+  defp prompt(_root, _dir, nil), do: {:ok, nil, [], []}
 
   defp prompt(root, dir, prompt) when is_binary(prompt) do
     references = Regex.scan(~r/\{file:([^}]+)\}/, prompt)
 
     references
-    |> Enum.reduce_while({:ok, prompt}, fn [reference, path], {:ok, prompt} ->
+    |> Enum.reduce_while({:ok, prompt, []}, fn [reference, path], {:ok, prompt, files} ->
       full = path |> String.trim() |> Path.expand(dir)
 
       case prompt_file(root, full, reference) do
-        {:ok, text} -> {:cont, {:ok, String.replace(prompt, reference, text)}}
-        skip -> {:halt, skip}
+        {:ok, text, file} ->
+          {:cont, {:ok, String.replace(prompt, reference, text), files ++ [file]}}
+
+        skip ->
+          {:halt, skip}
       end
     end)
     |> then(fn
-      {:ok, text} ->
+      {:ok, text, files} ->
         notes =
           Enum.map(
             references,
@@ -467,7 +481,7 @@ defmodule Troupe.Onboard.AgentsAndCommands.OpenCode do
             end
           )
 
-        {:ok, nilify(String.trim(text)), notes}
+        {:ok, nilify(String.trim(text)), notes, files}
 
       skip ->
         skip
@@ -490,8 +504,9 @@ defmodule Troupe.Onboard.AgentsAndCommands.OpenCode do
 
       true ->
         case File.read(full) do
-          {:ok, text} ->
-            {:ok, String.trim(text)}
+          {:ok, bytes} ->
+            {:ok, String.trim(bytes),
+             %{source: Shared.relative(root, full), source_hash: Shared.hash(bytes)}}
 
           {:error, reason} ->
             {:skip, "not proposed: its prompt reads #{reference}: #{:file.format_error(reason)}"}

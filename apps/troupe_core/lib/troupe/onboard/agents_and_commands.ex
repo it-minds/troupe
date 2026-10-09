@@ -10,17 +10,21 @@ defmodule Troupe.Onboard.AgentsAndCommands do
   session (#516).
 
   A source for onboarding in the shape `Troupe.Onboard.Source` fixes: `proposals/2`
-  answers plain maps, `%{target: :repo, path:, content:, source:, source_hash:, notes:}`,
-  `path` under `.troupe/`, `source` the other tool's file relative to the workspace,
-  `source_hash` the sha256 of its bytes, and `notes` one sentence per key left out or
-  changed, with why. Nothing here writes. The same files give the same proposals, byte
-  for byte: nothing in one depends on the clock or on what `.troupe/` already holds.
+  answers plain maps, `%{target: :repo, path:, content:, source:, source_hash:,
+  also_from:, notes:}`, `path` under `.troupe/`, `source` the other tool's file relative
+  to the workspace, `source_hash` the sha256 of its bytes, `also_from` every other file
+  the proposal depends on, named and hashed the same way (`.claude/settings.json` for a
+  Claude Code agent's permissions, an `opencode.json` whose own `permission` or `tools`
+  apply under an agent, a prompt's `{file:}`), and `notes` one sentence per key left out
+  or changed, with why. `skipped/2` answers what gave no proposal, and why. Nothing here
+  writes. The same files give the same proposals, byte for byte: nothing in one depends
+  on the clock or on what `.troupe/` already holds.
 
   How each tool's keys map is in `ClaudeCode` and `OpenCode`. Two files that give one
   name: Claude Code's wins over opencode's, a markdown agent over an `opencode.json`
-  entry; the proposal says which it hid, and `survey/2` lists the hidden one with what
-  else was not proposed and why. A command is not proposed under a name a built-in
-  command, an alias or a primary agent has, since Troupe skips such a file (Decision 763).
+  entry; the proposal says which it hid, and `skipped/2` lists the hidden one. A command
+  is not proposed under a name a built-in command, an alias or a primary agent has, since
+  Troupe skips such a file (Decision 763).
   """
 
   alias Troupe.Agent.{Definition, Definitions}
@@ -34,6 +38,7 @@ defmodule Troupe.Onboard.AgentsAndCommands do
           content: binary(),
           source: String.t(),
           source_hash: String.t(),
+          also_from: [Shared.also_from()],
           notes: [String.t()]
         }
 
@@ -47,6 +52,21 @@ defmodule Troupe.Onboard.AgentsAndCommands do
   """
   @spec proposals(Path.t(), keyword()) :: [proposal()]
   def proposals(workspace, opts \\ []), do: survey(workspace, opts).proposals
+
+  @doc """
+  Every file, or entry of one, that gave no proposal, and why, sorted by file: one outside
+  the workspace, one a name was won from, `disable: true`, a name Troupe cannot give, a
+  command under a taken name. The reason starts with the agent's or the command's name
+  where there is one, since one file (`opencode.json`) can hold several.
+  """
+  @spec skipped(Path.t(), keyword()) :: [%{source: String.t(), reason: String.t()}]
+  def skipped(workspace, opts \\ []) do
+    for skip <- survey(workspace, opts).skipped,
+        do: %{
+          source: skip.source,
+          reason: if(skip.name, do: "#{skip.name}: #{skip.reason}", else: skip.reason)
+        }
+  end
 
   @doc "`proposals/2`, with every file or entry that gave none and why, in words."
   @spec survey(Path.t(), keyword()) :: survey()
@@ -164,6 +184,7 @@ defmodule Troupe.Onboard.AgentsAndCommands do
       content: Definition.render(agent.definition),
       source: agent.source,
       source_hash: agent.source_hash,
+      also_from: agent.also_from |> Enum.reject(&(&1.source == agent.source)) |> Enum.uniq(),
       notes: replaces ++ agent.notes
     }
   end
@@ -175,6 +196,7 @@ defmodule Troupe.Onboard.AgentsAndCommands do
       content: command_file(command),
       source: command.source,
       source_hash: command.source_hash,
+      also_from: [],
       notes: command.notes
     }
   end
