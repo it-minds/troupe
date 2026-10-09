@@ -18,6 +18,10 @@ File.write!(
 System.delete_env("TROUPE_STATE_HOME")
 System.at_exit(fn _ -> File.rm_rf!(config_home) end)
 
+# The person's own `~/.agents/skills` (Decision 822) is read from the home directory,
+# which a test cannot move: an empty one of the suite's own instead of the developer's.
+Application.put_env(:troupe_core, :agents_home, Path.join(config_home, "home/.agents"))
+
 # Starting the daemon at login (Decision 762) writes into the person's own login items:
 # here into a scratch home instead, for every test that reaches it through the first
 # run's questions, starting a `troupe-daemon` that need not exist.
