@@ -268,6 +268,63 @@ defmodule Troupe.Config.LayersTest do
       refute Map.has_key?(config.mcp["fs"], :refused)
     end
 
+    # Decision 820: what goes to a server over HTTP with every request.
+    test "in an MCP server's headers refuses that server; set, it is read and --explain masks it",
+         ctx do
+      var = "TROUPE_TEST_MCP_HEADER_#{System.unique_integer([:positive])}"
+      on_exit(fn -> System.delete_env(var) end)
+
+      File.write!(ctx.user, """
+      mcp:
+        wiki:
+          url: https://wiki.example.com/mcp
+          headers:
+            Authorization: "Bearer {env:#{var}}"
+            X-Api-Key: literal-key-1234567890
+        fs:
+          command: fs-mcp
+      """)
+
+      config = load!(ctx)
+
+      assert config.mcp["wiki"].refused =~
+               "mcp.wiki.headers.Authorization reads Bearer {env:#{var}}"
+
+      assert config.mcp["wiki"].refused =~ "the MCP server wiki is not started until it is"
+      refute Map.has_key?(config.mcp["fs"], :headers)
+
+      System.put_env(var, "not-a-real-token")
+      config = load!(ctx)
+      refute Map.has_key?(config.mcp["wiki"], :refused)
+
+      assert config.mcp["wiki"].headers == %{
+               "Authorization" => "Bearer not-a-real-token",
+               "X-Api-Key" => "literal-key-1234567890"
+             }
+
+      {text, 0} = Config.Explain.explain(ctx.ws, "mcp.wiki", user_path: ctx.user)
+      refute text =~ "not-a-real-token"
+      refute text =~ "literal-key-1234567890"
+      assert text =~ "mcp.wiki.headers.Authorization = Bear...en (from Bearer {env:#{var}})"
+      assert text =~ "mcp.wiki.headers.X-Api-Key = lite...90"
+
+      {json, 0} = Config.Explain.explain(ctx.ws, "mcp.wiki", user_path: ctx.user, json: true)
+      refute json =~ "not-a-real-token"
+      refute json =~ "literal-key-1234567890"
+    end
+
+    test "an MCP server's header Troupe sends itself refuses the server", ctx do
+      File.write!(ctx.user, """
+      mcp:
+        wiki:
+          url: https://wiki.example.com/mcp
+          headers: {Accept: text/html}
+      """)
+
+      assert load!(ctx).mcp["wiki"].refused ==
+               "wiki: headers: Accept is sent by Troupe itself, and cannot be set"
+    end
+
     test "anywhere else refuses the load", ctx do
       File.write!(ctx.user, "state_dir: \"{env:TROUPE_TEST_SURELY_UNSET_4}\"\n")
       assert refused!(ctx) =~ "state_dir reads {env:TROUPE_TEST_SURELY_UNSET_4}, and TROUPE_TEST_SURELY_UNSET_4 is not set"

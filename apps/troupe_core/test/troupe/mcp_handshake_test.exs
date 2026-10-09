@@ -21,7 +21,7 @@ defmodule Troupe.MCPHandshakeTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.MCP.{Client, Server, Sessions}
-  alias Troupe.Session.MCP
+  alias Troupe.Session.{MCP, Questions}
   alias Troupe.Test.FakeMCP
   alias Troupe.Tool
 
@@ -299,6 +299,85 @@ defmodule Troupe.MCPHandshakeTest do
 
       :ok = Troupe.stop_session(session.id)
       refute_receive {:fake_mcp, %{method: "DELETE"}}, 200
+    end
+  end
+
+  describe "the headers a server's entry names (Decision 820)" do
+    setup context do
+      var = "TROUPE_TEST_MCP_HEADER_#{System.unique_integer([:positive])}"
+      System.put_env(var, "not-a-real-key")
+      on_exit(fn -> System.delete_env(var) end)
+
+      write_file(
+        context,
+        ".troupe/mcp.json",
+        Jason.encode!(%{
+          "mcpServers" => %{
+            "notes" => %{
+              "url" => context.fake.url,
+              "headers" => %{"X-Api-Key" => "{env:#{var}}", "X-Team" => "core"}
+            }
+          }
+        })
+      )
+
+      :ok
+    end
+
+    test "go out on every request, the handshake's and the session's end too, read from the environment",
+         context do
+      %{session: session} = start_session(context, [])
+      wait_for_state(session.id, "notes", [:ready])
+
+      assert {:ok, "three notes on maps"} =
+               Tool.invoke(tool(session.id), %{"topic" => "maps"}, ctx(session, context))
+
+      # What a crash report would print names them and holds no value.
+      status =
+        session.id
+        |> Troupe.Registry.session_mcp()
+        |> :sys.get_status()
+        |> inspect(limit: :infinity)
+
+      assert status =~ "X-Api-Key"
+      refute status =~ "not-a-real-key"
+
+      so_far = requests()
+      :ok = Troupe.stop_session(session.id)
+      assert_receive {:fake_mcp, %{method: "DELETE", status: 200} = ended}, 5_000
+      requests = so_far ++ [ended]
+
+      assert Enum.map(requests, &(&1.rpc || &1.method)) ==
+               ["initialize", "notifications/initialized", "tools/list", "tools/call", "DELETE"]
+
+      for request <- requests do
+        assert request.headers["x-api-key"] == "not-a-real-key"
+        assert request.headers["x-team"] == "core"
+      end
+    end
+
+    test "a workspace's server that sends them is asked about by name, before anything is sent",
+         context do
+      %{session: session} = start_session(context, config_overrides: [trusted_workspaces: []])
+
+      [question] = wait_for_question(session.id)
+
+      assert question.question =~
+               "notes (#{context.fake.url}, sending the headers X-Api-Key, X-Team)"
+
+      refute question.question =~ "not-a-real-key"
+      assert requests() == []
+    end
+  end
+
+  defp wait_for_question(session_id, waited \\ 0) do
+    case Questions.pending(session_id) do
+      [] when waited < 5_000 ->
+        Process.sleep(50)
+        wait_for_question(session_id, waited + 50)
+
+      questions ->
+        questions
     end
   end
 

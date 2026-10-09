@@ -14,7 +14,8 @@
 # answers a session it does not hold with `400`, as the TypeScript SDK's example servers
 # and older Python SDK releases do; started `bad_calls: true`, it refuses every `tools/call` with `400`, in a session it
 # holds too, as a server that dislikes the request rather than the session.
-# Every request is sent to the test process as `{:fake_mcp, request}`.
+# Every request is sent to the test process as `{:fake_mcp, request}`, with every header
+# it carried, by lower-case name, under `headers`.
 unless Code.ensure_loaded?(Troupe.Test.FakeMCP) do
   defmodule Troupe.Test.FakeMCP do
     @version "2025-03-26"
@@ -95,6 +96,7 @@ unless Code.ensure_loaded?(Troupe.Test.FakeMCP) do
              session: headers["mcp-session-id"],
              version: headers["mcp-protocol-version"],
              authorization: headers["authorization"],
+             headers: headers,
              status: status
            }}
         )

@@ -14,7 +14,8 @@ defmodule Troupe.Gateway.LocalSources do
   round; the TUI and the GUI hold a form each and never a path of their own.
 
   What goes back is what a panel shows and nothing a file keeps secret: a server's
-  environment travels as the names of its variables, never their values. A path goes
+  environment travels as the names of its variables, and its headers as their names
+  (Decision 820), never their values. A path goes
   back as a person on this platform writes it (`Troupe.Paths.display/1`), since a panel
   prints it; the files themselves are read and written by the paths they had.
   """
@@ -369,6 +370,7 @@ defmodule Troupe.Gateway.LocalSources do
       "url" => config[:url],
       "cd" => config[:cd],
       "env" => config |> Map.get(:env, %{}) |> Map.keys() |> Enum.sort(),
+      "headers" => config |> Map.get(:headers, %{}) |> Map.keys() |> Enum.sort(),
       "permission" => to_string(config[:permission] || :ask),
       "disabled" => server.disabled?,
       "refused" => config[:refused],
@@ -402,10 +404,14 @@ defmodule Troupe.Gateway.LocalSources do
 
   defp trust_of(_server, _workspace), do: nil
 
-  defp entry_json(entry) do
-    entry
-    |> Map.update("env", [], &(&1 |> Map.keys() |> Enum.sort()))
-    |> Map.reject(fn {key, _value} -> key == "env" and entry["env"] in [nil, %{}] end)
+  defp entry_json(entry), do: entry |> names_of("env") |> names_of("headers")
+
+  # A server's environment and headers by name, never their values (Decision 820).
+  defp names_of(entry, key) do
+    case entry[key] do
+      %{} = values when values != %{} -> Map.put(entry, key, values |> Map.keys() |> Enum.sort())
+      _none -> Map.delete(entry, key)
+    end
   end
 
   # -- skills --------------------------------------------------------------------

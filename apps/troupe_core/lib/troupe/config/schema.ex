@@ -111,6 +111,13 @@ defmodule Troupe.Config.Schema do
       spec("env", {:map, :string}, "Variables to set for it.", default: %{}, secret: true),
       spec("cd", :string, "The directory to run it in. Unset: the workspace."),
       spec("url", :string, "A server over HTTP: its URL."),
+      spec(
+        "headers",
+        {:map, :string},
+        "Headers sent with every request to a server over HTTP. `{env:VAR}` reads a value from the environment.",
+        default: %{},
+        secret: true
+      ),
       spec("oauth", {:object, oauth_entry()}, "A server over HTTP that wants you signed in: how to sign in."),
       spec("permission", {:enum, ~w(ask auto)}, "`auto` runs its tools without asking.", default: "ask"),
       spec("timeout_ms", {:integer, 1}, "How long one call may take.", default: 30_000)

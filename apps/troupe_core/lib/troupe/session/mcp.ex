@@ -355,6 +355,13 @@ defmodule Troupe.Session.MCP do
   defp describe(%{name: name, config: %{command: command} = config}) when is_binary(command),
     do: "#{name} (#{Enum.join([command | config.args], " ")})"
 
+  # A workspace's server that sends headers sends what they read to its URL, the
+  # person's own variables among them (Decision 820): the question names them.
+  defp describe(%{name: name, config: %{url: url, headers: %{} = headers}})
+       when is_binary(url) and headers != %{} do
+    "#{name} (#{url}, sending the headers #{headers |> Map.keys() |> Enum.sort() |> Enum.join(", ")})"
+  end
+
   defp describe(%{name: name, config: %{url: url}}) when is_binary(url), do: "#{name} (#{url})"
   defp describe(%{name: name}), do: name
 
@@ -410,6 +417,31 @@ defmodule Troupe.Session.MCP do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  # A crash report prints the state, and a server's environment and headers can hold a
+  # credential (Decision 820): it prints their names.
+  @impl GenServer
+  def format_status(status), do: Map.replace_lazy(status, :state, &redacted/1)
+
+  defp redacted(%__MODULE__{servers: servers} = state) do
+    %{state | servers: Map.new(servers, fn {name, entry} -> {name, redacted_entry(entry)} end)}
+  end
+
+  defp redacted(state), do: state
+
+  defp redacted_entry(%{record: %{config: config} = record} = entry) do
+    config = config |> names_only(:env) |> names_only(:headers)
+    %{entry | record: %{record | config: config}}
+  end
+
+  defp redacted_entry(entry), do: entry
+
+  defp names_only(config, key) do
+    case config do
+      %{^key => %{} = values} -> Map.put(config, key, values |> Map.keys() |> Enum.sort())
+      _other -> config
+    end
+  end
 
   defp decision({:ok, text}) when is_binary(text) do
     case text |> String.trim() |> String.downcase() do
@@ -579,6 +611,7 @@ defmodule Troupe.Session.MCP do
     Server.from_config(%{
       "name" => name,
       "url" => config[:url],
+      "headers" => config[:headers],
       "permission" => config[:permission] || :ask,
       "timeout_ms" => config[:timeout_ms] || 30_000
     })

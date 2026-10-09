@@ -127,8 +127,8 @@ come from its profile.
 ## Your own MCP servers and skills
 
 Beside `config.yaml` there are two more files a person keeps, in the shape other tools
-already use, so what you have for Claude Code, Claude Desktop, Cursor or VS Code comes
-over as it is:
+already use, so what you have for Claude Code, Claude Desktop, Cursor, VS Code or
+opencode comes over as it is:
 
 ```
 <config>/mcp.json              your MCP servers, on every workspace
@@ -137,16 +137,54 @@ over as it is:
 <workspace>/.troupe/skills/    the workspace's skills
 ```
 
-`mcp.json` is `{"mcpServers": {name: {"command", "args", "env"}}}` — or `{"url"}` —
-with one key of Troupe's own: `"include": ["~/.claude/.mcp.json"]` reads another file
-in place. `${VAR}` in an imported file becomes `{env:VAR}`, read as the rest of the
-configuration reads it. A `skills.json` beside a `skills/` directory does the same for
-directories of skills: `{"include": ["~/.claude/skills"]}`.
+`mcp.json` is `{"mcpServers": {name: {"command", "args", "env"}}}` — or
+`{"url", "headers"}` — with one key of Troupe's own: `"include": ["~/.claude/.mcp.json"]`
+reads another file in place. `${VAR}` in an imported file becomes `{env:VAR}`, read as
+the rest of the configuration reads it. opencode's servers are under `mcp` in its
+`opencode.json`, and import from there. A `skills.json` beside a `skills/` directory does
+the same for directories of skills: `{"include": ["~/.claude/skills"]}`.
 
 A `url` server is spoken to as the MCP specification's streamable HTTP transport has it:
 `initialize` before the first call, and the session the server hands back, if it keeps
 one, carried on every call after, opened again once if the server has forgotten it, and
 ended when the Troupe session ends.
+
+### A server that wants a key
+
+A server over HTTP that takes a key, a token or a team's name in a header gets it from
+the entry's `headers`, sent with every request to it, the first one too:
+
+```json
+{
+  "mcpServers": {
+    "tracker": {
+      "url": "https://mcp.example.com/mcp",
+      "headers": {"Authorization": "Bearer {env:TRACKER_TOKEN}", "X-Team": "core"}
+    }
+  }
+}
+```
+
+A value is written as it is, or as `{env:VAR}`, read from the environment each time the
+server is started and never written back. An unset variable keeps the server from
+starting, and its line on the `/mcp` page says which; nothing is sent in its place. Keep
+a key out of the file itself: `mcp.json` is a file people link, copy and commit, and
+`{env:VAR}` is how a secret stays out of it. Troupe keeps no keychain for these: a
+server that signs you in keeps its tokens where the next section says, and a key is
+yours to keep in the environment. What the daemon says about a server names its
+headers and never shows a value, and `troupe config --explain` masks one in
+`config.yaml`'s `mcp:` as it masks a key. A header Troupe sends itself (`Accept`,
+`Content-Type`, `Mcp-Session-Id`, `Mcp-Protocol-Version`) cannot be set, and on a server
+with `oauth` the sign-in's token is the `Authorization` that goes out, whatever the
+headers say. A workspace's server that sends headers is asked about with their names,
+and asked again when they change.
+
+Importing another tool's file carries its headers. A value that reads the environment
+comes over as `{env:VAR}`. One written out in the file is not copied into yours: the
+header is written as `{env:<SERVER>_<HEADER>}`, after its `Bearer` when it has one
+(`Bearer {env:TRACKER_AUTHORIZATION}`), and the import says which variable to set to what
+the other file has. A linked file is read where it is, values and all. Claude Code's
+`headersHelper`, a command that prints headers, is not run, and the import says so.
 
 The layers stack the way the config files do: the workspace's file over yours over
 `config.yaml`'s `mcp:`, an entry of the same name merged key by key, so a workspace can
@@ -707,6 +745,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `mcp.<name>.env` | map of name to string |  | user; project if trusted |  | Variables to set for it. |
 | `mcp.<name>.cd` | string |  | user; project if trusted |  | The directory to run it in. Unset: the workspace. |
 | `mcp.<name>.url` | string |  | user; project if trusted |  | A server over HTTP: its URL. |
+| `mcp.<name>.headers` | map of name to string |  | user; project if trusted |  | Headers sent with every request to a server over HTTP. `{env:VAR}` reads a value from the environment. |
 | `mcp.<name>.oauth` | settings |  | user; project if trusted |  | A server over HTTP that wants you signed in: how to sign in. |
 | `mcp.<name>.oauth.client_id` | string |  | user; project if trusted |  | A client registered in advance with the server's authorization server. |
 | `mcp.<name>.oauth.scopes` | list of strings |  | user; project if trusted |  | The scopes to ask for. Unset: what the server says it wants. |
