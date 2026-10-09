@@ -31,6 +31,7 @@
 install.sh text eol=lf
 scripts/build-images text eol=lf
 scripts/build-local text eol=lf
+scripts/check-installers text eol=lf
 scripts/ci text eol=lf
 scripts/credo text eol=lf
 scripts/dev-down text eol=lf
