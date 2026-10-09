@@ -29,7 +29,7 @@ defmodule Troupe.MCP.Local do
   """
 
   alias Troupe.Config.{JSONC, Layers, Migrate}
-  alias Troupe.MCP.{Import, OAuth}
+  alias Troupe.MCP.{Import, OAuth, Server}
   alias Troupe.Workspace
 
   @type layer :: :config | :user | :workspace
@@ -287,13 +287,14 @@ defmodule Troupe.MCP.Local do
   @spec to_config(String.t(), Import.entry(), Path.t() | nil) :: map()
   def to_config(name, entry, workspace) do
     env = entry["env"] || %{}
+    headers = entry["headers"] || %{}
     args = List.wrap(entry["args"])
     oauth = entry["oauth"]
 
     unset =
       unset_variable(
         [entry["command"], entry["url"], entry["cd"] | args ++ Map.values(env)] ++
-          oauth_strings(oauth)
+          Map.values(headers) ++ oauth_strings(oauth)
       )
 
     # With a variable unset the strings are kept as written: nothing is sent in its
@@ -310,13 +311,32 @@ defmodule Troupe.MCP.Local do
       timeout_ms: entry["timeout_ms"] || @default_timeout
     }
 
-    {config, oauth_refusal} = with_oauth(config, oauth, read)
+    {config, oauth_refusal} = config |> with_headers(headers, read) |> with_oauth(oauth, read)
 
     case refusal(name, unset, config) || oauth_refusal(name, oauth_refusal, config) do
       nil -> config
       why -> Map.put(config, :refused, why)
     end
   end
+
+  # Headers for a server over HTTP (Decision 820), read as every other string is, under
+  # `:headers` only where there are some, so every other server's config — and its
+  # fingerprint — is what it always was.
+  defp with_headers(config, headers, _read) when headers == %{}, do: config
+
+  defp with_headers(config, headers, read) do
+    headers = Map.new(headers, fn {k, v} -> {to_string(k), read.(to_string(v))} end)
+    Map.put(config, :headers, headers)
+  end
+
+  defp header_refusal(name, %{headers: headers}) do
+    case Server.header_problem(headers) do
+      nil -> nil
+      why -> "#{name}: #{why}"
+    end
+  end
+
+  defp header_refusal(_name, _config), do: nil
 
   # A server that wants the person signed in (Decision 741): its `oauth`, read, under
   # `:oauth`, or why it cannot be used. Only where there is one, so every other server's
@@ -367,7 +387,7 @@ defmodule Troupe.MCP.Local do
   defp refusal(name, _unset, %{command: nil, url: nil}),
     do: "#{name} has neither a command nor a url, and is not started"
 
-  defp refusal(_name, _unset, _config), do: nil
+  defp refusal(name, _unset, config), do: header_refusal(name, config)
 
   defp maybe(nil, _fun), do: nil
   defp maybe(value, fun), do: fun.(value)
@@ -397,9 +417,18 @@ defmodule Troupe.MCP.Local do
           []
       end
 
+    # What goes to the server with every call, a credential among it, read as the
+    # environment is (Decision 820): a workspace's server whose headers changed is asked
+    # about again.
+    headers =
+      case config[:headers] do
+        %{} = headers when headers != %{} -> [headers]
+        _none -> []
+      end
+
     canonical =
       ([config[:command], config[:args] || [], config[:env] || %{}, config[:cd], config[:url]] ++
-         sign_in)
+         sign_in ++ headers)
       |> Jason.encode!()
 
     :sha256 |> :crypto.hash(canonical) |> Base.encode16(case: :lower) |> binary_part(0, 16)
@@ -503,7 +532,10 @@ defmodule Troupe.MCP.Local do
   @doc """
   Bring another tool's servers in: copied into the layer's file (`link?: false`), or
   read in place by adding the file to `include` (`link?: true`). Either way the answer
-  says which names the layer now has from it and what was skipped or translated.
+  says which names the layer now has from it and what was skipped or translated. A copy
+  writes a header's value as the `{env:VAR}` that reads it, never the value itself, and
+  says which variable to set (`Troupe.MCP.Import.parse/2`, Decision 820); a link reads
+  the other tool's file as it is, where the value already was.
   """
   @spec import(:user | :workspace, Path.t() | nil, Path.t(), boolean(), keyword()) ::
           {:ok, imported()} | {:error, String.t()}
@@ -513,7 +545,7 @@ defmodule Troupe.MCP.Local do
     with {:ok, path} <- path(scope, workspace, opts),
          :ok <- not_itself(path, from),
          {:ok, file} <- read(path),
-         {:ok, source} <- read_source(from) do
+         {:ok, source} <- read_source(from, copy: not link?) do
       names = source.servers |> Map.keys() |> Enum.sort()
 
       updated =
@@ -541,10 +573,10 @@ defmodule Troupe.MCP.Local do
       else: :ok
   end
 
-  defp read_source(from) do
+  defp read_source(from, opts) do
     case File.read(from) do
       {:ok, text} ->
-        case Import.parse(text) do
+        case Import.parse(text, opts) do
           {:ok, parsed} -> {:ok, parsed}
           {:error, reason} -> {:error, "#{show(from)}: #{reason}"}
         end

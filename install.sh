@@ -7,6 +7,7 @@
 #   sh install.sh --tui --gui -y         # daemon, TUI and desktop app; no questions
 #   sh install.sh --tui --vscode         # daemon, TUI and the VS Code extension
 #   sh install.sh -y                     # the daemon alone; no questions
+#   sh install.sh --tui -y --start-at-login   # daemon and TUI, and the daemon starts at login
 #   sh install.sh --clean-install        # remove the current install first; config and state stay
 #   sh install.sh --uninstall [--purge]  # --purge removes config and state as well
 #   sh install.sh --no-modify-path       # leave shell profiles alone
@@ -32,6 +33,14 @@
 # --gui and --vscode it asks which clients to install. -y asks nothing: it installs what the
 # flags name, and the daemon alone if they name none. Without a terminal it asks nothing
 # either, and naming none then needs -y.
+#
+# Once the daemon is installed it offers to start it every time you log in: the installed
+# `troupe-daemon login on`, which writes this platform's own per-user entry (a launchd
+# agent on macOS; a systemd user unit on Linux, or an autostart entry without systemd). In
+# a terminal it asks, Enter meaning no, and where the daemon starts at login already it
+# says so instead. --start-at-login says yes and --no-start-at-login no, without a
+# question; -y alone leaves it as it is, asking nothing and turning nothing on.
+# --uninstall runs `troupe-daemon login off` before it removes anything.
 #
 # The copy attached to a release installs that release. TROUPE_VERSION names another; with
 # neither it installs the latest release, which GitHub names at /releases/latest. A private
@@ -286,12 +295,14 @@ uninstall() {
   fi
   daemon_pids=$(pids_of "$DAEMON_MATCH")
   tui_pids=$(pids_of "$TUI_MATCH")
+  if entry=$(login_entry); then item "remove what starts troupe-daemon at login ($entry)"; fi
   if [ -n "$daemon_pids" ]; then item "stop troupe-daemon (pid $daemon_pids); the sessions it runs end"; fi
   if [ -n "$tui_pids" ]; then item "stop troupe (pid $tui_pids)"; fi
   plan_removal "$purge"
   item "take the PATH line out of your shell profile, if this installer added one"
   if [ "$purge" = 1 ]; then go_ahead n; else go_ahead y; fi
 
+  stop_at_login
   stop_pids troupe-daemon "$(pids_of "$DAEMON_MATCH")"
   stop_pids troupe "$(pids_of "$TUI_MATCH")"
   remove_installed
@@ -444,6 +455,62 @@ model_settings() {
   say "  First run: https://github.com/$REPO/blob/v$VERSION/docs/user/README.md#first-run"
 }
 
+# Where the entry that starts the daemon at login is, as the installed daemon says (the
+# entry is the daemon's, and so are its paths: Decision 762); fails when there is none. A
+# daemon from before `login` answers "unknown arguments", and wrote none either.
+login_entry() {
+  [ -x "$BIN" ] || return 1
+  said=$("$BIN" login status 2>/dev/null) || return 1
+  printf '%s' "${said#*starts at login: }"
+}
+
+# Whether the daemon starts when this person logs in, offered once it is installed
+# (Decision 818). A yes is the installed `troupe-daemon login on`, a no is nothing at all,
+# and where an entry is there already there is nothing to ask. --start-at-login and
+# --no-start-at-login answer without the question; -y alone, or no terminal, asks nothing
+# and turns nothing on.
+start_at_login() {
+  heading "Start at login"
+  if [ "$at_login" = off ]; then
+    say "  Left as it is (--no-start-at-login); troupe-daemon login on or off changes it."
+    return 0
+  fi
+  if [ "$at_login" = ask ]; then
+    if entry=$(login_entry); then
+      say "  troupe-daemon starts when you log in: $entry"
+      say "  troupe-daemon login off takes that back."
+      return 0
+    fi
+    if [ "$tty" = 0 ]; then
+      say "  troupe-daemon starts when a client needs it; troupe-daemon login on has it start"
+      say "  every time you log in instead (--start-at-login, when installing)."
+      return 0
+    fi
+    if ! ask "  Start troupe-daemon when you log in, so it is running before any window is?" n; then
+      say "  Left off: troupe-daemon login on turns it on later."
+      return 0
+    fi
+  fi
+  if said=$("$BIN" login on 2>&1); then
+    printf '%s\n' "$said" | sed 's/^/  /'
+  else
+    say "warning: could not have troupe-daemon start at login: $(printf '%s\n' "$said" | head -n 1)"
+  fi
+}
+
+# The first thing an uninstall does, while the daemon that knows where its entry is is
+# still there (Decision 818): otherwise the entry would go on starting a program that is
+# gone. A daemon from before `login` wrote none, and answers "unknown arguments".
+stop_at_login() {
+  [ -x "$BIN" ] || return 0
+  if said=$("$BIN" login off 2>&1); then
+    printf '%s\n' "$said"
+    return 0
+  fi
+  case "$said" in *"unknown arguments"*) return 0 ;; esac
+  say "warning: troupe-daemon login off failed ($(printf '%s\n' "$said" | head -n 1)); what starts it at login may be left behind"
+}
+
 install() {
   if [ "$purge" = 1 ] && [ "$clean" = 0 ]; then die "--purge goes with --uninstall or --clean-install"; fi
   target=$(detect_target)
@@ -538,6 +605,7 @@ install() {
       path_added=1
     fi
   fi
+  if [ "$at_login" = on ]; then item "have troupe-daemon start when you log in (troupe-daemon login on)"; fi
   if [ "$purge" = 1 ]; then go_ahead n; else go_ahead y; fi
 
   heading "Download"
@@ -619,6 +687,7 @@ install() {
   fi
 
   model_settings
+  start_at_login
 
   heading "Done: Troupe $VERSION"
   if ! on_path; then
@@ -643,6 +712,8 @@ install() {
 }
 
 purge=0; mode=install; with_tui=0; with_gui=0; with_vscode=0; ext=0; yes=0; clean=0; no_modify_path=0
+# ask, on (--start-at-login) or off (--no-start-at-login).
+at_login=ask
 for arg in "$@"; do
   case "$arg" in
     --tui) with_tui=1 ;;
@@ -654,14 +725,21 @@ for arg in "$@"; do
     --uninstall) mode=uninstall ;;
     --purge) purge=1 ;;
     --no-modify-path) no_modify_path=1 ;;
+    --start-at-login | --no-start-at-login)
+      if [ "$arg" = --start-at-login ]; then said=on; else said=off; fi
+      if [ "$at_login" != ask ] && [ "$at_login" != "$said" ]; then die "--start-at-login and --no-start-at-login say opposite things; pass one of them"; fi
+      at_login=$said
+      ;;
     --help | -h)
-      say "usage: install.sh [--tui] [--gui] [--vscode] [-y] [--clean-install [--purge]] [--no-modify-path]"
+      say "usage: install.sh [--tui] [--gui] [--vscode] [-y] [--start-at-login | --no-start-at-login]"
+      say "                  [--clean-install [--purge]] [--no-modify-path]"
       say "       install.sh --uninstall [--purge] [-y]"
       exit 0
       ;;
     *) die "unknown argument $arg (--help lists them)" ;;
   esac
 done
+if [ "$mode" = uninstall ] && [ "$at_login" = on ]; then die "--start-at-login goes with an install; --uninstall turns starting at login off"; fi
 
 tty=0
 if [ "$yes" = 0 ] && (: </dev/tty) 2>/dev/null; then tty=1; fi

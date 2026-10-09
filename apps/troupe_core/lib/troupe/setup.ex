@@ -29,7 +29,9 @@ defmodule Troupe.Setup do
       the user's `config.yaml` through `Troupe.Config.ModelSettings`, never a repository's
       `.troupe/`.
     * `workspace` — the first project directory, and the approval model in two
-      sentences: ask first (the default), or every call runs. Writes `auto_approve`.
+      sentences: ask first (the default), or every call runs. Writes `auto_approve` where
+      that changes what the file says, so the same answers leave the file `troupe
+      config`'s questions leave (Decision 817).
     * `daemon` — whether the daemon starts when the person logs in (Decision 762). Yes
       writes the platform's login entry and no removes it, through
       `Troupe.StartAtLogin`; the report's `daemon` says whether one is there now.
@@ -405,8 +407,7 @@ defmodule Troupe.Setup do
   defp take(flow, "workspace", answer, _opts) do
     with {:ok, workspace} <- directory(answer["workspace"]),
          {:ok, approvals} <- approvals(answer["approvals"]),
-         {:ok, _path} <-
-           Config.write_key(Config.user_path(), ["auto_approve"], approvals == "auto") do
+         {:ok, _path} <- write_approvals(approvals) do
       {:ok,
        advance(flow, "workspace", %{"workspace" => workspace, "approvals" => approvals}, "daemon")}
     end
@@ -598,14 +599,37 @@ defmodule Troupe.Setup do
 
   # Through the writer the settings screen uses: the same spellings, the same `.previous`.
   # No key removes a saved one, so a gateway that wants none is not sent the last key.
+  # `auth` is written where it changes what the file means: `api_key` is the default, so
+  # over a file that means it already nothing is written, as `troupe config`'s questions
+  # write nothing for it, and the same answers leave the same file (Decision 817).
   defp write_settings(provider, key, default, cheap) do
     ModelSettings.write(%{
       "provider" => provider["provider"],
       "base_url" => provider["base_url"],
-      "auth" => provider["auth"],
+      "auth" => auth_to_write(provider["auth"]),
       "api_key" => key || "",
       "models" => %{"default" => default, "cheap" => cheap}
     })
+  end
+
+  defp auth_to_write("api_key" = auth),
+    do: if(ModelSettings.describe()["auth"] == auth, do: nil, else: auth)
+
+  defp auth_to_write(auth), do: auth
+
+  # Asking first is the default too: written over a file that runs everything, and not
+  # over one that asks already, so a first run's file holds what was chosen (Decision 817).
+  defp write_approvals(approvals) do
+    if approvals == "auto" or runs_everything?(),
+      do: Config.write_key(Config.user_path(), ["auto_approve"], approvals == "auto"),
+      else: {:ok, Config.user_path()}
+  end
+
+  defp runs_everything? do
+    case Config.resolve(nil) do
+      {:ok, config, _layers} -> config.auto_approve == true
+      {:error, _error} -> true
+    end
   end
 
   # -- validation -----------------------------------------------------------------

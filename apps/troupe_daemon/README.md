@@ -48,7 +48,10 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 The daemon is always installed. In a terminal the installer asks whether to add the TUI
 and the desktop app, shows what it is about to do, and asks before doing it; `--tui` and
 `--gui` (`-Tui`, `-Gui`) name them, and `-y` (`-Yes`) asks nothing, installing the daemon
-alone when neither is named. The copy attached to a release installs that release.
+alone when neither is named. Once the daemon is in place it asks whether to
+[start it at login](#start-at-login), Enter meaning no; `--start-at-login` and
+`--no-start-at-login` (`-StartAtLogin`, `-NoStartAtLogin`) answer without the question, and
+`-y` alone turns nothing on. The copy attached to a release installs that release.
 
 The Windows release builds the harness's zstd NIF (`ezstd`) from an it-minds fork that
 compiles it with Zig
@@ -64,9 +67,11 @@ keep the previous release beside the new one for rollback, and take `--uninstall
 ### Start at login
 
 `troupe-daemon login on` has the daemon start every time you log in, and `login off` takes
-that back; `login status` says which. The first run's questions ask the same thing, in the
-desktop app and in `troupe config`. Each platform gets its own per-user entry, and none
-needs an administrator
+that back; `login status` says which. The installers ask the same thing once the daemon
+is installed, and so do the first run's questions, in the desktop app and in
+`troupe config`; `--uninstall` (`-Uninstall`) runs `login off` before it removes anything
+([Decision 818](../../docs/decisions/0818-the-installers-offer-start-at-login-and-uninstall-takes-it-back.md)).
+Each platform gets its own per-user entry, and none needs an administrator
 ([Decision 762](../../docs/decisions/0762-the-daemon-starts-at-login-when-a-person-says-so.md)):
 
 | Platform | The entry |

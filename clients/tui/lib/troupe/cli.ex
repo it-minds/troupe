@@ -16,6 +16,7 @@ defmodule Troupe.CLI do
           | :version
           | :help
           | :config
+          | :setup
           | :config_explain
           | :config_validate
           | :config_migrate
@@ -54,6 +55,7 @@ defmodule Troupe.CLI do
           daemon_args: [String.t()],
           explain: boolean(),
           json: boolean(),
+          bench: boolean(),
           write: boolean(),
           list: boolean(),
           live: boolean(),
@@ -89,6 +91,7 @@ defmodule Troupe.CLI do
     all: :boolean,
     explain: :boolean,
     json: :boolean,
+    bench: :boolean,
     write: :boolean,
     list: :boolean,
     live: :boolean,
@@ -144,6 +147,10 @@ defmodule Troupe.CLI do
      "forget a plane's credentials and sign this machine's daemon out of it (--all: every plane)",
      [["logout"], ["logout", "--all"]]},
     {"troupe whoami [PLANE_URL]", "print who the plane says you are, and your teams", [["whoami"]]},
+    {"troupe setup",
+     "set up the provider, its key, the models, a first project and the daemon at login, " <>
+       "one screen at a time; Esc leaves with nothing written",
+     [["setup"], ["setup", "--workspace", "."]]},
     {"troupe config",
      "show the resolved providers and models (keys masked); with none, set them up", [["config"]]},
     {"troupe config --explain [KEY] [--json]",
@@ -165,9 +172,13 @@ defmodule Troupe.CLI do
     {"troupe models --json [--workspace DIR] [--refresh]",
      "the same as one JSON object for a program: models, roles, catalog, providers; never a key",
      [["models", "--json"], ["models", "--json", "--workspace", ".", "--refresh"]]},
-    {"troupe doctor",
+    {"troupe doctor [--json]",
      "check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure",
-     [["doctor"]]},
+     [["doctor"], ["doctor", "--json"]]},
+    {"troupe doctor --bench [--json]",
+     "the same, then a turn of tool calls, a cut output, a compaction, a cancel and a replay " <>
+       "against a scripted model: offline, in seconds",
+     [["doctor", "--bench"], ["doctor", "--bench", "--json"]]},
     {"troupe instructions check [--workspace DIR] [--json]",
      "check the instruction files a session here reads: contradictions, missing paths and programs, repeats; exits 1 on one",
      [["instructions", "check"], ["instructions", "check", "--workspace", ".", "--json"]]},
@@ -253,6 +264,7 @@ defmodule Troupe.CLI do
       daemon_args: [],
       explain: Keyword.get(opts, :explain, false),
       json: Keyword.get(opts, :json, false),
+      bench: Keyword.get(opts, :bench, false),
       write: Keyword.get(opts, :write, false),
       list: Keyword.get(opts, :list, false),
       live: Keyword.get(opts, :live, false),
@@ -336,6 +348,7 @@ defmodule Troupe.CLI do
     do: {:ok, %{base | mode: :config_untrust, path: List.first(path)}}
 
   defp parse_rest(["config"], base), do: {:ok, %{base | mode: :config}}
+  defp parse_rest(["setup"], base), do: {:ok, %{base | mode: :setup}}
   defp parse_rest(["config", "pull"], base), do: {:ok, %{base | mode: :config_pull}}
 
   defp parse_rest(["config", "pull", url], base),

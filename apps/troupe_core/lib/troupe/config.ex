@@ -52,7 +52,7 @@ defmodule Troupe.Config do
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
   alias Troupe.LLM.Endpoint
-  alias Troupe.MCP.OAuth
+  alias Troupe.MCP.{OAuth, Server}
 
   require Logger
 
@@ -469,8 +469,25 @@ defmodule Troupe.Config do
         timeout_ms: entry["timeout_ms"] || 30_000
       }
 
-      {name, server |> with_oauth(name, entry["oauth"]) |> with_refusal(refused[name])}
+      {name,
+       server
+       |> with_headers(name, entry["headers"])
+       |> with_oauth(name, entry["oauth"])
+       |> with_refusal(refused[name])}
     end)
+  end
+
+  # Headers for a server over HTTP (Decision 820), read as `mcp.json`'s are: only where
+  # there are some, so every other server is what it always was.
+  defp with_headers(server, _name, headers) when headers in [nil, %{}], do: server
+
+  defp with_headers(server, name, headers) do
+    read = Map.new(headers, fn {k, v} -> {k, string(v) || ""} end)
+
+    case Server.header_problem(read) do
+      nil -> Map.put(server, :headers, read)
+      why -> Map.put(server, :refused, "#{name}: #{why}")
+    end
   end
 
   # A server that wants the person signed in (Decision 741), read as `mcp.json`'s is.

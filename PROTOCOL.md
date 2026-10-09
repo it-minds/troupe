@@ -1385,12 +1385,13 @@ for a panel to print.
 {"workspace": "/home/me/project", "session_id": "s-9f"}
 ```
 `mcp.list` (`observe`; both optional) → `{"servers": [{"name", "layer", "source",
-"transport", "command", "args", "url", "cd", "env", "permission", "disabled",
+"transport", "command", "args", "url", "cd", "env", "headers", "permission", "disabled",
 "refused", "trust", "oauth", "auth", "state", "tools", "error"}], "warnings": [...]}` —
 every server the layers give the workspace, merged by name, the workspace's file over
 the user's over `config.yaml`. `layer` is `config`, `user` or `workspace` and `source`
-the file; `env` is the names of its variables, never their values; `refused` says why
-one will not start (an unset `{env:VAR}`, an `oauth` with no `client_id`); `trust` is
+the file; `env` is the names of its variables and `headers` the names of the headers it
+is sent (Decision 820), never their values; `refused` says why one will not start (an
+unset `{env:VAR}`, an `oauth` with no `client_id`, a header Troupe sends itself); `trust` is
 `trusted` or `pending` for a workspace-level server and null otherwise. For a server
 that wants the person signed in, `oauth` is `{"client_id", "scopes"?, "issuer"?}` as its
 entry says, and `auth` is how their sign-in stands — `{"state", "account", "error"}`,
@@ -1406,11 +1407,14 @@ names any more is listed too.
 ```
 `mcp.add` (`admin`) → `{"path", "from", "added": ["fs"], "skipped": [{"name",
 "reason"}], "warnings", "linked"}`. Imports another tool's file — Claude Code's and
-Claude Desktop's `mcpServers`, Cursor's, VS Code's `servers` — copying its servers into
-the layer's `mcp.json`, or with `link: true` reading it in place from then on. `${VAR}`
-and `${env:VAR}` become `{env:VAR}`; a server with a `${input:…}` is skipped and said
-so; `headers` are dropped with a warning; an `oauth` is kept, `clientId`, `redirectUri`
-and `callbackPort` read as `client_id` and `redirect_uri`. Importing again updates.
+Claude Desktop's `mcpServers`, Cursor's, VS Code's `servers`, opencode's `mcp` — copying
+its servers into the layer's `mcp.json`, or with `link: true` reading it in place from
+then on. `${VAR}` and `${env:VAR}` become `{env:VAR}`; a server with a `${input:…}` or
+an opencode `{file:…}` is skipped and said so; `headers` are kept, and a copy writes a
+header whose value is written out as the `{env:<SERVER>_<HEADER>}` that reads it, never
+the value, with a warning naming the variable to set (Decision 820); an `oauth` is kept,
+`clientId`, `redirectUri` and `callbackPort` read as `client_id` and `redirect_uri`.
+Importing again updates.
 
 ```json
 {"command_id": "c-15", "scope": "workspace", "workspace": "/home/me/project",
@@ -1418,8 +1422,8 @@ and `callbackPort` read as `client_id` and `redirect_uri`. Importing again updat
 ```
 The same call with `name` and `server` writes one entry, merged onto what the layer has
 under that name — `{"disabled": true}` alone turns one off without restating its
-command — and answers `{"name", "path", "entry", "warnings"}`, the entry's `env` as
-names. A name has lower-case letters, digits, `-` and `_`, and no dot.
+command — and answers `{"name", "path", "entry", "warnings"}`, the entry's `env` and
+`headers` as names. A name has lower-case letters, digits, `-` and `_`, and no dot.
 
 ```json
 {"command_id": "c-16", "scope": "user", "name": "fs"}

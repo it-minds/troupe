@@ -22,6 +22,14 @@
   switches name, and the daemon alone if they name none. Without a terminal it asks nothing
   either, and naming none then needs -Yes.
 
+  Once the daemon is installed it offers to start it every time you log in: the installed
+  troupe-daemon login on, which writes this platform's own per-user entry (here a
+  troupe-daemon.cmd in your Startup folder). In a terminal it asks, Enter meaning no, and
+  where the daemon starts at login already it says so instead. -StartAtLogin says yes and
+  -NoStartAtLogin no, without a question; -Yes alone leaves it as it is, asking nothing
+  and turning nothing on. -Uninstall runs troupe-daemon login off before it removes
+  anything.
+
   The copy attached to a release installs that release. TROUPE_VERSION names another; with
   neither it installs the latest release, which GitHub names at /releases/latest. A private
   repository answers that only to somebody signed in: set TROUPE_VERSION, and
@@ -34,6 +42,7 @@
   .\install.ps1 -Tui -Gui -Yes        # daemon, TUI and desktop app; no questions
   .\install.ps1 -Tui -VSCode          # daemon, TUI and the VS Code extension
   .\install.ps1 -Yes                  # the daemon alone; no questions
+  .\install.ps1 -Tui -Yes -StartAtLogin   # daemon and TUI, and the daemon starts at login
   .\install.ps1 -CleanInstall         # remove the current install first; config and state stay
   .\install.ps1 -Uninstall [-Purge]   # -Purge removes config and state as well
   .\install.ps1 -NoModifyPath         # leave the user PATH alone
@@ -47,6 +56,9 @@ param(
   [switch]$Uninstall,
   [switch]$Purge,
   [switch]$NoModifyPath,
+  # Whether the daemon starts at login, answered without the question.
+  [switch]$StartAtLogin,
+  [switch]$NoStartAtLogin,
   # The daemon alone, as before -Tui and -Gui: the same as -Yes with neither.
   [switch]$NoTui
 )
@@ -55,6 +67,8 @@ $ErrorActionPreference = "Stop"
 # desktop app's setup many times slower than the transfer itself.
 $ProgressPreference = "SilentlyContinue"
 if ($NoTui) { $Yes = $true }
+if ($StartAtLogin -and $NoStartAtLogin) { throw "-StartAtLogin and -NoStartAtLogin say opposite things; pass one of them" }
+if ($StartAtLogin -and $Uninstall) { throw "-StartAtLogin goes with an install; -Uninstall turns starting at login off" }
 
 # Set in the copy attached to a release (scripts/release-installers); empty in the repository.
 $PinnedVersion = ""
@@ -310,6 +324,70 @@ function Show-ModelSettings {
   Write-Host "  First run: https://github.com/$Repo/blob/v$Version/docs/user/README.md#first-run"
 }
 
+# Where the entry that starts the daemon at login is, as the installed daemon says (the
+# entry is the daemon's, and so are its paths: Decision 762), or $null when there is none.
+# A daemon from before `login` answers "unknown arguments", and wrote none either.
+function Get-StartAtLogin {
+  $ErrorActionPreference = "Continue"
+  if (-not (Test-Path $Shim)) { return $null }
+  $said = @(& $Shim login status 2>&1 | ForEach-Object { "$_" })
+  if ($LASTEXITCODE -ne 0) { return $null }
+  foreach ($line in $said) { if ($line -match "starts at login: (.+)$") { return $Matches[1].Trim() } }
+  return "$said".Trim()
+}
+
+# Whether the daemon starts when this person logs in, offered once it is installed
+# (Decision 818). A yes is the installed `troupe-daemon login on`, a no is nothing at all,
+# and where an entry is there already there is nothing to ask. -StartAtLogin and
+# -NoStartAtLogin answer without the question; -Yes alone, or no terminal, asks nothing
+# and turns nothing on.
+function Set-StartAtLogin {
+  $ErrorActionPreference = "Continue"
+  Write-Heading "Start at login"
+  if ($NoStartAtLogin) {
+    Write-Host "  Left as it is (-NoStartAtLogin); troupe-daemon login on or off changes it."
+    return
+  }
+  if (-not $StartAtLogin) {
+    $entry = Get-StartAtLogin
+    if ($entry) {
+      Write-Host "  troupe-daemon starts when you log in: $entry"
+      Write-Host "  troupe-daemon login off takes that back."
+      return
+    }
+    if (-not $Interactive) {
+      Write-Host "  troupe-daemon starts when a client needs it; troupe-daemon login on has it start"
+      Write-Host "  every time you log in instead (-StartAtLogin, when installing)."
+      return
+    }
+    if (-not (Read-YesNo "  Start troupe-daemon when you log in, so it is running before any window is?" $false)) {
+      Write-Host "  Left off: troupe-daemon login on turns it on later."
+      return
+    }
+  }
+  $said = @(& $Shim login on 2>&1 | ForEach-Object { "$_" })
+  if ($LASTEXITCODE -eq 0) {
+    $said | ForEach-Object { Write-Host "  $_" }
+  } else {
+    Write-Warn "could not have troupe-daemon start at login: $($said | Select-Object -First 1)"
+  }
+}
+
+# The first thing an uninstall does, while the daemon that knows where its entry is is
+# still there (Decision 818): otherwise the entry would go on starting a program that is
+# gone. A daemon from before `login` wrote none, and answers "unknown arguments".
+function Disable-StartAtLogin {
+  $ErrorActionPreference = "Continue"
+  if (-not (Test-Path $Shim)) { return }
+  $said = @(& $Shim login off 2>&1 | ForEach-Object { "$_" })
+  if ($LASTEXITCODE -eq 0) {
+    $said | ForEach-Object { Write-Host $_ }
+    return
+  }
+  if ("$said" -match "unknown arguments") { return }
+  Write-Warn "troupe-daemon login off failed ($($said | Select-Object -First 1)); what starts it at login may be left behind"
+}
+
 function Write-RemovalPlan([bool]$PurgeToo) {
   $daemonVersion = Get-DaemonVersion
   $entry = Get-DesktopEntry
@@ -352,6 +430,8 @@ if ($Uninstall) {
     return
   }
   $running = @(Get-Running)
+  $atLogin = Get-StartAtLogin
+  if ($atLogin) { Write-Item "remove what starts troupe-daemon at login ($atLogin)" }
   Write-StopPlan $running
   Write-RemovalPlan $Purge
   if ($extensionWas) { Write-Item "remove the VS Code extension ($VSCodeExtension)" }
@@ -360,6 +440,7 @@ if ($Uninstall) {
     Write-Host ""
     if (-not (Read-YesNo "Go ahead?" (-not $Purge))) { Write-Host "nothing changed"; return }
   }
+  Disable-StartAtLogin
   Stop-Running @(Get-Running)
   Remove-Installed
   if ($extensionWas -and -not (Invoke-Code $codeCli --uninstall-extension $VSCodeExtension).Ok) {
@@ -466,6 +547,7 @@ if ($VSCode) {
 }
 $AddPath = (-not $NoModifyPath) -and ((Get-UserPathParts) -notcontains $BinDir)
 if ($AddPath) { Write-Item "add $BinDir to the user PATH" }
+if ($StartAtLogin) { Write-Item "have troupe-daemon start when you log in (troupe-daemon login on)" }
 if ($Interactive) {
   Write-Host ""
   if (-not (Read-YesNo "Go ahead?" (-not $Purge))) { Write-Host "nothing changed"; return }
@@ -579,6 +661,7 @@ try {
 }
 
 Show-ModelSettings
+Set-StartAtLogin
 
 Write-Heading "Done: Troupe $Version"
 if (-not $PathHadBinDir) {

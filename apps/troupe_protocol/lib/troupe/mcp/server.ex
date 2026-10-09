@@ -11,7 +11,8 @@ defmodule Troupe.MCP.Server do
   The credential is held here as a resolved value because the worker has to send it, but
   it arrives as a *reference* — the name of a secret the pod was given — and that is the
   only form anything else ever sees. `inspect/1` is overridden for the same reason: a
-  crash report with a bearer token in it is a leaked credential.
+  crash report with a bearer token in it is a leaked credential. The headers a person's
+  own server's entry names (Decision 820) often are one, and it leaves them out too.
   """
 
   @enforce_keys [:name, :url]
@@ -41,7 +42,11 @@ defmodule Troupe.MCP.Server do
     # Where the MCP sessions this server issues are kept (`Troupe.MCP.Sessions`, Decision
     # 746): the table of whoever calls it, a local session or a pod. `nil` opens one per
     # call.
-    sessions: nil
+    sessions: nil,
+    # The headers a person's own server's entry names (Decision 820), `{name, value}` with
+    # each `{env:VAR}` already read, sent with every request beside the credential. A
+    # bundle's server has none: it carries its one credential.
+    headers: []
   ]
 
   @type t :: %__MODULE__{
@@ -54,8 +59,15 @@ defmodule Troupe.MCP.Server do
           permission: :ask | :auto,
           tools: :all | [String.t()],
           oauth: map() | nil,
-          sessions: :ets.tid() | nil
+          sessions: :ets.tid() | nil,
+          headers: [{String.t(), String.t()}]
         }
+
+  # What the client sends on its own, per request: a header of the entry's with one of
+  # these names would go out twice, or say something about the session it has no say in.
+  @reserved ~w(accept content-type content-length host connection transfer-encoding
+               mcp-session-id mcp-protocol-version)
+  @token ~r/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/
 
   @doc """
   Build a server from configuration, resolving its secret reference.
@@ -83,8 +95,44 @@ defmodule Troupe.MCP.Server do
       header: config["header"] || "authorization",
       timeout_ms: config["timeout_ms"] || 30_000,
       permission: permission(config["permission"]),
-      tools: allowlist(config["tools"])
+      tools: allowlist(config["tools"]),
+      headers: header_list(config["headers"])
     }
+  end
+
+  # In name order, so two reads of one entry are one credential to `Troupe.MCP.Sessions`;
+  # a name the client sends itself is left out, which `header_problem/1` refused already.
+  defp header_list(headers) when is_map(headers) do
+    headers
+    |> Enum.filter(fn {name, value} -> is_binary(name) and is_binary(value) end)
+    |> Enum.reject(fn {name, _value} -> String.downcase(name) in @reserved end)
+    |> Enum.sort()
+  end
+
+  defp header_list(_none), do: []
+
+  @doc """
+  Why an entry's headers cannot be sent, or `nil`: a name that is not an HTTP token, a
+  value with a line break or another control character in it, or a name the client
+  sends itself (`Accept`, `Mcp-Session-Id` and the like).
+  """
+  @spec header_problem(%{optional(String.t()) => String.t()}) :: String.t() | nil
+  def header_problem(headers) when is_map(headers) do
+    Enum.find_value(Enum.sort(headers), fn {name, value} ->
+      cond do
+        not Regex.match?(@token, name) ->
+          "headers: #{inspect(name)} is not a header name"
+
+        String.downcase(name) in @reserved ->
+          "headers: #{name} is sent by Troupe itself, and cannot be set"
+
+        not is_binary(value) or String.match?(value, ~r/[\x00-\x08\x0A-\x1F\x7F]/) ->
+          "headers: the value of #{name} has a line break or a control character in it"
+
+        true ->
+          nil
+      end
+    end)
   end
 
   # Anything but an explicit `person` is `profile`: a typo in a bundle should leave a
@@ -128,12 +176,20 @@ defmodule Troupe.MCP.Server do
     end
   end
 
-  @doc "The headers a call to this server carries. The service credential, and no more."
+  @doc """
+  The headers a call to this server carries: the ones its entry names (Decision 820), and
+  the credential, which wins over one of the entry's with the same name — a sign-in's
+  token over an `Authorization` written in the file, since the token is the one kept
+  fresh.
+  """
   @spec headers(t()) :: [{String.t(), String.t()}]
-  def headers(%__MODULE__{credential: nil}), do: []
+  def headers(%__MODULE__{credential: nil, headers: headers}), do: headers
 
   def headers(%__MODULE__{} = server) do
-    [{server.header, value_for(server)}]
+    credential = String.downcase(server.header)
+
+    Enum.reject(server.headers, fn {name, _value} -> String.downcase(name) == credential end) ++
+      [{server.header, value_for(server)}]
   end
 
   # A bearer token is conventionally prefixed; anything else — an API key header — is

@@ -36,6 +36,18 @@ defmodule Troupe.CLITest do
     assert CLI.version() == "troupe " <> (File.read!("../../VERSION") |> String.trim())
   end
 
+  # Issue #76, TUI Decision 153: the first run's questions as one screen, at any time.
+  test "troupe setup is a command line" do
+    assert {:ok, %{mode: :setup, workspace: ws}} = CLI.parse(["setup"])
+    assert ws == File.cwd!()
+    tmp = Path.expand(System.tmp_dir!())
+    assert {:ok, %{mode: :setup, workspace: ^tmp}} = CLI.parse(["setup", "--workspace", tmp])
+    assert {:error, _} = CLI.parse(["setup", "now"])
+    assert CLI.usage() =~ "troupe setup"
+    # Without a terminal it says so and asks line by line, so it is not refused here.
+    assert {:ok, %{mode: :setup}} = Runner.needs_terminal(CLI.parse(["setup"]), false)
+  end
+
   # Issue #484, Decision 812: `latest` is the newest session here, not a session called
   # `latest`; `--private` the newest private one; `--headless "message"` one turn on it.
   test "troupe resume takes latest, --private and --headless with a message" do

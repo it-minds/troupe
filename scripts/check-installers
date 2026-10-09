@@ -1,0 +1,270 @@
+#!/bin/sh
+# The installers' own checks, for install.sh (install.ps1 has check-installers.ps1): each
+# shell named, `sh` and `bash` when none is, runs it against a release of stand-ins. That
+# release's troupe-daemon only writes down what it is asked, and its login entry is a file;
+# `curl` copies out of the release and `code` knows no extension. Every run has a HOME of
+# its own, so nothing is downloaded and no real install, PATH line or login entry is
+# touched. The questions are answered through a pseudo-terminal (util-linux `script`), and
+# skipped, saying so, where there is none.
+#
+#   scripts/check-installers [SHELL...]
+set -eu
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+installer="$root/install.sh"
+version=0.0.0-check
+case "$(uname -s)" in
+  Linux) os=linux ;;
+  Darwin) os=macos ;;
+  *) echo "error: install.sh has no release for $(uname -s)" >&2; exit 1 ;;
+esac
+case "$(uname -m)" in
+  x86_64 | amd64) arch=x86_64 ;;
+  aarch64 | arm64) arch=aarch64 ;;
+  *) echo "error: install.sh has no release for $(uname -m)" >&2; exit 1 ;;
+esac
+target=${os}_$arch
+if [ $# -eq 0 ]; then set -- sh bash; fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+release=$work/release
+stubs=$work/stubs
+mkdir -p "$release" "$stubs" "$work/daemon/bin" "$work/daemon/releases"
+
+# troupe-daemon as the installer sees it. TROUPE_CHECK_DAEMON=old answers `login` as a
+# daemon from before it had one; =failing refuses to write or remove the entry.
+cat >"$work/daemon/bin/troupe-daemon" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >>"$TROUPE_CHECK_LOG"
+case "${TROUPE_CHECK_DAEMON:-}:$*" in
+  *:version) echo "troupe-daemon 0.0.0-check" ;;
+  old:login*) echo "unknown arguments: $*" >&2; exit 1 ;;
+  "failing:login on" | "failing:login off") echo "could not write the entry: permission denied" >&2; exit 1 ;;
+  *:"login status")
+    if [ -f "$TROUPE_CHECK_ENTRY" ]; then echo "troupe-daemon starts at login: $TROUPE_CHECK_ENTRY"; exit 0; fi
+    echo "troupe-daemon does not start at login"
+    exit 1
+    ;;
+  *:"login on")
+    echo entry >"$TROUPE_CHECK_ENTRY"
+    echo "troupe-daemon starts at login: $TROUPE_CHECK_ENTRY"
+    ;;
+  *:"login off")
+    if [ -e "$TROUPE_CHECK_TUI" ]; then echo "(troupe still installed)" >>"$TROUPE_CHECK_LOG"; fi
+    if [ -f "$TROUPE_CHECK_ENTRY" ]; then
+      rm -f "$TROUPE_CHECK_ENTRY"
+      echo "troupe-daemon no longer starts at login: removed $TROUPE_CHECK_ENTRY"
+    else
+      echo "troupe-daemon does not start at login; there was nothing to remove"
+    fi
+    ;;
+  *) echo "unknown arguments: $*" >&2; exit 1 ;;
+esac
+EOF
+printf '15.0 %s\n' "$version" >"$work/daemon/releases/start_erl.data"
+
+cat >"$release/troupe-$version-$target" <<'EOF'
+#!/bin/sh
+printf 'troupe %s\n' "$*" >>"$TROUPE_CHECK_LOG"
+echo "troupe 0.0.0-check"
+EOF
+
+cat >"$stubs/curl" <<'EOF'
+#!/bin/sh
+# A download is a copy out of the release directory.
+out=
+url=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift ;;
+    --proto | --retry | -w) shift ;;
+    -*) ;;
+    *) url=$1 ;;
+  esac
+  shift
+done
+[ -f "$TROUPE_CHECK_RELEASE/${url##*/}" ] || exit 22
+cp "$TROUPE_CHECK_RELEASE/${url##*/}" "$out"
+EOF
+
+cat >"$stubs/code" <<'EOF'
+#!/bin/sh
+printf 'code %s\n' "$*" >>"$TROUPE_CHECK_LOG"
+EOF
+
+chmod +x "$work/daemon/bin/troupe-daemon" "$release/troupe-$version-$target" "$stubs/curl" "$stubs/code"
+tar -czf "$release/troupe-daemon-$version-$target.tar.gz" -C "$work/daemon" bin releases
+(
+  cd "$release"
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum -- *; else shasum -a 256 -- *; fi
+) >"$work/SHA256SUMS"
+mv "$work/SHA256SUMS" "$release/SHA256SUMS"
+
+# run NAME SHELL [ARG...]: install.sh under SHELL in NAME's home, which a later run of the
+# same NAME finds as this one left it. What it printed lands in $home/out, what the daemon
+# was asked in $home/log, its exit status in $status. $answers, when set, is typed at its
+# questions; $daemon is the stand-in's TROUPE_CHECK_DAEMON.
+run() {
+  name=$1
+  shell=$2
+  shift 2
+  home=$work/$shell/$name
+  mkdir -p "$home"
+  : >"$home/log"
+  set -- env -i "HOME=$home" "PATH=$stubs:/usr/local/bin:/usr/bin:/bin" TERM=dumb \
+    "XDG_CONFIG_HOME=$home/.config" "XDG_DATA_HOME=$home/.local/share" "XDG_STATE_HOME=$home/.local/state" \
+    "TROUPE_VERSION=$version" TROUPE_RELEASE_URL=https://release.invalid \
+    "TROUPE_OPENCODE_CONFIG=$home/no-opencode.jsonc" \
+    "TROUPE_CHECK_RELEASE=$release" "TROUPE_CHECK_LOG=$home/log" \
+    "TROUPE_CHECK_ENTRY=$home/login-entry" "TROUPE_CHECK_TUI=$home/.local/bin/troupe" \
+    "TROUPE_CHECK_DAEMON=$daemon" \
+    "$shell" "$installer" "$@"
+  if [ -n "$answers" ]; then
+    command=
+    for word in "$@"; do command="$command '$(printf '%s' "$word" | sed "s/'/'\\\\''/g")'"; done
+    if printf '%b' "$answers" | script -qec "$command" /dev/null >"$home/out" 2>&1; then status=0; else status=$?; fi
+  else
+    if "$@" </dev/null >"$home/out" 2>&1; then status=0; else status=$?; fi
+  fi
+}
+
+failures=0
+# expect WHAT COMMAND...: one line saying whether COMMAND held of the last run, and what
+# that run printed when it did not.
+expect() {
+  what=$1
+  shift
+  if "$@"; then
+    printf 'ok    %s\n' "$what"
+  else
+    printf 'FAIL  %s\n' "$what"
+    sed 's/^/      | /' "$home/out"
+    sed 's/^/      daemon: /' "$home/log"
+    failures=$((failures + 1))
+  fi
+}
+not() { ! "$@"; }
+succeeded() { [ "$status" = 0 ]; }
+asked() { grep -qxF -- "$1" "$home/log"; }
+asked_about_login() { grep -q '^login' "$home/log"; }
+said() { grep -qF -- "$1" "$home/out"; }
+# The daemon was asked $1 before $2.
+in_order() {
+  first=$(grep -nxF -- "$1" "$home/log" | head -n 1 | cut -d: -f1)
+  second=$(grep -nxF -- "$2" "$home/log" | head -n 1 | cut -d: -f1)
+  [ -n "$first" ] && [ -n "$second" ] && [ "$first" -lt "$second" ]
+}
+exists() { [ -e "$home/$1" ]; }
+gone() { [ ! -e "$home/$1" ]; }
+
+question="Start troupe-daemon when you log in"
+pty=0
+if command -v script >/dev/null 2>&1 && script -qec true /dev/null </dev/null >/dev/null 2>&1; then pty=1; fi
+
+for shell in "$@"; do
+  command -v "$shell" >/dev/null 2>&1 || { echo "error: no $shell here" >&2; exit 1; }
+  printf '\ninstall.sh under %s\n' "$shell"
+  answers=
+  daemon=
+
+  run yes "$shell" -y
+  expect "-y installs the daemon" succeeded
+  expect "-y does not turn starting at login on" not asked "login on"
+  expect "-y says how to turn it on" said "troupe-daemon login on"
+
+  run on "$shell" -y --start-at-login
+  expect "--start-at-login installs" succeeded
+  expect "--start-at-login is in the plan" said "have troupe-daemon start when you log in"
+  expect "--start-at-login runs the installed troupe-daemon login on" asked "login on"
+  expect "... once the daemon is installed" in_order version "login on"
+  expect "... and the entry is written" exists login-entry
+
+  echo entry >"$home/login-entry"
+  run on "$shell" -y
+  expect "-y over an entry says it is there" said "troupe-daemon starts when you log in"
+  expect "... and writes nothing" not asked "login on"
+
+  run off "$shell" -y --no-start-at-login
+  expect "--no-start-at-login installs" succeeded
+  expect "--no-start-at-login asks the daemon nothing about login" not asked_about_login
+
+  run both "$shell" -y --start-at-login --no-start-at-login
+  expect "--start-at-login with --no-start-at-login is refused" not succeeded
+  expect "... before anything is installed" gone .local/lib/troupe-daemon
+
+  run both "$shell" -y --uninstall --start-at-login
+  expect "--start-at-login with --uninstall is refused" not succeeded
+  expect "... saying which" said "--start-at-login"
+
+  daemon=failing
+  run refused "$shell" -y --start-at-login
+  daemon=
+  expect "a refused login on leaves the install standing" succeeded
+  expect "... and says why" said "permission denied"
+  expect "... with the daemon in place" exists .local/bin/troupe-daemon
+
+  # An entry as `troupe-daemon login on` leaves one, from whichever client wrote it.
+  run gone "$shell" -y --tui
+  echo entry >"$home/login-entry"
+  run gone "$shell" -y --uninstall
+  expect "--uninstall uninstalls" succeeded
+  expect "--uninstall's plan names the login entry" said "remove what starts troupe-daemon at login"
+  expect "--uninstall runs troupe-daemon login off" asked "login off"
+  expect "... before it removes anything" asked "(troupe still installed)"
+  expect "... so the entry is gone" gone login-entry
+  expect "... and so is the daemon" gone .local/lib/troupe-daemon
+
+  run old "$shell" -y
+  daemon=old
+  run old "$shell" -y --uninstall
+  daemon=
+  expect "--uninstall of a daemon from before login on uninstalls" succeeded
+  expect "... asking it login off" asked "login off"
+  expect "... and saying nothing about its answer" not said "warning"
+  expect "... and the daemon is gone" gone .local/lib/troupe-daemon
+
+  run stuck "$shell" -y
+  echo entry >"$home/login-entry"
+  daemon=failing
+  run stuck "$shell" -y --uninstall
+  daemon=
+  expect "--uninstall goes on when login off fails" succeeded
+  expect "... saying why" said "permission denied"
+  expect "... and the daemon is gone" gone .local/lib/troupe-daemon
+
+  if [ "$pty" = 0 ]; then
+    echo "skipped: the questions (no util-linux script here)"
+    continue
+  fi
+  # The answers: "Go ahead?", "Set it up now, with troupe config?", then the question.
+  answers='y\nn\ny\n'
+  run ask-yes "$shell" --tui
+  expect "the question is asked after installing" said "$question"
+  expect "yes runs the installed troupe-daemon login on" asked "login on"
+  expect "... once the daemon is installed" in_order version "login on"
+
+  answers='y\nn\nn\n'
+  run ask-no "$shell" --tui
+  expect "no installs" succeeded
+  expect "no asks the daemon to write nothing" not asked "login on"
+
+  answers='y\nn\n\n'
+  run ask-enter "$shell" --tui
+  expect "Enter is no" not asked "login on"
+
+  mkdir -p "$work/$shell/ask-on"
+  echo entry >"$work/$shell/ask-on/login-entry"
+  answers='y\nn\n'
+  run ask-on "$shell" --tui
+  expect "an entry already there is not asked about" not said "$question"
+  expect "... but said" said "troupe-daemon starts when you log in"
+  answers=
+done
+
+printf '\n'
+if [ "$failures" -gt 0 ]; then
+  echo "$failures failed"
+  exit 1
+fi
+echo "every check held"

@@ -27,6 +27,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe login PLANE_URL` | sign in to a plane with the device flow |
 | `troupe logout [PLANE_URL]` | forget a plane's credentials and sign this machine's daemon out of it (--all: every plane) |
 | `troupe whoami [PLANE_URL]` | print who the plane says you are, and your teams |
+| `troupe setup` | set up the provider, its key, the models, a first project and the daemon at login, one screen at a time; Esc leaves with nothing written |
 | `troupe config` | show the resolved providers and models (keys masked); with none, set them up |
 | `troupe config --explain [KEY] [--json]` | every setting, or KEY's, and which file set it (secrets masked) |
 | `troupe config validate [PATH]` | check the config files, or one; exits 1 on any problem |
@@ -36,7 +37,8 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe config pull [PLANE_URL]` | save the plane's default provider and models here (never a key) |
 | `troupe models [--refresh]` | what each provider serves, its window and its price; asked again when stale, or now with --refresh |
 | `troupe models --json [--workspace DIR] [--refresh]` | the same as one JSON object for a program: models, roles, catalog, providers; never a key |
-| `troupe doctor` | check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure |
+| `troupe doctor [--json]` | check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure |
+| `troupe doctor --bench [--json]` | the same, then a turn of tool calls, a cut output, a compaction, a cancel and a replay against a scripted model: offline, in seconds |
 | `troupe instructions check [--workspace DIR] [--json]` | check the instruction files a session here reads: contradictions, missing paths and programs, repeats; exits 1 on one |
 | `troupe bench [--json [FILE]] [--md FILE]` | measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one |
 | `troupe bench --live [--suite smoke\|standard] [--scenario NAME,...] [--repeat N] [--model M] [--yes] [--keep DIR] [--json [FILE]] [--md FILE]` | tasks against your own provider, under a cap it prints and asks about first; scored, and kept in a history |

@@ -64,7 +64,10 @@ asks instead, for Anthropic, OpenAI, a [gateway](glossary.md#gateway) such as Li
 your organisation's plane, and writes the answer to `config.yaml`. `troupe doctor` checks
 the setup one line at a time: the settings files, the key (by asking the provider for its
 list of models, which costs nothing), the helper every command runs under, and the
-programs on your `PATH`. Every setting, and which file wins: [configuration.md](user/configuration.md).
+programs on your `PATH`. `troupe doctor --bench` adds a short run of the harness itself
+against a scripted model, offline and in seconds: a turn with tool calls, a cut tool
+output, a compaction, a cancel and a replay, each passed or failed with what failed.
+Every setting, and which file wins: [configuration.md](user/configuration.md).
 
 ## 3. A first session
 

@@ -6,17 +6,26 @@ defmodule Troupe.MCP.Import do
   Claude Code's `.mcp.json` and Claude Desktop's `claude_desktop_config.json` under
   `mcpServers`, Cursor's `mcp.json` the same, VS Code's `.vscode/mcp.json` under
   `servers` with an `inputs` list beside it. Each entry is a `command` with `args` and
-  `env`, or a `url`. Troupe's own `mcp.json` (`Troupe.MCP.Local`) is the same
-  `mcpServers` shape plus an `include` list, so a file Troupe wrote is one it can import
-  and one another tool can read.
+  `env`, or a `url` with `headers`. opencode's `opencode.json` keeps them under `mcp`, a
+  `command` list and an `environment`, or a `url` and `headers`, and `enabled: false` for
+  one that is off. Troupe's own `mcp.json` (`Troupe.MCP.Local`) is the `mcpServers` shape
+  plus an `include` list, so a file Troupe wrote is one it can import and one another
+  tool can read.
 
   What comes out is one entry per server in the shape Troupe stores: string keys,
-  `command`, `args`, `env`, `cd`, `url`, `permission`, `timeout_ms`, `disabled`. The
-  other tools' placeholders are translated where Troupe has a spelling for them —
-  `${VAR}` and `${env:VAR}` become `{env:VAR}`, which `Troupe.Config` reads and refuses
-  when unset rather than sending an empty string — and refused where it has none: a VS
-  Code `${input:…}` is a prompt only VS Code can answer, so that server is skipped and
-  said so, never imported with a hole in it. Nothing here touches a file.
+  `command`, `args`, `env`, `cd`, `url`, `headers`, `permission`, `timeout_ms`,
+  `disabled`. The other tools' placeholders are translated where Troupe has a spelling
+  for them — `${VAR}` and `${env:VAR}` become `{env:VAR}`, which `Troupe.Config` reads
+  and refuses when unset rather than sending an empty string — and refused where it has
+  none: a VS Code `${input:…}` is a prompt only VS Code can answer, and an opencode
+  `{file:…}` a file only opencode reads, so that server is skipped and said so, never
+  imported with a hole in it.
+
+  A copy (`copy: true`, Decision 820) is written into Troupe's own `mcp.json`, which
+  people link, copy and commit, so a header's value written out in the other tool's file
+  is not copied: the header is written as the `{env:VAR}` that reads it, keeping a
+  `Bearer ` in front, and a warning names the variable to set. Nothing here touches a
+  file.
   """
 
   alias Troupe.Config.JSONC
@@ -35,6 +44,10 @@ defmodule Troupe.MCP.Import do
   # `${VAR}`, `${env:VAR}` and Claude Code's `${VAR:-default}`, whose default is dropped.
   @placeholder ~r/\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/
   @input ~r/\$\{input:[^}]*\}/
+  @file_reference ~r/\{file:[^}]*\}/
+  @reference ~r/\{env:[A-Za-z_][A-Za-z0-9_]*\}/
+  # The schemes a credential is written after, which stay written when it is not copied.
+  @scheme ~r/^(Bearer|Basic|Token) +(?=\S)/i
 
   @doc """
   Parse a file's text: JSON, with the comments and trailing commas VS Code and Cursor
@@ -42,7 +55,9 @@ defmodule Troupe.MCP.Import do
 
   `partial: true` reads a layer file of Troupe's own, where an entry may carry only
   the fields it changes over a lower layer — `{"disabled": true}` — and the transport
-  is checked after the layers are merged, not here.
+  is checked after the layers are merged, not here. `copy: true` reads a file to copy
+  into Troupe's own: a header's value is not copied but read from the environment, and
+  a warning says from which variable.
   """
   @spec parse(String.t(), keyword()) :: {:ok, parsed()} | {:error, String.t()}
   def parse(text, opts \\ []) when is_binary(text) do
@@ -55,7 +70,7 @@ defmodule Troupe.MCP.Import do
 
   @doc """
   The servers in a decoded document: under `mcpServers` (Claude Code, Claude Desktop,
-  Cursor, Troupe), `servers` (VS Code), or a bare map of name to entry.
+  Cursor, Troupe), `servers` (VS Code), `mcp` (opencode), or a bare map of name to entry.
   """
   @spec from_map(term(), keyword()) :: {:ok, parsed()} | {:error, String.t()}
   def from_map(map, opts \\ [])
@@ -65,6 +80,14 @@ defmodule Troupe.MCP.Import do
 
   def from_map(%{"servers" => servers}, opts) when is_map(servers),
     do: {:ok, servers(servers, opts)}
+
+  # Not a bare map with one server named `mcp`, which has a command or a url of its own.
+  def from_map(%{"mcp" => servers}, opts)
+      when is_map(servers) and not is_map_key(servers, "command") and
+             not is_map_key(servers, "url") do
+    translated = Map.new(servers, fn {name, entry} -> {name, opencode(entry)} end)
+    {:ok, servers(translated, opts)}
+  end
 
   def from_map(map, opts) when is_map(map) do
     if map != %{} and Enum.all?(map, fn {_name, entry} -> is_map(entry) end),
@@ -78,11 +101,11 @@ defmodule Troupe.MCP.Import do
   One server's entry as Troupe stores it, or why it cannot be.
 
   `command` with `args`, `env` and a working directory (`cwd` as VS Code and Cursor
-  spell it, `cd` as Troupe does), or `url`, with an `oauth` sign-in (Decision 741);
-  `disabled` as Cursor and Cline write it; `permission` and `timeout_ms` as Troupe does.
-  `type` and `headers` are read and dropped: the transport follows from which of
-  `command` and `url` is set, and a header is a credential Troupe does not carry. With
-  `partial: true` an entry may name neither, and one that names both is still refused.
+  spell it, `cd` as Troupe does), or `url` with `headers` (Decision 820) and an `oauth`
+  sign-in (Decision 741); `disabled` as Cursor and Cline write it; `permission` and
+  `timeout_ms` as Troupe does. `type` is read and dropped: the transport follows from
+  which of `command` and `url` is set. With `partial: true` an entry may name neither,
+  and one that names both is still refused.
   """
   @spec normalize(String.t(), term(), keyword()) ::
           {:ok, entry(), [String.t()]} | {:error, String.t()}
@@ -94,7 +117,8 @@ defmodule Troupe.MCP.Import do
          {:ok, url} <- string_or_nil(raw, "url"),
          :ok <- one_transport(command, url, Keyword.get(opts, :partial, false)),
          {:ok, args} <- strings(raw, "args"),
-         {:ok, env} <- env(raw),
+         {:ok, env} <- string_map(raw, "env"),
+         {:ok, headers} <- string_map(raw, "headers"),
          {:ok, oauth} <- oauth(raw) do
       entry =
         %{
@@ -103,6 +127,7 @@ defmodule Troupe.MCP.Import do
           "env" => env,
           "cd" => first_string(raw, ["cd", "cwd"]),
           "url" => url,
+          "headers" => headers,
           "oauth" => oauth,
           "permission" => permission(raw),
           "timeout_ms" => timeout(raw),
@@ -171,10 +196,13 @@ defmodule Troupe.MCP.Import do
       {:ok, entry, warnings} ->
         renamed = if name == raw_name, do: [], else: ["#{raw_name} is imported as #{name}"]
 
+        {entry, copied} =
+          if Keyword.get(opts, :copy, false), do: headers_from_env(name, entry), else: {entry, []}
+
         %{
           acc
           | servers: Map.put(acc.servers, name, entry),
-            warnings: acc.warnings ++ renamed ++ warnings
+            warnings: acc.warnings ++ renamed ++ warnings ++ copied
         }
 
       {:error, reason} ->
@@ -182,11 +210,94 @@ defmodule Troupe.MCP.Import do
     end
   end
 
-  # A `${input:…}` anywhere in the entry is a value only VS Code could ask for.
+  # A `${input:…}` anywhere in the entry is a value only VS Code could ask for, and a
+  # `{file:…}` one only opencode reads.
   defp inputs_free(raw) do
-    if raw |> Jason.encode!() |> String.match?(@input),
-      do: {:error, "uses a ${input:…} placeholder only VS Code can fill in"},
-      else: :ok
+    text = Jason.encode!(raw)
+
+    cond do
+      String.match?(text, @input) ->
+        {:error, "uses a ${input:…} placeholder only VS Code can fill in"}
+
+      String.match?(text, @file_reference) ->
+        {:error, "uses a {file:…} reference only opencode reads; write it as {env:VAR}"}
+
+      true ->
+        :ok
+    end
+  end
+
+  # opencode's entry in the shape the others write: the program and its arguments are
+  # one `command` list, the variables `environment`, and `enabled: false` is off. Its
+  # `timeout` is how long the tools are waited for, not a call, and an `oauth: false`
+  # says no sign-in; neither is read.
+  defp opencode(%{} = entry) do
+    {command, args} =
+      case entry["command"] do
+        [command | args] -> {command, args}
+        other -> {other, entry["args"]}
+      end
+
+    entry
+    |> Map.drop(["command", "args", "environment", "enabled", "timeout", "type"])
+    |> Map.reject(fn {key, value} -> key == "oauth" and value == false end)
+    |> Map.merge(%{
+      "command" => command,
+      "args" => args,
+      "env" => entry["environment"] || entry["env"],
+      "disabled" => entry["enabled"] == false
+    })
+    |> Map.reject(fn {_key, value} -> is_nil(value) end)
+  end
+
+  defp opencode(other), do: other
+
+  # A copy into Troupe's own `mcp.json` (Decision 820): a header whose value is written
+  # out is written as the `{env:VAR}` that reads it, `Bearer ` and the like kept in
+  # front so the variable holds the credential alone, and the warning names the
+  # variable. One that already reads the environment is kept as it is.
+  defp headers_from_env(name, %{"headers" => headers} = entry) do
+    {headers, notes} =
+      headers
+      |> Enum.sort()
+      |> Enum.map_reduce([], fn {header, value}, notes ->
+        if value != "" and not Regex.match?(@reference, value) do
+          var = variable(name, header)
+          {scheme, what} = scheme(value)
+          written = scheme <> "{env:#{var}}"
+
+          note =
+            "#{name}: the header #{header} is copied as #{written}, not as its value; " <>
+              "set #{var} to the #{what} in the file it came from"
+
+          {{header, written}, notes ++ [note]}
+        else
+          {{header, value}, notes}
+        end
+      end)
+
+    {%{entry | "headers" => Map.new(headers)}, notes}
+  end
+
+  defp headers_from_env(_name, entry), do: {entry, []}
+
+  defp scheme(value) do
+    case Regex.run(@scheme, value) do
+      [prefix, _scheme] -> {prefix, "credential after #{String.trim(prefix)}"}
+      nil -> {"", "value"}
+    end
+  end
+
+  # `<SERVER>_<HEADER>`, as an environment variable is spelled: `github` and
+  # `X-Api-Key` are `GITHUB_X_API_KEY`.
+  defp variable(name, header) do
+    var =
+      (name <> "_" <> header)
+      |> String.upcase()
+      |> String.replace(~r/[^A-Z0-9]+/, "_")
+      |> String.trim("_")
+
+    if var =~ ~r/^[0-9]/, do: "MCP_" <> var, else: var
   end
 
   defp one_transport(nil, nil, false), do: {:error, "has neither a command nor a url"}
@@ -218,12 +329,13 @@ defmodule Troupe.MCP.Import do
     end
   end
 
-  defp env(raw) do
-    map = Map.get(raw, "env", %{})
+  # `env`, or `headers`: names to strings, a number or a boolean written as one.
+  defp string_map(raw, key) do
+    map = Map.get(raw, key, %{})
 
     cond do
-      not is_map(map) -> {:error, "env is not a map"}
-      not Enum.all?(map, &scalar?/1) -> {:error, "env is not a map of strings"}
+      not is_map(map) -> {:error, "#{key} is not a map"}
+      not Enum.all?(map, &scalar?/1) -> {:error, "#{key} is not a map of strings"}
       true -> {:ok, Map.new(map, fn {k, v} -> {to_string(k), translate(to_string(v))} end)}
     end
   end
@@ -296,9 +408,13 @@ defmodule Troupe.MCP.Import do
   defp timeout(_raw), do: nil
 
   defp warnings(name, raw, _entry) do
+    # Claude Code's command that prints headers when a server is connected.
     dropped =
-      if is_map(raw["headers"]) and raw["headers"] != %{},
-        do: ["#{name}: headers are not carried into a Troupe server yet, and were dropped"],
+      if is_binary(raw["headersHelper"]),
+        do: [
+          "#{name}: headersHelper is a command Troupe does not run; " <>
+            "give the headers it prints as headers, a secret as {env:VAR}"
+        ],
         else: []
 
     defaults =

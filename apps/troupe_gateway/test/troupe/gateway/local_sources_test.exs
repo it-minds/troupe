@@ -164,6 +164,57 @@ defmodule Troupe.Gateway.LocalSourcesTest do
       assert data["reason"] =~ "not a server name"
     end
 
+    # Decision 820.
+    test "a server's headers: imported as the variables that read them, and listed by name only",
+         context do
+      from = Path.join(context.base, "cursor/mcp.json")
+      File.mkdir_p!(Path.dirname(from))
+
+      File.write!(
+        from,
+        Jason.encode!(%{
+          "mcpServers" => %{
+            "api" => %{
+              "url" => "https://api.example.com/mcp",
+              "headers" => %{"Authorization" => "Bearer not-a-real-token", "X-Team" => "${TEAM}"}
+            }
+          }
+        })
+      )
+
+      assert {:ok, imported} =
+               Client.call(context.client, "mcp.add", %{"command_id" => "c-h1", "from" => from})
+
+      assert imported["added"] == ["api"]
+      assert Enum.any?(imported["warnings"], &(&1 =~ "set API_AUTHORIZATION to the credential"))
+      refute inspect(imported) =~ "not-a-real-token"
+      refute File.read!(context.user_file) =~ "not-a-real-token"
+
+      assert {:ok, %{"entry" => entry}} =
+               Client.call(context.client, "mcp.add", %{
+                 "command_id" => "c-h2",
+                 "name" => "keyed",
+                 "server" => %{
+                   "url" => "https://keyed.example.com/mcp",
+                   "headers" => %{"X-Key" => "key-value"}
+                 }
+               })
+
+      assert entry == %{"url" => "https://keyed.example.com/mcp", "headers" => ["X-Key"]}
+
+      assert {:ok, %{"servers" => servers}} = Client.call(context.client, "mcp.list", %{})
+
+      assert Enum.map(servers, &{&1["name"], &1["headers"]}) == [
+               {"api", ["Authorization", "X-Team"]},
+               {"keyed", ["X-Key"]}
+             ]
+
+      refute inspect(servers) =~ "key-value"
+      # The variables are not set here, so neither server will start, and each says why.
+      assert Enum.find(servers, &(&1["name"] == "api"))["refused"] =~
+               "{env:API_AUTHORIZATION} is not set"
+    end
+
     test "a session's servers are joined onto the listing, and mcp.check brings one back",
          context do
       File.write!(
