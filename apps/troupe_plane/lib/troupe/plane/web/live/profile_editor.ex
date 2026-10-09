@@ -214,6 +214,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
     fields
     |> Map.merge(Map.take(params, @scalars))
     |> Map.put("orgMount", Map.has_key?(params, "orgMount"))
+    |> Map.put("repositoryOverridesBundle", Map.has_key?(params, "repositoryOverridesBundle"))
   end
 
   # Rows arrive as `mcp.0.url`. Gathered by index and kept whole, empty ones included: a
@@ -286,7 +287,9 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
         "configBundleChannel" => fields["configBundleChannel"],
         # Always present: false is a value here, not an absence, and an absent `orgMount`
         # would mean a mounted volume could never be unmounted from this page.
-        "orgMount" => fields["orgMount"] == true
+        "orgMount" => fields["orgMount"] == true,
+        # The same, and the bundle winning is what false says (Decision 826).
+        "repositoryOverridesBundle" => fields["repositoryOverridesBundle"] == true
       })
 
     compact(%{
@@ -344,7 +347,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
     socket
     |> assign(current: nil, verdict: nil, preview: nil, gitops: nil)
     |> with_mode()
-    |> assign(fields: %{"orgMount" => false}, servers: [])
+    |> assign(fields: %{"orgMount" => false, "repositoryOverridesBundle" => false}, servers: [])
   end
 
   defp load(socket, name) do
@@ -362,7 +365,10 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
         socket
         |> assign(current: nil, verdict: nil, preview: nil, gitops: nil)
         |> with_mode()
-        |> assign(fields: %{"name" => name, "orgMount" => false}, servers: [])
+        |> assign(
+          fields: %{"name" => name, "orgMount" => false, "repositoryOverridesBundle" => false},
+          servers: []
+        )
         |> assign(error: error.message)
     end
   end
@@ -404,7 +410,8 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       "egress.gitHosts" => joined(get_in(spec, ["egress", "gitHosts"])),
       "storage.storageClassName" => get_in(spec, ["storage", "storageClassName"]),
       "configBundleChannel" => Map.get(spec, "configBundleChannel"),
-      "orgMount" => Map.get(spec, "orgMount") == true
+      "orgMount" => Map.get(spec, "orgMount") == true,
+      "repositoryOverridesBundle" => Map.get(spec, "repositoryOverridesBundle") == true
     }
   end
 
@@ -629,6 +636,16 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
             <.toggle form={@fields} name="orgMount" label="mount the org volume">
               Read-only, always. The volume the cluster policy names, for material every team
               may read.
+            </.toggle>
+
+            <.toggle
+              form={@fields}
+              name="repositoryOverridesBundle"
+              label="let a repository replace the bundle's agents and skills"
+            >
+              Off, the bundle's agents and skills win over a working copy's of the same name,
+              which a session lists as skipped. On, a repository's .troupe/agents and
+              .troupe/skills replace them. Read at every activation.
             </.toggle>
           </section>
 

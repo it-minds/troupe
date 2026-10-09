@@ -368,6 +368,12 @@ defmodule Troupe.Protocol.Schema do
       # What the session may touch: `[{name, kind, root, mode}]`. Resolved once, at
       # creation, and recorded so that a replay can tell what was allowed at the time.
       "mounts_resolved" => %{"mounts" => required(:array)},
+      # The agent and skill files a session found and did not read, each `{kind, name, path,
+      # reason}`: on a pod, a working copy's file of a name the bundle has, which the bundle
+      # beats unless the profile allows the repository's; in a git worktree, one the main
+      # checkout has not committed (Decision 826). Written at a start whose list differs
+      # from the one the log last recorded, an empty list included.
+      "files_skipped" => %{"files" => required(:array)},
       # Something other than a person started this session, and this is the whole of what
       # that was: which of the seven sources, under which trigger document, on whose
       # authority, against which idempotency key, carrying what.

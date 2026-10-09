@@ -90,6 +90,7 @@
     "events/compacted.json",
     "events/config_upgraded.json",
     "events/delegation_started.json",
+    "events/files_skipped.json",
     "events/fs_changed.json",
     "events/goal_cleared.json",
     "events/goal_set.json",

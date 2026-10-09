@@ -512,6 +512,10 @@ defmodule Troupe.Worker.Plane.Commands do
   # separately is a set one of them would forget. `nil` is no restriction, which is what
   # a plane that has not been told about entitlements sends and what every grant means
   # until somebody opens the editor.
+  #
+  # Whether the profile lets a repository's agents and skills replace the bundle's of the
+  # same name rides on it for the same reason (Decision 826). Only `true` lets them: a
+  # plane that says nothing leaves the bundle winning, which is the side to fail on.
   defp bundle_of(params) do
     case params["bundle_version"] do
       nil ->
@@ -525,7 +529,8 @@ defmodule Troupe.Worker.Plane.Commands do
            Map.merge(pin, %{
              dir: dir,
              upgraded_from: params["bundle_upgraded_from"],
-             entitlements: params["entitlements"]
+             entitlements: params["entitlements"],
+             repository_overrides: params["repository_overrides_bundle"] == true
            })}
         end
     end

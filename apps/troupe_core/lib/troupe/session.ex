@@ -171,7 +171,9 @@ defmodule Troupe.Session do
 
   `:bundle` is the config bundle the session is pinned to, `%{version, hash, channel,
   dir}`, which a worker passes and a laptop never does. Its `dir` is where agent
-  definitions of source `:bundle` come from and where the `skills:/` mount points.
+  definitions of source `:bundle` come from and where the `skills:/` mount points, and
+  its agents and skills beat the working copy's unless it carries
+  `repository_overrides: true` (`t:Troupe.Skills.bundle/0`, Decision 826).
   `:kind` says whether this is a `:team` session on a pod or a `:local` one, and
   `:origin` says what started it; both are recorded in `session_created` and nothing
   else reads them.
@@ -186,8 +188,12 @@ defmodule Troupe.Session do
          :ok <- known_provider(config) do
       # The files beside a person's own skills are read where they are (Decision 700):
       # the user's skills directory and every linked root become read roots, the
-      # workspace's own `.troupe/skills` being inside the workspace already.
-      config = %{config | read_roots: Enum.uniq(config.read_roots ++ Skills.Local.roots(workspace.root_real))}
+      # workspace's own `.troupe/skills` being inside the workspace already, and so does a
+      # worktree's main checkout's, whose committed skills it reads (Decision 826).
+      config = %{
+        config
+        | read_roots: Enum.uniq(config.read_roots ++ Skills.roots(workspace.root_real))
+      }
 
       # A local session has only `session:/` and this is exactly what `Workspace.new/1`
       # already gave it. A session on a pod arrives with its team volume and possibly
@@ -198,10 +204,13 @@ defmodule Troupe.Session do
         |> with_skills(bundle)
         |> then(&Workspace.with_mounts(workspace, &1))
 
+      # On a pod the bundle's agents beat the working copy's, unless its profile lets the
+      # repository's replace them (Decision 826).
       definitions =
         Keyword.get_lazy(opts, :definitions, fn ->
           Definitions.load(workspace.root_real,
             bundle_dir: bundle && bundle[:dir],
+            repository_overrides: bundle != nil and bundle[:repository_overrides] == true,
             entitled: entitled_agents(bundle),
             acp_agents: acp_agents(bundle)
           )

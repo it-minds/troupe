@@ -21,7 +21,7 @@ manifest's ([§6](#6-provisioning-direct-or-from-a-repository)).
 | `size_class` | `standard` (several sessions share a worker) or `heavy` (fewer, with more CPU, memory and disk each). A resource question, not a safety one: sessions cannot see each other's files either way |
 | `max_sessions` | how far it may grow, in sessions at once. Absent is no ceiling, bounded by the team's budget |
 | `warm_workers` | workers kept up when nothing runs. `0` scales to zero, and the next session waits about half a minute |
-| `spec` | the rest of the resource in its own camelCase: `llm`, `egress`, `mcpServers`, `configBundleChannel`, `orgMount`, and `storage.storageClassName`, the class a worker's disk comes from (one `allowedStorageClasses` names; absent is the cluster's default) |
+| `spec` | the rest of the resource in its own camelCase: `llm`, `egress`, `mcpServers`, `configBundleChannel`, `orgMount`, `repositoryOverridesBundle`, and `storage.storageClassName`, the class a worker's disk comes from (one `allowedStorageClasses` names; absent is the cluster's default) |
 
 `replicas`, `sessionsPerPod`, `resources` and `storage.size` are the plane's: it writes them
 from the size class and from what is running, and **refuses** a request that sends them
@@ -48,6 +48,7 @@ Other `spec` fields:
 | `egress.fqdns`, `egress.gitHosts` | extra hosts the pods may reach; each must match a policy pattern |
 | `configBundleChannel` | which bundle channel the profile follows (`stable`) |
 | `orgMount` | mount the policy's org volume at `/mnt/org`, always read-only |
+| `repositoryOverridesBundle` | `true` lets a session's working copy replace the bundle's agents and skills of the same name; absent or `false`, the bundle's win ([below](#a-repositorys-agents-and-skills-on-a-pod)) |
 | `mcpIdentities` | who the profile is at each MCP server its bundle calls with client credentials ([below](#calling-an-mcp-server-as-the-profile)). Yours to write, in direct and gitops mode alike; nothing in it is secret |
 | `mcpServers`, `teams` | **written by the plane** from the channel's bundle and from grants; do not set them |
 
@@ -151,6 +152,49 @@ regardless and offer that server's tools once both halves are there. A worker th
 get a token says which server and why: the token endpoint refused the client (with the
 provider's error), the transit key is not in OpenBao, the pod may not sign with it, or the
 server refused a tool the identity lacks.
+
+### A repository's agents and skills on a pod
+
+A session's working copy may carry agents and skills of its own: `.troupe/agents/*.md`,
+`.troupe/skills/<name>/` and `.agents/skills/<name>/`, which arrive with a clone. On a pod
+the **bundle's agents and skills beat them** wherever the names are the same (Decision
+826). A working copy's `build.md` does not replace the `build` the channel's bundle
+publishes, and its `review-checklist` skill does not stand in for the bundle's, whether or
+not the agent at hand may consult that skill. The same goes for the pod's own config
+directory. Names the bundle does not have are read as on a laptop, and a working copy may
+still replace a built-in agent the bundle does not publish; to fix a name, publish it in
+the bundle.
+
+A file that loses is not read. The session lists it as skipped, with the reason, in a
+`files_skipped` event in its log, written at each activation whose list differs from the
+last one recorded:
+
+```json
+{"files": [{"kind": "agent", "name": "build", "path": "/var/lib/troupe/workspaces/<id>/.troupe/agents/build.md",
+            "reason": "the session's bundle has an agent named build, and on a pod the bundle's beats a repository's unless the profile allows the repository's"}]}
+```
+
+A profile that wants the repository's files to win sets the switch:
+
+```yaml
+spec:
+  repositoryOverridesBundle: true
+```
+
+Off unless it is `true`: absent, `false`, and any other value leave the bundle winning, and
+`admin.profile.put` refuses a value that is not a boolean. The console's profile editor
+has it as a toggle. The plane reads it at every activation and sends it with the bundle
+pin, so changing it reaches a session the next time it wakes and restarts no pod. An `ssh`
+profile has it too: it rides the activation, not the pod's environment.
+
+Onboarding (`troupe onboard`, and the tool the librarian onboards with) refuses on a pod
+and says to onboard on your own machine and commit the result: the working copy is a clone
+the bundle beats, and the config directory is the pod's, read by every session it runs.
+
+Commands follow the same rule and have nothing to lose to yet: a bundle carries no
+commands, so a working copy's `.troupe/commands/` are read on a pod as on a laptop, and a
+command named like an agent stays the agent's, which on a pod is the bundle's (Decision
+763).
 
 ## 2. What the operator creates
 
@@ -417,7 +461,7 @@ What a profile takes from its resource:
 | `warm_workers` | annotation `troupe.dev/warm-workers`, 0 to 10; absent is 0 |
 | `provisioner` | annotation `troupe.dev/provisioner`; absent is `kubernetes` |
 | channel | `spec.configBundleChannel`; absent is `stable` |
-| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount` |
+| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount`, `repositoryOverridesBundle` |
 
 CPU, memory and disk are the manifest's to size, within the policy; the class the plane
 places and scales by is read off `sessionsPerPod`.

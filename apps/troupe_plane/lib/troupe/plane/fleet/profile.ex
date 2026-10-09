@@ -104,8 +104,27 @@ defmodule Troupe.Plane.Fleet.Profile do
     |> validate_inclusion(:provisioner, Provisioner.names())
     |> validate_number(:max_sessions, greater_than: 0)
     |> validate_number(:warm_workers, greater_than_or_equal_to: 0, less_than_or_equal_to: 10)
+    |> validate_change(:spec, &spec_switches/2)
     |> check_constraint(:provisioner, name: :profiles_provisioner)
   end
+
+  # `repositoryOverridesBundle` lets a repository's agents and skills replace the bundle's
+  # of the same name on this profile's pods (Decision 826), and is read as on only when it
+  # is `true`. A string `"true"` would read as off, so it is refused rather than saved: a
+  # profile whose admin believes they turned something on must not quietly have it off. The
+  # resource's schema refuses one too, and this is the check for a profile that is never
+  # one, on hosts.
+  defp spec_switches(:spec, spec) when is_map(spec) do
+    case Map.fetch(spec, "repositoryOverridesBundle") do
+      {:ok, value} when not is_boolean(value) ->
+        [spec: "repositoryOverridesBundle must be true or false, not #{inspect(value)}"]
+
+      _absent_or_boolean ->
+        []
+    end
+  end
+
+  defp spec_switches(:spec, _spec), do: []
 
   # The class is the answer, so the fields it decides are written from it rather than
   # taken from the caller. A profile whose `sessionsPerPod` disagreed with its class

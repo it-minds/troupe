@@ -13,8 +13,9 @@ defmodule Troupe do
 
   """
 
+  alias Troupe.Agent.Definitions
   alias Troupe.Agent.Server, as: Agent
-  alias Troupe.{Events, Mounts, Registry, Session, Sessions}
+  alias Troupe.{Events, Mounts, Registry, Session, Sessions, Skills}
   alias Troupe.LLM.Catalog.Refresher
   alias Troupe.Protocol.Origin
   alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
@@ -76,6 +77,8 @@ defmodule Troupe do
           Mounts.to_json(workspace.mounts)
         )
       end
+
+      skipped(session_id, session_opts, previously)
 
       # The model catalog is refreshed in the background when it is stale (Decision 778):
       # this session started with the cache as it was and never waits. Not on a pod,
@@ -180,6 +183,31 @@ defmodule Troupe do
       nil -> nil
       identity -> identity.subject
     end
+  end
+
+  # The agent and skill files this start found and did not read, each with why (Decision
+  # 826): on a pod, a working copy's file of a name the bundle has; in a worktree, one the
+  # main checkout has not committed. Read again at every start, as the definitions are,
+  # and written when the list differs from the one the log last recorded, so a session
+  # that keeps the same file through many activations says so once, and one whose file
+  # went away says that too.
+  defp skipped(session_id, session_opts, previously) do
+    workspace = Keyword.fetch!(session_opts, :workspace)
+
+    files =
+      session_opts
+      |> Keyword.fetch!(:definitions)
+      |> Definitions.skipped()
+      |> Kernel.++(Skills.skipped(Keyword.get(session_opts, :bundle), workspace.root_real))
+      |> Enum.map(&Definitions.skipped_to_json/1)
+
+    last =
+      previously
+      |> Enum.reverse()
+      |> Enum.find_value([], &(&1.type == "files_skipped" && &1.data["files"]))
+
+    if files != last,
+      do: Log.append(session_id, Session.root_path(), :files_skipped, %{"files" => files})
   end
 
   defp shared_mounts?(nil), do: false

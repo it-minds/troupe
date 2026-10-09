@@ -321,6 +321,7 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `session_activated` | `epoch`, `pod` |
 | `session_resumed` | `dormant_ms`, `moved` |
 | `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
+| `files_skipped` | `files` — the agent and skill files a session found at a start and did not read, each `{kind, name, path, reason}`: on a pod, a working copy's file of a name its bundle has, which the bundle beats unless the profile sets `repositoryOverridesBundle`; in a git worktree, one the main checkout has not committed (Decision 826). Written when the list differs from the one the log last recorded, so an empty list says the files went away |
 | `fs_changed` | `path`, `hash`, `size` |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 

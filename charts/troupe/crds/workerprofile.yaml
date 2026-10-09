@@ -204,6 +204,14 @@ spec:
                   type: boolean
                   default: false
                   description: Mount the org volume from TroupePolicy. Always read-only.
+                repositoryOverridesBundle:
+                  type: boolean
+                  description: >-
+                    Let a session's working copy replace the bundle's agents and skills of
+                    the same name with its own .troupe/agents, .troupe/skills and
+                    .agents/skills. Absent or false, the bundle's win on this profile's pods
+                    and the working copy's files of those names are skipped and listed.
+                    The plane reads it at every activation; no pod restarts.
                 teams:
                   type: array
                   description: >-
