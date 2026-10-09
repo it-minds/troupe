@@ -1009,9 +1009,15 @@ defmodule Troupe.Agent.Server do
     {:keep_state_and_data, [{:reply, from, setup}]}
   end
 
+  # A runner whose call reached an agent that wrote the record and was killed before it
+  # answered calls again, and the agent that took over has the record from the log already.
   defp common({:call, from}, {:shell_ran, data, actor}, _state_name, state) do
-    log(state, :user_shell, data, actor)
-    {:keep_state, hold_shell(state, data), [{:reply, from, :ok}]}
+    if MapSet.member?(state.shell_runs, data["run_id"]) do
+      {:keep_state_and_data, [{:reply, from, :ok}]}
+    else
+      log(state, :user_shell, data, actor)
+      {:keep_state, hold_shell(state, data), [{:reply, from, :ok}]}
+    end
   end
 
   defp common(:info, message, state_name, state) do
@@ -1205,10 +1211,14 @@ defmodule Troupe.Agent.Server do
 
   # -- the person's own commands (Decision 813) -------------------------------
 
-  defp hold_shell(state, %{"agent" => true} = data),
-    do: %{state | shell_notes: state.shell_notes ++ [Shell.note(data)]}
+  defp hold_shell(state, data) do
+    state = %{state | shell_runs: MapSet.put(state.shell_runs, data["run_id"])}
 
-  defp hold_shell(state, _kept_from_the_agent), do: state
+    case data do
+      %{"agent" => true} -> %{state | shell_notes: state.shell_notes ++ [Shell.note(data)]}
+      _kept_from_the_agent -> state
+    end
+  end
 
   # Before a model call, and only there: never between a tool call and its results, since
   # a call is only ever made with every result in. One user message for whatever ran since
