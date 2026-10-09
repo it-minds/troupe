@@ -446,19 +446,28 @@ defmodule Troupe.Gateway.Dispatch do
 
   # The agents a session in this workspace could run: the built-ins, the machine's
   # `agents/`, the project's `.troupe/agents/` — resolved the way `session.create` will
-  # resolve them, so a picker offers exactly what a `profile` may name.
+  # resolve them, so a picker offers exactly what a `profile` may name. A project agent's
+  # `notes` say what of it waits for the workspace to be trusted (Decision 825): a
+  # session here trusts it as the user's file says, and a pod's trusts none.
   defp handle("agents.list", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace") do
+      workspace = Path.expand(workspace)
+
+      trusted? =
+        Process.whereis(Troupe.Gateway.Daemon) != nil and Troupe.Config.trusted?(workspace)
+
       agents =
         workspace
-        |> Path.expand()
         |> Definitions.load()
+        |> Definitions.trust(trusted?, workspace)
         |> Definitions.primaries()
         |> Enum.map(
           &%{
             "name" => &1.name,
             "description" => &1.description,
-            "source" => Atom.to_string(&1.source)
+            "source" => Atom.to_string(&1.source),
+            "notes" =>
+              Enum.map(&1.notes, fn note -> %{"key" => note.key, "reason" => note.reason} end)
           }
         )
         |> Enum.sort_by(& &1["name"])

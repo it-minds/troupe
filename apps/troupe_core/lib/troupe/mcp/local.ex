@@ -10,8 +10,8 @@ defmodule Troupe.MCP.Local do
       <workspace>/.troupe/mcp.json   the workspace's, for whoever opens the repository
 
   Each file is `{"mcpServers": {name: entry}}`, so a Claude Code `.mcp.json`, a Cursor
-  or Claude Desktop file, or a VS Code `servers` file imports as it is
-  (`Troupe.MCP.Import`), and a file Troupe wrote is one the others can read. One key is
+  or Claude Desktop file, a VS Code `servers` file or a Codex `config.toml` imports as it
+  is (`Troupe.MCP.Import`), and a file Troupe wrote is one the others can read. One key is
   Troupe's own: `"include": [path]` reads another file in place — a *link* — so a
   person who keeps their servers in `~/.claude/.mcp.json` need not keep two copies.
 
@@ -28,7 +28,7 @@ defmodule Troupe.MCP.Local do
   the variable, and nothing is sent in its place.
   """
 
-  alias Troupe.Config.{JSONC, Layers, Migrate}
+  alias Troupe.Config.{Layers, Migrate}
   alias Troupe.MCP.{Import, OAuth, Server}
   alias Troupe.Workspace
 
@@ -117,26 +117,19 @@ defmodule Troupe.MCP.Local do
     end
   end
 
+  # A linked Codex `config.toml` is read as TOML (Decision 825); every other file is JSON.
   defp decode(path, text) do
-    case JSONC.decode(text) do
-      {:ok, decoded} when is_map(decoded) ->
-        {:ok, decoded}
-
-      {:ok, _other} ->
-        {:error, "#{show(path)} is not a JSON object"}
-
-      {:error, %Jason.DecodeError{} = error} ->
-        {:error, "#{show(path)} is not JSON: " <> Exception.message(error)}
-
-      {:error, other} ->
-        {:error, "#{show(path)} is not JSON: #{inspect(other)}"}
+    case Import.decode(text, Import.format(path)) do
+      {:ok, decoded} when is_map(decoded) -> {:ok, decoded}
+      {:ok, _other} -> {:error, "#{show(path)} is not a JSON object"}
+      {:error, reason} -> {:error, "#{show(path)} is #{reason}"}
     end
   end
 
   # A file with only `include` is a file with no servers of its own, not a malformed one.
   defp servers_of(path, decoded) do
     wrapped =
-      case Map.take(decoded, ["mcpServers", "servers"]) do
+      case Map.take(decoded, ["mcpServers", "servers", "mcp_servers"]) do
         empty when map_size(empty) == 0 -> %{"mcpServers" => %{}}
         some -> some
       end
@@ -533,17 +526,21 @@ defmodule Troupe.MCP.Local do
   Bring another tool's servers in: copied into the layer's file (`link?: false`), or
   read in place by adding the file to `include` (`link?: true`). Either way the answer
   says which names the layer now has from it and what was skipped or translated. A copy
-  writes a header's value as the `{env:VAR}` that reads it, never the value itself, and
-  says which variable to set (`Troupe.MCP.Import.parse/2`, Decision 820); a link reads
-  the other tool's file as it is, where the value already was.
+  writes a header's or an environment variable's value as the `{env:VAR}` that reads it,
+  never the value itself, and says which variable to set (`Troupe.MCP.Import.parse/2`,
+  Decisions 820 and 825); a link reads the other tool's file as it is, where the value
+  already was. A Codex `config.toml` is read as TOML, and the person's own one goes into
+  their layer only.
   """
   @spec import(:user | :workspace, Path.t() | nil, Path.t(), boolean(), keyword()) ::
           {:ok, imported()} | {:error, String.t()}
   def import(scope, workspace, from, link?, opts \\ []) do
     from = Path.expand(from)
+    codex_path = Keyword.get_lazy(opts, :codex_path, &Import.codex_user_path/0)
 
     with {:ok, path} <- path(scope, workspace, opts),
          :ok <- not_itself(path, from),
+         :ok <- ones_own(scope, from, codex_path),
          {:ok, file} <- read(path),
          {:ok, source} <- read_source(from, copy: not link?) do
       names = source.servers |> Map.keys() |> Enum.sort()
@@ -573,10 +570,23 @@ defmodule Troupe.MCP.Local do
       else: :ok
   end
 
+  # The person's own Codex configuration is theirs (Decision 825): its servers go into
+  # their layer, and a workspace's file, which is committed, neither copies nor links it.
+  defp ones_own(:workspace, from, codex_path) do
+    if Workspace.compare_key(from) == Workspace.compare_key(Path.expand(codex_path)),
+      do:
+        {:error,
+         "#{show(from)} is your own Codex configuration; import it into your own mcp.json " <>
+           "(the user scope), not the workspace's, which goes wherever the repository goes"},
+      else: :ok
+  end
+
+  defp ones_own(_scope, _from, _codex_path), do: :ok
+
   defp read_source(from, opts) do
     case File.read(from) do
       {:ok, text} ->
-        case Import.parse(text, opts) do
+        case Import.parse(text, [format: Import.format(from)] ++ opts) do
           {:ok, parsed} -> {:ok, parsed}
           {:error, reason} -> {:error, "#{show(from)}: #{reason}"}
         end

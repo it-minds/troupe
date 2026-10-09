@@ -204,16 +204,24 @@ defmodule Troupe.Session do
         |> with_skills(bundle)
         |> then(&Workspace.with_mounts(workspace, &1))
 
+      # A workspace's own agents let a tool run unasked only once the workspace is
+      # trusted, as its `config.yaml` may only then, and a pod trusts none (Decision 825).
+      trusted? =
+        Keyword.get(opts, :kind, :local) == :local and
+          Config.Trust.trusted?(workspace.root_real, config.trusted_workspaces)
+
       # On a pod the built-ins and the bundle's agents beat the working copy's, unless its
       # profile lets the repository's win (Decision 826).
       definitions =
-        Keyword.get_lazy(opts, :definitions, fn ->
+        opts
+        |> Keyword.get_lazy(:definitions, fn ->
           Definitions.load(workspace.root_real,
             bundle: bundle,
             entitled: entitled_agents(bundle),
             acp_agents: acp_agents(bundle)
           )
         end)
+        |> Definitions.trust(trusted?, workspace.root_real)
 
       {:ok,
        [

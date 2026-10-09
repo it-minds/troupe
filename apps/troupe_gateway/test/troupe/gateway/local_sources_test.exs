@@ -164,6 +164,56 @@ defmodule Troupe.Gateway.LocalSourcesTest do
       assert data["reason"] =~ "not a server name"
     end
 
+    # Decision 825, #508.
+    test "a server's environment: imported as the variables that read it, and listed by name only",
+         context do
+      from = Path.join(context.base, "claude/.mcp.json")
+      File.mkdir_p!(Path.dirname(from))
+
+      File.write!(
+        from,
+        Jason.encode!(%{
+          "mcpServers" => %{
+            "github" => %{
+              "command" => "npx",
+              "args" => ["-y", "github-mcp"],
+              "env" => %{"GITHUB_TOKEN" => "not-a-real-token", "HOME_DIR" => "${HOME}"}
+            }
+          }
+        })
+      )
+
+      for {scope, written} <- [
+            {"user", context.user_file},
+            {"workspace", Path.join(context.workspace, ".troupe/mcp.json")}
+          ] do
+        assert {:ok, imported} =
+                 Client.call(context.client, "mcp.add", %{
+                   "command_id" => "c-e-#{scope}",
+                   "scope" => scope,
+                   "workspace" => context.workspace,
+                   "from" => from
+                 })
+
+        assert imported["added"] == ["github"]
+
+        assert Enum.any?(
+                 imported["warnings"],
+                 &(&1 =~ "set GITHUB_GITHUB_TOKEN to the value in the file it came from")
+               )
+
+        refute inspect(imported) =~ "not-a-real-token"
+        assert File.read!(written) =~ "{env:GITHUB_GITHUB_TOKEN}"
+        refute File.read!(written) =~ "not-a-real-token"
+      end
+
+      assert {:ok, %{"servers" => [server]}} =
+               Client.call(context.client, "mcp.list", %{"workspace" => context.workspace})
+
+      assert server["env"] == ["GITHUB_TOKEN", "HOME_DIR"]
+      assert server["refused"] =~ "{env:GITHUB_GITHUB_TOKEN} is not set"
+    end
+
     # Decision 820.
     test "a server's headers: imported as the variables that read them, and listed by name only",
          context do

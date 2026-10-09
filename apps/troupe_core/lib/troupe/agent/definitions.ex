@@ -252,6 +252,16 @@ defmodule Troupe.Agent.Definitions do
     %__MODULE__{by_name: Map.new(definitions, &{&1.name, &1})}
   end
 
+  @doc """
+  Say whether `workspace` is trusted, for every definition read from it
+  (`Definition.trust/3`, Decision 825): its `auto` entries apply only when it is.
+  """
+  @spec trust(t(), boolean(), Path.t()) :: t()
+  def trust(%__MODULE__{by_name: by_name} = defs, trusted?, workspace) do
+    stamp = &Definition.trust(&1, trusted?, workspace)
+    %{defs | by_name: Map.new(by_name, fn {name, definition} -> {name, stamp.(definition)} end)}
+  end
+
   @spec fetch(t(), String.t()) :: {:ok, Definition.t()} | {:error, {:unknown_agent, String.t()}}
   def fetch(%__MODULE__{by_name: by_name}, name) do
     case Map.fetch(by_name, name) do

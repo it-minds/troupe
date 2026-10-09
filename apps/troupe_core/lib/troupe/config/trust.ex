@@ -3,7 +3,8 @@ defmodule Troupe.Config.Trust do
   Whether a workspace is trusted: whether its own `.troupe/config.yaml` and
   `config.local.yaml` may set the keys `Troupe.Config.Schema` marks `:trusted` — the
   ones that change approvals, where a request goes and with which key, what runs, and
-  what may be read.
+  what may be read — and whether a tool its `.troupe/agents/` set to `auto` runs without
+  asking (`Troupe.Agent.Definition.trust/3`, Decision 825).
 
   A workspace is trusted when the user file's `trusted_workspaces` names it or a
   directory above it. A git worktree of a trusted checkout is trusted too, since that
@@ -147,7 +148,8 @@ defmodule Troupe.Config.Trust do
 
       {:ok,
        worktree <>
-         "trusted #{show(root)}: its .troupe files may now set every key; `troupe config --explain` shows them\n" <>
+         "trusted #{show(root)}: its agents' auto now applies, and its .troupe files may set " <>
+         "every key; `troupe config --explain` shows them\n" <>
          "  added to #{@key} in #{show(user_path)}#{previous(user_path, text)}\n"}
     end
   end
@@ -189,7 +191,8 @@ defmodule Troupe.Config.Trust do
 
     with :ok <- save(user_path, text, &(&1 not in removed), [], by_hand) do
       said =
-        "untrusted #{show(path)}: its .troupe files set no key marked trusted any more\n" <>
+        "untrusted #{show(path)}: its .troupe files set no key marked trusted any more, " <>
+          "and its agents' auto asks\n" <>
           "  removed #{Enum.join(removed, ", ")} from #{@key} in #{show(user_path)}#{previous(user_path, text)}\n"
 
       if still == [], do: {:ok, said, 0}, else: {:ok, said <> still_trusted(path, user_path, still), 1}
