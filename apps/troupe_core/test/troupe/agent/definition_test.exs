@@ -116,4 +116,64 @@ defmodule Troupe.Agent.DefinitionTest do
     assert explore.description == "project explore"
     assert explore.prompt == "Project prompt."
   end
+
+  describe "render/1 (Decision 824)" do
+    test "every built-in reads back as itself" do
+      defs =
+        Definitions.load(
+          Path.join(System.tmp_dir!(), "troupe-no-such-#{System.unique_integer([:positive])}")
+        )
+
+      for definition <- Definitions.all(defs) do
+        assert Definition.parse(definition.name, Definition.render(definition), :builtin) ==
+                 {:ok, definition}
+      end
+    end
+
+    test "only the keys that say something, bare where YAML keeps them, quoted where not" do
+      definition = %Definition{
+        name: "awkward",
+        prompt: "Line one.\n---\nLine three.",
+        description: "Use when: it breaks # really",
+        mode: :subagent,
+        model: "anthropic/claude-sonnet-4-5",
+        tools: ["read_file", "mcp.tracker.search", "on"],
+        permissions: %{"shell" => :ask, "mcp.odd: tool" => :deny},
+        max_turns: 5,
+        skills: :all,
+        budget_share: 1.0,
+        source: :project
+      }
+
+      text = Definition.render(definition)
+
+      assert text == """
+             ---
+             description: "Use when: it breaks # really"
+             mode: subagent
+             model: anthropic/claude-sonnet-4-5
+             tools:
+               - read_file
+               - mcp.tracker.search
+               - "on"
+             skills: all
+             permissions:
+               "mcp.odd: tool": deny
+               shell: ask
+             max_turns: 5
+             budget_share: 1.0
+             ---
+
+             Line one.
+             ---
+             Line three.
+             """
+
+      assert Definition.parse("awkward", text, :project) == {:ok, definition}
+
+      bare = %Definition{name: "bare", prompt: "", mode: :primary, source: :project}
+      assert Definition.render(bare) == "---\nmode: primary\n---\n"
+      assert Definition.parse("bare", Definition.render(bare), :project) == {:ok, bare}
+    end
+  end
 end
