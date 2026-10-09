@@ -1198,7 +1198,8 @@ defmodule Troupe.UI.Setup do
       if state.wrote, do: "Esc leaves; what is saved stays", else: "Esc leaves, nothing written"
 
     back = if back?(state), do: " · Shift-Tab back", else: ""
-    " Enter #{action(state)} · ↑↓ choose#{back} · #{leave}"
+    choose = if choices(state) == [], do: "", else: " · ↑↓ choose"
+    " Enter #{action(state)}#{choose}#{back} · #{leave}"
   end
 
   defp back?(%{step: "models", part: :small}), do: true
