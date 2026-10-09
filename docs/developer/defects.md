@@ -934,6 +934,65 @@ a line without one, would end it.
 
 Found by the #496 fixer, 2026-10-09.
 
+### D94 - The installers after the start-at-login step (#504) (low)
+
+- `install.ps1` has no `[CmdletBinding()]`, so an unknown or misspelt switch is taken into
+  `$args` and ignored without a word; `install.sh` refuses unknown arguments. An installer
+  from before #504 given `-StartAtLogin` ignores it the same way.
+- `scripts/check-installers` and `scripts/check-installers.ps1` run by hand only; CI
+  doesn't run them.
+- `docs/quick-start.md` and the release notes templates in `release.yml` and
+  `prerelease.yml` don't name `--start-at-login` (`-StartAtLogin`).
+
+Found by the #76 installer fixer, 2026-10-09.
+
+### D95 - Setup after `troupe setup` (#513) (low)
+
+- `troupe config`'s line-by-line question about starting at login (`ConfigSetup.at_login/2`)
+  asks without checking whether an entry exists; the installers and the setup screen
+  don't ask then.
+- The desktop app's Daemon step offers "Only when an app needs it" when a login entry
+  exists, and choosing it removes the entry, where the installers and the TUI keep it.
+- The gateway's `setup.answer` for `finish` builds the first session's command id from
+  `params["command_id"]` (`first_session/3` in `dispatch.ex`), so a client that omits it
+  makes the handler raise. Every client sends one today.
+- The setup screen's summary shows the project path as the TUI expands it on Windows
+  (`c:/Users/...`, forward slashes).
+- The daemon holds one setup flow for every client, so opening the TUI's screen resets a
+  flow the desktop app left half-way.
+
+Found by the #76 setup fixer, 2026-10-09.
+
+### D96 - `troupe doctor --bench` and the offline bench (#505) (low)
+
+- None of the offline scenarios calls the `shell` tool and doctor has no shell line, so the
+  most fragile Windows tool path (Git for Windows' bash, Decision 776) is checked by
+  neither `troupe doctor --bench` nor CI's bench.
+- The bench's scripted model has no price, so every `troupe bench` and `troupe doctor
+  --bench` writes five "fake-model has no price" warnings into the person's own
+  `<state>/troupe.log`.
+- `doctor --bench` has no overall deadline: a hung harness waits up to 60 s per wait in
+  each scenario.
+- It runs in `troupe`'s own VM, so it doesn't exercise a running daemon (the desktop
+  app's, which TUI sessions use when it answers), and `troupe-daemon doctor` has no
+  `--bench`.
+
+Found by the #390 fixer, 2026-10-09.
+
+### D97 - MCP servers after `headers` (#507) (low)
+
+- The MCP trust fingerprint in `<state>/mcp-trust.json` hashes the resolved `env` values
+  and now the header values: a truncated sha256 of secrets in the state directory, and a
+  rotated token asks about a workspace's server again.
+- OAuth discovery's unauthenticated probe (`probe/1` in `Troupe.MCP.OAuth`) sends none of
+  the entry's headers, so a server behind a gateway that wants a static key as well as
+  OAuth fails discovery.
+- Importing from opencode skips a server whose values use `{file:path}`.
+- The TUI's `/mcp` page and the desktop app's panel show neither header nor `env` names,
+  though `mcp.list` now carries both.
+
+Found by the #60 fixer, 2026-10-09.
+
 ## Taken
 
 | Defect | Taken by |
@@ -1025,6 +1084,8 @@ Found by the #496 fixer, 2026-10-09.
 | D81's last item, D73's first and D8's second - `RestartTest` and `AutospawnTest` started slowly enough to fail | PR #469 |
 | D84's first item, the key half - a pod could never destroy a team session's key, and the plane marked the erasure done (what is left of it stays in D84) | #470, PR #480 |
 | D43's `troupe resume` item - with no id it opened the newest row, which could be a branch or an empty scratch session | #484, PR #495 |
+| D62's first item - uninstalling didn't run `troupe-daemon login off`, leaving the login entry pointing at nothing | #76, PR #504 |
+| D49's import item - importing MCP servers from other tools dropped their `headers` | #60, PR #507 |
 
 ## Checked and not a defect
 
