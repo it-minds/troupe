@@ -578,7 +578,7 @@ defmodule Troupe.Plane.PanelTest do
             llm.endpoint llm.provider llm.model llm.secretRef.name
             egress.fqdns egress.gitHosts
             storage.storageClassName
-            configBundleChannel orgMount
+            configBundleChannel orgMount repositoryOverridesBundle
           ) do
         assert html =~ ~s(name="#{field}"), "the editor has no field for #{field}"
       end
@@ -663,6 +663,30 @@ defmodule Troupe.Plane.PanelTest do
       # A boolean is a value even when it is false: without this, unmounting the org
       # volume would be a change the form could express and never send.
       assert draft["spec"]["orgMount"] == false
+      assert draft["spec"]["repositoryOverridesBundle"] == false
+    end
+
+    # Decision 826. Set in the API or a repository, it is read back into the toggle, so a
+    # save from this page keeps it rather than turning it off.
+    test "lets a repository replace the bundle's agents and skills, and keeps it", context do
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "dev",
+          image: "ghcr.io/troupe/worker:1",
+          spec: %{"repositoryOverridesBundle" => true}
+        })
+
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      assert html =~ "let a repository replace the bundle"
+      view |> element("#profile-editor") |> render_submit()
+      assert Fleet.get_profile("dev").spec["repositoryOverridesBundle"] == true
+
+      # Unticked, a checkbox sends nothing, and nothing is off.
+      render_change(view, "change", %{"name" => "dev", "image" => "ghcr.io/troupe/worker:1"})
+      view |> element("#profile-editor") |> render_submit()
+      assert Fleet.get_profile("dev").spec["repositoryOverridesBundle"] == false
     end
 
     # `llm.prices` is set through `admin.profile.put`, not on this page (Decision 689). A
