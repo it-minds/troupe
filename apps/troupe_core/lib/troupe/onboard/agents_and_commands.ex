@@ -45,12 +45,15 @@ defmodule Troupe.Onboard.AgentsAndCommands do
   @typedoc "The proposals, and every file or entry that gave none, with why."
   @type survey :: %{proposals: [proposal()], skipped: [Shared.skip()]}
 
+  @behaviour Troupe.Onboard.Source
+
   @doc """
   The proposals for the agents and commands Claude Code and opencode wrote into
   `workspace`, sorted by path. `below:` replaces Troupe's built-in agents, which an
   opencode entry without a prompt adjusts and a proposal of the same name replaces.
   """
   @spec proposals(Path.t(), keyword()) :: [proposal()]
+  @impl Troupe.Onboard.Source
   def proposals(workspace, opts \\ []), do: survey(workspace, opts).proposals
 
   @doc """
@@ -60,6 +63,7 @@ defmodule Troupe.Onboard.AgentsAndCommands do
   where there is one, since one file (`opencode.json`) can hold several.
   """
   @spec skipped(Path.t(), keyword()) :: [%{source: String.t(), reason: String.t()}]
+  @impl Troupe.Onboard.Source
   def skipped(workspace, opts \\ []) do
     for skip <- survey(workspace, opts).skipped,
         do: %{
