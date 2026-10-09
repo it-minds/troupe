@@ -33,6 +33,10 @@ defmodule Troupe.Doctor do
   Both programs print the same lines; the differences are which command a line names
   as the next step, `troupe config` through `troupe` and the file through the daemon, and
   which client the `identify` line names.
+
+  `bench/1` is what `troupe doctor --bench` adds after them (Decision 821): the offline
+  bench's scenarios, run in this program against a scripted model, a line each and one
+  for the whole. `json/2` is any of it as one object.
   """
 
   alias Troupe.{Config, Reaper}
@@ -92,9 +96,129 @@ defmodule Troupe.Doctor do
   @spec exit_status([check()]) :: 0 | 1
   def exit_status(checks), do: if(Enum.any?(checks, &(&1.state == :fail)), do: 1, else: 0)
 
+  @doc """
+  The lines as one JSON object: `passed`, and `checks`, each a `name`, a `state` (`ok`,
+  `warn`, `fail`) and its `detail`. With the bench's part (`bench/1`), `bench` too.
+  """
+  @spec json([check()], map() | nil) :: String.t()
+  def json(checks, bench \\ nil) do
+    report = %{
+      "passed" => exit_status(checks) == 0,
+      "checks" =>
+        Enum.map(checks, fn check ->
+          %{
+            "name" => check.name,
+            "state" => Atom.to_string(check.state),
+            "detail" => check.detail
+          }
+        end)
+    }
+
+    report = if bench, do: Map.put(report, "bench", bench), else: report
+    Jason.encode!(report, pretty: true) <> "\n"
+  end
+
+  @doc """
+  The offline bench as lines (Decision 821): `troupe bench`'s scenarios (`Troupe.Bench.run/1`),
+  a turn of tool calls, a cut tool output, a compaction, a cancel and a replay, each run
+  in this program, in directories of its own that are removed afterwards, against the
+  scripted model, so it needs no provider, key or network. A scenario's line is `ok` when
+  it passed, as `troupe bench` judges it, and `fail` naming what did not hold; the last
+  line, `bench`, says how many passed and in how long.
+
+  Answers the lines and the bench's part of `json/2`: `passed`, `seconds`, `scenarios`
+  and `failed`, each thing that failed as `scenario/measure`. Options are
+  `Troupe.Bench.run/1`'s (`:budgets`, `:only`).
+  """
+  @spec bench(keyword()) :: {[check()], map()}
+  def bench(opts \\ []) do
+    {micros, report} = :timer.tc(fn -> Troupe.Bench.run(opts) end)
+    bench_lines(report, Float.round(micros / 1_000_000, 1))
+  rescue
+    # A scenario that fails is in the report; this is the bench not starting at all, its
+    # directories not made, say.
+    error ->
+      {[check("bench", :fail, "did not run: #{Exception.message(error)}")],
+       %{"passed" => false, "seconds" => nil, "scenarios" => 0, "failed" => ["bench"]}}
+  end
+
   defp label(:ok), do: "ok"
   defp label(:warn), do: "warn"
   defp label(:fail), do: "FAIL"
+
+  # -- the bench --------------------------------------------------------------------
+
+  defp bench_lines(report, seconds) do
+    scenarios = Enum.map(report["scenarios"], &{&1, bench_failures(&1)})
+    failed = for {scenario, [_ | _]} <- scenarios, do: scenario["name"]
+    lines = Enum.map(scenarios, &scenario_check/1)
+
+    whole =
+      case failed do
+        [] ->
+          check(
+            "bench",
+            :ok,
+            "#{length(scenarios)} of #{length(scenarios)} passed in #{seconds} s, offline: " <>
+              "a scripted model in this program's harness, no provider, key or network"
+          )
+
+        _ ->
+          check(
+            "bench",
+            :fail,
+            "#{length(failed)} of #{length(scenarios)} failed in #{seconds} s: #{Enum.join(failed, ", ")}"
+          )
+      end
+
+    {lines ++ [whole],
+     %{
+       "passed" => failed == [],
+       "seconds" => seconds,
+       "scenarios" => length(scenarios),
+       "failed" => for({_scenario, failures} <- scenarios, {id, _words} <- failures, do: id)
+     }}
+  end
+
+  defp scenario_check({scenario, []}),
+    do: check("bench #{scenario["name"]}", :ok, scenario["title"])
+
+  defp scenario_check({scenario, failures}) do
+    words = Enum.map_join(failures, "; ", &elem(&1, 1))
+    check("bench #{scenario["name"]}", :fail, "#{scenario["title"]}; failed: #{words}")
+  end
+
+  # What did not hold in a scenario of the bench's report, each `{scenario/measure, words}`:
+  # why it did not run, a measure past its budget, a check, the outcome.
+  defp bench_failures(%{"name" => name} = scenario) do
+    error = if why = scenario["error"], do: [{name, "did not run: #{why}"}], else: []
+
+    metrics =
+      for %{"passed" => false} = metric <- scenario["metrics"],
+          do: {"#{name}/#{metric["name"]}", metric_failure(metric)}
+
+    checks =
+      for %{"passed" => false} = check <- scenario["checks"],
+          do: {"#{name}/#{check["name"]}", "#{check["label"]}: no"}
+
+    outcome =
+      case scenario["outcome"] do
+        %{"passed" => false, "what" => what} -> [{"#{name}/outcome", "#{what}: no"}]
+        _held_or_none -> []
+      end
+
+    error ++ metrics ++ checks ++ outcome
+  end
+
+  defp metric_failure(%{"value" => nil} = metric),
+    do: "#{metric["name"]} has a budget of #{metric["budget"]} and is not measured"
+
+  defp metric_failure(%{"unit" => unit} = metric) when unit in [nil, "share"],
+    do: "#{metric["label"]} #{metric["value"]}, over its budget of #{metric["budget"]}"
+
+  defp metric_failure(metric),
+    do:
+      "#{metric["label"]} #{metric["value"]} #{metric["unit"]}, over its budget of #{metric["budget"]}"
 
   # -- the checks -----------------------------------------------------------------
 

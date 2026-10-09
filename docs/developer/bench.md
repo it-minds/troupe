@@ -23,6 +23,7 @@ runs with (Decision 773; [the live bench](#the-live-bench) below, and
 |---|---|---|
 | an installed `troupe` | `troupe bench`, `troupe bench --json [FILE]` | the table, or the JSON report; exit 1 past a budget |
 | an installed `troupe` | `troupe bench --live [--repeat N] [--model M]`, `troupe bench --compare [REF]` | [the live bench](#the-live-bench) |
+| an installed `troupe` | `troupe doctor --bench [--json]` | doctor's checks, then a line a scenario, passed or what failed, and one for the whole with the time it took (Decision 821) |
 | a checkout | `mix troupe.bench [--json PATH]` | the table on standard output, the JSON in `PATH`; exit 1 past a budget |
 | this machine's CI | `scripts/ci` | the step *bench within its budgets* |
 | CI | the `lint` job of `ci.yml` | the table in the run's summary, the JSON as the `bench` artifact |

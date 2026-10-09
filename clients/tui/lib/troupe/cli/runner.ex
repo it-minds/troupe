@@ -125,7 +125,7 @@ defmodule Troupe.CLI.Runner do
         end
 
       {:ok, %{mode: :doctor} = args} ->
-        Troupe.CLI.Doctor.run(args.workspace)
+        Troupe.CLI.Doctor.run(args)
 
       # Read here too: the files a session would read, and this machine's PATH.
       {:ok, %{mode: :instructions_check} = args} ->

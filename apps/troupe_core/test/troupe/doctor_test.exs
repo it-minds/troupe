@@ -300,6 +300,96 @@ defmodule Troupe.DoctorTest do
     assert text == "ok    plane https://plane.example.test answers (troupe)\n"
   end
 
+  describe "the bench (Decision 821)" do
+    test "a line a scenario of the offline bench, then one for the whole, all ok", ctx do
+      {lines, bench} = Doctor.bench(only: ~w(cut_output replay))
+
+      assert [
+               %{
+                 name: "bench cut_output",
+                 state: :ok,
+                 detail: "a tool result over the limit is cut and read back"
+               },
+               %{
+                 name: "bench replay",
+                 state: :ok,
+                 detail: "the log replays to the session it recorded"
+               },
+               %{name: "bench", state: :ok, detail: whole}
+             ] = lines
+
+      assert whole =~
+               ~r/^2 of 2 passed in [\d.]+ s, offline: a scripted model in this program's harness, no provider, key or network$/
+
+      assert %{"passed" => true, "scenarios" => 2, "failed" => [], "seconds" => seconds} = bench
+      assert is_float(seconds)
+      assert Doctor.exit_status(lines) == 0
+
+      # It ran in directories of its own: the scratch config and state are as they were.
+      assert File.ls!(Path.join(ctx.base, "config")) == []
+      assert File.ls!(Path.join(ctx.base, "state")) == []
+    end
+
+    test "a scenario that fails is a fail line naming each thing that did not hold" do
+      budgets = %{
+        "tool_calls" => %{"model_calls" => 30},
+        "compaction" => %{"fired_at_share" => 0.5, "seconds" => 1}
+      }
+
+      {lines, bench} = Doctor.bench(budgets: budgets, only: ~w(tool_calls compaction cancel))
+      by_name = Map.new(lines, &{&1.name, &1})
+
+      assert %{
+               state: :fail,
+               detail:
+                 "one turn of 30 tool calls; failed: model calls in the turn 31 calls, over its budget of 30"
+             } = by_name["bench tool_calls"]
+
+      assert %{state: :fail, detail: compaction} = by_name["bench compaction"]
+
+      assert compaction =~
+               ~r/^compaction fires at the configured share of the window; failed: fullest prompt before compaction, of the window 0\.\d+, over its budget of 0\.5; seconds has a budget of 1 and is not measured$/
+
+      assert %{state: :ok} = by_name["bench cancel"]
+
+      assert %{state: :fail, detail: whole} = by_name["bench"]
+      assert whole =~ ~r/^2 of 3 failed in [\d.]+ s: tool_calls, compaction$/
+      assert Doctor.exit_status(lines) == 1
+
+      assert %{
+               "passed" => false,
+               "failed" => [
+                 "tool_calls/model_calls",
+                 "compaction/fired_at_share",
+                 "compaction/seconds"
+               ]
+             } = bench
+    end
+
+    test "json/2 is the lines as one object, with the bench's part when it ran" do
+      checks = [
+        %{name: "config", state: :ok, detail: "c"},
+        %{name: "reaper", state: :warn, detail: "r"}
+      ]
+
+      assert %{
+               "passed" => true,
+               "checks" => [
+                 %{"name" => "config", "state" => "ok", "detail" => "c"},
+                 %{"name" => "reaper", "state" => "warn", "detail" => "r"}
+               ]
+             } = report = checks |> Doctor.json() |> Jason.decode!()
+
+      refute Map.has_key?(report, "bench")
+
+      bench = %{"passed" => false, "seconds" => 1.5, "scenarios" => 1, "failed" => ["replay"]}
+      failing = checks ++ [%{name: "bench", state: :fail, detail: "1 of 1 failed"}]
+
+      assert %{"passed" => false, "bench" => ^bench} =
+               failing |> Doctor.json(bench) |> Jason.decode!()
+    end
+  end
+
   defp run_live_free(workspace), do: Doctor.run(workspace: workspace, live: false)
 
   defp http_server(status, body) do

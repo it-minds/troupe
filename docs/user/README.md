@@ -25,7 +25,12 @@ model says to run `troupe config` rather than failing without a reason. `troupe 
 checks the setup — the config files, the provider and its key (with a real request), the
 helper every command runs under, the daemon, the two programs on the PATH and any plane
 you are signed in to — one line each,
-and exits 1 when one fails. `troupe bench --live` goes one step further: it runs four small
+and exits 1 when one fails. `troupe doctor --bench` then says whether a session gets
+through the harness on this machine: a turn of thirty tool calls, a tool output too long to
+send whole, a compaction, a cancel and a replay of the session's log, run in `troupe` itself
+against a scripted model, so in a few seconds and with no provider, key or network, a line
+each saying it passed or what did not hold (`--json` prints it all as one object).
+`troupe bench --live` goes one step further: it runs four small
 tasks against your model, under a cap it prints and asks about first, and says whether they
 got done and what each cost ([what a task costs](bench.md)).
 
