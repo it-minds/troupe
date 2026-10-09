@@ -16,6 +16,7 @@ defmodule Troupe.CLI do
           | :version
           | :help
           | :config
+          | :setup
           | :config_explain
           | :config_validate
           | :config_migrate
@@ -146,6 +147,10 @@ defmodule Troupe.CLI do
      "forget a plane's credentials and sign this machine's daemon out of it (--all: every plane)",
      [["logout"], ["logout", "--all"]]},
     {"troupe whoami [PLANE_URL]", "print who the plane says you are, and your teams", [["whoami"]]},
+    {"troupe setup",
+     "set up the provider, its key, the models, a first project and the daemon at login, " <>
+       "one screen at a time; Esc leaves with nothing written",
+     [["setup"], ["setup", "--workspace", "."]]},
     {"troupe config",
      "show the resolved providers and models (keys masked); with none, set them up", [["config"]]},
     {"troupe config --explain [KEY] [--json]",
@@ -343,6 +348,7 @@ defmodule Troupe.CLI do
     do: {:ok, %{base | mode: :config_untrust, path: List.first(path)}}
 
   defp parse_rest(["config"], base), do: {:ok, %{base | mode: :config}}
+  defp parse_rest(["setup"], base), do: {:ok, %{base | mode: :setup}}
   defp parse_rest(["config", "pull"], base), do: {:ok, %{base | mode: :config_pull}}
 
   defp parse_rest(["config", "pull", url], base),

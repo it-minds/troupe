@@ -25,10 +25,14 @@ defmodule Troupe.CLI.ConfigSetup do
   read and write goes through the daemon, as `troupe config pull` does: the daemon is the
   process whose environment decides which `config.yaml` a session reads.
 
-  Plain `troupe` asks the same questions before it opens a session on a machine with no
-  settings and no key (`before_session/2`), so a first run meets the setup rather than a
-  model error — unless the daemon says the first run was done already (`setup.get`), in
-  the desktop app or by hand, in which case nothing is asked.
+  `troupe setup` asks the daemon's own first-run questions (`setup.get`, `setup.answer`;
+  root Decision 705) as one full screen, `Troupe.UI.Setup`, at any time, and ends in the
+  first session it started (`setup/2`; TUI Decision 153). Plain `troupe` opens that screen
+  before it opens a session on a machine with no settings and no key (`before_session/2`),
+  so a first run meets the setup rather than a model error — unless the daemon says the
+  first run was done already, in the desktop app or by hand, in which case nothing is
+  asked. A daemon from before `setup.get`, and a terminal the screen cannot be drawn on,
+  get the questions here, line by line, as `troupe config` asks them.
   """
 
   alias Troupe.CLI.{ModelConfig, Prompt, Terminal}
@@ -43,10 +47,13 @@ defmodule Troupe.CLI.ConfigSetup do
   same names, `describe` is the full report, `opencode` the providers Troupe is reading
   from opencode right now, `usable?` whether the settings in force can ask a model, and
   `troupe_daemon?` and `troupe_daemon` whether there is a standalone daemon binary and
-  `troupe daemon ARGS` run through it.
+  `troupe daemon ARGS` run through it. `not_terminal` names standard input or output when
+  either is not a terminal, `screen` runs the full-screen setup on the flow `setup.get`
+  answered and says how it ended (`Troupe.UI.Setup`), and `open` attaches to a session.
   """
   @type io :: %{
           interactive?: boolean(),
+          not_terminal: [String.t()],
           say: (String.t() -> any()),
           ask: (String.t() -> String.t() | nil),
           secret: (String.t() -> String.t() | nil),
@@ -58,7 +65,9 @@ defmodule Troupe.CLI.ConfigSetup do
           local_file?: (-> boolean()),
           usable?: (-> boolean()),
           troupe_daemon?: (-> boolean()),
-          troupe_daemon: ([String.t()] -> non_neg_integer())
+          troupe_daemon: ([String.t()] -> non_neg_integer()),
+          screen: (map() -> Troupe.UI.Setup.outcome() | {:cannot_draw, String.t()}),
+          open: (Path.t(), String.t() -> {:ok, String.t()} | {:error, term()})
         }
 
   @doc "Run `troupe config` for a workspace; returns the exit status."
@@ -91,11 +100,11 @@ defmodule Troupe.CLI.ConfigSetup do
 
   @doc """
   What plain `troupe` does before it opens a session: on a machine with no `config.yaml`
-  and no key in force, the questions `troupe config` asks on a first run, or one line
-  saying to run it where there is no terminal to ask on. Anything else goes on to the
-  session at once.
+  and no key in force, the full-screen setup (TUI Decision 153), whose first session is
+  the one to open (`{:open, session_id}`); or one line saying to run `troupe config`
+  where there is no terminal to ask on. Anything else goes on to a session at once.
   """
-  @spec before_session(Path.t(), io() | nil) :: :ok
+  @spec before_session(Path.t(), io() | nil) :: :ok | {:open, String.t()}
   def before_session(workspace, io \\ nil) do
     io = io || io(workspace)
 
@@ -107,33 +116,145 @@ defmodule Troupe.CLI.ConfigSetup do
         io.say.("No provider is set up yet: run `troupe config` to set one up.")
         :ok
 
-      # A first run done in the desktop app is recorded once, for both clients; the
-      # daemon says so, and this asks nothing (TUI Decision 123).
-      done_elsewhere?(io) ->
-        :ok
-
       true ->
-        # The daemon may know better: a file, or a key in its own environment.
-        case io.call.("config.get", %{}) do
-          {:ok, %{"exists" => true}} ->
+        case io.call.("setup.get", %{}) do
+          # A first run done in the desktop app is recorded once, for both clients; the
+          # daemon says so, and this asks nothing (TUI Decision 123).
+          {:ok, %{"needed" => false}} ->
             :ok
 
-          {:ok, %{"api_key_source" => "env"}} ->
-            :ok
+          {:ok, flow} ->
+            case flow |> io.screen.() |> ended(io) do
+              {:open, sid} -> {:open, sid}
+              _status -> :ok
+            end
 
-          {:ok, settings} ->
-            _ = first_run(settings, io)
-            :ok
-
+          # A daemon from before the first run's questions answers `method_not_found`:
+          # then nothing says it was done, and `troupe config`'s questions are asked.
           {:error, _reason} ->
-            :ok
+            old_questions(io)
         end
     end
   end
 
-  # A daemon from before the first run's questions has no `setup.get`, and answers
-  # `method_not_found`: then nothing says it was done, and the questions are asked.
-  defp done_elsewhere?(io), do: match?({:ok, %{"needed" => false}}, io.call.("setup.get", %{}))
+  # The daemon may know better than this process: a file, or a key in its environment.
+  defp old_questions(io) do
+    case io.call.("config.get", %{}) do
+      {:ok, %{"exists" => true}} ->
+        :ok
+
+      {:ok, %{"api_key_source" => "env"}} ->
+        :ok
+
+      {:ok, settings} ->
+        _ = first_run(settings, io)
+        :ok
+
+      {:error, _reason} ->
+        :ok
+    end
+  end
+
+  @doc """
+  `troupe setup`: the daemon's first-run questions as one screen, at any time, whatever is
+  set up already (TUI Decision 153). It ends in the first session, `{:open, session_id}`,
+  which the caller opens; or in an exit status, after saying how it ended. Where it cannot
+  be drawn it says why and asks `troupe config`'s questions line by line, which without a
+  terminal to ask on are the ways on.
+  """
+  @spec setup(Path.t(), io() | nil) :: {:open, String.t()} | non_neg_integer()
+  def setup(workspace, io \\ nil) do
+    io = io || io(workspace)
+
+    if io.interactive? do
+      case io.call.("setup.get", %{}) do
+        {:ok, flow} ->
+          flow |> io.screen.() |> ended(io)
+
+        {:error, reason} ->
+          io.say.(
+            "troupe setup: the daemon does not ask the first run's questions " <>
+              "(#{describe_error(reason)}); they are asked here, line by line."
+          )
+
+          line_by_line(io)
+      end
+    else
+      which =
+        case io.not_terminal do
+          [one] -> "#{one} is not a terminal"
+          both -> "#{Enum.join(both, " and ")} are not terminals"
+        end
+
+      io.say.("troupe setup: #{which}, so there is no screen to draw and nobody to ask.")
+
+      _ = line_by_line(io)
+      1
+    end
+  end
+
+  # `troupe config`'s questions, from the top, whatever is set up: what `troupe setup`
+  # falls back to.
+  defp line_by_line(io) do
+    path =
+      case io.call.("config.get", %{}) do
+        {:ok, %{"path" => path}} -> path
+        _ -> Troupe.Config.user_path()
+      end
+
+    path = Troupe.Paths.display(path)
+
+    if io.interactive? do
+      choose(path, io)
+    else
+      ways_on(path, io)
+      0
+    end
+  end
+
+  # How the screen ended, said, and the session it started to open.
+  defp ended({:session, sid, workspace}, io) do
+    case io.open.(workspace, sid) do
+      {:ok, sid} ->
+        {:open, sid}
+
+      {:error, reason} ->
+        io.say.(
+          "Set up. The first session started but could not be opened here " <>
+            "(#{describe_error(reason)}): troupe resume #{sid} opens it."
+        )
+
+        1
+    end
+  end
+
+  defp ended({:no_session, reason}, io) do
+    io.say.("Set up. The first session did not start: #{reason}")
+    1
+  end
+
+  # Signing in is the client's (root Decision 705): as `troupe config`'s plane choice does.
+  defp ended({:plane, url}, io) when url in [nil, ""] do
+    io.say.("Recorded. Sign in with troupe login <plane-url>, then troupe config pull.")
+    0
+  end
+
+  defp ended({:plane, url}, io), do: if(io.login.(url) == 0, do: io.pull.(url), else: 1)
+
+  defp ended({:left, false}, io) do
+    io.say.("Left the setup with nothing written; troupe setup asks again.")
+    0
+  end
+
+  defp ended({:left, true}, io) do
+    io.say.("Left the setup; what it saved before that stays. troupe setup asks again.")
+    0
+  end
+
+  defp ended({:cannot_draw, reason}, io) do
+    io.say.("troupe setup: the screen could not be drawn (#{reason}); the questions, line by line:")
+    line_by_line(io)
+  end
 
   defp report(io) do
     io.say.(io.describe.())
@@ -476,6 +597,15 @@ defmodule Troupe.CLI.ConfigSetup do
   def io(workspace) do
     %{
       interactive?: terminal?(),
+      not_terminal:
+        for(
+          {name, terminal?} <- [
+            {"standard input", Terminal.stdin?()},
+            {"standard output", Terminal.stdout?()}
+          ],
+          not terminal?,
+          do: name
+        ),
       say: &IO.puts/1,
       ask: &ask/1,
       secret: &secret/1,
@@ -487,8 +617,55 @@ defmodule Troupe.CLI.ConfigSetup do
       local_file?: fn -> File.regular?(Troupe.Config.user_path()) end,
       usable?: fn -> usable?(workspace) end,
       troupe_daemon?: fn -> match?({:ok, _path}, Troupe.CLI.Daemon.command()) end,
-      troupe_daemon: &Troupe.CLI.Daemon.run/1
+      troupe_daemon: &Troupe.CLI.Daemon.run/1,
+      screen: &screen(workspace, &1),
+      open: &Troupe.Client.open_session({:local, &1}, &2)
     }
+  end
+
+  # The screen runs as the terminal UI does, under `Troupe.UI.Windows`, and this waits for
+  # how it ended and for it to give the terminal back, before a session's window takes it.
+  # The fake provider is offered only where a script for it is set up (TUI Decision 153).
+  defp screen(workspace, flow) do
+    me = self()
+    ref = make_ref()
+
+    opts = [
+      call: &Link.call/2,
+      flow: flow,
+      workspace: workspace,
+      offer_fake: System.get_env("TROUPE_FAKE_SCRIPT") not in [nil, ""],
+      on_done: fn outcome -> send(me, {ref, outcome}) end,
+      name: nil
+    ]
+
+    spec = %{
+      id: Troupe.UI.Setup,
+      start: {Troupe.UI.Setup, :start_link, [opts]},
+      restart: :temporary
+    }
+
+    case DynamicSupervisor.start_child(Troupe.UI.Windows, spec) do
+      {:ok, pid} ->
+        monitor = Process.monitor(pid)
+
+        receive do
+          {^ref, outcome} ->
+            receive do
+              {:DOWN, ^monitor, _, _, _} -> :ok
+            after
+              5_000 -> DynamicSupervisor.terminate_child(Troupe.UI.Windows, pid)
+            end
+
+            outcome
+
+          {:DOWN, ^monitor, _, _, reason} ->
+            {:cannot_draw, Exception.format_exit(reason)}
+        end
+
+      {:error, reason} ->
+        {:cannot_draw, describe_error(reason)}
+    end
   end
 
   # Standard output as the person sees it, which in the binary on Linux and macOS is the

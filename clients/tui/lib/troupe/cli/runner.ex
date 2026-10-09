@@ -91,6 +91,14 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :config} = args} ->
         Troupe.CLI.ConfigSetup.run(args.workspace)
 
+      # The first run's questions as one screen, ending in the session it started (TUI
+      # Decision 153).
+      {:ok, %{mode: :setup} = args} ->
+        case Troupe.CLI.ConfigSetup.setup(args.workspace) do
+          {:open, sid} -> tui(sid, mouse_opts(args))
+          status -> status
+        end
+
       # Read here, from the same files the daemon reads: the answers are about files, and
       # need no daemon to give them.
       {:ok, %{mode: :config_explain} = args} ->
@@ -153,16 +161,22 @@ defmodule Troupe.CLI.Runner do
         Troupe.CLI.Daemon.run(args.daemon_args)
 
       {:ok, %{mode: :tui} = args} ->
-        # A first run meets the setup before a session it could not use: `troupe config`'s
-        # own questions on a machine with no settings and no key, and nothing otherwise.
-        unless args.remote, do: Troupe.CLI.ConfigSetup.before_session(args.workspace)
+        # A first run meets the setup before a session it could not use: the setup's
+        # screen on a machine with no settings and no key, whose first session is the one
+        # opened, and nothing otherwise (TUI Decision 153).
+        first_run =
+          if args.remote, do: :ok, else: Troupe.CLI.ConfigSetup.before_session(args.workspace)
 
-        case Client.create_session({:local, args.workspace}, %{
-               worktree: "never",
-               config: CLI.session_config(args),
-               private: args.private
-             }) do
-          {:ok, sid} -> tui(sid, window_opts(args))
+        with :ok <- first_run,
+             {:ok, sid} <-
+               Client.create_session({:local, args.workspace}, %{
+                 worktree: "never",
+                 config: CLI.session_config(args),
+                 private: args.private
+               }) do
+          tui(sid, window_opts(args))
+        else
+          {:open, sid} -> tui(sid, window_opts(args))
           {:error, reason} -> fail("troupe: could not start: " <> reason(reason))
         end
 

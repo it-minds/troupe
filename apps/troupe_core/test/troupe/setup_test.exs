@@ -12,6 +12,7 @@ defmodule Troupe.SetupTest do
   use ExUnit.Case, async: false
 
   alias Troupe.Config
+  alias Troupe.Config.ModelSettings
   alias Troupe.Setup
 
   @vars ~w(TROUPE_CONFIG_HOME TROUPE_STATE_HOME TROUPE_OPENCODE_CONFIG TROUPE_OPENCODE_AUTH TROUPE_API_KEY
@@ -115,7 +116,9 @@ defmodule Troupe.SetupTest do
                })
 
       assert flow.step == "daemon"
-      assert File.read!(ctx.config_file) =~ "auto_approve: false"
+      # Asking first is the default, and a first run's file holds only what was chosen
+      # (Decision 817).
+      refute File.read!(ctx.config_file) =~ "auto_approve"
 
       assert {:ok, flow} = Setup.answer(flow, "daemon", %{"at_login" => false})
       assert flow.step == "finish"
@@ -160,6 +163,79 @@ defmodule Troupe.SetupTest do
       {:ok, flow} = Setup.answer(flow, "finish", %{"start" => false})
       assert flow.session == nil
       assert Setup.completed()["choice"] == "local"
+    end
+
+    # Decision 817: `troupe setup` walks these steps, and `troupe config`'s questions save
+    # through `config.set`, which is `ModelSettings.write/1`; for the same answers the two
+    # leave the same file, byte for byte, and no `.previous` beside a new one.
+    test "the file is the one troupe config's questions write for the same answers", ctx do
+      System.put_env("SETUP_TEST_KEY", "sk-from-the-environment")
+      gateway = "http://127.0.0.1:1/v1"
+
+      cases = [
+        {%{"provider" => "fake"}, "sk-fake-typed", %{"provider" => "fake"}},
+        {%{"provider" => "fake"}, "{env:SETUP_TEST_KEY}", %{"provider" => "fake"}},
+        # Nothing listens there: the key is not confirmed, and the person types the model.
+        {%{"provider" => "openai", "kind" => "gateway", "base_url" => gateway}, "sk-gw",
+         %{"provider" => "openai", "base_url" => gateway}}
+      ]
+
+      for {provider, key, asked} <- cases do
+        {:ok, flow} = Setup.answer(Setup.new(), "where", %{"choice" => "local"})
+        {:ok, flow} = Setup.answer(flow, "provider", provider)
+        {:ok, %{step: "models"} = flow} = Setup.answer(flow, "key", %{"api_key" => key})
+        {:ok, flow} = Setup.answer(flow, "models", %{"default" => "m-1", "cheap" => nil})
+
+        {:ok, flow} =
+          Setup.answer(flow, "workspace", %{"workspace" => ctx.workspace, "approvals" => "ask"})
+
+        {:ok, _flow} = Setup.answer(flow, "daemon", %{"at_login" => false})
+        from_setup = File.read!(ctx.config_file)
+        refute File.exists?(ctx.config_file <> ".previous")
+        File.rm!(ctx.config_file)
+
+        {:ok, _saved} =
+          ModelSettings.write(
+            Map.merge(asked, %{"api_key" => key, "models" => %{"default" => "m-1"}})
+          )
+
+        assert File.read!(ctx.config_file) == from_setup
+        File.rm!(ctx.config_file)
+      end
+    end
+
+    test "asking first turns off a file that ran everything, and auto turns it on", ctx do
+      File.write!(ctx.config_file, "auto_approve: true\n")
+
+      {:ok, flow} = Setup.answer(Setup.new(), "where", %{"choice" => "local"})
+      {:ok, flow} = Setup.answer(flow, "provider", %{"provider" => "fake"})
+      {:ok, flow} = Setup.answer(flow, "key", %{"api_key" => "sk-fake"})
+      {:ok, flow} = Setup.answer(flow, "models", %{"default" => "fake-model"})
+      ask = %{"workspace" => ctx.workspace, "approvals" => "ask"}
+
+      {:ok, _flow} = Setup.answer(flow, "workspace", ask)
+      assert File.read!(ctx.config_file) =~ "auto_approve: false"
+      {:ok, config, _layers} = Config.resolve(ctx.workspace)
+      refute config.auto_approve
+
+      {:ok, _flow} = Setup.answer(flow, "workspace", %{ask | "approvals" => "auto"})
+      assert File.read!(ctx.config_file) =~ "auto_approve: true"
+    end
+
+    test "bearer is written, and so is api_key over a file that meant bearer", ctx do
+      File.write!(ctx.config_file, "provider: openai\nauth: bearer\napi_key: old\n")
+
+      {:ok, flow} = Setup.answer(Setup.new(), "where", %{"choice" => "local"})
+      {:ok, flow} = Setup.answer(flow, "provider", %{"provider" => "fake"})
+      {:ok, flow} = Setup.answer(flow, "key", %{"api_key" => "sk-fake"})
+      {:ok, _flow} = Setup.answer(flow, "models", %{"default" => "fake-model"})
+      assert File.read!(ctx.config_file) =~ "auth: api_key"
+
+      {:ok, flow} = Setup.answer(Setup.new(), "where", %{"choice" => "local"})
+      {:ok, flow} = Setup.answer(flow, "provider", %{"provider" => "fake", "auth" => "bearer"})
+      {:ok, flow} = Setup.answer(flow, "key", %{"api_key" => "sk-fake"})
+      {:ok, _flow} = Setup.answer(flow, "models", %{"default" => "fake-model"})
+      assert File.read!(ctx.config_file) =~ "auth: bearer"
     end
 
     test "a refused key keeps the step and says why; the next key goes on" do
