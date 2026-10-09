@@ -137,6 +137,16 @@ opencode comes over as it is:
 <workspace>/.troupe/skills/    the workspace's skills
 ```
 
+Skills are also read in place from `.agents/skills`, the directory other tools share
+for them: `~/.agents/skills/<name>/SKILL.md` (`%USERPROFILE%\.agents\skills` on Windows),
+and `.agents/skills/` in the directory a session starts in and in each directory above
+it up to the repository root. Troupe never writes there. Where two have a skill of one
+name, the nearer `.agents/skills` wins, and a skill in `<config>/skills` or
+`.troupe/skills` beats any of them ([Which one wins](#which-one-wins)). An
+`.agents/skills`, or a skill in it, that is a link to somewhere outside the repository
+(outside `~/.agents`, for yours) is not read. Nothing else under `.agents/` is read but
+`.agents/AGENTS.md` ([Instruction files](#instruction-files)).
+
 `mcp.json` is `{"mcpServers": {name: {"command", "args", "env"}}}` — or
 `{"url", "headers"}` — with one key of Troupe's own: `"include": ["~/.claude/.mcp.json"]`
 reads another file in place. `${VAR}` in an imported file becomes `{env:VAR}`, read as
@@ -191,7 +201,9 @@ The layers stack the way the config files do: the workspace's file over yours ov
 say `{"fs": {"disabled": true}}` and no more. The TUI's `/mcp` page and the desktop
 app's "Servers and skills" panel show every server and skill with the layer and file it
 came from, import a file (`/mcp import <path>`, `/skills import <path>`, or `link` to
-read it in place), remove one, and try a server before it is kept.
+read it in place), remove one, and try a server before it is kept. `skills.list`, which
+they ask, also lists every skill that is not offered and why: `skipped`, naming the one
+of that name that is used, or `outside`.
 
 A workspace's servers are commands a cloned repository would run, so a session starts
 them only after asking you — once per workspace when you answer `allow`, which is kept
@@ -298,6 +310,50 @@ prompt, so an edited command asks again and what you type after its name does no
 own commands never ask, and neither does a repository on `trusted_workspaces`, whose
 config could turn `auto_approve` on by itself.
 
+## Onboarding another tool's files
+
+What another coding tool keeps for a repository, or for you, is brought into Troupe's own
+files once, and sessions read Troupe's files from then on. `troupe onboard [--workspace
+DIR]` asks each source Troupe knows what it would write, and shows every file as a diff
+against what is there:
+
+```
+.troupe/agents/reviewer.md: new, from .claude/agents/reviewer.md
+  note: tools: WebSearch left out, Troupe has no such tool
++ ---
++ description: Reviews the change on this branch
++ tools: [read_file, grep]
++ imported_from: ".claude/agents/reviewer.md"
++ imported_hash: "9f2c..."
++ imported_at: "2026-10-09T12:00:00Z"
++ ---
++ You review code.
+Write .troupe/agents/reviewer.md? [y/N]
+```
+
+Only what you answer yes to is written, one file at a time. Onboarding writes two places
+and nothing else: the workspace's `.troupe/`, from the repository's files, and your config
+directory, from files in your home directory, never one into the other; and there only
+`agents/<name>.md`, `commands/<name>.md`, `skills/<name>/...`, `workflows/<name>.json`,
+`mcp.json` and your own `AGENTS.md`. A file that would land anywhere else, through a `..`
+or a `.troupe` that is a link to elsewhere, is refused. Each file written says where it
+came from, `imported_from`, `imported_hash` and `imported_at`, and `imported_also` for any
+other file it was made from (an agent's permissions in `.claude/settings.json`, say): in
+its frontmatter, for a Markdown file, and for anything else (and your `AGENTS.md`, which
+is read whole into the prompt) in `onboarded.json` beside it. A file a source found and
+made nothing of is listed first, as `skipped:` with the reason.
+
+Run it again and it proposes nothing until a source changes: a file onboarded from an
+unchanged source is left alone, your own edits to it included, and a file you said no to
+is not asked about again until its source changes (`--all` asks again; the answer is kept
+in Troupe's state directory, never in the repository). A changed source is offered as a
+diff against the file you have, and nothing is overwritten unasked. `--yes` writes every
+proposal without asking, and `--json` prints them as one object and writes nothing unless
+`--yes` is given too. It exits 1 when a proposal was refused or a write failed, and 2 when
+there was nobody to ask. Inside a session the librarian writes the same files with the
+`onboard_write` tool, which asks before each one; into your config directory it asks even
+with `auto_approve` on, since what lands there runs in every session without a question.
+
 ## Instruction files
 
 A repository that carries an `AGENTS.md` has told coding agents how to work in it, and
@@ -314,6 +370,11 @@ an edit takes effect on the next turn:
    `frontend/AGENTS.md` applies from the turn after the agent first opened something
    under `frontend/`.
 4. `.troupe/memory.md`, the project brief Troupe's own agents write.
+
+An `.agents/AGENTS.md` at the root, or in one of those directories, belongs to its
+directory too: it is read right before that directory's own `AGENTS.md`, so where the
+two disagree the directory's own wins, and `/context` names it with its directory's
+scope (`.agents/AGENTS.md (root)`). Your own `<config>` has none.
 
 Every file applies. A file in a directory below the root is about the work under that
 directory, and where two disagree, the nearer wins. In one directory `AGENTS.md`,
@@ -391,11 +452,15 @@ frontend/AGENTS.md:9: duplicate: the same rule as AGENTS.md:5
   `make` and their like); the shell's own commands and the platform's package managers
   are not looked for.
 - **duplicate**: a paragraph or list item said again in another file.
+- **drift**: a file `troupe onboard` wrote, in `.troupe/` or your config directory, whose
+  source, or another file it was made from, has changed or gone since, read from the
+  `imported_from`, `imported_hash` and `imported_also` it recorded; `troupe onboard` shows
+  what changed.
 
 It would rather miss a finding than make a false one. It exits 0 when it finds nothing, 1
 on a finding and 2 when it cannot read the workspace, so a repository can run it in CI on
-its own instruction files; `--json` prints the same as one object, with `files` and
-`findings`. Your own `<config>/AGENTS.md` is checked with the rest, except for paths,
+its own instruction files; `--json` prints the same as one object, with `files`,
+`onboarded` and `findings`. Your own `<config>/AGENTS.md` is checked with the rest, except for paths,
 which it names for every repository.
 
 ## Every file Troupe reads
@@ -408,12 +473,43 @@ things:
 | `<config>/config.yaml`, then `<workspace>/.troupe/config.yaml`, then `.troupe/config.local.yaml`, then the environment, then the command line | settings | every key above | later beats earlier; maps merge by key, `null` removes, a list replaces; trusted keys come from a workspace's files only once it is trusted |
 | `~/.config/opencode/opencode.jsonc` and `~/.local/share/opencode/auth.json` | settings | providers and the default model an opencode setup already has | read only when Troupe has no key of its own; never written |
 | `<config>/mcp.json`, then `<workspace>/.troupe/mcp.json` | MCP servers | your servers, then the workspace's, over `mcp:` in `config.yaml` | the same name merges key by key, the workspace's file last; a workspace's servers run only once you allow them |
-| `<config>/skills/<name>/SKILL.md`, `<workspace>/.troupe/skills/`, a profile's bundle | skills | what a skill tool may read | one name, the nearer layer's |
+| a profile's bundle, `~/.agents/skills/`, each `.agents/skills/` from the repository root down to the workspace, `<config>/skills/<name>/SKILL.md`, `<workspace>/.troupe/skills/` | skills | what a skill tool may read | one name, the highest on [the ladder](#which-one-wins); the others listed as skipped |
 | Troupe's built-in agents, a profile's bundle, `<config>/agents/*.md`, `<workspace>/.troupe/agents/*.md` | agents | the agents a session may run | a file at a higher layer replaces the same name below it |
 | `<config>/commands/*.md`, `<workspace>/.troupe/commands/*.md` | commands | the slash commands you and the repository define | one name, the workspace's; a built-in's or an agent's name is theirs |
 | `<workspace>/.troupe/workflows/<name>.json` | workflows | the steps `workflows.list` offers | one name, one file |
-| `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on (aliases `CLAUDE.md`, `GEMINI.md`, and `.github/copilot-instructions.md` at the root only, first found wins), and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out |
+| `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on (aliases `CLAUDE.md`, `GEMINI.md`, and `.github/copilot-instructions.md` at the root only, first found wins), each directory's `.agents/AGENTS.md` before its own, and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out |
 | `<workspace>/.troupe/memory.md` | instructions | the project brief Troupe's agents write | read after the instruction files; never authoritative, `read_file` and `grep` are |
+
+## Which one wins
+
+Where two places say different things, Troupe takes it from the one higher on this
+ladder, lowest first:
+
+1. **Troupe's built-ins**: the agents that ship with it.
+2. **A profile's bundle**, on a team's pod. There the bundle's agents and skills beat the
+   repository's `.agents/` and `.troupe/` unless the profile allows the repository's.
+3. **`.agents/`**: `~/.agents/skills`, then each `.agents/skills` from the repository
+   root down to where the session was started, the nearest highest; and each
+   directory's `.agents/AGENTS.md`.
+4. **`AGENTS.md`**: the repository root's, then each directory's on the way to the work,
+   the nearest highest.
+5. **Your `<config>/`**: `config.yaml`, `mcp.json`, `skills/`, `agents/`, `commands/`.
+6. **The repository's `.troupe/`**: the same files, and `memory.md`.
+
+The last two are Troupe's own files, so they beat what a convention shared with other
+tools says. What has a name (an agent, a skill, a command, an MCP server) comes from the
+highest step that has the name, and the ones below it are not used: `skills.list` lists
+each skill a higher one hid as `skipped`, naming the one that is used. Instruction files
+have no name to lose: every one applies, and the higher comes later in the prompt, wins
+where two disagree, and is kept whole first when the budget runs out. Your own
+`<config>/AGENTS.md` is the exception, read first and so below the repository's files:
+it is about every repository, and theirs is about this one.
+
+Two things stand beside the ladder rather than on it: a built-in command's name, or an
+agent's, stays theirs whatever a file says ([Your own commands](#your-own-commands)), and
+`config.yaml`'s settings have the environment and the command line above them ([The
+files](#the-files)), a workspace's own files setting the trusted keys only once you trust
+it ([Trusted workspaces](#trusted-workspaces)).
 
 ## Old spellings
 

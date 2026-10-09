@@ -165,6 +165,10 @@ defmodule Troupe.Tool do
       constants: `delegate` lists the subagents actually loaded, `shell` names the
       host OS and shell.
 
+    * `must_ask?/1` — a call a person must answer whatever the profile's permission or
+      the session's `auto_approve` says (a profile's `deny` still denies):
+      `onboard_write` into the config directory (Decision 823).
+
   `run/2` returns `{:ok, content}` or `{:error, reason}`; inline tools may also return
   `{:ok, content, updates}` to change agent state, or `{:defer, instruction}` to hand
   an effect to the agent and have the call completed later.
@@ -191,8 +195,9 @@ defmodule Troupe.Tool do
 
   @callback mode() :: :task | :inline
   @callback describe(Ctx.t()) :: String.t()
+  @callback must_ask?(args :: map()) :: boolean()
 
-  @optional_callbacks mode: 0, describe: 1
+  @optional_callbacks mode: 0, describe: 1, must_ask?: 1
 
   @typedoc """
   A tool, as the harness holds one.
@@ -227,6 +232,14 @@ defmodule Troupe.Tool do
   end
 
   def mode(%{}), do: :task
+
+  @doc "Whether this call must be asked about whatever the profile and the session say."
+  @spec must_ask?(handle(), map()) :: boolean()
+  def must_ask?(module, args) when is_atom(module) do
+    function_exported?(module, :must_ask?, 1) and module.must_ask?(args) == true
+  end
+
+  def must_ask?(%{}, _args), do: false
 
   @doc "A tool's description for this session, context-sensitive when the tool asks."
   @spec describe(handle(), Ctx.t()) :: String.t()

@@ -416,24 +416,32 @@ defmodule Troupe.Gateway.LocalSources do
 
   # -- skills --------------------------------------------------------------------
 
+  # What is offered, and beside it every skill the layers hold and do not offer, with why
+  # (Decision 822): one a nearer layer's name hid, or one outside its edge, never read.
   defp list_skills(params) do
     with {:ok, workspace} <- workspace_of(params) do
-      skills =
-        workspace
-        |> Skills.Local.list()
-        |> Enum.map(
-          &%{
-            "name" => &1.name,
-            "description" => &1.description,
-            "layer" => to_string(&1.layer),
-            "source" => Paths.display(&1.source),
-            "dir" => Paths.display(&1.dir),
-            "linked" => &1.linked?
-          }
-        )
+      %{skills: skills, skipped: skipped} = Skills.Local.resolve(workspace)
 
-      {:ok, %{"skills" => skills}}
+      {:ok,
+       %{
+         "skills" => Enum.map(skills, &Map.put(skill_json(&1), "description", &1.description)),
+         "skipped" =>
+           Enum.map(
+             skipped,
+             &Map.merge(skill_json(&1), %{"status" => to_string(&1.status), "reason" => &1.reason})
+           )
+       }}
     end
+  end
+
+  defp skill_json(skill) do
+    %{
+      "name" => skill.name,
+      "layer" => to_string(skill.layer),
+      "source" => Paths.display(skill.source),
+      "dir" => Paths.display(skill.dir),
+      "linked" => skill.linked?
+    }
   end
 
   defp add_skill(params) do

@@ -18,6 +18,12 @@ defmodule Troupe.Instructions do
   nobody debugs a file that was never loaded. A Copilot file below the root is listed as
   skipped too, saying it counts only at the root.
 
+  An `.agents/AGENTS.md` in the repository root, or in a directory on the way to where
+  the session works, is that directory's too (Decision 822): read right before the
+  directory's own file, in its scope, so where the two disagree the directory's own wins.
+  It is no alias: it hides nothing and nothing hides it. The person's own directory has
+  none.
+
   A file may import another with `@path/to/file.md`, as Claude Code's do: resolved from
   the importing file's directory, followed five deep, each file read once, and never
   from outside the repository (or, for the person's own file, the config directory). An
@@ -61,6 +67,7 @@ defmodule Troupe.Instructions do
   @copilot ".github/copilot-instructions.md"
   @aliases ["AGENTS.md", "CLAUDE.md", "GEMINI.md", @copilot]
   @copilot_reason "not read: Copilot's file counts only at the root"
+  @dot_agents ".agents/AGENTS.md"
   @budget_reason "left out: the budget was spent on nearer files"
   @default_max_chars 16_000
 
@@ -307,7 +314,13 @@ defmodule Troupe.Instructions do
     end
   end
 
-  defp repository_root(workspace) do
+  @doc """
+  The repository a workspace is in, as the instruction files are read up to it: the
+  nearest directory with a `.git` (a worktree's `.git` file counts), or the workspace
+  itself without one. `Troupe.Skills.Local` reads `.agents/skills` up to the same root.
+  """
+  @spec repository_root(Path.t()) :: Path.t()
+  def repository_root(workspace) do
     workspace
     |> ancestors()
     |> Enum.find(workspace, &File.exists?(Path.join(&1, ".git")))
@@ -340,9 +353,23 @@ defmodule Troupe.Instructions do
           read ++ Enum.map(skipped, &hidden(dir, &1, name, read, fields))
       end
 
-    if scope != :root and File.regular?(Path.join(dir, @copilot)),
-      do: found ++ [unread(Path.join(dir, @copilot), dir, fields, :skipped, @copilot_reason)],
-      else: found
+    found =
+      if scope != :root and File.regular?(Path.join(dir, @copilot)),
+        do: found ++ [unread(Path.join(dir, @copilot), dir, fields, :skipped, @copilot_reason)],
+        else: found
+
+    dot_agents(scope, dir, fields, bounds) ++ found
+  end
+
+  # A directory's `.agents/AGENTS.md`, before its own file and in its scope, so that file
+  # is the nearer of the two (Decision 822); confined as any found file is. Not in the
+  # person's own directory, whose file is `<config>/AGENTS.md`.
+  defp dot_agents(:user, _dir, _fields, _bounds), do: []
+
+  defp dot_agents(scope, dir, fields, bounds) do
+    if File.regular?(Path.join(dir, @dot_agents)),
+      do: read(dir, @dot_agents, [], fields, bound(scope, bounds)),
+      else: []
   end
 
   # A file found in a directory is confined as an import is: one that is really somewhere
