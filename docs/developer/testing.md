@@ -94,6 +94,13 @@ temporary directory once per run and passes `state_dir` through config, because
   ([vscode.md](../user/vscode.md#how-it-is-built-and-tested)).
 - `scripts/verify-local.ps1` checks an install made by `scripts/install-local.ps1` on this
   Windows machine.
+- `scripts/check-installers` (`install.sh` under `sh` and `bash`, or the shells named) and
+  `scripts/check-installers.ps1` (`install.ps1`, run once with `powershell` and once with
+  `pwsh`): the installers against a release of stand-ins in a scratch directory, whose
+  `troupe-daemon` only writes down what it is asked. Nothing is downloaded, and no real
+  install, `PATH` or login entry is touched. The questions are answered through a
+  pseudo-terminal for `install.sh`; `install.ps1`'s are checked by lifting the function that
+  asks out of the script, because a check has no console.
 - `scripts/live-check task|delegate|loop`: one headless run against a real model, and
   what it has to show; the nightly runs all three against the gateway
   ([ci.md](ci.md#the-live-check)). With `TROUPE_PROVIDER=fake` and a

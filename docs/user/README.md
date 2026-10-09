@@ -56,7 +56,8 @@ it first starts it (the terminal client runs one inside itself when none is runn
 it stops on its own a while after the last client leaves
 ([troupe-daemon](../../apps/troupe_daemon/README.md#how-long-it-stays-up)).
 `troupe daemon login on` starts it every time you log in instead, and then it stays up
-until you log out; `troupe daemon login off` takes that back, and the first run asks
+until you log out; `troupe daemon login off` takes that back, and the installers and the
+first run ask
 ([start at login](../../apps/troupe_daemon/README.md#start-at-login)):
 
 ```mermaid

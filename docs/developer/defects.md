@@ -443,8 +443,6 @@ Found by the chunk 15 fixer of slot D15 (PR #373), 2026-10-04.
 
 ### D62 - Start at login: small leftovers (low)
 
-- Uninstalling (`install.sh` / `install.ps1 --uninstall`) doesn't run
-  `troupe-daemon login off` first, so the login entry is left pointing at nothing.
 - On macOS and Linux a daemon started at login (and one a Finder-launched desktop app
   starts) gets the session manager's minimal `PATH`, so tools an agent's shell expects
   (Homebrew, `~/.local`) may be missing.
