@@ -48,7 +48,7 @@ Other `spec` fields:
 | `egress.fqdns`, `egress.gitHosts` | extra hosts the pods may reach; each must match a policy pattern |
 | `configBundleChannel` | which bundle channel the profile follows (`stable`) |
 | `orgMount` | mount the policy's org volume at `/mnt/org`, always read-only |
-| `repositoryOverridesBundle` | `true` lets a session's working copy replace the bundle's agents and skills of the same name; absent or `false`, the bundle's win ([below](#a-repositorys-agents-and-skills-on-a-pod)) |
+| `repositoryOverridesBundle` | `true` lets a session's working copy replace the bundle's agents and skills, and Troupe's built-in agents, of the same name; absent or `false`, those win ([below](#a-repositorys-agents-and-skills-on-a-pod)) |
 | `mcpIdentities` | who the profile is at each MCP server its bundle calls with client credentials ([below](#calling-an-mcp-server-as-the-profile)). Yours to write, in direct and gitops mode alike; nothing in it is secret |
 | `mcpServers`, `teams` | **written by the plane** from the channel's bundle and from grants; do not set them |
 
@@ -157,13 +157,12 @@ server refused a tool the identity lacks.
 
 A session's working copy may carry agents and skills of its own: `.troupe/agents/*.md`,
 `.troupe/skills/<name>/` and `.agents/skills/<name>/`, which arrive with a clone. On a pod
-the **bundle's agents and skills beat them** wherever the names are the same (Decision
-826). A working copy's `build.md` does not replace the `build` the channel's bundle
-publishes, and its `review-checklist` skill does not stand in for the bundle's, whether or
-not the agent at hand may consult that skill. The same goes for the pod's own config
-directory. Names the bundle does not have are read as on a laptop, and a working copy may
-still replace a built-in agent the bundle does not publish; to fix a name, publish it in
-the bundle.
+the **bundle's agents and skills, and the agents Troupe ships, beat them** wherever the
+names are the same (Decision 826). A working copy's `build.md` replaces neither the `build`
+the channel's bundle publishes nor, where it publishes none, Troupe's own `build`, and its
+`review-checklist` skill does not stand in for the bundle's, whether or not the agent at
+hand may consult that skill. The same goes for the pod's own config directory, and for a
+pod whose channel has nothing published. Other names are read as on a laptop.
 
 A file that loses is not read. The session lists it as skipped, with the reason, in a
 `files_skipped` event in its log, written at each activation whose list differs from the
@@ -174,7 +173,12 @@ last one recorded:
             "reason": "the session's bundle has an agent named build, and on a pod the bundle's beats a repository's unless the profile allows the repository's"}]}
 ```
 
-A profile that wants the repository's files to win sets the switch:
+A working copy's agent of a built-in's name is listed the same way, with the reason
+`build is an agent Troupe ships, and on a pod Troupe's own beats a repository's unless the
+profile allows the repository's`.
+
+A profile that wants the repository's files to win, over the bundle's and the built-ins
+alike, sets the switch:
 
 ```yaml
 spec:

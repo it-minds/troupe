@@ -108,12 +108,12 @@ defmodule Troupe.Plane.Fleet.Profile do
     |> check_constraint(:provisioner, name: :profiles_provisioner)
   end
 
-  # `repositoryOverridesBundle` lets a repository's agents and skills replace the bundle's
-  # of the same name on this profile's pods (Decision 826), and is read as on only when it
-  # is `true`. A string `"true"` would read as off, so it is refused rather than saved: a
-  # profile whose admin believes they turned something on must not quietly have it off. The
-  # resource's schema refuses one too, and this is the check for a profile that is never
-  # one, on hosts.
+  # `repositoryOverridesBundle` lets a repository's agents and skills replace the bundle's,
+  # and the built-ins, of the same name on this profile's pods (Decision 826), and is read
+  # as on only when it is `true`. A string `"true"` would read as off, so it is refused
+  # rather than saved: a profile whose admin believes they turned something on must not
+  # quietly have it off. The resource's schema refuses one too, and this is the check for a
+  # profile that is never one, on hosts.
   defp spec_switches(:spec, spec) when is_map(spec) do
     case Map.fetch(spec, "repositoryOverridesBundle") do
       {:ok, value} when not is_boolean(value) ->

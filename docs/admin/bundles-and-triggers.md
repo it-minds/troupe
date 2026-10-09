@@ -25,8 +25,9 @@ console check the same thing.
 A document with no `schema` key is schema 0, of which only `mcp_servers` is read; it is
 accepted for planes upgraded under one and never written again.
 
-On a pod the bundle's agents and skills beat a session's working copy's of the same name,
-and the working copy's are listed as skipped, unless the profile sets
+On a pod the bundle's agents and skills, and Troupe's built-in agents, beat a session's
+working copy's of the same name, and the working copy's are listed as skipped, unless the
+profile sets
 `repositoryOverridesBundle: true`
 ([profiles-and-policy.md](profiles-and-policy.md#a-repositorys-agents-and-skills-on-a-pod),
 Decision 826).

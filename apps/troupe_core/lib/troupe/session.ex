@@ -172,7 +172,7 @@ defmodule Troupe.Session do
   `:bundle` is the config bundle the session is pinned to, `%{version, hash, channel,
   dir}`, which a worker passes and a laptop never does. Its `dir` is where agent
   definitions of source `:bundle` come from and where the `skills:/` mount points, and
-  its agents and skills beat the working copy's unless it carries
+  its agents and skills, and the built-ins, beat the working copy's unless it carries
   `repository_overrides: true` (`t:Troupe.Skills.bundle/0`, Decision 826).
   `:kind` says whether this is a `:team` session on a pod or a `:local` one, and
   `:origin` says what started it; both are recorded in `session_created` and nothing
@@ -204,13 +204,12 @@ defmodule Troupe.Session do
         |> with_skills(bundle)
         |> then(&Workspace.with_mounts(workspace, &1))
 
-      # On a pod the bundle's agents beat the working copy's, unless its profile lets the
-      # repository's replace them (Decision 826).
+      # On a pod the built-ins and the bundle's agents beat the working copy's, unless its
+      # profile lets the repository's win (Decision 826).
       definitions =
         Keyword.get_lazy(opts, :definitions, fn ->
           Definitions.load(workspace.root_real,
-            bundle_dir: bundle && bundle[:dir],
-            repository_overrides: bundle != nil and bundle[:repository_overrides] == true,
+            bundle: bundle,
             entitled: entitled_agents(bundle),
             acp_agents: acp_agents(bundle)
           )

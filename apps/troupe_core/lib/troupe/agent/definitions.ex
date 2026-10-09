@@ -6,15 +6,18 @@ defmodule Troupe.Agent.Definitions do
   deliberately no process here: definitions cannot change while a session runs, so
   they are data, and a subagent three levels down reads them without a message.
 
-  Precedence, lowest to highest: built-ins shipped in `priv/agents/`, the global config
-  dir's `agents/`, the project's `.troupe/agents/`, and the session's config bundle. A
-  file at a higher level replaces the same name below it. A bundle is the plane's word
-  and only a pod has one, so its agents beat every file on the pod's disk of the same
-  name, the working copy's above all: a file that arrives with a clone does not stand in
-  for an agent an admin published (Decision 826). Such a file is not read, and is listed
-  in `skipped` with the reason. A profile that lets a repository's agents replace the
-  bundle's (`spec.repositoryOverridesBundle`) puts the bundle back below the directories,
-  as it was before; on a laptop there is no bundle and nothing changes.
+  Precedence on a laptop, lowest to highest: built-ins shipped in `priv/agents/`, the
+  global config dir's `agents/`, then the project's `.troupe/agents/`. A file at a higher
+  level replaces the same name below it.
+
+  On a pod the session is pinned to a config bundle, the plane's word, and the agents
+  Troupe ships and the bundle's beat every file on the pod's disk of the same name, the
+  working copy's above all: a file that arrives with a clone does not stand in for
+  `build`, nor for an agent an admin published (Decision 826). Such a file is not read,
+  and is listed in `skipped` with the reason. The order there is the directories, then
+  the built-ins, then the bundle. A profile that lets a repository's agents win
+  (`spec.repositoryOverridesBundle`) puts the laptop's order back, with the bundle between
+  the built-ins and the directories, as it was before.
 
   In a git worktree the project layer is the worktree's own `.troupe/agents/` over the
   main checkout's, of which only what the checkout has committed is read
@@ -39,21 +42,31 @@ defmodule Troupe.Agent.Definitions do
         }
 
   @doc """
-  Whether a session's bundle beats the files on its disk of the same names, agents and
-  skills alike: wherever there is a bundle, unless the profile that pinned it lets a
-  repository's files replace the bundle's (Decision 826). The one rule both merges ask.
+  Whether the bundle and the built-ins beat the files on a session's disk of the same
+  names, agents and skills alike: wherever the session is pinned to a bundle, which only a
+  pod is — a pod whose channel has nothing published is pinned to nothing, and that is a
+  pin too — unless the profile lets a repository's files win (Decision 826). The one rule
+  both merges ask.
   """
   @spec bundle_wins?(map() | nil) :: boolean()
-  def bundle_wins?(%{dir: dir} = bundle) when is_binary(dir),
-    do: Map.get(bundle, :repository_overrides) != true
+  def bundle_wins?(%{} = pin), do: Map.get(pin, :repository_overrides) != true
+  def bundle_wins?(nil), do: false
 
-  def bundle_wins?(_bundle), do: false
+  @doc """
+  Why a file of a name the bundle has (`owner` `:bundle`), or Troupe ships (`:builtin`), is
+  not read on a pod.
+  """
+  @spec lost_to_bundle(:agent | :skill, String.t(), :bundle | :builtin) :: String.t()
+  def lost_to_bundle(kind, name, owner \\ :bundle)
 
-  @doc "Why a file of a name the bundle has is not read on a pod."
-  @spec lost_to_bundle(:agent | :skill, String.t()) :: String.t()
-  def lost_to_bundle(kind, name) do
+  def lost_to_bundle(kind, name, :bundle) do
     "the session's bundle has #{kind_name(kind)} named #{name}, and on a pod the bundle's " <>
       "beats a repository's unless the profile allows the repository's"
+  end
+
+  def lost_to_bundle(kind, name, :builtin) do
+    "#{name} is #{kind_name(kind)} Troupe ships, and on a pod Troupe's own beats a " <>
+      "repository's unless the profile allows the repository's"
   end
 
   defp kind_name(:agent), do: "an agent"
@@ -77,11 +90,12 @@ defmodule Troupe.Agent.Definitions do
   @doc """
   Load every definition visible from a workspace.
 
-  `bundle_dir:` names a materialised bundle whose `agents/` is read as the `:bundle`
-  source, above every directory unless `repository_overrides: true` says the profile
-  lets the repository's replace it (`bundle_wins?/1`). Unparseable files are skipped
-  with a warning rather than failing the session: one broken custom agent should not
-  stop the user from working.
+  `bundle:` is the session's pin (`t:Troupe.Skills.bundle/0`), whose `dir`'s `agents/` is
+  read as the `:bundle` source; it and the built-ins are above every directory unless the
+  pin says `repository_overrides: true` (`bundle_wins?/1`). `bundle_dir:` with
+  `repository_overrides:` says the same without a pin. Unparseable files are skipped with
+  a warning rather than failing the session: one broken custom agent should not stop the
+  user from working.
 
   `entitled:` is the list of agent names this session's team was granted, or `nil` for
   no restriction. It is applied *after* the whole search order is merged, so an agent
@@ -92,18 +106,13 @@ defmodule Troupe.Agent.Definitions do
   """
   @spec load(Path.t(), keyword()) :: t()
   def load(workspace_root, opts \\ []) do
-    bundle_dir = Keyword.get(opts, :bundle_dir)
-    bundle = bundle_layer(bundle_dir)
+    pin = pin(opts)
+    bundle = bundle_layer(pin && pin[:dir])
     project = layer(Path.join(Paths.project_dir(workspace_root), "agents"), :project)
     {checkout, uncommitted} = checkout_layer(workspace_root, project)
     disk = [layer(Path.join(Paths.config_dir(), "agents"), :global)] ++ checkout ++ [project]
 
-    wins? =
-      bundle_wins?(%{
-        dir: bundle_dir,
-        repository_overrides: Keyword.get(opts, :repository_overrides)
-      })
-
+    wins? = bundle_wins?(pin)
     acp = Keyword.get(opts, :acp_agents, [])
     {layers, lost} = ordered(layer(builtin_dir(), :builtin), bundle, disk, wins?, acp)
 
@@ -116,31 +125,53 @@ defmodule Troupe.Agent.Definitions do
     %__MODULE__{by_name: by_name, skipped: uncommitted ++ lost}
   end
 
+  # The pin, given whole, or as the directory and the profile's word on it.
+  defp pin(opts) do
+    case Keyword.fetch(opts, :bundle) do
+      {:ok, pin} ->
+        pin
+
+      :error ->
+        case Keyword.get(opts, :bundle_dir) do
+          nil -> nil
+          dir -> %{dir: dir, repository_overrides: Keyword.get(opts, :repository_overrides)}
+        end
+    end
+  end
+
   # A layer is a directory, its source, and the names of the files read from it.
   defp layer(dir, source), do: %{dir: dir, source: source, names: names_in(dir)}
 
   defp bundle_layer(nil), do: nil
   defp bundle_layer(dir), do: layer(Path.join(dir, "agents"), :bundle)
 
-  # Where the bundle wins, every directory's file of a bundle name, its ACP agents'
-  # included, is taken out of its layer, unread, rather than read and replaced: a file
-  # that is not read cannot fail to parse into a warning, and the answer names it as what
-  # it is, skipped.
-  defp ordered(builtin, nil, disk, _wins?, _acp), do: {[builtin | disk], []}
-  defp ordered(builtin, bundle, disk, false, _acp), do: {[builtin, bundle | disk], []}
+  defp ordered(builtin, bundle, disk, false, _acp),
+    do: {[builtin | List.wrap(bundle)] ++ disk, []}
 
+  # Where the bundle wins, every directory's file of a built-in's name, the bundle's or its
+  # ACP agents', is taken out of its layer, unread, rather than read and replaced: a file
+  # that is not read cannot fail to parse into a warning, and the answer names it as what
+  # it is, skipped, saying whose name it is. The bundle's is said where a name is both,
+  # since that is the one that runs.
   defp ordered(builtin, bundle, disk, true, acp) do
-    taken = MapSet.new(bundle.names ++ Enum.map(acp, & &1.name))
+    owners =
+      Map.merge(
+        Map.new(builtin.names, &{&1, :builtin}),
+        Map.new(names_of(bundle) ++ Enum.map(acp, & &1.name), &{&1, :bundle})
+      )
 
     {disk, lost} =
       Enum.map_reduce(disk, [], fn layer, lost ->
-        {gone, kept} = Enum.split_with(layer.names, &MapSet.member?(taken, &1))
-        skipped = Enum.map(gone, &skip(layer.dir, &1, lost_to_bundle(:agent, &1)))
+        {gone, kept} = Enum.split_with(layer.names, &Map.has_key?(owners, &1))
+        skipped = Enum.map(gone, &skip(layer.dir, &1, lost_to_bundle(:agent, &1, owners[&1])))
         {%{layer | names: kept}, lost ++ skipped}
       end)
 
-    {[builtin | disk] ++ [bundle], lost}
+    {[builtin | disk] ++ List.wrap(bundle), lost}
   end
+
+  defp names_of(nil), do: []
+  defp names_of(layer), do: layer.names
 
   # In a worktree, the main checkout's committed agents, below the worktree's own. One the
   # checkout has not committed is listed, unless the worktree has its own of that name and

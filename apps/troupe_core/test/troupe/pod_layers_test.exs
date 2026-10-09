@@ -224,6 +224,80 @@ defmodule Troupe.PodLayersTest do
     end
   end
 
+  # The maintainer's word on #516's open question: Troupe's own agents beat the working
+  # copy on a pod as the bundle's do, and the same switch lets the repository's win.
+  describe "a built-in's name on a pod" do
+    setup context do
+      # A bundle that publishes no `build` of its own.
+      dir = Path.join(context.base, "bundles/sha256-no-build")
+      write(dir, "agents/auditor.md", "---\nmode: primary\n---\nYou audit.")
+      bundle = %{version: 8, hash: "sha256:no-build", channel: "stable", dir: dir}
+
+      write_file(
+        context,
+        ".troupe/agents/build.md",
+        "---\nmode: primary\n---\nYou are the repository's build."
+      )
+
+      Map.put(context, :no_build, bundle)
+    end
+
+    test "a pod session runs the built-in build over the repository's, and lists it", context do
+      %{session: session, fake: fake} =
+        start_session(context, bundle: context.no_build, kind: :team, steps: [{:text, "hi"}])
+
+      {:ok, definitions} = Troupe.definitions(session.id)
+      assert Definitions.fetch!(definitions, "build").source == :builtin
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "hello")
+      await_state(session.id, [:idle], 10_000)
+
+      [request | _] = Fake.requests(fake)
+      refute request.system =~ "You are the repository's build."
+
+      [event] = events_of_type(session.id, "files_skipped")
+      assert Schema.validate_event(event.type, event.data) == :ok
+
+      assert [%{"kind" => "agent", "name" => "build", "path" => path, "reason" => reason}] =
+               event.data["files"]
+
+      assert path == Troupe.Paths.display(Path.join(context.workspace, ".troupe/agents/build.md"))
+
+      assert reason ==
+               "build is an agent Troupe ships, and on a pod Troupe's own beats a repository's " <>
+                 "unless the profile allows the repository's"
+    end
+
+    test "with the setting on, the repository's build runs", context do
+      allowed = Map.put(context.no_build, :repository_overrides, true)
+      %{session: session} = start_session(context, bundle: allowed, kind: :team)
+
+      {:ok, definitions} = Troupe.definitions(session.id)
+      build = Definitions.fetch!(definitions, "build")
+      assert build.source == :project
+      assert build.prompt == "You are the repository's build."
+      assert events_of_type(session.id, "files_skipped") == []
+    end
+
+    test "a pod pinned to nothing, its channel having nothing published, is a pod too", context do
+      nothing = %{version: nil, hash: nil, channel: "stable", dir: nil}
+
+      defs = Definitions.load(context.workspace, bundle: nothing)
+      assert Definitions.fetch!(defs, "build").source == :builtin
+      assert [%{name: "build"}] = Definitions.skipped(defs)
+      assert Skills.skipped(nothing, context.workspace) == []
+
+      allowed = Map.put(nothing, :repository_overrides, true)
+
+      assert Definitions.fetch!(Definitions.load(context.workspace, bundle: allowed), "build").source ==
+               :project
+
+      # And a laptop, pinned to nothing at all, is as it was.
+      assert Definitions.fetch!(Definitions.load(context.workspace), "build").source == :project
+    end
+  end
+
   describe "a worktree made before onboarding" do
     setup context do
       main = Path.join(context.base, "main")

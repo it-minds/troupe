@@ -94,6 +94,29 @@ defmodule Troupe.Worker.BundleWinsTest do
     assert Definitions.fetch!(definitions, "build").source == :bundle
   end
 
+  # The built-ins beat the working copy on a pod as the bundle does, and a channel with
+  # nothing published pins the session to nothing rather than to a laptop's order.
+  test "with nothing published, the built-in build runs; with the setting on, the repository's",
+       context do
+    nothing = Map.drop(push(context), ["bundle_version", "bundle_hash"])
+    assert {:ok, %{"activated" => true}} = Commands.handle("session.activate", nothing)
+
+    {:ok, definitions} = Troupe.definitions(context.session_id)
+    assert Definitions.fetch!(definitions, "build").source == :builtin
+
+    [skipped] = Enum.filter(Troupe.events(context.session_id), &(&1.type == "files_skipped"))
+    assert [%{"name" => "build", "reason" => reason}] = skipped.data["files"]
+    assert reason =~ "an agent Troupe ships"
+
+    # Asleep and woken again under a profile that has turned the setting on.
+    assert {:ok, _} = Sessions.dormant(context.session_id)
+    allowed = Map.put(nothing, "repository_overrides_bundle", true)
+    assert {:ok, %{"activated" => true}} = Commands.handle("session.activate", allowed)
+
+    {:ok, definitions} = Troupe.definitions(context.session_id)
+    assert Definitions.fetch!(definitions, "build").source == :project
+  end
+
   defp push(context) do
     %{
       "session_id" => context.session_id,

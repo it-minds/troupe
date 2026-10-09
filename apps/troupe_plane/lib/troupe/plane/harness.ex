@@ -2406,8 +2406,9 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  # Whether the profile lets a repository's agents and skills replace its bundle's of the
-  # same name (Decision 826): `spec.repositoryOverridesBundle`, on only when it is `true`.
+  # Whether the profile lets a repository's agents and skills replace its bundle's and the
+  # built-ins of the same name (Decision 826): `spec.repositoryOverridesBundle`, on only
+  # when it is `true`.
   # It rides with the pin, as the entitlement set does, because the pod applies it wherever
   # it reads the bundle; and it is read again at every activation, as the channel is, so a
   # profile that turns it off reaches a session the next time it wakes.

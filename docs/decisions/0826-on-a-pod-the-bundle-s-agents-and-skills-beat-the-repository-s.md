@@ -1,6 +1,6 @@
 ---
 number: 826
-title: "On a pod the bundle's agents and skills beat the working copy's of the same name unless the profile sets `repositoryOverridesBundle`; the losers are listed as skipped, onboarding refuses there, and a worktree reads its main checkout's committed files"
+title: "On a pod the bundle's agents and skills, and Troupe's built-in agents, beat the working copy's of the same name unless the profile sets `repositoryOverridesBundle`; the losers are listed as skipped, onboarding refuses there, and a worktree reads its main checkout's committed files"
 date: 2026-10-09
 status: accepted
 issue: 516
@@ -28,11 +28,14 @@ symbols:
   - Troupe.Skills.skipped/2
   - Troupe.Worktree.main/1
   - Troupe.Onboard.Pod.refusal/1
-gist: "On a pod the bundle's agents and skills beat the disk's of a name unless spec.repositoryOverridesBundle is true; losers listed in files_skipped"
+gist: "On a pod the bundle's and the built-ins' names beat the disk's unless spec.repositoryOverridesBundle is true; losers listed in files_skipped"
 ---
 
 Issue #516, slice 7, and its decision 6 as the maintainer took it: on a pod the bundle
-wins, with a profile setting to let the repository's files win instead.
+wins, with a profile setting to let the repository's files win instead. The maintainer
+then settled the question this slice left open: Troupe's built-in agents (and built-in
+skills, were there any) win on a pod as the bundle's do, and the same setting lets the
+repository's win over both.
 
 What was there: `Troupe.Agent.Definitions.load/2` merged built-ins, then the bundle, then
 the config directory's `agents/`, then the working copy's `.troupe/agents/`, and
@@ -42,26 +45,38 @@ repository's `.troupe/agents/build.md` replaced the `build` the channel's bundle
 in every session of every team that opened that repository; the only defence was a
 moduledoc saying those directories were empty on a worker, which nothing made true.
 
-- **The rule, in one place.** `Definitions.bundle_wins?/1`: wherever a session has a
-  bundle, which only a pod does, the bundle's agents and skills beat every file on the
-  pod's disk of the same name, unless the bundle pin carries `repository_overrides: true`.
-  The agent merge (`load/2`) and the skill merge (`Skills.available/3`, through its
-  private `local/2`) both ask it. On a pod the order is: built-ins, the pod's config
-  directory, the working copy (`.troupe/agents/`, `.troupe/skills/`, and whatever
-  `Skills.Local` reads besides, `.agents/skills/` included once Decision 822's layer is
-  there), then the bundle, then its ACP agents. The setting puts the bundle back below the
-  directories, which is the order there was before.
-- **Only the names the bundle has.** A working copy's agent or skill of another name is
-  read as on a laptop, and may still replace a built-in agent the bundle does not
-  publish; an admin who wants a name fixed publishes it in the bundle. A skill on disk of
-  a name the bundle has is left out whether or not the agent at hand may consult the
-  bundle's one, for the reason `load/2` gives for applying the entitled set after the
-  merge: a file standing in for one somebody was not given is a different skill answering
-  to that name.
+- **The rule, in one place.** `Definitions.bundle_wins?/1`: wherever a session is pinned
+  to a bundle, which only a pod is, the bundle's agents and skills and Troupe's built-in
+  agents beat every file on the pod's disk of the same name, unless the pin carries
+  `repository_overrides: true`. The agent merge (`load/2`, given the pin) and the skill
+  merge (`Skills.available/3`, through its private `local/2`) both ask it. On a pod the
+  order is: the pod's config directory, the working copy (`.troupe/agents/`,
+  `.troupe/skills/`, and whatever `Skills.Local` reads besides, `.agents/skills/` included
+  once Decision 822's layer is there), then the built-ins, then the bundle, then its ACP
+  agents; a bundle still replaces a built-in only with `override: true`, as its validation
+  says. The setting puts back the order there was before: built-ins, bundle, directories.
+- **Built-ins too.** A repository's `.troupe/agents/build.md` on a pod whose bundle
+  publishes no `build` would otherwise replace the agent every session starts as, which a
+  clone should not be able to do any more than replace one an admin published. So a
+  working copy's file of a built-in's name is skipped as well, with its own reason (an
+  agent Troupe ships). Troupe ships no skills, so for skills the bundle's names are the
+  only ones; one it shipped would win the same way.
+- **A pod pinned to nothing.** A pod whose channel has nothing published used to activate
+  a session with no pin at all, which would have read as a laptop. The worker now pins
+  such a session to nothing (`version` and `dir` nil, the profile's word on the setting
+  carried as on any pin), so the built-ins win there too and the setting still reaches it.
+  Nothing else reads a pin with no version or directory differently from none: no
+  `bundle_version` is recorded, no `skills:/` mount is made, no entitled set applies.
+- **Only those names.** A working copy's agent or skill of another name is read as on a
+  laptop. A skill on disk of a name the bundle has is left out whether or not the agent at
+  hand may consult the bundle's one, for the reason `load/2` gives for applying the
+  entitled set after the merge: a file standing in for one somebody was not given is a
+  different skill answering to that name.
 - **A loser is not read, and is listed.** It is taken out of its layer before the merge,
   not parsed and then replaced, so a broken one cannot even warn. `Definitions.skipped/1`
   and `Skills.skipped/2` give each as `{kind, name, path, reason}`; the reason says the
-  bundle has that name and that the profile does not allow the repository's. The session
+  bundle has that name, or that it is an agent Troupe ships, and that the profile does not
+  allow the repository's. The session
   writes them into its log as `files_skipped` (a new durable event, an addition within
   version 1) at a start whose list differs from the one the log last recorded, an empty
   list included: the definitions are read again at every activation, a working copy can
@@ -90,8 +105,8 @@ moduledoc saying those directories were empty on a worker, which nothing made tr
   says nothing leaves pods on the safe side.
 - **Commands (Decision 763).** They follow the same rule and have nothing to lose to: a
   bundle carries no commands, so a working copy's `.troupe/commands/` are read on a pod as
-  everywhere, and a command named like an agent is still skipped as 763 says, the agent on
-  a pod being the bundle's. When bundles carry commands, they join this rule.
+  everywhere, and a command named like a built-in or an agent is still skipped as 763
+  says. When bundles carry commands, they join this rule.
 - **Onboarding refuses on a pod.** `Troupe.Onboard.Pod.refusal/1` is the one check, for
   `troupe onboard` and for the onboarding tool (#516 slice 3) alike: given a session id, a
   `team` session is refused; given `nil`, as a command line has no session, a machine
@@ -122,13 +137,17 @@ moduledoc saying those directories were empty on a worker, which nothing made tr
   prompt, a name the bundle lacks is the repository's, the repository's skills of the
   bundle's names are neither offered nor stand in, `skipped` lists them with the reason,
   `files_skipped` is written once across a dormancy and again, empty, when the files go,
-  `repository_overrides` puts the order back, and a laptop is unchanged; a worktree made
+  `repository_overrides` puts the order back, and a laptop is unchanged; on a pod whose
+  bundle publishes no `build`, the built-in `build` runs over the repository's, which is
+  listed as an agent Troupe ships, and with the setting on the repository's runs; a pin
+  with nothing pinned does the same; a worktree made
   before onboarding reads the main checkout's committed agent and skill, its own first,
   lists the uncommitted ones and reads them once committed, and the checkout reads its own
   as they are. `Troupe.Onboard.PodTest`: a team session and a worker's machine refused with
   the sentence, a local session and a laptop allowed. `Troupe.Worker.BundleWinsTest`, a
   `session.activate` with a bundle the pod's registry fetches: the bundle's `build` and the
   repository's in `files_skipped`; with `repository_overrides_bundle: true` the
-  repository's; with `"true"` the bundle's. The plane's `AdminTest` (a boolean kept, a
+  repository's; with `"true"` the bundle's; with nothing published, the built-in `build`,
+  and after a wake under the setting, the repository's. The plane's `AdminTest` (a boolean kept, a
   string or a number refused), `BundlesTest` (the push says `false`, then `true` once the
   profile does) and `PanelTest` (the toggle, kept on a save, cleared when unticked).

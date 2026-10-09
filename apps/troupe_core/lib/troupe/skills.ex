@@ -59,8 +59,9 @@ defmodule Troupe.Skills do
   `entitlements` is the set the plane resolved for this session's team, by name, or
   `nil` for no restriction — which is what a local session, a laptop and every grant
   nobody has narrowed all send. `repository_overrides` is `true` where the profile lets
-  a repository's agents and skills replace the bundle's (Decision 826); anything else is
-  the bundle winning.
+  a repository's agents and skills replace the bundle's and the built-ins (Decision 826);
+  anything else is those winning. A pod whose channel has nothing published is pinned to
+  nothing: `version` and `dir` nil.
   """
   @type bundle :: %{
           optional(:version) => term(),
@@ -173,8 +174,10 @@ defmodule Troupe.Skills do
       |> Enum.map(&Map.take(&1, [:name, :description, :layer, :dir]))
       |> with_checkout(root)
 
+    # Troupe ships no skills of its own, so the bundle's are the only names that win here;
+    # one it shipped would win as a built-in agent does.
     if Definitions.bundle_wins?(bundle) do
-      taken = bundle.dir |> Bundle.list_skills() |> MapSet.new(& &1.name)
+      taken = MapSet.new(bundle_skills(bundle), & &1.name)
       {lost, kept} = Enum.split_with(listed, &MapSet.member?(taken, &1.name))
 
       {kept,
@@ -208,6 +211,14 @@ defmodule Troupe.Skills do
        Enum.map(drafts, &skip(&1, Worktree.uncommitted(main)))}
     else
       _none -> {listed, []}
+    end
+  end
+
+  # A pin with nothing pinned, or no directory on this pod, has no skills.
+  defp bundle_skills(bundle) do
+    case dir(bundle) do
+      nil -> []
+      path -> Bundle.list_skills_in(path)
     end
   end
 

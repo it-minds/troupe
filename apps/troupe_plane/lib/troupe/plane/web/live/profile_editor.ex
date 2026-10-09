@@ -643,9 +643,9 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
               name="repositoryOverridesBundle"
               label="let a repository replace the bundle's agents and skills"
             >
-              Off, the bundle's agents and skills win over a working copy's of the same name,
-              which a session lists as skipped. On, a repository's .troupe/agents and
-              .troupe/skills replace them. Read at every activation.
+              Off, the bundle's agents and skills and the built-in agents win over a working
+              copy's of the same name, which a session lists as skipped. On, a repository's
+              .troupe/agents and .troupe/skills replace them. Read at every activation.
             </.toggle>
           </section>
 
