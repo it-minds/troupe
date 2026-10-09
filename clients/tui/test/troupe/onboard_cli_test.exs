@@ -226,7 +226,8 @@ defmodule Troupe.OnboardCLITest do
     assert out =~ "+ Do a.\n"
 
     assert out =~
-             "Nothing more was written: there is no terminal to ask in. Pass --yes to write them all"
+             "Nothing more was written: nobody was there to answer (no terminal, or the input " <>
+               "ended). Pass --yes to write them all"
 
     refute File.exists?(Path.join(ws, ".troupe"))
 

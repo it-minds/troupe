@@ -154,8 +154,8 @@ defmodule Troupe.CLI.Onboard do
     if unasked > 0,
       do:
         line <>
-          "\nNothing more was written: there is no terminal to ask in. Pass --yes to write " <>
-          "them all, or --json to read them.",
+          "\nNothing more was written: nobody was there to answer (no terminal, or the " <>
+          "input ended). Pass --yes to write them all, or --json to read them.",
       else: line
   end
 
