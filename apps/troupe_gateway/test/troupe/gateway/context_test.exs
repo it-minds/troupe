@@ -171,6 +171,49 @@ defmodule Troupe.Gateway.ContextTest do
     assert root["reason"] == "not read: outside the repository"
   end
 
+  # Decision 822: an `.agents/AGENTS.md` is an instruction file of its directory's scope,
+  # read before that directory's own `AGENTS.md`; one linked out of the repository is not.
+  test "context.get names an .agents/AGENTS.md with its scope, and one linked out as not read",
+       %{workspace: ws, state_dir: state_dir, client: client} = context do
+    ws = Path.expand(ws)
+    File.mkdir_p!(Path.join(ws, ".agents"))
+    File.mkdir_p!(Path.join(ws, "lib/.agents"))
+    File.write!(Path.join(ws, ".agents/AGENTS.md"), "From .agents.\n")
+    File.write!(Path.join(ws, "AGENTS.md"), "Root.\n")
+    outside = Path.join(Path.dirname(state_dir), "elsewhere.md")
+    File.write!(outside, "not the repository's\n")
+    File.ln_s!(outside, Path.join(ws, "lib/.agents/AGENTS.md"))
+    File.write!(Path.join(ws, "lib/a.ex"), "a\n")
+
+    session =
+      start_session(context, [{:tools, [{"read_file", %{"path" => "lib/a.ex"}}]}, {:text, "hi"}])
+
+    :ok = Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "hello")
+    await_turn_ended(session.id)
+
+    assert {:ok, answer} = Client.call(client, "context.get", %{"session_id" => session.id})
+    agents = Path.join(ws, ".agents/AGENTS.md")
+    linked = Path.join(ws, "lib/.agents/AGENTS.md")
+
+    assert [
+             %{"scope" => "root", "path" => ^agents, "status" => "whole", "size" => 14},
+             %{"scope" => "root", "status" => "whole", "reason" => nil},
+             %{
+               "scope" => "nested",
+               "path" => ^linked,
+               "status" => "outside",
+               "size" => 0,
+               "hash" => nil,
+               "reason" => "not read: outside the repository"
+             },
+             %{"scope" => "brief"}
+           ] = answer["files"]
+
+    assert answer["used"] == String.length("From .agents.") + String.length("Root.")
+    assert answer == Troupe.Instructions.provenance(ws, Troupe.Config.load(ws), ["lib/a.ex"])
+  end
+
   # Decision 806: Copilot's file counts at the repository root only; one on the way to what
   # the session read is listed as skipped, with why, and not read.
   test "context.get names a nested Copilot file as skipped, saying why",

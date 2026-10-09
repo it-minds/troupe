@@ -326,6 +326,37 @@ defmodule Troupe.Gateway.LocalSourcesTest do
 
       assert data["reason"] =~ "not a directory"
     end
+
+    # Decision 822: the repository's `.agents/skills` is a layer below Troupe's own, read in
+    # place; a name `.troupe/skills` has too is listed as skipped, saying which is used.
+    test "an .agents/skills skill is listed with its layer, and one .troupe/skills beats is " <>
+           "listed as skipped, with why",
+         context do
+      ws = Path.expand(context.workspace)
+
+      skill = fn dir, description ->
+        File.mkdir_p!(dir)
+        File.write!(Path.join(dir, "SKILL.md"), "---\ndescription: #{description}\n---\nDo it.")
+      end
+
+      skill.(Path.join(ws, ".agents/skills/deploy"), "From .agents")
+      skill.(Path.join(ws, ".agents/skills/review"), "Hidden by .troupe")
+      skill.(Path.join(ws, ".troupe/skills/review"), "From .troupe")
+
+      assert {:ok, %{"skills" => [deploy, review], "skipped" => [skipped]}} =
+               Client.call(context.client, "skills.list", %{"workspace" => ws})
+
+      assert %{"name" => "deploy", "layer" => "agents", "description" => "From .agents"} = deploy
+      assert deploy["source"] == Path.join(ws, ".agents/skills")
+
+      assert %{"name" => "review", "layer" => "workspace", "description" => "From .troupe"} =
+               review
+
+      assert %{"name" => "review", "layer" => "agents", "status" => "skipped"} = skipped
+      assert skipped["dir"] == Path.join(ws, ".agents/skills/review")
+      assert skipped["reason"] == "skipped: #{Path.join(ws, ".troupe/skills/review")} is used"
+      refute Map.has_key?(skipped, "description")
+    end
   end
 
   defp wait_for_ready(client, session_id, waited \\ 0) do

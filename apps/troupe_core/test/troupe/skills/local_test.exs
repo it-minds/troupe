@@ -63,6 +63,121 @@ defmodule Troupe.Skills.LocalTest do
            ]
   end
 
+  test "a repository's .agents/skills is offered, the nearest directory's first up to the " <>
+         "root, and ~/.agents/skills below them",
+       context do
+    repo = Path.join(context.base, "repo")
+    File.mkdir_p!(Path.join(repo, ".git"))
+    workspace = Path.join(repo, "services/api")
+    File.mkdir_p!(workspace)
+    home = Path.join(context.base, "home/.agents")
+
+    skill!(Path.join(home, "skills"), "lint", "From my home")
+    skill!(Path.join(home, "skills"), "review", "Mine, which the repository's beats")
+    skill!(Path.join(repo, ".agents/skills"), "review", "The repository's review")
+    skill!(Path.join(repo, ".agents/skills"), "deploy", "The root's deploy")
+    skill!(Path.join(repo, "services/.agents/skills"), "deploy", "The services' deploy")
+    skill!(Path.join(workspace, ".agents/skills"), "test", "The api's tests")
+    skill!(Path.join(repo, "web/.agents/skills"), "stray", "Not on the way to the workspace")
+
+    listed = Local.list(workspace, user_dir: context.user_dir, agents_home: home)
+
+    assert Enum.map(listed, &{&1.name, &1.layer, &1.description}) == [
+             {"deploy", :agents, "The services' deploy"},
+             {"lint", :user_agents, "From my home"},
+             {"review", :agents, "The repository's review"},
+             {"test", :agents, "The api's tests"}
+           ]
+
+    assert Enum.find(listed, &(&1.name == "deploy")).dir ==
+             Path.join(repo, "services/.agents/skills/deploy")
+
+    plain = %Definition{name: "plain", mode: :primary, prompt: ""}
+    assert Skills.prompt_section(nil, plain, workspace) =~ "deploy: The services' deploy"
+  end
+
+  test "a .troupe/skills skill beats an .agents one of the same name, which is listed as " <>
+         "skipped, saying which is used",
+       context do
+    File.mkdir_p!(Path.join(context.workspace, ".git"))
+    home = Path.join(context.base, "home/.agents")
+    agents = skill!(Path.join(context.workspace, ".agents/skills"), "review", "From .agents")
+    mine = skill!(Path.join(home, "skills"), "review", "From ~/.agents")
+    skill!(Path.join(context.workspace, ".agents/skills"), "deploy", "Only in .agents")
+    skill!(Path.join(context.workspace, ".agents/skills"), "Not_A_Name", "A name no skill has")
+    troupe = skill!(Local.workspace_dir(context.workspace), "review", "From .troupe")
+
+    opts = [user_dir: context.user_dir, agents_home: home]
+    %{skills: skills, skipped: skipped} = Local.resolve(context.workspace, opts)
+
+    assert Enum.map(skills, &{&1.name, &1.layer, &1.description}) == [
+             {"deploy", :agents, "Only in .agents"},
+             {"review", :workspace, "From .troupe"}
+           ]
+
+    used = "skipped: #{troupe} is used"
+
+    assert [
+             %{name: "review", layer: :user_agents, dir: ^mine, status: :skipped, reason: ^used},
+             %{
+               name: "Not_A_Name",
+               layer: :agents,
+               status: :skipped,
+               reason: "skipped: not a skill name: lower-case letters, digits and dashes"
+             },
+             %{name: "review", layer: :agents, dir: ^agents, status: :skipped, reason: ^used}
+           ] = skipped
+
+    refute Enum.any?(skipped, &Map.has_key?(&1, :description))
+    assert Local.list(context.workspace, opts) == skills
+  end
+
+  test "an .agents/skills, or a skill in it, that links outside its edge is listed as outside " <>
+         "and not read",
+       context do
+    repo = context.workspace
+    File.mkdir_p!(Path.join(repo, ".git"))
+    elsewhere = Path.join(context.base, "elsewhere")
+    secret = skill!(elsewhere, "secret", "a stand-in for a private file")
+    File.mkdir_p!(Path.join(repo, ".agents/skills"))
+    File.ln_s!(secret, Path.join(repo, ".agents/skills/secret"))
+    skill!(Path.join(repo, ".agents/skills"), "fine", "Inside the repository")
+    File.mkdir_p!(Path.join(repo, "sub/.agents"))
+    File.ln_s!(elsewhere, Path.join(repo, "sub/.agents/skills"))
+
+    # The person's own ~/.agents is held to itself: a skill linked out of it is not read.
+    home = Path.join(context.base, "home/.agents")
+    File.mkdir_p!(Path.join(home, "skills"))
+    File.ln_s!(secret, Path.join(home, "skills/secret"))
+
+    opts = [user_dir: context.user_dir, agents_home: home]
+    %{skills: skills, skipped: skipped} = Local.resolve(Path.join(repo, "sub"), opts)
+
+    assert [%{name: "fine", layer: :agents}] = skills
+
+    repository = "not read: outside the repository"
+
+    assert [
+             %{
+               name: "secret",
+               layer: :user_agents,
+               status: :outside,
+               reason: "not read: outside ~/.agents"
+             },
+             %{name: "secret", layer: :agents, status: :outside, reason: ^repository},
+             %{name: nil, layer: :agents, dir: linked, status: :outside, reason: ^repository}
+           ] = skipped
+
+    assert linked == Path.join(repo, "sub/.agents/skills")
+    refute inspect(skipped) =~ "private"
+
+    # Only what is inside an edge is a read root.
+    assert Local.roots(Path.join(repo, "sub"), opts) == [
+             Path.join(home, "skills"),
+             Path.join(repo, ".agents/skills")
+           ]
+  end
+
   test "imports a directory of skills by copying, skipping names a skill may not have", context do
     claude = Path.join(context.base, ".claude/skills")
     skill!(claude, "review", "From Claude Code", %{"checklist.md" => "- tests\n"})

@@ -53,6 +53,68 @@ defmodule Troupe.InstructionsTest do
     refute prompt =~ "not on the path"
   end
 
+  test "an .agents/AGENTS.md is read at its directory's scope, before that directory's own file",
+       %{repo: repo} do
+    write!(repo, ".agents/AGENTS.md", "the root's .agents")
+    write!(repo, "CLAUDE.md", "the root's own")
+    write!(repo, "web/.agents/AGENTS.md", "web's .agents")
+    write!(repo, "api/.agents/AGENTS.md", "not on the way")
+
+    loaded = Instructions.load(repo, config(), ["web/a.ts"])
+
+    assert files(loaded, repo) == [
+             {:root, ".agents/AGENTS.md"},
+             {:root, "CLAUDE.md"},
+             {:nested, "web/.agents/AGENTS.md"}
+           ]
+
+    assert [
+             %{scope: :root, status: :whole, reason: nil, skipped: []},
+             %{scope: :root, status: :whole, skipped: []},
+             %{scope: :nested, where: "web", status: :whole}
+           ] = Enum.reject(loaded.files, &(&1.scope == :brief))
+
+    prompt = Instructions.to_prompt(loaded)
+    assert [_head, agents, own, web] = String.split(prompt, "Contents of ")
+    assert agents =~ "(repository root):\nthe root's .agents"
+    assert own =~ "(repository root):\nthe root's own"
+    assert web =~ "(nearer: web/):\nweb's .agents"
+    refute prompt =~ "not on the way"
+
+    assert [
+             %{"scope" => "root", "path" => path, "status" => "whole", "reason" => nil},
+             %{"scope" => "root"},
+             %{"scope" => "nested"},
+             %{"scope" => "brief"}
+           ] = Instructions.provenance(loaded)["files"]
+
+    assert path == Path.join(repo, ".agents/AGENTS.md")
+  end
+
+  test "an .agents/AGENTS.md really outside the repository, through a linked .agents, is not read",
+       %{base: base, repo: repo} do
+    write!(base, "elsewhere/AGENTS.md", "a stand-in for a private file")
+    File.ln_s!(Path.join(base, "elsewhere"), Path.join(repo, ".agents"))
+    write!(repo, "AGENTS.md", "root rule")
+
+    loaded = Instructions.load(repo, config())
+
+    assert [
+             %{
+               scope: :root,
+               status: :outside,
+               chars: 0,
+               hash: nil,
+               reason: "not read: outside the repository"
+             },
+             %{scope: :root, status: :whole, text: "root rule"},
+             %{scope: :brief}
+           ] = loaded.files
+
+    assert hd(loaded.files).path == Path.join(repo, ".agents/AGENTS.md")
+    refute Instructions.to_prompt(loaded) =~ "private"
+  end
+
   test "in one directory the first alias is read and the rest are listed as skipped, saying why",
        %{repo: repo} do
     write!(repo, "CLAUDE.md", "claude's")

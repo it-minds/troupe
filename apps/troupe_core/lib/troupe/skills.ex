@@ -92,7 +92,7 @@ defmodule Troupe.Skills do
   @type listed :: %{
           name: String.t(),
           description: String.t(),
-          layer: :bundle | :user | :workspace,
+          layer: :bundle | Local.layer(),
           dir: Path.t()
         }
 
