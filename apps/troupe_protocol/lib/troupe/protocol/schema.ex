@@ -368,6 +368,12 @@ defmodule Troupe.Protocol.Schema do
       # What the session may touch: `[{name, kind, root, mode}]`. Resolved once, at
       # creation, and recorded so that a replay can tell what was allowed at the time.
       "mounts_resolved" => %{"mounts" => required(:array)},
+      # The agent and skill files a session found and did not read, each `{kind, name, path,
+      # reason}`: on a pod, a working copy's file of a name the bundle has or a built-in
+      # agent's, which those beat unless the profile allows the repository's; in a git
+      # worktree, one the main checkout has not committed (Decision 826). Written at a start
+      # whose list differs from the one the log last recorded, an empty list included.
+      "files_skipped" => %{"files" => required(:array)},
       # Something other than a person started this session, and this is the whole of what
       # that was: which of the seven sources, under which trigger document, on whose
       # authority, against which idempotency key, carrying what.
@@ -389,6 +395,18 @@ defmodule Troupe.Protocol.Schema do
         "hash" => required(:string),
         "bytes" => required(:integer),
         "direction" => required(:string)
+      },
+      # A file `onboard_write` wrote (Decision 823): under the workspace's `.troupe/`
+      # (`target: repo`) or the person's config directory (`user`), at `path` from that
+      # root, shown as `file`; from `source`, whose sha256 was `source_hash`; `action` is
+      # `created` or `replaced`.
+      "onboarded" => %{
+        "target" => required(:string),
+        "path" => required(:string),
+        "file" => required(:string),
+        "source" => required(:string),
+        "source_hash" => required(:string),
+        "action" => required(:string)
       },
       "session_dormant" => %{"last_seq" => required(:integer)},
       "session_activated" => %{"epoch" => required(:string), "pod" => optional(:string)},

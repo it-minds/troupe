@@ -669,6 +669,28 @@ defmodule Troupe.Plane.AdminTest do
       assert error.data.reason =~ "spec.configBundleChannel"
     end
 
+    # Whether a repository's agents and skills may replace the bundle's on the profile's pods
+    # (Decision 826): kept in the spec, and refused as anything but true or false, since a
+    # pod reads only `true` as on and a "true" saved as text would be on in nobody's eyes
+    # but the admin's.
+    test "repositoryOverridesBundle is kept when it is a boolean and refused otherwise",
+         context do
+      profile = %{"name" => "repo-dev", "image" => "ghcr.io/troupe/worker:1"}
+
+      allowed = Map.put(profile, "spec", %{"repositoryOverridesBundle" => true})
+      assert {:ok, _} = Admin.profile_put(context.root, allowed)
+      assert Fleet.get_profile("repo-dev").spec["repositoryOverridesBundle"] == true
+
+      for value <- ["true", 1, "yes"] do
+        sent = Map.put(profile, "spec", %{"repositoryOverridesBundle" => value})
+        assert {:error, error} = Admin.profile_put(context.root, sent)
+        assert error.message == "invalid_params"
+        assert error.data.reason =~ "repositoryOverridesBundle must be true or false"
+      end
+
+      assert Fleet.get_profile("repo-dev").spec["repositoryOverridesBundle"] == true
+    end
+
     # Who the profile is at a server its bundle calls with client credentials (Decision
     # 747): the owner's to write, and nothing in it secret, so the plane keeps it as it keeps
     # the rest of the spec and says what is missing rather than refusing.

@@ -139,6 +139,10 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :instructions_check} = args} ->
         print(Troupe.Instructions.Check.run(args.workspace, json: args.json))
 
+      # Read and written here too, a file at a time as the person says (root Decision 823).
+      {:ok, %{mode: :onboard} = args} ->
+        Troupe.CLI.Onboard.run(args)
+
       {:ok, %{mode: :bench} = args} ->
         Troupe.CLI.Bench.run(args)
 

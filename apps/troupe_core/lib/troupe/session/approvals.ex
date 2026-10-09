@@ -20,6 +20,10 @@ defmodule Troupe.Session.Approvals do
   log, with the system as the actor, so a person reading the transcript afterwards
   sees what the agent wanted and that it was refused for want of anyone to say yes.
   The default, `:wait`, is what a session with people attached has always done.
+
+  A request made with `always: true` is one its tool says a person must answer
+  (Decision 823: `onboard_write` into the config directory): `auto_approve` and a
+  standing `allow_session` let it through no more than they would let a refusal through.
   """
 
   use GenServer
@@ -177,10 +181,10 @@ defmodule Troupe.Session.Approvals do
   @impl GenServer
   def handle_call({:request, req}, from, state) do
     cond do
-      state.auto_approve == true ->
+      state.auto_approve == true and not always?(req) ->
         {:reply, :allow, state}
 
-      MapSet.member?(state.session_allows, req.tool) ->
+      MapSet.member?(state.session_allows, req.tool) and not always?(req) ->
         {:reply, :allow, state}
 
       # Already answered, and the tool is only asking again because the session came back
@@ -339,12 +343,19 @@ defmodule Troupe.Session.Approvals do
     }
   end
 
+  # A request that must be asked (`always: true`) stays for its answer.
   defp release_all(state) do
-    Enum.each(state.pending, fn {_id, entry} ->
+    {kept, released} = Enum.split_with(state.pending, fn {_id, entry} -> always?(entry.req) end)
+
+    Enum.each(released, fn {_id, entry} ->
       Process.demonitor(entry.monitor, [:flush])
       GenServer.reply(entry.from, :allow)
     end)
 
-    %{state | pending: %{}}
+    %{state | pending: Map.new(kept)}
   end
+
+  # A call the tool says must be asked about (Decision 823): neither `auto_approve` nor a
+  # standing `allow_session` answers it, only a person, or `mode: :deny`'s no.
+  defp always?(req), do: Map.get(req, :always, false) == true
 end

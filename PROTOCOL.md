@@ -270,7 +270,7 @@ Durable:
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to` |
-| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases, and Cursor's rules) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `reason`, `trimmed`, `skipped`, `imported_by`, `unfollowed`, `rule`, `applies` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
+| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases, `.agents/AGENTS.md`, and Cursor's rules) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `reason`, `trimmed`, `skipped`, `imported_by`, `unfollowed`, `rule`, `applies` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
 | `goal_set` | `text`, `command_id` — the session's goal, written by the root agent under the actor who set it (`session.goal.set`) |
 | `goal_cleared` | `command_id` |
 | `loop_started` | `loop_id` (`loop-<n>`), `max_iterations`, `max_failures`, `goal`, `command_id` — a loop towards the goal, written by the session under the actor who started it (`session.loop.start`) |
@@ -317,10 +317,12 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple`, `preview` — the agent's `ask_user`; answered with `question.answer`. `preview`, where there is one, is text the question is about, for a client to show as it is beneath it: the prompt a workspace's command would send, when it asks before it is first sent (`commands.run`). Open until its `question_answered`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no answer), or a `cancelled` on the agent that asked or on one above it. The budget's and the failure guard's question have no call; each also ends with its `budget_ask_answered` or `tool_failures_ask_answered`, the only word there is when nobody is there to ask, and one a cancel ended is asked again at the next turn with another `question_asked` under the same `call_id` |
 | `question_answered` | `call_id`, `text`, `actor` |
 | `command_declined` | `name`, `reason`, `command_id` — a workspace's command that asked before it was first sent (see `commands.run`) and was not: `reason` says why and how to run it later, and `command_id` is the `commands.run` that asked |
+| `onboarded` | `target` (`repo`: the workspace's `.troupe/`; `user`: the person's config directory), `path` (from that root), `file` (as a person reads it), `source` (the other tool's file it was made from: relative to the workspace, or `~/`), `source_hash` (the sha256 of that file, lowercase hex), `action` (`created` or `replaced`) — a file the `onboard_write` tool wrote, which asks first (Decision 823); the file records the same provenance itself |
 | `session_dormant` | `last_seq` |
 | `session_activated` | `epoch`, `pod` |
 | `session_resumed` | `dormant_ms`, `moved` |
 | `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
+| `files_skipped` | `files` — the agent and skill files a session found at a start and did not read, each `{kind, name, path, reason}`: on a pod, a working copy's file of a name its bundle has or a built-in agent's, which those beat unless the profile sets `repositoryOverridesBundle`; in a git worktree, one the main checkout has not committed (Decision 826). Written when the list differs from the one the log last recorded, so an empty list says the files went away |
 | `fs_changed` | `path`, `hash`, `size` |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
@@ -1167,6 +1169,9 @@ are the same file under other tools' names, and at the repository root so is
 `skipped` names the others, and each of them is listed after it as `skipped`, so nobody
 debugs a file that was never loaded. Copilot reads its file at the repository root only,
 so one in any other directory is listed as `skipped` and hides nothing (Decision 806).
+An `.agents/AGENTS.md` in the root or one of those directories (Decision 822) comes right
+before that directory's file, in its scope, and is no alias: it hides nothing and nothing
+hides it.
 `reason` says in words why a file is left out, the same words `/context` prints, and is
 null for a file that reached the prompt and for a brief `absent` or `disabled`: `not
 read: outside the repository` (`outside
@@ -1456,7 +1461,14 @@ stdio server that does not answer `initialize` within twenty seconds is `error`.
 {"workspace": "/home/me/project"}
 ```
 `skills.list` (`observe`; `workspace` optional) → `{"skills": [{"name", "description",
-"layer", "source", "dir", "linked"}]}`, the workspace's over the user's by name.
+"layer", "source", "dir", "linked"}], "skipped": [{"name", "layer", "source", "dir",
+"linked", "status", "reason"}]}`. `layer` is, lowest first, `user_agents`
+(`~/.agents/skills`), `agents` (an `.agents/skills` from the repository root down to the
+workspace, the nearest highest), `user` or `workspace`, and a name is the highest
+layer's. `skipped` is every skill the layers hold and do not offer, lowest first:
+`status` `skipped` with `reason` naming the directory used (`skipped: <dir> is used`), or
+`outside` (`not read: outside the repository`), a link out never read; an
+`.agents/skills` linked out whole is one entry with a null `name`.
 
 ```json
 {"command_id": "c-17", "scope": "user", "from": "/home/me/.claude/skills", "link": true}

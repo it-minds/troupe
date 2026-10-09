@@ -412,6 +412,25 @@ defmodule Troupe.Plane.BundlesTest do
       refute_receive {:pushed, ^pod, "session.activate", %{"agent" => "helper"}}, 200
     end
 
+    # Decision 826: the bundle's agents and skills win on a pod unless the profile lets a
+    # repository's replace them. The switch rides with the pin and is read from the profile
+    # at every activation, so turning it on or off reaches a session the next time it wakes.
+    test "the push says whether the profile lets a repository's files replace the bundle's",
+         context do
+      {:ok, v1} = Bundles.publish("stable", %{"agents" => ["build"]}, announce: false)
+      pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+      user = granted_user()
+      before = dormant_session(user, "dev", v1.version)
+      later = dormant_session(user, "dev", v1.version)
+
+      assert pushed(pod, before, user)["repository_overrides_bundle"] == false
+
+      spec = Map.put(Fleet.get_profile("dev").spec, "repositoryOverridesBundle", true)
+      {:ok, _} = Fleet.put_profile(%{name: "dev", spec: spec})
+
+      assert pushed(pod, later, user)["repository_overrides_bundle"] == true
+    end
+
     test "activating on a version that is still live is not an upgrade", context do
       {:ok, v1} = Bundles.publish("stable", %{"agents" => ["build"]}, announce: false)
       pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
@@ -510,6 +529,15 @@ defmodule Troupe.Plane.BundlesTest do
         }
       ]
     )
+  end
+
+  # A dormant session opened to activate, and the push its pod was sent for it.
+  defp pushed(pod, session, user) do
+    id = session.id
+    open = %{"session_id" => id, "mode" => "activate"}
+    assert {:ok, _} = Harness.call("session.open", open, context(user))
+    assert_receive {:pushed, ^pod, "session.activate", %{"session_id" => ^id} = params}, 5_000
+    params
   end
 
   defp granted_user do

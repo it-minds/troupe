@@ -6,27 +6,96 @@ defmodule Troupe.Agent.Definitions do
   deliberately no process here: definitions cannot change while a session runs, so
   they are data, and a subagent three levels down reads them without a message.
 
-  Precedence, lowest to highest: built-ins shipped in `priv/agents/`, the session's
-  config bundle, the global config dir's `agents/`, then the project's
-  `.troupe/agents/`. A file at a higher level replaces the same name below it. On a
-  worker the global and project directories are empty by design, so the bundle is the
-  effective source; on a laptop there is no bundle and nothing changes.
+  Precedence on a laptop, lowest to highest: built-ins shipped in `priv/agents/`, the
+  global config dir's `agents/`, then the project's `.troupe/agents/`. A file at a higher
+  level replaces the same name below it.
+
+  On a pod the session is pinned to a config bundle, the plane's word, and the agents
+  Troupe ships and the bundle's beat every file on the pod's disk of the same name, the
+  working copy's above all: a file that arrives with a clone does not stand in for
+  `build`, nor for an agent an admin published (Decision 826). Such a file is not read,
+  and is listed in `skipped` with the reason. The order there is the directories, then
+  the built-ins, then the bundle. A profile that lets a repository's agents win
+  (`spec.repositoryOverridesBundle`) puts the laptop's order back, with the bundle between
+  the built-ins and the directories, as it was before.
+
+  In a git worktree the project layer is the worktree's own `.troupe/agents/` over the
+  main checkout's, of which only what the checkout has committed is read
+  (`Troupe.Worktree`).
   """
 
   alias Troupe.Agent.Definition
-  alias Troupe.Paths
+  alias Troupe.{Paths, Worktree}
 
   @enforce_keys [:by_name]
-  defstruct [:by_name]
+  defstruct [:by_name, skipped: []]
 
-  @type t :: %__MODULE__{by_name: %{optional(String.t()) => Definition.t()}}
+  @typedoc """
+  A file found and not read, with why: an agent or a skill (`Troupe.Skills.skipped/2`),
+  the name it would have had, where it is, and a sentence a person can act on.
+  """
+  @type skipped :: %{kind: :agent | :skill, name: String.t(), path: Path.t(), reason: String.t()}
+
+  @type t :: %__MODULE__{
+          by_name: %{optional(String.t()) => Definition.t()},
+          skipped: [skipped()]
+        }
+
+  @doc """
+  Whether the bundle and the built-ins beat the files on a session's disk of the same
+  names, agents and skills alike: wherever the session is pinned to a bundle, which only a
+  pod is — a pod whose channel has nothing published is pinned to nothing, and that is a
+  pin too — unless the profile lets a repository's files win (Decision 826). The one rule
+  both merges ask.
+  """
+  @spec bundle_wins?(map() | nil) :: boolean()
+  def bundle_wins?(%{} = pin), do: Map.get(pin, :repository_overrides) != true
+  def bundle_wins?(nil), do: false
+
+  @doc """
+  Why a file of a name the bundle has (`owner` `:bundle`), or Troupe ships (`:builtin`), is
+  not read on a pod.
+  """
+  @spec lost_to_bundle(:agent | :skill, String.t(), :bundle | :builtin) :: String.t()
+  def lost_to_bundle(kind, name, owner \\ :bundle)
+
+  def lost_to_bundle(kind, name, :bundle) do
+    "the session's bundle has #{kind_name(kind)} named #{name}, and on a pod the bundle's " <>
+      "beats a repository's unless the profile allows the repository's"
+  end
+
+  def lost_to_bundle(kind, name, :builtin) do
+    "#{name} is #{kind_name(kind)} Troupe ships, and on a pod Troupe's own beats a " <>
+      "repository's unless the profile allows the repository's"
+  end
+
+  defp kind_name(:agent), do: "an agent"
+  defp kind_name(:skill), do: "a skill"
+
+  @doc "The files found and not read, each with why."
+  @spec skipped(t()) :: [skipped()]
+  def skipped(%__MODULE__{skipped: skipped}), do: skipped
+
+  @doc "A skipped file as `files_skipped` records it."
+  @spec skipped_to_json(skipped()) :: map()
+  def skipped_to_json(%{kind: kind, name: name, path: path, reason: reason}) do
+    %{
+      "kind" => to_string(kind),
+      "name" => name,
+      "path" => Paths.display(path),
+      "reason" => reason
+    }
+  end
 
   @doc """
   Load every definition visible from a workspace.
 
-  `bundle_dir:` names a materialised bundle whose `agents/` is read as the `:bundle`
-  source. Unparseable files are skipped with a warning rather than failing the
-  session: one broken custom agent should not stop the user from working.
+  `bundle:` is the session's pin (`t:Troupe.Skills.bundle/0`), whose `dir`'s `agents/` is
+  read as the `:bundle` source; it and the built-ins are above every directory unless the
+  pin says `repository_overrides: true` (`bundle_wins?/1`). `bundle_dir:` with
+  `repository_overrides:` says the same without a pin. Unparseable files are skipped with
+  a warning rather than failing the session: one broken custom agent should not stop the
+  user from working.
 
   `entitled:` is the list of agent names this session's team was granted, or `nil` for
   no restriction. It is applied *after* the whole search order is merged, so an agent
@@ -37,16 +106,106 @@ defmodule Troupe.Agent.Definitions do
   """
   @spec load(Path.t(), keyword()) :: t()
   def load(workspace_root, opts \\ []) do
+    pin = pin(opts)
+    bundle = bundle_layer(pin && pin[:dir])
+    project = layer(Path.join(Paths.project_dir(workspace_root), "agents"), :project)
+    {checkout, uncommitted} = checkout_layer(workspace_root, project)
+    disk = [layer(Path.join(Paths.config_dir(), "agents"), :global)] ++ checkout ++ [project]
+
+    wins? = bundle_wins?(pin)
+    acp = Keyword.get(opts, :acp_agents, [])
+    {layers, lost} = ordered(layer(builtin_dir(), :builtin), bundle, disk, wins?, acp)
+
     by_name =
-      %{}
-      |> merge_dir(builtin_dir(), :builtin)
-      |> merge_bundle(Keyword.get(opts, :bundle_dir))
-      |> merge_dir(Path.join(Paths.config_dir(), "agents"), :global)
-      |> merge_dir(Path.join(Paths.project_dir(workspace_root), "agents"), :project)
-      |> merge_acp(Keyword.get(opts, :acp_agents, []))
+      layers
+      |> Enum.reduce(%{}, &merge_layer/2)
+      |> merge_acp(acp)
       |> entitled(Keyword.get(opts, :entitled))
 
-    %__MODULE__{by_name: by_name}
+    %__MODULE__{by_name: by_name, skipped: uncommitted ++ lost}
+  end
+
+  # The pin, given whole, or as the directory and the profile's word on it.
+  defp pin(opts) do
+    case Keyword.fetch(opts, :bundle) do
+      {:ok, pin} ->
+        pin
+
+      :error ->
+        case Keyword.get(opts, :bundle_dir) do
+          nil -> nil
+          dir -> %{dir: dir, repository_overrides: Keyword.get(opts, :repository_overrides)}
+        end
+    end
+  end
+
+  # A layer is a directory, its source, and the names of the files read from it.
+  defp layer(dir, source), do: %{dir: dir, source: source, names: names_in(dir)}
+
+  defp bundle_layer(nil), do: nil
+  defp bundle_layer(dir), do: layer(Path.join(dir, "agents"), :bundle)
+
+  defp ordered(builtin, bundle, disk, false, _acp),
+    do: {[builtin | List.wrap(bundle)] ++ disk, []}
+
+  # Where the bundle wins, every directory's file of a built-in's name, the bundle's or its
+  # ACP agents', is taken out of its layer, unread, rather than read and replaced: a file
+  # that is not read cannot fail to parse into a warning, and the answer names it as what
+  # it is, skipped, saying whose name it is. The bundle's is said where a name is both,
+  # since that is the one that runs.
+  defp ordered(builtin, bundle, disk, true, acp) do
+    owners =
+      Map.merge(
+        Map.new(builtin.names, &{&1, :builtin}),
+        Map.new(names_of(bundle) ++ Enum.map(acp, & &1.name), &{&1, :bundle})
+      )
+
+    {disk, lost} =
+      Enum.map_reduce(disk, [], fn layer, lost ->
+        {gone, kept} = Enum.split_with(layer.names, &Map.has_key?(owners, &1))
+        skipped = Enum.map(gone, &skip(layer.dir, &1, lost_to_bundle(:agent, &1, owners[&1])))
+        {%{layer | names: kept}, lost ++ skipped}
+      end)
+
+    {[builtin | disk] ++ List.wrap(bundle), lost}
+  end
+
+  defp names_of(nil), do: []
+  defp names_of(layer), do: layer.names
+
+  # In a worktree, the main checkout's committed agents, below the worktree's own. One the
+  # checkout has not committed is listed, unless the worktree has its own of that name and
+  # would not have read the checkout's anyway.
+  defp checkout_layer(workspace_root, project) do
+    with main when is_binary(main) <- Worktree.main(workspace_root),
+         dir = Path.join(Paths.project_dir(main), "agents"),
+         [_ | _] = names <- names_in(dir) -- project.names do
+      committed = Worktree.committed(main, ".troupe/agents")
+
+      {kept, drafts} =
+        Enum.split_with(names, &MapSet.member?(committed, ".troupe/agents/#{&1}.md"))
+
+      {[%{dir: dir, source: :project, names: kept}],
+       Enum.map(drafts, &skip(dir, &1, Worktree.uncommitted(main)))}
+    else
+      _none -> {[], []}
+    end
+  end
+
+  defp skip(dir, name, reason),
+    do: %{kind: :agent, name: name, path: Path.join(dir, name <> ".md"), reason: reason}
+
+  defp names_in(dir) do
+    case File.ls(dir) do
+      {:ok, entries} ->
+        entries
+        |> Enum.filter(&String.ends_with?(&1, ".md"))
+        |> Enum.map(&Path.basename(&1, ".md"))
+        |> Enum.sort()
+
+      {:error, _} ->
+        []
+    end
   end
 
   # A bundle's ACP agents become ordinary subagent definitions carrying a command instead
@@ -134,20 +293,10 @@ defmodule Troupe.Agent.Definitions do
   @spec builtin_dir() :: Path.t()
   def builtin_dir, do: Application.app_dir(:troupe_core, "priv/agents")
 
-  defp merge_bundle(acc, nil), do: acc
-  defp merge_bundle(acc, dir), do: merge_dir(acc, Path.join(dir, "agents"), :bundle)
-
-  defp merge_dir(acc, dir, source) do
-    case File.ls(dir) do
-      {:ok, entries} ->
-        entries
-        |> Enum.filter(&String.ends_with?(&1, ".md"))
-        |> Enum.sort()
-        |> Enum.reduce(acc, fn entry, acc -> merge_file(acc, Path.join(dir, entry), source) end)
-
-      {:error, _} ->
-        acc
-    end
+  defp merge_layer(%{dir: dir, source: source, names: names}, acc) do
+    Enum.reduce(names, acc, fn name, acc ->
+      merge_file(acc, Path.join(dir, name <> ".md"), source)
+    end)
   end
 
   defp merge_file(acc, path, source) do

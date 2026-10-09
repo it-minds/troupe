@@ -22,7 +22,7 @@ defmodule Troupe.Agent.Definition do
   until it does.
   """
 
-  alias Troupe.Config.Trust
+  alias Troupe.Config.{Trust, Yaml}
   alias Troupe.Protocol.AgentDefinition
 
   @enforce_keys [:name, :mode, :prompt]
@@ -174,6 +174,44 @@ defmodule Troupe.Agent.Definition do
   def parse(name, contents, source) do
     with {:ok, parsed} <- AgentDefinition.parse(name, contents) do
       {:ok, from_parsed(parsed, source)}
+    end
+  end
+
+  @doc """
+  The file `parse/3` reads back to this definition, the name aside, which is the file's:
+  the frontmatter keys whose values differ from a file without them, in the order the
+  built-ins write them, then the prompt. What onboarding proposes for `.troupe/agents/`
+  (Decision 824). An ACP entry is a bundle's, with no file of its own, and has none.
+  """
+  @spec render(t()) :: String.t()
+  def render(%__MODULE__{acp: nil} = definition) do
+    frontmatter =
+      [
+        {"description", definition.description, ""},
+        {"mode", Atom.to_string(definition.mode), nil},
+        {"model", definition.model, nil},
+        {"tools", definition.tools, :all},
+        {"skills", if(definition.skills == :all, do: "all", else: definition.skills), []},
+        {"permissions",
+         Map.new(definition.permissions, fn {tool, permission} ->
+           {tool, Atom.to_string(permission)}
+         end), %{}},
+        {"max_turns", definition.max_turns, nil},
+        {"budget_share", definition.budget_share, 0.25}
+      ]
+      |> Enum.reject(fn {_key, value, absent} -> value == absent end)
+      |> Enum.reduce("", fn {key, value, _absent}, text -> put(text, key, value) end)
+
+    prompt = if definition.prompt == "", do: "", else: "\n" <> definition.prompt <> "\n"
+    "---\n" <> frontmatter <> "---\n" <> prompt
+  end
+
+  # One key after the others, bare where YAML reads it back as itself, which
+  # `Troupe.Config.Yaml.put/3` checks.
+  defp put(text, key, value) do
+    case Yaml.put(text, [key], value) do
+      {:ok, text} -> if String.ends_with?(text, "\n"), do: text, else: text <> "\n"
+      :error -> text <> Yaml.encode(%{key => value})
     end
   end
 
