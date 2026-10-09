@@ -124,11 +124,17 @@ which trusts other workspaces too; it says which one still trusts it.
 never reads these keys from a project's file, trusted or not: a pod's provider and key
 come from its profile.
 
+The workspace's own agents wait for the same answer. A `.troupe/agents/<name>.md` whose
+`permissions:` sets a tool to `auto` runs that tool without asking only in a trusted
+workspace; until then the tool asks as it would without the file, and `agents.list`
+gives the agent a note saying so and naming the command. Its `ask` and `deny` apply
+either way, and your own `<config>/agents/` and the built-ins are not the workspace's.
+
 ## Your own MCP servers and skills
 
 Beside `config.yaml` there are two more files a person keeps, in the shape other tools
-already use, so what you have for Claude Code, Claude Desktop, Cursor, VS Code or
-opencode comes over as it is:
+already use, so what you have for Claude Code, Claude Desktop, Cursor, VS Code, opencode
+or Codex comes over as it is:
 
 ```
 <config>/mcp.json              your MCP servers, on every workspace
@@ -141,8 +147,14 @@ opencode comes over as it is:
 `{"url", "headers"}` — with one key of Troupe's own: `"include": ["~/.claude/.mcp.json"]`
 reads another file in place. `${VAR}` in an imported file becomes `{env:VAR}`, read as
 the rest of the configuration reads it. opencode's servers are under `mcp` in its
-`opencode.json`, and import from there. A `skills.json` beside a `skills/` directory does
-the same for directories of skills: `{"include": ["~/.claude/skills"]}`.
+`opencode.json`, and import from there. Codex's are `[mcp_servers.<name>]` tables in a
+`config.toml`, a project's `.codex/config.toml` or your own `~/.codex/config.toml`, and
+import or link from there: `bearer_token_env_var` becomes an `Authorization` header read
+from that variable, `env_http_headers` headers read from theirs, and what has no place in
+Troupe's entry (`enabled_tools`, `http_headers_helper`, a tool's approval mode) is named in
+what the import says. Your own `~/.codex/config.toml` goes into your `mcp.json` only,
+never a workspace's. A `skills.json` beside a `skills/` directory does the same for
+directories of skills: `{"include": ["~/.claude/skills"]}`.
 
 A `url` server is spoken to as the MCP specification's streamable HTTP transport has it:
 `initialize` before the first call, and the session the server hands back, if it keeps
@@ -179,12 +191,16 @@ with `oauth` the sign-in's token is the `Authorization` that goes out, whatever 
 headers say. A workspace's server that sends headers is asked about with their names,
 and asked again when they change.
 
-Importing another tool's file carries its headers. A value that reads the environment
-comes over as `{env:VAR}`. One written out in the file is not copied into yours: the
-header is written as `{env:<SERVER>_<HEADER>}`, after its `Bearer` when it has one
-(`Bearer {env:TRACKER_AUTHORIZATION}`), and the import says which variable to set to what
-the other file has. A linked file is read where it is, values and all. Claude Code's
-`headersHelper`, a command that prints headers, is not run, and the import says so.
+Importing another tool's file carries its headers and its servers' `env`. A value that
+reads the environment comes over as `{env:VAR}`. One written out in the file is not
+copied into yours: a header is written as `{env:<SERVER>_<HEADER>}`, after its `Bearer`
+when it has one (`Bearer {env:TRACKER_AUTHORIZATION}`), a variable as
+`{env:<SERVER>_<NAME>}` (`GITHUB_TOKEN` of `github` as `{env:GITHUB_GITHUB_TOKEN}`), and
+the import says which variable to set to what the other file has. That holds for a
+`LOG_LEVEL` as for a token, since an import cannot tell one from the other; a value that
+is no secret is one edit to write back. A linked file is read where it is, values and
+all. Claude Code's `headersHelper`, a command that prints headers, is not run, and the
+import says so.
 
 The layers stack the way the config files do: the workspace's file over yours over
 `config.yaml`'s `mcp:`, an entry of the same name merged key by key, so a workspace can

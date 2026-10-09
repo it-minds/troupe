@@ -8,9 +8,12 @@ defmodule Troupe.MCP.Import do
   `servers` with an `inputs` list beside it. Each entry is a `command` with `args` and
   `env`, or a `url` with `headers`. opencode's `opencode.json` keeps them under `mcp`, a
   `command` list and an `environment`, or a `url` and `headers`, and `enabled: false` for
-  one that is off. Troupe's own `mcp.json` (`Troupe.MCP.Local`) is the `mcpServers` shape
-  plus an `include` list, so a file Troupe wrote is one it can import and one another
-  tool can read.
+  one that is off. Codex keeps them in TOML, a `[mcp_servers.<name>]` table each in its
+  `config.toml` (`~/.codex/config.toml`, or a project's `.codex/config.toml`): `command`,
+  `args`, `env` and `cwd`, or a `url` with `http_headers`, `env_http_headers` and
+  `bearer_token_env_var`, and `enabled = false` for one that is off. Troupe's own
+  `mcp.json` (`Troupe.MCP.Local`) is the `mcpServers` shape plus an `include` list, so a
+  file Troupe wrote is one it can import and one another tool can read.
 
   What comes out is one entry per server in the shape Troupe stores: string keys,
   `command`, `args`, `env`, `cd`, `url`, `headers`, `permission`, `timeout_ms`,
@@ -21,14 +24,14 @@ defmodule Troupe.MCP.Import do
   `{file:…}` a file only opencode reads, so that server is skipped and said so, never
   imported with a hole in it.
 
-  A copy (`copy: true`, Decision 820) is written into Troupe's own `mcp.json`, which
-  people link, copy and commit, so a header's value written out in the other tool's file
-  is not copied: the header is written as the `{env:VAR}` that reads it, keeping a
-  `Bearer ` in front, and a warning names the variable to set. Nothing here touches a
-  file.
+  A copy (`copy: true`, Decisions 820 and 825) is written into Troupe's own `mcp.json`,
+  which people link, copy and commit, so a header's or an environment variable's value
+  written out in the other tool's file is not copied: it is written as the `{env:VAR}`
+  that reads it, keeping a `Bearer ` in front, and a warning names the variable to set.
+  Nothing here touches a file.
   """
 
-  alias Troupe.Config.JSONC
+  alias Troupe.Config.{JSONC, TOML}
 
   @typedoc "One server as Troupe stores it, string-keyed, ready to be written or started."
   @type entry :: %{String.t() => term()}
@@ -51,26 +54,65 @@ defmodule Troupe.MCP.Import do
 
   @doc """
   Parse a file's text: JSON, with the comments and trailing commas VS Code and Cursor
-  allow. `{:error, reason}` only when the text is not a server file at all.
+  allow, or with `format: :toml` a Codex `config.toml`. `{:error, reason}` only when
+  the text is not a server file at all.
 
   `partial: true` reads a layer file of Troupe's own, where an entry may carry only
   the fields it changes over a lower layer — `{"disabled": true}` — and the transport
   is checked after the layers are merged, not here. `copy: true` reads a file to copy
-  into Troupe's own: a header's value is not copied but read from the environment, and
-  a warning says from which variable.
+  into Troupe's own: a header's or a variable's value is not copied but read from the
+  environment, and a warning says from which variable.
   """
   @spec parse(String.t(), keyword()) :: {:ok, parsed()} | {:error, String.t()}
   def parse(text, opts \\ []) when is_binary(text) do
-    case JSONC.decode(text) do
+    case decode(text, Keyword.get(opts, :format, :json)) do
       {:ok, decoded} -> from_map(decoded, opts)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Decode a server file's text as its format says: JSON with comments, or TOML. The
+  error is a sentence a person can act on.
+  """
+  @spec decode(String.t(), :json | :toml) :: {:ok, term()} | {:error, String.t()}
+  def decode(text, :toml) do
+    case TOML.decode(text) do
+      {:ok, %{"mcp_servers" => %{}} = decoded} -> {:ok, decoded}
+      {:ok, _other} -> {:error, "not a config.toml with [mcp_servers] tables"}
+      {:error, reason} -> {:error, "not TOML: " <> reason}
+    end
+  end
+
+  def decode(text, :json) do
+    case JSONC.decode(text) do
+      {:ok, decoded} -> {:ok, decoded}
       {:error, %Jason.DecodeError{} = error} -> {:error, "not JSON: " <> Exception.message(error)}
       {:error, other} -> {:error, "not JSON: #{inspect(other)}"}
     end
   end
 
+  @doc "The format of a server file, by its name: a `.toml` is Codex's, anything else JSON."
+  @spec format(Path.t()) :: :json | :toml
+  def format(path), do: if(Path.extname(path) == ".toml", do: :toml, else: :json)
+
+  @doc """
+  The person's own Codex configuration, `$CODEX_HOME/config.toml` or
+  `~/.codex/config.toml`: theirs, so an import puts its servers in their layer and never
+  in a workspace's (Decision 825).
+  """
+  @spec codex_user_path() :: Path.t()
+  def codex_user_path do
+    case System.get_env("CODEX_HOME") do
+      home when is_binary(home) and home != "" -> Path.join(Path.expand(home), "config.toml")
+      _unset -> Path.expand("~/.codex/config.toml")
+    end
+  end
+
   @doc """
   The servers in a decoded document: under `mcpServers` (Claude Code, Claude Desktop,
-  Cursor, Troupe), `servers` (VS Code), `mcp` (opencode), or a bare map of name to entry.
+  Cursor, Troupe), `servers` (VS Code), `mcp` (opencode), `mcp_servers` (Codex), or a
+  bare map of name to entry.
   """
   @spec from_map(term(), keyword()) :: {:ok, parsed()} | {:error, String.t()}
   def from_map(map, opts \\ [])
@@ -86,6 +128,11 @@ defmodule Troupe.MCP.Import do
       when is_map(servers) and not is_map_key(servers, "command") and
              not is_map_key(servers, "url") do
     translated = Map.new(servers, fn {name, entry} -> {name, opencode(entry)} end)
+    {:ok, servers(translated, opts)}
+  end
+
+  def from_map(%{"mcp_servers" => servers}, opts) when is_map(servers) do
+    translated = Map.new(servers, fn {name, entry} -> {name, codex(entry)} end)
     {:ok, servers(translated, opts)}
   end
 
@@ -188,6 +235,10 @@ defmodule Troupe.MCP.Import do
     |> Enum.reduce(%{servers: %{}, skipped: [], warnings: []}, &collect(&1, &2, opts))
   end
 
+  # An entry a translation already refused (`codex/1`), with why.
+  defp collect({raw_name, {:refused, reason}}, acc, _opts),
+    do: %{acc | skipped: acc.skipped ++ [%{name: to_string(raw_name), reason: reason}]}
+
   defp collect({raw_name, raw}, acc, opts) do
     raw_name = to_string(raw_name)
     name = sanitize_name(raw_name)
@@ -197,7 +248,7 @@ defmodule Troupe.MCP.Import do
         renamed = if name == raw_name, do: [], else: ["#{raw_name} is imported as #{name}"]
 
         {entry, copied} =
-          if Keyword.get(opts, :copy, false), do: headers_from_env(name, entry), else: {entry, []}
+          if Keyword.get(opts, :copy, false), do: values_from_env(name, entry), else: {entry, []}
 
         %{
           acc
@@ -252,34 +303,105 @@ defmodule Troupe.MCP.Import do
 
   defp opencode(other), do: other
 
-  # A copy into Troupe's own `mcp.json` (Decision 820): a header whose value is written
-  # out is written as the `{env:VAR}` that reads it, `Bearer ` and the like kept in
-  # front so the variable holds the credential alone, and the warning names the
-  # variable. One that already reads the environment is kept as it is.
-  defp headers_from_env(name, %{"headers" => headers} = entry) do
-    {headers, notes} =
+  # Codex's table in the shape the others write: `http_headers` are the headers, a header
+  # in `env_http_headers` names the variable it is read from, `bearer_token_env_var` names
+  # the one the `Authorization` is, `enabled = false` is off, and `tool_timeout_sec` is how
+  # long a call may take. Its other keys are left where `warnings/3` finds them; `env_vars`
+  # is not needed, since a server Troupe starts has the daemon's environment.
+  defp codex(%{} = entry) do
+    case codex_headers(entry) do
+      {:ok, headers} ->
+        entry
+        |> Map.drop(~w(http_headers env_http_headers bearer_token_env_var enabled env_vars))
+        |> Map.merge(%{
+          "headers" => headers,
+          "disabled" => entry["enabled"] == false,
+          "timeout_ms" => codex_timeout(entry["tool_timeout_sec"])
+        })
+        |> Map.reject(fn {_key, value} -> is_nil(value) end)
+
+      {:error, reason} ->
+        {:refused, reason}
+    end
+  end
+
+  defp codex(other), do: other
+
+  defp codex_headers(entry) do
+    headers = entry["http_headers"] || %{}
+    from_env = entry["env_http_headers"] || %{}
+    bearer = entry["bearer_token_env_var"]
+
+    with :ok <- codex_header_keys(headers, from_env, bearer) do
       headers
+      |> Map.merge(Map.new(from_env, fn {header, var} -> {header, "{env:#{var}}"} end))
+      |> then(&if(bearer, do: Map.put(&1, "Authorization", "Bearer {env:#{bearer}}"), else: &1))
+      |> then(&{:ok, if(&1 == %{}, do: nil, else: &1)})
+    end
+  end
+
+  defp codex_header_keys(headers, from_env, bearer) do
+    cond do
+      not is_map(headers) ->
+        {:error, "http_headers is not a map"}
+
+      not (is_map(from_env) and Enum.all?(from_env, fn {_header, var} -> variable?(var) end)) ->
+        {:error, "env_http_headers is not a map of header to variable name"}
+
+      not (is_nil(bearer) or variable?(bearer)) ->
+        {:error, "bearer_token_env_var is not a variable name"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp variable?(var), do: is_binary(var) and var =~ ~r/^[A-Za-z_][A-Za-z0-9_]*$/
+
+  defp codex_timeout(seconds) when is_number(seconds) and seconds > 0, do: round(seconds * 1000)
+  defp codex_timeout(_seconds), do: nil
+
+  # A copy into Troupe's own `mcp.json`: a header (Decision 820) or a variable of the
+  # server's environment (Decision 825) whose value is written out is written as the
+  # `{env:VAR}` that reads it, `Bearer ` and the like kept in front so the variable holds
+  # the credential alone, and the warning names the variable. One that already reads the
+  # environment is kept as it is.
+  defp values_from_env(name, entry) do
+    [{"env", "variable"}, {"headers", "header"}]
+    |> Enum.reduce({entry, []}, fn {key, what}, {entry, notes} ->
+      case entry do
+        %{^key => values} ->
+          {values, more} = from_env(name, what, values)
+          {%{entry | key => values}, notes ++ more}
+
+        _none ->
+          {entry, notes}
+      end
+    end)
+  end
+
+  defp from_env(name, what, values) do
+    {values, notes} =
+      values
       |> Enum.sort()
-      |> Enum.map_reduce([], fn {header, value}, notes ->
+      |> Enum.map_reduce([], fn {key, value}, notes ->
         if value != "" and not Regex.match?(@reference, value) do
-          var = variable(name, header)
-          {scheme, what} = scheme(value)
+          var = variable(name, key)
+          {scheme, held} = scheme(value)
           written = scheme <> "{env:#{var}}"
 
           note =
-            "#{name}: the header #{header} is copied as #{written}, not as its value; " <>
-              "set #{var} to the #{what} in the file it came from"
+            "#{name}: the #{what} #{key} is copied as #{written}, not as its value; " <>
+              "set #{var} to the #{held} in the file it came from"
 
-          {{header, written}, notes ++ [note]}
+          {{key, written}, notes ++ [note]}
         else
-          {{header, value}, notes}
+          {{key, value}, notes}
         end
       end)
 
-    {%{entry | "headers" => Map.new(headers)}, notes}
+    {Map.new(values), notes}
   end
-
-  defp headers_from_env(_name, entry), do: {entry, []}
 
   defp scheme(value) do
     case Regex.run(@scheme, value) do
@@ -429,6 +551,26 @@ defmodule Troupe.MCP.Import do
         "#{name}: ${#{var}:-…} is read as {env:#{var}}; its default is dropped"
       end)
 
-    Enum.uniq(dropped ++ defaults)
+    Enum.uniq(dropped ++ codex_dropped(name, raw) ++ defaults)
+  end
+
+  # What of a Codex table has no place in Troupe's entry, each said once.
+  @codex_dropped [
+    {["http_headers_helper"],
+     "a command Troupe does not run; give the headers it prints as headers, a secret as {env:VAR}"},
+    {["enabled_tools", "disabled_tools"],
+     "not carried: every tool the server lists is offered, and each asks before it runs"},
+    {["tools", "default_tools_approval_mode"],
+     "not carried: each of the server's tools asks before it runs"},
+    {["auth", "scopes", "oauth_resource"],
+     "not carried: a sign-in is written as oauth, with the client_id registered for it"}
+  ]
+
+  defp codex_dropped(name, raw) do
+    for {keys, why} <- @codex_dropped,
+        given = Enum.filter(keys, &Map.has_key?(raw, &1)),
+        given != [] do
+      "#{name}: #{Enum.join(given, " and ")} #{if match?([_], given), do: "is", else: "are"} #{why}"
+    end
   end
 end

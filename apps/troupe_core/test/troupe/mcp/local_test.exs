@@ -402,6 +402,127 @@ defmodule Troupe.MCP.LocalTest do
     end
   end
 
+  describe "env (Decision 825)" do
+    test "an import copies a variable written out as the {env:VAR} that reads it; a link reads it as written",
+         context do
+      from = Path.join(context.base, "claude/.mcp.json")
+
+      write_json!(from, %{
+        "mcpServers" => %{
+          "github" => %{
+            "command" => "npx",
+            "args" => ["-y", "github-mcp"],
+            "env" => %{
+              "GITHUB_PERSONAL_ACCESS_TOKEN" => "not-a-real-pat",
+              "LOG_LEVEL" => "debug",
+              "HOME_DIR" => "${HOME}"
+            }
+          }
+        }
+      })
+
+      assert {:ok, result} = Local.import(:user, nil, from, false, user_path: context.user_path)
+
+      assert Enum.any?(
+               result.warnings,
+               &(&1 =~
+                   "set GITHUB_GITHUB_PERSONAL_ACCESS_TOKEN to the value in the file it came from")
+             )
+
+      refute Enum.any?(result.warnings, &(&1 =~ "not-a-real-pat"))
+
+      assert {:ok, %{servers: %{"github" => %{"env" => env}}}} = Local.read(context.user_path)
+
+      assert env == %{
+               "GITHUB_PERSONAL_ACCESS_TOKEN" => "{env:GITHUB_GITHUB_PERSONAL_ACCESS_TOKEN}",
+               "LOG_LEVEL" => "{env:GITHUB_LOG_LEVEL}",
+               "HOME_DIR" => "{env:HOME}"
+             }
+
+      # Nothing the other file wrote out is in the one Troupe wrote.
+      written = File.read!(context.user_path)
+      refute written =~ "not-a-real-pat"
+      refute written =~ "debug"
+
+      # Read in place, the other tool's file is where the value already was.
+      assert {:ok, %{linked: true, warnings: []}} =
+               Local.import(:workspace, context.workspace, from, true, [])
+
+      {servers, []} =
+        Local.resolve(context.workspace, user_path: Path.join(context.base, "none.json"))
+
+      assert [%{config: %{env: %{"GITHUB_PERSONAL_ACCESS_TOKEN" => "not-a-real-pat"}}}] = servers
+      refute File.read!(Local.workspace_path(context.workspace)) =~ "not-a-real-pat"
+    end
+  end
+
+  describe "Codex's config.toml (Decision 825)" do
+    @codex """
+    model = "a-model"
+
+    [mcp_servers.docs]
+    command = "docs-server"
+    args = ["--stdio"]
+    env = { DOCS_KEY = "not-a-real-key" }
+
+    [mcp_servers.tracker]
+    url = "https://mcp.example.com/mcp"
+    bearer_token_env_var = "TRACKER_TOKEN"
+    """
+
+    test "a project's .codex/config.toml copies into either layer, its values as variables",
+         context do
+      from = Path.join(context.workspace, ".codex/config.toml")
+      File.mkdir_p!(Path.dirname(from))
+      File.write!(from, @codex)
+
+      assert {:ok, result} =
+               Local.import(:workspace, context.workspace, from, false,
+                 codex_path: Path.join(context.base, "home/.codex/config.toml")
+               )
+
+      assert result.added == ["docs", "tracker"]
+      assert Enum.any?(result.warnings, &(&1 =~ "set DOCS_DOCS_KEY to the value"))
+
+      assert {:ok, %{servers: servers}} = Local.read(Local.workspace_path(context.workspace))
+      assert servers["docs"]["env"] == %{"DOCS_KEY" => "{env:DOCS_DOCS_KEY}"}
+      assert servers["tracker"]["headers"] == %{"Authorization" => "Bearer {env:TRACKER_TOKEN}"}
+      refute File.read!(Local.workspace_path(context.workspace)) =~ "not-a-real-key"
+    end
+
+    test "a linked config.toml is read in place, as TOML", context do
+      from = Path.join(context.base, "home/.codex/config.toml")
+      File.mkdir_p!(Path.dirname(from))
+      File.write!(from, @codex)
+
+      assert {:ok, %{linked: true, added: ["docs", "tracker"]}} =
+               Local.import(:user, nil, from, true, user_path: context.user_path)
+
+      {servers, []} = Local.resolve(nil, user_path: context.user_path)
+      assert [docs, tracker] = servers
+      assert docs.config.env == %{"DOCS_KEY" => "not-a-real-key"}
+      assert tracker.config.refused =~ "{env:TRACKER_TOKEN} is not set"
+    end
+
+    test "the person's own one goes into their layer, never a workspace's", context do
+      own = Path.join(context.base, "home/.codex/config.toml")
+      File.mkdir_p!(Path.dirname(own))
+      File.write!(own, @codex)
+
+      for link? <- [false, true] do
+        assert {:error, message} =
+                 Local.import(:workspace, context.workspace, own, link?, codex_path: own)
+
+        assert message =~ "is your own Codex configuration; import it into your own mcp.json"
+      end
+
+      refute File.exists?(Local.workspace_path(context.workspace))
+
+      assert {:ok, %{added: ["docs", "tracker"]}} =
+               Local.import(:user, nil, own, false, user_path: context.user_path, codex_path: own)
+    end
+  end
+
   describe "the trust store" do
     test "remembers a server by workspace and fingerprint, and forgets on request", context do
       server = %{name: "fs", fingerprint: "abc"}

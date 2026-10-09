@@ -1049,11 +1049,19 @@ the client that uploaded it, not the session.
 ```json
 {"workspace": "/home/me/project"}
 ```
-→ `{"agents": [{"name", "description", "source"}]}` — the primary agents a session in that
+→ `{"agents": [{"name", "description", "source", "notes"}]}` — the primary agents a session in that
 workspace may be created with, resolved as `session.create` resolves them (built-ins, the
 machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `global`
 or `project`. A worker answers from its bundle instead, so a client offers exactly what
 `profile` may name wherever the session will run.
+
+`notes` is what a person should know about how an agent is read, each `{"key",
+"reason"}` with the reason in words, and empty for most. A `project` agent whose
+`permissions:` set a tool to `auto` in a workspace that is not trusted has one with the
+`key` `permissions`: the `auto` applies once the workspace is trusted, the tool asks until
+then, and the reason names the command that trusts it (Decision 825). A daemon trusts a
+workspace as its user's `trusted_workspaces` says, and a worker trusts none. The key is
+additive; a client that does not know it shows the agent as before.
 
 #### `commands.list`
 ```json

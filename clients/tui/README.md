@@ -509,7 +509,9 @@ calls, or while there is a list, so a small task spends no calls on one; a
 definition that names them, as `plan` and `workflow` do, has them on every call.
 `write_file`, `edit_file`, `shell` and `web_fetch` ask before they run — `y` /
 `n` / `a` in the window, or `auto_approve` for the session — and the rest run
-unattended; a definition can change either with a `permissions:` block.
+unattended; a definition can change either with a `permissions:` block. A
+project's `.troupe/agents/` file setting a tool to `auto` is held back until the
+workspace is trusted (`troupe config trust`): until then the tool asks.
 `web_fetch` is a GET that returns a URL as text, HTML reduced to readable text
 with its links kept, so an agent can read the documentation it is pointed at
 instead of guessing; `explore` and `plan` have it as well.
