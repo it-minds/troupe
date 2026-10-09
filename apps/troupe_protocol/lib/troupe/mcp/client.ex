@@ -22,9 +22,11 @@ defmodule Troupe.MCP.Client do
   renewed, ends the one the other opened. A call with nowhere to keep a session (a server
   tried before it is kept) opens one for that request and ends it after.
 
-  Every request carries the server's service credential and nothing about the session
-  except metadata for the server's own logs. That separation is the whole point of this
-  module being the only place that talks to an MCP server.
+  Every request carries the server's service credential, and the headers a person's own
+  server's entry names (Decision 820) — the handshake's and the `DELETE` that ends a
+  session too, since a server that wants a key wants it from the first request — and
+  nothing about the session except metadata for the server's own logs. That separation
+  is the whole point of this module being the only place that talks to an MCP server.
 
   A *personal* connector — one a harness offers, running on somebody's own machine —
   goes through exactly this code with exactly these rules. The difference is whose

@@ -32,11 +32,15 @@ defmodule Troupe.MCP.ImportTest do
              "env" => %{"LOG_LEVEL" => "debug"}
            }
 
-    # The transport follows from which key is set; `type` and `headers` are dropped, and
-    # a dropped header is said out loud since the server may need it.
-    assert parsed.servers["github"] == %{"url" => "https://api.githubcopilot.com/mcp/"}
+    # The transport follows from which key is set, so `type` is dropped; the headers are
+    # carried (Decision 820), as written when the file is read where it is.
+    assert parsed.servers["github"] == %{
+             "url" => "https://api.githubcopilot.com/mcp/",
+             "headers" => %{"Authorization" => "Bearer x"}
+           }
+
     assert parsed.skipped == []
-    assert ["github: headers are not carried" <> _] = parsed.warnings
+    assert parsed.warnings == []
   end
 
   test "a VS Code mcp.json: `servers`, comments, ${env:VAR} translated, ${input:…} skipped" do
@@ -100,6 +104,128 @@ defmodule Troupe.MCP.ImportTest do
     assert {:error, "not JSON" <> _} = Import.parse("{not json")
     assert {:error, "the file is not a JSON object"} = Import.parse("[1, 2]")
     assert {:error, "no mcpServers object in the file"} = Import.parse(~s({"version": 1}))
+  end
+
+  describe "headers (Decision 820)" do
+    # Each tool's file as it writes a server over HTTP with a key.
+    @claude_code """
+    {"mcpServers": {"tracker": {"type": "http", "url": "https://mcp.example.com/mcp",
+      "headers": {"Authorization": "Bearer ${TRACKER_TOKEN}", "X-Team": "core"},
+      "headersHelper": "/usr/local/bin/print-headers"}}}
+    """
+
+    @cursor """
+    {"mcpServers": {"docs": {"url": "https://docs.example.com/mcp",
+      "headers": {"X-Api-Key": "${env:DOCS_KEY}"}}}}
+    """
+
+    @vs_code """
+    {
+      "inputs": [{"id": "key", "type": "promptString", "password": true}],
+      "servers": {
+        "search": {"type": "http", "url": "https://search.example.com/mcp", "headers": {"X-Key": "${env:SEARCH_KEY}"}},
+        "asks": {"type": "http", "url": "https://asks.example.com/mcp", "headers": {"X-Key": "${input:key}"}},
+      }
+    }
+    """
+
+    @opencode """
+    {
+      "$schema": "https://opencode.ai/config.json",
+      "model": "anthropic/claude-sonnet-5",
+      "mcp": {
+        "wiki": {"type": "remote", "url": "https://wiki.example.com/mcp", "enabled": true,
+                 "headers": {"Authorization": "Bearer {env:WIKI_TOKEN}"}, "oauth": false, "timeout": 8000},
+        "files": {"type": "local", "command": ["npx", "-y", "files-mcp"], "environment": {"ROOT": "/srv"}, "enabled": false},
+        "vault": {"type": "remote", "url": "https://vault.example.com/mcp", "headers": {"X-Key": "{file:~/.vault-key}"}}
+      }
+    }
+    """
+
+    test "Claude Code's are carried, ${VAR} read as {env:VAR}, and its headersHelper said not run" do
+      assert {:ok, parsed} = Import.parse(@claude_code)
+
+      assert parsed.servers["tracker"]["headers"] == %{
+               "Authorization" => "Bearer {env:TRACKER_TOKEN}",
+               "X-Team" => "core"
+             }
+
+      assert [helper] = parsed.warnings
+      assert helper =~ "tracker: headersHelper is a command Troupe does not run"
+    end
+
+    test "Cursor's and VS Code's are carried; a VS Code ${input:…} in one still skips the server" do
+      assert {:ok, cursor} = Import.parse(@cursor)
+      assert cursor.servers["docs"]["headers"] == %{"X-Api-Key" => "{env:DOCS_KEY}"}
+
+      assert {:ok, vs_code} = Import.parse(@vs_code)
+      assert vs_code.servers["search"]["headers"] == %{"X-Key" => "{env:SEARCH_KEY}"}
+      assert [%{name: "asks", reason: reason}] = vs_code.skipped
+      assert reason =~ "${input:"
+    end
+
+    test "opencode's mcp block: remote with headers, local as a command, enabled false as off, {file:…} skipped" do
+      assert {:ok, parsed} = Import.parse(@opencode)
+
+      assert parsed.servers["wiki"] == %{
+               "url" => "https://wiki.example.com/mcp",
+               "headers" => %{"Authorization" => "Bearer {env:WIKI_TOKEN}"}
+             }
+
+      assert parsed.servers["files"] == %{
+               "command" => "npx",
+               "args" => ["-y", "files-mcp"],
+               "env" => %{"ROOT" => "/srv"},
+               "disabled" => true
+             }
+
+      assert [%{name: "vault", reason: reason}] = parsed.skipped
+      assert reason =~ "{file:…} reference only opencode reads"
+    end
+
+    test "a copy writes a header written out as the {env:VAR} that reads it, and says which to set" do
+      text = """
+      {"mcpServers": {
+        "Git Hub": {"url": "https://git.example.com/mcp",
+                    "headers": {"Authorization": "Bearer not-a-real-token", "X-Api-Key": "k-123",
+                                "X-Team": "{env:TEAM}", "X-Trace": "${TRACE_ID}", "X-Empty": ""}}
+      }}
+      """
+
+      assert {:ok, read} = Import.parse(text)
+      assert read.servers["git-hub"]["headers"]["X-Api-Key"] == "k-123"
+
+      assert {:ok, copied} = Import.parse(text, copy: true)
+
+      assert copied.servers["git-hub"]["headers"] == %{
+               "Authorization" => "Bearer {env:GIT_HUB_AUTHORIZATION}",
+               "X-Api-Key" => "{env:GIT_HUB_X_API_KEY}",
+               "X-Team" => "{env:TEAM}",
+               "X-Trace" => "{env:TRACE_ID}",
+               "X-Empty" => ""
+             }
+
+      # The warnings name the variable and never the value.
+      refute Enum.any?(copied.warnings, &(&1 =~ "not-a-real-token" or &1 =~ "k-123"))
+
+      assert ("git-hub: the header Authorization is copied as Bearer {env:GIT_HUB_AUTHORIZATION}, " <>
+                "not as its value; set GIT_HUB_AUTHORIZATION to the credential after Bearer in the " <>
+                "file it came from") in copied.warnings
+
+      assert Enum.any?(copied.warnings, &(&1 =~ "set GIT_HUB_X_API_KEY to the value in the file"))
+    end
+
+    test "headers that are not a map of strings refuse the server" do
+      assert {:ok, %{skipped: [%{name: "bad", reason: "headers is not a map"}]}} =
+               Import.parse(
+                 ~s({"mcpServers": {"bad": {"url": "https://x.test/mcp", "headers": ["X-Key: y"]}}})
+               )
+
+      assert {:ok, %{skipped: [%{name: "odd", reason: "headers is not a map of strings"}]}} =
+               Import.parse(
+                 ~s({"mcpServers": {"odd": {"url": "https://x.test/mcp", "headers": {"X-Key": {"a": 1}}}}})
+               )
+    end
   end
 
   test "Troupe's own permission and timeout are kept; a bad permission is the default" do

@@ -293,8 +293,7 @@ sleep at once; that path is not this defect's, which is the daemon's.
   stop only as the guard's question answered `stop`.
 - `Troupe.Tools.identity_of` finds only a pod's configured servers, so a call to a person's
   own MCP server is recorded with the subject `profile`, though since PR #310 the token is
-  the person's; `Troupe.MCP.Import` drops `headers`, so a local server that needs a static
-  key can't be imported.
+  the person's.
 
 Found by the chunk 11 fixers, 2026-10-01.
 

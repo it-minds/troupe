@@ -289,6 +289,119 @@ defmodule Troupe.MCP.LocalTest do
     end
   end
 
+  describe "headers (Decision 820)" do
+    # Each test its own variable: the suite runs async, and the environment is the VM's.
+    setup do
+      var = "TROUPE_TEST_MCP_HEADER_#{System.unique_integer([:positive])}"
+      on_exit(fn -> System.delete_env(var) end)
+      %{var: var}
+    end
+
+    test "read from the environment when the server is resolved, never written back; unset refuses it",
+         context do
+      write_json!(context.user_path, %{
+        "mcpServers" => %{
+          "api" => %{
+            "url" => "https://api.example.com/mcp",
+            "headers" => %{"Authorization" => "Bearer {env:#{context.var}}", "X-Team" => "core"}
+          },
+          "plain" => %{"url" => "https://plain.example.com/mcp"}
+        }
+      })
+
+      {servers, []} = Local.resolve(nil, user_path: context.user_path)
+      api = Enum.find(servers, &(&1.name == "api"))
+
+      assert api.config.refused ==
+               "{env:#{context.var}} is not set; the MCP server api is not started until it is"
+
+      System.put_env(context.var, "not-a-real-token")
+      {servers, []} = Local.resolve(nil, user_path: context.user_path)
+      api = Enum.find(servers, &(&1.name == "api"))
+      plain = Enum.find(servers, &(&1.name == "plain"))
+
+      assert api.config.headers == %{
+               "Authorization" => "Bearer not-a-real-token",
+               "X-Team" => "core"
+             }
+
+      refute Map.has_key?(api.config, :refused)
+      refute File.read!(context.user_path) =~ "not-a-real-token"
+
+      # A server with none is what it was, fingerprint and all; one whose headers change
+      # is another question for a workspace.
+      refute Map.has_key?(plain.config, :headers)
+      refute Local.fingerprint(api.config) == Local.fingerprint(Map.delete(api.config, :headers))
+
+      refute Local.fingerprint(api.config) ==
+               Local.fingerprint(put_in(api.config, [:headers, "X-Team"], "other"))
+    end
+
+    test "a header Troupe sends itself, or a value with a line break, refuses the server",
+         context do
+      write_json!(context.user_path, %{
+        "mcpServers" => %{
+          "session" => %{
+            "url" => "https://a.example.com/mcp",
+            "headers" => %{"Mcp-Session-Id" => "x"}
+          },
+          "broken" => %{
+            "url" => "https://b.example.com/mcp",
+            "headers" => %{"X-Key" => "a\r\nX-Other: b"}
+          },
+          "named" => %{"url" => "https://c.example.com/mcp", "headers" => %{"X Key" => "a"}}
+        }
+      })
+
+      {servers, []} = Local.resolve(nil, user_path: context.user_path)
+      by_name = Map.new(servers, &{&1.name, &1.config[:refused]})
+
+      assert by_name["session"] ==
+               "session: headers: Mcp-Session-Id is sent by Troupe itself, and cannot be set"
+
+      assert by_name["broken"] =~ "the value of X-Key has a line break or a control character"
+      assert by_name["named"] =~ ~s("X Key" is not a header name)
+    end
+
+    test "an import copies a header written out as the {env:VAR} that reads it; a link reads it as written",
+         context do
+      from = Path.join(context.base, "cursor/mcp.json")
+
+      write_json!(from, %{
+        "mcpServers" => %{
+          "api" => %{
+            "url" => "https://api.example.com/mcp",
+            "headers" => %{"Authorization" => "Bearer not-a-real-token"}
+          }
+        }
+      })
+
+      assert {:ok, result} = Local.import(:user, nil, from, false, user_path: context.user_path)
+
+      assert Enum.any?(
+               result.warnings,
+               &(&1 =~ "set API_AUTHORIZATION to the credential after Bearer")
+             )
+
+      refute Enum.any?(result.warnings, &(&1 =~ "not-a-real-token"))
+
+      assert {:ok, %{servers: %{"api" => %{"headers" => headers}}}} =
+               Local.read(context.user_path)
+
+      assert headers == %{"Authorization" => "Bearer {env:API_AUTHORIZATION}"}
+      refute File.read!(context.user_path) =~ "not-a-real-token"
+
+      # Read in place, the other tool's file is where the value already was.
+      assert {:ok, %{linked: true, warnings: []}} =
+               Local.import(:workspace, context.workspace, from, true, [])
+
+      {servers, []} =
+        Local.resolve(context.workspace, user_path: Path.join(context.base, "none.json"))
+
+      assert [%{config: %{headers: %{"Authorization" => "Bearer not-a-real-token"}}}] = servers
+    end
+  end
+
   describe "the trust store" do
     test "remembers a server by workspace and fingerprint, and forgets on request", context do
       server = %{name: "fs", fingerprint: "abc"}
