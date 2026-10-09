@@ -465,8 +465,9 @@ defmodule Troupe.Commands do
       entry("agents", "agents", "List the agents this session can start a branch on",
         usage: "/agents",
         detail:
-          "The primary agents: the built-ins, this machine's agents/ and the project's " <>
-            ".troupe/agents/. Each is a command of its own, below."
+          "The primary agents: the built-ins, this machine's agents/, the ones Claude Code " <>
+            "and opencode wrote into the project (.claude/agents/, opencode.json) and the " <>
+            "project's .troupe/agents/. Each is a command of its own, below."
       ),
       entry("worktree", "agents", "Run the default agent on a branch in a worktree of its own",
         usage: "/worktree [name:] <prompt>",
@@ -490,8 +491,10 @@ defmodule Troupe.Commands do
   end
 
   # An agent is a command that starts a branch on it. Its summary is the first line of
-  # the definition's description, so a long one still reads as one row.
-  defp agent(%Definition{name: name, description: description}) do
+  # the definition's description, so a long one still reads as one row. Its detail says
+  # which file it came from, since that is where to change it, and for one another tool
+  # wrote, what of that file was mapped or left out (Decision 819).
+  defp agent(%Definition{name: name, description: description} = definition) do
     description = description || ""
 
     entry(name, "agents", description |> String.split("\n", parts: 2) |> hd() |> String.trim(),
@@ -499,8 +502,24 @@ defmodule Troupe.Commands do
       args: [prompt()],
       availability: "local",
       source: "agent",
-      detail: String.trim(description)
+      detail:
+        [String.trim(description) | provenance(definition)]
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.join("\n\n")
     )
+  end
+
+  defp provenance(%Definition{file: nil}), do: []
+
+  defp provenance(%Definition{file: file, source: source, notes: notes}) do
+    from =
+      case source do
+        :claude_code -> "From #{file}, a Claude Code agent."
+        :opencode -> "From #{file}, an opencode agent."
+        _own -> "From #{file}."
+      end
+
+    [Enum.join([from | Enum.map(notes, &"#{&1.key}: #{&1.reason}")], "\n")]
   end
 
   # A command a file defines is summarised by its description, or by its prompt's first

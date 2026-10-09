@@ -113,7 +113,7 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 
 | command | what it does | needs |
 | --- | --- | --- |
-| `/agents` | List the agents this session can start a branch on. The primary agents: the built-ins, this machine's agents/ and the project's .troupe/agents/. Each is a command of its own, below. |  |
+| `/agents` | List the agents this session can start a branch on. The primary agents: the built-ins, this machine's agents/, the ones Claude Code and opencode wrote into the project (.claude/agents/, opencode.json) and the project's .troupe/agents/. Each is a command of its own, below. |  |
 | `/worktree [name:] <prompt>` | Run the default agent on a branch in a worktree of its own. /worktree &lt;prompt&gt; works in a fresh worktree, to /merge or /discard later; /worktree &lt;name&gt;: &lt;prompt&gt; in a Troupe worktree of that name, created the first time and reused after; /worktree &lt;existing&gt; &lt;prompt&gt; in one you checked out (Tab completes them). For example `/worktree fix the flaky test`. | a session on this machine |
 
 ### Quit
@@ -125,6 +125,8 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 
 Besides these, each agent is a command that starts a branch on it: `/build <prompt>`,
 `/plan <prompt>`, and whichever agents your config, your team's bundle or the
-repository's `.troupe/agents/` add (`/agents` lists them). So is each command you or the
+repository's `.troupe/agents/` add, and the primary agents of its `opencode.json`
+([agents other tools wrote](configuration.md#agents-other-tools-wrote)); `/agents` lists
+them. So is each command you or the
 repository write as a markdown file, `/<name> [arguments]`, under `Custom` in the palette
 ([your own commands](configuration.md#your-own-commands)).

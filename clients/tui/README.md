@@ -488,7 +488,9 @@ polling and says so.
 
 Agent definitions are markdown files with YAML frontmatter; the filename is
 the name and every `primary` one is a command. Project `.troupe/agents/`
-overrides the global `agents/` dir which overrides the built-ins (`code`,
+overrides the agents Claude Code and opencode wrote into the project
+(`.claude/agents/`, `opencode.json`; see the configuration guide), which
+override the global `agents/` dir which overrides the built-ins (`code`,
 `worktree`, `plan`, `workflow`, `ask`, the watch-mode pair `quick` and `answer`,
 and the subagents `general`, `explore`, `implementer`, `reviewer` and
 `librarian`).

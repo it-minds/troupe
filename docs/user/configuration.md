@@ -360,6 +360,44 @@ its own instruction files; `--json` prints the same as one object, with `files` 
 `findings`. Your own `<config>/AGENTS.md` is checked with the rest, except for paths,
 which it names for every repository.
 
+## Agents other tools wrote
+
+A repository that already has Claude Code subagents or opencode agents keeps them: Troupe
+reads them as its own agents, with no setup.
+
+- **Claude Code**: each `.claude/agents/*.md` in the workspace is a subagent, which the
+  agent you talk to can delegate to. Its `name` (or the file's name), `description`,
+  `tools`, `disallowedTools`, `model` and `maxTurns` are read, and the body is its prompt.
+- **opencode**: each entry of the `agent` block in the workspace's `opencode.json` (or
+  `opencode.jsonc`) is an agent, used as its `mode` says: `primary` is one you can start a
+  session on or switch to, `subagent` one that is delegated to, and `all`, opencode's
+  default, both. Its `description`, `prompt` (a `{file:./prompts/review.md}` is read from
+  the file), `model`, `steps`, `tools` and `permission` are read, the file's own
+  `permission` under each agent's. An entry without a `prompt` that names one of Troupe's
+  agents adjusts it, as opencode adjusts its own `build`: `"build": {"permission":
+  {"bash": "ask"}}` keeps Troupe's `build` and changes how its shell asks.
+
+They sit between your own `<config>/agents/` and the workspace's `.troupe/agents/`: a
+`.troupe/agents/` file of the same name wins, and a Claude Code file wins over an opencode
+entry. Tool names become Troupe's (`Read` is `read_file`, `Bash` is `shell`, `Grep` is
+`grep`, `WebFetch` is `web_fetch`), and opencode's `allow`, `ask` and `deny` become
+Troupe's `auto`, `ask` and `deny`. A model is kept when your provider is known to serve
+it; `inherit`, an alias such as `sonnet`, or a model your provider does not list runs on
+the session's model.
+
+What Troupe cannot honour is left out and said, never dropped silently: a tool it does not
+have (`WebSearch`), a rule for some uses of a tool (`Bash(git log:*)`, `"git *":
+"allow"`: Troupe allows a tool whole or not at all), a key it does not read
+(`temperature`, `permissionMode`, `color`). `agents.list` gives every agent its `source`
+(`claude_code`, `opencode`), its `file` and these `notes`, lists the subagents beside the
+agents you can start, and lists in `skipped` every file or entry not read, with why; the
+palette's row for an agent says which file it came from and what was left out. A file is
+read only where it really is in the workspace: a `.claude/agents` or an `opencode.json`
+that is a link to somewhere else, or a prompt's `{file:}` outside the workspace, is not
+read, and says so.
+
+Your own `~/.claude/agents` and opencode's global config are not read as agents yet.
+
 ## Every file Troupe reads
 
 In one table, in the order each kind is read, and what happens when two say different
@@ -371,7 +409,7 @@ things:
 | `~/.config/opencode/opencode.jsonc` and `~/.local/share/opencode/auth.json` | settings | providers and the default model an opencode setup already has | read only when Troupe has no key of its own; never written |
 | `<config>/mcp.json`, then `<workspace>/.troupe/mcp.json` | MCP servers | your servers, then the workspace's, over `mcp:` in `config.yaml` | the same name merges key by key, the workspace's file last; a workspace's servers run only once you allow them |
 | `<config>/skills/<name>/SKILL.md`, `<workspace>/.troupe/skills/`, a profile's bundle | skills | what a skill tool may read | one name, the nearer layer's |
-| Troupe's built-in agents, a profile's bundle, `<config>/agents/*.md`, `<workspace>/.troupe/agents/*.md` | agents | the agents a session may run | a file at a higher layer replaces the same name below it |
+| Troupe's built-in agents, a profile's bundle, `<config>/agents/*.md`, `<workspace>/.claude/agents/*.md` and the `agent` block of `<workspace>/opencode.json(c)`, `<workspace>/.troupe/agents/*.md` | agents | the agents a session may run | a file at a higher layer replaces the same name below it; a Claude Code file wins over an opencode entry; an opencode entry without a prompt adjusts the agent below it |
 | `<config>/commands/*.md`, `<workspace>/.troupe/commands/*.md` | commands | the slash commands you and the repository define | one name, the workspace's; a built-in's or an agent's name is theirs |
 | `<workspace>/.troupe/workflows/<name>.json` | workflows | the steps `workflows.list` offers | one name, one file |
 | `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on (aliases `CLAUDE.md`, `GEMINI.md`, and `.github/copilot-instructions.md` at the root only, first found wins), and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out |

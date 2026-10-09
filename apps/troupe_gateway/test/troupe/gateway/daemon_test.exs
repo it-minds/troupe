@@ -192,6 +192,85 @@ defmodule Troupe.Gateway.DaemonTest do
 
       assert {:error, %Error{}} = Client.call(client, "agents.list", %{})
     end
+
+    # Decision 819: the agents Claude Code and opencode wrote into the workspace, each with
+    # where it came from and what Troupe mapped or left out; the subagents beside the
+    # primaries, and what was not read at all, each with why.
+    test "lists other tools' agents with their source, their file and what was left out",
+         context do
+      client = connect(context)
+
+      File.mkdir_p!(Path.join(context.workspace, ".claude/agents"))
+
+      File.write!(Path.join(context.workspace, ".claude/agents/reviewer.md"), """
+      ---
+      name: reviewer
+      description: Reviews a change.
+      tools: Read, Grep, NotebookEdit
+      ---
+      You review code.
+      """)
+
+      File.write!(Path.join(context.workspace, ".claude/agents/notebook.md"), """
+      ---
+      tools: NotebookEdit
+      ---
+      Notebooks only.
+      """)
+
+      File.write!(Path.join(context.workspace, "opencode.json"), ~s({
+        "agent": {
+          "release": {
+            "description": "Cuts a release.",
+            "mode": "primary",
+            "prompt": "You cut releases.",
+            "permission": {"bash": "ask", "edit": "deny", "lsp": "allow"}
+          }
+        }
+      }))
+
+      {:ok, answer} = Client.call(client, "agents.list", %{"workspace" => context.workspace})
+      agents = Map.new(answer["agents"], &{&1["name"], &1})
+      subagents = Map.new(answer["subagents"], &{&1["name"], &1})
+
+      assert %{
+               "source" => "opencode",
+               "mode" => "primary",
+               "file" => "opencode.json",
+               "description" => "Cuts a release.",
+               "notes" => [
+                 %{
+                   "key" => "permission",
+                   "reason" => "lsp is left out: Troupe has no language-server tool"
+                 }
+               ]
+             } = agents["release"]
+
+      refute Map.has_key?(agents, "reviewer")
+
+      assert %{
+               "source" => "claude_code",
+               "mode" => "subagent",
+               "file" => file,
+               "notes" => [
+                 %{
+                   "key" => "tools",
+                   "reason" => "NotebookEdit is left out: Troupe has no notebook tool"
+                 }
+               ]
+             } = subagents["reviewer"]
+
+      assert file == Troupe.Paths.display(".claude/agents/reviewer.md")
+
+      # The built-ins are listed with no file and nothing left out.
+      assert %{"source" => "builtin", "file" => nil, "notes" => []} = agents["build"]
+      assert %{"source" => "builtin", "mode" => "subagent"} = subagents["explore"]
+
+      assert [%{"name" => nil, "reason" => reason}] =
+               Enum.filter(answer["skipped"], &(&1["file"] =~ "notebook.md"))
+
+      assert reason =~ "none of its tools (NotebookEdit) is one Troupe has"
+    end
   end
 
   describe "commands" do

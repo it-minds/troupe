@@ -445,25 +445,25 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   # The agents a session in this workspace could run: the built-ins, the machine's
-  # `agents/`, the project's `.troupe/agents/` — resolved the way `session.create` will
-  # resolve them, so a picker offers exactly what a `profile` may name.
+  # `agents/`, the ones Claude Code and opencode wrote into the workspace, the project's
+  # `.troupe/agents/` — resolved the way `session.create` will resolve them, so a picker
+  # offers exactly what a `profile` may name. Beside them, additively (Decision 819), the
+  # subagents an agent may delegate to, each with its file and what of another tool's
+  # was mapped or left out, and what was not read as an agent at all, with why.
   defp handle("agents.list", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace") do
-      agents =
-        workspace
-        |> Path.expand()
-        |> Definitions.load()
-        |> Definitions.primaries()
-        |> Enum.map(
-          &%{
-            "name" => &1.name,
-            "description" => &1.description,
-            "source" => Atom.to_string(&1.source)
-          }
-        )
-        |> Enum.sort_by(& &1["name"])
+      definitions = workspace |> Path.expand() |> workspace_definitions()
 
-      {:ok, %{"agents" => agents}}
+      {:ok,
+       %{
+         "agents" => definitions |> Definitions.primaries() |> Enum.map(&agent_entry/1),
+         "subagents" => definitions |> Definitions.subagents() |> Enum.map(&agent_entry/1),
+         "skipped" =>
+           Enum.map(
+             definitions.skipped,
+             &%{"name" => &1.name, "file" => &1.file, "reason" => &1.reason}
+           )
+       }}
     end
   end
 
@@ -1549,8 +1549,28 @@ defmodule Troupe.Gateway.Dispatch do
   defp session_definitions(session_id, session) do
     case Troupe.definitions(session_id) do
       {:ok, definitions} -> definitions
-      {:error, :no_agent} -> session.workspace |> Path.expand() |> Definitions.load()
+      {:error, :no_agent} -> session.workspace |> Path.expand() |> workspace_definitions()
     end
+  end
+
+  # The definitions a session in `workspace` would load, another tool's models judged by
+  # the workspace's config as the session's would be (Decision 819).
+  defp workspace_definitions(workspace) do
+    case Troupe.Config.resolve(workspace) do
+      {:ok, config, _layers} -> Definitions.load(workspace, config: config)
+      {:error, _refused} -> Definitions.load(workspace)
+    end
+  end
+
+  defp agent_entry(definition) do
+    %{
+      "name" => definition.name,
+      "description" => definition.description,
+      "source" => Atom.to_string(definition.source),
+      "mode" => Atom.to_string(definition.mode),
+      "file" => definition.file,
+      "notes" => Enum.map(definition.notes, &%{"key" => &1.key, "reason" => &1.reason})
+    }
   end
 
   # What the session's command table is built from: its primary agents and its workspace.

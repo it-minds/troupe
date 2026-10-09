@@ -18,17 +18,77 @@ defmodule Troupe.Config.OpenCode do
   kept, marked with why, and a request to it fails with that message instead of sending
   the reference as a key.
 
-  Not read: `variants`, `agent`, `permission`, `mcp`, `lsp` and everything else opencode
-  keeps in the same file.
+  Not read from that file: `variants`, `agent`, `permission`, `mcp`, `lsp` and everything
+  else opencode keeps in it.
 
   This is a laptop's concern. A pod has a profile and never an opencode installation,
   and on one both files are simply absent, which reads as no providers.
+
+  A repository's own `opencode.json` is another matter: `project/1` reads it from the
+  workspace, held to the workspace's edge, and `Troupe.Agent.Imported` takes its `agent`
+  and `permission` blocks as the workspace's agents (Decision 819).
   """
 
   alias Troupe.Config
   alias Troupe.Config.{JSONC, Layers}
+  alias Troupe.Workspace
 
   @file_reference ~r/\{file:([^}]+)\}/
+
+  # A repository's own config, in the order opencode merges them: the second over the first.
+  @project_files ["opencode.jsonc", "opencode.json"]
+
+  @typedoc """
+  One of a workspace's opencode files: what it holds, or `config: nil` and why it was
+  not read, in words.
+  """
+  @type project_file :: %{
+          name: String.t(),
+          path: Path.t(),
+          config: map() | nil,
+          reason: String.t() | nil
+        }
+
+  @doc """
+  A workspace's own opencode config (Decision 819): `opencode.jsonc`, then
+  `opencode.json`, each that is there. One that is really outside `root`, through a
+  link, is not read, nor is one that is not a JSON object; each comes back with
+  `config: nil` and the reason. Which blocks to use is the caller's.
+  """
+  @spec project(Path.t()) :: [project_file()]
+  def project(root) do
+    for name <- @project_files, path <- [Path.join(root, name)], File.regular?(path) do
+      file = %{name: name, path: path, config: nil, reason: nil}
+
+      with {:inside, true} <- {:inside, inside?(path, root)},
+           {:ok, text} <- File.read(path),
+           {:ok, config} when is_map(config) <- JSONC.decode(text) do
+        %{file | config: config}
+      else
+        {:inside, false} ->
+          %{file | reason: "not read: outside the workspace"}
+
+        {:error, reason} when is_atom(reason) ->
+          %{file | reason: "not read: #{:file.format_error(reason)}"}
+
+        _not_an_object ->
+          %{file | reason: "not read: not a JSON object"}
+      end
+    end
+  end
+
+  # Whether a file really is in the workspace, links followed, as the instruction files
+  # are judged (Decision 798).
+  defp inside?(path, root) do
+    with {:ok, real} <- Workspace.real_path(path),
+         {:ok, real_root} <- Workspace.real_path(root) do
+      key = Workspace.compare_key(real)
+      root_key = Workspace.compare_key(real_root)
+      String.starts_with?(key, root_key <> "/")
+    else
+      _error -> false
+    end
+  end
 
   @spec config_path() :: String.t()
   def config_path do

@@ -8,12 +8,17 @@ defmodule Troupe.Agent.Definition do
   process holding them: a definition never changes while a session runs, so making it
   data rather than state removes a whole class of races.
 
-  Precedence is project `.troupe/agents/` over the global config dir's `agents/` over
-  a bundle's `agents/` over the built-ins below.
+  Precedence is project `.troupe/agents/` over the agents other tools wrote into the
+  workspace (`Troupe.Agent.Imported`) over the global config dir's `agents/` over a
+  bundle's `agents/` over the built-ins below.
 
   The parsing itself lives in `Troupe.Protocol.AgentDefinition`, because the plane
   checks a definition at publish and does not depend on this app. This struct is what
   the harness runs under; the parser's map is what both sides agree a file means.
+
+  An agent another tool wrote may be `mode: :all`, opencode's word for one that is both:
+  a session may run it, and an agent may delegate to it. Troupe's own files are one or
+  the other (Decision 819).
   """
 
   alias Troupe.Protocol.AgentDefinition
@@ -31,6 +36,12 @@ defmodule Troupe.Agent.Definition do
     budget_share: 0.25,
     skills: [],
     source: :builtin,
+    # Where a person changes it, as they would write the path (`.claude/agents/x.md`,
+    # `opencode.json`); `nil` for a built-in, a bundle's or an ACP agent.
+    file: nil,
+    # What of another tool's file was mapped or left out, each `%{key, reason}` with the
+    # reason in words (Decision 819). Empty for Troupe's own files.
+    notes: [],
     # Set only for a bundle's `acp_agents` entry: the command, its arguments and the hash
     # of what it should be. An agent definition carries a prompt for a model to run; this
     # one carries a program to run instead, and is otherwise an ordinary subagent — which
@@ -39,9 +50,10 @@ defmodule Troupe.Agent.Definition do
     acp: nil
   ]
 
-  @type mode :: :primary | :subagent
+  @type mode :: :primary | :subagent | :all
   @type permission :: :auto | :ask | :deny
-  @type source :: :builtin | :bundle | :global | :project
+  @type source :: :builtin | :bundle | :global | :project | :claude_code | :opencode
+  @type note :: %{key: String.t(), reason: String.t()}
   @type t :: %__MODULE__{
           name: String.t(),
           prompt: String.t(),
@@ -54,8 +66,18 @@ defmodule Troupe.Agent.Definition do
           budget_share: float(),
           skills: :all | [String.t()],
           source: source(),
+          file: String.t() | nil,
+          notes: [note()],
           acp: map() | nil
         }
+
+  @doc "Whether a session may run this agent: a primary, or one opencode made both."
+  @spec primary?(t()) :: boolean()
+  def primary?(%__MODULE__{mode: mode}), do: mode in [:primary, :all]
+
+  @doc "Whether an agent may delegate to this one: a subagent, or one opencode made both."
+  @spec subagent?(t()) :: boolean()
+  def subagent?(%__MODULE__{mode: mode}), do: mode in [:subagent, :all]
 
   @doc "Whether this delegate is a subprocess somebody else wrote rather than a prompt."
   @spec acp?(t()) :: boolean()

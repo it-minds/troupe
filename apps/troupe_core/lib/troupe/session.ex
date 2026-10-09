@@ -203,7 +203,8 @@ defmodule Troupe.Session do
           Definitions.load(workspace.root_real,
             bundle_dir: bundle && bundle[:dir],
             entitled: entitled_agents(bundle),
-            acp_agents: acp_agents(bundle)
+            acp_agents: acp_agents(bundle),
+            config: config
           )
         end)
 

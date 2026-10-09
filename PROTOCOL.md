@@ -1049,11 +1049,23 @@ the client that uploaded it, not the session.
 ```json
 {"workspace": "/home/me/project"}
 ```
-→ `{"agents": [{"name", "description", "source"}]}` — the primary agents a session in that
+→ `{"agents": [{"name", "description", "source", "mode", "file", "notes"}], "subagents": [...],
+"skipped": [{"name", "file", "reason"}]}` — the primary agents a session in that
 workspace may be created with, resolved as `session.create` resolves them (built-ins, the
-machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `global`
-or `project`. A worker answers from its bundle instead, so a client offers exactly what
-`profile` may name wherever the session will run.
+machine's `agents/`, the agents Claude Code and opencode wrote into the workspace, the
+project's `.troupe/agents/`). `source` is `builtin`, `bundle`, `global`, `project`,
+`claude_code` or `opencode`. A worker answers from its bundle instead, so a client offers
+exactly what `profile` may name wherever the session will run.
+
+Each entry's `mode` is `primary`, `subagent` or `all` (an opencode agent that is both);
+`file` is where a person changes it (`.claude/agents/reviewer.md`, `opencode.json`), null
+for a built-in or a bundle's; `notes` is what of another tool's file was mapped or left
+out, each `{"key", "reason"}` with the reason in words (`{"key": "tools", "reason":
+"WebSearch is left out: Troupe has no web search tool"}`), empty for Troupe's own.
+`subagents` lists, in the same shape, the agents an agent may delegate to, and `skipped`
+every file or entry not read as an agent, with why (`not read: outside the workspace`,
+`skipped: .troupe/agents/reviewer.md is used`). The three keys after `source` and the two
+lists are additive (Decision 819).
 
 #### `commands.list`
 ```json
@@ -1074,7 +1086,9 @@ is `builtin`, `agent`, `user` or `project`. The agents are the primary ones the 
 was started with, described by their definition: on a pod its bundle's, as the team's
 grant narrows them, and for a session that is asleep the ones `agents.list` answers with
 for its workspace. They take a `prompt` and start a branch on it, which a client without
-branches shows as such.
+branches shows as such. An agent read from a file has a `detail` that ends by naming the
+file (`From opencode.json, an opencode agent.`), and for one another tool wrote, a line
+for each thing of it that was mapped or left out (Decision 819).
 
 The `custom` section is the commands markdown files define: `<config>/commands/<name>.md`
 (`source: "user"`) and the workspace's `.troupe/commands/<name>.md` (`source:

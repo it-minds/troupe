@@ -166,6 +166,37 @@ defmodule Troupe.Gateway.CommandsListTest do
     assert [%{"name" => "triage", "summary" => "Sorts the team's incoming issues."}] = agents
   end
 
+  # Decision 819: an agent opencode's config defines is a row like any primary's, and its
+  # detail says which file it came from and what Troupe left out of it.
+  test "an opencode agent's row says where it came from and what was left out", context do
+    File.write!(Path.join(context.workspace, "opencode.json"), ~s({
+      "agent": {
+        "release": {
+          "description": "Cuts a release.",
+          "mode": "primary",
+          "prompt": "You cut releases.",
+          "temperature": 0.2
+        }
+      }
+    }))
+
+    session = start_session(context)
+
+    {:ok, %{"commands" => commands}} =
+      Client.call(context.client, "commands.list", %{"session_id" => session.id})
+
+    assert %{
+             "section" => "agents",
+             "source" => "agent",
+             "summary" => "Cuts a release.",
+             "detail" => detail
+           } = Enum.find(commands, &(&1["name"] == "release"))
+
+    assert detail ==
+             "Cuts a release.\n\nFrom opencode.json, an opencode agent.\n" <>
+               "temperature: not read: Troupe sets no temperature per agent"
+  end
+
   # A command a repository defines (Decision 763): `.troupe/commands/review.md` is
   # `/review`, listed with its description in a section of its own, and running it sends
   # its prompt as the session's input.

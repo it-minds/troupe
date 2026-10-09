@@ -94,10 +94,11 @@ defmodule Troupe.Tools.Delegate do
   defp fetch_definition(%{definitions: definitions}, agent),
     do: Definitions.fetch(definitions, agent)
 
-  defp check_mode(%Definition{mode: :subagent}), do: :ok
-
-  defp check_mode(%Definition{name: name}) do
-    {:error, "#{name} is a primary profile, not a subagent. Delegate to a subagent instead."}
+  defp check_mode(%Definition{name: name} = definition) do
+    if Definition.subagent?(definition),
+      do: :ok,
+      else:
+        {:error, "#{name} is a primary profile, not a subagent. Delegate to a subagent instead."}
   end
 end
 

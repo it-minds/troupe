@@ -161,8 +161,9 @@ would spend money and re-run shell commands nobody is watching.
 ### 2.5 Agents, skills and the brief
 
 Agent definitions are markdown with YAML frontmatter, loaded lowest to highest from the
-built-ins (`apps/troupe_core/priv/agents/`), the profile's bundle, the config directory and
-the workspace's `.troupe/agents/`. A session has one root agent; `/<agent> prompt` opens a
+built-ins (`apps/troupe_core/priv/agents/`), the profile's bundle, the config directory, the
+agents Claude Code and opencode wrote into the workspace (`.claude/agents/`, `opencode.json`,
+Decision 819) and the workspace's `.troupe/agents/`. A session has one root agent; `/<agent> prompt` opens a
 **branch**, which is a session of its own with a `parent`. Skills follow the Agent Skills
 convention and are disclosed progressively: one line per skill in the system prompt, a
 `skill` tool that returns the body, and a read-only `skills:/` mount. The **project

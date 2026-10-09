@@ -7,19 +7,28 @@ defmodule Troupe.Agent.Definitions do
   they are data, and a subagent three levels down reads them without a message.
 
   Precedence, lowest to highest: built-ins shipped in `priv/agents/`, the session's
-  config bundle, the global config dir's `agents/`, then the project's
+  config bundle, the global config dir's `agents/`, the agents other tools wrote into
+  the workspace (Claude Code's `.claude/agents/`, then the `agent` entries of its
+  `opencode.json`, `Troupe.Agent.Imported`, Decision 819), then the project's
   `.troupe/agents/`. A file at a higher level replaces the same name below it. On a
   worker the global and project directories are empty by design, so the bundle is the
   effective source; on a laptop there is no bundle and nothing changes.
+
+  `skipped` lists what was not read as an agent, each with why in words: another tool's
+  file or entry Troupe could not read, and one a file of the same name at a higher level
+  hid.
   """
 
-  alias Troupe.Agent.Definition
+  alias Troupe.Agent.{Definition, Imported}
   alias Troupe.Paths
 
   @enforce_keys [:by_name]
-  defstruct [:by_name]
+  defstruct [:by_name, skipped: []]
 
-  @type t :: %__MODULE__{by_name: %{optional(String.t()) => Definition.t()}}
+  @type t :: %__MODULE__{
+          by_name: %{optional(String.t()) => Definition.t()},
+          skipped: [Imported.skip()]
+        }
 
   @doc """
   Load every definition visible from a workspace.
@@ -34,19 +43,49 @@ defmodule Troupe.Agent.Definitions do
   `fetch/2`, not `primaries/1`, not the delegation tool's list. Filtering at the point
   the bundle is merged would have left a built-in of the same name standing in for it,
   which is a different agent answering to a name somebody was refused.
+
+  `config:` is the session's configuration, against which another tool's `model` is
+  judged (`Troupe.Agent.Imported`): kept when its provider is known to serve it, else
+  the agent runs on the session's model.
   """
   @spec load(Path.t(), keyword()) :: t()
   def load(workspace_root, opts \\ []) do
-    by_name =
+    below =
       %{}
       |> merge_dir(builtin_dir(), :builtin)
       |> merge_bundle(Keyword.get(opts, :bundle_dir))
       |> merge_dir(Path.join(Paths.config_dir(), "agents"), :global)
-      |> merge_dir(Path.join(Paths.project_dir(workspace_root), "agents"), :project)
+
+    imported = Imported.load(workspace_root, below, opts)
+
+    project =
+      merge_dir(
+        %{},
+        Path.join(Paths.project_dir(workspace_root), "agents"),
+        :project,
+        workspace_root
+      )
+
+    by_name =
+      below
+      |> Map.merge(Map.new(imported.definitions, &{&1.name, &1}))
+      |> Map.merge(project)
       |> merge_acp(Keyword.get(opts, :acp_agents, []))
       |> entitled(Keyword.get(opts, :entitled))
 
-    %__MODULE__{by_name: by_name}
+    %__MODULE__{
+      by_name: by_name,
+      skipped: imported.skipped ++ hidden(imported.definitions, project)
+    }
+  end
+
+  # Troupe's own file of a name wins over another tool's (Decision 819), and the one it
+  # hid is said, so nobody edits a `.claude/agents/` file that is never read.
+  defp hidden(imported, project) do
+    for %Definition{name: name, file: file} <- imported,
+        %Definition{file: own} <- [project[name]] do
+      %{name: name, file: file, reason: "skipped: #{own} is used"}
+    end
   end
 
   # A bundle's ACP agents become ordinary subagent definitions carrying a command instead
@@ -79,11 +118,22 @@ defmodule Troupe.Agent.Definitions do
   # listed a name it never names.
   defp entitled(by_name, nil), do: by_name
 
+  # One opencode made both stays a subagent where it is not granted as a primary.
   defp entitled(by_name, names) when is_list(names) do
     allowed = MapSet.new(names)
 
-    Map.filter(by_name, fn {name, definition} ->
+    by_name
+    |> Map.filter(fn {name, definition} ->
       definition.mode != :primary or MapSet.member?(allowed, name)
+    end)
+    |> Map.new(fn
+      {name, %Definition{mode: :all} = definition} ->
+        if MapSet.member?(allowed, name),
+          do: {name, definition},
+          else: {name, %{definition | mode: :subagent}}
+
+      entry ->
+        entry
     end)
   end
 
@@ -114,11 +164,11 @@ defmodule Troupe.Agent.Definitions do
 
   @doc "Definitions the model may delegate to."
   @spec subagents(t()) :: [Definition.t()]
-  def subagents(%__MODULE__{} = defs), do: Enum.filter(all(defs), &(&1.mode == :subagent))
+  def subagents(%__MODULE__{} = defs), do: Enum.filter(all(defs), &Definition.subagent?/1)
 
   @doc "Definitions the user may switch the root agent between."
   @spec primaries(t()) :: [Definition.t()]
-  def primaries(%__MODULE__{} = defs), do: Enum.filter(all(defs), &(&1.mode == :primary))
+  def primaries(%__MODULE__{} = defs), do: Enum.filter(all(defs), &Definition.primary?/1)
 
   @doc false
   @spec builtin_dir() :: Path.t()
@@ -127,25 +177,27 @@ defmodule Troupe.Agent.Definitions do
   defp merge_bundle(acc, nil), do: acc
   defp merge_bundle(acc, dir), do: merge_dir(acc, Path.join(dir, "agents"), :bundle)
 
-  defp merge_dir(acc, dir, source) do
+  defp merge_dir(acc, dir, source, workspace_root \\ nil) do
     case File.ls(dir) do
       {:ok, entries} ->
         entries
         |> Enum.filter(&String.ends_with?(&1, ".md"))
         |> Enum.sort()
-        |> Enum.reduce(acc, fn entry, acc -> merge_file(acc, Path.join(dir, entry), source) end)
+        |> Enum.reduce(acc, fn entry, acc ->
+          merge_file(acc, Path.join(dir, entry), source, workspace_root)
+        end)
 
       {:error, _} ->
         acc
     end
   end
 
-  defp merge_file(acc, path, source) do
+  defp merge_file(acc, path, source, workspace_root) do
     name = Path.basename(path, ".md")
 
     with {:ok, contents} <- File.read(path),
          {:ok, definition} <- Definition.parse(name, contents, source) do
-      Map.put(acc, name, definition)
+      Map.put(acc, name, %{definition | file: shown(path, source, workspace_root)})
     else
       {:error, reason} ->
         require Logger
@@ -153,4 +205,10 @@ defmodule Troupe.Agent.Definitions do
         acc
     end
   end
+
+  # Where a person changes the agent: the workspace's file by its place in the workspace,
+  # the person's own in full. A built-in's and a bundle's are nobody's to edit here.
+  defp shown(path, :project, root), do: Paths.display(Path.relative_to(path, root))
+  defp shown(path, :global, _root), do: Paths.display(path)
+  defp shown(_path, _source, _root), do: nil
 end
