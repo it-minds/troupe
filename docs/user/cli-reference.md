@@ -39,7 +39,8 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe models --json [--workspace DIR] [--refresh]` | the same as one JSON object for a program: models, roles, catalog, providers; never a key |
 | `troupe doctor [--json]` | check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure |
 | `troupe doctor --bench [--json]` | the same, then a turn of tool calls, a cut output, a compaction, a cancel and a replay against a scripted model: offline, in seconds |
-| `troupe instructions check [--workspace DIR] [--json]` | check the instruction files a session here reads: contradictions, missing paths and programs, repeats; exits 1 on one |
+| `troupe instructions check [--workspace DIR] [--json]` | check the instruction files a session here reads: contradictions, missing paths and programs, repeats; and onboarded files whose source has changed; exits 1 on one |
+| `troupe onboard [--workspace DIR] [--yes] [--json] [--all]` | bring other tools' agents and commands into .troupe/ and your config, each shown as a diff and written only if you say yes; --all asks again about what you left out |
 | `troupe bench [--json [FILE]] [--md FILE]` | measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one |
 | `troupe bench --live [--suite smoke\|standard] [--scenario NAME,...] [--repeat N] [--model M] [--yes] [--keep DIR] [--json [FILE]] [--md FILE]` | tasks against your own provider, under a cap it prints and asks about first; scored, and kept in a history |
 | `troupe bench --compare [VERSION\|MODEL]` | the last live bench against the one before it, or against a version's or a model's |

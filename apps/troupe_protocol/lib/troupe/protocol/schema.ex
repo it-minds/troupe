@@ -390,6 +390,18 @@ defmodule Troupe.Protocol.Schema do
         "bytes" => required(:integer),
         "direction" => required(:string)
       },
+      # A file `onboard_write` wrote (Decision 823): under the workspace's `.troupe/`
+      # (`target: repo`) or the person's config directory (`user`), at `path` from that
+      # root, shown as `file`; from `source`, whose sha256 was `source_hash`; `action` is
+      # `created` or `replaced`.
+      "onboarded" => %{
+        "target" => required(:string),
+        "path" => required(:string),
+        "file" => required(:string),
+        "source" => required(:string),
+        "source_hash" => required(:string),
+        "action" => required(:string)
+      },
       "session_dormant" => %{"last_seq" => required(:integer)},
       "session_activated" => %{"epoch" => required(:string), "pod" => optional(:string)},
       "session_resumed" => %{

@@ -1,0 +1,35 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/onboarded.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "action": {
+      "type": "string"
+    },
+    "file": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "source_hash": {
+      "type": "string"
+    },
+    "target": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action",
+    "file",
+    "path",
+    "source",
+    "source_hash",
+    "target"
+  ],
+  "title": "onboarded",
+  "type": "object"
+}

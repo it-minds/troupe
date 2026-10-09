@@ -310,6 +310,50 @@ prompt, so an edited command asks again and what you type after its name does no
 own commands never ask, and neither does a repository on `trusted_workspaces`, whose
 config could turn `auto_approve` on by itself.
 
+## Onboarding another tool's files
+
+What another coding tool keeps for a repository, or for you, is brought into Troupe's own
+files once, and sessions read Troupe's files from then on. `troupe onboard [--workspace
+DIR]` asks each source Troupe knows what it would write, and shows every file as a diff
+against what is there:
+
+```
+.troupe/agents/reviewer.md: new, from .claude/agents/reviewer.md
+  note: tools: WebSearch left out, Troupe has no such tool
++ ---
++ description: Reviews the change on this branch
++ tools: [read_file, grep]
++ imported_from: ".claude/agents/reviewer.md"
++ imported_hash: "9f2c..."
++ imported_at: "2026-10-09T12:00:00Z"
++ ---
++ You review code.
+Write .troupe/agents/reviewer.md? [y/N]
+```
+
+Only what you answer yes to is written, one file at a time. Onboarding writes two places
+and nothing else: the workspace's `.troupe/`, from the repository's files, and your config
+directory, from files in your home directory, never one into the other; and there only
+`agents/<name>.md`, `commands/<name>.md`, `skills/<name>/...`, `workflows/<name>.json`,
+`mcp.json` and your own `AGENTS.md`. A file that would land anywhere else, through a `..`
+or a `.troupe` that is a link to elsewhere, is refused. Each file written says where it
+came from, `imported_from`, `imported_hash` and `imported_at`, and `imported_also` for any
+other file it was made from (an agent's permissions in `.claude/settings.json`, say): in
+its frontmatter, for a Markdown file, and for anything else (and your `AGENTS.md`, which
+is read whole into the prompt) in `onboarded.json` beside it. A file a source found and
+made nothing of is listed first, as `skipped:` with the reason.
+
+Run it again and it proposes nothing until a source changes: a file onboarded from an
+unchanged source is left alone, your own edits to it included, and a file you said no to
+is not asked about again until its source changes (`--all` asks again; the answer is kept
+in Troupe's state directory, never in the repository). A changed source is offered as a
+diff against the file you have, and nothing is overwritten unasked. `--yes` writes every
+proposal without asking, and `--json` prints them as one object and writes nothing unless
+`--yes` is given too. It exits 1 when a proposal was refused or a write failed, and 2 when
+there was nobody to ask. Inside a session the librarian writes the same files with the
+`onboard_write` tool, which asks before each one; into your config directory it asks even
+with `auto_approve` on, since what lands there runs in every session without a question.
+
 ## Instruction files
 
 A repository that carries an `AGENTS.md` has told coding agents how to work in it, and
@@ -408,11 +452,15 @@ frontend/AGENTS.md:9: duplicate: the same rule as AGENTS.md:5
   `make` and their like); the shell's own commands and the platform's package managers
   are not looked for.
 - **duplicate**: a paragraph or list item said again in another file.
+- **drift**: a file `troupe onboard` wrote, in `.troupe/` or your config directory, whose
+  source, or another file it was made from, has changed or gone since, read from the
+  `imported_from`, `imported_hash` and `imported_also` it recorded; `troupe onboard` shows
+  what changed.
 
 It would rather miss a finding than make a false one. It exits 0 when it finds nothing, 1
 on a finding and 2 when it cannot read the workspace, so a repository can run it in CI on
-its own instruction files; `--json` prints the same as one object, with `files` and
-`findings`. Your own `<config>/AGENTS.md` is checked with the rest, except for paths,
+its own instruction files; `--json` prints the same as one object, with `files`,
+`onboarded` and `findings`. Your own `<config>/AGENTS.md` is checked with the rest, except for paths,
 which it names for every repository.
 
 ## Every file Troupe reads
