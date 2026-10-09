@@ -9,7 +9,7 @@ defmodule Troupe.Session.ShellTest do
 
   use Troupe.SessionCase, async: true
 
-  alias Troupe.Agent.{Definition, Definitions}
+  alias Troupe.Agent.{Definition, Definitions, Server}
   alias Troupe.LLM.Message
   alias Troupe.Session.Shell
 
@@ -122,6 +122,32 @@ defmodule Troupe.Session.ShellTest do
     assert note =~ "before-the-restart"
 
     assert Enum.count(texts(second), fn {_role, text} -> text =~ "before-the-restart" end) == 1
+  end
+
+  # The runner's call reached an agent that wrote `user_shell` and was killed before it
+  # answered, so the runner calls the agent that took over, which has the record from the
+  # log already: it answers, and neither writes nor holds the command a second time.
+  test "a command reported again after a restart is logged and given once", context do
+    %{session: session, fake: fake} = start(context, steps: [{:text, "one"}])
+
+    run(session, "echo told-twice")
+    assert [%{data: data}] = events_of_type(session.id, :user_shell)
+
+    agent = Registry.agent_pid(session.id, ["root"])
+    ref = Process.monitor(agent)
+    Process.exit(agent, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^agent, :killed}, 5_000
+    await_event(session.id, :agent_restarted)
+
+    again = Registry.agent_pid(session.id, ["root"])
+    assert :ok = Server.shell_ran(again, data, nil)
+
+    turn(session, "after")
+
+    assert [request] = Fake.requests(fake)
+    assert [{:user, note}, {:user, "after"}] = texts(request)
+    assert [_, _] = String.split(note, "$ echo told-twice")
+    assert [_once] = events_of_type(session.id, :user_shell)
   end
 
   test "Esc's kill and the timeout end the command and say so in the note", context do
