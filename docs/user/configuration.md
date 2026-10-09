@@ -339,7 +339,8 @@ diff against the file you have, and nothing is overwritten unasked. `--yes` writ
 proposal without asking, and `--json` prints them as one object and writes nothing unless
 `--yes` is given too. It exits 1 when a proposal was refused or a write failed, and 2 when
 there was nobody to ask. Inside a session the librarian writes the same files with the
-`onboard_write` tool, which asks before each one.
+`onboard_write` tool, which asks before each one; into your config directory it asks even
+with `auto_approve` on, since what lands there runs in every session without a question.
 
 ## Instruction files
 

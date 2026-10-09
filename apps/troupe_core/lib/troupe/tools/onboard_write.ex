@@ -7,9 +7,10 @@ defmodule Troupe.Tools.OnboardWrite do
   the workspace's `.troupe/` or the person's config directory, of a kind Troupe reads
   there, and `Troupe.Onboard.write/3` refuses anything else, judged where it really is.
   Unlike `remember` it asks first: what it writes decides what runs (an agent's tools and
-  permissions, a command's prompt, an MCP server), so the person sees each file. And it
-  is offered only to a profile that names it (`Troupe.Tools`), not to every agent with
-  every tool.
+  permissions, a command's prompt, an MCP server), so the person sees each file; into the
+  config directory it asks even under `auto_approve` or a profile's `auto` (`must_ask?/1`).
+  And it is offered only to a profile that names it (`Troupe.Tools`), not to every agent
+  with every tool.
 
   The source's hash is the tool's to take, not the model's to say: it reads the file the
   content was made from, so `troupe instructions check` can tell when that file changes.
@@ -57,6 +58,13 @@ defmodule Troupe.Tools.OnboardWrite do
 
   @impl Troupe.Tool
   def default_permission, do: :ask
+
+  # The person's config directory is read by every session, and what lands there runs
+  # without a trust question (an MCP server, an agent: Decision 700), so a write there is
+  # asked about whatever the profile grants or `auto_approve` says (Decision 823).
+  @impl Troupe.Tool
+  def must_ask?(%{"target" => "user"}), do: true
+  def must_ask?(_args), do: false
 
   @impl Troupe.Tool
   def run(args, ctx) do

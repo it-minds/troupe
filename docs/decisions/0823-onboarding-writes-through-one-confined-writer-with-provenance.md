@@ -9,6 +9,8 @@ paths:
   - apps/troupe_core/lib/troupe/onboard/source.ex
   - apps/troupe_core/lib/troupe/tools/onboard_write.ex
   - apps/troupe_core/lib/troupe/tools.ex
+  - apps/troupe_core/lib/troupe/tool.ex
+  - apps/troupe_core/lib/troupe/session/approvals.ex
   - apps/troupe_core/lib/troupe/instructions/check.ex
   - apps/troupe_core/priv/agents/librarian.md
   - apps/troupe_core/test/troupe/onboard_test.exs
@@ -22,7 +24,8 @@ symbols:
   - Troupe.Onboard.write/3
   - Troupe.Onboard.drift/2
   - Troupe.Tools.OnboardWrite
-gist: One writer, two roots by real path, Troupe's kinds of file only; provenance in frontmatter or onboarded.json; nothing overwritten unasked; drift from records
+  - Troupe.Tool.must_ask?/2
+gist: One writer, two roots by real path, Troupe's kinds of file only; provenance recorded; nothing overwritten unasked; a config-dir write always asks
 ---
 
 Issue #516, slice 3, and the command that drives it. #516 decided that other tools'
@@ -125,8 +128,22 @@ was an unknown command line.
   `path`, `file`, `source`, `source_hash`, `action`) in the session's log. Its default is
   `:ask`, unlike `remember`: `remember` reaches one file of notes, this one writes what
   decides what runs (an agent's tools and permissions, a command's prompt, an MCP server),
-  so the person sees each file in the approval, and `auto_approve` is still the person's
-  own choice. It is offered only to a profile that names it (`@named_only` in
+  so the person sees each file in the approval. Into `.troupe/` it follows the ordinary
+  rule, so `auto_approve` or a profile's `auto` lets it through.
+- **Into the config directory, always asked.** A `target: user` call is asked about
+  whatever `auto_approve` (`--auto-approve`), a standing `allow_session` or the profile's
+  `permissions` say, the way a refusal is unconditional; only a profile's `deny` (or
+  `approvals: deny`, nobody to ask) answers it without a person. The config directory is
+  read by every session on the machine, and what lands there runs without a trust
+  question: a user-layer `mcp.json` server starts unasked and a user agent is everyone's
+  (Decision 700), unlike a workspace's, which is asked about or gated by trust. So a write
+  there must never be unasked. The tool says so through the optional `Troupe.Tool`
+  callback `must_ask?/1`; `Troupe.Tools.run_task/4` turns that into an approval request
+  with `always: true`, which `Troupe.Session.Approvals` answers only with a person's
+  decision (turning `auto_approve` on mid-wait does not release it either). A
+  workspace's agent naming `onboard_write: auto` for `.troupe/` is the run-time trust
+  gate's (#511, Decision 825), not this decision's.
+- **Named only.** It is offered only to a profile that names it (`@named_only` in
   `Troupe.Tools`): the librarian does; `build` and every other agent with `tools: all` is
   neither offered it nor let call it, which also keeps its spec out of every build prompt.
   Its refusals are the writer's sentences, plus the two above (a pod, a workspace's agent
@@ -175,7 +192,10 @@ was an unknown command line.
   source that link out refused; drift on a changed and a gone source in `.troupe/` and in
   the config directory, in text and JSON, and a record pointing outside passed over),
   `Troupe.Tools.OnboardWriteTest` (the librarian's call waits for the approval, then
-  writes the file with its provenance and logs `onboarded`; a denied call leaves nothing;
+  writes the file with its provenance and logs `onboarded`; with `auto_approve` on and
+  the profile's `auto`, a `target: repo` call written unasked and a `target: user` call
+  still raising an approval that turning `auto_approve` on again does not release (it
+  times out waiting for that approval with `must_ask?/1` off); a denied call leaves nothing;
   `build` is neither offered it nor let call it; each refusal; a pod and a workspace's own
   agent refused), and the TUI's `Troupe.OnboardCLITest` (the command line; `--yes` through
   the runner with a source registered; a yes and a no, the diff and the notes printed, and

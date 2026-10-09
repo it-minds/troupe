@@ -282,9 +282,9 @@ defmodule Troupe.Tools do
   def run_task(tool, args, %Definition{} = definition, %Ctx{} = ctx) do
     name = Tool.name(tool)
 
-    case Definition.permission(definition, name, Tool.default_permission(tool)) do
-      :ask ->
-        case ask(ctx, name, args) do
+    case permission(tool, name, args, definition) do
+      ask when ask in [:ask, :must_ask] ->
+        case ask(ctx, name, args, ask == :must_ask) do
           :allow -> execute(tool, args, ctx)
           :deny -> Result.error(ctx.call_id, name, {:denied, name})
           {:deny, :unattended} -> Result.error(ctx.call_id, name, {:denied_unattended, name})
@@ -298,12 +298,23 @@ defmodule Troupe.Tools do
     end
   end
 
-  defp ask(ctx, name, args) do
+  # A call the tool says a person must answer (`onboard_write` into the config directory,
+  # Decision 823) is asked about whatever the profile grants, and the session's
+  # `auto_approve` does not answer it; a profile's `deny` still denies.
+  defp permission(tool, name, args, definition) do
+    case Definition.permission(definition, name, Tool.default_permission(tool)) do
+      :deny -> :deny
+      permission -> if Tool.must_ask?(tool, args), do: :must_ask, else: permission
+    end
+  end
+
+  defp ask(ctx, name, args, always?) do
     Approvals.request(ctx.session_id, %{
       call_id: ctx.call_id,
       tool: name,
       args: args,
-      agent_path: ctx.agent_path
+      agent_path: ctx.agent_path,
+      always: always?
     })
   end
 

@@ -10,6 +10,7 @@ defmodule Troupe.Tools.OnboardWriteTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.Agent.{Definition, Definitions}
+  alias Troupe.Session.Approvals
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Tools
   alias Troupe.Tools.OnboardWrite
@@ -78,6 +79,62 @@ defmodule Troupe.Tools.OnboardWriteTest do
 
     assert content =~
              "created .troupe/agents/reviewer.md, imported from .claude/agents/reviewer.md"
+  end
+
+  test "into the config directory it asks even with auto_approve on and the profile's auto; into .troupe/ it follows the rule",
+       context do
+    write_file(context, ".claude/agents/reviewer.md", "Review.\n")
+
+    onboarder = %Definition{
+      name: "onboarder",
+      mode: :primary,
+      prompt: "Onboard what you are told to.",
+      tools: ["onboard_write", "finish"],
+      permissions: %{"onboard_write" => :auto},
+      source: :global
+    }
+
+    {_name, user} =
+      call(%{
+        "target" => "user",
+        "path" => "agents/b26-never-written.md",
+        "source" => "~/.troupe-b26-test-#{System.unique_integer([:positive])}/reviewer.md"
+      })
+
+    # The session's own config, as the suite starts every session: auto_approve on.
+    %{session: %{id: sid}} =
+      start_session(context,
+        agent: "onboarder",
+        definitions: Definitions.from_list([onboarder]),
+        steps: [
+          {:tools, [call()]},
+          {:tools, [{"onboard_write", user}]},
+          {:text_and_tools, "Done.", [{"finish", %{"summary" => "done"}}]}
+        ]
+      )
+
+    :ok = Troupe.subscribe(sid)
+    Troupe.send_input(sid, "Onboard the reviewer, for the repository and for me.")
+
+    request = await_event(sid, :approval_requested)
+    assert request.data["tool"] == "onboard_write"
+    assert request.data["args"]["target"] == "user"
+
+    # The repository's file was written as the rule says, unasked; the person's is waiting.
+    assert File.exists?(Path.join(context.workspace, ".troupe/agents/reviewer.md"))
+
+    assert [%Event{data: %{"args" => %{"target" => "user"}}}] =
+             events_of_type(sid, :approval_requested)
+
+    # Saying yes to everything again does not answer it either.
+    :ok = Approvals.set_auto_approve(sid, true)
+    assert [%{tool: "onboard_write"}] = Approvals.pending(sid)
+
+    Troupe.approve(sid, request.data["call_id"], :deny)
+    assert_receive {:troupe_event, ^sid, %Event{type: "agent_done", agent: ["root"]}}, 5_000
+
+    refute File.exists?(Path.join(Troupe.Paths.config_dir(), "agents/b26-never-written.md"))
+    assert [%Event{data: %{"target" => "repo"}}] = events_of_type(sid, :onboarded)
   end
 
   test "a denied call leaves nothing behind", context do
