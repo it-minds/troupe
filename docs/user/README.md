@@ -10,9 +10,16 @@ machine and you see the same transcript; two people can open the same session at
 
 1. Install `troupe` and `troupe-daemon` with the latest release's `install.sh` or
    `install.ps1` ([quick start](../quick-start.md#1-install)), saying yes to the TUI.
-2. `troupe config` sets up a model. Enter at every question is Anthropic with the key read
-   from `ANTHROPIC_API_KEY`; the other choices are OpenAI, a gateway such as LiteLLM, or
-   your organisation's plane.
+2. `troupe setup` sets up a model, one question to a screen: where the work runs, the
+   provider (a key in the environment, an opencode setup or a working `config.yaml` is
+   offered first), the key, the models with their context and price, a first project and
+   what the agent may do there without asking, and whether the daemon starts when you log
+   in. A summary comes last, and nothing is written before it: Enter writes it and opens
+   the first session in that project, Esc leaves with nothing written, Shift-Tab goes back
+   a step. Run it again whenever you like. Without a terminal (standard input or output
+   redirected) it says which and prints the ways on instead. `troupe config`, on a machine
+   with nothing set up, asks for a provider line by line, where Enter at every question is
+   Anthropic with the key read from `ANTHROPIC_API_KEY`.
 3. `troupe` in a project directory opens a session; `troupe run "a task" --headless` does
    one task and exits.
 4. The settings are one file, `config.yaml` in `~/.config/troupe/` (`%APPDATA%\troupe\` on
@@ -20,8 +27,9 @@ machine and you see the same transcript; two people can open the same session at
 5. `troupe config validate` checks that file after you edit it by hand;
    [configuration.md](configuration.md) has every key.
 
-With no model set up, plain `troupe` asks the same questions first, and whatever needs a
-model says to run `troupe config` rather than failing without a reason. `troupe doctor`
+With no model set up, plain `troupe` opens the same screen first and then the session it
+started, and whatever needs a model says to run `troupe config` rather than failing
+without a reason. `troupe doctor`
 checks the setup — the config files, the provider and its key (with a real request), the
 helper every command runs under, the daemon, the two programs on the PATH and any plane
 you are signed in to — one line each,
@@ -34,7 +42,7 @@ runs, the provider (with what is already on the machine offered: a key in the en
 an opencode setup, a `config.yaml`), the key, the models with their context and price, a
 first directory and the approval model, whether the daemon starts when you log in, then a
 first session there with a suggested prompt. It writes the same `config.yaml`, and once it is done the terminal client does not
-ask again. **Setup** in the app's rail runs it again at any time, and a session whose key
+ask again; `troupe setup` is the same questions in a terminal. **Setup** in the app's rail runs it again at any time, and a session whose key
 the provider refuses offers it too.
 
 Without either, the desktop app's **This computer** screen, under **Models**, sets up the

@@ -30,4 +30,16 @@ File.write!(
   "version: 1\ntrusted_workspaces:\n  - #{Jason.encode!(System.tmp_dir!())}\n"
 )
 
+# The setup's screen reaches the daemon's `daemon` step (TUI Decision 153), which writes or
+# removes the person's own login entry (root Decision 762): here a scratch home's, with a
+# `troupe-daemon` that need not exist, as the core and gateway suites do.
+Application.put_env(:troupe_core, :start_at_login,
+  env: %{
+    "HOME" => Path.join(tmp, "login"),
+    "APPDATA" => Path.join([tmp, "login", "AppData"]),
+    "XDG_CONFIG_HOME" => Path.join([tmp, "login", ".config"])
+  },
+  command: "/opt/troupe/bin/troupe-daemon"
+)
+
 ExUnit.start(exclude: [:manual, :slow], timeout: 60_000, capture_log: true)

@@ -282,12 +282,39 @@ defmodule Troupe.ConfigSetupTest do
       assert said() == []
     end
 
-    test "a machine with nothing gets the first run's questions" do
-      assert ConfigSetup.before_session("/w", io(daemon: settings(@nothing), answers: ["3"])) == :ok
+    # TUI Decision 153: the daemon's questions as one screen, and its first session is the
+    # one plain `troupe` opens.
+    test "a machine with nothing gets the setup's screen, and opens the session it ends in" do
+      outcome = {:session, "s-first", "/projects/app"}
+
+      assert ConfigSetup.before_session("/w", io(daemon: settings(@nothing), screen: outcome)) ==
+               {:open, "s-first"}
+
+      assert_received {:screen, %{"needed" => true}}
+      assert_received {:open, "/projects/app", "s-first"}
+      refute_received {:ask, _}
+      refute_received {:call, "config.get", _}
+    end
+
+    test "leaving the screen goes on to a session as before, having said nothing was written" do
+      assert ConfigSetup.before_session("/w", io(daemon: settings(@nothing))) == :ok
+      assert_received {:screen, _flow}
+      refute_received {:open, _, _}
+      assert said() == ["Left the setup with nothing written; troupe setup asks again."]
+    end
+
+    test "a screen that cannot be drawn gets the first run's questions, line by line" do
+      daemon = fn
+        "setup.get", _ -> {:ok, %{"needed" => true}}
+        "config.get", _ -> {:ok, @nothing}
+      end
+
+      io = io(daemon: daemon, screen: {:cannot_draw, "no console"}, answers: ["3"])
+      assert ConfigSetup.before_session("/w", io) == :ok
       assert_received {:ask, "choice [1]: "}
 
       text = Enum.join(said(), "\n")
-      assert text =~ "No model settings yet: #{@path} does not exist."
+      assert text =~ "the screen could not be drawn (no console)"
       assert text =~ "When you are ready, either:"
     end
 
@@ -320,6 +347,77 @@ defmodule Troupe.ConfigSetupTest do
     end
   end
 
+  # TUI Decision 153: `troupe setup`, at any time, whatever is set up already.
+  describe "troupe setup" do
+    test "opens the screen on the daemon's flow, then the session it ended in" do
+      daemon = fn "setup.get", _ -> {:ok, %{"needed" => false, "step" => "where"}} end
+      outcome = {:session, "s-1", "/projects/app"}
+
+      assert ConfigSetup.setup(
+               "/w",
+               io(daemon: daemon, local_file?: true, usable?: true, screen: outcome)
+             ) ==
+               {:open, "s-1"}
+
+      assert_received {:screen, %{"needed" => false, "step" => "where"}}
+      assert_received {:open, "/projects/app", "s-1"}
+    end
+
+    test "Esc on the screen writes nothing, and says so" do
+      daemon = fn "setup.get", _ -> {:ok, %{"needed" => true}} end
+      assert ConfigSetup.setup("/w", io(daemon: daemon, screen: {:left, false})) == 0
+      assert said() == ["Left the setup with nothing written; troupe setup asks again."]
+      refute_received {:call, "setup.answer", _}
+    end
+
+    test "a plane: sign in, then take its settings, as troupe config's choice does" do
+      daemon = fn "setup.get", _ -> {:ok, %{"needed" => true}} end
+
+      assert ConfigSetup.setup("/w", io(daemon: daemon, screen: {:plane, "https://plane.example"})) ==
+               0
+
+      assert_received {:login, "https://plane.example"}
+      assert_received {:pull, "https://plane.example"}
+    end
+
+    test "a first session that did not start, or could not be opened, says so and fails" do
+      daemon = fn "setup.get", _ -> {:ok, %{"needed" => true}} end
+
+      assert ConfigSetup.setup("/w", io(daemon: daemon, screen: {:no_session, "the disk is full"})) ==
+               1
+
+      assert said() == ["Set up. The first session did not start: the disk is full"]
+
+      io = io(daemon: daemon, screen: {:session, "s-2", "/p"}, open: {:error, "gone"})
+      assert ConfigSetup.setup("/w", io) == 1
+      assert [line] = said()
+      assert line =~ "troupe resume s-2 opens it"
+    end
+
+    test "without a terminal it says which, names the ways on, and fails" do
+      io = io(daemon: settings(@nothing), interactive?: false, not_terminal: ["standard output"])
+      assert ConfigSetup.setup("/w", io) == 1
+      refute_received {:screen, _}
+      refute_received {:ask, _}
+
+      text = Enum.join(said(), "\n")
+      assert text =~ "troupe setup: standard output is not a terminal"
+      assert text =~ "When you are ready, either:"
+    end
+
+    test "a daemon from before setup.get gets troupe config's questions" do
+      daemon = fn
+        "setup.get", _ -> {:error, "method_not_found"}
+        "config.get", _ -> {:ok, @nothing}
+      end
+
+      assert ConfigSetup.setup("/w", io(daemon: daemon, answers: ["3"])) == 0
+      refute_received {:screen, _}
+      assert_received {:ask, "choice [1]: "}
+      assert Enum.join(said(), "\n") =~ "the daemon does not ask the first run's questions"
+    end
+  end
+
   test "a daemon that cannot be reached still gets the report, and a failure" do
     assert ConfigSetup.run("/w", io(daemon: fn _, _ -> {:error, :econnrefused} end)) == 1
     assert ["REPORT", line] = said()
@@ -345,6 +443,7 @@ defmodule Troupe.ConfigSetupTest do
 
     %{
       interactive?: Keyword.get(opts, :interactive?, true),
+      not_terminal: Keyword.get(opts, :not_terminal, []),
       say: fn line -> send(test, {:say, line}) end,
       ask: fn prompt ->
         send(test, {:ask, prompt})
@@ -374,6 +473,16 @@ defmodule Troupe.ConfigSetupTest do
       troupe_daemon: fn args ->
         send(test, {:troupe_daemon, args})
         0
+      end,
+      # The screen, played: how it ended (`Troupe.UI.Setup.outcome/0`); `setup_screen_test`
+      # plays a person on the screen itself.
+      screen: fn flow ->
+        send(test, {:screen, flow})
+        Keyword.get(opts, :screen, {:left, false})
+      end,
+      open: fn workspace, sid ->
+        send(test, {:open, workspace, sid})
+        Keyword.get(opts, :open, {:ok, sid})
       end
     }
   end
