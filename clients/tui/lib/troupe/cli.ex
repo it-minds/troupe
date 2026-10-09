@@ -27,6 +27,7 @@ defmodule Troupe.CLI do
           | :models
           | :doctor
           | :instructions_check
+          | :onboard
           | :bench
           | :login
           | :logout
@@ -180,8 +181,13 @@ defmodule Troupe.CLI do
        "against a scripted model: offline, in seconds",
      [["doctor", "--bench"], ["doctor", "--bench", "--json"]]},
     {"troupe instructions check [--workspace DIR] [--json]",
-     "check the instruction files a session here reads: contradictions, missing paths and programs, repeats; exits 1 on one",
+     "check the instruction files a session here reads: contradictions, missing paths and programs, repeats; " <>
+       "and onboarded files whose source has changed; exits 1 on one",
      [["instructions", "check"], ["instructions", "check", "--workspace", ".", "--json"]]},
+    {"troupe onboard [--workspace DIR] [--yes] [--json] [--all]",
+     "bring other tools' agents and commands into .troupe/ and your config, each shown as a " <>
+       "diff and written only if you say yes; --all asks again about what you left out",
+     [["onboard"], ["onboard", "--workspace", ".", "--yes"], ["onboard", "--json", "--all"]]},
     {"troupe bench [--json [FILE]] [--md FILE]",
      "measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one",
      [["bench"], ["bench", "--json"], ["bench", "--json", "bench.json", "--md", "bench.md"]]},
@@ -359,6 +365,8 @@ defmodule Troupe.CLI do
 
   defp parse_rest(["instructions", "check"], base),
     do: {:ok, %{base | mode: :instructions_check}}
+
+  defp parse_rest(["onboard"], base), do: {:ok, %{base | mode: :onboard}}
 
   defp parse_rest(["bench"], base), do: {:ok, %{base | mode: :bench}}
 

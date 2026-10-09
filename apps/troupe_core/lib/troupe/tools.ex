@@ -39,13 +39,20 @@ defmodule Troupe.Tools do
     Troupe.Tools.AskUser,
     Troupe.Tools.WebFetch,
     Troupe.Tools.GitRead,
-    Troupe.Tools.Glob
+    Troupe.Tools.Glob,
+    # Onboarding another tool's files into Troupe's own (Decision 823).
+    Troupe.Tools.OnboardWrite
   ]
 
   # The task list's tools, and the model calls a turn makes before a profile that did not
   # name them is offered them (Decision 793).
   @task_list ~w(todo_write todo_read)
   @task_list_after 10
+
+  # Tools a profile has only when it names them (Decision 823): `onboard_write` writes the
+  # files that decide what runs, which is the librarian's job, and an agent with every
+  # tool (`build`) is neither offered it nor let call it.
+  @named_only ~w(onboard_write)
 
   @doc """
   Every tool available, built-ins plus anything registered in `:extra_tools`.
@@ -94,9 +101,16 @@ defmodule Troupe.Tools do
   @spec for_definition(Definition.t(), String.t() | nil) :: [Tool.handle()]
   def for_definition(%Definition{} = definition, session_id \\ nil) do
     Enum.filter(all(session_id), fn tool ->
-      Definition.permission(definition, Tool.name(tool), Tool.default_permission(tool)) != :deny
+      name = Tool.name(tool)
+
+      named?(definition, name) and
+        Definition.permission(definition, name, Tool.default_permission(tool)) != :deny
     end)
   end
+
+  # A named-only tool is a profile's when its list names it, not when it has every tool.
+  defp named?(%Definition{tools: :all}, name), do: name not in @named_only
+  defp named?(%Definition{}, _name), do: true
 
   @doc """
   The tools a profile may use in one agent's context: everything `for_definition/2`
@@ -234,7 +248,7 @@ defmodule Troupe.Tools do
 
       {:ok, tool} ->
         cond do
-          not Definition.allows_tool?(definition, name) ->
+          not (Definition.allows_tool?(definition, name) and named?(definition, name)) ->
             {:reject, Result.error(ctx.call_id, name, {:not_allowed, name})}
 
           Definition.permission(definition, name, Tool.default_permission(tool)) == :deny ->

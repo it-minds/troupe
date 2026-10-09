@@ -16,6 +16,9 @@ defmodule Troupe.Instructions.Check do
   - `command`: a command a rule names, in a code span or a fenced block, whose program is
     not on the `PATH` a session's commands run with.
   - `duplicate`: a rule, a paragraph or a list item, said again in another file.
+  - `drift`: a file onboarding wrote, under the workspace's `.troupe/` or the person's
+    config directory, whose source has changed or gone since (Decision 823), read from the
+    provenance the file recorded (`Troupe.Onboard.drift/2`), not from a search of its own.
 
   Each would rather miss a finding than make a false one: only what reads unmistakably as
   a command or a repository path is checked (`Troupe.Instructions.Check.Text`), and the
@@ -30,10 +33,10 @@ defmodule Troupe.Instructions.Check do
   `findings/2` is pure but for the two probes it is handed; `run/2` reads.
   """
 
-  alias Troupe.{Gitignore, Instructions, Paths, Reaper}
+  alias Troupe.{Gitignore, Instructions, Onboard, Paths, Reaper}
   alias Troupe.Instructions.Check.Text
 
-  @type kind :: :contradiction | :path | :command | :duplicate
+  @type kind :: :contradiction | :path | :command | :duplicate | :drift
 
   @type finding :: %{path: Path.t(), line: pos_integer(), kind: kind(), message: String.t()}
 
@@ -114,7 +117,8 @@ defmodule Troupe.Instructions.Check do
   Checks the instruction files a session in `workspace` would read, and answers what
   `troupe instructions check` prints and its exit status: 0 for no finding, 1 for any, 2
   when the workspace cannot be read. `json: true` prints the same as one object.
-  `executable?` replaces the `PATH` lookup, for a test.
+  `executable?` replaces the `PATH` lookup, and `config_dir` and `home` where onboarded
+  files and their sources are, for a test.
   """
   @spec run(Path.t(), keyword()) :: {String.t(), 0 | 1 | 2}
   def run(workspace, opts \\ []) do
@@ -125,7 +129,18 @@ defmodule Troupe.Instructions.Check do
       {:ok, _names} ->
         %{root: root, sources: sources, elsewhere?: elsewhere?} = sources(workspace)
         found = findings(sources, [root: root, elsewhere?: elsewhere?] ++ opts)
-        report(%{workspace: workspace, root: root, sources: sources, findings: found}, json?)
+        onboarded = Onboard.drift(workspace, Keyword.take(opts, [:config_dir, :home]))
+
+        report(
+          %{
+            workspace: workspace,
+            root: root,
+            sources: sources,
+            onboarded: onboarded.files,
+            findings: found ++ onboarded.findings
+          },
+          json?
+        )
 
       {:error, reason} ->
         unreadable(workspace, reason, json?)
@@ -552,7 +567,7 @@ defmodule Troupe.Instructions.Check do
     do: %{path: path, line: line, kind: kind, message: message}
 
   defp rank(kind),
-    do: Enum.find_index([:contradiction, :path, :command, :duplicate], &(&1 == kind))
+    do: Enum.find_index([:contradiction, :path, :command, :duplicate, :drift], &(&1 == kind))
 
   defp report(result, true) do
     %{workspace: workspace, root: root, sources: sources, findings: found} = result
@@ -564,6 +579,11 @@ defmodule Troupe.Instructions.Check do
         Enum.map(
           sources,
           &%{"file" => shown(&1.path, root), "path" => &1.path, "scope" => to_string(&1.scope)}
+        ),
+      "onboarded" =>
+        Enum.map(
+          result.onboarded,
+          &%{"file" => shown(&1.file, root), "path" => &1.file, "imported_from" => &1.from}
         ),
       "findings" =>
         Enum.map(found, fn f ->
@@ -580,20 +600,32 @@ defmodule Troupe.Instructions.Check do
     {Jason.encode!(json, pretty: true) <> "\n", status(found)}
   end
 
-  defp report(%{sources: []} = result, false),
+  defp report(%{sources: [], onboarded: []} = result, false),
     do: {"no instruction files reach a session in #{Paths.display(result.workspace)}\n", 0}
 
-  defp report(%{findings: [], sources: sources, root: root}, false) do
-    files = Enum.map_join(sources, ", ", &shown(&1.path, root))
-    {"no findings in #{count(sources, "instruction file")}: #{files}\n", 0}
+  defp report(%{findings: [], sources: sources, onboarded: onboarded, root: root} = result, false) do
+    files =
+      Enum.map_join(
+        Enum.map(sources, & &1.path) ++ Enum.map(onboarded, & &1.file),
+        ", ",
+        &shown(&1, root)
+      )
+
+    {"no findings in #{counted(result)}: #{files}\n", 0}
   end
 
-  defp report(%{findings: found, sources: sources, root: root}, false) do
+  defp report(%{findings: found, root: root} = result, false) do
     lines =
       Enum.map_join(found, "\n", &"#{shown(&1.path, root)}:#{&1.line}: #{&1.kind}: #{&1.message}")
 
-    {lines <> "\n\n#{count(found, "finding")} in #{count(sources, "instruction file")}.\n", 1}
+    {lines <> "\n\n#{count(found, "finding")} in #{counted(result)}.\n", 1}
   end
+
+  # The files checked: the instruction files, and the onboarded ones when there are any.
+  defp counted(%{sources: sources, onboarded: []}), do: count(sources, "instruction file")
+
+  defp counted(%{sources: sources, onboarded: onboarded}),
+    do: "#{count(sources, "instruction file")} and #{count(onboarded, "onboarded file")}"
 
   defp unreadable(workspace, reason, json?) do
     message =

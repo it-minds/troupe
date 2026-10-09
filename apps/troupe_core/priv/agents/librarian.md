@@ -7,6 +7,7 @@ tools:
   - list_files
   - grep
   - remember
+  - onboard_write
   - finish
 max_turns: 25
 budget_share: 0.3
