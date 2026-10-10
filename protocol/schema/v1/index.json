@@ -1,6 +1,11 @@
 {
   "documents": [
+    "commands/agents.changed.json",
+    "commands/agents.delete.json",
+    "commands/agents.get.json",
     "commands/agents.list.json",
+    "commands/agents.put.json",
+    "commands/agents.validate.json",
     "commands/approval.respond.json",
     "commands/blob.get.json",
     "commands/commands.list.json",

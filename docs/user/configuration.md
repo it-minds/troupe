@@ -145,6 +145,14 @@ directory, that is a link to somewhere else on the machine is not read, and is l
 with why: in `agents.list` and `skills.list`, and in the session's log. Reaching outside
 the repository is what a trusted `skills.json` is for.
 
+An agent a client saves goes through the daemon (`agents.put`), into your
+`<config>/agents/` or the repository's `.troupe/agents/`, and is checked as it is saved: a
+key no agent has, a missing `mode`, a tool that does not exist, a permission for a tool its
+`tools` leaves out, or a model your provider does not serve is refused with the reason,
+and nothing is written. A built-in is changed by saving a copy of it, under its name or
+another. A file edited by hand that does not load is not read, and is listed with why in
+`agents.list` and the session's log.
+
 ## Your own MCP servers and skills
 
 Beside `config.yaml` there are two more files a person keeps, in the shape other tools
