@@ -1262,7 +1262,7 @@ it can and shows the rest greyed with the reason. Reading the table wakes nothin
 → `{"status": "fresh", "path": "/home/me/project/.troupe/memory.md",
 "built_at": "2026-09-20T10:00:00Z", "sections": ["Overview", "Layout", "Commands",
 "Conventions", "Notes"], "text": "...", "refresh_due": false, "refresh_held_until": null,
-"generated": true, "facts": [{"id": "5c0d9a3e71b2", "kind": "command", "claim": "The gate is
+"generated": true, "facts": [{"id": "f_5c0d9a3e71b2", "kind": "command", "claim": "The gate is
 `mix check`", "scope": null, "anchors": [{"path": "mix.exs", "hash": "9f2c...e1"}],
 "evidence": {"session": "s_01J...", "seq": 412, "head": "7f8a221", "exit_status": 0, "by":
 "librarian"}, "created_at": "2026-10-10T09:00:00Z", "verified_at": "2026-10-10T09:00:00Z",
@@ -1304,7 +1304,7 @@ client shows the brief as it did.
 
 #### `memory.forget` → `{"command_id", "workspace", "id"}` (`id` optional)
 
-With an `id`, forgets that fact alone and answers `{"forgotten": true, "id": "5c0d9a3e71b2"}`;
+With an `id`, forgets that fact alone and answers `{"forgotten": true, "id": "f_5c0d9a3e71b2"}`;
 an `id` no fact has is `not_found`. Without one, deletes the whole brief, as before:
 `{"forgotten": true}`. `admin`.
 
