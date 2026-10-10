@@ -270,7 +270,7 @@ Durable:
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to` |
-| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases, `.agents/AGENTS.md`, and Cursor's rules) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `reason`, `trimmed`, `skipped`, `imported_by`, `unfollowed`, `rule`, `applies` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
+| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md`, `.agents/AGENTS.md` and `.troupe/rules`, and the other tools' files listed as not read) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `reason`, `trimmed`, `skipped`, `imported_by`, `unfollowed`, `rule`, `applies` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
 | `goal_set` | `text`, `command_id` — the session's goal, written by the root agent under the actor who set it (`session.goal.set`) |
 | `goal_cleared` | `command_id` |
 | `loop_started` | `loop_id` (`loop-<n>`), `max_iterations`, `max_failures`, `goal`, `command_id` — a loop towards the goal, written by the session under the actor who started it (`session.loop.start`) |
@@ -1139,11 +1139,11 @@ client to say why it started none. `memory.forget` forgets that try with the bri
 → `{"budget": 16000, "used": 1234, "searched": ["/home/me/.config/troupe", "/home/me/project"],
 "files": [{"scope": "root", "path": "/home/me/project/AGENTS.md", "size": 812, "chars": 800,
 "budget": 16000, "share": 0.05, "status": "whole", "reason": null, "trimmed": 0,
-"skipped": ["CLAUDE.md"], "imported_by": null,
+"skipped": [], "imported_by": null,
 "unfollowed": [{"import": "docs/gone.md", "reason": "missing"}], "hash": "sha256:…"},
 {"scope": "root", "path": "/home/me/project/CLAUDE.md", "size": 0, "chars": 0,
 "budget": 16000, "share": 0.0, "status": "skipped",
-"reason": "skipped: AGENTS.md is used in this directory", "trimmed": 0, "skipped": [],
+"reason": "not read: run troupe onboard", "trimmed": 0, "skipped": [],
 "imported_by": null, "unfollowed": [], "hash": null},
 {"scope": "brief", "path": "/home/me/project/.troupe/memory.md",
 "size": 0, "chars": 0, "budget": 6000, "share": 0.0, "status": "absent", "reason": null,
@@ -1165,29 +1165,30 @@ nearest wins where two disagree. `status` is `whole`; `trimmed`, with `trimmed` 
 how many characters were cut, the nearest scope (a file and what it imports) being kept
 whole first; `dropped`, the budget was spent before it; `outside`, the file found (the brief
 too) is really outside the repository (or, for the person's own, the config directory),
-through a link, and was not read, its `size` and `chars` 0 and its `hash` null; `skipped`,
-found and not read, with `size` and `chars` 0 and `hash` null too; or, for the brief,
-`absent` or `disabled` as `memory.get` has it. `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`
-are the same file under other tools' names, and at the repository root so is
-`.github/copilot-instructions.md`: in one directory the first that exists is read, its
-`skipped` names the others, and each of them is listed after it as `skipped`, so nobody
-debugs a file that was never loaded. Copilot reads its file at the repository root only,
-so one in any other directory is listed as `skipped` and hides nothing (Decision 806).
-An `.agents/AGENTS.md` in the root or one of those directories (Decision 822) comes right
-before that directory's file, in its scope, and is no alias: it hides nothing and nothing
-hides it.
+through a link, and was not read, its `size` and `chars` 0 and its `hash` null;
+`unreadable`, the file is there and could not be read, the same; `skipped`, found and not
+read, with `size` and `chars` 0 and `hash` null too; or, for the brief, `absent` or
+`disabled` as `memory.get` has it. Other tools' files are not read (Decision 828): a
+`CLAUDE.md` or `GEMINI.md` in one of those directories, `.github/copilot-instructions.md`
+at the repository root, and Cursor's root `.cursorrules` and `.cursor/rules/*.mdc` are
+each listed after the directory's own file as `skipped`, so nobody debugs a file that was
+never loaded. Copilot reads its file at the repository root only, so one in any other
+directory is listed as `skipped` with a reason of its own (Decision 806). `skipped` on a
+file is always empty now that no other name stands for `AGENTS.md`, kept for the clients
+that read it. An `.agents/AGENTS.md` in the root or one of those directories (Decision
+822) comes right before that directory's file, in its scope.
 `reason` says in words why a file is left out, the same words `/context` prints, and is
 null for a file that reached the prompt and for a brief `absent` or `disabled`: `not
-read: outside the repository` (`outside
-the config directory` for the person's own), `skipped: AGENTS.md is used in this
-directory` (`comes first`, when that file was itself not read), `not read: Copilot's
-file counts only at the root`, or `left out: the budget was spent on nearer files`.
-A Cursor rule (Decision 809), each `.cursor/rules/*.mdc` in the root and in a directory on
-the way to where the session works, and the legacy root `.cursorrules`, comes after that
-directory's file and its imports, in name order, in the directory's scope, with its front
-matter in `rule`: `apply` (`always`, `globs`, `requested` for a rule with only a
-`description`, or `manual` for one with none), `globs`, `description`, and `matched`, the
-file worked on that a glob matched, from the directory that holds `.cursor`. One that
+read: run troupe onboard`, `not read: outside the repository` (`outside the config
+directory` for the person's own), `not read: permission denied` (or another reason the
+system gave), `not read: Copilot's file counts only at the root`, or `left out: the
+budget was spent on nearer files`.
+A rule (Decisions 809 and 828), each `.troupe/rules/*.md` in the root and in a directory
+on the way to where the session works, comes after that directory's file and its
+imports, in name order, in the directory's scope, with its front matter in `rule`:
+`apply` (`always`, `globs`, `requested` for a rule with only a `description`, or `manual`
+for one with none), `globs`, `description`, and `matched`, the file worked on that a glob
+matched, from the directory that holds `.troupe`. One that
 reached the prompt says why in `applies` (`always applied`, `applied: src/a.ts matches
 src/**/*.ts`). One that did not is `inactive`, `chars` 0, with `reason` `applies when a
 file matching src/**/*.ts is read or edited` or `not joined: no alwaysApply, globs or
@@ -1245,16 +1246,17 @@ reads. There is no second settings file.
 "cheap", "expensive"}, "overrides": [{"source", "detail"}], "workspace", "trusted",
 "files", "keys", "warnings", "errors"}`. The first fields are what the user's **file**
 says, since that is what the model panel's save changes. The key is never in the answer:
-`api_key_set` says whether one is in force and `api_key_source` where from (`file`, `env`,
-`opencode` or null). `overrides` names what beats the file anyway: a project's
-`.troupe/config.yaml` (only when `workspace` is given), a `TROUPE_*` variable, or the
-opencode fallback that applies while no key is saved. `config_dir` and `path` are written
+`api_key_set` says whether one is in force and `api_key_source` where from (`file`, `env`
+or null; a daemon before Decision 828 also said `opencode`). `overrides` names what beats
+the file anyway: a project's `.troupe/config.yaml` (only when `workspace` is given) or a
+`TROUPE_*` variable; opencode's settings beat nothing, being copied in (`config.import`)
+and never read for a session. `config_dir` and `path` are written
 as a person on the daemon's platform writes them, for a screen to print.
 
 `keys` is every key the schema knows (`protocol/schema/config/v1.json`), as a session in
 `workspace` would read it (`troupe config --explain`): `{"key", "value", "layer",
 "source", "default", "scopes", "secret", "label", "doc"}`. `layer` is the one that set the
-value in effect — `default`, `user`, `project`, `local`, `env`, `cli` or `opencode` — and
+value in effect — `default`, `user`, `project`, `local`, `env` or `cli` — and
 `source` its file or variable. A secret's `value` is `****`, or the `{env:VAR}` a file
 wrote when the variable is not set; never the secret. `scopes` are the scopes `config.set`
 writes the key to here: only `user` without a workspace, for the trust list, and for a key
@@ -1327,9 +1329,9 @@ of its own is stale, and a screen sees the edit the next time it asks.
 `config.import` (`admin`) → the `config.get` answer after the write, plus `"imported":
 {"from", "providers", "kept", "default"}`. Copies opencode's providers into the file's
 `providers:` block (type, base URL, auth style, models, and the key as opencode has it
-written: an `{env:VAR}` stays a reference, a literal key is copied) so the machine stops
-depending on opencode's config. A provider the file already names is kept as it is and
-listed under `kept`; opencode's default model becomes `models.default` only when the file
+written: an `{env:VAR}` stays a reference, a literal key is copied), once: a session never
+reads opencode's config (Decision 828). A provider the file already names is kept as it is
+and listed under `kept`; opencode's default model becomes `models.default` only when the file
 has none. `from` is `opencode`, the only source; with no opencode providers the call fails
 with `invalid_params`. Nothing is written when nothing would change.
 

@@ -67,7 +67,7 @@ defmodule Troupe.ConfigSetupTest do
       }
 
       daemon = fn
-        "config.get", _ -> {:ok, %{@nothing | "api_key_source" => "opencode"}}
+        "config.get", _ -> {:ok, @nothing}
         "config.import", _ -> {:ok, %{"path" => @path, "imported" => imported}}
       end
 
@@ -81,19 +81,27 @@ defmodule Troupe.ConfigSetupTest do
       assert text =~
                "opencode is set up here, with gateway, portal (default model gateway/claude-opus-5)"
 
+      # Root Decision 828: opencode's settings are copied, never read for a session.
+      assert text =~ "Troupe doesn't read opencode's settings"
+      refute text =~ "uses those"
       assert text =~ "copied into #{@path}: gateway, portal"
     end
 
-    test "no leaves opencode's config in use, and copies nothing" do
-      daemon = settings(%{@nothing | "api_key_source" => "opencode"})
+    test "no copies nothing, and offers the other ways on" do
+      daemon = settings(@nothing)
 
-      assert ConfigSetup.run("/w", io(daemon: daemon, opencode: @opencode, answers: ["n"])) == 0
+      assert ConfigSetup.run("/w", io(daemon: daemon, opencode: @opencode, answers: ["n", "3"])) ==
+               0
+
       refute_received {:call, "config.import", _}
-      assert Enum.join(said(), "\n") =~ "keeps reading opencode's config"
+      text = Enum.join(said(), "\n")
+      assert text =~ "Not copied."
+      refute text =~ "keeps reading opencode's config"
+      assert text =~ "How should this machine reach a model?"
     end
 
     test "without a terminal it says how to copy, and asks nothing" do
-      daemon = settings(%{@nothing | "api_key_source" => "opencode"})
+      daemon = settings(@nothing)
 
       assert ConfigSetup.run("/w", io(daemon: daemon, opencode: @opencode, interactive?: false)) ==
                0

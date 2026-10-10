@@ -221,7 +221,7 @@ defmodule Troupe.ModelsCLITest do
     out = capture_io(fn -> assert Runner.main(["models"]) == 0 end)
 
     assert out =~
-             "other named providers: none configured (add `providers:` to config.yaml, or set up opencode)\n"
+             "other named providers: none configured (add `providers:` to config.yaml)\n"
 
     assert out =~
              "catalog: no provider to ask; one is asked what it serves once the config gives it a key\n"

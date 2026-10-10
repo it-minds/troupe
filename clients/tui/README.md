@@ -101,7 +101,7 @@ Every key, which file wins, and what is checked:
 `troupe config --explain` shows where each value came from, and
 `troupe config validate` checks the files.
 
-### Several providers, or reusing opencode
+### Several providers, or copying opencode's
 
 Name providers and address models as `<provider>/<model>`, so the expensive and
 the cheap model can live on different gateways:
@@ -185,20 +185,19 @@ workspace's own servers are commands a cloned repository would run, so the
 session asks before starting them — `deny`, `once` or `allow`, the last
 remembered for that workspace — and asks again when a command changes.
 
-If Troupe has no API key of its own, it reads the providers from opencode's
-`~/.config/opencode/opencode.jsonc` (keys also from its `auth.json`) and uses
-opencode's `model` as the default, so an existing opencode setup works with no
-Troupe config at all — `options.baseURL`, `options.apiKey`, `options.authToken`,
-and per model `id`, `limit.context`, `limit.output` and
-`options.reasoningEffort`. `{env:VAR}` and `{file:path}` in the first three are
-read as opencode reads them, and one whose variable is not set, or whose file
-cannot be read, refuses that provider. `variants`, `agent` and `permission` are not read;
-agents are files (see below). `troupe config` prints what was resolved with keys
-masked.
+Troupe does not read opencode's settings for a session. An existing opencode setup's
+providers are copied into `config.yaml` once, when you say so: `troupe config` and
+`troupe setup` offer it on a machine with no settings yet. The copy takes
+`options.baseURL`, `options.apiKey`, `options.authToken`, and per model `id`,
+`limit.context`, `limit.output` and `options.reasoningEffort` from
+`~/.config/opencode/opencode.jsonc` (keys also from its `auth.json`), and opencode's
+`model` as the default when you have none; an `{env:VAR}` stays a reference. `variants`,
+`agent` and `permission` are not copied; agents are files (see below), and `troupe
+onboard` brings opencode's in. `troupe config` prints what was resolved with keys masked.
 
 On a machine with no `config.yaml`, `troupe config` in a terminal sets one up instead.
 With opencode there, it offers to copy opencode's providers into `config.yaml`, keys as
-opencode has them written. Otherwise it offers three choices: set up a provider here
+opencode has them written. Otherwise, or if you say no, it offers three choices: set up a provider here
 (Anthropic first, then OpenAI or a gateway: provider, URL, key and a model from what the
 provider lists; Enter at every question is Anthropic, with
 `api_key: "{env:ANTHROPIC_API_KEY}"`), take your organisation's settings from a plane
@@ -392,8 +391,7 @@ that agent's branch window, Esc goes back.
 ### Models
 
 Troupe detects every model it can address: the ones each provider declares in
-`config.yaml`, the ones opencode's config declares, and whatever `models.default`
-and `models.cheap` already name. `troupe config` prints the list with each
+`config.yaml`, and whatever `models.default` and `models.cheap` already name. `troupe config` prints the list with each
 model's context window, where it came from, and whether a key was found.
 
 `troupe models` asks the providers themselves what they serve and caches the

@@ -39,9 +39,9 @@ Manual smoke without a model: put `provider: fake` and `fake_script: <path>` in
 the workspace's `.troupe/config.yaml` (the daemon reads the model from the
 workspace; a client cannot set the provider), then `scripts/dev run build smoke
 --headless --auto-approve`. `test/support/helpers.ex` shows the script shape
-(`{"routes": {"root": [steps]}}`). Real providers come from `~/.config/troupe/config.yaml`,
-env (`TROUPE_*`), or opencode's `~/.config/opencode/opencode.jsonc` as a
-fallback; `scripts/dev config` shows the resolution.
+(`{"routes": {"root": [steps]}}`). Real providers come from `~/.config/troupe/config.yaml`
+or env (`TROUPE_*`); opencode's `~/.config/opencode/opencode.jsonc` is not read, only
+copied in when asked (root Decision 828); `scripts/dev config` shows the resolution.
 
 There is no harness to bump: the path dependency is the umbrella's own source. A
 package both this project and the umbrella lock must be at the same version in both
