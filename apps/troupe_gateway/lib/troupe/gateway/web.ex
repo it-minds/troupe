@@ -40,7 +40,11 @@ defmodule Troupe.Gateway.Web do
         conn
         |> WebSockAdapter.upgrade(
           Socket,
-          [endpoint: conn.private[:troupe_endpoint], bearer: bearer(conn)],
+          [
+            endpoint: conn.private[:troupe_endpoint],
+            bearer: bearer(conn),
+            max_message_bytes: conn.private[:troupe_max_message_bytes]
+          ],
           timeout: :timer.hours(24)
         )
         |> halt()
@@ -126,6 +130,9 @@ defmodule Troupe.Gateway.Web do
     end
   end
 
+  # The header of a client's frame, at its longest: two bytes, eight of length, four of mask.
+  @client_frame_header 14
+
   @doc """
   A Bandit child serving this router.
 
@@ -134,33 +141,42 @@ defmodule Troupe.Gateway.Web do
   zero-arity function answering `:ok` or `{:error, reason}` for the readiness probe.
   `:allowed_origins` is a list, or a zero-arity function asked at each upgrade, and
   `:on_refused` a function given the origin of an upgrade the list refused.
+  `:max_frame_bytes` is the largest message the socket takes, which `initialize` says
+  (16 MiB unless the application environment says otherwise).
   """
   @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
     port = Keyword.fetch!(opts, :port)
     endpoint = Keyword.fetch!(opts, :endpoint)
     ready = Keyword.get(opts, :ready)
+    limit = Keyword.get(opts, :max_frame_bytes, max_frame_bytes())
 
     plug =
       {__MODULE__,
        endpoint: endpoint,
        ready: ready,
        allowed_origins: Keyword.get(opts, :allowed_origins),
-       on_refused: Keyword.get(opts, :on_refused)}
+       on_refused: Keyword.get(opts, :on_refused),
+       max_message_bytes: limit}
 
     # A frame is a whole message, and the connection refuses a message over 64 MiB with
     # `payload_too_large` — but only once it has the whole thing in memory, and before
     # `initialize` nobody has shown a token yet. So the socket itself has a ceiling,
     # well under the connection's, and Bandit closes the frame before it is assembled.
-    # Large payloads travel as blobs and `fs.upload` chunks, neither of which needs a
-    # frame this size.
+    # That ceiling is what a connection here says it takes at `initialize` (Decision 845):
+    # a client told 64 MiB sent 20 and lost the connection (D108). Bandit counts a frame's
+    # header against it, and a message in fragments against a limit of its own, so both are
+    # set from the one number.
     Supervisor.child_spec(
       {Bandit,
        plug: plug,
        scheme: :http,
        port: port,
        ip: Keyword.get(opts, :ip, :any),
-       websocket_options: [max_frame_size: Keyword.get(opts, :max_frame_bytes, max_frame_bytes())]},
+       websocket_options: [
+         max_frame_size: limit + @client_frame_header,
+         max_fragmented_message_size: limit
+       ]},
       id: Keyword.get(opts, :id, __MODULE__)
     )
   end
@@ -180,6 +196,7 @@ defmodule Troupe.Gateway.Web do
     |> Plug.Conn.put_private(:troupe_ready, Keyword.get(opts, :ready))
     |> Plug.Conn.put_private(:troupe_allowed_origins, Keyword.get(opts, :allowed_origins))
     |> Plug.Conn.put_private(:troupe_on_refused, Keyword.get(opts, :on_refused))
+    |> Plug.Conn.put_private(:troupe_max_message_bytes, Keyword.get(opts, :max_message_bytes))
     |> super(opts)
   end
 end
