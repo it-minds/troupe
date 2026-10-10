@@ -84,7 +84,11 @@ which the daemon now refuses; and the palette drew `/plan`, `/merge` and a repos
   The renderer remembers the last frame and draws only what differs, while the screen it
   gets back is blank, so one blank frame is drawn first and the next is drawn whole. On
   Windows the editor is a program with a window of its own (Notepad, `code --wait`); one
-  that wants the console is not supported there. A frame saying "editing … close the
+  that wants the console is not supported there. A console program there (`code`'s
+  `.cmd`, a script's interpreter) is started with the port's `:hide`, without which it
+  did not run at all from a port on this machine (exit 0, nothing done); a program whose
+  executable's header says it has a window is started without it, since `:hide` would
+  hide that window too. A frame saying "editing … close the
   editor to come back" is drawn before the editor opens. This is the one process the TUI
   starts outside `Troupe.OS.Process` beside the file watcher (Decision 19): the reaper
   takes the child's standard input and output for its own pipe, and an editor needs the

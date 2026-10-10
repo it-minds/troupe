@@ -31,6 +31,34 @@ defmodule Troupe.EditorTest do
              Editor.edit(Path.join(System.tmp_dir!(), "nothing.md"))
   end
 
+  # On Windows a console program is started hidden, which a program with a window must
+  # not be: the executable's header says which it is.
+  test "a Windows executable's header says whether it has a window of its own" do
+    dir = Path.join(System.tmp_dir!(), "troupe-pe-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    pe = fn subsystem ->
+      offset = 128
+      dos = "MZ" <> :binary.copy(<<0>>, 58) <> <<offset::little-32>>
+      padding = :binary.copy(<<0>>, offset - byte_size(dos))
+      dos <> padding <> "PE" <> <<0, 0>> <> :binary.copy(<<0>>, 20 + 68) <> <<subsystem::little-16>>
+    end
+
+    for {name, bytes, gui?} <- [
+          {"notepad.exe", pe.(2), true},
+          {"powershell.exe", pe.(3), false},
+          {"code.cmd", "@echo off\r\n", false},
+          {"short.exe", "MZ", false}
+        ] do
+      path = Path.join(dir, name)
+      File.write!(path, bytes)
+      assert Editor.windows_gui?(path) == gui?, name
+    end
+
+    refute Editor.windows_gui?(Path.join(dir, "missing.exe"))
+  end
+
   # The suite runs on Linux and macOS, where the editor is given the terminal.
   test "the editor runs on the file, has the terminal, and is waited for" do
     path = Path.join(System.tmp_dir!(), "troupe-editor-#{System.unique_integer([:positive])}.md")

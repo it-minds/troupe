@@ -14,7 +14,11 @@ defmodule Troupe.Editor do
   and returns to it after, so `vi` or `nano` draw where the person is looking. The TUI
   is not reading the terminal meanwhile: it is waiting here. On Windows the editor is a
   program with a window of its own (Notepad, or `code --wait`), which needs nothing of
-  the console the TUI holds; one that wants the console is not supported there.
+  the console the TUI holds; one that wants the console is not supported there. A
+  console program there (a script's interpreter, `code`'s `.cmd`) is started without a
+  console window of its own (`:hide`), without which it does not run at all from a port;
+  a program with a window, by its executable's header, is started as it is, since
+  `:hide` would hide its window too.
 
   This is the one OS process the TUI starts outside `Troupe.OS.Process` and its reaper
   besides the file watcher (TUI Decision 19): the reaper takes the child's standard input
@@ -84,12 +88,12 @@ defmodule Troupe.Editor do
   defp run({program, args}, path, opts) do
     case :os.type() do
       {:win32, _} ->
-        Port.open({:spawn_executable, program}, [
-          :binary,
-          :exit_status,
-          :stderr_to_stdout,
-          args: args ++ [path]
-        ])
+        hide = if windows_gui?(program), do: [], else: [:hide]
+
+        Port.open(
+          {:spawn_executable, program},
+          [:binary, :exit_status, :stderr_to_stdout] ++ hide ++ [args: args ++ [path]]
+        )
         |> wait(Path.basename(program))
 
       _ ->
@@ -106,6 +110,37 @@ defmodule Troupe.Editor do
         ])
         |> wait(Path.basename(program))
         |> then(&{:terminal, &1})
+    end
+  end
+
+  @doc """
+  Whether a Windows executable opens a window of its own: its PE header's subsystem is
+  the GUI's (2), not the console's (3). Anything that is not such a file (a `.cmd`, a
+  script) is taken as a console program.
+  """
+  @spec windows_gui?(String.t()) :: boolean()
+  def windows_gui?(path) do
+    with {:ok, file} <- File.open(path, [:read, :binary]),
+         header = read_header(file),
+         <<"MZ", _::binary-size(58), pe::little-32, _::binary>> <- header,
+         <<"PE", 0, 0, _coff::binary-size(20), _::binary-size(68), subsystem::little-16>> <-
+           read_at(path, pe, 4 + 20 + 70) do
+      subsystem == 2
+    else
+      _other -> false
+    end
+  end
+
+  defp read_header(file) do
+    header = IO.binread(file, 64)
+    File.close(file)
+    header
+  end
+
+  defp read_at(path, offset, size) do
+    case File.open(path, [:read, :binary], &:file.pread(&1, offset, size)) do
+      {:ok, {:ok, bytes}} -> bytes
+      _other -> nil
     end
   end
 
