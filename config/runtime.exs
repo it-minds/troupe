@@ -449,6 +449,13 @@ if config_env() == :prod do
     # session must behave identically with no sink at all.
     config :troupe_core, usage_sink: Troupe.Worker.Usage
 
+    # Every command a session starts runs in the sandbox here, whatever its mounts or
+    # bundle (Decision 832): a pod's sessions share its volume, and a namespace holding one
+    # session's mounts is what keeps each from the others' files. The worker's, not a
+    # setting: one that cannot start bubblewrap refuses the command rather than run it
+    # outside.
+    config :troupe_core, sandbox: :always
+
     config :troupe_worker,
       autostart: true,
       profile: System.get_env("TROUPE_PROFILE"),

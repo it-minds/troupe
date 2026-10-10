@@ -17,7 +17,9 @@ defmodule Troupe.Agent.ACPAgent do
   **through `Troupe.Workspace`**, which resolves through the mounts. A subprocess somebody
   else wrote gets the session's mounts at their modes rather than the pod's disk, and a
   path outside them fails the way any other tool call fails — not by a check written here,
-  but by the same `Mounts.resolve/3` every tool goes through.
+  but by the same `Mounts.resolve/3` every tool goes through. And on a worker the
+  subprocess itself runs in the sandbox over those mounts (Decision 832), so a file it
+  opens for itself, rather than through its client, is the session's too.
 
   That is the argument for doing it here. A client that ran the agent itself would be
   handing it a laptop; this hands it a session.
@@ -37,7 +39,7 @@ defmodule Troupe.Agent.ACPAgent do
   use GenServer, restart: :temporary
 
   alias Troupe.LLM.Usage
-  alias Troupe.Workspace
+  alias Troupe.{Mounts, Sandbox, Workspace}
 
   require Logger
 
@@ -390,20 +392,32 @@ defmodule Troupe.Agent.ACPAgent do
   # argument a bundle carried would otherwise be a place to put a pipeline, and the bundle
   # is signed for what it says rather than for what a shell makes of it.
   defp open_port(entry, workspace) do
-    case System.find_executable(entry.command) do
-      nil ->
-        {:error, {:not_on_path, entry.command}}
+    with executable when is_binary(executable) <- System.find_executable(entry.command),
+         {:ok, [program | args]} <- confine([executable | entry.args], workspace) do
+      {:ok,
+       Port.open({:spawn_executable, program}, [
+         :binary,
+         :exit_status,
+         {:args, args},
+         {:cd, workspace.root_real},
+         :use_stdio,
+         :hide
+       ])}
+    else
+      nil -> {:error, {:not_on_path, entry.command}}
+      {:error, why} -> {:error, {:sandbox, why}}
+    end
+  end
 
-      executable ->
-        {:ok,
-         Port.open({:spawn_executable, executable}, [
-           :binary,
-           :exit_status,
-           {:args, entry.args},
-           {:cd, workspace.root_real},
-           :use_stdio,
-           :hide
-         ])}
+  # On a worker the program runs in the sandbox over the session's mounts, as every
+  # command there does (Decision 832): what it reads and writes for itself, not only what
+  # it asks its client for, is the session's. Its `$HOME` is the sandbox's private `/tmp`.
+  defp confine(argv, workspace) do
+    if Sandbox.required?() do
+      mounts = workspace.mounts || Mounts.local(workspace.root_real)
+      Sandbox.command(argv, mounts, cwd: workspace.root_real, home: "/tmp")
+    else
+      {:ok, argv}
     end
   end
 end
