@@ -90,8 +90,10 @@ defmodule Troupe.AgentsManagerTest do
 
   test "/agents opens a manager that lists each agent with what decides it" do
     ws = tmp_workspace(%{".troupe/agents/careful.md" => @careful})
-    {sid, _, _} = start_session!(workspace: ws, script: [])
+    {sid, _, _} = start_session!(workspace: ws, script: [{:text, "done"}])
     {pid, session} = ready(sid)
+    assert {:ok, "build-1"} = Troupe.Client.dispatch(sid, "build", "say done")
+    eventually(fn -> Map.has_key?(user_state(pid).model.windows, "build-1") end)
     open_page(pid)
     text = screen_text(pid, session)
 
@@ -110,8 +112,8 @@ defmodule Troupe.AgentsManagerTest do
     assert text =~ ~r/careful .*max 7 turns/
     assert text =~ ~r/plan .*read-only/
 
-    # Which windows run it: the session's own runs build.
-    assert text =~ ~r/build .*runs in root/
+    # Which windows run it: the branch started on build.
+    assert text =~ ~r/build .*runs in build-1/
 
     press(pid, "esc")
     assert user_state(pid).focus == :command

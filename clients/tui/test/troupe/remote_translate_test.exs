@@ -765,7 +765,8 @@ defmodule Troupe.RemoteTranslateTest do
       ts: 1
     }
 
-    [window] = "s-1" |> Model.rebuild("/w", [spawned | events]) |> Model.windows()
+    # The session's own window, listed or not (TUI Decision 155).
+    window = "s-1" |> Model.rebuild("/w", [spawned | events]) |> Model.session_window()
     %{transcript: window.agents["root"].transcript, drawn_inputs: window.drawn_inputs}
   end
 end

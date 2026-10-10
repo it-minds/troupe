@@ -18,14 +18,13 @@ defmodule Troupe.BudgetAnswerTest do
     {sid, _, _} = start_session!(script: @two_calls, config: %{"max_turns" => 1})
     {pid, session} = start_tui(sid)
 
-    # The TUI starts on the command line; `1` opens the session's window, where digits
-    # pick options and typing goes to the window's own line.
-    eventually(fn -> user_state(pid).model.windows["root"] != nil end)
-    press(pid, "1")
-    eventually(fn -> user_state(pid).focus == {:window, "root"} end)
-
+    # The TUI starts in command mode; once the session's own agent has work, `1` opens its
+    # window (TUI Decision 155), where digits pick options and typing goes to the window's
+    # own line.
     say!(sid, "go")
     eventually(fn -> match?(%{options: [_ | _]}, budget(pid)) end, 10_000)
+    press(pid, "1")
+    eventually(fn -> user_state(pid).focus == {:window, "root"} end)
     %{sid: sid, pid: pid, session: session}
   end
 

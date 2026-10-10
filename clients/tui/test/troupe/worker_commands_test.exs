@@ -96,17 +96,18 @@ defmodule Troupe.WorkerCommandsTest do
     test "/todo add puts the item on the agent's task list" do
       {sid, _, _} = start_session!(script: [{:text, "noted"}])
       {pid, session} = start_tui(sid)
-      eventually(fn -> user_state(pid).model.windows["root"] != nil end)
+      {:ok, "build-1"} = Client.dispatch(sid, "build", "")
+      eventually(fn -> user_state(pid).model.windows["build-1"] != nil end)
       press(pid, "1")
 
       type(pid, "/todo add write the tests")
       press(pid, "enter")
 
-      added = await_event("root", :todo_updated)
+      added = await_event("build-1", :todo_updated)
       assert [%{text: "write the tests"}] = added.data.items
       # The side panel's line for it, not the transcript's note saying it was added.
       eventually(fn -> screen_text(pid, session) =~ "[ ] write the tests" end)
-      await_done()
+      await_state("build-1", :done, 10_000)
     end
 
     # An item's id is the model's, or a hash of its text, and is never on screen: the side
@@ -114,14 +115,15 @@ defmodule Troupe.WorkerCommandsTest do
     test "/todo cancel takes the number the side panel shows beside the task" do
       {sid, _, _} = start_session!(script: [{:text, "noted"}, {:text, "noted"}, {:text, "noted"}])
       {pid, session} = start_tui(sid)
-      eventually(fn -> user_state(pid).model.windows["root"] != nil end)
+      {:ok, "build-1"} = Client.dispatch(sid, "build", "")
+      eventually(fn -> user_state(pid).model.windows["build-1"] != nil end)
       press(pid, "1")
 
       for task <- ["write the tests", "ship it"] do
         type(pid, "/todo add " <> task)
         press(pid, "enter")
-        await_event("root", :todo_updated)
-        await_done()
+        await_event("build-1", :todo_updated)
+        await_state("build-1", :done, 10_000)
       end
 
       eventually(fn -> screen_text(pid, session) =~ "2. [ ] ship it" end)
@@ -129,28 +131,29 @@ defmodule Troupe.WorkerCommandsTest do
       type(pid, "/todo cancel 2")
       press(pid, "enter")
 
-      cancelled = await_event("root", :todo_updated)
+      cancelled = await_event("build-1", :todo_updated)
 
       assert [%{text: "write the tests", status: :pending}, %{text: "ship it", status: :cancelled}] =
                cancelled.data.items
 
       eventually(fn -> screen_text(pid, session) =~ "2. [-] ship it" end)
       assert screen_text(pid, session) =~ "1. [ ] write the tests"
-      await_done()
+      await_state("build-1", :done, 10_000)
     end
 
     # `todo.edit` has always taken `complete`; the window had no way to send it.
     test "/todo complete takes the number too, and ticks the task off" do
       {sid, _, _} = start_session!(script: [{:text, "noted"}, {:text, "noted"}, {:text, "noted"}])
       {pid, session} = start_tui(sid)
-      eventually(fn -> user_state(pid).model.windows["root"] != nil end)
+      {:ok, "build-1"} = Client.dispatch(sid, "build", "")
+      eventually(fn -> user_state(pid).model.windows["build-1"] != nil end)
       press(pid, "1")
 
       for task <- ["write the tests", "ship it"] do
         type(pid, "/todo add " <> task)
         press(pid, "enter")
-        await_event("root", :todo_updated)
-        await_done()
+        await_event("build-1", :todo_updated)
+        await_state("build-1", :done, 10_000)
       end
 
       eventually(fn -> screen_text(pid, session) =~ "1. [ ] write the tests" end)
@@ -158,13 +161,13 @@ defmodule Troupe.WorkerCommandsTest do
       type(pid, "/todo complete 1")
       press(pid, "enter")
 
-      completed = await_event("root", :todo_updated)
+      completed = await_event("build-1", :todo_updated)
 
       assert [%{text: "write the tests", status: :completed}, %{text: "ship it", status: :pending}] =
                completed.data.items
 
       eventually(fn -> screen_text(pid, session) =~ "1. [x] write the tests" end)
-      await_done()
+      await_state("build-1", :done, 10_000)
     end
 
     test "/upload puts a file from this machine into the session's workspace" do

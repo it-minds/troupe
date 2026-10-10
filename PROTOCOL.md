@@ -1247,7 +1247,9 @@ The `custom` section is the commands markdown files define: `<config>/commands/<
 frontmatter's `description` its summary (the prompt's first line without one) and its
 `argument-hint` what `usage` says follows the name; `detail` names the file, and `body`,
 which only these entries carry, is the prompt it sends as the file has it, `$ARGUMENTS`
-and all, for a palette to show before it runs (Decision 814). A name a
+and all, for a palette to show before it runs (Decision 814). `agent`, only where the
+frontmatter names one, is the agent the file says it runs on, which a client that starts a
+branch for it starts it on (the terminal client's command mode, TUI Decision 155). A name a
 built-in, an alias or one of the session's agents has stays theirs, and the file is
 skipped. The files are read when the table is asked for, so one written a moment ago is
 listed. A client runs one with `commands.run` (Steering, above) and needs no code of its
@@ -1821,7 +1823,19 @@ made twice.
 ```
 → `{"workspaces": [{"path", "score"}]}`
 
-#### `worktree.list` → `{"worktrees": [{"path", "branch", "session_id", "dirty"}]}`
+#### `worktree.list` → `{"worktrees": [{"path", "branch", "session_id", "dirty", "ahead", "behind", "added", "removed"}]}`
+
+Every worktree of the workspace's repository, the checkout first, with the live session
+working in it (`session_id`, `null` for none) and whether it has uncommitted or untracked
+files. How it stands against the checkout (Decision 840, additive): `ahead` and `behind`
+are the commits its branch has that the checkout's branch has not, and the other way
+round, and `added` and `removed` the lines it would bring, counted since its branch left
+the checkout's, its uncommitted changes and untracked files included, as `worktree.merge`
+would commit them. For the checkout itself `ahead` and `behind` are against its upstream
+and `added` and `removed` what it has not committed. Each is `null` where git cannot say
+(no upstream, a detached checkout). A binary file adds no lines, and an untracked file
+over 1 MB or past the first 200 is not counted.
+
 #### `worktree.remove`
 ```json
 {"command_id": "c-8", "path": "/home/me/project/../project-troupe-abc", "force": false}

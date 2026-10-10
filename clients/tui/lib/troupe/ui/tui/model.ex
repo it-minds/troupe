@@ -105,6 +105,13 @@ defmodule Troupe.UI.TUI.Model do
           ended_at: integer() | nil
         }
 
+  @typedoc "What a window's turns cost so far: their model calls, the micro-dollars priced, and the calls nobody priced."
+  @type spend :: %{
+          calls: non_neg_integer(),
+          cost_micros: non_neg_integer(),
+          unpriced: non_neg_integer()
+        }
+
   @typedoc "A loop towards the goal while it runs: which one, and where it is."
   @type loop :: %{id: String.t() | nil, iteration: non_neg_integer(), max: pos_integer() | nil}
 
@@ -119,9 +126,13 @@ defmodule Troupe.UI.TUI.Model do
 
   @typedoc """
   A window: one agent's branch and the subagents it delegated to. `state` is derived by
-  the fold (`:running`, `:needs_input`, `:done_unread`, `:failed_unread`), from what is
-  `pending` and from `outcome`, how the window's own agent's last turn ended (`nil`
-  while it works); `badge` says the window has ended since it was last opened.
+  the fold (`:idle`, `:running`, `:needs_input`, `:done_unread`, `:failed_unread`), from
+  what is `pending`, from `outcome`, how the window's own agent's last turn ended (`nil`
+  while it works), and from `started`, whether its agent has been given anything to do
+  at all (TUI Decision 155: a window nobody asked anything of is idle, not running);
+  `badge` says the window has ended since it was last opened. `session_id` is the
+  branch's own session, when its window was opened with one, and `cost` what its own
+  agent's turns cost, as the events that end them say (Decision 139).
   """
   @type window :: %{
           path: String.t(),
@@ -129,6 +140,9 @@ defmodule Troupe.UI.TUI.Model do
           profile: String.t(),
           state: atom(),
           outcome: :done | :failed | nil,
+          started: boolean(),
+          session_id: String.t() | nil,
+          cost: spend(),
           isolation: atom(),
           started_at: integer(),
           ended_at: integer() | nil,
@@ -165,6 +179,7 @@ defmodule Troupe.UI.TUI.Model do
   # Syntax highlighting is capped per block: syntect is ~0.04 ms a line.
   @highlight_cap 400
   @theme :base16_ocean_dark
+  @no_spend %{calls: 0, cost_micros: 0, unpriced: 0}
 
   @spec new(String.t(), String.t()) :: t()
   def new(sid, workspace), do: %__MODULE__{session_id: sid, workspace: workspace}
@@ -178,12 +193,19 @@ defmodule Troupe.UI.TUI.Model do
 
     case e.type do
       :branch_spawned ->
+        # A branch opens with its prompt and is working from the start; the session's own
+        # window opens with none, and is idle until something is asked of its agent.
+        started = (e.data[:prompt] || "") != ""
+
         window = %{
           path: e.agent_path,
           name: e.data.name,
           profile: e.data.name,
-          state: :running,
+          state: if(started, do: :running, else: :idle),
           outcome: nil,
+          started: started,
+          session_id: e.data[:session_id],
+          cost: @no_spend,
           isolation: e.data.isolation,
           started_at: e.ts,
           ended_at: nil,
@@ -249,14 +271,31 @@ defmodule Troupe.UI.TUI.Model do
   # branch that needs you" honest whichever way the last request went away: a killed
   # subagent never answers its own, and a `y` on a budget question resumes the turn.
   defp settle(w, %Event{} = e) do
-    w = turn(w, e)
+    w = w |> begun(e) |> turn(e)
     %{w | state: window_state(w)}
   end
 
   defp window_state(%{pending: [_ | _]}), do: :needs_input
   defp window_state(%{outcome: :done}), do: :done_unread
   defp window_state(%{outcome: :failed}), do: :failed_unread
+  defp window_state(%{started: false}), do: :idle
   defp window_state(_w), do: :running
+
+  # What says a window's agent has been given something to do (TUI Decision 155): its
+  # own work, never a note about it. A session's own window opens with the session and
+  # hears that it was created, that its agent started and what its start asks, and is
+  # idle through all of it; it used to read `running` from its first frame.
+  @work ~w(input assistant_message llm_delta tool_started approval_requested question_asked
+           budget_ask_started cancelled llm_error call_usage)a
+
+  defp begun(%{started: true} = w, _e), do: w
+  defp begun(w, %Event{type: type}) when type in @work, do: %{w | started: true}
+
+  defp begun(w, %Event{type: :agent_state, data: %{to: to}} = e) do
+    if to in [nil, :idle, :done] and e.transient?, do: w, else: %{w | started: true}
+  end
+
+  defp begun(w, _e), do: w
 
   # Where the window's own agent is. At rest as the log says it: `turn_ended`, `cancelled`
   # and `agent_done` arrive as a durable `agent_state`, while the live one says `idle`
@@ -280,7 +319,7 @@ defmodule Troupe.UI.TUI.Model do
 
   defp turn(w, _e), do: w
 
-  defp working(w), do: %{w | outcome: nil, message: nil, ended_at: nil}
+  defp working(w), do: %{w | outcome: nil, message: nil, ended_at: nil, started: true}
 
   # Why a rest is a failure, in words, or nil when it is none: the line the headless
   # printer draws between a run that finished and one that ended short, save that a cancel
@@ -630,8 +669,12 @@ defmodule Troupe.UI.TUI.Model do
 
   # What the turn cost, once, in the line under it (Decision 139): the event that ends a
   # turn carries it, and a live `agent_state` never does, so nothing is said while it runs.
-  defp turn_cost(w, path, %{turn: %{calls: calls} = turn}, false) when calls > 0,
-    do: w |> ensure_agent(path) |> push(path, {:system, turn_line(turn)})
+  # The window's own agent's turn carries what its subagents spent (root Decision 769), so
+  # only that one is added to what the window cost: a subagent's would count twice.
+  defp turn_cost(w, path, %{turn: %{calls: calls} = turn}, false) when calls > 0 do
+    w = if path == w.path, do: %{w | cost: spent(w.cost, turn)}, else: w
+    w |> ensure_agent(path) |> push(path, {:system, turn_line(turn)})
+  end
 
   defp turn_cost(w, _path, _data, _transient?), do: w
 
@@ -893,8 +936,91 @@ defmodule Troupe.UI.TUI.Model do
   @spec root(String.t()) :: String.t()
   def root(path), do: path |> String.split("/") |> hd()
 
+  @doc """
+  The windows on screen, in the order they opened: the branches, numbered by the digit
+  that opens each. The session's own window, `"root"`, is command mode's (TUI Decision
+  155), not a branch beside them: it is folded like any other, for its goal, its loop, the
+  start's questions and the session's own lines, and listed only once its agent has been
+  given work of its own (a `troupe run` task, a loop, a watch trigger, a pod session's
+  input, or a session from before command mode).
+  """
   @spec windows(t()) :: [window()]
-  def windows(%__MODULE__{} = m), do: Enum.map(m.order, &Map.fetch!(m.windows, &1))
+  def windows(%__MODULE__{} = m) do
+    m.order
+    |> Enum.map(&Map.fetch!(m.windows, &1))
+    |> Enum.filter(&listed?/1)
+  end
+
+  defp listed?(%{path: "root"} = w), do: Map.get(w, :started, true)
+  defp listed?(_w), do: true
+
+  @doc "The session's own window, `\"root\"`, listed or not; `nil` before its first event."
+  @spec session_window(t()) :: window() | nil
+  def session_window(%__MODULE__{windows: windows}), do: Map.get(windows, "root")
+
+  @doc """
+  The question a session's start asks that is still open, as `{window, question}`, or
+  `nil`: whichever window it is in, the session's own included, which is where the start
+  asks it (TUI Decision 154) and which command mode does not list.
+  """
+  @spec asking(t()) :: {String.t(), map()} | nil
+  def asking(%__MODULE__{} = m) do
+    Enum.find_value(m.order, fn path ->
+      case local_question(Map.fetch!(m.windows, path)) do
+        nil -> nil
+        question -> {path, question}
+      end
+    end)
+  end
+
+  @doc """
+  The tightest limit any window's warnings have come near, as `headroom_note/1` says it
+  with the window it is in (`build-1: 82% of input tokens`), or `nil` when none has.
+  """
+  @spec headroom(t()) :: String.t() | nil
+  def headroom(%__MODULE__{} = m) do
+    m.windows
+    |> Map.values()
+    |> Enum.flat_map(fn w -> Enum.map(w.warnings, fn {_dim, warn} -> {w.path, warn} end) end)
+    |> Enum.max_by(fn {_path, warn} -> warn[:fraction] || 0.0 end, fn -> nil end)
+    |> case do
+      nil -> nil
+      {path, warn} -> "#{path}: " <> headroom_note(%{warnings: %{warn.dimension => warn}})
+    end
+  end
+
+  @doc """
+  The last line a window's agent produced, for command mode's row: what it is writing as
+  it streams, and otherwise its transcript's last entry that is not a note about it (what
+  a turn cost, which the row has a column for, or that its session resumed): the last
+  line of a reply, a tool call's head, a command's head with how it ended. With nothing
+  but notes, the last note; before anything at all, what it is doing.
+  """
+  @spec last_line(window(), non_neg_integer(), integer()) :: String.t()
+  def last_line(w, tick, now) do
+    agent = Map.get(w.agents, w.path, new_agent())
+    streaming = agent.streaming |> sanitize() |> String.split("\n") |> last_said()
+
+    cond do
+      streaming != "" -> streaming
+      (said = said_last(agent.transcript)) != "" -> said
+      true -> activity_line(w, tick, now) || ""
+    end
+  end
+
+  defp said_last(transcript) do
+    {notes, said} = Enum.split_with(transcript, &match?({:system, _}, &1))
+
+    case List.last(said) || List.last(notes) do
+      nil -> ""
+      {:shell, _} = entry -> entry |> entry_lines(false) |> hd() |> line_text()
+      entry -> entry |> entry_lines(false) |> Enum.map(&line_text/1) |> last_said()
+    end
+  end
+
+  defp last_said(lines) do
+    lines |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) |> List.last("")
+  end
 
   @doc """
   The loop this screen's session is running, `%{id, iteration, max}`, as its events say,
@@ -1077,7 +1203,7 @@ defmodule Troupe.UI.TUI.Model do
   """
   @spec activity_line(window(), String.t(), non_neg_integer(), integer()) :: String.t() | nil
   def activity_line(%{state: s} = w, path, _tick, _now)
-      when s in [:done_unread, :failed_unread, :dismissed] do
+      when s in [:idle, :done_unread, :failed_unread, :dismissed] do
     # A window at rest has nothing going on, but a model that failed still says why,
     # where the person is looking.
     case Map.get(w, :model_errors, %{}) do
@@ -1320,6 +1446,32 @@ defmodule Troupe.UI.TUI.Model do
       "#{short(u.cache_read)} cached · ↓ #{short(u.output)} received · " <> money(turn)
   end
 
+  @doc """
+  What a window's turns have cost so far, in the words a turn's line uses (`$0.02`, `no
+  price`), or `""` before any turn ended (TUI Decision 155's collection).
+  """
+  @spec cost(%{cost: spend()} | map()) :: String.t()
+  def cost(%{cost: %{calls: 0}}), do: ""
+  def cost(%{cost: %{} = spend}), do: money(spend)
+  def cost(_w), do: ""
+
+  @doc "What every window of the session has cost, as `cost/1` says it."
+  @spec total_cost(t()) :: String.t()
+  def total_cost(%__MODULE__{windows: windows}) do
+    windows
+    |> Map.values()
+    |> Enum.reduce(@no_spend, &spent(&2, Map.get(&1, :cost, @no_spend)))
+    |> then(&cost(%{cost: &1}))
+  end
+
+  defp spent(a, b) do
+    %{
+      calls: a.calls + b.calls,
+      cost_micros: a.cost_micros + b.cost_micros,
+      unpriced: a.unpriced + b.unpriced
+    }
+  end
+
   defp money(%{calls: n, unpriced: n}), do: "no price"
   defp money(%{cost_micros: micros, unpriced: 0}), do: dollars(micros)
   defp money(%{cost_micros: micros, unpriced: 1}), do: dollars(micros) <> ", 1 call unpriced"
@@ -1401,9 +1553,13 @@ defmodule Troupe.UI.TUI.Model do
     entries ++ reasoning ++ streaming ++ activity ++ pending
   end
 
-  @doc "A window tile's body: the root transcript with tool calls collapsed, then the activity line."
-  @spec tile_lines(window(), non_neg_integer(), integer(), boolean()) :: [line()]
-  def tile_lines(w, tick, now, spacer?) do
+  @doc """
+  A window tile's body: the root transcript with tool calls collapsed, then the activity
+  line, then the question the start asks when it asks one there; `asked?` false leaves
+  the question to whoever draws it on its own (command mode's "waiting for you").
+  """
+  @spec tile_lines(window(), non_neg_integer(), integer(), boolean(), boolean()) :: [line()]
+  def tile_lines(w, tick, now, spacer?, asked? \\ true) do
     agent = Map.get(w.agents, w.path, new_agent())
     lines = Enum.flat_map(agent.transcript, &entry_lines(&1, false))
 
@@ -1415,21 +1571,25 @@ defmodule Troupe.UI.TUI.Model do
     streaming =
       if agent.streaming == "", do: [], else: streaming_lines(agent.streaming)
 
-    activity =
-      case activity_line(w, tick, now) do
-        nil ->
-          []
+    # Waiting on nothing but the start's question, where it is drawn elsewhere, is no
+    # activity of the window's own: command mode says it once, under "waiting for you".
+    only_asked? = not asked? and w.pending != [] and Enum.all?(w.pending, &(&1.kind == :local))
 
-        line ->
+    activity =
+      case not only_asked? && activity_line(w, tick, now) do
+        line when is_binary(line) ->
           if(spacer?, do: [{:blank, ""}], else: []) ++ [{:activity, activity_segments(line)}]
+
+        _none ->
+          []
       end
 
     # A question the start asks is answered from the command line (TUI Decision 154), so
     # the tile it shows in says it too.
     asked =
-      case local_question(w) do
-        nil -> []
-        item -> local_lines(item)
+      case asked? && local_question(w) do
+        item when is_map(item) -> local_lines(item)
+        _none -> []
       end
 
     lines ++ reasoning ++ streaming ++ activity ++ asked
@@ -1791,10 +1951,13 @@ defmodule Troupe.UI.TUI.Model do
     ]
   end
 
-  # A question the start asks (TUI Decision 154): what it is about first (the files, or one
-  # file's diff, coloured as an edit's), then the question with its keys, the default in
-  # capitals as a terminal prompt writes it, and what the keys do.
-  defp local_lines(item) do
+  @doc """
+  A question the start asks (TUI Decision 154): what it is about first (the files, or one
+  file's diff, coloured as an edit's), then the question with its keys, the default in
+  capitals as a terminal prompt writes it, and what the keys do.
+  """
+  @spec local_lines(map()) :: [line()]
+  def local_lines(item) do
     preview =
       (item.preview || "")
       |> sanitize()

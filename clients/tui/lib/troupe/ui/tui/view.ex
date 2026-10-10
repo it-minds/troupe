@@ -93,7 +93,7 @@ defmodule Troupe.UI.TUI.View do
 
   # The agent chooser is a popup over the window it switches, as the palette is over the
   # screen it was opened from (TUI Decision 156).
-  defp draw(%{focus: :chooser, chooser: %{for: {:window, path}} = chooser} = state, frame) do
+  defp draw(%{focus: :switcher, switcher: %{for: {:window, path}} = chooser} = state, frame) do
     behind = draw(%{state | focus: {:window, path}}, frame)
     {_line, cmd_rect} = List.last(behind)
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
@@ -120,6 +120,16 @@ defmodule Troupe.UI.TUI.View do
       [command_line(state, cmd_rect, cmd_rect.height)] ++ palette_popup(state, frame, cmd_rect)
   end
 
+  # Choosing what to start, and on which agent (TUI Decision 155): the agents beside the
+  # selected one's instruction, then where it works.
+  defp draw(%{focus: :chooser} = state, frame) do
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+    [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
+    chooser_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
+  end
+
+  # With a window activated, its pane under the tray of tiles; with none, command mode's
+  # collection of everything the session has going (TUI Decision 155).
   defp draw(state, frame) do
     windows = Model.windows(state.model)
     geometry = pane_geometry(state, {frame.width, frame.height})
@@ -128,9 +138,12 @@ defmodule Troupe.UI.TUI.View do
     {strip_rect, _pane_rect, status_rect, cmd_rect} =
       layout(frame.width, frame.height, geometry != nil, length(windows), cmd_rows)
 
-    strip(windows, strip_rect, state) ++
-      if(geometry, do: pane(geometry, state), else: []) ++
-      [status(state, status_rect), command_line(state, cmd_rect, cmd_rows)]
+    top =
+      if geometry,
+        do: strip(windows, strip_rect, state) ++ pane(geometry, state),
+        else: command_mode(state, windows, strip_rect)
+
+    top ++ [status(state, status_rect), command_line(state, cmd_rect, cmd_rows)]
   end
 
   @doc """
@@ -208,7 +221,7 @@ defmodule Troupe.UI.TUI.View do
 
       w ->
         {_strip, pane_rect, _status, _cmd} =
-          layout(width, height, true, map_size(state.model.windows), box_height(height))
+          layout(width, height, true, length(Model.windows(state.model)), box_height(height))
 
         {left, side} = pane_split(pane_rect)
         inner_w = max(left.width - 2, 1)
@@ -395,7 +408,7 @@ defmodule Troupe.UI.TUI.View do
     [
       String.pad_trailing(indent <> label, 22),
       String.pad_trailing("(#{name})", 10),
-      String.pad_trailing(state_text(st, state), 12),
+      String.pad_trailing(state_text(st, state, row.root? and row.window.badge), 12),
       String.pad_trailing(Model.agent_elapsed(row, state.now), 6),
       String.pad_leading(Model.tokens(row.agent), 15),
       detail
@@ -405,10 +418,16 @@ defmodule Troupe.UI.TUI.View do
     |> needs_you_line(st == :needs_input)
   end
 
-  defp state_text(:needs_input, state), do: if(blink?(state), do: "▶ you", else: "needs you")
-  defp state_text(:done_unread, _), do: "done ●"
-  defp state_text(:failed_unread, _), do: "failed ●"
-  defp state_text(state, _), do: to_string(state)
+  # The word beside the mark says what the mark says: `●` while the end has not been read,
+  # gone once the window has been opened (`badge`), as the mark goes from ⏺ to ○.
+  defp state_text(:needs_input, state, _badge?),
+    do: if(blink?(state), do: "▶ you", else: "needs you")
+
+  defp state_text(:done_unread, _, true), do: "done ●"
+  defp state_text(:done_unread, _, _badge?), do: "done"
+  defp state_text(:failed_unread, _, true), do: "failed ●"
+  defp state_text(:failed_unread, _, _badge?), do: "failed"
+  defp state_text(state, _, _badge?), do: to_string(state)
 
   defp detail_text(nil, _state),
     do: "No agents yet.\n\nDispatch one from the command line, e.g. /code fix the failing test."
@@ -1630,14 +1649,353 @@ defmodule Troupe.UI.TUI.View do
   def tile_rects(strip, n),
     do: Layout.split(strip, :horizontal, Enum.map(1..min(n, 9), fn _ -> {:fill, 1} end))
 
+  ## Command mode (TUI Decision 155)
+
+  # The screen with no window activated: not a chat with the session's own agent but one
+  # view over everything the session has going. The session's facts on top, then what
+  # waits on a person, first and in the reserved colour, the session's own latest lines,
+  # one row per branch, and one per worktree. With nothing started and nothing asked, the
+  # mask and what to type stand under the facts.
+  defp command_mode(state, windows, rect) do
+    inner_w = max(rect.width - 2, 1)
+    inner_h = max(rect.height - 2, 1)
+    asked = Model.asking(state.model)
+    {above, branches, trees} = collection(state, windows, asked, inner_w, inner_h)
+    rows = Model.rows(above ++ branches ++ trees, inner_w, 0, inner_h)
+
+    block = %Block{
+      title: " command mode · #{state.model.workspace} ",
+      borders: [:all],
+      border_type: :rounded,
+      border_style: Theme.style(:rail)
+    }
+
+    frame = {%Paragraph{text: styled(rows), wrap: false, block: block}, rect}
+    used = length(rows)
+
+    if windows == [] and asked == nil and inner_h - used > 2 do
+      rest = %Rect{
+        x: rect.x + 1,
+        y: rect.y + 1 + used + 1,
+        width: inner_w,
+        height: inner_h - used - 1
+      }
+
+      [frame | empty_state(rest, state)]
+    else
+      [frame]
+    end
+  end
+
+  # The collection's parts: what goes above the branches (the facts, what waits on you,
+  # the session's own lines in whatever room the rest leaves), the branches' rows, and
+  # the worktrees'.
+  defp collection(state, windows, asked, inner_w, inner_h) do
+    head = [facts_line(state)] ++ needs_lines(windows, asked)
+    branches = branch_lines(state, windows, inner_w)
+    trees = worktree_lines(state, windows)
+    room = inner_h - Model.row_count(head ++ branches ++ trees, inner_w)
+    {head ++ session_lines(state, windows, inner_w, room), branches, trees}
+  end
+
+  @doc """
+  The window whose row in command mode's collection is at screen cell `{x, y}`, or nil:
+  a click on a branch's row opens it, as its tile's did.
+  """
+  @spec branch_at(map(), non_neg_integer(), non_neg_integer()) :: String.t() | nil
+  def branch_at(%{size: {width, height}} = state, x, y) do
+    windows = Model.windows(state.model)
+    {rect, _pane, _status, _cmd} = layout(width, height, false, length(windows), box_height(height))
+    inner_w = max(rect.width - 2, 1)
+    inner_h = max(rect.height - 2, 1)
+
+    {above, _branches, _trees} =
+      collection(state, windows, Model.asking(state.model), inner_w, inner_h)
+
+    # The blank row and the heading come before the first branch's.
+    first = rect.y + 1 + Model.row_count(above, inner_w) + 2
+    inside? = x > rect.x and x < rect.x + rect.width - 1
+
+    case inside? and y >= first and Enum.at(windows, y - first) do
+      %{path: path} -> path
+      _ -> nil
+    end
+  end
+
+  def branch_at(_state, _x, _y), do: nil
+
+  # The session's own facts, on one line: its model, goal, watch, the tightest budget
+  # warning any window has had, and what it has spent.
+  defp facts_line(state) do
+    model = state.model
+    own = Model.session_window(model)
+    agent = own && Map.get(own.agents, own.path)
+    name = (agent && agent.model) || get_in(Map.get(state, :facts, %{}), [:model])
+
+    watch =
+      case model.watch do
+        %{enabled: true, backend: b} -> "on (#{b})"
+        _ -> "off"
+      end
+
+    goal =
+      case Model.goal(model) do
+        nil -> []
+        text -> [{"goal ", clip(text |> String.split("\n", trim: true) |> Enum.join(" "), 60)}]
+      end
+
+    spent =
+      case Model.total_cost(model) do
+        "" -> []
+        money -> [{"spent ", money}]
+      end
+
+    budget = Model.headroom(model) || "no limit near"
+
+    model_part = if name, do: [{"model ", name}], else: []
+    parts = model_part ++ goal ++ [{"watch ", watch}, {"budget ", budget}] ++ spent
+
+    segments =
+      parts
+      |> Enum.map(fn {label, value} -> [{Theme.style(:muted), label}, {:text, value}] end)
+      |> Enum.intersperse([{Theme.style(:muted), " · "}])
+      |> Enum.concat()
+
+    {:text, segments}
+  end
+
+  # What waits on a person: the start's question as its own window would draw it, then a
+  # line per window asking something, with the digit that opens it.
+  defp needs_lines(windows, asked) do
+    question =
+      case asked do
+        nil -> []
+        {_path, item} -> Model.local_lines(item)
+      end
+
+    asking =
+      windows
+      |> Enum.with_index(1)
+      |> Enum.flat_map(fn {w, n} ->
+        w.pending
+        |> Enum.reject(&(&1.kind == :local))
+        |> Enum.map(fn p ->
+          {:pending,
+           [
+             {:pending, "#{n} #{w.path} · "},
+             {:pending, pending_summary(p, "y / n / a in its window")},
+             {Theme.style(:muted), " — #{n} opens it"}
+           ]}
+        end)
+      end)
+
+    case question ++ asking do
+      [] -> []
+      lines -> [{:blank, ""}, {:pending, [{:pending, "▶ waiting for you"}]}] ++ lines
+    end
+  end
+
+  # The session's own lines while its agent is no branch of its own: what its start said,
+  # what `!` ran and printed. Its tail, in whatever room the rest leaves, a few rows at least.
+  defp session_lines(state, windows, width, room) do
+    own = Model.session_window(state.model)
+
+    if own == nil or Enum.any?(windows, &(&1.path == own.path)) do
+      []
+    else
+      lines = Model.tile_lines(own, state.tick, state.now, false, false)
+      rows = Model.tail_rows(lines, width, room |> Kernel.-(2) |> max(4) |> min(12))
+      if rows == [], do: [], else: [{:blank, ""} | rows]
+    end
+  end
+
+  # One row per branch: its digit and mark, the window, its agent, its state, how long it
+  # has gone, the last thing it said or did, and what it has used and cost.
+  defp branch_lines(_state, [], _width), do: []
+
+  defp branch_lines(state, windows, width) do
+    path_w = windows |> Enum.map(&Model.cell_width(&1.path)) |> Enum.max() |> min(24)
+    agent_w = windows |> Enum.map(&Model.cell_width(&1.profile || "")) |> Enum.max() |> min(14)
+
+    rows =
+      windows
+      |> Enum.with_index(1)
+      |> Enum.map(fn {w, n} ->
+        %Span{content: glyph, style: style} = mark(w, state)
+        word = state_text(w.state, state, w.badge)
+        used = String.trim("#{Model.tokens(w)}  #{Model.cost(w)}")
+
+        left =
+          "#{n} " <>
+            String.pad_trailing(clip(w.path, path_w), path_w + 2) <>
+            String.pad_trailing(clip(w.profile || "", agent_w), agent_w + 2) <>
+            String.pad_trailing(word, 11) <> String.pad_trailing(Model.elapsed(w, state.now), 7)
+
+        room = width - Model.cell_width(glyph) - Model.cell_width(left) - Model.cell_width(used) - 2
+        said = if room > 1, do: clip(Model.last_line(w, state.tick, state.now), room), else: ""
+        said = String.pad_trailing(said, max(room, 0))
+        word_style = if w.state == :needs_input, do: Theme.style(:needs_you, [:bold]), else: nil
+
+        {:text,
+         [
+           {style, glyph},
+           {word_style || :text, left},
+           {:text, said},
+           {Theme.style(:muted), "  " <> used}
+         ]}
+      end)
+
+    [{:blank, ""}, {:heading, "branches"} | rows]
+  end
+
+  # One row per worktree of the repository, as `worktree.list` has them (root Decision
+  # 840): its branch, how far it is ahead of and behind the checkout's, what it changed,
+  # whether it is dirty, and whose it is and whether that session is alive.
+  defp worktree_lines(state, windows) do
+    case Map.get(state, :worktrees, []) do
+      [] ->
+        []
+
+      trees ->
+        branch_w = trees |> Enum.map(&Model.cell_width(&1.branch || "")) |> Enum.max() |> min(28)
+
+        rows =
+          Enum.map(trees, fn t ->
+            {:text,
+             [
+               {:text, String.pad_trailing(clip(t.branch || "(detached)", branch_w), branch_w + 2)},
+               {Theme.style(:muted), String.pad_trailing(ahead_behind(t), 10)},
+               {:text, String.pad_trailing(changed(t), 12)},
+               {if(t.dirty, do: Theme.style(:working), else: Theme.style(:muted)),
+                String.pad_trailing(if(t.dirty, do: "dirty", else: "clean"), 7)},
+               {Theme.style(:muted), whose(t, state, windows)}
+             ]}
+          end)
+
+        [{:blank, ""}, {:heading, "worktrees"} | rows]
+    end
+  end
+
+  defp ahead_behind(%{ahead: a, behind: b}) when is_integer(a) and is_integer(b), do: "↑#{a} ↓#{b}"
+  defp ahead_behind(_tree), do: ""
+
+  defp changed(%{added: a, removed: r}) when is_integer(a) and is_integer(r), do: "+#{a} −#{r}"
+  defp changed(_tree), do: ""
+
+  # Whose a tree is: this session's checkout, a branch's (by the session working in it, or
+  # by its path while none is), or another session's.
+  defp whose(tree, state, windows) do
+    alive = if tree.session_id, do: "alive", else: "no session"
+    here = same_dir(tree.path)
+
+    cond do
+      tree.session_id == state.session_id or here == same_dir(state.model.workspace) ->
+        "this session's checkout"
+
+      w = tree.session_id && Enum.find(windows, &(Map.get(&1, :session_id) == tree.session_id)) ->
+        "#{w.path} · alive"
+
+      w = Enum.find(windows, &(tree_dir(&1) == here)) ->
+        "#{w.path} · #{alive}"
+
+      true ->
+        alive
+    end
+  end
+
+  defp tree_dir(%{worktree: %{path: path}}) when is_binary(path), do: same_dir(path)
+  defp tree_dir(_window), do: nil
+
+  # git writes `C:/…` where the daemon wrote `c:\…`: one directory, whichever way it is
+  # spelled. Only for matching a label, never for opening anything.
+  defp same_dir(nil), do: nil
+
+  defp same_dir(path),
+    do: path |> String.replace("\\", "/") |> String.trim_trailing("/") |> String.downcase()
+
+  ## Choosing an agent (TUI Decision 155)
+
+  defp chooser_page(%{chooser: c}, rect) do
+    [list_rect, text_rect] = Layout.split(rect, :horizontal, [{:fill, 2}, {:fill, 3}])
+    agent = Enum.at(c.agents, c.cursor)
+
+    {items, selected, title} =
+      case c.step do
+        :agent ->
+          {Enum.map(c.agents, &"#{&1.name} — #{&1.description}"), c.cursor,
+           " choose the agent#{task_note(c)} "}
+
+        :where ->
+          {["a worktree of its own", "the checkout"], c.where, " where #{agent.name} works "}
+      end
+
+    list = %ExRatatui.Widgets.List{
+      items: items,
+      selected: selected,
+      highlight_symbol: "▸ ",
+      highlight_style: selected(),
+      block: %Block{title: title, borders: [:all], border_type: :double}
+    }
+
+    text = %Paragraph{
+      text: instruction_text(c, agent),
+      wrap: true,
+      scroll: {c.scroll, 0},
+      block: %Block{title: " #{agent.name} — its instruction (PgUp/PgDn) ", borders: [:all]}
+    }
+
+    [{list, list_rect}, {text, text_rect}]
+  end
+
+  defp chooser_footer(%{step: :agent}),
+    do: " agents — ↑↓ move · Enter takes it · PgUp/PgDn read its instruction · Esc back "
+
+  defp chooser_footer(%{step: :where}),
+    do: " where — w a worktree of its own · c the checkout · ↑↓ and Enter · Esc back to the agents "
+
+  defp task_note(%{prompt: ""}), do: ""
+  defp task_note(%{prompt: prompt}), do: " for: " <> clip(prompt, 40)
+
+  # The agent's own instruction, as `agents.get` reads it; a daemon from before it says
+  # the description only, and says so.
+  defp instruction_text(c, agent) do
+    case Map.get(c.shown, agent.name) do
+      %{prompt: prompt} when is_binary(prompt) and prompt != "" ->
+        prompt
+
+      %{error: reason} ->
+        "#{agent.description}\n\n(its instruction could not be read: #{reason})"
+
+      _ ->
+        agent.description
+    end
+  end
+
   ## Window strip
 
-  # Nothing dispatched yet: the mask and the word over what to type, when the screen has
+  defp strip([], rect, state), do: empty_state(rect, state)
+
+  defp strip(windows, rect, state) do
+    shown = Enum.take(windows, 9)
+    rects = tile_rects(rect, length(shown))
+
+    shown
+    |> Enum.with_index(1)
+    |> Enum.zip(rects)
+    |> Enum.flat_map(fn {{w, n}, r} -> window_tile(w, n, r, state) end)
+  end
+
+  # Nothing started yet: the mask and the word over what to type, when the screen has
   # room for them, and the words alone when it has not.
-  defp strip([], rect, state) do
+  defp empty_state(rect, state) do
     hint =
-      "No branches. Type a command: " <>
-        Enum.map_join(state.agents, "  ", &("/" <> &1)) <> "  /help"
+      if Map.get(state, :branches?, true) do
+        "Nothing running. Type what you want done: Enter starts it on " <>
+          "#{Map.get(state, :default_agent, "build")} in the checkout. Ctrl-N chooses the " <>
+          "agent, its instruction shown, and a worktree. / lists the commands."
+      else
+        "Type what you want done: Enter sends it to the session's agent. / lists the commands."
+      end
 
     {mask_w, mask_h} = Theme.mask_size(:large)
     hint_h = div(Model.cell_width(hint) + rect.width - 1, max(rect.width, 1))
@@ -1667,16 +2025,6 @@ defmodule Troupe.UI.TUI.View do
     else
       [{%Paragraph{text: hint, style: Theme.style(:muted), wrap: true}, rect}]
     end
-  end
-
-  defp strip(windows, rect, state) do
-    shown = Enum.take(windows, 9)
-    rects = tile_rects(rect, length(shown))
-
-    shown
-    |> Enum.with_index(1)
-    |> Enum.zip(rects)
-    |> Enum.flat_map(fn {{w, n}, r} -> window_tile(w, n, r, state) end)
   end
 
   # A session nobody has said anything to yet is the TUI's empty state: its one window
@@ -1782,6 +2130,9 @@ defmodule Troupe.UI.TUI.View do
     do: Span.new(" ✗ ", style: Theme.style(:error, [:bold]))
 
   def mark(%{state: :failed_unread}, _state), do: Span.new(" ✗ ", style: Theme.style(:muted))
+
+  # Nothing asked of it yet (TUI Decision 155): at rest, not turning.
+  def mark(%{state: :idle}, _state), do: Span.new(" ○ ", style: Theme.style(:muted))
 
   def mark(_w, state), do: Span.new(" #{Model.spinner(state.now)} ", style: Theme.style(:working))
 
@@ -2135,9 +2486,8 @@ defmodule Troupe.UI.TUI.View do
     # A question the session's start asks takes Enter from the command line itself (TUI
     # Decision 154), so the line says what Enter does there rather than where to go.
     hint =
-      case {Enum.find_value(windows, &Model.local_question/1),
-            Enum.find_index(windows, &(&1.state == :needs_input))} do
-        {%{} = asked, _i} ->
+      case {Model.asking(state.model), Enum.find_index(windows, &(&1.state == :needs_input))} do
+        {{_window, asked}, _i} ->
           " · Enter answers the start's question: #{Model.local_default(asked)} " <>
             "(or #{Enum.join(asked.keys, " / ")})"
 
@@ -2278,10 +2628,35 @@ defmodule Troupe.UI.TUI.View do
       String.starts_with?(state.cmd_text, "!") ->
         " shell — runs in the session's workspace · no stdin · cd does not carry over · !! keeps it from the agent "
 
-      true ->
+      String.starts_with?(state.cmd_text, "/") ->
         " command "
+
+      true ->
+        plain_title(state)
     end
   end
+
+  # What Enter does with a line that is no command (TUI Decision 155): starts the agent
+  # chosen with Ctrl-N, or the default one in the checkout; on a session that starts no
+  # branches (a pod's), it is said to the session's own agent.
+  defp plain_title(state) do
+    case Map.get(state, :choice) do
+      %{agent: agent, where: where} ->
+        " → #{agent} in #{where_words(where)}: type the task · Enter starts it · Esc forgets the choice "
+
+      nil ->
+        if Map.get(state, :branches?, true),
+          do:
+            " → #{Map.get(state, :default_agent, "build")} in the checkout · Enter starts it · " <>
+              "Ctrl-N chooses the agent and a worktree · / commands ",
+          else: " → the session's agent · Enter sends · / commands "
+    end
+  end
+
+  @doc false
+  @spec where_words(:worktree | :checkout) :: String.t()
+  def where_words(:worktree), do: "a worktree of its own"
+  def where_words(:checkout), do: "the checkout"
 
   defp command_line(state, rect), do: command_line(state, rect, @cmd_rows)
 
@@ -2317,9 +2692,6 @@ defmodule Troupe.UI.TUI.View do
               multiline?(state.win_text) ->
                 pasted_title(state.win_text)
 
-              Map.get(state, :win_command) ->
-                " → #{path} — a command for this window: Enter runs it, Esc back "
-
               true ->
                 " → #{path} (Enter sends#{target}, Esc back) "
             end
@@ -2331,6 +2703,9 @@ defmodule Troupe.UI.TUI.View do
 
         :observer ->
           {"", " agents — ↑↓ move · Enter opens the agent · Esc back "}
+
+        :chooser ->
+          {"", chooser_footer(state.chooser)}
 
         :sessions ->
           {"", " sessions — ↑↓ move · Enter resumes · r refreshes · Esc back "}
@@ -2344,7 +2719,7 @@ defmodule Troupe.UI.TUI.View do
         :agents ->
           Agents.command_line(state.agents_page)
 
-        :chooser ->
+        :switcher ->
           {"", " the agent this window runs — ↑↓ choose · Enter switches · Esc keeps it "}
 
         :memory ->

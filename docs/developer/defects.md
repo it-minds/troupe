@@ -1111,11 +1111,8 @@ Found by the #502 audit, 2026-10-10.
 
 ### D107 - Commands from an activated window, and the palette's rows (low)
 
-For command mode (#502 parts A and 3) and the palette (#503), whose slots own these.
+For the palette (#503), whose slot owns these.
 
-- A slash command typed into an activated window's input box is sent to that window's
-  agent as words; only `/todo` and `/upload` are taken as commands there
-  (`window_key/3`). Commands from a window go through the palette (Ctrl-K).
 - A repository command run while a branch's window is activated goes to the session's
   own agent, not the window's (`Client.run_command/3`, by design in Decision 763); the
   palette doesn't say so.

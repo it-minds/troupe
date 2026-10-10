@@ -55,12 +55,14 @@ defmodule Troupe.NewSessionTest do
   # `session.fork` on the daemon: the fork's log is the conversation so far, so its screen
   # shows it and its agent's next request carries it, while the first never hears the line
   # typed in the fork. A session of its own, not a branch of the first.
+  # The conversation is the session's own agent's, as `troupe run` or a session from before
+  # command mode has one: a line typed on the command line starts a branch instead (TUI
+  # Decision 155).
   test "/new --branch forks the session on screen and goes on from its conversation" do
     {first, _, ws} = start_session!(script: [{:text_and_tools, "hello back", []}])
     {pid, session} = start_tui(first)
 
-    type(pid, "hello")
-    press(pid, "enter")
+    say!(first, "hello")
     eventually(fn -> screen_text(pid, session) =~ "hello back" end, 10_000)
     rested(first)
 
@@ -82,6 +84,9 @@ defmodule Troupe.NewSessionTest do
     {:ok, rows} = Client.sessions({:local, ws})
     assert %{parent: nil} = Enum.find(rows, &(&1.id == fork))
 
+    # The fork's own agent has a conversation, so it is a window to open and type into.
+    press(pid, "1")
+    assert user_state(pid).focus == {:window, "root"}
     type(pid, "go on from here")
     press(pid, "enter")
 
@@ -122,8 +127,7 @@ defmodule Troupe.NewSessionTest do
     login!(remote, url)
     {first, _, _ws} = start_session!(script: [{:text_and_tools, "hi", []}])
     {pid, session} = start_tui(first)
-    type(pid, "hello")
-    press(pid, "enter")
+    say!(first, "hello")
     rested(first)
 
     type(pid, "/new --remote code")
@@ -169,8 +173,7 @@ defmodule Troupe.NewSessionTest do
   test "/back to an erased session, and /resume of one another device holds, are refused" do
     {first, _, _ws} = start_session!(script: [{:text_and_tools, "hi", []}])
     {pid, session} = start_tui(first)
-    type(pid, "hello")
-    press(pid, "enter")
+    say!(first, "hello")
     rested(first)
 
     type(pid, "/new")

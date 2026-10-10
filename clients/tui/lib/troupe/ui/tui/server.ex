@@ -37,17 +37,25 @@ defmodule Troupe.UI.TUI.Server do
             | :memory
             | :hq
             | :palette
+            | :chooser
             | :agents
-            | :chooser,
+            | :switcher,
+          default_agent: String.t(),
+          branches?: boolean(),
+          facts: %{model: String.t() | nil},
+          chooser: chooser() | nil,
+          choice: %{agent: String.t(), where: :worktree | :checkout} | nil,
+          worktrees: [map()],
+          worktrees_loading: boolean(),
+          worktrees_stale: boolean(),
           cmd_text: String.t(),
           cmd_pos: non_neg_integer(),
           win_text: String.t(),
           win_pos: non_neg_integer(),
-          win_command: boolean(),
           agents: [String.t()],
           agent_rows: %{optional(String.t()) => map()},
           agents_page: Agents.page() | nil,
-          chooser: AgentChooser.t() | nil,
+          switcher: AgentChooser.t() | nil,
           commands: [Client.command()],
           palette: palette() | nil,
           tick: non_neg_integer(),
@@ -155,6 +163,23 @@ defmodule Troupe.UI.TUI.Server do
         }
 
   @typedoc """
+  Command mode's chooser (TUI Decision 155): the primary agents a branch can start on
+  (`agents.list`'s rows), the one selected, each one's instruction as `agents.get` read it
+  once it was shown (`shown`, by name), how far that is scrolled, and the step: the agent,
+  then where it works (`where`, 0 for a worktree of its own, 1 for the checkout). `prompt`
+  is what was typed before it opened, which starts the branch as soon as both are chosen.
+  """
+  @type chooser :: %{
+          step: :agent | :where,
+          agents: [map()],
+          cursor: non_neg_integer(),
+          where: 0 | 1,
+          scroll: non_neg_integer(),
+          shown: %{optional(String.t()) => map()},
+          prompt: String.t()
+        }
+
+  @typedoc """
   A multiple-choice answer being assembled: which question it belongs to and the
   labels ticked so far. Held in the UI rather than the log because it is a
   cursor, not a decision — nothing outside this process may depend on it, and
@@ -214,19 +239,22 @@ defmodule Troupe.UI.TUI.Server do
       back: nil,
       model: model,
       focus: :command,
+      chooser: nil,
+      choice: nil,
+      worktrees: [],
+      worktrees_loading: false,
+      worktrees_stale: false,
       cmd_text: prompt,
       cmd_pos: String.length(prompt),
       win_text: "",
       win_pos: 0,
-      # A command the palette put into a window's box, to run on Enter against that window
-      # rather than be sent to its agent as words (TUI Decision 156).
-      win_command: false,
       agents: Client.commands(sid),
       # `agents.list`'s rows by name, for the palette's agent rows (TUI Decision 156): read
       # when the palette first opens, not before the first frame.
       agent_rows: %{},
       agents_page: nil,
-      chooser: nil,
+      # Tab's chooser of the agent a window runs (TUI Decision 156).
+      switcher: nil,
       commands: Client.command_table(sid),
       palette: nil,
       tick: 0,
@@ -274,7 +302,28 @@ defmodule Troupe.UI.TUI.Server do
         _ -> state
       end
 
-    {:ok, state |> read_appearance() |> recheck_loop() |> schedule_tick()}
+    {:ok,
+     state
+     |> Map.merge(command_mode(sid))
+     |> read_appearance()
+     |> recheck_loop()
+     |> refresh_worktrees()
+     |> schedule_tick()}
+  end
+
+  # What command mode needs to know of a session (TUI Decision 155): whether it starts
+  # branches (a pod runs one agent and starts none), the agent a plain line starts, and
+  # the model its configuration names. A pod's configuration is its plane's, which this
+  # machine does not read: its model is the one its agent says it called.
+  defp command_mode(sid) do
+    {_workspace, config} = Client.context(sid)
+    branches? = not Client.remote?(sid)
+
+    %{
+      branches?: branches?,
+      default_agent: config.default_agent || "build",
+      facts: %{model: if(branches?, do: config.model)}
+    }
   end
 
   # After an editor has had the terminal, the screen it gives back is blank while the
@@ -430,6 +479,45 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # A branch command mode said it was starting (TUI Decision 155), started once that line
+  # has been drawn: the session it creates takes a moment, and the person has been told.
+  def handle_info({:start_command, sid, agent, name, args}, %{session_id: sid} = state) do
+    state =
+      case Client.start_command(sid, agent, name, args, "never") do
+        {:ok, _window} -> state
+        {:error, reason} -> notice(state, "/#{name} did not start: " <> to_message(reason))
+      end
+
+    {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
+  end
+
+  def handle_info({:start_branch, sid, agent, where, prompt}, %{session_id: sid} = state) do
+    mode = if where == :worktree, do: "always", else: "never"
+
+    state =
+      case Client.dispatch(sid, agent, %{prompt: prompt, worktree: mode}) do
+        {:ok, _window} -> state
+        {:error, reason} -> notice(state, "#{agent} did not start: " <> to_message(reason))
+      end
+
+    {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
+  end
+
+  # The worktrees command mode lists, as the daemon last said them; a refresh asked for
+  # while one was out is made now.
+  def handle_info({:worktrees, sid, answer}, %{session_id: sid} = state) do
+    state = %{state | worktrees_loading: false}
+
+    state =
+      case answer do
+        {:ok, trees} -> %{state | worktrees: trees}
+        {:error, _reason} -> state
+      end
+
+    state = if state.worktrees_stale, do: refresh_worktrees(state), else: state
+    {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
+  end
+
   def handle_info(_msg, state), do: {:noreply, state, render?: false}
 
   # A scrolled-up pane that ends up at the bottom (because the transcript shrank) follows
@@ -475,6 +563,13 @@ defmodule Troupe.UI.TUI.Server do
       ),
       do: {:noreply, open_palette(%{state | quit_armed: false})}
 
+  # Ctrl-N chooses the agent what is typed starts on, and where (TUI Decision 155).
+  def handle_event(%Key{code: "n", modifiers: ["ctrl"]}, %{focus: :command} = state),
+    do: {:noreply, open_chooser(%{state | quit_armed: false})}
+
+  def handle_event(%Key{} = key, %{focus: :chooser} = state),
+    do: {:noreply, chooser_key(key, %{state | quit_armed: false})}
+
   def handle_event(%Key{} = key, %{focus: :command} = state) do
     state = %{state | quit_armed: false}
 
@@ -511,8 +606,8 @@ defmodule Troupe.UI.TUI.Server do
   def handle_event(%Key{} = key, %{focus: :agents} = state),
     do: {:noreply, agents_key(key, %{state | quit_armed: false})}
 
-  def handle_event(%Key{} = key, %{focus: :chooser} = state),
-    do: {:noreply, chooser_key(key, %{state | quit_armed: false})}
+  def handle_event(%Key{} = key, %{focus: :switcher} = state),
+    do: {:noreply, switcher_key(key, %{state | quit_armed: false})}
 
   def handle_event(%Key{} = key, %{focus: {:window, path}} = state) do
     if Map.has_key?(state.model.windows, path) do
@@ -569,6 +664,9 @@ defmodule Troupe.UI.TUI.Server do
       :chooser ->
         {:noreply, state, render?: false}
 
+      :switcher ->
+        {:noreply, state, render?: false}
+
       :agents ->
         {:noreply, %{state | agents_page: Agents.paste(state.agents_page, content)}}
 
@@ -588,7 +686,8 @@ defmodule Troupe.UI.TUI.Server do
              :hq,
              :palette,
              :agents,
-             :chooser
+             :chooser,
+             :switcher
            ],
       do: {:noreply, state, render?: false}
 
@@ -686,11 +785,14 @@ defmodule Troupe.UI.TUI.Server do
       :palette ->
         {:noreply, move_cursor(state, div(step, 3))}
 
+      :chooser ->
+        {:noreply, scroll_instruction(state, step)}
+
       :agents ->
         {:noreply, agents_key(%Key{code: if(step < 0, do: "up", else: "down")}, state)}
 
-      :chooser ->
-        {:noreply, chooser_key(%Key{code: if(step < 0, do: "up", else: "down")}, state)}
+      :switcher ->
+        {:noreply, switcher_key(%Key{code: if(step < 0, do: "up", else: "down")}, state)}
 
       _ ->
         {:noreply, state, render?: false}
@@ -743,6 +845,9 @@ defmodule Troupe.UI.TUI.Server do
     View.pane_point(g, x, y)
   end
 
+  # Command mode has rows, not tiles: a click on a branch's opens it (TUI Decision 155).
+  defp clicked_window(%{focus: :command} = state, x, y), do: View.branch_at(state, x, y)
+
   # Hit-test a click against the tiles using the same layout the view draws.
   defp clicked_window(%{size: {w, h}} = state, x, y) do
     windows = Model.windows(state.model)
@@ -778,6 +883,8 @@ defmodule Troupe.UI.TUI.Server do
 
   # Esc kills the command this screen ran while it runs, and leaves what is typed.
   defp command_key(%Key{code: "esc"}, %{shell: %{} = run} = state), do: kill_shell(state, run)
+  # An agent chosen for the next line is forgotten before what is typed is.
+  defp command_key(%Key{code: "esc"}, %{choice: %{}} = state), do: %{state | choice: nil}
   defp command_key(%Key{code: "esc"}, state), do: put_cmd(state, "")
 
   defp command_key(%Key{code: "tab"}, state),
@@ -853,14 +960,8 @@ defmodule Troupe.UI.TUI.Server do
 
   defp put_win(state, text) when is_binary(text), do: put_win(state, {text, String.length(text)})
 
-  # A box emptied holds no command any more, whatever is typed into it next.
   defp put_win(state, {text, pos}),
-    do: %{
-      state
-      | win_text: text,
-        win_pos: Input.clamp(text, pos),
-        win_command: state.win_command and text != ""
-    }
+    do: %{state | win_text: text, win_pos: Input.clamp(text, pos)}
 
   # The built-ins this client runs itself, one clause of `builtin/4` each. How each is
   # typed, described and aliased is the harness's table (`state.commands`, Decision
@@ -900,19 +1001,25 @@ defmodule Troupe.UI.TUI.Server do
         name == "" ->
           :palette
 
-        # A line with no slash is what the person wants to say to the session's agent,
-        # whatever its first word (Decision 101): "help me fix the test" is a request, not
-        # `/help`. One agent per session, so there is one place for it to go. A slash
-        # names a command, and one this table does not know is asked of the client (a
-        # profile to dispatch, where the client supports that).
+        # A line with no slash is work to start, whatever its first word (Decision 101):
+        # "help me fix the test" is a request, not `/help`. Command mode is no chat with
+        # the session's own agent (TUI Decision 155): the line starts a branch, on the agent
+        # Ctrl-N chose or the default one in the checkout. A slash names a command, and one
+        # this table does not know is asked of the client (a profile to dispatch, where the
+        # client supports that).
         not slash? ->
-          Client.send_input(sid, "root", typed)
+          plain_line(state, typed)
 
         name in @builtins ->
           builtin(name, args, state, target)
 
         # A command a markdown file defines is the harness's to run (Decision 763): it
-        # sends the file's prompt, and the line comes back as the session's own input.
+        # sends the file's prompt. In command mode that is work like a plain line, so it
+        # starts a branch on the agent its file names, never the session's own agent (TUI
+        # Decision 155); from a window, and on a pod, it goes to the session's agent.
+        defined?(state, name) and state.focus == :command and state.branches? ->
+          command_line_command(state, name, args)
+
         defined?(state, name) ->
           Client.run_command(sid, name, args)
 
@@ -920,9 +1027,13 @@ defmodule Troupe.UI.TUI.Server do
           Client.dispatch(sid, name, args)
       end
 
+    kept = state
     state = put_cmd(state, "")
 
     case result do
+      {:keep, text} -> notice(kept, text)
+      {:start, agent, where, prompt} -> start_branch(state, agent, where, prompt)
+      {:start_command, agent, name, args} -> start_command(state, agent, name, args)
       :quit -> %{state | quitting: true}
       :palette -> open_palette(state)
       :files -> toggle_files(state)
@@ -959,6 +1070,194 @@ defmodule Troupe.UI.TUI.Server do
 
   defp defined?(state, name),
     do: Enum.any?(state.commands, &(&1["name"] == name and &1["source"] in ["user", "project"]))
+
+  ## Command mode (TUI Decision 155)
+
+  # A plain line starts work, never a chat with the session's own agent: on the agent
+  # Ctrl-N chose, or the default one in the checkout. The start's questions come first
+  # (TUI Decision 154), so the line waits, as typed, until they are answered. A session
+  # that starts no branches, a pod's, runs one agent, and the line is said to it.
+  defp plain_line(state, text) do
+    cond do
+      Model.asking(state.model) ->
+        {:keep, "answer the start's question first; then Enter starts what you typed"}
+
+      not state.branches? ->
+        Client.send_input(state.session_id, "root", text)
+
+      choice = state.choice ->
+        {:start, choice.agent, choice.where, text}
+
+      true ->
+        {:start, state.default_agent, :checkout, text}
+    end
+  end
+
+  # A command a file defines, typed in command mode: a branch in the checkout on the agent
+  # the file names, or the default one, once the start's questions are answered.
+  defp command_line_command(state, name, args) do
+    if Model.asking(state.model) do
+      {:keep, "answer the start's question first; then Enter starts what you typed"}
+    else
+      entry = Enum.find(state.commands, &(&1["name"] == name)) || %{}
+      {:start_command, entry["agent"] || state.default_agent, name, args}
+    end
+  end
+
+  defp start_command(state, agent, name, args) do
+    send(self(), {:start_command, state.session_id, agent, name, args})
+    notice(state, "starting /#{name} on #{agent} in the checkout")
+  end
+
+  # Said first, on the notice line, then started once that line is on screen.
+  defp start_branch(state, agent, where, prompt) do
+    send(self(), {:start_branch, state.session_id, agent, where, prompt})
+
+    said =
+      if state.choice,
+        do: "starting #{agent} in #{View.where_words(where)}",
+        else:
+          "starting #{agent} in #{View.where_words(where)}: a line without / starts it there; " <>
+            "Ctrl-N chooses the agent and a worktree"
+
+    notice(%{state | choice: nil}, said)
+  end
+
+  # The chooser opens on the agents a branch can start on, the default one selected, with
+  # what was typed kept as the task.
+  defp open_chooser(%{branches?: false} = state),
+    do: notice(state, "a remote session runs one profile; create another session from HQ")
+
+  defp open_chooser(state) do
+    prompt =
+      if String.starts_with?(state.cmd_text, ["/", "!"]), do: "", else: String.trim(state.cmd_text)
+
+    case Client.profiles({:local, state.workspace}) do
+      {:ok, [_ | _] = agents} ->
+        cursor = Enum.find_index(agents, &(&1.name == state.default_agent)) || 0
+
+        chooser = %{
+          step: :agent,
+          agents: agents,
+          cursor: cursor,
+          where: 0,
+          scroll: 0,
+          shown: %{},
+          prompt: prompt
+        }
+
+        show_instruction(%{state | focus: :chooser, chooser: chooser})
+
+      {:ok, []} ->
+        notice(state, "no agent here to start a branch on")
+
+      {:error, reason} ->
+        notice(state, "the agents could not be listed: " <> to_message(reason))
+    end
+  end
+
+  # The selected agent's instruction, read the first time it is shown.
+  defp show_instruction(%{chooser: c} = state) do
+    %{name: name} = Enum.at(c.agents, c.cursor)
+
+    shown =
+      case c.shown do
+        %{^name => _} ->
+          c.shown
+
+        shown ->
+          case Client.agent_definition(state.session_id, name) do
+            {:ok, agent} -> Map.put(shown, name, agent)
+            {:error, reason} -> Map.put(shown, name, %{error: to_message(reason)})
+          end
+      end
+
+    %{state | chooser: %{c | shown: shown, scroll: 0}}
+  end
+
+  defp chooser_key(%Key{code: "esc"}, %{chooser: %{step: :where} = c} = state),
+    do: %{state | chooser: %{c | step: :agent}}
+
+  defp chooser_key(%Key{code: "esc"}, state), do: %{state | focus: :command, chooser: nil}
+
+  defp chooser_key(%Key{code: code}, %{chooser: %{step: :agent} = c} = state)
+       when code in ["up", "k", "down", "j"] do
+    step = if code in ["up", "k"], do: -1, else: 1
+    cursor = (c.cursor + step) |> max(0) |> min(length(c.agents) - 1)
+    show_instruction(%{state | chooser: %{c | cursor: cursor}})
+  end
+
+  defp chooser_key(%Key{code: "enter"}, %{chooser: %{step: :agent} = c} = state),
+    do: %{state | chooser: %{c | step: :where}}
+
+  defp chooser_key(%Key{code: code}, %{chooser: %{step: :where} = c} = state)
+       when code in ["up", "k", "down", "j"],
+       do: %{state | chooser: %{c | where: if(code in ["up", "k"], do: 0, else: 1)}}
+
+  defp chooser_key(%Key{code: "w"}, %{chooser: %{step: :where}} = state),
+    do: chosen(state, :worktree)
+
+  defp chooser_key(%Key{code: "c"}, %{chooser: %{step: :where}} = state),
+    do: chosen(state, :checkout)
+
+  defp chooser_key(%Key{code: "enter"}, %{chooser: %{step: :where, where: where}} = state),
+    do: chosen(state, if(where == 0, do: :worktree, else: :checkout))
+
+  defp chooser_key(%Key{code: "page_up"}, state), do: scroll_instruction(state, -10)
+  defp chooser_key(%Key{code: "page_down"}, state), do: scroll_instruction(state, 10)
+  defp chooser_key(_key, state), do: state
+
+  defp scroll_instruction(%{chooser: %{} = c} = state, by),
+    do: %{state | chooser: %{c | scroll: max(c.scroll + by, 0)}}
+
+  defp scroll_instruction(state, _by), do: state
+
+  # Both chosen: with a task typed it starts now; without one the command line asks for it,
+  # and Enter starts it there.
+  defp chosen(%{chooser: c} = state, where) do
+    %{name: agent} = Enum.at(c.agents, c.cursor)
+    state = %{state | focus: :command, chooser: nil, choice: %{agent: agent, where: where}}
+
+    case c.prompt do
+      "" -> put_cmd(state, "")
+      prompt -> state |> put_cmd("") |> start_branch(agent, where, prompt)
+    end
+  end
+
+  # The worktrees command mode lists, asked of the daemon away from the screen's process;
+  # one asked for while another is out is asked once that one is back.
+  defp refresh_worktrees(%{worktrees_loading: true} = state), do: %{state | worktrees_stale: true}
+
+  defp refresh_worktrees(state) do
+    server = self()
+    sid = state.session_id
+
+    _ =
+      Task.start(fn ->
+        answer =
+          try do
+            Client.worktree_status(sid)
+          catch
+            :exit, reason -> {:error, reason}
+          end
+
+        send(server, {:worktrees, sid, answer})
+      end)
+
+    %{state | worktrees_loading: true, worktrees_stale: false}
+  end
+
+  # What may have moved a worktree: a branch opening, ending a turn or going, a worktree
+  # made, merged or thrown away, and a command the person ran.
+  @moves_trees ~w(branch_spawned window_dismissed worktree_created worktree_merged
+                  worktree_discarded user_shell)a
+
+  defp trees_moved?(%{type: type}) when type in @moves_trees, do: true
+
+  defp trees_moved?(%{type: :agent_state, transient?: false, data: %{to: to}}),
+    do: to in [:idle, :done]
+
+  defp trees_moved?(_event), do: false
 
   ## Shell mode (Decision 152)
 
@@ -1203,11 +1502,12 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  # Opened over a window, the palette leaves what it takes in that window's box, to act on
-  # that window when Enter runs it (D107); else on the command line.
+  # Opened over a window, the palette leaves what it takes in that window's box, where Enter
+  # runs it on that window as a command typed there is (D107, TUI Decisions 155 and 156);
+  # else on the command line.
   defp to_line(%{palette: %{return_to: {:window, path}}} = state, text) do
     if Map.has_key?(state.model.windows, path),
-      do: %{put_win(%{state | focus: {:window, path}, palette: nil}, text) | win_command: true},
+      do: put_win(%{state | focus: {:window, path}, palette: nil}, text),
       else: state |> close_palette() |> to_command_line() |> put_cmd(text)
   end
 
@@ -1557,7 +1857,7 @@ defmodule Troupe.UI.TUI.Server do
         agents: Client.commands(sid),
         agent_rows: %{},
         agents_page: nil,
-        chooser: nil,
+        switcher: nil,
         commands: Client.command_table(sid),
         palette: nil,
         focus: :command,
@@ -1565,18 +1865,28 @@ defmodule Troupe.UI.TUI.Server do
         cmd_pos: 0,
         win_text: "",
         win_pos: 0,
-        win_command: false,
         win_armed: nil,
         expanded: false,
         pane: fresh_pane(),
         settings: nil,
         observer: nil,
         sessions: nil,
+        chooser: nil,
+        choice: nil,
+        # The answer to a listing asked for the session left is dropped when it comes.
+        worktrees: [],
+        worktrees_loading: false,
+        worktrees_stale: false,
         dirty: true
     }
 
     retire(previous)
-    state |> recheck_loop() |> notice(said || "resumed #{sid}")
+
+    state
+    |> Map.merge(command_mode(sid))
+    |> recheck_loop()
+    |> refresh_worktrees()
+    |> notice(said || "resumed #{sid}")
   end
 
   ## New sessions and the way back
@@ -2181,27 +2491,27 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  # Tab in a window opens the chooser over it, the cursor on the agent the window runs.
-  defp open_chooser(state, path) do
+  # Tab in a window opens the agent chooser over it, the cursor on the agent the window runs.
+  defp open_switcher(state, path) do
     w = Map.fetch!(state.model.windows, path)
 
     case AgentChooser.open(state.session_id, w.profile,
            title: " the agent #{path} runs ",
            for: {:window, path}
          ) do
-      {:ok, chooser} -> %{state | focus: :chooser, chooser: chooser}
+      {:ok, switcher} -> %{state | focus: :switcher, switcher: switcher}
       {:error, reason} -> notice(state, reason)
     end
   end
 
   # The window keeps its conversation; the agent picked runs it from its next turn, and the
   # switch is in its transcript once the daemon has made it (root Decision 841).
-  defp chooser_key(key, %{chooser: %{for: {:window, path}} = chooser} = state) do
-    back = %{state | focus: {:window, path}, chooser: nil}
+  defp switcher_key(key, %{switcher: %{for: {:window, path}} = chooser} = state) do
+    back = %{state | focus: {:window, path}, switcher: nil}
 
     case AgentChooser.key(chooser, key, state.session_id) do
       {:ok, chooser} ->
-        %{state | chooser: chooser}
+        %{state | switcher: chooser}
 
       :close ->
         back
@@ -2627,7 +2937,7 @@ defmodule Troupe.UI.TUI.Server do
 
   # Tab with nothing typed chooses the agent the window runs, from the primary agents with
   # what each may do, rather than stepping blind to the next name (TUI Decision 156).
-  defp window_key(%Key{code: "tab"}, path, %{win_text: ""} = state), do: open_chooser(state, path)
+  defp window_key(%Key{code: "tab"}, path, %{win_text: ""} = state), do: open_switcher(state, path)
 
   defp window_key(%Key{code: "tab"}, _path, state),
     do: put_win(state, complete_file(state.win_text, state.model.workspace))
@@ -2719,12 +3029,36 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  # A command the palette put in the box is run on Enter, and acts on this window: `/copy`
-  # copies it, `/upload <path>` sends to its session (D107, TUI Decision 156).
-  defp window_key(%Key{code: "enter"}, _path, %{win_command: true, win_text: "/" <> _} = state),
-    do: run_command(put_win(state, ""), String.trim(state.win_text))
+  # A line in a window's box that names a command runs it, on this window where it takes
+  # one, as the command line would (TUI Decision 155, D107); one that does not is said to
+  # the window's agent, `/usr/bin is missing` included.
+  defp window_key(%Key{code: "enter"}, _path, %{win_text: "/" <> line = text} = state)
+       when line != "" do
+    if window_command?(state, line),
+      do: run_command(clear_input(state), String.trim(text)),
+      else: window_line(state, text)
+  end
 
-  defp window_key(%Key{code: "enter"}, path, %{win_text: text} = state) when text != "" do
+  defp window_key(%Key{code: "enter"}, _path, %{win_text: text} = state) when text != "",
+    do: window_line(state, text)
+
+  defp window_key(%Key{code: code, modifiers: mods} = key, _path, state)
+       when mods in [[], ["shift"]] do
+    if String.length(code) == 1,
+      do: put_win(state, Input.insert(win_input(state), code)),
+      else: editing_key(key, state)
+  end
+
+  defp window_key(key, _path, state), do: editing_key(key, state)
+
+  # `/todo` edits this window's own task list, which no table lists: it is the window's.
+  defp window_command?(state, line) do
+    {name, _args} = split_first(line)
+    name = canonical(state, name)
+    name != "todo" and (name in @builtins or defined?(state, name) or name in state.agents)
+  end
+
+  defp window_line(%{focus: {:window, path}} = state, text) do
     sid = state.session_id
     w = Map.fetch!(state.model.windows, path)
 
@@ -2738,9 +3072,6 @@ defmodule Troupe.UI.TUI.Server do
       String.starts_with?(text, "/todo add ") ->
         Client.edit_todo(sid, path, {:add, String.trim_leading(text, "/todo add ")})
 
-      String.starts_with?(text, "/upload ") ->
-        upload(sid, String.trim(String.trim_leading(text, "/upload ")))
-
       question = pending_of(w, state.pane.agent || path, [:question, :budget]) ->
         Client.answer(sid, question.call_id, text)
 
@@ -2752,15 +3083,6 @@ defmodule Troupe.UI.TUI.Server do
     # with fresh input, so a half-built selection is stale either way.
     follow(%{put_win(state, "") | answer: nil})
   end
-
-  defp window_key(%Key{code: code, modifiers: mods} = key, _path, state)
-       when mods in [[], ["shift"]] do
-    if String.length(code) == 1,
-      do: put_win(state, Input.insert(win_input(state), code)),
-      else: editing_key(key, state)
-  end
-
-  defp window_key(key, _path, state), do: editing_key(key, state)
 
   # y/n/a answers approvals — a delegated subagent raises them too, and its pending
   # item lives in the branch's window like the root's. When more than one is
@@ -2820,12 +3142,9 @@ defmodule Troupe.UI.TUI.Server do
   defp typed(state, nil), do: state.cmd_text
   defp typed(state, _path), do: state.win_text
 
-  defp asked(state, nil) do
-    Enum.find_value(Model.windows(state.model), fn w ->
-      q = Model.local_question(w)
-      q && {w.path, q}
-    end)
-  end
+  # Whichever window asks it, the session's own among them, which command mode does not
+  # list (TUI Decision 155).
+  defp asked(state, nil), do: Model.asking(state.model)
 
   defp asked(state, path) do
     case Model.local_question(Map.fetch!(state.model.windows, path)) do
@@ -2857,7 +3176,6 @@ defmodule Troupe.UI.TUI.Server do
       | focus: {:window, path},
         win_text: "",
         win_pos: 0,
-        win_command: false,
         win_armed: nil,
         model: model,
         pane: fresh_pane(agent),
@@ -2909,7 +3227,6 @@ defmodule Troupe.UI.TUI.Server do
       | focus: :command,
         win_text: "",
         win_pos: 0,
-        win_command: false,
         win_armed: nil,
         pane: fresh_pane(),
         selection: nil
@@ -3079,6 +3396,7 @@ defmodule Troupe.UI.TUI.Server do
       end
 
     state = %{state | model: model} |> shell_ended(event) |> watch_triggered(event)
+    state = if trees_moved?(event), do: refresh_worktrees(state), else: state
     if event.type == :remote_status, do: recheck_loop(state), else: state
   end
 

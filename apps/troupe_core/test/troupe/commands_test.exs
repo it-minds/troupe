@@ -151,6 +151,25 @@ defmodule Troupe.CommandsTest do
       refute Map.has_key?(Enum.find(entries, &(&1["name"] == "merge")), "body")
     end
 
+    # The agent a file says it runs on, which command mode starts its branch on (TUI
+    # Decision 155); a file that names none has no `agent` in its row.
+    test "a command a file defines carries the agent its frontmatter names", ctx do
+      File.write!(Path.join(ctx.workspace, ".troupe/commands/review.md"), """
+      ---
+      description: Review the change on this branch
+      agent: plan
+      ---
+      Review the change on this branch.
+      """)
+
+      File.write!(Path.join(ctx.user_dir, "standup.md"), "Say what changed since yesterday.\n")
+
+      entries = Commands.list(workspace: ctx.workspace, user_dir: ctx.user_dir)
+
+      assert %{"agent" => "plan"} = Enum.find(entries, &(&1["name"] == "review"))
+      refute Map.has_key?(Enum.find(entries, &(&1["name"] == "standup")), "agent")
+    end
+
     test "a file without frontmatter is a command too, summarised by its first line", ctx do
       File.write!(
         Path.join(ctx.user_dir, "standup.md"),

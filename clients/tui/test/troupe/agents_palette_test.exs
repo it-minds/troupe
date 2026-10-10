@@ -88,16 +88,15 @@ defmodule Troupe.AgentsPaletteTest do
     {sid, _, _} = start_session!(script: [{:text, "done"}])
     {pid, session} = ready(sid)
 
-    assert screen_text(pid, session) =~ "root (build)"
-
     assert {:ok, "build-1"} = Client.dispatch(sid, "build", "say done")
     eventually(fn -> match?(%{state: :done_unread}, user_state(pid).model.windows["build-1"]) end)
-    assert screen_text(pid, session) =~ "build-1 (build)"
+    assert screen_text(pid, session) =~ ~r/build-1 +build /
 
-    press(pid, "2")
+    press(pid, "1")
     assert user_state(pid).focus == {:window, "build-1"}
+    assert screen_text(pid, session) =~ "build-1 (build)"
     press(pid, "tab")
-    assert user_state(pid).focus == :chooser
+    assert user_state(pid).focus == :switcher
     text = screen_text(pid, session)
     assert text =~ "the agent build-1 runs"
     assert text =~ ~r/build +● built-in · default · checkout/
@@ -106,7 +105,7 @@ defmodule Troupe.AgentsPaletteTest do
     # Down to plan: its instruction is beside the list before it is chosen.
     eventually(fn ->
       press(pid, "down")
-      Enum.at(user_state(pid).chooser.rows, user_state(pid).chooser.cursor)["name"] == "plan"
+      Enum.at(user_state(pid).switcher.rows, user_state(pid).switcher.cursor)["name"] == "plan"
     end)
 
     assert screen_text(pid, session) =~ "You are Troupe's plan agent"
@@ -170,40 +169,48 @@ defmodule Troupe.AgentsPaletteTest do
     end
 
     test "the palette over a window keeps the window for a command that takes words" do
-      {sid, _, ws} = start_session!(script: [])
-      {pid, session} = ready(sid)
+      {sid, _, ws} = start_session!(script: [{:text, "done"}])
+      {pid, _session} = ready(sid)
 
       upload = Path.join(System.tmp_dir!(), "troupe-y26-#{System.unique_integer([:positive])}.txt")
       File.write!(upload, "from this machine")
       on_exit(fn -> File.rm(upload) end)
 
+      assert {:ok, "build-1"} = Client.dispatch(sid, "build", "say done")
+
+      eventually(fn ->
+        match?(%{state: :done_unread}, user_state(pid).model.windows["build-1"])
+      end)
+
       press(pid, "1")
-      assert user_state(pid).focus == {:window, "root"}
+      assert user_state(pid).focus == {:window, "build-1"}
       press(pid, "k", ["ctrl"])
       type(pid, "upload")
       press(pid, "enter")
 
-      assert user_state(pid).focus == {:window, "root"}
+      assert user_state(pid).focus == {:window, "build-1"}
       assert user_state(pid).win_text == "/upload "
-      assert screen_text(pid, session) =~ "a command for this window"
 
       paste(pid, upload)
       press(pid, "enter")
       eventually(fn -> File.exists?(Path.join(ws, Path.basename(upload))) end)
-      assert user_state(pid).focus == {:window, "root"}
+      assert user_state(pid).focus == {:window, "build-1"}
       assert user_state(pid).win_text == ""
-      refute Enum.any?(Client.events(sid), &(&1.type == :input))
 
       # Tab takes a command into the window's box too, and Enter runs it on that window.
       press(pid, "k", ["ctrl"])
       type(pid, "copy")
       press(pid, "tab")
       assert user_state(pid).win_text == "/copy "
-      assert user_state(pid).win_command
       press(pid, "enter")
-      assert user_state(pid).focus == {:window, "root"}
+      assert user_state(pid).focus == {:window, "build-1"}
       refute hd(user_state(pid).model.notices) =~ "no window given"
-      refute Enum.any?(Client.events(sid), &(&1.type == :input))
+
+      # Neither line reached an agent as words.
+      refute Enum.any?(
+               Client.events(sid),
+               &(&1.type == :input and &1.data[:content] =~ ~r{^/(upload|copy)})
+             )
     end
   end
 end
