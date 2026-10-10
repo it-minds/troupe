@@ -153,6 +153,16 @@ and nothing is written. A built-in is changed by saving a copy of it, under its 
 another. A file edited by hand that does not load is not read, and is listed with why in
 `agents.list` and the session's log.
 
+In the desktop app, **Agents** in the rail lists a workspace's agents with where each comes
+from, its model, its tools, whether it can write and the windows running it; opens one
+whole, instruction and all; and saves a new one, a copy (a built-in into the repository is
+one press) or an edit into the layer you choose, with what the daemon finds shown at the
+field. Before a save it shows what the agent may do, every `auto` named, and asks once
+when the save lets a tool run without asking that did not before: an `auto` in your own
+agents applies in every workspace, with no trust asked. A profile bundle's agent is
+changed in the console. A session's head shows the agent it runs and switches it from
+the next turn, the conversation kept; the transcript records the switch.
+
 ## Your own MCP servers and skills
 
 Beside `config.yaml` there are two more files a person keeps, in the shape other tools

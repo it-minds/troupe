@@ -1,3 +1,4 @@
+import type { AgentDefinition, ProfileSwitch } from "./agents.js";
 import type { TroupeConnection } from "./connection.js";
 import type {
   BlobResponse,
@@ -235,13 +236,25 @@ export class SessionView {
     await this.conn.call("turn.cancel", { command_id: this.conn.nextCommandId(), session_id: this.sessionId });
   }
 
-  /** `profile.switch`. Applied at the next turn boundary, not immediately. */
-  async switchProfile(profile: string): Promise<void> {
-    await this.conn.call("profile.switch", {
+  /**
+   * `profile.switch`: the agent this session, or this branch, runs from its next turn,
+   * read from its file now (troupe Decision 841). The conversation stays; the event is
+   * `profile_switched`. A name nothing defines is `not_found`, a subagent's is refused.
+   */
+  async switchProfile(profile: string): Promise<ProfileSwitch> {
+    return this.conn.call<ProfileSwitch>("profile.switch", {
       command_id: this.conn.nextCommandId(),
       session_id: this.sessionId,
       profile,
     });
+  }
+
+  /**
+   * One agent whole as this session would run it (`agents.get` with the session named):
+   * on a pod its bundle's, read-only there, saying where it is changed.
+   */
+  agent(name: string): Promise<AgentDefinition> {
+    return this.conn.call<AgentDefinition>("agents.get", { name, session_id: this.sessionId });
   }
 
   async editTodo(action: "add" | "cancel" | "complete", params: { id?: string; content?: string }): Promise<void> {
