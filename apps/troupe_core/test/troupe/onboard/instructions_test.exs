@@ -562,12 +562,14 @@ defmodule Troupe.Onboard.InstructionsTest do
       assert manifest["version"] == 1
       assert manifest["onboarding"] == Onboard.version()
 
+      version = Onboard.version()
+
       assert %{
                "AGENTS.md" => %{
                  "imported_from" => "CLAUDE.md",
                  "imported_hash" => claude_hash,
                  "imported_at" => @now,
-                 "imported_version" => 1,
+                 "imported_version" => ^version,
                  "imported_also" => [
                    %{"from" => ".github/copilot-instructions.md"},
                    %{"from" => "GEMINI.md"}
@@ -588,7 +590,7 @@ defmodule Troupe.Onboard.InstructionsTest do
              imported_from: ".cursor/rules/style.mdc"
              imported_hash: "#{sha256(@fixture[".cursor/rules/style.mdc"])}"
              imported_at: "#{@now}"
-             imported_version: 1
+             imported_version: #{version}
              ---
              Prefer pattern matching in function heads.
              """
@@ -649,6 +651,157 @@ defmodule Troupe.Onboard.InstructionsTest do
       refute File.exists?(Path.join(ctx.workspace, "AGENTS.md"))
       refute File.exists?(Path.join(ctx.workspace, ".troupe"))
       assert %{proposals: [], declined: 1} = Onboard.plan(ctx.workspace, ctx.opts)
+    end
+  end
+
+  # opencode's `instructions`: more files it joins into every prompt beside AGENTS.md, each
+  # a path or a glob from the root. On the chunk's tip they gave no proposal at all, and
+  # the onboarding rules were version 1.
+  describe "opencode's instructions" do
+    test "each file it names here goes into the root's AGENTS.md, or is a rule when its own globs scope it; the rest is skipped, saying why",
+         ctx do
+      write_all!(ctx.workspace, %{
+        "opencode.json" => """
+        {
+          "$schema": "https://opencode.ai/config.json",
+          "instructions": [
+            "CONTRIBUTING.md",
+            "docs/*.md",
+            "rules/ts.md",
+            "CLAUDE.md",
+            "packages/*/AGENTS.md",
+            "https://example.com/shared-rules.md",
+            "~/rules.md",
+            "../outside.md",
+            "missing/*.md",
+            "empty.md",
+            7
+          ]
+        }
+        """,
+        "CLAUDE.md" => "Run the tests with `mix test` before every commit.\n",
+        "CONTRIBUTING.md" => "# Contributing\n\nOpen a pull request against `main`.\n",
+        "docs/review.md" => "Ask for one review.\n",
+        "docs/style.md" => "---\ndescription: Docs style\n---\nOne sentence per line.\n",
+        "rules/ts.md" => "---\nglobs: \"src/**/*.ts\"\n---\nNo `any`.\n",
+        "packages/web/AGENTS.md" => "Web.\n",
+        "empty.md" => "\n"
+      })
+
+      File.write!(Path.join(ctx.base, "outside.md"), "Not the workspace's.\n")
+
+      assert Onboard.version() == 2
+      %{proposals: proposals, skipped: skipped} = Instructions.survey(ctx.workspace, ctx.opts)
+
+      assert Enum.map(proposals, &{&1.target, &1.path, &1.source}) == [
+               {:workspace, "AGENTS.md", "CLAUDE.md"},
+               {:repo, "rules/ts.md", "rules/ts.md"}
+             ]
+
+      [agents, rule] = proposals
+
+      assert agents.content == """
+             Run the tests with `mix test` before every commit.
+
+             # Contributing
+
+             Open a pull request against `main`.
+
+             Ask for one review.
+
+             One sentence per line.
+             """
+
+      assert agents.also_from ==
+               for(
+                 file <- ~w(CONTRIBUTING.md docs/review.md docs/style.md),
+                 do: %{
+                   source: file,
+                   source_hash: sha256(File.read!(Path.join(ctx.workspace, file)))
+                 }
+               )
+
+      named = "is named in opencode.json's instructions, which opencode joins into every prompt"
+
+      assert agents.notes == [
+               "CONTRIBUTING.md #{named}: what it says is added to AGENTS.md.",
+               "docs/review.md #{named}: what it says is added to AGENTS.md.",
+               "docs/style.md #{named}: what it says is added to AGENTS.md.",
+               "The front matter of docs/style.md is left out: nothing in it scopes the file, and AGENTS.md has none."
+             ]
+
+      assert rule.content == ~s(---\nglobs: ["src/**/*.ts"]\n---\nNo `any`.\n)
+
+      assert rule.notes == [
+               "rules/ts.md #{named}, and its own globs scope it: it joins once a file they match is read or edited."
+             ]
+
+      not_onboarded = "not onboarded: instructions names"
+      outside = "which is outside the workspace; onboarding takes only the workspace's files"
+
+      assert skipped == [
+               %{source: "empty.md", reason: "it is empty"},
+               %{source: "opencode.json", reason: "#{not_onboarded} ../outside.md, #{outside}"},
+               %{source: "opencode.json", reason: "#{not_onboarded} 7, which is not a path"},
+               %{
+                 source: "opencode.json",
+                 reason:
+                   "#{not_onboarded} CLAUDE.md, which is onboarded on its own, as the other tool's file it is"
+               },
+               %{
+                 source: "opencode.json",
+                 reason:
+                   "#{not_onboarded} https://example.com/shared-rules.md, which opencode fetches " <>
+                     "from the web; onboarding takes only the workspace's files"
+               },
+               %{
+                 source: "opencode.json",
+                 reason: "#{not_onboarded} missing/*.md: no file here matches it"
+               },
+               %{
+                 source: "opencode.json",
+                 reason:
+                   "#{not_onboarded} packages/web/AGENTS.md, an AGENTS.md, which Troupe reads itself, in its directory"
+               },
+               %{source: "opencode.json", reason: "#{not_onboarded} ~/rules.md, #{outside}"}
+             ]
+    end
+
+    test "a workspace with only opencode's instructions is found, onboarded once, and drifts when a file changes",
+         ctx do
+      write_all!(ctx.workspace, %{
+        ".git/HEAD" => "ref: refs/heads/main\n",
+        "opencode.jsonc" => """
+        {
+          // The house rules, shared with the other tools.
+          "instructions": ["docs/house-rules.md"]
+        }
+        """,
+        "docs/house-rules.md" => "Every file you write starts with a licence header.\n"
+      })
+
+      assert Instructions.found?(ctx.workspace)
+
+      assert %{proposals: [item]} = Onboard.plan(ctx.workspace, ctx.opts)
+      assert item.question == :create_agents_md
+      assert item.proposal.source == "docs/house-rules.md"
+      {:ok, %{action: :created}} = Onboard.accept(item, ctx.workspace, ctx.opts)
+
+      assert File.read!(Path.join(ctx.workspace, "AGENTS.md")) ==
+               "Every file you write starts with a licence header.\n"
+
+      manifest = Jason.decode!(File.read!(Path.join(ctx.workspace, ".troupe/onboarded.json")))
+
+      assert %{"imported_from" => "docs/house-rules.md", "imported_version" => 2} =
+               manifest["workspace"]["AGENTS.md"]
+
+      assert %{proposals: [], skipped: [again]} = Onboard.plan(ctx.workspace, ctx.opts)
+      assert again.reason == "everything it says is in AGENTS.md already"
+
+      File.write!(Path.join(ctx.workspace, "docs/house-rules.md"), "Use tabs.\n")
+      check = [executable?: fn _ -> true end, config_dir: ctx.config, home: ctx.home]
+      assert {out, 1} = Check.run(ctx.workspace, check)
+      assert out =~ "AGENTS.md:1: drift: "
     end
   end
 
@@ -737,7 +890,8 @@ defmodule Troupe.Onboard.InstructionsTest do
       {:ok, _} = Onboard.accept(item, ctx.workspace, ctx.opts)
 
       file = Path.join(ctx.workspace, ".troupe/rules/a.md")
-      older = String.replace(File.read!(file), "imported_version: 1\n", "imported_version: 0\n")
+      current = "imported_version: #{Onboard.version()}\n"
+      older = String.replace(File.read!(file), current, "imported_version: 0\n")
       File.write!(file, older)
 
       # Older rules, the same file: nothing to show.
@@ -748,13 +902,10 @@ defmodule Troupe.Onboard.InstructionsTest do
       File.write!(file, String.replace(older, "A.\n", "A, as we say it.\n"))
       assert %{proposals: [offered]} = Onboard.plan(ctx.workspace, ctx.opts)
       assert offered.diff =~ "- A, as we say it."
-      assert offered.diff =~ "+ imported_version: 1"
+      assert offered.diff =~ "+ " <> current
 
       # With this build's version, the person's edit stands.
-      File.write!(
-        file,
-        String.replace(File.read!(file), "imported_version: 0\n", "imported_version: 1\n")
-      )
+      File.write!(file, String.replace(File.read!(file), "imported_version: 0\n", current))
 
       assert %{proposals: [], unchanged: 1} = Onboard.plan(ctx.workspace, ctx.opts)
     end
@@ -776,7 +927,11 @@ defmodule Troupe.Onboard.InstructionsTest do
 
       File.write!(
         manifest,
-        String.replace(File.read!(manifest), ~s("onboarding": 1), ~s("onboarding": 0))
+        String.replace(
+          File.read!(manifest),
+          ~s("onboarding": #{Onboard.version()}),
+          ~s("onboarding": 0)
+        )
       )
 
       assert Onboard.onboarded_version(ctx.workspace) == 0
@@ -786,7 +941,8 @@ defmodule Troupe.Onboard.InstructionsTest do
 
       assert out =~
                ".troupe/onboarded.json:3: outdated: onboarded under version 0 of the onboarding " <>
-                 "rules, and this build's are version 1: `troupe onboard` shows what they would write now\n"
+                 "rules, and this build's are version #{Onboard.version()}: `troupe onboard` " <>
+                 "shows what they would write now\n"
 
       assert :ok = Onboard.stamp(ctx.workspace)
       assert Onboard.onboarded_version(ctx.workspace) == Onboard.version()

@@ -40,6 +40,14 @@ defmodule Troupe.Onboard.Instructions do
     meant there, and the body. A key no rule has is left out with a note. Names are made
     lowercase, with dashes; a nested rule's is its directory's then its own
     (`web-style`); two that come out the same are told apart by a number.
+  - **opencode's `instructions`.** The files `opencode.json` (and `opencode.jsonc`) name
+    there, each a path or a glob from the root, which opencode joins into every prompt
+    beside `AGENTS.md`: each is added to the root's `AGENTS.md`, after the other tools'
+    files, in the order named, its front matter left out; one whose own front matter
+    scopes it with `globs` becomes a rule, as its globs say. A URL, a path outside the
+    workspace (`~/`, absolute, or out through `..` or a link), an `AGENTS.md` (Troupe reads
+    those itself), Troupe's own files and another tool's file this source takes on its own
+    are skipped, saying why.
 
   Nothing here writes, and the same files give the same proposals. A file that is a link
   out of the workspace is not read, and one that is the directory's `AGENTS.md` under
@@ -54,8 +62,10 @@ defmodule Troupe.Onboard.Instructions do
 
   @behaviour Troupe.Onboard.Source
 
+  alias Troupe.Config.JSONC
   alias Troupe.{Gitignore, Paths, Workspace}
   alias Troupe.Instructions.Check.Text
+  alias Troupe.Instructions.FrontMatter
   alias Troupe.Protocol.AgentDefinition
 
   # Other tools' names for a directory's `AGENTS.md`, in the order they are added.
@@ -69,11 +79,17 @@ defmodule Troupe.Onboard.Instructions do
   @cursor_rules ".cursor/rules"
   @legacy ".cursorrules"
 
+  # opencode's own files, each of which may name more instruction files; the second is
+  # read over the first, as opencode does.
+  @opencode ~w(opencode.jsonc opencode.json)
+
   # The hidden directories a search enters, for the files above.
   @entered ~w(.github .cursor)
 
   # A rule's own front matter, as Decision 809 reads it.
   @rule_keys ~w(description globs alwaysApply)
+
+  @only_workspace "onboarding takes only the workspace's files"
 
   @typedoc "One file onboarding may write, and what it came from."
   @type proposal :: Troupe.Onboard.Source.proposal()
@@ -82,14 +98,16 @@ defmodule Troupe.Onboard.Instructions do
   @spec found?(Path.t()) :: boolean()
   @impl Troupe.Onboard.Source
   def found?(workspace) do
-    (@aliases ++ [@claude_dir, @copilot, @legacy, @copilot_rules, @cursor_rules])
+    (@aliases ++ [@claude_dir, @copilot, @legacy, @copilot_rules, @cursor_rules] ++ @opencode)
     |> Enum.any?(&File.exists?(Path.join(workspace, &1)))
   end
 
   @doc """
   The proposals for the instruction files in `workspace`: the `AGENTS.md` files first,
   the root's then each directory's, then the rules, by path, then the person's own
-  `AGENTS.md`. `opts`: `home` and `config_dir`, the person's, for a test.
+  `AGENTS.md`. `opts`: `home` and `config_dir`, the person's, for a test; `targets`, the
+  targets wanted, all by default: without `:user` nothing in the person's home or config
+  directory is read.
   """
   @spec proposals(Path.t(), keyword()) :: [proposal()]
   @impl Troupe.Onboard.Source
@@ -104,7 +122,8 @@ defmodule Troupe.Onboard.Instructions do
   @spec survey(Path.t(), keyword()) :: %{proposals: [proposal()], skipped: [map()]}
   def survey(workspace, opts \\ []) do
     root = Path.expand(workspace)
-    {own, own_skips} = own(opts)
+    targets = Keyword.get(opts, :targets, [:workspace, :repo, :user])
+    {own, own_skips} = if :user in targets, do: own(opts), else: {[], []}
 
     {proposals, skipped} =
       case Workspace.real_path(root) do
@@ -113,7 +132,10 @@ defmodule Troupe.Onboard.Instructions do
       end
 
     %{
-      proposals: Enum.sort_by(proposals ++ own, &{target_rank(&1.target), &1.path}),
+      proposals:
+        (proposals ++ own)
+        |> Enum.filter(&(&1.target in targets))
+        |> Enum.sort_by(&{target_rank(&1.target), &1.path}),
       skipped: Enum.sort_by(skipped ++ own_skips, &{&1.source, &1.reason})
     }
   end
@@ -144,9 +166,11 @@ defmodule Troupe.Onboard.Instructions do
     {files, rules} =
       Enum.split_with(inside, fn {kind, _path} -> kind in [:alias, :claude_dir, :copilot] end)
 
-    {agents_md, agents_md_skips} = agents_md(root, real, files)
-    {rule_files, rule_skips} = rules(root, rules)
-    {agents_md ++ rule_files, outside ++ locals ++ agents_md_skips ++ rule_skips}
+    {named, named_rules, named_skips} = opencode(root, real, found)
+    {agents_md, agents_md_skips} = agents_md(root, real, files, named)
+    {rule_files, rule_skips} = rules(root, rules ++ named_rules)
+
+    {agents_md ++ rule_files, outside ++ locals ++ named_skips ++ agents_md_skips ++ rule_skips}
   end
 
   ## Finding
@@ -258,8 +282,9 @@ defmodule Troupe.Onboard.Instructions do
   ## AGENTS.md
 
   # One proposal per directory that has another tool's name for its `AGENTS.md`; Copilot's
-  # file counts at the root only.
-  defp agents_md(root, real, files) do
+  # file counts at the root only. The files opencode's `instructions` name (`named`, each
+  # `{path, config}`) go into the root's, after the others.
+  defp agents_md(root, real, files, named) do
     {copilot_nested, files} =
       Enum.split_with(files, fn {kind, path} -> kind == :copilot and path != @copilot end)
 
@@ -273,11 +298,17 @@ defmodule Troupe.Onboard.Instructions do
         for {_kind, path} <- hidden,
             do: skip(path, "not onboarded: no session reads an AGENTS.md in a hidden directory")
 
+    named = for {path, config} <- named, do: {path, {:opencode, config}}
+
     {proposals, more} =
       files
       |> Enum.group_by(fn {kind, path} -> owner(kind, path) end, &elem(&1, 1))
+      |> Map.new(fn {dir, paths} -> {dir, Enum.map(order(dir, paths), &{&1, :alias})} end)
+      |> then(
+        &if(named == [], do: &1, else: Map.update(&1, "", named, fn own -> own ++ named end))
+      )
       |> Enum.sort()
-      |> Enum.map(fn {dir, paths} -> directory(root, real, dir, order(dir, paths)) end)
+      |> Enum.map(fn {dir, sources} -> directory(root, real, dir, sources) end)
       |> Enum.unzip()
 
     {Enum.concat(proposals), skips ++ Enum.concat(more)}
@@ -302,7 +333,7 @@ defmodule Troupe.Onboard.Instructions do
 
     if File.exists?(file) and not inside?(root, real, agents) do
       outside = "#{agents} is a link to outside the workspace, and is not written"
-      {[], Enum.map(sources, &skip(&1, outside))}
+      {[], Enum.map(sources, fn {name, _kind} -> skip(name, outside) end)}
     else
       dot = join(dir, ".agents/AGENTS.md")
 
@@ -316,33 +347,37 @@ defmodule Troupe.Onboard.Instructions do
         also_shown: dot
       }
 
-      sources = Enum.map(sources, &{&1, Path.join(root, &1)})
+      sources = Enum.map(sources, fn {name, kind} -> {name, Path.join(root, name), kind} end)
       sources(spot, sources)
     end
   end
 
-  # The other tools' files for one `AGENTS.md`, each `{name, file}`: those that are that
-  # file under another name give nothing, the rest are read and merged.
+  # The other tools' files for one `AGENTS.md`, each `{name, file, kind}`: those that are
+  # that file under another name give nothing, the rest are read and merged.
   defp sources(spot, sources) do
     {same, sources} =
-      Enum.split_with(sources, fn {_name, file} -> same_file?(file, spot.file) end)
+      Enum.split_with(sources, fn {_name, file, _kind} -> same_file?(file, spot.file) end)
 
     renamed = "it is #{spot.shown} under another name, so there is nothing to add"
 
     {read, unread} =
       sources
-      |> Enum.map(fn {name, file} -> read_source(name, file) end)
+      |> Enum.map(fn {name, file, kind} -> read_source(name, file, kind) end)
       |> Enum.split_with(&is_tuple/1)
 
     {proposal, skips} = merge(spot, read)
-    {proposal, Enum.map(same, fn {name, _file} -> skip(name, renamed) end) ++ unread ++ skips}
+
+    {proposal,
+     Enum.map(same, fn {name, _file, _kind} -> skip(name, renamed) end) ++ unread ++ skips}
   end
 
-  # `{source, file, bytes}`, or why not, as a skipped entry.
-  defp read_source(source, file) do
+  # `{source, file, bytes, kind}`, or why not, as a skipped entry.
+  defp read_source(source, file, kind) do
     case File.read(file) do
       {:ok, bytes} ->
-        if String.trim(bytes) == "", do: skip(source, "it is empty"), else: {source, file, bytes}
+        if String.trim(bytes) == "",
+          do: skip(source, "it is empty"),
+          else: {source, file, bytes, kind}
 
       {:error, reason} ->
         skip(source, "it cannot be read: #{:file.format_error(reason)}")
@@ -355,12 +390,15 @@ defmodule Troupe.Onboard.Instructions do
     known = [spot.existing, spot.also] |> Enum.reject(&is_nil/1) |> Enum.map(&known/1) |> union()
 
     {added, _known} =
-      Enum.map_reduce(read, known, fn {source, file, bytes}, known ->
+      Enum.map_reduce(read, known, fn {source, file, bytes, kind}, known ->
         # Merging when something is already there, the file's or an earlier source's.
         merging? = spot.existing != nil or known.started?
-        {text, notes} = additions(source, file, lf(bytes), known, merging?, spot)
-        known = union([known, known(lf(bytes))])
-        {{source, bytes, text, notes}, %{known | started?: known.started? or text != ""}}
+        {said, said_notes} = said(kind, source, bytes)
+        {text, notes} = additions(source, file, said, known, merging?, spot, kind)
+        known = union([known, known(said)])
+
+        {{source, bytes, text, said_notes ++ notes},
+         %{known | started?: known.started? or text != ""}}
       end)
 
     if Enum.all?(added, fn {_s, _b, text, _n} -> text == "" end) do
@@ -404,10 +442,38 @@ defmodule Troupe.Onboard.Instructions do
     }
   end
 
+  # What a file says, to merge, and a note for each thing done to it first: another tool's
+  # name for `AGENTS.md` as it is; a file opencode's `instructions` names without its front
+  # matter, which an `AGENTS.md` has none of (one whose globs scope it is a rule instead).
+  defp said(:alias, _source, bytes), do: {lf(bytes), []}
+
+  defp said({:opencode, config}, source, bytes) do
+    named =
+      "#{source} is named in #{config}'s instructions, which opencode joins into every " <>
+        "prompt: what it says is added to AGENTS.md."
+
+    case FrontMatter.split(bytes) do
+      {fields, body} when fields != %{} ->
+        {body,
+         [
+           named,
+           "The front matter of #{source} is left out: nothing in it scopes the file, and AGENTS.md has none."
+         ]}
+
+      _no_front_matter ->
+        {lf(bytes), [named]}
+    end
+  end
+
   # What one file adds, as text, and the notes saying what was left out or changed.
-  defp additions(source, file, text, known, merging?, spot) do
+  defp additions(source, file, text, known, merging?, spot, kind) do
     {lines, imports} = without_self_imports(text, Path.dirname(file), spot.file)
-    {lines, title} = retitle(lines, Path.basename(file), merging?)
+
+    # A first heading naming the other tool's file is a title for this one; a file opencode
+    # names keeps its own.
+    {lines, title} =
+      if kind == :alias, do: retitle(lines, Path.basename(file), merging?), else: {lines, nil}
+
     text = Enum.join(lines, "\n")
     units = units(text)
     {kept, dropped} = Enum.split_with(units, &(&1.kind == :heading or not said?(&1, known)))
@@ -658,7 +724,7 @@ defmodule Troupe.Onboard.Instructions do
 
       File.exists?(agents) and not under_real?(agents, real_config) ->
         outside = "#{shown} is a link to outside your config directory, and is not written"
-        {[], away ++ Enum.map(named, fn {name, _file} -> skip(name, outside) end)}
+        {[], away ++ Enum.map(named, fn {name, _file, _kind} -> skip(name, outside) end)}
 
       true ->
         spot = %{
@@ -676,7 +742,7 @@ defmodule Troupe.Onboard.Instructions do
     end
   end
 
-  # `{"~/...", file}` for a file really in the home directory, or why not.
+  # `{"~/...", file, :alias}` for a file really in the home directory, or why not.
   defp home_name(file, real_home) do
     with {:ok, real} <- Workspace.real_path(file),
          true <- under_real?(real, real_home) do
@@ -685,7 +751,7 @@ defmodule Troupe.Onboard.Instructions do
         |> String.slice(String.length(real_home) + 1, String.length(real))
         |> String.replace("\\", "/")
 
-      {"~/" <> rest, file}
+      {"~/" <> rest, file, :alias}
     else
       _elsewhere ->
         skip(
@@ -768,8 +834,10 @@ defmodule Troupe.Onboard.Instructions do
   defp rank(:cursor_rule), do: 0
   defp rank(:legacy), do: 1
   defp rank(:copilot_rule), do: 2
+  defp rank({:opencode_rule, _config}), do: 3
 
   defp placement(:cursor_rule, path), do: {:ok, up(path, 3)}
+  defp placement({:opencode_rule, _config}, _path), do: {:ok, ""}
 
   defp placement(:legacy, path) do
     if parent(path) == "",
@@ -797,11 +865,11 @@ defmodule Troupe.Onboard.Instructions do
   end
 
   defp rule_from(kind, path, owner, bytes, taken) do
-    {fields, body} = front(kind, bytes |> lf() |> String.trim_leading("﻿"))
+    {fields, body} = front(kind, bytes)
 
     with :ok <- if(body == "", do: {:skip, "it has nothing but its front matter"}, else: :ok),
          {:ok, name, name_notes} <- name(kind, path, owner, taken) do
-      {meta, meta_notes} = meta(kind, fields, owner)
+      {meta, meta_notes} = meta(kind, fields, owner, path)
 
       proposal = %{
         target: :repo,
@@ -819,28 +887,34 @@ defmodule Troupe.Onboard.Instructions do
 
   # When a rule applies, as Decision 809 reads Cursor's front matter, Copilot's `applyTo`
   # read as globs, and a nested rule's from the root.
-  defp meta(:legacy, _fields, _owner),
+  defp meta(:legacy, _fields, _owner, _path),
     do:
       {%{description: nil, globs: [], always: true},
        ["Cursor's .cursorrules applied always, which the rule says with alwaysApply: true."]}
 
-  defp meta(:cursor_rule, fields, owner) do
-    meta = %{
-      description: description(fields),
-      globs: globs(fields["globs"]),
-      always: String.downcase(scalar(fields["alwaysApply"])) == "true"
-    }
-
+  defp meta(:cursor_rule, fields, owner, _path) do
+    meta = FrontMatter.rule(fields)
     {meta, nested_notes} = nested(meta, owner)
     {meta, extra_notes(fields, @rule_keys) ++ nested_notes ++ manual_note(meta)}
   end
 
-  defp meta(:copilot_rule, fields, _owner) do
-    globs = globs(fields["applyTo"])
+  # A file opencode's `instructions` names, whose own globs scope it: opencode joined it
+  # into every prompt, and its globs say when it applies, as Cursor read them.
+  defp meta({:opencode_rule, config}, fields, _owner, path) do
+    {FrontMatter.rule(fields),
+     extra_notes(fields, @rule_keys) ++
+       [
+         "#{path} is named in #{config}'s instructions, which opencode joins into every " <>
+           "prompt, and its own globs scope it: it joins once a file they match is read or edited."
+       ]}
+  end
+
+  defp meta(:copilot_rule, fields, _owner, _path) do
+    globs = FrontMatter.globs(fields["applyTo"])
     everything? = globs != [] and Enum.all?(globs, &(&1 in ["**", "**/*", "*"]))
 
     meta = %{
-      description: description(fields),
+      description: FrontMatter.description(fields),
       globs: if(everything?, do: [], else: globs),
       always: everything?
     }
@@ -953,6 +1027,9 @@ defmodule Troupe.Onboard.Instructions do
 
   defp base_name(:cursor_rule, path), do: path |> Path.basename() |> Path.rootname()
 
+  defp base_name({:opencode_rule, _config}, path),
+    do: path |> Path.basename() |> Path.rootname()
+
   defp name_notes(name, slug, _wanted, taken) when name != slug,
     do: ["Named #{name}: #{slug} is #{taken[slug]}'s."]
 
@@ -980,98 +1057,148 @@ defmodule Troupe.Onboard.Instructions do
 
   ## Front matter, as Decision 809 reads it
 
-  # A rule's front matter and its body. Read a line per key, as Cursor writes it and YAML
-  # would not always read it (`globs: *.ts` is an alias to YAML); Copilot's is YAML, which
-  # this reads the same.
-  defp front(:legacy, text), do: {%{}, String.trim(text)}
+  # A rule's front matter and its body, by the one reader the loader reads
+  # `.troupe/rules/` with (`Troupe.Instructions.FrontMatter`); Copilot's is YAML, which it
+  # reads the same. The legacy `.cursorrules` has none.
+  defp front(:legacy, bytes),
+    do: {%{}, bytes |> lf() |> String.trim_leading("\uFEFF") |> String.trim()}
 
-  defp front(_kind, text) do
-    case String.split(text, "\n") do
-      [first | rest] ->
-        with "---" <- String.trim(first),
-             {front, [_close | body]} <- Enum.split_while(rest, &(String.trim(&1) != "---")) do
-          {keys(front), body |> Enum.join("\n") |> String.trim()}
-        else
-          _none -> {%{}, String.trim(text)}
-        end
-    end
-  end
+  defp front(_kind, bytes), do: FrontMatter.split(bytes)
 
-  # Each `key:` line and the lines after it that are indented or a list's `-`, trimmed.
-  defp keys(lines) do
-    lines
-    |> Enum.reduce({%{}, nil}, fn line, {fields, key} ->
-      case Regex.run(~r/^([A-Za-z][\w-]*)\s*:\s*(.*)$/, line) do
-        [_line, name, value] -> {Map.put(fields, name, [String.trim(value)]), name}
-        nil when key != nil -> {continue(fields, key, line), key}
-        nil -> {fields, nil}
+  ## opencode's instructions
+
+  # The files opencode's `instructions` names, in `opencode.jsonc` then `opencode.json`,
+  # each entry a path or a glob from the root, as opencode reads it there: `{path, config}`
+  # for one whose substance goes into the root's AGENTS.md, in the order named;
+  # `{{:opencode_rule, config}, path}` for one whose own front matter scopes it with globs;
+  # and what is not onboarded, with why. `found` is what the rest of this source found.
+  defp opencode(root, real, found) do
+    taken = MapSet.new(found, &elem(&1, 1))
+
+    {named, skips} =
+      for config <- @opencode, entry <- instructions(root, real, config), reduce: {[], []} do
+        {named, skips} ->
+          {more, more_skips} = named(root, real, config, entry, taken)
+          {named ++ more, skips ++ more_skips}
       end
+
+    named
+    |> Enum.uniq_by(&elem(&1, 0))
+    |> Enum.reduce({[], [], skips}, fn {path, config}, {agents, rules, skips} ->
+      if scoped?(Path.join(root, path)),
+        do: {agents, rules ++ [{{:opencode_rule, config}, path}], skips},
+        else: {agents ++ [{path, config}], rules, skips}
     end)
-    |> elem(0)
   end
 
-  defp continue(fields, key, line) do
-    if line =~ ~r/^(\s+\S|-)/,
-      do: Map.update!(fields, key, &(&1 ++ [String.trim(line)])),
-      else: fields
-  end
-
-  defp description(fields) do
-    case scalar(fields["description"]) do
-      "" -> nil
-      description -> description
+  # The entries of one of opencode's files, when it is in the workspace and holds a list.
+  # One that is a link out, or not JSON, is the agents' source's to say (Decision 824).
+  defp instructions(root, real, config) do
+    with true <- File.regular?(Path.join(root, config)),
+         true <- inside?(root, real, config),
+         {:ok, bytes} <- File.read(Path.join(root, config)),
+         {:ok, %{"instructions" => entries}} when is_list(entries) <- JSONC.decode(bytes) do
+      entries
+    else
+      _none -> []
     end
   end
 
-  defp scalar(nil), do: ""
+  # The files one entry names here, each `{path, config}`, and each it names that is not
+  # onboarded from it, as a skipped entry naming `config`.
+  defp named(_root, _real, config, entry, _taken) when not is_binary(entry),
+    do: {[], [not_named(config, "#{Jason.encode!(entry)}, which is not a path")]}
 
-  defp scalar([block | lines]) when block in ["|", ">", "|-", ">-"],
-    do: lines |> Enum.join(" ") |> unquote_value()
+  defp named(root, real, config, entry, taken) do
+    cond do
+      entry =~ ~r{^[a-z][a-z0-9+.-]*://}i ->
+        {[],
+         [not_named(config, "#{entry}, which opencode fetches from the web; #{@only_workspace}")]}
 
-  defp scalar(lines), do: lines |> Enum.join(" ") |> unquote_value()
+      String.starts_with?(entry, "~") or Path.type(entry) != :relative ->
+        {[], [not_named(config, "#{entry}, #{outside_workspace()}")]}
 
-  defp globs(nil), do: []
-
-  defp globs(["" | lines]) do
-    for "-" <> item <- lines, item = unquote_value(item), item != "", do: item
+      true ->
+        matches(root, real, config, entry, taken)
+    end
   end
 
-  defp globs(lines) do
-    # A quoted list of globs, as Copilot's `applyTo: "**/*.ts,**/*.tsx"`, is one string.
-    value = lines |> Enum.join(" ") |> unquote_value()
+  defp matches(root, real, config, entry, taken) do
+    {inside, outside} =
+      root
+      |> Path.join(entry)
+      |> Path.wildcard()
+      |> Enum.map(&Path.expand/1)
+      |> Enum.uniq()
+      |> Enum.sort()
+      |> Enum.map(&relative(root, &1))
+      |> Enum.split_with(&is_binary/1)
 
-    value =
-      if String.starts_with?(value, "[") and String.ends_with?(value, "]"),
-        do: String.slice(value, 1..-2//1),
-        else: value
+    {linked, inside} = Enum.split_with(inside, &(not inside?(root, real, &1)))
+    files = Enum.filter(inside, &File.regular?(Path.join(root, &1)))
 
-    for item <- split_globs(value), item = unquote_value(item), item != "", do: item
+    skips =
+      if(outside != [], do: [not_named(config, "#{entry}, #{outside_workspace()}")], else: []) ++
+        for(
+          path <- linked,
+          do: skip(path, "it is a link to outside the workspace, and is not read")
+        )
+
+    if files == [] and skips == [] do
+      {[], [not_named(config, "#{entry}: no file here matches it")]}
+    else
+      {named, more} =
+        files
+        |> Enum.map(&judge_named(&1, config, taken))
+        |> Enum.split_with(&is_tuple/1)
+
+      {named, skips ++ more}
+    end
   end
 
-  # On the commas outside braces, so `**/*.{ts,tsx}` stays one glob.
-  defp split_globs(value) do
-    {items, current, _depth} =
-      value
-      |> String.graphemes()
-      |> Enum.reduce({[], "", 0}, fn
-        ",", {items, current, 0} -> {[current | items], "", 0}
-        "{", {items, current, depth} -> {items, current <> "{", depth + 1}
-        "}", {items, current, depth} -> {items, current <> "}", max(depth - 1, 0)}
-        char, {items, current, depth} -> {items, current <> char, depth}
-      end)
+  # A file named that is Troupe's to read already, or another tool's this source takes on
+  # its own, is not taken from opencode's list too.
+  defp judge_named(path, config, taken) do
+    cond do
+      Path.basename(path) == "AGENTS.md" ->
+        not_named(config, "#{path}, an AGENTS.md, which Troupe reads itself, in its directory")
 
-    Enum.reverse([current | items])
+      ".troupe" in Path.split(path) ->
+        not_named(config, "#{path}, which is Troupe's own file already")
+
+      MapSet.member?(taken, path) ->
+        not_named(
+          config,
+          "#{path}, which is onboarded on its own, as the other tool's file it is"
+        )
+
+      true ->
+        {path, config}
+    end
   end
 
-  defp unquote_value(value) do
-    value = String.trim(value)
+  # Whether a file's own front matter scopes it with globs (and does not apply it always).
+  defp scoped?(file) do
+    case File.read(file) do
+      {:ok, bytes} ->
+        rule = bytes |> FrontMatter.split() |> elem(0) |> FrontMatter.rule()
+        rule.globs != [] and not rule.always
 
-    case value do
-      <<q, rest::binary>> when q in [?", ?'] and byte_size(rest) > 0 ->
-        if String.ends_with?(rest, <<q>>), do: String.slice(rest, 0..-2//1), else: value
+      {:error, _reason} ->
+        false
+    end
+  end
 
-      _other ->
-        value
+  defp not_named(config, why), do: skip(config, "not onboarded: instructions names " <> why)
+
+  defp outside_workspace, do: "which is outside the workspace; " <> @only_workspace
+
+  # `path` from `root`, or `nil` when it is not under it.
+  defp relative(root, path) do
+    case Path.relative_to(path, root) do
+      ^path -> nil
+      "." -> nil
+      relative -> relative
     end
   end
 

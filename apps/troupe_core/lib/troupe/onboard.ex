@@ -56,8 +56,8 @@ defmodule Troupe.Onboard do
   # The version of the onboarding rules: what the sources would write, and how. Raised in
   # the pull request that changes what any source writes for the same files, so a
   # workspace onboarded under older rules is told to run `troupe onboard` again (Decision
-  # 827). It never re-runs by itself.
-  @version 1
+  # 827). It never re-runs by itself. 2: opencode's `instructions` are onboarded too.
+  @version 2
 
   # Where a file other than frontmatter Markdown records its provenance, at each root.
   @manifest "onboarded.json"
@@ -124,8 +124,11 @@ defmodule Troupe.Onboard do
   only counted; `all: true` offers the declined again. `skipped` is what the sources found
   and proposed nothing for, each with its reason. Where `Troupe.Onboard.Pod` refuses (a
   pod, Decision 826; `session_id:` names the session asking) the plan is that one refusal
-  and no source is asked. Options, each for a test: `sources`,
-  `config_dir`, `home`, `state_dir` and `now` (the `imported_at` written).
+  and no source is asked. `targets:` asks for those targets only (all by default), and the
+  sources read nothing for the others: a session's start asks for `[:workspace, :repo]`,
+  so the person's home and config directory are not read (Decision 827). Options, each for
+  a test: `sources`, `config_dir`, `home`, `state_dir` and `now` (the `imported_at`
+  written).
   """
   @spec plan(Path.t(), keyword()) :: plan()
   def plan(workspace, opts \\ []) do
@@ -363,9 +366,11 @@ defmodule Troupe.Onboard do
   ## Planning
 
   defp propose(source, workspace, opts) do
-    case source.proposals(workspace, Keyword.take(opts, [:home, :config_dir])) do
+    case source.proposals(workspace, source_opts(opts)) do
       list when is_list(list) ->
-        Enum.map(list, fn
+        list
+        |> Enum.filter(&wanted?(&1, opts[:targets]))
+        |> Enum.map(fn
           proposal when is_map(proposal) -> {:ok, proposal}
           other -> {:refused, refusal(%{}, "#{inspect(source)} proposed #{inspect(other)}")}
         end)
@@ -377,12 +382,20 @@ defmodule Troupe.Onboard do
     error -> [{:refused, refusal(%{}, "#{inspect(source)} failed: #{Exception.message(error)}")}]
   end
 
+  # What a source is told: where `~` and the config directory are, and the targets asked
+  # for, when not every one is.
+  defp source_opts(opts), do: Keyword.take(opts, [:home, :config_dir, :targets])
+
+  # A proposal for a target asked for; one a source made anyway is passed over.
+  defp wanted?(%{target: target}, targets) when is_list(targets), do: target in targets
+  defp wanted?(_proposal, _targets), do: true
+
   # What a source found and proposed nothing for, when it says (an optional callback).
   defp skipped(source, workspace, opts) do
     if Code.ensure_loaded?(source) and function_exported?(source, :skipped, 2),
       do:
         Enum.map(
-          source.skipped(workspace, Keyword.take(opts, [:home, :config_dir])),
+          source.skipped(workspace, source_opts(opts)),
           &skipped_entry(source, &1)
         ),
       else: []

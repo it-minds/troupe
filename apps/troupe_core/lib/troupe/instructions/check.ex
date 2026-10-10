@@ -3,7 +3,7 @@ defmodule Troupe.Instructions.Check do
   `troupe instructions check`: the instruction files a session in a workspace would read,
   checked against each other and against this machine (issue #123, Decision 810).
 
-  Four kinds of finding, each on one line with its file and line:
+  Six kinds of finding, each on one line with its file and line:
 
   - `contradiction`: two scopes name different commands for one subject, as the root's
     `npm test` and `frontend/AGENTS.md`'s `pnpm test` do. The subject (test, build, lint,
@@ -19,6 +19,10 @@ defmodule Troupe.Instructions.Check do
   - `drift`: a file onboarding wrote, under the workspace's `.troupe/` or the person's
     config directory, whose source has changed or gone since (Decision 823), read from the
     provenance the file recorded (`Troupe.Onboard.drift/2`), not from a search of its own.
+  - `outdated`: the workspace was onboarded under older onboarding rules than this
+    build's (Decision 827), on the line of `.troupe/onboarded.json`'s `onboarding`; `troupe
+    onboard` shows what the newer rules would write, and a run that answers every question
+    records them. Also `Troupe.Onboard.drift/2`'s.
 
   Each would rather miss a finding than make a false one: only what reads unmistakably as
   a command or a repository path is checked (`Troupe.Instructions.Check.Text`), and the
@@ -37,7 +41,7 @@ defmodule Troupe.Instructions.Check do
   alias Troupe.{Gitignore, Instructions, Onboard, Paths, Reaper}
   alias Troupe.Instructions.Check.Text
 
-  @type kind :: :contradiction | :path | :command | :duplicate | :drift
+  @type kind :: :contradiction | :path | :command | :duplicate | :drift | :outdated
 
   @type finding :: %{path: Path.t(), line: pos_integer(), kind: kind(), message: String.t()}
 
@@ -576,7 +580,11 @@ defmodule Troupe.Instructions.Check do
     do: %{path: path, line: line, kind: kind, message: message}
 
   defp rank(kind),
-    do: Enum.find_index([:contradiction, :path, :command, :duplicate, :drift], &(&1 == kind))
+    do:
+      Enum.find_index(
+        [:contradiction, :path, :command, :duplicate, :drift, :outdated],
+        &(&1 == kind)
+      )
 
   defp report(result, true) do
     %{workspace: workspace, root: root, sources: sources, findings: found} = result

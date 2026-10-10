@@ -15,9 +15,10 @@ defmodule Troupe.Instructions do
 
   Other tools' files are not read (Decision 828): `troupe onboard` brings what they say
   into Troupe's own files once. A `CLAUDE.md` or a `GEMINI.md` in one of those
-  directories, Copilot's `.github/copilot-instructions.md` at the root, and Cursor's
-  `.cursorrules` and `.cursor/rules/*.mdc` are each listed as skipped, saying so, so
-  nobody debugs a file that was never loaded. A Copilot file below the root never counted
+  directories, Copilot's `.github/copilot-instructions.md` and
+  `.github/instructions/*.instructions.md` at the root, and Cursor's `.cursorrules` and
+  `.cursor/rules/*.mdc` are each listed as skipped, saying so, so nobody debugs a file
+  that was never loaded. A Copilot file below the root never counted
   (Decision 806), and says that instead. A file that is there and cannot be read is
   listed too, with why.
 
@@ -61,6 +62,7 @@ defmodule Troupe.Instructions do
   """
 
   alias Troupe.{Config, Memory, Paths, Workspace}
+  alias Troupe.Instructions.FrontMatter
   alias Troupe.LLM.{Message, ToolUse}
   alias Troupe.Session.Memory, as: Brief
 
@@ -77,11 +79,13 @@ defmodule Troupe.Instructions do
   @onboard_reason "not read: run troupe onboard"
   @copilot_reason "not read: Copilot's file counts only at the root"
 
-  # Troupe's own rules; and Cursor's, and the single file Cursor read before them at the
-  # repository root, no longer read (Decision 828).
+  # Troupe's own rules; and Cursor's, the single file Cursor read before them at the
+  # repository root, and Copilot's at the root, none of them read (Decision 828).
   @rules_dir ".troupe/rules"
   @cursor_rules ".cursor/rules"
   @legacy_rules ".cursorrules"
+  @copilot_rules ".github/instructions"
+  @copilot_ext ".instructions.md"
   @requested_reason "requested by description only: listed in the prompt, not joined"
   @manual_reason "not joined: no alwaysApply, globs or description"
 
@@ -450,33 +454,40 @@ defmodule Troupe.Instructions do
   ## Rules
 
   # A directory's `.troupe/rules/*.md`, in name order, after its instruction file
-  # (Decisions 809 and 828), then Cursor's rules found there, listed and not read: the
-  # legacy `.cursorrules` at the repository root and each `.cursor/rules/*.mdc`. Not in the
-  # person's own directory, whose own file is `<config>/AGENTS.md`.
+  # (Decisions 809 and 828), then the other tools' rules found there, listed and not read:
+  # the legacy `.cursorrules` at the repository root, each `.cursor/rules/*.mdc`, and
+  # Copilot's `.github/instructions/*.instructions.md` at the root, the only place Copilot
+  # reads them. Not in the person's own directory, whose own file is `<config>/AGENTS.md`.
   defp rules({:user, _dir, _where}, _bounds, _worked_on), do: []
 
   defp rules({scope, dir, where}, bounds, worked_on) do
     fields = %{scope: scope, where: where}
     bound = bounds.repository
     legacy = Path.join(dir, @legacy_rules)
+    listed = fn path -> [unread(path, dir, fields, :skipped, @onboard_reason)] end
 
     legacy =
       if scope == :root and File.regular?(legacy),
-        do: [unread(legacy, dir, fields, :skipped, @onboard_reason)],
+        do: listed.(legacy),
+        else: []
+
+    copilot =
+      if scope == :root,
+        do:
+          in_rules_dir(Path.join(dir, @copilot_rules), @copilot_ext, dir, fields, bound, listed),
         else: []
 
     in_rules_dir(Path.join(dir, @rules_dir), ".md", dir, fields, bound, fn path ->
       rule(path, dir, fields, bound, worked_on)
     end) ++
       legacy ++
-      in_rules_dir(Path.join(dir, @cursor_rules), ".mdc", dir, fields, bound, fn path ->
-        [unread(path, dir, fields, :skipped, @onboard_reason)]
-      end)
+      in_rules_dir(Path.join(dir, @cursor_rules), ".mdc", dir, fields, bound, listed) ++
+      copilot
   end
 
-  # Each file in a rules directory with the extension, in name order, through `each`. One
-  # that is really outside the repository is listed once, as `outside`, and not looked
-  # into, so not even the names of what is there reach the log.
+  # Each file in a rules directory whose name ends with the extension, in name order,
+  # through `each`. One that is really outside the repository is listed once, as
+  # `outside`, and not looked into, so not even the names of what is there reach the log.
   defp in_rules_dir(rules_dir, extension, dir, fields, bound, each) do
     cond do
       not File.dir?(rules_dir) ->
@@ -492,12 +503,17 @@ defmodule Troupe.Instructions do
           {:ok, names} -> names
           {:error, _reason} -> []
         end
-        |> Enum.filter(&(String.downcase(Path.extname(&1)) == extension))
+        |> Enum.filter(&rule_name?(&1, extension))
         |> Enum.sort()
         |> Enum.map(&Path.join(rules_dir, &1))
         |> Enum.filter(&File.regular?/1)
         |> Enum.flat_map(each)
     end
+  end
+
+  defp rule_name?(name, extension) do
+    name = String.downcase(name)
+    String.ends_with?(name, extension) and byte_size(name) > byte_size(extension)
   end
 
   # One rule, confined as a found file is, then read and judged against the files the
@@ -602,34 +618,12 @@ defmodule Troupe.Instructions do
   defp translate(<<char::utf8, rest::binary>>, depth),
     do: Regex.escape(<<char::utf8>>) <> translate(rest, depth)
 
-  # A rule's front matter and its body. The front matter is read a line per key, as Cursor
-  # writes it in an `.mdc` and YAML would not always read it (`globs: *.ts` is an alias to
-  # YAML): `globs` a comma-separated string, a `[...]` list or a list of `- ` lines.
+  # A rule's front matter and its body, read by the one reader onboarding reads Cursor's
+  # and Copilot's rules with (`Troupe.Instructions.FrontMatter`, Decision 809's way).
   defp front_matter(%{text: text}) do
-    text = String.trim_leading(text, "\uFEFF")
-    text |> String.split("\n") |> split_front_matter(text)
-  end
+    {fields, body} = FrontMatter.split(text)
+    %{always: always, globs: globs, description: description} = FrontMatter.rule(fields)
 
-  defp split_front_matter([first | rest], text) do
-    with "---" <- String.trim(first),
-         {front, [_close | body]} <- Enum.split_while(rest, &(String.trim(&1) != "---")) do
-      fields = keys(front)
-      always = String.downcase(scalar(fields["alwaysApply"])) == "true"
-
-      description =
-        case scalar(fields["description"]) do
-          "" -> nil
-          description -> description
-        end
-
-      rule = rule_from(always, globs(fields["globs"]), description)
-      {rule, body |> Enum.join("\n") |> String.trim()}
-    else
-      _no_front_matter -> {rule_from(false, [], nil), text}
-    end
-  end
-
-  defp rule_from(always, globs, description) do
     apply =
       cond do
         always -> :always
@@ -638,77 +632,7 @@ defmodule Troupe.Instructions do
         true -> :manual
       end
 
-    %{apply: apply, globs: globs, description: description, matched: nil}
-  end
-
-  # Each `key:` line and the lines after it that are indented or a list's `-`, trimmed.
-  defp keys(lines) do
-    lines
-    |> Enum.reduce({%{}, nil}, fn line, {fields, key} ->
-      case Regex.run(~r/^([A-Za-z][\w-]*)\s*:\s*(.*)$/, line) do
-        [_line, name, value] -> {Map.put(fields, name, [String.trim(value)]), name}
-        nil when key != nil -> {continue(fields, key, line), key}
-        nil -> {fields, nil}
-      end
-    end)
-    |> elem(0)
-  end
-
-  defp continue(fields, key, line) do
-    if line =~ ~r/^(\s+\S|-)/,
-      do: Map.update!(fields, key, &(&1 ++ [String.trim(line)])),
-      else: fields
-  end
-
-  defp scalar(nil), do: ""
-
-  defp scalar([block | lines]) when block in ["|", ">", "|-", ">-"],
-    do: lines |> Enum.join(" ") |> unquote_value()
-
-  defp scalar(lines), do: lines |> Enum.join(" ") |> unquote_value()
-
-  defp globs(nil), do: []
-
-  defp globs(["" | lines]) do
-    for "-" <> item <- lines, item = unquote_value(item), item != "", do: item
-  end
-
-  defp globs(lines) do
-    value = lines |> Enum.join(" ") |> String.trim()
-
-    value =
-      if String.starts_with?(value, "[") and String.ends_with?(value, "]"),
-        do: String.slice(value, 1..-2//1),
-        else: value
-
-    for item <- split_globs(value), item = unquote_value(item), item != "", do: item
-  end
-
-  # On the commas outside braces, so `**/*.{ts,tsx}` stays one glob.
-  defp split_globs(value) do
-    {items, current, _depth} =
-      value
-      |> String.graphemes()
-      |> Enum.reduce({[], "", 0}, fn
-        ",", {items, current, 0} -> {[current | items], "", 0}
-        "{", {items, current, depth} -> {items, current <> "{", depth + 1}
-        "}", {items, current, depth} -> {items, current <> "}", max(depth - 1, 0)}
-        char, {items, current, depth} -> {items, current <> char, depth}
-      end)
-
-    Enum.reverse([current | items])
-  end
-
-  defp unquote_value(value) do
-    value = String.trim(value)
-
-    case value do
-      <<q, rest::binary>> when q in [?", ?'] and byte_size(rest) > 0 ->
-        if String.ends_with?(rest, <<q>>), do: String.slice(rest, 0..-2//1), else: value
-
-      _other ->
-        value
-    end
+    {%{apply: apply, globs: globs, description: description, matched: nil}, body}
   end
 
   ## Imports

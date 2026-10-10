@@ -23,7 +23,9 @@ defmodule Troupe.Onboard.Notice do
 
   Asked only on the person's own machine (not on a pod, not where a worker runs); the
   first-time look asks each source's `found?/1` first, a look at the workspace's root, so
-  a workspace with none of their files costs a few `stat` calls a start.
+  a workspace with none of their files costs a few `stat` calls a start, and then asks
+  the sources for the workspace's files only (`targets`), so nothing in the person's home
+  or config directory is read.
   """
 
   alias Troupe.{Memory, Onboard, Paths, Workspace}
@@ -79,8 +81,11 @@ defmodule Troupe.Onboard.Notice do
     end
   end
 
-  # Nothing onboarded: what the sources that find their files at the root would propose,
-  # unless the person has already said no to something here.
+  # Nothing onboarded: what the sources that find their files at the root would propose
+  # into the workspace, unless the person has already said no to something here. Only the
+  # workspace's targets are asked for, so no source reads the person's own files, in their
+  # home or config directory: those would be news in every workspace's first session, and
+  # a start has no business reading them.
   defp first(workspace, key, opts) do
     sources = Enum.filter(Keyword.get(opts, :sources, Onboard.sources()), &found?(&1, workspace))
 
@@ -90,7 +95,10 @@ defmodule Troupe.Onboard.Notice do
       plan =
         Onboard.plan(
           workspace,
-          Keyword.merge(Keyword.take(opts, [:state_dir, :config_dir, :home]), sources: sources)
+          Keyword.merge(Keyword.take(opts, [:state_dir, :config_dir, :home]),
+            sources: sources,
+            targets: [:workspace, :repo]
+          )
         )
 
       case counts(plan.proposals) do
@@ -126,13 +134,8 @@ defmodule Troupe.Onboard.Notice do
   ]
 
   # The workspace's proposals by kind, in the order `@kinds` names them, each `{kind, n}`.
-  # The person's own files are theirs to onboard, not this workspace's news: they would be
-  # told of in every workspace's first session.
   defp counts(items) do
-    by_kind =
-      items
-      |> Enum.reject(&(&1.proposal.target == :user))
-      |> Enum.frequencies_by(&kind(&1.proposal))
+    by_kind = Enum.frequencies_by(items, &kind(&1.proposal))
 
     for {kind, _one, _many} <- @kinds, n = by_kind[kind], n != nil, do: {kind, n}
   end

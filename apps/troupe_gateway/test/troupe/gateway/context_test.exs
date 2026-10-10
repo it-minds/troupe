@@ -70,6 +70,9 @@ defmodule Troupe.Gateway.ContextTest do
     rules = "# Rules\n\nUse tabs.\n"
     File.write!(Path.join(ws, "AGENTS.md"), rules)
     File.write!(Path.join(ws, "CLAUDE.md"), "never read\n")
+    copilot = Path.join(ws, ".github/instructions/ts.instructions.md")
+    File.mkdir_p!(Path.dirname(copilot))
+    File.write!(copilot, "---\napplyTo: \"**/*.ts\"\n---\nnever read either\n")
     session = start_session(context)
 
     assert {:ok, answer} = Client.call(client, "context.get", %{"session_id" => session.id})
@@ -77,7 +80,7 @@ defmodule Troupe.Gateway.ContextTest do
     assert answer["used"] == String.length(String.trim(rules))
     assert Path.expand(ws) in answer["searched"]
 
-    assert [root, claude, brief] = answer["files"]
+    assert [root, claude, copilot_rule, brief] = answer["files"]
     assert root["scope"] == "root"
     assert root["path"] == Path.join(Path.expand(ws), "AGENTS.md")
     assert root["size"] == byte_size(rules)
@@ -101,6 +104,15 @@ defmodule Troupe.Gateway.ContextTest do
            } = claude
 
     assert claude["path"] == Path.join(Path.expand(ws), "CLAUDE.md")
+
+    # And Copilot's .github/instructions files, which onboarding brings in too.
+    assert %{"scope" => "root", "status" => "skipped", "chars" => 0, "rule" => nil} =
+             copilot_rule
+
+    assert copilot_rule["reason"] == "not read: run troupe onboard"
+
+    assert copilot_rule["path"] ==
+             Path.join(Path.expand(ws), ".github/instructions/ts.instructions.md")
 
     assert brief["scope"] == "brief"
     assert brief["path"] == Path.join(Path.expand(ws), ".troupe/memory.md")

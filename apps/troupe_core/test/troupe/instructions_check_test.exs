@@ -344,6 +344,25 @@ defmodule Troupe.Instructions.CheckTest do
       assert %{"error" => "cannot read the workspace " <> _} = Jason.decode!(json)
     end
 
+    # Decision 827: `outdated` comes from `Troupe.Onboard.drift/2`, beside `drift`; the
+    # type of a finding's kind, and what the check says it reports, name it too.
+    test "every kind of finding is the check's own: its type and its documentation name outdated" do
+      {:ok, types} = Code.Typespec.fetch_types(Check)
+
+      kinds =
+        Enum.find_value(types, fn
+          {:type, {:kind, union, []}} -> for {:atom, _, kind} <- flatten(union), do: kind
+          _other -> nil
+        end)
+
+      assert Enum.sort(kinds) ==
+               Enum.sort([:contradiction, :path, :command, :duplicate, :drift, :outdated])
+
+      {:docs_v1, _, _, _, %{"en" => moduledoc}, _, _} = Code.fetch_docs(Check)
+
+      for kind <- kinds, do: assert(moduledoc =~ "- `#{kind}`: ")
+    end
+
     test "no instruction files is nothing to find", %{repo: repo} do
       assert {"no instruction files reach a session in " <> _, 0} = Check.run(repo, @everywhere)
     end
@@ -368,6 +387,9 @@ defmodule Troupe.Instructions.CheckTest do
       assert text =~ "web/AGENTS.md:1: contradiction: "
     end
   end
+
+  defp flatten({:type, _, :union, members}), do: Enum.flat_map(members, &flatten/1)
+  defp flatten(other), do: [other]
 
   defp findings(repo, opts \\ []) do
     %{root: root, sources: sources, elsewhere?: elsewhere?} = Check.sources(repo)

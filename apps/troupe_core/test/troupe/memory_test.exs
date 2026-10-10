@@ -47,6 +47,30 @@ defmodule Troupe.MemoryTest do
     assert once =~ "built_at: 2026-09-01T10:00:00Z"
   end
 
+  # A short hash of digits and one `e` is a number to YAML (`4572e29` is 4.572e32), and one
+  # of digits with a leading zero loses it: the brief writes its head quoted, and a head an
+  # older build wrote bare reads back as the text on its line.
+  test "the head is written quoted, and one written bare reads as it was written" do
+    rendered = Memory.empty() |> Memory.stamp("4572e29", 10) |> Memory.render()
+    assert rendered =~ ~s(\nhead: "4572e29"\n)
+    assert brief!(rendered).head == "4572e29"
+    assert brief!(Memory.render(brief!(rendered))).head == "4572e29"
+
+    for bare <- ~w(4572e29 0012345 1234567 2703d22 1e10 true) do
+      old = String.replace(@full, "head: 2703d22", "head: #{bare}")
+      assert brief!(old).head == bare
+      assert Memory.render(brief!(old)) =~ ~s(\nhead: "#{bare}"\n)
+    end
+
+    assert brief!(String.replace(@full, "head: 2703d22", "head: 4572e29 # short")).head ==
+             "4572e29"
+
+    # What is not one word on its line cannot be told from what YAML made of it: no head,
+    # which decides nothing, and the next refresh writes it again.
+    assert brief!(String.replace(@full, "head: 2703d22", "head: [4572e29]")).head == nil
+    assert brief!(String.replace(@full, "head: 2703d22", "head:")).head == nil
+  end
+
   test "a file with no frontmatter parses, round-trips and reads as stale" do
     brief = brief!("## Overview\nJust prose.\n")
 
