@@ -24,11 +24,15 @@ defmodule Troupe.Gateway.Web.Socket do
 
   @impl WebSock
   def init(opts) do
-    attach = [
-      transport: {:relay, self()},
-      endpoint: Keyword.fetch!(opts, :endpoint),
-      bearer: Keyword.get(opts, :bearer)
-    ]
+    attach =
+      [
+        transport: {:relay, self()},
+        endpoint: Keyword.fetch!(opts, :endpoint),
+        bearer: Keyword.get(opts, :bearer),
+        # What this socket takes, which `initialize` says (Decision 845).
+        max_message_bytes: Keyword.get(opts, :max_message_bytes)
+      ]
+      |> Keyword.reject(fn {_key, value} -> is_nil(value) end)
 
     case Connections.attach(attach) do
       {:ok, connection} ->
@@ -46,8 +50,11 @@ defmodule Troupe.Gateway.Web.Socket do
   def handle_in({text, [opcode: :text]}, state) do
     # A frame is a whole message and a line is a whole message, and the connection knows
     # only about lines. The newline goes on here and comes off again in `handle_info`,
-    # so the two framings meet in this module and nowhere else.
-    send(state.connection, {:transport_data, text <> "\n"})
+    # so the two framings meet in this module and nowhere else. A frame may hold newlines
+    # of its own, as pretty-printed JSON does, and the connection split it at them and
+    # answered none of its pieces; JSON never has one inside a string, so outside one each
+    # is whitespace and a space reads the same, at the same length.
+    send(state.connection, {:transport_data, String.replace(text, "\n", " ") <> "\n"})
     {:ok, state}
   end
 

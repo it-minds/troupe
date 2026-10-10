@@ -77,6 +77,12 @@ framing, no batching. Binary frames are not used. The token goes in the
 `Authorization: Bearer` header, or in `auth.token` on `initialize` where headers are
 unavailable.
 
+A frame is one message whatever whitespace it holds, newlines between its tokens
+included. A frame larger than the socket's ceiling, 16 MiB unless the server is
+configured otherwise, closes the connection before it is read; `initialize` says what the
+ceiling is (`limits.max_message_bytes`), and a client does not send a message larger
+than that (Decision 845).
+
 ---
 
 ## 2. Framing: JSON-RPC 2.0
@@ -152,6 +158,11 @@ The response:
   "limits": {"max_message_bytes": 67108864, "outbound_queue": 10000}
 }}
 ```
+
+`limits.max_message_bytes` is the largest message this connection reads: 64 MiB on the
+socket and TCP transports, the socket's ceiling over a WebSocket (16 MiB by default). A
+larger one ends the connection, with `payload_too_large` on a socket and without a word
+on a WebSocket, so a client checks a message against it before sending one.
 
 The server's `capabilities`:
 
