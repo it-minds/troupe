@@ -107,6 +107,7 @@ defmodule Troupe.Client do
   @callback shell_cancel(session_id(), String.t()) :: :ok | {:error, term()}
   @callback approve(session_id(), String.t(), decision()) :: :ok | {:error, term()}
   @callback answer(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
+  @callback answer_local(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback edit_todo(session_id(), String.t(), term()) :: :ok | {:error, term()}
   @callback switch_profile(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback goal(session_id()) :: {:ok, String.t() | nil} | {:error, term()}
@@ -255,6 +256,15 @@ defmodule Troupe.Client do
   @spec answer(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   def answer(sid, call_id, text), do: impl(sid).answer(sid, call_id, text)
 
+  @doc """
+  Answers a question this client asked at the session's start (`:local_question`, TUI
+  Decision 154: onboarding, then the brief) with one of its `keys`; what the answer leads
+  to (a write, a no remembered, the next question, the librarian) happens before this
+  returns.
+  """
+  @spec answer_local(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
+  def answer_local(sid, id, key), do: impl(sid).answer_local(sid, id, key)
+
   @spec edit_todo(session_id(), String.t(), term()) :: :ok | {:error, term()}
   def edit_todo(sid, path, change), do: impl(sid).edit_todo(sid, path, change)
 
@@ -294,6 +304,14 @@ defmodule Troupe.Client do
 
   @spec dismiss(session_id(), String.t()) :: :ok | {:error, term()}
   def dismiss(sid, path), do: impl(sid).dismiss(sid, path)
+
+  @doc """
+  What `/dismiss` says of the session's own window, which stays: the session on screen is
+  left by switching to another one, never by letting go of it under the screen.
+  """
+  @spec own_window() :: String.t()
+  def own_window,
+    do: "this is the session's own window, and it stays; /back, /sessions or /new leave it"
 
   @spec merge(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def merge(sid, path), do: impl(sid).merge(sid, path)
@@ -465,6 +483,13 @@ defmodule Troupe.Client do
   @doc "The worktrees `/worktree <Tab>` offers: checked out, and Troupe-managed."
   @spec worktrees(String.t()) :: {[map()], [String.t()]}
   def worktrees(workspace), do: Daemon.worktrees(workspace)
+
+  @doc """
+  The session's branches whose windows were dismissed, still sessions of their own, which
+  the picker lists; a session a plane runs has none.
+  """
+  @spec dismissed_branches(session_id()) :: [%{window: String.t(), session_id: String.t()}]
+  def dismissed_branches(sid), do: if(remote?(sid), do: [], else: Daemon.dismissed_branches(sid))
 
   @doc "The text a multiple-choice answer is sent as."
   @spec answer_text([String.t()]) :: String.t()

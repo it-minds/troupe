@@ -145,6 +145,24 @@ directory, that is a link to somewhere else on the machine is not read, and is l
 with why: in `agents.list` and `skills.list`, and in the session's log. Reaching outside
 the repository is what a trusted `skills.json` is for.
 
+An agent a client saves goes through the daemon (`agents.put`), into your
+`<config>/agents/` or the repository's `.troupe/agents/`, and is checked as it is saved: a
+key no agent has, a missing `mode`, a tool that does not exist, a permission for a tool its
+`tools` leaves out, or a model your provider does not serve is refused with the reason,
+and nothing is written. A built-in is changed by saving a copy of it, under its name or
+another. A file edited by hand that does not load is not read, and is listed with why in
+`agents.list` and the session's log.
+
+In the desktop app, **Agents** in the rail lists a workspace's agents with where each comes
+from, its model, its tools, whether it can write and the windows running it; opens one
+whole, instruction and all; and saves a new one, a copy (a built-in into the repository is
+one press) or an edit into the layer you choose, with what the daemon finds shown at the
+field. Before a save it shows what the agent may do, every `auto` named, and asks once
+when the save lets a tool run without asking that did not before: an `auto` in your own
+agents applies in every workspace, with no trust asked. A profile bundle's agent is
+changed in the console. A session's head shows the agent it runs and switches it from
+the next turn, the conversation kept; the transcript records the switch.
+
 ## Your own MCP servers and skills
 
 Beside `config.yaml` there are two more files a person keeps, in the shape other tools
@@ -435,22 +453,27 @@ in Troupe's state directory, never in the repository). A changed source is offer
 diff against the file you have, and nothing is overwritten unasked. `--yes` writes every
 proposal without asking, and `--json` prints them as one object and writes nothing unless
 `--yes` is given too. It exits 1 when a proposal was refused or a write failed, and 2 when
-there was nobody to ask. Inside a session the librarian writes the same files with the
-`onboard_write` tool, which asks before each one; into your config directory, and into an
-`AGENTS.md`, it asks even with `auto_approve` on, since what lands there runs in every
-session without a question, or is read by every tool.
+there was nobody to ask. Inside a session, an agent whose profile names the
+`onboard_write` tool writes the same files with it, asking before each one; into your
+config directory, and into an `AGENTS.md`, it asks even with `auto_approve` on, since what
+lands there runs in every session without a question, or is read by every tool.
 
-Onboarding proposes by itself and never writes by itself. The first session in a
-workspace that has other tools' files and nothing onboarded says, in one line, what
-`troupe onboard` would bring in (`1 AGENTS.md, 2 rules and 1 agent`) and how to run it.
-The rules onboarding follows have a version, recorded in `.troupe/onboarded.json` as
-`onboarding` when a workspace is first onboarded and again by a `troupe onboard` run that
-answered every question; a session in a workspace onboarded under older rules than its
-build's suggests running `troupe onboard` again, and one whose brief an older version of
-the librarian's survey wrote (its `survey` in `.troupe/memory.md`) suggests `/memory
-refresh`, in the same line. Each is said once per workspace and version, and remembered in
-Troupe's state directory (`onboard.json`), never in the repository; saying no to a
-proposal in a workspace, or onboarding it, ends the first one. Nothing re-runs by itself.
+Onboarding proposes by itself and never writes by itself. A session in a workspace that
+has other tools' files and nothing onboarded says, in one line, what `troupe onboard` would
+bring in (`1 AGENTS.md, 2 rules and 1 agent`), and the terminal client and the desktop app
+ask about it as the session starts, before the librarian: `Onboard 3 files from Claude
+Code and Cursor into Troupe's own? [Y/n/r]`. Yes writes them, and then asks on its own
+about each `AGENTS.md` that is not there yet; `r` shows each file as `troupe onboard` does
+and asks for it; no leaves them all. The rules onboarding follows have a version,
+recorded in `.troupe/onboarded.json` as `onboarding` when a workspace is first onboarded
+and again once every question is answered; a session in a workspace onboarded under older
+rules than its build's asks `Onboarding rules changed since this repository was onboarded
+(v1 to v2). Re-run now? [Y/n]`, and one whose brief an older version of the librarian's
+survey wrote (its `survey` in `.troupe/memory.md`) asks whether to rewrite it, Yes the
+default for both. Only then does the librarian start, so it reads what onboarding wrote.
+Each is asked at every start until it is answered, and a no is remembered for that
+version in Troupe's state directory (`onboard.json`), never in the repository. Nothing
+re-runs by itself, and a headless run (`troupe run`) prints the line and asks nothing.
 
 ## Instruction files
 

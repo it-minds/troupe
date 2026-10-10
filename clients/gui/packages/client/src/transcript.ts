@@ -186,6 +186,23 @@ export interface TranscriptState {
   goal: string | undefined;
   /** The latest loop towards the goal, running or how it ended; undefined before the first. */
   loop: LoopState | undefined;
+  /**
+   * The latest `onboarding_suggested`, which a session's start writes when onboarding or
+   * the brief is due (troupe Decisions 827 and 835). A client with the daemon to ask turns
+   * it into questions over `onboard.plan`; its line says it where nothing asks.
+   */
+  onboarding: OnboardingSuggested | undefined;
+}
+
+/** What `onboarding_suggested` says is due, and where. */
+export interface OnboardingSuggested {
+  seq: number;
+  /** The workspace as the daemon resolved it, which `onboard.plan` is asked about. */
+  workspace: string | undefined;
+  /** `first`, `outdated` or `none`; absent from a daemon before the questions (Decision 827's notice only). */
+  due: string | undefined;
+  /** `first`, `stale`, `outdated` or `none`, the same way. */
+  briefDue: string | undefined;
 }
 
 export interface PresenceMember {
@@ -212,6 +229,7 @@ export const emptyTranscript: TranscriptState = {
   usage: undefined,
   goal: undefined,
   loop: undefined,
+  onboarding: undefined,
 };
 
 /** The root agent is the one-element path; everything deeper is a subagent. */
@@ -396,7 +414,7 @@ function systemText(d: DurableEvent): string {
     case "agent_restarted":
       return `agent restarted, replaying ${str(d.data["replayed_events"], "0")} events`;
     case "profile_switched":
-      return `profile ${str(d.data["from"], "?")} → ${str(d.data["to"], "?")}`;
+      return switchedText(d);
     case "compacted":
       return d.data["reason"] === "context_overflow"
         ? "conversation compacted, because the prompt no longer fit the model"
@@ -430,6 +448,31 @@ function systemText(d: DurableEvent): string {
     default:
       return d.type;
   }
+}
+
+/** Where an agent was read from, as `profile_switched`'s `layer` names it (troupe Decision 841). */
+const SWITCHED_FROM: Record<string, string> = {
+  builtin: "built in",
+  bundle: "the profile's bundle",
+  user: "yours",
+  project: "this repository's",
+};
+
+/**
+ * A switch of the agent, so the history says when the rules changed (troupe #503): from
+ * which to which, where the new one was read from, that it applies from the next turn, and
+ * the tools it gained and lost. A log from before Decision 841 has only the two names.
+ */
+function switchedText(d: DurableEvent): string {
+  const layer = SWITCHED_FROM[str(d.data["layer"])];
+  const names = (key: string): string[] => (Array.isArray(d.data[key]) ? (d.data[key] as unknown[]).map(String) : []);
+  const removed = names("tools_removed");
+  const added = names("tools_added");
+  return [
+    `agent ${str(d.data["from"], "?")} → ${str(d.data["to"], "?")}${layer ? ` (${layer})` : ""}, from the next turn`,
+    ...(removed.length ? [`no longer holds ${removed.join(", ")}`] : []),
+    ...(added.length ? [`now holds ${added.join(", ")}`] : []),
+  ].join("; ");
 }
 
 const SYSTEM_TYPES = new Set([
@@ -697,6 +740,21 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
     // one the main checkout has not committed. Said as the terminal client says it.
     case "files_skipped":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: filesSkippedText(d) }] };
+
+    // What a session's start found due: onboarding other tools' files, or the brief
+    // (troupe Decisions 827 and 835). The harness's own sentence goes in the stream, and
+    // what is due is kept for the screen that asks.
+    case "onboarding_suggested":
+      return {
+        ...next,
+        onboarding: {
+          seq: d.seq,
+          workspace: str(d.data["workspace"]) || undefined,
+          due: str(d.data["due"]) || undefined,
+          briefDue: str(d.data["brief_due"]) || undefined,
+        },
+        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: str(d.data["message"], "other tools' files are here: troupe onboard brings them in") }],
+      };
 
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
     case "truncated":

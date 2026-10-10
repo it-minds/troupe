@@ -46,7 +46,9 @@ defmodule Troupe do
          {:ok, pid} <- Sessions.start_session(session_opts) do
       session_id = Keyword.fetch!(session_opts, :session_id)
       workspace = Keyword.fetch!(session_opts, :workspace)
-      profile = Keyword.fetch!(session_opts, :profile)
+      # The agent it runs: the one its root was last switched to, which its replay comes
+      # back on, or the one it was started on (Decision 841).
+      profile = Index.switched_to(previously) || Keyword.fetch!(session_opts, :profile)
 
       Index.register(session_id, pid, %{
         workspace: workspace.root_real,
@@ -221,10 +223,10 @@ defmodule Troupe do
       do: Log.append(session_id, Session.root_path(), :files_skipped, %{"files" => files})
   end
 
-  # What `troupe onboard`, or the librarian, would do in this workspace, said once
-  # (Decision 827): on the person's own machine, by a session with no bundle, and nothing
-  # written but the note in the state directory that it was said. A failure here is the
-  # notice's, never the session's.
+  # What `troupe onboard` would do in this workspace (Decision 827), said at every start
+  # while it is due and not declined, with what a client's start asks next (`due`,
+  # `brief_due`, Decision 835): on the person's own machine, by a session with no bundle,
+  # and nothing written. A failure here is the notice's, never the session's.
   defp onboarding(session_id, session_opts) do
     config = Keyword.fetch!(session_opts, :config)
 
@@ -234,6 +236,7 @@ defmodule Troupe do
 
       case Notice.due(workspace.root_real,
              state_dir: config.state_dir,
+             config: config,
              memory: config.memory != false
            ) do
         nil -> :ok
@@ -318,9 +321,17 @@ defmodule Troupe do
   @spec cancel(String.t()) :: :ok | {:error, :no_session}
   def cancel(session_id), do: with_root(session_id, &Agent.cancel/1)
 
-  @doc "Switch the root agent's primary profile, applied at the next turn boundary."
-  @spec switch_profile(String.t(), String.t()) :: :ok | {:error, :no_session}
-  def switch_profile(session_id, name), do: with_root(session_id, &Agent.switch_profile(&1, name))
+  @doc """
+  Switch the root agent, a session's or a branch's (a branch is a session, Decision 646),
+  to another primary agent, read from its file now and applied at the next turn boundary
+  (Decision 841): `{:ok, definition}` once it is on its way, or why not. `opts`: `:actor`
+  and `:command_id`, written on `profile_switched`.
+  """
+  @spec switch_profile(String.t(), String.t(), keyword()) ::
+          {:ok, Troupe.Agent.Definition.t()}
+          | {:error, :no_session | {:unknown_agent, String.t()} | {:not_primary, String.t()}}
+  def switch_profile(session_id, name, opts \\ []),
+    do: with_root(session_id, &Agent.switch_profile(&1, name, opts))
 
   @doc """
   Set the session's goal: what every later turn of the root agent works towards, until it

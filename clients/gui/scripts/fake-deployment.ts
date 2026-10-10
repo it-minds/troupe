@@ -7,6 +7,7 @@
 // Approving the sign-in happens by itself a moment after the code appears, because
 // there is no browser at the other end to click anything.
 
+import { FakeDaemon, exampleOnboarding } from "../packages/client/test/support/daemon.js";
 import { FakeIdp } from "../packages/client/test/support/idp.js";
 import { FakePlane, GATEWAY_DEFAULTS } from "../packages/client/test/support/plane.js";
 import { FakeWorker } from "../packages/client/test/support/worker.js";
@@ -54,10 +55,33 @@ session.log.append("approval_requested", {
 // Nobody is going to click the provider's page, so approve shortly after it is asked for.
 setInterval(() => idp.approve("alice@example.com", "Alice"), 500).unref?.();
 
+// A daemon for this computer's half, with a repository whose start asks the onboarding
+// questions and then the brief's (Decision 835): Claude Code's and Cursor's files, nothing
+// onboarded, a brief an older survey wrote.
+const daemon = new FakeDaemon({ osUser: "ada" });
+await daemon.start();
+daemon.onboarding["/home/ada/repo"] = exampleOnboarding({ briefOutdated: true });
+daemon.seed("/home/ada/notes");
+// The agents manager (troupe #503) with every layer to show: the built-ins, the
+// repository's own reviewer, whose shell runs without asking, and a bundle's.
+daemon.agents.files.push(
+  {
+    name: "review",
+    layer: "project",
+    workspace: "/home/ada/notes",
+    text:
+      "---\ndescription: Reviews the change on this branch and runs the tests; never edits.\nmode: primary\nmodel: cheap\n" +
+      "tools:\n  - read_file\n  - grep\n  - glob\n  - shell\n  - finish\npermissions:\n  shell: auto\n  write_file: deny\n  edit_file: deny\nmax_turns: 30\n---\n" +
+      "You review the change on this branch. Run the tests first, then read the diff against the task, and report what is wrong without fixing it.\n",
+  },
+  { name: "deploy", layer: "bundle", text: "---\ndescription: Ships a release the way the team does.\nmode: primary\n---\nYou deploy.\n" },
+);
+
 console.log(`
   identity provider  ${idp.issuer}
   worker pod         ${worker.endpoint}
   plane              ${plane.baseUrl}
+  daemon             ws://127.0.0.1:${daemon.port}/v1/socket
 
   CORS allowlist     ${origins.join(", ")}
 
@@ -66,4 +90,10 @@ Alice; a device code approves itself.
 Prompts understand three prefixes: "approve: <cmd>" asks for an approval,
 "big: <label>" returns a tool result too large to inline, and "quiet: …"
 answers without streaming.
+
+This computer's daemon is a fake too: open the app at
+  ${origins[0]}/#daemon=${daemon.port}:${daemon.token}
+and a new session in /home/ada/repo asks to onboard Claude Code's and Cursor's files,
+then to rewrite the brief. Agents, in the rail, manages the agents of /home/ada/notes:
+the built-ins, the repository's review and a bundle's deploy.
 `);

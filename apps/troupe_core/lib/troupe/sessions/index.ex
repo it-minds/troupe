@@ -107,6 +107,21 @@ defmodule Troupe.Sessions.Index do
   @spec list(map()) :: [meta()]
   def list(filter \\ %{}), do: GenServer.call(__MODULE__, {:list, filter}, 15_000)
 
+  @doc """
+  The agent a session's root was last switched to, from its log's events, or `nil` when
+  it never was (Decision 841): what its listing says it runs, beside the one it was
+  created with.
+  """
+  @spec switched_to([Troupe.Protocol.Event.t()]) :: String.t() | nil
+  def switched_to(events) do
+    events
+    |> Enum.reverse()
+    |> Enum.find_value(fn
+      %{type: "profile_switched", agent: ["root"], data: %{"to" => to}} -> to
+      _other -> nil
+    end)
+  end
+
   @doc "Session ids with a running actor tree."
   @spec live_ids() :: [String.t()]
   def live_ids, do: GenServer.call(__MODULE__, :live_ids)
@@ -500,7 +515,7 @@ defmodule Troupe.Sessions.Index do
           workspace: get_data(created, "workspace", "(unknown)"),
           branch: get_data(created, "branch", nil),
           parent: get_data(created, "parent", nil),
-          profile: get_data(created, "profile", "build"),
+          profile: switched_to(events) || get_data(created, "profile", "build"),
           kind: get_data(created, "kind", "local"),
           owner: get_data(created, "owner", nil),
           state: :dormant,

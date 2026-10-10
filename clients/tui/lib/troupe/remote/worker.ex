@@ -159,7 +159,15 @@ defmodule Troupe.Remote.Worker do
   opened the window it waits, so it lands after that event.
   """
   @spec note(String.t(), String.t()) :: :ok | {:error, term()}
-  def note(session_id, text), do: call(session_id, {:note, text})
+  def note(session_id, text), do: post(session_id, :remote_note, %{text: text})
+
+  @doc """
+  An event of this client's own in the session's root window, `note/2`'s way: kept in the
+  journal, and waiting for the window to open. A question the start asks (`:local_question`,
+  TUI Decision 154) is one.
+  """
+  @spec post(String.t(), atom(), map()) :: :ok | {:error, term()}
+  def post(session_id, type, data), do: call(session_id, {:note, {type, data}})
 
   @spec blob(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, term()} | {:error, term()}
@@ -241,6 +249,8 @@ defmodule Troupe.Remote.Worker do
       subscribed?: false,
       scopes: [],
       capabilities: %{},
+      # The largest message the server takes, as `initialize` says (`limits`); nil before.
+      max_message: nil,
       memory: Translate.memory(Keyword.get(opts, :isolation, :remote), Keyword.get(opts, :profile)),
       profile: Keyword.get(opts, :profile) || "session",
       # What the root window says the session works in: a worker on the plane unless the
@@ -249,7 +259,8 @@ defmodule Troupe.Remote.Worker do
       team: Keyword.get(opts, :team),
       title: Keyword.get(opts, :title),
       agent: nil,
-      # Lines of this client's own waiting for the window to open (`note/2`).
+      # Events of this client's own waiting for the window to open (`post/3`), each
+      # `{type, data}`.
       notes: [],
       deltas: %{},
       delta_bytes: 0,
@@ -411,8 +422,8 @@ defmodule Troupe.Remote.Worker do
 
   def handle_call({:rpc, method, params}, from, state), do: command(state, from, method, params)
 
-  def handle_call({:note, text}, _from, state),
-    do: {:reply, :ok, write_notes(%{state | notes: state.notes ++ [text]})}
+  def handle_call({:note, event}, _from, state),
+    do: {:reply, :ok, write_notes(%{state | notes: state.notes ++ [event]})}
 
   ## Messages
 
@@ -513,8 +524,33 @@ defmodule Troupe.Remote.Worker do
 
   defp send_request(state, from, method, params) do
     id = state.next_id
+    frame = RPC.request(id, method, params)
 
-    case Socket.send_text(state.socket, RPC.request(id, method, params)) do
+    case too_large(state, frame) do
+      nil -> send_frame(state, from, id, frame, method, params)
+      sentence -> reply_and(state, from, {:error, sentence})
+    end
+  end
+
+  # A message larger than the server said it takes would be cut off at its socket, and the
+  # connection with it, every call waiting on it lost (D108): it is not sent, and the caller
+  # is told why. The size is the frame's, which is the file's and then some for an upload.
+  defp too_large(%{max_message: limit} = state, frame) when is_integer(limit) do
+    size = IO.iodata_length(frame)
+    server = if state.plane_url, do: "worker", else: "daemon"
+
+    if size > limit do
+      "too large to send: #{mib(size)} as sent, and the #{server} takes at most #{mib(limit)} " <>
+        "in one message; nothing was sent"
+    end
+  end
+
+  defp too_large(_state, _frame), do: nil
+
+  defp mib(bytes), do: "#{Float.round(bytes / (1024 * 1024), 1)} MiB"
+
+  defp send_frame(state, from, id, frame, method, params) do
+    case Socket.send_text(state.socket, frame) do
       {:ok, socket} ->
         Process.send_after(self(), {:rpc_timeout, id}, @call_timeout)
 
@@ -820,7 +856,8 @@ defmodule Troupe.Remote.Worker do
       | status: :up,
         error: nil,
         scopes: result["scopes"] || [],
-        capabilities: result["capabilities"] || %{}
+        capabilities: result["capabilities"] || %{},
+        max_message: max_message(result["limits"])
     }
 
     publish_status(state)
@@ -829,6 +866,9 @@ defmodule Troupe.Remote.Worker do
 
   defp initialized(state, _result),
     do: state |> put_error(:bad_handshake) |> drop_socket() |> schedule_reconnect()
+
+  defp max_message(%{"max_message_bytes" => limit}) when is_integer(limit) and limit > 0, do: limit
+  defp max_message(_limits), do: nil
 
   defp subscribe(%{subscribed?: true} = state), do: state
 
@@ -892,13 +932,13 @@ defmodule Troupe.Remote.Worker do
 
   defp write_notes(state) do
     events =
-      for text <- state.notes do
+      for {type, data} <- state.notes do
         %Troupe.Event{
           session_id: state.session_id,
           agent_path: state.agent,
-          type: :remote_note,
+          type: type,
           ts: System.system_time(:millisecond),
-          data: %{text: text}
+          data: data
         }
       end
 

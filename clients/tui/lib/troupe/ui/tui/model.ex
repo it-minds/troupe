@@ -510,6 +510,22 @@ defmodule Troupe.UI.TUI.Model do
       t when t in [:approval_answered, :question_answered] ->
         %{w | pending: Enum.reject(w.pending, &(&1.call_id == d.call_id))}
 
+      # A question this client asks at the session's start (TUI Decision 154): onboarding,
+      # then the brief, answered with one key.
+      :local_question ->
+        ask(w, %{
+          kind: :local,
+          call_id: d.id,
+          agent_path: path,
+          question: one_line(d.question),
+          keys: d.keys,
+          default: d.default,
+          preview: d[:preview]
+        })
+
+      :local_question_answered ->
+        %{w | pending: Enum.reject(w.pending, &(&1.call_id == d.id))}
+
       # A cancel stops the agent's subagents with it, and they say nothing more: what each
       # was last doing goes, and it ended here.
       :cancelled ->
@@ -1402,7 +1418,15 @@ defmodule Troupe.UI.TUI.Model do
           if(spacer?, do: [{:blank, ""}], else: []) ++ [{:activity, activity_segments(line)}]
       end
 
-    lines ++ reasoning ++ streaming ++ activity
+    # A question the start asks is answered from the command line (TUI Decision 154), so
+    # the tile it shows in says it too.
+    asked =
+      case local_question(w) do
+        nil -> []
+        item -> local_lines(item)
+      end
+
+    lines ++ reasoning ++ streaming ++ activity ++ asked
   end
 
   # Text still arriving is shown plain: it changes on every frame, and it becomes
@@ -1749,6 +1773,9 @@ defmodule Troupe.UI.TUI.Model do
             [{:blank, ""}, {:pending, "#{who}BUDGET: #{budget_words(item)}"}] ++
               question_lines(item, selection)
 
+          %{kind: :local} ->
+            local_lines(item)
+
           # Never raise here: the renderer's caller drops the frame on an
           # exception, which reads as a frozen terminal.
           %{kind: kind} ->
@@ -1757,6 +1784,43 @@ defmodule Troupe.UI.TUI.Model do
       end)
     ]
   end
+
+  # A question the start asks (TUI Decision 154): what it is about first (the files, or one
+  # file's diff, coloured as an edit's), then the question with its keys, the default in
+  # capitals as a terminal prompt writes it, and what the keys do.
+  defp local_lines(item) do
+    preview =
+      (item.preview || "")
+      |> sanitize()
+      |> String.split("\n", trim: true)
+      |> Enum.map(fn line -> line |> diff_line() |> indent_line() end)
+
+    [{:blank, ""} | preview] ++
+      [{:pending, "QUESTION: #{item.question} [#{keys_label(item)}]"}, {:system, local_hint(item)}]
+  end
+
+  defp indent_line({tag, text}), do: {tag, "  " <> text}
+
+  defp keys_label(item),
+    do: Enum.map_join(item.keys, "/", &if(&1 == item.default, do: String.upcase(&1), else: &1))
+
+  @local_words %{"y" => "yes", "n" => "no", "r" => "each file first"}
+
+  defp local_hint(item) do
+    Enum.map_join(item.keys, " · ", &"#{&1} #{@local_words[&1]}") <>
+      " · Enter #{@local_words[item.default]}"
+  end
+
+  @doc """
+  The question a session's start asks that is still open in a window, or `nil`: what the
+  command line's and the window's keys answer while nothing is typed (TUI Decision 154).
+  """
+  @spec local_question(window()) :: map() | nil
+  def local_question(w), do: Enum.find(w.pending, &(&1.kind == :local))
+
+  @doc "What Enter answers a question the start asks: its default, in words (`yes`, `no`)."
+  @spec local_default(map()) :: String.t()
+  def local_default(item), do: @local_words[item.default]
 
   # A daemon from before the question carried its words sends the limit alone.
   defp budget_words(%{question: question}) when is_binary(question) and question != "", do: question

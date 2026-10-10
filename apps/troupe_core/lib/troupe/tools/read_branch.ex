@@ -75,18 +75,16 @@ defmodule Troupe.Tools.ReadBranch do
   end
 
   # The branches of this session and, when this session is itself a branch, its
-  # siblings and the session they all came from: what a person looking at the same
-  # workspace would see grouped together.
+  # siblings: what a person looking at the same workspace would see grouped together.
+  # Not the session they all came from, which is no branch: `/ask`, a branch of it, read
+  # it as one that never started (Decision 843).
   defp family(ctx) do
     mine = Index.list(%{"parent" => ctx.session_id})
 
     others =
       case Index.get(ctx.session_id) do
-        %{parent: parent} when is_binary(parent) ->
-          [Index.get(parent) | Index.list(%{"parent" => parent})]
-
-        _ ->
-          []
+        %{parent: parent} when is_binary(parent) -> Index.list(%{"parent" => parent})
+        _ -> []
       end
 
     (mine ++ others)

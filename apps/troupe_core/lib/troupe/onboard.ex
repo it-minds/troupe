@@ -40,6 +40,10 @@ defmodule Troupe.Onboard do
   - **Skipped.** A source that exports `skipped/2` says which of the other tool's files it
     found and proposed nothing for, and why; `plan/2` passes them on for the person.
 
+  The same edge holds a person's own files that come from nobody else's: `put_file/5` and
+  `remove_file/4` write and take away an agent `agents.put` saves (Decision 841), with no
+  provenance.
+
   No process: each write is a function over a path, serialised by a VM-wide transaction on
   it, as the brief's are (Decision 649).
   """
@@ -253,6 +257,64 @@ defmodule Troupe.Onboard do
   end
 
   @doc """
+  Writes one of Troupe's own files that onboarding did not make: `path` as `check_path/2`
+  takes it, under the root `target` names, judged where it really is and written as an
+  onboarded file is (a temporary file renamed over it, in the same transaction), with no
+  provenance, since it came from nobody else's file. What `agents.put` writes through
+  (Decision 841), so a person's agents and onboarded ones keep one edge. Answers as
+  `write/3` does.
+  """
+  @spec put_file(target(), String.t(), binary(), Path.t() | nil, keyword()) ::
+          {:ok, %{file: Path.t(), shown: String.t(), action: :created | :replaced}}
+          | {:error, String.t()}
+  def put_file(target, path, content, workspace, opts \\ []) do
+    opts = defaults(opts)
+
+    with {:ok, place} <- own_place(target, path, workspace, opts) do
+      :global.trans({{__MODULE__, key(place.real)}, self()}, fn -> put_at(place, content) end)
+    end
+  end
+
+  defp put_at(place, content) do
+    current = read(place.real)
+
+    with :ok <- replace(place.real, content) do
+      action = if current, do: :replaced, else: :created
+      {:ok, %{file: place.file, shown: place.shown, action: action}}
+    end
+  end
+
+  @doc """
+  Removes one of Troupe's own files, held to the same edge as `put_file/5`: a file that is
+  a link is taken away, not what it points at. `{:error, :enoent}` when there is none.
+  """
+  @spec remove_file(target(), String.t(), Path.t() | nil, keyword()) ::
+          {:ok, %{file: Path.t(), shown: String.t()}} | {:error, :enoent | String.t()}
+  def remove_file(target, path, workspace, opts \\ []) do
+    opts = defaults(opts)
+
+    with {:ok, place} <- own_place(target, path, workspace, opts) do
+      :global.trans({{__MODULE__, key(place.real)}, self()}, fn -> remove_at(place) end)
+    end
+  end
+
+  defp remove_at(place) do
+    link? = match?({:ok, %{type: :symlink}}, File.lstat(place.file))
+    gone = if link?, do: place.file, else: place.real
+
+    case File.rm(gone) do
+      :ok -> {:ok, %{file: place.file, shown: place.shown}}
+      {:error, :enoent} -> {:error, :enoent}
+      {:error, reason} -> {:error, "cannot remove #{place.shown}: #{:file.format_error(reason)}"}
+    end
+  end
+
+  defp own_place(target, path, workspace, opts) do
+    with :ok <- check_path(target, path),
+         do: place(target, path, workspace && Path.expand(workspace), opts)
+  end
+
+  @doc """
   The lowercase hex sha256 of a source file's bytes, the file found as a proposal names
   it: relative to the workspace, and really inside it, for `:repo`; starting `~/`, and
   really inside the home directory, for `:user`.
@@ -300,8 +362,9 @@ defmodule Troupe.Onboard do
   `.troupe/onboarded.json`'s `onboarding`, `0` for a workspace onboarded before there was
   one, and `nil` for one never onboarded (no manifest and no file recording where it came
   from). `onboarding` is set when the manifest is first written, and raised by `stamp/1`,
-  never by one file's write: a workspace the librarian brought one file into under newer
-  rules is still the older rules' for the rest.
+  never by one file's write: a workspace one file was brought into under newer rules (by
+  `onboard_write`, or a single answer at a session's start) is still the older rules' for
+  the rest.
   """
   @spec onboarded_version(Path.t(), keyword()) :: non_neg_integer() | nil
   def onboarded_version(workspace, opts \\ []) do
@@ -709,7 +772,7 @@ defmodule Troupe.Onboard do
       else:
         {:error,
          "`#{path}` resolves to #{Paths.display(real)}, outside #{root_name(target)}: " <>
-           "onboarding writes only there"}
+           "Troupe writes only there"}
   end
 
   defp not_a_directory(real, path) do

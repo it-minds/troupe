@@ -73,6 +73,29 @@ defmodule Troupe.Worker.SandboxTest do
       assert completed["content"] =~ "home=#{context.workspace}"
     end
 
+    # How the command ended is a field of its event in the sandbox as on a laptop (#248,
+    # Decision 837): the status is the command's, not the sandbox's.
+    test "records how `shell`'s command ended beside `ok`, as a laptop does", context do
+      context = requires_tier(context)
+      requires_bubblewrap!()
+
+      {:ok, _} =
+        activate(context,
+          steps: [
+            {:tools, [{"shell", %{"command" => "echo ok"}}]},
+            {:tools, [{"shell", %{"command" => "printf no; exit 3"}}]},
+            {:text, "done"}
+          ]
+        )
+
+      [passed, failed] = tool_results(context.session_id, "shell", "run both", 2)
+
+      assert {passed["ok"], passed["exit_status"], passed["content"]} == {true, 0, "ok\n"}
+      assert {failed["ok"], failed["exit_status"]} == {true, 3}
+      assert failed["content"] == "no\n\n[exit status 3]"
+      refute Map.has_key?(passed, "timed_out") or Map.has_key?(failed, "timed_out")
+    end
+
     test "runs `git_read`'s git there too, where a repository outside the workspace is not",
          context do
       context = requires_tier(context)
@@ -123,6 +146,8 @@ defmodule Troupe.Worker.SandboxTest do
         assert completed["ok"] == false
         assert completed["content"] =~ "runs every command in a sandbox"
         assert completed["content"] =~ "bubblewrap is not installed"
+        # No command ran, so none ended (Decision 837).
+        refute Map.has_key?(completed, "exit_status") or Map.has_key?(completed, "timed_out")
       end
 
       refute File.exists?(Path.join(context.workspace, "ran-it"))
@@ -151,6 +176,8 @@ defmodule Troupe.Worker.SandboxTest do
         assert completed["ok"] == false
         assert completed["content"] =~ "could not start one"
         assert completed["content"] =~ "No permissions to create a new namespace"
+        # The sandbox's own exit is not a command's (Decision 837).
+        refute Map.has_key?(completed, "exit_status")
       end
 
       refute File.exists?(Path.join(context.workspace, "ran-it"))

@@ -171,8 +171,15 @@ defmodule Troupe.Log.Fold do
     }
   end
 
+  # How a `shell` command ended (Decision 837), present only where the event says, as the
+  # goal is: a log written before it folds to the map it always did.
   defp agent_fold(agent, %Event{type: "tool_call_completed", data: data}) do
-    %{agent | "tools" => agent["tools"] ++ [%{"name" => data["name"], "ok" => data["ok"]}]}
+    call =
+      data
+      |> Map.take(["exit_status", "timed_out"])
+      |> Map.merge(%{"name" => data["name"], "ok" => data["ok"]})
+
+    %{agent | "tools" => agent["tools"] ++ [call]}
   end
 
   defp agent_fold(agent, %Event{type: "todo_updated", data: data}) do

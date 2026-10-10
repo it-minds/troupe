@@ -331,9 +331,10 @@ defmodule Troupe.Onboard.AgentsAndCommandsTest do
 
       defs = Definitions.load(context.workspace)
 
+      # The file a definition was read from is the loader's to say (Decision 841).
       for %{path: "agents/" <> _} = proposal <- survey.proposals do
         expected = definition(proposal)
-        assert Definitions.fetch!(defs, expected.name) == expected
+        assert %{Definitions.fetch!(defs, expected.name) | path: nil} == expected
       end
 
       commands = Map.new(Local.list(context.workspace), &{&1.name, &1})

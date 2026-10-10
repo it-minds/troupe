@@ -3,11 +3,29 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "command_id": {
+      "type": "string"
+    },
     "from": {
+      "type": "string"
+    },
+    "layer": {
       "type": "string"
     },
     "to": {
       "type": "string"
+    },
+    "tools_added": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "tools_removed": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     }
   },
   "required": [

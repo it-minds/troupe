@@ -109,6 +109,11 @@ defmodule Troupe.Client.Remote do
   @impl true
   def answer(sid, call_id, text), do: describe(Worker.answer(sid, call_id, text))
 
+  # A pod's session asks nothing at its start: onboarding runs on the person's own machine
+  # (root Decision 826), and its brief is the pod's.
+  @impl true
+  def answer_local(_sid, _id, _key), do: {:error, "a session on a pod asks nothing at its start"}
+
   @impl true
   def edit_todo(sid, _path, change), do: describe(Worker.edit_todo(sid, change))
 
@@ -152,11 +157,10 @@ defmodule Troupe.Client.Remote do
   @impl true
   def cancel_branch(sid, _path), do: describe(Worker.cancel(sid))
 
+  # A pod session has one window, its own, which stays: letting go of it under the screen
+  # sent what was typed next to this machine's daemon (Decision 843).
   @impl true
-  def dismiss(sid, _path) do
-    Worker.detach(sid)
-    :ok
-  end
+  def dismiss(_sid, _path), do: {:error, Troupe.Client.own_window()}
 
   @impl true
   def merge(_sid, _path), do: {:error, "a remote session has no local worktree to merge"}
