@@ -666,6 +666,14 @@
       ],
       "minimum": 1
     },
+    "watch_auto_approve": {
+      "description": "A branch an `AI!` or `AI?` comment starts runs its writes, edits and shell commands without asking. Off, each asks, whatever `auto_approve` and the agent's own permissions say. Read from a project's file only in a trusted workspace.",
+      "default": false,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "fs_events": {
       "description": "Record every file change in the workspace as an event.",
       "default": false,

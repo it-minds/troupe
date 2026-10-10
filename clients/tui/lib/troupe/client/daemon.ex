@@ -160,6 +160,24 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # A branch the daemon started — a saved `AI!` or `AI?` comment's, in this session's
+  # checkout (root Decision 844) — opens its window as one typed here does: the journal
+  # records it, its worker publishes under the window's name. Once; a branch that has a
+  # window keeps it.
+  @impl true
+  def adopt_branch(sid, child, profile, prompt) do
+    case Enum.find(branches(sid), &(&1.session_id == child)) do
+      %{window: window} ->
+        {:ok, window}
+
+      nil ->
+        window = Branch.next_name(window_names(sid), profile)
+        branch = %{id: child, workspace: workspace(sid), worktree: nil, git_branch: nil}
+
+        with {:ok, _} <- open_branch(sid, branch, window, profile, prompt), do: {:ok, window}
+    end
+  end
+
   @impl true
   def send_input(sid, path, text), do: route(sid, path, &Worker.input(&1, text))
 
@@ -351,6 +369,8 @@ defmodule Troupe.Client.Daemon do
 
   defp apply_live(_sid, _key, _value), do: :ok
 
+  # This session is the one that watches (root Decision 844): a branch in the same
+  # checkout never is, unless named.
   @impl true
   def watch(sid, enabled?) do
     case Worker.whereis(sid) do
@@ -358,7 +378,9 @@ defmodule Troupe.Client.Daemon do
         {:error, "this session is not open"}
 
       _pid ->
-        case Worker.rpc(sid, "watch.set", %{workspace: workspace(sid), enabled: enabled?}) do
+        params = %{workspace: workspace(sid), enabled: enabled?, session_id: sid}
+
+        case Worker.rpc(sid, "watch.set", params) do
           {:ok, %{"backend" => backend}} when is_binary(backend) ->
             Link.put_watch(sid, enabled?, backend)
             {:ok, String.to_atom(backend)}
@@ -373,8 +395,17 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # What the daemon says (`watch.get`, D106), so a watch another client turned on shows
+  # here and the next `/watch` turns it off; a daemon from before it is answered with
+  # what this client last set.
   @impl true
-  def watch_status(sid), do: Link.watch_status(sid)
+  def watch_status(sid) do
+    case Link.call("watch.get", %{workspace: workspace(sid)}) do
+      {:ok, %{"enabled" => true, "backend" => backend}} -> %{enabled: true, backend: backend}
+      {:ok, %{"enabled" => false}} -> %{enabled: false, backend: nil}
+      _older_or_unreachable -> Link.watch_status(sid)
+    end
+  end
 
   # The workspace's own MCP servers (troupe-remote Decision 654), as the `/mcp` page
   # draws them: a count of tools, and the error when there is one.

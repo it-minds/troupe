@@ -99,6 +99,8 @@ defmodule Troupe.Client do
   @callback capability(session_id()) :: capability()
   @callback dispatch(session_id(), String.t(), String.t() | map()) ::
               {:ok, String.t()} | {:error, term()}
+  @callback adopt_branch(session_id(), session_id(), String.t(), String.t()) ::
+              {:ok, String.t()} | {:error, term()}
   @callback send_input(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback shell_run(session_id(), String.t(), boolean()) :: {:ok, String.t()} | {:error, term()}
@@ -213,6 +215,17 @@ defmodule Troupe.Client do
           {:ok, String.t()} | {:error, term()}
   def dispatch(sid, name, args), do: impl(sid).dispatch(sid, name, args)
 
+  @doc """
+  Opens the window of a branch the daemon started for this session — the one a saved
+  `AI!` or `AI?` comment started (`watch_triggered`, root Decision 844) — as a branch
+  `dispatch/3` started opens, once: answers the window's name, the same one again for a
+  branch that already has one.
+  """
+  @spec adopt_branch(session_id(), session_id(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def adopt_branch(sid, child, profile, prompt),
+    do: impl(sid).adopt_branch(sid, child, profile, prompt)
+
   @spec send_input(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   def send_input(sid, path, text), do: impl(sid).send_input(sid, path, text)
 
@@ -315,6 +328,11 @@ defmodule Troupe.Client do
   @spec watch(session_id(), boolean()) :: {:ok, atom()} | :ok | {:error, term()}
   def watch(sid, enabled?), do: impl(sid).watch(sid, enabled?)
 
+  @doc """
+  Whether the session's workspace is watched, as the daemon says (`watch.get`):
+  `%{enabled: boolean, backend: String.t() | nil}`. What the status line shows and what
+  `/watch` toggles, whichever client turned it on.
+  """
   @spec watch_status(session_id()) :: map()
   def watch_status(sid), do: impl(sid).watch_status(sid)
 

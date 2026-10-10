@@ -1313,16 +1313,30 @@ defmodule Troupe.Agent.Server do
   defp put_attached(data, []), do: data
   defp put_attached(data, sections), do: Map.put(data, "turn_context", sections)
 
-  # The profile in force for this turn. Normally the agent's own; during an `AI?`
-  # watch turn, `plan`, so a question cannot edit files.
-  defp effective_definition(%State{turn_mode: :question} = state) do
+  # The profile in force for this turn. Normally the agent's own; during an `AI?` watch
+  # turn, the agent's own under the plan permission set (Decision 844): its model, prompt
+  # and turns, with only the tools `plan` has too and `plan`'s denials over its own, so a
+  # question cannot edit files and `answer` stays the cheap agent TUI Decision 67 made it.
+  defp effective_definition(%State{turn_mode: :question, definition: own} = state) do
     case Definitions.fetch(state.definitions, "plan") do
-      {:ok, plan} -> %{plan | prompt: state.definition.prompt <> "\n\n" <> plan.prompt}
-      {:error, _} -> state.definition
+      {:ok, plan} -> under_plan(own, plan)
+      {:error, _} -> own
     end
   end
 
   defp effective_definition(%State{definition: definition}), do: definition
+
+  defp under_plan(own, plan) do
+    tools =
+      case {own.tools, plan.tools} do
+        {tools, :all} -> tools
+        {:all, tools} -> tools
+        {tools, allowed} -> Enum.filter(tools, &(&1 in allowed))
+      end
+
+    denied = for {name, :deny} <- plan.permissions, into: %{}, do: {name, :deny}
+    %{own | tools: tools, permissions: Map.merge(own.permissions, denied)}
+  end
 
   defp build_request(state, definition) do
     ctx = base_ctx(state, "")

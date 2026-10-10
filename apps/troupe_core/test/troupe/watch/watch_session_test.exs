@@ -1,96 +1,13 @@
 defmodule Troupe.Watch.WatchSessionTest do
-  @moduledoc "Watch mode wired to a real session, where the trigger reaches an agent."
+  @moduledoc """
+  Watch mode wired to a real session: turning it on and off, and what a client is told of
+  it (Decision 844). Where a trigger goes is `Troupe.Watch.WatchBranchTest`.
+  """
 
   use Troupe.SessionCase, async: true
 
   alias Troupe.Gitignore
   alias Troupe.Session.{Files, Watcher}
-
-  test "an AI? turn answers under the plan permission set and cannot write", context do
-    write_file(
-      context,
-      "lib/thing.ex",
-      "defmodule Thing do\n  # why is this zero? AI?\n  def n, do: 0\nend\n"
-    )
-
-    %{session: session} =
-      start_session(context,
-        config_overrides: [watch: true, watch_debounce_ms: 80],
-        steps: [
-          # The model tries to edit anyway; the profile in force for this turn must
-          # stop it before the tool runs.
-          {:tools, [{"write_file", %{"path" => "lib/thing.ex", "content" => "clobbered"}}]},
-          {:text, "It is zero because nothing sets it."}
-        ]
-      )
-
-    Troupe.subscribe(session.id)
-
-    # Touch the file so the watcher notices it, then let the turn run.
-    write_file(
-      context,
-      "lib/thing.ex",
-      "defmodule Thing do\n  # why is this zero? AI?\n  def n, do: 0\n  # padding\nend\n"
-    )
-
-    await_event(session.id, :user_input, 10_000)
-    await_state(session.id, [:idle], 15_000)
-
-    [attempt] = events_of_type(session.id, "tool_call_completed")
-    refute attempt.data["ok"]
-    assert attempt.data["content"] =~ "not available in the current profile"
-
-    assert read_file(context, "lib/thing.ex") =~ "def n, do: 0"
-    refute read_file(context, "lib/thing.ex") == "clobbered"
-
-    [input] = events_of_type(session.id, "user_input")
-    assert input.data["source"] == "watch"
-    # The watcher's input has a command id of its own, as a person's does (issue #181).
-    [accepted] = events_of_type(session.id, "input_accepted")
-    assert input.data["command_id"] == accepted.data["command_id"]
-    assert input.data["text"] =~ "AI? comment"
-    assert input.data["text"] =~ "why is this zero?"
-  end
-
-  test "an AI! turn may edit, and the trigger names the file and line", context do
-    write_file(context, "lib/calc.ex", "defmodule Calc do\n  def answer, do: 0\nend\n")
-
-    %{session: session} =
-      start_session(context,
-        config_overrides: [watch: true, watch_debounce_ms: 80],
-        steps: [
-          {:tools,
-           [
-             {"edit_file",
-              %{
-                "path" => "lib/calc.ex",
-                "old_string" => "  # make this 42 AI!\n  def answer, do: 0",
-                "new_string" => "  def answer, do: 42"
-              }}
-           ]},
-          {:text, "Done, and I removed the marker."}
-        ]
-      )
-
-    Troupe.subscribe(session.id)
-
-    write_file(
-      context,
-      "lib/calc.ex",
-      "defmodule Calc do\n  # make this 42 AI!\n  def answer, do: 0\nend\n"
-    )
-
-    await_event(session.id, :user_input, 10_000)
-    await_state(session.id, [:idle], 15_000)
-
-    [input] = events_of_type(session.id, "user_input")
-    assert input.data["text"] =~ "lib/calc.ex:2"
-    assert input.data["text"] =~ "make this 42"
-
-    contents = read_file(context, "lib/calc.ex")
-    assert contents =~ "def answer, do: 42"
-    refute contents =~ "AI!"
-  end
 
   # Reading the ignore rules walks the whole workspace; in a home directory that took
   # minutes, inside `session.create`, for rules only watching uses (#231).
@@ -117,5 +34,65 @@ defmodule Troupe.Watch.WatchSessionTest do
     assert backend in [:native, :poll]
     assert Watcher.backend(session.id) == backend
     assert {:ok, :off} = Troupe.watch(session.id, false)
+  end
+
+  # D106: no client could ask whether a session watches, so a status line showed what that
+  # client last set.
+  test "a client hears watch go on and off, and the workspace says which session watches",
+       context do
+    %{session: session} = start_session(context, steps: [{:text, "hi"}])
+    Troupe.subscribe(session.id)
+    root = session.workspace.root_real
+
+    assert Troupe.watch_state(root) == %{enabled: false, backend: :off, session_id: nil}
+
+    assert {:ok, backend} = Troupe.set_watch(root, true)
+    changed = await_event(session.id, :watch_changed)
+    assert changed.data == %{"enabled" => true, "backend" => Atom.to_string(backend)}
+    assert Troupe.watch_state(root) == %{enabled: true, backend: backend, session_id: session.id}
+
+    # Asked again by the session that watches, it is answered as it stands.
+    assert {:ok, ^backend} = Troupe.set_watch(root, true, session.id)
+
+    assert {:ok, :off} = Troupe.set_watch(root, false)
+
+    assert await_event(session.id, :watch_changed).data == %{
+             "enabled" => false,
+             "backend" => "off"
+           }
+
+    assert Troupe.watch_state(root).enabled == false
+  end
+
+  # A branch a trigger starts works in the same checkout, so the workspace has two sessions:
+  # watch belongs to the one that is no branch, and off turns off whichever watches.
+  test "with a branch in the checkout, watch goes to the session that is no branch", context do
+    %{session: session} = start_session(context, steps: [{:text, "hi"}])
+    %{session: branch} = start_session(context, parent: session.id, steps: [])
+    _ = :sys.get_state(Troupe.Sessions.Index)
+    root = session.workspace.root_real
+
+    assert {:ok, _backend} = Troupe.set_watch(root, true)
+    assert Watcher.enabled?(session.id)
+    refute Watcher.enabled?(branch.id)
+    assert {:error, :already_watching} = Troupe.set_watch(root, true, branch.id)
+
+    assert {:ok, :off} = Troupe.set_watch(root, false)
+    refute Watcher.enabled?(session.id)
+
+    # Named, the branch may watch, and off still finds it.
+    assert {:ok, _backend} = Troupe.set_watch(root, true, branch.id)
+    assert Troupe.watch_state(root).session_id == branch.id
+    assert {:ok, :off} = Troupe.set_watch(root, false)
+    refute Watcher.enabled?(branch.id)
+  end
+
+  test "a pod's session does not watch, whatever its config says", context do
+    %{session: session} =
+      start_session(context, kind: :team, config_overrides: [watch: true], steps: [])
+
+    refute Watcher.enabled?(session.id)
+    assert {:error, :not_local} = Troupe.watch(session.id, true)
+    refute Watcher.enabled?(session.id)
   end
 end

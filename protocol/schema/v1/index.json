@@ -64,6 +64,7 @@
     "commands/tools.unregister.json",
     "commands/turn.cancel.json",
     "commands/unsubscribe.json",
+    "commands/watch.get.json",
     "commands/watch.set.json",
     "commands/workflows.list.json",
     "commands/workspace.recent.json",
@@ -142,7 +143,9 @@
     "events/turn_ended.json",
     "events/user_input.json",
     "events/user_shell.json",
-    "events/watch_notice.json"
+    "events/watch_changed.json",
+    "events/watch_notice.json",
+    "events/watch_triggered.json"
   ],
   "version": "1"
 }

@@ -388,6 +388,16 @@ defmodule Troupe.Config.Schema do
           default: 1_000,
           field: :watch_poll_interval_ms
         ),
+        spec(
+          "watch_auto_approve",
+          :boolean,
+          "A branch an `AI!` or `AI?` comment starts runs its writes, edits and shell commands without asking. " <>
+            "Off, each asks, whatever `auto_approve` and the agent's own permissions say.",
+          default: false,
+          scope: :trusted,
+          field: :watch_auto_approve,
+          label: "watch auto approve"
+        ),
         spec("fs_events", :boolean, "Record every file change in the workspace as an event.",
           default: false,
           field: :fs_events

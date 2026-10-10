@@ -159,7 +159,7 @@ The server's `capabilities`:
 | --- | --- |
 | `worktrees` | this server can make a git worktree for a session |
 | `branches` | `session.create` takes `parent`, `session.list` filters on it, `worktree.merge` / `worktree.discard` end a branch's worktree, and an agent has `read_branch` |
-| `watch` | `watch.set` is served, and `fs_changed` events arrive |
+| `watch` | `watch.set` and `watch.get` are served, a saved `AI!` or `AI?` comment starts a branch (`watch_triggered`), and `fs_changed` events arrive |
 | `remote` | this is a worker pod rather than a local daemon |
 | `private_sessions` | this server can seal a session under the caller's own key, so a client may offer to make one |
 
@@ -319,6 +319,7 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `command_declined` | `name`, `reason`, `command_id` — a workspace's command that asked before it was first sent (see `commands.run`) and was not: `reason` says why and how to run it later, and `command_id` is the `commands.run` that asked |
 | `onboarded` | `target` (`repo`: the workspace's `.troupe/`; `workspace`: an `AGENTS.md` of the workspace's, Decision 827; `user`: the person's config directory), `path` (from that root), `file` (as a person reads it), `source` (the other tool's file it was made from: relative to the workspace, or `~/`), `source_hash` (the sha256 of that file, lowercase hex), `action` (`created` or `replaced`) — a file the `onboard_write` tool wrote, which asks first (Decision 823); the file records the same provenance itself, or `.troupe/onboarded.json` does for it |
 | `onboarding_suggested` | `reasons`, `message`, `workspace`, `command`, `proposals`, `onboarding_version`, `onboarded_version`, `survey_version`, `brief_version` — what onboarding would do in the session's workspace, said at a start, once per workspace and version; nothing was written (Decision 827). `reasons` holds `first` (other tools' files are there and nothing is onboarded: `proposals` counts what `troupe onboard` would propose by kind, `instructions`, `rules`, `agents`, `commands`, `skills`, `workflows`, `mcp`), `outdated` (the workspace was onboarded under `onboarded_version` of the onboarding rules, older than this build's `onboarding_version`) and `brief` (the brief was written by `brief_version` of the librarian's survey, older than `survey_version`). `message` says all of it in one line for a client to show as it is; `command` is what to run. Not on a pod |
+| `watch_triggered` | `agent`, `mode`, `markers`, `session_id`, `error` — a saved `AI!` or `AI?` comment started a branch of this session (Decision 844): `agent` (`quick` for a change, `answer` when every comment was a question; `mode` is `change` or `question`) as the session `session_id`, whose `parent` is this one, in this session's checkout, for the comments in `markers`, each `{file, line, comment}`. The session's own agent is told nothing. `error` in place of `session_id` says why no branch started. A client opens the branch as it opens one it started, and says which file and comment started it. The branch asks before every write, edit and shell command unless `watch_auto_approve` is on, and does not watch |
 | `session_dormant` | `last_seq` |
 | `session_activated` | `epoch`, `pod` |
 | `session_resumed` | `dormant_ms`, `moved` |
@@ -328,7 +329,10 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
 Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`, and `shell_started` and
-`shell_output` while a person's command runs (`shell.run`).
+`shell_output` while a person's command runs (`shell.run`); `watch_notice` (`message`)
+when watch mode falls back to polling or cannot start, and `watch_changed` (`enabled`,
+`backend`: `native`, `poll` or `off`) on the session whose watch went on or off or
+changed backend, which `watch.get` answers at any time.
 
 `budget_warning` — `dimension` (`turns`, `input`, `output`, `wall`, `context`), `used`,
 `limit`, `fraction`, `detail` (`input tokens 4.9M/6.0M (82%)`) — is written once per
@@ -1614,9 +1618,17 @@ while its session is working.
 ### Fleet
 
 #### `fleet.get` → the same shape `subscribe` to `fleet` would replay as a snapshot.
-#### `watch.set` → `{"command_id", "workspace", "enabled": true}`. Watch mode is
+#### `watch.set` → `{"command_id", "workspace", "enabled": true, "session_id"}`. Watch mode is
 **exclusive per workspace**; enabling it where another session already watches returns
-`conflict`.
+`conflict`. `session_id`, optional, names the session that watches; without it, the
+workspace's session that is no branch. Enabling it where the same session watches is
+answered as it stands; disabling turns off whichever session watches there. A pod's session
+never watches (`forbidden`). → `{"enabled", "backend"}`.
+
+#### `watch.get` → `{"workspace"}`. Whether the workspace is watched (Decision 844):
+`{"enabled": true, "backend": "native", "session_id": "s-3a"}`, or `enabled: false`,
+`backend: "off"` and a null `session_id`. `observe`; the daemon's only. What a status line
+shows and what the next toggle turns; `watch_changed` says when it changes.
 
 ### Session states, dormancy, and activation
 
@@ -1732,7 +1744,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
 
@@ -1792,7 +1804,7 @@ require `session_id` (§6) but the five below: `session.get`, `input.send`, `tur
 `mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register`, `tools.unregister`, `shell.run` and `shell.cancel`. Everything else a
 worker serves is about the pod or a path on it — `session.create`, `agents.list`,
 `workflows.list`, `memory.get`, `memory.forget`, `workspace.recent`, `workspace.search`,
-`worktree.*`, `watch.set`, `identity.*`, `config.*`, `skills.*` and the `mcp.*` methods
+`worktree.*`, `watch.*`, `identity.*`, `config.*`, `skills.*` and the `mcp.*` methods
 but `mcp.status` — and a token for one session is
 refused it with `forbidden` and `data.method` naming it. A method a worker does not have
 is `method_not_found`, whatever the token, and `initialize` and `auth.refresh` belong to

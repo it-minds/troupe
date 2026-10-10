@@ -323,12 +323,11 @@ defmodule Troupe.CommandAuditTest do
       {sid, _, _} = start_session!(script: [])
       {pid, session} = ready(sid)
 
-      before = notices(pid)
       press(pid, "/")
       type(pid, "watch")
       press(pid, "enter")
-      on = await_notice(pid, before)
-      assert on =~ "watch mode on"
+      # Where there is no native watcher, the daemon's word that it polls comes too.
+      eventually(fn -> Enum.any?(notices(pid), &(&1 =~ "watch mode on")) end)
       assert user_state(pid).model.watch.enabled
       assert screen_text(pid, session) =~ ~r/watch: (native|poll)/
 

@@ -99,13 +99,21 @@ defmodule Troupe.Session do
         fake_child(session_id, config, opts) ++
         [
           {Troupe.Agent.Node, agent_opts},
+          # A trigger starts a branch of this session (Decision 844), with what this one
+          # was started with; a pod's session never watches, whatever its config says.
           {Troupe.Session.Watcher,
            session_id: session_id,
            workspace: workspace,
            agent_path: @root_path,
            enabled: config.watch,
+           local: Keyword.get(opts, :kind, :local) == :local,
            debounce_ms: config.watch_debounce_ms,
-           poll_interval_ms: config.watch_poll_interval_ms},
+           poll_interval_ms: config.watch_poll_interval_ms,
+           auto_approve: config.watch_auto_approve,
+           branch: [
+             config_overrides: Keyword.get(opts, :config_overrides, []),
+             fake: Keyword.get(opts, :fake)
+           ]},
           # Separate from watch mode, and not optional where it is on: this is how a
           # client attached to a remote session learns that `shell` wrote something.
           {Troupe.Session.Files,
@@ -244,7 +252,10 @@ defmodule Troupe.Session do
          owner: Keyword.get(opts, :owner),
          # The session this one branches from, when a client made it as a branch of
          # another (Decision 646). Recorded, listed, filtered on; nothing else.
-         parent: Keyword.get(opts, :parent)
+         parent: Keyword.get(opts, :parent),
+         # What the caller set over the files, kept for a branch the watcher starts, which
+         # is started as this session was (Decision 844).
+         config_overrides: Keyword.get(opts, :config_overrides, [])
        ]}
     end
   end
