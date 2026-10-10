@@ -68,7 +68,7 @@ defmodule Troupe.Memory.Facts.Store do
   """
   @spec ensure(%{root: Path.t()}) :: tables()
   def ensure(%{root: root}) do
-    tables = running(root, 3)
+    tables = running(root, 100)
     if seen_fresh?(tables), do: tables, else: GenServer.call(tables.pid, :refresh, 30_000)
   end
 
@@ -147,18 +147,19 @@ defmodule Troupe.Memory.Facts.Store do
   # Started here, or by another caller at the same moment (`:ignore`): looked up again.
   defp start(root, tries) do
     case DynamicSupervisor.start_child(@supervisor, {__MODULE__, root}) do
-      {:ok, _pid} -> retry(root, tries)
+      {:ok, _pid} -> running(root, tries - 1)
       :ignore -> retry(root, tries)
       {:error, _reason} when tries > 0 -> retry(root, tries)
       {:error, reason} -> exit({:memory_store, reason})
     end
   end
 
-  # A process that just died is still registered until the registry hears of it.
+  # A process that just died is still registered until the registry hears of it, and its
+  # supervisor starts the next one: a busy machine may take a while over both.
   defp retry(_root, 0), do: exit(:memory_store_unavailable)
 
   defp retry(root, tries) do
-    if tries < 3, do: Process.sleep(10)
+    Process.sleep(10)
     running(root, tries - 1)
   end
 

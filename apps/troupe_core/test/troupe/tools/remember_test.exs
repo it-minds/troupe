@@ -8,6 +8,7 @@ defmodule Troupe.Tools.RememberTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.Memory.Facts
+  alias Troupe.Onboard.Notice
   alias Troupe.Session.Memory
   alias Troupe.Tools.Remember
 
@@ -120,6 +121,7 @@ defmodule Troupe.Tools.RememberTest do
   # through, and where the librarian writes nothing, in every session for good
   # (Decision 713).
   test "a librarian's run that failed holds off the next automatic refresh", context do
+    git_init!(context.workspace)
     config = Troupe.Config.load(context.workspace, state_dir: context.state_dir)
     write_file(context, ".troupe/memory.md", "## Overview\nWritten by hand.\n")
     assert Memory.refresh_due?(context.workspace, config)
@@ -130,6 +132,7 @@ defmodule Troupe.Tools.RememberTest do
   end
 
   test "and so does one that wrote nothing where there was no brief", context do
+    git_init!(context.workspace)
     config = Troupe.Config.load(context.workspace, state_dir: context.state_dir)
     assert Memory.refresh_due?(context.workspace, config)
 
@@ -138,7 +141,33 @@ defmodule Troupe.Tools.RememberTest do
     refute Memory.refresh_due?(context.workspace, config)
   end
 
+  # A start in a directory no repository holds (a home directory) is due nothing, as
+  # onboarding is not (Decision 835): a client that trusts the daemon starts no librarian
+  # there, and the start's plan says `none` for the brief (Decision 838).
+  test "outside a git repository the brief is due nothing", context do
+    config = Troupe.Config.load(context.workspace, state_dir: context.state_dir)
+    refute Memory.repository?(context.workspace)
+    assert Memory.status(context.workspace, config) == :absent
+    refute Memory.refresh_due?(context.workspace, config)
+    assert %{due: "none"} = Notice.brief(context.workspace, config: config)
+
+    # A stale brief there is not due either.
+    write_file(context, ".troupe/memory.md", "## Overview\nWritten by hand.\n")
+    assert Memory.status(context.workspace, config) == :stale
+    refute Memory.refresh_due?(context.workspace, config)
+    assert %{due: "none"} = Notice.brief(context.workspace, config: config)
+
+    # The same directory once it is a repository, and a directory inside it.
+    git_init!(context.workspace)
+    sub = Path.join(context.workspace, "lib")
+    File.mkdir_p!(sub)
+    assert Memory.repository?(sub)
+    assert Memory.refresh_due?(context.workspace, config)
+    assert %{due: "stale"} = Notice.brief(context.workspace, config: config)
+  end
+
   test "a try holds for memory_max_age_days, not past a build, and not past forget", context do
+    git_init!(context.workspace)
     config = Troupe.Config.load(context.workspace, state_dir: context.state_dir)
     days_ago = &DateTime.add(DateTime.utc_now(), -&1 * 86_400, :second)
 
@@ -157,7 +186,6 @@ defmodule Troupe.Tools.RememberTest do
 
     # Built after that try and stale since, because a command it holds rests on a file that
     # changed: the try did not leave it stale, so it holds nothing off.
-    git_init!(context.workspace)
     claim = %{kind: "command", claim: "`make` builds it.", anchors: ["README.md"]}
     {:ok, _} = Facts.put(context.workspace, claim, %{})
     :ok = Memory.checked(context.workspace)

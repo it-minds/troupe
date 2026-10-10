@@ -16,7 +16,7 @@ defmodule Troupe.Session.Memory do
   the state directory.
   """
 
-  alias Troupe.{Config, Git, Memory, Paths, Workspace}
+  alias Troupe.{Config, Git, Instructions, Memory, Paths, Workspace}
   alias Troupe.Config.Trust
   alias Troupe.Memory.Facts
 
@@ -194,14 +194,31 @@ defmodule Troupe.Session.Memory do
 
   @doc """
   Whether a client that keeps the brief up by itself (`memory_auto_refresh`) should
-  start a librarian now: the brief is absent or stale, and no librarian has tried it in
+  start a librarian now: the workspace is in a git repository (`repository?/1`), the brief
+  is absent or stale, and no librarian has tried it in
   the last `memory_max_age_days` without its being built since. So a run that failed,
   was cancelled or wrote nothing where there was no brief is tried again that much
   later, not in every new session (Decision 713).
   """
   @spec refresh_due?(Path.t(), Config.t() | nil) :: boolean()
   def refresh_due?(workspace, config) do
-    status(workspace, config) in [:absent, :stale] and held_until(workspace, config) == nil
+    repository?(workspace) and status(workspace, config) in [:absent, :stale] and
+      held_until(workspace, config) == nil
+  end
+
+  @doc """
+  Whether a workspace is in a git repository: a `.git` (a worktree's file too) in it or in
+  a directory above, as the instruction files and onboarding have it
+  (`Troupe.Instructions.repository_root/1`). Outside one the brief is due nothing, so no
+  client that trusts the daemon starts a librarian in a home directory.
+  """
+  @spec repository?(Path.t()) :: boolean()
+  def repository?(workspace) do
+    workspace
+    |> Path.expand()
+    |> Instructions.repository_root()
+    |> Path.join(".git")
+    |> File.exists?()
   end
 
   @doc """

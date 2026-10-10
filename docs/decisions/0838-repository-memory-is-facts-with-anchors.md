@@ -14,6 +14,8 @@ paths:
   - apps/troupe_core/lib/troupe/instructions.ex
   - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/application.ex
+  - apps/troupe_core/lib/troupe/onboard/notice.ex
+  - apps/troupe_core/lib/troupe/bench/memory.ex
   - apps/troupe_core/priv/agents/explore.md
   - apps/troupe_core/priv/agents/plan.md
   - apps/troupe_core/priv/agents/reviewer.md
@@ -126,6 +128,13 @@ scratch). Now:
   until a librarian or an agent re-anchors it. A librarian's stamp (`checked/1`) also
   counts every unanchored fact as checked, which is all a check of one can be; a moved
   fact it leaves alone.
+- **Outside a git repository nothing is due.** A directory no repository holds (a home
+  directory) has its brief `absent` or `stale` as before, but `refresh_due?/2` is false
+  there and Decision 835's `brief.due` (and the notice's older-brief sentence) is `none`,
+  as onboarding's has been since 835: a client that trusts the daemon never starts a
+  librarian in `~`. A repository is what onboarding and the instruction files take for one
+  (`Troupe.Session.Memory.repository?/1`, a `.git` here or above, through
+  `Troupe.Instructions.repository_root/1`), so the two cannot disagree.
 - **What this supersedes.** Of Decision 649: the brief as prose read whole into every
   prompt, and `remember`'s note reaching the next agent's prompt (it reaches `recall`; U26's
   slice changes `remember` itself). Of Decision 696: "or the repository has drifted", and
@@ -154,4 +163,8 @@ scratch). Now:
   and fences reading back as themselves. `Troupe.Tools.RecallTest` (the tool's answer, and
   the line named to `build` and `plan` and not to a workspace agent without the tool),
   `Troupe.MemoryTest`, `Troupe.Tools.RememberTest` (a note is the next session's to recall;
-  the stamp and the hold as before, a hold not past a change after the build).
+  the stamp and the hold as before, a hold not past a change after the build; outside a
+  git repository neither `refresh_due?/2` nor `brief.due` asks for a librarian, an absent
+  or a stale brief alike, and both do once the directory is one), `Troupe.Gateway.MemoryTest`
+  (`refresh_due` false over the wire outside a repository), and the offline bench's
+  `memory_stale_anchor` scenario.

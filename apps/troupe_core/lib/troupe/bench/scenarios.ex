@@ -22,7 +22,9 @@ defmodule Troupe.Bench.Scenarios do
   @doc "Every scenario, in report order."
   @spec all() :: [Scenario.t()]
   def all,
-    do: [tool_calls(), cut_output(), compaction(), cancel(), replay()] ++ Onboarding.all() ++ Memory.all()
+    do:
+      [tool_calls(), cut_output(), compaction(), cancel(), replay()] ++
+        Onboarding.all() ++ Memory.all()
 
   # -- a turn of thirty tool calls --------------------------------------------------
 

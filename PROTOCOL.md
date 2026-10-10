@@ -1254,7 +1254,8 @@ config). A `librarian`'s run that ends as it meant to builds it, whether or not 
 rewrote any of it.
 One brief per repository: a worktree's is the main checkout's. `refresh_due` is whether
 a client should start a `librarian` session on the workspace now, which is what
-`memory_auto_refresh` asks of it: the brief is `absent` or `stale`, and no librarian has
+`memory_auto_refresh` asks of it: the workspace is in a git repository (never true in a
+directory none holds, such as a home directory), the brief is `absent` or `stale`, and no librarian has
 started on it in the last `memory_max_age_days` without its being built since. A
 librarian's run that failed, was cancelled or wrote nothing is tried again that much
 later, not in every new session; `refresh_held_until` is when (or `null`), for a

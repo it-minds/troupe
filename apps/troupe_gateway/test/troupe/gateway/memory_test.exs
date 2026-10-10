@@ -68,6 +68,12 @@ defmodule Troupe.Gateway.MemoryTest do
   # A client that refreshes the brief by itself asks whether to, and a librarian's try that
   # built nothing holds that off (Decision 713) until the brief is forgotten.
   test "refresh_due says whether a librarian should start", %{workspace: ws, client: client} do
+    # Outside a git repository nothing is due: no librarian in a home directory (Decision 838).
+    assert {:ok, %{"status" => "absent", "refresh_due" => false}} =
+             Client.call(client, "memory.get", %{"workspace" => ws})
+
+    {_, 0} = System.cmd("git", ["init", "-q", ws])
+
     assert {:ok, %{"status" => "absent", "refresh_due" => true, "refresh_held_until" => nil}} =
              Client.call(client, "memory.get", %{"workspace" => ws})
 
