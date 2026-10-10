@@ -42,8 +42,7 @@ could read and write another's brief (#524).
   which trust's check alone would accept. A top level that is not the workspace or above
   it is not where the session works.
 - **Not done here.** The other git calls the brief makes (the HEAD and file count it is
-  stamped with) still run in the workspace with whatever `.git` it has; they write nothing
-  outside it.
+  stamped with) still run in the workspace with whatever `.git` it has.
 - **Proof:** `Troupe.Tools.RememberTest` — four workspaces, each with one of the forged
   `.git`s above (the fourth with `config.worktree`) and git answering the other
   checkout's `.git` as their common directory, read no brief, write and forget their own,
