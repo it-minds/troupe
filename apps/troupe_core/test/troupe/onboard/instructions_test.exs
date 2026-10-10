@@ -105,7 +105,7 @@ defmodule Troupe.Onboard.InstructionsTest do
          ctx do
       write_all!(ctx.workspace, @fixture)
 
-      %{proposals: proposals, skipped: skipped} = Instructions.survey(ctx.workspace)
+      %{proposals: proposals, skipped: skipped} = Instructions.survey(ctx.workspace, ctx.opts)
 
       assert Enum.map(proposals, &{&1.target, &1.path}) == [
                {:workspace, "AGENTS.md"},
@@ -152,6 +152,7 @@ defmodule Troupe.Onboard.InstructionsTest do
       assert root.notes == [
                "The line `@AGENTS.md` of CLAUDE.md is left out: it imports the file it would be written into.",
                "The title `# CLAUDE.md` of CLAUDE.md is written `# AGENTS.md`.",
+               "The title `# GEMINI.md` of GEMINI.md is left out: what it adds goes after what is there.",
                "1 paragraph or list item of GEMINI.md is left out: it is said already."
              ]
 
@@ -227,7 +228,9 @@ defmodule Troupe.Onboard.InstructionsTest do
 
     test "the same files give the same proposals, byte for byte", ctx do
       write_all!(ctx.workspace, @fixture)
-      assert Instructions.survey(ctx.workspace) == Instructions.survey(ctx.workspace)
+
+      assert Instructions.survey(ctx.workspace, ctx.opts) ==
+               Instructions.survey(ctx.workspace, ctx.opts)
     end
 
     test "what an AGENTS.md already says is not proposed again, and what is new is added after it, under its heading",
@@ -255,7 +258,7 @@ defmodule Troupe.Onboard.InstructionsTest do
         """
       })
 
-      assert [proposal] = Instructions.proposals(ctx.workspace)
+      assert [proposal] = Instructions.proposals(ctx.workspace, ctx.opts)
 
       assert proposal.content == """
              # Agents
@@ -289,7 +292,7 @@ defmodule Troupe.Onboard.InstructionsTest do
         "CLAUDE.md" => "Keep every change small and reviewed.\n\nUse the project's own scripts.\n"
       })
 
-      assert %{proposals: [], skipped: [skipped]} = Instructions.survey(ctx.workspace)
+      assert %{proposals: [], skipped: [skipped]} = Instructions.survey(ctx.workspace, ctx.opts)
 
       assert skipped == %{
                source: "CLAUDE.md",
@@ -306,7 +309,7 @@ defmodule Troupe.Onboard.InstructionsTest do
       :ok =
         File.ln_s(Path.join(ctx.base, "elsewhere.md"), Path.join(ctx.workspace, "pkg/CLAUDE.md"))
 
-      assert %{proposals: [], skipped: skipped} = Instructions.survey(ctx.workspace)
+      assert %{proposals: [], skipped: skipped} = Instructions.survey(ctx.workspace, ctx.opts)
 
       assert skipped == [
                %{
@@ -333,7 +336,7 @@ defmodule Troupe.Onboard.InstructionsTest do
         ".gitignore" => "ignored/\n"
       })
 
-      assert %{proposals: [], skipped: skipped} = Instructions.survey(ctx.workspace)
+      assert %{proposals: [], skipped: skipped} = Instructions.survey(ctx.workspace, ctx.opts)
 
       assert skipped == [
                %{
@@ -369,7 +372,7 @@ defmodule Troupe.Onboard.InstructionsTest do
         ".github/instructions/style.instructions.md" => "Two.\n"
       })
 
-      proposals = Instructions.proposals(ctx.workspace)
+      proposals = Instructions.proposals(ctx.workspace, ctx.opts)
       cursor = Enum.find(proposals, &(&1.source == ".cursor/rules/style.mdc"))
       copilot = Enum.find(proposals, &(&1.source == ".github/instructions/style.instructions.md"))
       assert cursor.path == "rules/style.md"
@@ -389,7 +392,7 @@ defmodule Troupe.Onboard.InstructionsTest do
         "CLAUDE.md" => "Keep it small.\r\n\r\nAsk before deleting anything.\r\n"
       })
 
-      assert [proposal] = Instructions.proposals(ctx.workspace)
+      assert [proposal] = Instructions.proposals(ctx.workspace, ctx.opts)
 
       assert proposal.content ==
                "# Agents\r\n\r\nKeep it small.\r\n\r\nAsk before deleting anything.\r\n"
@@ -397,6 +400,139 @@ defmodule Troupe.Onboard.InstructionsTest do
       assert %{proposals: [item]} = Onboard.plan(ctx.workspace, ctx.opts)
       assert item.diff =~ "+ Ask before deleting anything."
       refute item.diff =~ "- Keep it small."
+    end
+  end
+
+  describe "Claude Code's other names, and the person's own files" do
+    test "a repository's .claude/CLAUDE.md is added to the root's AGENTS.md after CLAUDE.md",
+         ctx do
+      write_all!(ctx.workspace, %{
+        "CLAUDE.md" => "Run the tests with `mix test` before every commit.\n",
+        ".claude/CLAUDE.md" => """
+        # CLAUDE.md
+
+        @../AGENTS.md
+
+        Ask before deleting a file under `priv/`, and see @docs/deleting.md for why.
+        """
+      })
+
+      assert [proposal] = Instructions.proposals(ctx.workspace, ctx.opts)
+      assert proposal.target == :workspace
+      assert proposal.path == "AGENTS.md"
+      assert proposal.source == "CLAUDE.md"
+      assert [%{source: ".claude/CLAUDE.md"}] = proposal.also_from
+
+      assert proposal.content == """
+             Run the tests with `mix test` before every commit.
+
+             Ask before deleting a file under `priv/`, and see @docs/deleting.md for why.
+             """
+
+      assert proposal.notes == [
+               "The line `@../AGENTS.md` of .claude/CLAUDE.md is left out: it imports the file it would be written into.",
+               "The title `# CLAUDE.md` of .claude/CLAUDE.md is left out: what it adds goes after what is there.",
+               "An @ import in .claude/CLAUDE.md is read from beside AGENTS.md once it is there, not from beside .claude/CLAUDE.md."
+             ]
+    end
+
+    test "CLAUDE.local.md is the person's own: never proposed, and says how to keep it", ctx do
+      write_all!(ctx.workspace, %{
+        "CLAUDE.local.md" => "My own notes.\n",
+        "pkg/CLAUDE.local.md" => "x\n"
+      })
+
+      reason =
+        "not onboarded: CLAUDE.local.md is your own and usually not committed, so it is not " <>
+          "proposed into a file that is; move what it says into your config directory's " <>
+          "AGENTS.md by hand, or keep it"
+
+      assert %{proposals: [], skipped: skipped} = Instructions.survey(ctx.workspace, ctx.opts)
+
+      assert skipped == [
+               %{source: "CLAUDE.local.md", reason: reason},
+               %{source: "pkg/CLAUDE.local.md", reason: reason}
+             ]
+    end
+
+    test "the config directory's CLAUDE.md and GEMINI.md and ~/.claude/CLAUDE.md go into the person's own AGENTS.md",
+         ctx do
+      config = Path.join(ctx.home, ".config/troupe")
+      opts = Keyword.put(ctx.opts, :config_dir, config)
+
+      write_all!(config, %{
+        "AGENTS.md" => "Answer briefly.\n",
+        "CLAUDE.md" => "Answer briefly.\n\nAsk before deleting anything you did not create.\n",
+        "GEMINI.md" => "Prefer small commits over large ones, in every repository.\n"
+      })
+
+      write_all!(ctx.home, %{
+        ".claude/CLAUDE.md" => "# CLAUDE.md\n\nNever push to main without asking first.\n"
+      })
+
+      assert [proposal] = Instructions.proposals(ctx.workspace, opts)
+      assert proposal.target == :user
+      assert proposal.path == "AGENTS.md"
+      assert proposal.source == "~/.config/troupe/CLAUDE.md"
+
+      assert Enum.map(proposal.also_from, & &1.source) == [
+               "~/.config/troupe/GEMINI.md",
+               "~/.claude/CLAUDE.md"
+             ]
+
+      assert proposal.content == """
+             Answer briefly.
+
+             Ask before deleting anything you did not create.
+
+             Prefer small commits over large ones, in every repository.
+
+             Never push to main without asking first.
+             """
+
+      # Written into the config directory with its record there, never the repository,
+      # and a second run proposes nothing.
+      assert %{proposals: [item], refused: []} = Onboard.plan(ctx.workspace, opts)
+      assert item.shown =~ "AGENTS.md"
+      assert item.question == :write
+      assert {:ok, %{action: :replaced}} = Onboard.accept(item, ctx.workspace, opts)
+
+      assert File.read!(Path.join(config, "AGENTS.md")) == proposal.content
+      refute File.exists?(Path.join(ctx.workspace, "AGENTS.md"))
+      refute File.exists?(Path.join(ctx.workspace, ".troupe"))
+
+      assert %{"files" => %{"AGENTS.md" => %{"imported_from" => "~/.config/troupe/CLAUDE.md"}}} =
+               Jason.decode!(File.read!(Path.join(config, "onboarded.json")))
+
+      assert %{proposals: [], skipped: skipped} = Onboard.plan(ctx.workspace, opts)
+
+      assert Enum.map(skipped, & &1.source) == [
+               "~/.claude/CLAUDE.md",
+               "~/.config/troupe/CLAUDE.md",
+               "~/.config/troupe/GEMINI.md"
+             ]
+
+      assert Enum.all?(skipped, &(&1.reason =~ "everything it says is in"))
+    end
+
+    test "a config directory outside the home directory is skipped; ~/.claude/CLAUDE.md still goes in",
+         ctx do
+      write_all!(ctx.config, %{"CLAUDE.md" => "Answer briefly.\n"})
+      write_all!(ctx.home, %{".claude/CLAUDE.md" => "Never push to main without asking first.\n"})
+
+      assert %{proposals: [proposal], skipped: [skipped]} =
+               Instructions.survey(ctx.workspace, ctx.opts)
+
+      assert proposal.source == "~/.claude/CLAUDE.md"
+      assert proposal.also_from == []
+      assert proposal.content == "Never push to main without asking first.\n"
+
+      assert skipped.reason ==
+               "not onboarded: it is not in your home directory, where onboarding takes your own files from"
+
+      assert %{proposals: [item]} = Onboard.plan(ctx.workspace, ctx.opts)
+      assert {:ok, %{action: :created}} = Onboard.accept(item, ctx.workspace, ctx.opts)
+      assert File.read!(Path.join(ctx.config, "AGENTS.md")) == proposal.content
     end
   end
 

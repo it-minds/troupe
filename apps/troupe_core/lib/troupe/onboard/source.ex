@@ -36,8 +36,8 @@ defmodule Troupe.Onboard.Source do
   `target` may also be `:workspace` for an `AGENTS.md`, `path` then relative to the
   workspace itself (Decision 827).
 
-  `opts` carries `home`, the directory `~` stands for, so a test can give a source a
-  scratch one. A source is registered in `Troupe.Onboard`'s `@sources`, one line.
+  `opts` carries `home`, the directory `~` stands for, and `config_dir`, the person's
+  config directory, so a test can give a source scratch ones. A source is registered in `Troupe.Onboard`'s `@sources`, one line.
   """
 
   @type also :: %{source: String.t(), source_hash: String.t()}

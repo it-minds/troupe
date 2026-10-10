@@ -350,13 +350,18 @@ Write .troupe/agents/reviewer.md? [y/N]
 What it brings in:
 
 - **Instruction files.** What a `CLAUDE.md` or `GEMINI.md` says, at the root or in a
-  directory, and Copilot's `.github/copilot-instructions.md` at the root, is proposed as
-  an addition to the `AGENTS.md` in the same directory: the file that is there stays as it
-  is, and only what it does not already say is added after it, under the heading it was
-  under. Said already means the same text, spaces aside, or the same rule as `troupe
+  directory, and Claude Code's `.claude/CLAUDE.md` and Copilot's
+  `.github/copilot-instructions.md` at the root, is proposed as an addition to the
+  `AGENTS.md` in the same directory: the file that is there stays as it is, and only what
+  it does not already say is added after it, under the heading it was under. Said already means the same text, spaces aside, or the same rule as `troupe
   instructions check` calls a duplicate; anything reworded is proposed and you read the
   diff. A line that only imports `AGENTS.md` (`@AGENTS.md`) is left out. When there is
   nothing left to add, nothing is proposed and the file is listed as `skipped:`, saying so.
+- **Your own instruction files.** Your config directory's `CLAUDE.md` and `GEMINI.md`, and
+  Claude Code's `~/.claude/CLAUDE.md`, are proposed as additions to your own
+  `<config>/AGENTS.md` in the same way, never to a repository's. `CLAUDE.local.md` is
+  yours and usually not committed, so it is not proposed anywhere: move what it says into
+  `<config>/AGENTS.md` by hand, or keep it.
 - **Rules.** Cursor's `.cursor/rules/*.mdc` (the root's and a directory's), its legacy
   `.cursorrules`, and Copilot's `.github/instructions/*.instructions.md` become
   `.troupe/rules/<name>.md`, with the front matter Cursor's rules have, `description`,

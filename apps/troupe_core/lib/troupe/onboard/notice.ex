@@ -125,9 +125,15 @@ defmodule Troupe.Onboard.Notice do
     {"other", "other file", "other files"}
   ]
 
-  # The proposals by kind, in the order `@kinds` names them, each `{kind, n}`.
+  # The workspace's proposals by kind, in the order `@kinds` names them, each `{kind, n}`.
+  # The person's own files are theirs to onboard, not this workspace's news: they would be
+  # told of in every workspace's first session.
   defp counts(items) do
-    by_kind = Enum.frequencies_by(items, &kind(&1.proposal))
+    by_kind =
+      items
+      |> Enum.reject(&(&1.proposal.target == :user))
+      |> Enum.frequencies_by(&kind(&1.proposal))
+
     for {kind, _one, _many} <- @kinds, n = by_kind[kind], n != nil, do: {kind, n}
   end
 

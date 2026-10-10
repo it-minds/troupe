@@ -5,11 +5,19 @@ defmodule Troupe.Onboard.Instructions do
 
   - **`CLAUDE.md`, `GEMINI.md` and Copilot's `.github/copilot-instructions.md`** are
     other tools' names for a directory's `AGENTS.md` (Copilot's at the root only, as
-    Copilot reads it, Decision 806). Their substance becomes one proposal for the
-    `AGENTS.md` in the same directory (`target: :workspace`): what is there kept as it
-    is, byte for byte, and what each file says that it does not, added after it, in
-    that order (`CLAUDE.md`, `GEMINI.md`, Copilot's). The first file is the proposal's
+    Copilot reads it, Decision 806), and so is Claude Code's `.claude/CLAUDE.md` at the
+    root. Their substance becomes one proposal for the `AGENTS.md` in the same directory
+    (`target: :workspace`): what is there kept as it is, byte for byte, and what each
+    file says that it does not, added after it, in that order (`CLAUDE.md`,
+    `.claude/CLAUDE.md`, `GEMINI.md`, Copilot's). The first file is the proposal's
     `source` and the others its `also_from`, so a change to any of them is drift.
+  - **The person's own.** `<config>/CLAUDE.md` and `<config>/GEMINI.md`, which Troupe
+    read as its config directory's `AGENTS.md` until the readers were retired, and Claude
+    Code's `~/.claude/CLAUDE.md` become one proposal for `<config>/AGENTS.md`
+    (`target: :user`, named from the home directory, `~/...`), merged the same way. A
+    file that is not really in the home directory (a config directory kept elsewhere) is
+    skipped, saying so. `CLAUDE.local.md` is the person's own and usually not committed,
+    so it is never proposed into a repository's file: it is skipped, with how to move it.
   - **Merge, don't duplicate.** A file is read as Markdown units: a paragraph, a list
     item, a fenced block, a table, a heading. A unit the directory's `AGENTS.md` (or its
     `.agents/AGENTS.md`, or a file before it in the proposal) already says is left out,
@@ -21,8 +29,8 @@ defmodule Troupe.Onboard.Instructions do
     are its own. A unit added keeps the heading it was under, written before it. A line
     that only imports the `AGENTS.md` being written (`@AGENTS.md`) is left out, and a
     first heading that names the other tool's file (`# CLAUDE.md`) is written
-    `# AGENTS.md`. When nothing is left to add, nothing is proposed, and the file is
-    listed as skipped, saying so.
+    `# AGENTS.md`, or left out when there is a file already. When nothing is left to add,
+    nothing is proposed, and the file is listed as skipped, saying so.
   - **Rules.** Cursor's `.cursor/rules/*.mdc` (the root's, and a directory's, whose globs
     are rewritten from the root: `src/**` under `web/` is `web/src/**`, an always rule
     there `web/**`), its legacy root `.cursorrules` (always applied), and Copilot's
@@ -46,13 +54,16 @@ defmodule Troupe.Onboard.Instructions do
 
   @behaviour Troupe.Onboard.Source
 
-  alias Troupe.{Gitignore, Workspace}
+  alias Troupe.{Gitignore, Paths, Workspace}
   alias Troupe.Instructions.Check.Text
   alias Troupe.Protocol.AgentDefinition
 
   # Other tools' names for a directory's `AGENTS.md`, in the order they are added.
   @aliases ["CLAUDE.md", "GEMINI.md"]
+  @claude_dir ".claude/CLAUDE.md"
+  @local "CLAUDE.local.md"
   @copilot ".github/copilot-instructions.md"
+  @order ["CLAUDE.md", @claude_dir, "GEMINI.md", @copilot]
   @copilot_rules ".github/instructions"
   @copilot_ext ".instructions.md"
   @cursor_rules ".cursor/rules"
@@ -71,13 +82,14 @@ defmodule Troupe.Onboard.Instructions do
   @spec found?(Path.t()) :: boolean()
   @impl Troupe.Onboard.Source
   def found?(workspace) do
-    (@aliases ++ [@copilot, @legacy, @copilot_rules, @cursor_rules])
+    (@aliases ++ [@claude_dir, @copilot, @legacy, @copilot_rules, @cursor_rules])
     |> Enum.any?(&File.exists?(Path.join(workspace, &1)))
   end
 
   @doc """
   The proposals for the instruction files in `workspace`: the `AGENTS.md` files first,
-  the root's then each directory's, then the rules, by path.
+  the root's then each directory's, then the rules, by path, then the person's own
+  `AGENTS.md`. `opts`: `home` and `config_dir`, the person's, for a test.
   """
   @spec proposals(Path.t(), keyword()) :: [proposal()]
   @impl Troupe.Onboard.Source
@@ -90,14 +102,25 @@ defmodule Troupe.Onboard.Instructions do
 
   @doc "`proposals/2` and `skipped/2` from one look at the files."
   @spec survey(Path.t(), keyword()) :: %{proposals: [proposal()], skipped: [map()]}
-  def survey(workspace, _opts \\ []) do
+  def survey(workspace, opts \\ []) do
     root = Path.expand(workspace)
+    {own, own_skips} = own(opts)
 
-    case Workspace.real_path(root) do
-      {:ok, real} -> survey(root, real, find(root))
-      {:error, _reason} -> %{proposals: [], skipped: []}
-    end
+    {proposals, skipped} =
+      case Workspace.real_path(root) do
+        {:ok, real} -> survey(root, real, find(root))
+        {:error, _reason} -> {[], []}
+      end
+
+    %{
+      proposals: Enum.sort_by(proposals ++ own, &{target_rank(&1.target), &1.path}),
+      skipped: Enum.sort_by(skipped ++ own_skips, &{&1.source, &1.reason})
+    }
   end
+
+  defp target_rank(:workspace), do: 0
+  defp target_rank(:repo), do: 1
+  defp target_rank(:user), do: 2
 
   defp survey(root, real, found) do
     {inside, outside} = Enum.split_with(found, fn {_kind, path} -> inside?(root, real, path) end)
@@ -106,14 +129,24 @@ defmodule Troupe.Onboard.Instructions do
       for {_kind, path} <- outside,
           do: skip(path, "it is a link to outside the workspace, and is not read")
 
-    {files, rules} = Enum.split_with(inside, fn {kind, _path} -> kind in [:alias, :copilot] end)
+    {locals, inside} = Enum.split_with(inside, fn {kind, _path} -> kind == :local end)
+
+    locals =
+      for {_kind, path} <- locals,
+          do:
+            skip(
+              path,
+              "not onboarded: CLAUDE.local.md is your own and usually not committed, so it " <>
+                "is not proposed into a file that is; move what it says into your config " <>
+                "directory's AGENTS.md by hand, or keep it"
+            )
+
+    {files, rules} =
+      Enum.split_with(inside, fn {kind, _path} -> kind in [:alias, :claude_dir, :copilot] end)
+
     {agents_md, agents_md_skips} = agents_md(root, real, files)
     {rule_files, rule_skips} = rules(root, rules)
-
-    %{
-      proposals: Enum.sort_by(agents_md ++ rule_files, &{&1.target != :workspace, &1.path}),
-      skipped: Enum.sort_by(outside ++ agents_md_skips ++ rule_skips, &{&1.source, &1.reason})
-    }
+    {agents_md ++ rule_files, outside ++ locals ++ agents_md_skips ++ rule_skips}
   end
 
   ## Finding
@@ -167,7 +200,11 @@ defmodule Troupe.Onboard.Instructions do
 
   # The root's own files by name, whatever `.gitignore` says of them.
   defp at_root(root) do
-    files = Enum.filter(@aliases ++ [@copilot, @legacy], &file?(Path.join(root, &1)))
+    files =
+      Enum.filter(
+        @aliases ++ [@claude_dir, @local, @copilot, @legacy],
+        &file?(Path.join(root, &1))
+      )
 
     listed =
       for dir <- [@copilot_rules, @cursor_rules],
@@ -189,7 +226,9 @@ defmodule Troupe.Onboard.Instructions do
     end
   end
 
+  defp kind(@claude_dir, _name, _dir), do: :claude_dir
   defp kind(_path, name, _dir) when name in @aliases, do: :alias
+  defp kind(_path, @local, _dir), do: :local
   defp kind(_path, @legacy, _dir), do: :legacy
 
   defp kind(path, name, dir) do
@@ -238,24 +277,24 @@ defmodule Troupe.Onboard.Instructions do
       files
       |> Enum.group_by(fn {kind, path} -> owner(kind, path) end, &elem(&1, 1))
       |> Enum.sort()
-      |> Enum.map(fn {dir, paths} -> directory(root, real, dir, order(paths)) end)
+      |> Enum.map(fn {dir, paths} -> directory(root, real, dir, order(dir, paths)) end)
       |> Enum.unzip()
 
     {Enum.concat(proposals), skips ++ Enum.concat(more)}
   end
 
   defp owner(:alias, path), do: parent(path)
-  defp owner(:copilot, _path), do: ""
+  defp owner(_kind, _path), do: ""
 
   defp hidden?(dir), do: dir |> String.split("/") |> Enum.any?(&String.starts_with?(&1, "."))
 
-  # `CLAUDE.md`, then `GEMINI.md`, then Copilot's.
-  defp order(paths),
-    do:
-      Enum.sort_by(
-        paths,
-        &{Enum.find_index(@aliases, fn a -> a == Path.basename(&1) end) || 9, &1}
-      )
+  # `CLAUDE.md`, then `.claude/CLAUDE.md`, then `GEMINI.md`, then Copilot's.
+  defp order(dir, paths) do
+    Enum.sort_by(paths, fn path ->
+      here = if dir == "", do: path, else: String.replace_prefix(path, dir <> "/", "")
+      {Enum.find_index(@order, &(&1 == here)) || 9, path}
+    end)
+  end
 
   defp directory(root, real, dir, sources) do
     agents = join(dir, "AGENTS.md")
@@ -265,46 +304,67 @@ defmodule Troupe.Onboard.Instructions do
       outside = "#{agents} is a link to outside the workspace, and is not written"
       {[], Enum.map(sources, &skip(&1, outside))}
     else
-      {same, sources} = Enum.split_with(sources, &same_file?(root, &1, agents))
-      renamed = "it is #{agents} under another name, so there is nothing to add"
-      {read, unread} = sources |> Enum.map(&read_source(root, &1)) |> Enum.split_with(&is_tuple/1)
-      {proposal, skips} = merge(root, real, dir, agents, read)
-      {proposal, Enum.map(same, &skip(&1, renamed)) ++ unread ++ skips}
+      dot = join(dir, ".agents/AGENTS.md")
+
+      spot = %{
+        target: :workspace,
+        path: agents,
+        shown: agents,
+        file: file,
+        existing: read_inside(root, real, agents),
+        also: read_inside(root, real, dot),
+        also_shown: dot
+      }
+
+      sources = Enum.map(sources, &{&1, Path.join(root, &1)})
+      sources(spot, sources)
     end
   end
 
-  # `{source, bytes}`, or why not, as a skipped entry.
-  defp read_source(root, source) do
-    case File.read(Path.join(root, source)) do
+  # The other tools' files for one `AGENTS.md`, each `{name, file}`: those that are that
+  # file under another name give nothing, the rest are read and merged.
+  defp sources(spot, sources) do
+    {same, sources} =
+      Enum.split_with(sources, fn {_name, file} -> same_file?(file, spot.file) end)
+
+    renamed = "it is #{spot.shown} under another name, so there is nothing to add"
+
+    {read, unread} =
+      sources
+      |> Enum.map(fn {name, file} -> read_source(name, file) end)
+      |> Enum.split_with(&is_tuple/1)
+
+    {proposal, skips} = merge(spot, read)
+    {proposal, Enum.map(same, fn {name, _file} -> skip(name, renamed) end) ++ unread ++ skips}
+  end
+
+  # `{source, file, bytes}`, or why not, as a skipped entry.
+  defp read_source(source, file) do
+    case File.read(file) do
       {:ok, bytes} ->
-        if String.trim(bytes) == "", do: skip(source, "it is empty"), else: {source, bytes}
+        if String.trim(bytes) == "", do: skip(source, "it is empty"), else: {source, file, bytes}
 
       {:error, reason} ->
         skip(source, "it cannot be read: #{:file.format_error(reason)}")
     end
   end
 
-  defp merge(_root, _real, _dir, _agents, []), do: {[], []}
+  defp merge(_spot, []), do: {[], []}
 
-  defp merge(root, real, dir, agents, read) do
-    existing = read_inside(root, real, agents)
-    dot_agents = read_inside(root, real, join(dir, ".agents/AGENTS.md"))
-    known = [existing, dot_agents] |> Enum.reject(&is_nil/1) |> Enum.map(&known/1) |> union()
+  defp merge(spot, read) do
+    known = [spot.existing, spot.also] |> Enum.reject(&is_nil/1) |> Enum.map(&known/1) |> union()
 
     {added, _known} =
-      Enum.map_reduce(read, known, fn {source, bytes}, known ->
+      Enum.map_reduce(read, known, fn {source, file, bytes}, known ->
         # Merging when something is already there, the file's or an earlier source's.
-        merging? = existing != nil or known.started?
-
-        {text, notes} =
-          additions(source, lf(bytes), known, merging?, Path.join(root, agents), root)
-
+        merging? = spot.existing != nil or known.started?
+        {text, notes} = additions(source, file, lf(bytes), known, merging?, spot)
         known = union([known, known(lf(bytes))])
         {{source, bytes, text, notes}, %{known | started?: known.started? or text != ""}}
       end)
 
     if Enum.all?(added, fn {_s, _b, text, _n} -> text == "" end) do
-      said = if dot_agents, do: "#{agents} or #{join(dir, ".agents/AGENTS.md")}", else: agents
+      said = if spot.also, do: "#{spot.shown} or #{spot.also_shown}", else: spot.shown
 
       {[],
        for(
@@ -312,12 +372,13 @@ defmodule Troupe.Onboard.Instructions do
          do: skip(source, "everything it says is in #{said} already")
        )}
     else
-      {[proposal(agents, existing, added)], []}
+      {[proposal(spot, added)], []}
     end
   end
 
-  defp proposal(agents, existing, added) do
+  defp proposal(spot, added) do
     [{source, bytes, _text, _notes} | rest] = added
+    existing = spot.existing
 
     parts =
       if(existing, do: [existing |> lf() |> String.trim_trailing()], else: []) ++
@@ -333,8 +394,8 @@ defmodule Troupe.Onboard.Instructions do
       end)
 
     %{
-      target: :workspace,
-      path: agents,
+      target: spot.target,
+      path: spot.path,
       content: content,
       source: source,
       source_hash: sha256(bytes),
@@ -344,11 +405,9 @@ defmodule Troupe.Onboard.Instructions do
   end
 
   # What one file adds, as text, and the notes saying what was left out or changed.
-  defp additions(source, text, known, merging?, agents_file, root) do
-    {lines, imports} =
-      without_self_imports(text, Path.dirname(Path.join(root, source)), agents_file)
-
-    {lines, title} = if merging?, do: {lines, nil}, else: retitle(lines, Path.basename(source))
+  defp additions(source, file, text, known, merging?, spot) do
+    {lines, imports} = without_self_imports(text, Path.dirname(file), spot.file)
+    {lines, title} = retitle(lines, Path.basename(file), merging?)
     text = Enum.join(lines, "\n")
     units = units(text)
     {kept, dropped} = Enum.split_with(units, &(&1.kind == :heading or not said?(&1, known)))
@@ -365,10 +424,28 @@ defmodule Troupe.Onboard.Instructions do
         imports,
         &"The line `#{&1}` of #{source} is left out: it imports the file it would be written into."
       ) ++
-        if(title, do: ["The title `#{title}` of #{source} is written `# AGENTS.md`."], else: []) ++
-        dropped_note(source, dropped)
+        title_note(source, title, merging?) ++
+        moved_note(source, file, text, spot) ++ dropped_note(source, dropped)
 
     {added, notes}
+  end
+
+  defp title_note(_source, nil, _merging?), do: []
+
+  defp title_note(source, title, false),
+    do: ["The title `#{title}` of #{source} is written `# AGENTS.md`."]
+
+  defp title_note(source, title, true),
+    do: ["The title `#{title}` of #{source} is left out: what it adds goes after what is there."]
+
+  # A file from another directory than the AGENTS.md it goes into: its `@` imports are
+  # read from where they land.
+  defp moved_note(source, file, text, spot) do
+    if Path.dirname(file) != Path.dirname(spot.file) and text =~ ~r/(?:^|\s)@[\w.~-]*[\/.]\w/m,
+      do: [
+        "An @ import in #{source} is read from beside #{spot.shown} once it is there, not from beside #{source}."
+      ],
+      else: []
   end
 
   defp dropped_note(_source, []), do: []
@@ -396,15 +473,18 @@ defmodule Troupe.Onboard.Instructions do
     end
   end
 
-  # The first heading, when it is a title naming the other tool's file.
-  defp retitle(lines, name) do
+  # The first heading, when it is a title naming the other tool's file: `# AGENTS.md` in a
+  # new file, and left out of an addition to one, which has its own.
+  defp retitle(lines, name, merging?) do
     names = [String.downcase(name), String.downcase(Path.rootname(name))]
 
     with i when is_integer(i) <- Enum.find_index(lines, &(String.trim(&1) != "")),
          line = Enum.at(lines, i),
          [_all, title] <- Regex.run(~r/^#\s+(.+?)\s*#*\s*$/, line),
          true <- String.downcase(title) in names do
-      {List.replace_at(lines, i, "# AGENTS.md"), String.trim(line)}
+      if merging?,
+        do: {List.delete_at(lines, i), String.trim(line)},
+        else: {List.replace_at(lines, i, "# AGENTS.md"), String.trim(line)}
     else
       _no_title -> {lines, nil}
     end
@@ -538,6 +618,89 @@ defmodule Troupe.Onboard.Instructions do
     do: %{state | units: [%{cur | lines: Enum.reverse(cur.lines)} | state.units], cur: nil}
 
   defp next_block(state), do: %{state | block: state.block + 1}
+
+  ## The person's own
+
+  # The person's own instruction files, `<config>/CLAUDE.md` and `<config>/GEMINI.md`
+  # (Troupe's config directory's other names for its `AGENTS.md`, until the readers were
+  # retired) and Claude Code's `~/.claude/CLAUDE.md`, as one proposal for
+  # `<config>/AGENTS.md`. Each is named from the home directory, as a `:user` source must
+  # be, and one that is not really in it is skipped.
+  defp own(opts) do
+    home = opts |> Keyword.get_lazy(:home, &System.user_home!/0) |> Path.expand()
+    config = opts |> Keyword.get_lazy(:config_dir, &Paths.config_dir/0) |> Path.expand()
+
+    files =
+      [
+        Path.join(config, "CLAUDE.md"),
+        Path.join(config, "GEMINI.md"),
+        Path.join(home, @claude_dir)
+      ]
+      |> Enum.filter(&file?/1)
+
+    with [_ | _] <- files,
+         {:ok, real_home} <- Workspace.real_path(home),
+         {:ok, real_config} <- Workspace.real_path(config) do
+      own(files, real_home, config, real_config)
+    else
+      _none -> {[], []}
+    end
+  end
+
+  defp own(files, real_home, config, real_config) do
+    agents = Path.join(config, "AGENTS.md")
+    shown = Paths.display(agents)
+    {named, away} = files |> Enum.map(&home_name(&1, real_home)) |> Enum.split_with(&is_tuple/1)
+
+    cond do
+      named == [] ->
+        {[], away}
+
+      File.exists?(agents) and not under_real?(agents, real_config) ->
+        outside = "#{shown} is a link to outside your config directory, and is not written"
+        {[], away ++ Enum.map(named, fn {name, _file} -> skip(name, outside) end)}
+
+      true ->
+        spot = %{
+          target: :user,
+          path: "AGENTS.md",
+          shown: shown,
+          file: agents,
+          existing: if(File.regular?(agents), do: read_text(agents)),
+          also: nil,
+          also_shown: nil
+        }
+
+        {proposals, skips} = sources(spot, named)
+        {proposals, away ++ skips}
+    end
+  end
+
+  # `{"~/...", file}` for a file really in the home directory, or why not.
+  defp home_name(file, real_home) do
+    with {:ok, real} <- Workspace.real_path(file),
+         true <- under_real?(real, real_home) do
+      rest =
+        real
+        |> String.slice(String.length(real_home) + 1, String.length(real))
+        |> String.replace("\\", "/")
+
+      {"~/" <> rest, file}
+    else
+      _elsewhere ->
+        skip(
+          Paths.display(file),
+          "not onboarded: it is not in your home directory, where onboarding takes your own files from"
+        )
+    end
+  end
+
+  defp read_text(file) do
+    case File.read(file) do
+      {:ok, text} -> text
+      {:error, _reason} -> nil
+    end
+  end
 
   ## Said already
 
@@ -925,8 +1088,17 @@ defmodule Troupe.Onboard.Instructions do
     end
   end
 
-  defp same_file?(root, a, b) do
-    File.exists?(Path.join(root, b)) and same_path?(Path.join(root, a), Path.join(root, b))
+  defp same_file?(file, other), do: File.exists?(other) and same_path?(file, other)
+
+  # Whether `path` is really under `real` (a real path).
+  defp under_real?(path, real) do
+    case Workspace.real_path(path) do
+      {:ok, resolved} ->
+        String.starts_with?(Workspace.compare_key(resolved), Workspace.compare_key(real) <> "/")
+
+      {:error, _reason} ->
+        false
+    end
   end
 
   defp same_path?(a, b) do

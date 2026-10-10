@@ -273,8 +273,20 @@ defmodule Troupe.OnboardCLITest do
   end
 
   describe "instruction files (root Decision 827)" do
+    # The person's own home and config directory are scratch ones: the source reads
+    # `~/.claude/CLAUDE.md` and the config directory's `CLAUDE.md` too.
     setup %{opts: opts} do
-      %{opts: Keyword.put(opts, :sources, [Troupe.Onboard.Instructions])}
+      own = Path.join(System.tmp_dir!(), "troupe-onboard-own-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf(own) end)
+
+      %{
+        opts:
+          Keyword.merge(opts,
+            sources: [Troupe.Onboard.Instructions],
+            home: Path.join(own, "home"),
+            config_dir: Path.join(own, "config")
+          )
+      }
     end
 
     test "a new AGENTS.md is its own question; an addition to one that is there is an ordinary one",

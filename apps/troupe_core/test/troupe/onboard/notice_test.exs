@@ -10,6 +10,7 @@ defmodule Troupe.Onboard.NoticeTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.Onboard
+  alias Troupe.Onboard.Notice
 
   @claude "# Rules\n\nRun the tests with `mix test` before you commit.\n"
 
@@ -67,6 +68,23 @@ defmodule Troupe.Onboard.NoticeTest do
     write_file(context, "CLAUDE.md", @claude)
     %{session: %{id: pod}} = start_session(context, kind: :team)
     assert events_of_type(pod, :onboarding_suggested) == []
+  end
+
+  test "the person's own files are not this workspace's news", context do
+    write_file(context, "CLAUDE.md", @claude)
+    home = Path.join(context.base, "home")
+    File.mkdir_p!(Path.join(home, ".claude"))
+    File.write!(Path.join(home, ".claude/CLAUDE.md"), "Never push to main without asking.\n")
+
+    data =
+      Notice.due(context.workspace,
+        state_dir: context.state_dir,
+        home: home,
+        config_dir: Path.join(context.base, "config"),
+        memory: false
+      )
+
+    assert data["proposals"] == %{"instructions" => 1}
   end
 
   test "a CLAUDE.md that is AGENTS.md under another name gives nothing to say, and is looked at once",

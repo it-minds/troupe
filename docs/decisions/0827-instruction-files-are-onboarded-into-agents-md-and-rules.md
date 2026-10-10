@@ -56,6 +56,25 @@ prompt said `CLAUDE.md`, `GEMINI.md` and Copilot's file were already in every pr
   that is the directory's `AGENTS.md` under another name gives nothing; each is listed as
   skipped with why, as is a nested Copilot file or `.cursorrules`, a rule in a folder under
   `.cursor/rules`, an empty file, and one whose every unit is said already.
+- **Claude Code's other names, and the person's own files.** Once the readers are retired
+  (Decision 828), files the loader read as a person's own `AGENTS.md` would stop counting
+  with nothing to bring them in, so the source covers them too. A repository's
+  `.claude/CLAUDE.md` (Claude Code's other place for its project file) is one more name for
+  the root's `AGENTS.md`, added after `CLAUDE.md` and before `GEMINI.md`; its `@` imports
+  are read from the root once there, which its note says. The person's own
+  `<config>/CLAUDE.md` and `<config>/GEMINI.md` (the config directory's other names for its
+  `AGENTS.md`, which the loader read as such) and Claude Code's `~/.claude/CLAUDE.md`
+  become one proposal for `<config>/AGENTS.md`, `target: :user`, merged the same way: the
+  writer's existing user target, recorded in `<config>/onboarded.json`, and asked
+  whatever `auto_approve` says when the librarian writes it (Decision 823). Each is named
+  from the home directory (`~/...`), as a `:user` source must be; a config directory kept
+  outside the home directory is skipped with a sentence, since onboarding takes the
+  person's own files from there only. Sources are now given `config_dir` beside `home`.
+  `CLAUDE.local.md` is Claude Code's personal file, usually not committed: it is never
+  proposed into a file that is, and is skipped with how to keep it, moved by hand into
+  `<config>/AGENTS.md` or left where it is. A session's notice counts the workspace's
+  proposals only: the person's own would be news in every workspace's first session.
+  No mapping of a file already onboarded changes, so the version stays 1.
 - **Merge, don't duplicate, judged conservatively.** The `AGENTS.md` that is there is kept
   byte for byte (its Windows line endings too) and what each other file adds comes after
   it. A file is read as Markdown units: a paragraph, a list item, a fenced block, a table,
@@ -71,7 +90,7 @@ prompt said `CLAUDE.md`, `GEMINI.md` and Copilot's file were already in every pr
   written once before it (a file's title only when nothing is there yet). A line that only
   imports the `AGENTS.md` being written (`@AGENTS.md`, Claude Code's way of pointing at
   it) is left out with a note, and a first heading naming the other tool's file (`# CLAUDE.md`)
-  is written `# AGENTS.md`. When nothing is left to add, nothing is proposed: the file is
+  is written `# AGENTS.md` in a new file and left out of an addition to one. When nothing is left to add, nothing is proposed: the file is
   skipped, "everything it says is in AGENTS.md already", which is also what a second run
   says once its proposal was written. Not chosen: a section-level merge (a matching
   heading would hide new text under it), or a model's paraphrase (#516: the onboarding
@@ -168,9 +187,7 @@ prompt said `CLAUDE.md`, `GEMINI.md` and Copilot's file were already in every pr
   own. The brief still never copies what `AGENTS.md` says (Decision 649), nor what the
   person did not let it onboard.
 - **Not in this slice.** Reading `.troupe/rules/` and removing the run-time readers
-  (Decision 828); the person's own `~/.claude/CLAUDE.md` or a `<config>/CLAUDE.md`, which
-  the loader read as an alias of `<config>/AGENTS.md`, as a `:user` proposal; Claude Code's
-  `.claude/CLAUDE.md` and `CLAUDE.local.md`; rules in folders under `.cursor/rules`; a
+  (Decision 828); rules in folders under `.cursor/rules`; a
   notice for a repository whose only other-tool file is nested; the desktop app showing
   the notice; `instructions/check.ex`'s `@type` naming `:outdated`.
 - **Proof:** `Troupe.Onboard.InstructionsTest` (the fixture with every kind of file: two
@@ -182,10 +199,15 @@ prompt said `CLAUDE.md`, `GEMINI.md` and Copilot's file were already in every pr
   kept; every proposal written with its provenance and version, the manifest's
   `workspace` section, and a second run proposing nothing; a change to `GEMINI.md`
   drifting on `AGENTS.md` and proposing only its new item; a declined new `AGENTS.md`
-  leaving nothing; the writer's `AGENTS.md` refusals, a linked `.troupe` among them; older
+  leaving nothing; `.claude/CLAUDE.md` added after `CLAUDE.md` with its notes;
+  `CLAUDE.local.md` skipped, root and nested; the config directory's `CLAUDE.md` and
+  `GEMINI.md` and `~/.claude/CLAUDE.md` merged into `<config>/AGENTS.md`, written there with
+  its record and proposing nothing again; a config directory outside the home directory
+  skipped and `~/.claude/CLAUDE.md` still proposed; the writer's `AGENTS.md` refusals, a linked `.troupe` among them; older
   rules left alone on the same content and offered on another; `outdated` in the check
   until `stamp/1`, and one write not raising it), `Troupe.Onboard.NoticeTest` (in real
-  sessions: one notice with the counts and nothing written, quiet at the next start and
+  sessions: one notice with the counts and nothing written, the person's own files not
+  counted, quiet at the next start and
   remembered in the state directory; nothing in a workspace without such files or on a
   pod; nothing once declined or onboarded; an older onboarding told once; an older brief
   in the same notice, and a brief built now carrying `survey`),

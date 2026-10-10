@@ -363,7 +363,7 @@ defmodule Troupe.Onboard do
   ## Planning
 
   defp propose(source, workspace, opts) do
-    case source.proposals(workspace, home: opts[:home]) do
+    case source.proposals(workspace, Keyword.take(opts, [:home, :config_dir])) do
       list when is_list(list) ->
         Enum.map(list, fn
           proposal when is_map(proposal) -> {:ok, proposal}
@@ -380,7 +380,11 @@ defmodule Troupe.Onboard do
   # What a source found and proposed nothing for, when it says (an optional callback).
   defp skipped(source, workspace, opts) do
     if Code.ensure_loaded?(source) and function_exported?(source, :skipped, 2),
-      do: Enum.map(source.skipped(workspace, home: opts[:home]), &skipped_entry(source, &1)),
+      do:
+        Enum.map(
+          source.skipped(workspace, Keyword.take(opts, [:home, :config_dir])),
+          &skipped_entry(source, &1)
+        ),
       else: []
   rescue
     error -> [{:refused, refusal(%{}, "#{inspect(source)} failed: #{Exception.message(error)}")}]
