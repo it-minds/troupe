@@ -177,8 +177,8 @@ defmodule Troupe.CLI do
      "check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure",
      [["doctor"], ["doctor", "--json"]]},
     {"troupe doctor --bench [--json]",
-     "the same, then a turn of tool calls, a cut output, a compaction, a cancel and a replay " <>
-       "against a scripted model: offline, in seconds",
+     "the same, then a turn of tool calls, a cut output, a compaction, a cancel, a replay " <>
+       "and four onboarded repositories against a scripted model: offline, in seconds",
      [["doctor", "--bench"], ["doctor", "--bench", "--json"]]},
     {"troupe instructions check [--workspace DIR] [--json]",
      "check the instruction files a session here reads: contradictions, missing paths and programs, repeats; " <>
