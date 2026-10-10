@@ -1539,13 +1539,17 @@ defmodule Troupe.UI.TUI.Model do
     streaming =
       if agent.streaming == "", do: [], else: streaming_lines(agent.streaming)
 
-    activity =
-      case activity_line(w, tick, now) do
-        nil ->
-          []
+    # Waiting on nothing but the start's question, where it is drawn elsewhere, is no
+    # activity of the window's own: command mode says it once, under "waiting for you".
+    only_asked? = not asked? and w.pending != [] and Enum.all?(w.pending, &(&1.kind == :local))
 
-        line ->
+    activity =
+      case not only_asked? && activity_line(w, tick, now) do
+        line when is_binary(line) ->
           if(spacer?, do: [{:blank, ""}], else: []) ++ [{:activity, activity_segments(line)}]
+
+        _none ->
+          []
       end
 
     # A question the start asks is answered from the command line (TUI Decision 154), so

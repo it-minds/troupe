@@ -1629,20 +1629,36 @@ defmodule Troupe.UI.TUI.View do
   defp changed(%{added: a, removed: r}) when is_integer(a) and is_integer(r), do: "+#{a} −#{r}"
   defp changed(_tree), do: ""
 
+  # Whose a tree is: this session's checkout, a branch's (by the session working in it, or
+  # by its path while none is), or another session's.
   defp whose(tree, state, windows) do
     alive = if tree.session_id, do: "alive", else: "no session"
+    here = same_dir(tree.path)
 
     cond do
-      w = Enum.find(windows, &match?(%{worktree: %{path: p}} when p == tree.path, &1)) ->
-        "#{w.path} · #{alive}"
-
-      tree.session_id == state.session_id or tree.path == state.model.workspace ->
+      tree.session_id == state.session_id or here == same_dir(state.model.workspace) ->
         "this session's checkout"
+
+      w = tree.session_id && Enum.find(windows, &(Map.get(&1, :session_id) == tree.session_id)) ->
+        "#{w.path} · alive"
+
+      w = Enum.find(windows, &(tree_dir(&1) == here)) ->
+        "#{w.path} · #{alive}"
 
       true ->
         alive
     end
   end
+
+  defp tree_dir(%{worktree: %{path: path}}) when is_binary(path), do: same_dir(path)
+  defp tree_dir(_window), do: nil
+
+  # git writes `C:/…` where the daemon wrote `c:\…`: one directory, whichever way it is
+  # spelled. Only for matching a label, never for opening anything.
+  defp same_dir(nil), do: nil
+
+  defp same_dir(path),
+    do: path |> String.replace("\\", "/") |> String.trim_trailing("/") |> String.downcase()
 
   ## Choosing an agent (TUI Decision 155)
 

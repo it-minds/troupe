@@ -387,10 +387,13 @@ defmodule Troupe.Gateway.Worktrees do
   end
 
   defp annotate(%{"worktree" => path} = entry, main) do
+    # git writes `C:/…` where a session's workspace is `c:/…` or `C:\…`: the same directory.
+    key = same_key(path)
+
     session =
       %{}
       |> Troupe.list_live_sessions()
-      |> Enum.find(&(&1.workspace == path))
+      |> Enum.find(&(same_key(&1.workspace) == key))
 
     status = status(path)
 

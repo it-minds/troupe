@@ -106,7 +106,9 @@ defmodule Troupe.CommandModeTest do
 
     eventually(fn -> Model.asking(user_state(pid).model) != nil end)
     eventually(fn -> screen_text(pid, session) =~ "Onboard 1 file from Claude Code" end)
-    assert screen_text(pid, session) =~ "waiting for you"
+
+    # Said once, first, and not again as the session's own activity.
+    assert [_, _] = String.split(screen_text(pid, session), "waiting for you")
 
     type(pid, "fix the failing test")
     press(pid, "enter")
@@ -180,7 +182,8 @@ defmodule Troupe.CommandModeTest do
         text = screen_text(pid, session)
 
         text =~ "worktrees" and text =~ created.data.git_branch and text =~ "↑0 ↓0" and
-          text =~ "+2 −0" and text =~ "dirty" and text =~ "quick-1 · alive"
+          text =~ "+2 −0" and text =~ "dirty" and text =~ "quick-1 · alive" and
+          text =~ "this session's checkout"
       end,
       10_000
     )
