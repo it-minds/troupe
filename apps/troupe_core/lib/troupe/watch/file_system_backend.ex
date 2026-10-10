@@ -36,16 +36,43 @@ defmodule Troupe.Watch.FileSystemBackend do
   def name, do: :native
 
   @impl Troupe.Watch.Backend
-  def available?(_root) do
+  def available?(_root), do: listener() != nil
+
+  # The platform's watcher program: on the PATH alone (Decision 846), else the one
+  # `file_system` ships. The library would look for it itself with
+  # `System.find_executable/1`, which on Windows looks in the current directory first, so
+  # it is told which one to start (`point/0`).
+  defp listener do
+    {_key, exe} = backend()
+    Troupe.Executable.find(exe) || in_priv(exe)
+  end
+
+  defp backend do
     case :os.type() do
-      {:unix, :darwin} -> executable?("mac_listener")
-      {:win32, _} -> executable?("inotifywait.exe")
-      {:unix, _} -> executable?("inotifywait")
+      {:unix, :darwin} -> {:fs_mac, "mac_listener"}
+      {:win32, _} -> {:fs_windows, "inotifywait.exe"}
+      {:unix, _} -> {:fs_inotify, "inotifywait"}
     end
   end
 
-  defp executable?(exe) do
-    System.find_executable(exe) != nil or File.regular?(Path.join(file_system_priv(), exe))
+  defp in_priv(exe) do
+    path = Path.join(file_system_priv(), exe)
+    if File.regular?(path), do: path
+  end
+
+  # `file_system` reads `executable_file` from its own config after its environment
+  # variable, which is the person's to set, and before its own `PATH` lookup.
+  defp point do
+    {key, _exe} = backend()
+
+    case listener() do
+      nil ->
+        :ok
+
+      path ->
+        config = Application.get_env(:file_system, key, [])
+        Application.put_env(:file_system, key, Keyword.put(config, :executable_file, path))
+    end
   end
 
   defp file_system_priv do
@@ -141,6 +168,8 @@ defmodule Troupe.Watch.FileSystemBackend do
   defp arm(root, probe_dir) do
     # The probe directory is watched alongside the workspace purely so start-up has
     # something to write to that is not the user's repository.
+    point()
+
     case FileSystem.start_link(dirs: [root, probe_dir]) do
       {:ok, watcher} ->
         FileSystem.subscribe(watcher)

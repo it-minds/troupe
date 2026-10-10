@@ -84,7 +84,8 @@ defmodule Troupe.Bench.Scenario do
     do: holds?(workspace, relative, content)
 
   def outcome(%__MODULE__{outcome: {:command, [program | args]}}, workspace) do
-    case System.find_executable(program) do
+    # On the PATH alone, never the current directory (Decision 846).
+    case Troupe.Executable.find(program) do
       nil ->
         false
 

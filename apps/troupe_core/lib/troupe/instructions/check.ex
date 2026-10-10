@@ -38,7 +38,7 @@ defmodule Troupe.Instructions.Check do
   `findings/2` is pure but for the two probes it is handed; `run/2` reads.
   """
 
-  alias Troupe.{Gitignore, Instructions, Onboard, Paths, Reaper}
+  alias Troupe.{Executable, Gitignore, Instructions, Onboard, Paths, Reaper}
   alias Troupe.Instructions.Check.Text
 
   @type kind :: :contradiction | :path | :command | :duplicate | :drift | :outdated
@@ -464,9 +464,8 @@ defmodule Troupe.Instructions.Check do
         _none -> System.get_env("PATH", "")
       end
 
-    fn program ->
-      :os.find_executable(String.to_charlist(program), String.to_charlist(path)) != false
-    end
+    # Looked for as the session's own commands are found: on the PATH alone (Decision 846).
+    fn program -> Executable.find(program, path: path) != nil end
   end
 
   ## Duplicates

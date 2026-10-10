@@ -29,7 +29,7 @@ defmodule Troupe.Bench.Live do
   """
 
   alias Troupe.Bench.{History, LiveScenarios, Prefix, Runner, Scenario}
-  alias Troupe.Config
+  alias Troupe.{Config, Executable}
   alias Troupe.LLM.Catalog
   alias Troupe.Protocol.Event
   alias Troupe.Session.Blobs
@@ -197,7 +197,7 @@ defmodule Troupe.Bench.Live do
   end
 
   defp missing_program(%Scenario{outcome: {:command, [program | _args]}}) do
-    if System.find_executable(program), do: nil, else: program
+    if Executable.find(program), do: nil, else: program
   end
 
   defp missing_program(_scenario), do: nil

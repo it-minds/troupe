@@ -20,7 +20,7 @@ defmodule Troupe.Tools.Shell do
 
   @behaviour Troupe.Tool
 
-  alias Troupe.{Config, Mounts, Reaper, Tool}
+  alias Troupe.{Config, Executable, Mounts, Reaper, Tool}
   alias Troupe.Tools.Output
 
   @impl Troupe.Tool
@@ -228,20 +228,24 @@ defmodule Troupe.Tools.Shell do
     end
   end
 
-  @doc "The shell and its command flag for this host."
+  @doc """
+  The shell and its command flag for this host, each program found on the `PATH` alone,
+  never in the current directory (`Troupe.Executable`, Decision 846).
+  """
   @spec shell() :: {String.t(), String.t()}
   def shell do
     case :os.type() do
       {:win32, _} -> windows_shell()
-      _ -> {System.find_executable("bash") || "/bin/sh", "-c"}
+      _ -> {Executable.find("bash") || "/bin/sh", "-c"}
     end
   end
 
+  # `cmd.exe` by name: the reaper looks it up as it looks up every name.
   defp windows_shell do
     cond do
       bash = windows_bash(System.get_env()) -> {bash, "-c"}
-      pwsh = System.find_executable("pwsh") -> {pwsh, "-Command"}
-      ps = System.find_executable("powershell.exe") -> {ps, "-Command"}
+      pwsh = Executable.find("pwsh") -> {pwsh, "-Command"}
+      ps = Executable.find("powershell.exe") -> {ps, "-Command"}
       true -> {"cmd.exe", "/c"}
     end
   end
@@ -256,6 +260,10 @@ defmodule Troupe.Tools.Shell do
   operating system, with that system's programs, where the Windows `elixir` finds no
   `erl`, while the tool's description tells the model it is on Windows. `env` is the
   environment, its names in any case, and `exists?` says whether a file is there.
+
+  Only the `PATH`'s absolute entries are looked in (Decision 846): a relative one is the
+  current directory, where a repository's `git.exe` would have made its `bin/bash.exe`
+  the shell.
   """
   @spec windows_bash(%{String.t() => String.t()}, (Path.t() -> boolean())) :: Path.t() | nil
   def windows_bash(env, exists? \\ &File.regular?/1) do
@@ -263,7 +271,7 @@ defmodule Troupe.Tools.Shell do
       env
       |> env_var("PATH")
       |> Kernel.||("")
-      |> String.split(";", trim: true)
+      |> Executable.dirs({:win32, :nt})
       |> Enum.map(&slashes/1)
 
     beside_git =

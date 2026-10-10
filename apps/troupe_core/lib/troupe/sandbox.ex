@@ -88,7 +88,7 @@ defmodule Troupe.Sandbox do
   @doc "Where `bwrap` is, or `nil`."
   @spec executable() :: Path.t() | nil
   def executable do
-    Application.get_env(:troupe_core, :bwrap) || System.find_executable("bwrap")
+    Application.get_env(:troupe_core, :bwrap) || Troupe.Executable.find("bwrap")
   end
 
   @doc """

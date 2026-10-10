@@ -15,9 +15,8 @@ defmodule Troupe.MCP.Stdio do
 
   use GenServer
 
-  alias Troupe.MCP
+  alias Troupe.{Executable, MCP, Reaper}
   alias Troupe.MCP.Tool
-  alias Troupe.Reaper
 
   require Logger
 
@@ -328,15 +327,16 @@ defmodule Troupe.MCP.Stdio do
 
   ## Process
 
+  # The command as written (Decision 846): a name is found on the PATH alone, never in the
+  # daemon's current directory; a relative path is from the server's `cd`, else the
+  # workspace, and with neither it is refused rather than read from the current directory.
   defp open(config, cwd) do
     config = Map.new(config, fn {key, value} -> {to_string(key), value} end)
-    command = config["command"]
     env = Enum.map(config["env"] || %{}, fn {k, v} -> {to_string(k), to_string(v)} end)
-    dir = config["cd"] || cwd || File.cwd!()
+    base = config["cd"] || cwd
 
-    case System.find_executable(command) do
-      nil -> {:error, {:not_found, command}}
-      exe -> Reaper.open_stdio(dir, [exe | List.wrap(config["args"])], env: env)
+    with {:ok, exe} <- Executable.resolve(config["command"], base) do
+      Reaper.open_stdio(base || File.cwd!(), [exe | List.wrap(config["args"])], env: env)
     end
   end
 

@@ -233,16 +233,17 @@ defmodule Troupe.Protocol.Daemon do
 
   `:command` wins, then `TROUPE_DAEMON_COMMAND`, then a `troupe-daemon` executable on
   the `PATH` — which is what the daemon is shipped as, by the `troupe` repository, and
-  what its installers put there. A worker pod's daemon is started by its own release
-  and never spawned from here. With none of the three this says it cannot, rather than
-  guessing at a binary that is not installed.
+  what its installers put there. The `PATH` alone: a client started in a repository does
+  not start that repository's `troupe-daemon.bat` (Decision 846). A worker pod's daemon is
+  started by its own release and never spawned from here. With none of the three this
+  says it cannot, rather than guessing at a binary that is not installed.
   """
   @spec command([option()]) :: {:ok, String.t()} | {:error, :no_daemon_command}
   def command(opts \\ []) do
     cond do
       command = Keyword.get(opts, :command) -> {:ok, command}
       command = env("TROUPE_DAEMON_COMMAND") -> {:ok, command}
-      command = System.find_executable("troupe-daemon") -> {:ok, command}
+      command = Troupe.Executable.find("troupe-daemon") -> {:ok, command}
       true -> {:error, :no_daemon_command}
     end
   end
