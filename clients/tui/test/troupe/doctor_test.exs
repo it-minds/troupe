@@ -57,7 +57,7 @@ defmodule Troupe.DoctorCLITest do
     assert CLI.usage() =~ "troupe doctor --bench"
   end
 
-  test "--bench runs the checks, then the five scenarios offline, a line each, and exits 0 when all pass",
+  test "--bench runs the checks, then the nine scenarios offline, a line each, and exits 0 when all pass",
        %{user: user} do
     File.write!(user, "version: 1\nprovider: fake\n")
     # Nothing of the person's moves: their config and state directories are as they were,
@@ -81,14 +81,18 @@ defmodule Troupe.DoctorCLITest do
           {"cut_output", "a tool result over the limit is cut and read back"},
           {"compaction", "compaction fires at the configured share of the window"},
           {"cancel", "a cancelled turn leaves nothing running"},
-          {"replay", "the log replays to the session it recorded"}
+          {"replay", "the log replays to the session it recorded"},
+          {"onboard_claude_code", "Claude Code's files onboarded, and its rule in the prompt"},
+          {"onboard_opencode", "opencode's files onboarded, and its rule in the prompt"},
+          {"onboard_cursor", "Cursor's files onboarded, and its rule in the prompt"},
+          {"onboard_copilot", "Copilot's files onboarded, and its rule in the prompt"}
         ] do
       assert bench =~ ~r/^ok    bench #{name} +#{title}$/m
     end
 
     assert [_, seconds] =
              Regex.run(
-               ~r/^ok    bench +5 of 5 passed in ([\d.]+) s, offline: a scripted model in this program's harness, no provider, key or network$/m,
+               ~r/^ok    bench +9 of 9 passed in ([\d.]+) s, offline: a scripted model in this program's harness, no provider, key or network$/m,
                bench
              )
 

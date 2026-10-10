@@ -73,7 +73,7 @@ defmodule Troupe.BenchCLITest do
     assert out =~ "| tool_calls | model calls in the turn | 31 calls | 31 | ok |"
 
     assert out =~
-             ~r/offline: 5 scenarios, every measure within its budget\.\nThe suite took [\d.]+ s\.\n\z/
+             ~r/offline: 9 scenarios, every measure within its budget\.\nThe suite took [\d.]+ s\.\n\z/
   end
 
   test "troupe bench --json prints the report and nothing else" do

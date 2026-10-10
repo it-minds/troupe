@@ -22,7 +22,7 @@ defmodule Troupe.BenchTest do
     assert Bench.passed?(report), Bench.markdown(report)
 
     assert Enum.map(report["scenarios"], & &1["name"]) ==
-             ~w(tool_calls cut_output compaction cancel replay)
+             ~w(tool_calls cut_output compaction cancel replay onboard_claude_code onboard_opencode onboard_cursor onboard_copilot)
 
     # #389's turn: thirty tool calls are thirty-one model calls, each resending the last.
     tool_calls = scenario(report, "tool_calls")

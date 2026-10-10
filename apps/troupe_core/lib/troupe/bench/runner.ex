@@ -39,39 +39,59 @@ defmodule Troupe.Bench.Runner do
     # In a process of its own, so the session's events and the model's notes die with
     # it rather than waiting in the caller's mailbox.
     with_env(isolation(dir), fn ->
-      fn -> attempt(scenario, work, Path.join(dir, "state")) end
+      fn -> attempt(scenario, work, dir) end
       |> Task.async()
       |> Task.await(:infinity)
     end)
   end
 
-  defp attempt(scenario, work, state_dir) do
-    measured(scenario, work, state_dir)
+  defp attempt(scenario, work, dir) do
+    measured(scenario, work, dir)
   rescue
     error -> %{record: nil, metrics: [], checks: [], error: Exception.message(error)}
   catch
     :exit, reason -> %{record: nil, metrics: [], checks: [], error: "exited: " <> inspect(reason)}
   end
 
-  defp measured(scenario, work, state_dir) do
+  defp measured(scenario, work, dir) do
     {:ok, workspace} = Troupe.Workspace.new(work)
     root = workspace.root_real
+    state_dir = Path.join(dir, "state")
+    marks = prepare(scenario, root, dir)
 
     {:ok, model} =
       GenServer.start(Model, steps: scenario.script, workspace: root, observer: self())
 
     try do
-      in_session(scenario, root, model, overrides(state_dir) ++ scenario.config)
+      in_session(scenario, root, model, overrides(state_dir) ++ scenario.config, marks)
     after
       GenServer.stop(model)
     end
   end
 
-  defp in_session(scenario, root, model, overrides) do
+  # What a scenario does to its workspace before the session starts (onboarding, Decision
+  # 834), with the run's own directories: a `home` of its own too, so nothing under the
+  # person's home directory is read.
+  defp prepare(%Scenario{prepare: nil}, _root, _dir), do: %{}
+
+  defp prepare(%Scenario{prepare: prepare}, root, dir) do
+    home = Path.join(dir, "home")
+    File.mkdir_p!(home)
+
+    prepare.(%{
+      workspace: root,
+      home: home,
+      config_dir: Path.join(dir, "config"),
+      state_dir: Path.join(dir, "state")
+    })
+  end
+
+  defp in_session(scenario, root, model, overrides, marks) do
     config = Troupe.Config.load(root, overrides)
+    agent = if scenario.agent, do: [agent: scenario.agent], else: []
 
     {:ok, session} =
-      Troupe.start_session(workspace: root, fake: model, config_overrides: overrides)
+      Troupe.start_session([workspace: root, fake: model, config_overrides: overrides] ++ agent)
 
     Troupe.subscribe(session.id)
 
@@ -82,7 +102,7 @@ defmodule Troupe.Bench.Runner do
       model: model,
       config: config,
       overrides: overrides,
-      marks: %{}
+      marks: marks
     }
 
     try do
