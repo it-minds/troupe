@@ -1261,7 +1261,12 @@ it can and shows the rest greyed with the reason. Reading the table wakes nothin
 ```
 → `{"status": "fresh", "path": "/home/me/project/.troupe/memory.md",
 "built_at": "2026-09-20T10:00:00Z", "sections": ["Overview", "Layout", "Commands",
-"Conventions", "Notes"], "text": "...", "refresh_due": false, "refresh_held_until": null}`
+"Conventions", "Notes"], "text": "...", "refresh_due": false, "refresh_held_until": null,
+"generated": true, "facts": [{"id": "f_5c0d9a3e71b2", "kind": "command", "claim": "The gate is
+`mix check`", "scope": null, "anchors": [{"path": "mix.exs", "hash": "9f2c...e1"}],
+"evidence": {"session": "s_01J...", "seq": 412, "head": "7f8a221", "exit_status": 0, "by":
+"librarian"}, "created_at": "2026-10-10T09:00:00Z", "verified_at": "2026-10-10T09:00:00Z",
+"status": "current"}]}`
 
 The **project brief**: what earlier agents learned about the repository, read into
 every agent's system prompt and written by the `remember` tool and the `librarian`
@@ -1279,7 +1284,29 @@ librarian's run that failed, was cancelled or wrote nothing is tried again that 
 later, not in every new session; `refresh_held_until` is when (or `null`), for a
 client to say why it started none. `memory.forget` forgets that try with the brief.
 
-#### `memory.forget` → `{"command_id", "workspace"}` deletes the brief. `admin`.
+The brief is made of **facts** (Decision 839), and `facts` lists every one, kind by kind
+(`overview`, `layout`, `command`, `convention`, `negative`, `note`), oldest first within a
+kind. `claim` is the fact in a sentence or two; `scope` a glob of the paths it applies to,
+or `null` for the whole repository; `anchors` the files it was read from, each by its
+`path` from the repository's top and the lowercase hex SHA-256 of what the file held when
+the fact was written, which Troupe took and no model gave. `evidence` is where it came
+from: the `session` and the `seq` of the `remember` call that wrote it, the repository's
+`head` then (`null` outside git), `exit_status` when it is a command the session ran
+(absent otherwise), and `by`: `librarian`, `agent:<name>`, `person` (a hand edit of the
+brief, read back) or `migrated` (from a brief written before facts). `id` names the fact
+for `memory.forget`; `created_at` is when it was first written and `verified_at` when it
+was last checked. `status` is computed as the answer is made, never stored: `current`
+(every anchor holds what it did), `moved` (an anchor changed) or `missing` (one is gone),
+both of which a client shows as "may no longer be true", and `unanchored` (no anchors: it
+ages out by `verified_at`). `generated: true` says `text` and `sections` are a view of the
+facts, rewritten whenever they change. A daemon from before facts sends neither key, and a
+client shows the brief as it did.
+
+#### `memory.forget` → `{"command_id", "workspace", "id"}` (`id` optional)
+
+With an `id`, forgets that fact alone and answers `{"forgotten": true, "id": "f_5c0d9a3e71b2"}`;
+an `id` no fact has is `not_found`. Without one, deletes the whole brief, as before:
+`{"forgotten": true}`. `admin`.
 
 #### `memory.decline` → `{"workspace"}` (`command_id` optional)
 → `{"declined": true}`. The person said no to rewriting a brief an older version of the

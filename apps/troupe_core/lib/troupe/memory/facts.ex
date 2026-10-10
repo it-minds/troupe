@@ -25,11 +25,14 @@ defmodule Troupe.Memory.Facts do
     pull, another daemon, a person) is read again before anything is answered or written.
   - **An anchor is a file in the workspace**: a path outside it, through `..` or a link,
     one into `.git`, the memory's own files, a directory and a file over 10 MiB are each
-    refused with a sentence. An anchor read back from the file is held to the same edge
-    before it is hashed, so a repository's `facts.jsonl` cannot have Troupe read
-    elsewhere.
+    refused with a sentence, and in a git repository so is a file git does not track (an
+    ignored `.env`), whose hash should not reach a `facts.jsonl` that may be committed
+    (Decision 839). An anchor read back from the file is held to the workspace, `.git` and
+    the memory's own files before it is hashed, so a repository's `facts.jsonl` cannot have
+    Troupe read elsewhere.
   """
 
+  alias Troupe.Git
   alias Troupe.Memory
   alias Troupe.Memory.Facts.Store
   alias Troupe.Session.Memory, as: Brief
@@ -103,9 +106,10 @@ defmodule Troupe.Memory.Facts do
   The facts that answer a question, each with its `status` and evidence, at most `limit`
   (default #{@recall_limit}): by `query`, words any of which the claim or scope holds
   (case aside); by `kind`; by `path`, a file or directory (from the workspace) a fact rests
-  on or whose `scope` covers it. With none of them, every fact. Current and unanchored
-  facts come before the ones that may no longer be true, then the ones that match more of
-  the words, then the most recently checked.
+  on or whose `scope` covers it; by `status`, as `status/2` has it (Decision 839: the
+  librarian asks for the `moved` and `missing` ones). With none of them, every fact.
+  Current and unanchored facts come before the ones that may no longer be true, then the
+  ones that match more of the words, then the most recently checked.
   """
   @spec recall(Path.t() | where(), keyword()) :: [fact()]
   def recall(workspace, opts \\ []) do
@@ -119,6 +123,9 @@ defmodule Troupe.Memory.Facts do
     |> Enum.map(&{&1, score(&1, words)})
     |> Enum.reject(fn {_fact, score} -> words != [] and score == 0 end)
     |> Enum.map(fn {fact, score} -> {read(where, fact), score} end)
+    |> Enum.filter(fn {fact, _score} ->
+      opts[:status] in [nil, ""] or fact["status"] == opts[:status]
+    end)
     |> Enum.sort_by(fn {fact, score} ->
       {rank(fact["status"]), -score, desc(fact["verified_at"])}
     end)
@@ -326,8 +333,34 @@ defmodule Troupe.Memory.Facts do
     with rel when is_binary(rel) <- relative_path(path, from, top) || {:error, outside(path)},
          :ok <- within(Path.expand(path, from), from, path),
          {:ok, file} <- confined(rel, top),
-         {:ok, bytes} <- read_anchor(file, path) do
+         {:ok, bytes} <- read_anchor(file, path),
+         :ok <- tracked(rel, top) do
       {:ok, %{"path" => rel, "hash" => sha256(bytes)}}
+    end
+  end
+
+  # Only a file git tracks is an anchor (Decision 839): the hash of an ignored or untracked
+  # file, a `.env`, would go into a `facts.jsonl` that may be committed, and a hash is an
+  # oracle for what a file holds. Outside a repository nothing is committed, so nothing is
+  # held back; inside one where git cannot answer, the anchor is refused rather than guessed.
+  defp tracked(rel, top) do
+    case Git.run(top, ["ls-files", "--cached", "-z", "--", ":(literal)" <> rel],
+           timeout_ms: 10_000
+         ) do
+      {:ok, out, 0} ->
+        listed = out |> String.split(<<0>>, trim: true) |> Enum.map(&Workspace.compare_key/1)
+
+        if Workspace.compare_key(rel) in listed,
+          do: :ok,
+          else:
+            {:error,
+             "#{rel} is not a file git tracks (it is ignored or was never added): anchor a " <>
+               "file the repository commits"}
+
+      _other ->
+        if Brief.repository?(top),
+          do: {:error, "git could not say whether it tracks #{rel}, so it is no anchor"},
+          else: :ok
     end
   end
 

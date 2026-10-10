@@ -19,9 +19,11 @@ import { useSetupFlow } from "./hooks";
 import { Where } from "./Where";
 import { Workspace } from "./Workspace";
 
-/** How a run ended: the session it started, or the plane to sign in to. */
+/** How a run ended: the session it started, and where, or the plane to sign in to. */
 export interface SetupOutcome {
   sessionId: string | null;
+  /** The workspace that session started in: its start goes on as a new session's does. */
+  workspace?: string | null;
   plane: string | null;
 }
 
@@ -78,6 +80,7 @@ function outcomeOf(flow: SetupFlow): SetupOutcome {
   const plane = flow.answers.where?.["choice"] === "plane";
   return {
     sessionId: flow.session?.session_id ?? null,
+    workspace: flow.session?.session_id ? flow.session.workspace : null,
     plane: plane ? ((flow.answers.where?.["plane_url"] as string | null) ?? "") : null,
   };
 }

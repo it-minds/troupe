@@ -82,6 +82,12 @@ defmodule Troupe.UI.TUI.View do
     mcp_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
+  defp draw(%{focus: :memory} = state, frame) do
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+    [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
+    memory_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
+  end
+
   # The palette is a popup over the session (Decision 119): the screen is drawn as it was
   # where the palette was opened from, the command box shows the filter being typed, and
   # the popup sits over the rest.
@@ -1026,6 +1032,156 @@ defmodule Troupe.UI.TUI.View do
     do: field("command", Enum.join([command | args], " "))
 
   defp transport_field(_server), do: field("command", "(none)")
+
+  ## Memory page (root Decision 839)
+
+  # The order the page lists kinds in: what every prompt carries first, then what
+  # `recall` answers.
+  @kinds ~w(command convention negative overview layout note)
+  @kind_titles %{
+    "command" => "Commands",
+    "convention" => "Conventions",
+    "negative" => "What does not work",
+    "overview" => "Overview",
+    "layout" => "Layout",
+    "note" => "Notes"
+  }
+  @doubtful ~w(moved missing)
+
+  @doc """
+  The facts the `/memory` page lists, in its order: kind by kind, each kind in the order
+  the facts were written. What the page's cursor indexes.
+  """
+  @spec memory_facts(map()) :: [map()]
+  def memory_facts(%{memory: %{facts: facts}}),
+    do:
+      Enum.sort_by(Enum.with_index(facts), fn {f, i} -> {kind_rank(f["kind"]), i} end)
+      |> Enum.map(&elem(&1, 0))
+
+  def memory_facts(_state), do: []
+
+  defp kind_rank(kind), do: Enum.find_index(@kinds, &(&1 == kind)) || length(@kinds)
+
+  defp memory_page(state, rect) do
+    facts = memory_facts(state)
+    [list_rect, detail_rect] = Layout.split(rect, :horizontal, [{:fill, 3}, {:fill, 2}])
+    rows = memory_rows(facts)
+    cursor = state.memory.cursor
+
+    items =
+      case rows do
+        [] ->
+          [
+            "No facts yet.",
+            "",
+            "/memory refresh has the librarian survey the repository and write them;",
+            "an agent's `remember` adds one as it works."
+          ]
+
+        rows ->
+          Enum.map(rows, &memory_line/1)
+      end
+
+    doubtful = Enum.count(facts, &(&1["status"] in @doubtful))
+
+    list = %ExRatatui.Widgets.List{
+      items: items,
+      selected: if(facts == [], do: nil, else: row_of(rows, Enum.at(facts, cursor))),
+      highlight_symbol: "▸ ",
+      highlight_style: selected(),
+      block: %Block{
+        title: memory_title(length(facts), doubtful),
+        borders: [:all],
+        border_type: :double
+      }
+    }
+
+    detail = %Paragraph{
+      text: memory_detail(Enum.at(facts, cursor)),
+      wrap: true,
+      block: %Block{title: " where it came from ", borders: [:all]}
+    }
+
+    [{list, list_rect}, {detail, detail_rect}]
+  end
+
+  defp memory_title(count, 0), do: " Memory: #{facts(count)} "
+
+  defp memory_title(count, doubtful),
+    do: " Memory: #{facts(count)}, #{doubtful} may no longer be true "
+
+  defp facts(1), do: "1 fact"
+  defp facts(count), do: "#{count} facts"
+
+  defp memory_rows(facts) do
+    facts
+    |> Enum.chunk_by(& &1["kind"])
+    |> Enum.flat_map(fn [first | _] = kind ->
+      [{:heading, Map.get(@kind_titles, first["kind"], first["kind"]), length(kind)}] ++
+        Enum.map(kind, &{:fact, &1})
+    end)
+  end
+
+  defp row_of(rows, fact), do: Enum.find_index(rows, &(&1 == {:fact, fact}))
+
+  defp memory_line({:heading, title, count}),
+    do: Line.new([Span.new("#{title} (#{count})", style: Theme.style(:accent, [:bold]))])
+
+  defp memory_line({:fact, %{"status" => status} = fact}) when status in @doubtful,
+    do:
+      Line.new([
+        Span.new("  #{fact["claim"]}  "),
+        Span.new("may no longer be true", style: Theme.style(:stale))
+      ])
+
+  defp memory_line({:fact, fact}), do: Line.new([Span.new("  #{fact["claim"]}")])
+
+  defp memory_detail(nil), do: "Select a fact to see where it came from."
+
+  defp memory_detail(fact) do
+    evidence = fact["evidence"] || %{}
+
+    [
+      field("kind", fact["kind"]),
+      memory_status(fact["status"]),
+      field("claim", fact["claim"]),
+      field("scope", fact["scope"] || "the whole repository"),
+      anchors_field(fact["anchors"] || []),
+      field("written by", evidence["by"]),
+      evidence["session"] && field("session", "#{evidence["session"]} (event #{evidence["seq"]})"),
+      evidence["head"] && field("at", evidence["head"]),
+      is_integer(evidence["exit_status"]) && field("exited", evidence["exit_status"]),
+      field("written", fact["created_at"]),
+      field("verified", fact["verified_at"]),
+      field("id", fact["id"])
+    ]
+    |> Enum.filter(&(&1 not in [nil, false]))
+    |> Enum.map(&memory_detail_line/1)
+  end
+
+  defp memory_detail_line(%Line{} = line), do: line
+  defp memory_detail_line(text), do: Line.new([Span.new(text)])
+
+  defp memory_status(status) when status in @doubtful do
+    why = if status == "moved", do: "an anchor changed", else: "an anchor is gone"
+
+    Line.new([
+      Span.new(field("status", "#{status}: #{why}, ")),
+      Span.new("may no longer be true", style: Theme.style(:stale))
+    ])
+  end
+
+  defp memory_status("unanchored"), do: field("status", "unanchored: it ages out")
+  defp memory_status(status), do: field("status", status)
+
+  defp anchors_field([]), do: field("anchors", "none")
+
+  defp anchors_field(anchors),
+    do:
+      field(
+        "anchors",
+        Enum.map_join(anchors, ", ", &"#{&1["path"]} (#{String.slice(&1["hash"] || "", 0, 8)})")
+      )
 
   ## Settings page
 
@@ -2451,6 +2607,9 @@ defmodule Troupe.UI.TUI.View do
 
         :mcp ->
           {"", " mcp — ↑↓ move · r reload · c check · d enable/disable · x remove · Esc back "}
+
+        :memory ->
+          {"", " memory — ↑↓ move · x forgets the fact · r reload · Esc back "}
 
         :hq ->
           {hq_text(state), Troupe.UI.HQ.footer(state.hq)}

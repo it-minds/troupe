@@ -70,6 +70,13 @@ defmodule Troupe.Client do
           warnings: [String.t()]
         }
 
+  @typedoc """
+  Memory's facts as the `/memory` page lists them (root Decision 839): each fact as
+  `memory.get` answers it, a wire map with its `status` as read now, and the brief's
+  status beside them.
+  """
+  @type memory :: %{facts: [map()], status: String.t(), path: String.t() | nil}
+
   @typedoc "What a session allows right now, and why not when it does not."
   @type capability :: %{
           state: atom(),
@@ -129,6 +136,8 @@ defmodule Troupe.Client do
   @callback sources(session_id()) :: {:ok, sources()} | {:error, term()}
   @callback manage_sources(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   @callback memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  @callback memory_facts(session_id()) :: {:ok, memory()} | :no_facts | {:error, term()}
+  @callback forget_fact(session_id(), String.t()) :: :ok | {:error, term()}
   @callback instructions(session_id()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
@@ -371,6 +380,17 @@ defmodule Troupe.Client do
 
   @spec memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def memory(sid, command), do: impl(sid).memory(sid, command)
+
+  @doc """
+  `/memory`'s page: the workspace's facts with their status. `:no_facts` from a daemon
+  from before facts, or where the brief is off, which `/memory` answers as it did.
+  """
+  @spec memory_facts(session_id()) :: {:ok, memory()} | :no_facts | {:error, term()}
+  def memory_facts(sid), do: impl(sid).memory_facts(sid)
+
+  @doc "Forgets one fact, by its id: `memory.forget` with an `id`."
+  @spec forget_fact(session_id(), String.t()) :: :ok | {:error, term()}
+  def forget_fact(sid, id), do: impl(sid).forget_fact(sid, id)
 
   @doc """
   `/context`: every file the session's next prompt is read from, as `context.get` lists

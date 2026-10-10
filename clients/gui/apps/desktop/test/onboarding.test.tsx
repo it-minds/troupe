@@ -57,6 +57,8 @@ function field(label: string): HTMLInputElement | HTMLTextAreaElement {
 describe("a fresh machine's first run", () => {
   it("reaches a first working session with one API key, and is not asked again", async () => {
     const fake = await start({ firstRun: true });
+    // The project has no brief: the first session is a start like any, and starts the librarian.
+    fake.memory["/home/ada/project"] = { status: "absent" };
     unmount = render(<App />).unmount;
 
     // The theme first, pre-answered; Continue is enough.
@@ -128,6 +130,10 @@ describe("a fresh machine's first run", () => {
       ["session_created", undefined],
       ["user_input", "Look around this directory and tell me what you find."],
     ]);
+    // Its start went on to the librarian, as a branch of it, now that a model can be asked.
+    await waitFor(() => fake.librarians.length === 1, "the first session's librarian");
+    expect(fake.librarians.map((l) => [l.workspace, l.parent])).toEqual([["/home/ada/project", created!.id]]);
+    await waitFor(() => says("The librarian is writing the project brief, in a session of its own."), "its line");
 
     // What the daemon was told, and what it wrote: the key went once, at its own step.
     expect(fake.settings).toMatchObject({ exists: true, provider: "anthropic", api_key: "sk-right", models: { default: "claude-opus-5", cheap: "claude-haiku-4-5" } });

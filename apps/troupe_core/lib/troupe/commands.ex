@@ -401,9 +401,11 @@ defmodule Troupe.Commands do
         args: [arg("action", false, "text")],
         availability: "local",
         detail:
-          "The brief in .troupe/memory.md is read into every agent's prompt. /memory says " <>
-            "what it holds, /memory refresh asks the librarian to rewrite it, /memory forget " <>
-            "deletes it.",
+          "The brief is made of facts, each anchored on the files it was read from; its " <>
+            "commands and conventions are read into every agent's prompt. /memory lists the " <>
+            "facts by kind, says which may no longer be true and where each came from, and " <>
+            "forgets one; /memory refresh asks the librarian to re-verify and rewrite them, " <>
+            "/memory forget deletes the whole brief.",
         example: "/memory refresh"
       ),
       entry(

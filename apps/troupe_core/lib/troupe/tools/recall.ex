@@ -17,6 +17,9 @@ defmodule Troupe.Tools.Recall do
   alias Troupe.Memory.Facts
 
   @limit 20
+  # What `status` asks for (Decision 839): the librarian's re-verifying starts with
+  # `moved` and `missing`, which a question by words would put last.
+  @statuses ~w(current moved missing unanchored)
 
   @impl Troupe.Tool
   def name, do: "recall"
@@ -28,7 +31,7 @@ defmodule Troupe.Tools.Recall do
 
     Each fact comes with its status: current, unanchored (not tied to a file), or "may no longer be true" when a file it rests on has changed or gone since it was checked. Check one of those before you rely on it.
 
-    Ask by `query` (words in the fact), `kind` (#{Enum.join(Memory.kinds(), ", ")}), or `path` (a file or directory the fact rests on or applies to); with none, every fact. Cheaper than surveying the repository again: ask before you explore.
+    Ask by `query` (words in the fact), `kind` (#{Enum.join(Memory.kinds(), ", ")}), `path` (a file or directory the fact rests on or applies to) or `status`; with none, every fact. Cheaper than surveying the repository again: ask before you explore.
     """
     |> String.trim()
   end
@@ -44,7 +47,8 @@ defmodule Troupe.Tools.Recall do
           "type" => "string",
           "description" =>
             "A file or directory, from the workspace, a fact rests on or applies to."
-        }
+        },
+        "status" => %{"type" => "string", "enum" => @statuses}
       }
     }
   end
@@ -57,16 +61,20 @@ defmodule Troupe.Tools.Recall do
     with {:ok, query} <- optional(args, "query"),
          {:ok, kind} <- optional(args, "kind"),
          {:ok, path} <- optional(args, "path"),
-         :ok <- check_kind(kind) do
+         {:ok, status} <- optional(args, "status"),
+         :ok <- check_kind(kind),
+         :ok <- check_status(status) do
       if enabled?(ctx),
-        do: {:ok, answer(ctx.workspace.root_real, query, kind, path)},
+        do:
+          {:ok,
+           answer(ctx.workspace.root_real, query: query, kind: kind, path: path, status: status)},
         else:
           {:ok, "The project brief is off in this workspace (memory: false): no facts are kept."}
     end
   end
 
-  defp answer(workspace, query, kind, path) do
-    found = Facts.recall(workspace, query: query, kind: kind, path: path, limit: @limit + 1)
+  defp answer(workspace, ask) do
+    found = Facts.recall(workspace, ask ++ [limit: @limit + 1])
     total = Facts.count(workspace)
 
     cond do
@@ -151,6 +159,14 @@ defmodule Troupe.Tools.Recall do
     if kind in Memory.kinds(),
       do: :ok,
       else: {:error, "unknown kind #{kind}; one of #{Enum.join(Memory.kinds(), ", ")}"}
+  end
+
+  defp check_status(nil), do: :ok
+
+  defp check_status(status) do
+    if status in @statuses,
+      do: :ok,
+      else: {:error, "unknown status #{status}; one of #{Enum.join(@statuses, ", ")}"}
   end
 
   defp enabled?(%{config: %Troupe.Config{memory: false}}), do: false

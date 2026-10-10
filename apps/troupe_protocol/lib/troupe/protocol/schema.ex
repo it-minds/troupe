@@ -755,7 +755,12 @@ defmodule Troupe.Protocol.Schema do
       # of the budget (Decision 706); reading it wakes nothing.
       "context.get" => %{"session_id" => required(:string)},
       "mcp.status" => %{"session_id" => required(:string)},
-      "memory.forget" => %{"command_id" => required(:string), "workspace" => required(:string)},
+      # With `id`, one fact; without, the whole brief (Decision 839).
+      "memory.forget" => %{
+        "command_id" => required(:string),
+        "workspace" => required(:string),
+        "id" => optional(:string)
+      },
       # A no to rewriting a brief an older survey wrote, remembered for that survey's
       # version (Decision 835).
       "memory.decline" => %{"workspace" => required(:string), "command_id" => optional(:string)},

@@ -26,6 +26,8 @@ export interface PaletteActions {
   go: (screen: PaletteScreen) => void;
   /** Show the backstage's Files pane. */
   showFiles: () => void;
+  /** Show the backstage's Memory pane, the repository's facts, and with `refresh` or `forget` do that there. */
+  showMemory: (what?: "refresh" | "forget") => void;
   /** The transcript as text, for /copy. */
   transcript: () => string;
   /** Open the agents manager on the session's workspace: a session on this computer's (troupe #503). */
@@ -79,6 +81,13 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
   sessions: ({ go }) => void go("sessions"),
   hq: ({ go }) => void go("sessions"),
   files: ({ showFiles }) => void showFiles(),
+  // The memory view, as the terminal client's /memory: refresh has the librarian write the
+  // brief again, forget asks before it forgets the whole brief; a fact is forgotten there.
+  memory: ({ showMemory }, args) => {
+    if (args === "") return void showMemory();
+    if (args === "refresh" || args === "forget") return void showMemory(args);
+    return `unknown /memory ${args}; use /memory, /memory refresh or /memory forget`;
+  },
   settings: ({ go }) => void go("local"),
   models: ({ go }) => void go("local"),
   agents: ({ agents }) =>
@@ -99,7 +108,6 @@ const NOT_HERE: Record<string, string> = {
   dismiss: "there are no windows to dismiss here",
   observer: "not in the desktop app yet",
   upload: "not in the desktop app yet",
-  memory: "not in the desktop app yet",
   watch: "on This computer, under this session's controls",
   mcp: "not in the desktop app yet",
   worktree: "start a branch from the terminal client, or a new session from the list",
