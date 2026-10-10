@@ -7,9 +7,9 @@ defmodule Troupe.CLI.ConfigSetup do
   has always printed. A machine with none of those has nothing to report, and on a
   terminal this asks how it should reach a model instead:
 
-    * opencode is set up here: Troupe already reads opencode's providers while it has
-      none of its own, and this offers to copy them into `config.yaml` (`config.import`),
-      keys as opencode has them written, so the machine stops depending on opencode.
+    * opencode is set up here: Troupe reads none of opencode's settings (root Decision
+      828), so this offers to copy its providers into `config.yaml` (`config.import`),
+      keys as opencode has them written; a no goes on to the ways below.
     * otherwise, three ways on: set a provider up here (Anthropic first, then OpenAI or a
       gateway: provider, URL and key, then a model from what the provider lists, through
       `config.models` and `config.set`); take an organisation's settings from a Troupe
@@ -44,8 +44,9 @@ defmodule Troupe.CLI.ConfigSetup do
   Everything this touches outside itself, so a test can play a person and a daemon:
   `say` prints a line, `ask` reads one (`nil` at end of input), `secret` reads one
   without echo, `call` is a daemon request, `login` and `pull` are the commands of the
-  same names, `describe` is the full report, `opencode` the providers Troupe is reading
-  from opencode right now, `usable?` whether the settings in force can ask a model, and
+  same names, `describe` is the full report, `opencode` the providers opencode's settings
+  declare, as the daemon finds them to offer the copy (`setup.get`'s `detected`),
+  `usable?` whether the settings in force can ask a model, and
   `troupe_daemon?` and `troupe_daemon` whether there is a standalone daemon binary and
   `troupe daemon ARGS` run through it. `not_terminal` names standard input or output when
   either is not a terminal, `screen` runs the full-screen setup on the flow `setup.get`
@@ -85,9 +86,6 @@ defmodule Troupe.CLI.ConfigSetup do
 
         {:ok, %{"api_key_source" => "env"}} ->
           report(io)
-
-        {:ok, %{"api_key_source" => "opencode"} = settings} ->
-          first_run(settings, io)
 
         {:ok, settings} ->
           if io.usable?.(), do: report(io), else: first_run(settings, io)
@@ -274,14 +272,14 @@ defmodule Troupe.CLI.ConfigSetup do
     1
   end
 
-  defp first_run(%{"path" => path} = settings, io) do
+  defp first_run(%{"path" => path}, io) do
     path = Troupe.Paths.display(path)
     opencode = io.opencode.()
 
     io.say.("No model settings yet: #{path} does not exist.")
 
     cond do
-      settings["api_key_source"] == "opencode" and opencode.names != [] ->
+      opencode.names != [] ->
         offer_opencode(path, opencode, io)
 
       io.interactive? ->
@@ -303,7 +301,7 @@ defmodule Troupe.CLI.ConfigSetup do
         if(opencode.default, do: " (default model #{opencode.default}).", else: ".")
     )
 
-    io.say.("Troupe uses those as they are while it has no settings of its own.")
+    io.say.("Troupe doesn't read opencode's settings; a copy makes them Troupe's own.")
 
     cond do
       not io.interactive? ->
@@ -314,8 +312,8 @@ defmodule Troupe.CLI.ConfigSetup do
         io |> import_opencode() |> at_login(io)
 
       true ->
-        io.say.("Left as it is: Troupe keeps reading opencode's config.")
-        0
+        io.say.("Not copied.")
+        choose(path, io)
     end
   end
 
@@ -613,7 +611,7 @@ defmodule Troupe.CLI.ConfigSetup do
       login: &RemoteCLI.login/1,
       pull: &ModelConfig.pull/1,
       describe: fn -> describe(workspace) end,
-      opencode: fn -> opencode(workspace) end,
+      opencode: &opencode/0,
       local_file?: fn -> File.regular?(Troupe.Config.user_path()) end,
       usable?: fn -> usable?(workspace) end,
       troupe_daemon?: fn -> match?({:ok, _path}, Troupe.CLI.Daemon.command()) end,
@@ -732,22 +730,16 @@ defmodule Troupe.CLI.ConfigSetup do
     end
   end
 
-  defp opencode(workspace) do
-    config =
-      case Troupe.Config.resolve(workspace) do
-        {:ok, config, _layers} -> config
-        {:error, _error} -> %Troupe.Config{}
-      end
+  # What opencode's settings declare, as the daemon finds them for the first run's offer
+  # to copy them; nothing, from a daemon that has no first run to ask.
+  defp opencode do
+    case Link.call("setup.get", %{}) do
+      {:ok, %{"detected" => %{"opencode" => %{"providers" => names} = found}}}
+      when is_list(names) ->
+        %{names: names, default: found["default"]}
 
-    names =
-      config.providers
-      |> Enum.filter(fn {_name, provider} -> provider.source == :opencode end)
-      |> Enum.map(&elem(&1, 0))
-      |> Enum.sort()
-
-    %{
-      names: names,
-      default: if(names != [] and String.contains?(config.model, "/"), do: config.model)
-    }
+      _other ->
+        %{names: [], default: nil}
+    end
   end
 end

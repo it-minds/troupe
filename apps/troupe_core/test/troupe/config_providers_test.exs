@@ -1,8 +1,8 @@
 defmodule Troupe.ConfigProvidersTest do
   @moduledoc """
-  A laptop's configuration: named providers, opencode's providers when Troupe has no
-  key of its own, and the model catalog — the three things a pod never has and a
-  person always does.
+  A laptop's configuration: named providers, opencode's providers as the copy reads them
+  (and never for a session, Decision 828), and the model catalog — the three things a pod
+  never has and a person always does.
 
   `async: false` because the opencode and catalog paths are found through the
   environment, and two tests pointing them at two directories at once would read each
@@ -205,32 +205,26 @@ defmodule Troupe.ConfigProvidersTest do
       assert OpenCode.default_model() == "portal/glm-5.2"
     end
 
-    test "with no key of its own Troupe takes opencode's providers and its default model", %{workspace: workspace} do
-      config = Config.load(workspace)
+    # Decision 828: opencode's files are copied once, when a person asks
+    # (`ModelSettings.import_opencode/1`), and never read for a session.
+    test "with no key of its own Troupe reads none of opencode's providers, nor its default model",
+         %{workspace: workspace} do
+      {:ok, config, layers} = Config.resolve(workspace)
 
-      assert config.model == "portal/glm-5.2"
-      assert config.providers["portal"].source == :opencode
-      assert Config.target(config, nil) |> Map.take([:provider, :model, :base_url, :api_key]) ==
-               %{provider: "openai", model: "glm-5.2", base_url: "https://llm-gw.example/v1", api_key: "portal-key-from-auth"}
-    end
-
-    test "a model named in a file or the environment is not displaced by opencode's", %{workspace: workspace} do
-      File.write!(Path.join(workspace, ".troupe/config.yaml"), "model: gateway/claude-opus-5\n")
-      assert Config.load(workspace).model == "gateway/claude-opus-5"
-
-      System.put_env("TROUPE_MODEL", "claude-sonnet-5")
-      assert Config.load(workspace).model == "claude-sonnet-5"
-    end
-
-    test "a session key of its own means opencode is not consulted", %{workspace: workspace} do
-      System.put_env("TROUPE_API_KEY", "own-key-1234567890")
-      config = Config.load(workspace)
       assert config.providers == %{}
       assert config.model == "claude-sonnet-5"
+      assert Config.key_problem(config) != nil
+      refute Enum.any?(config.warnings, &(&1 =~ "opencode"))
+
+      refute Enum.any?(Map.values(layers.ladder), fn steps ->
+               Enum.any?(steps, &(to_string(&1.source) =~ "opencode"))
+             end)
+
+      refute Config.describe(config) =~ "opencode"
     end
 
     test "a key or URL in opencode.jsonc that says {env:VAR} or {file:path} is read as opencode reads it",
-         %{workspace: workspace, opencode: opencode} do
+         %{opencode: opencode} do
       File.write!(Path.join(opencode, "secret-key"), "file-key-1234567890\n")
 
       File.write!(Path.join(opencode, "opencode.jsonc"), """
@@ -247,12 +241,15 @@ defmodule Troupe.ConfigProvidersTest do
       System.put_env("TROUPE_TEST_OC_HOST", "gw.example")
       on_exit(fn -> Enum.each(~w(TROUPE_TEST_OC_KEY TROUPE_TEST_OC_HOST), &System.delete_env/1) end)
 
-      config = Config.load(workspace)
+      providers = OpenCode.providers()
 
-      assert Config.target(config, "envy/m") |> Map.take([:base_url, :api_key]) ==
+      assert Map.take(providers["envy"], [:base_url, :api_key]) ==
                %{base_url: "https://gw.example/v1", api_key: "env-key-1234567890"}
 
-      assert Config.target(config, "filed/m") |> Map.take([:api_key, :auth]) == %{api_key: "file-key-1234567890", auth: :bearer}
+      assert Map.take(providers["filed"], [:api_key, :auth]) == %{
+               api_key: "file-key-1234567890",
+               auth: :bearer
+             }
 
       # For a copy into config.yaml, which reads {env:VAR} itself but not {file:path}.
       copied = OpenCode.providers(as_written: true)
@@ -261,7 +258,7 @@ defmodule Troupe.ConfigProvidersTest do
     end
 
     test "an {env:VAR} that is not set, or a {file:path} that cannot be read, refuses that provider and no other",
-         %{workspace: workspace, opencode: opencode} do
+         %{opencode: opencode} do
       File.write!(Path.join(opencode, "opencode.jsonc"), """
       {
         "model": "fine/m",
@@ -274,30 +271,15 @@ defmodule Troupe.ConfigProvidersTest do
       """)
 
       System.delete_env("TROUPE_TEST_OC_UNSET")
-      config = Config.load(workspace)
+      providers = OpenCode.providers()
 
-      assert Config.target(config, "fine/m").api_key == "fine-key-1234567890"
-      assert {:refused, why} = Config.target(config, "unset/m").api_key
+      assert providers["fine"].api_key == "fine-key-1234567890"
+      refute Map.has_key?(providers["fine"], :refused)
+      assert %{api_key: nil, refused: why} = providers["unset"]
       assert why =~ "provider.unset.options.apiKey reads {env:TROUPE_TEST_OC_UNSET}, and TROUPE_TEST_OC_UNSET is not set"
       assert why =~ "the provider unset is refused until it is"
-      assert {:refused, why} = Config.target(config, "missing/m").api_key
+      assert %{api_key: nil, refused: why} = providers["missing"]
       assert why =~ "provider.missing.options.apiKey reads {file:no-such-key-file}, and #{Path.join(opencode, "no-such-key-file")}"
-      assert Enum.any?(config.warnings, &(&1 =~ "TROUPE_TEST_OC_UNSET is not set"))
-      refute Enum.any?(config.warnings, &(&1 =~ "provider.fine"))
-    end
-
-    test "a config file's provider of the same name wins over opencode's", %{workspace: workspace, config_home: config_home} do
-      File.write!(Path.join(config_home, "config.yaml"), """
-      providers:
-        portal:
-          base_url: https://mine.example/v1
-          api_key: my-portal-key-12345
-      """)
-
-      config = Config.load(workspace)
-      assert config.providers["portal"].source == :yaml
-      assert config.providers["gateway"].source == :opencode
-      assert Config.target(config, "portal/glm-5.2").base_url == "https://mine.example/v1"
     end
   end
 

@@ -185,8 +185,8 @@ defmodule Troupe.Config.Schema do
                "default",
                :string,
                "The model every agent uses unless its definition names one. A bare id goes to the " <>
-                 "session-wide provider; `<provider>/<model>` goes to a named one, from `providers` or " <>
-                 "opencode. `troupe models` lists what this machine can address.",
+                 "session-wide provider; `<provider>/<model>` goes to a named one, from `providers`. " <>
+                 "`troupe models` lists what this machine can address.",
                default: "claude-sonnet-5",
                field: :model,
                label: "model"
@@ -439,7 +439,7 @@ defmodule Troupe.Config.Schema do
         spec(
           "instructions_max_chars",
           {:integer, 1},
-          "How many characters of instruction files (`AGENTS.md` and its aliases, every scope together) go into a prompt; the nearest are kept whole first.",
+          "How many characters of instruction files (`AGENTS.md`, `.agents/AGENTS.md` and `.troupe/rules`, every scope together) go into a prompt; the nearest are kept whole first.",
           default: 16_000,
           field: :instructions_max_chars
         )

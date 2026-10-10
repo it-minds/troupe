@@ -5,13 +5,14 @@ defmodule Troupe.Client.Instructions do
   one notice line, in the order the prompt reads them.
 
   Paths under the workspace are shown from it; the person's own file, which is not,
-  is shown whole. A file the budget cut or left out says so, and so does an alias the
-  file hid in its directory, so nobody debugs a `CLAUDE.md` that was never loaded.
+  is shown whole. A file the budget cut or left out says so, and so does another tool's
+  file the daemon does not read, so nobody debugs a `CLAUDE.md` that was never loaded.
   Every file left out says why in words (Decision 148): the `reason` `context.get` gives
-  it (outside the repository, an alias another name hid, a Copilot file below the root,
-  the budget), and each import that was not followed, after the file that names it. A
-  Cursor rule says why it applies, as `context.get`'s `applies` puts it, or why it does
-  not, as its `reason` does (root Decision 809).
+  it (outside the repository, another tool's file waiting for `troupe onboard`, a
+  Copilot file below the root, one that cannot be read, the budget; root Decision 828),
+  and each import that was not followed, after the file that names it. A rule in
+  `.troupe/rules` says why it applies, as `context.get`'s `applies` puts it, or why it
+  does not, as its `reason` does (root Decisions 809 and 828).
   """
 
   @doc "The line for an answer to `context.get`; `workspace` is `nil` when unknown."

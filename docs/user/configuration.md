@@ -393,19 +393,23 @@ two disagree the directory's own wins, and `/context` names it with its director
 scope (`.agents/AGENTS.md (root)`). Your own `<config>` has none.
 
 Every file applies. A file in a directory below the root is about the work under that
-directory, and where two disagree, the nearer wins. In one directory `AGENTS.md`,
-`CLAUDE.md` and `GEMINI.md` are the same file under other tools' names, and at the
-repository root so is `.github/copilot-instructions.md`: the first that exists is read
-and the rest are skipped, and the session's log and `/context` say which and why, so
-nobody debugs a file that was never loaded. So a repository with only a `CLAUDE.md`
-works as it is. Copilot reads its file at the repository root and nowhere else, and so
-does Troupe: a `.github/copilot-instructions.md` in a directory below the root is not
-read, and is listed as skipped, saying so. A file that is a link to somewhere outside
-the repository (outside `<config>`, for your own `AGENTS.md`) is not read; `context.get`
-and the session's log list it as `outside`. The same goes for `.troupe/memory.md`, which
-is then neither read nor written. Every file left out comes with a `reason`, in words,
-which `/context` prints: `not read: outside the repository`, `skipped: AGENTS.md is used
-in this directory`, `not read: Copilot's file counts only at the root`.
+directory, and where two disagree, the nearer wins.
+
+Other tools' files are not read. A `CLAUDE.md` or a `GEMINI.md` in one of those
+directories, Copilot's `.github/copilot-instructions.md` at the root, and Cursor's
+`.cursorrules` and `.cursor/rules/*.mdc` are each listed in the session's log and
+`/context` as skipped, `not read: run troupe onboard`: [`troupe
+onboard`](#onboarding-another-tools-files) brings what they say into `AGENTS.md` and
+`.troupe/rules/` once, and from then on those are what a session reads. So a repository
+with only a `CLAUDE.md` gives a session nothing until it is onboarded. A Copilot file in
+a directory below the root never counted, as Copilot reads its file at the root only,
+and says so: `not read: Copilot's file counts only at the root`. A file that is a link to
+somewhere outside the repository (outside `<config>`, for your own `AGENTS.md`) is not
+read; `context.get` and the session's log list it as `outside`. The same goes for
+`.troupe/memory.md`, which is then neither read nor written. A file that is there and
+cannot be read is listed as `unreadable`. Every file left out comes with a `reason`, in
+words, which `/context` prints: `not read: run troupe onboard`, `not read: outside the
+repository`, `not read: permission denied`.
 
 A file can pull in another with `@path/to/file.md` on a line of its own or in a
 sentence, as Claude Code's do. The path is taken from the importing file's directory
@@ -418,21 +422,32 @@ only from inside `<config>`; an import that is not followed (`missing`, `outside
 session's log, and `/context` prints it after that file (`@docs/gone.md (root) import not
 followed: missing`).
 
-Cursor's rules are read as Cursor reads them. Each `.cursor/rules/*.mdc` at the
-repository root, and in a directory on the way to where the session works, comes right
-after that directory's own file, in name order, and its front matter says when it
-applies: `alwaysApply: true` puts it in every prompt, and so does the legacy
-`.cursorrules` at the root; `globs` (`src/**/*.ts, *.tsx`, or a list) put it in the
-prompt from the turn after the agent first read, edited or wrote a file one of them
-matches, for as long as the conversation holds that call; a rule with only a
+A repository's rules are Markdown files in `.troupe/rules/`, each with front matter that
+says when it applies, as Cursor's rules do:
+
+```markdown
+---
+description: TypeScript in the web app
+globs: src/**/*.ts, *.tsx
+alwaysApply: false
+---
+No `any`; prefer `unknown` and narrow it.
+```
+
+Each `.troupe/rules/*.md` at the repository root, and in a directory on the way to where
+the session works, comes right after that directory's own file, in name order:
+`alwaysApply: true` puts it in every prompt; `globs` (a comma-separated string or a list)
+put it in the prompt from the turn after the agent first read, edited or wrote a file one
+of them matches, for as long as the conversation holds that call; a rule with only a
 `description` is listed in the prompt by it, and the agent reads the file when the
-description fits the work; a rule with none of them is not used. A glob is taken from
-the directory that holds `.cursor` (the repository root, for the root's rules), and one
+description fits the work; a rule with none of them is not used. A glob is taken from the
+directory that holds `.troupe` (the repository root, for the root's rules), and one
 without a `/` matches a file's name in any directory. `/context` says of each rule why it
 applies (`always applied`, `applied: src/a.ts matches src/**/*.ts`) or why not (`applies
 when a file matching src/**/*.ts is read or edited`, `requested by description only:
 listed in the prompt, not joined`). Rules share the budget below and are held to the
-repository's edge as every other file is; an `@` in a rule is not followed.
+repository's edge as every other file is; an `@` in a rule is not followed. `troupe
+onboard` writes them from Cursor's `.mdc` rules and `.cursorrules`.
 
 The files share one budget, `instructions_max_chars` (16,000 characters), a file and
 what it imports counting as one scope. The nearest scope is kept whole first; a file the
@@ -443,8 +458,9 @@ prompt and its share of the budget; the session's `instructions_loaded` event re
 the same, what was cut included, whenever what was read changed.
 
 `troupe instructions check [--workspace DIR] [--json]` checks those files, every one a
-session in the workspace would read wherever it worked, nested ones and imports
-included. It prints one line for each finding, with the file and the line:
+session in the workspace would read wherever it worked, nested ones, `.troupe/rules` and
+imports included, and none of the other tools' files a session does not read. It prints
+one line for each finding, with the file and the line:
 
 ```
 frontend/AGENTS.md:3: contradiction: how to run the tests: `pnpm test` here, `npm test` in AGENTS.md:3
@@ -458,10 +474,11 @@ frontend/AGENTS.md:9: duplicate: the same rule as AGENTS.md:5
   no command in common. A root's `mix test` and `frontend/`'s `pnpm test` are two parts
   of one repository, not a contradiction, and two sibling directories never are.
 - **path**: a path in a code span or a link that is not there, from the file's own
-  directory or from the repository root, and an `@` import that names no file. A span
-  counts as a path when it starts with `./` or `../`, or has a slash and ends in one,
-  names a file with an extension, or starts with a directory that is there; a bare file
-  name, a branch like `origin/main` and a URL are not checked.
+  directory (for an `.agents/AGENTS.md` or a rule, also from the directory holding its
+  `.agents` or `.troupe`) or from the repository root, and an `@` import that names no
+  file. A span counts as a path when it starts with `./` or `../`, or has a slash and
+  ends in one, names a file with an extension, or starts with a directory that is there;
+  a bare file name, a branch like `origin/main` and a URL are not checked.
 - **command**: a command in a code span, or in a fenced block marked as a shell (or with
   no language), whose program is not on the `PATH`. A span counts as a command when it
   starts with a known build tool (`npm`, `pnpm`, `mix`, `cargo`, `go`, `pytest`, `mise`,
@@ -487,13 +504,12 @@ things:
 | File | Layer | What it is for | On conflict |
 |---|---|---|---|
 | `<config>/config.yaml`, then `<workspace>/.troupe/config.yaml`, then `.troupe/config.local.yaml`, then the environment, then the command line | settings | every key above | later beats earlier; maps merge by key, `null` removes, a list replaces; trusted keys come from a workspace's files only once it is trusted |
-| `~/.config/opencode/opencode.jsonc` and `~/.local/share/opencode/auth.json` | settings | providers and the default model an opencode setup already has | read only when Troupe has no key of its own; never written |
 | `<config>/mcp.json`, then `<workspace>/.troupe/mcp.json` | MCP servers | your servers, then the workspace's, over `mcp:` in `config.yaml` | the same name merges key by key, the workspace's file last; a workspace's servers run only once you allow them |
 | a profile's bundle, `~/.agents/skills/`, each `.agents/skills/` from the repository root down to the workspace, `<config>/skills/<name>/SKILL.md`, `<workspace>/.troupe/skills/` | skills | what a skill tool may read | one name, the highest on [the ladder](#which-one-wins); the others listed as skipped |
 | Troupe's built-in agents, a profile's bundle, `<config>/agents/*.md`, `<workspace>/.troupe/agents/*.md` | agents | the agents a session may run | a file at a higher layer replaces the same name below it |
 | `<config>/commands/*.md`, `<workspace>/.troupe/commands/*.md` | commands | the slash commands you and the repository define | one name, the workspace's; a built-in's or an agent's name is theirs |
 | `<workspace>/.troupe/workflows/<name>.json` | workflows | the steps `workflows.list` offers | one name, one file |
-| `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on (aliases `CLAUDE.md`, `GEMINI.md`, and `.github/copilot-instructions.md` at the root only, first found wins), each directory's `.agents/AGENTS.md` before its own, and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out |
+| `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on, each directory's `.agents/AGENTS.md` before its own and its `.troupe/rules/*.md` after it, and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out. Other tools' files (`CLAUDE.md`, `GEMINI.md`, Copilot's, Cursor's) are not read: `troupe onboard` brings them in once |
 | `<workspace>/.troupe/memory.md` | instructions | the project brief Troupe's agents write | read after the instruction files; never authoritative, `read_file` and `grep` are |
 
 ## Which one wins
@@ -510,7 +526,7 @@ ladder, lowest first:
 4. **`AGENTS.md`**: the repository root's, then each directory's on the way to the work,
    the nearest highest.
 5. **Your `<config>/`**: `config.yaml`, `mcp.json`, `skills/`, `agents/`, `commands/`.
-6. **The repository's `.troupe/`**: the same files, and `memory.md`.
+6. **The repository's `.troupe/`**: the same files, `rules/` and `memory.md`.
 
 The last two are Troupe's own files, so they beat what a convention shared with other
 tools says. What has a name (an agent, a skill, a command, an MCP server) comes from the
@@ -803,7 +819,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `providers.<name>.models.<model>.max_output` | integer ≥ 1 |  | user; project if trusted |  | The most output tokens to ask for. |
 | `providers.<name>.models.<model>.reasoning_effort` | string or integer |  | user; project if trusted |  | How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a thinking budget in tokens. An Anthropic model gets it in the form it takes. |
 | `models` | settings |  | any |  | Which model each role uses. |
-| `models.default` | string | `claude-sonnet-5` | any | model | The model every agent uses unless its definition names one. A bare id goes to the session-wide provider; `<provider>/<model>` goes to a named one, from `providers` or opencode. `troupe models` lists what this machine can address. |
+| `models.default` | string | `claude-sonnet-5` | any | model | The model every agent uses unless its definition names one. A bare id goes to the session-wide provider; `<provider>/<model>` goes to a named one, from `providers`. `troupe models` lists what this machine can address. |
 | `models.cheap` | string |  | any | cheap model | The model for small jobs, compaction summaries among them. Unset: the default model. |
 | `models.expensive` | string |  | any | expensive model | The model an agent asking for `expensive` gets. Unset: the default model. |
 | `models.windows` | map of name to integer ≥ 1 |  | any |  | Context windows for bare model ids, in tokens. |
@@ -889,7 +905,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `memory_auto_refresh` | boolean | `true` | any | refresh the brief | A new session in a git repository refreshes a missing or stale brief, but not within `memory_max_age_days` of a refresh that built nothing; never a headless run. |
 | `memory_max_chars` | integer ≥ 1 | `6000` | any |  | How much of the brief goes into a prompt. |
 | `memory_max_age_days` | integer ≥ 1 | `7` | any |  | How old the brief may be before it counts as stale. |
-| `instructions_max_chars` | integer ≥ 1 | `16000` | any |  | How many characters of instruction files (`AGENTS.md` and its aliases, every scope together) go into a prompt; the nearest are kept whole first. |
+| `instructions_max_chars` | integer ≥ 1 | `16000` | any |  | How many characters of instruction files (`AGENTS.md`, `.agents/AGENTS.md` and `.troupe/rules`, every scope together) go into a prompt; the nearest are kept whole first. |
 
 ### This machine
 

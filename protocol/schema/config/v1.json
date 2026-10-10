@@ -172,7 +172,7 @@
       ],
       "properties": {
         "default": {
-          "description": "The model every agent uses unless its definition names one. A bare id goes to the session-wide provider; `<provider>/<model>` goes to a named one, from `providers` or opencode. `troupe models` lists what this machine can address.",
+          "description": "The model every agent uses unless its definition names one. A bare id goes to the session-wide provider; `<provider>/<model>` goes to a named one, from `providers`. `troupe models` lists what this machine can address.",
           "default": "claude-sonnet-5",
           "type": [
             "string",
@@ -752,7 +752,7 @@
       "minimum": 1
     },
     "instructions_max_chars": {
-      "description": "How many characters of instruction files (`AGENTS.md` and its aliases, every scope together) go into a prompt; the nearest are kept whole first.",
+      "description": "How many characters of instruction files (`AGENTS.md`, `.agents/AGENTS.md` and `.troupe/rules`, every scope together) go into a prompt; the nearest are kept whole first.",
       "default": 16000,
       "type": [
         "integer",

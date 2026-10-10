@@ -250,8 +250,8 @@ says that folder's configuration can address (Decision 794): what each named pro
 declares, the models the config names or prices, and what each provider's own list has.
 
 - **Each model** with its window and its price in dollars a million tokens, in/out, as
-  `troupe models` prints them, and where they came from: the provider's list, your config
-  (a price from `models.prices` says so) or opencode. `no key` when its provider has none.
+  `troupe models` prints them, and where they came from: the provider's list or your
+  config (a price from `models.prices` says so). `no key` when its provider has none.
 - **The default, cheap and expensive models** are starred and say which they are. A role
   you have not set is the default model's, so that one says all three.
 - **A model its provider does not serve** has a warning and says so, with what the
