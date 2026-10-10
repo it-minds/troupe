@@ -13,6 +13,14 @@ defmodule Troupe.CLI.Onboard do
   remembered, so the next run asks only about what changed since; `--all` asks again.
   What a source found and proposed nothing for is listed first, each with its reason.
 
+  Creating an `AGENTS.md` that is not there is a question of its own (root Decision 827):
+  every coding tool reads that file, not only Troupe, so it is asked in its own words, and
+  `--yes` never answers it: the file is left for a run at a terminal and the summary says
+  so. `--json` marks it `"question": "create_agents_md"` (any other proposal is
+  `"write"`), and with `--yes` gives it `"written": false` and the reason, which is not a
+  failure. A run that leaves nothing unanswered records that the workspace is onboarded
+  under this build's rules (`Troupe.Onboard.stamp/1`), so a session stops suggesting it.
+
   Exits 0 when everything asked about was answered, 1 when a proposal was refused or a
   write failed, 2 when the workspace is not a directory here or there was nobody to ask.
   """
@@ -57,6 +65,7 @@ defmodule Troupe.CLI.Onboard do
     case plan.proposals do
       [] ->
         IO.puts(nothing(plan))
+        stamp(plan, [])
         status(plan, [])
 
       proposals ->
@@ -69,7 +78,19 @@ defmodule Troupe.CLI.Onboard do
           end)
 
         IO.puts("\n" <> summary(plan, results))
+        stamp(plan, results)
         status(plan, results)
+    end
+  end
+
+  # Every proposal answered, written or left out: the workspace is onboarded under this
+  # build's rules, whatever it wrote.
+  defp stamp(plan, results) do
+    if Enum.all?(results, &(&1 in [:written, :declined])) do
+      case Troupe.Onboard.stamp(plan.workspace) do
+        :ok -> :ok
+        {:error, reason} -> IO.puts(:stderr, "not recorded as onboarded: #{reason}")
+      end
     end
   end
 
@@ -91,16 +112,31 @@ defmodule Troupe.CLI.Onboard do
     IO.puts(item.diff)
   end
 
+  defp status_word(%{question: :create_agents_md}), do: "new, and not there yet"
   defp status_word(%{status: :new}), do: "new"
+
+  defp status_word(%{status: :changed, was: nil, proposal: %{target: :workspace}}),
+    do: "adds to the one that is there"
+
   defp status_word(%{status: :changed, was: nil}), do: "replaces a file onboarding did not write"
   defp status_word(%{status: :changed}), do: "its source has changed"
 
-  # `:yes` writes, `:ask` asks, `:show` prints what is left once nobody could be asked.
+  # `:yes` writes, `:ask` asks, `:show` prints what is left once nobody could be asked. A
+  # new `AGENTS.md` is asked about in its own words, and `--yes` leaves it.
+  defp answer(%{question: :create_agents_md} = item, :yes, _workspace, _onboard, _ask) do
+    IO.puts(
+      "not created: #{item.shown}: --yes never creates an AGENTS.md; " <>
+        "run troupe onboard at a terminal to be asked"
+    )
+
+    {:left, :yes}
+  end
+
   defp answer(item, :yes, workspace, onboard, _ask), do: {write(item, workspace, onboard), :yes}
   defp answer(_item, :show, _workspace, _onboard, _ask), do: {:unasked, :show}
 
   defp answer(item, :ask, workspace, onboard, ask) do
-    case ask.("Write #{item.shown}? [y/N] ") do
+    case ask.(question(item)) do
       line when is_binary(line) ->
         if yes?(line),
           do: {write(item, workspace, onboard), :ask},
@@ -111,6 +147,13 @@ defmodule Troupe.CLI.Onboard do
         {:unasked, :show}
     end
   end
+
+  defp question(%{question: :create_agents_md} = item),
+    do:
+      "#{item.shown} is not there. Create it? Every coding tool reads AGENTS.md, " <>
+        "not only Troupe. [y/N] "
+
+  defp question(item), do: "Write #{item.shown}? [y/N] "
 
   defp write(item, workspace, onboard) do
     case Troupe.Onboard.accept(item, workspace, onboard) do
@@ -148,8 +191,17 @@ defmodule Troupe.CLI.Onboard do
     written = Enum.count(results, &(&1 == :written))
     declined = Enum.count(results, &(&1 == :declined))
     unasked = Enum.count(results, &(&1 == :unasked))
+    left = Enum.count(results, &(&1 == :left))
 
     line = "#{count(written, "file")} written, #{declined} left out" <> passed_over(plan) <> "."
+
+    line =
+      if left > 0,
+        do:
+          line <>
+            "\n#{count(left, "new AGENTS.md", "new AGENTS.md files")} not created: creating " <>
+            "one is asked at a terminal, never answered by --yes.",
+        else: line
 
     if unasked > 0,
       do:
@@ -209,6 +261,7 @@ defmodule Troupe.CLI.Onboard do
               &%{"source" => &1.source, "source_hash" => &1.source_hash}
             ),
           "status" => Atom.to_string(item.status),
+          "question" => Atom.to_string(item.question),
           "notes" => item.proposal.notes,
           "diff" => item.diff
         }
@@ -236,8 +289,20 @@ defmodule Troupe.CLI.Onboard do
 
     IO.write(Jason.encode!(object, pretty: true) <> "\n")
 
-    if plan.refused != [] or Enum.any?(proposals, &(&1["written"] == false)), do: 1, else: 0
+    failed? = Enum.any?(proposals, &(&1["written"] == false and &1["question"] == "write"))
+
+    if args.yes and Enum.all?(proposals, &(&1["written"] == true)),
+      do: stamp(plan, [])
+
+    if plan.refused != [] or failed?, do: 1, else: 0
   end
+
+  # A new `AGENTS.md` is never written by `--yes`, and not having written it is no failure.
+  defp written(%{question: :create_agents_md}, _workspace, _onboard),
+    do: %{
+      "written" => false,
+      "reason" => "creating an AGENTS.md is asked at a terminal, never answered by --yes"
+    }
 
   defp written(item, workspace, onboard) do
     case Troupe.Onboard.accept(item, workspace, onboard) do
@@ -264,4 +329,7 @@ defmodule Troupe.CLI.Onboard do
   defp count(n, noun) when is_list(n), do: count(length(n), noun)
   defp count(1, noun), do: "1 #{noun}"
   defp count(n, noun), do: "#{n} #{noun}s"
+
+  defp count(1, one, _many), do: "1 #{one}"
+  defp count(n, _one, many), do: "#{n} #{many}"
 end

@@ -29,6 +29,13 @@ defmodule Troupe.Onboard.Source do
   nothing for, each with its reason in a sentence (linked outside the workspace, disabled,
   a name Troupe cannot take); `troupe onboard` lists them.
 
+  `found?/1`, optional, is a cheap look at the workspace's root for the files the source
+  reads: a session's start asks it before it asks for proposals, to say what `troupe
+  onboard` would bring in (Decision 827), and a source without it is always asked.
+
+  `target` may also be `:workspace` for an `AGENTS.md`, `path` then relative to the
+  workspace itself (Decision 827).
+
   `opts` carries `home`, the directory `~` stands for, so a test can give a source a
   scratch one. A source is registered in `Troupe.Onboard`'s `@sources`, one line.
   """
@@ -36,7 +43,7 @@ defmodule Troupe.Onboard.Source do
   @type also :: %{source: String.t(), source_hash: String.t()}
 
   @type proposal :: %{
-          required(:target) => :repo | :user,
+          required(:target) => :repo | :user | :workspace,
           required(:path) => String.t(),
           required(:content) => binary(),
           required(:source) => String.t(),
@@ -49,6 +56,7 @@ defmodule Troupe.Onboard.Source do
 
   @callback proposals(workspace :: Path.t(), opts :: keyword()) :: [proposal()]
   @callback skipped(workspace :: Path.t(), opts :: keyword()) :: [skipped()]
+  @callback found?(workspace :: Path.t()) :: boolean()
 
-  @optional_callbacks skipped: 2
+  @optional_callbacks skipped: 2, found?: 1
 end

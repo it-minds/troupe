@@ -1010,8 +1010,6 @@ Found by the #60 fixer, 2026-10-09.
 - A command's positional arguments aren't filled: Troupe fills only `$ARGUMENTS`
   (Decision 763), while Claude Code counts `$0`/`$ARGUMENTS[0]` from zero and opencode
   `$1` from one; the importer notes them. #516's table says they already match.
-- The librarian's prompt still says `CLAUDE.md`, `GEMINI.md` and Copilot's file are in
-  every prompt, and doesn't mention `onboard_write` (#516's slice 2).
 - `troupe onboard` calls a source's `proposals/2` and then `skipped/2`, so the agents and
   commands source surveys the files twice a run.
 

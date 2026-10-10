@@ -72,6 +72,17 @@ defmodule Troupe.Onboard.AgentsAndCommands do
         }
   end
 
+  @doc """
+  Whether the workspace's root has any of the files this source reads, a look and no read:
+  what a session's start asks first (Decision 827).
+  """
+  @spec found?(Path.t()) :: boolean()
+  @impl Troupe.Onboard.Source
+  def found?(workspace) do
+    ~w(.claude/agents .claude/commands opencode.json opencode.jsonc .opencode)
+    |> Enum.any?(&File.exists?(Path.join(workspace, &1)))
+  end
+
   @doc "`proposals/2`, with every file or entry that gave none and why, in words."
   @spec survey(Path.t(), keyword()) :: survey()
   def survey(workspace, opts \\ []) do

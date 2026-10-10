@@ -141,7 +141,7 @@ defmodule Troupe.OnboardCLITest do
     assert File.read!(Path.join(ws, ".troupe/agents/a.md")) =~
              ~s(imported_from: ".other/agents/a.md")
 
-    assert File.ls!(Path.join(ws, ".troupe")) == ["agents"]
+    assert File.ls!(Path.join(ws, ".troupe")) |> Enum.sort() == ["agents", "onboarded.json"]
     assert File.ls!(Path.join(ws, ".troupe/agents")) == ["a.md"]
 
     {out, 0} = onboard(ws, opts, [])
@@ -270,6 +270,113 @@ defmodule Troupe.OnboardCLITest do
     out = capture_io(fn -> assert Onboard.run(args(ws, ["--json", "--yes"]), opts) == 0 end)
     assert %{"proposals" => [%{"written" => true}]} = Jason.decode!(out)
     assert File.exists?(Path.join(ws, ".troupe/agents/a.md"))
+  end
+
+  describe "instruction files (root Decision 827)" do
+    setup %{opts: opts} do
+      %{opts: Keyword.put(opts, :sources, [Troupe.Onboard.Instructions])}
+    end
+
+    test "a new AGENTS.md is its own question; an addition to one that is there is an ordinary one",
+         %{opts: opts} do
+      ws =
+        tmp_workspace(%{
+          "CLAUDE.md" => "# CLAUDE.md\n\nRun the tests with `mix test` before you commit.\n",
+          "pkg/AGENTS.md" => "# pkg\n",
+          "pkg/CLAUDE.md" => "Run this package's tests from `pkg/`, never from the root.\n",
+          ".cursor/rules/style.mdc" => "---\nalwaysApply: true\n---\nBe brief.\n"
+        })
+
+      {out, 0} = onboard(ws, opts, ["y\n", "y\n", "y\n"])
+
+      assert out =~ "AGENTS.md: new, and not there yet, from CLAUDE.md\n"
+      assert out =~ "  note: The title `# CLAUDE.md` of CLAUDE.md is written `# AGENTS.md`.\n"
+      assert out =~ "pkg/AGENTS.md: adds to the one that is there, from pkg/CLAUDE.md\n"
+      assert out =~ ".troupe/rules/style.md: new, from .cursor/rules/style.mdc\n"
+
+      assert_received {:asked,
+                       "AGENTS.md is not there. Create it? Every coding tool reads AGENTS.md, " <>
+                         "not only Troupe. [y/N] "}
+
+      assert_received {:asked, "Write pkg/AGENTS.md? [y/N] "}
+      assert_received {:asked, "Write .troupe/rules/style.md? [y/N] "}
+
+      assert File.read!(Path.join(ws, "AGENTS.md")) ==
+               "# AGENTS.md\n\nRun the tests with `mix test` before you commit.\n"
+
+      assert File.read!(Path.join(ws, "pkg/AGENTS.md")) ==
+               "# pkg\n\nRun this package's tests from `pkg/`, never from the root.\n"
+
+      manifest = Jason.decode!(File.read!(Path.join(ws, ".troupe/onboarded.json")))
+      assert manifest["onboarding"] == Troupe.Onboard.version()
+      assert %{"imported_from" => "CLAUDE.md"} = manifest["workspace"]["AGENTS.md"]
+
+      # A second run proposes nothing, and says why of each file it found.
+      {out, 0} = onboard(ws, opts, [])
+      assert out =~ "skipped: CLAUDE.md: everything it says is in AGENTS.md already\n"
+      assert out =~ "skipped: pkg/CLAUDE.md: everything it says is in pkg/AGENTS.md already\n"
+
+      assert out =~
+               "Nothing to onboard in #{Troupe.Paths.display(ws)}; 1 unchanged since onboarded.\n"
+
+      refute_received {:asked, _question}
+    end
+
+    test "--yes writes the rest but never creates an AGENTS.md, and --json says which is which",
+         %{opts: opts} do
+      ws =
+        tmp_workspace(%{
+          "CLAUDE.md" => "Run the tests with `mix test` before you commit.\n",
+          ".cursorrules" => "Never commit a secret.\n"
+        })
+
+      out = capture_io(fn -> assert Onboard.run(args(ws, ["--json"]), opts) == 0 end)
+      %{"proposals" => proposals} = Jason.decode!(out)
+
+      assert Enum.map(proposals, &{&1["file"], &1["question"]}) == [
+               {"AGENTS.md", "create_agents_md"},
+               {".troupe/rules/cursorrules.md", "write"}
+             ]
+
+      out = capture_io(fn -> assert Onboard.run(args(ws, ["--yes"]), opts) == 0 end)
+
+      assert out =~
+               "not created: AGENTS.md: --yes never creates an AGENTS.md; run troupe onboard " <>
+                 "at a terminal to be asked\n"
+
+      assert out =~ "created .troupe/rules/cursorrules.md\n"
+
+      assert out =~
+               "1 new AGENTS.md not created: creating one is asked at a terminal, never answered by --yes."
+
+      refute File.exists?(Path.join(ws, "AGENTS.md"))
+
+      # Left for a person, so the workspace is not yet onboarded under these rules as a whole:
+      # its manifest keeps the version its first write gave it.
+      manifest = Path.join(ws, ".troupe/onboarded.json")
+
+      File.write!(
+        manifest,
+        String.replace(File.read!(manifest), ~s("onboarding": 1), ~s("onboarding": 0))
+      )
+
+      out = capture_io(fn -> assert Onboard.run(args(ws, ["--json", "--yes"]), opts) == 0 end)
+
+      assert [
+               %{
+                 "file" => "AGENTS.md",
+                 "question" => "create_agents_md",
+                 "written" => false,
+                 "reason" => "creating an AGENTS.md is asked at a terminal, never answered by --yes"
+               }
+             ] = Jason.decode!(out)["proposals"]
+
+      assert Troupe.Onboard.onboarded_version(ws) == 0
+
+      # A person who says no at a terminal answers everything: the version is recorded.
+      {_out, 0} = onboard(ws, opts, ["n\n"])
+      assert Troupe.Onboard.onboarded_version(ws) == Troupe.Onboard.version()
+    end
   end
 
   test "a workspace that is not a directory here is refused with 2" do

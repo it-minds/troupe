@@ -138,6 +138,7 @@ defmodule Troupe.OnboardTest do
                  ~s(imported_from: ".claude/agents/reviewer.md"\n) <>
                  ~s(imported_hash: "#{hash}"\n) <>
                  ~s(imported_at: "#{@now}"\n) <>
+                 "imported_version: #{Onboard.version()}\n" <>
                  "---\nYou review code.\n"
 
       # Troupe reads it as the agent it is: the provenance keys are not configuration.
@@ -162,7 +163,12 @@ defmodule Troupe.OnboardTest do
       assert :ok = Onboard.decline(b, ctx.opts)
 
       assert File.ls!(Path.join(ctx.workspace, ".troupe/agents")) == ["a.md"]
-      assert files_under(Path.join(ctx.workspace, ".troupe")) == [".troupe/agents/a.md"]
+
+      assert files_under(Path.join(ctx.workspace, ".troupe")) == [
+               ".troupe/agents/a.md",
+               ".troupe/onboarded.json"
+             ]
+
       assert File.ls!(ctx.config) == []
 
       assert %{proposals: [], unchanged: 1, declined: 1} = Onboard.plan(ctx.workspace, ctx.opts)
@@ -418,6 +424,9 @@ defmodule Troupe.OnboardTest do
           %{target: "user", path: "config.yaml", content: "x", source: "~/.claude/agents/a.md"}
         ])
 
+      repo =
+        "commands/<name>.md, rules/<name>.md, skills/<name>/..., workflows/<name>.json and mcp.json"
+
       assert Enum.map(refused, & &1.reason) == [
                "`../escape.md` has an empty, `.` or `..` part",
                "`agents/../../escape.md` has an empty, `.` or `..` part",
@@ -425,17 +434,15 @@ defmodule Troupe.OnboardTest do
                "`~/escape.md` is not relative: a path is relative to .troupe/ or to your config directory",
                "`agents\\a.md` has a backslash: write it with /",
                "`config.yaml` is not a file onboarding writes: it writes agents/<name>.md, " <>
-                 "commands/<name>.md, skills/<name>/..., workflows/<name>.json and mcp.json",
+                 repo,
                "`config.local.yaml` is not a file onboarding writes: it writes agents/<name>.md, " <>
-                 "commands/<name>.md, skills/<name>/..., workflows/<name>.json and mcp.json",
-               "`memory.md` is not a file onboarding writes: it writes agents/<name>.md, " <>
-                 "commands/<name>.md, skills/<name>/..., workflows/<name>.json and mcp.json",
+                 repo,
+               "`memory.md` is not a file onboarding writes: it writes agents/<name>.md, " <> repo,
                "`onboarded.json` is not a file onboarding writes: it writes agents/<name>.md, " <>
-                 "commands/<name>.md, skills/<name>/..., workflows/<name>.json and mcp.json",
+                 repo,
                "`agents/Not A Name.md` is not a file onboarding writes: it writes agents/<name>.md, " <>
-                 "commands/<name>.md, skills/<name>/..., workflows/<name>.json and mcp.json",
-               "`AGENTS.md` is not a file onboarding writes: it writes agents/<name>.md, " <>
-                 "commands/<name>.md, skills/<name>/..., workflows/<name>.json and mcp.json",
+                 repo,
+               "`AGENTS.md` is not a file onboarding writes: it writes agents/<name>.md, " <> repo,
                "`credentials.json` is not a file onboarding writes: it writes agents/<name>.md, " <>
                  "commands/<name>.md, skills/<name>/..., workflows/<name>.json and mcp.json, " <>
                  "and your own AGENTS.md",
@@ -604,8 +611,11 @@ defmodule Troupe.OnboardTest do
 
       write!(ctx.workspace, ".troupe/agents/b.md", "---\ndescription: mine\n---\nb\n")
 
-      assert %{files: [%{path: "agents/a.md"}], findings: []} =
+      assert %{files: [%{path: "agents/a.md"}], findings: findings} =
                Onboard.drift(ctx.workspace, config_dir: ctx.config, home: ctx.home)
+
+      # The record is not followed out; it is only an older onboarding's, which it says.
+      assert [%{kind: :outdated}] = findings
     end
   end
 

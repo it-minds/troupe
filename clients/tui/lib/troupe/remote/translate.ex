@@ -389,6 +389,12 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:remote_note, %{text: to_string(data["reason"] || "the command was not sent")})],
          memory}
 
+      # What `troupe onboard`, or the librarian, would do in this workspace, said once at a
+      # start (troupe Decision 827): the harness's own sentence, as a line.
+      "onboarding_suggested" ->
+        {[emit.(:remote_note, %{text: to_string(data["message"] || "run troupe onboard here")})],
+         memory}
+
       "approval_resolved" ->
         {[], memory}
 
