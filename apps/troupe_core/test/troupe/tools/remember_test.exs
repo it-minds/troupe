@@ -31,7 +31,7 @@ defmodule Troupe.Tools.RememberTest do
     assert fake |> Fake.requests() |> List.first() |> Map.fetch!(:system) |> Kernel.=~("Project brief") == false
 
     path = Path.join(context.workspace, ".troupe/memory.md")
-    assert File.read!(path) =~ "root: the ledger is a fold over the log"
+    assert File.read!(path) =~ "build: the ledger is a fold over the log"
     assert Memory.status(context.workspace, Troupe.Config.load(context.workspace)) == :stale,
            "a note alone is not a built brief"
 
@@ -49,7 +49,7 @@ defmodule Troupe.Tools.RememberTest do
     assert [
              %{
                "claim" => "the ledger is a fold over the log",
-               "evidence" => %{"by" => "agent:root"}
+               "evidence" => %{"by" => "agent:build"}
              }
            ] = Facts.recall(context.workspace, query: "ledger")
   end

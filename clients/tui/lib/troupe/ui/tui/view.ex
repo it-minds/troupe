@@ -1092,10 +1092,13 @@ defmodule Troupe.UI.TUI.View do
     [{list, list_rect}, {detail, detail_rect}]
   end
 
-  defp memory_title(count, 0), do: " Memory: #{count} facts "
+  defp memory_title(count, 0), do: " Memory: #{facts(count)} "
 
   defp memory_title(count, doubtful),
-    do: " Memory: #{count} facts, #{doubtful} may no longer be true "
+    do: " Memory: #{facts(count)}, #{doubtful} may no longer be true "
+
+  defp facts(1), do: "1 fact"
+  defp facts(count), do: "#{count} facts"
 
   defp memory_rows(facts) do
     facts

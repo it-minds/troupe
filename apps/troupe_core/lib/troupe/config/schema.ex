@@ -414,8 +414,9 @@ defmodule Troupe.Config.Schema do
         spec(
           "memory",
           :boolean,
-          "Agents read the project brief, `.troupe/memory.md`, into every prompt and write it with " <>
-            "`remember`. `/memory` shows it.",
+          "The project brief: facts about the repository, kept in `.troupe/memory/facts.jsonl` " <>
+            "and written with `remember`. Its commands and conventions are in every prompt, " <>
+            "the rest comes through `recall`. `/memory` lists them.",
           default: true,
           field: :memory,
           label: "project brief"
