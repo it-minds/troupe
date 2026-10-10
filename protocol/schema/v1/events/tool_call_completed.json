@@ -12,10 +12,16 @@
         "object"
       ]
     },
+    "exit_status": {
+      "type": "integer"
+    },
     "name": {
       "type": "string"
     },
     "ok": {
+      "type": "boolean"
+    },
+    "timed_out": {
       "type": "boolean"
     }
   },

@@ -94,32 +94,81 @@ defmodule Troupe.CLI.Onboard do
     end
   end
 
-  defp show(item) do
-    from = if item.was && item.was != item.proposal.source, do: ", was from #{item.was}", else: ""
+  defp show(item), do: IO.puts("\n" <> describe(entry(item)))
 
-    with_also =
-      case item.proposal.also_from do
-        [] -> ""
-        also -> " with " <> Enum.map_join(also, ", ", & &1.source)
-      end
+  @doc """
+  A proposal as `troupe onboard` shows it: its file, what it is and where it came from,
+  each of its source's notes, and the diff. The terminal UI shows a file the same way when
+  a session's start asks about it (TUI Decision 154). `item` is an `entry/1`.
+  """
+  @spec describe(map()) :: String.t()
+  def describe(item) do
+    from = if item.was && item.was != item.from, do: ", was from #{item.was}", else: ""
+    with_also = if item.also == [], do: "", else: " with " <> Enum.join(item.also, ", ")
+    notes = Enum.map(item.notes, &("  note: " <> &1 <> "\n"))
 
-    IO.puts("""
-
-    #{item.shown}: #{status_word(item)}, from #{item.proposal.source}#{with_also}#{from}\
-    """)
-
-    Enum.each(item.proposal.notes, &IO.puts("  note: " <> &1))
-    IO.puts(item.diff)
+    "#{item.shown}: #{status_word(item)}, from #{item.from}#{with_also}#{from}\n" <>
+      Enum.join(notes) <> item.diff
   end
 
-  defp status_word(%{question: :create_agents_md}), do: "new, and not there yet"
-  defp status_word(%{status: :new}), do: "new"
+  @doc """
+  The question `troupe onboard` asks about a proposal, without its keys: a new `AGENTS.md`
+  in its own words (root Decision 827), any other file as a write.
+  """
+  @spec question(map()) :: String.t()
+  def question(%{ask: "create_agents_md"} = item),
+    do:
+      "#{item.shown} is not there. Create it? Every coding tool reads AGENTS.md, " <>
+        "not only Troupe."
 
-  defp status_word(%{status: :changed, was: nil, proposal: %{target: :workspace}}),
+  def question(item), do: "Write #{item.shown}?"
+
+  @doc """
+  A proposal as `describe/1` and `question/1` read it, from a `Troupe.Onboard.plan/2` item
+  or an item `onboard.plan` answered: `id` (the protocol's only), `shown`, `target`, `ask`
+  (`write` or `create_agents_md`), `change` (`new` or `changed`), `from` (its source),
+  `also`, `was`, `notes` and `diff`. Words only, no atoms, so it is the same once a journal
+  has read it back.
+  """
+  @spec entry(map()) :: map()
+  def entry(%{proposal: proposal} = item) do
+    %{
+      id: nil,
+      shown: item.shown,
+      target: to_string(proposal.target),
+      ask: to_string(item.question),
+      change: to_string(item.status),
+      from: proposal.source,
+      also: Enum.map(Map.get(proposal, :also_from, []), & &1.source),
+      was: item.was,
+      notes: Map.get(proposal, :notes, []),
+      diff: item.diff
+    }
+  end
+
+  def entry(%{"id" => id} = item) do
+    %{
+      id: id,
+      shown: item["shown"],
+      target: item["target"],
+      ask: item["question"],
+      change: item["status"],
+      from: item["source"],
+      also: item["also_from"] || [],
+      was: item["was"],
+      notes: item["notes"] || [],
+      diff: item["diff"] || ""
+    }
+  end
+
+  defp status_word(%{ask: "create_agents_md"}), do: "new, and not there yet"
+  defp status_word(%{change: "new"}), do: "new"
+
+  defp status_word(%{change: "changed", was: nil, target: "workspace"}),
     do: "adds to the one that is there"
 
-  defp status_word(%{status: :changed, was: nil}), do: "replaces a file onboarding did not write"
-  defp status_word(%{status: :changed}), do: "its source has changed"
+  defp status_word(%{change: "changed", was: nil}), do: "replaces a file onboarding did not write"
+  defp status_word(%{change: "changed"}), do: "its source has changed"
 
   # `:yes` writes, `:ask` asks, `:show` prints what is left once nobody could be asked. A
   # new `AGENTS.md` is asked about in its own words, and `--yes` leaves it.
@@ -136,7 +185,7 @@ defmodule Troupe.CLI.Onboard do
   defp answer(_item, :show, _workspace, _onboard, _ask), do: {:unasked, :show}
 
   defp answer(item, :ask, workspace, onboard, ask) do
-    case ask.(question(item)) do
+    case ask.(question(entry(item)) <> " [y/N] ") do
       line when is_binary(line) ->
         if yes?(line),
           do: {write(item, workspace, onboard), :ask},
@@ -147,13 +196,6 @@ defmodule Troupe.CLI.Onboard do
         {:unasked, :show}
     end
   end
-
-  defp question(%{question: :create_agents_md} = item),
-    do:
-      "#{item.shown} is not there. Create it? Every coding tool reads AGENTS.md, " <>
-        "not only Troupe. [y/N] "
-
-  defp question(item), do: "Write #{item.shown}? [y/N] "
 
   defp write(item, workspace, onboard) do
     case Troupe.Onboard.accept(item, workspace, onboard) do

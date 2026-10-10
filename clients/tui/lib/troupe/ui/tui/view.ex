@@ -1879,10 +1879,22 @@ defmodule Troupe.UI.TUI.View do
 
     notice = List.first(state.model.notices)
 
+    windows = Model.windows(state.model)
+
+    # A question the session's start asks takes Enter from the command line itself (TUI
+    # Decision 154), so the line says what Enter does there rather than where to go.
     hint =
-      case Enum.find_index(Model.windows(state.model), &(&1.state == :needs_input)) do
-        nil -> ""
-        i -> " · press #{i + 1} (or Enter, or click the window) to answer"
+      case {Enum.find_value(windows, &Model.local_question/1),
+            Enum.find_index(windows, &(&1.state == :needs_input))} do
+        {%{} = asked, _i} ->
+          " · Enter answers the start's question: #{Model.local_default(asked)} " <>
+            "(or #{Enum.join(asked.keys, " / ")})"
+
+        {nil, nil} ->
+          ""
+
+        {nil, i} ->
+          " · press #{i + 1} (or Enter, or click the window) to answer"
       end
 
     mcp =

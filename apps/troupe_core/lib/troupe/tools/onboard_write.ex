@@ -1,7 +1,9 @@
 defmodule Troupe.Tools.OnboardWrite do
   @moduledoc """
-  Writes one of Troupe's own files from another tool's, recording where it came from: the
-  librarian's way of onboarding (issue #516, Decision 823).
+  Writes one of Troupe's own files from another tool's, recording where it came from: a
+  session's way of onboarding, for a profile that names it (issue #516, Decision 823). The
+  librarian no longer does: a session's start asks about onboarding before it starts
+  (Decision 835).
 
   Confined as `remember` is (Decision 649): the model names a file under one of two roots,
   the workspace's `.troupe/` or the person's config directory, of a kind Troupe reads

@@ -42,6 +42,16 @@ defmodule Troupe.Gateway.Worktrees do
     end
   end
 
+  @doc """
+  Whether a session started in `workspace` now would get a worktree of its own, as
+  `resolve/2` decides it for `"auto"`: what `agents.list` says of each agent (Decision 841).
+  """
+  @spec auto?(Path.t()) :: boolean()
+  def auto?(workspace) do
+    workspace = Path.expand(workspace)
+    git_repository?(workspace) and busy?(workspace)
+  end
+
   defp plain(workspace), do: %{path: workspace, worktree: nil, branch: nil}
 
   defp busy?(workspace) do
@@ -124,7 +134,7 @@ defmodule Troupe.Gateway.Worktrees do
          {:ok, branch} <- branch_of(path),
          {:ok, committed?} <- commit_pending(path, Keyword.get(opts, :message) || "troupe: #{branch}"),
          {:ok, output} <- merge_branch(workspace, branch),
-         :ok <- remove_tree(path),
+         :ok <- remove_tree(workspace, path),
          :ok <- delete_branch(workspace, branch, "-d") do
       {:ok, %{"branch" => branch, "committed" => committed?, "output" => output}}
     end
@@ -139,7 +149,7 @@ defmodule Troupe.Gateway.Worktrees do
     with :ok <- worktree_at(path),
          :ok <- resting(path),
          {:ok, branch} <- branch_of(path),
-         :ok <- remove_tree(path),
+         :ok <- remove_tree(workspace, path),
          :ok <- delete_branch(workspace, branch, "-D") do
       {:ok, %{"branch" => branch}}
     end
@@ -221,8 +231,10 @@ defmodule Troupe.Gateway.Worktrees do
     end
   end
 
-  defp remove_tree(path) do
-    case git(path, ["worktree", "remove", "--force", path]) do
+  # Run from the checkout, not the tree: on Windows git cannot delete the directory it was
+  # started in, and the merge or discard stopped half done, the tree unregistered but left.
+  defp remove_tree(workspace, path) do
+    case git(workspace, ["worktree", "remove", "--force", path]) do
       {:ok, _, 0} -> :ok
       {:ok, output, _} -> {:error, {:git, String.trim(output)}}
       {:error, reason} -> {:error, reason}

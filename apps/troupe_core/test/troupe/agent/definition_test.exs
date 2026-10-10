@@ -124,9 +124,10 @@ defmodule Troupe.Agent.DefinitionTest do
           Path.join(System.tmp_dir!(), "troupe-no-such-#{System.unique_integer([:positive])}")
         )
 
+      # The file a loaded definition came from is the loader's to say, not the text's.
       for definition <- Definitions.all(defs) do
         assert Definition.parse(definition.name, Definition.render(definition), :builtin) ==
-                 {:ok, definition}
+                 {:ok, %{definition | path: nil}}
       end
     end
 

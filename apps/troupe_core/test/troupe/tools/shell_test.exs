@@ -137,7 +137,7 @@ defmodule Troupe.Tools.ShellReleasePathTest do
     assert [{"PATH", path}] = Reaper.child_env()
     refute erts_bin in String.split(path, ":")
 
-    assert {:ok, output} = Shell.run(%{"command" => "echo \"$PATH\""}, ctx)
+    assert {:ok, output, _outcome} = Shell.run(%{"command" => "echo \"$PATH\""}, ctx)
     refute erts_bin in (output |> String.trim() |> String.split(":"))
     assert output =~ "/usr/bin"
   end
@@ -176,13 +176,16 @@ defmodule Troupe.Tools.ShellLastLineTest do
   end
 
   test "printf x answers x", %{ctx: ctx} do
-    assert {:ok, "x"} = Shell.run(%{"command" => "printf x"}, ctx)
-    assert {:ok, "x\n\n[exit status 3]"} = Shell.run(%{"command" => "printf x; exit 3"}, ctx)
+    assert {:ok, "x", %{fields: %{"exit_status" => 0}}} =
+             Shell.run(%{"command" => "printf x"}, ctx)
+
+    assert {:ok, "x\n\n[exit status 3]", %{fields: %{"exit_status" => 3}}} =
+             Shell.run(%{"command" => "printf x; exit 3"}, ctx)
   end
 
   test "cat reads a file without a final newline whole", %{ctx: ctx, tmp_dir: root} do
     File.write!(Path.join(root, "notes.txt"), "one\ntwo\nthree")
-    assert {:ok, "one\ntwo\nthree"} = Shell.run(%{"command" => "cat notes.txt"}, ctx)
+    assert {:ok, "one\ntwo\nthree", _outcome} = Shell.run(%{"command" => "cat notes.txt"}, ctx)
   end
 
   test "the runner streams the last line too", %{ctx: ctx} do

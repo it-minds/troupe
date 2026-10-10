@@ -159,7 +159,15 @@ defmodule Troupe.Remote.Worker do
   opened the window it waits, so it lands after that event.
   """
   @spec note(String.t(), String.t()) :: :ok | {:error, term()}
-  def note(session_id, text), do: call(session_id, {:note, text})
+  def note(session_id, text), do: post(session_id, :remote_note, %{text: text})
+
+  @doc """
+  An event of this client's own in the session's root window, `note/2`'s way: kept in the
+  journal, and waiting for the window to open. A question the start asks (`:local_question`,
+  TUI Decision 154) is one.
+  """
+  @spec post(String.t(), atom(), map()) :: :ok | {:error, term()}
+  def post(session_id, type, data), do: call(session_id, {:note, {type, data}})
 
   @spec blob(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, term()} | {:error, term()}
@@ -249,7 +257,8 @@ defmodule Troupe.Remote.Worker do
       team: Keyword.get(opts, :team),
       title: Keyword.get(opts, :title),
       agent: nil,
-      # Lines of this client's own waiting for the window to open (`note/2`).
+      # Events of this client's own waiting for the window to open (`post/3`), each
+      # `{type, data}`.
       notes: [],
       deltas: %{},
       delta_bytes: 0,
@@ -411,8 +420,8 @@ defmodule Troupe.Remote.Worker do
 
   def handle_call({:rpc, method, params}, from, state), do: command(state, from, method, params)
 
-  def handle_call({:note, text}, _from, state),
-    do: {:reply, :ok, write_notes(%{state | notes: state.notes ++ [text]})}
+  def handle_call({:note, event}, _from, state),
+    do: {:reply, :ok, write_notes(%{state | notes: state.notes ++ [event]})}
 
   ## Messages
 
@@ -892,13 +901,13 @@ defmodule Troupe.Remote.Worker do
 
   defp write_notes(state) do
     events =
-      for text <- state.notes do
+      for {type, data} <- state.notes do
         %Troupe.Event{
           session_id: state.session_id,
           agent_path: state.agent,
-          type: :remote_note,
+          type: type,
           ts: System.system_time(:millisecond),
-          data: %{text: text}
+          data: data
         }
       end
 

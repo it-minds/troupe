@@ -1,10 +1,11 @@
 defmodule Troupe.Tools.OnboardWriteTest do
   @moduledoc """
-  `onboard_write` (issue #516, slice 3; Decision 823): the librarian's one way to write
-  Troupe's own files from another tool's, confined to the workspace's `.troupe/` and the
-  person's config directory, asked first, recording where each file came from, with an
-  `onboarded` event in the session's log. On the chunk's tip no tool the librarian has
-  could write `.troupe/agents/x.md` at all.
+  `onboard_write` (issue #516, slice 3; Decision 823): a profile's way to write Troupe's
+  own files from another tool's, confined to the workspace's `.troupe/` and the person's
+  config directory, asked first, recording where each file came from, with an `onboarded`
+  event in the session's log. On the chunk's tip no tool the librarian has could write
+  `.troupe/agents/x.md` at all; since Decision 835 the librarian does not onboard, and the
+  tool is a profile's that names it, as `onboarder` does here.
   """
 
   use Troupe.SessionCase, async: true
@@ -16,6 +17,20 @@ defmodule Troupe.Tools.OnboardWriteTest do
   alias Troupe.Tools.OnboardWrite
 
   @content "---\ndescription: Reviews a change\n---\nYou review code.\n"
+
+  # A profile that names `onboard_write`, as one must (Decision 823's named-only list); the
+  # librarian no longer does (Decision 835).
+  defp onboarder do
+    Definitions.from_list([
+      %Definition{
+        name: "onboarder",
+        mode: :primary,
+        prompt: "Onboard what you are told to.",
+        tools: ["onboard_write", "finish"],
+        source: :global
+      }
+    ])
+  end
 
   defp call(args \\ %{}) do
     {"onboard_write",
@@ -30,13 +45,14 @@ defmodule Troupe.Tools.OnboardWriteTest do
      )}
   end
 
-  test "the librarian writes .troupe/agents/x.md only once the person approves, with its provenance and an onboarded event",
+  test "a profile that names it writes .troupe/agents/x.md only once the person approves, with its provenance and an onboarded event",
        context do
     write_file(context, ".claude/agents/reviewer.md", "---\nname: reviewer\n---\nReview.\n")
 
     %{session: %{id: sid}} =
       start_session(context,
-        agent: "librarian",
+        agent: "onboarder",
+        definitions: onboarder(),
         config_overrides: [auto_approve: false],
         steps: [
           {:tools, [call()]},
@@ -154,7 +170,8 @@ defmodule Troupe.Tools.OnboardWriteTest do
     # The suite starts every session with auto_approve on.
     %{session: %{id: sid}} =
       start_session(context,
-        agent: "librarian",
+        agent: "onboarder",
+        definitions: onboarder(),
         steps: [
           {:tools, [{"onboard_write", agents}]},
           {:text_and_tools, "Done.", [{"finish", %{"summary" => "onboarded"}}]}
@@ -190,7 +207,8 @@ defmodule Troupe.Tools.OnboardWriteTest do
 
     %{session: %{id: sid}} =
       start_session(context,
-        agent: "librarian",
+        agent: "onboarder",
+        definitions: onboarder(),
         config_overrides: [auto_approve: false],
         steps: [
           {:tools, [call()]},
@@ -209,18 +227,23 @@ defmodule Troupe.Tools.OnboardWriteTest do
     assert events_of_type(sid, :onboarded) == []
   end
 
-  test "an agent with every tool is neither offered onboard_write nor let call it", context do
+  test "an agent with every tool, and the librarian, are neither offered onboard_write nor let call it",
+       context do
     definitions = Definitions.load(context.workspace)
     build = Definitions.fetch!(definitions, "build")
     librarian = Definitions.fetch!(definitions, "librarian")
-
-    refute "onboard_write" in Enum.map(Tools.for_definition(build), &Troupe.Tool.name/1)
-    assert "onboard_write" in Enum.map(Tools.for_definition(librarian), &Troupe.Tool.name/1)
-
+    named = Definitions.fetch!(onboarder(), "onboarder")
     ctx = ctx(context)
-    assert {:reject, %{content: refusal}} = Tools.authorize("onboard_write", build, ctx)
-    assert refusal == "The tool onboard_write is not available in the current profile."
-    assert {:run, OnboardWrite, :task} = Tools.authorize("onboard_write", librarian, ctx)
+
+    # The librarian writes the brief only (Decision 835): onboarding is the start's.
+    for definition <- [build, librarian] do
+      refute "onboard_write" in Enum.map(Tools.for_definition(definition), &Troupe.Tool.name/1)
+      assert {:reject, %{content: refusal}} = Tools.authorize("onboard_write", definition, ctx)
+      assert refusal == "The tool onboard_write is not available in the current profile."
+    end
+
+    assert "onboard_write" in Enum.map(Tools.for_definition(named), &Troupe.Tool.name/1)
+    assert {:run, OnboardWrite, :task} = Tools.authorize("onboard_write", named, ctx)
     assert OnboardWrite.default_permission() == :ask
   end
 
