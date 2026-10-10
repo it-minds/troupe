@@ -288,14 +288,22 @@ defmodule Troupe.Protocol.Daemon do
   quotes off, leaving the rest as written, as the TUI's `troupe daemon` does. A `command`
   that is a program's path is quoted here; anything else is a command line and goes as
   it is.
+
+  The `cmd` that `start` runs is cmd.exe by its absolute path (`Troupe.Executable.comspec/1`;
+  `:comspec` stands in for it): `start` looks for a bare `cmd` in the current directory
+  first, and a client started in a repository would have started that repository's
+  `cmd.exe` or `cmd.bat` (Decision 846).
   """
-  @spec detach_line(String.t(), {atom(), atom()}) ::
+  @spec detach_line(String.t(), {atom(), atom()}, keyword()) ::
           {:shell, String.t()} | {:exec, String.t(), [String.t()]}
-  def detach_line(command, {:win32, _}) do
+  def detach_line(command, os_type, opts \\ [])
+
+  def detach_line(command, {:win32, _}, opts) do
     program = if File.regular?(command), do: ~s("#{command}"), else: command
-    {:shell, ~s("start "troupe-daemon" /min cmd /c "#{program}"")}
+    cmd = Keyword.get_lazy(opts, :comspec, &Troupe.Executable.comspec/0)
+    {:shell, ~s("start "troupe-daemon" /min "#{cmd}" /c "#{program}"")}
   end
 
-  def detach_line(command, _os_type),
+  def detach_line(command, _os_type, _opts),
     do: {:exec, "/bin/sh", ["-c", "nohup " <> command <> " >/dev/null 2>&1 &"]}
 end

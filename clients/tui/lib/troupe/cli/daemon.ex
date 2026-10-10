@@ -33,7 +33,11 @@ defmodule Troupe.CLI.Daemon do
     end
   end
 
-  @doc "Where the daemon binary is, if anywhere: `TROUPE_DAEMON_COMMAND`, then the `PATH`."
+  @doc """
+  Where the daemon binary is, if anywhere: `TROUPE_DAEMON_COMMAND`, then the `PATH`, alone:
+  `troupe daemon` in a repository never runs the repository's `troupe-daemon.bat`
+  (Decision 846).
+  """
   @spec command() :: {:ok, String.t()} | :error
   def command do
     case System.get_env("TROUPE_DAEMON_COMMAND") do
@@ -41,7 +45,7 @@ defmodule Troupe.CLI.Daemon do
         {:ok, value}
 
       _ ->
-        case System.find_executable("troupe-daemon") do
+        case Troupe.OS.Process.executable("troupe-daemon") do
           nil -> :error
           path -> {:ok, path}
         end

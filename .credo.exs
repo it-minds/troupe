@@ -166,8 +166,9 @@
           #
           ## Troupe's own (apps/troupe_protocol/credo/)
           #
-          # A program started by name is found on PATH alone (Decision 846).
-          {Troupe.Credo.PathOnlyLookup, []}
+          # A program started by name is found on PATH alone (Decision 846); tests may
+          # use find_executable.
+          {Troupe.Credo.PathOnlyLookup, [files: %{included: ["apps/*/lib/"]}]}
         ],
         disabled: [
           #

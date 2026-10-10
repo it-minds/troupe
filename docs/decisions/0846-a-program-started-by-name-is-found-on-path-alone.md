@@ -1,6 +1,6 @@
 ---
 number: 846
-title: Every program the daemon and the worker start by name is found on PATH alone, through Troupe.Executable, never in the current directory or a relative PATH entry, and a command given as a relative path is taken from the workspace
+title: Every program the daemon, the worker and the TUI start by name is found on PATH alone, through Troupe.Executable, never in the current directory or a relative PATH entry, and a command given as a relative path is taken from the workspace
 date: 2026-10-10
 status: accepted
 issue: 555
@@ -14,13 +14,24 @@ paths:
   - apps/troupe_core/lib/troupe/mcp/stdio.ex
   - apps/troupe_core/lib/troupe/agent/acp_agent.ex
   - apps/troupe_core/lib/troupe/watch/file_system_backend.ex
+  - apps/troupe_protocol/lib/troupe/protocol/daemon.ex
+  - apps/troupe_daemon/lib/troupe/daemon/cli.ex
   - apps/troupe_protocol/test/troupe/executable_test.exs
   - apps/troupe_core/test/troupe/path_only_lookup_test.exs
+  - clients/tui/lib/troupe/os/process.ex
+  - clients/tui/lib/troupe/browser.ex
+  - clients/tui/lib/troupe/cli/daemon.ex
+  - clients/tui/lib/mix/tasks/troupe.xref.ex
+  - clients/tui/.credo.exs
+  - clients/tui/test/troupe/path_only_lookup_test.exs
 symbols:
   - Troupe.Executable.find/2
   - Troupe.Executable.resolve/3
+  - Troupe.Executable.comspec/1
   - Troupe.Reaper.open/3
-gist: "A name is looked up by Troupe.Executable on PATH alone (no cwd, no relative entry); the reaper gets no bare name; a relative command is the workspace's"
+  - Troupe.OS.Process.executable/2
+  - Troupe.Protocol.Daemon.detach_line/3
+gist: "A name is looked up by Troupe.Executable on PATH alone (no cwd, no relative entry), the TUI's too; no bare name to the reaper or to start; relative = workspace's"
 ---
 
 On Windows `System.find_executable/1`, and `:os.find_executable/1,2` under it, look in the
@@ -79,12 +90,32 @@ workspace to take it from".
 `System.find_executable` or `:os.find_executable` anywhere in `apps/*/lib`, in every form
 (a call, `&System.find_executable/1`). Tests may still use them.
 
+**The TUI is the same lookup.** `Troupe.OS.Process.executable/2` answers what
+`Troupe.Executable.resolve/3` answers, through a door of its own in `mix troupe.xref`, and
+so tries only the extensions of `PATHEXT` a process starts from, where it used to try
+`.js` and `.vbs` too. It is how `troupe daemon` finds `troupe-daemon`, the terminal finds
+`ps` and `lsof`, the shell is chosen, and the browser opener finds `rundll32`, `open` or
+`xdg-open`. The opener moved out of the UI to `Troupe.Browser`, which the UI reaches
+through `Troupe.Client.open_url/1` as it reaches the clipboard. `Troupe.OS.Process.run/3`
+starts nothing for a program on no `PATH`: it answers `<name> is not on the PATH` with
+status 127, as a shell's "command not found" does, rather than hand the name to Windows'
+launcher. The TUI's `.credo.exs` loads the same check, over `lib/`.
+
+**No bare `cmd` inside a command line.** A client that starts the daemon on Windows runs
+`start "troupe-daemon" /min cmd /c ...` (Decision 802), and `start` looks for a bare `cmd`
+in the current directory first. That `cmd` is now cmd.exe by its absolute path
+(`Troupe.Executable.comspec/1`: `%ComSpec%` when it is absolute, else `cmd.exe` on `PATH`,
+else the Windows directory's). `troupe-daemon open`'s `start "" <file>` opens a file by
+its association and names no program; a `BROWSER` there is given by its path on the
+`PATH`, and one on no `PATH` is refused; `open` and `xdg-open` are found as every name is.
+The cmd.exe that runs either line is `System.shell/2`'s, `%ComSpec%`, which Windows sets
+to an absolute path.
+
 **Not covered.** `System.cmd/3` given a bare name looks it up with `:os.find_executable`
 too. In `apps/*/lib` that is the worker's `df` (Linux, no current directory in its
-lookup), the daemon CLI's `open` and `xdg-open`, and the mix tasks' `zig` and `kubectl`,
-run in a developer's own checkout. A client starting the daemon on Windows runs `start ...
-cmd /c`, whose `cmd` cmd.exe finds as it finds every name. The TUI's own lookups
-(`Troupe.CLI.Daemon`, the terminal and the browser) are the TUI's. Each is a follow-up.
+lookup) and the mix tasks' `zig` and `kubectl`, run in a developer's own checkout. A
+`TROUPE_DAEMON_COMMAND` that is a command line rather than a path goes to cmd.exe as the
+person wrote it.
 
 **Proof.** `Troupe.PathOnlyLookupTest` runs the daemon's code in a repository that holds
 a planted `rg`, `git`, `bash`, MCP server and `AGENTS.md` tool, each writing a marker,
@@ -96,4 +127,9 @@ failed on the chunk's tip, as did `ShellTest`'s relative entry, which made a rep
 `bin/bash.exe` the shell. `Troupe.ExecutableTest` plays the lookup with Windows as the OS
 on every host. On Windows, with Windows Elixir, the installed build and
 `NoDefaultCurrentDirectoryInExePath` unset, the tip ran a planted `rg.bat`, `pwsh.bat` and
-`git.exe`, and this change ran none of them.
+`git.exe`, and this change ran none of them. The TUI's own `Troupe.PathOnlyLookupTest`
+plants `troupe-daemon`, the browser opener and a program in the repository with only `.`
+and `rel` on `PATH`: `troupe daemon` finds none, `open_url` says the opener is not on the
+`PATH`, `run/3` answers 127, and nothing runs; `.js` and `.vbs` are not tried.
+`AutospawnTest` checks the `start` line's cmd.exe is a path and `CliTest` that a `BROWSER`
+in the current directory is not taken.

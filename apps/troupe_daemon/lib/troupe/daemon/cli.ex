@@ -33,6 +33,7 @@ defmodule Troupe.Daemon.CLI do
 
   alias Troupe.Config
   alias Troupe.Config.ModelSettings
+  alias Troupe.Executable
   alias Troupe.Gateway.Loopback
   alias Troupe.LLM.Catalog
   alias Troupe.Protocol.Daemon
@@ -485,26 +486,59 @@ defmodule Troupe.Daemon.CLI do
   end
 
   # Nothing the browser printed is repeated: on Windows it is handed the address itself.
+  # A program named by name is found on the PATH alone, never in the directory `open` was
+  # run in (Decision 846): BROWSER on Windows, which cmd.exe would look for there first,
+  # and `open` or `xdg-open`.
   defp browse(target, os_type) do
-    {program, result} =
-      case browse_line(target, os_type, System.get_env("BROWSER")) do
-        {:shell, line} -> {"start", System.shell(line, stderr_to_stdout: true)}
-        {:exec, program, args} -> {program, System.cmd(program, args, stderr_to_stdout: true)}
-      end
+    with {:ok, browser} <- browser(System.get_env("BROWSER"), os_type) do
+      {program, result} =
+        case browse_line(target, os_type, browser) do
+          {:shell, line} -> {"start", System.shell(line, stderr_to_stdout: true)}
+          {:exec, program, args} -> {program, run_found(program, args)}
+        end
 
-    case result do
-      {_output, 0} -> :ok
-      {_output, status} -> {:error, "could not open a browser: #{program} exited with #{status}; set BROWSER"}
+      case result do
+        {:error, why} -> {:error, "could not open a browser: #{Executable.explain(why)}; set BROWSER"}
+        {_output, 0} -> :ok
+        {_output, status} -> {:error, "could not open a browser: #{program} exited with #{status}; set BROWSER"}
+      end
     end
   rescue
     error in ErlangError -> {:error, "could not open a browser (#{inspect(error.original)}); set BROWSER"}
   end
 
   @doc """
+  The `BROWSER` `browse_line/3` is given on `os_type`: on Windows, where cmd.exe would
+  look for a name in the current directory first, the program by its path, found on the
+  `PATH` alone (Decision 846); elsewhere a command line for `sh`, as written. `opts` are
+  `Troupe.Executable.resolve/3`'s.
+  """
+  @spec browser(String.t() | nil, {atom(), atom()}, keyword()) :: {:ok, String.t() | nil} | {:error, String.t()}
+  def browser(browser, os_type, opts \\ [])
+
+  def browser(browser, {:win32, _} = os, opts) when browser not in [nil, ""] do
+    case Executable.resolve(browser, nil, Keyword.put(opts, :os, os)) do
+      {:ok, path} -> {:ok, path}
+      {:error, _why} -> {:error, "could not open a browser: BROWSER names #{browser}, which is not a program on the PATH"}
+    end
+  end
+
+  def browser(browser, _os_type, _opts), do: {:ok, browser}
+
+  defp run_found(program, args) do
+    case Executable.resolve(program, nil) do
+      {:ok, path} -> System.cmd(path, args, stderr_to_stdout: true)
+      {:error, why} -> {:error, why}
+    end
+  end
+
+  @doc """
   How `target` is opened on `os_type`: with `BROWSER` where it is set, as other tools
   read it; otherwise `start` in `cmd.exe`, `open` on macOS and `xdg-open` elsewhere.
   `start` takes its first quoted argument as a window's title, so it is given an empty
-  one first, as `Troupe.Protocol.Daemon.detach_line/2` gives it one.
+  one first, as `Troupe.Protocol.Daemon.detach_line/3` gives it one. `start ""` opens the
+  address, or the file `open` wrote, by what is registered for it, and looks for no
+  program by name; a `BROWSER` on Windows is given here by its path (Decision 846).
   """
   @spec browse_line(String.t(), {atom(), atom()}, String.t() | nil) ::
           {:shell, String.t()} | {:exec, String.t(), [String.t()]}

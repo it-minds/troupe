@@ -31,7 +31,7 @@ paths:
   - clients/gui/packages/client/test/local-sources.test.ts
   - clients/gui/packages/client/test/support/daemon.ts
   - clients/tui/lib/troupe/client/daemon.ex
-  - clients/tui/lib/troupe/ui/browser.ex
+  - clients/tui/lib/troupe/browser.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/test/troupe/mcp_page_test.exs

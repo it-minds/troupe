@@ -10,7 +10,8 @@ defmodule Troupe.Executable do
   and the directory the command starts in, which for Troupe's own git is the workspace,
   unless `NoDefaultCurrentDirectoryInExePath` is set. So every program Troupe starts by name
   is found here, `Troupe.Reaper` gives its launcher no bare name, and nothing else in
-  `apps/` calls `find_executable` (a credo check, `Troupe.Credo.PathOnlyLookup`, holds it).
+  `apps/` or the TUI calls `find_executable` (a credo check, `Troupe.Credo.PathOnlyLookup`,
+  holds it).
 
   On Windows a name is looked for in `PATH`'s absolute entries, in order, never in the
   current directory and never in a relative entry, which is the current directory by
@@ -21,7 +22,8 @@ defmodule Troupe.Executable do
   skipped there too.
 
   This lives in `troupe_protocol` because every app depends on it: the daemon and the
-  worker, and a client looking for `troupe-daemon` to start.
+  worker, a client looking for `troupe-daemon` to start, and the TUI, whose
+  `Troupe.OS.Process.executable/2` is this lookup (one of its doors, `mix troupe.xref`).
   """
 
   @launchable ~w(.com .exe .bat .cmd)
@@ -93,6 +95,31 @@ defmodule Troupe.Executable do
     |> String.split(separator, trim: true)
     |> Enum.map(&(&1 |> String.trim() |> String.trim("\"")))
     |> Enum.filter(&absolute?(&1, os))
+  end
+
+  @doc """
+  Windows' cmd.exe by its absolute path, for a command line that names it inside another
+  (`start "title" /min cmd /c ...`), where cmd.exe would look for a bare `cmd` in the
+  current directory first: `%ComSpec%` when it is absolute, else `cmd.exe` on `PATH`, else
+  the one in the Windows directory. Never a bare name. `:comspec` and `:system_root` stand
+  in for this machine's variables, and the rest are `find/2`'s.
+  """
+  @spec comspec(keyword()) :: Path.t()
+  def comspec(opts \\ []) do
+    windows = {:win32, :nt}
+    given = Keyword.get_lazy(opts, :comspec, fn -> System.get_env("ComSpec") end)
+
+    cond do
+      is_binary(given) and absolute?(given, windows) ->
+        spelled(given, windows)
+
+      found = find("cmd.exe", Keyword.put(opts, :os, windows)) ->
+        found
+
+      true ->
+        root = Keyword.get_lazy(opts, :system_root, fn -> System.get_env("SystemRoot") end)
+        spelled(Path.join([root || "C:\\Windows", "System32", "cmd.exe"]), windows)
+    end
   end
 
   @doc "Why `resolve/3` found no program, as a clause: no capital, no full stop."

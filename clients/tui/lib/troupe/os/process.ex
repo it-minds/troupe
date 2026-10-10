@@ -17,6 +17,16 @@ defmodule Troupe.OS.Process do
   """
   @spec run(String.t(), [String.t()], keyword()) :: result()
   def run(cmd, args, opts \\ []) when is_binary(cmd) and is_list(args) do
+    # A program on no PATH is not handed to the reaper by its name: Windows' launcher would
+    # look for it in the directory it starts in (Decision 846). It ends as a shell's
+    # "command not found" does.
+    case executable(cmd) do
+      nil -> {:ok, "#{cmd} is not on the PATH", 127}
+      exe -> launch([exe | args], opts)
+    end
+  end
+
+  defp launch(argv, opts) do
     reaper =
       case Troupe.Reaper.path() do
         {:ok, path} -> String.to_charlist(path)
@@ -27,7 +37,7 @@ defmodule Troupe.OS.Process do
     max_output = Keyword.get(opts, :max_output, @default_max_output)
 
     port_opts =
-      [:binary, :exit_status, :stderr_to_stdout, :hide, args: argv(cmd, args)] ++
+      [:binary, :exit_status, :stderr_to_stdout, :hide, args: argv] ++
         cd_opt(opts[:cd]) ++ env_opt(opts[:env])
 
     port = Port.open({:spawn_executable, reaper}, port_opts)
@@ -42,8 +52,8 @@ defmodule Troupe.OS.Process do
 
   @doc """
   What the reaper is given for `cmd` and `args`: the program, found as `executable/2` finds
-  it, then the arguments. `:os`, `:path` and `:pathext` stand in for this machine's, for
-  the tests.
+  it, then the arguments. A program there is none of is named as given, and `run/3` starts
+  nothing for it. `:os`, `:path` and `:pathext` stand in for this machine's, for the tests.
   """
   @spec argv(String.t(), [String.t()], keyword()) :: [String.t()]
   def argv(cmd, args, opts \\ []) do
@@ -57,55 +67,27 @@ defmodule Troupe.OS.Process do
   end
 
   @doc """
-  The program `cmd` names, or nil when there is none.
+  The program `cmd` names, or nil when there is none: `Troupe.Executable`'s answer, the one
+  lookup the daemon, the worker and the TUI share (Decision 846). `:os`, `:path` and
+  `:pathext` stand in for this machine's.
 
-  On Windows it is looked up on `PATH` alone, with `PATHEXT`'s extensions, and spelled
-  with backslashes (D109). `System.find_executable/1` looks in the current directory
-  first there, which is the repository the TUI was started in, so a `clip.bat` or a
-  `cmd.exe` the repository carries would have been what ran. And it answers with forward
-  slashes, which cmd.exe reads as switches in its own name: the reaper hands on the
-  command line as Erlang built it, and `c:/WINDOWS/system32/cmd.exe /c echo hi` is "The
-  syntax of the command is incorrect." Elsewhere it is `System.find_executable/1`.
+  A name is looked up on `PATH` alone, never in the current directory and never in a
+  relative entry, and on Windows with those of `PATHEXT`'s extensions a process starts
+  from (`.com`, `.exe`, `.bat`, `.cmd`) and spelled with backslashes (D109).
+  `System.find_executable/1` looks in the current directory first there, which is the
+  repository the TUI was started in, so a `clip.bat` or a `cmd.exe` the repository carries
+  would have been what ran. And it answers with forward slashes, which cmd.exe reads as
+  switches in its own name: the reaper hands on the command line as Erlang built it, and
+  `c:/WINDOWS/system32/cmd.exe /c echo hi` is "The syntax of the command is incorrect." A
+  path is taken as written when it is absolute; a relative one, which only the current
+  directory could resolve, is none.
   """
   @spec executable(String.t(), keyword()) :: String.t() | nil
   def executable(cmd, opts \\ []) do
-    case Keyword.get(opts, :os, :os.type()) do
-      {:win32, _} = os ->
-        path = Keyword.get_lazy(opts, :path, fn -> System.get_env("PATH", "") end)
-
-        if String.contains?(cmd, ["/", "\\"]),
-          do: spelled(cmd, os),
-          else: on_path(cmd, path, pathext(opts))
-
-      _ ->
-        System.find_executable(cmd)
+    case Troupe.Executable.resolve(cmd, nil, opts) do
+      {:ok, found} -> found
+      {:error, _not_found} -> nil
     end
-  end
-
-  defp on_path(cmd, path, extensions) do
-    names =
-      if Path.extname(cmd) == "",
-        do: Enum.map(extensions, &(cmd <> &1)),
-        else: [cmd]
-
-    path
-    |> String.split(";", trim: true)
-    |> Enum.map(&String.trim(&1, "\""))
-    # A relative entry is the current directory by another name.
-    |> Enum.filter(&(Path.type(&1) == :absolute))
-    |> Enum.find_value(fn dir ->
-      Enum.find_value(names, fn name ->
-        candidate = Path.join(dir, name)
-        if File.regular?(candidate), do: spelled(candidate, {:win32, :nt})
-      end)
-    end)
-  end
-
-  defp pathext(opts) do
-    opts
-    |> Keyword.get_lazy(:pathext, fn -> System.get_env("PATHEXT") || ".COM;.EXE;.BAT;.CMD" end)
-    |> String.split(";", trim: true)
-    |> Enum.map(&String.downcase/1)
   end
 
   defp spelled(cmd, {:win32, _}), do: String.replace(cmd, "/", "\\")
@@ -136,7 +118,7 @@ defmodule Troupe.OS.Process do
   end
 
   # bash on Linux and macOS; a clean Alpine has only sh, so fall back rather than fail every command.
-  defp unix_shell, do: if(System.find_executable("bash"), do: "bash", else: "sh")
+  defp unix_shell, do: if(executable("bash"), do: "bash", else: "sh")
 
   defp windows_shell(command) do
     git_bash =

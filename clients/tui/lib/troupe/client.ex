@@ -524,6 +524,13 @@ defmodule Troupe.Client do
   @spec copy(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def copy(text), do: Troupe.Clipboard.copy(text)
 
+  @doc """
+  Opens a URL in this machine's browser, for the same reason and by the same door as
+  `copy/1`: the browser is the person's own whichever side the session lives on.
+  """
+  @spec open_url(String.t()) :: :ok | {:error, String.t()}
+  def open_url(url), do: Troupe.Browser.open(url)
+
   @doc "The planes this machine is logged in to."
   @spec planes() :: [map()]
   def planes, do: Remote.planes()
