@@ -797,6 +797,7 @@ defmodule Troupe.UI.TUI.Server do
       {:sessions, arg} -> resume_by_arg(state, arg)
       {:new, arg} -> new_session(state, arg)
       :back -> go_back(state)
+      {:watch, said} -> watch_toggled(state, said)
       {:ok, _} -> state
       :ok -> state
       {:notice, text} -> notice(state, text)
@@ -870,7 +871,7 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("hq", args, _state, _target), do: {:hq, args}
 
   defp builtin("watch", _args, state, _target),
-    do: toggle_watch(state.session_id, state.model.watch.enabled)
+    do: {:watch, toggle_watch(state.session_id, state.model.watch.enabled)}
 
   defp builtin("cancel", _args, state, target),
     do: with_target(target.(), &Client.cancel_branch(state.session_id, &1))
@@ -878,11 +879,12 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("dismiss", _args, state, target),
     do: with_target(target.(), &Client.dismiss(state.session_id, &1))
 
+  # The window goes either way, so what landed or went is said on the notice line.
   defp builtin("merge", _args, state, target),
-    do: with_target(target.(), &Client.merge(state.session_id, &1))
+    do: with_target(target.(), &notice_of(Client.merge(state.session_id, &1)))
 
   defp builtin("discard", _args, state, target),
-    do: with_target(target.(), &Client.discard(state.session_id, &1))
+    do: with_target(target.(), &notice_of(Client.discard(state.session_id, &1)))
 
   defp builtin("agents", _args, state, _target),
     do: {:notice, "agents: " <> Enum.join(state.agents, ", ")}
@@ -2186,6 +2188,14 @@ defmodule Troupe.UI.TUI.Server do
 
   defp paste_into_settings(state, _content), do: state
 
+  # What the screen holds about watch is what the next `/watch` toggles and the status line
+  # shows, so it is read back once the daemon has answered, either way: left as it was, a
+  # second `/watch` turned watch on again rather than off.
+  defp watch_toggled(state, {_said, text}) do
+    watch = Client.watch_status(state.session_id)
+    notice(%{state | model: %{state.model | watch: watch}}, to_message(text))
+  end
+
   defp toggle_watch(sid, true) do
     case Client.watch(sid, false) do
       {:error, reason} -> {:error, reason}
@@ -2754,11 +2764,16 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   @doc """
-  Tab completion on the command line: command names (`wor` → `worktree `), window paths
+  Tab completion on the command line: command names (`wor` → `/worktree `), window paths
   for the commands whose first argument is a window — `/merge`, `/discard`, `/cancel`,
   `/dismiss`, `/copy` as the table has them (repeated Tab cycles through the matches) —
   and `@file` paths anywhere. `/merge` and `/discard` only offer worktree branches that
   have finished and are neither merged nor discarded.
+
+  What Tab completes is a command, so it comes back with its slash whether or not one was
+  typed: a line without one is said to the agent (TUI Decision 101), and `mer` completed to
+  `merge ` used to send "merge" there on Enter (D93). A Tab that finds nothing leaves the
+  line as it was typed.
   """
   @spec complete_command(String.t(), map()) :: String.t()
   def complete_command(text, state) do
@@ -2767,27 +2782,27 @@ defmodule Troupe.UI.TUI.Server do
         complete_file(text, state.model.workspace)
 
       not String.contains?(text, " ") ->
-        complete_name(text, command_names(state))
+        slashed(text, complete_name(String.trim_leading(text, "/"), command_names(state)))
 
       true ->
         [name, arg] = String.split(text, " ", parts: 2)
-        # A name the palette put on the line carries its slash; the completion keeps it.
-        {slash, name} =
-          if String.starts_with?(name, "/"),
-            do: {"/", String.trim_leading(name, "/")},
-            else: {"", name}
+        name = String.trim_leading(name, "/")
 
         cond do
           takes_window?(state, name) ->
-            slash <> complete_path(name, String.trim(arg), state)
+            slashed(text, complete_path(name, String.trim(arg), state))
 
           name == "worktree" and not String.contains?(String.trim(arg), " ") ->
-            slash <> complete_worktree(arg, state)
+            slashed(text, complete_worktree(arg, state))
 
           true ->
             text
         end
     end
+  end
+
+  defp slashed(text, completed) do
+    if completed == String.trim_leading(text, "/"), do: text, else: "/" <> completed
   end
 
   # What Tab completes on the line: the table's names and aliases (Decision 698), agents

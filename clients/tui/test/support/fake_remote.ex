@@ -774,6 +774,12 @@ defmodule Troupe.FakeRemote do
       }}, state}
   end
 
+  # A pod's harness lists the command table a daemon does (the worker's
+  # `harness_auth_test`), with the bundle's agents beside the built-ins; the palette greys
+  # the rows only a session on this machine can run.
+  defp dispatch(state, :worker, "commands.list", _params, _pid),
+    do: {{:ok, %{"commands" => Troupe.Commands.list([])}}, state}
+
   defp dispatch(state, _kind, method, _params, _pid)
        when method in ["turn.cancel", "approval.respond", "todo.edit", "profile.switch"],
        do: {{:ok, %{"accepted" => true}}, state}
