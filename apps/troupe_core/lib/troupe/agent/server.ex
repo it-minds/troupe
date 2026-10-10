@@ -32,8 +32,17 @@ defmodule Troupe.Agent.Server do
 
   @behaviour :gen_statem
 
-  alias Troupe.Agent.{BudgetQuestion, Call, Definition, Definitions, Headroom, Spend, State}
-  alias Troupe.{Budget, Config, Events, Instructions, Registry, Skills, Todo, Tools}
+  alias Troupe.Agent.{
+    BudgetQuestion,
+    Call,
+    Definition,
+    Definitions,
+    Headroom,
+    Local,
+    Spend,
+    State
+  }
+  alias Troupe.{Budget, Config, Events, Instructions, Registry, Skills, Todo, Tool, Tools}
 
   alias Troupe.LLM.{
     Catalog,
@@ -109,12 +118,32 @@ defmodule Troupe.Agent.Server do
     :ok
   end
 
-  @doc "Switch primary profile. Applied at the next turn boundary."
-  @spec switch_profile(pid(), String.t()) :: :ok
-  def switch_profile(pid, name) do
-    send(pid, {:switch_profile, name})
-    :ok
+  @doc """
+  Switch the agent to another primary definition, applied at the next turn boundary, or at
+  once to an agent that is done (#503, Decision 841). The definitions are read again from
+  their files first, so an agent written or edited since the session started is the one
+  switched to; a name nothing defines, or a subagent's, is refused here and nothing is
+  sent. `opts`: `:actor`, who switched it, and `:command_id`, both written on
+  `profile_switched`.
+  """
+  @spec switch_profile(pid(), String.t(), keyword()) ::
+          {:ok, Definition.t()}
+          | {:error, {:unknown_agent, String.t()} | {:not_primary, String.t()}}
+  def switch_profile(pid, name, opts \\ []) do
+    definitions = pid |> definitions() |> Definitions.reload()
+
+    with {:ok, definition} <- Definitions.fetch(definitions, name),
+         :ok <- primary(definition) do
+      meta = %{actor: Keyword.get(opts, :actor), command_id: Keyword.get(opts, :command_id)}
+      send(pid, {:switch_profile, name, definitions, meta})
+      {:ok, definition}
+    end
   end
+
+  # A person runs a primary agent, in a session or a branch; a subagent is an agent's to
+  # delegate to (`Definitions.primaries/1`).
+  defp primary(%Definition{mode: :primary}), do: :ok
+  defp primary(%Definition{name: name}), do: {:error, {:not_primary, name}}
 
   @doc """
   Set the session's goal, or clear it with `nil`. Taken in any state rather than at the
@@ -746,8 +775,8 @@ defmodule Troupe.Agent.Server do
     start_turn(accept_input(state, source, content, actor, meta))
   end
 
-  def idle(:info, {:switch_profile, name}, state) do
-    {:keep_state, do_switch_profile(state, name)}
+  def idle(:info, {:switch_profile, name, definitions, meta}, state) do
+    {:keep_state, do_switch_profile(state, name, definitions, meta)}
   end
 
   def idle(:info, :cancel, state), do: {:keep_state, state}
@@ -798,7 +827,8 @@ defmodule Troupe.Agent.Server do
   def thinking(:info, {:input, _source, _content, _actor, _meta} = event, state),
     do: queue_input(state, event)
 
-  def thinking(:info, {:switch_profile, _name}, _state), do: {:keep_state_and_data, :postpone}
+  def thinking(:info, {:switch_profile, _name, _definitions, _meta}, _state),
+    do: {:keep_state_and_data, :postpone}
 
   def thinking(event_type, event, state), do: common(event_type, event, :thinking, state)
 
@@ -850,7 +880,8 @@ defmodule Troupe.Agent.Server do
   def acting(:info, {:input, _source, _content, _actor, _meta} = event, state),
     do: queue_input(state, event)
 
-  def acting(:info, {:switch_profile, _name}, _state), do: {:keep_state_and_data, :postpone}
+  def acting(:info, {:switch_profile, _name, _definitions, _meta}, _state),
+    do: {:keep_state_and_data, :postpone}
 
   def acting(event_type, event, state), do: common(event_type, event, :acting, state)
 
@@ -876,7 +907,8 @@ defmodule Troupe.Agent.Server do
   def waiting(:info, {:input, _source, _content, _actor, _meta} = event, state),
     do: queue_input(state, event)
 
-  def waiting(:info, {:switch_profile, _name}, _state), do: {:keep_state_and_data, :postpone}
+  def waiting(:info, {:switch_profile, _name, _definitions, _meta}, _state),
+    do: {:keep_state_and_data, :postpone}
 
   def waiting(event_type, event, state), do: common(event_type, event, :waiting, state)
 
@@ -917,7 +949,8 @@ defmodule Troupe.Agent.Server do
   def compacting(:info, {:input, _source, _content, _actor, _meta} = event, state),
     do: queue_input(state, event)
 
-  def compacting(:info, {:switch_profile, _name}, _state), do: {:keep_state_and_data, :postpone}
+  def compacting(:info, {:switch_profile, _name, _definitions, _meta}, _state),
+    do: {:keep_state_and_data, :postpone}
 
   def compacting(event_type, event, state), do: common(event_type, event, :compacting, state)
 
@@ -952,7 +985,11 @@ defmodule Troupe.Agent.Server do
 
   def done(:info, :cancel, _state), do: {:keep_state_and_data, []}
 
-  def done(:info, {:switch_profile, _name}, _state), do: {:keep_state_and_data, []}
+  # Nothing is in flight, so a switch is applied now rather than postponed, which here
+  # would be for good (Decision 841): a finished branch's next input runs on the agent it
+  # was switched to. It wakes nothing; one whose budget ran out stays done.
+  def done(:info, {:switch_profile, name, definitions, meta}, state),
+    do: {:keep_state, do_switch_profile(state, name, definitions, meta)}
 
   def done(event_type, event, state), do: common(event_type, event, :done, state)
 
@@ -3285,11 +3322,15 @@ defmodule Troupe.Agent.Server do
 
   # -- profile ----------------------------------------------------------------
 
-  defp do_switch_profile(state, name) do
-    case Definitions.fetch(state.definitions, name) do
-      {:ok, %Definition{}} ->
-        log(state, :profile_switched, %{"from" => state.definition.name, "to" => name})
-        switch_definition(state, name)
+  # The conversation stays; the definition, its tools and its permissions are the new one's
+  # from the next model call (Decision 841). `profile_switched` says what changed, for a
+  # transcript to show, and who changed it; the session's listing says what it runs now.
+  defp do_switch_profile(state, name, definitions, meta) do
+    case Definitions.fetch(definitions, name) do
+      {:ok, %Definition{} = definition} ->
+        log(state, :profile_switched, switched(state, definition, meta), meta.actor)
+        if state.parent == nil, do: Index.update(state.session_id, %{profile: name})
+        apply_definition_budget(%{state | definitions: definitions, definition: definition})
 
       {:error, reason} ->
         Logger.warning("troupe: cannot switch profile: #{inspect(reason)}")
@@ -3297,10 +3338,39 @@ defmodule Troupe.Agent.Server do
     end
   end
 
+  defp switched(state, definition, meta) do
+    before = tool_names(state.definition, state.session_id)
+    now = tool_names(definition, state.session_id)
+
+    %{
+      "from" => state.definition.name,
+      "to" => definition.name,
+      "layer" => Local.layer(definition),
+      "tools_added" => now -- before,
+      "tools_removed" => before -- now
+    }
+    |> Map.merge(command_data(meta.command_id))
+  end
+
+  defp tool_names(definition, session_id) do
+    definition |> Tools.for_definition(session_id) |> Enum.map(&Tool.name/1) |> Enum.sort()
+  end
+
+  # What a switch in the log comes back to on a replay: the definition read again from its
+  # file, as the switch read it, so one written after the session started is there; the
+  # snapshot's own when nothing loads it any more.
   defp switch_definition(state, name) do
-    case Definitions.fetch(state.definitions, name) do
-      {:ok, definition} -> apply_definition_budget(%{state | definition: definition})
-      {:error, _} -> state
+    fresh = Definitions.reload(state.definitions)
+
+    case {Definitions.fetch(fresh, name), Definitions.fetch(state.definitions, name)} do
+      {{:ok, definition}, _} ->
+        apply_definition_budget(%{state | definitions: fresh, definition: definition})
+
+      {_none, {:ok, definition}} ->
+        apply_definition_budget(%{state | definition: definition})
+
+      _neither ->
+        state
     end
   end
 

@@ -1,0 +1,33 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/agents.put.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "name",
+    "scope",
+    "source"
+  ],
+  "title": "agents.put",
+  "type": "object"
+}
