@@ -5,12 +5,14 @@ defmodule Troupe.Tools.OnboardWrite do
 
   Confined as `remember` is (Decision 649): the model names a file under one of two roots,
   the workspace's `.troupe/` or the person's config directory, of a kind Troupe reads
-  there, and `Troupe.Onboard.write/3` refuses anything else, judged where it really is.
-  Unlike `remember` it asks first: what it writes decides what runs (an agent's tools and
-  permissions, a command's prompt, an MCP server), so the person sees each file; into the
-  config directory it asks even under `auto_approve` or a profile's `auto` (`must_ask?/1`).
-  And it is offered only to a profile that names it (`Troupe.Tools`), not to every agent
-  with every tool.
+  there, or an `AGENTS.md` at the workspace's root or in a directory of it (`target:
+  workspace`, Decision 827), and `Troupe.Onboard.write/3` refuses anything else, judged
+  where it really is. Unlike `remember` it asks first: what it writes decides what runs (an
+  agent's tools and permissions, a command's prompt, an MCP server), so the person sees
+  each file; into the config directory, and into an `AGENTS.md`, which every coding tool
+  reads and creating which is the person's own question (#516), it asks even under
+  `auto_approve` or a profile's `auto` (`must_ask?/1`). And it is offered only to a
+  profile that names it (`Troupe.Tools`), not to every agent with every tool.
 
   The source's hash is the tool's to take, not the model's to say: it reads the file the
   content was made from, so `troupe instructions check` can tell when that file changes.
@@ -30,9 +32,9 @@ defmodule Troupe.Tools.OnboardWrite do
     """
     Write one of Troupe's own files from another tool's configuration file, recording where it came from. Use it to onboard what another coding tool keeps (a Claude Code subagent, an opencode command) into Troupe's own files, once, so sessions read Troupe's file from then on.
 
-    `target: "repo"` writes under this repository's `.troupe/`, from a file in the repository; `target: "user"` writes under the person's own Troupe config directory, from a file in their home directory. `path` is relative to that directory and is one of: `agents/<name>.md`, `commands/<name>.md`, `skills/<name>/<file>`, `workflows/<name>.json`, `mcp.json`, or (user only) `AGENTS.md`. `source` is the file you made the content from: relative to the workspace for repo, starting `~/` for user. `content` is the whole file as Troupe should read it.
+    `target: "repo"` writes under this repository's `.troupe/`, from a file in the repository; `target: "workspace"` writes an `AGENTS.md` at the repository's root or in a directory of it, from a file in the repository; `target: "user"` writes under the person's own Troupe config directory, from a file in their home directory. `path` is relative to that directory: for repo one of `agents/<name>.md`, `commands/<name>.md`, `rules/<name>.md`, `skills/<name>/<file>`, `workflows/<name>.json`, `mcp.json`; for workspace `AGENTS.md` or `<dir>/AGENTS.md`; for user the same as repo but rules, and `AGENTS.md`. `source` is the file you made the content from: relative to the workspace for repo and workspace, starting `~/` for user. `content` is the whole file as Troupe should read it: for an `AGENTS.md` that is there, what it holds with your additions.
 
-    The tool records the source's hash beside what it writes, so a later change to the source is reported. It writes nowhere else, and the person approves each file.
+    The tool records the source's hash beside what it writes, so a later change to the source is reported. It writes nowhere else, and the person approves each file; an `AGENTS.md` always, since every coding tool reads it.
     """
     |> String.trim()
   end
@@ -42,10 +44,12 @@ defmodule Troupe.Tools.OnboardWrite do
     %{
       "type" => "object",
       "properties" => %{
-        "target" => %{"type" => "string", "enum" => ["repo", "user"]},
+        "target" => %{"type" => "string", "enum" => ["repo", "workspace", "user"]},
         "path" => %{
           "type" => "string",
-          "description" => "Relative to .troupe/ (repo) or the config directory (user)."
+          "description" =>
+            "Relative to .troupe/ (repo), the workspace (workspace: an AGENTS.md) or the " <>
+              "config directory (user)."
         },
         "source" => %{
           "type" => "string",
@@ -62,9 +66,12 @@ defmodule Troupe.Tools.OnboardWrite do
 
   # The person's config directory is read by every session, and what lands there runs
   # without a trust question (an MCP server, an agent: Decision 700), so a write there is
-  # asked about whatever the profile grants or `auto_approve` says (Decision 823).
+  # asked about whatever the profile grants or `auto_approve` says (Decision 823). So is an
+  # `AGENTS.md`, every coding tool's file and not only Troupe's, creating which is the
+  # person's own question (Decision 827): the call cannot tell a new one from an addition
+  # before it runs, so both ask.
   @impl Troupe.Tool
-  def must_ask?(%{"target" => "user"}), do: true
+  def must_ask?(%{"target" => target}) when target in ["user", "workspace"], do: true
   def must_ask?(_args), do: false
 
   @impl Troupe.Tool
@@ -115,10 +122,14 @@ defmodule Troupe.Tools.OnboardWrite do
   end
 
   defp target(%{"target" => "repo"}), do: {:ok, :repo}
+  defp target(%{"target" => "workspace"}), do: {:ok, :workspace}
   defp target(%{"target" => "user"}), do: {:ok, :user}
 
   defp target(%{"target" => other}),
-    do: {:error, {:invalid_args, "target must be \"repo\" or \"user\", got #{inspect(other)}"}}
+    do:
+      {:error,
+       {:invalid_args,
+        "target must be \"repo\", \"workspace\" or \"user\", got #{inspect(other)}"}}
 
   defp target(_args), do: {:error, {:invalid_args, "missing required argument \"target\""}}
 

@@ -1528,7 +1528,7 @@ defmodule Troupe.UI.TUI.Server do
     page =
       case Client.sources(state.session_id) do
         {:ok, sources} -> sources
-        {:error, reason} -> %{servers: [], skills: [], warnings: [to_message(reason)]}
+        {:error, reason} -> %{servers: [], skills: [], skipped: [], warnings: [to_message(reason)]}
       end
 
     model =
@@ -1784,13 +1784,36 @@ defmodule Troupe.UI.TUI.Server do
       {:server, _server} ->
         {:error, "a server from config.yaml is removed there"}
 
-      {:skill, skill} ->
-        remove_source(state, "skills", %{name: skill.name}, Atom.to_string(skill.layer))
+      {kind, %{name: name, layer: layer}}
+      when kind in [:skill, :skipped] and layer in [:user, :workspace] and is_binary(name) ->
+        remove_source(state, "skills", %{name: name}, Atom.to_string(layer))
+
+      {_kind, skill} ->
+        {:error, not_ours(skill)}
 
       nil ->
         nil
     end
   end
+
+  # A skill in an `.agents/skills` is read where it is and never written (root Decision
+  # 822): nothing in Troupe's own files to remove, so the notice says whose it is.
+  defp not_ours(%{name: nil, dir: dir, reason: reason}),
+    do: "#{dir} is not read (#{reason}), so there is nothing of it to remove"
+
+  defp not_ours(%{name: name, layer: :agents} = skill),
+    do:
+      "#{name} is the repository's, in #{skill.dir}: Troupe reads .agents/skills where it is " <>
+        "and never writes there, so remove it from the repository, or give .troupe/skills " <>
+        "a skill of that name to use instead"
+
+  defp not_ours(%{name: name, layer: :user_agents} = skill),
+    do:
+      "#{name} is in your #{skill.dir}, which other tools read too: Troupe reads " <>
+        "~/.agents/skills where it is and never writes there, so remove it there"
+
+  defp not_ours(%{name: name, layer: layer}),
+    do: "#{name} comes from the #{layer} layer, which Troupe does not write"
 
   defp load_files(state, path) do
     case Client.fs_list(state.session_id, path) do

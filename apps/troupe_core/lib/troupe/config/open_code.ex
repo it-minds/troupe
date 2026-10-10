@@ -1,25 +1,26 @@
 defmodule Troupe.Config.OpenCode do
   @moduledoc """
   Reads provider definitions from opencode's `opencode.jsonc` (and keys from its
-  `auth.json`) so an existing opencode setup works with Troupe unchanged.
+  `auth.json`) for the one-time copy into Troupe's own `config.yaml`
+  (`Troupe.Config.ModelSettings.import_opencode/1`), and for the first run to offer it
+  (`Troupe.Setup.detect/0`). Nothing else reads them: a session's configuration never
+  comes from opencode's files (Decision 828).
 
   Read from `provider.<name>`: `options.baseURL`, `options.apiKey`, `options.authToken`
   (a bearer token, which is how a gateway in front of the Anthropic API is usually
   keyed), `npm` (to detect an Anthropic SDK provider), and per model `models.<name>.id`
   (the id the gateway wants on the wire), `limit.context`, `limit.output` and
-  `options.reasoningEffort`. Keys are used at session start and never written anywhere
-  by Troupe, unless a person asks for the copy (`Troupe.Config.ModelSettings.import_opencode/1`),
-  which writes each one into `config.yaml` as it is written here.
+  `options.reasoningEffort`. The copy writes each key into `config.yaml` as it is
+  written here.
 
   `baseURL`, `apiKey` and `authToken` are read as opencode reads them: `{env:VAR}` is the
   variable, and `{file:path}` the file's contents, trimmed, the path taken from the
   config's own directory or from `~`. A variable that is not set, or a file that cannot
   be read, refuses that provider as an unset `{env:VAR}` in `config.yaml` does: it is
-  kept, marked with why, and a request to it fails with that message instead of sending
-  the reference as a key.
+  kept, marked with why, and copied without a key.
 
   Not read: `variants`, `agent`, `permission`, `mcp`, `lsp` and everything else opencode
-  keeps in the same file.
+  keeps in the same file (onboarding and `/mcp import` read some of those, each once).
 
   This is a laptop's concern. A pod has a profile and never an opencode installation,
   and on one both files are simply absent, which reads as no providers.

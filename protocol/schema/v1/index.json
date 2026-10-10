@@ -108,6 +108,7 @@
     "events/loop_stopped.json",
     "events/mounts_resolved.json",
     "events/onboarded.json",
+    "events/onboarding_suggested.json",
     "events/presence.json",
     "events/profile_switched.json",
     "events/progress.json",

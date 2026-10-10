@@ -25,7 +25,7 @@ defmodule Troupe.Config.Models do
       provider does not serve, Decision 799), `input` and `output`
       in dollars per million tokens (`nil` where nothing prices it), `price_source`
       (`catalog`, `config` or `nil`), `source` (where its facts came from: `catalog`,
-      `config`, `yaml` or `opencode`), `key` (whether one is set), and `served`: `true`
+      `config` or `yaml`), `key` (whether one is set), and `served`: `true`
       when its provider's list has it, `false` with the `nearest` ids it does list when
       it does not, `nil` when that provider has never answered.
     * `roles` - `default`, `cheap` and `expensive`, each the id `Config.resolve_model/2`

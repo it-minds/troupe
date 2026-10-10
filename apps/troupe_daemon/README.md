@@ -127,8 +127,9 @@ models:
   cheap: gateway/claude-haiku-4-5
 ```
 
-With no key of its own the daemon reuses an opencode installation's providers and default
-model. `troupe-daemon config` shows what was resolved, `config --explain [KEY]` which file
+The daemon reads none of an opencode installation's settings; `troupe-daemon config
+import-opencode` copies its providers and default model into `config.yaml` once.
+`troupe-daemon config` shows what was resolved, `config --explain [KEY]` which file
 set each value, `config validate` what is wrong, and `config migrate` the rewrite to the
 current spellings. `troupe-daemon models` lists what every provider serves, with windows
 and prices, cached in `models.json`: it asks the providers first when the cache is stale,

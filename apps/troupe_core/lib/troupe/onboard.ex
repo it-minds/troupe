@@ -6,26 +6,34 @@ defmodule Troupe.Onboard do
   - **Two roots, Troupe's kinds of file.** A proposal (`Troupe.Onboard.Source`) writes
     under the workspace's `.troupe/` (`:repo`) or the person's config directory (`:user`),
     and only what Troupe reads there: `agents/<name>.md`, `commands/<name>.md`,
-    `skills/<name>/...`, `workflows/<name>.json`, `mcp.json`, and the person's own
-    `AGENTS.md`. The file is judged where it really is, links followed (Decision 798's
-    edge, #512's rule for what Troupe writes): one that resolves outside its root, through
-    a linked `.troupe` or `agents`, is refused, as is a path with `..`, an absolute one,
-    and one naming any other file (`config.yaml`, which has a writer of its own, the
-    credentials, the brief). A repository's file is onboarded into the repository and the
-    person's own, under `~/`, into their config directory, never one into the other.
+    `rules/<name>.md` (a repository's), `skills/<name>/...`, `workflows/<name>.json`,
+    `mcp.json`, and the person's own `AGENTS.md`. And one file outside `.troupe/`: an
+    `AGENTS.md` at the workspace's root or in a directory of it (`:workspace`, Decision
+    827), the file every coding tool reads. The file is judged where it really is, links
+    followed (Decision 798's edge, #512's rule for what Troupe writes): one that resolves
+    outside its root, through a linked `.troupe` or `agents`, is refused, as is a path
+    with `..`, an absolute one, and one naming any other file (`config.yaml`, which has a
+    writer of its own, the credentials, the brief). A repository's file is onboarded into
+    the repository and the person's own, under `~/`, into their config directory, never
+    one into the other.
   - **Provenance.** Every file written says where it came from: `imported_from`,
-    `imported_hash` (the lowercase hex sha256 of the source's bytes) and `imported_at`, and
+    `imported_hash` (the lowercase hex sha256 of the source's bytes) and `imported_at`,
     `imported_also` for the other files it was made from (`also_from`: an agent's
-    permissions in a settings file, say), in a Markdown file's frontmatter; for any other
-    file, and for `AGENTS.md`, which is read into a prompt as it is, in `onboarded.json`
-    at the root, keyed by the file's path.
+    permissions in a settings file, say), and `imported_version`, the version of the
+    onboarding rules that wrote it (`version/0`), in a Markdown file's frontmatter; for any
+    other file, and for an `AGENTS.md`, which is read into a prompt as it is, in
+    `onboarded.json` at the root (the workspace's `.troupe/` for a `:workspace` file),
+    keyed by the file's path. The manifest also says, as `onboarding`, the version of the
+    rules the workspace was last onboarded under as a whole.
   - **Nothing silent.** `plan/2` asks the registered sources and passes over what was
-    onboarded from the same source with the same hash (the person's later edits stand) and
-    what the person declined for that hash; everything else is a proposal with its diff
-    against what is there. `accept/3` writes one, atomically, and refuses when the file
-    changed since it was shown; `decline/2` remembers a no in the state directory, so the
-    next run does not ask again until the source changes. A declined proposal leaves
-    nothing in either root.
+    onboarded from the same source with the same hash, by rules no older than this build's
+    or to the same content (the person's later edits stand), and what the person declined
+    for that hash; everything else is a proposal with its diff against what is there.
+    Creating an `AGENTS.md` that is not there is a question of its own (`question:
+    :create_agents_md`), never one `--yes` answers. `accept/3` writes one, atomically, and
+    refuses when the file changed since it was shown; `decline/2` remembers a no in the
+    state directory, so the next run does not ask again until the source changes. A
+    declined proposal leaves nothing in either root.
   - **Drift.** `drift/2` reads the provenance back and names each file whose source, or
     one of the files it was also made from, has changed or gone since: what `troupe
     instructions check` reports.
@@ -43,7 +51,13 @@ defmodule Troupe.Onboard do
 
   # The sources `troupe onboard` asks, in this order. A source registers itself here, one
   # line.
-  @sources [Troupe.Onboard.AgentsAndCommands]
+  @sources [Troupe.Onboard.Instructions, Troupe.Onboard.AgentsAndCommands]
+
+  # The version of the onboarding rules: what the sources would write, and how. Raised in
+  # the pull request that changes what any source writes for the same files, so a
+  # workspace onboarded under older rules is told to run `troupe onboard` again (Decision
+  # 827). It never re-runs by itself.
+  @version 1
 
   # Where a file other than frontmatter Markdown records its provenance, at each root.
   @manifest "onboarded.json"
@@ -53,7 +67,7 @@ defmodule Troupe.Onboard do
 
   @keys ~w(imported_from imported_hash imported_at)
 
-  @type target :: :repo | :user
+  @type target :: :repo | :user | :workspace
 
   @typedoc "A proposal checked against its root, as `troupe onboard` shows it."
   @type item :: %{
@@ -62,6 +76,7 @@ defmodule Troupe.Onboard do
           real: Path.t(),
           shown: String.t(),
           status: :new | :changed,
+          question: :write | :create_agents_md,
           current: binary() | nil,
           content: binary(),
           diff: String.t(),
@@ -93,6 +108,14 @@ defmodule Troupe.Onboard do
   """
   @spec sources() :: [module()]
   def sources, do: Application.get_env(:troupe_core, :onboard_sources, @sources)
+
+  @doc """
+  The version of the onboarding rules this build has: recorded with every file onboarding
+  writes (`imported_version`) and in the workspace's `onboarded.json` (`onboarding`), so a
+  session can say when a workspace was onboarded under older ones (Decision 827).
+  """
+  @spec version() :: pos_integer()
+  def version, do: @version
 
   @doc """
   What onboarding would write in `workspace`: each registered source's proposals, checked
@@ -246,38 +269,101 @@ defmodule Troupe.Onboard do
   end
 
   @doc """
-  The files onboarding wrote, under the workspace's `.troupe/` and the person's config
-  directory, with their recorded provenance (`files`), and a `drift` finding for each source
-  or other file it was made from that has changed or gone since (`findings`, on the line
-  of `imported_hash` or `imported_also`), in `troupe instructions check`'s shape. A
-  record naming a source where none may be (a repository's file pointing outside the
-  workspace) is passed over, as is a `.troupe` that links out.
+  The files onboarding wrote, under the workspace's `.troupe/`, as its `AGENTS.md` files
+  and under the person's config directory, with their recorded provenance (`files`), and a
+  `drift` finding for each source or other file it was made from that has changed or gone
+  since (`findings`, on the line of `imported_hash` or `imported_also`), in `troupe
+  instructions check`'s shape; and one `outdated` finding when the workspace was onboarded
+  under older rules than this build's (`onboarded_version/2`), on the line of its
+  `onboarding`. A record naming a source where none may be (a repository's file pointing
+  outside the workspace) is passed over, as is a `.troupe` that links out.
   """
   @spec drift(Path.t(), keyword()) :: %{files: [map()], findings: [map()]}
   def drift(workspace, opts \\ []) do
     workspace = Path.expand(workspace)
     opts = defaults(opts)
-    records = Enum.flat_map([:repo, :user], &records(&1, workspace, opts))
+    records = Enum.flat_map([:repo, :workspace, :user], &records(&1, workspace, opts))
 
     findings =
       for record <- records, {line, message} <- drifted(record, workspace, opts) do
         %{path: record.file, line: line, kind: :drift, message: message}
       end
 
-    %{files: records, findings: findings}
+    %{files: records, findings: findings ++ outdated(workspace, records)}
+  end
+
+  @doc """
+  The version of the onboarding rules `workspace` was last onboarded under as a whole: its
+  `.troupe/onboarded.json`'s `onboarding`, `0` for a workspace onboarded before there was
+  one, and `nil` for one never onboarded (no manifest and no file recording where it came
+  from). `onboarding` is set when the manifest is first written, and raised by `stamp/1`,
+  never by one file's write: a workspace the librarian brought one file into under newer
+  rules is still the older rules' for the rest.
+  """
+  @spec onboarded_version(Path.t(), keyword()) :: non_neg_integer() | nil
+  def onboarded_version(workspace, opts \\ []) do
+    workspace = Path.expand(workspace)
+
+    case repo_manifest(workspace) do
+      {:ok, %{"onboarding" => n}} when is_integer(n) and n >= 0 ->
+        n
+
+      {:ok, _map} ->
+        0
+
+      :none ->
+        opts = defaults(opts)
+
+        if Enum.flat_map([:repo, :workspace], &records(&1, workspace, opts)) == [],
+          do: nil,
+          else: 0
+    end
+  end
+
+  @doc """
+  Records that `workspace` has been onboarded under this build's rules as a whole: its
+  `.troupe/onboarded.json`'s `onboarding` set to `version/0`. What `troupe onboard` does at
+  the end of a run that left nothing unanswered, so a workspace whose files the newer
+  rules would not change stops being told to run it again. A workspace with no manifest,
+  never onboarded, is left as it is, and so is one whose `.troupe` links out.
+  """
+  @spec stamp(Path.t()) :: :ok | {:error, String.t()}
+  def stamp(workspace) do
+    workspace = Path.expand(workspace)
+
+    with {:ok, real_ws} <- real(workspace),
+         base = real_ws <> "/.troupe",
+         {:ok, file} <- real(Path.join(base, @manifest)),
+         :ok <- under(file, base, @manifest, :repo),
+         true <- File.regular?(file) do
+      :global.trans({{__MODULE__, key(file)}, self()}, fn ->
+        map = read_json(file)
+        write_manifest(file, @version, sections(map))
+      end)
+    else
+      false -> :ok
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc "A line diff of what a file holds and what onboarding would write; all `+` for a new one."
   @spec diff(binary() | nil, binary()) :: String.t()
   def diff(nil, new),
-    do: new |> String.trim_trailing() |> String.split("\n") |> Enum.map_join("\n", &("+ " <> &1))
+    do:
+      new
+      |> lf()
+      |> String.trim_trailing()
+      |> String.split("\n")
+      |> Enum.map_join("\n", &("+ " <> &1))
 
-  def diff(old, new), do: Migrate.diff(String.replace(old, "\r\n", "\n"), new)
+  def diff(old, new), do: Migrate.diff(lf(old), lf(new))
+
+  defp lf(text), do: String.replace(text, "\r\n", "\n")
 
   ## Planning
 
   defp propose(source, workspace, opts) do
-    case source.proposals(workspace, home: opts[:home]) do
+    case source.proposals(workspace, Keyword.take(opts, [:home, :config_dir])) do
       list when is_list(list) ->
         Enum.map(list, fn
           proposal when is_map(proposal) -> {:ok, proposal}
@@ -294,7 +380,11 @@ defmodule Troupe.Onboard do
   # What a source found and proposed nothing for, when it says (an optional callback).
   defp skipped(source, workspace, opts) do
     if Code.ensure_loaded?(source) and function_exported?(source, :skipped, 2),
-      do: Enum.map(source.skipped(workspace, home: opts[:home]), &skipped_entry(source, &1)),
+      do:
+        Enum.map(
+          source.skipped(workspace, Keyword.take(opts, [:home, :config_dir])),
+          &skipped_entry(source, &1)
+        ),
       else: []
   rescue
     error -> [{:refused, refusal(%{}, "#{inspect(source)} failed: #{Exception.message(error)}")}]
@@ -317,7 +407,8 @@ defmodule Troupe.Onboard do
         was = recorded(current, place)
 
         cond do
-          was != nil and fingerprint(was) == fingerprint(proposal) ->
+          was != nil and fingerprint(was) == fingerprint(proposal) and
+              current?(was, current, proposal, place) ->
             {:unchanged, place}
 
           Map.get(declined, key(place.real)) == fingerprint(proposal) ->
@@ -347,6 +438,36 @@ defmodule Troupe.Onboard do
 
   defp also(proposal), do: Map.get(proposal, :also_from, [])
 
+  # A file onboarded from the same sources is left alone when the rules that wrote it are
+  # this build's, or newer; under older rules only when they would write it the same, so a
+  # change of rules is shown once as a diff and the person's own edits are not taken back
+  # unasked.
+  defp current?(was, current, proposal, place),
+    do: was["imported_version"] >= @version or same_content?(current, proposal, place)
+
+  defp same_content?(current, proposal, place) do
+    if frontmatter?(place.target, place.path),
+      do: bare(current) == bare(proposal.content),
+      else: lf(current) == lf(proposal.content)
+  end
+
+  # A Markdown file without its provenance: the keys taken out, and a frontmatter that held
+  # nothing else with them.
+  defp bare(text) do
+    text = lf(text)
+
+    case frontmatter(text) do
+      {:ok, yaml, body} ->
+        case strip(yaml) do
+          "" -> body
+          rest -> "---\n" <> rest <> "---\n" <> body
+        end
+
+      :none ->
+        text
+    end
+  end
+
   defp item(proposal, place, current, was, at) do
     content = render(proposal, place, at)
 
@@ -356,6 +477,10 @@ defmodule Troupe.Onboard do
       real: place.real,
       shown: place.shown,
       status: if(current, do: :changed, else: :new),
+      # An `AGENTS.md` that is not there is every coding tool's new file, not only
+      # Troupe's: creating one is its own question (#516's seventh decision).
+      question:
+        if(place.target == :workspace and current == nil, do: :create_agents_md, else: :write),
       current: current,
       content: content,
       diff: diff(current, content),
@@ -375,7 +500,7 @@ defmodule Troupe.Onboard do
 
   ## Checking
 
-  defp shape(%{target: target} = p) when target in [:repo, :user] do
+  defp shape(%{target: target} = p) when target in [:repo, :user, :workspace] do
     cond do
       not Enum.all?([:path, :content, :source, :source_hash], &is_binary(p[&1])) ->
         shape(nil)
@@ -397,8 +522,8 @@ defmodule Troupe.Onboard do
   defp shape(_proposal),
     do:
       {:error,
-       "it is not a proposal: it needs a target (:repo or :user), a path, content, " <>
-         "a source and a source_hash"}
+       "it is not a proposal: it needs a target (:repo, :user or :workspace), a path, " <>
+         "content, a source and a source_hash"}
 
   defp list_of?(list, fun), do: is_list(list) and Enum.all?(list, fun)
 
@@ -419,27 +544,34 @@ defmodule Troupe.Onboard do
     segments = String.split(path, "/")
 
     cond do
-      problem = path_problem(path, segments) ->
+      problem = path_problem(target, path, segments) ->
         {:error, problem}
 
       ours?(target, segments) ->
         :ok
 
+      target == :workspace ->
+        {:error,
+         "`#{path}` is not a file onboarding writes into the workspace: it writes AGENTS.md, " <>
+           "at the workspace's root or in a directory of it that is not hidden"}
+
       true ->
         {:error,
          "`#{path}` is not a file onboarding writes: it writes agents/<name>.md, " <>
-           "commands/<name>.md, skills/<name>/..., workflows/<name>.json and mcp.json" <>
+           "commands/<name>.md, " <>
+           if(target == :repo, do: "rules/<name>.md, ", else: "") <>
+           "skills/<name>/..., workflows/<name>.json and mcp.json" <>
            if(target == :user, do: ", and your own AGENTS.md", else: "")}
     end
   end
 
-  defp path_problem(path, segments) do
+  defp path_problem(target, path, segments) do
     cond do
       path == "" ->
         "the path is empty"
 
       Workspace.absolute?(path) or String.starts_with?(path, "~") ->
-        "`#{path}` is not relative: a path is relative to .troupe/ or to your config directory"
+        "`#{path}` is not relative: " <> relative_to(target)
 
       String.contains?(path, "\\") ->
         "`#{path}` has a backslash: write it with /"
@@ -459,8 +591,20 @@ defmodule Troupe.Onboard do
     end
   end
 
+  defp relative_to(:workspace), do: "an AGENTS.md's path is relative to the workspace"
+  defp relative_to(_target), do: "a path is relative to .troupe/ or to your config directory"
+
+  # An `AGENTS.md`, at the root or in a directory, none of it hidden (`.git`, `.troupe`,
+  # `.agents`, whose `AGENTS.md` is that directory's other file and not onboarding's).
+  defp ours?(:workspace, segments) do
+    {dirs, [file]} = Enum.split(segments, -1)
+    file == "AGENTS.md" and not Enum.any?(dirs, &String.starts_with?(&1, "."))
+  end
+
   defp ours?(_target, ["agents", file]), do: named?(file, ".md")
   defp ours?(_target, ["commands", file]), do: named?(file, ".md")
+  # A rule, as `.troupe/rules/` holds them (Decision 827): a repository's only.
+  defp ours?(:repo, ["rules", file]), do: named?(file, ".md")
   defp ours?(_target, ["workflows", file]), do: named?(file, ".json")
   # A skill's own files, one directory deep at most: as deep as `drift/2` looks.
   defp ours?(_target, ["skills", name, _file]), do: AgentDefinition.valid_name?(name)
@@ -481,13 +625,16 @@ defmodule Troupe.Onboard do
     with {:ok, base} <- base(target, workspace, opts),
          {:ok, real} <- real(file),
          :ok <- under(real, base, path, target),
-         :ok <- not_a_directory(real, path) do
+         :ok <- not_a_directory(real, path),
+         :ok <- in_the_open(target, real, base, path),
+         {:ok, manifest} <- manifest_base(target, base) do
       {:ok,
        %{
          target: target,
          path: path,
          root: root,
          base: base,
+         manifest: manifest,
          file: file,
          real: real,
          shown: shown(target, path, opts)
@@ -496,15 +643,52 @@ defmodule Troupe.Onboard do
   end
 
   defp root(:repo, workspace, _opts), do: Paths.project_dir(workspace)
+  defp root(:workspace, workspace, _opts), do: workspace
   defp root(:user, _workspace, opts), do: opts[:config_dir]
 
   # The root as it must really be: the workspace's own `.troupe`, not where a link would
-  # take it; the config directory wherever the person keeps it.
+  # take it; the workspace itself for an `AGENTS.md`; the config directory wherever the
+  # person keeps it.
   defp base(:repo, workspace, _opts) do
     with {:ok, real} <- real(workspace), do: {:ok, real <> "/.troupe"}
   end
 
+  defp base(:workspace, workspace, _opts), do: real(workspace)
   defp base(:user, _workspace, opts), do: real(opts[:config_dir])
+
+  # Where the root's `onboarded.json` is: an `AGENTS.md` records in the workspace's
+  # `.troupe/`, which must really be the workspace's, checked before anything is written.
+  defp manifest_base(:workspace, base) do
+    troupe = base <> "/.troupe"
+
+    with {:ok, real} <- real(Path.join(troupe, @manifest)),
+         :ok <- under(real, troupe, @manifest, :repo),
+         do: {:ok, troupe}
+  end
+
+  defp manifest_base(_target, base), do: {:ok, base}
+
+  # An `AGENTS.md` really in a directory of the workspace that is there and not hidden: a
+  # directory linked into `.git`, say, is refused as a written `.git/AGENTS.md` would be,
+  # and onboarding makes no directory for one.
+  defp in_the_open(:workspace, real, base, path) do
+    dirs = real |> Path.relative_to(base) |> Path.split() |> Enum.drop(-1)
+
+    cond do
+      Enum.any?(dirs, &String.starts_with?(&1, ".")) ->
+        {:error, "`#{path}` resolves into a hidden directory (#{Paths.display(real)})"}
+
+      not File.dir?(Path.dirname(real)) ->
+        {:error,
+         "`#{path}`: there is no such directory in the workspace, and onboarding writes an " <>
+           "AGENTS.md only beside the files it came from"}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp in_the_open(_target, _real, _base, _path), do: :ok
 
   defp under(real, base, path, target) do
     if inside?(real, base),
@@ -520,9 +704,11 @@ defmodule Troupe.Onboard do
   end
 
   defp root_name(:repo), do: "the workspace's .troupe/"
+  defp root_name(:workspace), do: "the workspace"
   defp root_name(:user), do: "your config directory"
 
   defp shown(:repo, path, _opts), do: ".troupe/" <> path
+  defp shown(:workspace, path, _opts), do: path
   defp shown(:user, path, opts), do: Paths.display(Path.join(opts[:config_dir], path))
 
   # The source, and each file it was also made from, is where it may be and holds what the
@@ -545,12 +731,13 @@ defmodule Troupe.Onboard do
 
   # A repository's file becomes a repository's, and the person's own, under `~/`, their
   # own: never one into the other, so a clone cannot write the person's config directory.
-  defp source_file(:repo, source, workspace, _opts) do
+  defp source_file(target, source, workspace, _opts) when target in [:repo, :workspace] do
     cond do
       String.starts_with?(source, "~") ->
         {:error,
-         "`#{source}` is in your home directory: a file written into the repository's " <>
-           ".troupe/ comes from the repository"}
+         "`#{source}` is in your home directory: a file written into the " <>
+           if(target == :repo, do: "repository's .troupe/", else: "repository") <>
+           " comes from the repository"}
 
       Workspace.absolute?(source) ->
         {:error, "`#{source}` is not relative to the workspace"}
@@ -581,13 +768,13 @@ defmodule Troupe.Onboard do
   # The proposal's content as written: with its provenance in the frontmatter, for a
   # Markdown file read as frontmatter and body; as it is, for the rest.
   defp render(proposal, place, at) do
-    if frontmatter?(place.path),
+    if frontmatter?(place.target, place.path),
       do: with_provenance(proposal.content, provenance(proposal, at)),
       else: proposal.content
   end
 
   # `imported_also` only when the file was made from more than its source, each other file
-  # by its path and hash, in path order.
+  # by its path and hash, in path order; `imported_version` the rules that wrote it.
   defp provenance(proposal, at) do
     also =
       proposal
@@ -598,16 +785,20 @@ defmodule Troupe.Onboard do
     %{
       "imported_from" => proposal.source,
       "imported_hash" => proposal.source_hash,
-      "imported_at" => at
+      "imported_at" => at,
+      "imported_version" => @version
     }
     |> then(&if also == [], do: &1, else: Map.put(&1, "imported_also", also))
   end
 
   # Each key on a line of its own, its value as JSON, which YAML reads as it is: a quoted
-  # string, or `imported_also`'s list of `{"from", "hash"}`.
+  # string, `imported_also`'s list of `{"from", "hash"}`, or the version's number. The
+  # version last, so the lines a drift finding names stay where they were.
   defp with_provenance(content, provenance) do
     lines =
-      for key <- @keys ++ ["imported_also"], Map.has_key?(provenance, key), into: "" do
+      for key <- @keys ++ ["imported_also", "imported_version"],
+          Map.has_key?(provenance, key),
+          into: "" do
         "#{key}: #{Jason.encode!(provenance[key])}\n"
       end
 
@@ -618,7 +809,7 @@ defmodule Troupe.Onboard do
   end
 
   defp strip(yaml),
-    do: Regex.replace(~r/^imported_(?:from|hash|at|also):[^\n]*(?:\n|\z)/m, yaml, "")
+    do: Regex.replace(~r/^imported_(?:from|hash|at|also|version):[^\n]*(?:\n|\z)/m, yaml, "")
 
   defp frontmatter(text) do
     case Regex.run(~r/\A---\r?\n(.*?)^---[ \t]*(?:\r?\n|\z)/ms, text) do
@@ -631,8 +822,10 @@ defmodule Troupe.Onboard do
   end
 
   # `AGENTS.md` is read into a prompt whole, frontmatter and all, so it records in the
-  # manifest; every other Markdown file Troupe reads takes its keys from a frontmatter.
-  defp frontmatter?(path), do: String.ends_with?(path, ".md") and path != "AGENTS.md"
+  # manifest, the person's own and a workspace's alike; every other Markdown file Troupe
+  # reads takes its keys from a frontmatter.
+  defp frontmatter?(:workspace, _path), do: false
+  defp frontmatter?(_target, path), do: String.ends_with?(path, ".md") and path != "AGENTS.md"
 
   defp as_shown(current, place, opts) do
     if Keyword.has_key?(opts, :expect) and opts[:expect] != current,
@@ -656,28 +849,75 @@ defmodule Troupe.Onboard do
     end
   end
 
-  # The provenance of a file that keeps none of its own, beside it at the root: written
-  # after the file, so a failure between the two leaves a file with no record (proposed
-  # again, never taken for unchanged) rather than a record of a file not written.
+  # The root's `onboarded.json`, after every file: the provenance of a file that keeps none
+  # of its own (in `files`, or in `workspace` for an `AGENTS.md` of the workspace's), and
+  # for any file the version of the rules the root is onboarded under, set when the
+  # manifest is first written. Written after the file, so a failure between the two leaves
+  # a file with no record (proposed again, never taken for unchanged) rather than a record
+  # of a file not written.
   defp manifest(proposal, place, at) do
-    with false <- frontmatter?(place.path),
-         {:ok, real} <- real(Path.join(place.base, @manifest)),
-         :ok <- under(real, place.base, @manifest, place.target) do
-      entry = provenance(proposal, at)
+    with {:ok, real} <- real(Path.join(place.manifest, @manifest)),
+         :ok <- under(real, place.manifest, @manifest, manifest_target(place.target)) do
+      entry =
+        if frontmatter?(place.target, place.path), do: nil, else: provenance(proposal, at)
 
       :global.trans({{__MODULE__, key(real)}, self()}, fn ->
-        put_manifest(real, place.path, entry)
+        put_manifest(real, section(place.target), place.path, entry)
       end)
-    else
-      true -> :ok
-      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp put_manifest(manifest, path, entry) do
-    files = manifest |> read_json() |> Map.get("files", %{}) |> Map.put(path, entry)
-    object = Jason.OrderedObject.new(Enum.sort(files))
-    replace(manifest, Jason.encode!(%{"version" => 1, "files" => object}, pretty: true) <> "\n")
+  defp manifest_target(:workspace), do: :repo
+  defp manifest_target(target), do: target
+
+  defp section(:workspace), do: "workspace"
+  defp section(_target), do: "files"
+
+  defp put_manifest(manifest, section, path, entry) do
+    map = read_json(manifest)
+    sections = sections(map)
+
+    sections =
+      if entry, do: Map.update!(sections, section, &Map.put(&1, path, entry)), else: sections
+
+    # A manifest written before there were versions is of the rules before the first.
+    onboarding =
+      cond do
+        is_integer(map["onboarding"]) -> map["onboarding"]
+        map == %{} -> @version
+        true -> 0
+      end
+
+    write_manifest(manifest, onboarding, sections)
+  end
+
+  defp sections(map) do
+    for name <- ["files", "workspace"], into: %{} do
+      case Map.get(map, name) do
+        %{} = entries -> {name, entries}
+        _other -> {name, %{}}
+      end
+    end
+  end
+
+  # `version` (the manifest's own format), `onboarding`, then the entries by path;
+  # `workspace` only when there is one.
+  defp write_manifest(file, onboarding, sections) do
+    workspace =
+      if sections["workspace"] == %{},
+        do: [],
+        else: [{"workspace", Jason.OrderedObject.new(Enum.sort(sections["workspace"]))}]
+
+    object =
+      Jason.OrderedObject.new(
+        [
+          {"version", 1},
+          {"onboarding", onboarding},
+          {"files", Jason.OrderedObject.new(Enum.sort(sections["files"]))}
+        ] ++ workspace
+      )
+
+    replace(file, Jason.encode!(object, pretty: true) <> "\n")
   end
 
   ## Reading back
@@ -685,9 +925,16 @@ defmodule Troupe.Onboard do
   defp recorded(nil, _place), do: nil
 
   defp recorded(current, place) do
-    if frontmatter?(place.path),
+    if frontmatter?(place.target, place.path),
       do: frontmatter_provenance(current),
-      else: place.base |> Path.join(@manifest) |> read_json() |> get_in(["files", place.path])
+      else: manifest_entry(place.manifest, section(place.target), place.path)
+  end
+
+  defp manifest_entry(base, section, path) do
+    case base |> Path.join(@manifest) |> read_json() |> sections() |> get_in([section, path]) do
+      %{} = entry -> Map.put(entry, "imported_version", version_read(entry["imported_version"]))
+      _none -> nil
+    end
   end
 
   defp frontmatter_provenance(text) do
@@ -698,10 +945,15 @@ defmodule Troupe.Onboard do
       |> Map.take(@keys)
       |> Map.new(fn {k, v} -> {k, to_string(v)} end)
       |> Map.put("imported_also", also_read(map["imported_also"]))
+      |> Map.put("imported_version", version_read(map["imported_version"]))
     else
       _ -> nil
     end
   end
+
+  # A file recorded with no version was written before there were versions.
+  defp version_read(n) when is_integer(n) and n >= 0, do: n
+  defp version_read(_none), do: 0
 
   # The other files a record names, as `{"from", "hash"}` maps; anything else in the key
   # is not a record of one.
@@ -713,18 +965,77 @@ defmodule Troupe.Onboard do
 
   defp also_read(_none), do: []
 
+  # A workspace's `AGENTS.md` files are recorded in its `.troupe/onboarded.json`, under
+  # `workspace`, and are where those records say, in the workspace.
+  defp records(:workspace, workspace, opts) do
+    with {:ok, base} <- base(:workspace, workspace, opts),
+         {:ok, troupe} <- manifest_base(:workspace, base),
+         true <- File.dir?(troupe) do
+      troupe
+      |> manifest_records(:workspace, base)
+      |> Enum.map(&Map.merge(&1, %{target: :workspace, shown: &1.path}))
+      |> Enum.sort_by(& &1.path)
+    else
+      _ -> []
+    end
+  end
+
   defp records(target, workspace, opts) do
     root = root(target, workspace, opts)
 
     with {:ok, base} <- base(target, workspace, opts),
          {:ok, real} <- real(root),
          true <- key(real) == key(base) and File.dir?(base) do
-      (Enum.flat_map(~w(agents commands skills), &markdown_entry(base, "", &1, 0)) ++
-         manifest_records(base))
+      (Enum.flat_map(~w(agents commands rules skills), &markdown_entry(base, "", &1, 0)) ++
+         manifest_records(base, target, base))
       |> Enum.map(&Map.merge(&1, %{target: target, shown: shown(target, &1.path, opts)}))
       |> Enum.sort_by(& &1.path)
     else
       _ -> []
+    end
+  end
+
+  # The repository's manifest, `{:ok, map}`, when its `.troupe` is really the workspace's
+  # and holds one; `:none` otherwise.
+  defp repo_manifest(workspace) do
+    with {:ok, real_ws} <- real(workspace),
+         base = real_ws <> "/.troupe",
+         {:ok, file} <- real(Path.join(base, @manifest)),
+         :ok <- under(file, base, @manifest, :repo),
+         {:ok, text} <- File.read(file),
+         {:ok, %{} = map} <- Jason.decode(text) do
+      {:ok, map}
+    else
+      _ -> :none
+    end
+  end
+
+  # The one finding a workspace onboarded under older rules gets, on its manifest's
+  # `onboarding` line (or its first record's, with no manifest).
+  defp outdated(workspace, records) do
+    case onboarded_version(workspace) do
+      version when is_integer(version) and version < @version ->
+        file = Path.join(Paths.project_dir(workspace), @manifest)
+
+        {path, line} =
+          case File.read(file) do
+            {:ok, text} -> {file, line_of(text, ~s(  "onboarding":))}
+            {:error, _} -> {records |> List.first(%{file: file}) |> Map.get(:file), 1}
+          end
+
+        [
+          %{
+            path: path,
+            line: line,
+            kind: :outdated,
+            message:
+              "onboarded under version #{version} of the onboarding rules, and this build's " <>
+                "are version #{@version}: `troupe onboard` shows what they would write now"
+          }
+        ]
+
+      _current ->
+        []
     end
   end
 
@@ -748,7 +1059,7 @@ defmodule Troupe.Onboard do
         markdown_records(file, rel, depth + 1)
 
       {:ok, %File.Stat{type: :regular}} ->
-        if frontmatter?(rel), do: markdown_record(file, rel), else: []
+        if frontmatter?(:repo, rel), do: markdown_record(file, rel), else: []
 
       _other ->
         []
@@ -766,6 +1077,7 @@ defmodule Troupe.Onboard do
           from: from,
           hash: hash,
           also: record["imported_also"],
+          version: record["imported_version"],
           line: line_of(text, "imported_hash:"),
           also_line: line_of(text, "imported_also:")
         }
@@ -775,11 +1087,14 @@ defmodule Troupe.Onboard do
     end
   end
 
-  defp manifest_records(base) do
+  # The manifest at `base`'s records of `target`'s files, each where it is under `dir`; a
+  # key that names no file onboarding writes there is not one of its records.
+  defp manifest_records(base, target, dir) do
     for {rel, %{"imported_from" => from, "imported_hash" => hash} = record} <-
-          base |> Path.join(@manifest) |> read_json() |> Map.get("files", %{}),
+          base |> Path.join(@manifest) |> read_json() |> sections() |> Map.fetch!(section(target)),
         is_binary(from) and is_binary(hash),
-        file = Path.join(base, rel),
+        check_path(target, rel) == :ok,
+        file = Path.join(dir, rel),
         File.regular?(file),
         do: %{
           path: rel,
@@ -787,6 +1102,7 @@ defmodule Troupe.Onboard do
           from: from,
           hash: hash,
           also: also_read(record["imported_also"]),
+          version: version_read(record["imported_version"]),
           line: 1,
           also_line: 1
         }

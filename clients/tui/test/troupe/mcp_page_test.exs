@@ -143,6 +143,58 @@ defmodule Troupe.MCPPageTest do
     eventually(fn -> screen_text(pid, session) =~ "sign in — s" end)
   end
 
+  # Decision 822's layers: a skill in the repository's `.agents/skills` and one in
+  # `~/.agents/skills` are named for their layers, the one a nearer layer hides is listed
+  # with why, and `x` on one Troupe never writes says whose it is instead of asking the
+  # daemon to remove it from the person's own files.
+  test "the .agents layers are named, a hidden skill is listed with why, and x leaves the repository's alone" do
+    home =
+      tmp_workspace(%{"skills/notes/SKILL.md" => "---\ndescription: My notes\n---\nWrite it down."})
+
+    Application.put_env(:troupe_core, :agents_home, home)
+    on_exit(fn -> Application.delete_env(:troupe_core, :agents_home) end)
+
+    ws =
+      tmp_workspace(%{
+        ".agents/skills/lint/SKILL.md" => "---\ndescription: The repository's lint\n---\nRun it.",
+        ".agents/skills/review/SKILL.md" => "---\ndescription: The shared review\n---\nLook.",
+        ".troupe/skills/review/SKILL.md" => "---\ndescription: Our review\n---\nCheck the tests."
+      })
+
+    {sid, _, _ws} = start_session!(workspace: ws, script: [])
+    {pid, session} = start_tui(sid)
+
+    type(pid, "/mcp")
+    press(pid, "enter")
+    eventually(fn -> screen_text(pid, session) =~ "◆ lint  [agents]  The repository's lint" end)
+
+    text = screen_text(pid, session)
+    assert text =~ "◆ notes  [user_agents]  My notes"
+    assert text =~ "◆ review  [workspace]  Our review"
+    assert text =~ "◇ review  [agents]  skipped: "
+    refute text =~ "[session]"
+
+    assert {:ok, %{skipped: [%{name: "review", layer: :agents, status: :skipped} = hidden]}} =
+             Client.sources(sid)
+
+    assert hidden.reason =~ "is used"
+
+    # The hidden one, selected, says why it is not offered.
+    press(pid, "down")
+    press(pid, "down")
+    press(pid, "down")
+    eventually(fn -> screen_text(pid, session) =~ "offered    no" end)
+
+    # `x` on the repository's `.agents` skill: nothing is asked of the daemon, and the
+    # notice says whose it is and why Troupe leaves it.
+    press(pid, "up")
+    press(pid, "up")
+    press(pid, "up")
+    press(pid, "x")
+    eventually(fn -> screen_text(pid, session) =~ "lint is the repository's" end)
+    assert File.regular?(Path.join(ws, ".agents/skills/lint/SKILL.md"))
+  end
+
   test "a remote session's page says the servers are its profile's" do
     assert {:error, message} = Troupe.Client.Remote.sources("s-remote")
     assert message =~ "profile"

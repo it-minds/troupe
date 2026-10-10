@@ -46,6 +46,7 @@ defmodule Troupe.Config.TrustTest do
 
     assert {text, 0} = trust(ctx)
     assert text =~ "trusted #{ctx.ws}"
+    assert text =~ "its agents' and MCP servers' auto now applies"
     assert text =~ "the file as it was is #{ctx.user}.previous"
 
     assert File.read!(ctx.user) ==
@@ -60,6 +61,7 @@ defmodule Troupe.Config.TrustTest do
 
     assert {text, 0} = untrust(ctx)
     assert text =~ "untrusted #{ctx.ws}"
+    assert text =~ "its agents' and MCP servers' auto asks"
     assert text =~ "removed #{ctx.ws} from trusted_workspaces"
     assert File.read!(ctx.user) == @user_file
   end

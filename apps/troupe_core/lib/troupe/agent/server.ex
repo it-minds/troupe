@@ -1431,7 +1431,9 @@ defmodule Troupe.Agent.Server do
       definition.prompt,
       unless(stable?, do: Instructions.to_prompt(state.instructions)),
       environment_section(state),
-      Skills.prompt_section(state.bundle, definition, state.workspace.root_real),
+      Skills.prompt_section(state.bundle, definition, state.workspace.root_real,
+        trusted: state.workspace.trusted?
+      ),
       unless(stable?, do: goal_section(state))
     ]
     |> Enum.reject(&(&1 in [nil, ""]))

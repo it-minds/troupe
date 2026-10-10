@@ -118,7 +118,7 @@ defmodule Troupe.Config.Explain do
     winner = ladder |> Enum.reject(& &1.ignored) |> List.last()
 
     cond do
-      winner.layer in [:default, :cli, :opencode] -> winner
+      winner.layer in [:default, :cli] -> winner
       winner.value != nil and present?(layers.values, path) -> winner
       true -> %{hd(ladder) | layer: :default}
     end

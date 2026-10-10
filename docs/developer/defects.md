@@ -764,8 +764,6 @@ Found by the #460 fixer, 2026-10-06.
   (`:global.trans`) can leave a waiting reader asleep up to 8 s after the lock frees.
 - `/context` prints on the TUI's single status line, clipped at the terminal's width; a
   repository with several files left out won't fit (TUI Decision 148).
-- An instruction file that exists but can't be read only logs a warning and is missing from
-  `context.get`, so clients can't see it was dropped.
 
 Found by the chunk 22 fixers, 2026-10-06.
 
@@ -1010,8 +1008,6 @@ Found by the #60 fixer, 2026-10-09.
 - A command's positional arguments aren't filled: Troupe fills only `$ARGUMENTS`
   (Decision 763), while Claude Code counts `$0`/`$ARGUMENTS[0]` from zero and opencode
   `$1` from one; the importer notes them. #516's table says they already match.
-- The librarian's prompt still says `CLAUDE.md`, `GEMINI.md` and Copilot's file are in
-  every prompt, and doesn't mention `onboard_write` (#516's slice 2).
 - `troupe onboard` calls a source's `proposals/2` and then `skipped/2`, so the agents and
   commands source surveys the files twice a run.
 
@@ -1025,18 +1021,13 @@ Found by the #516 fixers, 2026-10-09.
   for the person's own when removing it, so removing an `.agents` skill fails with "no
   skill named".
 - Neither client shows `skills.list`'s `skipped`.
-- `troupe instructions check` resolves a path written in `<dir>/.agents/AGENTS.md` from
-  `<dir>/.agents/` and the root, not from `<dir>`, so a nested one can be called missing.
-- An `.agents/AGENTS.md` that can't be read only logs a warning, and an unreadable
-  `.agents/skills/*/SKILL.md` is dropped with no entry; neither shows in `context.get` or
-  `skills.list` (as D84's instruction-file item).
+- An unreadable `.agents/skills/*/SKILL.md` is dropped with no entry; it doesn't show in
+  `skills.list`.
 
 Found by the #516 fixers, 2026-10-09.
 
 ### D100 - MCP import after #520 (low)
 
-- Linking (`include`) an `opencode.json` yields no servers: `Troupe.MCP.Local.servers_of/2`
-  reads `mcpServers`, `servers` and `mcp_servers`, not opencode's `mcp`. A copy works.
 - `agents.list` lists primary agents only, so the note on a `.troupe/agents` subagent whose
   `auto` waits for trust reaches no client.
 - The desktop app's import hint and the `/mcp import` row of the CLI reference don't

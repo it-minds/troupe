@@ -261,9 +261,9 @@ function Remove-Installed {
 }
 
 # A model is the one thing a first run cannot do without. opencode's providers are copied
-# by the daemon (Troupe reads them anyway while it has none of its own). Otherwise the
-# next step is `troupe config` where the TUI is installed, and the desktop app's Models
-# panel or the file itself where it is not: only the TUI has the command.
+# by the daemon, once: Troupe does not read opencode's settings. Otherwise, or after a no,
+# the next step is `troupe config` where the TUI is installed, and the desktop app's
+# Models panel or the file itself where it is not: only the TUI has the command.
 function Show-ModelSettings {
   # Windows PowerShell turns a native command's stderr into a terminating error under
   # "Stop"; here a failure is an answer to report, not a reason to stop.
@@ -282,23 +282,21 @@ function Show-ModelSettings {
   }
   Write-Host "  No $configFile yet, so no model is set up."
   if (Test-Path $opencodeFile) {
-    Write-Host "  opencode is set up here ($opencodeFile), and Troupe uses its providers"
-    Write-Host "  while it has none of its own."
+    Write-Host "  opencode is set up here ($opencodeFile). Troupe does not read its settings;"
+    Write-Host "  it can copy its providers."
     if (-not $Interactive) {
       Write-Host "  troupe-daemon config import-opencode copies them into $configFile."
       return
     }
-    if (-not (Read-YesNo "  Copy them into $configFile, keys as opencode has them written?" $true)) {
-      Write-Host "  Left as it is: Troupe keeps reading opencode's config."
-      return
+    if (Read-YesNo "  Copy them into $configFile, keys as opencode has them written?" $true) {
+      # A daemon from before the command answers "unknown arguments"; say so, not its usage.
+      $copied = @(& $Shim config import-opencode 2>&1 | ForEach-Object { "$_" })
+      if ($LASTEXITCODE -eq 0) {
+        $copied | ForEach-Object { Write-Host "  $_" }
+        return
+      }
+      Write-Host "  could not copy them: $($copied | Select-Object -First 1)"
     }
-    # A daemon from before the command answers "unknown arguments"; say so, not its usage.
-    $copied = @(& $Shim config import-opencode 2>&1 | ForEach-Object { "$_" })
-    if ($LASTEXITCODE -eq 0) {
-      $copied | ForEach-Object { Write-Host "  $_" }
-      return
-    }
-    Write-Host "  could not copy them: $($copied | Select-Object -First 1)"
   }
   if ($Tui -and $Interactive) {
     if (Read-YesNo "  Set it up now, with troupe config?" $true) {

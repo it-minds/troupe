@@ -8,7 +8,7 @@ defmodule Troupe.Config.ModelSettingsTest do
   use ExUnit.Case, async: false
 
   alias Troupe.Config
-  alias Troupe.Config.ModelSettings
+  alias Troupe.Config.{ModelSettings, OpenCode}
   alias Troupe.LLM.Catalog.Store
 
   @vars ~w(TROUPE_CONFIG_HOME TROUPE_OPENCODE_CONFIG TROUPE_OPENCODE_AUTH TROUPE_PROVIDER TROUPE_BASE_URL
@@ -279,8 +279,12 @@ defmodule Troupe.Config.ModelSettingsTest do
     test "copies every provider as opencode declares it, and the result loads the same", %{
       path: path
     } do
-      before = Config.load(nil).providers
-      # opencode's fallback reads the reference as the file will: GW_TOKEN is not set yet.
+      # Nothing of opencode's is read for a session, nor said to stand in (Decision 828).
+      assert Config.load(nil).providers == %{}
+      assert %{"api_key_source" => nil, "overrides" => []} = ModelSettings.describe()
+
+      # What opencode declares, read as the file will read it: GW_TOKEN is not set yet.
+      before = OpenCode.providers()
       assert before["gateway"].refused =~ "reads {env:GW_TOKEN}, and GW_TOKEN is not set"
 
       assert {:ok, %{"imported" => imported} = described} = ModelSettings.import_opencode()
@@ -289,7 +293,7 @@ defmodule Troupe.Config.ModelSettingsTest do
       assert imported["kept"] == []
       assert imported["default"] == "gateway/claude-opus-5"
       assert described["exists"]
-      # The keys now come from the file, and opencode no longer stands in for anything.
+      # The keys now come from the file.
       assert described["api_key_source"] == "file"
       assert described["overrides"] == []
 

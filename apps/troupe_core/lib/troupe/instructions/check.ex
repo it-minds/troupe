@@ -11,8 +11,8 @@ defmodule Troupe.Instructions.Check do
     held to the nearest scope around it that names the same subject in the same
     ecosystem, and the two disagree when they name no command in common.
   - `path`: a repository path a rule names, in a code span or a link, that is not there,
-    from the file's directory or from the repository root; and an `@` import the loader
-    found missing.
+    from the directory the file is about (the one holding its `.agents` or `.troupe`), its
+    own directory or the repository root; and an `@` import the loader found missing.
   - `command`: a command a rule names, in a code span or a fenced block, whose program is
     not on the `PATH` a session's commands run with.
   - `duplicate`: a rule, a paragraph or a list item, said again in another file.
@@ -26,9 +26,10 @@ defmodule Troupe.Instructions.Check do
 
   The files are `Troupe.Instructions.load/3`'s, as a session that had worked on every file
   under the workspace would read them, so a nested `AGENTS.md` is checked wherever it is
-  and whatever else the loader reads comes with it. Which files, which alias and which
-  import are the loader's alone; this reads each file it read again, whole, for the lines.
-  The brief is Troupe's own, and not checked.
+  and whatever else the loader reads comes with it: `.agents/AGENTS.md` and
+  `.troupe/rules/*.md`, and none of the other tools' files it lists as skipped (Decision
+  828). Which files and which import are the loader's alone; this reads each file it read
+  again, whole, for the lines. The brief is Troupe's own, and not checked.
 
   `findings/2` is pure but for the two probes it is handed; `run/2` reads.
   """
@@ -42,14 +43,17 @@ defmodule Troupe.Instructions.Check do
 
   @typedoc """
   One file the loader read: its path, scope and directory as `Troupe.Instructions` gives
-  them, the imports it named that were not followed, and its whole content.
+  them, the imports it named that were not followed, and its whole content. `directory`
+  is the one the file is about, the loader's: an `.agents/AGENTS.md`'s or a rule's is the
+  directory that holds its `.agents` or `.troupe`, not the file's own.
   """
   @type source :: %{
-          path: Path.t(),
-          scope: atom(),
-          where: String.t() | nil,
-          unfollowed: [map()],
-          content: String.t()
+          required(:path) => Path.t(),
+          required(:scope) => atom(),
+          required(:where) => String.t() | nil,
+          required(:unfollowed) => [map()],
+          required(:content) => String.t(),
+          optional(:directory) => Path.t()
         }
 
   # What each subject is for, in the finding's words.
@@ -168,9 +172,11 @@ defmodule Troupe.Instructions.Check do
 
     sources =
       for file <- loaded.files,
-          file.scope != :brief and file.status not in [:skipped, :outside],
+          file.scope != :brief and file.status not in [:skipped, :outside, :unreadable],
           {:ok, content} <- [File.read(file.path)] do
-        file |> Map.take([:path, :scope, :where, :unfollowed]) |> Map.put(:content, content)
+        file
+        |> Map.take([:path, :scope, :where, :unfollowed, :directory])
+        |> Map.put(:content, content)
       end
 
     %{root: root, sources: sources, elsewhere?: elsewhere(workspace, root, files, ignore)}
@@ -384,17 +390,20 @@ defmodule Troupe.Instructions.Check do
     ArgumentError -> target
   end
 
-  # Missing from the file's directory and from the root alike, and not one the repository
-  # has under another directory (a rule that names `client/link.ex` after naming
-  # `lib/troupe/`) or hides (`_build/`). A path that leads out of the repository is not
-  # judged at all. A link's target is a path whatever it looks like; a span's is not when
-  # its first directory is not here and nothing else says it is one (`origin/main`,
-  # `example.com/x.md`).
+  # Missing from the directory the file is about, its own and the root alike, and not one
+  # the repository has under another directory (a rule that names `client/link.ex` after
+  # naming `lib/troupe/`) or hides (`_build/`). A path that leads out of the repository is
+  # not judged at all. A link's target is a path whatever it looks like; a span's is not
+  # when its first directory is not here and nothing else says it is one (`origin/main`,
+  # `example.com/x.md`). The directory a file is about is its scope's: `web/` for
+  # `web/.agents/AGENTS.md` and a rule in `web/.troupe/rules`, the file's own for the rest.
   defp missing?(path, how, doc, root, %{exists?: exists?, elsewhere?: elsewhere?}) do
+    about = Map.get(doc, :directory) || Path.dirname(doc.path)
+
     {path, bases} =
       if String.starts_with?(path, "/"),
         do: {String.trim_leading(path, "/"), [root]},
-        else: {path, Enum.uniq([Path.dirname(doc.path), root])}
+        else: {path, Enum.uniq([about, Path.dirname(doc.path), root])}
 
     targets =
       for base <- bases, target = Path.expand(path, base), inside?(target, root), do: target

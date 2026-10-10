@@ -4,18 +4,23 @@ defmodule Troupe.Session.Memory do
 
   One brief per repository: the path is the repository's main checkout, so a session in
   a worktree reads and writes the same file as the session whose branch it is, and a
-  later session on either finds what both learned. Writes go through a VM-wide
-  transaction keyed by the path, re-read the file before merging, and replace it by
-  rename — so two agents in one daemon cannot clobber each other's note, and a hand
-  edit made between two calls survives. Two daemons on one repository are last-write-
-  wins per section; that is deliberate, and cheaper than locking state nobody is racing
-  for in practice.
+  later session on either finds what both learned. A worktree is one its checkout names
+  back, as trust has it (`Troupe.Config.Trust.root/1`): a `.git` a workspace wrote itself,
+  giving another checkout's `.git` as its common directory, leaves the brief in the
+  workspace (Decision 831).
+
+  Writes go through a VM-wide transaction keyed by the path, re-read the file before
+  merging, and replace it by rename — so two agents in one daemon cannot clobber each
+  other's note, and a hand edit made between two calls survives. Two daemons on one
+  repository are last-write-wins per section; that is deliberate, and cheaper than
+  locking state nobody is racing for in practice.
 
   No process of its own: the brief is a file, the daemon has many sessions, and a
   function over a path is what both want.
   """
 
   alias Troupe.{Config, Git, Memory, Paths, Workspace}
+  alias Troupe.Config.Trust
 
   require Logger
 
@@ -283,17 +288,36 @@ defmodule Troupe.Session.Memory do
   end
 
   # The main checkout of the repository a workspace is in: a worktree's brief is the
-  # repository's, not a copy that disappears with the worktree.
+  # repository's, not a copy that disappears with the worktree. git takes a `.git` at its
+  # word, and one a workspace wrote itself can give any checkout's `.git` as its common
+  # directory, so that checkout is the brief's only when trust finds it for git's top
+  # level, which must hold the workspace: the top level is then the checkout itself, or a
+  # worktree the checkout's `.git/worktrees/<name>` names back. Otherwise the brief is the
+  # workspace's own (Decision 831).
   defp repository_root(workspace) do
     workspace = Path.expand(workspace)
+    args = ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"]
 
-    case git(workspace, ["rev-parse", "--path-format=absolute", "--git-common-dir"]) do
-      {:ok, common} ->
-        common = common |> String.trim() |> Path.expand()
-        if Path.basename(common) == ".git", do: Path.dirname(common), else: workspace
+    with {:ok, out} <- git(workspace, args),
+         [top, common] <- String.split(out, "\n", trim: true),
+         common = Path.expand(common),
+         ".git" <- Path.basename(common),
+         checkout = Path.dirname(common),
+         true <- within?(workspace, top),
+         true <- key(Trust.root(top)) == key(checkout) do
+      checkout
+    else
+      _ -> workspace
+    end
+  end
 
-      :error ->
-        workspace
+  defp within?(path, root),
+    do: key(path) == key(root) or String.starts_with?(key(path), key(root) <> "/")
+
+  defp key(path) do
+    case Workspace.real_path(path) do
+      {:ok, real} -> Workspace.compare_key(real)
+      {:error, _} -> Workspace.compare_key(path)
     end
   end
 

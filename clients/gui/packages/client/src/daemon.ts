@@ -86,8 +86,13 @@ export interface RecentWorkspace {
   sessions: number;
 }
 
-/** Which file a server or a skill came from (troupe-remote Decision 700). `session` is one a session still runs that no file names. */
-export type SourceLayer = "config" | "user" | "workspace" | "session";
+/**
+ * Which file a server or a skill came from (troupe-remote Decision 700). `session` is one a
+ * session still runs that no file names. A skill may also come from an `.agents/skills`
+ * (troupe Decision 822): `user_agents` is `~/.agents/skills`, `agents` the repository's;
+ * both are read where they are and never written.
+ */
+export type SourceLayer = "config" | "user" | "workspace" | "session" | "agents" | "user_agents";
 /** Which layer a write goes to: the user's files, or a workspace's `.troupe/`. */
 export type SourceScope = "user" | "workspace";
 
@@ -172,6 +177,22 @@ export interface LocalSkill {
   source: string;
   dir: string;
   linked: boolean;
+}
+
+/**
+ * A skill the layers hold and do not offer, as `skills.list`'s `skipped` says it (troupe
+ * Decision 822): `skipped` when a nearer layer has its name, or its folder's name is not
+ * one a skill may have; `outside` when it is outside its edge and was not read. `reason`
+ * says which, in words. An `.agents/skills` linked out whole is one entry with no name.
+ */
+export interface SkippedSkill {
+  name: string | null;
+  layer: SourceLayer;
+  source: string;
+  dir: string;
+  linked: boolean;
+  status: "skipped" | "outside";
+  reason: string;
 }
 
 /** What `mcp.add` and `skills.add` answer for a file or a directory brought in. */
@@ -729,7 +750,8 @@ export class DaemonClient {
     return this.command<ServerToolResult>("mcp.call", { ...params });
   }
 
-  listSkills(workspace?: string): Promise<{ skills: LocalSkill[] }> {
+  /** Every skill the layers offer, and beside them the ones they hold and do not offer, with why (`skipped`; a daemon before 0.9.3 says none). */
+  listSkills(workspace?: string): Promise<{ skills: LocalSkill[]; skipped?: SkippedSkill[] }> {
     return this.call("skills.list", workspace ? { workspace } : {});
   }
 
