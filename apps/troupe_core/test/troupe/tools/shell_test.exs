@@ -142,3 +142,66 @@ defmodule Troupe.Tools.ShellReleasePathTest do
     assert output =~ "/usr/bin"
   end
 end
+
+defmodule Troupe.Tools.ShellLastLineTest do
+  @moduledoc """
+  The `shell` tool, and the runner a person's own command shares with it (Decision 813),
+  answer with a last line that has no newline after it (#536): `printf x` answered
+  "(no output)", because the port lets go of such a line only after the exit status.
+  With the host's shell, so on Windows with Git for Windows' bash. `async: false`:
+  `Troupe.ReaperTest` points the whole VM at a helper that will not start.
+  """
+
+  use ExUnit.Case, async: false
+
+  alias Troupe.Tool.Ctx
+  alias Troupe.Tools.Shell
+  alias Troupe.Workspace
+
+  @moduletag :tmp_dir
+
+  setup %{tmp_dir: root} do
+    {:ok, workspace} = Workspace.new(root)
+
+    ctx = %Ctx{
+      session_id: "s-#{System.unique_integer([:positive])}",
+      agent_path: ["root"],
+      workspace: workspace,
+      call_id: "call_1",
+      agent_pid: self(),
+      config: %Troupe.Config{}
+    }
+
+    %{ctx: ctx}
+  end
+
+  test "printf x answers x", %{ctx: ctx} do
+    assert {:ok, "x"} = Shell.run(%{"command" => "printf x"}, ctx)
+    assert {:ok, "x\n\n[exit status 3]"} = Shell.run(%{"command" => "printf x; exit 3"}, ctx)
+  end
+
+  test "cat reads a file without a final newline whole", %{ctx: ctx, tmp_dir: root} do
+    File.write!(Path.join(root, "notes.txt"), "one\ntwo\nthree")
+    assert {:ok, "one\ntwo\nthree"} = Shell.run(%{"command" => "cat notes.txt"}, ctx)
+  end
+
+  test "the runner streams the last line too", %{ctx: ctx} do
+    me = self()
+
+    assert {:ok, "one\ntwo", 0} =
+             Shell.execute("printf 'one\\ntwo'", ctx.workspace,
+               timeout_ms: 10_000,
+               on_output: &send(me, {:streamed, &1})
+             )
+
+    assert streamed() == "one\ntwo"
+  end
+
+  defp streamed(acc \\ "") do
+    receive do
+      {:streamed, chunk} -> streamed(acc <> chunk)
+    after
+      0 -> acc
+    end
+  end
+end
