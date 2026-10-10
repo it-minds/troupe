@@ -6,6 +6,8 @@ status: accepted
 issue: 248
 paths:
   - apps/troupe_core/lib/troupe/tools/remember.ex
+  - apps/troupe_core/lib/troupe/tools/recall.ex
+  - apps/troupe_core/lib/troupe/memory/facts.ex
   - apps/troupe_core/priv/agents/librarian.md
   - apps/troupe_core/lib/troupe/memory.ex
   - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex
@@ -23,7 +25,7 @@ symbols:
   - Troupe.Tools.Remember.run/2
   - Troupe.Memory.survey_version/0
   - Troupe.Client.Daemon.memory_page/1
-gist: "remember: kind/claim/anchors; Troupe takes hash, seq, head, exit status; replaces re-anchors or drops; librarian no notes; survey 2; forget by id"
+gist: "remember: kind/claim/anchors (tracked files only); Troupe takes hash, seq, exit; replaces: librarian any, agent own or moved; recall by status; survey 2"
 ---
 
 #248's writers and views, beside Decision 838's store (`Troupe.Memory.Facts`: the record,
@@ -54,12 +56,25 @@ repository, and a hash is an oracle for what a file holds. An anchor the agent d
 read, edit or write in this session is allowed (it may know a manifest without reading it
 again) and the answer says so, so the model can read it before it trusts the anchor.
 
+**Only a file git tracks is an anchor.** In a git repository the store refuses, for every
+writer (`Facts.put/3`, so the librarian, an agent, a migration alike), a file git ignores or
+has never been given (`git ls-files --cached`; an added file counts): the hash of a `.env`
+would otherwise go into a `facts.jsonl` that may be committed, and a hash is an oracle for a
+short secret. Where git cannot answer inside a repository the anchor is refused, not
+guessed. Outside a repository nothing is held back: nothing there is committed, and such a
+workspace has no brief due (838). Not done: the same check when an anchor is read back from
+a committed `facts.jsonl` to work out its status, which runs at every prompt.
+
 **`replaces` re-verifies.** With a claim, the new fact is written and the one it names is
 dropped once it is; alone, it drops that fact. The same kind and claim written again is
 the same fact to the store (838), its id kept and its anchors and evidence this call's,
 and is not then dropped. That is how a fact that may no longer be true is re-anchored,
 corrected or dropped. A person's fact (`by: person`, a hand edit read back)
 is theirs: `remember` neither replaces nor drops it, and only `memory.forget` removes it.
+The librarian may replace or drop any other fact; another agent only one it wrote itself
+(the same `by`) or one that is `moved` or `missing`, and is told so otherwise. `remember` is
+`:auto` and in the read-only set (`explore` and `plan` have it), so without this one agent a
+prompt talked round could erase what the librarian checked, unasked.
 `:auto` stays (Decision 649, TUI Decision 55): the paths a model names are only read, to
 hash them, inside the workspace, and the store is the one file written.
 
@@ -81,9 +96,12 @@ what the schema offers (the offline bench's tool-definition budget, which the fi
 with both offered and a longer description went over). Remove them in the release after
 this one.
 
-**The librarian.** Its tools gain `recall`. Its prompt starts with `recall` and no
-arguments, re-reads the anchors of every `moved` or `missing` fact and of every `migrated`
-one, and re-anchors, corrects or drops each with `replaces`; then surveys as before and
+**The librarian.** Its tools gain `recall`, and `recall` gains a `status` filter
+(`Facts.recall/2` too): asked by words or with none it answers at most twenty facts with
+the ones that may no longer be true last, so in a repository with more than that a
+librarian asking with no arguments might never see them. Its prompt asks `recall` for
+`status` `moved`, then `missing`, then `unanchored` (where the `migrated` facts are),
+re-reads the anchors of each, and re-anchors, corrects or drops it with `replaces`; then surveys as before and
 writes `command` facts anchored on the manifest it read them in, `convention` facts on the
 file a convention is stated or shown in, and `overview` and `layout` facts for `recall`.
 `Troupe.Memory.survey_version/0` is 2, so every brief written before facts is `outdated`

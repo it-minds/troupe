@@ -25,7 +25,7 @@ defmodule Troupe.Tools.LibrarianFactsTest do
     assert librarian.prompt =~ "anchored on the manifest or file you read it in"
     assert librarian.prompt =~ "anchored on the file it is stated or shown in"
     assert librarian.prompt =~ "Never write a `note`"
-    assert librarian.prompt =~ "Call `recall` with no arguments"
+    assert librarian.prompt =~ "Call `recall` with `status` `moved`, then with `status` `missing`"
     assert librarian.prompt =~ "with `replaces` set to its id"
     assert librarian.prompt =~ "`remember` with only `replaces` drops it"
     assert librarian.prompt =~ "never replace or drop a fact a person wrote"
@@ -58,7 +58,7 @@ defmodule Troupe.Tools.LibrarianFactsTest do
       start_session(context,
         agent: "librarian",
         steps: [
-          {:tools, [{"recall", %{}}]},
+          {:tools, [{"recall", %{"status" => "moved"}}, {"recall", %{"status" => "missing"}}]},
           {:tools, [{"read_file", %{"path" => "mix.exs"}}]},
           {:tools,
            [
@@ -99,6 +99,21 @@ defmodule Troupe.Tools.LibrarianFactsTest do
       |> Enum.find(&(&1.data["ok"] == false and &1.data["name"] == "remember"))
 
     assert refused.data["content"] =~ "the librarian writes no notes"
+
+    # Asked by status, recall answered each one alone.
+    args =
+      Map.new(events_of_type(sid, :tool_call_started), &{&1.data["call_id"], &1.data["args"]})
+
+    recalled =
+      for %Event{data: %{"name" => "recall", "call_id" => id} = data} <-
+            events_of_type(sid, :tool_call_completed),
+          into: %{},
+          do: {args[id]["status"], data["content"]}
+
+    assert recalled["moved"] =~ moved["id"]
+    refute recalled["moved"] =~ missing["id"]
+    assert recalled["missing"] =~ missing["id"]
+    refute recalled["missing"] =~ moved["id"]
   end
 
   defp git_commit!(dir, files) do

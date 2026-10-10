@@ -202,8 +202,21 @@ defmodule Troupe.Tools.Remember do
         {:error, "#{id} is a person's fact: only they forget or change it"}
 
       fact ->
-        {:ok, fact}
+        may_replace(by(ctx), fact)
     end
+  end
+
+  # The librarian re-verifies any fact but a person's; another agent changes only a fact it
+  # wrote itself, or one that may no longer be true.
+  defp may_replace("librarian", fact), do: {:ok, fact}
+
+  defp may_replace(by, fact) do
+    if get_in(fact, ["evidence", "by"]) == by or fact["status"] in ~w(moved missing),
+      do: {:ok, fact},
+      else:
+        {:error,
+         "#{fact["id"]} is #{get_in(fact, ["evidence", "by"]) || "another writer"}'s and " <>
+           "still current: an agent changes only its own facts, or one that may no longer be true"}
   end
 
   ## Evidence, from the session's own log

@@ -125,8 +125,16 @@ defmodule Troupe.Tools.RememberFactsTest do
     {:ok, moved} =
       put.(%{kind: "command", claim: "`mix check` is the gate", anchors: ["mix.exs"]})
 
-    {:ok, wrong} = put.(%{kind: "convention", claim: "Aliases are in config/", anchors: ["mix.exs"]})
-    {:ok, gone} = put.(%{kind: "layout", claim: "README.md says what it is", anchors: ["README.md"]})
+    {:ok, wrong} =
+      put.(%{kind: "convention", claim: "Aliases are in config/", anchors: ["mix.exs"]})
+
+    # The agent's own, and current: its to drop.
+    {:ok, gone} =
+      Facts.put(
+        context.workspace,
+        %{kind: "layout", claim: "README.md says what it is", anchors: ["README.md"]},
+        %{session: "s-old", seq: 2, by: "agent:root"}
+      )
 
     File.write!(Path.join(context.workspace, "mix.exs"), @mix <> "# changed\n")
     assert Facts.status(context.workspace, moved) == "moved"
@@ -189,6 +197,101 @@ defmodule Troupe.Tools.RememberFactsTest do
 
     assert [%{"id" => id}] = Facts.list(context.workspace)
     assert id == theirs["id"]
+  end
+
+  test "an agent changes only its own facts or one that may no longer be true; the librarian any but a person's",
+       context do
+    agent = ctx(context)
+
+    librarian = %{
+      agent
+      | definition: %Troupe.Agent.Definition{name: "librarian", prompt: "", mode: :primary}
+    }
+
+    by = fn who -> %{session: "s-old", seq: 1, by: who} end
+
+    {:ok, theirs} =
+      Facts.put(
+        context.workspace,
+        %{kind: "overview", claim: "A fixture", anchors: ["README.md"]},
+        by.("librarian")
+      )
+
+    {:ok, other} =
+      Facts.put(
+        context.workspace,
+        %{kind: "note", claim: "a build note", anchors: []},
+        by.("agent:build")
+      )
+
+    # Current, and another writer's: not this agent's to change or drop.
+    for id <- [theirs["id"], other["id"]] do
+      assert {:error, message} = Remember.run(%{"replaces" => id}, agent)
+      assert message =~ "an agent changes only its own facts, or one that may no longer be true"
+
+      assert {:error, _} =
+               Remember.run(
+                 %{"kind" => "overview", "claim" => "Another", "replaces" => id},
+                 agent
+               )
+    end
+
+    # Once its anchor changed, any agent may re-verify it.
+    File.write!(Path.join(context.workspace, "README.md"), "# r, changed\n")
+
+    assert {:ok, _} =
+             Remember.run(
+               %{
+                 "kind" => "overview",
+                 "claim" => "A changed fixture",
+                 "anchors" => ["README.md"],
+                 "replaces" => theirs["id"]
+               },
+               agent
+             )
+
+    # The librarian re-verifies any fact but a person's, current or not.
+    assert {:ok, "dropped " <> _} = Remember.run(%{"replaces" => other["id"]}, librarian)
+
+    assert Enum.map(Facts.list(context.workspace), & &1["claim"]) == ["A changed fixture"]
+  end
+
+  # A hash of an ignored or untracked file, a `.env`, would reach a `facts.jsonl` that may be
+  # committed: the store refuses it for every writer. Outside a repository nothing is held back.
+  test "a file git ignores or does not track is no anchor; outside a repository nothing is held back",
+       context do
+    write_file(context, ".gitignore", ".env\n")
+    write_file(context, ".env", "TOKEN=not-a-real-one\n")
+    write_file(context, "new.txt", "written this session\n")
+    ctx = ctx(context)
+
+    for path <- [".env", "new.txt"] do
+      assert {:error, message} =
+               Remember.run(%{"kind" => "note", "claim" => "x", "anchors" => [path]}, ctx)
+
+      assert message =~ "#{path} is not a file git tracks"
+
+      assert {:error, _} =
+               Facts.put(context.workspace, %{kind: "note", claim: "x", anchors: [path]}, %{
+                 by: "person"
+               })
+    end
+
+    refute File.read!(Path.join(context.workspace, ".env")) == ""
+    assert Facts.list(context.workspace) == []
+
+    # Added, it is tracked.
+    {_, 0} = System.cmd("git", ["add", "new.txt"], cd: context.workspace)
+
+    assert {:ok, _} =
+             Remember.run(%{"kind" => "note", "claim" => "x", "anchors" => ["new.txt"]}, ctx)
+
+    plain = Path.join(context.base, "plain")
+    File.mkdir_p!(plain)
+    File.write!(Path.join(plain, "a.txt"), "a\n")
+
+    assert {:ok, _} =
+             Facts.put(plain, %{kind: "note", claim: "y", anchors: ["a.txt"]}, %{by: "person"})
   end
 
   test "the librarian writes no notes", context do

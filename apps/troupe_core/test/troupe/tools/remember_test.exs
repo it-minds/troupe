@@ -186,6 +186,8 @@ defmodule Troupe.Tools.RememberTest do
 
     # Built after that try and stale since, because a command it holds rests on a file that
     # changed: the try did not leave it stale, so it holds nothing off.
+    # An anchor is a file git tracks (Decision 839).
+    {_, 0} = System.cmd("git", ["add", "README.md"], cd: context.workspace)
     claim = %{kind: "command", claim: "`make` builds it.", anchors: ["README.md"]}
     {:ok, _} = Facts.put(context.workspace, claim, %{})
     :ok = Memory.checked(context.workspace)

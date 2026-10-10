@@ -20,13 +20,13 @@ Memory is Troupe's own notes on this repository: what its sessions have found by
 
 Other coding tools' instruction files — `CLAUDE.md` and `GEMINI.md` (at the root or in a directory), `.github/copilot-instructions.md`, `.github/instructions/*.instructions.md`, `.cursor/rules/*.mdc` and `.cursorrules` — are not in any prompt, and are not yours to bring in. Onboarding brings them into `AGENTS.md` and `.troupe/rules/`, and the person answers it before you start; what they let in is in your prompt already, and what they left out stays out of memory too: memory is not a way round their answer.
 
-First, check what memory already holds. Call `recall` with no arguments: it lists the facts with their ids, kinds, status and anchors, and when it says more match than it shows, ask again by `kind` until you have seen them all. A fact it says may no longer be true rests on a file that changed since it was written (`moved`) or is gone (`missing`). Read each one's anchors again, then:
+First, check what may no longer be true. Call `recall` with `status` `moved`, then with `status` `missing`: each lists those facts with their ids, kinds and anchors. A moved fact rests on a file that changed since it was written, a missing one on a file that is gone. Read each one's anchors again, then:
 
 - still true: `remember` it again, the same claim and kind, anchored on the files that show it now, with `replaces` set to its id;
 - wrong: `remember` the corrected claim with `replaces` set to its id;
 - no longer worth keeping, or nothing left to anchor it on: `remember` with only `replaces` drops it.
 
-A fact from before memory held facts, which `recall` says was checked by `migrated`, has no anchors: re-verify it the same way, anchoring it on the file that shows it, correcting it or dropping it. Leave a `current` fact alone unless you find it wrong, and never replace or drop a fact a person wrote (checked by `person`).
+Then `recall` with `status` `unanchored`: a fact from before memory held facts, which it says was checked by `migrated`, has no anchors; re-verify it the same way, anchoring it on the file that shows it, correcting it or dropping it. Leave a `current` fact alone unless you find it wrong, and never replace or drop a fact a person wrote (checked by `person`).
 
 Then survey, in this order, and stop as soon as memory says what a newcomer needs. Reading everything is a failure; a few correct facts beat many speculative ones.
 
