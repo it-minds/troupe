@@ -33,6 +33,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Identity
   alias Troupe.LLM.Provider
+  alias Troupe.Memory.Facts
   alias Troupe.Mounts
   alias Troupe.Onboard.Start, as: Onboarding
   alias Troupe.Protocol.Error
@@ -375,7 +376,9 @@ defmodule Troupe.Gateway.Dispatch do
   # The project brief, as a client shows it: status, where it is, when it was built and
   # what it covers, and the text itself for a client that renders it. `refresh_due` is
   # whether a client that refreshes it by itself should start a librarian now, and
-  # `refresh_held_until` until when a try that built nothing holds that off.
+  # `refresh_held_until` until when a try that built nothing holds that off. `facts` are
+  # what the brief is now made of, each with its status as read now, and `generated` says
+  # `text` is their view (Decision 839).
   defp handle("memory.get", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          workspace = Path.expand(workspace),
@@ -391,13 +394,27 @@ defmodule Troupe.Gateway.Dispatch do
          "sections" => if(brief, do: Troupe.Memory.titles(brief), else: []),
          "text" => brief && Troupe.Memory.render(brief),
          "refresh_due" => Troupe.Session.Memory.refresh_due?(workspace, config),
-         "refresh_held_until" => held && DateTime.to_iso8601(held)
+         "refresh_held_until" => held && DateTime.to_iso8601(held),
+         "facts" => Facts.list(workspace),
+         "generated" => true
        }}
     end
   end
 
-  # With the record of a librarian's try at it, which is kept where the workspace's
-  # config keeps state; a config that cannot be read leaves that under the default.
+  # One fact, by its `id`, or with none the whole brief with the record of a librarian's
+  # try at it, which is kept where the workspace's config keeps state; a config that
+  # cannot be read leaves that under the default.
+  defp handle("memory.forget", %{"id" => id} = params, _context) when is_binary(id) do
+    with {:ok, workspace} <- fetch(params, "workspace") do
+      workspace = Path.expand(workspace)
+
+      case Facts.delete(workspace, id) do
+        :ok -> {:ok, %{"forgotten" => true, "id" => id}}
+        {:error, reason} -> {:error, not_forgotten(workspace, id, reason)}
+      end
+    end
+  end
+
   defp handle("memory.forget", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace") do
       workspace = Path.expand(workspace)
@@ -1461,6 +1478,14 @@ defmodule Troupe.Gateway.Dispatch do
       {:ok, config, _layers} -> {:ok, config}
       {:error, error} -> {:error, Error.new(:invalid_params, %{field: "config", reason: Exception.message(error)})}
     end
+  end
+
+  # `memory.forget` of a fact (Decision 839): an id no fact has is `not_found`; one that is
+  # there and could not be forgotten (its file could not be written) is the store's reason.
+  defp not_forgotten(workspace, id, reason) do
+    if Enum.any?(Facts.list(workspace), &(&1["id"] == id)),
+      do: Error.new(:internal, %{reason: inspect(reason)}),
+      else: Error.new(:not_found, %{kind: "fact", id: id})
   end
 
   defp fetch(params, key) do

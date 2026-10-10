@@ -312,7 +312,8 @@ defmodule Troupe.Tools.RememberTest do
     assert {:error, "nothing to remember" <> _} =
              Remember.run(%{"section" => "note", "text" => "  "}, ctx)
 
-    assert {:ok, "project brief updated: Overview rewritten"} =
+    # The older form writes facts (Decision 839).
+    assert {:ok, "remembered 1 overview fact(s)" <> _} =
              Remember.run(%{"section" => "overview", "text" => "A thing."}, ctx)
   end
 
