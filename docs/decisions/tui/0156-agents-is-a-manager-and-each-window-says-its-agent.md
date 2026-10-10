@@ -94,17 +94,19 @@ which the daemon now refuses; and the palette drew `/plan`, `/merge` and a repos
   takes the child's standard input and output for its own pipe, and an editor needs the
   terminal; the person's editor on the person's file is left open if the TUI goes.
 - **Each window says its agent, and Tab chooses it.** The tile title is `1 build-1 (plan)`
-  and the pane's `build-1 (plan)`: the window keeps the name it started with, and the
-  agent in brackets follows `session_created`, `agent_started` and `profile_switched`
-  (translated to `:agent_named`), so a session started without naming one says `build`,
-  not `root`. Tab in a window with nothing typed (Decision 22's Tab, no longer a blind
-  cycle) opens a chooser over it (`Troupe.UI.TUI.AgentChooser`): the primary agents from
-  `agents.list`, the one in use marked, each with its layer and badges, and the highlighted
-  one's description, permissions and instruction beside them. Enter sends `profile.switch`
-  for that window's session; the window keeps its conversation and the daemon's
-  `profile_switched` is a line in its transcript with the layer and the tools it gained and
-  lost. The chooser takes `agents.list` rows and hands back a name, so command mode's
-  agent choice (#502, TUI Decision 155) can open the same popup.
+  and the pane's `build-1 (plan)`, and command mode's row for the window (TUI Decision 155)
+  names the same agent: the window keeps the name it started with, and the agent follows
+  `session_created`, `agent_started` and `profile_switched` (translated to `:agent_named`),
+  so a session started without naming one says `build`, not `root`. Tab in a window with
+  nothing typed (Decision 22's Tab, no longer a blind cycle) opens a chooser over it
+  (`Troupe.UI.TUI.AgentChooser`, the server's `switcher`; Ctrl-N's chooser of an agent for
+  a new branch is command mode's own): the primary agents from `agents.list`, the one in
+  use marked, each with its layer and badges, and the highlighted one's description,
+  permissions and instruction beside them. Enter sends `profile.switch` for that window's
+  session; the window keeps its conversation and the daemon's `profile_switched` is a line
+  in its transcript with the layer and the tools it gained and lost. The popup takes
+  `agents.list` rows and hands back a name, so anything else that asks for an agent can
+  open it.
 - **The palette's three kinds.** Each row has a kind column: `command` (Troupe's own,
   muted), `agent` (accent), `repository` or `yours` (a file's command). An agent's row
   carries its layer, its model (`default` for the session's), `read-only`, and `worktree`
@@ -118,8 +120,8 @@ which the daemon now refuses; and the palette drew `/plan`, `/merge` and a repos
   `agents.changed` arrives, so a save in the desktop app is a row here at once.
 - **The palette's rows the audit found wrong (D107).** Opened over a window, a command the
   palette takes to finish typing (one that wants an argument, or taken with Tab or Space)
-  goes into that window's box, marked as a command for it, and Enter runs it against the
-  window: `/upload <path>` from a window, `/copy` taken with Tab. A new query's cursor lands
+  goes into that window's box, where Enter runs it on that window as a command typed there
+  is run (TUI Decision 155): `/upload <path>` from a window, `/copy` taken with Tab. A new query's cursor lands
   on the exact name, else the first name or alias it begins, so `wor` and Tab give
   `/worktree`. A command a file defines that takes arguments (its `argument-hint`) is put
   on the line by Enter rather than run with `$ARGUMENTS` empty.
@@ -132,7 +134,7 @@ which the daemon now refuses; and the palette drew `/plan`, `/merge` and a repos
   template into mine and its palette row; an unchanged edit saving nothing; a bundle's
   agent refused with its reason; on a pod (the suite's `FakeRemote`) read-only, saying
   why, nothing sent. `agents_palette_test.exs`: the three kinds and an agent's badges; an
-  agent that cannot run greyed with why; `root (build)` and `build-1 (build)`, Tab's
+  agent that cannot run greyed with why; a branch's row and `build-1 (build)`, Tab's
   chooser with the instruction beside it, the switch to `plan` in the header and the
   transcript; and the three D107 rows. `editor_test.exs`: `VISUAL` over `EDITOR`, split as a
   shell splits it, a missing editor said, and a scripted editor run, waited for and its
