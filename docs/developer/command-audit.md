@@ -5,6 +5,10 @@ draws) run in a session, with what happened and what now holds it: a test, or a 
 [defects.md](defects.md). Recorded on 2026-10-10 on `development-2026-10-09-2` at
 `50cb1e01` (0.10.0-beta), before command mode (#502 part A) changes what the root is.
 
+Since then, in the same release: D105's items but two were fixed by #556, D106 (watch) by
+#558, D107's palette items by #560 and #563, and D108 and D109 (uploads, a dropped
+connection, copying on Windows) by #552. What is still open is in D105 and D107.
+
 ## How it was run
 
 - **The installed build on Windows.** `scripts/install-local.ps1`, then the installed

@@ -20,6 +20,8 @@ paths:
   - apps/troupe_core/test/troupe/tools/remember_facts_test.exs
   - apps/troupe_core/test/troupe/tools/librarian_facts_test.exs
   - apps/troupe_gateway/test/troupe/gateway/memory_facts_test.exs
+  - clients/gui/packages/client/src/memory.ts
+  - clients/gui/apps/desktop/src/views/Memory.tsx
   - clients/tui/test/troupe/memory_facts_tui_test.exs
 symbols:
   - Troupe.Tools.Remember.run/2
@@ -125,8 +127,17 @@ its own, `:stale` (`status.offline.fg`, the sixteen colours' yellow), not in the
 colour: TUI Decision 149 keeps that for a person being needed, and a fact whose anchor
 moved needs the librarian, not the person.
 
+**The desktop app's Memory pane** (`views/Memory.tsx`, `@troupe/client`'s `memory.ts`;
+#550). `/memory` opens it from the palette: the facts in the TUI's order and words, "may
+no longer be true" in the `offline` status tokens (the design keeps `waiting` for "waiting
+for you"), where a fact came from when it is picked, Forget by id, Forget the brief behind
+a second word, and Refresh, which starts the librarian as a branch of the session on the
+start's conditions but, like the TUI's `/memory refresh` (TUI Decision 127), not held back
+by `memory_auto_refresh` or by a try that built nothing. The pane reloads when a librarian
+it started finishes. An older daemon's `memory.get` without `facts` shows the brief's text.
+
 **Not here.** The store, the status, the prompt's core, `recall` and the generated view
-(838); the desktop app's view (AA26); a person's forget by id from the command line; facts
+(838); a person's forget by id from the command line; facts
 derived from the log (#248's Option 3); symbol anchors (#36).
 
 **Proof.** `Troupe.Tools.RememberFactsTest` (a fact anchored on a file the agent read,
