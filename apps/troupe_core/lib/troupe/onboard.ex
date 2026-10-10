@@ -37,13 +37,13 @@ defmodule Troupe.Onboard do
   """
 
   alias Troupe.Config.Migrate
-  alias Troupe.Onboard.Source
+  alias Troupe.Onboard.{Pod, Source}
   alias Troupe.{Paths, Workspace}
   alias Troupe.Protocol.AgentDefinition
 
   # The sources `troupe onboard` asks, in this order. A source registers itself here, one
   # line.
-  @sources []
+  @sources [Troupe.Onboard.AgentsAndCommands]
 
   # Where a file other than frontmatter Markdown records its provenance, at each root.
   @manifest "onboarded.json"
@@ -99,11 +99,33 @@ defmodule Troupe.Onboard do
   against their roots. A proposal whose file was onboarded from the same source with the
   same hash is `unchanged` and one the person declined for that hash is `declined`, both
   only counted; `all: true` offers the declined again. `skipped` is what the sources found
-  and proposed nothing for, each with its reason. Options, each for a test: `sources`,
+  and proposed nothing for, each with its reason. Where `Troupe.Onboard.Pod` refuses (a
+  pod, Decision 826; `session_id:` names the session asking) the plan is that one refusal
+  and no source is asked. Options, each for a test: `sources`,
   `config_dir`, `home`, `state_dir` and `now` (the `imported_at` written).
   """
   @spec plan(Path.t(), keyword()) :: plan()
   def plan(workspace, opts \\ []) do
+    case Pod.refusal(Keyword.get(opts, :session_id)) do
+      nil -> plan_here(workspace, opts)
+      reason -> refused_here(workspace, reason)
+    end
+  end
+
+  # On a pod onboarding doesn't run at all (Decision 826): one refusal, no source asked.
+  defp refused_here(workspace, reason) do
+    %{
+      workspace: Path.expand(workspace),
+      sources: [],
+      proposals: [],
+      refused: [%{target: nil, path: nil, source: nil, reason: reason}],
+      skipped: [],
+      unchanged: 0,
+      declined: 0
+    }
+  end
+
+  defp plan_here(workspace, opts) do
     workspace = Path.expand(workspace)
     opts = defaults(opts)
     sources = Keyword.get(opts, :sources) || sources()

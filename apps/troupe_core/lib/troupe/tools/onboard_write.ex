@@ -19,6 +19,7 @@ defmodule Troupe.Tools.OnboardWrite do
   @behaviour Troupe.Tool
 
   alias Troupe.{Onboard, Tool}
+  alias Troupe.Onboard.Pod
   alias Troupe.Session.Log
 
   @impl Troupe.Tool
@@ -96,14 +97,22 @@ defmodule Troupe.Tools.OnboardWrite do
   end
 
   # A pod's agents and skills are the bundle's; onboarding writes a person's own files, on
-  # their own machine.
-  defp local(%{bundle: nil}), do: :ok
+  # their own machine. `Troupe.Onboard.Pod` says what a pod is (Decision 826), for this tool
+  # and `troupe onboard` alike; a session carrying a bundle is refused as well.
+  defp local(ctx) do
+    case Pod.refusal(ctx.session_id) do
+      nil when ctx.bundle == nil ->
+        :ok
 
-  defp local(_ctx),
-    do:
-      {:error,
-       "onboard_write runs on the person's own machine; this session runs on a pod, " <>
-         "where the bundle's files are the ones that count"}
+      nil ->
+        {:error,
+         "onboard_write runs on the person's own machine; this session runs on a pod, " <>
+           "where the bundle's files are the ones that count"}
+
+      refusal ->
+        {:error, refusal}
+    end
+  end
 
   defp target(%{"target" => "repo"}), do: {:ok, :repo}
   defp target(%{"target" => "user"}), do: {:ok, :user}
