@@ -41,7 +41,7 @@
       # If you create your own checks, you must specify the source files for
       # them here, so they can be loaded by Credo before running the analysis.
       #
-      requires: [],
+      requires: ["apps/troupe_protocol/credo/*.ex"],
       #
       # If you want to enforce a style guide and need a more traditional linting
       # experience, you can change `strict` to `true` below:
@@ -161,7 +161,14 @@
           {Credo.Check.Warning.UnusedRegexOperation, []},
           {Credo.Check.Warning.UnusedStringOperation, []},
           {Credo.Check.Warning.UnusedTupleOperation, []},
-          {Credo.Check.Warning.WrongTestFilename, []}
+          {Credo.Check.Warning.WrongTestFilename, []},
+
+          #
+          ## Troupe's own (apps/troupe_protocol/credo/)
+          #
+          # A program started by name is found on PATH alone (Decision 846); tests may
+          # use find_executable.
+          {Troupe.Credo.PathOnlyLookup, [files: %{included: ["apps/*/lib/"]}]}
         ],
         disabled: [
           #

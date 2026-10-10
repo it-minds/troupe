@@ -2206,7 +2206,7 @@ defmodule Troupe.UI.TUI.Server do
 
   # The opener is configurable so the suite opens no browser: `:troupe, :open_url`.
   defp open_url(url) do
-    opener = Application.get_env(:troupe, :open_url, &Troupe.UI.Browser.open/1)
+    opener = Application.get_env(:troupe, :open_url, &Client.open_url/1)
     opener.(url)
   end
 

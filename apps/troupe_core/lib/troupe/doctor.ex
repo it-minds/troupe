@@ -39,7 +39,7 @@ defmodule Troupe.Doctor do
   for the whole. `json/2` is any of it as one object.
   """
 
-  alias Troupe.{Config, Reaper}
+  alias Troupe.{Config, Executable, Reaper}
   alias Troupe.LLM.{Catalog, Identify}
   alias Troupe.LLM.Catalog.Store
   alias Troupe.Protocol.{Daemon, Endpoint}
@@ -453,8 +453,9 @@ defmodule Troupe.Doctor do
     end
   end
 
+  # As a session looks for it: on the PATH alone (Decision 846).
   defp path_check(program, when_missing) do
-    case System.find_executable(program) do
+    case Executable.find(program) do
       nil -> check("#{program} on PATH", :warn, "not found; #{when_missing}")
       path -> check("#{program} on PATH", :ok, Troupe.Paths.display(path))
     end

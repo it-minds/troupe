@@ -17,20 +17,22 @@ defmodule Troupe.Reaper do
   Decision 832), and a sandbox the worker cannot start is such an error too.
   """
 
-  alias Troupe.{Mounts, Sandbox}
+  alias Troupe.{Executable, Mounts, Sandbox}
 
   require Logger
 
   @typedoc """
   Why no command ran: no helper built for this host, a helper that will not start (the
-  OS's reason), a working directory that is not there, or a worker that cannot start
-  the sandbox every command there runs in (`Troupe.Sandbox.check/0`'s clause).
+  OS's reason), a working directory that is not there, a worker that cannot start the
+  sandbox every command there runs in (`Troupe.Sandbox.check/0`'s clause), or a program
+  that is not on the `PATH` (`Troupe.Executable`).
   """
   @type error ::
           :reaper_missing
           | {:reaper_unstartable, term()}
           | {:no_directory, Path.t()}
           | {:sandbox, String.t()}
+          | Executable.error()
 
   @doc """
   Path to the reaper binary for this host, or `{:error, :reaper_missing}`.
@@ -60,10 +62,14 @@ defmodule Troupe.Reaper do
   `:mounts` is the mount table the command may see, which `shell` passes, and the
   sandbox is asked about it (`Troupe.Sandbox`). On a worker a command with none is
   sandboxed over `cwd` alone, so nothing starts there outside it (Decision 832).
+
+  A program given by name is found on the `PATH` alone, and one given by a relative path
+  is taken from `cwd` (Decision 846).
   """
   @spec open(Path.t(), [String.t()], keyword()) :: {:ok, port()} | {:error, error()}
   def open(cwd, argv, opts \\ []) do
     with {:ok, reaper} <- path(),
+         {:ok, argv} <- program(cwd, argv, opts),
          {:ok, argv} <- confine(cwd, argv, opts) do
       start_reaper(reaper, cwd, [
         :binary,
@@ -90,7 +96,11 @@ defmodule Troupe.Reaper do
   exits when its stdin closes, which is what the MCP contract asks of it.
   """
   @spec open_stdio(Path.t(), [String.t()], keyword()) :: {:ok, port()} | {:error, term()}
-  def open_stdio(cwd, [exe | _] = argv, opts \\ []) do
+  def open_stdio(cwd, argv, opts \\ []) do
+    with {:ok, argv} <- program(cwd, argv, opts), do: stdio(cwd, argv, opts)
+  end
+
+  defp stdio(cwd, [exe | _] = argv, opts) do
     env =
       env(
         Keyword.update(
@@ -120,6 +130,28 @@ defmodule Troupe.Reaper do
 
       {_, {:error, reason}} ->
         {:error, reason}
+    end
+  end
+
+  # The program, as `Troupe.Executable` finds it (Decision 846): a name on the `PATH` the
+  # command is given, never in the directory it starts in, which Windows' launcher would
+  # search first for a bare name, so a workspace's own `git.exe` would have been Troupe's
+  # git; a relative path from `cwd`, said rather than left to the launcher. A first
+  # argument that is an option is the helper's own (`--version`).
+  defp program(_cwd, ["-" <> _ | _] = argv, _opts), do: {:ok, argv}
+
+  defp program(cwd, [command | args], opts) do
+    with {:ok, found} <- Executable.resolve(command, cwd, path: command_path(opts)),
+         do: {:ok, [found | args]}
+  end
+
+  # The `PATH` the command will have: the caller's, else `child_env/0`'s, else this VM's.
+  defp command_path(opts) do
+    given = Keyword.get(opts, :env, []) ++ child_env()
+
+    case Enum.find(given, fn {name, _value} -> String.upcase(name) == "PATH" end) do
+      {_name, path} when is_binary(path) -> path
+      _none -> System.get_env("PATH", "")
     end
   end
 
@@ -192,6 +224,8 @@ defmodule Troupe.Reaper do
 
   def explain({:no_directory, cwd}), do: "the directory #{Troupe.Paths.display(cwd)} is not there"
   def explain({:sandbox, why}), do: why
+  def explain({:not_on_path, _name} = reason), do: Executable.explain(reason)
+  def explain({:relative_command, _command} = reason), do: Executable.explain(reason)
   def explain(other), do: inspect(other)
 
   # `Port.open/2` raises when the program is there and will not start: not executable, a

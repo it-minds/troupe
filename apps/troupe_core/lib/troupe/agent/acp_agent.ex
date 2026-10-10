@@ -38,8 +38,8 @@ defmodule Troupe.Agent.ACPAgent do
   # already has its answer. The parent has had its report, or turns the `:DOWN` into one.
   use GenServer, restart: :temporary
 
+  alias Troupe.{Executable, Mounts, Sandbox, Workspace}
   alias Troupe.LLM.Usage
-  alias Troupe.{Mounts, Sandbox, Workspace}
 
   require Logger
 
@@ -390,9 +390,11 @@ defmodule Troupe.Agent.ACPAgent do
 
   # The command and its arguments come from the bundle and nothing else. No shell: an
   # argument a bundle carried would otherwise be a place to put a pipeline, and the bundle
-  # is signed for what it says rather than for what a shell makes of it.
+  # is signed for what it says rather than for what a shell makes of it. A name is found
+  # on the PATH alone and a relative path is the workspace's, never the daemon's current
+  # directory (Decision 846).
   defp open_port(entry, workspace) do
-    with executable when is_binary(executable) <- System.find_executable(entry.command),
+    with {:ok, executable} <- Executable.resolve(entry.command, workspace.root_real),
          {:ok, [program | args]} <- confine([executable | entry.args], workspace) do
       {:ok,
        Port.open({:spawn_executable, program}, [
@@ -404,8 +406,8 @@ defmodule Troupe.Agent.ACPAgent do
          :hide
        ])}
     else
-      nil -> {:error, {:not_on_path, entry.command}}
-      {:error, why} -> {:error, {:sandbox, why}}
+      {:error, why} when is_binary(why) -> {:error, {:sandbox, why}}
+      {:error, not_found} -> {:error, not_found}
     end
   end
 

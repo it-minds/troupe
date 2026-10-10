@@ -77,7 +77,7 @@ defmodule Mix.Tasks.Troupe.E2e do
   defp trace(opts), do: if(opts[:trace], do: "--trace", else: "--seed=0")
 
   defp kubectl_present do
-    if System.find_executable("kubectl") do
+    if Troupe.Executable.find("kubectl") do
       :ok
     else
       {:error,

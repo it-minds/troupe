@@ -52,7 +52,7 @@ defmodule Mix.Tasks.Compile.Reaper do
       not File.exists?(source) ->
         {:noop, []}
 
-      is_nil(System.find_executable("zig")) ->
+      is_nil(Troupe.Executable.find("zig")) ->
         Mix.shell().info([
           :yellow,
           "reaper: zig not found on PATH, skipping native build. ",

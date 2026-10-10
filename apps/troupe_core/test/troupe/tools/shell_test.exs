@@ -75,6 +75,28 @@ defmodule Troupe.Tools.ShellTest do
     assert Shell.windows_bash(env, exists(files)) ==
              "C:/Users/me/AppData/Local/Programs/Git/bin/bash.exe"
   end
+
+  # A relative entry is the daemon's current directory, often a repository: its `git.exe`
+  # would have made its `bin/bash.exe` the shell (#555, Decision 846).
+  test "a relative entry of the PATH is never looked in" do
+    env = %{
+      "PATH" => ".;tools\\git\\cmd;C:\\Program Files\\Git\\cmd",
+      "SystemRoot" => "C:\\WINDOWS"
+    }
+
+    files = [
+      "./git.exe",
+      "./bin/bash.exe",
+      "./bash.exe",
+      "tools/git/cmd/git.exe",
+      "tools/git/bin/bash.exe",
+      "C:/Program Files/Git/cmd/git.exe",
+      "C:/Program Files/Git/bin/bash.exe"
+    ]
+
+    assert Shell.windows_bash(env, exists(files)) == "C:/Program Files/Git/bin/bash.exe"
+    assert Shell.windows_bash(%{env | "PATH" => ".;tools\\git\\cmd"}, exists(files)) == nil
+  end
 end
 
 defmodule Troupe.Tools.ShellReleasePathTest do
