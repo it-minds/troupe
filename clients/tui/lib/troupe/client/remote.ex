@@ -189,6 +189,12 @@ defmodule Troupe.Client.Remote do
   @impl true
   def memory(_sid, _command), do: {:error, "the project brief lives on the worker"}
 
+  @impl true
+  def memory_facts(_sid), do: {:error, "the project brief lives on the worker"}
+
+  @impl true
+  def forget_fact(_sid, _id), do: {:error, "the project brief lives on the worker"}
+
   # The pod's checkout has instruction files of its own, and `context.get` is a session
   # method a worker answers; the paths are the pod's, shown as they come.
   @impl true

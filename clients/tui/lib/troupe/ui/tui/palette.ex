@@ -30,6 +30,7 @@ defmodule Troupe.UI.TUI.Palette do
     * `:ok` — a tool that succeeded, a window done and not yet read
     * `:error` — a tool that failed, a window that failed
     * `:offline` — a plane that does not answer
+    * `:stale` — a fact that may no longer be true: an anchor of it changed or went
     * `:added` — a line a diff adds
     * `:removed` — a line a diff removes
     * `:hunk` — a diff's file and hunk headers
@@ -46,6 +47,7 @@ defmodule Troupe.UI.TUI.Palette do
           | :ok
           | :error
           | :offline
+          | :stale
           | :added
           | :removed
           | :hunk
@@ -142,6 +144,12 @@ defmodule Troupe.UI.TUI.Palette do
         light: %{rgb: {93, 74, 30}, x256: 58},
         x16: :yellow
       },
+      stale: %{
+        token: "status.offline.fg",
+        dark: %{rgb: {201, 178, 122}, x256: 180},
+        light: %{rgb: {93, 74, 30}, x256: 58},
+        x16: :yellow
+      },
       added: %{
         token: "diff.addedText",
         dark: %{rgb: {0, 219, 211}, x256: 44},
@@ -223,6 +231,12 @@ defmodule Troupe.UI.TUI.Palette do
         x16: :red
       },
       offline: %{
+        token: "status.offline.fg",
+        dark: %{rgb: {201, 178, 122}, x256: 180},
+        light: %{rgb: {93, 74, 30}, x256: 58},
+        x16: :yellow
+      },
+      stale: %{
         token: "status.offline.fg",
         dark: %{rgb: {201, 178, 122}, x256: 180},
         light: %{rgb: {93, 74, 30}, x256: 58},
@@ -314,6 +328,12 @@ defmodule Troupe.UI.TUI.Palette do
         light: %{rgb: {95, 74, 33}, x256: 58},
         x16: :yellow
       },
+      stale: %{
+        token: "status.offline.fg",
+        dark: %{rgb: {198, 176, 138}, x256: 180},
+        light: %{rgb: {95, 74, 33}, x256: 58},
+        x16: :yellow
+      },
       added: %{
         token: "diff.addedText",
         dark: %{rgb: {143, 224, 172}, x256: 115},
@@ -395,6 +415,12 @@ defmodule Troupe.UI.TUI.Palette do
         x16: :red
       },
       offline: %{
+        token: "status.offline.fg",
+        dark: %{rgb: {203, 171, 112}, x256: 180},
+        light: %{rgb: {92, 72, 24}, x256: 94},
+        x16: :yellow
+      },
+      stale: %{
         token: "status.offline.fg",
         dark: %{rgb: {203, 171, 112}, x256: 180},
         light: %{rgb: {92, 72, 24}, x256: 94},

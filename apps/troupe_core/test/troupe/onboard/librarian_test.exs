@@ -24,7 +24,7 @@ defmodule Troupe.Onboard.LibrarianTest do
 
   test "it writes the brief only: no onboarding pass, and no onboard_write", ctx do
     refute "onboard_write" in ctx.tools
-    assert ctx.tools == ~w(read_file list_files grep remember finish)
+    assert ctx.tools == ~w(read_file list_files grep recall remember finish)
     refute ctx.prompt =~ "onboard_write"
     refute ctx.prompt =~ "Offer to onboard"
     refute ctx.description =~ "onboard"
@@ -42,7 +42,7 @@ defmodule Troupe.Onboard.LibrarianTest do
 
     assert ctx.prompt =~ "are not in any prompt, and are not yours to bring in"
     assert ctx.prompt =~ "the person answers it before you start"
-    assert ctx.prompt =~ "the brief is not a way round their answer"
-    assert ctx.prompt =~ "So the brief never copies it"
+    assert ctx.prompt =~ "memory is not a way round their answer"
+    assert ctx.prompt =~ "So memory never copies it"
   end
 end
