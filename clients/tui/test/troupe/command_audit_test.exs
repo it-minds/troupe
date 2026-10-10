@@ -1,8 +1,9 @@
 defmodule Troupe.CommandAuditTest do
   @moduledoc """
   The audit of every command (issue #502, part B; `docs/developer/command-audit.md`): what
-  each row of the harness's table does when it is typed, from the command line and from an
-  activated window, in a session on this machine, and what the gaps it found now hold.
+  the rows of the harness's table do when they are typed, from the command line and from
+  the palette over an activated window, on this machine and on a pod, where the audit
+  found them wrong or nothing else held them.
   """
 
   use ExUnit.Case, async: false
@@ -88,6 +89,28 @@ defmodule Troupe.CommandAuditTest do
         press(pid, "tab")
         assert line(pid) == text
         press(pid, "esc")
+      end
+    end
+  end
+
+  describe "/quit" do
+    # Sessions live in the daemon (the row's own words): the screen goes, the session stays.
+    test "each of its names closes the screen and leaves the session running" do
+      {sid, _, _} = start_session!(script: [])
+
+      for line <- ["/quit", "/q", "/exit"] do
+        me = self()
+        {pid, _session} = start_tui(sid, on_quit: fn -> send(me, {:quit, line}) end)
+        eventually(fn -> user_state(pid).commands != [] end)
+        ref = Process.monitor(pid)
+        Process.unlink(pid)
+
+        paste(pid, line)
+        press(pid, "enter")
+
+        assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 5_000
+        assert_received {:quit, ^line}
+        assert Client.has_session?(sid), line
       end
     end
   end
