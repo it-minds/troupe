@@ -127,8 +127,11 @@ configured `read_roots`; both compare canonical paths. The runner is the one pla
 Every OS process runs under **`reaper`**, a small Zig program owned by a Port, so killing
 the VM kills everything it started. A reaper that will not start is an error, not a crash:
 `shell` says why, `grep` scans in the VM, the brief's `git` reads as no repository, and
-`troupe doctor` fails its line. On a pod, `shell` runs under bubblewrap with the
-session's mount table as its bind list.
+`troupe doctor` fails its line. On a pod every command runs under bubblewrap, whatever
+the session's mounts or bundle: `shell` and an ACP agent with the session's mount table
+as the bind list, the git and ripgrep the tools run with their own directory alone. A
+pod that cannot start it refuses the command with a sentence and says so once in its
+log, and never runs it outside (Decision 832).
 
 Results are **bounded where they are created** — head and tail of command output, a window
 of a file, the first items of a listing — with a marker naming the exact call that returns

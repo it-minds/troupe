@@ -19,9 +19,11 @@ defmodule Troupe.Plane.Fleet.SizeClass do
 
   **They are not about safety, and the console says so in those words.** Session-to-session
   file separation is already built: the mount table is resolved at create and recorded as
-  a durable event, and `shell` runs under bubblewrap with only that session's mounts bound
-  — another session's workspace is not in the namespace at all. Two sessions on one worker
-  cannot reach each other's files whether they belong to one person or two.
+  a durable event, and every command a session starts on a worker runs under bubblewrap,
+  whatever its mounts or bundle, with only that session's mounts bound — another
+  session's workspace is not in the namespace at all. A worker that cannot start
+  bubblewrap runs no command rather than one outside it (Decision 832). Two sessions on
+  one worker cannot reach each other's files whether they belong to one person or two.
 
   So there is no isolated class, and adding one would buy kernel separation nobody needs
   at the cost of a cold start per session. `sessionsPerPod: 1` stays available in the
