@@ -129,6 +129,9 @@ The workspace's own agents wait for the same answer. A `.troupe/agents/<name>.md
 workspace; until then the tool asks as it would without the file, and `agents.list`
 gives the agent a note saying so and naming the command. Its `ask` and `deny` apply
 either way, and your own `<config>/agents/` and the built-ins are not the workspace's.
+Its MCP servers wait for it too: the tools of one its `.troupe/mcp.json` sets to
+`permission: auto` ask before each call until the workspace is trusted
+([Your own MCP servers and skills](#your-own-mcp-servers-and-skills)).
 
 ## Your own MCP servers and skills
 
@@ -157,7 +160,7 @@ name, the nearer `.agents/skills` wins, and a skill in `<config>/skills` or
 `{"url", "headers"}` — with one key of Troupe's own: `"include": ["~/.claude/.mcp.json"]`
 reads another file in place. `${VAR}` in an imported file becomes `{env:VAR}`, read as
 the rest of the configuration reads it. opencode's servers are under `mcp` in its
-`opencode.json`, and import from there. Codex's are `[mcp_servers.<name>]` tables in a
+`opencode.json`, and import or link from there. Codex's are `[mcp_servers.<name>]` tables in a
 `config.toml`, a project's `.codex/config.toml` or your own `~/.codex/config.toml`, and
 import or link from there: `bearer_token_env_var` becomes an `Authorization` header read
 from that variable, `env_http_headers` headers read from theirs, and what has no place in
@@ -226,8 +229,17 @@ it is, not from Troupe: removing one there says so.
 A workspace's servers are commands a cloned repository would run, so a session starts
 them only after asking you — once per workspace when you answer `allow`, which is kept
 in Troupe's state directory and never in the repository, and asked again when a
-server's command changes. A workspace on `trusted_workspaces` is not asked. Your own
-skills are offered to every agent; a bundle's stay as its profiles list them.
+server's command changes. A workspace on `trusted_workspaces` is not asked. The answer
+starts them and no more: a workspace's server set to `"permission": "auto"`, in
+`.troupe/mcp.json` or a file it links, runs its tools without asking only once the
+workspace is trusted, and until then each call asks; the question says so, and
+`mcp.list` gives the server a note naming the command. A server of your own `mcp.json`
+keeps its `auto`. Until the workspace is trusted, its `.troupe/mcp.json` also reads
+nothing from outside the repository: a file it includes from elsewhere (your own
+`~/.claude.json`, say), or a `.troupe/mcp.json` that is itself a link out, gives no
+servers, and the `/mcp` page's warnings say so and name the command. Your own `mcp.json`
+may include any file. Your own skills are offered to every agent; a bundle's stay as its
+profiles list them.
 
 ### A server that wants you to sign in
 

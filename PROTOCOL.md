@@ -1399,13 +1399,20 @@ for a panel to print.
 ```
 `mcp.list` (`observe`; both optional) → `{"servers": [{"name", "layer", "source",
 "transport", "command", "args", "url", "cd", "env", "headers", "permission", "disabled",
-"refused", "trust", "oauth", "auth", "state", "tools", "error"}], "warnings": [...]}` —
+"refused", "trust", "notes", "oauth", "auth", "state", "tools", "error"}], "warnings": [...]}` —
 every server the layers give the workspace, merged by name, the workspace's file over
 the user's over `config.yaml`. `layer` is `config`, `user` or `workspace` and `source`
 the file; `env` is the names of its variables and `headers` the names of the headers it
 is sent (Decision 820), never their values; `refused` says why one will not start (an
 unset `{env:VAR}`, an `oauth` with no `client_id`, a header Troupe sends itself); `trust` is
-`trusted` or `pending` for a workspace-level server and null otherwise. For a server
+`trusted` or `pending` for a workspace-level server and null otherwise. `notes` is
+`[{"key", "reason"}]`, as `agents.list`'s: a workspace-level server set to `permission:
+auto` in a workspace not on `trusted_workspaces` has one `permission` note, since its tools
+ask until the workspace is trusted, whatever its start's answer (Decision 830);
+`permission` stays what the entry says. The workspace's layer reads nothing from outside
+the repository until the workspace is trusted: an `include` from elsewhere (the person's
+own `~/.claude.json`, say), or a `.troupe/mcp.json` that is a link out, gives no servers,
+and `warnings` names it with the command that trusts the workspace (Decision 830). For a server
 that wants the person signed in, `oauth` is `{"client_id", "scopes"?, "issuer"?}` as its
 entry says, and `auth` is how their sign-in stands — `{"state", "account", "error"}`,
 `state` one of `signed_out`, `signing_in` (a browser is out), `signed_in` and `expired`

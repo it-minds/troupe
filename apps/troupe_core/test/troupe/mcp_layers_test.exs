@@ -43,6 +43,25 @@ defmodule Troupe.MCPLayersTest do
     assert Questions.pending(session.id) == []
   end
 
+  # The person wrote it, so its `auto` is theirs to give, trusted workspace or not
+  # (Decision 830).
+  test "a server in the user's mcp.json set to auto keeps it in a workspace nobody trusts",
+       context do
+    File.write!(
+      context.user_file,
+      Jason.encode!(%{
+        "mcpServers" => %{
+          "stub" => %{"command" => @elixir, "args" => [@stub], "permission" => "auto"}
+        }
+      })
+    )
+
+    %{session: session} = start_session(context, config_overrides: [trusted_workspaces: []])
+    [greet] = session.id |> wait_for_tools() |> Enum.filter(&(Tool.name(&1) == "mcp.stub.greet"))
+    assert Tool.default_permission(greet) == :auto
+    assert Questions.pending(session.id) == []
+  end
+
   test "a skill in the user's directory is offered, and its files are read roots", context do
     dir = Path.join(context.skills_dir, "review")
     File.mkdir_p!(dir)

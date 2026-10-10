@@ -1035,8 +1035,6 @@ Found by the #516 fixers, 2026-10-09.
 
 ### D100 - MCP import after #520 (low)
 
-- Linking (`include`) an `opencode.json` yields no servers: `Troupe.MCP.Local.servers_of/2`
-  reads `mcpServers`, `servers` and `mcp_servers`, not opencode's `mcp`. A copy works.
 - `agents.list` lists primary agents only, so the note on a `.troupe/agents` subagent whose
   `auto` waits for trust reaches no client.
 - The desktop app's import hint and the `/mcp import` row of the CLI reference don't

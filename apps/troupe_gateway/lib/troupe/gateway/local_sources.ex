@@ -345,14 +345,18 @@ defmodule Troupe.Gateway.LocalSources do
 
   # `config.yaml`'s `mcp:` is the lowest layer; a file `Troupe.Config` refuses leaves
   # it out and says so beside the other warnings, since a panel is not the place a
-  # config error stops everything.
+  # config error stops everything. The workspace's layer reads from outside the
+  # repository only once the user's file trusts the workspace, as a session here would
+  # read it (Decision 830).
   defp resolve(workspace) do
+    trusted? = is_binary(workspace) and Troupe.Config.trusted?(workspace)
+
     case Troupe.Config.resolve(workspace) do
       {:ok, config, _layers} ->
-        Local.resolve(workspace, base: config.mcp)
+        Local.resolve(workspace, base: config.mcp, trusted: trusted?)
 
       {:error, error} ->
-        {servers, warnings} = Local.resolve(workspace)
+        {servers, warnings} = Local.resolve(workspace, trusted: trusted?)
         {servers, [Exception.message(error) | warnings]}
     end
   end
@@ -375,6 +379,7 @@ defmodule Troupe.Gateway.LocalSources do
       "disabled" => server.disabled?,
       "refused" => config[:refused],
       "trust" => trust_of(server, workspace),
+      "notes" => notes_of(server, workspace),
       "oauth" => oauth_json(config),
       "auth" => auth_json(server)
     }
@@ -403,6 +408,17 @@ defmodule Troupe.Gateway.LocalSources do
   end
 
   defp trust_of(_server, _workspace), do: nil
+
+  # What of a server waits for the workspace to be trusted, in `agents.list`'s shape
+  # (Decision 825): a workspace's `permission: auto`, which a session holds until then
+  # (Decision 830), whatever its start's answer was.
+  defp notes_of(server, workspace) when is_binary(workspace) do
+    if Local.waits_for_trust?(server) and not Troupe.Config.trusted?(workspace),
+      do: [%{"key" => "permission", "reason" => Local.held_reason([server.name], workspace)}],
+      else: []
+  end
+
+  defp notes_of(_server, _workspace), do: []
 
   defp entry_json(entry), do: entry |> names_of("env") |> names_of("headers")
 
