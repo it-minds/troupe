@@ -322,7 +322,7 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `session_activated` | `epoch`, `pod` |
 | `session_resumed` | `dormant_ms`, `moved` |
 | `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
-| `files_skipped` | `files` — the agent and skill files a session found at a start and did not read, each `{kind, name, path, reason}`: on a pod, a working copy's file of a name its bundle has or a built-in agent's, which those beat unless the profile sets `repositoryOverridesBundle`; in a git worktree, one the main checkout has not committed (Decision 826). Written when the list differs from the one the log last recorded, so an empty list says the files went away |
+| `files_skipped` | `files` — the agent, skill, command and workflow files a session found at a start and did not read, each `{kind, name, path, reason}`: on a pod, a working copy's file of a name its bundle has or a built-in agent's, which those beat unless the profile sets `repositoryOverridesBundle`; in a git worktree, one the main checkout has not committed (Decision 826); a workspace's `.troupe/` file, or directory, that is a link out of it, a skill whose `SKILL.md` can't be read, and what a workspace's `skills.json` links from outside the repository while the workspace is not trusted (Decision 829). A directory not looked into has a null `name`. Written when the list differs from the one the log last recorded, so an empty list says the files went away |
 | `fs_changed` | `path`, `hash`, `size` |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
@@ -1051,11 +1051,15 @@ the client that uploaded it, not the session.
 ```json
 {"workspace": "/home/me/project"}
 ```
-→ `{"agents": [{"name", "description", "source", "notes"}]}` — the primary agents a session in that
+→ `{"agents": [{"name", "description", "source", "notes"}], "skipped": [{"name", "path",
+"reason"}]}` — the primary agents a session in that
 workspace may be created with, resolved as `session.create` resolves them (built-ins, the
 machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `global`
 or `project`. A worker answers from its bundle instead, so a client offers exactly what
-`profile` may name wherever the session will run.
+`profile` may name wherever the session will run. `skipped` is each agent file found and
+not read, with why: one that is a link out of the workspace (`not read: outside the
+workspace`; a `.troupe/agents` linked out whole is one entry with a null `name`,
+Decision 829), or in a git worktree one the main checkout has not committed. Additive.
 
 `notes` is what a person should know about how an agent is read, each `{"key",
 "reason"}` with the reason in words, and empty for most. A `project` agent whose
@@ -1475,7 +1479,11 @@ workspace, the nearest highest), `user` or `workspace`, and a name is the highes
 layer's. `skipped` is every skill the layers hold and do not offer, lowest first:
 `status` `skipped` with `reason` naming the directory used (`skipped: <dir> is used`), or
 `outside` (`not read: outside the repository`), a link out never read; an
-`.agents/skills` linked out whole is one entry with a null `name`.
+`.agents/skills` linked out whole is one entry with a null `name`. The workspace's
+`.troupe/skills` is held to the workspace (`not read: outside the workspace`), and what its
+`skills.json` includes from outside the repository is `outside` until the workspace is
+trusted, the `reason` naming the command that trusts it, one entry with a null `name`
+(Decision 829); `unreadable` is a `SKILL.md` that can't be read, the `reason` saying why.
 
 ```json
 {"command_id": "c-17", "scope": "user", "from": "/home/me/.claude/skills", "link": true}

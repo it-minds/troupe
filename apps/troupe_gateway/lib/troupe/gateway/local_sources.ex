@@ -433,10 +433,13 @@ defmodule Troupe.Gateway.LocalSources do
   # -- skills --------------------------------------------------------------------
 
   # What is offered, and beside it every skill the layers hold and do not offer, with why
-  # (Decision 822): one a nearer layer's name hid, or one outside its edge, never read.
+  # (Decision 822): one a nearer layer's name hid, or one outside its edge, never read. A
+  # session here trusts the workspace as the user's file says, so what its `skills.json`
+  # links from outside the repository is listed as a session would read it (Decision 829).
   defp list_skills(params) do
     with {:ok, workspace} <- workspace_of(params) do
-      %{skills: skills, skipped: skipped} = Skills.Local.resolve(workspace)
+      trusted? = workspace != nil and Troupe.Config.trusted?(workspace)
+      %{skills: skills, skipped: skipped} = Skills.Local.resolve(workspace, trusted: trusted?)
 
       {:ok,
        %{

@@ -420,6 +420,22 @@ defmodule Troupe.Gateway.LocalSourcesTest do
                  "link" => true
                })
 
+      # Outside the repository, the link waits for the workspace to be trusted
+      # (Decision 829), and says so.
+      assert {:ok, %{"skills" => [], "skipped" => [waiting]}} =
+               Client.call(context.client, "skills.list", %{"workspace" => context.workspace})
+
+      assert %{"name" => nil, "layer" => "workspace", "linked" => true, "status" => "outside"} =
+               waiting
+
+      assert waiting["reason"] =~ "troupe config trust"
+
+      File.write!(
+        Path.join([context.base, "config", "config.yaml"]),
+        "version: 1\nprovider: fake\nmodels:\n  default: fake-model\n" <>
+          "trusted_workspaces:\n  - #{Jason.encode!(context.workspace)}\n"
+      )
+
       assert {:ok, %{"skills" => [linked]}} =
                Client.call(context.client, "skills.list", %{"workspace" => context.workspace})
 
