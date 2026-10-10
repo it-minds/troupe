@@ -1,5 +1,8 @@
 defmodule Troupe.MemoryTest do
-  @moduledoc "The brief's shape: lossless parsing, curated sections, dated notes, staleness."
+  @moduledoc """
+  The brief's text: lossless parsing, the view generated from facts and read back item by
+  item, the prompt's core and its cap, staleness. Pure, no disk.
+  """
 
   use ExUnit.Case, async: true
 
@@ -37,7 +40,7 @@ defmodule Troupe.MemoryTest do
     assert brief.files == 200
     assert DateTime.to_iso8601(brief.built_at) == "2026-09-01T10:00:00Z"
     assert Memory.titles(brief) == ~w(Overview Layout Gotchas Notes)
-    assert Memory.section(brief, "Overview") =~ "actor-model"
+    assert Memory.section(brief, "overview") =~ "actor-model"
   end
 
   test "render/parse is a fixpoint, including unknown sections" do
@@ -51,7 +54,9 @@ defmodule Troupe.MemoryTest do
   # of digits with a leading zero loses it: the brief writes its head quoted, and a head an
   # older build wrote bare reads back as the text on its line.
   test "the head is written quoted, and one written bare reads as it was written" do
-    rendered = Memory.empty() |> Memory.stamp("4572e29", 10) |> Memory.render()
+    rendered =
+      Memory.view([%{"id" => "f_1", "kind" => "note", "claim" => "x"}], %{head: "4572e29"})
+
     assert rendered =~ ~s(\nhead: "4572e29"\n)
     assert brief!(rendered).head == "4572e29"
     assert brief!(Memory.render(brief!(rendered))).head == "4572e29"
@@ -71,14 +76,14 @@ defmodule Troupe.MemoryTest do
     assert brief!(String.replace(@full, "head: 2703d22", "head:")).head == nil
   end
 
-  test "a file with no frontmatter parses, round-trips and reads as stale" do
+  test "a file with no frontmatter parses, round-trips, and was never built" do
     brief = brief!("## Overview\nJust prose.\n")
 
     assert brief.built_at == nil
     assert Memory.section(brief, "Overview") == "Just prose."
     refute Memory.render(brief) =~ "---"
     assert brief!(Memory.render(brief)) == brief
-    assert Memory.stale?(brief)
+    assert Memory.stale?(brief.built_at, [])
   end
 
   test "text before the first heading survives a round trip" do
@@ -87,66 +92,121 @@ defmodule Troupe.MemoryTest do
     assert brief!(Memory.render(brief)) == brief
   end
 
-  test "put_section replaces in place and preserves order, or appends" do
-    brief = @full |> brief!() |> Memory.put_section("overview", "  Rewritten.  ")
+  test "a brief's items are facts by its titles, an unknown title leading its notes" do
+    assert Memory.units(brief!(@full)) == [
+             {"overview", "Troupe is an actor-model coding-agent harness."},
+             {"layout", "`lib/troupe/session/` — per-session actors."},
+             {"note", "Gotchas: Hand-written, and not a title the librarian knows."},
+             {"note", "2026-09-01 root: the ledger is a fold over the log."}
+           ]
 
-    assert Memory.section(brief, "Overview") == "Rewritten."
-    assert Memory.titles(brief) == ~w(Overview Layout Gotchas Notes)
+    assert Memory.claims("Intro:\n\n```sh\nmix check\n```\n\nAfter.") ==
+             ["Intro:\n\n```sh\nmix check\n```", "After."]
 
-    appended = Memory.put_section(brief, "commands", "mix test")
-    assert List.last(appended.sections) == {"Commands", "mix test"}
+    assert Memory.claims("- one\n  more of one\n* two\n\n3. three") == [
+             "one\nmore of one",
+             "two",
+             "three"
+           ]
+
+    assert Memory.units(brief!("Loose.\n\n## commands\n- `make`\n")) == [
+             {"note", "Loose."},
+             {"command", "`make`"}
+           ]
   end
 
-  test "add_note prepends, dedupes on text, squishes whitespace and caps the list" do
-    brief = Memory.add_note(Memory.empty(), "root", "locks are advisory")
-    assert Memory.section(brief, "Notes") =~ "root: locks are advisory"
+  test "the view is generated, says so, and knows when it was edited" do
+    facts = [
+      %{
+        "id" => "f_2",
+        "kind" => "command",
+        "claim" => "`make`",
+        "created_at" => "2026-10-10T00:00:01Z"
+      },
+      %{
+        "id" => "f_1",
+        "kind" => "overview",
+        "claim" => "A tool.",
+        "created_at" => "2026-10-10T00:00:02Z"
+      },
+      %{
+        "id" => "f_3",
+        "kind" => "note",
+        "claim" => "locks are advisory",
+        "created_at" => "2026-10-09T08:00:00Z",
+        "evidence" => %{"by" => "agent:root/explore#1"}
+      }
+    ]
 
-    again = Memory.add_note(brief, "root/explore#1", "locks are advisory")
-    assert length(String.split(Memory.section(again, "Notes"), "\n")) == 1
-    assert Memory.section(again, "Notes") =~ "root/explore#1"
+    built = ~U[2026-10-10 09:00:00Z]
+    view = Memory.view(facts, %{built_at: built, head: "abc1234", survey: 1})
 
-    wrapped = Memory.add_note(Memory.empty(), "root", "wrapped\n  over   lines")
-    assert Memory.section(wrapped, "Notes") =~ "root: wrapped over lines"
+    assert view =~
+             ~r/\A---\nbuilt_at: 2026-10-10T09:00:00Z\nhead: "abc1234"\nsurvey: 1\ngenerated: "sha256:[0-9a-f]{64}"\n---\n\n/
 
-    many = Enum.reduce(1..60, Memory.empty(), &Memory.add_note(&2, "root", "note #{&1}"))
-    notes = String.split(Memory.section(many, "Notes"), "\n")
-    assert length(notes) == 40
-    assert hd(notes) =~ "note 60"
+    assert view =~ "\n\n> Generated by Troupe from `.troupe/memory/facts.jsonl`"
+
+    assert view =~
+             "## Overview\n- A tool.\n\n## Commands\n- `make`\n\n## Notes\n- 2026-10-09 root/explore#1: locks are advisory\n"
+
+    assert Memory.view([], %{}) == nil
+
+    assert Memory.generated(view) == :generated
+    assert Memory.generated(String.replace(view, "\n", "\r\n")) == :generated
+    assert Memory.generated(String.replace(view, "- A tool.", "- A tool, edited.")) == :edited
+    assert Memory.generated(@full) == :unstamped
+
+    # Read back, the header is not a fact and every item is the one written.
+    assert Memory.units(brief!(view)) == [
+             {"overview", "A tool."},
+             {"command", "`make`"},
+             {"note", "2026-10-09 root/explore#1: locks are advisory"}
+           ]
   end
 
-  test "stale? triggers on absence, age and file drift but not on a new commit" do
-    fresh = @full |> brief!() |> Memory.stamp("abc1234", 200)
-
-    assert Memory.stale?(nil)
-    assert Memory.stale?(Memory.empty())
-    refute Memory.stale?(fresh, files: 200)
-    refute Memory.stale?(fresh, files: 210), "10 files is within the absolute floor"
-    assert Memory.stale?(fresh, files: 260)
-    assert Memory.stale?(fresh, files: 100)
-
-    small = Memory.stamp(Memory.put_section(Memory.empty(), "Overview", "x"), nil, 1)
-    refute Memory.stale?(small, files: 2), "writing the brief must not invalidate it"
-    assert Memory.stale?(small, files: 40)
-
-    old = %Memory{fresh | built_at: DateTime.add(DateTime.utc_now(), -8, :day)}
-    assert Memory.stale?(old, files: 200)
-    refute Memory.stale?(old, files: 200, max_age_days: 30)
-  end
-
-  test "to_prompt renders a capped, clearly non-authoritative block" do
-    brief = brief!(@full)
-
+  test "the prompt carries the core, clearly checked rather than authoritative" do
     assert Memory.to_prompt(nil) == ""
-    assert Memory.to_prompt(Memory.empty()) == ""
+    assert Memory.to_prompt(%{facts: [], others: %{}}) == ""
 
-    text = Memory.to_prompt(brief)
+    core = %{
+      facts: [
+        %{"kind" => "command", "claim" => "`make check`", "status" => "current"},
+        %{
+          "kind" => "convention",
+          "claim" => "Tabs.",
+          "status" => "moved",
+          "changed" => ["Makefile"]
+        }
+      ],
+      others: %{"layout" => 3}
+    }
+
+    text = Memory.to_prompt(core)
     assert text =~ "# Project brief"
-    assert text =~ "treat it as correct"
-    assert text =~ "## Overview"
-    assert text =~ "## Gotchas"
+    assert text =~ "Each\nwas checked when it was written down."
+    assert text =~ "If a command here fails, read the error"
+    refute text =~ "treat it as correct"
 
-    capped = Memory.to_prompt(brief, max_chars: 40)
-    assert capped =~ "(brief truncated)"
-    assert String.length(capped) < String.length(text)
+    assert text =~
+             "## Commands\n- `make check`\n\n## Conventions\n- Tabs. (may no longer be true: `Makefile` changed"
+
+    assert text =~ "3 more facts about this repository (3 layout)"
+  end
+
+  test "stale? triggers on a brief never built, on age, and on a core fact moved since, not " <>
+         "on a new commit" do
+    now = DateTime.utc_now()
+    moved = %{"kind" => "command", "status" => "moved", "changed_at" => DateTime.to_iso8601(now)}
+
+    assert Memory.stale?(nil, [])
+    refute Memory.stale?(now, [])
+    refute Memory.stale?(now, [%{"kind" => "command", "status" => "current"}])
+    assert Memory.stale?(DateTime.add(now, -60), [moved])
+    refute Memory.stale?(DateTime.add(now, 60), [moved]), "a check since the change"
+    assert Memory.stale?(now, [%{moved | "status" => "missing", "changed_at" => nil}])
+
+    old = DateTime.add(now, -8, :day)
+    assert Memory.stale?(old, [])
+    refute Memory.stale?(old, [], max_age_days: 30)
   end
 end

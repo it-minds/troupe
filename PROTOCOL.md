@@ -1265,13 +1265,15 @@ it can and shows the rest greyed with the reason. Reading the table wakes nothin
 
 The **project brief**: what earlier agents learned about the repository, read into
 every agent's system prompt and written by the `remember` tool and the `librarian`
-agent. `status` is `absent`, `stale` (never built, older than `memory_max_age_days`, or
-the tracked file count drifted), `fresh` or `disabled` (`memory: false` in the workspace
+agent. `status` is `absent` (no facts), `stale` (never built, older than
+`memory_max_age_days`, or a command or convention it holds rests on a file that changed or
+went since it was last checked, Decision 838), `fresh` or `disabled` (`memory: false` in the workspace
 config). A `librarian`'s run that ends as it meant to builds it, whether or not it
 rewrote any of it.
 One brief per repository: a worktree's is the main checkout's. `refresh_due` is whether
 a client should start a `librarian` session on the workspace now, which is what
-`memory_auto_refresh` asks of it: the brief is `absent` or `stale`, and no librarian has
+`memory_auto_refresh` asks of it: the workspace is in a git repository (never true in a
+directory none holds, such as a home directory), the brief is `absent` or `stale`, and no librarian has
 started on it in the last `memory_max_age_days` without its being built since. A
 librarian's run that failed, was cancelled or wrote nothing is tried again that much
 later, not in every new session; `refresh_held_until` is when (or `null`), for a

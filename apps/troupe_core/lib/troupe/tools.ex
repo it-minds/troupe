@@ -33,6 +33,8 @@ defmodule Troupe.Tools do
     Troupe.Tools.ReadBranch,
     # The project brief (Decision 649): the one file a tool may write unasked.
     Troupe.Tools.Remember,
+    # The repository's facts the prompt does not carry, asked for (Decision 838).
+    Troupe.Tools.Recall,
     # The rest of a cut shell or grep result (Decision 650).
     Troupe.Tools.ReadOutput,
     # The four the TUI's harness had and the core lacked (Decisions 651 and 652).

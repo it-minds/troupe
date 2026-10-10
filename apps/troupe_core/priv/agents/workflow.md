@@ -14,6 +14,7 @@ tools:
   - delegate
   - read_branch
   - remember
+  - recall
   - ask_user
   - finish
 permissions:
