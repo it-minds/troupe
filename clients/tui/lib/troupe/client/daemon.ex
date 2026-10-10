@@ -299,8 +299,12 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # A window already gone was taken by a second cancel, a discard or a merge meanwhile.
   defp discard_at_rest(sid, branch, deadline) do
-    case discard_worktree(sid, branch) do
+    case branch(sid, branch.window) && discard_worktree(sid, branch) do
+      nil ->
+        :ok
+
       :ok ->
         :ok
 
@@ -1020,14 +1024,11 @@ defmodule Troupe.Client.Daemon do
   defp same_dir?(a, b) when is_binary(a) and is_binary(b), do: dir_key(a) == dir_key(b)
   defp same_dir?(_a, _b), do: false
 
-  # git lists a tree by its real path; a workspace may be named through a link.
+  # git lists a tree with forward slashes; a workspace on Windows is named with
+  # backslashes, in whatever case it was typed.
   defp dir_key(path) do
-    path = Path.expand(path)
-
-    case Troupe.Workspace.real_path(path) do
-      {:ok, real} -> Troupe.Workspace.compare_key(real)
-      {:error, _} -> Troupe.Workspace.compare_key(path)
-    end
+    key = path |> Path.expand() |> String.replace("\\", "/") |> String.trim_trailing("/")
+    if match?({:win32, _}, :os.type()), do: String.downcase(key), else: key
   end
 
   @doc """
