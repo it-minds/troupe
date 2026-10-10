@@ -81,6 +81,10 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
 - Under full load, core `Troupe.Agent.CompactionTest` "a result the model has not answered
   yet is sent whole" failed once (a 54-byte result where it waits for one over the inline
   limit); it passes alone.
+- Under full load, core `ForkSessionTest` (a `Sessions.Index` call timing out),
+  `BudgetQuestionTest` ("a typed amount raises the limit"), `OnboardWriteTest` and
+  `DoctorTest`'s bench line fail now and then; all pass alone. `Session.ShellTest` "a
+  command that ends mid-turn ..." once found its workspace gone ("spawn: Could not cd").
 
 Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23), in chunks 3 to 7, and by
 the chunk 24 and 26 fixers (2026-10-08/09).
@@ -769,22 +773,21 @@ Found by the chunk 22 fixers, 2026-10-06.
 
 ### D85 - Instruction files and Cursor rules: what the 0.9.0 slices of #123 left (low)
 
-- `.cursor/rules` is read as far as Decision 809 goes: not `.mdc` files in subdirectories of
-  `.cursor/rules`, not `.md` rules, not a rule's `@` file references, and a glob's `[...]`
-  character class is taken literally. Whether Cursor takes a nested rule's globs from its
-  own directory (809's choice) or from the root is unchecked.
+- `.troupe/rules` (where Decision 828 moved 809's reading) reads no rules in its
+  subdirectories, no `@` file references, and takes a glob's `[...]` character class
+  literally. Whether a nested rule's globs should come from its own directory (809's choice)
+  or the root is unchecked against Cursor, whose rules onboarding brings in.
 - `troupe instructions check` takes every file under the workspace as its focus; how that
-  attaches glob-scoped Cursor rules, and how a root rule compares with the root's
-  `AGENTS.md`, is untried now that the loader reads them (Decision 810 predates 809).
+  attaches glob-scoped rules, and how a root rule compares with the root's `AGENTS.md`, is
+  untried.
 - Left out of the check by its rule of preferring a missed finding to a false one: an
   `install` subject, whether a command's subcommand exists (#123's item 14), and files so
   long the budget will cut them (the loader already marks them `trimmed` or `dropped`).
   `troupe-daemon` has no `instructions check` of its own.
-- On this repository the check flags `clients/tui/CLAUDE.md`'s lines 39 and 83 (example
-  paths it reads as real ones) and, on Windows, line 20 (`mise` lives in WSL here);
-  rewording the two examples would let it run quiet in this repository's CI.
+- This repository's `clients/tui/CLAUDE.md` is no longer read by Troupe sessions (Decision
+  828): onboard it, or rename it `AGENTS.md`.
 
-Found by the chunk 23 fixers, 2026-10-07.
+Found by the chunk 23 fixers, 2026-10-07; brought up to date by the chunk 26 fixers.
 
 ### D86 - The TUI's themes and mark: small leftovers (low)
 
@@ -1013,19 +1016,6 @@ Found by the #60 fixer, 2026-10-09.
 
 Found by the #516 fixers, 2026-10-09.
 
-### D99 - `.agents/` and skills after #518 (low)
-
-- The TUI's `/mcp` page shows the new skill layers (`agents`, `user_agents`) as `[session]`,
-  from the fallback of `layer/1` in `clients/tui/lib/troupe/client/daemon.ex`.
-- The desktop app's "Servers and skills" panel takes every skill not in the workspace layer
-  for the person's own when removing it, so removing an `.agents` skill fails with "no
-  skill named".
-- Neither client shows `skills.list`'s `skipped`.
-- An unreadable `.agents/skills/*/SKILL.md` is dropped with no entry; it doesn't show in
-  `skills.list`.
-
-Found by the #516 fixers, 2026-10-09.
-
 ### D100 - MCP import after #520 (low)
 
 - `agents.list` lists primary agents only, so the note on a `.troupe/agents` subagent whose
@@ -1042,12 +1032,81 @@ Found by the #516 fixers, 2026-10-09.
 
 ### D101 - Pods and worktrees after #523 (low)
 
-- The TUI shows the `files_skipped` event as a bare line (`files_skipped files=[1]`).
 - A worktree reads its main checkout's committed agents and skills, but not its commands,
   workflows or `mcp.json`.
 - `TroupePolicy` can't forbid a profile's `repositoryOverridesBundle`.
 
 Found by the #516 fixers, 2026-10-09.
+
+### D102 - Onboarding after #516's second half (low)
+
+- A retired file that has already been onboarded still says "not read: run troupe onboard"
+  in `context.get`; the loader doesn't consult `.troupe/onboarded.json`.
+- The first-session notice looks only for other tools' files at the root, so a repository
+  whose only such file is nested isn't told.
+- A second `troupe onboard` prints a "said already" skipped line for every instruction file,
+  every run, instead of counting them as unchanged.
+- An item `GEMINI.md` adds after `CLAUDE.md`'s list joins the proposed `AGENTS.md` as a
+  separate block, a loose list.
+- A glob in opencode's `instructions` is expanded with `Path.wildcard`, which ignores
+  `.gitignore` and `node_modules`: a broad `**/*.md` proposes every Markdown file. Nothing
+  is written unasked, but the proposal can be huge.
+- The person's global opencode `instructions` (`~/.config/opencode/opencode.json`) aren't
+  onboarded, only the workspace's.
+- On a machine a worker runs on (`TROUPE_WORKER_AUTOSTART=true`), `troupe bench` and `troupe
+  doctor --bench` fail the four onboarding scenarios with the pod refusal.
+- A first session start in a workspace with other tools' files walks the tree and surveys
+  the sources synchronously, once per onboarding version: a one-off delay in a very large
+  repository.
+- `Setup.detect/0` (`setup.get`) reads opencode's `auth.json`, which holds keys, only to
+  list provider names for the copy offer.
+
+Found by the #516 fixers, 2026-10-10.
+
+### D103 - Trust, confinement and MCP after #531 and #532 (low)
+
+- A copy-import into the person's own layer keeps a source file's `permission: auto`
+  without saying so.
+- `mcp.list`'s `trust` says "trusted" both when the workspace is trusted and when only the
+  start was allowed; since #522 those differ for `auto`. The `notes` carry the difference,
+  and neither client shows `notes` (nor `agents.list`'s).
+- Trust is read when a session starts, so after `troupe config trust` a running session
+  keeps asking until a new one starts.
+- `Troupe.Protocol.Bundle.list_skills_in/1` and `Skills.Local.skills_at` (`skills.add`,
+  `skills.remove`) still raise on an unreadable `SKILL.md`.
+- `skills.add` with `link` into an untrusted workspace answers `added` though the skills
+  aren't offered until the workspace is trusted.
+- `commands.list` and `workflows.list` carry no `skipped`; linked-out commands and
+  workflows are listed only in the session's `files_skipped` and the daemon log.
+- The TUI's `d` and `x` on a server whose layer is `session` or `request` say "a server
+  from config.yaml is ... there"; a typed `/skills remove <name>` on an `.agents` skill
+  still goes to the daemon and gets "no skill named".
+
+Found by the #519, #522 and client fixers, 2026-10-10.
+
+### D104 - Processes, the sandbox and git after #535, #537 and #540 (low)
+
+- `Troupe.Agent.ACPAgent` starts its program with `Port.open` directly, not under the
+  reaper; on a worker bubblewrap's `--die-with-parent` covers it, locally nothing does.
+- Inside the sandbox `shell`'s `HOME` is the workspace, so a committed `.gitconfig` or
+  `.npmrc` at the repository root is the user configuration of the commands it runs
+  (contained in the sandbox).
+- A worker doesn't check the sandbox when it starts, only at the first command, and `troupe
+  doctor` has no sandbox line. Where nodes forbid unprivileged user namespaces the operator
+  may need a pod security setting.
+- The gateway's `git worktree remove` without `--force` runs git's own status, which
+  recurses into a worktree's submodules under their own configuration.
+- `Worktrees.list` runs git status in whatever directory `.git/worktrees/*/gitdir` names;
+  it is neutral and confined, but tells that directory's dirty bit.
+- On Linux a working directory gone when a command starts gives exit status 2 and no
+  output ("spawn: Could not cd" on the VM's stderr) instead of the reaper's no-directory
+  sentence (Decision 733).
+- On Windows a port reports the exit status without waiting for end of file, so a
+  background child's later output is lost.
+- `troupe config` run with no daemon embeds one and leaves a `daemon.json` naming ports
+  nothing listens on once it exits.
+
+Found by the #528, #529 and #536 fixers, 2026-10-10.
 
 ## Taken
 
@@ -1142,6 +1201,11 @@ Found by the #516 fixers, 2026-10-09.
 | D43's `troupe resume` item - with no id it opened the newest row, which could be a branch or an empty scratch session | #484, PR #495 |
 | D62's first item - uninstalling didn't run `troupe-daemon login off`, leaving the login entry pointing at nothing | #76, PR #504 |
 | D49's import item - importing MCP servers from other tools dropped their `headers` | #60, PR #507 |
+| D99 - `.agents/` and skills: the TUI's layer labels, the desktop app's remove, the clients' skipped lists, unreadable `SKILL.md` and `.agents/AGENTS.md`, and the check's paths in `.agents/AGENTS.md` | PRs #530, #532, #533 |
+| D101's first item - `files_skipped` shown as a bare line | PR #530 |
+| D100's first item - a linked `opencode.json` gave no servers | #522, PR #531 |
+| D98's librarian item - its prompt said other tools' files are in every prompt | #516, PR #534 |
+| D84's last item - an instruction file that couldn't be read only logged a warning | #516, PR #533 |
 
 ## Checked and not a defect
 
