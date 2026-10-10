@@ -158,6 +158,20 @@ defmodule Troupe.TroupeDirTest do
       assert [%{kind: :workflow, name: nil, path: ^dir, reason: @outside}] =
                Workflow.skipped(workspace)
     end
+
+    test "a dotfile is no workflow, as a glob's * never matched one", context do
+      write_file(context, ".troupe/workflows/.draft.json", "[]")
+      write_file(context, ".troupe/workflows/fine.json", "[]")
+      File.write!(Path.join(context.elsewhere, "x.json"), "[]")
+
+      link!(
+        Path.join(context.elsewhere, "x.json"),
+        "#{context.workspace}/.troupe/workflows/.x.json"
+      )
+
+      assert Workflow.available(context.workspace) == ["default", "fine"]
+      assert Workflow.skipped(context.workspace) == []
+    end
   end
 
   describe ".troupe/skills" do

@@ -155,7 +155,7 @@ defmodule Troupe.Workflow do
   @spec available(Path.t()) :: [String.t()]
   def available(workspace) do
     on_disk =
-      case Workspace.files_within(workflows_dir(workspace), ".json", workspace) do
+      case files(workspace) do
         :outside -> []
         {inside, _outside} -> Enum.map(inside, &Path.basename(&1, ".json"))
       end
@@ -172,7 +172,7 @@ defmodule Troupe.Workflow do
   def skipped(workspace) do
     dir = workflows_dir(workspace)
 
-    case Workspace.files_within(dir, ".json", workspace) do
+    case files(workspace) do
       :outside ->
         [skip(nil, dir)]
 
@@ -180,6 +180,16 @@ defmodule Troupe.Workflow do
         Enum.map(outside, &skip(Path.basename(&1, ".json"), Path.join(dir, &1)))
     end
   end
+
+  # The `.json` files held to the workspace, a dotfile left out as a glob's `*` leaves it.
+  defp files(workspace) do
+    case Workspace.files_within(workflows_dir(workspace), ".json", workspace) do
+      :outside -> :outside
+      {inside, outside} -> {Enum.reject(inside, &dotfile?/1), Enum.reject(outside, &dotfile?/1)}
+    end
+  end
+
+  defp dotfile?(file), do: String.starts_with?(file, ".")
 
   defp skip(name, path),
     do: %{kind: :workflow, name: name, path: path, reason: Definitions.outside_workspace()}
