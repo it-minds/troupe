@@ -843,11 +843,14 @@ defmodule Troupe.UI.TUI.View do
 
   @doc """
   The rows the `/mcp` page lists, in order: every server the layers give the workspace,
-  then every skill. What the page's cursor and keys index.
+  then every skill, then every skill the layers hold and do not offer (root Decision
+  822). What the page's cursor and keys index.
   """
-  @spec mcp_entries(map()) :: [{:server, map()} | {:skill, map()}]
-  def mcp_entries(%{mcp_page: %{servers: servers, skills: skills}}),
-    do: Enum.map(servers, &{:server, &1}) ++ Enum.map(skills, &{:skill, &1})
+  @spec mcp_entries(map()) :: [{:server, map()} | {:skill, map()} | {:skipped, map()}]
+  def mcp_entries(%{mcp_page: %{servers: servers, skills: skills} = page}),
+    do:
+      Enum.map(servers, &{:server, &1}) ++
+        Enum.map(skills, &{:skill, &1}) ++ Enum.map(Map.get(page, :skipped, []), &{:skipped, &1})
 
   def mcp_entries(_state), do: []
 
@@ -925,6 +928,9 @@ defmodule Troupe.UI.TUI.View do
   defp mcp_line({:skill, %{name: name, layer: layer, description: description}}),
     do: "◆ #{name}  [#{layer}]  #{clip(description, 48)}"
 
+  defp mcp_line({:skipped, %{layer: layer, reason: reason} = skill}),
+    do: "◇ #{skill.name || skill.dir}  [#{layer}]  #{reason}"
+
   defp mcp_glyph(%{disabled?: true}), do: "–"
   defp mcp_glyph(%{state: :ready}), do: "✓"
   defp mcp_glyph(%{state: :connecting}), do: "…"
@@ -987,6 +993,17 @@ defmodule Troupe.UI.TUI.View do
       skill.description
     ]
     |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp mcp_detail({:skipped, skill}, _sign_in) do
+    [
+      field("name", skill.name || "(the whole directory)"),
+      field("layer", skill.layer),
+      field("source", skill.dir || skill.source),
+      field("offered", "no"),
+      field("why", skill.reason)
+    ]
     |> Enum.join("\n")
   end
 

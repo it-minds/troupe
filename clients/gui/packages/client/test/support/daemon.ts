@@ -157,13 +157,25 @@ export interface FakeAuth {
   error: string | null;
 }
 
+/** A skill in one of the daemon's layers; `user_agents` and `agents` are the `.agents/skills` read in place (troupe Decision 822). */
 export interface FakeSkill {
   name: string;
   description: string;
-  layer: "user" | "workspace";
+  layer: "user_agents" | "agents" | "user" | "workspace";
   source: string;
   dir: string;
   linked: boolean;
+}
+
+/** A skill the layers hold and do not offer, as `skills.list`'s `skipped` says it. */
+export interface FakeSkippedSkill {
+  name: string | null;
+  layer: FakeSkill["layer"];
+  source: string;
+  dir: string;
+  linked: boolean;
+  status: "skipped" | "outside";
+  reason: string;
 }
 
 /** What the fake finds at a path a test names: the stand-in for the daemon reading a file or a directory. */
@@ -265,6 +277,8 @@ export class FakeDaemon {
   /** `mcp.call`'s answers by command id: one asked again is answered from the first. */
   private readonly answered = new Map<string, unknown>();
   skills: FakeSkill[] = [];
+  /** The skills a nearer layer's name hid, or that are outside their edge. */
+  skippedSkills: FakeSkippedSkill[] = [];
   /** What lies at a path a test names, for `mcp.add` and `skills.add` with `from`. */
   importable: Record<string, Importable> = {};
   /** The record of a finished first run, as `setup.get` reports it; null until `finish`. */
@@ -1160,7 +1174,7 @@ export class FakeDaemon {
     const layerPath = (what: "mcp.json" | "skills") => (scope === "workspace" ? `${workspace}/.troupe/${what}` : `${dir}/${what}`);
     if (scope === "workspace" && !workspace) return invalid("the workspace scope needs a workspace");
 
-    const visible = <T extends { layer: string }>(rows: T[]): T[] => rows.filter((r) => r.layer === "user" || Boolean(workspace));
+    const visible = <T extends { layer: string }>(rows: T[]): T[] => rows.filter((r) => r.layer === "user" || r.layer === "user_agents" || Boolean(workspace));
     const authOf = (s: FakeServer): FakeAuth | null => (s.oauth ? (this.signIns[s.name] ?? { state: "signed_out", account: null, error: null }) : null);
     const liveOf = (s: FakeServer) =>
       s.disabled
@@ -1306,7 +1320,7 @@ export class FakeDaemon {
       }
 
       case "skills.list":
-        return reply(ws, id, { skills: visible(this.skills) });
+        return reply(ws, id, { skills: visible(this.skills), skipped: visible(this.skippedSkills) });
 
       case "skills.add": {
         if (!params["command_id"]) return invalid("command_id is required");

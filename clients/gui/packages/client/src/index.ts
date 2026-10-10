@@ -116,6 +116,7 @@ export type {
   ServerToolResult,
   ServerTools,
   SignInStarted,
+  SkippedSkill,
   SourceLayer,
   SourceScope,
   Worktree,
