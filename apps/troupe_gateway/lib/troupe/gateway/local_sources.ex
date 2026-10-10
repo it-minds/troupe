@@ -345,14 +345,18 @@ defmodule Troupe.Gateway.LocalSources do
 
   # `config.yaml`'s `mcp:` is the lowest layer; a file `Troupe.Config` refuses leaves
   # it out and says so beside the other warnings, since a panel is not the place a
-  # config error stops everything.
+  # config error stops everything. The workspace's layer reads from outside the
+  # repository only once the user's file trusts the workspace, as a session here would
+  # read it (Decision 830).
   defp resolve(workspace) do
+    trusted? = is_binary(workspace) and Troupe.Config.trusted?(workspace)
+
     case Troupe.Config.resolve(workspace) do
       {:ok, config, _layers} ->
-        Local.resolve(workspace, base: config.mcp)
+        Local.resolve(workspace, base: config.mcp, trusted: trusted?)
 
       {:error, error} ->
-        {servers, warnings} = Local.resolve(workspace)
+        {servers, warnings} = Local.resolve(workspace, trusted: trusted?)
         {servers, [Exception.message(error) | warnings]}
     end
   end

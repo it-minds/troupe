@@ -232,7 +232,11 @@ starts them and no more: a workspace's server set to `"permission": "auto"`, in
 `.troupe/mcp.json` or a file it links, runs its tools without asking only once the
 workspace is trusted, and until then each call asks; the question says so, and
 `mcp.list` gives the server a note naming the command. A server of your own `mcp.json`
-keeps its `auto`. Your own skills are offered to every agent; a bundle's stay as its
+keeps its `auto`. Until the workspace is trusted, its `.troupe/mcp.json` also reads
+nothing from outside the repository: a file it includes from elsewhere (your own
+`~/.claude.json`, say), or a `.troupe/mcp.json` that is itself a link out, gives no
+servers, and the `/mcp` page's warnings say so and name the command. Your own `mcp.json`
+may include any file. Your own skills are offered to every agent; a bundle's stay as its
 profiles list them.
 
 ### A server that wants you to sign in

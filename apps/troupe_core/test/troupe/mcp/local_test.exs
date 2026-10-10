@@ -220,7 +220,10 @@ defmodule Troupe.MCP.LocalTest do
         "mcpServers" => %{"fs" => %{"command" => "npx"}, "more" => %{"command" => "m"}}
       })
 
-      {servers, []} = Local.resolve(context.workspace, user_path: context.user_path)
+      # A file outside the repository, read once the workspace is trusted (Decision 830).
+      {servers, []} =
+        Local.resolve(context.workspace, user_path: context.user_path, trusted: true)
+
       assert Enum.map(servers, & &1.name) == ["fs", "more"]
 
       assert {:error, message} = Local.remove(:workspace, context.workspace, %{name: "fs"}, [])
@@ -396,7 +399,10 @@ defmodule Troupe.MCP.LocalTest do
                Local.import(:workspace, context.workspace, from, true, [])
 
       {servers, []} =
-        Local.resolve(context.workspace, user_path: Path.join(context.base, "none.json"))
+        Local.resolve(context.workspace,
+          user_path: Path.join(context.base, "none.json"),
+          trusted: true
+        )
 
       assert [%{config: %{headers: %{"Authorization" => "Bearer not-a-real-token"}}}] = servers
     end
@@ -449,7 +455,10 @@ defmodule Troupe.MCP.LocalTest do
                Local.import(:workspace, context.workspace, from, true, [])
 
       {servers, []} =
-        Local.resolve(context.workspace, user_path: Path.join(context.base, "none.json"))
+        Local.resolve(context.workspace,
+          user_path: Path.join(context.base, "none.json"),
+          trusted: true
+        )
 
       assert [%{config: %{env: %{"GITHUB_PERSONAL_ACCESS_TOKEN" => "not-a-real-pat"}}}] = servers
       refute File.read!(Local.workspace_path(context.workspace)) =~ "not-a-real-pat"
@@ -606,6 +615,79 @@ defmodule Troupe.MCP.LocalTest do
 
       waiting = for server <- servers, Local.waits_for_trust?(server), do: server.name
       assert waiting == ["linked", "shared", "theirs"]
+    end
+  end
+
+  describe "a workspace's layer, held to the repository until it is trusted (Decision 830)" do
+    setup context do
+      # The person's own file elsewhere on the machine: a server, and its environment.
+      own = Path.join(context.base, "home/.claude.json")
+
+      write_json!(own, %{
+        "mcpServers" => %{
+          "mine" => %{"command" => "m", "env" => %{"TOKEN" => "not-a-real-token"}}
+        }
+      })
+
+      %{own: own, none: Path.join(context.base, "none.json")}
+    end
+
+    test "a file it includes from outside the repository is listed, not read, until trusted",
+         context do
+      inside = Path.join(context.workspace, "tools/mcp.json")
+      write_json!(inside, %{"mcpServers" => %{"theirs" => %{"command" => "t"}}})
+      write_json!(Local.workspace_path(context.workspace), %{"include" => [context.own, inside]})
+
+      {servers, [held]} = Local.resolve(context.workspace, user_path: context.none)
+      assert Enum.map(servers, & &1.name) == ["theirs"]
+      assert held =~ "includes #{context.own}, outside the repository: not read until"
+      assert held =~ "this workspace is trusted (troupe config trust #{context.workspace})"
+      refute held =~ "not-a-real-token"
+
+      {servers, []} = Local.resolve(context.workspace, user_path: context.none, trusted: true)
+
+      assert Enum.map(servers, &{&1.name, &1.layer}) == [
+               {"mine", :workspace},
+               {"theirs", :workspace}
+             ]
+
+      # The person's own layer has no edge: the person wrote it.
+      write_json!(context.user_path, %{"include" => [context.own]})
+      {servers, [_held]} = Local.resolve(context.workspace, user_path: context.user_path)
+      assert [%{name: "mine", layer: :user}, %{name: "theirs"}] = servers
+    end
+
+    test "the edge is the repository, and a file is judged where it really is", context do
+      repo = Path.join(context.base, "repo")
+      workspace = Path.join(repo, "service")
+      File.mkdir_p!(Path.join(repo, ".git"))
+      File.mkdir_p!(workspace)
+
+      # Beside the workspace, inside the repository: read.
+      shared = Path.join(repo, "shared/mcp.json")
+      write_json!(shared, %{"mcpServers" => %{"shared" => %{"command" => "s"}}})
+
+      # Inside the repository by name, a link to the person's own file by where it is.
+      link = Path.join(workspace, "linked.json")
+      File.ln_s!(context.own, link)
+
+      write_json!(Local.workspace_path(workspace), %{"include" => [shared, link]})
+
+      {servers, [held]} = Local.resolve(workspace, user_path: context.none)
+      assert Enum.map(servers, & &1.name) == ["shared"]
+      assert held =~ "includes #{link}, outside the repository"
+    end
+
+    test "a .troupe/mcp.json that is a link out is not read until trusted", context do
+      path = Local.workspace_path(context.workspace)
+      File.mkdir_p!(Path.dirname(path))
+      File.ln_s!(context.own, path)
+
+      {[], [held]} = Local.resolve(context.workspace, user_path: context.none)
+      assert held =~ "#{path} is really outside the repository: not read until"
+
+      {[mine], []} = Local.resolve(context.workspace, user_path: context.none, trusted: true)
+      assert {mine.name, mine.layer} == {"mine", :workspace}
     end
   end
 

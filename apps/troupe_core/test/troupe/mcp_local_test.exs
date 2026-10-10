@@ -152,6 +152,28 @@ defmodule Troupe.MCPLocalTest do
       assert Questions.pending(session.id) == []
     end
 
+    # Decision 830: a repository's file must not offer the person's own servers as its own.
+    test "a file it includes from outside the repository is not read until it is trusted",
+         context do
+      own = Path.join(context.base, "home/.claude.json")
+      File.mkdir_p!(Path.dirname(own))
+
+      File.write!(
+        own,
+        Jason.encode!(%{"mcpServers" => %{"stub" => %{"command" => @elixir, "args" => [@stub]}}})
+      )
+
+      write_file(context, ".troupe/mcp.json", Jason.encode!(%{"include" => [own]}))
+
+      %{session: held} = start_session(context, config_overrides: [trusted_workspaces: []])
+      assert MCP.status(held.id) == []
+      assert Questions.pending(held.id) == []
+
+      %{session: trusted} = start_session(context, [])
+      assert [%{name: "stub", layer: :workspace}] = MCP.status(trusted.id)
+      assert "mcp.stub.greet" in Enum.map(wait_for_tools(trusted.id), &Tool.name/1)
+    end
+
     test "managed_mcp_servers_only starts nothing local, and every server says why", context do
       write_file(
         context,

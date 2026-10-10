@@ -1409,7 +1409,10 @@ unset `{env:VAR}`, an `oauth` with no `client_id`, a header Troupe sends itself)
 `[{"key", "reason"}]`, as `agents.list`'s: a workspace-level server set to `permission:
 auto` in a workspace not on `trusted_workspaces` has one `permission` note, since its tools
 ask until the workspace is trusted, whatever its start's answer (Decision 830);
-`permission` stays what the entry says. For a server
+`permission` stays what the entry says. The workspace's layer reads nothing from outside
+the repository until the workspace is trusted: an `include` from elsewhere (the person's
+own `~/.claude.json`, say), or a `.troupe/mcp.json` that is a link out, gives no servers,
+and `warnings` names it with the command that trusts the workspace (Decision 830). For a server
 that wants the person signed in, `oauth` is `{"client_id", "scopes"?, "issuer"?}` as its
 entry says, and `auth` is how their sign-in stands — `{"state", "account", "error"}`,
 `state` one of `signed_out`, `signing_in` (a browser is out), `signed_in` and `expired`

@@ -1,6 +1,6 @@
 ---
 number: 830
-title: "A workspace's MCP server set to `permission: auto` runs its tools unasked only once the workspace is trusted; the start question grants starting it and says so; a linked `opencode.json` gives its servers"
+title: "A workspace's MCP server set to `permission: auto` runs its tools unasked only once the workspace is trusted; the start question grants starting it and says so; the workspace's layer reads nothing from outside the repository until trusted; a linked `opencode.json` gives its servers"
 date: 2026-10-10
 status: accepted
 issue: 522
@@ -19,8 +19,9 @@ paths:
 symbols:
   - Troupe.MCP.Local.waits_for_trust?/1
   - Troupe.MCP.Local.held_reason/2
+  - Troupe.MCP.Local.resolve/2
   - Troupe.Session.MCP
-gist: "A workspace MCP server's auto applies only once the workspace is trusted, held where a session starts it; allow grants starting only; opencode.json links"
+gist: "Workspace MCP auto and includes from outside the repo wait for trust (held at session start/resolve); allow grants starting only; opencode.json links"
 ---
 
 Issue #522, found while gating a workspace agent's `auto` on trust (Decision 825), and
@@ -76,6 +77,28 @@ repository's file could let a tool run unasked.
   start, so no client reads either differently. The TUI's `/mcp` page and the desktop app do
   not show `notes` yet. `troupe config trust` and `untrust` name the servers beside the
   agents in their answers.
+- **A workspace's layer reads nothing from outside the repository until it is trusted.**
+  Found beside this by the #519 fixer (Decision 829): a `.troupe/mcp.json` could
+  `include` the person's own file (`~/.claude.json`, `<config>/mcp.json`) and so offer
+  their servers, their environment with them, under the workspace's layer, asked about as
+  the repository's at best. Now the workspace's layer is held to the repository
+  (`Troupe.Instructions.repository_root/1`, the directory with `.git`, else the workspace),
+  by where each file really is, links followed, as 829 holds a `skills.json`'s include:
+  an include from outside, a link inside that points out, and a `.troupe/mcp.json` that is
+  itself a link out are not read until the workspace is trusted, and each is named in the
+  warnings, "… includes ~/.claude.json, outside the repository: not read until this
+  workspace is trusted (troupe config trust <path>)", which `mcp.list` carries and the
+  session logs. Inside the repository an include is read as before; once trusted, anything
+  is, since trusting a workspace is how a person says its files may name what runs (686).
+  The person's own layer has no edge. In the warnings rather than a new field: they are
+  where `mcp.list` already says a linked file is missing or malformed, and no server comes
+  of it, so there is no entry to hang a note on. `Troupe.MCP.Local.resolve/2` takes
+  `trusted: true`; anything else is not, so a caller that forgets is held. The session
+  passes what it judged at start; `mcp.list`, `mcp.check`, `mcp.sign_in`, `mcp.tools` and
+  `mcp.call` pass the user's file's word, so a held server is `not_found` there too. The
+  three existing tests that link a file from elsewhere into a workspace's layer
+  (Decisions 700, 820 and 825: a link reads the other file as written) now resolve with
+  `trusted: true`, which is what they test.
 - **D100: a linked `opencode.json` gives its servers.** `Troupe.MCP.Local`'s reader took a
   layer file's servers from `mcpServers`, `servers` and `mcp_servers`, so a file linked
   with `include` read as empty when it was opencode's, whose servers are under `mcp`, while
@@ -95,7 +118,13 @@ repository's file could let a tool run unasked.
   untrusted workspace), `Troupe.MCP.LocalTest` (`waits_for_trust?/1` on a workspace entry,
   a file the workspace links and a workspace's change over the person's own, and not on
   the person's own or `config.yaml`'s; a linked `opencode.json` resolving to its servers
-  and unlinking naming them, failed on the tip with none), `Troupe.Gateway.LocalSourcesTest`
+  and unlinking naming them, failed on the tip with none; a workspace's include of the
+  person's own file held and named until `trusted: true`, the person's own layer reading
+  it, the repository rather than the workspace as the edge, a link inside pointing out
+  held, and a `.troupe/mcp.json` that is a link out held), `Troupe.Gateway.LocalSourcesTest`
   (`mcp.list`'s `permission` note on the workspace's `auto` server only, gone once the user
-  file trusts the workspace: failed on the tip, where there was no `notes`) and
-  `Troupe.Config.TrustTest` (the answers name the servers).
+  file trusts the workspace: failed on the tip, where there was no `notes`; an include of
+  the person's own file listed in `warnings` with the command, `mcp.check` of its server
+  `not_found`, and listed once the user's file trusts the workspace), `Troupe.MCPLocalTest`
+  (an untrusted session reads no server from such an include and asks nothing; a trusted
+  one starts it) and `Troupe.Config.TrustTest` (the answers name the servers).

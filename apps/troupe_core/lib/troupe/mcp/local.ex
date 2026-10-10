@@ -31,10 +31,13 @@ defmodule Troupe.MCP.Local do
   A server the workspace's layer names, in its own file or one it links, that says
   `permission: auto` runs its tools unasked only once the workspace is trusted
   (`waits_for_trust?/1`, Decision 830): answering the question that starts it grants
-  starting it, as a workspace agent's `auto` waits (Decision 825).
+  starting it, as a workspace agent's `auto` waits (Decision 825). And the workspace's
+  layer reads nothing from outside the repository until then (`resolve/2`): what its file
+  includes from elsewhere, the person's own files among them, is listed, not read.
   """
 
   alias Troupe.Config.{Layers, Migrate, Trust}
+  alias Troupe.Instructions
   alias Troupe.MCP.{Import, OAuth, Server}
   alias Troupe.Workspace
 
@@ -164,6 +167,12 @@ defmodule Troupe.MCP.Local do
   Every server the two layers give a workspace, merged and sorted by name, with
   `config.yaml`'s `mcp:` underneath when `:base` carries it (`Troupe.Config.t/0`'s
   `mcp`). `nil` for the workspace reads the user's layer alone.
+
+  The workspace's layer is held to the repository, by where each file really is, until
+  the workspace is trusted (`trusted: true`, which the session says as it starts, and
+  anything else is not): a `.troupe/mcp.json` that is a link out, or a file it includes
+  from outside, is not read, and a warning names it and the command that trusts the
+  workspace (Decision 830). The person's own layer has no edge.
   """
   @spec resolve(Path.t() | nil, keyword()) :: {[server()], [String.t()]}
   def resolve(workspace, opts \\ []) do
@@ -173,12 +182,15 @@ defmodule Troupe.MCP.Local do
       |> Enum.map(fn {name, config} -> from_base(name, config) end)
 
     layers =
-      [{:user, user_path(opts)}] ++
-        if(workspace, do: [{:workspace, workspace_path(workspace)}], else: [])
+      [{:user, user_path(opts), nil}] ++
+        if(workspace,
+          do: [{:workspace, workspace_path(workspace), edge(workspace, opts)}],
+          else: []
+        )
 
     {entries, warnings} =
-      Enum.reduce(layers, {%{}, []}, fn {layer, path}, {acc, warnings} ->
-        case layer_entries(layer, path) do
+      Enum.reduce(layers, {%{}, []}, fn {layer, path, edge}, {acc, warnings} ->
+        case layer_entries(layer, path, edge) do
           {:ok, entries, warned} ->
             {Enum.reduce(entries, acc, &merge_entry/2), warnings ++ warned}
 
@@ -203,11 +215,17 @@ defmodule Troupe.MCP.Local do
   end
 
   # A layer's entries in reading order: each included file's, then the file's own.
-  defp layer_entries(layer, path) do
+  defp layer_entries(layer, path, edge) do
+    if outside?(path, edge),
+      do: {:ok, [], ["#{show(path)} is really outside the repository: #{edge.held}"]},
+      else: read_layer(layer, path, edge)
+  end
+
+  defp read_layer(layer, path, edge) do
     with {:ok, file} <- read(path) do
       {included, warnings} =
         Enum.reduce(file.include, {[], file.warnings}, fn included_path, {entries, warnings} ->
-          {more, warned} = included_entries(layer, path, included_path)
+          {more, warned} = included_entries(layer, path, included_path, edge)
           {entries ++ more, warnings ++ warned}
         end)
 
@@ -215,16 +233,59 @@ defmodule Troupe.MCP.Local do
     end
   end
 
-  defp included_entries(layer, path, included_path) do
-    case read(included_path) do
-      {:ok, %{exists?: false}} ->
-        {[], ["#{show(path)} includes #{show(included_path)}, which is not there"]}
+  defp included_entries(layer, path, included_path, edge) do
+    if outside?(included_path, edge) do
+      {[],
+       ["#{show(path)} includes #{show(included_path)}, outside the repository: #{edge.held}"]}
+    else
+      case read(included_path) do
+        {:ok, %{exists?: false}} ->
+          {[], ["#{show(path)} includes #{show(included_path)}, which is not there"]}
 
-      {:ok, included} ->
-        {tagged(included.servers, layer, included_path), included.warnings}
+        {:ok, included} ->
+          {tagged(included.servers, layer, included_path), included.warnings}
 
-      {:error, message} ->
-        {[], [message]}
+        {:error, message} ->
+          {[], [message]}
+      end
+    end
+  end
+
+  # What a workspace's layer is held to (Decision 830): the repository, until the
+  # workspace is trusted, and nothing once it is, as the person's own layer never is. A
+  # repository's file must not read one of the person's own (`~/.claude.json`) and offer
+  # their servers, their environment with them, as the workspace's, as a `skills.json`'s
+  # link waits (Decision 829).
+  defp edge(workspace, opts) do
+    if Keyword.get(opts, :trusted) == true do
+      nil
+    else
+      workspace = Path.expand(workspace)
+
+      %{
+        bound: workspace |> Instructions.repository_root() |> key(),
+        held: "not read until this workspace is trusted (#{Trust.command(workspace)})"
+      }
+    end
+  end
+
+  # Judged where the file really is, links followed. One that is not there has nothing to
+  # read, and `read/1` says so.
+  defp outside?(_path, nil), do: false
+
+  defp outside?(path, %{bound: bound}) do
+    case Workspace.real_path(path) do
+      {:ok, real} -> not under?(Workspace.compare_key(real), bound)
+      {:error, _reason} -> false
+    end
+  end
+
+  defp under?(key, bound), do: key == bound or String.starts_with?(key, bound <> "/")
+
+  defp key(path) do
+    case Workspace.real_path(path) do
+      {:ok, real} -> Workspace.compare_key(real)
+      {:error, _reason} -> Workspace.compare_key(Path.expand(path))
     end
   end
 

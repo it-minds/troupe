@@ -220,7 +220,10 @@ defmodule Troupe.Session.MCP do
   defp resolve(%{local?: false}, base),
     do: {Enum.map(base, fn {name, config} -> base_record(name, config) end), []}
 
-  defp resolve(state, base), do: Local.resolve(state.workspace, base: base)
+  # The workspace's layer reads from outside the repository only once the workspace is
+  # trusted (Decision 830), as the session judged it when it started.
+  defp resolve(state, base),
+    do: Local.resolve(state.workspace, base: base, trusted: state.trusted?)
 
   defp base_record(name, config) do
     %{
