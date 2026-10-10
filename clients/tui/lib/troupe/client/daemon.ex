@@ -154,6 +154,7 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def dispatch(sid, name, args) do
     with {:ok, profile, mode, kind} <- branch_profile(sid, name),
+         mode = chosen_mode(args, kind, mode),
          {place, prompt} = placement(sid, name, mode, prompt_of(args)),
          {workflow, prompt} = workflow_and_prompt(sid, kind, prompt),
          window = Branch.next_name(window_names(sid), name),
@@ -227,6 +228,18 @@ defmodule Troupe.Client.Daemon do
   # the session's table that listed it.
   @impl true
   def run_command(sid, name, arguments), do: describe(Worker.run_command(sid, name, arguments))
+
+  # In command mode a command a file defines starts a branch, as a plain line does (TUI
+  # Decision 155, amending Decision 763 there): a branch with no prompt of its own, on the
+  # agent the file names, and the command run in it, so the daemon expands its prompt and
+  # asks first where it would (Decision 814), in that window.
+  @impl true
+  def start_command(sid, agent, name, arguments, mode) do
+    with {:ok, window} <- dispatch(sid, agent, %{prompt: "", worktree: mode}),
+         :ok <- route(sid, window, &Worker.run_command(&1, name, arguments)) do
+      {:ok, window}
+    end
+  end
 
   # The person's own command runs in the daemon, in the session's workspace, as the agent's
   # shell does (root Decision 813); this session's, whatever window is activated.
@@ -812,12 +825,16 @@ defmodule Troupe.Client.Daemon do
   def has_session?(sid), do: Worker.whereis(sid) != nil
 
   # The scratch session `troupe` opens is idle until somebody has typed into it, a `!`
-  # command included.
+  # command included, or started a branch from it: in command mode a plain line starts a
+  # branch and the session's own agent hears nothing (TUI Decision 155).
   @impl true
   def idle?(sid) do
-    has_session?(sid) and
-      not Enum.any?(Journal.all(sid), &(&1.type in [:input, :user_input, :user_shell]))
+    has_session?(sid) and not Enum.any?(Journal.all(sid), &worked?/1)
   end
+
+  defp worked?(%{type: type}) when type in [:input, :user_input, :user_shell], do: true
+  defp worked?(%{type: :branch_spawned, data: %{session_id: child}}), do: is_binary(child)
+  defp worked?(_event), do: false
 
   # The daemon's `session.fork` (root Decision 812): a session of its own whose log starts
   # as this one's, in the same workspace, attached as a created one is. Its screen is the
@@ -846,6 +863,64 @@ defmodule Troupe.Client.Daemon do
 
       {:error, reason} ->
         {:error, Troupe.Client.open_refusal(sid, message(reason))}
+    end
+  end
+
+  # One agent as a session in this workspace would run it, for command mode's chooser
+  # (TUI Decision 155): `agents.get`, whose `prompt` is its instruction (root Decision 841).
+  # A daemon from before it answers `method_not_found`, and the row `agents.list` has is
+  # all there is to show: its description.
+  @impl true
+  def agent_definition(sid, name) do
+    case Link.call("agents.get", %{name: name, workspace: workspace(sid)}) do
+      {:ok, %{} = agent} ->
+        {:ok,
+         %{
+           name: agent["name"] || name,
+           description: agent["description"] || "",
+           prompt: agent["prompt"]
+         }}
+
+      {:error, "method_not_found" <> _} ->
+        with {:ok, agents} <- profiles({:local, workspace(sid)}, nil),
+             %{} = agent <- Enum.find(agents, &(&1.name == name)) do
+          {:ok, %{name: name, description: agent.description, prompt: nil}}
+        else
+          nil -> {:error, "no agent #{name} here"}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, message(reason)}
+    end
+  end
+
+  # Every worktree of the session's repository, as command mode lists them (TUI Decision
+  # 155): `worktree.list`, with how far each is from the checkout's branch and what it
+  # changed (root Decision 840), which a daemon from before that leaves out.
+  @impl true
+  def worktree_status(sid) do
+    case Link.call("worktree.list", %{workspace: workspace(sid)}) do
+      {:ok, %{"worktrees" => list}} when is_list(list) ->
+        {:ok,
+         Enum.map(list, fn t ->
+           %{
+             path: t["path"],
+             branch: blank_to_nil(t["branch"]),
+             session_id: t["session_id"],
+             dirty: t["dirty"] == true,
+             ahead: t["ahead"],
+             behind: t["behind"],
+             added: t["added"],
+             removed: t["removed"]
+           }
+         end)}
+
+      {:ok, other} ->
+        {:error, "unexpected worktree.list answer: #{inspect(other)}"}
+
+      {:error, reason} ->
+        {:error, message(reason)}
     end
   end
 
@@ -1278,6 +1353,12 @@ defmodule Troupe.Client.Daemon do
         {"default", prompt}
     end
   end
+
+  # Where command mode said the branch works (TUI Decision 155): `"never"`, the checkout,
+  # for a plain line and for a choice of it, `"always"` for a worktree of its own. A
+  # workflow's subagents write, so it keeps its worktree whatever was chosen.
+  defp chosen_mode(%{worktree: mode}, :agent, _mode) when mode in ["never", "always"], do: mode
+  defp chosen_mode(_args, _kind, mode), do: mode
 
   defp prompt_of(args) when is_binary(args), do: String.trim(args)
   defp prompt_of(%{} = args), do: prompt_of(args[:prompt] || args["prompt"] || "")

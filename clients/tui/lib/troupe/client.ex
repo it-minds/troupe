@@ -106,6 +106,10 @@ defmodule Troupe.Client do
   @callback capability(session_id()) :: capability()
   @callback dispatch(session_id(), String.t(), String.t() | map()) ::
               {:ok, String.t()} | {:error, term()}
+  @callback agent_definition(session_id(), String.t()) :: {:ok, map()} | {:error, term()}
+  @callback start_command(session_id(), String.t(), String.t(), String.t(), String.t()) ::
+              {:ok, String.t()} | {:error, term()}
+  @callback worktree_status(session_id()) :: {:ok, [map()]} | {:error, term()}
   @callback adopt_branch(session_id(), session_id(), String.t(), String.t()) ::
               {:ok, String.t()} | {:error, term()}
   @callback send_input(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
@@ -221,9 +225,30 @@ defmodule Troupe.Client do
   @spec capability(session_id()) :: capability()
   def capability(sid), do: impl(sid).capability(sid)
 
+  @doc """
+  Starts a branch on an agent: `args` is the prompt, or `%{prompt: text, worktree: mode}`
+  with `"never"` for the checkout and `"always"` for a worktree of its own, as command
+  mode chooses (TUI Decision 155). Answers the window it opens in (`build-1`).
+  """
   @spec dispatch(session_id(), String.t(), String.t() | map()) ::
           {:ok, String.t()} | {:error, term()}
   def dispatch(sid, name, args), do: impl(sid).dispatch(sid, name, args)
+
+  @doc """
+  One agent as a session here would run it, for command mode's chooser (TUI Decision
+  155): `%{name, description, prompt}`, `prompt` its instruction, `nil` from a daemon
+  that cannot say it.
+  """
+  @spec agent_definition(session_id(), String.t()) :: {:ok, map()} | {:error, term()}
+  def agent_definition(sid, name), do: impl(sid).agent_definition(sid, name)
+
+  @doc """
+  Every worktree of the session's repository, its checkout among them, as command mode
+  lists them: `%{path, branch, session_id, dirty, ahead, behind, added, removed}`, the
+  last four `nil` where the daemon cannot say (root Decision 840).
+  """
+  @spec worktree_status(session_id()) :: {:ok, [map()]} | {:error, term()}
+  def worktree_status(sid), do: impl(sid).worktree_status(sid)
 
   @doc """
   Opens the window of a branch the daemon started for this session — the one a saved
@@ -246,6 +271,16 @@ defmodule Troupe.Client do
   """
   @spec run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   def run_command(sid, name, arguments), do: impl(sid).run_command(sid, name, arguments)
+
+  @doc """
+  Runs a command a markdown file defines in a branch of its own (TUI Decision 155): a
+  branch on `agent`, in the checkout (`"never"`) or a worktree (`"always"`), with the
+  command run there rather than in the session. Answers the window it opened in.
+  """
+  @spec start_command(session_id(), String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def start_command(sid, agent, name, arguments, mode),
+    do: impl(sid).start_command(sid, agent, name, arguments, mode)
 
   @doc """
   Runs a command the person typed (`!cmd`) where the session runs, in its workspace
