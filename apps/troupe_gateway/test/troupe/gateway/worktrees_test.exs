@@ -10,7 +10,7 @@ defmodule Troupe.Gateway.WorktreesTest do
 
   use ExUnit.Case, async: false
 
-  alias Troupe.Gateway.Daemon
+  alias Troupe.Gateway.{Daemon, Worktrees}
   alias Troupe.Protocol.{Client, Endpoint, Error}
 
   @moduletag timeout: 120_000
@@ -118,7 +118,84 @@ defmodule Troupe.Gateway.WorktreesTest do
     assert second["workspace"] == context.workspace
   end
 
+  # #529 (Decision 833): the gateway's own git runs none of the commands the repository's
+  # `.git` names, as it makes a worktree, commits what was left in it and merges it.
+  describe "a repository whose own .git runs commands" do
+    setup %{base: base, workspace: workspace} do
+      marker = Path.join(base, "marker")
+      script = Path.join(base, "mark.sh")
+      File.write!(script, "#!/bin/sh\necho \"$*\" >> '#{marker}'\ncat\n")
+      File.chmod!(script, 0o755)
+
+      File.write!(Path.join(workspace, ".gitattributes"), "*.txt merge=mark filter=mark\n")
+      File.write!(Path.join(workspace, "notes.txt"), "one\n")
+      quiet!(workspace, ["add", "."])
+      quiet!(workspace, ["commit", "-q", "-m", "notes"])
+
+      {_, 0} = git(workspace, ["config", "core.fsmonitor", "#{script} fsmonitor"])
+      {_, 0} = git(workspace, ["config", "merge.mark.driver", "#{script} merge %O %A %B"])
+      {_, 0} = git(workspace, ["config", "filter.mark.smudge", "#{script} smudge"])
+      {_, 0} = git(workspace, ["config", "filter.mark.clean", "#{script} clean"])
+      hooks = Path.join(workspace, ".git/hooks")
+      File.mkdir_p!(hooks)
+
+      named = ~w(post-checkout pre-commit commit-msg post-commit pre-merge-commit post-merge)
+
+      for hook <- named ++ ~w(reference-transaction post-index-change) do
+        File.write!(Path.join(hooks, hook), "#!/bin/sh\n#{script} hook #{hook} </dev/null\n")
+        File.chmod!(Path.join(hooks, hook), 0o755)
+      end
+
+      %{marker: marker}
+    end
+
+    test "a worktree is made, its work committed and merged without running any", context do
+      %{workspace: workspace, marker: marker} = context
+
+      assert {:ok, %{path: wt, branch: branch}} = Worktrees.create(workspace)
+      on_exit(fn -> File.rm_rf!(wt) end)
+      assert File.read!(Path.join(wt, "notes.txt")) == "one\n"
+      File.write!(Path.join(wt, "feature.md"), "new\n")
+
+      assert [%{"dirty" => false}, %{"dirty" => true}] =
+               Worktrees.list(workspace) |> Enum.sort_by(& &1["path"])
+
+      assert {:ok, %{"branch" => ^branch, "committed" => true}} = Worktrees.merge(workspace, wt)
+
+      assert File.read!(Path.join(workspace, "feature.md")) == "new\n"
+      refute File.exists?(marker), "ran: #{ran(marker)}"
+    end
+
+    test "a file only the repository's merge driver would merge is a conflict", context do
+      %{workspace: workspace, marker: marker} = context
+
+      assert {:ok, %{path: wt}} = Worktrees.create(workspace)
+      on_exit(fn -> File.rm_rf!(wt) end)
+      File.write!(Path.join(wt, "notes.txt"), "one\ntwo\n")
+      File.write!(Path.join(workspace, "notes.txt"), "zero\none\n")
+      quiet!(workspace, ["commit", "-q", "-am", "zero"])
+
+      assert {:error, {:conflicts, output}} = Worktrees.merge(workspace, wt)
+      assert output =~ "notes.txt"
+      assert File.read!(Path.join(workspace, "notes.txt")) == "zero\none\n"
+      refute File.exists?(marker), "ran: #{ran(marker)}"
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
+
+  defp ran(marker) do
+    case File.read(marker) do
+      {:ok, ran} -> ran
+      {:error, _} -> ""
+    end
+  end
+
+  # The test's own git, which would run what the repository names.
+  defp quiet!(cwd, args) do
+    off = ~w(core.fsmonitor=false core.hooksPath=/dev/null filter.mark.clean= filter.mark.smudge=)
+    {_, 0} = git(cwd, Enum.flat_map(off, &["-c", &1]) ++ args)
+  end
 
   defp connect(context) do
     {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: context.endpoint, spawn: false)

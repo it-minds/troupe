@@ -102,6 +102,12 @@ defmodule Troupe.Tool.Result do
       "#{name} is mounted read-only for this session and cannot be written to. " <>
         "Write to session:/ instead, and use `publish` if it needs to go to #{name}."
 
+  def describe({:git_dir, path}),
+    do:
+      "#{path} is inside a .git directory (or is a .git file), which holds the repository's " <>
+        "own settings and history, and the file tools do not write there. Change the " <>
+        "repository with git commands instead."
+
   def describe({:not_allowed, tool}),
     do: "The tool #{tool} is not available in the current profile."
 

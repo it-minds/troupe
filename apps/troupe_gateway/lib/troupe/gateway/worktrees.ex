@@ -19,7 +19,7 @@ defmodule Troupe.Gateway.Worktrees do
   worktree, because the tree would move under its agent.
   """
 
-  alias Troupe.Reaper
+  alias Troupe.Git
 
   @type resolved :: %{path: Path.t(), worktree: Path.t() | nil, branch: String.t() | nil}
 
@@ -283,10 +283,12 @@ defmodule Troupe.Gateway.Worktrees do
   end
 
   # Through reaper like every other OS process, so a hung git cannot outlive the
-  # command that started it.
+  # command that started it; and neutralised, so no hook, filter or merge driver the
+  # repository's own `.git` names runs, and confined to the checkout's own `.git`
+  # (Decision 833).
   defp git(cwd, args) do
     if File.dir?(cwd) do
-      Reaper.run(cwd, ["git" | args], timeout_ms: 30_000)
+      Git.run(cwd, args, timeout_ms: 30_000)
     else
       {:error, :not_found}
     end

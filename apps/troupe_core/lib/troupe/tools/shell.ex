@@ -20,7 +20,7 @@ defmodule Troupe.Tools.Shell do
 
   @behaviour Troupe.Tool
 
-  alias Troupe.{Config, Reaper, Sandbox, Tool}
+  alias Troupe.{Config, Mounts, Reaper, Tool}
   alias Troupe.Tools.Output
 
   @impl Troupe.Tool
@@ -96,19 +96,18 @@ defmodule Troupe.Tools.Shell do
   @spec execute(String.t(), Troupe.Workspace.t(), keyword()) ::
           {:ok, binary(), ending()} | {:error, String.t()}
   def execute(command, workspace, opts) do
-    with :ok <- Sandbox.check() do
-      {shell, flag} = shell()
+    {shell, flag} = shell()
 
-      # Path checks are not the enforcement here and cannot be: a shell command can do
-      # anything a process can. The mount table the file tools resolve against is also
-      # the bind list for the sandbox, so a read-only team volume is read-only to the
-      # kernel and another team's volume is absent from the namespace entirely.
-      argv = Sandbox.wrap([shell, flag, command], workspace.mounts, cwd: workspace.root_real)
+    # Path checks are not the enforcement here and cannot be: a shell command can do
+    # anything a process can. The mount table the file tools resolve against is also
+    # the bind list for the sandbox, so a read-only team volume is read-only to the
+    # kernel and another team's volume is absent from the namespace entirely. The reaper
+    # asks the sandbox about it, and on a worker always builds one (Decision 832).
+    mounts = workspace.mounts || Mounts.local(workspace.root_real)
 
-      case Reaper.open(workspace.root_real, argv) do
-        {:ok, port} -> collect(port, opts)
-        {:error, reason} -> {:error, unavailable(reason)}
-      end
+    case Reaper.open(workspace.root_real, [shell, flag, command], mounts: mounts) do
+      {:ok, port} -> collect(port, opts)
+      {:error, reason} -> {:error, unavailable(reason)}
     end
   end
 
@@ -323,6 +322,9 @@ defmodule Troupe.Tools.Shell do
     "The shell tool is unavailable: #{Reaper.explain(reason)}, so no command can run on " <>
       "this machine until it does. `troupe doctor` shows the same to the person."
   end
+
+  # A worker that cannot start the sandbox runs nothing outside it (Decision 832).
+  defp unavailable({:sandbox, why}), do: "The shell tool did not run the command: #{why}."
 
   defp unavailable(reason),
     do: "The shell tool could not run the command: #{Reaper.explain(reason)}."
