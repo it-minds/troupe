@@ -31,6 +31,11 @@ defmodule Troupe.Session.MCP do
   an unattended session leaves them waiting. `managed_mcp_servers_only` from a plane
   starts nothing local at all, and each server says so in its status.
 
+  **The answer grants starting them, and no more.** A workspace's server set to
+  `permission: auto` runs its tools unasked only once the workspace is trusted, as its
+  agents' `auto` does (Decisions 825 and 830): until then each call asks, and the
+  question says so. A pod trusts no workspace, and reads none of these layers anyway.
+
   A server is `reload`ed by name — after an edit to its file, or to bring one back —
   which reads the layers again for that name, stops what ran under it and starts what
   they say now. Supervised with the stdio servers as linked children, so a server that
@@ -185,14 +190,16 @@ defmodule Troupe.Session.MCP do
     session_id = Keyword.fetch!(opts, :session_id)
     workspace = Keyword.fetch!(opts, :workspace)
     Process.set_label("troupe session mcp #{session_id}")
+    local? = Keyword.get(opts, :local, true)
 
     state = %__MODULE__{
       session_id: session_id,
       workspace: workspace,
       state_dir: Keyword.get(opts, :state_dir),
       sessions: opts |> Keyword.get(:sessions) |> Sessions.table(),
-      local?: Keyword.get(opts, :local, true),
-      trusted?: Keyword.get(opts, :trusted, false),
+      local?: local?,
+      # A pod trusts no workspace (Decision 825), whatever the list says.
+      trusted?: local? and Keyword.get(opts, :trusted, false),
       managed_only?: Keyword.get(opts, :managed_only, false)
     }
 
@@ -213,7 +220,10 @@ defmodule Troupe.Session.MCP do
   defp resolve(%{local?: false}, base),
     do: {Enum.map(base, fn {name, config} -> base_record(name, config) end), []}
 
-  defp resolve(state, base), do: Local.resolve(state.workspace, base: base)
+  # The workspace's layer reads from outside the repository only once the workspace is
+  # trusted (Decision 830), as the session judged it when it started.
+  defp resolve(state, base),
+    do: Local.resolve(state.workspace, base: base, trusted: state.trusted?)
 
   defp base_record(name, config) do
     %{
@@ -260,7 +270,9 @@ defmodule Troupe.Session.MCP do
   defp approved?(%{trusted?: true}, _record), do: true
   defp approved?(state, record), do: Trust.approved?(state.state_dir, state.workspace, record)
 
-  defp start(state, %{name: name, config: config} = record) do
+  defp start(state, %{name: name} = record) do
+    config = permitted(state, record)
+
     cond do
       is_binary(config[:command]) ->
         case Stdio.start_link(
@@ -290,6 +302,15 @@ defmodule Troupe.Session.MCP do
     end
   end
 
+  # The config a server starts with: a workspace's `auto` is held until the workspace is
+  # trusted (Decision 830), here where its tools are made, so a stdio server's and a URL
+  # server's alike, and one started again by a reload or a sign-in, ask until then.
+  defp permitted(state, %{config: config} = record) do
+    if not state.trusted? and Local.waits_for_trust?(record),
+      do: %{config | permission: :ask},
+      else: config
+  end
+
   # -- the workspace's question ----------------------------------------------------
 
   # One question for every workspace server still waiting, asked from a task so this
@@ -305,7 +326,7 @@ defmodule Troupe.Session.MCP do
         call_id = "mcp-trust-" <> question_id(records)
         parent = self()
         session_id = state.session_id
-        question = question(call_id, records)
+        question = question(call_id, records, state.workspace)
 
         {:ok, _pid} =
           Task.start_link(fn ->
@@ -335,18 +356,28 @@ defmodule Troupe.Session.MCP do
     |> binary_part(0, 8)
   end
 
-  defp question(call_id, records) do
+  # The answer grants starting the servers and nothing else (Decision 830), so the
+  # question says that, and for a server set to `auto` that its tools still ask until the
+  # workspace is trusted: only an untrusted workspace is asked at all.
+  defp question(call_id, records, workspace) do
     listed = Enum.map_join(records, "; ", &describe/1)
+
+    held =
+      case for(record <- records, Local.waits_for_trust?(record), do: record.name) do
+        [] -> ""
+        names -> " " <> Local.held_reason(names, workspace) <> "."
+      end
 
     %{
       call_id: call_id,
       agent_path: Troupe.Session.root_path(),
       question:
-        "This workspace's .troupe/mcp.json names MCP servers to run on this machine: #{listed}. Run them?",
+        "This workspace's .troupe/mcp.json names MCP servers to start on this machine: " <>
+          "#{listed}.#{held} Start them?",
       options: [
-        %{label: "deny", description: "run none of them; asked again next session"},
-        %{label: "once", description: "run them for this session only"},
-        %{label: "allow", description: "run them, and remember it for this workspace"}
+        %{label: "deny", description: "start none of them; asked again next session"},
+        %{label: "once", description: "start them for this session only"},
+        %{label: "allow", description: "start them, and remember it for this workspace"}
       ],
       multiple: false
     }

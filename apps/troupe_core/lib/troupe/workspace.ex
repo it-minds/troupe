@@ -15,13 +15,24 @@ defmodule Troupe.Workspace do
   """
 
   @enforce_keys [:root, :root_real, :root_key]
-  defstruct [:root, :root_real, :root_key, :mounts]
+  defstruct [
+    :root,
+    :root_real,
+    :root_key,
+    :mounts,
+    # Whether the session trusts this workspace, stamped once as it starts
+    # (`Troupe.Session.build_opts/1`): false unless someone vouches, so a workspace made
+    # anywhere else is not. What its `skills.json` may link from outside the repository
+    # waits on it (Decision 829).
+    trusted?: false
+  ]
 
   @type t :: %__MODULE__{
           root: Path.t(),
           root_real: Path.t(),
           root_key: String.t(),
-          mounts: Troupe.Mounts.t() | nil
+          mounts: Troupe.Mounts.t() | nil,
+          trusted?: boolean()
         }
 
   @max_link_hops 40
@@ -174,6 +185,48 @@ defmodule Troupe.Workspace do
       %{kind: :session} -> Path.relative_to(path, ws.root_real)
       nil -> path
       _entry -> Troupe.Mounts.display(ws.mounts, path)
+    end
+  end
+
+  @doc """
+  Whether `path` really is `root` or inside it, both judged where they really are, links
+  and junctions followed: how a workspace's own `.troupe/` files are held to it
+  (Decision 829). A path that does not resolve, a link loop, is not.
+  """
+  @spec within?(Path.t(), Path.t()) :: boolean()
+  def within?(path, root) do
+    case real_path(path) do
+      {:ok, real} -> under?(real, root)
+      {:error, _} -> false
+    end
+  end
+
+  @doc """
+  The files in `dir` whose names end in `ext`, in name order, held to `root` as
+  `within?/2` holds them: `{inside, outside}`, file names both. A `dir` that is itself
+  really outside `root` is `:outside` and is not looked into, so not even the names of
+  what is there are said. A directory that is not there has nothing in it.
+  """
+  @spec files_within(Path.t(), String.t(), Path.t()) :: {[String.t()], [String.t()]} | :outside
+  def files_within(dir, ext, root) do
+    cond do
+      not File.dir?(dir) ->
+        {[], []}
+
+      not within?(dir, root) ->
+        :outside
+
+      true ->
+        case File.ls(dir) do
+          {:ok, entries} ->
+            entries
+            |> Enum.filter(&String.ends_with?(&1, ext))
+            |> Enum.sort()
+            |> Enum.split_with(&within?(Path.join(dir, &1), root))
+
+          {:error, _} ->
+            {[], []}
+        end
     end
   end
 

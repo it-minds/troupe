@@ -12,8 +12,10 @@ defmodule Troupe.Config.ModelSettings do
 
   What the screen shows is the file, not the effective configuration: that is what
   saving changes. Everything that would beat the file anyway — a project's
-  `.troupe/config.yaml`, a `TROUPE_*` variable, the opencode fallback — is reported
-  beside it as an override, so nobody saves a model and wonders why nothing changed.
+  `.troupe/config.yaml`, a `TROUPE_*` variable — is reported beside it as an override,
+  so nobody saves a model and wonders why nothing changed. opencode's settings beat
+  nothing: they are not read for a session, only copied in when a person asks
+  (`import_opencode/1`, Decision 828).
 
   The key goes in and never comes out. `describe/1` says whether one is set and where
   it comes from; the value itself is only ever sent to the provider it was typed for.
@@ -78,7 +80,7 @@ defmodule Troupe.Config.ModelSettings do
       "api_key_set" => key_source(file) != nil,
       "api_key_source" => key_source(file),
       "models" => models,
-      "overrides" => overrides(file, workspace)
+      "overrides" => overrides(workspace)
     }
   end
 
@@ -155,8 +157,11 @@ defmodule Troupe.Config.ModelSettings do
   end
 
   @doc """
-  Copies opencode's providers into the user's file, so the machine keeps what it set up
-  in opencode without reading opencode's config at every session.
+  Copies opencode's providers into the user's file, once, so the machine keeps what it
+  set up in opencode: a session reads none of opencode's config (Decision 828). Asked for
+  by `config.import` (`troupe config`'s first run), the first-run setup's `reuse:
+  opencode` (`setup.answer`, in the terminal UI and the desktop app) and
+  `troupe-daemon config import-opencode` (the installers).
 
   Each provider lands in `providers:` as opencode declares it (type, base URL, auth style
   and models) with its key as it is written there. An `{env:VAR}` reference stays a
@@ -306,9 +311,6 @@ defmodule Troupe.Config.ModelSettings do
       present(file["api_key"]) || present(file["auth_token"]) || keyed_provider?(file) ->
         "file"
 
-      OpenCode.providers() != %{} ->
-        "opencode"
-
       true ->
         nil
     end
@@ -323,8 +325,8 @@ defmodule Troupe.Config.ModelSettings do
     end)
   end
 
-  defp overrides(file, workspace) do
-    project(workspace) ++ env() ++ opencode(file)
+  defp overrides(workspace) do
+    project(workspace) ++ env()
   end
 
   defp project(nil), do: []
@@ -351,23 +353,6 @@ defmodule Troupe.Config.ModelSettings do
   defp env do
     for {var, setting} <- @env_overrides, present(System.get_env(var)) do
       %{"source" => "env", "detail" => "#{var} is set and overrides #{setting}"}
-    end
-  end
-
-  # opencode is only consulted when the session has no key of its own, and a provider the
-  # file names (one copied from opencode, say) shadows opencode's of the same name.
-  defp opencode(file) do
-    unshadowed = Map.keys(OpenCode.providers()) -- Map.keys(file_providers(file))
-
-    if saved_key(file) == nil and unshadowed != [] do
-      [
-        %{
-          "source" => "opencode",
-          "detail" => "no key is saved, so the providers in #{OpenCode.config_path()} are used"
-        }
-      ]
-    else
-      []
     end
   end
 

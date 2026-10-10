@@ -15,7 +15,8 @@ defmodule Troupe do
 
   alias Troupe.Agent.Definitions
   alias Troupe.Agent.Server, as: Agent
-  alias Troupe.{Events, Mounts, Registry, Session, Sessions, Skills}
+  alias Troupe.Commands.Local, as: CommandFiles
+  alias Troupe.{Events, Mounts, Registry, Session, Sessions, Skills, Workflow}
   alias Troupe.LLM.Catalog.Refresher
   alias Troupe.Onboard.Notice
   alias Troupe.Protocol.Origin
@@ -191,18 +192,24 @@ defmodule Troupe do
 
   # The agent and skill files this start found and did not read, each with why (Decision
   # 826): on a pod, a working copy's file of a name the bundle has; in a worktree, one the
-  # main checkout has not committed. Read again at every start, as the definitions are,
+  # main checkout has not committed. With them, the workspace's agents, skills, commands
+  # and workflows that are really outside it, a skill whose `SKILL.md` can't be read, and
+  # what its `skills.json` links from outside the repository while it is not trusted
+  # (Decision 829). Read again at every start, as the definitions are,
   # and written when the list differs from the one the log last recorded, so a session
   # that keeps the same file through many activations says so once, and one whose file
   # went away says that too.
   defp skipped(session_id, session_opts, previously) do
     workspace = Keyword.fetch!(session_opts, :workspace)
+    bundle = Keyword.get(session_opts, :bundle)
 
     files =
       session_opts
       |> Keyword.fetch!(:definitions)
       |> Definitions.skipped()
-      |> Kernel.++(Skills.skipped(Keyword.get(session_opts, :bundle), workspace.root_real))
+      |> Kernel.++(Skills.skipped(bundle, workspace.root_real, trusted: workspace.trusted?))
+      |> Kernel.++(CommandFiles.skipped(workspace.root_real))
+      |> Kernel.++(Workflow.skipped(workspace.root_real))
       |> Enum.map(&Definitions.skipped_to_json/1)
 
     last =

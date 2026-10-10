@@ -1,11 +1,11 @@
 defmodule Troupe.Gateway.ContextTest do
   @moduledoc """
-  The provenance of a session's prompt over the protocol (Decisions 706, 798, 806 and
-  809): `context.get` lists every instruction file and the brief with its scope, size and
-  share of the budget, lists the aliases it skipped and a nested Copilot file with why,
-  includes the nested files on the way to what the session worked on and the files
-  imported, lists each Cursor rule with why it applies or not, is `observe`, and refuses
-  a session that is not there.
+  The provenance of a session's prompt over the protocol (Decisions 706, 798, 806, 809 and
+  828): `context.get` lists every instruction file and the brief with its scope, size and
+  share of the budget, lists the other tools' files it did not read and a nested Copilot
+  file with why, includes the nested files on the way to what the session worked on and
+  the files imported, lists each rule with why it applies or not, is `observe`, and
+  refuses a session that is not there.
   """
 
   use ExUnit.Case, async: false
@@ -87,17 +87,17 @@ defmodule Troupe.Gateway.ContextTest do
     assert root["status"] == "whole"
     assert root["reason"] == nil
     assert root["trimmed"] == 0
-    assert root["skipped"] == ["CLAUDE.md"]
+    assert root["skipped"] == []
     assert "sha256:" <> _ = root["hash"]
 
-    # The alias it hid is listed after it, saying why (Decision 806).
+    # Another tool's file beside it is listed after it, saying why (Decisions 806, 828).
     assert %{
              "scope" => "root",
              "status" => "skipped",
              "chars" => 0,
              "size" => 0,
              "hash" => nil,
-             "reason" => "skipped: AGENTS.md is used in this directory"
+             "reason" => "not read: run troupe onboard"
            } = claude
 
     assert claude["path"] == Path.join(Path.expand(ws), "CLAUDE.md")
@@ -212,6 +212,20 @@ defmodule Troupe.Gateway.ContextTest do
 
     assert answer["used"] == String.length("From .agents.") + String.length("Root.")
     assert answer == Troupe.Instructions.provenance(ws, Troupe.Config.load(ws), ["lib/a.ex"])
+
+    # D99: one that is there and cannot be read is named too, with why.
+    File.chmod!(agents, 0o000)
+    assert {:ok, answer} = Client.call(client, "context.get", %{"session_id" => session.id})
+
+    assert [
+             %{
+               "path" => ^agents,
+               "status" => "unreadable",
+               "chars" => 0,
+               "reason" => "not read: permission denied"
+             },
+             %{"scope" => "root", "status" => "whole"} | _
+           ] = answer["files"]
   end
 
   # Decision 806: Copilot's file counts at the repository root only; one on the way to what
@@ -251,23 +265,27 @@ defmodule Troupe.Gateway.ContextTest do
     assert answer["used"] == String.length("Root.")
   end
 
-  # Decision 809: each Cursor rule is listed with why it applies or why not, and a glob
-  # rule applies once the session has read a file it matches.
-  test "context.get lists each Cursor rule with why it applies, or why not",
+  # Decisions 809 and 828: each rule in `.troupe/rules` is listed with why it applies or why
+  # not, and a glob rule applies once the session has read a file it matches; a Cursor
+  # rule is listed as not read.
+  test "context.get lists each rule with why it applies, or why not",
        %{workspace: ws, client: client} = context do
     ws = Path.expand(ws)
+    File.mkdir_p!(Path.join(ws, ".troupe/rules"))
     File.mkdir_p!(Path.join(ws, ".cursor/rules"))
     File.mkdir_p!(Path.join(ws, "src"))
-    File.write!(Path.join(ws, ".cursor/rules/always.mdc"), "---\nalwaysApply: true\n---\nTabs.\n")
-    File.write!(Path.join(ws, ".cursor/rules/ts.mdc"), "---\nglobs: src/*.ts\n---\nStrict.\n")
-    File.write!(Path.join(ws, ".cursor/rules/db.mdc"), "---\ndescription: Migrations\n---\nUp.\n")
+    File.write!(Path.join(ws, ".troupe/rules/always.md"), "---\nalwaysApply: true\n---\nTabs.\n")
+    File.write!(Path.join(ws, ".troupe/rules/ts.md"), "---\nglobs: src/*.ts\n---\nStrict.\n")
+    File.write!(Path.join(ws, ".troupe/rules/db.md"), "---\ndescription: Migrations\n---\nUp.\n")
+    File.write!(Path.join(ws, ".cursor/rules/old.mdc"), "---\nalwaysApply: true\n---\nOld.\n")
     File.write!(Path.join(ws, "src/a.ts"), "a\n")
 
     session =
       start_session(context, [{:tools, [{"read_file", %{"path" => "src/a.ts"}}]}, {:text, "hi"}])
 
-    rule = &Path.join(ws, ".cursor/rules/#{&1}")
-    [always, db, ts] = Enum.map(["always.mdc", "db.mdc", "ts.mdc"], rule)
+    rule = &Path.join(ws, ".troupe/rules/#{&1}")
+    [always, db, ts] = Enum.map(["always.md", "db.md", "ts.md"], rule)
+    old = Path.join(ws, ".cursor/rules/old.mdc")
 
     assert {:ok, before} = Client.call(client, "context.get", %{"session_id" => session.id})
 
@@ -286,6 +304,13 @@ defmodule Troupe.Gateway.ContextTest do
                "chars" => 0,
                "applies" => nil,
                "reason" => "applies when a file matching src/*.ts is read or edited"
+             },
+             %{
+               "path" => ^old,
+               "status" => "skipped",
+               "chars" => 0,
+               "rule" => nil,
+               "reason" => "not read: run troupe onboard"
              },
              %{"scope" => "brief"}
            ] = before["files"]
@@ -306,6 +331,7 @@ defmodule Troupe.Gateway.ContextTest do
                "applies" => "applied: src/a.ts matches src/*.ts",
                "rule" => %{"apply" => "globs", "globs" => ["src/*.ts"], "matched" => "src/a.ts"}
              },
+             %{"path" => ^old, "status" => "skipped"},
              %{"scope" => "brief"}
            ] = answer["files"]
 

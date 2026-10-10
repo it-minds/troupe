@@ -399,9 +399,9 @@ install_gui_macos() {
 }
 
 # A model is the one thing a first run cannot do without. opencode's providers are copied
-# by the daemon (Troupe reads them anyway while it has none of its own). Otherwise the
-# next step is `troupe config` where the TUI is installed, and the desktop app's Models
-# panel or the file itself where it is not: only the TUI has the command.
+# by the daemon, once: Troupe does not read opencode's settings. Otherwise, or after a no,
+# the next step is `troupe config` where the TUI is installed, and the desktop app's
+# Models panel or the file itself where it is not: only the TUI has the command.
 model_settings() {
   heading "Model settings"
   config_file="$CONFIG_DIR/config.yaml"
@@ -414,22 +414,20 @@ model_settings() {
   fi
   say "  No $config_file yet, so no model is set up."
   if [ -f "$opencode_file" ]; then
-    say "  opencode is set up here ($opencode_file), and Troupe uses its providers"
-    say "  while it has none of its own."
+    say "  opencode is set up here ($opencode_file). Troupe does not read its settings;"
+    say "  it can copy its providers."
     if [ "$tty" = 0 ]; then
       say "  troupe-daemon config import-opencode copies them into $config_file."
       return 0
     fi
-    if ! ask "  Copy them into $config_file, keys as opencode has them written?" y; then
-      say "  Left as it is: Troupe keeps reading opencode's config."
-      return 0
+    if ask "  Copy them into $config_file, keys as opencode has them written?" y; then
+      # A daemon from before the command answers "unknown arguments"; say so, not its usage.
+      if copied=$("$BIN" config import-opencode 2>&1); then
+        printf '%s\n' "$copied" | sed 's/^/  /'
+        return 0
+      fi
+      say "  could not copy them: $(printf '%s\n' "$copied" | head -n 1)"
     fi
-    # A daemon from before the command answers "unknown arguments"; say so, not its usage.
-    if copied=$("$BIN" config import-opencode 2>&1); then
-      printf '%s\n' "$copied" | sed 's/^/  /'
-      return 0
-    fi
-    say "  could not copy them: $(printf '%s\n' "$copied" | head -n 1)"
   fi
   if [ "$with_tui" = 1 ] && [ "$tty" = 1 ]; then
     if ask "  Set it up now, with troupe config?" y; then

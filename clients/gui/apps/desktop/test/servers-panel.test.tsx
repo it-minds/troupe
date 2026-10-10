@@ -78,6 +78,38 @@ describe("the servers and skills panel", () => {
     expect([...methods].filter((m) => m.startsWith("mcp.") || m.startsWith("skills.")).sort()).toEqual(["mcp.add", "mcp.check", "mcp.list", "mcp.remove", "skills.add", "skills.list", "skills.remove"]);
   });
 
+  // troupe Decision 822: a skill in the repository's `.agents/skills` is read in place and
+  // never written, so Remove says whose it is rather than asking the daemon to take it out
+  // of your own files; one a nearer layer hides is listed with why.
+  it("names the .agents layer, lists a hidden skill with why, and leaves the repository's skill alone", async () => {
+    const agents = "/home/ada/project/.agents/skills";
+    daemon.skills.push({ name: "lint", description: "The repository's lint", layer: "agents", source: agents, dir: `${agents}/lint`, linked: false });
+    daemon.skippedSkills.push({
+      name: "review",
+      layer: "agents",
+      source: agents,
+      dir: `${agents}/review`,
+      linked: false,
+      status: "skipped",
+      reason: "skipped: /home/ada/project/.troupe/skills/review is used",
+    });
+
+    unmount = render(<Servers client={client} />).unmount;
+    await waitFor(() => says("No servers yet"), "the panel");
+    type(document.querySelector<HTMLInputElement>('input[placeholder="/home/me/project (optional)"]')!, "/home/ada/project");
+    const skill = await waitFor(() => [...document.querySelectorAll("tr")].find((r) => r.textContent?.includes("The repository's lint")), "the skill's row");
+    expect(skill.textContent).toContain("agents");
+
+    button("Remove", skill)!.click();
+    await waitFor(() => says("lint is the repository's"), "the refusal");
+    expect(document.body.textContent).not.toContain("no skill named");
+    expect(daemon.calls.some((c) => c.method === "skills.remove")).toBe(false);
+
+    const hidden = await waitFor(() => [...document.querySelectorAll("tr")].find((r) => r.textContent?.includes("/home/ada/project/.troupe/skills/review is used")), "the hidden skill's row");
+    expect(hidden.textContent).toContain("review");
+    expect(button("Remove", hidden)).toBeFalsy();
+  });
+
   // troupe-remote Decision 741: a server that wants you signed in.
   it("signs in to a server that wants you, opens the browser, and says whose the sign-in is", async () => {
     daemon.servers.push({

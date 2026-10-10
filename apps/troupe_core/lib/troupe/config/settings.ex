@@ -33,8 +33,8 @@ defmodule Troupe.Config.Settings do
   whether it exists), `keys` and the `warnings` loading gave. A file that is refused
   answers no keys and the reasons as `errors`.
 
-  Each key is `key`, `value`, `layer` (`default`, `user`, `project`, `local`, `env`,
-  `cli` or `opencode`), `source` (the file, or the variable), `default`, `scopes` (the
+  Each key is `key`, `value`, `layer` (`default`, `user`, `project`, `local`, `env` or
+  `cli`), `source` (the file, or the variable), `default`, `scopes` (the
   scopes `set/4` writes it to here), `secret`, `label` (the name a settings page shows
   it by, or null) and `doc`.
   """
@@ -108,7 +108,7 @@ defmodule Troupe.Config.Settings do
   defp as_written(value), do: value
 
   defp source_json(%{layer: layer, source: source})
-       when layer in [:user, :project, :local, :opencode] and is_binary(source),
+       when layer in [:user, :project, :local] and is_binary(source),
        do: shown(source)
 
   defp source_json(%{source: source}), do: source

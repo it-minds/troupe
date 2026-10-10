@@ -692,6 +692,12 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
       };
     }
 
+    // The agent and skill files a start found and did not read (troupe Decision 826): on a
+    // pod, a working copy's that the bundle's or a built-in's name beats; in a worktree,
+    // one the main checkout has not committed. Said as the terminal client says it.
+    case "files_skipped":
+      return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: filesSkippedText(d) }] };
+
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
     case "truncated":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: truncatedText(d) }] };
@@ -934,6 +940,31 @@ function optionsOf(v: unknown): QuestionOption[] {
     }
     return [];
   });
+}
+
+/**
+ * How many of each kind, then each reason once with the files it covers: a worktree's one
+ * reason fits every file, while a pod's names the file it is about. An empty list says the
+ * files listed before are read now, or gone.
+ */
+function filesSkippedText(d: DurableEvent): string {
+  const files = (Array.isArray(d.data["files"]) ? d.data["files"] : []).filter((f): f is Record<string, unknown> => typeof f === "object" && f !== null);
+  if (files.length === 0) return "no agent or skill file is skipped now";
+  const kindOf = (f: Record<string, unknown>) => str(f["kind"], "file");
+  const reasonOf = (f: Record<string, unknown>) => str(f["reason"], "not read");
+  const kinds = [...new Set(files.map(kindOf))].map((kind) => {
+    const n = files.filter((f) => kindOf(f) === kind).length;
+    return n === 1 ? `1 ${kind}` : `${n} ${kind}s`;
+  });
+  const counted = kinds.length === 1 ? kinds[0]! : `${kinds.slice(0, -1).join(", ")} and ${kinds.at(-1)!}`;
+  const reasons = [...new Set(files.map(reasonOf))].map(
+    (reason) =>
+      `${files
+        .filter((f) => reasonOf(f) === reason)
+        .map((f) => `${kindOf(f)} ${str(f["name"])} (${str(f["path"])})`)
+        .join(", ")}: ${reason}`,
+  );
+  return `${counted} not read here: ${reasons.join("; ")}`;
 }
 
 function truncatedText(d: DurableEvent): string {

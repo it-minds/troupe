@@ -186,13 +186,23 @@ defmodule Troupe.Session do
     with {:ok, workspace} <- open_workspace(workspace_path, opts),
          {:ok, config} <- config(workspace, opts),
          :ok <- known_provider(config) do
+      # A workspace's own agents let a tool run unasked only once the workspace is
+      # trusted, as its `config.yaml` may only then, and a pod trusts none (Decision 825);
+      # what its `skills.json` links from outside the repository waits for the same
+      # (Decision 829). Stamped on the workspace, which every agent and tool carries.
+      trusted? =
+        Keyword.get(opts, :kind, :local) == :local and
+          Config.Trust.trusted?(workspace.root_real, config.trusted_workspaces)
+
       # The files beside a person's own skills are read where they are (Decision 700):
       # the user's skills directory and every linked root become read roots, the
       # workspace's own `.troupe/skills` being inside the workspace already, and so does a
-      # worktree's main checkout's, whose committed skills it reads (Decision 826).
+      # worktree's main checkout's, whose committed skills it reads (Decision 826). A
+      # workspace's link out of the repository only once it is trusted (Decision 829).
       config = %{
         config
-        | read_roots: Enum.uniq(config.read_roots ++ Skills.roots(workspace.root_real))
+        | read_roots:
+            Enum.uniq(config.read_roots ++ Skills.roots(workspace.root_real, trusted: trusted?))
       }
 
       # A local session has only `session:/` and this is exactly what `Workspace.new/1`
@@ -202,13 +212,7 @@ defmodule Troupe.Session do
       workspace =
         (Keyword.get(opts, :mounts) || workspace.mounts)
         |> with_skills(bundle)
-        |> then(&Workspace.with_mounts(workspace, &1))
-
-      # A workspace's own agents let a tool run unasked only once the workspace is
-      # trusted, as its `config.yaml` may only then, and a pod trusts none (Decision 825).
-      trusted? =
-        Keyword.get(opts, :kind, :local) == :local and
-          Config.Trust.trusted?(workspace.root_real, config.trusted_workspaces)
+        |> then(&Workspace.with_mounts(%{workspace | trusted?: trusted?}, &1))
 
       # On a pod the built-ins and the bundle's agents beat the working copy's, unless its
       # profile lets the repository's win (Decision 826).
