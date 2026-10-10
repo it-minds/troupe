@@ -19,7 +19,7 @@ defmodule Troupe.Session.Memory do
   function over a path is what both want.
   """
 
-  alias Troupe.{Config, Memory, Paths, Reaper, Workspace}
+  alias Troupe.{Config, Git, Memory, Paths, Workspace}
   alias Troupe.Config.Trust
 
   require Logger
@@ -343,10 +343,11 @@ defmodule Troupe.Session.Memory do
 
   # Not a repository, git missing or failing, and a reaper that will not start all read
   # as no repository: this runs before every model call, and the reaper logs its own
-  # failure once (Decision 733).
+  # failure once (Decision 733). So does a `.git` naming another checkout's repository,
+  # and nothing the repository's own `.git` names runs (Decision 833).
   defp git(workspace, args) do
     if File.dir?(workspace) do
-      case Reaper.run(workspace, ["git" | args], timeout_ms: 10_000) do
+      case Git.run(workspace, args, timeout_ms: 10_000) do
         {:ok, out, 0} -> {:ok, out}
         _other -> :error
       end

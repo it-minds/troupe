@@ -120,7 +120,8 @@ defmodule Troupe.Mounts do
   Resolve a tool-supplied path, or say why it has no meaning here.
 
   `:write` refuses a read-only mount before anything is opened, so the error a model
-  sees names the mount rather than an errno from halfway through a copy.
+  sees names the mount rather than an errno from halfway through a copy, and a path under
+  a `.git` directory or to a `.git` file (`Troupe.Workspace.git_dir?/2`, Decision 833).
   """
   @spec resolve(t(), String.t(), :read | :write) ::
           {:ok, Path.t(), Entry.t()} | {:error, term()}
@@ -129,7 +130,8 @@ defmodule Troupe.Mounts do
   def resolve(%__MODULE__{} = mounts, path, mode) when is_binary(path) do
     with {:ok, entry, rest} <- entry_for(mounts, path),
          {:ok, resolved} <- within(entry, rest),
-         :ok <- writable(entry, mode) do
+         :ok <- writable(entry, mode),
+         :ok <- not_git(entry, resolved, path, mode) do
       {:ok, resolved, entry}
     end
   end
@@ -206,6 +208,12 @@ defmodule Troupe.Mounts do
   defp writable(%Entry{mode: :rw}, _mode), do: :ok
   defp writable(_entry, :read), do: :ok
   defp writable(%Entry{name: name}, :write), do: {:error, {:read_only_mount, name}}
+
+  defp not_git(%Entry{root: root}, resolved, path, :write) do
+    if Workspace.git_dir?(root, resolved), do: {:error, {:git_dir, path}}, else: :ok
+  end
+
+  defp not_git(_entry, _resolved, _path, :read), do: :ok
 
   @doc """
   Which mount an absolute path belongs to, and at what mode.
