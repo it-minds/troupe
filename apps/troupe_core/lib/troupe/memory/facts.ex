@@ -90,7 +90,7 @@ defmodule Troupe.Memory.Facts do
   """
   @spec list(Path.t() | where(), keyword()) :: [fact()]
   def list(workspace, filter \\ []) do
-    where = locate(workspace)
+    where = loaded(workspace)
 
     where
     |> all()
@@ -109,7 +109,7 @@ defmodule Troupe.Memory.Facts do
   """
   @spec recall(Path.t() | where(), keyword()) :: [fact()]
   def recall(workspace, opts \\ []) do
-    where = locate(workspace)
+    where = loaded(workspace)
     words = words(opts[:query])
     path = opts[:path] && relative_path(opts[:path], from(workspace, where), where.top)
 
@@ -128,7 +128,7 @@ defmodule Troupe.Memory.Facts do
 
   @doc "A fact's status now: `current`, `moved`, `missing` or `unanchored`."
   @spec status(Path.t() | where(), fact()) :: String.t()
-  def status(workspace, fact), do: workspace |> locate() |> check(fact) |> elem(0)
+  def status(workspace, fact), do: workspace |> loaded() |> check(fact) |> elem(0)
 
   @doc "Forgets one fact."
   @spec delete(Path.t() | where(), String.t()) :: :ok | {:error, String.t()}
@@ -143,7 +143,7 @@ defmodule Troupe.Memory.Facts do
   """
   @spec core(Path.t() | where()) :: Memory.core()
   def core(workspace) do
-    where = locate(workspace)
+    where = loaded(workspace)
     {core, others} = where |> all() |> Enum.split_with(&(&1["kind"] in Memory.core_kinds()))
 
     %{
@@ -219,6 +219,13 @@ defmodule Troupe.Memory.Facts do
   defp from(%{top: top}, _where), do: top
   defp from(workspace, _where), do: Path.expand(workspace)
 
+  # A location with its store's tables, asked for once for every fact a call reads.
+  defp loaded(workspace) do
+    where = locate(workspace)
+    Map.put(where, :tables, Store.ensure(where))
+  end
+
+  defp tables(%{tables: tables}), do: tables
   defp tables(where), do: Store.ensure(where)
 
   defp all(where), do: where |> tables() |> Store.facts()
