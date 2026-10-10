@@ -252,7 +252,7 @@ defmodule Troupe.Client.Daemon do
 
   @impl true
   def merge(sid, path) do
-    with {:ok, branch} <- worktree_branch(sid, path) do
+    with {:ok, branch} <- worktree_branch(sid, path, "merge") do
       params = %{
         workspace: workspace(sid),
         path: branch.worktree,
@@ -282,7 +282,7 @@ defmodule Troupe.Client.Daemon do
 
   @impl true
   def discard(sid, path) do
-    with {:ok, branch} <- worktree_branch(sid, path) do
+    with {:ok, branch} <- worktree_branch(sid, path, "discard") do
       params = %{
         workspace: workspace(sid),
         path: branch.worktree,
@@ -1137,10 +1137,10 @@ defmodule Troupe.Client.Daemon do
     record(sid, branch.window, :window_dismissed, %{})
   end
 
-  defp worktree_branch(sid, path) do
+  defp worktree_branch(sid, path, verb) do
     case branch(sid, path) do
       nil -> {:error, "no branch #{path}"}
-      %{worktree: nil} -> {:error, "#{path} shares this checkout; there is nothing to merge"}
+      %{worktree: nil} -> {:error, "#{path} shares this checkout; there is nothing to #{verb}"}
       branch -> {:ok, branch}
     end
   end

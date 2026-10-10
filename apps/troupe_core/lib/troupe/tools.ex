@@ -339,6 +339,9 @@ defmodule Troupe.Tools do
         {:ok, content} ->
           Result.ok(ctx.call_id, name, text(content))
 
+        {:ok, content, %{fields: fields} = updates} ->
+          Result.ok(ctx.call_id, name, text(content), meta(Map.delete(updates, :fields), fields))
+
         {:ok, content, updates} ->
           Result.ok(ctx.call_id, name, text(content), %{updates: updates})
 
@@ -365,6 +368,11 @@ defmodule Troupe.Tools do
         Result.error(ctx.call_id, name, {:tool_crashed, "exited with #{inspect(reason)}"})
     end
   end
+
+  # The fields for the call's event travel apart from the agent's updates, so a tool that
+  # returns only fields hands the agent no updates to apply (Decision 837).
+  defp meta(updates, fields) when map_size(updates) == 0, do: %{fields: fields}
+  defp meta(updates, fields), do: %{updates: updates, fields: fields}
 
   # A result goes into the log and to the model, both JSON, which holds only UTF-8. Bytes
   # that are not (what a command printed, a binary file, a cut inside a character) are
