@@ -1119,8 +1119,9 @@ it can and shows the rest greyed with the reason. Reading the table wakes nothin
 
 The **project brief**: what earlier agents learned about the repository, read into
 every agent's system prompt and written by the `remember` tool and the `librarian`
-agent. `status` is `absent`, `stale` (never built, older than `memory_max_age_days`, or
-the tracked file count drifted), `fresh` or `disabled` (`memory: false` in the workspace
+agent. `status` is `absent` (no facts), `stale` (never built, older than
+`memory_max_age_days`, or a command or convention it holds rests on a file that changed or
+went since it was last checked, Decision 838), `fresh` or `disabled` (`memory: false` in the workspace
 config). A `librarian`'s run that ends as it meant to builds it, whether or not it
 rewrote any of it.
 One brief per repository: a worktree's is the main checkout's. `refresh_due` is whether

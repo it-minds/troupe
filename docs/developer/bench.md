@@ -54,7 +54,7 @@ machine's daemon, which could be another version.
 | onboard_claude_code | instructions in the first prompt | 519 bytes | 570 | ok |
 ...
 
-troupe bench 0.9.3-beta, offline: 9 scenarios, every measure within its budget.
+troupe bench 0.9.3-beta, offline: 10 scenarios, every measure within its budget.
 ```
 
 A row is a measure (a number, held to its budget when it has one) or a check (yes or no).
@@ -74,6 +74,7 @@ were 11,814 bytes on Windows and 12,390 on Linux), and the budgets are set above
 | `cancel` | a cancel during a model call ends the call's task, no call is made afterwards, the agent rests and answers the next input |
 | `replay` | the log on disk folds as the running log does, its hashes chain, a client replaying from the start sees each event once, a resumed agent has the conversation it had; and the file it was asked to write holds what was asked for |
 | `onboard_claude_code`, `onboard_opencode`, `onboard_cursor`, `onboard_copilot` | a repository with one other tool's files only, `troupe onboard`'s plan accepted whole, a new `AGENTS.md` included; then a note written under the house rule the tool's files carry, which the scripted model follows only when it finds it in its prompt. What the instructions took of the first prompt (for opencode, the onboarded agent's prompt, which the session starts on), the files onboarding wrote, and the tool's files it left out; a fixture whose onboarding writes nothing, or loses the rule, fails |
+| `memory_stale_anchor` | a repository whose memory holds a command anchored on `mix.exs`, checked by a librarian, and the `check` alias changed since (#248, Decision 838): the first prompt marks the command "may no longer be true" and names `recall` for the other facts, and the scripted model asks `recall`, which answers it with the same status, only when it finds the mark. What the brief took of the first prompt |
 
 **What a token is here.** The scripted model counts four bytes of the prompt as a token,
 rounded up, and reports that as the call's input. It is not a tokeniser; it is what makes

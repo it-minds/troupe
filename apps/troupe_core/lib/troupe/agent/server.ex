@@ -1404,7 +1404,11 @@ defmodule Troupe.Agent.Server do
   # it told apart from the rest. A stable system prompt has none in it: it goes with the
   # turn, and counts in the conversation (Decision 815).
   defp prompt_bytes(state, %Request{} = request) do
-    brief = if stable?(state), do: "", else: Instructions.to_prompt(state.instructions)
+    recall? = Enum.any?(request.tools, &(&1.name == "recall"))
+
+    brief =
+      if stable?(state), do: "", else: Instructions.to_prompt(state.instructions, recall: recall?)
+
     Spend.prompt_bytes(request, brief)
   end
 
@@ -1429,7 +1433,9 @@ defmodule Troupe.Agent.Server do
 
     [
       definition.prompt,
-      unless(stable?, do: Instructions.to_prompt(state.instructions)),
+      unless(stable?,
+        do: Instructions.to_prompt(state.instructions, recall: recall?(definition))
+      ),
       environment_section(state),
       Skills.prompt_section(state.bundle, definition, state.workspace.root_real,
         trusted: state.workspace.trusted?
@@ -1441,6 +1447,10 @@ defmodule Troupe.Agent.Server do
   end
 
   defp stable?(%State{config: config}), do: config.system_prompt == "stable"
+
+  # The brief names `recall` only to an agent that has it (Decision 838).
+  defp recall?(%Definition{} = definition),
+    do: Definition.permission(definition, "recall", :auto) != :deny
 
   # Issue #465's second option (Decision 815). What the system prompt would have changed
   # by between turns goes into the conversation instead, as a text block after what the
@@ -1486,7 +1496,8 @@ defmodule Troupe.Agent.Server do
 
   defp turn_sections(state) do
     [
-      {"instructions", Instructions.to_prompt(state.instructions)},
+      {"instructions",
+       Instructions.to_prompt(state.instructions, recall: recall?(effective_definition(state)))},
       {"goal", goal_section(state)},
       {"task_list", todo_section(state.prompt_todos)}
     ]

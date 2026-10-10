@@ -62,10 +62,11 @@ defmodule Troupe.GitTest do
     end
 
     test "does not run it through the project brief", c do
-      # The brief's file count and HEAD, stamped as a section is written and read back.
+      # The brief's HEAD, stamped as a section is written and read back (the file count it
+      # was stamped with too is gone, Decision 838).
       assert :ok = Memory.put_section(c.root, "Overview", "a repository")
       assert Memory.status(c.root, nil) == :fresh
-      assert %{head: head, files: 2} = Memory.brief(c.root)
+      assert %{head: head, files: nil} = Memory.brief(c.root)
       assert is_binary(head)
       refute File.exists?(c.marker), "the brief ran: #{marker(c)}"
     end

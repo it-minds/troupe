@@ -913,16 +913,29 @@ defmodule Troupe.InstructionsTest do
     write!(repo, "AGENTS.md", "two")
     assert Instructions.load(repo, config()).digest != first.digest
 
-    write!(repo, ".troupe/memory.md", "## Overview\nA brief.\n")
+    # A brief's command that does not fit the cap: left out, counted, and named for
+    # `recall` (Decision 838). The size is the view's, as a person opens it.
+    write!(repo, ".troupe/memory.md", "## Commands\n- A brief.\n")
     with_brief = Instructions.load(repo, config(memory_max_chars: 3))
     assert with_brief.digest != first.digest
 
-    assert %{scope: :brief, status: :trimmed, budget: 3, size: size, hash: "sha256:" <> _} =
+    assert %{
+             scope: :brief,
+             status: :trimmed,
+             budget: 3,
+             size: size,
+             hash: "sha256:" <> _,
+             trimmed: trimmed
+           } =
              List.last(with_brief.files)
 
-    assert size == byte_size("## Overview\nA brief.\n")
-    assert Instructions.to_prompt(with_brief) =~ "# Project brief"
-    assert Instructions.to_prompt(with_brief) =~ "(brief truncated)"
+    assert size == File.stat!(Path.join(repo, ".troupe/memory.md")).size
+    assert trimmed == String.length("- A brief.")
+
+    assert Instructions.to_prompt(with_brief) =~
+             "# Project brief\n1 fact about this repository (1 command)"
+
+    refute Instructions.to_prompt(with_brief, recall: false) =~ "# Project brief"
 
     off = Instructions.load(repo, config(memory: false))
     assert %{scope: :brief, status: :disabled, chars: 0, text: ""} = List.last(off.files)

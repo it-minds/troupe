@@ -208,8 +208,9 @@ defmodule Troupe.Onboard.NoticeTest do
                "build's is version #{Troupe.Memory.survey_version()}: `/memory refresh` has the " <>
                "librarian write it again."
 
-    # The brief is as it was.
-    assert read_file(context, ".troupe/memory.md") =~ "built_at: 2026-10-01T00:00:00Z\n---"
+    # The brief is as it was: kept as facts now (Decision 838), its stamp and words with it.
+    assert read_file(context, ".troupe/memory.md") =~ "built_at: 2026-10-01T00:00:00Z\n"
+    assert read_file(context, ".troupe/memory.md") =~ "## Overview\n- A project.\n"
 
     # A brief this build's survey wrote says nothing.
     :ok = Troupe.Session.Memory.put_section(context.workspace, "overview", "A project.")

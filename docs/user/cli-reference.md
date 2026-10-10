@@ -38,7 +38,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe models [--refresh]` | what each provider serves, its window and its price; asked again when stale, or now with --refresh |
 | `troupe models --json [--workspace DIR] [--refresh]` | the same as one JSON object for a program: models, roles, catalog, providers; never a key |
 | `troupe doctor [--json]` | check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure |
-| `troupe doctor --bench [--json]` | the same, then a turn of tool calls, a cut output, a compaction, a cancel, a replay and four onboarded repositories against a scripted model: offline, in seconds |
+| `troupe doctor --bench [--json]` | the same, then a turn of tool calls, a cut output, a compaction, a cancel, a replay, four onboarded repositories and a memory whose command's file changed against a scripted model: offline, in seconds |
 | `troupe instructions check [--workspace DIR] [--json]` | check the instruction files a session here reads: contradictions, missing paths and programs, repeats; and onboarded files whose source has changed, or a workspace onboarded under older rules; exits 1 on one |
 | `troupe onboard [--workspace DIR] [--yes] [--json] [--all]` | bring other tools' instruction files, rules, agents and commands into AGENTS.md, .troupe/ and your config, each shown as a diff and written only if you say yes; a new AGENTS.md is its own question, never answered by --yes; --all asks again about what you left out |
 | `troupe bench [--json [FILE]] [--md FILE]` | measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one |

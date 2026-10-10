@@ -50,7 +50,8 @@ defmodule Troupe.Gateway.MemoryTest do
 
     :ok = Memory.put_section(ws, "overview", "A project.")
 
-    assert {:ok, %{"status" => "fresh", "sections" => ["Notes", "Overview"], "built_at" => built}} =
+    # The view's sections come in its own order (Decision 838).
+    assert {:ok, %{"status" => "fresh", "sections" => ["Overview", "Notes"], "built_at" => built}} =
              Client.call(client, "memory.get", %{"workspace" => ws})
 
     assert is_binary(built)

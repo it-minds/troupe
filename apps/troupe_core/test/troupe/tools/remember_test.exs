@@ -7,10 +7,13 @@ defmodule Troupe.Tools.RememberTest do
 
   use Troupe.SessionCase, async: true
 
+  alias Troupe.Memory.Facts
   alias Troupe.Session.Memory
   alias Troupe.Tools.Remember
 
-  test "a note written by one session opens the next session's system prompt", context do
+  # A note is not in every prompt any more (Decision 838): the next session's brief counts
+  # it and names `recall`, which answers it.
+  test "a note written by one session is the next session's to recall", context do
     %{session: first, fake: fake} =
       start_session(context,
         steps: [
@@ -40,7 +43,14 @@ defmodule Troupe.Tools.RememberTest do
 
     system = fake2 |> Fake.requests() |> List.first() |> Map.fetch!(:system)
     assert system =~ "# Project brief"
-    assert system =~ "the ledger is a fold over the log"
+    assert system =~ "1 fact about this repository (1 note) is kept out of this prompt"
+
+    assert [
+             %{
+               "claim" => "the ledger is a fold over the log",
+               "evidence" => %{"by" => "agent:root"}
+             }
+           ] = Facts.recall(context.workspace, query: "ledger")
   end
 
   test "a curated section stamps the brief, and memory: false keeps it out of the prompt",
@@ -48,7 +58,7 @@ defmodule Troupe.Tools.RememberTest do
     assert :ok = Memory.put_section(context.workspace, "commands", "mix test")
     brief = Memory.brief(context.workspace)
     assert brief.built_at != nil
-    assert Troupe.Memory.section(brief, "Commands") == "mix test"
+    assert Troupe.Memory.section(brief, "Commands") == "- mix test"
 
     config = Troupe.Config.load(context.workspace)
     assert Memory.status(context.workspace, config) == :fresh
@@ -78,13 +88,16 @@ defmodule Troupe.Tools.RememberTest do
     assert Memory.status(context.workspace, config) == :fresh
     assert %{built_at: %DateTime{}, sections: ^before} = Memory.brief(context.workspace)
 
-    # A brief a person wrote, with no stamp, and the librarian calls `finish` on it.
+    # A brief a person wrote, with no stamp, and the librarian calls `finish` on it. What
+    # they wrote is added to the facts, and the note is not lost (Decision 838).
     write_file(context, ".troupe/memory.md", "## Overview\nWritten by hand.\n")
     assert Memory.status(context.workspace, config) == :stale
 
     librarian!(context, [{:tools, [{"finish", %{"summary" => "nothing to change"}}]}])
     assert Memory.status(context.workspace, config) == :fresh
-    assert %{sections: [{"Overview", "Written by hand."}]} = Memory.brief(context.workspace)
+    brief = Memory.brief(context.workspace)
+    assert Troupe.Memory.section(brief, "Overview") == "- Written by hand."
+    assert Troupe.Memory.section(brief, "Notes") =~ "the ledger is a fold over the log"
   end
 
   test "only a librarian's run that ended as it meant to stamps the brief", context do
@@ -142,16 +155,14 @@ defmodule Troupe.Tools.RememberTest do
     assert Memory.held_until(context.workspace, config) ==
              DateTime.add(tried, 7 * 86_400, :second)
 
-    # Built after that try and stale since, because the repository is not the one it
-    # counted: the try did not leave it stale, so it holds nothing off.
+    # Built after that try and stale since, because a command it holds rests on a file that
+    # changed: the try did not leave it stale, so it holds nothing off.
     git_init!(context.workspace)
-    built = DateTime.to_iso8601(DateTime.utc_now())
-
-    write_file(
-      context,
-      ".troupe/memory.md",
-      "---\nbuilt_at: #{built}\nfiles: 100\n---\n\n## Overview\nOld.\n"
-    )
+    claim = %{kind: "command", claim: "`make` builds it.", anchors: ["README.md"]}
+    {:ok, _} = Facts.put(context.workspace, claim, %{})
+    :ok = Memory.checked(context.workspace)
+    File.write!(Path.join(context.workspace, "README.md"), "# r, changed\n")
+    File.touch!(Path.join(context.workspace, "README.md"), System.os_time(:second) + 5)
 
     assert Memory.status(context.workspace, config) == :stale
     assert Memory.refresh_due?(context.workspace, config)
