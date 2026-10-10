@@ -253,6 +253,50 @@ defmodule Troupe.InstructionsTest do
            ] = Instructions.provenance(loaded)["files"]
   end
 
+  # Decision 828: Copilot's `.github/instructions/*.instructions.md` were never read, and
+  # onboarding brings them in (Decision 827), so they are listed as waiting for it, as
+  # every other tool's file is; at the root only, where Copilot reads them.
+  test "Copilot's .github/instructions files at the root are listed as skipped, never read",
+       %{base: base, repo: repo} do
+    write!(
+      repo,
+      ".github/instructions/ts.instructions.md",
+      "---\napplyTo: \"**\"\n---\ncopilot's rule"
+    )
+
+    write!(repo, ".github/instructions/notes.md", "not one of Copilot's")
+    write!(repo, "lib/.github/instructions/lib.instructions.md", "nested, never read")
+    write!(base, "elsewhere/x.instructions.md", "outside")
+
+    loaded = Instructions.load(repo, config(), ["lib/a.ex"])
+
+    assert files(loaded, repo) == [{:root, ".github/instructions/ts.instructions.md"}]
+
+    assert [
+             %{
+               status: :skipped,
+               reason: "not read: run troupe onboard",
+               size: 0,
+               chars: 0,
+               hash: nil,
+               text: "",
+               rule: nil
+             },
+             %{scope: :brief}
+           ] = loaded.files
+
+    refute Instructions.to_prompt(loaded) =~ "copilot's rule"
+
+    # A `.github/instructions` that is a link out is listed once, its files not named.
+    File.rm_rf!(Path.join(repo, ".github/instructions"))
+    :ok = File.ln_s(Path.join(base, "elsewhere"), Path.join(repo, ".github/instructions"))
+
+    assert [%{status: :outside, path: path}, %{scope: :brief}] =
+             Instructions.load(repo, config()).files
+
+    assert path == Path.join(repo, ".github/instructions")
+  end
+
   # D84 and D99: a file that is there and cannot be read is listed with why, not only
   # logged, so `context.get` shows it was left out.
   test "an AGENTS.md or an .agents/AGENTS.md that cannot be read is listed, saying why", %{

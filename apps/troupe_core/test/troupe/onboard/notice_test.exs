@@ -50,7 +50,8 @@ defmodule Troupe.Onboard.NoticeTest do
 
     # Remembered in the state directory, not the repository, so the next start is quiet.
     state = Jason.decode!(File.read!(Path.join(context.state_dir, "onboard.json")))
-    assert [%{"onboarding" => 1}] = Map.values(state["suggested"])
+    version = Onboard.version()
+    assert [%{"onboarding" => ^version}] = Map.values(state["suggested"])
 
     %{session: %{id: again}} = start_session(context)
     assert events_of_type(again, :onboarding_suggested) == []
@@ -87,6 +88,44 @@ defmodule Troupe.Onboard.NoticeTest do
     assert data["proposals"] == %{"instructions" => 1}
   end
 
+  # The notice asks about the workspace's files only, so a start never reads the person's
+  # own: on the chunk's tip it read and hashed `~/.claude/CLAUDE.md` and the config
+  # directory's `CLAUDE.md` and `GEMINI.md`, and then dropped what it found.
+  test "the first notice reads nothing in the person's home or config directory", context do
+    write_file(context, "CLAUDE.md", @claude)
+    home = Path.join(context.base, "home")
+    config = Path.join(home, ".config/troupe")
+    File.mkdir_p!(Path.join(home, ".claude"))
+    File.mkdir_p!(config)
+    File.write!(Path.join(home, ".claude/CLAUDE.md"), "Never push to main without asking.\n")
+    File.write!(Path.join(config, "CLAUDE.md"), "Answer briefly.\n")
+    File.write!(Path.join(config, "GEMINI.md"), "Prefer small commits.\n")
+
+    {data, touched} =
+      files_touched(fn ->
+        Notice.due(context.workspace,
+          state_dir: context.state_dir,
+          home: home,
+          config_dir: config,
+          memory: false
+        )
+      end)
+
+    assert data["proposals"] == %{"instructions" => 1}
+    assert Enum.filter(touched, &String.starts_with?(&1, home)) == []
+    assert Path.join(context.workspace, "CLAUDE.md") in touched
+
+    # `troupe onboard` itself still offers them.
+    assert %{proposals: proposals} =
+             Onboard.plan(context.workspace,
+               state_dir: context.state_dir,
+               home: home,
+               config_dir: config
+             )
+
+    assert Enum.map(proposals, & &1.proposal.target) == [:workspace, :user]
+  end
+
   test "a CLAUDE.md that is AGENTS.md under another name gives nothing to say, and is looked at once",
        context do
     write_file(context, "AGENTS.md", @claude)
@@ -97,7 +136,8 @@ defmodule Troupe.Onboard.NoticeTest do
 
     # The look was taken for this version: the next start does not plan again.
     state = Jason.decode!(File.read!(Path.join(context.state_dir, "onboard.json")))
-    assert [%{"onboarding" => 1}] = Map.values(state["suggested"])
+    version = Onboard.version()
+    assert [%{"onboarding" => ^version}] = Map.values(state["suggested"])
   end
 
   test "a workspace onboarded, or where the person said no to something, is not told again",
@@ -177,4 +217,45 @@ defmodule Troupe.Onboard.NoticeTest do
     assert read_file(context, ".troupe/memory.md") =~
              "survey: #{Troupe.Memory.survey_version()}\n"
   end
+
+  # Every path this process hands `:file` while `fun` runs, as it handed it: a call traced
+  # by a process beside the test (a process is not its own tracer).
+  defp files_touched(fun) do
+    Code.ensure_loaded!(:file)
+    :erlang.trace_pattern({:file, :_, :_}, true, [:global])
+    on_exit(fn -> :erlang.trace_pattern({:file, :_, :_}, false, [:global]) end)
+    tracer = spawn_link(fn -> collect([]) end)
+
+    :erlang.trace(self(), true, [:call, {:tracer, tracer}])
+    result = fun.()
+    :erlang.trace(self(), false, [:call])
+
+    ref = :erlang.trace_delivered(self())
+    assert_receive {:trace_delivered, _pid, ^ref}
+    send(tracer, {:paths, self()})
+    assert_receive {:paths, paths}
+    {result, paths}
+  end
+
+  defp collect(paths) do
+    receive do
+      {:trace, _pid, :call, {:file, _function, args}} ->
+        collect(Enum.flat_map(args, &path/1) ++ paths)
+
+      {:paths, from} ->
+        send(from, {:paths, Enum.uniq(paths)})
+    end
+  end
+
+  defp path(arg) when is_binary(arg), do: [arg]
+
+  defp path(arg) when is_list(arg) do
+    if List.ascii_printable?(arg) or Enum.all?(arg, &is_integer/1),
+      do: [List.to_string(arg)],
+      else: []
+  rescue
+    _not_a_path -> []
+  end
+
+  defp path(_arg), do: []
 end

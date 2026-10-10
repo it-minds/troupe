@@ -37,7 +37,10 @@ defmodule Troupe.Onboard.Source do
   workspace itself (Decision 827).
 
   `opts` carries `home`, the directory `~` stands for, and `config_dir`, the person's
-  config directory, so a test can give a source scratch ones. A source is registered in `Troupe.Onboard`'s `@sources`, one line.
+  config directory, so a test can give a source scratch ones; and `targets`, when only
+  some targets are wanted (a session's start asks for `[:workspace, :repo]`): a source
+  reads nothing for a target not in it, the person's own files for `:user` above all. A
+  source is registered in `Troupe.Onboard`'s `@sources`, one line.
   """
 
   @type also :: %{source: String.t(), source_hash: String.t()}

@@ -55,9 +55,9 @@ runs, and the person would find out from an agent ignoring their house rules.
   Troupe reads as it is, so there is nothing of opencode's to onboard there; what is
   opencode's alone is its agents. The rule is in a primary agent's prompt and the session
   starts on that agent (the scenario's `agent`), as a person who picks it in opencode would
-  in Troupe. opencode's `instructions` key (more files to read as instructions) is not
-  onboarded today; a fixture with one would fail here, which is the bench doing its job,
-  and that mapping is #516's follow-up, not this slice's.
+  in Troupe. opencode's `instructions` key (more files to read as instructions) is
+  onboarded since Decision 827's amendment, into the root's `AGENTS.md`; the fixture
+  keeps its rule in the agent, and does not carry one in `instructions` yet.
 - **The measures.** `instruction_bytes`: what the instructions took of the first request's
   system prompt, the scratch workspace's path written `<workspace>` as everywhere in the
   bench; the instruction files' section, and for a session on an agent the workspace

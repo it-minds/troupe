@@ -7,6 +7,7 @@ issue: 516
 supersedes: [683, 706, 806, 809]
 paths:
   - apps/troupe_core/lib/troupe/instructions.ex
+  - apps/troupe_core/lib/troupe/instructions/front_matter.ex
   - apps/troupe_core/lib/troupe/instructions/check.ex
   - apps/troupe_core/lib/troupe/config.ex
   - apps/troupe_core/lib/troupe/config/open_code.ex
@@ -18,12 +19,14 @@ paths:
   - apps/troupe_core/test/troupe/instructions_test.exs
   - apps/troupe_core/test/troupe/instructions_prompt_test.exs
   - apps/troupe_core/test/troupe/instructions_check_test.exs
+  - apps/troupe_core/test/troupe/instructions/front_matter_test.exs
   - apps/troupe_core/test/troupe/config_providers_test.exs
   - apps/troupe_gateway/test/troupe/gateway/context_test.exs
   - clients/tui/test/troupe/context_command_test.exs
   - clients/tui/test/troupe/config_setup_test.exs
 symbols:
   - Troupe.Instructions.load/3
+  - Troupe.Instructions.FrontMatter
   - Troupe.Instructions.Check.sources/1
   - Troupe.Config.resolve/3
   - Troupe.Config.ModelSettings.import_opencode/1
@@ -67,7 +70,11 @@ import-opencode` makes it.
   where `.cursor/rules/*.mdc` was: at the repository root and in each directory on the way
   to where the session works, after the directory's `AGENTS.md`, in name order, only the
   files directly in it. Its front matter is the one 809 read from an `.mdc`
-  (`description`, `globs` as a list or a comma-separated string, `alwaysApply`), and means
+  (`description`, `globs` as a list or a comma-separated string, `alwaysApply`), read by
+  `Troupe.Instructions.FrontMatter`, the one reader onboarding reads Cursor's and
+  Copilot's rules with (Decision 827), so a rule onboarding read one way is never read
+  another once written; the loader's own copy had read a quoted string of globs (`globs:
+  "docs/**,lib/**"`) as two broken ones, which onboarding read as two. It means
   what it meant there: an always rule joins every prompt; a `globs` rule joins from the
   turn after a file it matches is worked on, the globs taken from the directory that holds
   `.troupe`; a description-only rule is listed by its description and not joined; one
@@ -78,7 +85,11 @@ import-opencode` makes it.
   onboarding source writes (`rules/<name>.md`, Decision 827). The legacy `.cursorrules`,
   which 809 joined as an always rule, and every `.cursor/rules/*.mdc` are now listed as
   `skipped`, `not read: run troupe onboard`, and a `.cursor/rules` linked out of the
-  repository is still listed once as `outside` and not looked into. Not chosen: reading
+  repository is still listed once as `outside` and not looked into. So is Copilot's
+  `.github/instructions/*.instructions.md`, which Troupe never read and onboarding brings
+  in (Decision 827): each at the repository root is listed after Cursor's, and a
+  `.github/instructions` linked out once as `outside`; not below the root, where Copilot
+  does not read them and onboarding does not take them. Not chosen: reading
   `.cursor/rules` in place and
   `.troupe/rules` beside it (#516's recommendation, overruled), which keeps a format Troupe
   does not own read at every turn; a `<config>/rules` for the person, which nothing
@@ -115,8 +126,7 @@ import-opencode` makes it.
   MCP servers were never read at run time; onboarding (824) and `/mcp import` (820) copy
   them.
 - **Not in this slice.** The first session's proposal and the instruction files'
-  onboarding source and the librarian's prompt (Decision 827); Copilot's
-  `.github/instructions/*.instructions.md`, never read, which onboarding takes; a file
+  onboarding source and the librarian's prompt (Decision 827); a file
   already onboarded still saying `run troupe onboard` (it does not read
   `.troupe/onboarded.json`); the desktop app's and VS Code's labels for a model `from
   opencode`, which no daemon now sends.
@@ -138,4 +148,9 @@ import-opencode` makes it.
   failed: a `CLAUDE.md` was read, `.troupe/rules` were not, an unreadable file was not
   listed, and opencode's providers and default model were the configuration's; the check's
   `.agents` test failed with the paths called missing, and the loader's with the file
-  read twice.
+  read twice. The second wave's leftovers (#516): `Troupe.Instructions.FrontMatterTest`
+  (each form of the keys, both readers' tests', and the loader and onboarding reading one
+  front matter alike), `Troupe.InstructionsTest` and `Troupe.Gateway.ContextTest` (a root
+  `.github/instructions/*.instructions.md` listed as skipped with the reason, a nested one
+  not, a linked-out directory once as `outside`); on the chunk's tip the loader read
+  `"docs/**,lib/**"` as two broken globs and listed no Copilot rule.

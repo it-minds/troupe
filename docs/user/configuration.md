@@ -394,6 +394,12 @@ What it brings in:
   `globs` and `alwaysApply`, meaning what it meant there. A directory's rule has its globs
   written from the root (`src/**` under `web/` is `web/src/**`); Copilot's `applyTo` is
   its globs, and `applyTo: "**"` is `alwaysApply: true`.
+- **opencode's `instructions`.** The files `opencode.json` names in `instructions`, by
+  path or glob, which opencode adds to every prompt, are proposed as additions to the
+  root's `AGENTS.md`, after what the other tools' files add, without their front matter.
+  One whose own front matter scopes it with `globs` becomes a rule instead. A URL, a file
+  outside the workspace, an `AGENTS.md` (Troupe reads those itself) and another tool's
+  file onboarded on its own are listed as `skipped:`, saying why.
 - **Agents and commands**, Claude Code's and opencode's, become `.troupe/agents/` and
   `.troupe/commands/` files.
 
@@ -472,8 +478,9 @@ Every file applies. A file in a directory below the root is about the work under
 directory, and where two disagree, the nearer wins.
 
 Other tools' files are not read. A `CLAUDE.md` or a `GEMINI.md` in one of those
-directories, Copilot's `.github/copilot-instructions.md` at the root, and Cursor's
-`.cursorrules` and `.cursor/rules/*.mdc` are each listed in the session's log and
+directories, Copilot's `.github/copilot-instructions.md` and
+`.github/instructions/*.instructions.md` at the root, and Cursor's `.cursorrules` and
+`.cursor/rules/*.mdc` are each listed in the session's log and
 `/context` as skipped, `not read: run troupe onboard`: [`troupe
 onboard`](#onboarding-another-tools-files) brings what they say into `AGENTS.md` and
 `.troupe/rules/` once, and from then on those are what a session reads. So a repository

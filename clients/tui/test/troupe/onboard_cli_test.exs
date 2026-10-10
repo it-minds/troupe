@@ -369,7 +369,11 @@ defmodule Troupe.OnboardCLITest do
 
       File.write!(
         manifest,
-        String.replace(File.read!(manifest), ~s("onboarding": 1), ~s("onboarding": 0))
+        String.replace(
+          File.read!(manifest),
+          ~s("onboarding": #{Troupe.Onboard.version()}),
+          ~s("onboarding": 0)
+        )
       )
 
       out = capture_io(fn -> assert Onboard.run(args(ws, ["--json", "--yes"]), opts) == 0 end)

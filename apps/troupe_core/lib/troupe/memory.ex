@@ -68,11 +68,11 @@ defmodule Troupe.Memory do
   @spec parse(String.t()) :: {:ok, t()} | {:error, term()}
   def parse(content) when is_binary(content) do
     case split_frontmatter(content) do
-      {:ok, meta, body} ->
+      {:ok, meta, body, front} ->
         {:ok,
          %__MODULE__{
            built_at: parse_ts(Map.get(meta, "built_at")),
-           head: maybe_string(Map.get(meta, "head")),
+           head: head(Map.get(meta, "head"), front),
            files: parse_int(Map.get(meta, "files")),
            survey: parse_int(Map.get(meta, "survey")),
            sections: sections(body)
@@ -256,7 +256,8 @@ defmodule Troupe.Memory do
     lines =
       [
         m.built_at && "built_at: #{DateTime.to_iso8601(m.built_at)}",
-        m.head && "head: #{m.head}",
+        # Quoted: a short hash of digits and one `e` (`4572e29`) is a number to YAML.
+        m.head && "head: #{Jason.encode!(m.head)}",
         m.files && "files: #{m.files}",
         m.survey && "survey: #{m.survey}"
       ]
@@ -265,15 +266,16 @@ defmodule Troupe.Memory do
     "---\n" <> Enum.join(lines, "\n") <> "\n---\n\n"
   end
 
-  # Content with no frontmatter is not an error: an empty map plus the whole content.
+  # Content with no frontmatter is not an error: an empty map plus the whole content. The
+  # frontmatter's text comes too, for what YAML does not read as written.
   defp split_frontmatter("---" <> rest) do
     case String.split(rest, ~r/\r?\n---[ \t]*(\r?\n|$)/, parts: 2) do
-      [front, body] -> with({:ok, meta} <- parse_yaml(front), do: {:ok, meta, body})
+      [front, body] -> with({:ok, meta} <- parse_yaml(front), do: {:ok, meta, body, front})
       _ -> {:error, :unterminated_frontmatter}
     end
   end
 
-  defp split_frontmatter(content), do: {:ok, %{}, content}
+  defp split_frontmatter(content), do: {:ok, %{}, content, ""}
 
   defp parse_yaml(front) do
     case YamlElixir.read_from_string(front) do
@@ -304,8 +306,21 @@ defmodule Troupe.Memory do
 
   defp parse_int(_other), do: nil
 
-  defp maybe_string(nil), do: nil
-  defp maybe_string(value), do: to_string(value)
+  # The head as it was written. Written quoted now; an older build wrote it bare, and YAML
+  # reads a bare short hash of digits and one `e` as a float (`4572e29`) and one of digits
+  # with a leading zero as a number without it, so a head YAML did not read as text is taken
+  # from its line, one word as written. One that is not a word there (`[4572e29]`) cannot
+  # be told from what YAML made of it, and is no head: it is for a person to read, nothing
+  # decides on it (`stale?/2`), and the next refresh writes it again.
+  defp head(value, _front) when is_binary(value), do: value
+  defp head(nil, _front), do: nil
+
+  defp head(_not_text, front) do
+    case Regex.run(~r/^head:[ \t]*([^\s#"'\[\]{},&*!|>%@`]+)[ \t]*(?:#[^\r\n]*)?\r?$/m, front) do
+      [_line, word] -> word
+      nil -> nil
+    end
+  end
 
   defp truncate(text, max) when byte_size(text) <= max, do: text
   defp truncate(text, max), do: String.slice(text, 0, max) <> "\n\n(brief truncated)"
