@@ -377,6 +377,7 @@ defmodule Troupe.Config.Schema do
       group("Watching", [
         spec("watch", :boolean, "Act on `AI!` and `AI?` comments in the workspace's files.",
           default: false,
+          scope: :trusted,
           field: :watch,
           label: "watch mode"
         ),
@@ -387,6 +388,17 @@ defmodule Troupe.Config.Schema do
         spec("watch_poll_interval_ms", {:integer, 1}, "How often watch mode polls where it cannot be told.",
           default: 1_000,
           field: :watch_poll_interval_ms
+        ),
+        spec(
+          "watch_auto_approve",
+          :boolean,
+          "A branch an `AI!` or `AI?` comment starts runs its writes, edits, shell commands and MCP servers' tools " <>
+            "without asking. Off, each asks, whatever `auto_approve`, the agent's own permissions and a server's " <>
+            "`permission` say.",
+          default: false,
+          scope: :trusted,
+          field: :watch_auto_approve,
+          label: "watch auto approve"
         ),
         spec("fs_events", :boolean, "Record every file change in the workspace as an event.",
           default: false,

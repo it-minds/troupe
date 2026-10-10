@@ -90,6 +90,11 @@ defmodule Troupe.Client.Remote do
   def start_command(_sid, _agent, _name, _arguments, _mode),
     do: {:error, "a remote session runs one profile; create another session from HQ"}
 
+  # A pod's session never watches, so no comment starts a branch of it.
+  @impl true
+  def adopt_branch(_sid, _child, _profile, _prompt),
+    do: {:error, "watch mode runs where the files are"}
+
   @impl true
   def send_input(sid, _path, text), do: describe(Worker.input(sid, text))
 

@@ -151,6 +151,8 @@ defmodule Troupe.Gateway.Dispatch do
     # Deleting what every agent on the repository starts from.
     "memory.forget" => :admin,
     "watch.set" => :admin,
+    # Whether a workspace is watched says nothing a status line may not show.
+    "watch.get" => :observe,
     # Saying who this machine's user is changes the name on every subsequent event, so
     # it takes the scope that everything else which changes the daemon takes. Reading it
     # back does not, because a client needs to know whether to offer the control at all.
@@ -1062,16 +1064,34 @@ defmodule Troupe.Gateway.Dispatch do
     with {:ok, workspace} <- fetch(params, "workspace") do
       enabled = Map.get(params, "enabled", true)
 
-      case Troupe.set_watch(workspace, enabled) do
+      case Troupe.set_watch(workspace, enabled, Map.get(params, "session_id")) do
         {:ok, backend} ->
           {:ok, %{"enabled" => enabled, "backend" => to_string(backend)}}
 
         {:error, :already_watching} ->
           {:error, Error.new(:conflict, %{reason: "watch is exclusive per workspace"})}
 
+        {:error, :not_local} ->
+          {:error, Error.new(:forbidden, %{reason: "watch mode runs where the files are"})}
+
         {:error, reason} ->
           {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
       end
+    end
+  end
+
+  # What a status line shows, and what the next `/watch` toggles (Decision 844): the
+  # session that watches the workspace, if one does, and with which backend.
+  defp handle("watch.get", params, _context) do
+    with {:ok, workspace} <- fetch(params, "workspace") do
+      state = Troupe.watch_state(workspace)
+
+      {:ok,
+       %{
+         "enabled" => state.enabled,
+         "backend" => to_string(state.backend),
+         "session_id" => state.session_id
+       }}
     end
   end
 
