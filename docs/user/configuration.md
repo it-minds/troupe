@@ -188,7 +188,9 @@ name, the nearer `.agents/skills` wins, and a skill in `<config>/skills` or
 
 `mcp.json` is `{"mcpServers": {name: {"command", "args", "env"}}}` — or
 `{"url", "headers"}` — with one key of Troupe's own: `"include": ["~/.claude/.mcp.json"]`
-reads another file in place. `${VAR}` in an imported file becomes `{env:VAR}`, read as
+reads another file in place. A `command` that is a program's name is looked for on the
+`PATH` alone, never in the directory Troupe was started in; one that is a relative path
+(`bin/server`) is taken from the server's `cd`, else the workspace. `${VAR}` in an imported file becomes `{env:VAR}`, read as
 the rest of the configuration reads it. opencode's servers are under `mcp` in its
 `opencode.json`, and import or link from there. Codex's are `[mcp_servers.<name>]` tables in a
 `config.toml`, a project's `.codex/config.toml` or your own `~/.codex/config.toml`, and
