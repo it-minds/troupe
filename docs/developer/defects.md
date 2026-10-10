@@ -1100,35 +1100,12 @@ Found by the #528, #529 and #536 fixers, 2026-10-10.
 
 What the command audit ([command-audit.md](command-audit.md)) found the TUI's branch
 commands no longer doing, against their rows in `Troupe.Commands` and the TUI decisions
-that made them.
+that made them. The rest were fixed with Decision 843.
 
-- `/cancel` (and `x` twice in a window) only cancels the branch's turn
-  (`Troupe.Client.Daemon.cancel_branch/2` sends `turn.cancel`): the window stays and the
-  worktree Troupe made for it is kept. The row says it removes the window and the
-  worktree, as TUI Decision 57 had it. After a cancel mid-tool the window reads finished.
-- `/worktree <existing> <prompt>` and `/worktree <name>: <prompt>` start the default agent
-  in a fresh worktree with the whole line as its prompt: `Daemon.dispatch/3` reads neither
-  form (TUI Decisions 39 and 42). Tab after `/worktree ` offers the checkout's own branch
-  first, and never a `<name>:`, since `Daemon.worktrees/1` returns no managed names.
-- `/dismiss`'s row says a branch's session stays in the daemon "where /sessions still
-  lists it"; the picker leaves out every session with a parent (`pickable_sessions/1`), so
-  a dismissed branch can't be reached from the TUI again.
-- A `/merge` git refuses because the checkout has uncommitted changes to the files the
-  branch changed says "merge conflicts; resolve in your checkout", though nothing
-  conflicted and there is nothing to resolve. The checkout is left as it was, rightly.
-  `merge_branch/2` in `Troupe.Gateway.Worktrees` reads any failed merge as conflicts.
-- `worktree.remove` (the desktop app's) still runs git inside the tree it removes, which on
-  Windows git cannot delete; `merge` and `discard` no longer do. A merge whose tree then
-  can't be removed has already landed, and the caller is told only the removal's error.
 - After `/merge`, `/discard` or `/dismiss` from the palette over the activated window, the
   screen's focus still names the closed window until the next key.
-- `/ask` runs as a branch of the session, so its `read_branch` lists the session it was
-  started from (`build idle (no prompt)`) as though it were a branch, and with nothing
-  finished it never says so.
-- `/dismiss` of a session's own window lets go of the session and leaves the screen on it.
-  On a pod session what is typed next goes to this machine's daemon (`Client.impl/1` finds
-  the remote registration gone): `/memory` answers from this machine, `/merge` says "no
-  branch", `/watch` and `/goal` say the session is not open.
+- `/ask`'s `read_branch`, with no branch finished, lists the others with their states and
+  never says that none has finished.
 
 Found by the #502 audit, 2026-10-10.
 

@@ -601,6 +601,13 @@ brings to the same shape, in `session.create` and in a first `session.register`.
 workspace already has a live session; `"never"` reuses the directory; `"always"`
 always branches.
 
+`worktree_name`: work in the worktree of that name, whatever `worktree` says:
+`<workspace>-<name>` on `troupe/<name>`, made the first time, the same tree after, and
+made again from its branch when only the directory has gone. A name is one path segment
+of letters, digits, `.`, `_` and `-`, not starting with `.` or `-` (`invalid_params`,
+field `worktree_name`, otherwise); refused with `conflict` while a session is working
+in that tree.
+
 `workflow`: run the prompt as a named **workflow**: the step list at
 `<workspace>/.troupe/workflows/<name>.json` (or the built-in `default` pipeline) is
 rendered around the prompt as the plan the `workflow` agent starts from, and `profile`
@@ -1786,22 +1793,27 @@ made twice.
 ```json
 {"command_id": "c-8", "path": "/home/me/project/../project-troupe-abc", "force": false}
 ```
-Refuses a dirty tree with `conflict` unless `force` is true.
+Refuses a dirty tree with `conflict` unless `force` is true. git runs from the checkout
+the tree belongs to, not inside the tree.
 
 #### `worktree.merge`
 ```json
 {"command_id": "c-9", "workspace": "/home/me/project",
  "path": "/home/me/project-troupe-abc", "message": "troupe: fix the test"}
 ```
-→ `{"merged": true, "branch": "troupe/abc", "committed": true, "output": "..."}`
+→ `{"merged": true, "branch": "troupe/abc", "committed": true, "output": "...", "removed": true}`
 
 Lands a branch's work on the checkout it came from: anything uncommitted in the
 worktree is committed first (as `message`, or a default naming the branch), the branch
 is merged into `workspace` with a merge commit (`--no-ff`), and the worktree and branch
 are removed. A merge git cannot complete is aborted and answered with `conflict`
 (`reason: "merge conflicts"`, `output`: git's words); the worktree is untouched, so the
-person can resolve it by hand. Refused with `conflict` while the session in that
-worktree is mid-turn (`reason` names the session).
+person can resolve it by hand. One git will not start because uncommitted changes in
+the checkout are in its way is `conflict` with `reason: "local changes in the checkout"`
+(`output` names the files); nothing is changed. A merge that landed and whose tree git
+then could not remove is still answered as a merge, with `"removed": false` and
+`removal_error` (git's words); the tree and its branch are left. Refused with
+`conflict` while the session in that worktree is mid-turn (`reason` names the session).
 
 #### `worktree.discard`
 ```json
