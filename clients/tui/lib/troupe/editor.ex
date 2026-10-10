@@ -55,7 +55,8 @@ defmodule Troupe.Editor do
 
   @doc """
   The editor this machine would use, as `{program, args}` with the program found on the
-  PATH, or `{:missing, name}` when it is not there.
+  PATH alone, never in the current directory (`Troupe.OS.Process.executable/2`, Decision
+  846), or `{:missing, name}` when it is not there.
   """
   @spec command(map()) :: {String.t(), [String.t()]} | {:missing, String.t()}
   def command(env \\ System.get_env()) do
@@ -69,7 +70,7 @@ defmodule Troupe.Editor do
 
     [name | args] = words
 
-    case System.find_executable(name) do
+    case Troupe.OS.Process.executable(name) do
       nil -> {:missing, name}
       program -> {program, args}
     end

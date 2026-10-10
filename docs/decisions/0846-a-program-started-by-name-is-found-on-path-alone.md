@@ -21,6 +21,7 @@ paths:
   - clients/tui/lib/troupe/os/process.ex
   - clients/tui/lib/troupe/browser.ex
   - clients/tui/lib/troupe/cli/daemon.ex
+  - clients/tui/lib/troupe/editor.ex
   - clients/tui/lib/mix/tasks/troupe.xref.ex
   - clients/tui/.credo.exs
   - clients/tui/test/troupe/path_only_lookup_test.exs
@@ -94,8 +95,8 @@ workspace to take it from".
 `Troupe.Executable.resolve/3` answers, through a door of its own in `mix troupe.xref`, and
 so tries only the extensions of `PATHEXT` a process starts from, where it used to try
 `.js` and `.vbs` too. It is how `troupe daemon` finds `troupe-daemon`, the terminal finds
-`ps` and `lsof`, the shell is chosen, and the browser opener finds `rundll32`, `open` or
-`xdg-open`. The opener moved out of the UI to `Troupe.Browser`, which the UI reaches
+`ps` and `lsof`, `/agents` finds the person's editor, the shell is chosen, and the browser
+opener finds `rundll32`, `open` or `xdg-open`. The opener moved out of the UI to `Troupe.Browser`, which the UI reaches
 through `Troupe.Client.open_url/1` as it reaches the clipboard. `Troupe.OS.Process.run/3`
 starts nothing for a program on no `PATH`: it answers `<name> is not on the PATH` with
 status 127, as a shell's "command not found" does, rather than hand the name to Windows'
