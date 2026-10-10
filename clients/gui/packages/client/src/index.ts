@@ -26,7 +26,29 @@ export { SessionAttachment, waitOn } from "./attach.js";
 export type { AttachOptions, AttachStatus } from "./attach.js";
 export { ServerOffer, offeredName } from "./offer.js";
 export type { OfferAsk, OfferOptions, OfferState } from "./offer.js";
-export { LIBRARIAN_PROMPT, StartQuestions, briefQuestion, createQuestion, describeItem, onboardQuestion } from "./onboard.js";
+export {
+  LIBRARIAN_PROMPT,
+  LIBRARIAN_REWRITING,
+  LIBRARIAN_WRITING,
+  StartQuestions,
+  briefQuestion,
+  createQuestion,
+  describeItem,
+  onboardQuestion,
+} from "./onboard.js";
+export {
+  FACT_KINDS,
+  LIBRARIAN_FIRST_PROMPT,
+  factStatusLine,
+  factsByKind,
+  learnedBy,
+  librarianBarred,
+  librarianDone,
+  mayNoLongerBeTrue,
+  refreshNow,
+  refreshStep,
+} from "./memory.js";
+export type { FactAnchor, FactEvidence, FactKind, FactStatus, LibrarianBarred, MemoryBrief, MemoryFact, Refreshed, RefreshStep } from "./memory.js";
 export type {
   BriefDue,
   OnboardApplied,

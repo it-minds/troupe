@@ -1,22 +1,26 @@
 defmodule Troupe.Session.Watcher do
   @moduledoc """
-  Watch mode: turn AI comments in files into agent input.
+  Watch mode: turn AI comments in files into branches of the session.
 
   Started last in the session so its crashes never restart an agent — `rest_for_one`
   makes that a structural guarantee rather than a convention. It owns a backend
   process (native or polling), debounces bursts of change events into one scan, and
-  sends the root agent a single `:watch` input per scan.
+  starts one branch per scan (`Troupe.Watch.Branch`, Decision 844): `quick` for an
+  `AI!`, `answer` for an `AI?`, never a turn of the session's own agent. The session's
+  log says which file and comment started which branch (`watch_triggered`), and a
+  client hears watch go on and off (`watch_changed`).
 
   Self-triggering is prevented by the write and edit tools announcing writes before
   they happen; a change event whose current content hash matches an announcement is
-  dropped.
+  dropped. A marker whose branch has not ended its turn is not sent again: the file is
+  saved again while that branch's write waits for the person, and that is no new request.
   """
 
   use GenServer
 
-  alias Troupe.Agent
   alias Troupe.{Events, Gitignore, Paths, Registry, Watch, Workspace}
-  alias Troupe.Watch.{FileSystemBackend, Marker, PollBackend, Trigger}
+  alias Troupe.Session.Log
+  alias Troupe.Watch.{Branch, FileSystemBackend, Marker, PollBackend, Trigger}
 
   require Logger
 
@@ -30,11 +34,24 @@ defmodule Troupe.Session.Watcher do
     :forced_backend,
     :timer,
     enabled?: false,
+    # A pod's session never watches (Decision 844): watching is for the files on the
+    # person's own machine, and a branch it started there would be a session no plane
+    # placed.
+    local?: true,
     debounce_ms: 300,
     poll_interval_ms: 1_000,
     pending: MapSet.new(),
     expected: %{},
-    ignore: nil
+    ignore: nil,
+    # `watch_auto_approve`, and what the session was started with, for its branches;
+    # `dispatch` stands in for `Branch.start/2` in a test of the watcher alone.
+    auto_approve: false,
+    branch: [],
+    dispatch: &Branch.start/2,
+    # The markers a branch is working on, `{file, comment} => session id`, until it ends
+    # its turn or its session goes; and the monitor on each branch's session.
+    working: %{},
+    monitors: %{}
   ]
 
   # -- client -----------------------------------------------------------------
@@ -54,8 +71,11 @@ defmodule Troupe.Session.Watcher do
   @spec backend(String.t()) :: :native | :poll | :off
   def backend(session_id), do: GenServer.call(Registry.watcher(session_id), :backend)
 
-  @doc "Turn watching on or off. Returns which backend is in use."
-  @spec set_enabled(String.t(), boolean()) :: {:ok, :native | :poll | :off}
+  @doc """
+  Turn watching on or off. Returns which backend is in use; a pod's session refuses
+  (`:not_local`).
+  """
+  @spec set_enabled(String.t(), boolean()) :: {:ok, :native | :poll | :off} | {:error, :not_local}
   def set_enabled(session_id, enabled?) do
     GenServer.call(Registry.watcher(session_id), {:set_enabled, enabled?})
   end
@@ -81,12 +101,16 @@ defmodule Troupe.Session.Watcher do
       session_id: session_id,
       workspace: workspace,
       agent_path: Keyword.get(opts, :agent_path, ["root"]),
+      local?: Keyword.get(opts, :local, true),
       debounce_ms: Keyword.get(opts, :debounce_ms, 300),
       poll_interval_ms: Keyword.get(opts, :poll_interval_ms, 1_000),
-      forced_backend: Keyword.get(opts, :backend)
+      forced_backend: Keyword.get(opts, :backend),
+      auto_approve: Keyword.get(opts, :auto_approve, false) == true,
+      branch: Keyword.get(opts, :branch, []),
+      dispatch: Keyword.get(opts, :dispatch, &Branch.start/2)
     }
 
-    if Keyword.get(opts, :enabled, false) do
+    if Keyword.get(opts, :enabled, false) and state.local? do
       {:ok, start_backend(state)}
     else
       {:ok, state}
@@ -94,24 +118,26 @@ defmodule Troupe.Session.Watcher do
   end
 
   @impl GenServer
+  def handle_call({:set_enabled, true}, _from, %{local?: false} = state) do
+    {:reply, {:error, :not_local}, state}
+  end
+
   def handle_call({:set_enabled, true}, _from, %{enabled?: true} = state) do
     {:reply, {:ok, state.backend_module.name()}, state}
   end
 
   def handle_call({:set_enabled, true}, _from, state) do
-    state = start_backend(state)
-    {:reply, {:ok, state.backend_module.name()}, state}
+    state = state |> start_backend() |> changed(state)
+    {:reply, {:ok, backend_name(state)}, state}
   end
 
   def handle_call({:set_enabled, false}, _from, state) do
-    {:reply, {:ok, :off}, stop_backend(state)}
+    {:reply, {:ok, :off}, state |> stop_backend() |> changed(state)}
   end
 
   def handle_call(:enabled?, _from, state), do: {:reply, state.enabled?, state}
 
-  def handle_call(:backend, _from, state) do
-    {:reply, if(state.enabled?, do: state.backend_module.name(), else: :off), state}
-  end
+  def handle_call(:backend, _from, state), do: {:reply, backend_name(state), state}
 
   def handle_call({:scan_now, paths}, _from, state) do
     {:reply, :ok, scan_and_trigger(%{with_ignore(state) | pending: MapSet.new(paths)})}
@@ -146,7 +172,19 @@ defmodule Troupe.Session.Watcher do
     # A backend that died is worth one notice and a fallback, not a session failure.
     Logger.warning("troupe: watch backend exited (#{inspect(reason)}), falling back to polling")
     notice(state, "watch backend stopped; falling back to polling")
-    {:noreply, state |> Map.put(:backend, nil) |> start_backend(PollBackend)}
+    {:noreply, state |> Map.put(:backend, nil) |> start_backend(PollBackend) |> changed(state)}
+  end
+
+  def handle_info({:branch_started, token, trigger, result}, state),
+    do: {:noreply, started(state, token, trigger, result)}
+
+  # A branch that ended its turn, or whose session went, has finished with its markers.
+  def handle_info({:troupe_event, child, %{type: "turn_ended", agent: ["root"]}}, state),
+    do: {:noreply, done_with(state, child)}
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    {child, monitors} = Map.pop(state.monitors, ref)
+    {:noreply, done_with(%{state | monitors: monitors}, child)}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -218,12 +256,9 @@ defmodule Troupe.Session.Watcher do
     {paths, state} = take_pending(state)
     {markers, state} = Enum.reduce(paths, {[], state}, &scan_path/2)
 
-    if markers == [] do
-      state
-    else
-      trigger = Trigger.new(markers, context_markers(state, markers))
-      send_to_agent(state, trigger)
-      state
+    case Enum.reject(markers, &Map.has_key?(state.working, key(&1))) do
+      [] -> state
+      markers -> dispatch(state, Trigger.new(markers, context_markers(state, markers)))
     end
   end
 
@@ -279,14 +314,110 @@ defmodule Troupe.Session.Watcher do
     |> Enum.reject(&MapSet.member?(triggering_locations, {&1.file, &1.line}))
   end
 
-  defp send_to_agent(state, trigger) do
-    case Registry.agent_pid(state.session_id, state.agent_path) do
-      nil ->
-        Logger.debug("troupe: watch trigger with no root agent to send it to")
+  # -- the branch --------------------------------------------------------------
 
-      pid ->
-        Agent.Server.input(pid, :watch, trigger)
+  # One branch per scan (Decision 844). The session starts in a task of its own, so the
+  # watcher answers `enabled?` and its own shutdown while it does: the sessions' index asks
+  # every watcher that as it sweeps, and a session starting asks it things back. Its
+  # markers count as worked on from now.
+  defp dispatch(state, trigger) do
+    token = make_ref()
+    watcher = self()
+    start = state.dispatch
+
+    opts =
+      [
+        parent: state.session_id,
+        workspace: state.workspace.root_real,
+        auto_approve: state.auto_approve
+      ] ++
+        state.branch
+
+    {:ok, _task} =
+      Task.start(fn ->
+        send(watcher, {:branch_started, token, trigger, start_branch(start, trigger, opts)})
+      end)
+
+    %{state | working: Enum.reduce(trigger.markers, state.working, &Map.put(&2, key(&1), token))}
+  end
+
+  # A branch that cannot start is the trigger's failure, said in the log, never a crash.
+  defp start_branch(start, trigger, opts) do
+    start.(trigger, opts)
+  rescue
+    error -> {:error, Exception.message(error)}
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  # The branch is followed from before its input, so its turn's end is heard, and the
+  # session's log says which file and comment started it, or why none could start, for a
+  # client to show.
+  defp started(state, token, trigger, {:ok, %{id: child, pid: pid}}) do
+    :ok = Events.subscribe(child, :internal)
+    triggered(state, trigger, %{"session_id" => child})
+    _ = Troupe.send_input(child, trigger, :watch)
+
+    working =
+      Map.new(state.working, fn {key, id} -> {key, if(id == token, do: child, else: id)} end)
+
+    %{state | working: working, monitors: Map.put(state.monitors, Process.monitor(pid), child)}
+  end
+
+  defp started(state, token, trigger, {:error, reason}) do
+    Logger.warning("troupe: watch could not start #{Branch.agent(trigger)}: #{inspect(reason)}")
+    triggered(state, trigger, %{"error" => describe(reason)})
+    %{state | working: Map.reject(state.working, fn {_key, id} -> id == token end)}
+  end
+
+  defp triggered(state, trigger, outcome) do
+    markers =
+      Enum.map(trigger.markers, &%{"file" => &1.file, "line" => &1.line, "comment" => &1.comment})
+
+    data =
+      Map.merge(outcome, %{
+        "agent" => Branch.agent(trigger),
+        "mode" => Atom.to_string(trigger.mode),
+        "markers" => markers
+      })
+
+    Log.append(state.session_id, state.agent_path, :watch_triggered, data)
+  end
+
+  defp key(%Marker{file: file, comment: comment}), do: {file, comment}
+
+  defp done_with(state, nil), do: state
+
+  defp done_with(state, child) do
+    Events.unsubscribe(child)
+    {gone, monitors} = Enum.split_with(state.monitors, fn {_ref, id} -> id == child end)
+    Enum.each(gone, fn {ref, _id} -> Process.demonitor(ref, [:flush]) end)
+    working = Map.reject(state.working, fn {_key, id} -> id == child end)
+    %{state | working: working, monitors: Map.new(monitors)}
+  end
+
+  defp describe({:unknown_agent, name}), do: "there is no agent #{name}"
+  defp describe(reason) when is_binary(reason), do: reason
+  defp describe(reason), do: inspect(reason)
+
+  # -- watch state ---------------------------------------------------------------
+
+  defp backend_name(%{enabled?: true, backend_module: module}) when module != nil,
+    do: module.name()
+
+  defp backend_name(_state), do: :off
+
+  # Whether watch is on, and how, said to every client as it changes (`watch_changed`),
+  # so a status line shows what the session does rather than what that client last set.
+  defp changed(state, before) do
+    if backend_name(state) != backend_name(before) do
+      Events.publish_ephemeral(state.session_id, "watch_changed", state.agent_path, %{
+        "enabled" => state.enabled?,
+        "backend" => Atom.to_string(backend_name(state))
+      })
     end
+
+    state
   end
 
   defp gitignore?(path), do: Path.basename(path) == ".gitignore"

@@ -450,6 +450,17 @@ defmodule Troupe.Protocol.Schema do
         "brief_due" => optional(:string),
         "counts" => optional(:object)
       },
+      # A saved `AI!` or `AI?` comment started a branch of this session (Decision 844):
+      # `agent` (`quick` or `answer`) as the session `session_id`, in this session's
+      # checkout, for the comments in `markers` (`file`, `line`, `comment`); `mode` is
+      # `change` or `question`. `error` instead of `session_id` says why none started.
+      "watch_triggered" => %{
+        "agent" => required(:string),
+        "mode" => required(:string),
+        "markers" => required(:array),
+        "session_id" => optional(:string),
+        "error" => optional(:string)
+      },
       "session_dormant" => %{"last_seq" => required(:integer)},
       "session_activated" => %{"epoch" => required(:string), "pod" => optional(:string)},
       "session_resumed" => %{
@@ -549,6 +560,9 @@ defmodule Troupe.Protocol.Schema do
       },
       "summary_diff" => %{"changed" => required(:object)},
       "watch_notice" => %{"message" => required(:string)},
+      # Watch went on or off for this session, or changed backend (Decision 844);
+      # `watch.get` says the same at any time.
+      "watch_changed" => %{"enabled" => required(:boolean), "backend" => required(:string)},
       # A person's command while it runs (Decision 813): started, then its output as it
       # comes. Its end is the durable `user_shell`, which carries the tail either way.
       "shell_started" => %{
@@ -755,7 +769,12 @@ defmodule Troupe.Protocol.Schema do
       # of the budget (Decision 706); reading it wakes nothing.
       "context.get" => %{"session_id" => required(:string)},
       "mcp.status" => %{"session_id" => required(:string)},
-      "memory.forget" => %{"command_id" => required(:string), "workspace" => required(:string)},
+      # With `id`, one fact; without, the whole brief (Decision 839).
+      "memory.forget" => %{
+        "command_id" => required(:string),
+        "workspace" => required(:string),
+        "id" => optional(:string)
+      },
       # A no to rewriting a brief an older survey wrote, remembered for that survey's
       # version (Decision 835).
       "memory.decline" => %{"workspace" => required(:string), "command_id" => optional(:string)},
@@ -795,8 +814,12 @@ defmodule Troupe.Protocol.Schema do
       "watch.set" => %{
         "command_id" => required(:string),
         "workspace" => required(:string),
-        "enabled" => optional(:boolean)
+        "enabled" => optional(:boolean),
+        "session_id" => optional(:string)
       },
+      # Whether a workspace is watched, how, and by which session (Decision 844); the
+      # daemon's, since a pod's session never watches.
+      "watch.get" => %{"workspace" => required(:string)},
       # Presence. No `command_id`: it is not an effect to be replayed, and a client that
       # retried one would be asserting something it no longer knows to be true.
       "presence.set" => %{

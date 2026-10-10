@@ -70,6 +70,13 @@ defmodule Troupe.Client do
           warnings: [String.t()]
         }
 
+  @typedoc """
+  Memory's facts as the `/memory` page lists them (root Decision 839): each fact as
+  `memory.get` answers it, a wire map with its `status` as read now, and the brief's
+  status beside them.
+  """
+  @type memory :: %{facts: [map()], status: String.t(), path: String.t() | nil}
+
   @typedoc "What a session allows right now, and why not when it does not."
   @type capability :: %{
           state: atom(),
@@ -98,6 +105,8 @@ defmodule Troupe.Client do
   @callback context(session_id()) :: {String.t(), Config.t()}
   @callback capability(session_id()) :: capability()
   @callback dispatch(session_id(), String.t(), String.t() | map()) ::
+              {:ok, String.t()} | {:error, term()}
+  @callback adopt_branch(session_id(), session_id(), String.t(), String.t()) ::
               {:ok, String.t()} | {:error, term()}
   @callback send_input(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
@@ -128,6 +137,8 @@ defmodule Troupe.Client do
   @callback manage_sources(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   @callback agents(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   @callback memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  @callback memory_facts(session_id()) :: {:ok, memory()} | :no_facts | {:error, term()}
+  @callback forget_fact(session_id(), String.t()) :: :ok | {:error, term()}
   @callback instructions(session_id()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
@@ -214,6 +225,17 @@ defmodule Troupe.Client do
   @spec dispatch(session_id(), String.t(), String.t() | map()) ::
           {:ok, String.t()} | {:error, term()}
   def dispatch(sid, name, args), do: impl(sid).dispatch(sid, name, args)
+
+  @doc """
+  Opens the window of a branch the daemon started for this session — the one a saved
+  `AI!` or `AI?` comment started (`watch_triggered`, root Decision 844) — as a branch
+  `dispatch/3` started opens, once: answers the window's name, the same one again for a
+  branch that already has one.
+  """
+  @spec adopt_branch(session_id(), session_id(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def adopt_branch(sid, child, profile, prompt),
+    do: impl(sid).adopt_branch(sid, child, profile, prompt)
 
   @spec send_input(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   def send_input(sid, path, text), do: impl(sid).send_input(sid, path, text)
@@ -336,6 +358,11 @@ defmodule Troupe.Client do
   @spec watch(session_id(), boolean()) :: {:ok, atom()} | :ok | {:error, term()}
   def watch(sid, enabled?), do: impl(sid).watch(sid, enabled?)
 
+  @doc """
+  Whether the session's workspace is watched, as the daemon says (`watch.get`):
+  `%{enabled: boolean, backend: String.t() | nil}`. What the status line shows and what
+  `/watch` toggles, whichever client turned it on.
+  """
   @spec watch_status(session_id()) :: map()
   def watch_status(sid), do: impl(sid).watch_status(sid)
 
@@ -372,6 +399,17 @@ defmodule Troupe.Client do
 
   @spec memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def memory(sid, command), do: impl(sid).memory(sid, command)
+
+  @doc """
+  `/memory`'s page: the workspace's facts with their status. `:no_facts` from a daemon
+  from before facts, or where the brief is off, which `/memory` answers as it did.
+  """
+  @spec memory_facts(session_id()) :: {:ok, memory()} | :no_facts | {:error, term()}
+  def memory_facts(sid), do: impl(sid).memory_facts(sid)
+
+  @doc "Forgets one fact, by its id: `memory.forget` with an `id`."
+  @spec forget_fact(session_id(), String.t()) :: :ok | {:error, term()}
+  def forget_fact(sid, id), do: impl(sid).forget_fact(sid, id)
 
   @doc """
   `/context`: every file the session's next prompt is read from, as `context.get` lists

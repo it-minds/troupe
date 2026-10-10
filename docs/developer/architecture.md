@@ -136,7 +136,7 @@ starts with an `O_EXCL` lock.
 |---|---|
 | A local session's log | `<state>/sessions/<workspace-hash>/<session-id>/events.jsonl`; `<state>` is `TROUPE_STATE_HOME`, else `$XDG_STATE_HOME/troupe` or `%LOCALAPPDATA%\troupe`; blobs beside it |
 | Local config | `TROUPE_CONFIG_HOME`, else `$XDG_CONFIG_HOME/troupe` or `%APPDATA%\troupe`: `config.yaml`, `agents/`, `models.json` |
-| The project brief | `<repository root>/.troupe/memory.md` |
+| The project brief | `<repository root>/.troupe/memory/facts.jsonl`, one fact per line, and its generated view `.troupe/memory.md`; one process per repository writes both (Decision 838) |
 | Daemon discovery | `$XDG_RUNTIME_DIR/troupe/daemon.sock`, or `daemon.json` (TCP port and token, loopback WebSocket) |
 | A pod's working copies | the `data` volume at `/var/lib/troupe` |
 | Sealed sessions | S3 `sessions/<id>/…`, written by workers and by daemons for private sessions |

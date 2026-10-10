@@ -472,13 +472,20 @@ Environment variables still win over every file, so a setting masked by
 
 ### Watch mode
 
-Any comment ending in `AI!` is a change request and spawns a `/quick` branch;
-`AI?` is a question and spawns an `/answer` branch; bare `AI` comments are
-collected as context. Both profiles run on the cheap model with a small
-reasoning budget and few turns, because saving a comment is a cheap gesture and
-the branch it starts should be one too. Point them somewhere heavier with
-`watch.change_command` / `watch.question_command` (`code` and `plan` are the
-obvious ones) when a comment deserves the full treatment.
+Any comment ending in `AI!` is a change request and starts a `quick` branch;
+`AI?` is a question and starts an `answer` branch, which cannot edit; bare `AI`
+comments are collected as context. The branch works in the checkout the comment
+is in, its window opens as `quick-1` (and so on), and the line under the screen
+says which file and comment started it; the session's own agent is told nothing.
+Both agents run on the cheap model with few turns, because saving a comment is a
+cheap gesture and the branch it starts should be one too. For something heavier,
+redefine `quick` or `answer` in `.troupe/agents/` or your own `agents/`, which is
+what `/quick` starts too (root Decision 844).
+
+Anything that writes a file can write a comment, so a branch a comment started
+asks before every write, edit and shell command, whatever `auto_approve` says,
+until you set `watch_auto_approve: true`. The status line says whether the
+workspace is watched, whichever client turned it on, and `/watch` turns it off.
 
 On Linux, native watching needs `inotifywait`; without it Troupe falls back to
 polling and says so.

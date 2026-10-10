@@ -181,8 +181,9 @@ defmodule Troupe.DaemonClientTest do
       eventually(fn -> screen_text(pid, session) =~ "the daemon is not reachable" end)
       assert Process.alive?(pid)
 
-      # The next command connects again, and its answer replaces the line.
-      type(pid, "/memory")
+      # The next command connects again, and its answer replaces the line. `/memory` alone
+      # opens a page now (root Decision 839); `/memory forget` still answers on the line.
+      type(pid, "/memory forget")
       press(pid, "enter")
       eventually(fn -> not (screen_text(pid, session) =~ "not reachable") end)
       assert Link.up?()

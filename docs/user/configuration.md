@@ -490,7 +490,9 @@ an edit takes effect on the next turn:
    and the directory of every file its conversation has read, edited or written, so
    `frontend/AGENTS.md` applies from the turn after the agent first opened something
    under `frontend/`.
-4. `.troupe/memory.md`, the project brief Troupe's own agents write.
+4. The project brief Troupe's own agents write: the commands and conventions of the
+   repository's facts (`.troupe/memory/facts.jsonl`), each that may no longer be true
+   marked so, and a line naming the `recall` tool for the rest.
 
 An `.agents/AGENTS.md` at the root, or in one of those directories, belongs to its
 directory too: it is read right before that directory's own `AGENTS.md`, so where the
@@ -619,7 +621,7 @@ things:
 | `<config>/commands/*.md`, `<workspace>/.troupe/commands/*.md` | commands | the slash commands you and the repository define | one name, the workspace's; a built-in's or an agent's name is theirs |
 | `<workspace>/.troupe/workflows/<name>.json` | workflows | the steps `workflows.list` offers | one name, one file |
 | `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on, each directory's `.agents/AGENTS.md` before its own and its `.troupe/rules/*.md` after it, and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out. Other tools' files (`CLAUDE.md`, `GEMINI.md`, Copilot's, Cursor's) are not read: `troupe onboard` brings them in once |
-| `<workspace>/.troupe/memory.md` | instructions | the project brief Troupe's agents write | read after the instruction files; never authoritative, `read_file` and `grep` are |
+| `<workspace>/.troupe/memory/facts.jsonl`, and its view `.troupe/memory.md` | instructions | the project brief Troupe's agents write, as facts | its commands and conventions read after the instruction files, the rest through `recall`; never authoritative, `read_file` and `grep` are; an edit to the view is read back as facts |
 
 ## Which one wins
 
@@ -996,9 +998,10 @@ shows a key by, in the desktop app and the terminal UI alike.
 
 | Key | Type | Default | Set by | Shown as | What it does |
 |---|---|---|---|---|---|
-| `watch` | boolean | `false` | any | watch mode | Act on `AI!` and `AI?` comments in the workspace's files. |
+| `watch` | boolean | `false` | user; project if trusted | watch mode | Act on `AI!` and `AI?` comments in the workspace's files. |
 | `watch_debounce_ms` | integer ≥ 0 | `300` | any |  | How long watch mode waits for writes to settle. |
 | `watch_poll_interval_ms` | integer ≥ 1 | `1000` | any |  | How often watch mode polls where it cannot be told. |
+| `watch_auto_approve` | boolean | `false` | user; project if trusted | watch auto approve | A branch an `AI!` or `AI?` comment starts runs its writes, edits, shell commands and MCP servers' tools without asking. Off, each asks, whatever `auto_approve`, the agent's own permissions and a server's `permission` say. |
 | `fs_events` | boolean | `false` | any |  | Record every file change in the workspace as an event. |
 | `fs_debounce_ms` | integer ≥ 0 | `100` | any |  | How long file events wait for writes to settle. |
 
@@ -1010,7 +1013,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `resume_on_restart` | boolean | `false` | any |  | A session that comes back after a restart carries on by itself. |
 | `loop_max_iterations` | integer ≥ 1 | `10` | any |  | Turns `/loop` runs when not told. |
 | `loop_max_failures` | integer ≥ 1 | `3` | any |  | Failed turns in a row that stop a loop. |
-| `memory` | boolean | `true` | any | project brief | Agents read the project brief, `.troupe/memory.md`, into every prompt and write it with `remember`. `/memory` shows it. |
+| `memory` | boolean | `true` | any | project brief | The project brief: facts about the repository, kept in `.troupe/memory/facts.jsonl` and written with `remember`. Its commands and conventions are in every prompt, the rest comes through `recall`. `/memory` lists them. |
 | `memory_auto_refresh` | boolean | `true` | any | refresh the brief | A new session in a git repository refreshes a missing or stale brief, but not within `memory_max_age_days` of a refresh that built nothing; never a headless run. |
 | `memory_max_chars` | integer ≥ 1 | `6000` | any |  | How much of the brief goes into a prompt. |
 | `memory_max_age_days` | integer ≥ 1 | `7` | any |  | How old the brief may be before it counts as stale. |

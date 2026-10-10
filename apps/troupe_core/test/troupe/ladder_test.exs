@@ -94,7 +94,7 @@ defmodule Troupe.LadderTest do
     write!(repo, "AGENTS.md", "root own")
     write!(workspace, ".agents/AGENTS.md", "app .agents")
     write!(workspace, "AGENTS.md", "app own")
-    write!(workspace, ".troupe/memory.md", "## Overview\nThe brief.\n")
+    write!(workspace, ".troupe/memory.md", "## Commands\n- The brief.\n")
 
     {files, [brief]} = Enum.split(Instructions.load(workspace, %Troupe.Config{}).files, -1)
 

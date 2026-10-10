@@ -645,29 +645,58 @@ export function useSessionView(
   return { state, status, detail, view, send, respond, answer, cancel, switchProfile, setGoal, clearGoal, startLoop, stopLoop, readBlob, offer, answerOffer, error };
 }
 
+// The start this app began for each session it started, by daemon connection: a screen
+// that goes and comes back, or one React mounts twice in development, finds the start it
+// began, so the librarian starts once per session start (the terminal client's Decision
+// 127) and an unanswered question is still there.
+const begun = new WeakMap<DaemonClient, Map<string, StartQuestions>>();
+
 /**
  * The questions a session's start asks on this computer (troupe Decision 835): onboarding
- * other tools' files into Troupe's own, then the brief. Started by the session's
- * `onboarding_suggested`, once per event, and asked of the daemon that holds the session;
- * the daemon's plan decides what is due, so a session opened again after it was answered
- * asks nothing. A team session's pod is not this computer's to onboard, and a reader
- * answers nothing, so neither is asked.
+ * other tools' files into Troupe's own, then the brief. A session this app has just
+ * started (`startedIn`, the workspace `session.create` answered with) begins at once, and
+ * goes on to start the librarian on a missing or stale brief, as the terminal client does;
+ * one opened again begins on its `onboarding_suggested`, once per event, and starts none.
+ * Both are asked of the daemon that holds the session; the daemon's plan decides what is
+ * due, so a session opened again after it was answered asks nothing. A team session's pod
+ * is not this computer's to onboard, and a reader answers nothing, so neither is asked.
  */
 export function useStartQuestions(
   daemon: DaemonClient | null,
   sessionId: string,
   onboarding: OnboardingSuggested | undefined,
-  opts: { local: boolean; canAnswer: boolean },
+  opts: { local: boolean; canAnswer: boolean; startedIn?: string | undefined },
 ): { state: StartState | null; answer: (answer: StartAnswer) => void } {
   const [state, setState] = useState<StartState | null>(null);
   const flow = useRef<StartQuestions | null>(null);
   const seq = onboarding?.seq;
   const workspace = onboarding?.workspace;
-  const { local, canAnswer } = opts;
+  const { local, canAnswer, startedIn } = opts;
 
   useEffect(() => {
     setState(null);
-    if (!daemon || !local || !canAnswer || seq === undefined || !workspace) return;
+    if (!daemon || !local || !canAnswer) return;
+
+    const started = begun.get(daemon) ?? new Map<string, StartQuestions>();
+    begun.set(daemon, started);
+    let mine = started.get(sessionId);
+    if (!mine && startedIn) {
+      mine = new StartQuestions(daemon, { workspace: startedIn, sessionId, started: true });
+      started.set(sessionId, mine);
+      void mine.start();
+    }
+    if (mine) {
+      const questions = mine;
+      flow.current = questions;
+      setState(questions.current);
+      const off = questions.subscribe(setState);
+      return () => {
+        off();
+        if (flow.current === questions) flow.current = null;
+      };
+    }
+
+    if (seq === undefined || !workspace) return;
     let live = true;
     const questions = new StartQuestions(daemon, { workspace, sessionId, onState: (s) => live && setState(s) });
     flow.current = questions;
@@ -676,7 +705,7 @@ export function useStartQuestions(
       live = false;
       if (flow.current === questions) flow.current = null;
     };
-  }, [daemon, sessionId, seq, workspace, local, canAnswer]);
+  }, [daemon, sessionId, seq, workspace, local, canAnswer, startedIn]);
 
   const answer = useCallback((a: StartAnswer) => void flow.current?.answer(a), []);
   return { state, answer };

@@ -34,6 +34,7 @@ defmodule Troupe.UI.TUI.Server do
             | :sessions
             | :files
             | :mcp
+            | :memory
             | :hq
             | :palette
             | :agents
@@ -65,6 +66,7 @@ defmodule Troupe.UI.TUI.Server do
           sessions: sessions() | nil,
           files: files() | nil,
           mcp_cursor: non_neg_integer(),
+          memory: memory() | nil,
           hq: HQ.t() | nil,
           shell: shell() | nil,
           theme: Theme.t(),
@@ -128,6 +130,17 @@ defmodule Troupe.UI.TUI.Server do
   instead (past the end, for a model; a theme is one of the choices).
   """
   @type picker :: %{choices: [Settings.choice()], cursor: non_neg_integer(), typed?: boolean()}
+
+  @typedoc """
+  `/memory`'s page (root Decision 839): the facts as the daemon answered them, the
+  brief's status, and the cursor over the facts, kind by kind as the page lists them.
+  """
+  @type memory :: %{
+          facts: [map()],
+          status: String.t(),
+          path: String.t() | nil,
+          cursor: non_neg_integer()
+        }
 
   @typedoc """
   Command-palette state (Decision 119): the filter typed so far, the cursor over the
@@ -235,6 +248,7 @@ defmodule Troupe.UI.TUI.Server do
       # The sign-in URL the daemon last answered, `%{name, url}`, shown on the page in
       # full for a person whose browser did not open (troupe-remote Decision 741).
       mcp_sign_in: nil,
+      memory: nil,
       hq: nil,
       shell: nil,
       # The person's theme, from `ui.theme` (`read_appearance/1`), and the value last said
@@ -488,6 +502,9 @@ defmodule Troupe.UI.TUI.Server do
   def handle_event(%Key{} = key, %{focus: :mcp} = state),
     do: {:noreply, mcp_key(key, %{state | quit_armed: false})}
 
+  def handle_event(%Key{} = key, %{focus: :memory} = state),
+    do: {:noreply, memory_key(key, %{state | quit_armed: false})}
+
   def handle_event(%Key{} = key, %{focus: :hq} = state),
     do: {:noreply, hq_key(key, %{state | quit_armed: false})}
 
@@ -540,6 +557,9 @@ defmodule Troupe.UI.TUI.Server do
       :mcp ->
         {:noreply, state, render?: false}
 
+      :memory ->
+        {:noreply, state, render?: false}
+
       :hq ->
         {:noreply, state, render?: false}
 
@@ -564,6 +584,7 @@ defmodule Troupe.UI.TUI.Server do
              :sessions,
              :files,
              :mcp,
+             :memory,
              :hq,
              :palette,
              :agents,
@@ -907,6 +928,7 @@ defmodule Troupe.UI.TUI.Server do
       :files -> toggle_files(state)
       :mcp -> open_mcp(state)
       :agents -> open_agents(state)
+      :memory -> open_memory(state)
       {:mcp, text} -> state |> notice(text) |> open_mcp(state.mcp_cursor)
       {:mcp_sign_in, _name, _url, _text} = signing -> signing_in(state, signing)
       {:hq, arg} -> open_hq(state, plane_arg(arg))
@@ -990,8 +1012,10 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("back", _args, _state, _target), do: :back
   defp builtin("hq", args, _state, _target), do: {:hq, args}
 
+  # Toggled from what the daemon says now (D106), not from what this screen last set: a
+  # watch the desktop app turned on is turned off here.
   defp builtin("watch", _args, state, _target),
-    do: {:watch, toggle_watch(state.session_id, state.model.watch.enabled)}
+    do: {:watch, toggle_watch(state.session_id, Client.watch_status(state.session_id).enabled)}
 
   defp builtin("cancel", _args, state, target),
     do: with_target(target.(), &Client.cancel_branch(state.session_id, &1))
@@ -1010,8 +1034,14 @@ defmodule Troupe.UI.TUI.Server do
   # which is a command that starts one.
   defp builtin("agents", _args, _state, _target), do: :agents
 
-  defp builtin("memory", args, state, _target),
-    do: notice_of(Client.memory(state.session_id, String.trim(args)))
+  # `/memory` alone opens the facts' page (root Decision 839); `refresh` and `forget` are
+  # the client's answer on the notice line.
+  defp builtin("memory", args, state, _target) do
+    case String.trim(args) do
+      "" -> :memory
+      args -> notice_of(Client.memory(state.session_id, args))
+    end
+  end
 
   defp builtin("context", _args, state, _target),
     do: notice_of(Client.instructions(state.session_id))
@@ -2187,6 +2217,55 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  ## Memory page (root Decision 839)
+
+  # `/memory` opens the page on a live `memory.get`: the facts kind by kind with their
+  # status, the selected one's evidence beside them. A daemon from before facts, or a
+  # brief that is off, is answered on the notice line as `/memory` always was. `r` reads
+  # it again, keeping the cursor.
+  defp open_memory(state, cursor \\ 0) do
+    case Client.memory_facts(state.session_id) do
+      {:ok, page} ->
+        state = %{put_cmd(state, "") | focus: :memory, memory: Map.put(page, :cursor, 0)}
+        move_memory(state, cursor)
+
+      :no_facts ->
+        notice(state, state.session_id |> Client.memory("") |> notice_text())
+
+      {:error, reason} ->
+        notice(state, to_message(reason))
+    end
+  end
+
+  defp notice_text({:ok, text}), do: text
+  defp notice_text({:error, reason}), do: to_message(reason)
+
+  defp memory_key(%Key{code: "esc"}, state), do: to_command_line(state)
+  defp memory_key(%Key{code: code}, state) when code in ["up", "k"], do: move_memory(state, -1)
+  defp memory_key(%Key{code: code}, state) when code in ["down", "j"], do: move_memory(state, 1)
+  defp memory_key(%Key{code: "r"}, state), do: open_memory(state, state.memory.cursor)
+  defp memory_key(%Key{code: "x"}, state), do: forget_selected(state)
+  defp memory_key(_key, state), do: state
+
+  defp move_memory(state, step) do
+    last = max(length(View.memory_facts(state)) - 1, 0)
+    %{state | memory: %{state.memory | cursor: (state.memory.cursor + step) |> max(0) |> min(last)}}
+  end
+
+  # One fact, by its id; what it said goes on the notice line.
+  defp forget_selected(state) do
+    case Enum.at(View.memory_facts(state), state.memory.cursor) do
+      nil ->
+        state
+
+      fact ->
+        case Client.forget_fact(state.session_id, fact["id"]) do
+          :ok -> state |> open_memory(state.memory.cursor) |> notice("forgot: #{fact["claim"]}")
+          {:error, reason} -> notice(state, to_message(reason))
+        end
+    end
+  end
+
   defp preview(state, entry) do
     path = mount_of(state.files.path) <> entry.path
 
@@ -2999,9 +3078,33 @@ defmodule Troupe.UI.TUI.Server do
         _ -> model
       end
 
-    state = shell_ended(%{state | model: model}, event)
+    state = %{state | model: model} |> shell_ended(event) |> watch_triggered(event)
     if event.type == :remote_status, do: recheck_loop(state), else: state
   end
+
+  # A saved comment started a branch in the daemon (root Decision 844): its window opens
+  # as one started here does, and the line under the screen says which file and comment
+  # started which window. Only as it happens; a journal read back opens nothing.
+  defp watch_triggered(state, %{type: :watch_triggered, data: %{session_id: child} = d})
+       when is_binary(child) do
+    prompt = d.markers |> List.first(%{}) |> Map.get("comment", "")
+
+    case Client.adopt_branch(state.session_id, child, d.agent, prompt) do
+      {:ok, window} ->
+        notice(state, Model.watch_line(%{d | agent: window}))
+
+      {:error, reason} ->
+        notice(
+          state,
+          Model.watch_line(d) <> ", but its window did not open: " <> to_message(reason)
+        )
+    end
+  end
+
+  defp watch_triggered(state, %{type: :watch_triggered, data: d}),
+    do: notice(state, Model.watch_line(d))
+
+  defp watch_triggered(state, _event), do: state
 
   # The loop on the status line is the journal's, and a daemon that stopped mid-loop left
   # the journal saying it runs: `loop_stopped interrupted` is written only when the

@@ -1109,21 +1109,6 @@ that made them. The rest were fixed with Decision 843.
 
 Found by the #502 audit, 2026-10-10.
 
-### D106 - Watch mode since the daemon split (medium)
-
-- A trigger is sent to the session's own agent (`Session.Watcher`'s `agent_path`), not to
-  a `quick` branch for `AI!` or an `answer` one for `AI?` as TUI Decision 67 had it; the
-  `watch.change_command` and `watch.question_command` settings are gone. So an `AI!` and
-  `/quick` are two paths (#502 says they should be one), and the work lands in the
-  session's own window whichever window is activated.
-- Nothing on the screen says a trigger was taken: no notice, and the activated window shows
-  nothing; only the session's own tile changes state.
-- No method or event says whether a session watches (there is only `watch.set`). The TUI's
-  status line is its own record of what it set, so a watch another client turned on shows
-  as off there, and the TUI's `/watch` turns it on again rather than off.
-
-Found by the #502 audit, 2026-10-10.
-
 ### D107 - Commands from an activated window, and the palette's rows (low)
 
 For command mode (#502 parts A and 3) and the palette (#503), whose slots own these.
