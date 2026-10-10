@@ -447,6 +447,10 @@ defmodule Troupe.Onboard do
       Enum.any?(segments, &(&1 in ["", ".", ".."])) ->
         "`#{path}` has an empty, `.` or `..` part"
 
+      # What git reads from a `.git` can run a command (Decision 833).
+      Workspace.git_dir?(path) ->
+        "`#{path}` is in a .git directory, which onboarding never writes"
+
       path =~ ~r/[\x00-\x1f:*?"<>|]/ ->
         "`#{path}` has a character a file name cannot have everywhere"
 

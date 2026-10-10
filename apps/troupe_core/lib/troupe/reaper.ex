@@ -217,7 +217,7 @@ defmodule Troupe.Reaper do
     :error, :badarg -> :ok
   end
 
-  # The caller's variables over `child_env/0`'s.
+  # The caller's variables over `child_env/0`'s; one given as `nil` is taken away.
   defp env(opts) do
     given = Keyword.get(opts, :env, [])
     names = MapSet.new(given, fn {k, _v} -> String.upcase(k) end)
@@ -225,7 +225,10 @@ defmodule Troupe.Reaper do
     child_env()
     |> Enum.reject(fn {k, _v} -> MapSet.member?(names, String.upcase(k)) end)
     |> Kernel.++(given)
-    |> Enum.map(fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
+    |> Enum.map(fn
+      {k, nil} -> {String.to_charlist(k), false}
+      {k, v} -> {String.to_charlist(k), String.to_charlist(v)}
+    end)
   end
 
   @doc """

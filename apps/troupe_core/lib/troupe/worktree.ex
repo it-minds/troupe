@@ -18,7 +18,7 @@ defmodule Troupe.Worktree do
   """
 
   alias Troupe.Config.Trust
-  alias Troupe.{Paths, Reaper, Workspace}
+  alias Troupe.{Git, Paths, Workspace}
 
   @doc """
   The main checkout `root` is a git worktree of, or `nil` for a checkout, a directory
@@ -71,8 +71,9 @@ defmodule Troupe.Worktree do
 
   # Through reaper, as every git the harness runs (Decision 733): a helper that will not
   # start is no committed files rather than a crash in whatever was loading definitions.
+  # And neutralised, confined to the checkout's own `.git` (Decision 833).
   defp git(cwd, args) do
-    case Reaper.run(cwd, ["git" | args], timeout_ms: 10_000) do
+    case Git.run(cwd, args, timeout_ms: 10_000) do
       {:ok, out, 0} -> {:ok, out}
       _other -> :error
     end
