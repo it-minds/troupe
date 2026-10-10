@@ -8,7 +8,9 @@ defmodule Troupe.MCPLocalTest do
   session's question, `allow` starts them and is remembered for the workspace, `deny`
   leaves them stopped, `once` starts them and remembers nothing, a trusted workspace is
   never asked, `managed_mcp_servers_only` starts nothing, and a `reload` reads the file
-  again. The user's layer is `Troupe.MCPLayersTest`, which has to run alone.
+  again. Its `permission: auto` applies once the workspace is trusted (Decision 830): the
+  question grants starting it, and until then its tools ask. The user's layer is
+  `Troupe.MCPLayersTest`, which has to run alone.
   """
 
   use Troupe.SessionCase, async: true
@@ -179,6 +181,112 @@ defmodule Troupe.MCPLocalTest do
       File.rm!(path)
       assert {:error, :unknown_server} = MCP.reload(session.id, "stub")
       assert MCP.status(session.id) == []
+    end
+  end
+
+  # A workspace's server set to `permission: auto` (#522, Decision 830): the question
+  # grants starting it, and its tools run unasked only once the workspace is trusted. The
+  # agent calls the tool and a person is there to ask, so an `ask` is an approval request.
+  defp auto_stub(context, opts) do
+    write_file(
+      context,
+      ".troupe/mcp.json",
+      Jason.encode!(%{
+        "mcpServers" => %{
+          "stub" => %{"command" => @elixir, "args" => [@stub], "permission" => "auto"}
+        }
+      })
+    )
+
+    start_session(context,
+      kind: Keyword.get(opts, :kind, :local),
+      steps: [{:tools, [{"mcp.stub.greet", %{"name" => "world"}}]}, {:text, "done"}],
+      config_overrides: [
+        auto_approve: false,
+        trusted_workspaces: if(opts[:trusted], do: [context.workspace], else: [])
+      ]
+    )
+  end
+
+  defp greet_result(sid) do
+    sid
+    |> events_of_type(:tool_call_completed)
+    |> Enum.find(&(&1.data["name"] == "mcp.stub.greet"))
+  end
+
+  describe "a workspace's permission: auto" do
+    test "in a workspace nobody trusts, allowing the start leaves its tools asking", context do
+      %{session: session} = auto_stub(context, trusted: false)
+      sid = session.id
+
+      [question] = wait_for_question(sid)
+      Troupe.answer(sid, question.call_id, "allow")
+
+      [greet] = sid |> wait_for_tools() |> Enum.filter(&(Tool.name(&1) == "mcp.stub.greet"))
+      assert Tool.default_permission(greet) == :ask
+
+      :ok = Troupe.subscribe(sid)
+      Troupe.send_input(sid, "say hello")
+
+      assert_receive {:troupe_event, ^sid, %Event{type: "approval_requested", data: asked}},
+                     15_000
+
+      assert asked["tool"] == "mcp.stub.greet"
+      Troupe.approve(sid, asked["call_id"], :deny)
+
+      assert_receive {:troupe_event, ^sid, %Event{type: "turn_ended", agent: ["root"]}}, 10_000
+      refute greet_result(sid).data["ok"]
+    end
+
+    test "the same workspace trusted is not asked to start it, and its tools run unasked",
+         context do
+      %{session: session} = auto_stub(context, trusted: true)
+      sid = session.id
+
+      [greet] = sid |> wait_for_tools() |> Enum.filter(&(Tool.name(&1) == "mcp.stub.greet"))
+      assert Tool.default_permission(greet) == :auto
+      assert Questions.pending(sid) == []
+
+      :ok = Troupe.subscribe(sid)
+      Troupe.send_input(sid, "say hello")
+
+      assert_receive {:troupe_event, ^sid, %Event{type: "turn_ended", agent: ["root"]}}, 15_000
+      assert events_of_type(sid, :approval_requested) == []
+      assert greet_result(sid).data["ok"]
+
+      assert (greet_result(sid).data["result"] || greet_result(sid).data["content"]) =~
+               "Hello, world!"
+    end
+
+    test "the question grants starting it, and says its tools ask until the workspace is trusted",
+         context do
+      %{session: session} = auto_stub(context, trusted: false)
+      [question] = wait_for_question(session.id)
+
+      assert question.question =~ "to start on this machine: stub ("
+      assert question.question =~ "Start them?"
+      refute question.question =~ "Run them?"
+
+      assert question.question =~
+               "stub is set to permission: auto, which applies once this workspace is trusted " <>
+                 "(troupe config trust "
+
+      assert question.question =~ "until then its tools ask before each call"
+
+      assert [%{label: "deny"}, %{label: "once"}, %{label: "allow", description: allow}] =
+               question.options
+
+      assert allow =~ "start them"
+
+      Troupe.answer(session.id, question.call_id, "deny")
+    end
+
+    test "a pod session reads none of it, trusted or not", context do
+      %{session: session} = auto_stub(context, trusted: true, kind: :team)
+
+      assert MCP.status(session.id) == []
+      assert MCP.tools(session.id) == []
+      assert Questions.pending(session.id) == []
     end
   end
 

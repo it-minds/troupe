@@ -265,6 +265,55 @@ defmodule Troupe.Gateway.LocalSourcesTest do
                "{env:API_AUTHORIZATION} is not set"
     end
 
+    # Decision 830, #522.
+    test "a workspace's server set to auto says it waits for the workspace to be trusted",
+         context do
+      File.mkdir_p!(Path.join(context.workspace, ".troupe"))
+
+      File.write!(
+        Path.join(context.workspace, ".troupe/mcp.json"),
+        Jason.encode!(%{
+          "mcpServers" => %{
+            "theirs" => %{"command" => "t", "permission" => "auto"},
+            "plain" => %{"command" => "p"}
+          }
+        })
+      )
+
+      File.write!(
+        context.user_file,
+        Jason.encode!(%{"mcpServers" => %{"mine" => %{"command" => "m", "permission" => "auto"}}})
+      )
+
+      list = fn ->
+        assert {:ok, %{"servers" => servers}} =
+                 Client.call(context.client, "mcp.list", %{"workspace" => context.workspace})
+
+        Map.new(servers, &{&1["name"], &1})
+      end
+
+      listed = list.()
+      assert listed["theirs"]["permission"] == "auto"
+      assert [%{"key" => "permission", "reason" => reason}] = listed["theirs"]["notes"]
+
+      assert reason =~
+               "theirs is set to permission: auto, which applies once this workspace is trusted"
+
+      assert reason =~ "troupe config trust "
+      assert reason =~ "until then its tools ask before each call"
+      assert listed["plain"]["notes"] == []
+      assert listed["mine"]["notes"] == []
+
+      config = Path.join([context.base, "config", "config.yaml"])
+
+      File.write!(
+        config,
+        File.read!(config) <> "trusted_workspaces:\n  - #{Jason.encode!(context.workspace)}\n"
+      )
+
+      assert Enum.all?(list.(), fn {_name, server} -> server["notes"] == [] end)
+    end
+
     test "a session's servers are joined onto the listing, and mcp.check brings one back",
          context do
       File.write!(

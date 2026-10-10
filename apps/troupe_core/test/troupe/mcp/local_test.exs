@@ -523,6 +523,92 @@ defmodule Troupe.MCP.LocalTest do
     end
   end
 
+  describe "opencode's opencode.json, linked (D100)" do
+    test "a linked opencode.json gives its servers, its mcp block read as an import reads it",
+         context do
+      from = Path.join(context.base, "project/opencode.json")
+
+      write_json!(from, %{
+        "$schema" => "https://opencode.ai/config.json",
+        "model" => "a-model",
+        "mcp" => %{
+          "docs" => %{
+            "type" => "local",
+            "command" => ["docs-server", "--stdio"],
+            "environment" => %{"LEVEL" => "debug"}
+          },
+          "tracker" => %{
+            "type" => "remote",
+            "url" => "https://mcp.example.com/mcp",
+            "enabled" => false
+          }
+        }
+      })
+
+      assert {:ok, %{linked: true, added: ["docs", "tracker"]}} =
+               Local.import(:user, nil, from, true, user_path: context.user_path)
+
+      {servers, []} = Local.resolve(nil, user_path: context.user_path)
+      assert [docs, tracker] = servers
+      assert {docs.source, docs.layer} == {from, :user}
+      assert docs.config.command == "docs-server"
+      assert docs.config.args == ["--stdio"]
+      assert docs.config.env == %{"LEVEL" => "debug"}
+      refute docs.disabled?
+      assert tracker.config.url == "https://mcp.example.com/mcp"
+      assert tracker.disabled?
+
+      assert {:ok, %{removed: ["docs", "tracker"]}} =
+               Local.remove(:user, nil, %{include: from}, user_path: context.user_path)
+    end
+  end
+
+  describe "a workspace's permission: auto (Decision 830)" do
+    test "waits for trust on a server the workspace's layer names, and on no other", context do
+      linked = Path.join(context.workspace, "tools/mcp.json")
+
+      write_json!(linked, %{
+        "mcpServers" => %{"linked" => %{"command" => "l", "permission" => "auto"}}
+      })
+
+      write_json!(context.user_path, %{
+        "mcpServers" => %{
+          "mine" => %{"command" => "m", "permission" => "auto"},
+          "shared" => %{"command" => "s", "permission" => "auto"}
+        }
+      })
+
+      write_json!(Local.workspace_path(context.workspace), %{
+        "include" => [linked],
+        "mcpServers" => %{
+          "theirs" => %{"command" => "t", "permission" => "auto"},
+          "plain" => %{"command" => "p"},
+          # Over the person's own entry: the command is the workspace's now, and so is
+          # the auto it would run under.
+          "shared" => %{"command" => "elsewhere"}
+        }
+      })
+
+      base = %{
+        "yaml" => %{
+          command: "y",
+          args: [],
+          env: %{},
+          cd: nil,
+          url: nil,
+          permission: :auto,
+          timeout_ms: 1
+        }
+      }
+
+      {servers, []} =
+        Local.resolve(context.workspace, user_path: context.user_path, base: base)
+
+      waiting = for server <- servers, Local.waits_for_trust?(server), do: server.name
+      assert waiting == ["linked", "shared", "theirs"]
+    end
+  end
+
   describe "the trust store" do
     test "remembers a server by workspace and fingerprint, and forgets on request", context do
       server = %{name: "fs", fingerprint: "abc"}

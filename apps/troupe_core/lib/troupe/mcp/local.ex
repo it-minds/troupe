@@ -10,10 +10,11 @@ defmodule Troupe.MCP.Local do
       <workspace>/.troupe/mcp.json   the workspace's, for whoever opens the repository
 
   Each file is `{"mcpServers": {name: entry}}`, so a Claude Code `.mcp.json`, a Cursor
-  or Claude Desktop file, a VS Code `servers` file or a Codex `config.toml` imports as it
-  is (`Troupe.MCP.Import`), and a file Troupe wrote is one the others can read. One key is
-  Troupe's own: `"include": [path]` reads another file in place — a *link* — so a
-  person who keeps their servers in `~/.claude/.mcp.json` need not keep two copies.
+  or Claude Desktop file, a VS Code `servers` file, an opencode `opencode.json` or a Codex
+  `config.toml` imports as it is (`Troupe.MCP.Import`), and a file Troupe wrote is one the
+  others can read. One key is Troupe's own: `"include": [path]` reads another file in
+  place — a *link* — so a person who keeps their servers in `~/.claude/.mcp.json` need
+  not keep two copies.
 
   The layers stack the way `config.yaml` does (Decision 686): the user's file, then the
   workspace's, an entry of the same name merged key by key with the higher layer's
@@ -26,9 +27,14 @@ defmodule Troupe.MCP.Local do
   `config.yaml`'s `mcp:` stays as it was, the lowest layer of the three. A `{env:VAR}`
   in any string is read as `Troupe.Config` reads it: unset refuses that server, naming
   the variable, and nothing is sent in its place.
+
+  A server the workspace's layer names, in its own file or one it links, that says
+  `permission: auto` runs its tools unasked only once the workspace is trusted
+  (`waits_for_trust?/1`, Decision 830): answering the question that starts it grants
+  starting it, as a workspace agent's `auto` waits (Decision 825).
   """
 
-  alias Troupe.Config.{Layers, Migrate}
+  alias Troupe.Config.{Layers, Migrate, Trust}
   alias Troupe.MCP.{Import, OAuth, Server}
   alias Troupe.Workspace
 
@@ -127,9 +133,11 @@ defmodule Troupe.MCP.Local do
   end
 
   # A file with only `include` is a file with no servers of its own, not a malformed one.
+  # A linked file is read under whichever key its tool keeps its servers, as an import
+  # reads it: opencode's `opencode.json` has them under `mcp` (Decision 830).
   defp servers_of(path, decoded) do
     wrapped =
-      case Map.take(decoded, ["mcpServers", "servers", "mcp_servers"]) do
+      case Map.take(decoded, ["mcpServers", "servers", "mcp", "mcp_servers"]) do
         empty when map_size(empty) == 0 -> %{"mcpServers" => %{}}
         some -> some
       end
@@ -391,6 +399,31 @@ defmodule Troupe.MCP.Local do
 
   defp present(value) when is_binary(value) and value != "", do: value
   defp present(_value), do: nil
+
+  @doc """
+  Whether a server's `permission: auto` waits for the workspace to be trusted
+  (`trusted_workspaces`, Decision 686) before its tools run unasked: one the workspace's
+  layer names, in `.troupe/mcp.json` or a file it links, since that came with a clone.
+  An entry the workspace's file changes over one of the person's own is the workspace's
+  too, since what would run unasked is then what the workspace says. The person's own
+  `mcp.json` and `config.yaml`'s `mcp:` keep what they say (Decision 830).
+  """
+  @spec waits_for_trust?(server()) :: boolean()
+  def waits_for_trust?(%{layer: :workspace, config: %{permission: :auto}}), do: true
+  def waits_for_trust?(_server), do: false
+
+  @doc """
+  What a held `auto` waits for, naming the servers and the command that trusts the
+  workspace: for the question that starts them and `mcp.list`'s note.
+  """
+  @spec held_reason([String.t()], Path.t()) :: String.t()
+  def held_reason(names, workspace) do
+    {is, its} = if match?([_], names), do: {"is", "its"}, else: {"are", "their"}
+
+    "#{Enum.join(names, ", ")} #{is} set to permission: auto, which applies once this " <>
+      "workspace is trusted (#{Trust.command(workspace)}); until then " <>
+      "#{its} tools ask before each call"
+  end
 
   @doc """
   What would run, hashed: the command, its arguments, its environment, its directory or
