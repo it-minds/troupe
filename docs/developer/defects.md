@@ -926,18 +926,6 @@ Found by the #371 fixer, 2026-10-08.
 
 Found by the #465 fixer and the coordinator's live run, 2026-10-08.
 
-### D93 - Tab completes a command name without its slash (low)
-
-`complete_command/2` in `clients/tui/lib/troupe/ui/tui/server.ex` (TUI Decision 38)
-completes a command name on a line with no slash: "mer" and Tab give "merge ", "hel" and
-Tab give "help ", and "merge 2" and Tab give "merge code-1". Since #496 a line without a
-slash goes to the agent, so Enter then sends those words to the agent instead of running
-the command. The palette's way ("/", "mer", Tab) still gives "/merge " and runs it.
-Putting the slash in when Tab completes a command name, or offering no command names on
-a line without one, would end it.
-
-Found by the #496 fixer, 2026-10-09.
-
 ### D94 - The installers after the start-at-login step (#504) (low)
 
 - `install.ps1` has no `[CmdletBinding()]`, so an unknown or misspelt switch is taken into
@@ -1108,6 +1096,110 @@ Found by the #519, #522 and client fixers, 2026-10-10.
 
 Found by the #528, #529 and #536 fixers, 2026-10-10.
 
+### D105 - Branch commands since a branch became a session of its own (medium)
+
+What the command audit ([command-audit.md](command-audit.md)) found the TUI's branch
+commands no longer doing, against their rows in `Troupe.Commands` and the TUI decisions
+that made them.
+
+- `/cancel` (and `x` twice in a window) only cancels the branch's turn
+  (`Troupe.Client.Daemon.cancel_branch/2` sends `turn.cancel`): the window stays and the
+  worktree Troupe made for it is kept. The row says it removes the window and the
+  worktree, as TUI Decision 57 had it. After a cancel mid-tool the window reads finished.
+- `/worktree <existing> <prompt>` and `/worktree <name>: <prompt>` start the default agent
+  in a fresh worktree with the whole line as its prompt: `Daemon.dispatch/3` reads neither
+  form (TUI Decisions 39 and 42). Tab after `/worktree ` offers the checkout's own branch
+  first, and never a `<name>:`, since `Daemon.worktrees/1` returns no managed names.
+- `/dismiss`'s row says a branch's session stays in the daemon "where /sessions still
+  lists it"; the picker leaves out every session with a parent (`pickable_sessions/1`), so
+  a dismissed branch can't be reached from the TUI again.
+- A `/merge` git refuses because the checkout has uncommitted changes to the files the
+  branch changed says "merge conflicts; resolve in your checkout", though nothing
+  conflicted and there is nothing to resolve. The checkout is left as it was, rightly.
+  `merge_branch/2` in `Troupe.Gateway.Worktrees` reads any failed merge as conflicts.
+- `worktree.remove` (the desktop app's) still runs git inside the tree it removes, which on
+  Windows git cannot delete; `merge` and `discard` no longer do. A merge whose tree then
+  can't be removed has already landed, and the caller is told only the removal's error.
+- After `/merge`, `/discard` or `/dismiss` from the palette over the activated window, the
+  screen's focus still names the closed window until the next key.
+- `/ask` runs as a branch of the session, so its `read_branch` lists the session it was
+  started from (`build idle (no prompt)`) as though it were a branch, and with nothing
+  finished it never says so.
+- `/dismiss` of a session's own window lets go of the session and leaves the screen on it.
+  On a pod session what is typed next goes to this machine's daemon (`Client.impl/1` finds
+  the remote registration gone): `/memory` answers from this machine, `/merge` says "no
+  branch", `/watch` and `/goal` say the session is not open.
+
+Found by the #502 audit, 2026-10-10.
+
+### D106 - Watch mode since the daemon split (medium)
+
+- A trigger is sent to the session's own agent (`Session.Watcher`'s `agent_path`), not to
+  a `quick` branch for `AI!` or an `answer` one for `AI?` as TUI Decision 67 had it; the
+  `watch.change_command` and `watch.question_command` settings are gone. So an `AI!` and
+  `/quick` are two paths (#502 says they should be one), and the work lands in the
+  session's own window whichever window is activated.
+- Nothing on the screen says a trigger was taken: no notice, and the activated window shows
+  nothing; only the session's own tile changes state.
+- No method or event says whether a session watches (there is only `watch.set`). The TUI's
+  status line is its own record of what it set, so a watch another client turned on shows
+  as off there, and the TUI's `/watch` turns it on again rather than off.
+
+Found by the #502 audit, 2026-10-10.
+
+### D107 - Commands from an activated window, and the palette's rows (low)
+
+For command mode (#502 parts A and 3) and the palette (#503), whose slots own these.
+
+- A slash command typed into an activated window's input box is sent to that window's
+  agent as words; only `/todo` and `/upload` are taken as commands there
+  (`window_key/3`). Commands from a window go through the palette (Ctrl-K).
+- The palette opened over a window puts a command that needs an argument (`/upload`,
+  `/worktree`, every agent row) on the command line and lets the window go; its Tab and
+  Space do so for any row (`to_line/2`), so `/copy` taken with Tab has no window to copy.
+- The palette's Tab takes the selected row, which is the first row whose name or summary
+  matches: "wor" and Tab give `/merge ` (its summary says "worktree"). Space checks that
+  the name starts with what was typed.
+- A repository command with an `argument-hint` runs on Enter in the palette with
+  `$ARGUMENTS` empty ("Review  and say what you would change").
+- A repository command run while a branch's window is activated goes to the session's
+  own agent, not the window's (`Client.run_command/3`, by design in Decision 763); the
+  palette doesn't say so.
+- `/agents` lists `worktree` among the agents (`Troupe.Client.Daemon.commands/1` adds it).
+- `explore`, `general`, `implementer` and `reviewer` ship as subagents, so they have no
+  row and nothing a person types starts one; #502 lists them as rows.
+
+Found by the #502 audit, 2026-10-10.
+
+### D108 - A dropped connection: a large `/upload`, and a call in flight (medium)
+
+- `/upload` of a file over about 16 MB fails with "the daemon is not reachable": the TUI
+  reads the whole file and sends it as one `fs.upload` frame, and the daemon's WebSocket
+  listener closes the connection at its 16 MiB frame limit (`max_frame_bytes`,
+  `TROUPE_MAX_FRAME_BYTES`; Bandit logs `{:deserializing, :max_frame_size_exceeded}`).
+  `initialize` advertises `max_message_bytes` as 64 MiB, the socket transport's limit, and
+  the TUI checks neither before sending. The connection comes back by itself, but any call
+  in flight on it is lost.
+- When the daemon closes the connection while a call is waiting on it,
+  `Troupe.Client.Daemon.Link` exits with its connection and the caller's `GenServer.call`
+  exits too: a TUI that ran the command is gone. Seen with `/merge` on Windows before the
+  audit's fix to the gateway (a git failure there closed the connection).
+
+Found by the #502 audit, 2026-10-10.
+
+### D109 - `/copy` and Ctrl-Y fail on Windows (medium)
+
+`Troupe.Clipboard` feeds `clip` through `cmd.exe /c "clip < <file>"`, run by the TUI's
+`Troupe.OS.Process.run/3`, and on Windows that runner gets "The syntax of the command is
+incorrect." from `cmd.exe` for any command, `echo hi` included; core's
+`Troupe.Reaper.run/3` runs the same `cmd.exe /c echo hi`, and PowerShell runs through
+`OS.Process`. So the installed TUI's `/copy` says "clip exited 1: The syntax of the command
+is incorrect." and copies nothing. The suite sets its own clipboard command, and the
+`ClipboardTest` runs on Linux only. Not tried against a person's clipboard, which a copy
+that works would overwrite.
+
+Found by the #502 audit, 2026-10-10.
+
 ## Taken
 
 | Defect | Taken by |
@@ -1206,6 +1298,7 @@ Found by the #528, #529 and #536 fixers, 2026-10-10.
 | D100's first item - a linked `opencode.json` gave no servers | #522, PR #531 |
 | D98's librarian item - its prompt said other tools' files are in every prompt | #516, PR #534 |
 | D84's last item - an instruction file that couldn't be read only logged a warning | #516, PR #533 |
+| D93 - Tab completed a command name without its slash | #502's audit |
 
 ## Checked and not a defect
 
