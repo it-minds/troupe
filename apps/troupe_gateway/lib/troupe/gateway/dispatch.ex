@@ -448,7 +448,9 @@ defmodule Troupe.Gateway.Dispatch do
   # `agents/`, the project's `.troupe/agents/` — resolved the way `session.create` will
   # resolve them, so a picker offers exactly what a `profile` may name. A project agent's
   # `notes` say what of it waits for the workspace to be trusted (Decision 825): a
-  # session here trusts it as the user's file says, and a pod's trusts none.
+  # session here trusts it as the user's file says, and a pod's trusts none. `skipped` is
+  # each agent file found and not read, with why: one linked out of the workspace
+  # (Decision 829), or in a worktree one its main checkout has not committed.
   defp handle("agents.list", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace") do
       workspace = Path.expand(workspace)
@@ -456,9 +458,10 @@ defmodule Troupe.Gateway.Dispatch do
       trusted? =
         Process.whereis(Troupe.Gateway.Daemon) != nil and Troupe.Config.trusted?(workspace)
 
+      definitions = Definitions.load(workspace)
+
       agents =
-        workspace
-        |> Definitions.load()
+        definitions
         |> Definitions.trust(trusted?, workspace)
         |> Definitions.primaries()
         |> Enum.map(
@@ -472,7 +475,12 @@ defmodule Troupe.Gateway.Dispatch do
         )
         |> Enum.sort_by(& &1["name"])
 
-      {:ok, %{"agents" => agents}}
+      skipped =
+        definitions
+        |> Definitions.skipped()
+        |> Enum.map(&(&1 |> Definitions.skipped_to_json() |> Map.delete("kind")))
+
+      {:ok, %{"agents" => agents, "skipped" => skipped}}
     end
   end
 

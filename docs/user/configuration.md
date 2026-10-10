@@ -130,6 +130,18 @@ workspace; until then the tool asks as it would without the file, and `agents.li
 gives the agent a note saying so and naming the command. Its `ask` and `deny` apply
 either way, and your own `<config>/agents/` and the built-ins are not the workspace's.
 
+So does what a workspace's `.troupe/skills.json` includes from outside the repository
+(`"include": ["~"]`): its skills are offered, and its files readable with `read_file`,
+only once the workspace is trusted, as a `read_roots` in its `config.yaml` is.
+Until then `skills.list` names it, why, and the command. An include inside the
+repository is read either way.
+
+Trusted or not, a workspace's `.troupe/agents`, `commands`, `workflows` and `skills` are
+read only where they really are inside the workspace. A file there, or the whole
+directory, that is a link to somewhere else on the machine is not read, and is listed
+with why: in `agents.list` and `skills.list`, and in the session's log. Reaching outside
+the repository is what a trusted `skills.json` is for.
+
 ## Your own MCP servers and skills
 
 Beside `config.yaml` there are two more files a person keeps, in the shape other tools

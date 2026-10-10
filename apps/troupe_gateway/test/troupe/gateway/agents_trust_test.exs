@@ -3,8 +3,10 @@ defmodule Troupe.Gateway.AgentsTrustTest do
   `agents.list` and a workspace's own agents (#511, Decision 825): an agent in
   `.troupe/agents/` that sets a tool to `auto` says in its `notes` that the `auto` waits
   for the workspace to be trusted, and what trusts it; once the user's file trusts the
-  workspace, the note is gone. A pod trusts no workspace's agents. Its own config
-  directory, so the suite's (which trusts the temp directory) is not the one read.
+  workspace, the note is gone. A pod trusts no workspace's agents. Beside them,
+  `skipped` lists an agent file linked out of the workspace, not read (Decision 829). Its
+  own config directory, so the suite's (which trusts the temp directory) is not the one
+  read.
   """
 
   use ExUnit.Case, async: false
@@ -77,6 +79,34 @@ defmodule Troupe.Gateway.AgentsTrustTest do
              Client.call(client, "agents.list", %{"workspace" => context.workspace})
 
     assert runner(agents)["notes"] == []
+  end
+
+  # Decision 829: a workspace's agent file that is a link out of it is not read, and is
+  # listed beside the agents with why, the same answer on a pod.
+  test "an agent file linked out of the workspace is skipped, not listed", context do
+    elsewhere = Path.join(context.base, "elsewhere")
+    File.mkdir_p!(elsewhere)
+    File.write!(Path.join(elsewhere, "spy.md"), "---\nmode: primary\n---\nFrom elsewhere.")
+    link = Path.join(context.workspace, ".troupe/agents/spy.md")
+    File.ln_s!(Path.join(elsewhere, "spy.md"), link)
+
+    dispatch = %Dispatch.Context{
+      principal: %{"subject" => "someone"},
+      scopes: [:observe],
+      connection: self()
+    }
+
+    assert {:ok, %{"agents" => agents, "skipped" => [skipped]}} =
+             Dispatch.call("agents.list", %{"workspace" => context.workspace}, dispatch)
+
+    refute Enum.any?(agents, &(&1["name"] == "spy"))
+    assert runner(agents)
+
+    assert skipped == %{
+             "name" => "spy",
+             "path" => link,
+             "reason" => "not read: outside the workspace"
+           }
   end
 
   # A pod runs the same dispatcher without the daemon, and trusts no workspace's agents.

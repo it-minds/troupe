@@ -131,7 +131,7 @@ defmodule Troupe.Tools do
     definition
     |> for_definition(ctx.session_id)
     |> entitled_servers(ctx.bundle)
-    |> Kernel.++(Skills.tools(ctx.bundle, definition, skills_root(ctx)))
+    |> Kernel.++(skill_tools(definition, ctx))
     |> Kernel.++(loop_tools(ctx))
     |> task_list(definition, ctx)
   end
@@ -149,9 +149,13 @@ defmodule Troupe.Tools do
   defp task_list(tools, _definition, _ctx), do: tools
 
   # The person's own skills are read beside the workspace (Decision 700), and only when
-  # there is one to read beside: a context built without a workspace has no layer.
-  defp skills_root(%Ctx{workspace: %Troupe.Workspace{root_real: root}}), do: root
-  defp skills_root(%Ctx{}), do: nil
+  # there is one to read beside: a context built without a workspace has no layer. What
+  # its `skills.json` links from outside the repository waits for the session to trust it
+  # (Decision 829).
+  defp skill_tools(definition, %Ctx{workspace: %Troupe.Workspace{} = ws} = ctx),
+    do: Skills.tools(ctx.bundle, definition, ws.root_real, trusted: ws.trusted?)
+
+  defp skill_tools(definition, %Ctx{} = ctx), do: Skills.tools(ctx.bundle, definition, nil)
 
   # A loop's structured verdict (Decision 679), on the turns a running loop started and
   # no others, and outside the profile's list: it changes nothing but whether the loop
@@ -266,7 +270,7 @@ defmodule Troupe.Tools do
   defp or_scoped({:ok, tool}, _name, _definition, _ctx), do: {:ok, tool}
 
   defp or_scoped({:error, reason}, name, definition, ctx) do
-    case Enum.find(Skills.tools(ctx.bundle, definition, skills_root(ctx)), &(Tool.name(&1) == name)) do
+    case Enum.find(skill_tools(definition, ctx), &(Tool.name(&1) == name)) do
       nil -> {:error, reason}
       tool -> {:ok, tool}
     end

@@ -218,16 +218,24 @@ defmodule Troupe.Skills.LocalTest do
 
     assert links == Path.join(context.workspace, ".troupe/skills.json")
 
-    assert [%{name: "review", layer: :workspace, linked?: true, source: ^claude}] =
-             Local.list(context.workspace, user_dir: context.user_dir)
+    # Outside the repository, so read once the workspace is trusted (Decision 829), and
+    # until then listed as waiting for it.
+    trusted = [user_dir: context.user_dir, trusted: true]
 
-    assert Local.roots(context.workspace, user_dir: context.user_dir) == [claude]
+    assert [%{name: "review", layer: :workspace, linked?: true, source: ^claude}] =
+             Local.list(context.workspace, trusted)
+
+    assert Local.roots(context.workspace, trusted) == [claude]
+    assert Local.roots(context.workspace, user_dir: context.user_dir) == []
+
+    assert %{skills: [], skipped: [%{name: nil, dir: ^claude, status: :outside}]} =
+             Local.resolve(context.workspace, user_dir: context.user_dir)
 
     # Read in place: a skill added to the linked directory is listed at once.
     skill!(claude, "deploy", "Also from Claude Code")
 
     assert ["deploy", "review"] =
-             context.workspace |> Local.list(user_dir: context.user_dir) |> Enum.map(& &1.name)
+             context.workspace |> Local.list(trusted) |> Enum.map(& &1.name)
 
     assert {:error, message} = Local.remove(:workspace, context.workspace, %{name: "review"}, [])
     assert message =~ "comes from"
@@ -235,7 +243,7 @@ defmodule Troupe.Skills.LocalTest do
     assert {:ok, %{removed: ["deploy", "review"]}} =
              Local.remove(:workspace, context.workspace, %{include: claude}, [])
 
-    assert Local.list(context.workspace, user_dir: context.user_dir) == []
+    assert Local.list(context.workspace, trusted) == []
   end
 
   test "removes a copied skill, and says so when there is none", context do

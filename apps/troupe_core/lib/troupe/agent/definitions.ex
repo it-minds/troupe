@@ -22,19 +22,42 @@ defmodule Troupe.Agent.Definitions do
   In a git worktree the project layer is the worktree's own `.troupe/agents/` over the
   main checkout's, of which only what the checkout has committed is read
   (`Troupe.Worktree`).
+
+  The project layer is held to its workspace (the main checkout's to the checkout) by
+  where each file really is, links followed (Decision 829): a file that is a link out of
+  it, or a `.troupe/agents` that is one, is not read, and is listed in `skipped`, the
+  directory once with no name and not looked into.
   """
 
   alias Troupe.Agent.Definition
-  alias Troupe.{Paths, Worktree}
+  alias Troupe.{Paths, Workspace, Worktree}
 
   @enforce_keys [:by_name]
   defstruct [:by_name, skipped: []]
 
+  @outside_workspace "not read: outside the workspace"
+  @outside_checkout "not read: outside the main checkout"
+
   @typedoc """
-  A file found and not read, with why: an agent or a skill (`Troupe.Skills.skipped/2`),
-  the name it would have had, where it is, and a sentence a person can act on.
+  A file found and not read, with why: an agent, a skill (`Troupe.Skills.skipped/2`), a
+  command (`Troupe.Commands.Local.skipped/1`) or a workflow (`Troupe.Workflow.skipped/1`),
+  the name it would have had, where it is, and a sentence a person can act on. A
+  directory not looked into has no name.
   """
-  @type skipped :: %{kind: :agent | :skill, name: String.t(), path: Path.t(), reason: String.t()}
+  @type skipped :: %{
+          kind: :agent | :skill | :command | :workflow,
+          name: String.t() | nil,
+          path: Path.t(),
+          reason: String.t()
+        }
+
+  @doc "Why a workspace's own file, linked out of it, is not read (Decision 829)."
+  @spec outside_workspace() :: String.t()
+  def outside_workspace, do: @outside_workspace
+
+  @doc "Why a worktree's main checkout's file, linked out of the checkout, is not read."
+  @spec outside_checkout() :: String.t()
+  def outside_checkout, do: @outside_checkout
 
   @type t :: %__MODULE__{
           by_name: %{optional(String.t()) => Definition.t()},
@@ -108,9 +131,11 @@ defmodule Troupe.Agent.Definitions do
   def load(workspace_root, opts \\ []) do
     pin = pin(opts)
     bundle = bundle_layer(pin && pin[:dir])
-    project = layer(Path.join(Paths.project_dir(workspace_root), "agents"), :project)
+    project_dir = Path.join(Paths.project_dir(workspace_root), "agents")
+    project = held_layer(project_dir, workspace_root, @outside_workspace)
     {checkout, uncommitted} = checkout_layer(workspace_root, project)
     disk = [layer(Path.join(Paths.config_dir(), "agents"), :global)] ++ checkout ++ [project]
+    outside = Enum.flat_map(disk, &Map.get(&1, :outside, []))
 
     wins? = bundle_wins?(pin)
     acp = Keyword.get(opts, :acp_agents, [])
@@ -122,7 +147,7 @@ defmodule Troupe.Agent.Definitions do
       |> merge_acp(acp)
       |> entitled(Keyword.get(opts, :entitled))
 
-    %__MODULE__{by_name: by_name, skipped: uncommitted ++ lost}
+    %__MODULE__{by_name: by_name, skipped: outside ++ uncommitted ++ lost}
   end
 
   # The pin, given whole, or as the directory and the profile's word on it.
@@ -141,6 +166,23 @@ defmodule Troupe.Agent.Definitions do
 
   # A layer is a directory, its source, and the names of the files read from it.
   defp layer(dir, source), do: %{dir: dir, source: source, names: names_in(dir)}
+
+  # A repository's layer, held to `root` (Decision 829): what is really outside it is not
+  # read, and is `outside`, with why; a directory that is itself a link out, once.
+  defp held_layer(dir, root, reason) do
+    case Workspace.files_within(dir, ".md", root) do
+      :outside ->
+        %{dir: dir, source: :project, names: [], outside: [skip_dir(dir, reason)]}
+
+      {inside, outside} ->
+        %{
+          dir: dir,
+          source: :project,
+          names: inside |> Enum.map(&Path.basename(&1, ".md")) |> Enum.sort(),
+          outside: Enum.map(outside, &skip(dir, Path.basename(&1, ".md"), reason))
+        }
+    end
+  end
 
   defp bundle_layer(nil), do: nil
   defp bundle_layer(dir), do: layer(Path.join(dir, "agents"), :bundle)
@@ -173,19 +215,24 @@ defmodule Troupe.Agent.Definitions do
   defp names_of(nil), do: []
   defp names_of(layer), do: layer.names
 
-  # In a worktree, the main checkout's committed agents, below the worktree's own. One the
-  # checkout has not committed is listed, unless the worktree has its own of that name and
-  # would not have read the checkout's anyway.
+  # In a worktree, the main checkout's committed agents, below the worktree's own, held to
+  # the checkout. One the checkout has not committed, or that is a link out of it, is
+  # listed, unless the worktree has its own of that name and would not have read the
+  # checkout's anyway.
   defp checkout_layer(workspace_root, project) do
     with main when is_binary(main) <- Worktree.main(workspace_root),
          dir = Path.join(Paths.project_dir(main), "agents"),
-         [_ | _] = names <- names_in(dir) -- project.names do
-      committed = Worktree.committed(main, ".troupe/agents")
+         found = held_layer(dir, main, @outside_checkout),
+         outside = Enum.reject(found.outside, &(&1.name in project.names)),
+         names = found.names -- project.names,
+         true <- names != [] or outside != [] do
+      committed =
+        if names == [], do: MapSet.new(), else: Worktree.committed(main, ".troupe/agents")
 
       {kept, drafts} =
         Enum.split_with(names, &MapSet.member?(committed, ".troupe/agents/#{&1}.md"))
 
-      {[%{dir: dir, source: :project, names: kept}],
+      {[%{found | names: kept, outside: outside}],
        Enum.map(drafts, &skip(dir, &1, Worktree.uncommitted(main)))}
     else
       _none -> {[], []}
@@ -194,6 +241,8 @@ defmodule Troupe.Agent.Definitions do
 
   defp skip(dir, name, reason),
     do: %{kind: :agent, name: name, path: Path.join(dir, name <> ".md"), reason: reason}
+
+  defp skip_dir(dir, reason), do: %{kind: :agent, name: nil, path: dir, reason: reason}
 
   defp names_in(dir) do
     case File.ls(dir) do
