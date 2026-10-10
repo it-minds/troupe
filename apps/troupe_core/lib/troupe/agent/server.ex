@@ -2215,12 +2215,18 @@ defmodule Troupe.Agent.Server do
     if call.timer, do: Process.cancel_timer(call.timer)
     if call.monitor, do: Process.demonitor(call.monitor, [:flush])
 
-    log(state, :tool_call_completed, %{
-      "call_id" => call.id,
-      "name" => call.name,
-      "ok" => result.ok?,
-      "content" => store_payload(state, result.content)
-    })
+    # A tool's own fields go beside `ok` and never over the four every call has: how a
+    # `shell` command ended (Decision 837). The model is handed `content` alone.
+    log(
+      state,
+      :tool_call_completed,
+      Map.merge(Map.get(result.meta, :fields, %{}), %{
+        "call_id" => call.id,
+        "name" => call.name,
+        "ok" => result.ok?,
+        "content" => store_payload(state, result.content)
+      })
+    )
 
     :telemetry.execute(
       [:troupe, :tool, :stop],

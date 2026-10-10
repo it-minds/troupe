@@ -16,6 +16,9 @@
 //   what changed                 settings file changed (troupe #57), whoever changed it
 //   it asks the first run's      `setup.get` says where it stands and `setup.answer`
 //   questions                    moves it a step, checking a key and writing the settings
+//   it onboards other tools'     a start says `onboarding_suggested`, and `onboard.plan`,
+//   files, then the brief        `onboard.apply`, `onboard.decline` and `memory.decline`
+//                                answer what is due and take the person's answers
 //
 // It implements the protocol rather than imitating a screen, for the same reason the
 // fake worker does: a test that passes against a fake that agrees with the client by
@@ -97,6 +100,11 @@ export interface FakeDaemonOptions {
    * (troupe Decision 814).
    */
   autoApprove?: boolean;
+  /**
+   * False is a daemon from before the start's questions (troupe Decision 835): the
+   * `onboard.*` methods and `memory.decline` answer `method_not_found`.
+   */
+  onboard?: boolean;
 }
 
 /** A workspace's command waiting on its question (troupe Decision 814). */
@@ -182,6 +190,116 @@ export interface FakeSkippedSkill {
 export interface Importable {
   servers?: Record<string, Record<string, unknown>>;
   skills?: Array<{ name: string; description: string }>;
+}
+
+/** One file onboarding would write, as `onboard.plan` lists it (troupe Decision 835). */
+export interface FakeOnboardItem {
+  id: string;
+  target: "repo" | "workspace" | "user";
+  path: string;
+  shown: string;
+  status: "new" | "changed";
+  question: "write" | "create_agents_md";
+  source: string;
+  also_from: string[];
+  was: string | null;
+  notes: string[];
+  diff: string;
+}
+
+/**
+ * Where onboarding and the brief stand in one workspace, as the daemon keeps them: what
+ * the plan would write, under which version of the rules the workspace was onboarded
+ * (null: never), and the brief's survey. Each file answered — written or declined — leaves
+ * the plan, and the version is recorded once none is left.
+ */
+export interface FakeOnboarding {
+  version: number;
+  recorded: number | null;
+  tools: string[];
+  items: FakeOnboardItem[];
+  skipped?: Array<{ source: string; reason: string }>;
+  brief?: { due: "first" | "stale" | "outdated" | "none"; recorded: number | null; version: number };
+  /** The sentence onboarding answers with where it may not run, as on a machine a worker runs on. */
+  refusal?: string;
+}
+
+/**
+ * A repository with Claude Code's and Cursor's files and nothing onboarded: an `AGENTS.md`
+ * to create from `CLAUDE.md` (its own question), one to add to in `web/`, and two rules.
+ * The brief, when asked for, was written by an older survey.
+ */
+export function exampleOnboarding(opts: { briefOutdated?: boolean } = {}): FakeOnboarding {
+  return {
+    version: 2,
+    recorded: null,
+    tools: ["Claude Code", "Cursor"],
+    items: [
+      {
+        id: "p1",
+        target: "workspace",
+        path: "AGENTS.md",
+        shown: "AGENTS.md",
+        status: "new",
+        question: "create_agents_md",
+        source: "CLAUDE.md",
+        also_from: [".claude/CLAUDE.md"],
+        was: null,
+        notes: ["the first heading named CLAUDE.md and is written # AGENTS.md"],
+        diff: "+ # AGENTS.md\n+ \n+ Run the tests with `make test` before you push.",
+      },
+      {
+        id: "p2",
+        target: "workspace",
+        path: "web/AGENTS.md",
+        shown: "web/AGENTS.md",
+        status: "changed",
+        question: "write",
+        source: "web/CLAUDE.md",
+        also_from: [],
+        was: null,
+        notes: [],
+        diff: "  # web\n  \n+ Components live in src/components, one per file.",
+      },
+      {
+        id: "p3",
+        target: "repo",
+        path: "rules/style.md",
+        shown: ".troupe/rules/style.md",
+        status: "new",
+        question: "write",
+        source: ".cursor/rules/style.mdc",
+        also_from: [],
+        was: null,
+        notes: [],
+        diff: '+ ---\n+ globs: ["src/**/*.ts"]\n+ ---\n+ Prefer named exports.',
+      },
+      {
+        id: "p4",
+        target: "repo",
+        path: "rules/legacy.md",
+        shown: ".troupe/rules/legacy.md",
+        status: "new",
+        question: "write",
+        source: ".cursorrules",
+        also_from: [],
+        was: null,
+        notes: ["the legacy file is always applied"],
+        diff: "+ ---\n+ alwaysApply: true\n+ ---\n+ Write in British English.",
+      },
+    ],
+    skipped: [{ source: "CLAUDE.local.md", reason: "Claude Code's personal file, usually not committed: move it into your own AGENTS.md by hand, or leave it" }],
+    ...(opts.briefOutdated ? { brief: { due: "outdated" as const, recorded: 1, version: 2 } } : {}),
+  };
+}
+
+/** The librarian as `session.create` was asked to start it: on which workspace, from which session, with what. */
+export interface FakeLibrarian {
+  sessionId: string;
+  workspace: string;
+  parent: string | null;
+  prompt: string | null;
+  worktree: string | null;
 }
 
 /** What the fake daemon's settings file holds. The key is here and nowhere in an answer. */
@@ -300,6 +418,16 @@ export class FakeDaemon {
   readonly commandsAllowed = new Map<string, string>();
   /** Workspace commands waiting on their question, by the question's `call_id`. */
   private readonly askedCommands = new Map<string, AskedCommand>();
+  /** Onboarding and the brief by workspace (troupe Decision 835); a workspace not here has nothing due. */
+  onboarding: Record<string, FakeOnboarding> = {};
+  /** Each file `onboard.apply` wrote or `onboard.decline` turned down, as `<workspace> <id>`. */
+  readonly onboarded = new Map<string, "written" | "declined">();
+  /** The version a workspace's whole plan was declined for (`onboard.decline` with `all`). */
+  readonly onboardDeclined = new Map<string, number>();
+  /** The survey version a workspace's outdated brief was declined for (`memory.decline`). */
+  readonly briefDeclined = new Map<string, number>();
+  /** Every librarian `session.create` started, oldest first. */
+  readonly librarians: FakeLibrarian[] = [];
 
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -311,6 +439,7 @@ export class FakeDaemon {
   private readonly env: Record<string, string>;
   private readonly opencode: { providers: string[]; default: string | null };
   private readonly servesKeys: boolean;
+  private readonly servesOnboard: boolean;
   private nextId = 1;
   private restarts = 0;
 
@@ -323,6 +452,7 @@ export class FakeDaemon {
     this.env = opts.env ?? {};
     this.opencode = opts.opencode ?? { providers: [], default: null };
     this.servesKeys = opts.servesKeys ?? true;
+    this.servesOnboard = opts.onboard ?? true;
     this.autoApprove = opts.autoApprove ?? false;
     this.setupCompleted = opts.firstRun ? null : { completed_at: "2026-09-01T08:00:00Z", choice: "local", subject: null };
   }
@@ -421,6 +551,151 @@ export class FakeDaemon {
   ask(sessionId: string, question: Record<string, unknown>): LoggedEvent {
     const session = this.sessions.get(sessionId)!;
     return session.log.append("question_asked", { agent_path: ["root"], options: [], multiple: false, ...question });
+  }
+
+  /**
+   * What a session's start writes when onboarding or the brief is due in its workspace
+   * (troupe Decisions 827 and 835): one `onboarding_suggested`, with what is due, counts by
+   * kind and the harness's sentence; nothing when nothing is. `session.create` calls it; a
+   * test calls it for a session it seeded.
+   */
+  suggest(sessionId: string): LoggedEvent | null {
+    const session = this.sessions.get(sessionId)!;
+    const o = this.onboarding[session.workspace];
+    if (!o) return null;
+    const plan = this.planOf(session.workspace);
+    const due = plan.onboarding.due;
+    const briefDue = plan.brief.due;
+    if (due === "none" && briefDue !== "outdated" && !o.refusal) return null;
+    // The workspace's own files only, as the notice counts them: what a client would ask about.
+    const own = plan.onboarding.items.filter((i) => i.target !== "user");
+    const counts = {
+      files: own.length,
+      write: own.filter((i) => i.question === "write").length,
+      create_agents_md: own.filter((i) => i.question === "create_agents_md").length,
+    };
+    const n = own.length;
+    const sentences = [
+      ...(due === "first"
+        ? [`Other tools' files are here: \`troupe onboard\` would bring in ${n === 1 ? "1 file" : `${n} files`} as Troupe's own files. Run it in this workspace to see each as a diff and choose; nothing is written until you do.`]
+        : []),
+      ...(due === "outdated"
+        ? [`This workspace was onboarded under version ${o.recorded} of the onboarding rules, and this build's are version ${o.version}: run \`troupe onboard\` to see what they would write now.`]
+        : []),
+      ...(briefDue === "outdated" && o.brief
+        ? [`The project brief was written by version ${o.brief.recorded ?? 0} of the librarian's survey, and this build's is version ${o.brief.version}: \`/memory refresh\` has the librarian write it again.`]
+        : []),
+    ];
+    return session.log.append("onboarding_suggested", {
+      workspace: session.workspace,
+      reasons: [...(due === "none" ? [] : [due]), ...(briefDue === "outdated" ? ["brief"] : [])],
+      due,
+      brief_due: briefDue,
+      counts,
+      message: sentences.join(" ") || "Other tools' files are here.",
+      command: "troupe onboard",
+      onboarding_version: o.version,
+      ...(o.recorded !== null ? { onboarded_version: o.recorded } : {}),
+      ...(o.brief ? { survey_version: o.brief.version, ...(o.brief.recorded !== null ? { brief_version: o.brief.recorded } : {}) } : {}),
+    });
+  }
+
+  /** The files of a workspace's plan nobody has answered yet. */
+  private openItems(workspace: string): FakeOnboardItem[] {
+    return (this.onboarding[workspace]?.items ?? []).filter((i) => !this.onboarded.has(`${workspace} ${i.id}`));
+  }
+
+  /** What `onboard.plan` answers, as the daemon works it out from what was answered. */
+  planOf(workspace: string): {
+    onboarding: { due: "first" | "outdated" | "none"; recorded: number | null; version: number; tools: string[]; items: FakeOnboardItem[]; skipped: Array<{ source: string; reason: string }> };
+    brief: { due: "first" | "stale" | "outdated" | "none"; recorded: number | null; version: number };
+    refusal: string | null;
+  } {
+    const o = this.onboarding[workspace];
+    if (!o) {
+      return {
+        onboarding: { due: "none", recorded: null, version: 2, tools: [], items: [], skipped: [] },
+        brief: { due: "none", recorded: null, version: 1 },
+        refusal: null,
+      };
+    }
+    const b = o.brief ?? { due: "none" as const, recorded: null, version: 1 };
+    const brief = { ...b, due: b.due === "outdated" && this.briefDeclined.get(workspace) === b.version ? ("none" as const) : b.due };
+    if (o.refusal) {
+      return { onboarding: { due: "none", recorded: o.recorded, version: o.version, tools: [], items: [], skipped: [] }, brief, refusal: o.refusal };
+    }
+    const open = this.openItems(workspace);
+    const answered = (o.recorded !== null && o.recorded >= o.version) || this.onboardDeclined.get(workspace) === o.version || open.length === 0;
+    const due = answered ? "none" : o.recorded === null ? "first" : "outdated";
+    // Listed only while onboarding is due: with nothing due no source is asked.
+    if (due === "none") return { onboarding: { due, recorded: o.recorded, version: o.version, tools: [], items: [], skipped: [] }, brief, refusal: null };
+    return { onboarding: { due, recorded: o.recorded, version: o.version, tools: o.tools, items: open, skipped: o.skipped ?? [] }, brief, refusal: null };
+  }
+
+  /**
+   * `onboard.plan`, `onboard.apply`, `onboard.decline` and `memory.decline`, with the
+   * daemon's semantics (`Troupe.Onboard.Start`): `all` writes every open file that is only
+   * a write and never a new `AGENTS.md` (Decision 827), which is written only when named; the
+   * first write records the workspace as onboarded under this version, so the plan says
+   * nothing is due from then on while the files it listed can still be answered by id; a no
+   * is remembered for this version; `command_id` is optional.
+   */
+  private onboardCall(ws: WebSocket, id: unknown, method: string, params: Record<string, unknown>): void {
+    const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
+    const workspace = String(params["workspace"] ?? "");
+    if (!workspace) return invalid("workspace is required");
+    if (method === "onboard.plan") return reply(ws, id, this.planOf(workspace));
+    const o = this.onboarding[workspace];
+
+    if (method === "memory.decline") {
+      if (o?.brief) this.briefDeclined.set(workspace, o.brief.version);
+      return reply(ws, id, { declined: true });
+    }
+
+    if (o?.refusal) return invalid(o.refusal);
+    const open = this.openItems(workspace);
+    const all = params["all"] === true;
+    const ids = all
+      ? (method === "onboard.apply" ? open.filter((i) => i.question === "write") : open).map((i) => i.id)
+      : Array.isArray(params["ids"])
+        ? params["ids"].map(String)
+        : null;
+    if (!ids) return invalid("name the items by id, or pass all: true");
+    const stamp = (): void => {
+      if (o && this.openItems(workspace).length === 0) o.recorded = o.version;
+    };
+
+    if (method === "onboard.apply") {
+      const written: Array<{ id: string; shown: string; action: string }> = [];
+      const refused: Array<{ id: string; reason: string }> = [];
+      for (const itemId of ids) {
+        const item = open.find((i) => i.id === itemId);
+        if (!item) {
+          refused.push({
+            id: itemId,
+            reason: "it is not proposed as it was shown any more: its source or the file changed, or it was written or left out since; ask for the plan again",
+          });
+          continue;
+        }
+        this.onboarded.set(`${workspace} ${itemId}`, "written");
+        written.push({ id: itemId, shown: item.shown, action: item.status === "new" ? "created" : "replaced" });
+      }
+      // The manifest a write leaves says the workspace is onboarded, under this version.
+      if (o && written.length > 0) o.recorded = o.version;
+      stamp();
+      return reply(ws, id, { written, refused });
+    }
+
+    // onboard.decline
+    let declined = 0;
+    for (const itemId of ids) {
+      if (!open.some((i) => i.id === itemId)) continue;
+      this.onboarded.set(`${workspace} ${itemId}`, "declined");
+      declined += 1;
+    }
+    if (all && o) this.onboardDeclined.set(workspace, o.version);
+    stamp();
+    return reply(ws, id, { declined });
   }
 
   /** A command's prompt, sent as the session's input under the `commands.run` that asked. */
@@ -640,11 +915,28 @@ export class FakeDaemon {
         // `private` beside `workspace`, as the daemon reads it; one inside `config` is a
         // setting no client may choose, and is not asked for.
         const asked = params["private"] === true;
+        // A branch names a session the daemon has, or is refused, as the daemon refuses it.
+        const parent = typeof params["parent"] === "string" ? params["parent"] : null;
+        if (parent !== null && !this.sessions.has(parent)) {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "parent", reason: "no such session" } });
+        }
+        const profile = typeof params["profile"] === "string" && params["profile"] ? params["profile"] : undefined;
         const created = this.seed(workspace, {
           watch: Boolean(config.watch),
+          ...(profile ? { profile } : {}),
           ...(asked ? { kind: "private" as const, sync: this.planeToken !== null ? ("current" as const) : ("paused" as const) } : {}),
         });
         if (asked) this.privateSessions.add(created.id);
+        if (profile === "librarian") {
+          const prompt = typeof params["prompt"] === "string" ? params["prompt"] : null;
+          this.librarians.push({ sessionId: created.id, workspace, parent, prompt, worktree: typeof params["worktree"] === "string" ? params["worktree"] : null });
+          // The fake librarian builds the brief at once, under this build's survey.
+          const brief = this.onboarding[workspace]?.brief;
+          if (brief) Object.assign(brief, { due: "none", recorded: brief.version });
+        } else {
+          // What a start finds due, said once in the new session's log (Decisions 827, 835).
+          this.suggest(created.id);
+        }
         return reply(ws, id, {
           session_id: created.id,
           workspace,
@@ -864,6 +1156,13 @@ export class FakeDaemon {
       case "skills.add":
       case "skills.remove":
         return this.sources(ws, id, method, params);
+
+      case "onboard.plan":
+      case "onboard.apply":
+      case "onboard.decline":
+      case "memory.decline":
+        if (!this.servesOnboard) return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
+        return this.onboardCall(ws, id, method, params);
 
       default:
         return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });

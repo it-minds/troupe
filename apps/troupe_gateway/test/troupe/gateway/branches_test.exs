@@ -166,6 +166,33 @@ defmodule Troupe.Gateway.BranchesTest do
     assert String.trim(branches) == ""
   end
 
+  # On Windows git cannot delete a worktree it was started in, and anywhere a file it
+  # cannot delete stops it: either way the caller is told, and the connection that asked
+  # stays up (it used to be closed under the client, and the TUI with it).
+  test "a worktree git cannot remove is an internal error the caller is told", context do
+    client = connect(context)
+
+    {:ok, parent} = create(client, context.workspace)
+    {:ok, branch} = create(client, context.workspace, %{"parent" => parent["session_id"]})
+    locked = Path.join(branch["worktree"], "locked")
+    File.mkdir_p!(locked)
+    File.write!(Path.join(locked, "kept.txt"), "git cannot delete this\n")
+    File.chmod!(locked, 0o555)
+    on_exit(fn -> File.chmod(locked, 0o755) end)
+
+    assert {:error, %Error{message: "internal_error", data: %{"reason" => reason}}} =
+             Client.call(client, "worktree.discard", %{
+               "command_id" => Client.command_id(),
+               "workspace" => context.workspace,
+               "path" => branch["worktree"]
+             })
+
+    assert reason =~ Path.basename(branch["worktree"])
+
+    assert {:ok, %{"id" => _}} =
+             Client.call(client, "session.get", %{"session_id" => parent["session_id"]})
+  end
+
   test "a path that is not a worktree is refused", context do
     client = connect(context)
     stray = Path.join(context.base, "stray")

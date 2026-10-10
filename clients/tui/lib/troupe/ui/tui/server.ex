@@ -389,8 +389,14 @@ defmodule Troupe.UI.TUI.Server do
       ),
       do: {:noreply, open_palette(%{state | quit_armed: false})}
 
-  def handle_event(%Key{} = key, %{focus: :command} = state),
-    do: finish(command_key(key, %{state | quit_armed: false}))
+  def handle_event(%Key{} = key, %{focus: :command} = state) do
+    state = %{state | quit_armed: false}
+
+    case local_answer(key, state, nil) do
+      {:answered, state} -> finish(state)
+      :pass -> finish(command_key(key, state))
+    end
+  end
 
   def handle_event(%Key{} = key, %{focus: :palette} = state),
     do: finish(palette_key(key, %{state | quit_armed: false}))
@@ -414,9 +420,16 @@ defmodule Troupe.UI.TUI.Server do
     do: {:noreply, hq_key(key, %{state | quit_armed: false})}
 
   def handle_event(%Key{} = key, %{focus: {:window, path}} = state) do
-    if Map.has_key?(state.model.windows, path),
-      do: {:noreply, window_key(key, path, disarm(%{state | quit_armed: false}, key))},
-      else: handle_event(key, to_command_line(state))
+    if Map.has_key?(state.model.windows, path) do
+      state = disarm(%{state | quit_armed: false}, key)
+
+      case local_answer(key, state, path) do
+        {:answered, state} -> {:noreply, state}
+        :pass -> {:noreply, window_key(key, path, state)}
+      end
+    else
+      handle_event(key, to_command_line(state))
+    end
   end
 
   # A reflow moves every wrapped row, so transcript coordinates no longer point at
@@ -797,6 +810,7 @@ defmodule Troupe.UI.TUI.Server do
       {:sessions, arg} -> resume_by_arg(state, arg)
       {:new, arg} -> new_session(state, arg)
       :back -> go_back(state)
+      {:watch, said} -> watch_toggled(state, said)
       {:ok, _} -> state
       :ok -> state
       {:notice, text} -> notice(state, text)
@@ -870,7 +884,7 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("hq", args, _state, _target), do: {:hq, args}
 
   defp builtin("watch", _args, state, _target),
-    do: toggle_watch(state.session_id, state.model.watch.enabled)
+    do: {:watch, toggle_watch(state.session_id, state.model.watch.enabled)}
 
   defp builtin("cancel", _args, state, target),
     do: with_target(target.(), &Client.cancel_branch(state.session_id, &1))
@@ -878,11 +892,12 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("dismiss", _args, state, target),
     do: with_target(target.(), &Client.dismiss(state.session_id, &1))
 
+  # The window goes either way, so what landed or went is said on the notice line.
   defp builtin("merge", _args, state, target),
-    do: with_target(target.(), &Client.merge(state.session_id, &1))
+    do: with_target(target.(), &notice_of(Client.merge(state.session_id, &1)))
 
   defp builtin("discard", _args, state, target),
-    do: with_target(target.(), &Client.discard(state.session_id, &1))
+    do: with_target(target.(), &notice_of(Client.discard(state.session_id, &1)))
 
   defp builtin("agents", _args, state, _target),
     do: {:notice, "agents: " <> Enum.join(state.agents, ", ")}
@@ -2186,6 +2201,14 @@ defmodule Troupe.UI.TUI.Server do
 
   defp paste_into_settings(state, _content), do: state
 
+  # What the screen holds about watch is what the next `/watch` toggles and the status line
+  # shows, so it is read back once the daemon has answered, either way: left as it was, a
+  # second `/watch` turned watch on again rather than off.
+  defp watch_toggled(state, {_said, text}) do
+    watch = Client.watch_status(state.session_id)
+    notice(%{state | model: %{state.model | watch: watch}}, to_message(text))
+  end
+
   defp toggle_watch(sid, true) do
     case Client.watch(sid, false) do
       {:error, reason} -> {:error, reason}
@@ -2427,6 +2450,50 @@ defmodule Troupe.UI.TUI.Server do
       :ok -> follow(state)
       {:error, reason} -> notice(follow(state), approval_error(reason))
     end
+  end
+
+  # A question the session's start asks (onboarding, then the brief: TUI Decision 154) is
+  # the first thing on a new session's screen, before anything is typed or a window is
+  # opened, so its keys answer it from the command line as from its window, and Enter is
+  # its default, while nothing is typed. `path` is the window focused, `nil` for the
+  # command line, which answers whichever window asks.
+  defp local_answer(%Key{code: code, modifiers: mods}, state, path) when mods in [[], ["shift"]] do
+    with true <- typed(state, path) == "",
+         {window, question} <- asked(state, path),
+         key when is_binary(key) <- local_key(code, question) do
+      case Client.answer_local(state.session_id, question.call_id, key) do
+        :ok -> {:answered, if(path, do: follow(state), else: state)}
+        {:error, reason} -> {:answered, notice(state, "#{window}: " <> to_message(reason))}
+      end
+    else
+      _ -> :pass
+    end
+  end
+
+  defp local_answer(_key, _state, _path), do: :pass
+
+  defp typed(state, nil), do: state.cmd_text
+  defp typed(state, _path), do: state.win_text
+
+  defp asked(state, nil) do
+    Enum.find_value(Model.windows(state.model), fn w ->
+      q = Model.local_question(w)
+      q && {w.path, q}
+    end)
+  end
+
+  defp asked(state, path) do
+    case Model.local_question(Map.fetch!(state.model.windows, path)) do
+      nil -> nil
+      q -> {path, q}
+    end
+  end
+
+  defp local_key("enter", question), do: question.default
+
+  defp local_key(code, question) do
+    key = String.downcase(code)
+    if key in question.keys, do: key
   end
 
   defp pending_of(w, viewed, kinds) do
@@ -2754,11 +2821,16 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   @doc """
-  Tab completion on the command line: command names (`wor` → `worktree `), window paths
+  Tab completion on the command line: command names (`wor` → `/worktree `), window paths
   for the commands whose first argument is a window — `/merge`, `/discard`, `/cancel`,
   `/dismiss`, `/copy` as the table has them (repeated Tab cycles through the matches) —
   and `@file` paths anywhere. `/merge` and `/discard` only offer worktree branches that
   have finished and are neither merged nor discarded.
+
+  What Tab completes is a command, so it comes back with its slash whether or not one was
+  typed: a line without one is said to the agent (TUI Decision 101), and `mer` completed to
+  `merge ` used to send "merge" there on Enter (D93). A Tab that finds nothing leaves the
+  line as it was typed.
   """
   @spec complete_command(String.t(), map()) :: String.t()
   def complete_command(text, state) do
@@ -2767,27 +2839,27 @@ defmodule Troupe.UI.TUI.Server do
         complete_file(text, state.model.workspace)
 
       not String.contains?(text, " ") ->
-        complete_name(text, command_names(state))
+        slashed(text, complete_name(String.trim_leading(text, "/"), command_names(state)))
 
       true ->
         [name, arg] = String.split(text, " ", parts: 2)
-        # A name the palette put on the line carries its slash; the completion keeps it.
-        {slash, name} =
-          if String.starts_with?(name, "/"),
-            do: {"/", String.trim_leading(name, "/")},
-            else: {"", name}
+        name = String.trim_leading(name, "/")
 
         cond do
           takes_window?(state, name) ->
-            slash <> complete_path(name, String.trim(arg), state)
+            slashed(text, complete_path(name, String.trim(arg), state))
 
           name == "worktree" and not String.contains?(String.trim(arg), " ") ->
-            slash <> complete_worktree(arg, state)
+            slashed(text, complete_worktree(arg, state))
 
           true ->
             text
         end
     end
+  end
+
+  defp slashed(text, completed) do
+    if completed == String.trim_leading(text, "/"), do: text, else: "/" <> completed
   end
 
   # What Tab completes on the line: the table's names and aliases (Decision 698), agents

@@ -3,10 +3,19 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "brief_due": {
+      "type": "string"
+    },
     "brief_version": {
       "type": "integer"
     },
     "command": {
+      "type": "string"
+    },
+    "counts": {
+      "type": "object"
+    },
+    "due": {
       "type": "string"
     },
     "message": {

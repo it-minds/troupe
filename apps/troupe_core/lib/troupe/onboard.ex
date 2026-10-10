@@ -362,8 +362,9 @@ defmodule Troupe.Onboard do
   `.troupe/onboarded.json`'s `onboarding`, `0` for a workspace onboarded before there was
   one, and `nil` for one never onboarded (no manifest and no file recording where it came
   from). `onboarding` is set when the manifest is first written, and raised by `stamp/1`,
-  never by one file's write: a workspace the librarian brought one file into under newer
-  rules is still the older rules' for the rest.
+  never by one file's write: a workspace one file was brought into under newer rules (by
+  `onboard_write`, or a single answer at a session's start) is still the older rules' for
+  the rest.
   """
   @spec onboarded_version(Path.t(), keyword()) :: non_neg_integer() | nil
   def onboarded_version(workspace, opts \\ []) do

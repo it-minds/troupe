@@ -179,7 +179,12 @@ defmodule Troupe.Protocol.Schema do
         "ok" => required(:boolean),
         # Text, or `{"blob", "size", "preview", "truncated"}` when it was too large to
         # put on the wire.
-        "content" => required(:text_or_blob)
+        "content" => required(:text_or_blob),
+        # How a `shell` call's command ended (Decision 837): `exit_status` when it exited,
+        # `timed_out: true` when its timeout killed it. Absent on every other tool and on
+        # a call that did not run; `ok` is true for a command that ran, whatever its status.
+        "exit_status" => optional(:integer),
+        "timed_out" => optional(:boolean)
       },
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
@@ -419,13 +424,18 @@ defmodule Troupe.Protocol.Schema do
         "source_hash" => required(:string),
         "action" => required(:string)
       },
-      # What onboarding would do in the session's workspace, said at a start and once per
-      # workspace and version (Decision 827); nothing was written. `reasons`: `first`
+      # What onboarding would do in the session's workspace, said at every start while it is
+      # due and the person has not said no for that version (Decisions 827 and 835); nothing
+      # was written. `reasons`: `first`
       # (other tools' files, nothing onboarded: `proposals` counts what `troupe onboard`
       # would propose by kind), `outdated` (onboarded under `onboarded_version` of the rules,
       # older than `onboarding_version`) and `brief` (the brief written by `brief_version` of
       # the librarian's survey, older than `survey_version`). `message` says it all in a
-      # line a client shows as it is; `command` is what to run.
+      # line a client shows as it is; `command` is what to run. What a client's start asks
+      # next (Decision 835): `due` (`first`, `outdated` or `none`) for onboarding,
+      # `brief_due` (`first`, `stale`, `outdated` or `none`) for the brief, and `counts`, the
+      # workspace's files it would ask about (`files`, `write`, `create_agents_md`);
+      # `onboard.plan` lists them.
       "onboarding_suggested" => %{
         "reasons" => required({:array, :string}),
         "message" => required(:string),
@@ -435,7 +445,10 @@ defmodule Troupe.Protocol.Schema do
         "onboarding_version" => optional(:integer),
         "onboarded_version" => optional(:integer),
         "survey_version" => optional(:integer),
-        "brief_version" => optional(:integer)
+        "brief_version" => optional(:integer),
+        "due" => optional(:string),
+        "brief_due" => optional(:string),
+        "counts" => optional(:object)
       },
       "session_dormant" => %{"last_seq" => required(:integer)},
       "session_activated" => %{"epoch" => required(:string), "pod" => optional(:string)},
@@ -742,6 +755,25 @@ defmodule Troupe.Protocol.Schema do
       "context.get" => %{"session_id" => required(:string)},
       "mcp.status" => %{"session_id" => required(:string)},
       "memory.forget" => %{"command_id" => required(:string), "workspace" => required(:string)},
+      # A no to rewriting a brief an older survey wrote, remembered for that survey's
+      # version (Decision 835).
+      "memory.decline" => %{"workspace" => required(:string), "command_id" => optional(:string)},
+      # What a session's start asks, onboarding then the brief (Decision 835); the
+      # daemon's alone. `apply` and `decline` act on the items named by `ids`, or on all
+      # (`all: true`); `apply` with `all` never creates an `AGENTS.md` that is not there.
+      "onboard.plan" => %{"workspace" => required(:string)},
+      "onboard.apply" => %{
+        "workspace" => required(:string),
+        "ids" => optional({:array, :string}),
+        "all" => optional(:boolean),
+        "command_id" => optional(:string)
+      },
+      "onboard.decline" => %{
+        "workspace" => required(:string),
+        "ids" => optional({:array, :string}),
+        "all" => optional(:boolean),
+        "command_id" => optional(:string)
+      },
       "worktree.list" => %{"workspace" => optional(:string)},
       "worktree.remove" => %{
         "command_id" => required(:string),

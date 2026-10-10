@@ -223,10 +223,10 @@ defmodule Troupe do
       do: Log.append(session_id, Session.root_path(), :files_skipped, %{"files" => files})
   end
 
-  # What `troupe onboard`, or the librarian, would do in this workspace, said once
-  # (Decision 827): on the person's own machine, by a session with no bundle, and nothing
-  # written but the note in the state directory that it was said. A failure here is the
-  # notice's, never the session's.
+  # What `troupe onboard` would do in this workspace (Decision 827), said at every start
+  # while it is due and not declined, with what a client's start asks next (`due`,
+  # `brief_due`, Decision 835): on the person's own machine, by a session with no bundle,
+  # and nothing written. A failure here is the notice's, never the session's.
   defp onboarding(session_id, session_opts) do
     config = Keyword.fetch!(session_opts, :config)
 
@@ -236,6 +236,7 @@ defmodule Troupe do
 
       case Notice.due(workspace.root_real,
              state_dir: config.state_dir,
+             config: config,
              memory: config.memory != false
            ) do
         nil -> :ok

@@ -158,6 +158,40 @@ defmodule Troupe.Log.FoldTest do
       assert Fold.hash(plain) != Fold.hash(timed_out)
     end
 
+    # Decision 837: how a `shell` command ended is folded without reading `content`, and a
+    # call written before it was a field folds as it did.
+    test "a shell call's exit status and timeout are folded, and a call from before is not" do
+      completed = fn fields ->
+        [
+          event(
+            1,
+            :tool_call_completed,
+            Map.merge(fields, %{
+              "call_id" => "c1",
+              "name" => "shell",
+              "ok" => true,
+              "content" => "x"
+            })
+          )
+        ]
+      end
+
+      tools = &Fold.state(&1)["agents"]["root"]["tools"]
+
+      assert tools.(completed.(%{})) == [%{"name" => "shell", "ok" => true}]
+
+      assert tools.(completed.(%{"exit_status" => 3})) == [
+               %{"name" => "shell", "ok" => true, "exit_status" => 3}
+             ]
+
+      assert tools.(completed.(%{"timed_out" => true})) == [
+               %{"name" => "shell", "ok" => true, "timed_out" => true}
+             ]
+
+      assert Fold.hash(completed.(%{"exit_status" => 0})) !=
+               Fold.hash(completed.(%{"exit_status" => 3}))
+    end
+
     test "the hash does not depend on key order" do
       one = [event(1, :user_input, %{"source" => "user", "text" => "a"})]
       two = [event(1, :user_input, %{"text" => "a", "source" => "user"})]
