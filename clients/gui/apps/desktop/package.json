@@ -25,7 +25,7 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-http": "~2.8.0",
     "@tauri-apps/plugin-dialog": "^2",
-    "@tauri-apps/plugin-notification": "~2.5.0"
+    "@tauri-apps/plugin-notification": "~2.5.1"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
