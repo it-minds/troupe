@@ -163,6 +163,12 @@ defmodule Troupe.Client.Daemon.Link do
     {:noreply, state}
   end
 
+  # An agent was saved or deleted, by this client or another (root Decision 841).
+  def handle_info({:troupe_notification, "agents.changed", params}, state) do
+    Troupe.Client.Events.agents_changed(params)
+    {:noreply, state}
+  end
+
   # The token is due for renewal, or a hand-over failed for want of the plane. A daemon
   # this process is not connected to is handed one when it next is.
   def handle_info(:hand_over, %{client: client} = state) when is_pid(client),

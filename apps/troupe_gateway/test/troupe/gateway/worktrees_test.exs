@@ -173,6 +173,55 @@ defmodule Troupe.Gateway.WorktreesTest do
     assert second["workspace"] == context.workspace
   end
 
+  # A directory is the session's however it is spelled (Decision 840): on Windows git writes
+  # `C:/` where the session's workspace is `c:/`; here a link to the checkout stands for the
+  # other spelling. The live session is found, so the checkout is busy, and its row names it.
+  test "a session is found in its checkout however the path is spelled", context do
+    client = connect(context)
+    workspace = context.workspace
+    link = Path.join(context.base, "link")
+    :ok = File.ln_s(workspace, link)
+
+    refute Worktrees.auto?(link)
+    {:ok, %{"session_id" => sid}} = create(client, workspace, "never")
+
+    assert Worktrees.auto?(link)
+    assert [%{"session_id" => ^sid}] = Worktrees.list(link)
+  end
+
+  # Decision 840: what command mode's worktree rows say, from the daemon that has the trees.
+  test "worktree.list says how far each worktree stands from the checkout, and what it changed",
+       context do
+    workspace = context.workspace
+    client = connect(context)
+
+    assert {:ok, %{path: wt, branch: branch}} = Worktrees.create(workspace)
+    on_exit(fn -> File.rm_rf!(wt) end)
+
+    # A commit on the worktree's branch, a change on top of it nobody committed, and a new
+    # file git does not track yet; and a commit on the checkout's branch it has not got.
+    File.write!(Path.join(wt, "README.md"), "# repo\nmore\n")
+    {_, 0} = git(wt, ["commit", "-qam", "more"])
+    File.write!(Path.join(wt, "README.md"), "# repo, changed\nmore\n")
+    File.write!(Path.join(wt, "new.txt"), "one\ntwo\n")
+    File.write!(Path.join(workspace, "other.txt"), "x\n")
+    {_, 0} = git(workspace, ["add", "other.txt"])
+    {_, 0} = git(workspace, ["commit", "-qm", "other"])
+
+    assert {:ok, %{"worktrees" => trees}} =
+             Client.call(client, "worktree.list", %{"workspace" => workspace})
+
+    tree = Enum.find(trees, &(&1["branch"] == branch))
+    checkout = Enum.find(trees, &(&1["branch"] == "main"))
+
+    # Since it left `main`: `# repo` became two lines, and `new.txt` is two more.
+    assert %{"ahead" => 1, "behind" => 1, "added" => 4, "removed" => 1, "dirty" => true} = tree
+
+    # The checkout has nothing uncommitted, and no upstream to be ahead of or behind.
+    assert %{"ahead" => nil, "behind" => nil, "added" => 0, "removed" => 0, "dirty" => false} =
+             checkout
+  end
+
   # #529 (Decision 833): the gateway's own git runs none of the commands the repository's
   # `.git` names, as it makes a worktree, commits what was left in it and merges it.
   describe "a repository whose own .git runs commands" do

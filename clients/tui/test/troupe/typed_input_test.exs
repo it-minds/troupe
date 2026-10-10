@@ -5,9 +5,10 @@ defmodule Troupe.TypedInputTest do
   The window draws a line the moment it is typed, and the daemon writes it back: as
   `user_input` when the agent takes it, and first as `input_queued` when the agent was
   working. Every one of those names the command id the line was sent with, and the window
-  draws the first and not the rest. Each test types into the TUI itself, on a session in
-  the daemon this VM embeds, so the events are the ones a real agent writes rather than a
-  fake's, and each also rebuilds the window from the journal, as a restart does.
+  draws the first and not the rest. Each test types into the TUI itself, into a branch's
+  window on a session in the daemon this VM embeds, so the events are the ones a real
+  agent writes rather than a fake's, and each also rebuilds the window from the journal,
+  as a restart does.
   """
 
   use ExUnit.Case, async: false
@@ -31,6 +32,7 @@ defmodule Troupe.TypedInputTest do
   test "a line typed at an idle agent is drawn once, live and rebuilt from the journal" do
     {sid, _, _} = start_session!(script: [{:text_and_tools, "Hello back.", []}])
     {pid, _session} = start_tui(sid)
+    _child = open_idle_branch(sid, pid)
 
     type(pid, "hello")
     press(pid, "enter")
@@ -46,21 +48,23 @@ defmodule Troupe.TypedInputTest do
   test "a line typed while the agent works is drawn once, live and rebuilt from the journal" do
     {sid, _, _} = start_session!(script: @approval_then_two_replies, auto_approve: false)
     {pid, _session} = start_tui(sid)
+    _child = open_idle_branch(sid, pid)
 
     type(pid, "write a note")
     press(pid, "enter")
-    %{data: %{call_id: call_id}} = await_event("root", :approval_requested, 10_000)
+    %{data: %{call_id: call_id}} = await_event("build-1", :approval_requested, 10_000)
 
-    type(pid, "and then this")
+    # Not a line that begins with y, n or a: in the window those answer the approval.
+    type(pid, "then this as well")
     press(pid, "enter")
-    await_queued(sid, "and then this")
+    await_queued(sid, "then this as well")
 
     :ok = Client.approve(sid, call_id, :allow)
     eventually(fn -> replies(live(pid)) == 3 end, 10_000)
 
     assert drawn(live(pid), "write a note") == 1
-    assert drawn(live(pid), "and then this") == 1
-    assert drawn(rebuilt(sid), "and then this") == 1
+    assert drawn(live(pid), "then this as well") == 1
+    assert drawn(rebuilt(sid), "then this as well") == 1
     assert window(pid).unconfirmed == %{}
   end
 
@@ -69,36 +73,51 @@ defmodule Troupe.TypedInputTest do
   test "a line typed before the connection restarts is still drawn once" do
     {sid, _, _} = start_session!(script: @approval_then_two_replies, auto_approve: false)
     {pid, _session} = start_tui(sid)
+    child = open_idle_branch(sid, pid)
 
     type(pid, "write a note")
     press(pid, "enter")
-    %{data: %{call_id: call_id}} = await_event("root", :approval_requested, 10_000)
+    %{data: %{call_id: call_id}} = await_event("build-1", :approval_requested, 10_000)
 
-    type(pid, "and then this")
+    # Not a line that begins with y, n or a: in the window those answer the approval.
+    type(pid, "then this as well")
     press(pid, "enter")
-    await_queued(sid, "and then this")
+    await_queued(sid, "then this as well")
 
-    worker = Worker.whereis(sid)
+    worker = Worker.whereis(child)
     Process.exit(worker, :kill)
-    eventually(fn -> Worker.whereis(sid) not in [nil, worker] end)
-    eventually(fn -> Client.capability(sid).up? end)
+    eventually(fn -> Worker.whereis(child) not in [nil, worker] end)
+    eventually(fn -> Client.capability(child).up? end)
 
-    :ok = Client.approve(sid, call_id, :allow)
+    # Answered through the branch's own session: the parent's screen finds a branch's call
+    # by what its worker registered, and the worker that registered it is gone.
+    :ok = Client.approve(child, call_id, :allow)
     eventually(fn -> replies(live(pid)) == 3 end, 10_000)
 
-    assert drawn(live(pid), "and then this") == 1
-    assert drawn(rebuilt(sid), "and then this") == 1
+    assert drawn(live(pid), "then this as well") == 1
+    assert drawn(rebuilt(sid), "then this as well") == 1
+  end
+
+  # A branch nobody has asked anything yet, its window open, and its session: a line typed
+  # on the command line would start one with it as the task instead (TUI Decision 155).
+  defp open_idle_branch(sid, pid) do
+    {:ok, "build-1"} = Client.dispatch(sid, "build", "")
+    spawned = await_event("build-1", :branch_spawned)
+    eventually(fn -> Map.has_key?(user_state(pid).model.windows, "build-1") end)
+    press(pid, "1")
+    eventually(fn -> user_state(pid).focus == {:window, "build-1"} end)
+    spawned.data.session_id
   end
 
   # The daemon has written the line down as queued: it is in the journal, which is where
   # a rebuild would find it.
   defp await_queued(sid, text), do: eventually(fn -> drawn(rebuilt(sid), text) >= 1 end)
 
-  defp window(pid), do: user_state(pid).model.windows["root"]
-  defp live(pid), do: window(pid).agents["root"].transcript
+  defp window(pid), do: user_state(pid).model.windows["build-1"]
+  defp live(pid), do: window(pid).agents["build-1"].transcript
 
   defp rebuilt(sid),
-    do: Model.rebuild(sid, "/w", Client.events(sid)).windows["root"].agents["root"].transcript
+    do: Model.rebuild(sid, "/w", Client.events(sid)).windows["build-1"].agents["build-1"].transcript
 
   defp drawn(transcript, text), do: Enum.count(transcript, &(&1 == {:user, text}))
   defp replies(transcript), do: Enum.count(transcript, &match?({:assistant, _}, &1))

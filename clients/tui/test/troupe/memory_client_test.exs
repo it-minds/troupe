@@ -109,7 +109,7 @@ defmodule Troupe.MemoryClientTest do
              "librarian-1"
            ].agents["librarian-1"].transcript
 
-    press(pid, "2")
+    press(pid, "1")
     eventually(fn -> screen_text(pid, session) =~ "session created as librarian" end)
   end
 

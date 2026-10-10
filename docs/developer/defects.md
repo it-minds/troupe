@@ -1111,23 +1111,11 @@ Found by the #502 audit, 2026-10-10.
 
 ### D107 - Commands from an activated window, and the palette's rows (low)
 
-For command mode (#502 parts A and 3) and the palette (#503), whose slots own these.
+For the palette (#503), whose slot owns these.
 
-- A slash command typed into an activated window's input box is sent to that window's
-  agent as words; only `/todo` and `/upload` are taken as commands there
-  (`window_key/3`). Commands from a window go through the palette (Ctrl-K).
-- The palette opened over a window puts a command that needs an argument (`/upload`,
-  `/worktree`, every agent row) on the command line and lets the window go; its Tab and
-  Space do so for any row (`to_line/2`), so `/copy` taken with Tab has no window to copy.
-- The palette's Tab takes the selected row, which is the first row whose name or summary
-  matches: "wor" and Tab give `/merge ` (its summary says "worktree"). Space checks that
-  the name starts with what was typed.
-- A repository command with an `argument-hint` runs on Enter in the palette with
-  `$ARGUMENTS` empty ("Review  and say what you would change").
 - A repository command run while a branch's window is activated goes to the session's
   own agent, not the window's (`Client.run_command/3`, by design in Decision 763); the
   palette doesn't say so.
-- `/agents` lists `worktree` among the agents (`Troupe.Client.Daemon.commands/1` adds it).
 - `explore`, `general`, `implementer` and `reviewer` ship as subagents, so they have no
   row and nothing a person types starts one; #502 lists them as rows.
 

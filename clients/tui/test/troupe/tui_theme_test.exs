@@ -319,7 +319,7 @@ defmodule Troupe.TUIThemeTest do
 
     text = cells |> Enum.group_by(& &1.row) |> Enum.map_join("\n", fn {_r, cs} -> line(cs) end)
     assert text =~ "troupe"
-    assert text =~ "No branches. Type a command:"
+    assert text =~ "Nothing running. Type what you want done"
   end
 
   test "a session nobody has spoken to wears the mask in its window, and loses it at the first line" do
@@ -457,11 +457,15 @@ defmodule Troupe.TUIThemeTest do
 
     corners =
       for now <- [0, 250, 500, 750, 1000] do
-        working() |> draw(theme, focus: :command, now: now) |> corner()
+        working() |> draw(theme, now: now) |> corner()
       end
 
     assert Enum.map(corners, & &1.symbol) == ~w(◐ ◓ ◑ ◒ ◐)
     assert Enum.all?(corners, &(&1.fg == Theme.color(:working, theme)))
+
+    # Command mode's row for it starts with the same mark (TUI Decision 155).
+    row = working() |> draw(theme, focus: :command, now: 250) |> row_of("1 root")
+    assert %{symbol: "◓"} = Enum.find(row, &(&1.symbol in ~w(◐ ◓ ◑ ◒)))
   end
 
   test "the activity line turns with it, at the same pace" do
@@ -487,11 +491,33 @@ defmodule Troupe.TUIThemeTest do
     assert {steady.symbol, steady.fg} == {"◑", amber}
   end
 
+  # TUI Decision 155: the word beside the mark says what the mark says, in command mode's
+  # row and in the observer's tree alike.
+  test "the state's ● goes once the window is read, as the mark's ⏺ does" do
+    theme = %{depth: :none, mode: :dark}
+    done = fold(started() ++ [{"turn_ended", %{}}])
+    read = Model.seen(done, "root")
+
+    text = fn model, opts ->
+      model
+      |> draw(theme, opts)
+      |> Enum.group_by(& &1.row)
+      |> Enum.map_join("\n", fn {_r, cs} -> line(cs) end)
+    end
+
+    assert text.(done, focus: :command) =~ "done ●"
+    refute text.(read, focus: :command) =~ "done ●"
+    assert text.(read, focus: :command) =~ ~r/1 root\s+\S+\s+done\s/
+    assert text.(done, focus: :observer, observer: %{cursor: 0}) =~ "done ●"
+    refute text.(read, focus: :observer, observer: %{cursor: 0}) =~ "done ●"
+    assert text.(read, focus: :observer, observer: %{cursor: 0}) =~ ~r/\)\s+done\s/
+  end
+
   test "a window done and not yet read: ⏺ in one cell; read, ○; failed, ✗" do
     theme = %{name: :signal, depth: :truecolor, mode: :dark}
     done = fold(started() ++ [{"turn_ended", %{}}])
     failed = fold(started() ++ [{"turn_ended", %{"reason" => "tool_failures"}}])
-    mark = fn model -> model |> draw(theme, focus: :command) |> corner() end
+    mark = fn model -> model |> draw(theme) |> corner() end
 
     assert %{symbol: "⏺︎"} = unread = mark.(done)
     assert unread.fg == Theme.color(:ok, theme)
@@ -506,7 +532,7 @@ defmodule Troupe.TUIThemeTest do
   end
 
   test "with no colour the mark still says which: the glyph and the word, never the colour alone" do
-    cells = draw(approval_model(), %{depth: :none, mode: :dark}, focus: :command)
+    cells = draw(approval_model(), %{depth: :none, mode: :dark})
     top = cells |> Enum.filter(&(&1.row == 0)) |> line()
 
     assert corner(cells).symbol == "◑"
@@ -530,6 +556,14 @@ defmodule Troupe.TUIThemeTest do
   end
 
   @marks ~w(◐ ◓ ◑ ◒ ⏺︎ ○ ✗)
+
+  # The cells of the row whose text holds `text`, in column order.
+  defp row_of(cells, text) do
+    cells
+    |> Enum.group_by(& &1.row)
+    |> Enum.map(fn {_row, cs} -> Enum.sort_by(cs, & &1.col) end)
+    |> Enum.find(fn cs -> line(cs) =~ text end)
+  end
 
   # The mark in the first window's corner: the one cell of its top border that is a mark.
   defp corner(cells) do
@@ -563,6 +597,7 @@ defmodule Troupe.TUIThemeTest do
       answer: nil,
       size: {width, height},
       hq: Keyword.get(opts, :hq),
+      observer: Keyword.get(opts, :observer),
       theme: theme
     }
 

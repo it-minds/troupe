@@ -51,4 +51,12 @@ defmodule Troupe.Client.Events do
       for {pid, _} <- entries, do: send(pid, {:troupe_settings_changed, params})
     end)
   end
+
+  @doc "Hands an `agents.changed` to everybody listening for the settings."
+  @spec agents_changed(map()) :: :ok
+  def agents_changed(params) do
+    Registry.dispatch(__MODULE__, @settings, fn entries ->
+      for {pid, _} <- entries, do: send(pid, {:troupe_agents_changed, params})
+    end)
+  end
 end

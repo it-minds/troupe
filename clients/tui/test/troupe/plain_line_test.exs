@@ -1,9 +1,10 @@
 defmodule Troupe.PlainLineTest do
   @moduledoc """
-  A line typed without a slash is what the person says to the session's agent, whatever
-  its first word (issue #496, TUI Decision 101): "help me fix the failing test" is a
-  request, not `/help`. A built-in runs from a line that starts with `/`, or from the
-  palette (`Troupe.CommandPaletteTest` runs every one of them that way).
+  A line typed without a slash is work for an agent, whatever its first word (issue #496,
+  TUI Decision 101): "help me fix the failing test" is a request, not `/help`. In command
+  mode it starts the default agent on it, in the checkout (TUI Decision 155). A built-in
+  runs from a line that starts with `/`, or from the palette (`Troupe.CommandPaletteTest`
+  runs every one of them that way).
   """
 
   use ExUnit.Case, async: false
@@ -13,7 +14,7 @@ defmodule Troupe.PlainLineTest do
 
   alias Troupe.Client
 
-  test "a plain line whose first word is a built-in's name reaches the agent" do
+  test "a plain line whose first word is a built-in's name starts the default agent on it" do
     {sid, _, _} = start_session!(script: [])
     {pid, _session} = start_tui(sid)
     eventually(fn -> user_state(pid).commands != [] end)
@@ -21,8 +22,8 @@ defmodule Troupe.PlainLineTest do
     type(pid, "help me fix the failing test")
     press(pid, "enter")
 
-    input = await_event("root", :input, 10_000)
-    assert input.data.content == "help me fix the failing test"
+    spawned = await_event("build-1", :branch_spawned, 10_000)
+    assert spawned.data.prompt == "help me fix the failing test"
     assert user_state(pid).focus == :command
   end
 

@@ -252,8 +252,10 @@ defmodule Troupe.BranchCommandsTest do
       {pid, _session} = ready(sid)
       eventually(fn -> user_state(pid).model.windows != %{} end)
 
+      # Named, since command mode numbers the branches and lists no window of the
+      # session's own until its agent has work (TUI Decision 155).
       before = notices(pid)
-      enter(pid, "/dismiss 1")
+      enter(pid, "/dismiss root")
       assert await_notice(pid, before) =~ "own window"
       assert Client.has_session?(sid)
       assert user_state(pid).session_id == sid

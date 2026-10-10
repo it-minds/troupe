@@ -230,7 +230,7 @@ defmodule Troupe.BranchClientTest do
     await_event("build-1", :branch_spawned)
     await_state("build-1", :done, 10_000)
     eventually(fn -> screen_text(pid, session) =~ "build-1" end)
-    press(pid, "2")
+    press(pid, "1")
     eventually(fn -> screen_text(pid, session) =~ "hello from the branch" end)
   end
 

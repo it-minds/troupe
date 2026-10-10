@@ -15,7 +15,9 @@ defmodule Troupe.SetupScreenDaemonTest do
   use ExUnit.Case, async: false
 
   import Troupe.TestHelpers, only: [eventually: 2]
-  import Troupe.TUIHelpers, only: [press: 2, type: 2, screen: 2, screen_text: 2, start_tui: 1]
+
+  import Troupe.TUIHelpers,
+    only: [press: 2, type: 2, screen: 2, screen_text: 2, start_tui: 1, user_state: 1]
 
   alias ExRatatui.CellSession
   alias Troupe.CLI.ConfigSetup
@@ -82,6 +84,12 @@ defmodule Troupe.SetupScreenDaemonTest do
     assert {:ok, ^sid} = Client.open_session({:local, workspace}, sid)
     on_exit(fn -> Client.stop_session(sid) end)
     {tui, tui_session} = start_tui(sid)
+
+    # The session's own agent has the question, so it is listed, and its window opens on it
+    # (TUI Decision 155).
+    eventually(fn -> Map.has_key?(user_state(tui).model.windows, "root") end, 10_000)
+    eventually(fn -> user_state(tui).model.windows["root"].started end, 10_000)
+    press(tui, "1")
     eventually(fn -> screen_text(tui, tui_session) =~ "Look around this directory" end, 10_000)
 
     assert {:ok, %{"needed" => false, "completed" => %{"choice" => "local"}}} =

@@ -106,6 +106,10 @@ defmodule Troupe.Client do
   @callback capability(session_id()) :: capability()
   @callback dispatch(session_id(), String.t(), String.t() | map()) ::
               {:ok, String.t()} | {:error, term()}
+  @callback agent_definition(session_id(), String.t()) :: {:ok, map()} | {:error, term()}
+  @callback start_command(session_id(), String.t(), String.t(), String.t(), String.t()) ::
+              {:ok, String.t()} | {:error, term()}
+  @callback worktree_status(session_id()) :: {:ok, [map()]} | {:error, term()}
   @callback adopt_branch(session_id(), session_id(), String.t(), String.t()) ::
               {:ok, String.t()} | {:error, term()}
   @callback send_input(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
@@ -135,6 +139,7 @@ defmodule Troupe.Client do
   @callback mcp_status(session_id()) :: [map()]
   @callback sources(session_id()) :: {:ok, sources()} | {:error, term()}
   @callback manage_sources(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  @callback agents(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   @callback memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback memory_facts(session_id()) :: {:ok, memory()} | :no_facts | {:error, term()}
   @callback forget_fact(session_id(), String.t()) :: :ok | {:error, term()}
@@ -221,9 +226,30 @@ defmodule Troupe.Client do
   @spec capability(session_id()) :: capability()
   def capability(sid), do: impl(sid).capability(sid)
 
+  @doc """
+  Starts a branch on an agent: `args` is the prompt, or `%{prompt: text, worktree: mode}`
+  with `"never"` for the checkout and `"always"` for a worktree of its own, as command
+  mode chooses (TUI Decision 155). Answers the window it opens in (`build-1`).
+  """
   @spec dispatch(session_id(), String.t(), String.t() | map()) ::
           {:ok, String.t()} | {:error, term()}
   def dispatch(sid, name, args), do: impl(sid).dispatch(sid, name, args)
+
+  @doc """
+  One agent as a session here would run it, for command mode's chooser (TUI Decision
+  155): `%{name, description, prompt}`, `prompt` its instruction, `nil` from a daemon
+  that cannot say it.
+  """
+  @spec agent_definition(session_id(), String.t()) :: {:ok, map()} | {:error, term()}
+  def agent_definition(sid, name), do: impl(sid).agent_definition(sid, name)
+
+  @doc """
+  Every worktree of the session's repository, its checkout among them, as command mode
+  lists them: `%{path, branch, session_id, dirty, ahead, behind, added, removed}`, the
+  last four `nil` where the daemon cannot say (root Decision 840).
+  """
+  @spec worktree_status(session_id()) :: {:ok, [map()]} | {:error, term()}
+  def worktree_status(sid), do: impl(sid).worktree_status(sid)
 
   @doc """
   Opens the window of a branch the daemon started for this session — the one a saved
@@ -246,6 +272,16 @@ defmodule Troupe.Client do
   """
   @spec run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   def run_command(sid, name, arguments), do: impl(sid).run_command(sid, name, arguments)
+
+  @doc """
+  Runs a command a markdown file defines in a branch of its own (TUI Decision 155): a
+  branch on `agent`, in the checkout (`"never"`) or a worktree (`"always"`), with the
+  command run there rather than in the session. Answers the window it opened in.
+  """
+  @spec start_command(session_id(), String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def start_command(sid, agent, name, arguments, mode),
+    do: impl(sid).start_command(sid, agent, name, arguments, mode)
 
   @doc """
   Runs a command the person typed (`!cmd`) where the session runs, in its workspace
@@ -347,7 +383,9 @@ defmodule Troupe.Client do
   @doc """
   Hear `{:troupe_settings_changed, params}` whenever the daemon says a settings file
   changed, whoever changed it (`config.changed`): the settings page shows what another
-  client set while it is open.
+  client set while it is open. The same subscription hears `{:troupe_agents_changed,
+  params}` when an agent is saved or deleted (`agents.changed`), so a palette and the
+  `/agents` page follow what the desktop app wrote.
   """
   @spec subscribe_settings() :: :ok
   def subscribe_settings, do: Troupe.Client.Events.subscribe_settings()
@@ -372,6 +410,27 @@ defmodule Troupe.Client do
   @doc "`mcp.add`, `mcp.remove`, `mcp.check`, `skills.add` or `skills.remove` on the session's workspace."
   @spec manage_sources(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   def manage_sources(sid, method, params), do: impl(sid).manage_sources(sid, method, params)
+
+  @doc """
+  The agents the session's workspace has, through the daemon (root Decision 841):
+  `agents.list`, `agents.get` (with the session, so its answer names the windows of the
+  session's family that run it), `agents.validate`, `agents.put` and `agents.delete`,
+  each answered as the wire map. On a pod the agents are its bundle's: `agents.list`
+  carries `read_only`, the sentence that says why, and the two writes answer it as
+  their error without being sent.
+  """
+  @spec agents(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def agents(sid, method, params \\ %{}), do: impl(sid).agents(sid, method, params)
+
+  @doc """
+  Opens a file in the person's own editor (`VISUAL`, then `EDITOR`) and returns once it
+  is closed (TUI Decision 156). The editor is this machine's whichever side the session
+  lives on, as the clipboard is. `{:terminal, outcome}` says the editor had the terminal,
+  and `mouse: true` gives the screen its mouse reporting back after it.
+  """
+  @spec edit_file(String.t(), keyword()) ::
+          Troupe.Editor.outcome() | {:terminal, Troupe.Editor.outcome()}
+  def edit_file(path, opts \\ []), do: Troupe.Editor.edit(path, opts)
 
   @spec memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def memory(sid, command), do: impl(sid).memory(sid, command)

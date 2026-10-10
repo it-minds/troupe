@@ -8,9 +8,10 @@ defmodule Troupe.Commands.Local do
   The file name is the command: `review.md` is `/review`. The file has the shape other
   tools' command files have — optional YAML frontmatter, then the body — so one written
   for another tool reads here as it is. The frontmatter's `description` is what a palette
-  shows, and `argument-hint` what its usage line says follows the name; other keys are
-  left alone. The body is the prompt the command sends, with `$ARGUMENTS` standing for
-  whatever was typed after the name (`expand/2`).
+  shows, `argument-hint` what its usage line says follows the name, and `agent` the agent
+  it runs on where a client starts a branch for it (the terminal client's command mode,
+  TUI Decision 155); other keys are left alone. The body is the prompt the command sends,
+  with `$ARGUMENTS` standing for whatever was typed after the name (`expand/2`).
 
   The layers resolve the way the skills' do (Decision 700): the workspace's command wins
   over the user's of the same name. A command is a prompt, sent only when somebody types
@@ -35,6 +36,7 @@ defmodule Troupe.Commands.Local do
           name: String.t(),
           description: String.t(),
           hint: String.t() | nil,
+          agent: String.t() | nil,
           body: String.t(),
           layer: layer(),
           path: Path.t()
@@ -137,6 +139,7 @@ defmodule Troupe.Commands.Local do
           name: name,
           description: text_of(meta["description"]) || "",
           hint: text_of(meta["argument-hint"]),
+          agent: text_of(meta["agent"]),
           body: body,
           layer: layer,
           path: path
