@@ -466,11 +466,16 @@ defmodule Troupe.Commands do
           "Type to filter by name, alias or description; ↑↓ move, Enter runs, Tab puts " <>
             "the command on the line, Esc closes. / on an empty line opens it too."
       ),
-      entry("agents", "agents", "List the agents this session can start a branch on",
+      entry("agents", "agents", "Read, copy, create, edit and delete the agents",
         usage: "/agents",
         detail:
-          "The primary agents: the built-ins, this machine's agents/ and the project's " <>
-            ".troupe/agents/. Each is a command of its own, below."
+          "The primary agents, each with where it comes from (built in, a bundle, yours or " <>
+            "the repository's), its model, its tools, whether it is read-only and which " <>
+            "windows run it; Enter reads its whole instruction. An edit opens your editor " <>
+            "and is checked and saved by the daemon into your agents/ or the repository's " <>
+            ".troupe/agents/; c copies one into the repository, n starts a new one, x " <>
+            "deletes a copy. Each is a command of its own, below, and Tab in a window " <>
+            "switches the agent it runs."
       ),
       entry("worktree", "agents", "Run the default agent on a branch in a worktree of its own",
         usage: "/worktree [name:] <prompt>",

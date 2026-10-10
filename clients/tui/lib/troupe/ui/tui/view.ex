@@ -18,7 +18,7 @@ defmodule Troupe.UI.TUI.View do
   alias ExRatatui.Widgets.Block.Title
   alias Troupe.Client
   alias Troupe.Settings
-  alias Troupe.UI.TUI.{Input, Model, Theme}
+  alias Troupe.UI.TUI.{AgentChooser, Agents, Input, Model, Theme}
 
   # Command-box geometry. The focused box — the command line and an active
   # window's input — is a fixed `@input_rows` console rows: `@input_content`
@@ -80,6 +80,27 @@ defmodule Troupe.UI.TUI.View do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
     mcp_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
+  end
+
+  # `/agents`, the manager (TUI Decision 156).
+  defp draw(%{focus: :agents} = state, frame) do
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+    [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
+
+    Agents.render(state.agents_page, page_rect, state) ++
+      [status(state, status_rect), command_line(state, cmd_rect)]
+  end
+
+  # The agent chooser is a popup over the window it switches, as the palette is over the
+  # screen it was opened from (TUI Decision 156).
+  defp draw(%{focus: :chooser, chooser: %{for: {:window, path}} = chooser} = state, frame) do
+    behind = draw(%{state | focus: {:window, path}}, frame)
+    {_line, cmd_rect} = List.last(behind)
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+
+    Enum.drop(behind, -1) ++
+      [command_line(state, cmd_rect, cmd_rect.height)] ++
+      AgentChooser.render(chooser, area, cmd_rect.y)
   end
 
   # The palette is a popup over the session (Decision 119): the screen is drawn as it was
@@ -1118,10 +1139,21 @@ defmodule Troupe.UI.TUI.View do
     rows =
       state.commands
       |> Enum.filter(&matches?(&1, query))
-      |> Enum.map(&%{entry: &1, status: availability(&1, return_to, state)})
+      |> Enum.map(&%{entry: &1, status: runnable(availability(&1, return_to, state), &1, state)})
 
     {rows, min(cursor, max(length(rows) - 1, 0))}
   end
+
+  # An agent the daemon says cannot run here (a model the provider does not serve) is a row
+  # that says why, as any other that cannot run now (TUI Decision 156).
+  defp runnable(:ok, %{"source" => "agent", "name" => name}, state) do
+    case state |> Map.get(:agent_rows, %{}) |> Map.get(name) do
+      %{"available" => false, "reason" => reason} -> {:no, "#{name} cannot run here: #{reason}"}
+      _ -> :ok
+    end
+  end
+
+  defp runnable(status, _entry, _state), do: status
 
   # Names, aliases and summaries, as the filter is typed: `mer` finds `/merge`.
   defp matches?(_entry, ""), do: true
@@ -1191,7 +1223,7 @@ defmodule Troupe.UI.TUI.View do
       |> Enum.flat_map(fn [{first, _} | _] = chunk ->
         [
           {nil, section_line(first.entry["section"], width)}
-          | Enum.map(chunk, fn {row, i} -> {i, palette_line(row, name_w, width)} end)
+          | Enum.map(chunk, fn {row, i} -> {i, palette_line(row, name_w, width, state)} end)
         ]
       end)
 
@@ -1225,16 +1257,54 @@ defmodule Troupe.UI.TUI.View do
   end
 
   # A command this client cannot run now is greyed rather than hidden; the detail says why.
-  defp palette_line(%{entry: entry, status: status}, name_w, width) do
+  # Three kinds of row, and each looks it (TUI Decision 156): a command Troupe has; an
+  # agent, which is not a command but starts a branch on itself, with where it comes from
+  # and what it may do; and a command a file defines, with whose file it is.
+  @kind_w 11
+
+  defp palette_line(%{entry: entry, status: status}, name_w, width, state) do
     style = Theme.style(if(status == :ok, do: nil, else: :muted))
     name = String.pad_trailing("/" <> entry["name"], name_w)
-    summary = Model.wrap(entry["summary"], max(width - name_w, 8), :char) |> List.first() || ""
+    {kind, kind_style} = row_kind(entry)
+    badges = palette_badges(entry, state)
+    used = name_w + @kind_w + Enum.sum(Enum.map(badges, &String.length(elem(&1, 0))))
+    summary = Model.wrap(entry["summary"], max(width - used, 8), :char) |> List.first() || ""
 
-    Line.new([
-      Span.new(name, style: Map.put(style, :modifiers, [:bold])),
-      Span.new(summary, style: style)
-    ])
+    Line.new(
+      [
+        Span.new(name, style: Map.put(style, :modifiers, [:bold])),
+        Span.new(String.pad_trailing(kind, @kind_w),
+          style: if(status == :ok, do: kind_style, else: style)
+        )
+      ] ++
+        Enum.map(badges, fn {text, badge_style} ->
+          Span.new(text, style: if(status == :ok, do: badge_style, else: style))
+        end) ++ [Span.new(summary, style: style)]
+    )
   end
+
+  defp row_kind(%{"source" => "agent"}), do: {"agent", Theme.style(:accent, [:bold])}
+  defp row_kind(%{"source" => "project"}), do: {"repository", Theme.style(:hunk)}
+  defp row_kind(%{"source" => "user"}), do: {"yours", Theme.style(:ok)}
+  defp row_kind(_builtin), do: {"command", Theme.style(:muted)}
+
+  # An agent's row carries where it comes from, its model (`default`: the session's),
+  # whether it is read-only and whether a branch on it gets a worktree or works in the
+  # checkout, ahead of its description, in as few cells as say it.
+  defp palette_badges(%{"source" => "agent", "name" => name}, state) do
+    case state |> Map.get(:agent_rows, %{}) |> Map.get(name) do
+      %{} = row ->
+        [
+          {Agents.layer_word(row["layer"]), Agents.layer_style(row["layer"])},
+          {" · " <> Enum.join(Agents.badges(row), " · ") <> "  ", Theme.style(:muted)}
+        ]
+
+      nil ->
+        []
+    end
+  end
+
+  defp palette_badges(_entry, _state), do: []
 
   defp nothing_line(%{commands: []}),
     do:
@@ -1270,12 +1340,13 @@ defmodule Troupe.UI.TUI.View do
     }
   end
 
-  defp palette_detail(%{entry: entry, status: status}, _state, rect) do
+  defp palette_detail(%{entry: entry, status: status}, state, rect) do
     example = if entry["example"], do: ["", "for example: " <> entry["example"]], else: []
     now = if status == :ok, do: [], else: ["", "not now: " <> elem(status, 1)]
 
     lines =
       [entry["summary"], "", entry["detail"]] ++
+        agent_lines(entry, state) ++
         example ++
         ["", source_word(entry["source"]) <> " · " <> availability_word(entry["availability"])] ++
         now
@@ -1286,6 +1357,26 @@ defmodule Troupe.UI.TUI.View do
       block: %Block{title: " " <> entry["usage"] <> " ", borders: [:all]}
     }
   end
+
+  # An agent is not a command: the row starts a branch on it, and the detail says what it
+  # is and where to change it (TUI Decision 156).
+  defp agent_lines(%{"source" => "agent", "name" => name}, state) do
+    case state |> Map.get(:agent_rows, %{}) |> Map.get(name) do
+      %{} = row ->
+        [
+          "",
+          "An agent, from #{Agents.layer_word(row["layer"])}: " <>
+            Enum.join(Agents.facts(row, worktree: true), " · ") <> ".",
+          "Typed with a prompt it starts a branch on #{name}. Tab in a window switches " <>
+            "the agent that window runs; /agents reads, edits and copies it."
+        ]
+
+      nil ->
+        []
+    end
+  end
+
+  defp agent_lines(_entry, _state), do: []
 
   # What a command a file defines sends, last in its detail (troupe Decision 814): its
   # first lines, as many as the pane has room for, and how many more the file holds.
@@ -1494,15 +1585,19 @@ defmodule Troupe.UI.TUI.View do
     [{tile, rect} | lockup(w, rect, length(rows), state)]
   end
 
+  # Each window says which agent it runs (TUI Decision 156): its name is where it started,
+  # and a switch changes the agent, not the name.
   defp tile_title(w, n, state, inner_w) do
     badge = if w.badge, do: " ●", else: ""
     blink = if w.state == :needs_input and blink?(state), do: " ▶ needs input", else: ""
     stats = " · #{Model.elapsed(w, state.now)} · #{Model.tokens(w)}"
+    who = "#{w.path} (#{w.profile})"
 
     [
-      " #{n} #{w.path} · #{w.state}#{badge}#{blink}#{stats} ",
-      " #{n} #{w.path} · #{w.state}#{badge}#{blink} ",
-      " #{n} #{w.path} · #{w.state}#{badge} ",
+      " #{n} #{who} · #{w.state}#{badge}#{blink}#{stats} ",
+      " #{n} #{who} · #{w.state}#{badge}#{blink} ",
+      " #{n} #{who} · #{w.state}#{badge} ",
+      " #{n} #{who} ",
       " #{n} #{w.path} ",
       " #{n} "
     ]
@@ -1670,7 +1765,7 @@ defmodule Troupe.UI.TUI.View do
        ["xx cancel & remove", "xx cancel", "xx"]},
       {not armed?(state, w.path, "d") and w.state in [:done_unread, :failed_unread],
        ["dd dismiss", "dd dismiss", "dd"]},
-      {true, ["Tab profile", nil, nil]}
+      {true, ["Tab switches its agent", "Tab agent", nil]}
     ]
 
     0..2
@@ -2057,10 +2152,20 @@ defmodule Troupe.UI.TUI.View do
 
           title =
             cond do
-              blocked = input_blocked(state) -> " → #{path} — input disabled: #{blocked} "
-              armed = armed_note(state, path) -> armed
-              multiline?(state.win_text) -> pasted_title(state.win_text)
-              true -> " → #{path} (Enter sends#{target}, Esc back) "
+              blocked = input_blocked(state) ->
+                " → #{path} — input disabled: #{blocked} "
+
+              armed = armed_note(state, path) ->
+                armed
+
+              multiline?(state.win_text) ->
+                pasted_title(state.win_text)
+
+              Map.get(state, :win_command) ->
+                " → #{path} — a command for this window: Enter runs it, Esc back "
+
+              true ->
+                " → #{path} (Enter sends#{target}, Esc back) "
             end
 
           {{:edit, {state.win_text, state.win_pos}}, title}
@@ -2079,6 +2184,12 @@ defmodule Troupe.UI.TUI.View do
 
         :mcp ->
           {"", " mcp — ↑↓ move · r reload · c check · d enable/disable · x remove · Esc back "}
+
+        :agents ->
+          Agents.command_line(state.agents_page)
+
+        :chooser ->
+          {"", " the agent this window runs — ↑↓ choose · Enter switches · Esc keeps it "}
 
         :hq ->
           {hq_text(state), Troupe.UI.HQ.footer(state.hq)}

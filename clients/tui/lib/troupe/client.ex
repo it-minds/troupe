@@ -126,6 +126,7 @@ defmodule Troupe.Client do
   @callback mcp_status(session_id()) :: [map()]
   @callback sources(session_id()) :: {:ok, sources()} | {:error, term()}
   @callback manage_sources(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  @callback agents(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   @callback memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback instructions(session_id()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
@@ -317,7 +318,9 @@ defmodule Troupe.Client do
   @doc """
   Hear `{:troupe_settings_changed, params}` whenever the daemon says a settings file
   changed, whoever changed it (`config.changed`): the settings page shows what another
-  client set while it is open.
+  client set while it is open. The same subscription hears `{:troupe_agents_changed,
+  params}` when an agent is saved or deleted (`agents.changed`), so a palette and the
+  `/agents` page follow what the desktop app wrote.
   """
   @spec subscribe_settings() :: :ok
   def subscribe_settings, do: Troupe.Client.Events.subscribe_settings()
@@ -337,6 +340,27 @@ defmodule Troupe.Client do
   @doc "`mcp.add`, `mcp.remove`, `mcp.check`, `skills.add` or `skills.remove` on the session's workspace."
   @spec manage_sources(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   def manage_sources(sid, method, params), do: impl(sid).manage_sources(sid, method, params)
+
+  @doc """
+  The agents the session's workspace has, through the daemon (root Decision 841):
+  `agents.list`, `agents.get` (with the session, so its answer names the windows of the
+  session's family that run it), `agents.validate`, `agents.put` and `agents.delete`,
+  each answered as the wire map. On a pod the agents are its bundle's: `agents.list`
+  carries `read_only`, the sentence that says why, and the two writes answer it as
+  their error without being sent.
+  """
+  @spec agents(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def agents(sid, method, params \\ %{}), do: impl(sid).agents(sid, method, params)
+
+  @doc """
+  Opens a file in the person's own editor (`VISUAL`, then `EDITOR`) and returns once it
+  is closed (TUI Decision 156). The editor is this machine's whichever side the session
+  lives on, as the clipboard is. `{:terminal, outcome}` says the editor had the terminal,
+  and `mouse: true` gives the screen its mouse reporting back after it.
+  """
+  @spec edit_file(String.t(), keyword()) ::
+          Troupe.Editor.outcome() | {:terminal, Troupe.Editor.outcome()}
+  def edit_file(path, opts \\ []), do: Troupe.Editor.edit(path, opts)
 
   @spec memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def memory(sid, command), do: impl(sid).memory(sid, command)

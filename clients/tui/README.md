@@ -303,8 +303,9 @@ Keys: `1`–`9`, Enter, or a mouse click on its tile activate a window; Esc retu
 Enter sends input or answers a question, and when a question offers options a
 digit picks one (with `multiple`, digits tick and untick and Enter sends the
 ticked set); Alt-Enter (or Ctrl-J) puts a newline in the box instead of
-sending; Tab switches the window's profile
-(`/plan` → Tab to `code` → "go" is plan-then-build); `xx` (x twice) cancels and removes the window; Tab on the command line completes command names and the window paths for `/merge`, `/discard`, `/cancel`, `/dismiss`; `dd`
+sending; Tab chooses the agent the window runs, each with its instruction beside it
+(`/plan` → Tab, `build` → "go" is plan-then-build; the window's title says which agent it
+runs); `xx` (x twice) cancels and removes the window; Tab on the command line completes command names and the window paths for `/merge`, `/discard`, `/cancel`, `/dismiss`; `dd`
 dismisses a finished window, keeping its worktree; `e` expands tool output; Ctrl-Y copies the
 transcript you are reading to the clipboard; `@file` completes paths;
 Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo complete <n>`, `/todo cancel <n>` (the task's
@@ -490,6 +491,17 @@ overrides the global `agents/` dir which overrides the built-ins (`code`,
 `worktree`, `plan`, `workflow`, `ask`, the watch-mode pair `quick` and `answer`,
 and the subagents `general`, `explore`, `implementer`, `reviewer` and
 `librarian`).
+
+`/agents` lists the primary ones with where each comes from, its model, its tools,
+whether it is read-only, its cap on turns and which windows run it; Enter reads one's
+whole instruction. `e` opens it in your editor (`VISUAL`, then `EDITOR`; Notepad or `vi`
+without either) and the daemon checks what you saved: refused, the errors are on the page
+and your edit is kept for the next `e`; accepted, you pick where it goes, `r` the
+repository's `.troupe/agents/` or `m` your own `agents/`, after it says which tools it
+would run without asking, and asks again when the save adds one. `c` copies one into the
+repository in one key, `n` starts one from a template, `x` deletes a copy and says what
+answers to the name after. A bundle's agents, and every agent on a pod, are read-only
+here and say where they are changed (TUI Decision 156).
 
 A definition's `model:` is `default`, `cheap`, `expensive`, or a model named
 outright, and

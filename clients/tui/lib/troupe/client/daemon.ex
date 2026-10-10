@@ -448,6 +448,24 @@ defmodule Troupe.Client.Daemon do
 
   def manage_sources(_sid, method, _params), do: {:error, "unknown method #{method}"}
 
+  # The agents of this session's workspace, read, checked and written by the daemon (root
+  # Decision 841). Reading and checking name the session too, so `agents.get` answers
+  # with the session's own definitions and the windows of its family that run one; a
+  # write gets its command id here, as every other does.
+  @impl true
+  def agents(sid, method, params) when method in ~w(agents.list agents.get agents.validate) do
+    base = %{workspace: workspace(sid)}
+    base = if method == "agents.list", do: base, else: Map.put(base, :session_id, sid)
+    manage(method, Map.merge(base, params))
+  end
+
+  def agents(sid, method, params) when method in ~w(agents.put agents.delete) do
+    base = %{workspace: workspace(sid), command_id: Troupe.Remote.RPC.command_id()}
+    manage(method, Map.merge(base, params))
+  end
+
+  def agents(_sid, method, _params), do: {:error, "unknown method #{method}"}
+
   defp manage(method, params) do
     case Link.call(method, params) do
       {:ok, answer} when is_map(answer) -> {:ok, answer}

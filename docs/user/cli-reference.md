@@ -116,7 +116,7 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 
 | command | what it does | needs |
 | --- | --- | --- |
-| `/agents` | List the agents this session can start a branch on. The primary agents: the built-ins, this machine's agents/ and the project's .troupe/agents/. Each is a command of its own, below. |  |
+| `/agents` | Read, copy, create, edit and delete the agents. The primary agents, each with where it comes from (built in, a bundle, yours or the repository's), its model, its tools, whether it is read-only and which windows run it; Enter reads its whole instruction. An edit opens your editor and is checked and saved by the daemon into your agents/ or the repository's .troupe/agents/; c copies one into the repository, n starts a new one, x deletes a copy. Each is a command of its own, below, and Tab in a window switches the agent it runs. |  |
 | `/worktree [name:] <prompt>` | Run the default agent on a branch in a worktree of its own. /worktree &lt;prompt&gt; works in a fresh worktree, to /merge or /discard later; /worktree &lt;name&gt;: &lt;prompt&gt; in a Troupe worktree of that name, created the first time and reused after; /worktree &lt;existing&gt; &lt;prompt&gt; in one you checked out (Tab completes them). For example `/worktree fix the flaky test`. | a session on this machine |
 
 ### Quit
@@ -128,6 +128,6 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 
 Besides these, each agent is a command that starts a branch on it: `/build <prompt>`,
 `/plan <prompt>`, and whichever agents your config, your team's bundle or the
-repository's `.troupe/agents/` add (`/agents` lists them). So is each command you or the
+repository's `.troupe/agents/` add (`/agents` manages them). So is each command you or the
 repository write as a markdown file, `/<name> [arguments]`, under `Custom` in the palette
 ([your own commands](configuration.md#your-own-commands)).
