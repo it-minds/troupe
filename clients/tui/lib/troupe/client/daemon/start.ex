@@ -86,13 +86,22 @@ defmodule Troupe.Client.Daemon.Start do
       question ->
         key = if key == "", do: question.default, else: String.downcase(key)
 
-        if key in question.keys do
-          :ok = Worker.post(sid, :local_question_answered, %{id: id, answer: key})
-          go_on(sid, question, key)
-          :ok
-        else
-          {:error, "answer with " <> Enum.join(question.keys, ", ")}
-        end
+        if key in question.keys,
+          do: take(sid, id, question, key),
+          else: {:error, "answer with " <> Enum.join(question.keys, ", ")}
+    end
+  end
+
+  # A session let go of meanwhile takes no answer, and the question stays for its next
+  # screen.
+  defp take(sid, id, question, key) do
+    case Worker.post(sid, :local_question_answered, %{id: id, answer: key}) do
+      :ok ->
+        go_on(sid, question, key)
+        :ok
+
+      {:error, reason} ->
+        {:error, "the answer was not taken: #{message(reason)}"}
     end
   end
 
@@ -384,7 +393,11 @@ defmodule Troupe.Client.Daemon.Start do
 
   defp ask(sid, question) do
     id = "start-" <> Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
-    :ok = Worker.post(sid, :local_question, Map.put(question, :id, id))
+
+    case Worker.post(sid, :local_question, Map.put(question, :id, id)) do
+      :ok -> :ok
+      {:error, reason} -> Logger.warning("no question at #{sid}'s start: #{message(reason)}")
+    end
   end
 
   # The question `id` names, as it was asked, while nobody has answered it.
