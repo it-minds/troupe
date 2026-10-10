@@ -11,6 +11,7 @@ paths:
   - apps/troupe_core/lib/troupe/watch/branch.ex
   - apps/troupe_core/lib/troupe/session/watcher.ex
   - apps/troupe_core/lib/troupe/session.ex
+  - apps/troupe_core/lib/troupe/session/mcp.ex
   - apps/troupe_core/lib/troupe/agent/server.ex
   - apps/troupe_core/lib/troupe/config/schema.ex
   - apps/troupe_core/test/troupe/watch/watch_branch_test.exs
@@ -79,21 +80,26 @@ taken, and no client could ask whether a session watched. On the tip, a core tes
 
 Anything that writes a file can write an `AI!` comment: a pull, a generator, a formatter,
 another tool, a dependency's post-install step. With watch on, that is a change turn the
-person did not ask for. So the branch a trigger starts asks before every write, edit and
-shell command, whatever `auto_approve` says and whatever the agent's own `permissions`
-say: it runs with `auto_approve: false`, and every definition it runs under has its `auto`
-entries taken out (`Branch.hold_auto/1`, the way Decision 825 holds back a workspace's
-until it is trusted), so each such tool asks by its own default.
+person did not ask for. So the branch a trigger starts asks before every write, edit,
+shell command and MCP server's tool, whatever `auto_approve` says and whatever the agent's
+own `permissions` and a server's `permission: auto` say. It runs with `auto_approve: false`
+and is started with `hold_auto`: every definition it runs under has its `auto` entries taken
+out (`Branch.hold_auto/1`, in `Session.build_opts/1`), and every MCP server it starts has
+its `permission: auto` set back to `ask` (`Troupe.Session.MCP`), the way Decisions 825 and
+830 hold back a workspace's until it is trusted. Each such tool then asks by its own
+default. A server's tool can write as surely as `edit_file` can, and a redefined `quick`
+may list one.
 
 `watch_auto_approve` (boolean, default `false`, trusted scope, so a project's file sets it
 only in a trusted workspace, as `auto_approve`) turns that off: the branch then runs
-`auto_approve: true` and its agents' `auto` entries apply. It is its own key so that
-turning `auto_approve` on for the work a person types does not also hand it to whatever
-writes a comment.
+`auto_approve: true`, and its agents' and servers' `auto` entries apply. It is its own key
+so that turning `auto_approve` on for the work a person types does not also hand it to
+whatever writes a comment.
 
-Not covered here: an MCP server's own `permission: auto` (Decision 830) still applies in a
-trusted workspace. The built-in `quick` and `answer` name their tools and name no server's,
-so it applies only to a redefined one that lists a server's tools.
+`watch` itself has trusted scope too: a repository's own `.troupe/config.yaml` turns watch on
+only in a workspace the person trusts, so a clone cannot make every comment in it start
+work. The person's own file, `--watch`, a client's `session.create` config and `watch.set`
+are not affected.
 
 ## Where watch runs
 
@@ -133,7 +139,9 @@ no change for this: it shows a branch session of its workspace as it does any ot
 `Troupe.Watch.WatchBranchTest` (an `AI!` starts `quick` in the checkout and its edit asks
 though the session auto-approves; an `AI?` starts `answer` and its write attempt is refused
 under the plan permission set though `watch_auto_approve` is on; `watch_auto_approve` lets
-the edit run; a trusted workspace's `quick` with `edit_file: auto` still asks; a marker is
+the edit run; a trusted workspace's `quick` with `edit_file: auto` still asks; a trusted
+workspace's MCP server at `permission: auto` is `ask` in the branch and its call asks, and
+`auto` again with `watch_auto_approve`; a marker is
 not sent again while its branch works, and is once it has ended),
 `Troupe.Watch.WatchSessionTest` (`watch_changed`, `watch_state`, a branch in the checkout
 never chosen to watch, a pod's session refusing), `Troupe.Gateway.WatchTest` (`watch.get`,

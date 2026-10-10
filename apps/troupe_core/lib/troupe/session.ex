@@ -18,6 +18,7 @@ defmodule Troupe.Session do
   alias Troupe.{Config, Mounts, Registry, Skills, Workspace}
   alias Troupe.LLM.Fake
   alias Troupe.LLM.Provider
+  alias Troupe.Watch.Branch
 
   @root_path ["root"]
 
@@ -85,7 +86,8 @@ defmodule Troupe.Session do
         # started with the session and gone with it. Above the agent, since their tools
         # are in its list; below `Questions`, which the workspace's servers are asked
         # through. Only a local session reads the `mcp.json` layers: a pod's servers are
-        # its bundle's, and a checkout's file must never start a command there.
+        # its bundle's, and a checkout's file must never start a command there. A branch a
+        # saved comment started holds every server's `permission: auto` (Decision 844).
         {Troupe.Session.MCP,
          session_id: session_id,
          workspace: workspace.root_real,
@@ -93,6 +95,7 @@ defmodule Troupe.Session do
          local: Keyword.get(opts, :kind, :local) == :local,
          trusted: Config.Trust.trusted?(workspace.root_real, config.trusted_workspaces),
          managed_only: config.managed_mcp_servers_only,
+         hold_auto: Keyword.get(opts, :hold_auto, false),
          state_dir: config.state_dir,
          sessions: Troupe.Registry.mcp_sessions(session_id)}
       ] ++
@@ -184,7 +187,8 @@ defmodule Troupe.Session do
   `repository_overrides: true` (`t:Troupe.Skills.bundle/0`, Decision 826).
   `:kind` says whether this is a `:team` session on a pod or a `:local` one, and
   `:origin` says what started it; both are recorded in `session_created` and nothing
-  else reads them.
+  else reads them. `:hold_auto` is a branch a saved comment started (Decision 844): no
+  agent's `auto` and no MCP server's `permission: auto` applies in it.
   """
   @spec build_opts(keyword()) :: {:ok, keyword()} | {:error, term()}
   def build_opts(opts) do
@@ -234,6 +238,7 @@ defmodule Troupe.Session do
           )
         end)
         |> Definitions.trust(trusted?, workspace.root_real)
+        |> held(Keyword.get(opts, :hold_auto, false))
 
       {:ok,
        [
@@ -255,10 +260,16 @@ defmodule Troupe.Session do
          parent: Keyword.get(opts, :parent),
          # What the caller set over the files, kept for a branch the watcher starts, which
          # is started as this session was (Decision 844).
-         config_overrides: Keyword.get(opts, :config_overrides, [])
+         config_overrides: Keyword.get(opts, :config_overrides, []),
+         hold_auto: Keyword.get(opts, :hold_auto, false)
        ]}
     end
   end
+
+  # A branch a saved comment started holds every agent's own `auto` (Decision 844); its
+  # MCP servers' are held where their tools are made (`Troupe.Session.MCP`).
+  defp held(definitions, true), do: Branch.hold_auto(definitions)
+  defp held(definitions, _hold?), do: definitions
 
   # A file Troupe refuses is an answer to `session.create`, naming the file, the key and
   # the fix. A session on a pod reads no gated key from the project's own file, whatever

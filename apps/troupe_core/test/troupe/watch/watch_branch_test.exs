@@ -2,13 +2,15 @@ defmodule Troupe.Watch.WatchBranchTest do
   @moduledoc """
   Where a watch trigger goes (Decision 844): a branch of the watching session, in its
   checkout, on `quick` for an `AI!` and on `answer` for an `AI?` (TUI Decision 67), never
-  a turn of the session's own agent; and a write that branch makes asks, whatever the
-  session's `auto_approve` says, unless `watch_auto_approve` is on.
+  a turn of the session's own agent; and a write that branch makes, or a call to an MCP
+  server's tool, asks, whatever the session's `auto_approve`, an agent's `auto` or a
+  server's `permission: auto` says, unless `watch_auto_approve` is on.
   """
 
   use Troupe.SessionCase, async: false
 
-  alias Troupe.Session.{Approvals, Watcher}
+  alias Troupe.Session.{Approvals, MCP, Watcher}
+  alias Troupe.Tool
 
   @calc "defmodule Calc do\n  def answer, do: 0\nend\n"
   @marked "defmodule Calc do\n  # make this 42 AI!\n  def answer, do: 0\nend\n"
@@ -43,6 +45,42 @@ defmodule Troupe.Watch.WatchBranchTest do
       config_overrides: [watch: true, watch_debounce_ms: 80] ++ overrides,
       steps: steps
     )
+  end
+
+  @stub Path.expand("../../support/mcp_stub.exs", __DIR__)
+  @elixir System.find_executable("elixir") || "elixir"
+
+  # A trusted workspace's MCP server set to `permission: auto`, which Decision 830 lets
+  # run unasked, and a `quick` that lists its tool.
+  defp auto_server(context) do
+    server = %{"command" => @elixir, "args" => [@stub], "permission" => "auto"}
+    write_file(context, ".troupe/mcp.json", Jason.encode!(%{"mcpServers" => %{"stub" => server}}))
+
+    write_file(context, ".troupe/agents/quick.md", """
+    ---
+    description: quick, with the server's tool
+    mode: primary
+    tools: [read_file, mcp.stub.greet, finish]
+    ---
+    Make the change.
+    """)
+
+    write_file(context, "lib/calc.ex", @calc)
+  end
+
+  # The server's tool as a session has it, once its server is up.
+  defp greet(session_id, tries \\ 400) do
+    case Enum.find(
+           MCP.tools(session_id),
+           &(Tool.name(&1) == "mcp.stub.greet")
+         ) do
+      nil when tries > 0 ->
+        Process.sleep(50)
+        greet(session_id, tries - 1)
+
+      tool ->
+        tool
+    end
   end
 
   test "an AI! comment starts a quick branch in the checkout, and the session's own agent gets nothing",
@@ -226,5 +264,45 @@ defmodule Troupe.Watch.WatchBranchTest do
     [asked] = eventually(fn -> events_of_type(child, "approval_requested") end)
     assert asked.data["tool"] == "edit_file"
     assert read_file(context, "lib/calc.ex") =~ "AI!"
+  end
+
+  # A server's tool can write as surely as `edit_file` can: in a branch a comment started,
+  # its server's `auto` is held as an agent's is, and a call asks.
+  test "an MCP server's own auto is held for a branch a comment started", context do
+    auto_server(context)
+
+    %{session: session} =
+      watching(context, [trusted_workspaces: [context.workspace]], [
+        {:text, "Nothing to change."},
+        {:tools, [{"mcp.stub.greet", %{"name" => "world"}}]},
+        {:text, "done"}
+      ])
+
+    Troupe.subscribe(session.id)
+
+    # The session itself runs it unasked, as its trusted workspace says.
+    assert Tool.default_permission(greet(session.id)) == :auto
+
+    write_file(context, "lib/calc.ex", @marked)
+    {_data, child} = triggered(session)
+    assert Tool.default_permission(greet(child)) == :ask
+
+    # Its first turn ended; asked to call the server's tool, it asks.
+    eventually(fn -> events_of_type(child, "turn_ended") end)
+    Troupe.send_input(child, "greet the world")
+    [asked] = eventually(fn -> events_of_type(child, "approval_requested") end)
+    assert asked.data["tool"] == "mcp.stub.greet"
+  end
+
+  test "with watch_auto_approve on, an MCP server's own auto applies in the branch", context do
+    auto_server(context)
+
+    %{session: session} =
+      watching(context, [trusted_workspaces: [context.workspace], watch_auto_approve: true], [])
+
+    Troupe.subscribe(session.id)
+    write_file(context, "lib/calc.ex", @marked)
+    {_data, child} = triggered(session)
+    assert Tool.default_permission(greet(child)) == :auto
   end
 end

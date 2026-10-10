@@ -377,6 +377,7 @@ defmodule Troupe.Config.Schema do
       group("Watching", [
         spec("watch", :boolean, "Act on `AI!` and `AI?` comments in the workspace's files.",
           default: false,
+          scope: :trusted,
           field: :watch,
           label: "watch mode"
         ),

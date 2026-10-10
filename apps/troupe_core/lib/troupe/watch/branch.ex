@@ -11,9 +11,9 @@ defmodule Troupe.Watch.Branch do
   own `agents/`, which is also what `/quick` starts: an `AI!` and `/quick` are one path.
 
   Anything that writes a file can write a comment — a pull, a generator, another tool — so
-  what a trigger starts asks before every write, edit and shell command, whatever
-  `auto_approve` and an agent's own `auto` say, until the person turns
-  `watch_auto_approve` on. And it does not watch: it works in the files the watcher sees.
+  what a trigger starts asks before every write, edit, shell command and MCP server's
+  tool, whatever `auto_approve`, an agent's own `auto` and a server's `permission: auto`
+  say, until the person turns `watch_auto_approve` on. And it does not watch: it works in the files the watcher sees.
   """
 
   alias Troupe.Agent.Definitions
@@ -40,30 +40,20 @@ defmodule Troupe.Watch.Branch do
     overrides =
       Keyword.get(opts, :config_overrides, []) ++ [watch: false, auto_approve: auto?]
 
-    start =
-      [
-        workspace: workspace,
-        agent: agent(trigger),
-        parent: Keyword.fetch!(opts, :parent),
-        fake: Keyword.get(opts, :fake),
-        config_overrides: overrides
-      ]
-      |> held(auto?)
+    # `hold_auto`: every agent's own `auto` and every MCP server's `permission: auto` held
+    # back in the branch (`Troupe.Session.build_opts/1`, `Troupe.Session.MCP`), as Decisions
+    # 825 and 830 hold a workspace's until it is trusted: each tool asks by its own
+    # default, which for a write, an edit, a shell command or a server's tool is to ask.
+    start = [
+      workspace: workspace,
+      agent: agent(trigger),
+      parent: Keyword.fetch!(opts, :parent),
+      fake: Keyword.get(opts, :fake),
+      config_overrides: overrides,
+      hold_auto: not auto?
+    ]
 
     with {:ok, session} <- Troupe.start_session(start), do: {:ok, Map.take(session, [:id, :pid])}
-  end
-
-  # The definitions the branch runs under, with every agent's own `auto` held back, as
-  # Decision 825 holds back a workspace's until it is trusted: the tool's own default,
-  # which for a write, an edit or a shell command is to ask.
-  defp held(start, true), do: start
-
-  defp held(start, false) do
-    Keyword.put(
-      start,
-      :definitions,
-      start |> Keyword.fetch!(:workspace) |> Definitions.load() |> hold_auto()
-    )
   end
 
   @doc "Every definition's `auto` entries taken out, so each of those tools asks again."

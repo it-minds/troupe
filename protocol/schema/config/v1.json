@@ -641,7 +641,7 @@
       }
     },
     "watch": {
-      "description": "Act on `AI!` and `AI?` comments in the workspace's files.",
+      "description": "Act on `AI!` and `AI?` comments in the workspace's files. Read from a project's file only in a trusted workspace.",
       "default": false,
       "type": [
         "boolean",

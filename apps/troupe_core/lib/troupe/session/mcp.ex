@@ -58,6 +58,8 @@ defmodule Troupe.Session.MCP do
     local?: true,
     trusted?: false,
     managed_only?: false,
+    # A branch a saved comment started (Decision 844): no server's `auto` applies in it.
+    hold_auto?: false,
     # Every server the layers name, by name: its record (`Troupe.MCP.Local.server/0`)
     # and how it stands here — `:stdio` running, `:http` discovered, `:pending` an
     # answer, `:denied` one, `:disabled`, or `:refused` with why.
@@ -200,7 +202,8 @@ defmodule Troupe.Session.MCP do
       local?: local?,
       # A pod trusts no workspace (Decision 825), whatever the list says.
       trusted?: local? and Keyword.get(opts, :trusted, false),
-      managed_only?: Keyword.get(opts, :managed_only, false)
+      managed_only?: Keyword.get(opts, :managed_only, false),
+      hold_auto?: Keyword.get(opts, :hold_auto, false) == true
     }
 
     {:ok, state, {:continue, {:start, Keyword.get(opts, :servers, %{})}}}
@@ -304,11 +307,19 @@ defmodule Troupe.Session.MCP do
 
   # The config a server starts with: a workspace's `auto` is held until the workspace is
   # trusted (Decision 830), here where its tools are made, so a stdio server's and a URL
-  # server's alike, and one started again by a reload or a sign-in, ask until then.
+  # server's alike, and one started again by a reload or a sign-in, ask until then. In a
+  # branch a saved comment started, any server's `auto` is held (Decision 844).
   defp permitted(state, %{config: config} = record) do
-    if not state.trusted? and Local.waits_for_trust?(record),
-      do: %{config | permission: :ask},
-      else: config
+    cond do
+      state.hold_auto? and Map.get(config, :permission) == :auto ->
+        Map.put(config, :permission, :ask)
+
+      not state.trusted? and Local.waits_for_trust?(record) ->
+        %{config | permission: :ask}
+
+      true ->
+        config
+    end
   end
 
   # -- the workspace's question ----------------------------------------------------

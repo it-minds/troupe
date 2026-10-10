@@ -33,7 +33,8 @@ defmodule Troupe do
   Options: `:workspace`, `:agent` (starting profile), `:task` (a first message),
   `:session_id`, `:config_overrides`, `:definitions`, `:fake`, `:mounts`, `:bundle`
   (`%{version, hash, channel, dir}`), `:kind` (`:local` or `:team`), `:origin`,
-  `:parent` (the session id this one is a branch of).
+  `:parent` (the session id this one is a branch of), `:hold_auto` (no agent's `auto` and
+  no MCP server's `permission: auto` applies: a branch a saved comment started).
   """
   @spec start_session(keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(opts \\ []) do
