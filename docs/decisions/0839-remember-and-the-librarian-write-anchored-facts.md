@@ -75,8 +75,11 @@ bullet (a continuation line kept with its bullet; text with no bullets is one fa
 unanchored, and replace what the same writer wrote of that kind the old way before, so a
 librarian from an older bundle rewriting its sections each run does not pile up copies,
 and nothing anchored or a person's is touched. The answer says it is the older form. Both
-arguments stay in the schema, marked as the older form, so a provider that holds a call to
-its schema does not refuse an old call. Remove them in the release after this one.
+arguments are accepted and no longer offered in the schema: a model calls the old way
+because a prompt told it to, not because the schema offers it, and every request pays for
+what the schema offers (the offline bench's tool-definition budget, which the first draft
+with both offered and a longer description went over). Remove them in the release after
+this one.
 
 **The librarian.** Its tools gain `recall`. Its prompt starts with `recall` and no
 arguments, re-reads the anchors of every `moved` or `missing` fact and of every `migrated`

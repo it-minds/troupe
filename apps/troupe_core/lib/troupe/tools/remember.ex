@@ -43,48 +43,28 @@ defmodule Troupe.Tools.Remember do
   @impl Troupe.Tool
   def description do
     """
-    Record a fact about this repository in its memory, so later agents start knowing it instead of working it out again. Do not record what is already there: `recall`, where you have it, says.
+    Record a fact about this repository so later agents start knowing it. Only what stays true beyond your task and what you verified, and not what `recall` already has.
 
-    Record only what stays true beyond your current task and what you verified: never task-specific state, or findings about code you are mid-way through changing.
+    `kind`: `command` (build, test, format or lint, exactly as written down), `convention` (a rule a newcomer would break), `overview`, `layout`, `negative` (what does not work here, and why) or `note`. `claim`: one or two sentences.
 
-    `kind` is one of: `command` (how to build, test, format or lint, exactly as written down), `convention` (a rule a newcomer would break), `overview`, `layout`, `negative` (what does not work here, and why), `note` (anything else worth keeping). `claim` is the fact in one or two sentences.
+    `anchors`: the files you read it in, from the workspace (the manifest for a command). Troupe records what they hold; once one changes, the fact shows as "may no longer be true". A fact with no anchor ages out.
 
-    `anchors` are the files the claim was read from or is about, relative to the workspace: the manifest for a command, the file a convention is stated or shown in. Troupe records what each holds now, and once one changes the fact is shown as "may no longer be true". A fact with no anchor ages out.
-
-    `replaces` is the id of a fact this one corrects (from `recall`); with no `claim` it drops that fact. That is how a fact that may no longer be true is re-verified: read its anchors again, then re-anchor it, correct it or drop it.
-
-    `section` and `text` are an older form, still accepted.
+    `replaces`: the id of a fact this one corrects or re-anchors; alone, it drops that fact.
     """
     |> String.trim()
   end
 
+  # `section` and `text`, the older form, are accepted and not offered (Decision 839).
   @impl Troupe.Tool
   def schema do
     %{
       "type" => "object",
       "properties" => %{
         "kind" => %{"type" => "string", "enum" => @kinds},
-        "claim" => %{"type" => "string", "description" => "The fact, in one or two sentences."},
-        "anchors" => %{
-          "type" => "array",
-          "items" => %{"type" => "string"},
-          "description" => "Workspace-relative paths of the files the claim was read from."
-        },
-        "scope" => %{
-          "type" => "string",
-          "description" =>
-            "A glob of the paths the fact applies to, when not the whole repository."
-        },
-        "replaces" => %{
-          "type" => "string",
-          "description" => "The id of a fact this one corrects; alone, drops that fact."
-        },
-        "section" => %{
-          "type" => "string",
-          "enum" => Map.keys(@sections),
-          "description" => "Older form: use kind."
-        },
-        "text" => %{"type" => "string", "description" => "Older form: use claim."}
+        "claim" => %{"type" => "string"},
+        "anchors" => %{"type" => "array", "items" => %{"type" => "string"}},
+        "scope" => %{"type" => "string", "description" => "A glob; none is the whole repository."},
+        "replaces" => %{"type" => "string"}
       }
     }
   end
