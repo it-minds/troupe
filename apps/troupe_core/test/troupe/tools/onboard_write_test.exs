@@ -239,8 +239,9 @@ defmodule Troupe.Tools.OnboardWriteTest do
           {%{"target" => "user", "source" => ".claude/agents/reviewer.md"},
            "does not start with ~/"},
           {%{"target" => "elsewhere"}, "target must be \"repo\", \"workspace\" or \"user\""},
+          # Decision 833: said as what it is, before the kinds of file are looked at.
           {%{"target" => "workspace", "path" => ".git/AGENTS.md"},
-           "`.git/AGENTS.md` is not a file onboarding writes into the workspace"},
+           "`.git/AGENTS.md` is in a .git directory, which onboarding never writes"},
           {%{"target" => "workspace", "path" => "CLAUDE.md"},
            "`CLAUDE.md` is not a file onboarding writes into the workspace"},
           {%{"target" => "workspace", "path" => "nowhere/AGENTS.md"},

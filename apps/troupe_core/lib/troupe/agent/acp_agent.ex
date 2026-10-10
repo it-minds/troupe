@@ -193,6 +193,14 @@ defmodule Troupe.Agent.ACPAgent do
     }
   end
 
+  defp refusal({:git_dir, _path}, path) do
+    %{
+      "code" => -32_602,
+      "message" => "that path is in a .git directory, which is not written through the client",
+      "data" => %{"path" => path}
+    }
+  end
+
   defp refusal({:outside_workspace, _path}, path) do
     %{
       "code" => -32_602,
