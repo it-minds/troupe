@@ -188,7 +188,17 @@ defmodule Troupe.Protocol.Schema do
       },
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
-      "profile_switched" => %{"from" => optional(:string), "to" => required(:string)},
+      # The agent a session or branch runs, changed (Decision 841): the layer the new one was
+      # read from, the tools it holds that the old did not and the other way round, and the
+      # switch's `command_id`. Written under whoever switched it.
+      "profile_switched" => %{
+        "from" => optional(:string),
+        "to" => required(:string),
+        "layer" => optional(:string),
+        "tools_added" => optional({:array, :string}),
+        "tools_removed" => optional({:array, :string}),
+        "command_id" => optional(:string)
+      },
       # What the agent's system prompt was read from at this turn (Decision 706): the
       # instruction files, what they import, and the brief, as `context.get` lists them,
       # each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`,
@@ -699,6 +709,35 @@ defmodule Troupe.Protocol.Schema do
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "workflows.list" => %{"workspace" => required(:string)},
       "agents.list" => %{"workspace" => required(:string)},
+      # One agent whole, checked, written and taken away (#503, Decision 841). Reading and
+      # checking answer on a pod too; writing is the daemon's, and a pod refuses it.
+      # `scope` is `user` or `project` (`workspace` is taken as `project`).
+      "agents.get" => %{
+        "name" => required(:string),
+        "workspace" => optional(:string),
+        "session_id" => optional(:string)
+      },
+      "agents.validate" => %{
+        "source" => required(:string),
+        "name" => optional(:string),
+        "workspace" => optional(:string),
+        "session_id" => optional(:string)
+      },
+      "agents.put" => %{
+        "command_id" => required(:string),
+        "name" => required(:string),
+        "scope" => required(:string),
+        "source" => required(:string),
+        "workspace" => optional(:string),
+        "session_id" => optional(:string)
+      },
+      "agents.delete" => %{
+        "command_id" => required(:string),
+        "name" => required(:string),
+        "scope" => required(:string),
+        "workspace" => optional(:string),
+        "session_id" => optional(:string)
+      },
       # The slash commands a client may offer for a session, agents included; reading
       # the table wakes nothing.
       "commands.list" => %{"session_id" => required(:string)},
@@ -923,6 +962,7 @@ defmodule Troupe.Protocol.Schema do
   is nothing to dial back to, and a laptop behind a NAT could not be dialled anyway.
   `config.changed` is a notification, with no answer: the daemon telling every client
   that a settings file it writes has changed (#57), so one client shows what another set.
+  `agents.changed` is one too, for an agent a client saved or took away (Decision 841).
   """
   @spec server_requests() :: %{String.t() => shape()}
   def server_requests do
@@ -936,6 +976,15 @@ defmodule Troupe.Protocol.Schema do
         "scope" => required(:string),
         "path" => required(:string),
         "keys" => required({:array, :string}),
+        "workspace" => optional(:string)
+      },
+      # An agent a client saved or took away (Decision 841), told to every client so each
+      # list follows; `workspace` for a project one.
+      "agents.changed" => %{
+        "name" => required(:string),
+        "scope" => required(:string),
+        "path" => required(:string),
+        "action" => required(:string),
         "workspace" => optional(:string)
       }
     }

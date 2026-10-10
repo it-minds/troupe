@@ -46,7 +46,9 @@ defmodule Troupe do
          {:ok, pid} <- Sessions.start_session(session_opts) do
       session_id = Keyword.fetch!(session_opts, :session_id)
       workspace = Keyword.fetch!(session_opts, :workspace)
-      profile = Keyword.fetch!(session_opts, :profile)
+      # The agent it runs: the one its root was last switched to, which its replay comes
+      # back on, or the one it was started on (Decision 841).
+      profile = Index.switched_to(previously) || Keyword.fetch!(session_opts, :profile)
 
       Index.register(session_id, pid, %{
         workspace: workspace.root_real,
@@ -319,9 +321,17 @@ defmodule Troupe do
   @spec cancel(String.t()) :: :ok | {:error, :no_session}
   def cancel(session_id), do: with_root(session_id, &Agent.cancel/1)
 
-  @doc "Switch the root agent's primary profile, applied at the next turn boundary."
-  @spec switch_profile(String.t(), String.t()) :: :ok | {:error, :no_session}
-  def switch_profile(session_id, name), do: with_root(session_id, &Agent.switch_profile(&1, name))
+  @doc """
+  Switch the root agent, a session's or a branch's (a branch is a session, Decision 646),
+  to another primary agent, read from its file now and applied at the next turn boundary
+  (Decision 841): `{:ok, definition}` once it is on its way, or why not. `opts`: `:actor`
+  and `:command_id`, written on `profile_switched`.
+  """
+  @spec switch_profile(String.t(), String.t(), keyword()) ::
+          {:ok, Troupe.Agent.Definition.t()}
+          | {:error, :no_session | {:unknown_agent, String.t()} | {:not_primary, String.t()}}
+  def switch_profile(session_id, name, opts \\ []),
+    do: with_root(session_id, &Agent.switch_profile(&1, name, opts))
 
   @doc """
   Set the session's goal: what every later turn of the root agent works towards, until it
