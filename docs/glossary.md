@@ -114,8 +114,12 @@ granted to it.
 
 ### Project brief
 
-`.troupe/memory.md` in a workspace: a short note on where things are and how to build and
-test, which every agent reads first. A `librarian` session writes it and keeps it current.
+What earlier agents found out about a repository, kept as facts in
+`.troupe/memory/facts.jsonl`, each with the files it rests on and who checked it: a fact
+whose file has changed since is marked "may no longer be true". Every agent's prompt carries
+the commands and conventions; the rest it asks for with `recall`. `.troupe/memory.md` is a
+view of the facts for a person to read, and an edit to it is read back. A `librarian`
+session writes it and keeps it current.
 
 ### Provider
 

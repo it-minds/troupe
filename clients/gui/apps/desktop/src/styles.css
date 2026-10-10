@@ -2862,6 +2862,160 @@ button.danger {
   border-color: var(--border-strong);
   color: var(--text-primary);
 }
+.chip.as-button[aria-pressed="true"] {
+  border-color: var(--running-solid);
+  color: var(--text-primary);
+}
+
+/* -- agents ------------------------------------------------------------------ */
+
+/* The manager (troupe #503): a ruled table of what a session could run, then the one
+   opened, whole, with what can be done to it, and the editor in its place while one is
+   being changed. Buttons sit at the start of a section, as a form's do. */
+.group > .actions,
+.group > .tabs,
+.group > .fields,
+.group > .agent-form,
+.group > .agent-body,
+.group > .may-do,
+.group > .instruction-head,
+.group > pre.instruction,
+.group > .field-note {
+  margin-left: var(--space-6);
+  margin-right: var(--space-6);
+}
+.group > .actions {
+  justify-content: flex-start;
+  margin-top: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.table .agent-description {
+  display: block;
+  max-width: 36ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.table tr[aria-selected="true"] {
+  background: var(--running-bg);
+}
+/* The name opens the agent; a session id opens its window, written as it is. */
+.table th button.agent-name,
+.table td button.session-id {
+  min-height: 0;
+  padding: 0;
+  font: var(--t-code);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.table td button.session-id + button.session-id {
+  margin-left: var(--space-2);
+}
+.chip.permission-auto {
+  border-color: var(--waiting-solid);
+  color: var(--text-primary);
+}
+.agent-detail .instruction-head,
+.may-do h4 {
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-2);
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+pre.instruction {
+  max-height: 50vh;
+  overflow: auto;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-sunken);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  font: var(--t-code-small);
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+.agent-editor .fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.agent-editor .fields > label {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.agent-editor .tabs {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.agent-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.agent-form fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.agent-form .permission-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+.agent-form .permission-row input {
+  flex: 1 1 12rem;
+}
+.agent-form .permission-row .note {
+  flex-basis: 100%;
+}
+.agent-body textarea {
+  font: var(--t-code-small);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.note.field-note {
+  margin: var(--space-1) 0 0;
+  text-transform: none;
+  letter-spacing: 0;
+}
+/* What the agent may do, above Save: every auto named, on the reserved colour's edge,
+   since a tool that runs without asking is the thing a person is asked about. */
+.may-do {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-left: var(--bw-marker) solid var(--waiting-solid);
+  background: var(--bg-panel);
+}
+.may-do .may-do-row {
+  display: contents;
+}
+.agent-switch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.agent-switch label.inline {
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+.agent-switch .micro.error {
+  color: var(--error-fg);
+}
+/* A switch of the agent is a frame in the transcript, so the history says when the rules
+   changed (#474). */
+.note.switched {
+  border-top: var(--bw-hairline) solid var(--border-strong);
+  padding-top: var(--space-2);
+  color: var(--text-primary);
+}
 
 /* -- command palette -------------------------------------------------------- */
 

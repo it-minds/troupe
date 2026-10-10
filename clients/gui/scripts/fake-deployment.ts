@@ -66,6 +66,20 @@ daemon.onboarding["/home/ada/repo"] = exampleOnboarding({ briefOutdated: true })
 daemon.memory["/home/ada/repo"] = { status: "fresh", built_at: "2026-10-08T09:00:00Z", facts: exampleFacts() };
 daemon.memory["/home/ada/project"] = { status: "absent" };
 daemon.seed("/home/ada/notes");
+// The agents manager (troupe #503) with every layer to show: the built-ins, the
+// repository's own reviewer, whose shell runs without asking, and a bundle's.
+daemon.agents.files.push(
+  {
+    name: "review",
+    layer: "project",
+    workspace: "/home/ada/notes",
+    text:
+      "---\ndescription: Reviews the change on this branch and runs the tests; never edits.\nmode: primary\nmodel: cheap\n" +
+      "tools:\n  - read_file\n  - grep\n  - glob\n  - shell\n  - finish\npermissions:\n  shell: auto\n  write_file: deny\n  edit_file: deny\nmax_turns: 30\n---\n" +
+      "You review the change on this branch. Run the tests first, then read the diff against the task, and report what is wrong without fixing it.\n",
+  },
+  { name: "deploy", layer: "bundle", text: "---\ndescription: Ships a release the way the team does.\nmode: primary\n---\nYou deploy.\n" },
+);
 
 console.log(`
   identity provider  ${idp.issuer}
@@ -85,5 +99,7 @@ This computer's daemon is a fake too: open the app at
   ${origins[0]}/#daemon=${daemon.port}:${daemon.token}
 and a new session in /home/ada/repo asks to onboard Claude Code's and Cursor's files,
 then to rewrite the brief; /memory there lists its facts. A new session in
-/home/ada/project, which has no brief, starts the librarian by itself.
+/home/ada/project, which has no brief, starts the librarian by itself. Agents, in the
+rail, manages the agents of /home/ada/notes: the built-ins, the repository's review and
+a bundle's deploy.
 `);

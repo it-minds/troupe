@@ -153,6 +153,16 @@ and nothing is written. A built-in is changed by saving a copy of it, under its 
 another. A file edited by hand that does not load is not read, and is listed with why in
 `agents.list` and the session's log.
 
+In the desktop app, **Agents** in the rail lists a workspace's agents with where each comes
+from, its model, its tools, whether it can write and the windows running it; opens one
+whole, instruction and all; and saves a new one, a copy (a built-in into the repository is
+one press) or an edit into the layer you choose, with what the daemon finds shown at the
+field. Before a save it shows what the agent may do, every `auto` named, and asks once
+when the save lets a tool run without asking that did not before: an `auto` in your own
+agents applies in every workspace, with no trust asked. A profile bundle's agent is
+changed in the console. A session's head shows the agent it runs and switches it from
+the next turn, the conversation kept; the transcript records the switch.
+
 ## Your own MCP servers and skills
 
 Beside `config.yaml` there are two more files a person keeps, in the shape other tools
@@ -480,7 +490,9 @@ an edit takes effect on the next turn:
    and the directory of every file its conversation has read, edited or written, so
    `frontend/AGENTS.md` applies from the turn after the agent first opened something
    under `frontend/`.
-4. `.troupe/memory.md`, the project brief Troupe's own agents write.
+4. The project brief Troupe's own agents write: the commands and conventions of the
+   repository's facts (`.troupe/memory/facts.jsonl`), each that may no longer be true
+   marked so, and a line naming the `recall` tool for the rest.
 
 An `.agents/AGENTS.md` at the root, or in one of those directories, belongs to its
 directory too: it is read right before that directory's own `AGENTS.md`, so where the
@@ -609,7 +621,7 @@ things:
 | `<config>/commands/*.md`, `<workspace>/.troupe/commands/*.md` | commands | the slash commands you and the repository define | one name, the workspace's; a built-in's or an agent's name is theirs |
 | `<workspace>/.troupe/workflows/<name>.json` | workflows | the steps `workflows.list` offers | one name, one file |
 | `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace and to each file the conversation worked on, each directory's `.agents/AGENTS.md` before its own and its `.troupe/rules/*.md` after it, and the files each imports with `@path` | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out. Other tools' files (`CLAUDE.md`, `GEMINI.md`, Copilot's, Cursor's) are not read: `troupe onboard` brings them in once |
-| `<workspace>/.troupe/memory.md` | instructions | the project brief Troupe's agents write | read after the instruction files; never authoritative, `read_file` and `grep` are |
+| `<workspace>/.troupe/memory/facts.jsonl`, and its view `.troupe/memory.md` | instructions | the project brief Troupe's agents write, as facts | its commands and conventions read after the instruction files, the rest through `recall`; never authoritative, `read_file` and `grep` are; an edit to the view is read back as facts |
 
 ## Which one wins
 

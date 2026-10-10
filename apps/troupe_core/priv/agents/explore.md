@@ -8,6 +8,7 @@ tools:
   - grep
   - glob
   - git_read
+  - recall
   - finish
 permissions:
   write_file: deny

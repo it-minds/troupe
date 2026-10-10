@@ -48,6 +48,21 @@ defmodule Troupe.ClipboardTest do
     end
   end
 
+  # D109: on every OS, what cmd.exe is given on Windows. `clip < "<path>"` as one argument
+  # reached cmd.exe with Erlang's escaped quotes, which it cannot read.
+  test "on Windows, cmd.exe is given clip by its path on PATH and the staged file by its name" do
+    bin = Path.join(System.tmp_dir!(), "troupe-clipboard-bin-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(bin)
+    File.write!(Path.join(bin, "clip.exe"), "")
+    on_exit(fn -> File.rm_rf!(bin) end)
+
+    staged = Path.join(System.tmp_dir!(), "troupe-clip-7")
+    opts = [os: {:win32, :nt}, path: bin, pathext: ".COM;.EXE"]
+
+    assert ["/c", clip, "<", "troupe-clip-7"] = Clipboard.windows_argv("clip", staged, opts)
+    assert clip == String.replace(Path.join(bin, "clip.exe"), "/", "\\")
+  end
+
   defp staged_files,
     do: System.tmp_dir!() |> Path.join("troupe-clip-*") |> Path.wildcard() |> length()
 

@@ -1082,7 +1082,7 @@ defmodule Troupe.UI.TUI.Server do
 
         case Client.fs_upload(sid, target, content) do
           :ok -> {:ok, "uploaded #{path} to #{target}"}
-          {:error, reason} -> {:error, to_message(reason)}
+          {:error, reason} -> {:error, "#{path} not uploaded: #{to_message(reason)}"}
         end
 
       {:error, reason} ->
@@ -1232,19 +1232,30 @@ defmodule Troupe.UI.TUI.Server do
   # Sessions this window offers to switch to: the ones the daemon has for the directory
   # the TUI was opened in that did something, spoke to a model or started a branch, plus
   # the session on screen (which may still be empty) so the list always says where you
-  # are, and the one `/back` returns to, which `/new` left. A branch is not one of them: it
-  # is a window of its parent's, counted on its row.
+  # are, and the one `/back` returns to, which `/new` left. A branch is not one of them
+  # while it is a window of its parent's, counted on its row; one whose window was
+  # dismissed is, after them, named for the window it was (the row of `/dismiss`).
   defp pickable_sessions(state) do
     case Client.sessions({:local, here(state)}) do
       {:ok, sessions} ->
-        Enum.filter(
-          sessions,
-          &(&1.id in [state.session_id, state.back] or (&1.parent == nil and worked?(&1)))
-        )
+        listed =
+          Enum.filter(
+            sessions,
+            &(&1.id in [state.session_id, state.back] or (&1.parent == nil and worked?(&1)))
+          )
+
+        listed ++ dismissed_branches(state, MapSet.new(listed, & &1.id))
 
       {:error, _reason} ->
         []
     end
+  end
+
+  defp dismissed_branches(state, listed) do
+    for %{window: window, session_id: id} <- Client.dismissed_branches(state.session_id),
+        not MapSet.member?(listed, id),
+        {:ok, row} <- [Client.get_session({:local, here(state)}, id)],
+        do: %{row | title: "#{window}, dismissed: #{row.title}"}
   end
 
   defp worked?(entry), do: entry.branches != [] or (entry.tokens || 0) > 0

@@ -6,9 +6,10 @@ defmodule Troupe.Instructions do
   `AGENTS.md` is the file the tools settled on, and a repository that has one has told
   agents how to work in it. Troupe reads it the way the others do: the person's own
   `<config>/AGENTS.md` first, then the repository root's, then one in each directory on
-  the way from the root to where the session works, and Troupe's own brief
-  (`.troupe/memory.md`) last. Where the session works is its workspace and the directory
-  of every file its conversation has read, edited or written (`focus/1`), so a
+  the way from the root to where the session works, and Troupe's own brief (the commands
+  and conventions of the repository's facts, Decision 838) last. Where the session works
+  is its workspace and the directory of every file its conversation has read, edited or
+  written (`focus/1`), so a
   `frontend/AGENTS.md` applies once the agent has opened something under `frontend/`.
   Every one applies; where two disagree the nearer wins, which is why the nearer comes
   later in the prompt.
@@ -134,6 +135,11 @@ defmodule Troupe.Instructions do
   joined says why in `applies` (`nil` for every other file and every rule not joined).
   """
   @type file :: %{
+          optional(:memory) => %{
+            text: String.t(),
+            recall: String.t() | nil,
+            trimmed: non_neg_integer()
+          },
           scope: scope(),
           path: Path.t(),
           directory: Path.t(),
@@ -237,12 +243,15 @@ defmodule Troupe.Instructions do
 
   @doc """
   The system prompt's `# Instruction files` block, then the brief's own block, or `""`
-  when there is neither.
+  when there is neither. `recall: false` leaves out the brief's line naming the `recall`
+  tool, for an agent that does not have it (Decision 838).
   """
-  @spec to_prompt(t() | nil) :: String.t()
-  def to_prompt(nil), do: ""
+  @spec to_prompt(t() | nil, keyword()) :: String.t()
+  def to_prompt(loaded, opts \\ [])
+  def to_prompt(nil, _opts), do: ""
 
-  def to_prompt(%{files: files}) do
+  def to_prompt(%{files: files}, opts) do
+    recall? = Keyword.get(opts, :recall, true)
     {briefs, instructions} = Enum.split_with(files, &(&1.scope == :brief))
 
     blocks =
@@ -256,9 +265,25 @@ defmodule Troupe.Instructions do
         _ -> "# Instruction files\n#{@preamble}\n" <> Enum.join(blocks, "\n\n")
       end
 
-    [section | Enum.map(briefs, & &1.text)]
+    [section | Enum.map(briefs, &brief_text(&1, recall?))]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
+  end
+
+  defp brief_text(%{memory: %{} = prompt}, recall?), do: Memory.compose(prompt, recall?)
+  defp brief_text(file, _recall?), do: file.text
+
+  @doc """
+  Whether a glob, as a rule's `globs` and a fact's `scope` are written, matches a path from
+  the directory it is read from: `**` crosses directories, `*` and `?` do not, `{a,b}` is
+  either, and one without a `/` matches a file's name in any directory.
+  """
+  @spec glob_match?(String.t(), String.t()) :: boolean()
+  def glob_match?(glob, path) do
+    case glob_regex(glob) do
+      {:ok, regex} -> Regex.match?(regex, path)
+      {:error, _} -> false
+    end
   end
 
   @doc """
@@ -807,33 +832,38 @@ defmodule Troupe.Instructions do
     end
   end
 
-  # The brief as `Troupe.Session.Memory` puts it in the prompt, with its own budget and
-  # status: listed here so one table says everything a prompt was read from. Its path is
-  # asked for once, since that is a `git` call and this runs at every turn. A brief that is
-  # a link out of its repository is `outside`, as an instruction file is, and not read.
+  # The brief as `Troupe.Session.Memory` puts it in the prompt, the core of the
+  # repository's facts (Decision 838), with its own budget and status: listed here so one
+  # table says everything a prompt was read from. Where the facts are is asked for once,
+  # since that is a `git` call and this runs at every turn. A brief that is a link out of
+  # its repository is `outside`, as an instruction file is, and not read. Its `path` is the
+  # view a person opens, `.troupe/memory.md`, and `hash` that file's; what reached the
+  # prompt is in the digest by itself, since an anchor's file changing changes the prompt
+  # and not the view.
   defp brief(workspace, config) do
-    path = Brief.path(workspace)
+    where = Brief.locate(workspace)
+    path = Brief.view_path(where)
     max = memory_max_chars(config)
 
     if Brief.inside?(path) do
-      brief(path, max, config)
+      brief(where, path, max, config)
     else
       fields = %{scope: :brief, where: nil, chars: 0, budget: max, trimmed: 0}
       unread(path, Path.dirname(path), fields, :outside, outside_reason(:brief))
     end
   end
 
-  defp brief(path, max, config) do
+  defp brief(where, path, max, config) do
+    core = if memory_enabled?(config), do: Brief.core(where)
+    prompt = Memory.prompt(core, Brief.prompt_opts(config))
+    text = Memory.compose(prompt, true)
     {size, hash} = stat(path)
-    brief = Brief.read(path)
-    text = Brief.to_prompt(brief, config)
-    overflow = Memory.overflow(brief, max_chars: max)
 
     status =
       cond do
         not memory_enabled?(config) -> :disabled
-        size == nil -> :absent
-        overflow > 0 -> :trimmed
+        text == "" -> :absent
+        prompt.trimmed > 0 -> :trimmed
         true -> :whole
       end
 
@@ -848,13 +878,14 @@ defmodule Troupe.Instructions do
       hash: hash,
       status: status,
       reason: nil,
-      trimmed: if(status == :trimmed, do: overflow, else: 0),
+      trimmed: if(status == :trimmed, do: prompt.trimmed, else: 0),
       skipped: [],
       imported_by: nil,
       unfollowed: [],
       rule: nil,
       applies: nil,
-      text: text
+      text: text,
+      memory: prompt
     }
   end
 
@@ -873,7 +904,8 @@ defmodule Troupe.Instructions do
     files
     |> Enum.map_join("\n", fn f ->
       unfollowed = Enum.map(f.unfollowed, &"#{&1.import}:#{&1.reason}")
-      fields = [f.path, f.hash || "", f.status, f.chars, f.trimmed, f.imported_by || ""]
+      text = :crypto.hash(:sha256, f.text) |> Base.encode16(case: :lower)
+      fields = [f.path, f.hash || "", f.status, f.chars, f.trimmed, f.imported_by || "", text]
       Enum.join(fields ++ [f.applies || ""] ++ f.skipped ++ unfollowed, "\t")
     end)
     |> then(&:crypto.hash(:sha256, &1))

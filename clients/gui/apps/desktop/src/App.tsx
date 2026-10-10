@@ -15,6 +15,7 @@ import type { JSX } from "react";
 import { awaitingYou } from "@troupe/client";
 import type { AuthSession, SessionKind } from "@troupe/client";
 import { useAdmin, useDaemon, useFleet } from "./hooks";
+import { Agents } from "./views/Agents";
 import { chooseLocalOnly, storedLocalOnly } from "./mode";
 import type { AppMode } from "./mode";
 import { useNotifications } from "./notify";
@@ -41,12 +42,19 @@ type Where =
   | { screen: "approvals" }
   | { screen: "review" }
   | { screen: "local" }
+  | { screen: "agents"; workspace?: string; agent?: string }
   | { screen: "appearance" }
   | { screen: "setup" }
   | { screen: "session"; id: string; kind?: SessionKind; workspace?: string };
 
 /** How often an app working offline asks whether the plane is back. */
 const OFFLINE_RETRY_MS = 15_000;
+
+/** The workspace a session on this computer works in, for the agents manager it opens. */
+function workspaceOf(row: { kind: SessionKind; raw: unknown } | undefined): { workspace?: string } {
+  const workspace = row && row.kind !== "team" ? (row.raw as { workspace?: unknown } | null)?.workspace : undefined;
+  return typeof workspace === "string" && workspace ? { workspace } : {};
+}
 
 /** Where a start lands: the launcher, or the list for a person who chose it. */
 function startScreen(): Where {
@@ -275,6 +283,9 @@ export function App(): JSX.Element {
             This computer
             {daemon.status === "connected" && <span className="count muted">{local}</span>}
           </button>
+          <button aria-current={where.screen === "agents" ? "page" : undefined} onClick={() => setWhere({ screen: "agents" })}>
+            Agents
+          </button>
           <button aria-current={where.screen === "appearance" ? "page" : undefined} onClick={() => setWhere({ screen: "appearance" })}>
             Appearance
           </button>
@@ -370,6 +381,18 @@ export function App(): JSX.Element {
           />
         )}
 
+        {where.screen === "agents" && (
+          <Agents
+            key={`${where.workspace ?? ""}:${where.agent ?? ""}`}
+            client={daemon.client}
+            rows={snapshot.rows}
+            workspace={where.workspace}
+            agent={where.agent}
+            planeUrl={auth?.planeUrl ?? null}
+            onOpenSession={(id) => setWhere({ screen: "session", id })}
+          />
+        )}
+
         {where.screen === "review" && auth && (
           <Review auth={auth} admin={adminApi} daemon={daemon.client} teams={auth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
         )}
@@ -399,6 +422,7 @@ export function App(): JSX.Element {
             startedIn={where.workspace}
             onBack={() => setWhere({ screen: "sessions" })}
             onGo={(screen) => setWhere({ screen })}
+            onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}
           />
         )}
       </main>

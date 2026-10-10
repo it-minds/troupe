@@ -32,6 +32,7 @@ import type {
   OnboardingSuggested,
   Principal,
   ProfileOffering,
+  ProfileSwitch,
   SessionKind,
   SessionView,
   StartAnswer,
@@ -373,7 +374,8 @@ export interface SessionHandle {
   /** Answer a question — the agent's, or the harness's about the budget. */
   answer(callId: string, text: string): Promise<void>;
   cancel(): Promise<void>;
-  switchProfile(profile: string): Promise<void>;
+  /** The agent this session runs from its next turn (`profile.switch`, troupe Decision 841). */
+  switchProfile(profile: string): Promise<ProfileSwitch>;
   /** The goal every later turn works towards (`session.goal.*`); the effect is its event. */
   setGoal(text: string): Promise<void>;
   clearGoal(): Promise<void>;
@@ -602,7 +604,8 @@ export function useSessionView(
 
   const switchProfile = useCallback(async (profile: string) => {
     const v = ref.current;
-    if (v) await following(() => v.switchProfile(profile));
+    if (!v) throw new Error("not attached");
+    return following(() => v.switchProfile(profile));
   }, [following]);
 
   const setGoal = useCallback(async (text: string) => {

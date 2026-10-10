@@ -414,7 +414,7 @@ function systemText(d: DurableEvent): string {
     case "agent_restarted":
       return `agent restarted, replaying ${str(d.data["replayed_events"], "0")} events`;
     case "profile_switched":
-      return `profile ${str(d.data["from"], "?")} → ${str(d.data["to"], "?")}`;
+      return switchedText(d);
     case "compacted":
       return d.data["reason"] === "context_overflow"
         ? "conversation compacted, because the prompt no longer fit the model"
@@ -448,6 +448,31 @@ function systemText(d: DurableEvent): string {
     default:
       return d.type;
   }
+}
+
+/** Where an agent was read from, as `profile_switched`'s `layer` names it (troupe Decision 841). */
+const SWITCHED_FROM: Record<string, string> = {
+  builtin: "built in",
+  bundle: "the profile's bundle",
+  user: "yours",
+  project: "this repository's",
+};
+
+/**
+ * A switch of the agent, so the history says when the rules changed (troupe #503): from
+ * which to which, where the new one was read from, that it applies from the next turn, and
+ * the tools it gained and lost. A log from before Decision 841 has only the two names.
+ */
+function switchedText(d: DurableEvent): string {
+  const layer = SWITCHED_FROM[str(d.data["layer"])];
+  const names = (key: string): string[] => (Array.isArray(d.data[key]) ? (d.data[key] as unknown[]).map(String) : []);
+  const removed = names("tools_removed");
+  const added = names("tools_added");
+  return [
+    `agent ${str(d.data["from"], "?")} → ${str(d.data["to"], "?")}${layer ? ` (${layer})` : ""}, from the next turn`,
+    ...(removed.length ? [`no longer holds ${removed.join(", ")}`] : []),
+    ...(added.length ? [`now holds ${added.join(", ")}`] : []),
+  ].join("; ");
 }
 
 const SYSTEM_TYPES = new Set([

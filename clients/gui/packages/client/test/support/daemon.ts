@@ -22,6 +22,9 @@
 //   it keeps each repository's   `memory.get` answers the brief, whether a librarian is
 //   brief, as facts              due, and its facts with their status; `memory.forget`
 //                                forgets one fact by id, or the whole brief
+//   it keeps the agents          `agents.*` read, check, write and take away the person's
+//                                and a workspace's agent files, `agents.changed` tells every
+//                                client, and `profile.switch` changes a session's agent
 //
 // It implements the protocol rather than imitating a screen, for the same reason the
 // fake worker does: a test that passes against a fake that agrees with the client by
@@ -30,6 +33,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
+import { FakeAgents, checkAgent } from "./agents.js";
 import { COMMANDS, DEFINED, expandDefined } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 
@@ -63,6 +67,8 @@ interface Session {
   sync?: "current" | "behind" | "paused" | "elsewhere" | "erasure_pending";
   /** The other device that holds a private one, where `sync` is `elsewhere`. */
   device?: string | null;
+  /** The session this one is a branch of. */
+  parent?: string | null;
 }
 
 interface Client {
@@ -108,6 +114,11 @@ export interface FakeDaemonOptions {
    * `onboard.*` methods and `memory.decline` answer `method_not_found`.
    */
   onboard?: boolean;
+  /**
+   * False is a daemon from before troupe Decision 841: `agents.get`, `agents.validate`,
+   * `agents.put` and `agents.delete` answer `method_not_found`.
+   */
+  agentsApi?: boolean;
 }
 
 /** A workspace's command waiting on its question (troupe Decision 814). */
@@ -525,6 +536,8 @@ export class FakeDaemon {
   /** The config's `memory` and `memory_auto_refresh`, as `config.get` reports them; both default on. */
   memoryOn = true;
   memoryAutoRefresh = true;
+  /** The agent files of every layer (troupe Decision 841): the built-ins, the person's and each workspace's. */
+  readonly agents: FakeAgents;
 
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -537,6 +550,7 @@ export class FakeDaemon {
   private readonly opencode: { providers: string[]; default: string | null };
   private readonly servesKeys: boolean;
   private readonly servesOnboard: boolean;
+  private readonly servesAgents: boolean;
   private nextId = 1;
   private restarts = 0;
 
@@ -550,6 +564,8 @@ export class FakeDaemon {
     this.opencode = opts.opencode ?? { providers: [], default: null };
     this.servesKeys = opts.servesKeys ?? true;
     this.servesOnboard = opts.onboard ?? true;
+    this.servesAgents = opts.agentsApi ?? true;
+    this.agents = new FakeAgents(`/home/${this.osUser}/.config/troupe`);
     this.autoApprove = opts.autoApprove ?? false;
     this.setupCompleted = opts.firstRun ? null : { completed_at: "2026-09-01T08:00:00Z", choice: "local", subject: null };
   }
@@ -1063,6 +1079,7 @@ export class FakeDaemon {
         const profile = typeof params["profile"] === "string" && params["profile"] ? params["profile"] : undefined;
         const created = this.seed(workspace, {
           watch: Boolean(config.watch),
+          parent,
           ...(profile ? { profile } : {}),
           ...(asked ? { kind: "private" as const, sync: this.planeToken !== null ? ("current" as const) : ("paused" as const) } : {}),
         });
@@ -1314,6 +1331,17 @@ export class FakeDaemon {
       case "memory.decline":
         if (!this.servesOnboard) return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
         return this.onboardCall(ws, id, method, params);
+
+      case "agents.list":
+      case "agents.get":
+      case "agents.validate":
+      case "agents.put":
+      case "agents.delete":
+        if (method !== "agents.list" && !this.servesAgents) return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
+        return this.agentsCall(ws, id, method, params);
+
+      case "profile.switch":
+        return this.switchAgent(ws, id, params);
 
       default:
         return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
@@ -1808,6 +1836,133 @@ export class FakeDaemon {
     }
   }
 
+  /** What a model is checked against: the models the provider serves, once a key lists them, and the roles. */
+  private servedModels(): { served: string[] | null; roles: string[] } {
+    const offers = this.settings.provider && this.settings.api_key ? OFFERS[this.settings.provider] : undefined;
+    return { served: offers ? offers.map((o) => String(o["id"])) : null, roles: ["default", "cheap", "expensive"] };
+  }
+
+  /** Every client attached hears an agent file written or taken away, the one that did it too. */
+  announceAgent(changed: { name: string; scope: string; path: string; action: string; workspace?: string }): void {
+    for (const c of this.clients) notify(c.ws, "agents.changed", changed);
+  }
+
+  /**
+   * The five `agents.*` methods (troupe Decision 841), with the daemon's semantics: a
+   * listing of the primaries a workspace sees, one definition whole, a check that writes
+   * nothing, and writes into the person's agents or a workspace's `.troupe/agents` that
+   * write nothing while the check finds an error. A built-in is changed by a copy and
+   * never deleted; every write is announced.
+   */
+  private agentsCall(ws: WebSocket, id: unknown, method: string, params: Record<string, unknown>): void {
+    const invalid = (data: Record<string, unknown>) => reply(ws, id, null, { code: -32602, message: "invalid_params", data });
+    const named = typeof params["session_id"] === "string" ? this.sessions.get(params["session_id"]) : undefined;
+    if (typeof params["session_id"] === "string" && !named) {
+      return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", session_id: params["session_id"] } });
+    }
+    const workspace = typeof params["workspace"] === "string" && params["workspace"] ? params["workspace"] : (named?.workspace ?? null);
+    const models = this.servedModels();
+    const ctx = { worktree: workspace !== null && [...this.sessions.values()].some((s) => s.workspace === workspace && s.state === "active"), ...models };
+    const name = params["name"];
+
+    if (method === "agents.list") {
+      if (!workspace) return invalid({ field: "workspace", missing: "workspace", reason: "required" });
+      const agents = this.agents
+        .resolve(workspace)
+        .filter((d) => d.meta["mode"] === "primary")
+        .map((d) => this.agents.row(d, ctx));
+      const skipped = this.agents.skipped.filter((s) => !s.workspace || s.workspace === workspace).map(({ workspace: _w, ...s }) => s);
+      return reply(ws, id, { agents, skipped });
+    }
+
+    if (method === "agents.get") {
+      if (typeof name !== "string" || !name) return invalid({ field: "name", missing: "name", reason: "required" });
+      const found = this.agents.find(name, workspace);
+      if (!found) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "agent", name } });
+      const family = named ? [named.parent ?? named.id] : [];
+      const running = named
+        ? [...this.sessions.values()]
+            .filter((s) => (family.includes(s.id) || (s.parent && family.includes(s.parent))) && s.state === "active" && s.profile === name)
+            .map((s) => ({ session_id: s.id, parent: s.parent ?? null }))
+        : [];
+      return reply(ws, id, this.agents.whole(found, workspace, ctx, running));
+    }
+
+    const source = params["source"];
+    if (method === "agents.validate") {
+      if (typeof source !== "string") return invalid({ field: "source", reason: "required" });
+      return reply(ws, id, checkAgent(source, { ...(name !== undefined ? { name } : {}), ...models }));
+    }
+
+    // agents.put and agents.delete
+    if (!params["command_id"]) return invalid({ reason: "command_id is required" });
+    if (typeof name !== "string" || !name) return invalid({ field: "name", missing: "name", reason: "required" });
+    const asked = params["scope"];
+    const scope = asked === "user" ? "user" : asked === "project" || asked === "workspace" ? "project" : null;
+    if (!scope) return invalid({ field: "scope", reason: `scope is user or project, not ${JSON.stringify(asked ?? null)}` });
+    if (scope === "project" && !workspace) return invalid({ field: "workspace", reason: "a project agent is a workspace's: name the workspace, or a session in it" });
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(name)) {
+      return invalid({ field: "name", reason: `${JSON.stringify(name)} is not a name an agent may have: lowercase letters, digits and dashes, starting with a letter or digit, at most 64` });
+    }
+    const announce = (path: string, action: string): void =>
+      this.announceAgent({ name, scope, path, action, ...(scope === "project" ? { workspace: workspace! } : {}) });
+
+    if (method === "agents.put") {
+      if (typeof source !== "string") return invalid({ field: "source", reason: "required" });
+      const checked = checkAgent(source, { name, ...models });
+      if (!checked.ok) {
+        const [first, ...rest] = checked.errors;
+        return invalid({ reason: `${name} is not saved: ${first!.message}${rest.length ? `, and ${rest.length} more (in errors)` : ""}`, errors: checked.errors, warnings: checked.warnings });
+      }
+      const shadowed =
+        scope === "user" && workspace && this.agents.files.some((f) => f.name === name && f.layer === "project" && f.workspace === workspace)
+          ? [{ field: "name", message: `the repository's .troupe/agents/${name}.md has this name too, and is the one that runs in this workspace` }]
+          : [];
+      const written = this.agents.put(name, scope, workspace, source);
+      reply(ws, id, { name, scope, layer: scope, path: written.path, action: written.action, warnings: [...checked.warnings, ...shadowed] });
+      return announce(written.path, written.action);
+    }
+
+    const removed = this.agents.delete(name, scope, workspace);
+    if (removed === null) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "agent", name, scope } });
+    if ("forbidden" in removed) return reply(ws, id, null, { code: -32004, message: "forbidden", data: { reason: removed.forbidden } });
+    reply(ws, id, { name, scope, path: removed.path, deleted: true, layer: this.agents.find(name, workspace)?.layer ?? null });
+    return announce(removed.path, "deleted");
+  }
+
+  /**
+   * `profile.switch` as the daemon does it since troupe Decision 841: the agent read from
+   * its file now, a name nothing defines refused, a subagent refused, and `profile_switched`
+   * with where it came from and the tools it gained and lost, under the switcher.
+   */
+  private switchAgent(ws: WebSocket, id: unknown, params: Record<string, unknown>): void {
+    const session = this.sessions.get(String(params["session_id"] ?? ""));
+    if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session" } });
+    const to = String(params["profile"] ?? "");
+    const next = this.agents.find(to, session.workspace);
+    if (!next) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "agent", name: to } });
+    if (next.meta["mode"] !== "primary") {
+      return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "profile", reason: `${to} is a subagent: a session or a branch runs a primary agent` } });
+    }
+    const now = this.agents.find(session.profile, session.workspace);
+    const before = now ? this.agents.toolsOf(now) : [];
+    const after = this.agents.toolsOf(next);
+    session.log.append(
+      "profile_switched",
+      {
+        from: session.profile,
+        to,
+        layer: next.layer,
+        tools_added: after.filter((t) => !before.includes(t)),
+        tools_removed: before.filter((t) => !after.includes(t)),
+        command_id: params["command_id"],
+      },
+      { kind: "user", subject: this.principal.subject },
+    );
+    session.profile = to;
+    return reply(ws, id, { accepted: true, profile: to, layer: next.layer });
+  }
+
   private configJson(): Record<string, unknown> {
     const s = this.settings;
     const dir = `/home/${this.osUser}/.config/troupe`;
@@ -1886,6 +2041,7 @@ export class FakeDaemon {
       sync: s.kind === "private" ? (s.sync ?? "paused") : null,
       device: s.kind === "private" && s.sync === "elsewhere" ? (s.device ?? null) : null,
       ...(this.linked ? { owner: this.linked.subject } : {}),
+      parent: s.parent ?? null,
       pending_approvals: s.pendingApprovals,
       pending_questions: s.pendingQuestions,
       unseen: this.unseenOf(s),

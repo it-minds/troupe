@@ -25,6 +25,8 @@ defmodule Troupe.Application do
       # Asks the providers what they serve when a local session starts and the cached
       # list is stale (Decision 778), in the background.
       Troupe.LLM.Catalog.Refresher,
+      # A repository's facts, one process each, started on first use (Decision 838).
+      {DynamicSupervisor, name: Troupe.Memory.Facts.Stores, strategy: :one_for_one},
       Troupe.Sessions.Index,
       Troupe.Sessions
     ]

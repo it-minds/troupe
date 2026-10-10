@@ -14,6 +14,7 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { ConnectOptions, ConnectionHooks } from "./connection.js";
+import type { AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
@@ -294,6 +295,8 @@ export class DaemonClient {
   private readonly listening = new Map<string, Map<Listener, (() => void) | null>>();
   // Who hears `config.changed`, across every socket this client dials.
   private readonly configListeners = new Set<(c: ConfigChanged) => void>();
+  // Who hears `agents.changed`, the same way.
+  private readonly agentListeners = new Set<(c: AgentsChanged) => void>();
   private readonly hooks: DaemonHooks;
   private opening: Promise<TroupeConnection> | null = null;
 
@@ -362,6 +365,9 @@ export class DaemonClient {
       },
       onConfigChanged: (changed) => {
         for (const listener of this.configListeners) listener(changed);
+      },
+      onAgentsChanged: (changed) => {
+        for (const listener of this.agentListeners) listener(changed);
       },
       ...(this.hooks.onToolInvoke ? { onToolInvoke: this.hooks.onToolInvoke } : {}),
     };
@@ -766,6 +772,50 @@ export class DaemonClient {
 
   removeSkill(params: ScopedParams & ({ name: string } | { include: string })): Promise<RemoveResult> {
     return this.command<RemoveResult>("skills.remove", { ...params });
+  }
+
+  /**
+   * The primary agents a session in `workspace` could run, as `session.create` resolves
+   * them, each with what decides whether a person wants it (troupe Decision 841), and the
+   * agent files found and not read, with why.
+   */
+  listAgents(workspace: string): Promise<{ agents: AgentRow[]; skipped?: AgentSkippedFile[] }> {
+    return this.call("agents.list", { workspace });
+  }
+
+  /**
+   * One definition whole: its frontmatter, its instruction, its file and that file's text,
+   * whether it is a person's to change here and, with a session, the windows of its family
+   * running it. `not_found` (`kind: "agent"`) for a name nothing defines.
+   */
+  getAgent(params: { name: string; workspace?: string; session_id?: string }): Promise<AgentDefinition> {
+    return this.call<AgentDefinition>("agents.get", { ...params });
+  }
+
+  /** Check a definition's text as `putAgent` would, writing nothing. */
+  validateAgent(params: { source: string; name?: string; workspace?: string }): Promise<AgentCheck> {
+    return this.call<AgentCheck>("agents.validate", { ...params });
+  }
+
+  /**
+   * Check a definition and write it as `<name>.md` in the scope's directory: the person's
+   * agents (`user`, read by every session on this computer) or a workspace's
+   * `.troupe/agents` (`project`, committed and shared). One with an error is refused with
+   * every error at its field (`agentRefusal`) and nothing is written. `admin`.
+   */
+  putAgent(params: { name: string; scope: AgentScope; source: string; workspace?: string }): Promise<AgentWritten> {
+    return this.command<AgentWritten>("agents.put", { ...params });
+  }
+
+  /** Take `<name>.md` away from the scope's directory; the answer says which layer answers to the name now. `admin`. */
+  deleteAgent(params: { name: string; scope: AgentScope; workspace?: string }): Promise<AgentDeleted> {
+    return this.command<AgentDeleted>("agents.delete", { ...params });
+  }
+
+  /** Hear `agents.changed`: an agent file was written or taken away, here or from another client. */
+  onAgentsChanged(listener: (changed: AgentsChanged) => void): () => void {
+    this.agentListeners.add(listener);
+    return () => void this.agentListeners.delete(listener);
   }
 
   /**
