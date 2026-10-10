@@ -1538,6 +1538,47 @@ details.advanced > summary {
 .approval.question .evidence {
   flex-shrink: 0;
 }
+/* A file onboarding would write, as the daemon's line diff (Decision 835): what it adds
+   and takes away in the diff colours, a line each, the rest as context. */
+.approval .diff-lines {
+  margin: 0;
+  padding: var(--space-2) 0;
+  background: var(--diff-gutter-bg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diff-lines > span {
+  display: block;
+  min-height: 1.2em;
+  padding: 0 var(--space-3);
+  color: var(--diff-ctx);
+}
+.diff-lines > .add {
+  background: var(--diff-add-bg);
+  color: var(--diff-add-fg);
+}
+.diff-lines > .del {
+  background: var(--diff-del-bg);
+  color: var(--diff-del-fg);
+}
+/* The files the one question is about, a line each: the file, then what it is from. */
+.approval .onboard-files,
+.approval .onboard-notes {
+  margin: 0;
+  padding-left: var(--space-4);
+  font: var(--t-ui-small);
+  color: var(--text-secondary);
+}
+.approval .onboard-files .mono {
+  font: var(--t-code-small);
+  color: var(--text-primary);
+}
+/* What the sources passed over is a sentence each, not a label. */
+.approval .also.plain {
+  text-transform: none;
+  letter-spacing: 0;
+  font: var(--t-ui-small);
+}
 .approval .evidence .command {
   font: var(--t-code);
   color: var(--text-primary);
