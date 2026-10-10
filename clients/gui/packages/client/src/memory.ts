@@ -15,7 +15,9 @@
 // the terminal client does (its Decisions 127 and 131): only when the workspace's config
 // leaves `memory_auto_refresh` on, only with a model to ask, and only when the daemon
 // says one is due, which it does not while a try that built nothing is waited out. When
-// none starts for a reason a person would want to know, a line says why.
+// none starts for a reason a person would want to know, a line says why. A refresh the
+// person asks for (`refreshNow`) starts one under the same conditions, less the two that
+// only hold back the automatic one.
 
 import { configKey } from "./config.js";
 import type { DaemonClient } from "./daemon.js";
@@ -146,17 +148,20 @@ function message(e: unknown): string {
  * model to ask (the first run's `setup.get`: questions still needed, or a settings file
  * through which no model can be asked, is none). Null when it may. A daemon that cannot
  * say about the config or a model leaves those as they default; one that cannot say
- * whether the directory is a repository starts nothing.
+ * whether the directory is a repository starts nothing. `asked`: a refresh the person
+ * asked for (`/memory refresh`), which `memory_auto_refresh` does not hold back, and
+ * whose every reason is said.
  */
-export async function librarianBarred(daemon: DaemonClient, workspace: string): Promise<LibrarianBarred | null> {
+export async function librarianBarred(daemon: DaemonClient, workspace: string, opts: { asked?: boolean } = {}): Promise<LibrarianBarred | null> {
   const config = await daemon.modelConfig(workspace).catch(() => null);
-  if (config && configKey(config, "memory")?.value === false) return { why: "memory is off", say: false };
-  if (config && configKey(config, "memory_auto_refresh")?.value === false) return { why: "memory_auto_refresh is off", say: false };
+  if (config && configKey(config, "memory")?.value === false) return { why: "memory is off (memory: false in the workspace's config)", say: opts.asked === true };
+  // A refresh the person asked for is not the automatic one the key turns off.
+  if (!opts.asked && config && configKey(config, "memory_auto_refresh")?.value === false) return { why: "memory_auto_refresh is off", say: false };
   const repository = await daemon
     .worktrees(workspace)
     .then((r) => r.worktrees.length > 0)
     .catch(() => false);
-  if (!repository) return { why: "not a git repository", say: false };
+  if (!repository) return { why: "this is not a git repository, which is what a brief describes", say: opts.asked === true };
   const setup = await daemon.setup().catch(() => null);
   if (setup && (setup.needed || (setup.detected?.config?.exists && !setup.detected.config.usable))) {
     return { why: "no model can be asked with this computer's settings; This computer > Models sets one up", say: true };
@@ -188,4 +193,43 @@ export async function refreshStep(daemon: DaemonClient, workspace: string): Prom
   if (brief.status === "absent") return { start: LIBRARIAN_FIRST_PROMPT, status: "absent" };
   if (brief.status === "stale") return { start: LIBRARIAN_PROMPT, status: "stale" };
   return { why: `the brief is ${brief.status}`, say: false };
+}
+
+/** What a refresh the person asked for came to: the librarian's session, and the line that says so or why not. */
+export interface Refreshed {
+  librarian: string | null;
+  said: string;
+}
+
+/**
+ * A refresh the person asked for (`/memory refresh` in the terminal client): the librarian
+ * as a branch of `parent`, in the checkout, writing the brief where there is none and
+ * rewriting it otherwise. Under the start's conditions, less `memory_auto_refresh` and a
+ * try being waited out, which hold back only the refresh nobody asked for (Decision 127).
+ */
+export async function refreshNow(daemon: DaemonClient, workspace: string, parent: string): Promise<Refreshed> {
+  const barred = await librarianBarred(daemon, workspace, { asked: true });
+  if (barred) return { librarian: null, said: `No librarian for the project brief: ${barred.why}.` };
+  let status: string;
+  try {
+    status = (await daemon.memory(workspace)).status;
+  } catch (e) {
+    return { librarian: null, said: `No librarian for the project brief: the daemon did not say where the brief stands: ${message(e)}.` };
+  }
+  if (status === "disabled") return { librarian: null, said: "No librarian for the project brief: memory is off (memory: false in the workspace's config)." };
+  try {
+    const prompt = status === "absent" ? LIBRARIAN_FIRST_PROMPT : LIBRARIAN_PROMPT;
+    const created = await daemon.startLibrarian({ workspace, parent, prompt });
+    return {
+      librarian: created.session_id,
+      said: `The librarian is ${status === "absent" ? "writing" : "rewriting"} the project brief, in a session of its own.`,
+    };
+  } catch (e) {
+    return { librarian: null, said: `No librarian for the project brief: the daemon did not start it: ${message(e)}.` };
+  }
+}
+
+/** Whether an event ends the librarian's work: its root agent finished, or its turn ended and it rests. */
+export function librarianDone(e: { type: string; agent?: string[] }): boolean {
+  return (e.type === "agent_done" || e.type === "turn_ended") && (e.agent?.length ?? 1) <= 1;
 }

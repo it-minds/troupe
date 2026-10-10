@@ -36,6 +36,7 @@ import { Files } from "./Files";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
 import { MemoryPane } from "./Memory";
+import type { MemoryAsk } from "./Memory";
 import { OfferLine, OfferPanel } from "./Offer";
 import { StartLine, StartPanel } from "./Onboard";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
@@ -85,6 +86,8 @@ export function Session({
   const { profiles } = useProfiles(auth);
   const [backstage, setBackstage] = useState(true);
   const [pane, setPane] = useState<Pane>("tasks");
+  // What `/memory refresh` or `/memory forget` asked of the memory pane, until it takes it.
+  const [memoryAsk, setMemoryAsk] = useState<MemoryAsk | null>(null);
   const [palette, setPalette] = useState(false);
   const self = (kind === "team" ? auth?.me?.subject : (machineUser ?? auth?.me?.subject)) ?? undefined;
 
@@ -132,9 +135,10 @@ export function Session({
               setBackstage(true);
               setPane("files");
             },
-            showMemory: () => {
+            showMemory: (what) => {
               setBackstage(true);
               setPane("memory");
+              if (what) setMemoryAsk((a) => ({ what, n: (a?.n ?? 0) + 1 }));
             },
             transcript: () => transcriptText(view.state),
           }}
@@ -198,7 +202,26 @@ export function Session({
         </div>
 
         {backstage && (
-          <Backstage view={view} daemon={daemon} row={row} self={self} pane={pane} onPane={setPane} memory={daemon && kind !== "team" ? { daemon, workspace } : null} />
+          <Backstage
+            view={view}
+            daemon={daemon}
+            row={row}
+            self={self}
+            pane={pane}
+            onPane={setPane}
+            memory={
+              daemon && kind !== "team"
+                ? {
+                    daemon,
+                    workspace,
+                    sessionId,
+                    librarians: start.state?.librarian ? [start.state.librarian] : [],
+                    ask: memoryAsk,
+                    onAsked: () => setMemoryAsk(null),
+                  }
+                : null
+            }
+          />
         )}
       </div>
     </section>
@@ -807,8 +830,18 @@ function Backstage({
   /** Which pane is up: the session's, so `/files` and `/memory` from the palette can open it. */
   pane: Pane;
   onPane: (pane: Pane) => void;
-  /** The daemon and the workspace for the memory pane: a session on this computer's, null for a team session's. */
-  memory: { daemon: DaemonClient; workspace: string | undefined } | null;
+  /**
+   * What the memory pane needs: a session on this computer's daemon, workspace, id and the
+   * librarian its start began; null for a team session's.
+   */
+  memory: {
+    daemon: DaemonClient;
+    workspace: string | undefined;
+    sessionId: string;
+    librarians: string[];
+    ask: MemoryAsk | null;
+    onAsked: () => void;
+  } | null;
 }): JSX.Element {
   const agents = Object.entries(view.state.agentState).filter(([path]) => path !== "");
   // A team session's memory is its pod's, and `memory.get` is this computer's daemon's.
@@ -835,7 +868,14 @@ function Backstage({
       {shown === "memory" && memory ? (
         <section>
           <h3>Memory</h3>
-          <MemoryPane daemon={memory.daemon} workspace={memory.workspace} />
+          <MemoryPane
+            daemon={memory.daemon}
+            workspace={memory.workspace}
+            sessionId={memory.sessionId}
+            librarians={memory.librarians}
+            ask={memory.ask}
+            onAsked={memory.onAsked}
+          />
         </section>
       ) : shown === "tasks" ? (
         <section>

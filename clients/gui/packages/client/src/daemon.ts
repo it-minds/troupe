@@ -809,6 +809,11 @@ export class DaemonClient {
     return this.command("memory.forget", { workspace, id });
   }
 
+  /** Forget the whole brief, every fact with it, and the record of a librarian's try at it. */
+  forgetBrief(workspace: string): Promise<unknown> {
+    return this.command("memory.forget", { workspace });
+  }
+
   /**
    * Start the librarian on a workspace's brief, as a branch of the session that asked, in
    * the checkout itself (it writes one file, the brief), as the terminal client starts it.

@@ -189,7 +189,13 @@ export function App(): JSX.Element {
         setSignInNow(true);
       }
     } else {
-      setWhere(outcome.sessionId ? { screen: "session", id: outcome.sessionId } : { screen: "sessions" });
+      // The first session is a start like one from the start screen: onboarding, then the
+      // librarian on a missing brief.
+      setWhere(
+        outcome.sessionId
+          ? { screen: "session", id: outcome.sessionId, kind: "local", ...(outcome.workspace ? { workspace: outcome.workspace } : {}) }
+          : { screen: "sessions" },
+      );
     }
   };
 

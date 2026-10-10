@@ -1905,6 +1905,11 @@ details.advanced > summary {
   display: block;
   word-break: break-all;
 }
+.memory .fact .claim code {
+  font: var(--t-code-small);
+  color: var(--text-primary);
+}
+.memory .memory-actions,
 .memory .forget-answers {
   display: flex;
   gap: var(--space-2);

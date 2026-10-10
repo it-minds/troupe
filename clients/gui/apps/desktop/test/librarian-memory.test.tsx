@@ -6,14 +6,17 @@
 // due, once onboarding is answered where it was due, once per start, and with a line in
 // the transcript; never for a session opened again and never for a team session. The
 // memory view is a backstage pane: the repository's facts by kind with their status,
-// evidence on selection, and forgetting one. The daemon is the fake the client's tests
-// use, so the assertions are on what reached it.
+// evidence on selection, and forgetting one; and, as the terminal client's `/memory`,
+// a refresh under the start's conditions and forgetting the whole brief on a second word.
+// It reads the memory again when a librarian it knows of is done. The daemon is the fake
+// the client's tests use, so the assertions are on what reached it.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { webTokenStore } from "@troupe/client";
 import { App } from "../src/App";
 import { FakeDaemon, exampleFacts, exampleOnboarding } from "../../../packages/client/test/support/daemon.js";
+import type { FakeFact } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
 import { button, render, says, sleep, startOnTheList, type, waitFor } from "./support";
@@ -239,6 +242,100 @@ describe("the memory view", () => {
     [...memory.querySelectorAll<HTMLButtonElement>(".fact .claim")].find((b) => b.textContent?.startsWith("The gate"))!.click();
     const gate = await waitFor(() => memory.querySelector<HTMLElement>(".evidence-of"), "the gate's evidence");
     expect(gate.textContent).toContain("Exit status0");
+  });
+
+  /** A fact a librarian learned since, with a command in backticks. */
+  const docsFact = (): FakeFact => ({
+    ...exampleFacts()[0]!,
+    id: "f-docs",
+    claim: "The docs build with `mix docs`",
+    anchors: [{ path: "mix.exs", hash: "3f9a6c0e2b7d41a58c9e0f1d2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d" }],
+  });
+
+  function memoryPane(): HTMLElement {
+    return document.querySelector<HTMLElement>(".backstage .memory")!;
+  }
+
+  it("refreshes from the pane, reads the memory again when that librarian is done, and sets a command in a claim as code", async () => {
+    daemon.memory[REPO] = { status: "fresh", built_at: "2026-10-08T09:00:00Z", facts: exampleFacts() };
+    const composer = await startIn(REPO);
+    const memory = await openMemory(composer);
+    await waitFor(() => memory.querySelector(".fact"), "the facts");
+    expect(memory.querySelector(".fact .claim code")?.textContent).toBe("mix check");
+
+    button("Refresh", memory)!.click();
+    await waitFor(() => memoryPane().textContent?.includes(REWRITING), "what the refresh did");
+    const parent = [...daemon.sessions.values()].find((s) => s.workspace === REPO && s.profile === "build")!;
+    expect(daemon.librarians.map((l) => [l.parent, l.prompt, l.worktree])).toEqual([[parent.id, REFRESH, "never"]]);
+
+    // The librarian learns a fact; the pane shows it once the librarian is done, not before.
+    daemon.memory[REPO]!.facts!.push(docsFact());
+    await sleep(200);
+    expect(memoryPane().textContent).not.toContain("The docs build with");
+    daemon.sessions.get(daemon.librarians[0]!.sessionId)!.log.append("agent_done", { reason: "finished" });
+    await waitFor(() => memoryPane().textContent?.includes("The docs build with mix docs"), "the fact the librarian wrote");
+  });
+
+  it("reads the memory again when the start's librarian is done", async () => {
+    daemon.memory[REPO] = { status: "absent", facts: [] };
+    await startIn(REPO);
+    await waitFor(() => daemon.librarians.length === 1, "the start's librarian");
+    button("Memory", document.querySelector<HTMLElement>(".backstage")!)!.click();
+    await waitFor(() => memoryPane()?.textContent?.includes("No facts yet."), "the memory as it was");
+    daemon.memory[REPO]!.facts!.push(docsFact());
+    daemon.sessions.get(daemon.librarians[0]!.sessionId)!.log.append("agent_done", { reason: "finished" });
+    await waitFor(() => memoryPane().textContent?.includes("The docs build with mix docs"), "the fact the start's librarian wrote");
+  });
+
+  it("says why /memory refresh starts no librarian outside a git repository, and starts it there with memory_auto_refresh off", async () => {
+    daemon.memory["/home/ada/notes"] = { status: "fresh", facts: [] };
+    const composer = await startIn("/home/ada/notes");
+    key(composer, "/");
+    const dialog = await waitFor(() => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Commands"]'), "the palette");
+    await waitFor(() => dialog.querySelector(".row"), "the commands");
+    type(dialog.querySelector<HTMLInputElement>("input")!, "memory refresh");
+    await waitFor(() => dialog.querySelector('.row[aria-selected="true"] .name')?.textContent === "/memory", "the memory row");
+    key(dialog.querySelector("input")!, "Enter");
+    await waitFor(
+      () => memoryPane()?.textContent?.includes("No librarian for the project brief: this is not a git repository, which is what a brief describes."),
+      "why none started",
+    );
+    expect(daemon.librarians).toEqual([]);
+
+    // A refresh asked for is not the automatic one memory_auto_refresh turns off.
+    unmount?.();
+    daemon.memoryAutoRefresh = false;
+    daemon.memory[REPO] = { status: "fresh", facts: exampleFacts() };
+    await startIn(REPO);
+    button("Memory", document.querySelector<HTMLElement>(".backstage")!)!.click();
+    await waitFor(() => memoryPane()?.querySelector(".fact"), "the facts");
+    button("Refresh", memoryPane())!.click();
+    await waitFor(() => daemon.librarians.length === 1, "the librarian, asked for");
+  });
+
+  it("forgets the whole brief on a second word, from the pane or /memory forget", async () => {
+    daemon.memory[REPO] = { status: "fresh", built_at: "2026-10-08T09:00:00Z", facts: exampleFacts() };
+    const composer = await startIn(REPO);
+    key(composer, "/");
+    const dialog = await waitFor(() => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Commands"]'), "the palette");
+    await waitFor(() => dialog.querySelector(".row"), "the commands");
+    type(dialog.querySelector<HTMLInputElement>("input")!, "memory forget");
+    await waitFor(() => dialog.querySelector('.row[aria-selected="true"] .name')?.textContent === "/memory", "the memory row");
+    key(dialog.querySelector("input")!, "Enter");
+
+    // Asked, not done: the second word first.
+    const ask = await waitFor(() => document.querySelector<HTMLElement>('.backstage .memory [aria-label="Forget the brief"]'), "the second word");
+    expect(daemon.calls.some((c) => c.method === "memory.forget")).toBe(false);
+    button("Keep it", ask)!.click();
+    await waitFor(() => !document.querySelector('.backstage .memory [aria-label="Forget the brief"]'), "kept");
+
+    button("Forget the brief", memoryPane())!.click();
+    const again = await waitFor(() => document.querySelector<HTMLElement>('.backstage .memory [aria-label="Forget the brief"]'), "the second word again");
+    button("Forget all of it", again)!.click();
+    await waitFor(() => memoryPane().textContent?.includes("There is no project brief yet."), "the brief gone");
+    expect(memoryPane().querySelector(".fact")).toBeNull();
+    const forget = daemon.calls.filter((c) => c.method === "memory.forget");
+    expect(forget.map((c) => [c.params["workspace"], "id" in c.params])).toEqual([[REPO, false]]);
   });
 
   it("shows the brief's text from a daemon whose memory.get has no facts", async () => {

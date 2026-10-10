@@ -21,7 +21,9 @@ import {
   factsByKind,
   learnedBy,
   librarianBarred,
+  librarianDone,
   mayNoLongerBeTrue,
+  refreshNow,
   refreshStep,
 } from "../src/index.js";
 import type { MemoryFact, StartState } from "../src/index.js";
@@ -68,6 +70,46 @@ describe("a repository's memory, over the daemon", () => {
     );
 
     await assert.rejects(client.forgetFact(REPO, "f-gone"), (e: unknown) => e instanceof TroupeRpcError);
+
+    // Without an id, the whole brief.
+    await client.forgetBrief(REPO);
+    const whole = daemon.calls.filter((c) => c.method === "memory.forget").at(-1);
+    assert.equal("id" in (whole?.params ?? {}), false);
+    const gone = await client.memory(REPO);
+    assert.equal(gone.status, "absent");
+    assert.deepEqual(gone.facts, []);
+  });
+
+  it("refreshes when asked: the librarian as a branch, with the first prompt where there is no brief, whatever memory_auto_refresh says", async () => {
+    const parent = daemon.seed(REPO);
+    daemon.memoryAutoRefresh = false;
+    daemon.memory[REPO] = { status: "absent", refresh_held_until: "2026-10-17T09:00:00Z" };
+    const first = await refreshNow(client, REPO, parent.id);
+    assert.equal(first.said, LIBRARIAN_WRITING);
+    assert.equal(first.librarian, daemon.librarians[0]?.sessionId);
+    assert.deepEqual(
+      daemon.librarians.map((l) => [l.parent, l.prompt, l.worktree]),
+      [[parent.id, LIBRARIAN_FIRST_PROMPT, "never"]],
+    );
+
+    const again = await refreshNow(client, REPO, parent.id);
+    assert.equal(again.said, LIBRARIAN_REWRITING);
+    assert.equal(daemon.librarians[1]?.prompt, LIBRARIAN_PROMPT);
+
+    const notes = daemon.seed("/home/ada/notes");
+    const refused = await refreshNow(client, "/home/ada/notes", notes.id);
+    assert.equal(refused.librarian, null);
+    assert.equal(refused.said, "No librarian for the project brief: this is not a git repository, which is what a brief describes.");
+    daemon.memoryOn = false;
+    assert.equal((await refreshNow(client, REPO, parent.id)).said, "No librarian for the project brief: memory is off (memory: false in the workspace's config).");
+    assert.equal(daemon.librarians.length, 2);
+  });
+
+  it("knows a librarian is done by its root's agent_done or its turn ending, not a subagent's", () => {
+    assert.equal(librarianDone({ type: "agent_done", agent: ["root"] }), true);
+    assert.equal(librarianDone({ type: "turn_ended", agent: ["root"] }), true);
+    assert.equal(librarianDone({ type: "agent_done", agent: ["root", "explore#1"] }), false);
+    assert.equal(librarianDone({ type: "llm_response", agent: ["root"] }), false);
   });
 
   it("answers a daemon from before facts with the brief's text and no facts", async () => {
@@ -138,11 +180,20 @@ describe("whether the librarian may start by itself", () => {
   });
 
   it("may not, quietly, with memory or its refresh off, or outside a git repository", async () => {
-    assert.deepEqual(await librarianBarred(client, "/home/ada/notes"), { why: "not a git repository", say: false });
+    assert.deepEqual(await librarianBarred(client, "/home/ada/notes"), { why: "this is not a git repository, which is what a brief describes", say: false });
     daemon.memoryAutoRefresh = false;
     assert.deepEqual(await librarianBarred(client, REPO), { why: "memory_auto_refresh is off", say: false });
     daemon.memoryOn = false;
-    assert.deepEqual(await librarianBarred(client, REPO), { why: "memory is off", say: false });
+    assert.deepEqual(await librarianBarred(client, REPO), { why: "memory is off (memory: false in the workspace's config)", say: false });
+  });
+
+  it("may, when the person asks, with memory_auto_refresh off, and says every reason it may not", async () => {
+    daemon.memoryAutoRefresh = false;
+    assert.equal(await librarianBarred(client, REPO, { asked: true }), null);
+    assert.deepEqual(await librarianBarred(client, "/home/ada/notes", { asked: true }), {
+      why: "this is not a git repository, which is what a brief describes",
+      say: true,
+    });
   });
 
   it("may not with no model to ask, and says so", async () => {
@@ -206,6 +257,7 @@ describe("the librarian at a session's start", () => {
     assert.deepEqual(daemon.librarians, [{ sessionId: daemon.librarians[0]!.sessionId, workspace: REPO, parent: parentId, prompt: LIBRARIAN_FIRST_PROMPT, worktree: "never" }]);
     assert.deepEqual(last().said, [LIBRARIAN_WRITING]);
     assert.equal(last().asking, null);
+    assert.equal(last().librarian, daemon.librarians[0]!.sessionId, "the session a screen watches to read the brief again");
   });
 
   it("starts it on a stale brief with the refresh prompt", async () => {

@@ -43,10 +43,12 @@ export {
   factsByKind,
   learnedBy,
   librarianBarred,
+  librarianDone,
   mayNoLongerBeTrue,
+  refreshNow,
   refreshStep,
 } from "./memory.js";
-export type { FactAnchor, FactEvidence, FactKind, FactStatus, LibrarianBarred, MemoryBrief, MemoryFact, RefreshStep } from "./memory.js";
+export type { FactAnchor, FactEvidence, FactKind, FactStatus, LibrarianBarred, MemoryBrief, MemoryFact, Refreshed, RefreshStep } from "./memory.js";
 export type {
   BriefDue,
   OnboardApplied,

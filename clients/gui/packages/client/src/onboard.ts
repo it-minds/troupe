@@ -121,6 +121,8 @@ export interface StartState {
   /** Where onboarding may not run (a pod): the daemon's sentence, and nothing is asked. */
   refusal: string | null;
   error: string | null;
+  /** The librarian session the start began, once it has: a screen watches it to read the brief again when it is done. */
+  librarian?: string | null;
 }
 
 export interface StartOptions {
@@ -288,9 +290,9 @@ export class StartQuestions {
           return;
         case "brief":
           if (answer === "rerun") {
-            await this.daemon.startLibrarian({ workspace: this.opts.workspace, parent: this.opts.sessionId, prompt: LIBRARIAN_PROMPT });
+            const created = await this.daemon.startLibrarian({ workspace: this.opts.workspace, parent: this.opts.sessionId, prompt: LIBRARIAN_PROMPT });
             this.say(LIBRARIAN_REWRITING);
-            return this.set({ asking: null });
+            return this.set({ asking: null, librarian: created.session_id });
           }
           if (answer === "decline") {
             await this.daemon.declineBrief(this.opts.workspace);
@@ -376,7 +378,8 @@ export class StartQuestions {
     const step = await refreshStep(this.daemon, this.opts.workspace);
     if (step.start !== undefined) {
       try {
-        await this.daemon.startLibrarian({ workspace: this.opts.workspace, parent: this.opts.sessionId, prompt: step.start });
+        const created = await this.daemon.startLibrarian({ workspace: this.opts.workspace, parent: this.opts.sessionId, prompt: step.start });
+        this.set({ librarian: created.session_id });
         this.say(step.status === "absent" ? LIBRARIAN_WRITING : LIBRARIAN_REWRITING);
       } catch (e) {
         this.say(`No librarian for the project brief: the daemon did not start it: ${e instanceof Error ? e.message : String(e)}.`);
