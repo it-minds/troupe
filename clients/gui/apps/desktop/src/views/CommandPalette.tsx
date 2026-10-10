@@ -28,6 +28,8 @@ export interface PaletteActions {
   showFiles: () => void;
   /** The transcript as text, for /copy. */
   transcript: () => string;
+  /** Open the agents manager on the session's workspace: a session on this computer's (troupe #503). */
+  agents?: (() => void) | undefined;
 }
 
 interface RunContext extends PaletteActions {
@@ -79,6 +81,8 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
   files: ({ showFiles }) => void showFiles(),
   settings: ({ go }) => void go("local"),
   models: ({ go }) => void go("local"),
+  agents: ({ agents }) =>
+    agents ? void agents() : "a session on the platform runs its profile bundle's agents, which are changed in the console; the header switches between them",
   copy: async ({ transcript }) => {
     await navigator.clipboard.writeText(transcript());
     return "copied the transcript";
@@ -99,7 +103,6 @@ const NOT_HERE: Record<string, string> = {
   watch: "on This computer, under this session's controls",
   mcp: "not in the desktop app yet",
   worktree: "start a branch from the terminal client, or a new session from the list",
-  agents: "they are the Agents section of this list",
 };
 
 interface Row {

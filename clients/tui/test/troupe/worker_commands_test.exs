@@ -64,6 +64,24 @@ defmodule Troupe.WorkerCommandsTest do
     assert File.read!(Path.join(ws, "after.txt")) == "still connected"
   end
 
+  # D108: a file larger than the daemon's socket takes in one message went out whole, the
+  # daemon closed the connection at its frame ceiling, and the upload said "the daemon is
+  # not reachable". `initialize` says how large a message may be, and nothing larger is sent.
+  test "fs.upload refuses a file over the daemon's 16 MiB a message, and the connection stays up" do
+    {sid, _, ws} = start_session!(script: [])
+
+    big = String.duplicate("a", 17 * 1024 * 1024)
+    assert {:error, reason} = Client.fs_upload(sid, "session:/big.txt", big)
+    assert reason =~ "17.0 MiB"
+    assert reason =~ "the daemon takes at most 16.0 MiB in one message"
+    assert reason =~ "nothing was sent"
+    refute File.exists?(Path.join(ws, "big.txt"))
+
+    assert Client.capability(sid).up?
+    assert :ok = Client.fs_upload(sid, "session:/after.txt", "still connected")
+    assert File.read!(Path.join(ws, "after.txt")) == "still connected"
+  end
+
   test "fs.list says which entries are directories, the way the files panel needs" do
     ws = tmp_workspace(%{"lib/a.ex" => "defmodule A, do: nil\n", "README.md" => "# hi\n"})
     {sid, _, _} = start_session!(workspace: ws, script: [])
@@ -165,6 +183,25 @@ defmodule Troupe.WorkerCommandsTest do
 
       eventually(fn -> screen_text(pid, session) =~ "uploaded" end)
       assert File.read!(Path.join(ws, "notes.md")) == "from this machine"
+    end
+
+    # D108, as the audit ran it: a 20 MB `/upload` said "the daemon is not reachable".
+    test "/upload of a file larger than the daemon takes says so, and the window stays connected" do
+      {sid, _, ws} = start_session!(script: [])
+      eventually(fn -> Client.capability(sid).up? end)
+
+      path = Path.join(tmp_workspace(), "big.txt")
+      File.write!(path, String.duplicate("a", 20 * 1024 * 1024))
+
+      {pid, session} = start_tui(sid)
+      type(pid, "/upload " <> path)
+      press(pid, "enter")
+
+      eventually(fn -> screen_text(pid, session) =~ "nothing was sent" end)
+      assert screen_text(pid, session) =~ "big.txt"
+      refute screen_text(pid, session) =~ "not reachable"
+      refute File.exists?(Path.join(ws, "big.txt"))
+      assert Client.capability(sid).up?
     end
   end
 

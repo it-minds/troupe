@@ -149,6 +149,71 @@ defmodule Troupe.DaemonClientTest do
     end
   end
 
+  # D108: the daemon closing the link's connection in the middle of a call exited the link,
+  # and the caller's call with it, which took a terminal UI down. The call is an error now,
+  # the link lives on, and the next call connects again as it does after a restart.
+  describe "a connection the daemon drops in the middle of a call" do
+    test "is an error for the caller, and the next call connects again" do
+      {:ok, _} = Link.call("identity.get", %{})
+      link = Process.whereis(Link)
+      held = hold_link_connection()
+
+      answer = Task.async(fn -> caught(fn -> Link.call("session.list", %{filter: %{}}) end) end)
+      drop_mid_call(held)
+
+      assert {:error, reason} = Task.await(answer)
+      assert reason =~ "the daemon is not reachable"
+      assert Process.whereis(Link) == link
+      assert {:ok, %{"sessions" => _}} = Link.call("session.list", %{filter: %{}})
+    end
+
+    test "leaves the screen up, saying the daemon is not reachable" do
+      {sid, _, _} = start_session!(script: [])
+      {pid, session} = start_tui(sid)
+      {:ok, _} = Link.call("identity.get", %{})
+      held = hold_link_connection()
+
+      type(pid, "/memory")
+      enter = Task.async(fn -> caught(fn -> press(pid, "enter") end) end)
+      drop_mid_call(held)
+
+      assert Task.await(enter) == :ok
+      eventually(fn -> screen_text(pid, session) =~ "the daemon is not reachable" end)
+      assert Process.alive?(pid)
+
+      # The next command connects again, and its answer replaces the line.
+      type(pid, "/memory")
+      press(pid, "enter")
+      eventually(fn -> not (screen_text(pid, session) =~ "not reachable") end)
+      assert Link.up?()
+    end
+  end
+
+  # The link's protocol client, and the daemon's end of its connection held still so that
+  # nothing is answered: the socket transport's connections, where every session's own is
+  # a WebSocket relay.
+  defp hold_link_connection do
+    connections =
+      for pid <- Troupe.Gateway.Connections.list(),
+          match?({:tcp, _}, :sys.get_state(pid).transport),
+          do: pid
+
+    Enum.each(connections, &:sys.suspend/1)
+    {:sys.get_state(Link).client, connections}
+  end
+
+  # Once the call is on its way, the daemon ends the connection, as one that closes it does.
+  defp drop_mid_call({client, connections}) do
+    eventually(fn -> map_size(:sys.get_state(client).pending) > 0 end)
+    Enum.each(connections, &Process.exit(&1, :kill))
+  end
+
+  defp caught(fun) do
+    fun.()
+  catch
+    :exit, reason -> {:exited, reason}
+  end
+
   describe "the TUI on a daemon session" do
     test "renders the transcript the daemon streams, and answers an approval with y" do
       script = [

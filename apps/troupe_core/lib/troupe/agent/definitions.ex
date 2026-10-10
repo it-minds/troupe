@@ -3,8 +3,10 @@ defmodule Troupe.Agent.Definitions do
   The immutable snapshot of every agent definition available to a session.
 
   Loaded once at session start and passed down in `Agent.Node` child specs. There is
-  deliberately no process here: definitions cannot change while a session runs, so
-  they are data, and a subagent three levels down reads them without a message.
+  deliberately no process here: definitions do not change under a running agent, so
+  they are data, and a subagent three levels down reads them without a message. The one
+  exception is a person's: switching a session's agent reads them again from their files
+  (`reload/1`), so the agent switched to is the file as it is now (Decision 841).
 
   Precedence on a laptop, lowest to highest: built-ins shipped in `priv/agents/`, the
   global config dir's `agents/`, then the project's `.troupe/agents/`. A file at a higher
@@ -23,17 +25,23 @@ defmodule Troupe.Agent.Definitions do
   main checkout's, of which only what the checkout has committed is read
   (`Troupe.Worktree`).
 
+  A file that does not parse is not read either, and is listed in `skipped` with what is
+  wrong with it in words (Decision 841), so a client can show it rather than the person
+  finding it in the daemon's log.
+
   The project layer is held to its workspace (the main checkout's to the checkout) by
   where each file really is, links followed (Decision 829): a file that is a link out of
   it, or a `.troupe/agents` that is one, is not read, and is listed in `skipped`, the
   directory once with no name and not looked into.
   """
 
-  alias Troupe.Agent.Definition
+  alias Troupe.Agent.{Definition, Validate}
   alias Troupe.{Paths, Workspace, Worktree}
 
   @enforce_keys [:by_name]
-  defstruct [:by_name, skipped: []]
+  # `loaded` is how `load/2` read the snapshot and `trusted` how `trust/3` stamped it, so
+  # `reload/1` can read it again the same way; `nil` for one built from a list.
+  defstruct [:by_name, skipped: [], loaded: nil, trusted: nil]
 
   @outside_workspace "not read: outside the workspace"
   @outside_checkout "not read: outside the main checkout"
@@ -61,7 +69,9 @@ defmodule Troupe.Agent.Definitions do
 
   @type t :: %__MODULE__{
           by_name: %{optional(String.t()) => Definition.t()},
-          skipped: [skipped()]
+          skipped: [skipped()],
+          loaded: {Path.t() | nil, keyword()} | nil,
+          trusted: {boolean(), Path.t()} | nil
         }
 
   @doc """
@@ -120,6 +130,9 @@ defmodule Troupe.Agent.Definitions do
   a warning rather than failing the session: one broken custom agent should not stop the
   user from working.
 
+  A `workspace_root` of `nil` has no project layer: the built-ins, the bundle's and the
+  person's own, for a client asking about an agent with no workspace in hand.
+
   `entitled:` is the list of agent names this session's team was granted, or `nil` for
   no restriction. It is applied *after* the whole search order is merged, so an agent
   the team may not run is not in the map at all and nothing further has to know — not
@@ -127,12 +140,11 @@ defmodule Troupe.Agent.Definitions do
   the bundle is merged would have left a built-in of the same name standing in for it,
   which is a different agent answering to a name somebody was refused.
   """
-  @spec load(Path.t(), keyword()) :: t()
+  @spec load(Path.t() | nil, keyword()) :: t()
   def load(workspace_root, opts \\ []) do
     pin = pin(opts)
     bundle = bundle_layer(pin && pin[:dir])
-    project_dir = Path.join(Paths.project_dir(workspace_root), "agents")
-    project = held_layer(project_dir, workspace_root, @outside_workspace)
+    project = project_layer(workspace_root)
     {checkout, uncommitted} = checkout_layer(workspace_root, project)
     disk = [layer(Path.join(Paths.config_dir(), "agents"), :global)] ++ checkout ++ [project]
     outside = Enum.flat_map(disk, &Map.get(&1, :outside, []))
@@ -140,14 +152,37 @@ defmodule Troupe.Agent.Definitions do
     wins? = bundle_wins?(pin)
     acp = Keyword.get(opts, :acp_agents, [])
     {layers, lost} = ordered(layer(builtin_dir(), :builtin), bundle, disk, wins?, acp)
+    {by_name, failed} = Enum.reduce(layers, {%{}, []}, &merge_layer/2)
 
     by_name =
-      layers
-      |> Enum.reduce(%{}, &merge_layer/2)
+      by_name
       |> merge_acp(acp)
       |> entitled(Keyword.get(opts, :entitled))
 
-    %__MODULE__{by_name: by_name, skipped: outside ++ uncommitted ++ lost}
+    %__MODULE__{
+      by_name: by_name,
+      skipped: outside ++ uncommitted ++ lost ++ failed,
+      loaded: {workspace_root, opts}
+    }
+  end
+
+  @doc """
+  The same definitions read again from their files, as `load/2` read them for this
+  snapshot and stamped as `trust/3` stamped it: what a switch of agent reads (Decision
+  841), so an agent written or edited since the session started is the one switched to,
+  and a restarted agent that was switched comes back on it. One built from a list
+  (`from_list/1`) has no files, and is itself.
+  """
+  @spec reload(t()) :: t()
+  def reload(%__MODULE__{loaded: nil} = defs), do: defs
+
+  def reload(%__MODULE__{loaded: {workspace_root, opts}, trusted: trusted}) do
+    fresh = load(workspace_root, opts)
+
+    case trusted do
+      {trusted?, workspace} -> trust(fresh, trusted?, workspace)
+      nil -> fresh
+    end
   end
 
   # The pin, given whole, or as the directory and the profile's word on it.
@@ -166,6 +201,14 @@ defmodule Troupe.Agent.Definitions do
 
   # A layer is a directory, its source, and the names of the files read from it.
   defp layer(dir, source), do: %{dir: dir, source: source, names: names_in(dir)}
+
+  # No workspace, no project layer.
+  defp project_layer(nil), do: %{dir: nil, source: :project, names: []}
+
+  defp project_layer(workspace_root) do
+    dir = Path.join(Paths.project_dir(workspace_root), "agents")
+    held_layer(dir, workspace_root, @outside_workspace)
+  end
 
   # A repository's layer, held to `root` (Decision 829): what is really outside it is not
   # read, and is `outside`, with why; a directory that is itself a link out, once.
@@ -219,6 +262,8 @@ defmodule Troupe.Agent.Definitions do
   # the checkout. One the checkout has not committed, or that is a link out of it, is
   # listed, unless the worktree has its own of that name and would not have read the
   # checkout's anyway.
+  defp checkout_layer(nil, _project), do: {[], []}
+
   defp checkout_layer(workspace_root, project) do
     with main when is_binary(main) <- Worktree.main(workspace_root),
          dir = Path.join(Paths.project_dir(main), "agents"),
@@ -308,7 +353,12 @@ defmodule Troupe.Agent.Definitions do
   @spec trust(t(), boolean(), Path.t()) :: t()
   def trust(%__MODULE__{by_name: by_name} = defs, trusted?, workspace) do
     stamp = &Definition.trust(&1, trusted?, workspace)
-    %{defs | by_name: Map.new(by_name, fn {name, definition} -> {name, stamp.(definition)} end)}
+
+    %{
+      defs
+      | by_name: Map.new(by_name, fn {name, definition} -> {name, stamp.(definition)} end),
+        trusted: {trusted?, workspace}
+    }
   end
 
   @spec fetch(t(), String.t()) :: {:ok, Definition.t()} | {:error, {:unknown_agent, String.t()}}
@@ -348,17 +398,20 @@ defmodule Troupe.Agent.Definitions do
     end)
   end
 
-  defp merge_file(acc, path, source) do
+  # A file that cannot be read or parsed is listed with why, in words, as well as logged:
+  # the log is where nobody looks (Decision 841).
+  defp merge_file({by_name, failed}, path, source) do
     name = Path.basename(path, ".md")
 
     with {:ok, contents} <- File.read(path),
          {:ok, definition} <- Definition.parse(name, contents, source) do
-      Map.put(acc, name, definition)
+      {Map.put(by_name, name, %{definition | path: path}), failed}
     else
       {:error, reason} ->
         require Logger
         Logger.warning("troupe: skipping agent definition #{path}: #{inspect(reason)}")
-        acc
+        why = "not read: " <> Validate.describe(reason)
+        {by_name, failed ++ [skip(Path.dirname(path), name, why)]}
     end
   end
 end

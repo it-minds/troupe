@@ -29,6 +29,9 @@
     },
     "worktree": {
       "type": "string"
+    },
+    "worktree_name": {
+      "type": "string"
     }
   },
   "required": [

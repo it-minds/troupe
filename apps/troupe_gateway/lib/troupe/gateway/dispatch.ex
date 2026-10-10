@@ -14,10 +14,11 @@ defmodule Troupe.Gateway.Dispatch do
   effect.
   """
 
-  alias Troupe.Agent.Definitions
+  alias Troupe.Agent.{Definitions, Local}
   alias Troupe.Config.{ModelSettings, Settings}
 
   alias Troupe.Gateway.{
+    Agents,
     ClientTool,
     Commands,
     Connections,
@@ -78,6 +79,12 @@ defmodule Troupe.Gateway.Dispatch do
     "fs.upload" => :control,
     "workspace.recent" => :observe,
     "agents.list" => :observe,
+    # An agent whole, and checked without writing (#503, Decision 841); writing one or
+    # taking it away is `admin`, as `mcp.add` is: a definition decides what runs.
+    "agents.get" => :observe,
+    "agents.validate" => :observe,
+    "agents.put" => :admin,
+    "agents.delete" => :admin,
     "commands.list" => :observe,
     # A command a file defines sends the session its prompt, so it takes what input does.
     "commands.run" => :control,
@@ -468,45 +475,9 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  # The agents a session in this workspace could run: the built-ins, the machine's
-  # `agents/`, the project's `.troupe/agents/` — resolved the way `session.create` will
-  # resolve them, so a picker offers exactly what a `profile` may name. A project agent's
-  # `notes` say what of it waits for the workspace to be trusted (Decision 825): a
-  # session here trusts it as the user's file says, and a pod's trusts none. `skipped` is
-  # each agent file found and not read, with why: one linked out of the workspace
-  # (Decision 829), or in a worktree one its main checkout has not committed.
-  defp handle("agents.list", params, _context) do
-    with {:ok, workspace} <- fetch(params, "workspace") do
-      workspace = Path.expand(workspace)
-
-      trusted? =
-        Process.whereis(Troupe.Gateway.Daemon) != nil and Troupe.Config.trusted?(workspace)
-
-      definitions = Definitions.load(workspace)
-
-      agents =
-        definitions
-        |> Definitions.trust(trusted?, workspace)
-        |> Definitions.primaries()
-        |> Enum.map(
-          &%{
-            "name" => &1.name,
-            "description" => &1.description,
-            "source" => Atom.to_string(&1.source),
-            "notes" =>
-              Enum.map(&1.notes, fn note -> %{"key" => note.key, "reason" => note.reason} end)
-          }
-        )
-        |> Enum.sort_by(& &1["name"])
-
-      skipped =
-        definitions
-        |> Definitions.skipped()
-        |> Enum.map(&(&1 |> Definitions.skipped_to_json() |> Map.delete("kind")))
-
-      {:ok, %{"agents" => agents, "skipped" => skipped}}
-    end
-  end
+  # The agents a session here could run, each whole, checked, written and taken away
+  # (`Troupe.Gateway.Agents`, Decisions 825, 829 and 841). Writing them is the daemon's.
+  defp handle("agents." <> _ = method, params, _context), do: Agents.call(method, params)
 
   # The slash commands a client may offer for this session (Decision 698): the harness's
   # table, then one entry per primary agent, described by its definition. The agents are
@@ -683,12 +654,41 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # A session's agent, its root's, which is a branch's too: a branch is a session (Decision
+  # 646). Read from its file now, so an agent saved a moment ago is one to switch to, and
+  # applied at the turn boundary; a name nothing defines, or a subagent's, is refused with
+  # nothing written (Decision 841). The effect is `profile_switched`, carrying this
+  # `command_id`.
   defp handle("profile.switch", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, profile} <- fetch(params, "profile"),
          :ok <- activate(session_id, context) do
-      Troupe.switch_profile(session_id, profile)
-      {:ok, %{"accepted" => true}}
+      opts = [actor: actor(context)] ++ command_opts(params)
+
+      case Troupe.switch_profile(session_id, profile, opts) do
+        {:ok, definition} ->
+          {:ok,
+           %{
+             "accepted" => true,
+             "profile" => definition.name,
+             "layer" => Local.layer(definition)
+           }}
+
+        {:error, {:unknown_agent, name}} ->
+          {:error, Error.new(:not_found, %{kind: "agent", name: name})}
+
+        {:error, {:not_primary, name}} ->
+          {:error,
+           Error.new(:invalid_params, %{
+             field: "profile",
+             reason:
+               "#{name} is a subagent, which an agent delegates to: a session or a branch " <>
+                 "runs a primary agent"
+           })}
+
+        {:error, :no_session} ->
+          {:error, Error.new(:unavailable, %{reason: "the session is not running"})}
+      end
     end
   end
 
@@ -878,7 +878,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("session.create", params, context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          {:ok, parent} <- parent_of(params),
-         {:ok, resolved} <- Worktrees.resolve(workspace, Map.get(params, "worktree", "auto")) do
+         {:ok, resolved} <- where(workspace, params) do
       private? = Map.get(params, "private", false) == true
       {profile, task} = workflow_of(params, workspace)
 
@@ -1020,6 +1020,10 @@ defmodule Troupe.Gateway.Dispatch do
 
         {:error, {:conflicts, output}} ->
           {:error, Error.new(:conflict, %{reason: "merge conflicts", output: output})}
+
+        {:error, {:local_changes, output}} ->
+          {:error,
+           Error.new(:conflict, %{reason: "local changes in the checkout", output: output})}
 
         {:error, reason} ->
           worktree_error(reason)
@@ -1408,8 +1412,35 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Where a new session works: the workspace, a fresh worktree, or the one `worktree_name`
+  # names (TUI Decision 42, Decision 843). A worktree git would not make is answered as an
+  # error the connection can send, not handed back raw.
+  defp where(workspace, params) do
+    case Worktrees.resolve(
+           workspace,
+           Map.get(params, "worktree", "auto"),
+           Map.get(params, "worktree_name")
+         ) do
+      {:ok, resolved} ->
+        {:ok, resolved}
+
+      {:error, {:bad_name, _name}} ->
+        {:error,
+         Error.new(:invalid_params, %{
+           field: "worktree_name",
+           reason: "one path segment of letters, digits, '.', '_' and '-', not starting with '.' or '-'"
+         })}
+
+      {:error, reason} ->
+        worktree_error(reason)
+    end
+  end
+
   defp worktree_error({:busy, session_id}),
     do: {:error, Error.new(:conflict, %{reason: "session #{session_id} is still working there"})}
+
+  defp worktree_error({:worktree_failed, output}),
+    do: {:error, Error.new(:internal_error, %{reason: output})}
 
   defp worktree_error(:not_found),
     do: {:error, Error.new(:not_found, %{kind: "worktree"})}
@@ -1639,9 +1670,11 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Read again from their files, as a switch reads them (Decision 841), so an agent saved
+  # since the session started is offered beside the rest.
   defp session_definitions(session_id, session) do
     case Troupe.definitions(session_id) do
-      {:ok, definitions} -> definitions
+      {:ok, definitions} -> Definitions.reload(definitions)
       {:error, :no_agent} -> session.workspace |> Path.expand() |> Definitions.load()
     end
   end

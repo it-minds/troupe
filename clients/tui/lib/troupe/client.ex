@@ -315,6 +315,14 @@ defmodule Troupe.Client do
   @spec dismiss(session_id(), String.t()) :: :ok | {:error, term()}
   def dismiss(sid, path), do: impl(sid).dismiss(sid, path)
 
+  @doc """
+  What `/dismiss` says of the session's own window, which stays: the session on screen is
+  left by switching to another one, never by letting go of it under the screen.
+  """
+  @spec own_window() :: String.t()
+  def own_window,
+    do: "this is the session's own window, and it stays; /back, /sessions or /new leave it"
+
   @spec merge(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def merge(sid, path), do: impl(sid).merge(sid, path)
 
@@ -480,6 +488,13 @@ defmodule Troupe.Client do
   @doc "The worktrees `/worktree <Tab>` offers: checked out, and Troupe-managed."
   @spec worktrees(String.t()) :: {[map()], [String.t()]}
   def worktrees(workspace), do: Daemon.worktrees(workspace)
+
+  @doc """
+  The session's branches whose windows were dismissed, still sessions of their own, which
+  the picker lists; a session a plane runs has none.
+  """
+  @spec dismissed_branches(session_id()) :: [%{window: String.t(), session_id: String.t()}]
+  def dismissed_branches(sid), do: if(remote?(sid), do: [], else: Daemon.dismissed_branches(sid))
 
   @doc "The text a multiple-choice answer is sent as."
   @spec answer_text([String.t()]) :: String.t()
