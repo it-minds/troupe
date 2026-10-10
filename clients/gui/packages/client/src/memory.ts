@@ -75,14 +75,17 @@ export interface MemoryBrief {
   generated?: boolean;
 }
 
-/** The kinds, in the order a person reads them: what to run and how to write first. */
+/**
+ * The kinds, in the order the terminal client's `/memory` lists them: what every prompt
+ * carries first, then what `recall` answers.
+ */
 export const FACT_KINDS: ReadonlyArray<{ kind: FactKind; title: string }> = [
   { kind: "command", title: "Commands" },
   { kind: "convention", title: "Conventions" },
+  { kind: "negative", title: "What does not work" },
   { kind: "overview", title: "Overview" },
   { kind: "layout", title: "Layout" },
   { kind: "note", title: "Notes" },
-  { kind: "negative", title: "What did not work" },
 ];
 
 /** The facts grouped by kind, in `FACT_KINDS`' order, any other kind after them; no empty group. */

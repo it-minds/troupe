@@ -134,14 +134,14 @@ describe("the facts as a person reads them", () => {
     status,
   });
 
-  it("groups by kind, commands and conventions first, any other kind after, and no empty group", () => {
+  it("groups by kind in the terminal client's order, any other kind after, and no empty group", () => {
     const groups = factsByKind([fact("a", "note", "current"), fact("b", "command", "current"), fact("c", "flaky", "current"), fact("d", "negative", "moved")]);
     assert.deepEqual(
       groups.map((g) => [g.title, g.facts.map((f) => f.id)]),
       [
         ["Commands", ["b"]],
+        ["What does not work", ["d"]],
         ["Notes", ["a"]],
-        ["What did not work", ["d"]],
         ["flaky", ["c"]],
       ],
     );
