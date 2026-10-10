@@ -57,11 +57,13 @@ which the daemon now refuses; and the palette drew `/plan`, `/merge` and a repos
   terminal person has an editor), and opening the real file (a half-written file would be
   read by every session meanwhile, and the daemon's check would come after the damage).
 - **What the agent may do, before it is saved.** The save shows the permissions the text
-  sets, every `auto` first and by name. A save that adds an `auto` the name did not have
-  (compared with what answers to the name now, any layer), or that moves one from the
-  repository's layer, where an `auto` waits for the workspace to be trusted (root Decision
-  825), into the person's, where nothing holds it back (X26's note), asks once more, `y` or
-  back, and says which of the two it is. A save that adds none goes at once.
+  sets, every `auto` first and by name. A save that lets a tool run without asking that
+  did not before asks once more, `y` or back, compared as the desktop app compares (root
+  Decision 842): with the file it replaces, the agent answering to the name now when it is
+  in the layer saved to; anything else is a new file there, and every `auto` in it counts.
+  So a copy from the repository's layer, where an `auto` waits for the workspace to be
+  trusted (root Decision 825), into the person's, where nothing holds it back, is asked
+  about, and the question says so. A save that adds none goes at once.
 - **Copy, new, delete.** `c` copies the selected agent into the repository under its own
   name in one key (the common case: a built-in made the repository's), and the
   repository's own into mine; it is a save like any other, so the same question guards an
@@ -105,9 +107,11 @@ which the daemon now refuses; and the palette drew `/plan`, `/merge` and a repos
   or `checkout` (what `agents.list` says a session on it would get), ahead of its
   description; its detail says it is an agent, not a command, and where it is managed. An
   agent the daemon says cannot run here (a model the provider does not serve) is greyed
-  with the reason, as any row that cannot run now. The rows are `agents.list`'s, read with
-  the command table and again whenever `agents.changed` arrives, so a save in the desktop
-  app is a row here at once.
+  with the reason, as any row that cannot run now. The rows are `agents.list`'s, asked for
+  the first time the palette opens, from a task and over the session's own socket as the
+  command table is, so neither the first frame nor the palette waits on them (the badges
+  come a moment after), and read again whenever an agent is written here or
+  `agents.changed` arrives, so a save in the desktop app is a row here at once.
 - **The palette's rows the audit found wrong (D107).** Opened over a window, a command the
   palette takes to finish typing (one that wants an argument, or taken with Tab or Space)
   goes into that window's box, marked as a command for it, and Enter runs it against the

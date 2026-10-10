@@ -36,7 +36,9 @@ defmodule Troupe.AgentsPaletteTest do
     {sid, _, _} = start_session!(workspace: ws, script: [])
     {pid, session} = ready(sid)
 
+    # The agent rows' badges arrive once the palette has asked for them.
     press(pid, "/")
+    eventually(fn -> user_state(pid).agent_rows != %{} end)
     type(pid, "plan")
     text = screen_text(pid, session)
     assert text =~ ~r/\/plan +agent +built-in · default · read-only · checkout +Read/
@@ -61,10 +63,10 @@ defmodule Troupe.AgentsPaletteTest do
     {sid, _, _} = start_session!(script: [])
     {pid, _session} = ready(sid)
 
-    # The rows are read as the palette first opens.
+    # The rows are asked for as the palette first opens, and arrive after it.
     assert user_state(pid).agent_rows == %{}
     press(pid, "/")
-    assert user_state(pid).agent_rows["plan"]["available"] == true
+    eventually(fn -> user_state(pid).agent_rows["plan"]["available"] == true end)
     press(pid, "esc")
 
     :sys.replace_state(pid, fn server ->

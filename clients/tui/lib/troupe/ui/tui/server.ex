@@ -361,6 +361,13 @@ defmodule Troupe.UI.TUI.Server do
     {:noreply, schedule_tick(%{agents_changed(state) | dirty: true}), render?: false}
   end
 
+  # The palette's agent rows, asked for when it first opened (`ask_agent_rows/1`); an
+  # answer for a session no longer on screen is not this screen's.
+  def handle_info({:agent_rows, sid, rows}, %{session_id: sid} = state),
+    do: {:noreply, schedule_tick(%{state | agent_rows: rows, dirty: true}), render?: false}
+
+  def handle_info({:agent_rows, _sid, _rows}, state), do: {:noreply, state, render?: false}
+
   def handle_info(:repainted, state), do: {:noreply, %{state | repaint: false}, render?: true}
 
   # The editor runs once the frame that says so is drawn (TUI Decision 156): it holds the
@@ -1043,14 +1050,14 @@ defmodule Troupe.UI.TUI.Server do
         commands -> commands
       end
 
-    agent_rows =
-      if state.agent_rows == %{}, do: agent_rows(state.session_id), else: state.agent_rows
+    # The agent rows' badges are asked for the first time the palette opens, off the
+    # screen's process: a daemon slow to answer never holds the palette (TUI Decision 156).
+    if state.agent_rows == %{}, do: ask_agent_rows(state.session_id)
 
     %{
       state
       | focus: :palette,
         commands: commands,
-        agent_rows: agent_rows,
         palette: %{query: "", cursor: 0, return_to: return_to},
         cmd_text: "",
         cmd_pos: 0
@@ -2059,6 +2066,12 @@ defmodule Troupe.UI.TUI.Server do
   defp mcp_key(_key, state), do: state
 
   ## Agents (TUI Decision 156)
+
+  defp ask_agent_rows(sid) do
+    server = self()
+    {:ok, _task} = Task.start(fn -> send(server, {:agent_rows, sid, agent_rows(sid)}) end)
+    :ok
+  end
 
   # `agents.list`'s rows by name, which the palette's agent rows carry their badges from.
   defp agent_rows(sid) do

@@ -399,18 +399,17 @@ defmodule Troupe.UI.TUI.Agents do
   end
 
   @doc """
-  The tools a save into `scope` lets run without asking that the name did not already
-  let run so: each `auto` the text gives that the agent answering to the name now does
-  not, and every one when the save moves it from the repository's layer, where an `auto`
-  waits for the workspace to be trusted, into the person's, where it does not.
+  The tools a save into `scope` lets run without asking that did not before, compared
+  with the file it replaces, as the desktop app compares (root Decision 842): the agent
+  answering to the name now when it is in that layer, an `auto` added or an `ask` or `deny`
+  made `auto`; anything else is a new file there, and every `auto` in it counts. So a copy
+  from the repository's layer, where an `auto` waits for the workspace to be trusted, into
+  the person's, where it does not, is asked about.
   """
   @spec widened(map(), String.t()) :: [String.t()]
   def widened(%{permissions: permissions, before: before, layer: layer}, scope) do
-    untrusted? = scope == "user" and layer == "project"
-
-    for {tool, "auto"} <- Enum.sort(permissions),
-        untrusted? or Map.get(before, tool) != "auto",
-        do: tool
+    replaced = if layer == scope, do: before, else: %{}
+    for {tool, "auto"} <- Enum.sort(permissions), Map.get(replaced, tool) != "auto", do: tool
   end
 
   defp put(%{ask: ask} = page, sid, scope) do
@@ -916,12 +915,10 @@ defmodule Troupe.UI.TUI.Agents do
                   "repository's layer that waits until the workspace is trusted."
 
               scope == "user" ->
-                "Saving into your agents #{runs}, which it did not before, in every " <>
-                  "workspace, trusted or not."
+                "Saving into your agents #{runs} in every workspace, trusted or not."
 
               true ->
-                "Saving into this repository #{runs}, which it did not before, once this " <>
-                  "workspace is trusted."
+                "Saving into this repository #{runs} once this workspace is trusted."
             end
 
           ["", why, "", "y saves it so · any other key goes back"]

@@ -571,13 +571,26 @@ defmodule Troupe.Client.Daemon do
 
   # The agents of this session's workspace, read, checked and written by the daemon (root
   # Decision 841). Reading and checking name the session too, so `agents.get` answers
-  # with the session's own definitions and the windows of its family that run one; a
-  # write gets its command id here, as every other does.
+  # with the session's own definitions and the windows of its family that run one, and go
+  # over the session's own socket, as the command table does, so a fleet call the link is
+  # busy with never holds them; a write gets its command id here, as every other does.
   @impl true
   def agents(sid, method, params) when method in ~w(agents.list agents.get agents.validate) do
     base = %{workspace: workspace(sid)}
     base = if method == "agents.list", do: base, else: Map.put(base, :session_id, sid)
-    manage(method, Map.merge(base, params))
+    params = Map.merge(base, params)
+
+    case Worker.whereis(sid) do
+      nil ->
+        manage(method, params)
+
+      _pid ->
+        case Worker.rpc(sid, method, params) do
+          {:ok, answer} when is_map(answer) -> {:ok, answer}
+          {:ok, other} -> {:error, "unexpected #{method} answer: #{inspect(other)}"}
+          {:error, reason} -> {:error, message(reason)}
+        end
+    end
   end
 
   def agents(sid, method, params) when method in ~w(agents.put agents.delete) do
