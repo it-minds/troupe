@@ -313,7 +313,7 @@ defmodule Troupe.InstructionsPromptTest do
     on_exit(fn -> File.rm(mine) end)
 
     write_file(context, "AGENTS.md", "Theirs: run mix check.\n")
-    write_file(context, ".troupe/memory.md", "## Overview\nA brief.\n")
+    write_file(context, ".troupe/memory.md", "## Commands\n- A brief.\n")
 
     %{session: session, fake: fake} = start_session(context, steps: [{:text, "ok"}])
     :ok = Troupe.subscribe(session.id)

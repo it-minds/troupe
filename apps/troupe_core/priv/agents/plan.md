@@ -11,6 +11,7 @@ tools:
   - web_fetch
   - read_output
   - read_branch
+  - recall
   - todo_read
   - todo_write
   - delegate
