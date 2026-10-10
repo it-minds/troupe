@@ -1082,7 +1082,7 @@ defmodule Troupe.UI.TUI.Server do
 
         case Client.fs_upload(sid, target, content) do
           :ok -> {:ok, "uploaded #{path} to #{target}"}
-          {:error, reason} -> {:error, to_message(reason)}
+          {:error, reason} -> {:error, "#{path} not uploaded: #{to_message(reason)}"}
         end
 
       {:error, reason} ->
