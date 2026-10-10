@@ -78,9 +78,12 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
 - With mise's shims on `PATH` in WSL, the core suite's `FileToolsTest`, `ReadOutputTest`,
   `ReadRootsTest` and `BenchTest` fail as `BenchCLITest` does: the `rg` shim answers "No
   version is set" outside a mise directory.
+- Under full load, core `Troupe.Agent.CompactionTest` "a result the model has not answered
+  yet is sent whole" failed once (a 54-byte result where it waits for one over the inline
+  limit); it passes alone.
 
 Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23), in chunks 3 to 7, and by
-the chunk 24 fixers (2026-10-08).
+the chunk 24 and 26 fixers (2026-10-08/09).
 
 ### D23 - Small leftovers (low)
 
@@ -992,6 +995,68 @@ Found by the #390 fixer, 2026-10-09.
   though `mcp.list` now carries both.
 
 Found by the #60 fixer, 2026-10-09.
+
+### D98 - Onboarding after #516's first slices (low)
+
+- Onboarding proposes only a repository's files: the person's own `~/.claude/agents`,
+  `~/.claude/commands` and opencode's global agents (`target: :user`) are not proposed,
+  nor opencode's `command` block, its legacy `.opencode/mode(s)/` files, or files in
+  subdirectories (listed as skipped).
+- A rule that denies a tool for some uses only (Claude Code's `Read(./.env)`) becomes
+  `ask` for the whole tool, since Troupe allows a tool whole or not at all: that `.env` is
+  then asked about rather than refused.
+- An opencode `provider/model` whose provider isn't in `config.yaml` is sent whole to the
+  session's provider.
+- A command's positional arguments aren't filled: Troupe fills only `$ARGUMENTS`
+  (Decision 763), while Claude Code counts `$0`/`$ARGUMENTS[0]` from zero and opencode
+  `$1` from one; the importer notes them. #516's table says they already match.
+- The librarian's prompt still says `CLAUDE.md`, `GEMINI.md` and Copilot's file are in
+  every prompt, and doesn't mention `onboard_write` (#516's slice 2).
+- `troupe onboard` calls a source's `proposals/2` and then `skipped/2`, so the agents and
+  commands source surveys the files twice a run.
+
+Found by the #516 fixers, 2026-10-09.
+
+### D99 - `.agents/` and skills after #518 (low)
+
+- The TUI's `/mcp` page shows the new skill layers (`agents`, `user_agents`) as `[session]`,
+  from the fallback of `layer/1` in `clients/tui/lib/troupe/client/daemon.ex`.
+- The desktop app's "Servers and skills" panel takes every skill not in the workspace layer
+  for the person's own when removing it, so removing an `.agents` skill fails with "no
+  skill named".
+- Neither client shows `skills.list`'s `skipped`.
+- `troupe instructions check` resolves a path written in `<dir>/.agents/AGENTS.md` from
+  `<dir>/.agents/` and the root, not from `<dir>`, so a nested one can be called missing.
+- An `.agents/AGENTS.md` that can't be read only logs a warning, and an unreadable
+  `.agents/skills/*/SKILL.md` is dropped with no entry; neither shows in `context.get` or
+  `skills.list` (as D84's instruction-file item).
+
+Found by the #516 fixers, 2026-10-09.
+
+### D100 - MCP import after #520 (low)
+
+- Linking (`include`) an `opencode.json` yields no servers: `Troupe.MCP.Local.servers_of/2`
+  reads `mcpServers`, `servers` and `mcp_servers`, not opencode's `mcp`. A copy works.
+- `agents.list` lists primary agents only, so the note on a `.troupe/agents` subagent whose
+  `auto` waits for trust reaches no client.
+- The desktop app's import hint and the `/mcp import` row of the CLI reference don't
+  mention Codex's `config.toml`.
+- A linked file's import warnings (Codex's `enabled_tools is not carried`) repeat on every
+  `mcp.list`.
+- Codex's top-level `scopes`/`auth` aren't folded into Troupe's `oauth`.
+- An imported `${HOME}` becomes `{env:HOME}`, which refuses the server on a machine where
+  `HOME` isn't set (Windows).
+
+Found by the #516 fixers, 2026-10-09.
+
+### D101 - Pods and worktrees after #523 (low)
+
+- The TUI shows the `files_skipped` event as a bare line (`files_skipped files=[1]`).
+- A worktree reads its main checkout's committed agents and skills, but not its commands,
+  workflows or `mcp.json`.
+- `TroupePolicy` can't forbid a profile's `repositoryOverridesBundle`.
+
+Found by the #516 fixers, 2026-10-09.
 
 ## Taken
 
