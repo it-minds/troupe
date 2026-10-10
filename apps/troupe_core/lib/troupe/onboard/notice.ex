@@ -15,7 +15,8 @@ defmodule Troupe.Onboard.Notice do
     `Troupe.Session.Memory.refresh_due?/2` has it (Decisions 696 and 713, the TUI's 127);
     `outdated` when an older survey than this build's wrote it
     (`Troupe.Memory.survey_version/0`) and the person has not said no to that
-    (`decline_brief/2`); otherwise `none`.
+    (`decline_brief/2`); otherwise `none`, and always `none` outside a git repository, as
+    onboarding is (Decision 838).
   - **The notice.** `due/2` is the `onboarding_suggested` event a session's start logs:
     what to say about onboarding (counted by kind, `2 AGENTS.md files, 3 rules and 1
     agent`, never the content) and about an older brief, with what is due (`due`,
@@ -38,7 +39,7 @@ defmodule Troupe.Onboard.Notice do
   reads nothing in the person's home or config directory.
   """
 
-  alias Troupe.{Config, Instructions, Memory, Onboard, Paths, Workspace}
+  alias Troupe.{Config, Memory, Onboard, Paths, Workspace}
   alias Troupe.Onboard.Pod
   alias Troupe.Session.Memory, as: Brief
 
@@ -137,7 +138,14 @@ defmodule Troupe.Onboard.Notice do
     end
   end
 
+  # Outside a git repository nothing is due, as onboarding is not (Decision 838).
   defp brief_due(workspace, brief, config, opts) do
+    if Brief.repository?(workspace),
+      do: brief_due_here(workspace, brief, config, opts),
+      else: "none"
+  end
+
+  defp brief_due_here(workspace, brief, config, opts) do
     case Brief.status(workspace, config) do
       :absent -> if Brief.held_until(workspace, config) == nil, do: "first", else: "none"
       :stale -> if Brief.held_until(workspace, config) == nil, do: "stale", else: "none"
@@ -196,8 +204,7 @@ defmodule Troupe.Onboard.Notice do
   # the instruction files are read up to it. Onboarding brings a repository's files in; a
   # start in a directory that is in none (the home directory, whose `.claude/` is Claude
   # Code's own) is due nothing, and no source looks at it, let alone walks it.
-  defp repository?(workspace),
-    do: workspace |> Instructions.repository_root() |> Path.join(".git") |> File.exists?()
+  defp repository?(workspace), do: Brief.repository?(workspace)
 
   defp found?(source, workspace) do
     if Code.ensure_loaded?(source) and function_exported?(source, :found?, 1),
@@ -247,6 +254,7 @@ defmodule Troupe.Onboard.Notice do
   defp say_brief(workspace, opts) do
     cond do
       Keyword.get(opts, :memory, true) == false -> []
+      not repository?(workspace) -> []
       said_no?("brief_declined", brief_key(workspace), Memory.survey_version(), opts) -> []
       true -> older(Brief.brief(workspace))
     end

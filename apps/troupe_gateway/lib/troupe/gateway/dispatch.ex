@@ -895,7 +895,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("session.create", params, context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          {:ok, parent} <- parent_of(params),
-         {:ok, resolved} <- Worktrees.resolve(workspace, Map.get(params, "worktree", "auto")) do
+         {:ok, resolved} <- where(workspace, params) do
       private? = Map.get(params, "private", false) == true
       {profile, task} = workflow_of(params, workspace)
 
@@ -1037,6 +1037,10 @@ defmodule Troupe.Gateway.Dispatch do
 
         {:error, {:conflicts, output}} ->
           {:error, Error.new(:conflict, %{reason: "merge conflicts", output: output})}
+
+        {:error, {:local_changes, output}} ->
+          {:error,
+           Error.new(:conflict, %{reason: "local changes in the checkout", output: output})}
 
         {:error, reason} ->
           worktree_error(reason)
@@ -1425,8 +1429,35 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Where a new session works: the workspace, a fresh worktree, or the one `worktree_name`
+  # names (TUI Decision 42, Decision 843). A worktree git would not make is answered as an
+  # error the connection can send, not handed back raw.
+  defp where(workspace, params) do
+    case Worktrees.resolve(
+           workspace,
+           Map.get(params, "worktree", "auto"),
+           Map.get(params, "worktree_name")
+         ) do
+      {:ok, resolved} ->
+        {:ok, resolved}
+
+      {:error, {:bad_name, _name}} ->
+        {:error,
+         Error.new(:invalid_params, %{
+           field: "worktree_name",
+           reason: "one path segment of letters, digits, '.', '_' and '-', not starting with '.' or '-'"
+         })}
+
+      {:error, reason} ->
+        worktree_error(reason)
+    end
+  end
+
   defp worktree_error({:busy, session_id}),
     do: {:error, Error.new(:conflict, %{reason: "session #{session_id} is still working there"})}
+
+  defp worktree_error({:worktree_failed, output}),
+    do: {:error, Error.new(:internal_error, %{reason: output})}
 
   defp worktree_error(:not_found),
     do: {:error, Error.new(:not_found, %{kind: "worktree"})}

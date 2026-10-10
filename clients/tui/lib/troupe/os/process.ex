@@ -26,10 +26,8 @@ defmodule Troupe.OS.Process do
     timeout = Keyword.get(opts, :timeout_ms, @default_timeout)
     max_output = Keyword.get(opts, :max_output, @default_max_output)
 
-    exe = System.find_executable(cmd) || cmd
-
     port_opts =
-      [:binary, :exit_status, :stderr_to_stdout, :hide, args: [exe | args]] ++
+      [:binary, :exit_status, :stderr_to_stdout, :hide, args: argv(cmd, args)] ++
         cd_opt(opts[:cd]) ++ env_opt(opts[:env])
 
     port = Port.open({:spawn_executable, reaper}, port_opts)
@@ -41,6 +39,77 @@ defmodule Troupe.OS.Process do
 
     collect(port, [], 0, max_output, timeout)
   end
+
+  @doc """
+  What the reaper is given for `cmd` and `args`: the program, found as `executable/2` finds
+  it, then the arguments. `:os`, `:path` and `:pathext` stand in for this machine's, for
+  the tests.
+  """
+  @spec argv(String.t(), [String.t()], keyword()) :: [String.t()]
+  def argv(cmd, args, opts \\ []) do
+    exe =
+      case executable(cmd, opts) do
+        nil -> spelled(cmd, Keyword.get(opts, :os, :os.type()))
+        found -> found
+      end
+
+    [exe | args]
+  end
+
+  @doc """
+  The program `cmd` names, or nil when there is none.
+
+  On Windows it is looked up on `PATH` alone, with `PATHEXT`'s extensions, and spelled
+  with backslashes (D109). `System.find_executable/1` looks in the current directory
+  first there, which is the repository the TUI was started in, so a `clip.bat` or a
+  `cmd.exe` the repository carries would have been what ran. And it answers with forward
+  slashes, which cmd.exe reads as switches in its own name: the reaper hands on the
+  command line as Erlang built it, and `c:/WINDOWS/system32/cmd.exe /c echo hi` is "The
+  syntax of the command is incorrect." Elsewhere it is `System.find_executable/1`.
+  """
+  @spec executable(String.t(), keyword()) :: String.t() | nil
+  def executable(cmd, opts \\ []) do
+    case Keyword.get(opts, :os, :os.type()) do
+      {:win32, _} = os ->
+        path = Keyword.get_lazy(opts, :path, fn -> System.get_env("PATH", "") end)
+
+        if String.contains?(cmd, ["/", "\\"]),
+          do: spelled(cmd, os),
+          else: on_path(cmd, path, pathext(opts))
+
+      _ ->
+        System.find_executable(cmd)
+    end
+  end
+
+  defp on_path(cmd, path, extensions) do
+    names =
+      if Path.extname(cmd) == "",
+        do: Enum.map(extensions, &(cmd <> &1)),
+        else: [cmd]
+
+    path
+    |> String.split(";", trim: true)
+    |> Enum.map(&String.trim(&1, "\""))
+    # A relative entry is the current directory by another name.
+    |> Enum.filter(&(Path.type(&1) == :absolute))
+    |> Enum.find_value(fn dir ->
+      Enum.find_value(names, fn name ->
+        candidate = Path.join(dir, name)
+        if File.regular?(candidate), do: spelled(candidate, {:win32, :nt})
+      end)
+    end)
+  end
+
+  defp pathext(opts) do
+    opts
+    |> Keyword.get_lazy(:pathext, fn -> System.get_env("PATHEXT") || ".COM;.EXE;.BAT;.CMD" end)
+    |> String.split(";", trim: true)
+    |> Enum.map(&String.downcase/1)
+  end
+
+  defp spelled(cmd, {:win32, _}), do: String.replace(cmd, "/", "\\")
+  defp spelled(cmd, _os), do: cmd
 
   @doc "Runs a shell command string with the platform shell."
   @spec shell(String.t(), keyword()) :: result()
@@ -85,7 +154,7 @@ defmodule Troupe.OS.Process do
       git_bash ->
         {git_bash, ["-c", command]}
 
-      System.find_executable("pwsh") ->
+      executable("pwsh") ->
         {"pwsh", ["-NoProfile", "-NonInteractive", "-Command", command]}
 
       true ->

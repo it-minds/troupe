@@ -66,6 +66,27 @@ defmodule Troupe.Tools.ReadBranchTest do
     assert {:ok, "no branches"} = ReadBranch.run(%{}, ctx(stranger, context))
   end
 
+  # `/ask` is a branch of the session it was asked from, and reads the branches a person
+  # started beside it. The session they came from is not one of them: listed, it read as
+  # `build idle (no prompt)`, a branch that never started (Decision 843).
+  test "a branch lists its siblings and not the session they came from", context do
+    %{session: parent} = start_session(context, steps: [])
+    %{session: sibling} = start_session(context, parent: parent.id, steps: [])
+    %{session: ask} = start_session(context, parent: parent.id, steps: [])
+
+    assert {:ok, listing} = ReadBranch.run(%{}, ctx(ask, context))
+    assert listing =~ sibling.id
+    refute listing =~ parent.id
+
+    assert {:error, "no branch " <> _} =
+             ReadBranch.run(%{"session_id" => parent.id}, ctx(ask, context))
+
+    # A branch with no siblings has no branches to read.
+    %{session: alone} = start_session(context, steps: [])
+    %{session: only} = start_session(context, parent: alone.id, steps: [])
+    assert {:ok, "no branches"} = ReadBranch.run(%{}, ctx(only, context))
+  end
+
   # An agent told only "no branch 7" guesses the next id, one model call at a time. The
   # usual mistake is taking the subagents it delegated to for branches.
   test "a wrong id is answered with the ids that exist and where a subagent's findings are",

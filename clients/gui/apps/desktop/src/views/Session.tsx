@@ -22,12 +22,12 @@ import type {
   FleetRow,
   LoopInfo,
   LoopState,
-  ProfileOffering,
   SessionKind,
   TranscriptState,
 } from "@troupe/client";
-import { useProfiles, useSessionView, useStartQuestions } from "../hooks";
+import { useSessionView, useStartQuestions } from "../hooks";
 import type { SessionHandle } from "../hooks";
+import { AgentSwitch } from "./AgentSwitch";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
 import { CommandPalette } from "./CommandPalette";
@@ -48,8 +48,9 @@ export function Session({
   created,
   onBack,
   onGo,
+  onAgents,
 }: {
-  /** The plane, for a team session and its profiles. Null in local mode. */
+  /** The plane, for a team session. Null in local mode. */
   auth: AuthSession | null;
   daemon: DaemonClient | null;
   /** Who the daemon records this person as, which is "you" in a session on this computer. */
@@ -61,6 +62,8 @@ export function Session({
   onBack: () => void;
   /** Leave for another screen, for the palette's Navigate and Setup commands. */
   onGo?: (screen: PaletteScreen) => void;
+  /** Open the agents manager on this session's workspace, at one agent if named: a session on this computer's. */
+  onAgents?: ((agent?: string) => void) | undefined;
 }): JSX.Element {
   // Where it runs decides which socket it is reached over and nothing else about this
   // screen: the transcript, the approvals and the composer are the same protocol either
@@ -69,7 +72,6 @@ export function Session({
   // otherwise a team session only where there is a team to have one.
   const kind = row?.kind ?? created ?? (auth ? "team" : "local");
   const view = useSessionView(auth, sessionId, { daemon, kind });
-  const { profiles } = useProfiles(auth);
   const [backstage, setBackstage] = useState(true);
   const [pane, setPane] = useState<"tasks" | "files">("tasks");
   const [palette, setPalette] = useState(false);
@@ -114,6 +116,7 @@ export function Session({
               setPane("files");
             },
             transcript: () => transcriptText(view.state),
+            ...(kind !== "team" && onAgents ? { agents: () => onAgents() } : {}),
           }}
         />
       )}
@@ -122,15 +125,24 @@ export function Session({
         row={row}
         sessionId={sessionId}
         state={view.state}
-        profiles={profiles}
         self={self}
         backstage={backstage}
         onBack={onBack}
         onToggleBackstage={() => setBackstage((b) => !b)}
-        onSwitch={(p) => void view.switchProfile(p)}
         loop={loop}
         canChange={!readOnly}
         view={view}
+        agent={
+          <AgentSwitch
+            view={view}
+            daemon={daemon}
+            kind={kind}
+            workspace={kind !== "team" ? workspaceOf(row) : null}
+            current={agentOf(view.state, row)}
+            canChange={!readOnly}
+            onAbout={kind !== "team" ? onAgents : undefined}
+          />
+        }
       />
 
       <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
@@ -192,33 +204,47 @@ function transcriptText(state: TranscriptState): string {
  * it works towards; who is here; and the controls, with the loop beside the status
  * while one runs.
  */
+/**
+ * The agent a window runs: as its transcript says (`session_created`, then each
+ * `profile_switched`), and until that has arrived, as a daemon's row says it. A plane's row
+ * names the plane's profile, which is not an agent, so it is not shown as one.
+ */
+function agentOf(state: TranscriptState, row: FleetRow | undefined): string | null {
+  return state.profile ?? (row && row.kind !== "team" ? row.profile : null) ?? null;
+}
+
+/** Where a session on this computer works, as its row says. */
+function workspaceOf(row: FleetRow | undefined): string | null {
+  const workspace = (row?.raw as { workspace?: unknown } | undefined)?.workspace;
+  return typeof workspace === "string" && workspace ? workspace : null;
+}
+
 function Header({
   row,
   sessionId,
   state,
-  profiles,
   self,
   backstage,
   onBack,
   onToggleBackstage,
-  onSwitch,
   loop,
   canChange,
   view,
+  agent,
 }: {
   row: FleetRow | undefined;
   sessionId: string;
   state: TranscriptState;
-  profiles: ProfileOffering[];
   self: string | undefined;
   backstage: boolean;
   onBack: () => void;
   onToggleBackstage: () => void;
-  onSwitch: (p: string) => void;
   loop: LoopState | undefined;
   /** Whether this person may set the goal and start or stop a loop: not a reader's. */
   canChange: boolean;
   view: SessionHandle;
+  /** The agent it runs, and the switch (`AgentSwitch`). */
+  agent: JSX.Element;
 }): JSX.Element {
   const working = rootState(state);
   const here = state.presence.filter((p) => p.subject);
@@ -242,7 +268,9 @@ function Header({
               </span>
             </>
           )}
-          <span className="profile">{state.profile ?? row?.profile ?? "—"}</span>
+          <span className="profile" title="The agent this window runs">
+            {agentOf(state, row) ?? "—"}
+          </span>
           <span className="sep" aria-hidden="true">
             /
           </span>
@@ -281,17 +309,8 @@ function Header({
 
         <LoopStatus loop={loop} canStop={canChange} onStop={view.stopLoop} />
 
-        {/* The profiles are the plane's. With no plane there are none to switch to, and an
-            empty control is a broken one. */}
-        {profiles.length > 0 && (
-          <select value={state.profile ?? ""} onChange={(e) => onSwitch(e.target.value)} aria-label="Profile" title="Applied at the next turn">
-            {profiles.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        )}
+        {/* The agent this window runs, and the switch to another from the next turn. */}
+        {agent}
 
         <button className="tab" onClick={onToggleBackstage} aria-pressed={backstage}>
           {backstage ? "Hide backstage" : "Show backstage"}
@@ -548,7 +567,11 @@ function StreamEntry({
       const step = local && entry.type === "llm_error" ? modelErrorStep(entry.text) : null;
       return (
         <>
-          <p className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" || entry.type === "agent_failed" ? "error" : ""}`}>{entry.text}</p>
+          <p
+            className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" || entry.type === "agent_failed" ? "error" : ""} ${entry.type === "profile_switched" ? "switched" : ""}`}
+          >
+            {entry.text}
+          </p>
           {step && (
             <p className="note">
               {step}

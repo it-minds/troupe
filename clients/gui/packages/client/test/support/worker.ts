@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
+import { FakeAgents } from "./agents.js";
 import { COMMANDS, expandDefined } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 
@@ -103,6 +104,8 @@ export class FakeWorker {
   readonly frames: string[] = [];
   /** Client-hosted tools by session and prefixed name, as `tools.register` left them. */
   readonly tools = new Map<string, RegisteredTool>();
+  /** The agents a session here could run: the built-ins, and a bundle's a test adds (troupe Decision 841). */
+  readonly agents = new FakeAgents("/home/troupe/.config/troupe", true);
 
   private readonly clients = new Set<Client>();
   private readonly opts: Required<WorkerOptions>;
@@ -165,9 +168,11 @@ export class FakeWorker {
       costMicros: 0,
     };
     this.sessions.set(id, session);
+    // `profile` here is the agent the root runs, as a pod writes it (`Troupe.Session`
+    // takes the plane's `agent`, or the default); the plane's profile is the pod's.
     session.log.append("session_created", {
       workspace: session.workspace,
-      profile: session.profile,
+      profile: session.agent,
       visibility: "team",
       bundle_version: "3",
       kind: "team",
@@ -388,12 +393,34 @@ export class FakeWorker {
         return reply(ws, id, { cancelled: true });
       }
 
+      // As a pod does it since troupe Decision 841: the agent read now, a name nothing
+      // defines and a subagent refused, and the event saying where it came from and what
+      // it gained and lost.
       case "profile.switch": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         const to = String(params["profile"] ?? "");
-        session.log.append("profile_switched", { from: session.profile, to }, { kind: "user", subject: client.token.sub });
-        session.profile = to;
-        return reply(ws, id, { profile: to });
+        const next = this.agents.find(to, null);
+        if (!next) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "agent", name: to } });
+        if (next.meta["mode"] !== "primary") {
+          return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "profile", reason: `${to} is a subagent: a session or a branch runs a primary agent` } });
+        }
+        const now = this.agents.find(session.agent, null);
+        const before = now ? this.agents.toolsOf(now) : [];
+        const after = this.agents.toolsOf(next);
+        session.log.append(
+          "profile_switched",
+          {
+            from: session.agent,
+            to,
+            layer: next.layer,
+            tools_added: after.filter((t) => !before.includes(t)),
+            tools_removed: before.filter((t) => !after.includes(t)),
+            command_id: params["command_id"],
+          },
+          { kind: "user", subject: client.token.sub },
+        );
+        session.agent = to;
+        return reply(ws, id, { accepted: true, profile: to, layer: next.layer });
       }
 
       case "presence.set":

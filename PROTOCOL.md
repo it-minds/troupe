@@ -77,6 +77,12 @@ framing, no batching. Binary frames are not used. The token goes in the
 `Authorization: Bearer` header, or in `auth.token` on `initialize` where headers are
 unavailable.
 
+A frame is one message whatever whitespace it holds, newlines between its tokens
+included. A frame larger than the socket's ceiling, 16 MiB unless the server is
+configured otherwise, closes the connection before it is read; `initialize` says what the
+ceiling is (`limits.max_message_bytes`), and a client does not send a message larger
+than that (Decision 845).
+
 ---
 
 ## 2. Framing: JSON-RPC 2.0
@@ -152,6 +158,11 @@ The response:
   "limits": {"max_message_bytes": 67108864, "outbound_queue": 10000}
 }}
 ```
+
+`limits.max_message_bytes` is the largest message this connection reads: 64 MiB on the
+socket and TCP transports, the socket's ceiling over a WebSocket (16 MiB by default). A
+larger one ends the connection, with `payload_too_large` on a socket and without a word
+on a WebSocket, so a client checks a message against it before sending one.
 
 The server's `capabilities`:
 
@@ -589,6 +600,13 @@ brings to the same shape, in `session.create` and in a first `session.register`.
 `worktree`: `"auto"` (default) creates a git worktree on `troupe/<slug>` when the
 workspace already has a live session; `"never"` reuses the directory; `"always"`
 always branches.
+
+`worktree_name`: work in the worktree of that name, whatever `worktree` says:
+`<workspace>-<name>` on `troupe/<name>`, made the first time, the same tree after, and
+made again from its branch when only the directory has gone. A name is one path segment
+of letters, digits, `.`, `_` and `-`, not starting with `.` or `-` (`invalid_params`,
+field `worktree_name`, otherwise); refused with `conflict` while a session is working
+in that tree.
 
 `workflow`: run the prompt as a named **workflow**: the step list at
 `<workspace>/.troupe/workflows/<name>.json` (or the built-in `default` pipeline) is
@@ -1252,13 +1270,15 @@ it can and shows the rest greyed with the reason. Reading the table wakes nothin
 
 The **project brief**: what earlier agents learned about the repository, read into
 every agent's system prompt and written by the `remember` tool and the `librarian`
-agent. `status` is `absent`, `stale` (never built, older than `memory_max_age_days`, or
-the tracked file count drifted), `fresh` or `disabled` (`memory: false` in the workspace
+agent. `status` is `absent` (no facts), `stale` (never built, older than
+`memory_max_age_days`, or a command or convention it holds rests on a file that changed or
+went since it was last checked, Decision 838), `fresh` or `disabled` (`memory: false` in the workspace
 config). A `librarian`'s run that ends as it meant to builds it, whether or not it
 rewrote any of it.
 One brief per repository: a worktree's is the main checkout's. `refresh_due` is whether
 a client should start a `librarian` session on the workspace now, which is what
-`memory_auto_refresh` asks of it: the brief is `absent` or `stale`, and no librarian has
+`memory_auto_refresh` asks of it: the workspace is in a git repository (never true in a
+directory none holds, such as a home directory), the brief is `absent` or `stale`, and no librarian has
 started on it in the last `memory_max_age_days` without its being built since. A
 librarian's run that failed, was cancelled or wrote nothing is tried again that much
 later, not in every new session; `refresh_held_until` is when (or `null`), for a
@@ -1802,22 +1822,27 @@ made twice.
 ```json
 {"command_id": "c-8", "path": "/home/me/project/../project-troupe-abc", "force": false}
 ```
-Refuses a dirty tree with `conflict` unless `force` is true.
+Refuses a dirty tree with `conflict` unless `force` is true. git runs from the checkout
+the tree belongs to, not inside the tree.
 
 #### `worktree.merge`
 ```json
 {"command_id": "c-9", "workspace": "/home/me/project",
  "path": "/home/me/project-troupe-abc", "message": "troupe: fix the test"}
 ```
-→ `{"merged": true, "branch": "troupe/abc", "committed": true, "output": "..."}`
+→ `{"merged": true, "branch": "troupe/abc", "committed": true, "output": "...", "removed": true}`
 
 Lands a branch's work on the checkout it came from: anything uncommitted in the
 worktree is committed first (as `message`, or a default naming the branch), the branch
 is merged into `workspace` with a merge commit (`--no-ff`), and the worktree and branch
 are removed. A merge git cannot complete is aborted and answered with `conflict`
 (`reason: "merge conflicts"`, `output`: git's words); the worktree is untouched, so the
-person can resolve it by hand. Refused with `conflict` while the session in that
-worktree is mid-turn (`reason` names the session).
+person can resolve it by hand. One git will not start because uncommitted changes in
+the checkout are in its way is `conflict` with `reason: "local changes in the checkout"`
+(`output` names the files); nothing is changed. A merge that landed and whose tree git
+then could not remove is still answered as a merge, with `"removed": false` and
+`removal_error` (git's words); the tree and its branch are left. Refused with
+`conflict` while the session in that worktree is mid-turn (`reason` names the session).
 
 #### `worktree.discard`
 ```json

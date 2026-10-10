@@ -42,5 +42,8 @@
     "instruction_bytes": 530,
     "files_written": 2,
     "files_left_out": 0
+  },
+  "memory_stale_anchor": {
+    "brief_bytes": 830
   }
 }
