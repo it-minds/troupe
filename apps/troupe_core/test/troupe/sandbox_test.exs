@@ -170,6 +170,14 @@ defmodule Troupe.SandboxTest do
       assert output =~ "mine"
     end
 
+    test "a last line without a newline comes out of the sandbox too (#536)", context do
+      # `mine.txt` is "mine", with no newline after it.
+      assert {:ok, "mine", 0} = Reaper.run(context.session, ["/bin/sh", "-c", "cat mine.txt"])
+
+      {:ok, workspace} = Workspace.new(context.session)
+      assert {:ok, "mine", 0} = Shell.execute("cat mine.txt", workspace, timeout_ms: 10_000)
+    end
+
     test "`shell` runs over the session's table even with no mount besides its own", context do
       {:ok, workspace} = Workspace.new(context.session)
 

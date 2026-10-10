@@ -217,3 +217,62 @@ defmodule Troupe.ReaperTest do
     end
   end
 end
+
+defmodule Troupe.ReaperLastLineTest do
+  @moduledoc """
+  Output that does not end with a newline is read to its end (#536). In line mode the
+  port holds a last line until its newline, and lets go of it only as it closes, after
+  the exit status: a reader that stopped at `{:exit_status, _}` lost it, so `printf x`
+  read as nothing and a file without a final newline lost its last line, through every
+  caller of the reaper (git, ripgrep, the shell). Run with the host's shell, so on
+  Windows with Git for Windows' bash.
+
+  `async: false`: `Troupe.ReaperTest` points the whole VM at a helper that will not start.
+  """
+
+  use ExUnit.Case, async: false
+
+  alias Troupe.Reaper
+  alias Troupe.Tools.Shell
+
+  @moduletag :tmp_dir
+
+  defp sh(command) do
+    {shell, flag} = Shell.shell()
+    [shell, flag, command]
+  end
+
+  test "printf x is x", %{tmp_dir: dir} do
+    assert {:ok, "x", 0} = Reaper.run(dir, sh("printf x"))
+    assert {:ok, "one\ntwo", 0} = Reaper.run(dir, sh("printf 'one\\ntwo'"))
+    assert {:ok, "x", 3} = Reaper.run(dir, sh("printf x; exit 3"))
+  end
+
+  test "cat reads a file without a final newline whole", %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "notes.txt"), "one\ntwo\nthree")
+    assert {:ok, "one\ntwo\nthree", 0} = Reaper.run(dir, sh("cat notes.txt"))
+  end
+
+  test "git shows a file without a final newline whole", %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "notes.txt"), "one\ntwo\nthree")
+    who = ~w(-c user.name=t -c user.email=t@example.test -c commit.gpgsign=false)
+
+    for args <- [~w(init -q), ~w(add notes.txt), who ++ ~w(commit -q -m notes)],
+        do: assert({:ok, _, 0} = Reaper.run(dir, ["git" | args]))
+
+    assert {:ok, "one\ntwo\nthree", 0} = Reaper.run(dir, ~w(git show HEAD:notes.txt))
+  end
+
+  test "a last line longer than the port's line is whole", %{tmp_dir: dir} do
+    long = String.duplicate("a", 70_000)
+    File.write!(Path.join(dir, "long.txt"), "first\n" <> long)
+    assert {:ok, output, 0} = Reaper.run(dir, sh("cat long.txt"))
+    assert byte_size(output) == byte_size("first\n" <> long)
+    assert output == "first\n" <> long
+  end
+
+  test "output that ends with a newline is unchanged", %{tmp_dir: dir} do
+    assert {:ok, "one\ntwo\n", 0} = Reaper.run(dir, sh("printf 'one\\ntwo\\n'"))
+    assert {:ok, "", 0} = Reaper.run(dir, sh("true"))
+  end
+end

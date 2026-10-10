@@ -76,6 +76,28 @@ defmodule Troupe.Gateway.ShellRunTest do
     assert ended.seq
   end
 
+  # The port lets go of a last line without a newline only after the exit status (#536).
+  test "a last line without a newline is streamed and kept", context do
+    session = start(context)
+    File.write!(Path.join(context.workspace, "notes.txt"), "one\ntwo")
+
+    runs = [{"printf x", "x", "x", "c-13"}, {"cat notes.txt", "one\ntwo", "two", "c-14"}]
+
+    for {command, output, last, id} <- runs do
+      {:ok, %{"run_id" => run_id}} =
+        Dispatch.call(
+          "shell.run",
+          %{"session_id" => session.id, "command" => command, "command_id" => id},
+          context(:admin)
+        )
+
+      await_output(session.id, run_id, last)
+      ended = await_shell(session.id, run_id)
+      assert ended.data["output"] == output
+      assert ended.data["exit_status"] == 0
+    end
+  end
+
   test "the output streams as shell_output before the command ends", context do
     session = start(context)
 
