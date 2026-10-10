@@ -376,9 +376,11 @@ function render(key: keyof AgentFields, fields: AgentFields): string[] {
       const value = fields[key].trim();
       return value === "" ? [] : [`${key}: ${/^[-+]?\d*\.?\d+$/.test(value) ? value : scalar(value)}`];
     }
+    // As typed, so a space typed at the end of a word is still there for the next one:
+    // `scalar` quotes a value that ends in one.
     default: {
-      const value = fields[key].trim();
-      return value === "" ? [] : [`${key}: ${scalar(value)}`];
+      const value = fields[key];
+      return value.trim() === "" ? [] : [`${key}: ${scalar(value)}`];
     }
   }
 }

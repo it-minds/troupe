@@ -159,6 +159,10 @@ describe("the agents manager", () => {
     const edit = await waitFor(() => button("Edit", document.querySelector('[aria-label="The agent runner"]') ?? document.createElement("div")), "Edit on runner");
     edit.click();
     const again = await waitFor(() => document.querySelector<HTMLElement>('[aria-label="Edit runner"]'), "the editor on runner");
+    // Typed a key at a time: the space after a word stays for the next one.
+    const description = labelled<HTMLInputElement>("Description", again);
+    type(description, "Runs ");
+    await waitFor(() => labelled<HTMLInputElement>("Description", again).value === "Runs ", "the space kept");
     type(labelled<HTMLInputElement>("Description", again), "Runs things.");
     button("Save to your agents", again)!.click();
     await waitFor(() => says("Replaced runner in your agents"), "saved without a question");

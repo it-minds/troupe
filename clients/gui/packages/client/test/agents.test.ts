@@ -65,6 +65,13 @@ You plan.
     assert.equal(withFields(PLAN, { mode: "primary" }), PLAN);
   });
 
+  it("keeps a value as it is typed, a space at its end included, so the next word can follow", () => {
+    const typing = withFields(PLAN, { description: "Plans " });
+    assert.match(typing, /^description: "Plans "$/m);
+    assert.equal(parseAgent(typing).fields?.description, "Plans ");
+    assert.match(withFields(typing, { description: "Plans things" }), /^description: Plans things$/m);
+  });
+
   it("replaces the instruction and keeps the frontmatter, and gives a file without one a frontmatter", () => {
     assert.equal(withBody(PLAN, "You plan carefully.\n"), PLAN.replace("You plan.\n", "You plan carefully.\n"));
     assert.equal(withFields("Just an instruction.\n", { mode: "primary" }), "---\nmode: primary\n---\nJust an instruction.\n");
