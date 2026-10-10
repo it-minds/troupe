@@ -17,6 +17,8 @@ paths:
   - apps/troupe_core/test/troupe/tools/onboard_write_test.exs
   - apps/troupe_gateway/test/troupe/gateway/onboard_test.exs
   - clients/tui/lib/troupe/client/daemon/start.ex
+  - clients/gui/packages/client/src/onboard.ts
+  - clients/gui/apps/desktop/src/views/Onboard.tsx
 symbols:
   - Troupe.Onboard.Notice.onboarding/2
   - Troupe.Onboard.Notice.brief/2
@@ -112,6 +114,22 @@ was `method_not_found`.
   is due; a client asks about onboarding and starts the librarian only once onboarding is
   answered, so it reads the onboarded `AGENTS.md`. The terminal UI's flow is TUI Decision
   154 (`clients/tui/lib/troupe/client/daemon/start.ex`); the desktop app's is its own.
+- **The desktop app's flow** (`@troupe/client`'s `StartQuestions`, `views/Onboard.tsx`;
+  #544, #550). The questions sit where the approval panel sits, not in a modal, the
+  default (Onboard, Re-run) first and filled, and nothing takes the focus from the
+  composer. Review is offered beside Re-run for an out-of-date onboarding too, since a
+  re-run can replace files and the diff costs nothing to show. A new `AGENTS.md` is asked
+  in its place in the plan under Review, or after the rest is written under Onboard, in
+  827's words with its diff. The client keeps the first plan's items for the follow-up
+  questions, because after the first write the plan answers nothing due. Every replay asks
+  for the plan again and the plan decides, so a session opened after it was answered asks
+  nothing; the harness's own line stays in the transcript for an older daemon, a replay or
+  a team session. A team session runs no flow and asks the local daemon nothing, and a
+  plan's refusal shows its sentence and asks nothing. The librarian starts only for a
+  session this app just started (the first run's session counts), after onboarding is
+  answered, on the same conditions as the terminal UI's (memory on, a git repository, a
+  model, `memory_auto_refresh` for the automatic start); the outdated brief's Re-run sits
+  behind the same conditions.
 - **Not here.** Onboarding by itself without asking; `onboard.apply` and
   `onboard.decline` refusing outside a repository (a client calls them only on a plan's
   items, and `troupe onboard` still runs anywhere it is asked to); the bench (slice 8).
