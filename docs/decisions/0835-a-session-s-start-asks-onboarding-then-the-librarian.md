@@ -23,7 +23,7 @@ symbols:
   - Troupe.Onboard.Notice.decline_onboarding/2
   - Troupe.Onboard.Notice.decline_brief/2
   - Troupe.Onboard.Start
-gist: "Start: onboarding (first/outdated) before the librarian; ids name what was shown; the notice repeats until answered; the librarian has no onboard_write"
+gist: "Start: onboarding (first/outdated, in a repo only) before the librarian; ids name what was shown; plan is admin; notice repeats; no onboard_write"
 ---
 
 Issue #516, the chunk's third wave, as the maintainer decided it: at a session's start,
@@ -40,7 +40,12 @@ was `method_not_found`.
   there (827's test, the plan it took to decide kept); `outdated` when the workspace's
   recorded onboarding version (`Troupe.Onboard.onboarded_version/2`) is older than
   `Troupe.Onboard.version/0`; `none` otherwise, on a pod or a worker's machine, and once
-  the person said no under this version. `Troupe.Onboard.Notice.brief/2`: `first` and
+  the person said no under this version. **Only in a git repository** (a `.git` here or
+  above, as `Troupe.Instructions.repository_root/1` finds it): a start in a directory in
+  none is `none` before any source is asked. In the home directory, Claude Code's own
+  `~/.claude/` looked like a workspace's `.claude/`, so a start there planned by walking
+  the whole home tree and proposed `~/AGENTS.md`, and with the notice said at every start
+  it would have done so every time. `Troupe.Onboard.Notice.brief/2`: `first` and
   `stale` as `refresh_due` has them (Decisions 649, 696, 713, the TUI's 127), `outdated`
   when an older survey wrote the brief (`Troupe.Memory.survey_version/0`) and the person
   has not said no to that, `none` otherwise or with memory off. The event and the protocol
@@ -87,10 +92,15 @@ was `method_not_found`.
   workspace as onboarded under this build's rules (`Troupe.Onboard.stamp/1`), as `troupe
   onboard` does after a run that left nothing unanswered (827). A yes to all that leaves a
   new `AGENTS.md` to its own question is not answered yet; the question's answer is.
-- **Scopes.** `onboard.plan`, `onboard.decline` and `memory.decline` take `control`; they
-  read, and write only the person's own answer. `onboard.apply` takes `admin`: it writes
-  into the repository and into the person's config directory, which is what `config.set`
-  and `memory.forget` take. The local clients hold all three.
+- **Scopes.** `onboard.plan` and `onboard.apply` take `admin`, what `config.set` and
+  `memory.forget` take: the plan answers with what other tools' files hold at the path it
+  is given, the person's own (`~/.claude/CLAUDE.md`, their config directory's) among them,
+  so a `control` token would read files under the person's home; a yes writes into the
+  repository and into the person's config directory. `onboard.decline` and
+  `memory.decline` take `control`: they write only the person's own answer. The local
+  clients hold all three: a Unix socket's connection, and a loopback TCP or WebSocket one
+  with the discovery file's token (the terminal UI's link and the desktop app's), are
+  given `observe`, `control` and `admin`.
 - **The librarian writes the brief only.** `priv/agents/librarian.md` loses 827's
   onboarding pass and `onboard_write` from its tools; it starts from `README.md`, reads
   what onboarding wrote (already in its prompt as `AGENTS.md` and `.troupe/rules/`), and
@@ -102,19 +112,21 @@ was `method_not_found`.
   is due; a client asks about onboarding and starts the librarian only once onboarding is
   answered, so it reads the onboarded `AGENTS.md`. The terminal UI's flow is TUI Decision
   154 (`clients/tui/lib/troupe/client/daemon/start.ex`); the desktop app's is its own.
-- **Not here.** Onboarding by itself without asking; a start outside a git repository
-  asking (the terminal UI asks only in one; the notice still runs there, as 827 has it);
-  the bench (slice 8).
+- **Not here.** Onboarding by itself without asking; `onboard.apply` and
+  `onboard.decline` refusing outside a repository (a client calls them only on a plan's
+  items, and `troupe onboard` still runs anywhere it is asked to); the bench (slice 8).
 - **Proof.** `Troupe.Gateway.OnboardTest` (the plan's `first`, items with ids, the same
   ids again, the brief `first`, nothing written; apply with `all` writing the rule and not
   the new `AGENTS.md`, then due `none`, then the `AGENTS.md` by its id and the version
   recorded; an unknown id refused; a changed source refused by id; decline with `all`
   remembered; `outdated` until declined and then recorded; `memory.decline`; a worker's
-  machine refusing; the scopes): all eight failed on the chunk's tip with
-  `method_not_found`. `Troupe.Onboard.NoticeTest` (`due`, `brief_due`, `counts` in the
-  event; the event again at the next start until declined, first and outdated and the
-  brief alike, where 827's test asserted the second start was quiet; nothing written in
-  the state directory; `onboarding/2` and `brief/2` with their declines),
+  machine refusing; the scopes, a `control` connection refused the plan): all eight failed
+  on the chunk's tip with `method_not_found`. `Troupe.Onboard.NoticeTest` (`due`,
+  `brief_due`, `counts` in the event; the event again at the next start until declined,
+  first and outdated and the brief alike, where 827's test asserted the second start was
+  quiet; nothing written in the state directory; `onboarding/2` and `brief/2` with their
+  declines; a directory in no repository with a `.claude/` in it due nothing, traced
+  handing no path under `.claude` to `:file`, and due once it is one),
   `Troupe.Onboard.LibrarianTest` (no `onboard_write`, no onboarding pass) and
   `Troupe.Tools.OnboardWriteTest` (the tool through a profile that names it; the
   librarian and `build` neither offered it nor let call it). The terminal UI's half is

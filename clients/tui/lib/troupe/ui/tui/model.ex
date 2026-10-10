@@ -1792,6 +1792,10 @@ defmodule Troupe.UI.TUI.Model do
   @spec local_question(window()) :: map() | nil
   def local_question(w), do: Enum.find(w.pending, &(&1.kind == :local))
 
+  @doc "What Enter answers a question the start asks: its default, in words (`yes`, `no`)."
+  @spec local_default(map()) :: String.t()
+  def local_default(item), do: @local_words[item.default]
+
   # A daemon from before the question carried its words sends the limit alone.
   defp budget_words(%{question: question}) when is_binary(question) and question != "", do: question
   defp budget_words(item), do: "#{Map.get(item, :detail, "a limit is reached")} — continue?"

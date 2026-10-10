@@ -99,6 +99,10 @@ defmodule Troupe.StartOnboardingTest do
     eventually(fn -> screen_text(pid, session) =~ "Onboard 2 files from Claude Code and Cursor" end)
     assert screen_text(pid, session) =~ "[Y/n/r]"
 
+    # The status line says what Enter does while it is asked, not where to go to answer.
+    assert screen_text(pid, session) =~ "Enter answers the start's question: yes (or y / n / r)"
+    refute screen_text(pid, session) =~ "(or Enter, or click the window) to answer"
+
     press(pid, "r")
     eventually(fn -> question(sid).data.question =~ "AGENTS.md is not there. Create it?" end)
 
@@ -107,6 +111,7 @@ defmodule Troupe.StartOnboardingTest do
     end)
 
     assert screen_text(pid, session) =~ "[y/N]"
+    assert screen_text(pid, session) =~ "Enter answers the start's question: no (or y / n)"
 
     # Enter is the question's default: no.
     press(pid, "enter")

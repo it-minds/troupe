@@ -8,7 +8,9 @@ defmodule Troupe.Onboard.Notice do
     nothing declined in it; `outdated` in one onboarded under older rules than this build's
     (`Troupe.Onboard.onboarded_version/2` below `Troupe.Onboard.version/0`); otherwise
     `none`. A person who said no to onboarding the workspace under this build's rules
-    (`decline_onboarding/2`) is not asked again until the rules change.
+    (`decline_onboarding/2`) is not asked again until the rules change. Only in a git
+    repository: a workspace in none (the home directory, say, whose `.claude/` is Claude
+    Code's own) is due nothing, and no source is asked about it (Decision 835).
   - **The brief is due** `first` when there is none and `stale` when it is stale, each as
     `Troupe.Session.Memory.refresh_due?/2` has it (Decisions 696 and 713, the TUI's 127);
     `outdated` when an older survey than this build's wrote it
@@ -36,7 +38,7 @@ defmodule Troupe.Onboard.Notice do
   reads nothing in the person's home or config directory.
   """
 
-  alias Troupe.{Config, Memory, Onboard, Paths, Workspace}
+  alias Troupe.{Config, Instructions, Memory, Onboard, Paths, Workspace}
   alias Troupe.Onboard.Pod
   alias Troupe.Session.Memory, as: Brief
 
@@ -81,6 +83,7 @@ defmodule Troupe.Onboard.Notice do
 
     cond do
       not Pod.allowed?(nil) -> none
+      not repository?(workspace) -> none
       said_no?("onboarding_declined", key(workspace), current, opts) -> none
       is_integer(recorded) and recorded < current -> %{none | due: "outdated"}
       is_integer(recorded) -> none
@@ -188,6 +191,13 @@ defmodule Troupe.Onboard.Notice do
   end
 
   ## Onboarding
+
+  # In a git repository: a `.git` (a worktree's file too) here or in a directory above, as
+  # the instruction files are read up to it. Onboarding brings a repository's files in; a
+  # start in a directory that is in none (the home directory, whose `.claude/` is Claude
+  # Code's own) is due nothing, and no source looks at it, let alone walks it.
+  defp repository?(workspace),
+    do: workspace |> Instructions.repository_root() |> Path.join(".git") |> File.exists?()
 
   defp found?(source, workspace) do
     if Code.ensure_loaded?(source) and function_exported?(source, :found?, 1),

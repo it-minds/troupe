@@ -86,11 +86,11 @@ defmodule Troupe.Gateway.Dispatch do
     # A no to rewriting a brief an older survey wrote (Decision 835): it writes only the
     # person's own answer, in the state directory.
     "memory.decline" => :control,
-    # What a session's start asks (Decision 835), the daemon's alone. The plan reads the
-    # person's own files beside the workspace's and a no writes only their answer; a yes
-    # writes into the repository and into the person's config directory, which is what
-    # `config.set` and `memory.forget` take.
-    "onboard.plan" => :control,
+    # What a session's start asks (Decision 835), the daemon's alone. The plan answers with
+    # the contents of other tools' files at the path it is given, the person's own among
+    # them, and a yes writes into the repository and into the person's config directory:
+    # both take what `config.set` and `memory.forget` take. A no writes only their answer.
+    "onboard.plan" => :admin,
     "onboard.decline" => :control,
     "onboard.apply" => :admin,
     "context.get" => :observe,

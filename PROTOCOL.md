@@ -1153,10 +1153,12 @@ checkout of the repository shares it. `control`.
 null, "version": 1}, "refusal": null}`
 
 What a session's start asks, in this order (Decision 835): onboarding other tools' files
-into Troupe's own, then the brief. The daemon's alone; `control`. **Onboarding** is `due`
-`first` when the workspace has other tools' files, nothing has been onboarded there and
-nothing declined; `outdated` when it was onboarded under an older version of the
-onboarding rules (`recorded`) than this build's (`version`); `none` otherwise, and once the
+into Troupe's own, then the brief. The daemon's alone; `admin`, since it answers with what
+other tools' files hold, the person's own among them. **Onboarding** is `due` `first` when
+the workspace is in a git repository, has other tools' files, nothing has been onboarded
+there and nothing declined; `outdated` when it was onboarded under an older version of the
+onboarding rules (`recorded`) than this build's (`version`); `none` otherwise: outside a
+git repository (the home directory, whose `.claude/` is Claude Code's own), and once the
 person has said no for this version. While it is due, `items` lists every file onboarding
 would write, the workspace's and the person's own (into their config directory), each as
 `troupe onboard` shows it: `target` (`workspace`, `repo` or `user`), `path` under it,
@@ -1793,8 +1795,8 @@ is asked again, under the same id, and an answer that arrived in the meantime â€
 | scope | grants |
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
-| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.decline`, `onboard.plan`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
+| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or

@@ -17,6 +17,17 @@ defmodule Troupe.Onboard.NoticeTest do
 
   @claude "# Rules\n\nRun the tests with `mix test` before you commit.\n"
 
+  # Onboarding is a repository's (Decision 835): every workspace here is one.
+  setup context do
+    git_init!(context.workspace)
+    :ok
+  end
+
+  defp git_init!(dir) do
+    {_, 0} = System.cmd("git", ["init", "-q", "--initial-branch", "main"], cd: dir)
+    dir
+  end
+
   test "a session in a workspace with other tools' files says what troupe onboard would propose, at every start until it is answered",
        context do
     write_file(context, "CLAUDE.md", @claude)
@@ -272,11 +283,39 @@ defmodule Troupe.Onboard.NoticeTest do
     # Another workspace, onboarded under older rules: outdated until its no is said.
     older = Path.join(context.base, "older")
     File.mkdir_p!(Path.join(older, ".troupe"))
+    git_init!(older)
     File.write!(Path.join(older, ".troupe/onboarded.json"), ~s({"version": 1, "onboarding": 1}\n))
 
     assert %{due: "outdated", recorded: 1} = Notice.onboarding(older, opts)
     :ok = Notice.decline_onboarding(older, opts)
     assert %{due: "none", recorded: 1} = Notice.onboarding(older, opts)
+  end
+
+  # A start in a directory no repository holds, the home directory with Claude Code's own
+  # `.claude/` in it say, is due nothing: no source looks at it, and nothing walks it.
+  test "outside a git repository nothing is due, and no source looks at a .claude/ there",
+       context do
+    home = Path.join(context.base, "home")
+    File.mkdir_p!(Path.join(home, ".claude/agents"))
+    File.write!(Path.join(home, ".claude/CLAUDE.md"), "Never push to main without asking.\n")
+
+    File.write!(
+      Path.join(home, ".claude/agents/reviewer.md"),
+      "---\nname: reviewer\ndescription: Reviews a change\n---\nReview.\n"
+    )
+
+    File.write!(Path.join(home, "CLAUDE.md"), @claude)
+    opts = [state_dir: context.state_dir]
+
+    {status, touched} = files_touched(fn -> Notice.onboarding(home, opts) end)
+    assert %{due: "none", plan: nil} = status
+    assert Enum.filter(touched, &String.contains?(&1, ".claude")) == []
+    refute Path.join(home, "CLAUDE.md") in touched
+    assert Notice.due(home, [memory: false] ++ opts) == nil
+
+    # The same files in a repository are due.
+    git_init!(home)
+    assert %{due: "first", plan: %{proposals: [_ | _]}} = Notice.onboarding(home, opts)
   end
 
   test "the brief is due first when there is none, outdated when an older survey wrote it, and not once declined",

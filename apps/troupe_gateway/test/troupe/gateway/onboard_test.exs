@@ -20,6 +20,8 @@ defmodule Troupe.Gateway.OnboardTest do
     state_dir = Path.join(base, "state")
     config_dir = Path.join(base, "config")
     Enum.each([workspace, state_dir, config_dir], &File.mkdir_p!/1)
+    # Onboarding is a repository's (Decision 835).
+    {_, 0} = System.cmd("git", ["init", "-q", "--initial-branch", "main"], cd: workspace)
 
     previous = Map.new(~w(TROUPE_STATE_HOME TROUPE_CONFIG_HOME), &{&1, System.get_env(&1)})
     System.put_env("TROUPE_STATE_HOME", state_dir)
@@ -219,11 +221,18 @@ defmodule Troupe.Gateway.OnboardTest do
     refute File.exists?(Path.join(ws, "AGENTS.md"))
   end
 
-  test "the scopes: a plan and a no take control, a write takes admin" do
+  # The plan answers with what other tools' files hold, the person's own among them, so it
+  # takes what a write takes; a no writes only the person's answer.
+  test "the scopes: a plan and a write take admin, a no takes control", %{workspace: ws} do
     methods = Dispatch.methods()
-    assert methods["onboard.plan"] == :control
-    assert methods["onboard.decline"] == :control
+    assert methods["onboard.plan"] == :admin
     assert methods["onboard.apply"] == :admin
+    assert methods["onboard.decline"] == :control
     assert methods["memory.decline"] == :control
+
+    control = %Dispatch.Context{principal: %{}, scopes: [:observe, :control], connection: self()}
+
+    assert {:error, %Error{message: "forbidden", data: %{required_scope: "admin"}}} =
+             Dispatch.call("onboard.plan", %{"workspace" => ws}, control)
   end
 end

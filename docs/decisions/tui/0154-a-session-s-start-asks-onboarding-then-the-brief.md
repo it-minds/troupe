@@ -11,6 +11,7 @@ paths:
   - clients/tui/lib/troupe/remote/worker.ex
   - clients/tui/lib/troupe/ui/tui/model.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
+  - clients/tui/lib/troupe/ui/tui/view.ex
   - clients/tui/lib/troupe/cli/onboard.ex
   - clients/tui/test/troupe/start_onboarding_test.exs
 symbols:
@@ -59,7 +60,9 @@ brief started the librarian at once and asked nothing.
 - **One key, from where the person is.** While nothing is typed, the question's keys
   answer it, and Enter is its default (the capital in `[Y/n/r]`), from the command line
   (where a new session opens) as from its window; with anything typed, keys are text, as
-  always. `Troupe.Client.answer_local/3` takes the answer and does what follows before it
+  always. While one is asked the status line says what Enter does ("Enter answers the
+  start's question: yes (or y / n / r)") rather than "press 1 (or Enter, …) to answer",
+  which would send the person to a window Enter no longer opens. `Troupe.Client.answer_local/3` takes the answer and does what follows before it
   returns: the write, the no, the next question, the librarian. Each question's data
   carries what the next step needs (the plan's items with their ids, the brief's due), so
   the client keeps no state but the journal. A pod's session asks nothing
