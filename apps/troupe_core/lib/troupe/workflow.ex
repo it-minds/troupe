@@ -37,9 +37,16 @@ defmodule Troupe.Workflow do
   With no file (or `name: "default"`), `default_steps/0` is used — a generic engineering
   pipeline that suits any repository. A workflow whose JSON is invalid falls back to the
   default rather than failing the run.
+
+  A workspace's workflows are held to it by where each file really is (Decision 829): a
+  file that is a link out of the workspace, or a `.troupe/workflows` that is one, is not
+  offered nor read, as if it were not there, and `skipped/1` says so.
   """
 
-  alias Troupe.Paths
+  alias Troupe.Agent.Definitions
+  alias Troupe.Workspace
+
+  require Logger
 
   @type step :: %{
           name: String.t(),
@@ -112,9 +119,29 @@ defmodule Troupe.Workflow do
   def load(_workspace, "default"), do: default_steps()
 
   def load(workspace, name) when is_binary(name) do
-    case read_steps(workflow_path(workspace, name)) do
-      {:ok, steps} -> steps
+    path = workflow_path(workspace, name)
+
+    with true <- held?(path, workspace),
+         {:ok, steps} <- read_steps(path) do
+      steps
+    else
       _ -> default_steps()
+    end
+  end
+
+  # One that is there and really outside the workspace is said in the log as it is passed
+  # over; one that is not there is the default, as it always was.
+  defp held?(path, workspace) do
+    cond do
+      not File.exists?(path) ->
+        false
+
+      Workspace.within?(path, workspace) ->
+        true
+
+      true ->
+        Logger.warning("troupe: not reading workflow #{path}: #{Definitions.outside_workspace()}")
+        false
     end
   end
 
@@ -128,16 +155,46 @@ defmodule Troupe.Workflow do
   @spec available(Path.t()) :: [String.t()]
   def available(workspace) do
     on_disk =
-      workspace
-      |> Paths.glob_escape()
-      |> Path.join(".troupe/workflows/*.json")
-      |> Path.wildcard()
-      |> Enum.map(&Path.basename(&1, ".json"))
-      |> Enum.reject(&(&1 == "default"))
-      |> Enum.sort()
+      case files(workspace) do
+        :outside -> []
+        {inside, _outside} -> Enum.map(inside, &Path.basename(&1, ".json"))
+      end
 
-    ["default" | on_disk]
+    ["default" | on_disk |> Enum.reject(&(&1 == "default")) |> Enum.sort()]
   end
+
+  @doc """
+  The workspace's workflow files that are not read because they are really outside it,
+  links followed, each with why, shaped as `Troupe.Agent.Definitions.skipped/1` gives an
+  agent: a `.troupe/workflows` that is a link out is one entry with no name.
+  """
+  @spec skipped(Path.t()) :: [Definitions.skipped()]
+  def skipped(workspace) do
+    dir = workflows_dir(workspace)
+
+    case files(workspace) do
+      :outside ->
+        [skip(nil, dir)]
+
+      {_inside, outside} ->
+        Enum.map(outside, &skip(Path.basename(&1, ".json"), Path.join(dir, &1)))
+    end
+  end
+
+  # The `.json` files held to the workspace, a dotfile left out as a glob's `*` leaves it.
+  defp files(workspace) do
+    case Workspace.files_within(workflows_dir(workspace), ".json", workspace) do
+      :outside -> :outside
+      {inside, outside} -> {Enum.reject(inside, &dotfile?/1), Enum.reject(outside, &dotfile?/1)}
+    end
+  end
+
+  defp dotfile?(file), do: String.starts_with?(file, ".")
+
+  defp skip(name, path),
+    do: %{kind: :workflow, name: name, path: path, reason: Definitions.outside_workspace()}
+
+  defp workflows_dir(workspace), do: Path.join([workspace, ".troupe", "workflows"])
 
   defp read_steps(path) do
     with {:ok, content} <- File.read(path),

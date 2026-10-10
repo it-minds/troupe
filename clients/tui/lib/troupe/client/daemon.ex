@@ -407,18 +407,21 @@ defmodule Troupe.Client.Daemon do
 
   # The person's own servers and skills (troupe-remote Decision 700), as the `/mcp`
   # page lists them: every server the layers give this session's workspace, with its
-  # live state where the session runs it, and every skill with its layer.
+  # live state where the session runs it, every skill with its layer, and every skill
+  # the layers hold and do not offer, with why (root Decision 822).
   @impl true
   def sources(sid) do
     workspace = workspace(sid)
 
     with {:ok, %{"servers" => servers} = listed} <-
            Link.call("mcp.list", %{workspace: workspace, session_id: sid}),
-         {:ok, %{"skills" => skills}} <- Link.call("skills.list", %{workspace: workspace}) do
+         {:ok, %{"skills" => skills} = offered} <-
+           Link.call("skills.list", %{workspace: workspace}) do
       {:ok,
        %{
          servers: Enum.map(servers, &server_entry/1),
          skills: Enum.map(skills, &skill_entry/1),
+         skipped: offered["skipped"] |> List.wrap() |> Enum.map(&skipped_entry/1),
          warnings: List.wrap(listed["warnings"])
        }}
     else
@@ -494,14 +497,35 @@ defmodule Troupe.Client.Daemon do
       description: skill["description"] || "",
       layer: layer(skill["layer"]),
       source: skill["source"],
+      dir: skill["dir"],
       linked?: skill["linked"] == true
     }
   end
 
+  # A skill a nearer layer's name hid, or one outside its edge and never read; an
+  # `.agents/skills` linked out whole has no name.
+  defp skipped_entry(skill) do
+    %{
+      name: skill["name"],
+      layer: layer(skill["layer"]),
+      source: skill["source"],
+      dir: skill["dir"],
+      linked?: skill["linked"] == true,
+      status: if(skill["status"] == "outside", do: :outside, else: :skipped),
+      reason: skill["reason"] || ""
+    }
+  end
+
+  # The layers `mcp.list` and `skills.list` name, `.agents/skills` among them (root
+  # Decision 822); one this client does not know is shown as the daemon names it.
   defp layer("user"), do: :user
   defp layer("workspace"), do: :workspace
   defp layer("config"), do: :config
-  defp layer(_other), do: :session
+  defp layer("agents"), do: :agents
+  defp layer("user_agents"), do: :user_agents
+  defp layer("session"), do: :session
+  defp layer(other) when is_binary(other) and other != "", do: other
+  defp layer(_none), do: :session
 
   # `/memory` shows the brief, `/memory refresh` has the librarian rewrite it as a branch
   # of this session, `/memory forget` deletes it.

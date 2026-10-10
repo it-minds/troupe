@@ -229,8 +229,9 @@ defmodule Troupe.Bench.Runner do
 
   @doc """
   The environment a run under `dir` has: its own config and state directories, and
-  opencode's files too, which a config reads for providers when it has no key of its
-  own, naming files that are not there. The live runner's runs have the same.
+  opencode's files too, which only the copy into `config.yaml` and the first run's offer
+  of it read (Decision 828), naming files that are not there. The live runner's runs have
+  the same.
   """
   @spec isolation(Path.t()) :: %{String.t() => String.t()}
   def isolation(dir) do

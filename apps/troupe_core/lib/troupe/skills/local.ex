@@ -30,6 +30,16 @@ defmodule Troupe.Skills.Local do
   root, or `~/.agents` for the person's), through a link, is listed as `outside` and not
   read, as instruction files are (Decision 798).
 
+  The workspace's layer has edges too (Decision 829). Its `.troupe/skills`, and each
+  skill in it, is held to the workspace as its other `.troupe/` files are, trusted or not:
+  reaching out is what `include` is for. What its `skills.json` includes from outside the
+  repository is read, and is a read root, only once the workspace is trusted (`trusted:
+  true`, which the session says as it starts); until then it is listed as `outside`, saying
+  so, and not looked into, and a root inside the repository is held to the repository. The
+  person's own layer and its links have no edge: the person put them there.
+
+  A `SKILL.md` that can't be read is listed as `unreadable`, with why, rather than dropped.
+
   Unlike a bundle's skills, which a profile lists by name because an admin published
   them for particular agents, a person's own skills are offered to every agent of the
   session: the person put them there, for their own work, and a skill nobody can call
@@ -38,7 +48,8 @@ defmodule Troupe.Skills.Local do
   roots of the session (`Troupe.Session.build_opts/1`).
   """
 
-  alias Troupe.Config.{JSONC, Migrate}
+  alias Troupe.Agent.Definitions
+  alias Troupe.Config.{JSONC, Migrate, Trust}
   alias Troupe.Instructions
   alias Troupe.Protocol.{AgentDefinition, Bundle}
   alias Troupe.Workspace
@@ -63,8 +74,10 @@ defmodule Troupe.Skills.Local do
   @typedoc """
   A skill the layers hold and do not offer, and why, in `reason`: `skipped` when a name
   higher on the ladder hid it, or when its directory's name is not one a skill may have;
-  `outside` when it is really outside its edge and was not read. An `.agents/skills`
-  that is itself a link out is one entry, with no `name`, and is not looked into.
+  `outside` when it is really outside its edge, or is a workspace's link out of the
+  repository that waits for trust, and was not read; `unreadable` when its `SKILL.md`
+  can't be read. A directory of skills that is itself outside is one entry, with no
+  `name`, and is not looked into.
   """
   @type left_out :: %{
           name: String.t() | nil,
@@ -72,7 +85,7 @@ defmodule Troupe.Skills.Local do
           dir: Path.t(),
           source: Path.t(),
           linked?: boolean(),
-          status: :skipped | :outside,
+          status: :skipped | :outside | :unreadable,
           reason: String.t()
         }
 
@@ -142,7 +155,9 @@ defmodule Troupe.Skills.Local do
   What `list/2` offers, and every skill the layers hold and do not offer, with why
   (Decision 822): each one a name higher on the ladder hid, saying which is used, and
   each one outside its edge, never read. The ladder is enforced here and nowhere else;
-  `skipped` is in ladder order, lowest first.
+  `skipped` is in ladder order, lowest first. `trusted: true` says the workspace is
+  trusted, so what its `skills.json` links from outside the repository is read
+  (Decision 829); anything else is not.
   """
   @spec resolve(Path.t() | nil, keyword()) :: %{skills: [skill()], skipped: [left_out()]}
   def resolve(workspace, opts \\ []) do
@@ -163,7 +178,7 @@ defmodule Troupe.Skills.Local do
   defp ladder(workspace, opts) do
     agents =
       Enum.flat_map(agents_dirs(workspace, opts), fn {layer, dir, edge, outside} ->
-        agents_skills(layer, dir, edge, outside)
+        skills_in(layer, dir, edge, outside, false)
       end)
 
     layers = [:user] ++ if(workspace, do: [:workspace], else: [])
@@ -171,7 +186,7 @@ defmodule Troupe.Skills.Local do
     agents ++
       Enum.flat_map(layers, fn layer ->
         {:ok, paths} = layer_paths(layer, workspace, opts)
-        layer_skills(layer, paths)
+        layer_skills(layer, paths, workspace, opts)
       end)
   end
 
@@ -187,7 +202,8 @@ defmodule Troupe.Skills.Local do
 
   @doc """
   The directories a session must be able to read for its local skills' files: the
-  user's layer, the `.agents/skills` inside their edges, and every linked root. The
+  user's layer, the `.agents/skills` inside their edges, and every linked root, the
+  workspace's from outside the repository only with `trusted: true` (Decision 829). The
   workspace's own layer is inside the workspace already. Only what exists, since a read
   root that is not there resolves nothing.
   """
@@ -197,8 +213,12 @@ defmodule Troupe.Skills.Local do
 
     workspace_links =
       case workspace && layer_paths(:workspace, workspace, opts) do
-        {:ok, paths} -> links(paths.links)
-        _ -> []
+        {:ok, paths} ->
+          edge = link_edge(workspace, opts)
+          Enum.filter(links(paths.links), &(is_nil(edge) or under?(key(&1), key(edge))))
+
+        _ ->
+          []
       end
 
     agents =
@@ -211,22 +231,33 @@ defmodule Troupe.Skills.Local do
     |> Enum.uniq()
   end
 
-  # Linked roots first, then the layer's own directory, so the latter's names win.
-  defp layer_skills(layer, paths) do
-    linked =
-      paths.links
-      |> links()
-      |> Enum.flat_map(fn root ->
-        Enum.map(skills_at(root), &Map.merge(&1, %{source: root, linked?: true}))
-      end)
+  # Linked roots first, then the layer's own directory, so the latter's names win. The
+  # person's own have no edge. The workspace's `.troupe/skills` is held to the workspace,
+  # trusted or not, and its links to the repository until it is trusted (Decision 829).
+  defp layer_skills(:user, paths, _workspace, _opts) do
+    linked = Enum.flat_map(links(paths.links), &skills_in(:user, &1, nil, nil, true))
+    linked ++ skills_in(:user, paths.dir, nil, nil, false)
+  end
 
-    own =
-      Enum.map(
-        Bundle.list_skills_in(paths.dir),
-        &Map.merge(&1, %{source: paths.dir, linked?: false})
-      )
+  defp layer_skills(:workspace, paths, workspace, opts) do
+    edge = link_edge(workspace, opts)
+    waiting = edge && untrusted(workspace)
+    linked = Enum.flat_map(links(paths.links), &skills_in(:workspace, &1, edge, waiting, true))
+    own = skills_in(:workspace, paths.dir, workspace, Definitions.outside_workspace(), false)
+    linked ++ own
+  end
 
-    Enum.map(linked ++ own, &Map.put(&1, :layer, layer))
+  # What a workspace's links are held to: the repository until the workspace is trusted,
+  # and nothing once it is, as the person's own are.
+  defp link_edge(workspace, opts) do
+    if Keyword.get(opts, :trusted) == true,
+      do: nil,
+      else: workspace |> Path.expand() |> Instructions.repository_root()
+  end
+
+  defp untrusted(workspace) do
+    "not read: outside the repository, until this workspace is trusted " <>
+      "(#{Trust.command(Path.expand(workspace))})"
   end
 
   # -- .agents/skills ----------------------------------------------------------------
@@ -273,35 +304,61 @@ defmodule Troupe.Skills.Local do
     end
   end
 
-  # One `.agents/skills`: not there, wholly outside its edge (listed once, not looked
-  # into, so not even the names of what is there are said), or each skill in it, in name
-  # order. A skill is judged where its `SKILL.md` really is, so a skill directory or a
-  # manifest linked out is `outside` and its frontmatter is never read.
-  defp agents_skills(layer, dir, edge, outside) do
-    if File.dir?(dir), do: agents_skills_in(layer, dir, key(edge), outside), else: []
+  # -- one directory of skills -------------------------------------------------------
+
+  @doc """
+  The skills in one directory of them, held to `edge` by where each really is
+  (Decision 829), and those left out, each with why (`reason`, as `resolve/2` gives
+  one): how `Troupe.Skills` reads a worktree's main checkout's `.troupe/skills`, held to
+  the checkout.
+  """
+  @spec held(Path.t(), Path.t(), String.t()) :: {[skill()], [left_out()]}
+  def held(dir, edge, outside) do
+    :workspace
+    |> skills_in(dir, edge, outside, false)
+    |> Enum.split_with(&(not Map.has_key?(&1, :status)))
   end
 
-  defp agents_skills_in(layer, dir, bound, outside) do
-    if under?(key(dir), bound) do
-      dir
+  # One directory of skills, held to `edge` when it has one: not there; wholly outside its
+  # edge (listed once, not looked into, so not even the names of what is there are said);
+  # or each skill in it, in name order. A skill is judged where its `SKILL.md` really is,
+  # so a skill directory or a manifest linked out is `outside` and its frontmatter is never
+  # read. A linked root may be one skill's own directory, which is that skill alone.
+  defp skills_in(layer, root, edge, outside, linked?) do
+    if File.dir?(root),
+      do: held_skills(layer, root, edge && key(edge), outside, linked?),
+      else: []
+  end
+
+  defp held_skills(layer, root, bound, outside, linked?) do
+    where = %{layer: layer, source: root, linked?: linked?}
+
+    if bound && not under?(key(root), bound) do
+      [Map.merge(where, %{name: nil, dir: root, status: :outside, reason: outside})]
+    else
+      root |> manifests(linked?) |> Enum.flat_map(&skill(&1, where, bound, outside))
+    end
+  end
+
+  defp manifests(root, linked?) do
+    if linked? and File.regular?(Path.join(root, "SKILL.md")) do
+      [Path.join(root, "SKILL.md")]
+    else
+      root
       |> Troupe.Paths.glob_escape()
       |> Path.join("*/SKILL.md")
       |> Path.wildcard()
       |> Enum.sort()
-      |> Enum.flat_map(&agents_skill(&1, layer, dir, bound, outside))
-    else
-      entry = %{name: nil, layer: layer, dir: dir, source: dir, linked?: false}
-      [Map.merge(entry, %{status: :outside, reason: outside})]
     end
   end
 
-  defp agents_skill(manifest, layer, source, bound, outside) do
+  defp skill(manifest, where, bound, outside) do
     dir = Path.dirname(manifest)
     name = Path.basename(dir)
-    entry = %{name: name, layer: layer, dir: dir, source: source, linked?: false}
+    entry = Map.merge(where, %{name: name, dir: dir})
 
     cond do
-      not under?(key(manifest), bound) ->
+      bound && not under?(key(manifest), bound) ->
         [Map.merge(entry, %{status: :outside, reason: outside})]
 
       not AgentDefinition.valid_name?(name) ->
@@ -309,8 +366,12 @@ defmodule Troupe.Skills.Local do
 
       true ->
         case File.read(manifest) do
-          {:ok, text} -> [Map.put(entry, :description, description(text))]
-          {:error, _reason} -> []
+          {:ok, text} ->
+            [Map.put(entry, :description, description(text))]
+
+          {:error, reason} ->
+            why = "not read: its SKILL.md can't be read: #{:file.format_error(reason)}"
+            [Map.merge(entry, %{status: :unreadable, reason: why})]
         end
     end
   end

@@ -345,14 +345,18 @@ defmodule Troupe.Gateway.LocalSources do
 
   # `config.yaml`'s `mcp:` is the lowest layer; a file `Troupe.Config` refuses leaves
   # it out and says so beside the other warnings, since a panel is not the place a
-  # config error stops everything.
+  # config error stops everything. The workspace's layer reads from outside the
+  # repository only once the user's file trusts the workspace, as a session here would
+  # read it (Decision 830).
   defp resolve(workspace) do
+    trusted? = is_binary(workspace) and Troupe.Config.trusted?(workspace)
+
     case Troupe.Config.resolve(workspace) do
       {:ok, config, _layers} ->
-        Local.resolve(workspace, base: config.mcp)
+        Local.resolve(workspace, base: config.mcp, trusted: trusted?)
 
       {:error, error} ->
-        {servers, warnings} = Local.resolve(workspace)
+        {servers, warnings} = Local.resolve(workspace, trusted: trusted?)
         {servers, [Exception.message(error) | warnings]}
     end
   end
@@ -375,6 +379,7 @@ defmodule Troupe.Gateway.LocalSources do
       "disabled" => server.disabled?,
       "refused" => config[:refused],
       "trust" => trust_of(server, workspace),
+      "notes" => notes_of(server, workspace),
       "oauth" => oauth_json(config),
       "auth" => auth_json(server)
     }
@@ -404,6 +409,17 @@ defmodule Troupe.Gateway.LocalSources do
 
   defp trust_of(_server, _workspace), do: nil
 
+  # What of a server waits for the workspace to be trusted, in `agents.list`'s shape
+  # (Decision 825): a workspace's `permission: auto`, which a session holds until then
+  # (Decision 830), whatever its start's answer was.
+  defp notes_of(server, workspace) when is_binary(workspace) do
+    if Local.waits_for_trust?(server) and not Troupe.Config.trusted?(workspace),
+      do: [%{"key" => "permission", "reason" => Local.held_reason([server.name], workspace)}],
+      else: []
+  end
+
+  defp notes_of(_server, _workspace), do: []
+
   defp entry_json(entry), do: entry |> names_of("env") |> names_of("headers")
 
   # A server's environment and headers by name, never their values (Decision 820).
@@ -417,10 +433,13 @@ defmodule Troupe.Gateway.LocalSources do
   # -- skills --------------------------------------------------------------------
 
   # What is offered, and beside it every skill the layers hold and do not offer, with why
-  # (Decision 822): one a nearer layer's name hid, or one outside its edge, never read.
+  # (Decision 822): one a nearer layer's name hid, or one outside its edge, never read. A
+  # session here trusts the workspace as the user's file says, so what its `skills.json`
+  # links from outside the repository is listed as a session would read it (Decision 829).
   defp list_skills(params) do
     with {:ok, workspace} <- workspace_of(params) do
-      %{skills: skills, skipped: skipped} = Skills.Local.resolve(workspace)
+      trusted? = workspace != nil and Troupe.Config.trusted?(workspace)
+      %{skills: skills, skipped: skipped} = Skills.Local.resolve(workspace, trusted: trusted?)
 
       {:ok,
        %{

@@ -30,7 +30,7 @@ defmodule Troupe.Config.Layers do
 
   alias Troupe.Config.{Issue, Migrate, Schema, Trust}
 
-  @type layer :: :default | :user | :project | :local | :env | :cli | :opencode
+  @type layer :: :default | :user | :project | :local | :env | :cli
 
   @typedoc "One value one layer gave one key: the ladder `--explain` shows."
   @type entry :: %{

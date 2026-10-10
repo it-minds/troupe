@@ -24,11 +24,11 @@ that says how it works. Troupe's own words are in the [glossary](glossary.md).
 
 If you use one of the agent CLIs today, most of what makes it useful is here too: an agent
 that reads, edits and runs commands in your checkout, and asks before it changes anything.
-Troupe reads what you have already written for those tools: `AGENTS.md`, or `CLAUDE.md`,
-`GEMINI.md` and `.github/copilot-instructions.md` under their names; Cursor's
-`.cursor/rules`, each when its front matter says it applies; your MCP servers from
-an `.mcp.json`; your skills; an opencode setup's providers
-([configuration.md](user/configuration.md#your-own-mcp-servers-and-skills)). Any provider
+Troupe reads `AGENTS.md` and `.agents/` as they are, and brings in once, into its own
+files, what you have written for those tools: `CLAUDE.md`, `GEMINI.md`, Copilot's and
+Cursor's rules, your agents and commands (`troupe onboard`); your MCP servers from an
+`.mcp.json`; your skills; an opencode setup's providers
+([configuration.md](user/configuration.md#onboarding-another-tools-files)). Any provider
 with an Anthropic or an OpenAI API will do, behind a gateway or not.
 
 What differs is where the work lives and what is kept of it:

@@ -2,9 +2,9 @@ defmodule Troupe.ContextCommandTest do
   @moduledoc """
   `/context` (Decision 124): the provenance of the session's prompt, read through the
   daemon's `context.get`, on the notice line — every instruction file with its scope and
-  share of the budget, the aliases it hid, and the brief; and every file left out, or
-  import not followed, with why (Decision 148); and each Cursor rule with why it applies
-  or not (root Decision 809).
+  share of the budget, and the brief; and every file left out, another tool's among them,
+  or import not followed, with why (Decision 148, root Decision 828); and each rule in
+  `.troupe/rules` with why it applies or not (root Decisions 809 and 828).
   """
 
   use ExUnit.Case, async: false
@@ -15,11 +15,11 @@ defmodule Troupe.ContextCommandTest do
   alias Troupe.Client
   alias Troupe.Client.Instructions
 
-  test "/context lists the files the prompt is read from, and what each hid" do
+  test "/context lists the files the prompt is read from, and the ones it does not read" do
     ws =
       tmp_workspace(%{
         "AGENTS.md" => "Use tabs.\n",
-        "CLAUDE.md" => "an alias nobody reads\n",
+        "CLAUDE.md" => "another tool's file, nobody reads it\n",
         "sub/GEMINI.md" => "deeper\n"
       })
 
@@ -28,8 +28,8 @@ defmodule Troupe.ContextCommandTest do
     assert {:ok, line} = Client.instructions(sid)
     assert line =~ "context: 9 of 16,000 chars"
 
-    assert line =~
-             "AGENTS.md (root) 9 · CLAUDE.md (root) skipped: AGENTS.md is used in this directory"
+    # Root Decision 828: another tool's file is not read, and says how to bring it in.
+    assert line =~ "AGENTS.md (root) 9 · CLAUDE.md (root) not read: run troupe onboard"
 
     assert line =~ ".troupe/memory.md (brief) absent"
     refute line =~ "GEMINI"
@@ -184,24 +184,26 @@ defmodule Troupe.ContextCommandTest do
 
   test "/context says why an instruction file outside the repository was not read" do
     outside = tmp_workspace(%{"key.md" => "a stand-in for a private key\n"})
-    ws = tmp_workspace(%{"CLAUDE.md" => "an alias the link hid\n"})
+    ws = tmp_workspace(%{"CLAUDE.md" => "another tool's file, never read\n"})
     File.ln_s!(Path.join(outside, "key.md"), Path.join(ws, "AGENTS.md"))
 
     {sid, _, _} = start_session!(workspace: ws, script: [])
 
     assert {:ok, line} = Client.instructions(sid)
     assert line =~ "AGENTS.md (root) not read: outside the repository"
-    assert line =~ "CLAUDE.md (root) skipped: AGENTS.md comes first in this directory"
+    assert line =~ "CLAUDE.md (root) not read: run troupe onboard"
     refute line =~ "AGENTS.md (root) 0"
   end
 
-  # Root Decision 809: a Cursor rule says why it is in the prompt, or why it is not.
-  test "/context says why each Cursor rule applies, or why not" do
+  # Root Decisions 809 and 828: a rule in `.troupe/rules` says why it is in the prompt, or
+  # why it is not; a Cursor rule is not read, and says so.
+  test "/context says why each rule applies, or why not" do
     ws =
       tmp_workspace(%{
-        ".cursor/rules/always.mdc" => "---\nalwaysApply: true\n---\nUse tabs.\n",
-        ".cursor/rules/db.mdc" => "---\ndescription: Migrations\n---\nUp and down.\n",
-        ".cursor/rules/ts.mdc" => "---\nglobs: src/**/*.ts\n---\nStrict.\n"
+        ".troupe/rules/always.md" => "---\nalwaysApply: true\n---\nUse tabs.\n",
+        ".troupe/rules/db.md" => "---\ndescription: Migrations\n---\nUp and down.\n",
+        ".troupe/rules/ts.md" => "---\nglobs: src/**/*.ts\n---\nStrict.\n",
+        ".cursor/rules/old.mdc" => "---\nalwaysApply: true\n---\nOld.\n"
       })
 
     {sid, _, _} = start_session!(workspace: ws, script: [])
@@ -209,11 +211,11 @@ defmodule Troupe.ContextCommandTest do
     assert {:ok, line} = Client.instructions(sid)
 
     assert line =~
-             ".cursor/rules/always.mdc (root) 9, always applied · " <>
-               ".cursor/rules/db.mdc (root) requested by description only: listed in the " <>
+             ".troupe/rules/always.md (root) 9, always applied · " <>
+               ".troupe/rules/db.md (root) requested by description only: listed in the " <>
                "prompt, not joined · " <>
-               ".cursor/rules/ts.mdc (root) applies when a file matching src/**/*.ts is read " <>
-               "or edited"
+               ".troupe/rules/ts.md (root) applies when a file matching src/**/*.ts is read " <>
+               "or edited · .cursor/rules/old.mdc (root) not read: run troupe onboard"
 
     answer = %{
       "budget" => 16_000,
@@ -222,7 +224,7 @@ defmodule Troupe.ContextCommandTest do
       "files" => [
         %{
           "scope" => "root",
-          "path" => "/home/me/repo/.cursor/rules/ts.mdc",
+          "path" => "/home/me/repo/.troupe/rules/ts.md",
           "chars" => 7,
           "status" => "whole",
           "trimmed" => 0,
@@ -235,7 +237,7 @@ defmodule Troupe.ContextCommandTest do
     }
 
     assert Instructions.line(answer, "/home/me/repo") ==
-             "context: 7 of 16,000 chars · .cursor/rules/ts.mdc (root) 7, " <>
+             "context: 7 of 16,000 chars · .troupe/rules/ts.md (root) 7, " <>
                "applied: src/a.ts matches src/**/*.ts"
   end
 end

@@ -14,10 +14,15 @@
 // the daemon runs the sign-in and listens for the browser on this computer, this panel
 // opens the URL it answers and reads how the sign-in stands every two seconds while a
 // browser is out. No token ever reaches this screen.
+//
+// Skills also come from an `.agents/skills` (troupe Decision 822), the repository's or
+// your `~/.agents/skills`, read where they are and never written: Remove on one says whose
+// it is instead of asking the daemon. A skill the layers hold and do not offer, because a
+// nearer layer has its name or it is outside its edge, is listed with why.
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
-import type { DaemonClient, LocalServer, LocalSkill, ScopedParams, ServerAuth, SourceScope } from "@troupe/client";
+import type { DaemonClient, LocalServer, LocalSkill, ScopedParams, ServerAuth, SkippedSkill, SourceScope } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import { shell } from "../shell";
 import { Failed, Loading, Pill, Table } from "./bits";
@@ -66,6 +71,21 @@ async function openExternal(url: string): Promise<void> {
   else globalThis.open?.(url, "_blank", "noopener,noreferrer");
 }
 
+/** The layer a skill is removed from, or null for one Troupe reads in place and never writes. */
+function ownLayer(skill: LocalSkill | SkippedSkill): SourceScope | null {
+  return skill.layer === "user" || skill.layer === "workspace" ? skill.layer : null;
+}
+
+/** Why a skill in an `.agents/skills` is not removed here, and where it is removed instead. */
+function notOurs(skill: LocalSkill | SkippedSkill): string {
+  if (!skill.name) return `${skill.dir} is not read, so there is nothing of it to remove.`;
+  if (skill.layer === "agents")
+    return `${skill.name} is the repository's, in ${skill.dir}: Troupe reads .agents/skills where it is and never writes there, so remove it from the repository, or give .troupe/skills a skill of that name to use instead.`;
+  if (skill.layer === "user_agents")
+    return `${skill.name} is in your ${skill.dir}, which other tools read too: Troupe reads ~/.agents/skills where it is and never writes there, so remove it there.`;
+  return `${skill.name} comes from the ${skill.layer} layer, which Troupe does not write.`;
+}
+
 function runs(server: LocalServer): string {
   if (server.url) return server.url;
   if (server.command) return [server.command, ...(server.args ?? [])].join(" ");
@@ -87,7 +107,7 @@ export function Servers({ client }: { client: DaemonClient }): JSX.Element {
   const ws = workspace.trim();
   const load = useCallback(async () => {
     const [servers, skills] = await Promise.all([client.listServers(ws ? { workspace: ws } : {}), client.listSkills(ws || undefined)]);
-    return { servers: servers.servers, warnings: servers.warnings, skills: skills.skills };
+    return { servers: servers.servers, warnings: servers.warnings, skills: skills.skills, skipped: skills.skipped ?? [] };
   }, [client, ws]);
   const { data, loading, error: readError } = useAdminQuery(load, [load, round]);
 
@@ -164,9 +184,10 @@ export function Servers({ client }: { client: DaemonClient }): JSX.Element {
       return `Removed ${r.removed.join(", ")} from ${r.path}.`;
     });
 
-  const removeSkill = (skill: LocalSkill): Promise<void> =>
-    act(`remove-skill:${skill.name}`, async () => {
-      const layer: SourceScope = skill.layer === "workspace" ? "workspace" : "user";
+  const removeSkill = (skill: LocalSkill | SkippedSkill): Promise<void> =>
+    act(`remove-skill:${skill.layer}:${skill.name}`, async () => {
+      const layer = ownLayer(skill);
+      if (!layer || !skill.name) throw new Error(notOurs(skill));
       const r = await client.removeSkill({ scope: layer, ...(layer === "workspace" && ws ? { workspace: ws } : {}), name: skill.name });
       return `Removed ${r.removed.join(", ")} from ${r.path}.`;
     });
@@ -311,6 +332,29 @@ export function Servers({ client }: { client: DaemonClient }): JSX.Element {
                 <button className="danger" onClick={() => void removeSkill(skill)} disabled={busy !== null}>
                   Remove
                 </button>
+              </td>
+            </tr>
+          ))}
+        </Table>
+      )}
+
+      {data && data.skipped.length > 0 && (
+        <Table head={["Not offered", "Layer", "Why", "Source", ""]}>
+          {data.skipped.map((skill) => (
+            <tr key={`${skill.layer}:${skill.dir}`}>
+              <th scope="row">{skill.name ?? "(the whole directory)"}</th>
+              <td>{skill.layer}</td>
+              <td>{skill.reason}</td>
+              <td className="mono micro">
+                {skill.dir}
+                {skill.linked ? " (linked)" : ""}
+              </td>
+              <td>
+                {ownLayer(skill) && skill.name && (
+                  <button className="danger" onClick={() => void removeSkill(skill)} disabled={busy !== null}>
+                    Remove
+                  </button>
+                )}
               </td>
             </tr>
           ))}

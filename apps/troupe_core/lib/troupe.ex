@@ -15,11 +15,15 @@ defmodule Troupe do
 
   alias Troupe.Agent.Definitions
   alias Troupe.Agent.Server, as: Agent
-  alias Troupe.{Events, Mounts, Registry, Session, Sessions, Skills}
+  alias Troupe.Commands.Local, as: CommandFiles
+  alias Troupe.{Events, Mounts, Registry, Session, Sessions, Skills, Workflow}
   alias Troupe.LLM.Catalog.Refresher
+  alias Troupe.Onboard.Notice
   alias Troupe.Protocol.Origin
   alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
   alias Troupe.Sessions.{Fork, Index, Unseen}
+
+  require Logger
 
   @type session :: %{id: String.t(), pid: pid(), workspace: Troupe.Workspace.t()}
 
@@ -79,6 +83,7 @@ defmodule Troupe do
       end
 
       skipped(session_id, session_opts, previously)
+      onboarding(session_id, session_opts)
 
       # The model catalog is refreshed in the background when it is stale (Decision 778):
       # this session started with the cache as it was and never waits. Not on a pod,
@@ -187,18 +192,24 @@ defmodule Troupe do
 
   # The agent and skill files this start found and did not read, each with why (Decision
   # 826): on a pod, a working copy's file of a name the bundle has; in a worktree, one the
-  # main checkout has not committed. Read again at every start, as the definitions are,
+  # main checkout has not committed. With them, the workspace's agents, skills, commands
+  # and workflows that are really outside it, a skill whose `SKILL.md` can't be read, and
+  # what its `skills.json` links from outside the repository while it is not trusted
+  # (Decision 829). Read again at every start, as the definitions are,
   # and written when the list differs from the one the log last recorded, so a session
   # that keeps the same file through many activations says so once, and one whose file
   # went away says that too.
   defp skipped(session_id, session_opts, previously) do
     workspace = Keyword.fetch!(session_opts, :workspace)
+    bundle = Keyword.get(session_opts, :bundle)
 
     files =
       session_opts
       |> Keyword.fetch!(:definitions)
       |> Definitions.skipped()
-      |> Kernel.++(Skills.skipped(Keyword.get(session_opts, :bundle), workspace.root_real))
+      |> Kernel.++(Skills.skipped(bundle, workspace.root_real, trusted: workspace.trusted?))
+      |> Kernel.++(CommandFiles.skipped(workspace.root_real))
+      |> Kernel.++(Workflow.skipped(workspace.root_real))
       |> Enum.map(&Definitions.skipped_to_json/1)
 
     last =
@@ -208,6 +219,31 @@ defmodule Troupe do
 
     if files != last,
       do: Log.append(session_id, Session.root_path(), :files_skipped, %{"files" => files})
+  end
+
+  # What `troupe onboard`, or the librarian, would do in this workspace, said once
+  # (Decision 827): on the person's own machine, by a session with no bundle, and nothing
+  # written but the note in the state directory that it was said. A failure here is the
+  # notice's, never the session's.
+  defp onboarding(session_id, session_opts) do
+    config = Keyword.fetch!(session_opts, :config)
+
+    if Keyword.get(session_opts, :kind, :local) == :local and
+         Keyword.get(session_opts, :bundle) == nil do
+      workspace = Keyword.fetch!(session_opts, :workspace)
+
+      case Notice.due(workspace.root_real,
+             state_dir: config.state_dir,
+             memory: config.memory != false
+           ) do
+        nil -> :ok
+        data -> Log.append(session_id, Session.root_path(), :onboarding_suggested, data)
+      end
+    end
+  rescue
+    error ->
+      Logger.warning("onboarding: no notice for this session: #{Exception.message(error)}")
+      :ok
   end
 
   defp shared_mounts?(nil), do: false

@@ -406,19 +406,23 @@ defmodule Troupe.Commands do
             "deletes it.",
         example: "/memory refresh"
       ),
-      entry("context", "workspace", "Every instruction file and Cursor rule, why each is in or left out, and its share of the budget",
+      entry(
+        "context",
+        "workspace",
+        "Every instruction file and rule, why each is in or left out, and its share of the budget",
         usage: "/context",
         detail:
           "The files the next turn's system prompt is read from: your own AGENTS.md, the " <>
             "repository's, one in each directory down to the workspace and to the files " <>
             "the conversation worked on, the files they import with @path, the " <>
-            "repository's Cursor rules (always, or once a matching file is read or " <>
-            "edited), and the project brief, each with its scope, size and share of the " <>
+            "repository's rules in .troupe/rules (always, or once a matching file is read " <>
+            "or edited), and the project brief, each with its scope, size and share of the " <>
             "budget; and every " <>
-            "file left out, with why: an alias (CLAUDE.md, GEMINI.md, " <>
-            "copilot-instructions.md) another name hid, a Copilot file below the root, a " <>
-            "file outside the repository, an import not followed, a rule whose files " <>
-            "haven't been touched or that only describes itself."
+            "file left out, with why: another tool's file (CLAUDE.md, GEMINI.md, " <>
+            "copilot-instructions.md, Cursor's rules), which troupe onboard brings in, a " <>
+            "Copilot file below the root, a file outside the repository or one that can't " <>
+            "be read, an import not followed, a rule whose files haven't been touched or " <>
+            "that only describes itself."
       ),
       entry("watch", "workspace", "Toggle watch mode: act on AI! and AI? comments",
         usage: "/watch",

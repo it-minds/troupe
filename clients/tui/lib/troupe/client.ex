@@ -60,9 +60,15 @@ defmodule Troupe.Client do
   @typedoc """
   The person's own MCP servers and skills as the `/mcp` page lists them (troupe-remote
   Decision 700): every server the layers give the session's workspace, with its live
-  state when the session runs it, and every skill with its layer.
+  state when the session runs it, every skill with its layer, and the skills the layers
+  hold and do not offer, each with why (root Decision 822).
   """
-  @type sources :: %{servers: [map()], skills: [map()], warnings: [String.t()]}
+  @type sources :: %{
+          servers: [map()],
+          skills: [map()],
+          skipped: [map()],
+          warnings: [String.t()]
+        }
 
   @typedoc "What a session allows right now, and why not when it does not."
   @type capability :: %{

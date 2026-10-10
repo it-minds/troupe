@@ -174,7 +174,9 @@ defmodule Troupe.Tools.RememberTest do
     assert :ok = Memory.checked(context.workspace)
 
     assert %{built_at: %DateTime{}} = brief = Memory.brief(context.workspace)
-    assert Troupe.Memory.render(%{brief | built_at: nil, head: nil, files: nil}) == text
+
+    assert Troupe.Memory.render(%{brief | built_at: nil, head: nil, files: nil, survey: nil}) ==
+             text
   end
 
   test "a worktree's brief is the repository's", context do
@@ -190,9 +192,82 @@ defmodule Troupe.Tools.RememberTest do
     {_, 0} = System.cmd("git", ["worktree", "add", "-q", "-b", "troupe/x", worktree], cd: repo)
 
     assert Memory.path(worktree) == Path.join(repo, ".troupe/memory.md")
+
+    for dir <- [Path.join(repo, "lib"), Path.join(worktree, "lib")] do
+      File.mkdir_p!(dir)
+      assert Memory.path(dir) == Path.join(repo, ".troupe/memory.md")
+    end
+
     assert :ok = Memory.note(worktree, "root", "written from the worktree")
     assert File.read!(Path.join(repo, ".troupe/memory.md")) =~ "written from the worktree"
     refute File.exists?(Path.join(worktree, ".troupe/memory.md"))
+  end
+
+  # #524: git takes a workspace's own `.git` at its word, so one whose git directory has a
+  # `commondir` naming another checkout's `.git` is, to git, a worktree of that checkout.
+  # The brief follows only a checkout that names the worktree back.
+  test "a .git that only claims another checkout keeps the brief in the workspace", context do
+    other = Path.join(context.base, "other")
+    File.mkdir_p!(other)
+    git_commit!(other)
+    wt = Path.join(context.base, "wt")
+    {_, 0} = System.cmd("git", ["worktree", "add", "-q", "-b", "wt", wt], cd: other)
+    theirs = "## Overview\nthe other workspace's brief\n"
+    File.mkdir_p!(Path.join(other, ".troupe"))
+    File.write!(Path.join(other, ".troupe/memory.md"), theirs)
+
+    forged = [
+      # a `.git` file naming a git directory of its own, whose `commondir` is the other's
+      fn ws ->
+        gitdir = Path.join(ws, "forged")
+        File.mkdir_p!(gitdir)
+        File.write!(Path.join(gitdir, "HEAD"), "ref: refs/heads/main\n")
+        File.write!(Path.join(gitdir, "commondir"), Path.join(other, ".git") <> "\n")
+        File.write!(Path.join(ws, ".git"), "gitdir: #{gitdir}\n")
+      end,
+      # a `.git` directory with a `commondir` in it
+      fn ws ->
+        File.mkdir_p!(Path.join(ws, ".git"))
+        File.write!(Path.join(ws, ".git/HEAD"), "ref: refs/heads/main\n")
+        File.write!(Path.join(ws, ".git/commondir"), Path.join(other, ".git") <> "\n")
+      end,
+      # a `.git` file naming the other checkout's real worktree, which names its own back
+      fn ws ->
+        File.write!(Path.join(ws, ".git"), "gitdir: #{Path.join(other, ".git/worktrees/wt")}\n")
+      end,
+      # the first, where the other checkout reads a worktree's own config: git's top level
+      # is then whatever that config says, here the other checkout
+      fn ws ->
+        {_, 0} = System.cmd("git", ["config", "extensions.worktreeConfig", "true"], cd: other)
+        gitdir = Path.join(ws, "forged")
+        File.mkdir_p!(gitdir)
+        File.write!(Path.join(gitdir, "HEAD"), "ref: refs/heads/main\n")
+        File.write!(Path.join(gitdir, "commondir"), Path.join(other, ".git") <> "\n")
+        File.write!(Path.join(gitdir, "config.worktree"), "[core]\n\tworktree = #{other}\n")
+        File.write!(Path.join(ws, ".git"), "gitdir: #{gitdir}\n")
+      end
+    ]
+
+    for {forge, n} <- Enum.with_index(forged) do
+      ws = Path.join(context.base, "forged-#{n}")
+      File.mkdir_p!(ws)
+      forge.(ws)
+
+      # git itself is taken in.
+      {common, 0} =
+        System.cmd("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], cd: ws)
+
+      assert String.trim(common) == Path.join(other, ".git")
+
+      assert Memory.path(ws) == Path.join(ws, ".troupe/memory.md")
+      assert Memory.brief(ws) == nil
+      assert Memory.prompt_section(ws, nil) == ""
+      assert :ok = Memory.note(ws, "root", "written from forged-#{n}")
+      assert File.read!(Path.join(ws, ".troupe/memory.md")) =~ "written from forged-#{n}"
+      assert :ok = Memory.forget(ws)
+      refute File.exists?(Path.join(ws, ".troupe/memory.md"))
+      assert File.read!(Path.join(other, ".troupe/memory.md")) == theirs
+    end
   end
 
   # Decision 798: a brief that is really somewhere else on the machine, through a link to
@@ -258,6 +333,14 @@ defmodule Troupe.Tools.RememberTest do
   defp git_init!(dir) do
     {_, 0} = System.cmd("git", ["init", "-q", "--initial-branch", "main"], cd: dir)
     File.write!(Path.join(dir, "README.md"), "# r\n")
+  end
+
+  defp git_commit!(dir) do
+    git_init!(dir)
+    {_, 0} = System.cmd("git", ["config", "user.email", "t@example.com"], cd: dir)
+    {_, 0} = System.cmd("git", ["config", "user.name", "t"], cd: dir)
+    {_, 0} = System.cmd("git", ["add", "."], cd: dir)
+    {_, 0} = System.cmd("git", ["commit", "-q", "-m", "first"], cd: dir)
   end
 
   defp ctx(session, context) do

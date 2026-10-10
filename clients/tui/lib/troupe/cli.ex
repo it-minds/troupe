@@ -182,11 +182,14 @@ defmodule Troupe.CLI do
      [["doctor", "--bench"], ["doctor", "--bench", "--json"]]},
     {"troupe instructions check [--workspace DIR] [--json]",
      "check the instruction files a session here reads: contradictions, missing paths and programs, repeats; " <>
-       "and onboarded files whose source has changed; exits 1 on one",
+       "and onboarded files whose source has changed, or a workspace onboarded under older " <>
+       "rules; exits 1 on one",
      [["instructions", "check"], ["instructions", "check", "--workspace", ".", "--json"]]},
     {"troupe onboard [--workspace DIR] [--yes] [--json] [--all]",
-     "bring other tools' agents and commands into .troupe/ and your config, each shown as a " <>
-       "diff and written only if you say yes; --all asks again about what you left out",
+     "bring other tools' instruction files, rules, agents and commands into AGENTS.md, " <>
+       ".troupe/ and your config, each shown as a diff and written only if you say yes; a new " <>
+       "AGENTS.md is its own question, never answered by --yes; --all asks again about what " <>
+       "you left out",
      [["onboard"], ["onboard", "--workspace", ".", "--yes"], ["onboard", "--json", "--all"]]},
     {"troupe bench [--json [FILE]] [--md FILE]",
      "measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one",

@@ -1,10 +1,10 @@
 defmodule Troupe.Instructions.CheckTest do
   @moduledoc """
-  `troupe instructions check`'s findings (issue #123, Decision 810), on fixtures: a
-  contradiction between scopes, a path that is not there, a command whose program is not
+  `troupe instructions check`'s findings (issue #123, Decisions 810 and 828), on fixtures:
+  a contradiction between scopes, a path that is not there, a command whose program is not
   on the PATH, a rule said twice, a repository with none of them, and the cases each
-  detector passes over rather than guess. The PATH is a stand-in throughout, so what is
-  installed here changes nothing.
+  detector passes over rather than guess; Troupe's rules checked and other tools' files
+  not. The PATH is a stand-in throughout, so what is installed here changes nothing.
   """
 
   use ExUnit.Case, async: true
@@ -138,6 +138,32 @@ defmodule Troupe.Instructions.CheckTest do
              ] = for(f <- findings(repo), do: {Path.relative_to(f.path, repo), f.line, f.message})
     end
 
+    # D99: a nested `.agents/AGENTS.md`, or a rule in a nested `.troupe/rules`, is about its
+    # directory, as its scope is, so a path it names is looked for from there too.
+    test "a path in web/.agents/AGENTS.md or web/.troupe/rules is resolved from web/", %{
+      repo: repo
+    } do
+      write!(repo, "docs/guide.md", "")
+      write!(repo, "web/AGENTS.md", "Web.\n")
+
+      write!(
+        repo,
+        "web/.agents/AGENTS.md",
+        "Read [the guide](../docs/guide.md), not [this](../docs/gone.md).\n"
+      )
+
+      write!(
+        repo,
+        "web/.troupe/rules/style.md",
+        "---\nalwaysApply: true\n---\nSee [the guide](../docs/guide.md) and [that](../docs/old.md).\n"
+      )
+
+      assert [
+               {"web/.agents/AGENTS.md", 1, "`../docs/gone.md` does not exist"},
+               {"web/.troupe/rules/style.md", 4, "`../docs/old.md` does not exist"}
+             ] = for(f <- findings(repo), do: {Path.relative_to(f.path, repo), f.line, f.message})
+    end
+
     test "what only might be a path is passed over", %{repo: repo} do
       write!(repo, "docs/here.md", "")
       write!(repo, "lib/troupe/client/link.ex", "")
@@ -242,7 +268,9 @@ defmodule Troupe.Instructions.CheckTest do
              ] = for(f <- findings(repo), do: {f.line, f.message})
     end
 
-    test "an alias the loader skipped is not read, so it repeats nothing", %{repo: repo} do
+    test "another tool's file the loader skipped is not read, so it repeats nothing", %{
+      repo: repo
+    } do
       rules = "Never push straight to the main branch, ever.\n"
       write!(repo, "AGENTS.md", rules)
       write!(repo, "CLAUDE.md", rules)
@@ -252,6 +280,23 @@ defmodule Troupe.Instructions.CheckTest do
   end
 
   describe "the files and the exit status" do
+    # Decisions 810 and 828: the files the loader reads, `.troupe/rules` among them, and not
+    # the other tools' files it lists as skipped.
+    test "Troupe's rules are checked, and other tools' files, not read, are not", %{repo: repo} do
+      gone = "Read [the notes](docs/gone.md) first.\n"
+      write!(repo, "AGENTS.md", "Run `npm test`.\n")
+      write!(repo, ".troupe/rules/web.md", "---\nglobs: web/**\n---\n" <> gone)
+      write!(repo, "CLAUDE.md", "Run `yarn test`.\n" <> gone)
+      write!(repo, "web/CLAUDE.md", "Run `pnpm test`.\n")
+      write!(repo, ".cursor/rules/old.mdc", "---\nalwaysApply: true\n---\n" <> gone)
+      write!(repo, ".cursorrules", gone)
+      write!(repo, "web/index.ts", "")
+
+      assert Check.run(repo, @everywhere) ==
+               {".troupe/rules/web.md:4: path: `docs/gone.md` does not exist\n\n" <>
+                  "1 finding in 2 instruction files.\n", 1}
+    end
+
     test "a clean repository passes, and says which files it read", %{repo: repo} do
       write!(repo, "docs/guide.md", "")
       write!(repo, "AGENTS.md", "Read [the guide](docs/guide.md), and run `npm test`.\n")

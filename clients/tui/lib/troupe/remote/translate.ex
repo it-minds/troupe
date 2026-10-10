@@ -389,6 +389,18 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:remote_note, %{text: to_string(data["reason"] || "the command was not sent")})],
          memory}
 
+      # What `troupe onboard`, or the librarian, would do in this workspace, said once at a
+      # start (troupe Decision 827): the harness's own sentence, as a line.
+      "onboarding_suggested" ->
+        {[emit.(:remote_note, %{text: to_string(data["message"] || "run troupe onboard here")})],
+         memory}
+
+      # The agent and skill files a start found and did not read (root Decision 826): on a
+      # pod, a working copy's that the bundle's or a built-in's name beats; in a worktree,
+      # one the main checkout has not committed.
+      "files_skipped" ->
+        {[emit.(:remote_note, %{text: files_skipped(data["files"])})], memory}
+
       "approval_resolved" ->
         {[], memory}
 
@@ -864,6 +876,45 @@ defmodule Troupe.Remote.Translate do
 
   defp because(%{"reason" => reason}) when is_binary(reason), do: ": #{reason}"
   defp because(_data), do: ""
+
+  # How many of each kind, then each reason once with the files it covers: a worktree's
+  # one reason fits every file, while a pod's names the file it is about. An empty list
+  # says the files listed before are read now, or gone.
+  defp files_skipped(files) do
+    case Enum.filter(List.wrap(files), &is_map/1) do
+      [] ->
+        "no agent or skill file is skipped now"
+
+      files ->
+        by_reason = Enum.group_by(files, &skipped_reason/1, &skipped_file/1)
+
+        reasons =
+          files
+          |> Enum.map(&skipped_reason/1)
+          |> Enum.uniq()
+          |> Enum.map(&(Enum.join(by_reason[&1], ", ") <> ": " <> &1))
+
+        Enum.join([counted(files) <> " not read here:" | reasons], "\n")
+    end
+  end
+
+  defp skipped_reason(file), do: to_string(file["reason"] || "not read")
+  defp skipped_kind(file), do: to_string(file["kind"] || "file")
+  defp skipped_file(file), do: "#{skipped_kind(file)} #{file["name"]} (#{file["path"]})"
+
+  # `2 agents and 1 skill`, the kinds in the order the list first names them.
+  defp counted(files) do
+    kinds = Enum.map(files, &skipped_kind/1)
+    many = Enum.frequencies(kinds)
+
+    case Enum.map(Enum.uniq(kinds), &count_of(&1, many[&1])) do
+      [one] -> one
+      some -> Enum.join(Enum.drop(some, -1), ", ") <> " and " <> List.last(some)
+    end
+  end
+
+  defp count_of(kind, 1), do: "1 #{kind}"
+  defp count_of(kind, n), do: "#{n} #{kind}s"
 
   # How a person's command ended, and where it ran: a session on a plane says which
   # profile's pod, and is otherwise drawn as a local one is.

@@ -137,6 +137,54 @@ defmodule Troupe.Tools.OnboardWriteTest do
     assert [%Event{data: %{"target" => "repo"}}] = events_of_type(sid, :onboarded)
   end
 
+  test "an AGENTS.md is asked about whatever auto_approve says, and written with its record in .troupe/onboarded.json",
+       context do
+    write_file(context, "CLAUDE.md", "Be brief.\n")
+
+    {_name, agents} =
+      call(%{
+        "target" => "workspace",
+        "path" => "AGENTS.md",
+        "source" => "CLAUDE.md",
+        "content" => "Be brief.\n"
+      })
+
+    assert OnboardWrite.must_ask?(agents)
+
+    # The suite starts every session with auto_approve on.
+    %{session: %{id: sid}} =
+      start_session(context,
+        agent: "librarian",
+        steps: [
+          {:tools, [{"onboard_write", agents}]},
+          {:text_and_tools, "Done.", [{"finish", %{"summary" => "onboarded"}}]}
+        ]
+      )
+
+    :ok = Troupe.subscribe(sid)
+    Troupe.send_input(sid, "Onboard CLAUDE.md.")
+
+    request = await_event(sid, :approval_requested)
+    assert request.data["args"]["target"] == "workspace"
+    refute File.exists?(Path.join(context.workspace, "AGENTS.md"))
+
+    # Generous: under a full suite's load the turn after the approval has taken longer than 5 s.
+    Troupe.approve(sid, request.data["call_id"], :allow)
+    assert_receive {:troupe_event, ^sid, %Event{type: "agent_done", agent: ["root"]}}, 15_000
+
+    assert read_file(context, "AGENTS.md") == "Be brief.\n"
+
+    assert %{"workspace" => %{"AGENTS.md" => %{"imported_from" => "CLAUDE.md"}}} =
+             Jason.decode!(read_file(context, ".troupe/onboarded.json"))
+
+    assert [
+             %Event{
+               data: %{"target" => "workspace", "file" => "AGENTS.md", "action" => "created"}
+             }
+           ] =
+             events_of_type(sid, :onboarded)
+  end
+
   test "a denied call leaves nothing behind", context do
     write_file(context, ".claude/agents/reviewer.md", "Review.\n")
 
@@ -190,7 +238,13 @@ defmodule Troupe.Tools.OnboardWriteTest do
           {%{"source" => ".claude/agents/none.md"}, "`.claude/agents/none.md` is not there"},
           {%{"target" => "user", "source" => ".claude/agents/reviewer.md"},
            "does not start with ~/"},
-          {%{"target" => "elsewhere"}, "target must be \"repo\" or \"user\""}
+          {%{"target" => "elsewhere"}, "target must be \"repo\", \"workspace\" or \"user\""},
+          {%{"target" => "workspace", "path" => ".git/AGENTS.md"},
+           "`.git/AGENTS.md` is not a file onboarding writes into the workspace"},
+          {%{"target" => "workspace", "path" => "CLAUDE.md"},
+           "`CLAUDE.md` is not a file onboarding writes into the workspace"},
+          {%{"target" => "workspace", "path" => "nowhere/AGENTS.md"},
+           "`nowhere/AGENTS.md`: there is no such directory in the workspace"}
         ] do
       {_name, args} = call(args)
       assert {:error, reason} = OnboardWrite.run(args, ctx)
