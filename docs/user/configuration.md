@@ -219,7 +219,9 @@ app's "Servers and skills" panel show every server and skill with the layer and 
 came from, import a file (`/mcp import <path>`, `/skills import <path>`, or `link` to
 read it in place), remove one, and try a server before it is kept. `skills.list`, which
 they ask, also lists every skill that is not offered and why: `skipped`, naming the one
-of that name that is used, or `outside`.
+of that name that is used, or `outside`; both show those too. A skill from an
+`.agents/skills` is shown with its layer, `agents` or `user_agents`, and is removed where
+it is, not from Troupe: removing one there says so.
 
 A workspace's servers are commands a cloned repository would run, so a session starts
 them only after asking you — once per workspace when you answer `allow`, which is kept

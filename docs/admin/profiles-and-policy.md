@@ -175,7 +175,8 @@ last one recorded:
 
 A working copy's agent of a built-in's name is listed the same way, with the reason
 `build is an agent Troupe ships, and on a pod Troupe's own beats a repository's unless the
-profile allows the repository's`.
+profile allows the repository's`. The terminal and the desktop app show the event in the
+session's transcript as a note: how many of each kind, each file, and why.
 
 A profile that wants the repository's files to win, over the bundle's and the built-ins
 alike, sets the switch:
