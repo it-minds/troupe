@@ -123,6 +123,18 @@ export const COMMANDS: CommandEntry[] = [
     example: null,
   },
   {
+    name: "agents",
+    aliases: [],
+    section: "agents",
+    summary: "List the agents this session can start a branch on",
+    usage: "/agents",
+    args: [],
+    availability: "always",
+    source: "builtin",
+    detail: "The primary agents: the built-ins, this machine's agents/ and the project's .troupe/agents/. Each is a command of its own, below.",
+    example: null,
+  },
+  {
     name: "build",
     aliases: [],
     section: "agents",
