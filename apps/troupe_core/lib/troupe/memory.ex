@@ -42,8 +42,9 @@ defmodule Troupe.Memory do
   # The version of the librarian's survey: what it reads and what the brief leaves to other
   # files. Recorded as `survey` when a brief is built, and raised whenever the survey would
   # write a different brief for the same repository, so a session can say that a brief was
-  # written under an older one (Decision 827). Nothing rebuilds a brief for it.
-  @survey 1
+  # written under an older one (Decision 827). Nothing rebuilds a brief for it. 2: the
+  # librarian writes anchored facts, not sections (Decision 839).
+  @survey 2
 
   @kinds ~w(command convention overview layout note negative)
   @core ~w(command convention)

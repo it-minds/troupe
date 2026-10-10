@@ -1013,7 +1013,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `resume_on_restart` | boolean | `false` | any |  | A session that comes back after a restart carries on by itself. |
 | `loop_max_iterations` | integer ≥ 1 | `10` | any |  | Turns `/loop` runs when not told. |
 | `loop_max_failures` | integer ≥ 1 | `3` | any |  | Failed turns in a row that stop a loop. |
-| `memory` | boolean | `true` | any | project brief | Agents read the project brief, `.troupe/memory.md`, into every prompt and write it with `remember`. `/memory` shows it. |
+| `memory` | boolean | `true` | any | project brief | The project brief: facts about the repository, kept in `.troupe/memory/facts.jsonl` and written with `remember`. Its commands and conventions are in every prompt, the rest comes through `recall`. `/memory` lists them. |
 | `memory_auto_refresh` | boolean | `true` | any | refresh the brief | A new session in a git repository refreshes a missing or stale brief, but not within `memory_max_age_days` of a refresh that built nothing; never a headless run. |
 | `memory_max_chars` | integer ≥ 1 | `6000` | any |  | How much of the brief goes into a prompt. |
 | `memory_max_age_days` | integer ≥ 1 | `7` | any |  | How old the brief may be before it counts as stale. |

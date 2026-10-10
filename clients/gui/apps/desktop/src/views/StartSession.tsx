@@ -31,8 +31,12 @@ export function StartSession({
   daemon: DaemonClient | null;
   linked: boolean;
   onClose: () => void;
-  /** With where it was made, which the list may not know yet when the session opens. */
-  onCreated: (id: string, kind: SessionKind) => void;
+  /**
+   * With where it was made, which the list may not know yet when the session opens, and
+   * for one on this computer the workspace the daemon started it in: its start goes on to
+   * the brief's librarian there.
+   */
+  onCreated: (id: string, kind: SessionKind, workspace?: string) => void;
 }): JSX.Element {
   const [where, setWhere] = useState<"team" | "local">(auth ? "team" : "local");
 
@@ -230,7 +234,7 @@ function LocalSession({
   daemon: DaemonClient;
   linked: boolean;
   onClose: () => void;
-  onCreated: (id: string, kind: SessionKind) => void;
+  onCreated: (id: string, kind: SessionKind, workspace?: string) => void;
 }): JSX.Element {
   const [workspace, setWorkspace] = useState("");
   const [recent, setRecent] = useState<Array<{ path: string; sessions: number }>>([]);
@@ -266,7 +270,7 @@ function LocalSession({
         config: { watch },
         ...(privately ? { private: true } : {}),
       });
-      onCreated(created.session_id, privately ? "private" : "local");
+      onCreated(created.session_id, privately ? "private" : "local", created.workspace);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

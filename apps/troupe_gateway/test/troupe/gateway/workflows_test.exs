@@ -105,7 +105,7 @@ defmodule Troupe.Gateway.WorkflowsTest do
     assert {:ok, %{"profile" => "workflow"}} =
              Client.call(client, "session.get", %{"session_id" => sid})
 
-    assert_receive {:troupe_event, ^sid, %Event{type: "agent_done", agent: ["root"]}}, 20_000
+    assert_root_done(sid, context.state_dir)
 
     events = Log.read_session(sid, context.state_dir)
 
@@ -137,7 +137,7 @@ defmodule Troupe.Gateway.WorkflowsTest do
 
     on_exit(fn -> Troupe.stop_session(sid) end)
     :ok = Troupe.subscribe(sid)
-    assert_receive {:troupe_event, ^sid, %Event{type: "agent_done", agent: ["root"]}}, 20_000
+    assert_root_done(sid, context.state_dir)
 
     assert %Event{data: %{"text" => plan}} =
              sid
@@ -149,6 +149,33 @@ defmodule Troupe.Gateway.WorkflowsTest do
   end
 
   # -- helpers ----------------------------------------------------------------
+
+  # `session.create` starts the turn, so the subscription comes after it: a root whose fake
+  # answers at once can write `agent_done` before the test subscribes. The event or the log,
+  # whichever shows it first.
+  defp assert_root_done(sid, state_dir, ms \\ 20_000) do
+    deadline = System.monotonic_time(:millisecond) + ms
+    await_root_done(sid, state_dir, deadline)
+  end
+
+  defp await_root_done(sid, state_dir, deadline) do
+    receive do
+      {:troupe_event, ^sid, %Event{type: "agent_done", agent: ["root"]}} -> :ok
+    after
+      100 ->
+        cond do
+          root_done_logged?(sid, state_dir) -> :ok
+          System.monotonic_time(:millisecond) > deadline -> flunk("no agent_done for root")
+          true -> await_root_done(sid, state_dir, deadline)
+        end
+    end
+  end
+
+  defp root_done_logged?(sid, state_dir) do
+    sid
+    |> Log.read_session(state_dir)
+    |> Enum.any?(&(&1.type == "agent_done" and &1.agent == ["root"]))
+  end
 
   defp connect(context) do
     {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: context.endpoint, spawn: false)

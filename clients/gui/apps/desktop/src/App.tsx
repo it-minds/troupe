@@ -45,7 +45,7 @@ type Where =
   | { screen: "agents"; workspace?: string; agent?: string }
   | { screen: "appearance" }
   | { screen: "setup" }
-  | { screen: "session"; id: string; kind?: SessionKind };
+  | { screen: "session"; id: string; kind?: SessionKind; workspace?: string };
 
 /** How often an app working offline asks whether the plane is back. */
 const OFFLINE_RETRY_MS = 15_000;
@@ -197,7 +197,13 @@ export function App(): JSX.Element {
         setSignInNow(true);
       }
     } else {
-      setWhere(outcome.sessionId ? { screen: "session", id: outcome.sessionId } : { screen: "sessions" });
+      // The first session is a start like one from the start screen: onboarding, then the
+      // librarian on a missing brief.
+      setWhere(
+        outcome.sessionId
+          ? { screen: "session", id: outcome.sessionId, kind: "local", ...(outcome.workspace ? { workspace: outcome.workspace } : {}) }
+          : { screen: "sessions" },
+      );
     }
   };
 
@@ -357,9 +363,9 @@ export function App(): JSX.Element {
             daemon={daemon.client}
             linked={Boolean(daemon.identity?.linked)}
             onClose={() => setWhere({ screen: "sessions" })}
-            onCreated={(id, kind) => {
+            onCreated={(id, kind, workspace) => {
               refresh();
-              setWhere({ screen: "session", id, kind });
+              setWhere({ screen: "session", id, kind, ...(workspace ? { workspace } : {}) });
             }}
           />
         )}
@@ -413,6 +419,7 @@ export function App(): JSX.Element {
             row={row}
             sessionId={where.id}
             created={where.kind}
+            startedIn={where.workspace}
             onBack={() => setWhere({ screen: "sessions" })}
             onGo={(screen) => setWhere({ screen })}
             onAgents={(agent) => setWhere({ screen: "agents", ...workspaceOf(row), ...(agent ? { agent } : {}) })}

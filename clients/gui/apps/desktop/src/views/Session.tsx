@@ -10,7 +10,7 @@
 // the stream, because the stream's order is the server's and a reconnect must not
 // reshuffle what somebody has already read.
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import { isBlobRef, isBusy, needsYou, openApprovals, openQuestions, rootState, settleLoop, unseenSummary } from "@troupe/client";
 import type {
@@ -35,9 +35,20 @@ import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
+import { MemoryPane } from "./Memory";
+import type { MemoryAsk } from "./Memory";
 import { OfferLine, OfferPanel } from "./Offer";
 import { StartLine, StartPanel } from "./Onboard";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
+
+/** A backstage pane: the running order, the files, or the repository's memory. */
+type Pane = "tasks" | "files" | "memory";
+
+/** A line this app says in the transcript, after the event it was said at. */
+interface Note {
+  after: number;
+  text: string;
+}
 
 export function Session({
   auth,
@@ -46,6 +57,7 @@ export function Session({
   row,
   sessionId,
   created,
+  startedIn,
   onBack,
   onGo,
   onAgents,
@@ -59,6 +71,8 @@ export function Session({
   sessionId: string;
   /** Where it was just made, for a session opened straight from the start screen. */
   created?: SessionKind | undefined;
+  /** The workspace a session on this computer was just started in, from the start screen: its start goes on to the librarian. */
+  startedIn?: string | undefined;
   onBack: () => void;
   /** Leave for another screen, for the palette's Navigate and Setup commands. */
   onGo?: (screen: PaletteScreen) => void;
@@ -73,7 +87,9 @@ export function Session({
   const kind = row?.kind ?? created ?? (auth ? "team" : "local");
   const view = useSessionView(auth, sessionId, { daemon, kind });
   const [backstage, setBackstage] = useState(true);
-  const [pane, setPane] = useState<"tasks" | "files">("tasks");
+  const [pane, setPane] = useState<Pane>("tasks");
+  // What `/memory refresh` or `/memory forget` asked of the memory pane, until it takes it.
+  const [memoryAsk, setMemoryAsk] = useState<MemoryAsk | null>(null);
   const [palette, setPalette] = useState(false);
   const self = (kind === "team" ? auth?.me?.subject : (machineUser ?? auth?.me?.subject)) ?? undefined;
 
@@ -87,8 +103,14 @@ export function Session({
   // a session that stopped mid-loop records the interruption only when it wakes.
   const loop = settleLoop(view.state.loop, useLoopAnswer(view.view));
   const [away, seenAway] = useAway(sessionId, row);
-  // Onboarding, then the brief, as the session's start found them due (Decision 835).
-  const start = useStartQuestions(daemon, sessionId, view.state.onboarding, { local: kind !== "team", canAnswer: !readOnly });
+  // Onboarding, then the brief, as the session's start found them due (Decision 835), and
+  // the librarian for a session started here; what they came to is said in the transcript.
+  const start = useStartQuestions(daemon, sessionId, view.state.onboarding, { local: kind !== "team", canAnswer: !readOnly, startedIn });
+  const notes = useStartNotes(daemon, sessionId, start.state?.said, view.state.lastSeq);
+  // Where a session on this computer works: what the start screen was told, what the list
+  // says, or what the start's event named; the memory pane asks about its repository.
+  const workspace =
+    kind === "team" ? undefined : (startedIn ?? (row?.raw as { workspace?: string } | undefined)?.workspace ?? view.state.onboarding?.workspace);
 
   // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen.
   useEffect(() => {
@@ -114,6 +136,11 @@ export function Session({
             showFiles: () => {
               setBackstage(true);
               setPane("files");
+            },
+            showMemory: (what) => {
+              setBackstage(true);
+              setPane("memory");
+              if (what) setMemoryAsk((a) => ({ what, n: (a?.n ?? 0) + 1 }));
             },
             transcript: () => transcriptText(view.state),
             ...(kind !== "team" && onAgents ? { agents: () => onAgents() } : {}),
@@ -152,7 +179,7 @@ export function Session({
 
       <div className="stagearea">
         <div className="conversation">
-          <Stream state={view.state} self={self} local={kind === "local"} readBlob={view.readBlob} onSetup={onGo ? () => onGo("setup") : undefined} />
+          <Stream state={view.state} notes={notes} self={self} local={kind === "local"} readBlob={view.readBlob} onSetup={onGo ? () => onGo("setup") : undefined} />
 
           {/* Sticky, so scrolling up to read the context never loses the decision. */}
           {open.map((entry) => (
@@ -186,10 +213,60 @@ export function Session({
           )}
         </div>
 
-        {backstage && <Backstage view={view} daemon={daemon} row={row} self={self} pane={pane} onPane={setPane} />}
+        {backstage && (
+          <Backstage
+            view={view}
+            daemon={daemon}
+            row={row}
+            self={self}
+            pane={pane}
+            onPane={setPane}
+            memory={
+              daemon && kind !== "team"
+                ? {
+                    daemon,
+                    workspace,
+                    sessionId,
+                    librarians: start.state?.librarian ? [start.state.librarian] : [],
+                    ask: memoryAsk,
+                    onAsked: () => setMemoryAsk(null),
+                  }
+                : null
+            }
+          />
+        )}
       </div>
     </section>
   );
+}
+
+// The start's lines by daemon connection and session, each where it was said, for as long
+// as the app runs: a session left and opened again shows them where they were, not under
+// its replay's head.
+const anchored = new WeakMap<DaemonClient, Map<string, Note[]>>();
+
+/**
+ * The start's lines (what onboarding did, the librarian it started or why none), each
+ * placed after the event the transcript had reached when it was said, as the terminal
+ * client writes them into the session's window as it goes. They are this app's, not the
+ * session's log, so a start asked again (the app opened again) has its own.
+ */
+function useStartNotes(daemon: DaemonClient | null, sessionId: string, said: string[] | undefined, lastSeq: number): Note[] {
+  const [, redraw] = useState(0);
+  const at = useRef(lastSeq);
+  at.current = lastSeq;
+  useEffect(() => {
+    if (!daemon || !said) return;
+    const notes = anchored.get(daemon) ?? new Map<string, Note[]>();
+    anchored.set(daemon, notes);
+    const had = notes.get(sessionId) ?? [];
+    const same = had.length <= said.length && had.every((n, i) => n.text === said[i]);
+    if (same && had.length === said.length) return;
+    const kept = same ? had : [];
+    notes.set(sessionId, [...kept, ...said.slice(kept.length).map((text) => ({ after: at.current, text }))]);
+    redraw((n) => n + 1);
+  }, [daemon, sessionId, said]);
+  return (daemon && anchored.get(daemon)?.get(sessionId)) || [];
 }
 
 /** What was said, for `/copy`: the people's and the agent's words, not the tool traffic. */
@@ -431,12 +508,15 @@ function useLoopAnswer(view: SessionHandle["view"]): LoopInfo | null | undefined
 
 function Stream({
   state,
+  notes,
   self,
   local,
   readBlob,
   onSetup,
 }: {
   state: TranscriptState;
+  /** This app's own lines, each after the event it was said at. */
+  notes: Note[];
   self: string | undefined;
   /** A session on this computer, whose model settings are this person's to change. */
   local: boolean;
@@ -448,14 +528,18 @@ function Stream({
   useEffect(() => {
     // Scrolling is not focus: an arriving event must never move the caret.
     bottom.current?.scrollIntoView({ block: "end" });
-  }, [state.entries.length, state.streaming, state.pending.length]);
+  }, [state.entries.length, state.streaming, state.pending.length, notes.length]);
 
   return (
     <div className="stream" aria-live="polite">
       {state.entries.length === 0 && <Loading what="Reading the session. The newest part arrives first." />}
 
-      {state.entries.map((e) => (
-        <StreamEntry key={`${e.kind}-${e.seq}`} entry={e} self={self} local={local} readBlob={readBlob} onSetup={onSetup} />
+      <NotesAt notes={notes} from={-Infinity} to={state.entries[0]?.seq ?? Infinity} />
+      {state.entries.map((e, i) => (
+        <Fragment key={`${e.kind}-${e.seq}`}>
+          <StreamEntry entry={e} self={self} local={local} readBlob={readBlob} onSetup={onSetup} />
+          <NotesAt notes={notes} from={e.seq} to={state.entries[i + 1]?.seq ?? Infinity} />
+        </Fragment>
       ))}
 
       {state.thinking && (
@@ -488,6 +572,21 @@ function Stream({
 
       <div ref={bottom} />
     </div>
+  );
+}
+
+/** This app's lines said at or after `from` and before `to`. */
+function NotesAt({ notes, from, to }: { notes: Note[]; from: number; to: number }): JSX.Element | null {
+  const here = notes.filter((n) => n.after >= from && n.after < to);
+  if (here.length === 0) return null;
+  return (
+    <>
+      {here.map((n, i) => (
+        <p key={`${n.after}-${i}-${n.text}`} className="note start-note">
+          {n.text}
+        </p>
+      ))}
+    </>
   );
 }
 
@@ -745,31 +844,63 @@ function Backstage({
   self,
   pane,
   onPane,
+  memory,
 }: {
   view: SessionHandle;
   daemon: DaemonClient | null;
   row: FleetRow | undefined;
   self: string | undefined;
-  /** Which pane is up: the session's, so `/files` from the palette can open it. */
-  pane: "tasks" | "files";
-  onPane: (pane: "tasks" | "files") => void;
+  /** Which pane is up: the session's, so `/files` and `/memory` from the palette can open it. */
+  pane: Pane;
+  onPane: (pane: Pane) => void;
+  /**
+   * What the memory pane needs: a session on this computer's daemon, workspace, id and the
+   * librarian its start began; null for a team session's.
+   */
+  memory: {
+    daemon: DaemonClient;
+    workspace: string | undefined;
+    sessionId: string;
+    librarians: string[];
+    ask: MemoryAsk | null;
+    onAsked: () => void;
+  } | null;
 }): JSX.Element {
   const agents = Object.entries(view.state.agentState).filter(([path]) => path !== "");
+  // A team session's memory is its pod's, and `memory.get` is this computer's daemon's.
+  const shown: Pane = pane === "memory" && !memory ? "tasks" : pane;
 
   return (
     <aside className="backstage">
       <section>
         <div className="tabs">
-          <button className="tab" aria-selected={pane === "tasks"} onClick={() => onPane("tasks")}>
+          <button className="tab" aria-selected={shown === "tasks"} onClick={() => onPane("tasks")}>
             Tasks
           </button>
-          <button className="tab" aria-selected={pane === "files"} onClick={() => onPane("files")}>
+          <button className="tab" aria-selected={shown === "files"} onClick={() => onPane("files")}>
             Files
           </button>
+          {memory && (
+            <button className="tab" aria-selected={shown === "memory"} onClick={() => onPane("memory")}>
+              Memory
+            </button>
+          )}
         </div>
       </section>
 
-      {pane === "tasks" ? (
+      {shown === "memory" && memory ? (
+        <section>
+          <h3>Memory</h3>
+          <MemoryPane
+            daemon={memory.daemon}
+            workspace={memory.workspace}
+            sessionId={memory.sessionId}
+            librarians={memory.librarians}
+            ask={memory.ask}
+            onAsked={memory.onAsked}
+          />
+        </section>
+      ) : shown === "tasks" ? (
         <section>
           <h3>Running order</h3>
           {view.state.todo.length === 0 ? (

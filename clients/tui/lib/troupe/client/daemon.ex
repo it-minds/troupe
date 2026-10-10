@@ -687,8 +687,9 @@ defmodule Troupe.Client.Daemon do
   defp layer(other) when is_binary(other) and other != "", do: other
   defp layer(_none), do: :session
 
-  # `/memory` shows the brief, `/memory refresh` has the librarian rewrite it as a branch
-  # of this session, `/memory forget` deletes it.
+  # `/memory` shows the brief (its line, where there are no facts to list: root Decision
+  # 839), `/memory refresh` has the librarian rewrite it as a branch of this session,
+  # `/memory forget` deletes it.
   @impl true
   def memory(sid, "") do
     case Link.call("memory.get", %{workspace: workspace(sid)}) do
@@ -729,6 +730,37 @@ defmodule Troupe.Client.Daemon do
 
   def memory(_sid, other),
     do: {:error, "unknown /memory #{other}; use /memory, /memory refresh or /memory forget"}
+
+  # The facts the brief is made of (root Decision 839), for `/memory`'s page. A daemon
+  # from before facts answers no `facts`, and a brief that is off has none to show: both
+  # are `/memory`'s line, as before.
+  @impl true
+  def memory_facts(sid) do
+    case Link.call("memory.get", %{workspace: workspace(sid)}) do
+      {:ok, answer} -> memory_page(answer)
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  @doc false
+  @spec memory_page(map()) :: {:ok, Troupe.Client.memory()} | :no_facts | {:error, String.t()}
+  def memory_page(%{"status" => "disabled"}), do: :no_facts
+
+  def memory_page(%{"facts" => facts, "status" => status} = answer) when is_list(facts),
+    do: {:ok, %{facts: facts, status: status, path: answer["path"]}}
+
+  def memory_page(%{"status" => _}), do: :no_facts
+  def memory_page(other), do: {:error, "unexpected memory.get answer: #{inspect(other)}"}
+
+  @impl true
+  def forget_fact(sid, id) do
+    params = %{workspace: workspace(sid), id: id, command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call("memory.forget", params) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
 
   # `/context`: the provenance of the prompt, as the daemon reads it now (Decision 124).
   @impl true

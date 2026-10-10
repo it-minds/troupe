@@ -15,9 +15,18 @@
 // from Claude Code and Cursor into Troupe's own?"), with each file's diff a click away;
 // creating an `AGENTS.md` that is not there is always its own question (Decision 827),
 // because every coding tool reads that file, not only Troupe.
+//
+// Then the brief, as the terminal client has it (its Decisions 127, 131 and 154): where
+// `memory_auto_refresh` is on, in a git repository, with a model to ask (`memory.ts`), a
+// brief an older survey wrote is asked about, and a session this client has just started
+// starts the librarian by itself on a missing or stale one when the daemon says it is due,
+// saying so in a line. A session opened again starts none: only its start does.
 
 import { TroupeRpcError } from "./connection.js";
 import type { DaemonClient } from "./daemon.js";
+import { LIBRARIAN_PROMPT, librarianBarred, refreshStep } from "./memory.js";
+
+export { LIBRARIAN_PROMPT };
 
 /** Why onboarding is due: nothing onboarded yet, or onboarded under older rules. */
 export type OnboardingDue = "first" | "outdated" | "none";
@@ -112,6 +121,8 @@ export interface StartState {
   /** Where onboarding may not run (a pod): the daemon's sentence, and nothing is asked. */
   refusal: string | null;
   error: string | null;
+  /** The librarian session the start began, once it has: a screen watches it to read the brief again when it is done. */
+  librarian?: string | null;
 }
 
 export interface StartOptions {
@@ -119,11 +130,17 @@ export interface StartOptions {
   workspace: string;
   /** The session that started: the librarian is started as a branch of it. */
   sessionId: string;
-  onState: (state: StartState) => void;
+  onState?: (state: StartState) => void;
+  /**
+   * This client has just started the session (`session.create`), rather than opened one
+   * that was there: the librarian starts by itself on a missing or stale brief, once.
+   */
+  started?: boolean;
 }
 
-/** What the librarian is asked when the brief is rewritten; the terminal client's words. */
-export const LIBRARIAN_PROMPT = "The project brief is out of date. Revise it against the repository as it is now.";
+/** The lines a session's start says about the librarian it started. */
+export const LIBRARIAN_WRITING = "The librarian is writing the project brief, in a session of its own.";
+export const LIBRARIAN_REWRITING = "The librarian is rewriting the project brief, in a session of its own.";
 
 const METHOD_NOT_FOUND = -32601;
 
@@ -178,15 +195,17 @@ export function createQuestion(item: OnboardItem): string {
 }
 
 /**
- * The start's questions for one session: `start` once `onboarding_suggested` arrives,
- * then `answer` each question the state asks. The plan is asked for once: every later
- * question (a new `AGENTS.md` after Onboard, each file under Review) is about the first
- * plan's items, by id, since after the first write the daemon's plan says nothing is due
- * and lists nothing. A daemon too old to plan leaves the event's own line to say it, and
- * nothing is asked.
+ * The start's questions for one session: `start` once the session is started here or its
+ * `onboarding_suggested` arrives, then `answer` each question the state asks. The plan is
+ * asked for once: every later question (a new `AGENTS.md` after Onboard, each file under
+ * Review) is about the first plan's items, by id, since after the first write the daemon's
+ * plan says nothing is due and lists nothing. A daemon too old to plan leaves the event's
+ * own line to say it, and nothing is asked; a session started here goes on to the brief,
+ * as the terminal client does with such a daemon.
  */
 export class StartQuestions {
   private state: StartState = { asking: null, busy: false, said: [], refusal: null, error: null };
+  private readonly listeners = new Set<(state: StartState) => void>();
   private plan: OnboardPlan | null = null;
   // The files still to ask about one at a time: every file under Review, the new
   // `AGENTS.md`s after Onboard.
@@ -204,13 +223,19 @@ export class StartQuestions {
     return this.state;
   }
 
+  /** Hear every change of state, besides `onState`; the function returned stops it. */
+  subscribe(listener: (state: StartState) => void): () => void {
+    this.listeners.add(listener);
+    return () => void this.listeners.delete(listener);
+  }
+
   async start(): Promise<void> {
     await this.step(async () => {
       let plan: OnboardPlan;
       try {
         plan = await this.daemon.onboardPlan(this.opts.workspace);
       } catch (e) {
-        if (e instanceof TroupeRpcError && e.code === METHOD_NOT_FOUND) return;
+        if (e instanceof TroupeRpcError && e.code === METHOD_NOT_FOUND) return this.brief();
         throw e;
       }
       this.plan = plan;
@@ -229,7 +254,7 @@ export class StartQuestions {
           skipped: onboarding.skipped,
         });
       }
-      this.brief();
+      return this.brief();
     });
   }
 
@@ -265,9 +290,9 @@ export class StartQuestions {
           return;
         case "brief":
           if (answer === "rerun") {
-            await this.daemon.startLibrarian({ workspace: this.opts.workspace, parent: this.opts.sessionId, prompt: LIBRARIAN_PROMPT });
-            this.say("The librarian is rewriting the project brief, in a session of its own.");
-            return this.set({ asking: null });
+            const created = await this.daemon.startLibrarian({ workspace: this.opts.workspace, parent: this.opts.sessionId, prompt: LIBRARIAN_PROMPT });
+            this.say(LIBRARIAN_REWRITING);
+            return this.set({ asking: null, librarian: created.session_id });
           }
           if (answer === "decline") {
             await this.daemon.declineBrief(this.opts.workspace);
@@ -306,7 +331,7 @@ export class StartQuestions {
   }
 
   /** The next file to ask about, or what onboarding came to and then the brief. */
-  private next(): void {
+  private async next(): Promise<void> {
     const item = this.queue.shift();
     if (item) {
       const total = this.plan?.onboarding.items.length ?? 0;
@@ -314,7 +339,7 @@ export class StartQuestions {
       return this.ask({ kind: "review", text: `Write ${item.shown}?`, item, index: total - this.queue.length, total });
     }
     this.say(this.outcome());
-    this.brief();
+    return this.brief();
   }
 
   /** What onboarding did, in one sentence. */
@@ -326,15 +351,41 @@ export class StartQuestions {
     return parts.length > 0 ? `Onboarding: ${parts.join("; ")}.` : "Onboarding: nothing to write.";
   }
 
-  /** The brief's question, once onboarding is answered, when an older survey wrote it. */
-  private brief(): void {
+  /**
+   * The brief, once onboarding is answered (`Start.brief_step` in the terminal client): the
+   * question when an older survey wrote it, and for a session started here the librarian
+   * on a missing or stale one; neither where the librarian may not start by itself, with a
+   * line when the reason is one a person would want.
+   */
+  private async brief(): Promise<void> {
     const brief = this.plan?.brief;
-    if (brief?.due === "outdated") {
+    const outdated = brief?.due === "outdated";
+    if (!outdated && !this.opts.started) return this.set({ asking: null });
+
+    const barred = await librarianBarred(this.daemon, this.opts.workspace);
+    if (barred) {
+      if (barred.say) this.say(`No librarian for the project brief: ${barred.why}.`);
+      return this.set({ asking: null });
+    }
+    if (brief && outdated) {
       return this.ask({
         kind: "brief",
         text: briefQuestion(brief),
         detail: "The librarian surveys the repository again and rewrites .troupe/memory.md, in a session of its own beside this one.",
       });
+    }
+
+    const step = await refreshStep(this.daemon, this.opts.workspace);
+    if (step.start !== undefined) {
+      try {
+        const created = await this.daemon.startLibrarian({ workspace: this.opts.workspace, parent: this.opts.sessionId, prompt: step.start });
+        this.set({ librarian: created.session_id });
+        this.say(step.status === "absent" ? LIBRARIAN_WRITING : LIBRARIAN_REWRITING);
+      } catch (e) {
+        this.say(`No librarian for the project brief: the daemon did not start it: ${e instanceof Error ? e.message : String(e)}.`);
+      }
+    } else if (step.say) {
+      this.say(`No librarian for the project brief: ${step.why}.`);
     }
     this.set({ asking: null });
   }
@@ -361,6 +412,7 @@ export class StartQuestions {
 
   private set(change: Partial<StartState>): void {
     this.state = { ...this.state, ...change };
-    this.opts.onState(this.state);
+    this.opts.onState?.(this.state);
+    for (const listener of this.listeners) listener(this.state);
   }
 }
