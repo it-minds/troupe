@@ -44,6 +44,16 @@ defmodule Troupe.Gateway.Worktrees do
     end
   end
 
+  @doc """
+  Whether a session started in `workspace` now would get a worktree of its own, as
+  `resolve/2` decides it for `"auto"`: what `agents.list` says of each agent (Decision 841).
+  """
+  @spec auto?(Path.t()) :: boolean()
+  def auto?(workspace) do
+    workspace = Path.expand(workspace)
+    git_repository?(workspace) and busy?(workspace)
+  end
+
   defp plain(workspace), do: %{path: workspace, worktree: nil, branch: nil}
 
   defp busy?(workspace) do

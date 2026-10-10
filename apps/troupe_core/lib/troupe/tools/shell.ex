@@ -73,11 +73,19 @@ defmodule Troupe.Tools.Shell do
       timeout = Tool.fetch_int(args, "timeout_ms", ctx.timeout_ms) || 120_000
 
       case execute(command, ctx.workspace, timeout_ms: timeout) do
-        {:ok, output, status} -> {:ok, render(output, status, ctx)}
+        {:ok, output, status} -> {:ok, render(output, status, ctx), %{fields: outcome(status)}}
         {:error, reason} -> {:error, reason}
       end
     end
   end
+
+  # How the command ended, as fields of the call's `tool_call_completed` beside `ok`, which
+  # stays true for a command that ran, whatever it exited with: a fold tells a failing
+  # command from a passing one without reading `content`, and the model reads the text it
+  # always did (#248, Decision 837).
+  defp outcome(:timeout), do: %{"timed_out" => true}
+  defp outcome(:killed), do: %{}
+  defp outcome(status), do: %{"exit_status" => status}
 
   @typedoc "How a command ended: its exit status, the timeout, or `kill/1`."
   @type ending :: non_neg_integer() | :timeout | :killed

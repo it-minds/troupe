@@ -43,6 +43,13 @@ defmodule Troupe.Worker.AuthTest do
     "watch.set",
     "memory.get",
     "memory.forget",
+    "memory.decline",
+    # A session's start asks them on the person's own machine (root Decision 835): the plan
+    # and a yes take `admin` there, a no `control`; a worker has none of them, whatever the
+    # token.
+    "onboard.plan",
+    "onboard.apply",
+    "onboard.decline",
     "agents.list",
     "workflows.list",
     "workspace.recent",

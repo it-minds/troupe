@@ -75,6 +75,8 @@ defmodule Troupe.MCPLocalTest do
     assert data["name"] == "mcp.stub.greet"
     assert data["ok"] == true
     assert (data["result"] || data["content"]) =~ "Hello, world!"
+    # How a command ended is `shell`'s alone (Decision 837).
+    refute Map.has_key?(data, "exit_status") or Map.has_key?(data, "timed_out")
     assert_receive {:troupe_event, ^sid, %Event{type: "agent_done", agent: ["root"]}}, 5_000
   end
 

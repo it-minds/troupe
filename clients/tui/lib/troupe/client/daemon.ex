@@ -24,9 +24,10 @@ defmodule Troupe.Client.Daemon do
   The **project brief** (`.troupe/memory.md`, troupe-remote Decision 649) is the
   daemon's: it reads it into every prompt and `remember` writes it. What is the client's
   is `/memory` — showing it, forgetting it, and asking the `librarian` to write it — and
-  the refresh a session starts with when the brief is missing or stale and the workspace
-  config asks for one (`memory_auto_refresh`): a `librarian` branch in the checkout
-  itself, since all it writes is the brief.
+  what a new session asks at its start (`Troupe.Client.Daemon.Start`, TUI Decision 154):
+  onboarding other tools' files first, then the refresh when the brief is missing or stale
+  and the workspace config asks for one (`memory_auto_refresh`): a `librarian` branch in
+  the checkout itself, since all it writes is the brief.
 
   What a daemon session does not have yet says so in words: the settings that changed a
   running agent (phase 3 of the daemon plan).
@@ -34,16 +35,12 @@ defmodule Troupe.Client.Daemon do
 
   @behaviour Troupe.Client
 
-  alias Troupe.Client.Daemon.Link
+  alias Troupe.Client.Daemon.{Link, Start}
   alias Troupe.Client.Events
   alias Troupe.Config
   alias Troupe.Remote.{Branch, Capability, Journal, Worker}
 
-  require Logger
-
   @scopes ["observe", "control", "admin"]
-  @refresh_prompt "The project brief is out of date. Revise it against the repository as it is now."
-  @first_prompt "There is no project brief yet. Survey this repository and write one."
   # The journal keys its directory by where the session lives; a daemon session lives here.
   @journal_key "daemon"
   # What this session's own window is called, as a window command names it.
@@ -227,6 +224,10 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def answer(sid, call_id, text),
     do: describe(Worker.answer(call_target(sid, call_id), call_id, text))
+
+  # A question this client asked at the session's start (TUI Decision 154).
+  @impl true
+  def answer_local(sid, id, key), do: Start.answer(sid, id, key)
 
   @impl true
   def edit_todo(sid, path, change), do: route(sid, path, &Worker.edit_todo(&1, change))
@@ -669,7 +670,7 @@ defmodule Troupe.Client.Daemon do
   end
 
   def memory(sid, "refresh") do
-    case dispatch(sid, "librarian", @refresh_prompt) do
+    case dispatch(sid, "librarian", Start.refresh_prompt()) do
       {:ok, window} -> {:ok, "refreshing the project brief in #{window}"}
       {:error, reason} -> {:error, reason}
     end
@@ -880,8 +881,9 @@ defmodule Troupe.Client.Daemon do
                  title: params[:prompt],
                  isolation: if(result["worktree"], do: :worktree, else: :shared)
                }) do
+          # Onboarding, then the brief (root Decision 835, TUI Decision 154).
           if params[:refresh_brief] != false,
-            do: refresh_brief_if_asked(sid, result["workspace"] || workspace)
+            do: Start.begin(sid, result["workspace"] || workspace)
 
           {:ok, sid}
         end
@@ -1310,102 +1312,6 @@ defmodule Troupe.Client.Daemon do
     end
 
     :ok
-  end
-
-  # A new session on a repository with no brief, or a stale one, starts the librarian
-  # as a branch when the workspace config asks for it (`memory_auto_refresh`, the
-  # default). Off in tests and for anyone who would rather run `/memory refresh`. Only in
-  # a git repository, which is what a brief describes — `troupe` opened in a home
-  # directory surveys nothing — and only with a model to ask, or the first thing a new
-  # user saw would be the librarian failing beside their own first turn. And only when
-  # the daemon says the refresh is due: a librarian that tried lately and built nothing
-  # is not tried again in every session (Decision 127); a daemon too old to say leaves
-  # it to the status.
-  #
-  # When none starts, the log says why, and so does a line in the session's window when
-  # it is something a person can act on or would otherwise wonder about: no model to ask,
-  # a daemon that did not answer or refused the branch, a try that is being waited out
-  # (Decision 131). Memory turned off, a directory git does not know and a fresh brief
-  # are the ordinary cases and say nothing on screen.
-  defp refresh_brief_if_asked(sid, workspace) do
-    case refresh_brief(sid, workspace) do
-      :started ->
-        :ok
-
-      {:quiet, why} ->
-        Logger.info("no librarian for #{workspace}: #{why}")
-
-      {:say, why} ->
-        Logger.warning("no librarian for #{workspace}: #{why}")
-        _ = Worker.note(sid, "no librarian for the project brief: " <> why)
-        :ok
-    end
-  end
-
-  defp refresh_brief(sid, workspace) do
-    config = config(workspace)
-
-    cond do
-      config.memory == false -> {:quiet, "memory is off"}
-      config.memory_auto_refresh == false -> {:quiet, "memory_auto_refresh is off"}
-      not repository?(workspace) -> {:quiet, "not a git repository"}
-      problem = Config.key_problem(config) -> {:say, no_model(problem)}
-      true -> refresh_if_due(sid, workspace)
-    end
-  end
-
-  defp refresh_if_due(sid, workspace) do
-    case Link.call("memory.get", %{workspace: workspace}) do
-      {:ok, %{"refresh_due" => false, "status" => status} = brief}
-      when status in ["absent", "stale"] ->
-        {:say, held_off(brief["refresh_held_until"])}
-
-      {:ok, %{"refresh_due" => false, "status" => status}} ->
-        {:quiet, "the brief is #{status}"}
-
-      {:ok, %{"status" => status}} when status in ["absent", "stale"] ->
-        prompt = if status == "absent", do: @first_prompt, else: @refresh_prompt
-
-        case dispatch(sid, "librarian", prompt) do
-          {:ok, _window} -> :started
-          {:error, reason} -> {:say, "the daemon did not start it: #{message(reason)}"}
-        end
-
-      {:ok, %{"status" => status}} ->
-        {:quiet, "the brief is #{status}"}
-
-      {:ok, other} ->
-        {:say, "unexpected memory.get answer: #{inspect(other)}"}
-
-      {:error, reason} ->
-        {:say, "the daemon did not say whether one is due: #{message(reason)}"}
-    end
-  end
-
-  defp no_model({:no_key, name}),
-    do: "#{name} has no key, so no model can be asked; `troupe config` sets one up"
-
-  defp no_model({:refused, why}), do: why
-
-  # A daemon from before the date leaves it out.
-  defp held_off(until) when is_binary(until) do
-    "the last one built none, so the next waits until #{String.slice(until, 0, 10)}; " <>
-      "/memory refresh starts one now"
-  end
-
-  defp held_off(_until),
-    do: "the last one built none, so the next waits a while; /memory refresh starts one now"
-
-  # In a git work tree: a `.git` directory, or the `.git` file a worktree has, here or in
-  # a directory above.
-  defp repository?(dir) do
-    dir = Path.expand(dir)
-
-    cond do
-      File.exists?(Path.join(dir, ".git")) -> true
-      Path.dirname(dir) == dir -> false
-      true -> repository?(Path.dirname(dir))
-    end
   end
 
   defp close_branch(sid, branch, said \\ %{}) do

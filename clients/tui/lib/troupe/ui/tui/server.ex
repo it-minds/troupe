@@ -389,8 +389,14 @@ defmodule Troupe.UI.TUI.Server do
       ),
       do: {:noreply, open_palette(%{state | quit_armed: false})}
 
-  def handle_event(%Key{} = key, %{focus: :command} = state),
-    do: finish(command_key(key, %{state | quit_armed: false}))
+  def handle_event(%Key{} = key, %{focus: :command} = state) do
+    state = %{state | quit_armed: false}
+
+    case local_answer(key, state, nil) do
+      {:answered, state} -> finish(state)
+      :pass -> finish(command_key(key, state))
+    end
+  end
 
   def handle_event(%Key{} = key, %{focus: :palette} = state),
     do: finish(palette_key(key, %{state | quit_armed: false}))
@@ -414,9 +420,16 @@ defmodule Troupe.UI.TUI.Server do
     do: {:noreply, hq_key(key, %{state | quit_armed: false})}
 
   def handle_event(%Key{} = key, %{focus: {:window, path}} = state) do
-    if Map.has_key?(state.model.windows, path),
-      do: {:noreply, window_key(key, path, disarm(%{state | quit_armed: false}, key))},
-      else: handle_event(key, to_command_line(state))
+    if Map.has_key?(state.model.windows, path) do
+      state = disarm(%{state | quit_armed: false}, key)
+
+      case local_answer(key, state, path) do
+        {:answered, state} -> {:noreply, state}
+        :pass -> {:noreply, window_key(key, path, state)}
+      end
+    else
+      handle_event(key, to_command_line(state))
+    end
   end
 
   # A reflow moves every wrapped row, so transcript coordinates no longer point at
@@ -2448,6 +2461,50 @@ defmodule Troupe.UI.TUI.Server do
       :ok -> follow(state)
       {:error, reason} -> notice(follow(state), approval_error(reason))
     end
+  end
+
+  # A question the session's start asks (onboarding, then the brief: TUI Decision 154) is
+  # the first thing on a new session's screen, before anything is typed or a window is
+  # opened, so its keys answer it from the command line as from its window, and Enter is
+  # its default, while nothing is typed. `path` is the window focused, `nil` for the
+  # command line, which answers whichever window asks.
+  defp local_answer(%Key{code: code, modifiers: mods}, state, path) when mods in [[], ["shift"]] do
+    with true <- typed(state, path) == "",
+         {window, question} <- asked(state, path),
+         key when is_binary(key) <- local_key(code, question) do
+      case Client.answer_local(state.session_id, question.call_id, key) do
+        :ok -> {:answered, if(path, do: follow(state), else: state)}
+        {:error, reason} -> {:answered, notice(state, "#{window}: " <> to_message(reason))}
+      end
+    else
+      _ -> :pass
+    end
+  end
+
+  defp local_answer(_key, _state, _path), do: :pass
+
+  defp typed(state, nil), do: state.cmd_text
+  defp typed(state, _path), do: state.win_text
+
+  defp asked(state, nil) do
+    Enum.find_value(Model.windows(state.model), fn w ->
+      q = Model.local_question(w)
+      q && {w.path, q}
+    end)
+  end
+
+  defp asked(state, path) do
+    case Model.local_question(Map.fetch!(state.model.windows, path)) do
+      nil -> nil
+      q -> {path, q}
+    end
+  end
+
+  defp local_key("enter", question), do: question.default
+
+  defp local_key(code, question) do
+    key = String.downcase(code)
+    if key in question.keys, do: key
   end
 
   defp pending_of(w, viewed, kinds) do

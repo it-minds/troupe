@@ -17,6 +17,7 @@ import type { ConnectOptions, ConnectionHooks } from "./connection.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
+import type { OnboardApplied, OnboardPlan } from "./onboard.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
 import type { ConfigChanged, EventEnvelope, Principal, SessionCreateResult, ToolInvoke, TroupeEvent } from "./types.js";
 
@@ -229,6 +230,8 @@ export interface CreateLocalParams {
    * cannot seal yet makes the session anyway, and says `syncing: false`.
    */
   private?: boolean;
+  /** The session this one is a branch of, as the librarian is of the session that started it. */
+  parent?: string;
 }
 
 export interface DaemonHooks {
@@ -762,6 +765,42 @@ export class DaemonClient {
 
   removeSkill(params: ScopedParams & ({ name: string } | { include: string })): Promise<RemoveResult> {
     return this.command<RemoveResult>("skills.remove", { ...params });
+  }
+
+  /**
+   * What onboarding would write in a workspace, and whether its brief is due (troupe
+   * Decision 835): each file with its diff, the other tools' files passed over, and the
+   * daemon's sentence where onboarding may not run. Reads; writes nothing.
+   */
+  onboardPlan(workspace: string): Promise<OnboardPlan> {
+    return this.call<OnboardPlan>("onboard.plan", { workspace });
+  }
+
+  /**
+   * Write the files named, or with `all` every one that is only a write: an `AGENTS.md`
+   * that is not there is written only when named (Decision 827). The daemon records the
+   * version once the plan is answered.
+   */
+  onboardApply(workspace: string, which: "all" | string[]): Promise<OnboardApplied> {
+    return this.command<OnboardApplied>("onboard.apply", { workspace, ...(which === "all" ? { all: true } : { ids: which }) });
+  }
+
+  /** Say no to the files named, or to all of them: remembered for this version of the rules. */
+  onboardDecline(workspace: string, which: "all" | string[]): Promise<{ declined: number }> {
+    return this.command("onboard.decline", { workspace, ...(which === "all" ? { all: true } : { ids: which }) });
+  }
+
+  /** Say no to rewriting a brief an older survey wrote: remembered for this survey's version. */
+  declineBrief(workspace: string): Promise<unknown> {
+    return this.command("memory.decline", { workspace });
+  }
+
+  /**
+   * Start the librarian on a workspace's brief, as a branch of the session that asked, in
+   * the checkout itself (it writes one file, the brief), as the terminal client starts it.
+   */
+  startLibrarian(params: { workspace: string; parent: string; prompt: string }): Promise<SessionCreateResult> {
+    return this.createSession({ workspace: params.workspace, profile: "librarian", worktree: "never", parent: params.parent, prompt: params.prompt });
   }
 }
 
