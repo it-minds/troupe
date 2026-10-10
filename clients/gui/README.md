@@ -105,9 +105,14 @@ streaming. The plane answers `me.client_defaults` with an organisation gateway, 
 organisation defaults* on the models panel has something to fill in;
 `NO_CLIENT_DEFAULTS=1 pnpm fake` is an organisation that has set nothing.
 
+It also starts the fake daemon the tests use, and prints the address to open the app at
+(`#daemon=<port>:<token>`). A new session there in `/home/ada/repo` starts as a
+repository with Claude Code's and Cursor's files does: it asks to onboard them, each as
+a diff under Review, then to have the librarian rewrite a brief an older survey wrote.
+
 ### Your own daemon beside the fake plane
 
-The fake deployment has no daemon, and `pnpm dev:local` has no plane. To see both halves
+The fake deployment's daemon runs no agent, and `pnpm dev:local` has no plane. To see both halves
 of the one list — a team session and a session on this computer, with questions, the
 budget question, streamed reasoning and the harness's notes — run the real
 `troupe-daemon` with its scripted model, which is how its own smoke tests and the TUI's
@@ -347,6 +352,7 @@ packages/client/src
   transcript.ts   the fold: events → a transcript. Pure, and the reason two clients agree
   fleet.ts        FleetStore — one list from however many sources there are
   daemon.ts       DaemonClient — the machine in front of you: one socket, many sessions
+  onboard.ts      StartQuestions — a start's onboarding, then the brief, over `onboard.plan`
   config.ts       model settings: the shapes, and what an empty field in the form means
   admin.ts        the plane's administrative surface, one call per method
 
@@ -359,7 +365,8 @@ apps/desktop/src
   tokens.css      generated from docs/design/themes/*.tokens.json — do not edit
   mark.ts         the mask's geometry, generated from the same files — do not edit
   views/          SignIn · Launcher · Sessions · StartSession · Session · Approval · Question
-                  Approvals · Files · Review · CommandPalette · Local (Models · Servers) · Appearance
+                  Onboard (a start's onboarding and brief questions) · Approvals · Files · Review
+                  CommandPalette · Local (Models · Servers) · Appearance
                   Onboarding/     the first run's questions, one screen per step, over `setup.get`
                                   and `setup.answer`; FirstRun leads with the theme, SetupScreen
                                   is the rail's Setup entry
