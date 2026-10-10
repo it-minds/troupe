@@ -788,10 +788,18 @@ defmodule Troupe do
     end
   end
 
+  # A session records its workspace's real path; a client names it as it has it, which on
+  # Windows may be another spelling of the same directory.
   defp active_in(workspace) do
+    names =
+      case Troupe.Workspace.new(workspace) do
+        {:ok, resolved} -> [workspace, resolved.root_real]
+        {:error, _} -> [workspace]
+      end
+
     %{}
     |> list_live_sessions()
-    |> Enum.filter(&(&1.workspace == workspace and &1.state == :active))
+    |> Enum.filter(&(&1.workspace in names and &1.state == :active))
   end
 
   # The session already watching, the one named, or the workspace's that is no branch.

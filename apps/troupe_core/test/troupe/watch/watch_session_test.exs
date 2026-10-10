@@ -51,8 +51,11 @@ defmodule Troupe.Watch.WatchSessionTest do
     assert changed.data == %{"enabled" => true, "backend" => Atom.to_string(backend)}
     assert Troupe.watch_state(root) == %{enabled: true, backend: backend, session_id: session.id}
 
-    # Asked again by the session that watches, it is answered as it stands.
+    # Asked again by the session that watches, it is answered as it stands; and the same
+    # directory spelled another way is the same workspace.
     assert {:ok, ^backend} = Troupe.set_watch(root, true, session.id)
+    other_spelling = Path.join([root, "..", Path.basename(root)])
+    assert Troupe.watch_state(other_spelling).session_id == session.id
 
     assert {:ok, :off} = Troupe.set_watch(root, false)
 
