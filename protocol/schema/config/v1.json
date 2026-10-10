@@ -667,7 +667,7 @@
       "minimum": 1
     },
     "watch_auto_approve": {
-      "description": "A branch an `AI!` or `AI?` comment starts runs its writes, edits and shell commands without asking. Off, each asks, whatever `auto_approve` and the agent's own permissions say. Read from a project's file only in a trusted workspace.",
+      "description": "A branch an `AI!` or `AI?` comment starts runs its writes, edits, shell commands and MCP servers' tools without asking. Off, each asks, whatever `auto_approve`, the agent's own permissions and a server's `permission` say. Read from a project's file only in a trusted workspace.",
       "default": false,
       "type": [
         "boolean",

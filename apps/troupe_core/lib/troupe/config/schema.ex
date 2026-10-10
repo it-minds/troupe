@@ -392,8 +392,9 @@ defmodule Troupe.Config.Schema do
         spec(
           "watch_auto_approve",
           :boolean,
-          "A branch an `AI!` or `AI?` comment starts runs its writes, edits and shell commands without asking. " <>
-            "Off, each asks, whatever `auto_approve` and the agent's own permissions say.",
+          "A branch an `AI!` or `AI?` comment starts runs its writes, edits, shell commands and MCP servers' tools " <>
+            "without asking. Off, each asks, whatever `auto_approve`, the agent's own permissions and a server's " <>
+            "`permission` say.",
           default: false,
           scope: :trusted,
           field: :watch_auto_approve,

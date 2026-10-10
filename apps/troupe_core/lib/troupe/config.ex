@@ -119,8 +119,8 @@ defmodule Troupe.Config do
             watch_debounce_ms: 300,
             watch_poll_interval_ms: 1_000,
             # Whether a branch an `AI!` or `AI?` comment started runs its writes unasked
-            # (Decision 844). Off, each asks, whatever `auto_approve` and an agent say: any
-            # process that writes a file can write a comment.
+            # (Decision 844). Off, each asks, whatever `auto_approve`, an agent or an MCP
+            # server says: any process that writes a file can write a comment.
             watch_auto_approve: false,
             # Durable `fs_changed` events for everything that happens in the workspace.
             # Off locally, where the user can see their own files; on in a pod, where a
