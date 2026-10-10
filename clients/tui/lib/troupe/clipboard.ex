@@ -40,7 +40,7 @@ defmodule Troupe.Clipboard do
   def command do
     case Application.get_env(:troupe, :clipboard_command) do
       cmd when is_binary(cmd) -> cmd
-      _ -> Enum.find(candidates(), &System.find_executable/1)
+      _ -> Enum.find(candidates(), &OS.Process.executable/1)
     end
   end
 
@@ -77,11 +77,27 @@ defmodule Troupe.Clipboard do
   # Redirection, not a pipe, so nothing depends on the shell's job control. On
   # Windows the platform shell may be PowerShell, which has no `<` at all, so
   # `clip` is fed by cmd.exe rather than through `OS.Process.shell/2`.
-  defp run("clip", path),
-    do: OS.Process.run("cmd.exe", ["/c", "clip < \"#{path}\""], timeout_ms: @timeout_ms)
+  defp run("clip", path) do
+    OS.Process.run("cmd.exe", windows_argv("clip", path),
+      cd: Path.dirname(path),
+      timeout_ms: @timeout_ms
+    )
+  end
 
   defp run(name, path),
     do: OS.Process.shell("#{argv(name)} < '#{path}'", timeout_ms: @timeout_ms)
+
+  @doc """
+  What cmd.exe is given to feed `name` the file at `path`, which it runs in the file's
+  directory (D109): the command by its path on `PATH`, so cmd.exe does not look for it in
+  a directory of its own choosing, and the file by its name, in arguments of their own.
+  `clip < "<path>"` as one argument reached cmd.exe with its quotes escaped the way Erlang
+  escapes them, which cmd.exe does not read: "The filename, directory name, or volume label
+  syntax is incorrect." `opts` are `OS.Process.executable/2`'s.
+  """
+  @spec windows_argv(String.t(), Path.t(), keyword()) :: [String.t()]
+  def windows_argv(name, path, opts \\ []),
+    do: ["/c", OS.Process.executable(name, opts) || name, "<", Path.basename(path)]
 
   defp report(name, {:ok, _output, 0}), do: {:ok, name}
 

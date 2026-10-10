@@ -249,6 +249,8 @@ defmodule Troupe.Remote.Worker do
       subscribed?: false,
       scopes: [],
       capabilities: %{},
+      # The largest message the server takes, as `initialize` says (`limits`); nil before.
+      max_message: nil,
       memory: Translate.memory(Keyword.get(opts, :isolation, :remote), Keyword.get(opts, :profile)),
       profile: Keyword.get(opts, :profile) || "session",
       # What the root window says the session works in: a worker on the plane unless the
@@ -522,8 +524,33 @@ defmodule Troupe.Remote.Worker do
 
   defp send_request(state, from, method, params) do
     id = state.next_id
+    frame = RPC.request(id, method, params)
 
-    case Socket.send_text(state.socket, RPC.request(id, method, params)) do
+    case too_large(state, frame) do
+      nil -> send_frame(state, from, id, frame, method, params)
+      sentence -> reply_and(state, from, {:error, sentence})
+    end
+  end
+
+  # A message larger than the server said it takes would be cut off at its socket, and the
+  # connection with it, every call waiting on it lost (D108): it is not sent, and the caller
+  # is told why. The size is the frame's, which is the file's and then some for an upload.
+  defp too_large(%{max_message: limit} = state, frame) when is_integer(limit) do
+    size = IO.iodata_length(frame)
+    server = if state.plane_url, do: "worker", else: "daemon"
+
+    if size > limit do
+      "too large to send: #{mib(size)} as sent, and the #{server} takes at most #{mib(limit)} " <>
+        "in one message; nothing was sent"
+    end
+  end
+
+  defp too_large(_state, _frame), do: nil
+
+  defp mib(bytes), do: "#{Float.round(bytes / (1024 * 1024), 1)} MiB"
+
+  defp send_frame(state, from, id, frame, method, params) do
+    case Socket.send_text(state.socket, frame) do
       {:ok, socket} ->
         Process.send_after(self(), {:rpc_timeout, id}, @call_timeout)
 
@@ -829,7 +856,8 @@ defmodule Troupe.Remote.Worker do
       | status: :up,
         error: nil,
         scopes: result["scopes"] || [],
-        capabilities: result["capabilities"] || %{}
+        capabilities: result["capabilities"] || %{},
+        max_message: max_message(result["limits"])
     }
 
     publish_status(state)
@@ -838,6 +866,9 @@ defmodule Troupe.Remote.Worker do
 
   defp initialized(state, _result),
     do: state |> put_error(:bad_handshake) |> drop_socket() |> schedule_reconnect()
+
+  defp max_message(%{"max_message_bytes" => limit}) when is_integer(limit) and limit > 0, do: limit
+  defp max_message(_limits), do: nil
 
   defp subscribe(%{subscribed?: true} = state), do: state
 

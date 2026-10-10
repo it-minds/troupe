@@ -303,9 +303,9 @@ defmodule Troupe.Commands do
         args: [window()],
         availability: "window",
         detail:
-          "Closes the activated window, or the one named. This session's own window lets " <>
-            "go of the session; a branch's window closes for good and its session stays in " <>
-            "the daemon, where /sessions still lists it.",
+          "Closes the activated window, or the one named: a branch's window closes for " <>
+            "good and its session stays in the daemon, where /sessions still lists it. " <>
+            "This session's own window stays; /back, /sessions or /new leave the session.",
         example: "/dismiss 3"
       ),
       entry("merge", "session", "Land a worktree branch on the checkout",

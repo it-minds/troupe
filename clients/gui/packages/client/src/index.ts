@@ -111,6 +111,35 @@ export type {
   Trigger,
   TriggerRun,
 } from "./admin.js";
+export {
+  agentRefusal,
+  agentTemplate,
+  findingsFor,
+  layerOf,
+  layerWords,
+  parseAgent,
+  permissionsOf,
+  validAgentName,
+  widenedAutos,
+  withBody,
+  withFields,
+} from "./agents.js";
+export type {
+  AgentCheck,
+  AgentDefinition,
+  AgentDeleted,
+  AgentFields,
+  AgentFinding,
+  AgentLayer,
+  AgentPermission,
+  AgentRow,
+  AgentScope,
+  AgentSkippedFile,
+  AgentSource,
+  AgentsChanged,
+  AgentWritten,
+  ProfileSwitch,
+} from "./agents.js";
 export { DaemonClient, DaemonSource, claimRefusal, daemonUrl, rowFromDaemon } from "./daemon.js";
 export type {
   ClaimResult,

@@ -40,18 +40,36 @@ defmodule Troupe.Client.Daemon.Link do
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: @name)
 
-  @doc "Call a daemon method, starting or finding the daemon first."
+  @doc """
+  Call a daemon method, starting or finding the daemon first.
+
+  Answers, whatever happened to the connection or to this process: a terminal UI waits on
+  these calls, and an exit here would be its own (D108).
+  """
   @spec call(String.t(), map()) :: {:ok, term()} | {:error, term()}
-  def call(method, params),
-    do: GenServer.call(@name, {:call, method, params}, @call_timeout + 5_000)
+  def call(method, params), do: ask({:call, method, params}, @call_timeout + 5_000)
 
   @doc "The loopback WebSocket the daemon serves, for a per-session worker connection."
   @spec websocket() :: {:ok, %{port: :inet.port_number(), token: String.t()}} | {:error, term()}
-  def websocket, do: GenServer.call(@name, :websocket, @call_timeout)
+  def websocket, do: ask(:websocket, @call_timeout)
 
   @doc "Make sure a daemon is answering; say where."
   @spec ensure() :: {:ok, Endpoint.t()} | {:error, term()}
-  def ensure, do: GenServer.call(@name, :ensure, @call_timeout)
+  def ensure, do: ask(:ensure, @call_timeout)
+
+  # This process gone (it is restarted, and the next call finds the daemon again) or past
+  # its own deadline: words for the caller either way.
+  defp ask(message, timeout) do
+    GenServer.call(@name, message, timeout)
+  catch
+    :exit, {:timeout, _} -> {:error, "the daemon did not answer within #{div(timeout, 1_000)} s"}
+    :exit, _gone -> {:error, "the daemon is not reachable"}
+  end
+
+  defp unreachable(method),
+    do: "the daemon is not reachable: the connection closed during #{method}"
+
+  defp forget_client(state), do: %{state | client: nil, error: :closed}
 
   @spec up?() :: boolean()
   def up? do
@@ -118,6 +136,7 @@ defmodule Troupe.Client.Daemon.Link do
         case request(state.client, method, params) do
           {:ok, result} -> {:reply, {:ok, result}, state}
           {:error, %{} = error} -> {:reply, {:error, error_message(error)}, state}
+          {:error, :closed} -> {:reply, {:error, unreachable(method)}, forget_client(state)}
           {:error, reason} -> {:reply, {:error, reason}, state}
         end
 
@@ -165,12 +184,17 @@ defmodule Troupe.Client.Daemon.Link do
 
   # A daemon that has not answered in time has answered too: the caller gets an error it
   # can print, and this process, the one link to the daemon, lives on for the next call
-  # rather than dying of the caller's (#231).
+  # rather than dying of the caller's (#231). So does one that closed the connection with
+  # the call in it, which the protocol client ends with (D108): the next call connects
+  # again, as it does after the daemon restarts.
   defp request(client, method, params) do
     Client.call(client, method, params, @call_timeout)
   catch
     :exit, {:timeout, _} ->
       {:error, "the daemon did not answer #{method} within #{div(@call_timeout, 1_000)} s"}
+
+    :exit, _closed ->
+      {:error, :closed}
   end
 
   ## Finding or starting the daemon
