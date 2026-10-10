@@ -1,0 +1,19 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/watch_changed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "backend": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "backend",
+    "enabled"
+  ],
+  "title": "watch_changed",
+  "type": "object"
+}

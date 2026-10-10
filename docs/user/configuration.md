@@ -998,9 +998,10 @@ shows a key by, in the desktop app and the terminal UI alike.
 
 | Key | Type | Default | Set by | Shown as | What it does |
 |---|---|---|---|---|---|
-| `watch` | boolean | `false` | any | watch mode | Act on `AI!` and `AI?` comments in the workspace's files. |
+| `watch` | boolean | `false` | user; project if trusted | watch mode | Act on `AI!` and `AI?` comments in the workspace's files. |
 | `watch_debounce_ms` | integer ≥ 0 | `300` | any |  | How long watch mode waits for writes to settle. |
 | `watch_poll_interval_ms` | integer ≥ 1 | `1000` | any |  | How often watch mode polls where it cannot be told. |
+| `watch_auto_approve` | boolean | `false` | user; project if trusted | watch auto approve | A branch an `AI!` or `AI?` comment starts runs its writes, edits, shell commands and MCP servers' tools without asking. Off, each asks, whatever `auto_approve`, the agent's own permissions and a server's `permission` say. |
 | `fs_events` | boolean | `false` | any |  | Record every file change in the workspace as an event. |
 | `fs_debounce_ms` | integer ≥ 0 | `100` | any |  | How long file events wait for writes to settle. |
 

@@ -171,7 +171,9 @@ convention and are disclosed progressively: one line per skill in the system pro
 `skill` tool that returns the body, and a read-only `skills:/` mount. The **project
 brief**, `.troupe/memory.md` at the repository root, is read into every prompt once and
 written by `remember` and a `librarian` agent. **Watch mode** acts on `AI!`, `AI?` and
-`AI` comments in saved files and ignores the agent's own writes by content hash.
+`AI` comments in saved files and ignores the agent's own writes by content hash: each
+trigger starts a `quick` or `answer` branch in the checkout, whose writes ask first
+(Decision 844).
 
 ## 3. The wire
 

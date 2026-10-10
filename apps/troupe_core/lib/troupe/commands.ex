@@ -430,8 +430,8 @@ defmodule Troupe.Commands do
         usage: "/watch",
         availability: "local",
         detail:
-          "A comment ending in AI! starts a change and AI? starts an answer. One session " <>
-            "per workspace watches at a time."
+          "A comment ending in AI! starts a quick branch in this checkout and AI? an answer " <>
+            "one; their writes ask first. One session per workspace watches at a time."
       ),
       entry("settings", "setup", "Settings, and the keys and concepts worth knowing",
         usage: "/settings",

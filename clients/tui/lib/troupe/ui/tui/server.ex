@@ -904,8 +904,10 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("back", _args, _state, _target), do: :back
   defp builtin("hq", args, _state, _target), do: {:hq, args}
 
+  # Toggled from what the daemon says now (D106), not from what this screen last set: a
+  # watch the desktop app turned on is turned off here.
   defp builtin("watch", _args, state, _target),
-    do: {:watch, toggle_watch(state.session_id, state.model.watch.enabled)}
+    do: {:watch, toggle_watch(state.session_id, Client.watch_status(state.session_id).enabled)}
 
   defp builtin("cancel", _args, state, target),
     do: with_target(target.(), &Client.cancel_branch(state.session_id, &1))
@@ -2818,9 +2820,33 @@ defmodule Troupe.UI.TUI.Server do
         _ -> model
       end
 
-    state = shell_ended(%{state | model: model}, event)
+    state = %{state | model: model} |> shell_ended(event) |> watch_triggered(event)
     if event.type == :remote_status, do: recheck_loop(state), else: state
   end
+
+  # A saved comment started a branch in the daemon (root Decision 844): its window opens
+  # as one started here does, and the line under the screen says which file and comment
+  # started which window. Only as it happens; a journal read back opens nothing.
+  defp watch_triggered(state, %{type: :watch_triggered, data: %{session_id: child} = d})
+       when is_binary(child) do
+    prompt = d.markers |> List.first(%{}) |> Map.get("comment", "")
+
+    case Client.adopt_branch(state.session_id, child, d.agent, prompt) do
+      {:ok, window} ->
+        notice(state, Model.watch_line(%{d | agent: window}))
+
+      {:error, reason} ->
+        notice(
+          state,
+          Model.watch_line(d) <> ", but its window did not open: " <> to_message(reason)
+        )
+    end
+  end
+
+  defp watch_triggered(state, %{type: :watch_triggered, data: d}),
+    do: notice(state, Model.watch_line(d))
+
+  defp watch_triggered(state, _event), do: state
 
   # The loop on the status line is the journal's, and a daemon that stopped mid-loop left
   # the journal saying it runs: `loop_stopped interrupted` is written only when the

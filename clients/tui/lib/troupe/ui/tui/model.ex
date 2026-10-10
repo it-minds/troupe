@@ -220,6 +220,10 @@ defmodule Troupe.UI.TUI.Model do
       :notice ->
         %{m | notices: Enum.take([e.data.text | m.notices], 3)}
 
+      # What the daemon says of watch, whoever turned it on or off (root Decision 844).
+      :watch_changed ->
+        %{m | watch: %{enabled: e.data.enabled, backend: e.data[:backend]}}
+
       # What the remote client knows about the session behind this window: the
       # session's own state, the scopes the token carries, and whether the
       # worker connection is up. The view reads it to disable what is not
@@ -340,6 +344,11 @@ defmodule Troupe.UI.TUI.Model do
 
       :remote_note ->
         push(ensure_agent(w, path), path, {:system, d.text})
+
+      # A saved comment started a branch of this session (root Decision 844): said in the
+      # session's own transcript, where the person would otherwise see nothing of it.
+      :watch_triggered ->
+        push(ensure_agent(w, path), path, {:system, watch_line(d)})
 
       # The person's own command (Decision 152): a block of its own, opened when it
       # starts, filled as it prints, and settled by the durable `user_shell`, which is all a
@@ -960,6 +969,23 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   def mcp_servers(_), do: []
+
+  @doc """
+  A `watch_triggered` as one line (root Decision 844): the file and comment, and what it
+  started, or why nothing did. `agent` is the agent's name, or the window's once it has one.
+  """
+  @spec watch_line(map()) :: String.t()
+  def watch_line(%{error: reason} = d) when is_binary(reason),
+    do: "watch: #{comment_at(d[:markers])} could not start #{d.agent}: #{reason}"
+
+  def watch_line(d), do: "watch: #{comment_at(d[:markers])} started #{d.agent}"
+
+  defp comment_at([%{} = marker | rest]) do
+    one = "#{marker["file"]}:#{marker["line"]} \"#{marker["comment"]}\""
+    if rest == [], do: one, else: "#{one} and #{length(rest)} more"
+  end
+
+  defp comment_at(_markers), do: "a comment"
 
   @doc "The agents of a window in display order: the root first, then its subagents by path."
   @spec agent_paths(window()) :: [String.t()]

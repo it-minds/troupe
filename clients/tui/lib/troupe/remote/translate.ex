@@ -105,7 +105,22 @@ defmodule Troupe.Remote.Translate do
            })
          ], memory}
 
-      type when type in ["presence", "summary_diff", "watch_notice"] ->
+      # Watch went on or off, whoever turned it (root Decision 844): the status line follows.
+      "watch_changed" ->
+        backend = if data["enabled"] == true, do: data["backend"]
+
+        {[
+           transient(session_id, agent, :watch_changed, %{
+             enabled: data["enabled"] == true,
+             backend: backend
+           })
+         ], memory}
+
+      # Watch fell back to polling, or could not start: the line under the screen.
+      "watch_notice" ->
+        {[transient(session_id, agent, :notice, %{text: to_string(data["message"] || "")})], memory}
+
+      type when type in ["presence", "summary_diff"] ->
         {[], memory}
 
       other ->
@@ -394,6 +409,19 @@ defmodule Troupe.Remote.Translate do
       "onboarding_suggested" ->
         {[emit.(:remote_note, %{text: to_string(data["message"] || "run troupe onboard here")})],
          memory}
+
+      # A saved `AI!` or `AI?` comment started a branch of this session (root Decision 844):
+      # the branch's session, its agent, and the comments, as the daemon wrote them.
+      "watch_triggered" ->
+        {[
+           emit.(:watch_triggered, %{
+             session_id: data["session_id"],
+             agent: to_string(data["agent"] || "quick"),
+             mode: data["mode"],
+             markers: List.wrap(data["markers"]),
+             error: data["error"]
+           })
+         ], memory}
 
       # The agent and skill files a start found and did not read (root Decision 826): on a
       # pod, a working copy's that the bundle's or a built-in's name beats; in a worktree,

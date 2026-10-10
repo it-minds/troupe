@@ -33,7 +33,8 @@ defmodule Troupe do
   Options: `:workspace`, `:agent` (starting profile), `:task` (a first message),
   `:session_id`, `:config_overrides`, `:definitions`, `:fake`, `:mounts`, `:bundle`
   (`%{version, hash, channel, dir}`), `:kind` (`:local` or `:team`), `:origin`,
-  `:parent` (the session id this one is a branch of).
+  `:parent` (the session id this one is a branch of), `:hold_auto` (no agent's `auto` and
+  no MCP server's `permission: auto` applies: a branch a saved comment started).
   """
   @spec start_session(keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(opts \\ []) do
@@ -515,8 +516,8 @@ defmodule Troupe do
     :exit, _ -> Log.read_session(session_id)
   end
 
-  @doc "Turn watch mode on or off, reporting which backend took over."
-  @spec watch(String.t(), boolean()) :: {:ok, :native | :poll | :off}
+  @doc "Turn watch mode on or off, reporting which backend took over; a pod's session refuses."
+  @spec watch(String.t(), boolean()) :: {:ok, :native | :poll | :off} | {:error, :not_local}
   def watch(session_id, enabled?), do: Watcher.set_enabled(session_id, enabled?)
 
   @doc """
@@ -742,39 +743,81 @@ defmodule Troupe do
   Turn watch mode on or off for a workspace.
 
   Watch is exclusive per workspace: two sessions watching the same files would both
-  act on the same marker.
+  act on the same marker. `session_id` names the session that watches; without one it
+  is the workspace's session that is no branch, since a branch a trigger started works
+  in the same checkout (Decision 844). Off turns off whichever session watches there.
   """
-  @spec set_watch(Path.t(), boolean()) ::
-          {:ok, :native | :poll | :off} | {:error, :already_watching | :no_session}
-  def set_watch(workspace, enabled?) do
-    sessions =
-      %{}
-      |> list_live_sessions()
-      |> Enum.filter(&(&1.workspace == workspace and &1.state == :active))
+  @spec set_watch(Path.t(), boolean(), String.t() | nil) ::
+          {:ok, :native | :poll | :off}
+          | {:error, :already_watching | :no_session | :not_local}
+  def set_watch(workspace, enabled?, session_id \\ nil) do
+    sessions = active_in(workspace)
+    watching = Enum.filter(sessions, &watching?(&1.id))
 
-    case sessions do
-      [] ->
+    cond do
+      sessions == [] ->
         {:error, :no_session}
 
-      [session] ->
-        watch(session.id, enabled?)
+      not enabled? ->
+        Enum.each(watching, &watch(&1.id, false))
+        {:ok, :off}
 
-      [session | _rest] when enabled? ->
-        if Enum.any?(sessions, &watching?(&1.id)) do
-          {:error, :already_watching}
-        else
-          watch(session.id, enabled?)
+      session_id != nil and Enum.any?(watching, &(&1.id != session_id)) ->
+        {:error, :already_watching}
+
+      true ->
+        case watcher_for(sessions, watching, session_id) do
+          nil -> {:error, :no_session}
+          session -> watch(session.id, true)
         end
-
-      [session | _rest] ->
-        watch(session.id, enabled?)
     end
   end
+
+  @doc """
+  Whether a workspace is watched, how, and by which session (Decision 844): `enabled`,
+  `backend` (`:native`, `:poll` or `:off`) and `session_id`, `nil` when none watches.
+  """
+  @spec watch_state(Path.t()) :: %{
+          enabled: boolean(),
+          backend: :native | :poll | :off,
+          session_id: String.t() | nil
+        }
+  def watch_state(workspace) do
+    case workspace |> active_in() |> Enum.find(&watching?(&1.id)) do
+      nil -> %{enabled: false, backend: :off, session_id: nil}
+      session -> %{enabled: true, backend: backend_of(session.id), session_id: session.id}
+    end
+  end
+
+  # A session records its workspace's real path; a client names it as it has it, which on
+  # Windows may be another spelling of the same directory.
+  defp active_in(workspace) do
+    names =
+      case Troupe.Workspace.new(workspace) do
+        {:ok, resolved} -> [workspace, resolved.root_real]
+        {:error, _} -> [workspace]
+      end
+
+    %{}
+    |> list_live_sessions()
+    |> Enum.filter(&(&1.workspace in names and &1.state == :active))
+  end
+
+  # The session already watching, the one named, or the workspace's that is no branch.
+  defp watcher_for(_sessions, [session | _], _session_id), do: session
+  defp watcher_for(sessions, [], nil), do: Enum.find(sessions, &is_nil(&1.parent)) || hd(sessions)
+  defp watcher_for(sessions, [], session_id), do: Enum.find(sessions, &(&1.id == session_id))
 
   defp watching?(session_id) do
     Watcher.enabled?(session_id)
   catch
     :exit, _ -> false
+  end
+
+  defp backend_of(session_id) do
+    Watcher.backend(session_id)
+  catch
+    :exit, _ -> :off
   end
 
   defp with_root(session_id, fun) do

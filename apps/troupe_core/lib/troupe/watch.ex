@@ -29,11 +29,13 @@ end
 
 defmodule Troupe.Watch.Trigger do
   @moduledoc """
-  What the watcher hands the root agent: one message per debounced scan.
+  What the watcher hands the branch it starts (`Troupe.Watch.Branch`): one message per
+  debounced scan.
 
   `markers` holds every `AI!` or `AI?` comment found, and `context` every bare `AI`
   comment in the workspace. `mode` is `:change` unless every marker was a question,
-  in which case the turn runs under the `plan` permission set and cannot edit.
+  in which case the branch is `answer` and its turn runs under the `plan` permission set
+  and cannot edit.
   """
 
   alias Troupe.Watch.Marker
@@ -65,8 +67,8 @@ defmodule Troupe.Watch.Trigger do
   defp header(%__MODULE__{mode: :question}) do
     """
     A file in the workspace has an AI? comment. Answer the question in prose.
-    You are running under the read-only plan profile for this turn: you cannot edit
-    files, and you should not try.
+    You are running under the read-only plan permission set for this turn: you cannot
+    edit files, and you should not try.
     """
     |> String.trim()
   end
