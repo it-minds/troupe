@@ -105,7 +105,22 @@ defmodule Troupe.Remote.Translate do
            })
          ], memory}
 
-      type when type in ["presence", "summary_diff", "watch_notice"] ->
+      # Watch went on or off, whoever turned it (root Decision 844): the status line follows.
+      "watch_changed" ->
+        backend = if data["enabled"] == true, do: data["backend"]
+
+        {[
+           transient(session_id, agent, :watch_changed, %{
+             enabled: data["enabled"] == true,
+             backend: backend
+           })
+         ], memory}
+
+      # Watch fell back to polling, or could not start: the line under the screen.
+      "watch_notice" ->
+        {[transient(session_id, agent, :notice, %{text: to_string(data["message"] || "")})], memory}
+
+      type when type in ["presence", "summary_diff"] ->
         {[], memory}
 
       other ->
@@ -389,6 +404,31 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:remote_note, %{text: to_string(data["reason"] || "the command was not sent")})],
          memory}
 
+      # What `troupe onboard`, or the librarian, would do in this workspace, said once at a
+      # start (troupe Decision 827): the harness's own sentence, as a line.
+      "onboarding_suggested" ->
+        {[emit.(:remote_note, %{text: to_string(data["message"] || "run troupe onboard here")})],
+         memory}
+
+      # A saved `AI!` or `AI?` comment started a branch of this session (root Decision 844):
+      # the branch's session, its agent, and the comments, as the daemon wrote them.
+      "watch_triggered" ->
+        {[
+           emit.(:watch_triggered, %{
+             session_id: data["session_id"],
+             agent: to_string(data["agent"] || "quick"),
+             mode: data["mode"],
+             markers: List.wrap(data["markers"]),
+             error: data["error"]
+           })
+         ], memory}
+
+      # The agent and skill files a start found and did not read (root Decision 826): on a
+      # pod, a working copy's that the bundle's or a built-in's name beats; in a worktree,
+      # one the main checkout has not committed.
+      "files_skipped" ->
+        {[emit.(:remote_note, %{text: files_skipped(data["files"])})], memory}
+
       "approval_resolved" ->
         {[], memory}
 
@@ -398,8 +438,13 @@ defmodule Troupe.Remote.Translate do
       "agent.state" ->
         {[emit.(:agent_state, %{to: state_atom(data["to"] || data["state"])})], memory}
 
+      # What the window runs is named by the agent itself, whatever the window is called
+      # (TUI Decision 156).
       "agent_started" ->
-        {[emit.(:remote_note, %{text: "agent started" <> as(data)})], memory}
+        {[
+           emit.(:remote_note, %{text: "agent started" <> as(data)}),
+           emit.(:agent_named, %{name: data["profile"]})
+         ], memory}
 
       "agent_restarted" ->
         {[emit.(:remote_note, %{text: "agent restarted"})], memory}
@@ -455,8 +500,13 @@ defmodule Troupe.Remote.Translate do
            })
          ], memory}
 
+      # The transcript says when the rules changed and what they took away or gave (root
+      # Decision 841); the window's header follows the agent it runs now (TUI Decision 156).
       "profile_switched" ->
-        {[emit.(:remote_note, %{text: "profile switched" <> switch(data)})], memory}
+        {[
+           emit.(:remote_note, %{text: "profile switched" <> switch(data) <> tools_changed(data)}),
+           emit.(:agent_named, %{name: data["to"]})
+         ], memory}
 
       # The session's goal (issue #59): its own events, because the window keeps it and the
       # status line shows it for as long as it is set, not only when it is announced.
@@ -500,7 +550,10 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:remote_note, %{text: "delegated" <> to_child(data)})], memory}
 
       "session_created" ->
-        {[emit.(:remote_note, %{text: "session created" <> as(data)})], memory}
+        {[
+           emit.(:remote_note, %{text: "session created" <> as(data)}),
+           emit.(:agent_named, %{name: data["profile"]})
+         ], memory}
 
       type when type in ["input_after_done", "trigger_fired"] ->
         {[emit.(:remote_note, %{text: generic(type, data)})], memory}
@@ -694,6 +747,19 @@ defmodule Troupe.Remote.Translate do
   defp switch(%{"to" => to}) when is_binary(to), do: " to #{to}"
   defp switch(_data), do: ""
 
+  # `(project) · gains shell · loses write_file, edit_file`, from what a daemon since
+  # Decision 841 says of a switch; an older one's says neither.
+  defp tools_changed(data) do
+    layer = if is_binary(data["layer"]), do: " (#{data["layer"]})", else: ""
+
+    [{"gains", data["tools_added"]}, {"loses", data["tools_removed"]}]
+    |> Enum.flat_map(fn
+      {word, [_ | _] = tools} -> [" · #{word} " <> Enum.join(tools, ", ")]
+      {_word, _none} -> []
+    end)
+    |> then(&Enum.join([layer | &1]))
+  end
+
   defp to_child(%{"child_path" => [_ | _] = path}), do: " to " <> Enum.join(path, "/")
   defp to_child(%{"agent" => agent}) when is_binary(agent), do: " to #{agent}"
   defp to_child(_data), do: ""
@@ -864,6 +930,45 @@ defmodule Troupe.Remote.Translate do
 
   defp because(%{"reason" => reason}) when is_binary(reason), do: ": #{reason}"
   defp because(_data), do: ""
+
+  # How many of each kind, then each reason once with the files it covers: a worktree's
+  # one reason fits every file, while a pod's names the file it is about. An empty list
+  # says the files listed before are read now, or gone.
+  defp files_skipped(files) do
+    case Enum.filter(List.wrap(files), &is_map/1) do
+      [] ->
+        "no agent or skill file is skipped now"
+
+      files ->
+        by_reason = Enum.group_by(files, &skipped_reason/1, &skipped_file/1)
+
+        reasons =
+          files
+          |> Enum.map(&skipped_reason/1)
+          |> Enum.uniq()
+          |> Enum.map(&(Enum.join(by_reason[&1], ", ") <> ": " <> &1))
+
+        Enum.join([counted(files) <> " not read here:" | reasons], "\n")
+    end
+  end
+
+  defp skipped_reason(file), do: to_string(file["reason"] || "not read")
+  defp skipped_kind(file), do: to_string(file["kind"] || "file")
+  defp skipped_file(file), do: "#{skipped_kind(file)} #{file["name"]} (#{file["path"]})"
+
+  # `2 agents and 1 skill`, the kinds in the order the list first names them.
+  defp counted(files) do
+    kinds = Enum.map(files, &skipped_kind/1)
+    many = Enum.frequencies(kinds)
+
+    case Enum.map(Enum.uniq(kinds), &count_of(&1, many[&1])) do
+      [one] -> one
+      some -> Enum.join(Enum.drop(some, -1), ", ") <> " and " <> List.last(some)
+    end
+  end
+
+  defp count_of(kind, 1), do: "1 #{kind}"
+  defp count_of(kind, n), do: "#{n} #{kind}s"
 
   # How a person's command ended, and where it ran: a session on a plane says which
   # profile's pod, and is otherwise drawn as a local one is.

@@ -77,6 +77,24 @@ defmodule Troupe.Client.Remote do
   def dispatch(_sid, _name, _args),
     do: {:error, "a remote session runs one profile; create another session from HQ"}
 
+  # A pod starts no branches, so command mode's chooser has nothing to start here
+  # (TUI Decision 155), and the pod's checkout is its only one.
+  @impl true
+  def agent_definition(_sid, _name),
+    do: {:error, "a remote session runs one profile; create another session from HQ"}
+
+  @impl true
+  def worktree_status(_sid), do: {:ok, []}
+
+  @impl true
+  def start_command(_sid, _agent, _name, _arguments, _mode),
+    do: {:error, "a remote session runs one profile; create another session from HQ"}
+
+  # A pod's session never watches, so no comment starts a branch of it.
+  @impl true
+  def adopt_branch(_sid, _child, _profile, _prompt),
+    do: {:error, "watch mode runs where the files are"}
+
   @impl true
   def send_input(sid, _path, text), do: describe(Worker.input(sid, text))
 
@@ -103,6 +121,11 @@ defmodule Troupe.Client.Remote do
   # remote agent's `ask_user` reaches it.
   @impl true
   def answer(sid, call_id, text), do: describe(Worker.answer(sid, call_id, text))
+
+  # A pod's session asks nothing at its start: onboarding runs on the person's own machine
+  # (root Decision 826), and its brief is the pod's.
+  @impl true
+  def answer_local(_sid, _id, _key), do: {:error, "a session on a pod asks nothing at its start"}
 
   @impl true
   def edit_todo(sid, _path, change), do: describe(Worker.edit_todo(sid, change))
@@ -147,11 +170,10 @@ defmodule Troupe.Client.Remote do
   @impl true
   def cancel_branch(sid, _path), do: describe(Worker.cancel(sid))
 
+  # A pod session has one window, its own, which stays: letting go of it under the screen
+  # sent what was typed next to this machine's daemon (Decision 843).
   @impl true
-  def dismiss(sid, _path) do
-    Worker.detach(sid)
-    :ok
-  end
+  def dismiss(_sid, _path), do: {:error, Troupe.Client.own_window()}
 
   @impl true
   def merge(_sid, _path), do: {:error, "a remote session has no local worktree to merge"}
@@ -182,8 +204,41 @@ defmodule Troupe.Client.Remote do
   def manage_sources(_sid, _method, _params),
     do: {:error, "a remote session's MCP servers and skills are its profile's"}
 
+  # A pod's agents are its profile's bundle (root Decision 841): the worker reads and checks
+  # them, and says so in the same words it refuses a write with, which are never sent.
+  @pod_agents "On a pod the agents come from the profile's bundle and are read-only here: " <>
+                "change them in the console"
+
+  @impl true
+  def agents(sid, "agents.list", params) do
+    case Worker.rpc(sid, "agents.list", params) do
+      {:ok, %{} = listed} -> {:ok, Map.put(listed, "read_only", @pod_agents)}
+      {:ok, other} -> {:error, "unexpected agents.list answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  def agents(sid, method, params) when method in ~w(agents.get agents.validate) do
+    case Worker.rpc(sid, method, Map.put(params, :session_id, sid)) do
+      {:ok, %{} = answer} -> {:ok, answer}
+      {:ok, other} -> {:error, "unexpected #{method} answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  def agents(_sid, method, _params) when method in ~w(agents.put agents.delete),
+    do: {:error, @pod_agents}
+
+  def agents(_sid, method, _params), do: {:error, "unknown method #{method}"}
+
   @impl true
   def memory(_sid, _command), do: {:error, "the project brief lives on the worker"}
+
+  @impl true
+  def memory_facts(_sid), do: {:error, "the project brief lives on the worker"}
+
+  @impl true
+  def forget_fact(_sid, _id), do: {:error, "the project brief lives on the worker"}
 
   # The pod's checkout has instruction files of its own, and `context.get` is a session
   # method a worker answers; the paths are the pod's, shown as they come.

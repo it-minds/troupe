@@ -686,6 +686,74 @@ defmodule Troupe.RemoteTranslateTest do
     assert {data.status, data.agent, data.where} == {:killed, false, nil}
   end
 
+  # Decision 826: the files a start found and did not read, as a person reads them, not as
+  # the event's field names.
+  test "files_skipped says what was not read, how many, and why" do
+    bundle =
+      "the session's bundle has an agent named build, and on a pod the bundle's beats a " <>
+        "repository's unless the profile allows the repository's"
+
+    shipped =
+      "plan is an agent Troupe ships, and on a pod Troupe's own beats a repository's " <>
+        "unless the profile allows the repository's"
+
+    files = [
+      %{
+        "kind" => "agent",
+        "name" => "build",
+        "path" => "/w/.troupe/agents/build.md",
+        "reason" => bundle
+      },
+      %{
+        "kind" => "agent",
+        "name" => "plan",
+        "path" => "/w/.troupe/agents/plan.md",
+        "reason" => shipped
+      }
+    ]
+
+    [note] = translate(durable("files_skipped", %{"files" => files}))
+    assert note.type == :remote_note
+
+    assert note.data.text ==
+             "2 agents not read here:\n" <>
+               "agent build (/w/.troupe/agents/build.md): #{bundle}\n" <>
+               "agent plan (/w/.troupe/agents/plan.md): #{shipped}"
+
+    assert [{:system, _}] = folded([note]).transcript
+
+    # A worktree's: one reason for every file the main checkout has not committed, said once.
+    uncommitted =
+      "not committed in /main, the checkout this worktree belongs to, and a worktree reads " <>
+        "only what the checkout has committed: commit it to use it here"
+
+    files = [
+      %{
+        "kind" => "agent",
+        "name" => "draft",
+        "path" => "/main/.troupe/agents/draft.md",
+        "reason" => uncommitted
+      },
+      %{
+        "kind" => "skill",
+        "name" => "tidy",
+        "path" => "/main/.troupe/skills/tidy/SKILL.md",
+        "reason" => uncommitted
+      }
+    ]
+
+    [note] = translate(durable("files_skipped", %{"files" => files}))
+
+    assert note.data.text ==
+             "1 agent and 1 skill not read here:\n" <>
+               "agent draft (/main/.troupe/agents/draft.md), skill tidy (/main/.troupe/skills/tidy/SKILL.md): " <>
+               uncommitted
+
+    # An empty list is the files gone, or read now.
+    [note] = translate(durable("files_skipped", %{"files" => []}))
+    assert note.data.text == "no agent or skill file is skipped now"
+  end
+
   # The root window after `events`: its transcript, and the inputs it has drawn and not yet
   # seen taken.
   defp folded(events) do
@@ -697,7 +765,8 @@ defmodule Troupe.RemoteTranslateTest do
       ts: 1
     }
 
-    [window] = "s-1" |> Model.rebuild("/w", [spawned | events]) |> Model.windows()
+    # The session's own window, listed or not (TUI Decision 155).
+    window = "s-1" |> Model.rebuild("/w", [spawned | events]) |> Model.session_window()
     %{transcript: window.agents["root"].transcript, drawn_inputs: window.drawn_inputs}
   end
 end

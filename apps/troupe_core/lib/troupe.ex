@@ -13,12 +13,17 @@ defmodule Troupe do
 
   """
 
+  alias Troupe.Agent.Definitions
   alias Troupe.Agent.Server, as: Agent
-  alias Troupe.{Events, Mounts, Registry, Session, Sessions}
+  alias Troupe.Commands.Local, as: CommandFiles
+  alias Troupe.{Events, Mounts, Registry, Session, Sessions, Skills, Workflow}
   alias Troupe.LLM.Catalog.Refresher
+  alias Troupe.Onboard.Notice
   alias Troupe.Protocol.Origin
   alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
   alias Troupe.Sessions.{Fork, Index, Unseen}
+
+  require Logger
 
   @type session :: %{id: String.t(), pid: pid(), workspace: Troupe.Workspace.t()}
 
@@ -28,7 +33,8 @@ defmodule Troupe do
   Options: `:workspace`, `:agent` (starting profile), `:task` (a first message),
   `:session_id`, `:config_overrides`, `:definitions`, `:fake`, `:mounts`, `:bundle`
   (`%{version, hash, channel, dir}`), `:kind` (`:local` or `:team`), `:origin`,
-  `:parent` (the session id this one is a branch of).
+  `:parent` (the session id this one is a branch of), `:hold_auto` (no agent's `auto` and
+  no MCP server's `permission: auto` applies: a branch a saved comment started).
   """
   @spec start_session(keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(opts \\ []) do
@@ -41,7 +47,9 @@ defmodule Troupe do
          {:ok, pid} <- Sessions.start_session(session_opts) do
       session_id = Keyword.fetch!(session_opts, :session_id)
       workspace = Keyword.fetch!(session_opts, :workspace)
-      profile = Keyword.fetch!(session_opts, :profile)
+      # The agent it runs: the one its root was last switched to, which its replay comes
+      # back on, or the one it was started on (Decision 841).
+      profile = Index.switched_to(previously) || Keyword.fetch!(session_opts, :profile)
 
       Index.register(session_id, pid, %{
         workspace: workspace.root_real,
@@ -76,6 +84,9 @@ defmodule Troupe do
           Mounts.to_json(workspace.mounts)
         )
       end
+
+      skipped(session_id, session_opts, previously)
+      onboarding(session_id, session_opts)
 
       # The model catalog is refreshed in the background when it is stale (Decision 778):
       # this session started with the cache as it was and never waits. Not on a pod,
@@ -182,6 +193,63 @@ defmodule Troupe do
     end
   end
 
+  # The agent and skill files this start found and did not read, each with why (Decision
+  # 826): on a pod, a working copy's file of a name the bundle has; in a worktree, one the
+  # main checkout has not committed. With them, the workspace's agents, skills, commands
+  # and workflows that are really outside it, a skill whose `SKILL.md` can't be read, and
+  # what its `skills.json` links from outside the repository while it is not trusted
+  # (Decision 829). Read again at every start, as the definitions are,
+  # and written when the list differs from the one the log last recorded, so a session
+  # that keeps the same file through many activations says so once, and one whose file
+  # went away says that too.
+  defp skipped(session_id, session_opts, previously) do
+    workspace = Keyword.fetch!(session_opts, :workspace)
+    bundle = Keyword.get(session_opts, :bundle)
+
+    files =
+      session_opts
+      |> Keyword.fetch!(:definitions)
+      |> Definitions.skipped()
+      |> Kernel.++(Skills.skipped(bundle, workspace.root_real, trusted: workspace.trusted?))
+      |> Kernel.++(CommandFiles.skipped(workspace.root_real))
+      |> Kernel.++(Workflow.skipped(workspace.root_real))
+      |> Enum.map(&Definitions.skipped_to_json/1)
+
+    last =
+      previously
+      |> Enum.reverse()
+      |> Enum.find_value([], &(&1.type == "files_skipped" && &1.data["files"]))
+
+    if files != last,
+      do: Log.append(session_id, Session.root_path(), :files_skipped, %{"files" => files})
+  end
+
+  # What `troupe onboard` would do in this workspace (Decision 827), said at every start
+  # while it is due and not declined, with what a client's start asks next (`due`,
+  # `brief_due`, Decision 835): on the person's own machine, by a session with no bundle,
+  # and nothing written. A failure here is the notice's, never the session's.
+  defp onboarding(session_id, session_opts) do
+    config = Keyword.fetch!(session_opts, :config)
+
+    if Keyword.get(session_opts, :kind, :local) == :local and
+         Keyword.get(session_opts, :bundle) == nil do
+      workspace = Keyword.fetch!(session_opts, :workspace)
+
+      case Notice.due(workspace.root_real,
+             state_dir: config.state_dir,
+             config: config,
+             memory: config.memory != false
+           ) do
+        nil -> :ok
+        data -> Log.append(session_id, Session.root_path(), :onboarding_suggested, data)
+      end
+    end
+  rescue
+    error ->
+      Logger.warning("onboarding: no notice for this session: #{Exception.message(error)}")
+      :ok
+  end
+
   defp shared_mounts?(nil), do: false
 
   defp shared_mounts?(%Mounts{entries: entries}), do: Enum.any?(entries, &(&1.kind != :session))
@@ -254,9 +322,17 @@ defmodule Troupe do
   @spec cancel(String.t()) :: :ok | {:error, :no_session}
   def cancel(session_id), do: with_root(session_id, &Agent.cancel/1)
 
-  @doc "Switch the root agent's primary profile, applied at the next turn boundary."
-  @spec switch_profile(String.t(), String.t()) :: :ok | {:error, :no_session}
-  def switch_profile(session_id, name), do: with_root(session_id, &Agent.switch_profile(&1, name))
+  @doc """
+  Switch the root agent, a session's or a branch's (a branch is a session, Decision 646),
+  to another primary agent, read from its file now and applied at the next turn boundary
+  (Decision 841): `{:ok, definition}` once it is on its way, or why not. `opts`: `:actor`
+  and `:command_id`, written on `profile_switched`.
+  """
+  @spec switch_profile(String.t(), String.t(), keyword()) ::
+          {:ok, Troupe.Agent.Definition.t()}
+          | {:error, :no_session | {:unknown_agent, String.t()} | {:not_primary, String.t()}}
+  def switch_profile(session_id, name, opts \\ []),
+    do: with_root(session_id, &Agent.switch_profile(&1, name, opts))
 
   @doc """
   Set the session's goal: what every later turn of the root agent works towards, until it
@@ -440,8 +516,8 @@ defmodule Troupe do
     :exit, _ -> Log.read_session(session_id)
   end
 
-  @doc "Turn watch mode on or off, reporting which backend took over."
-  @spec watch(String.t(), boolean()) :: {:ok, :native | :poll | :off}
+  @doc "Turn watch mode on or off, reporting which backend took over; a pod's session refuses."
+  @spec watch(String.t(), boolean()) :: {:ok, :native | :poll | :off} | {:error, :not_local}
   def watch(session_id, enabled?), do: Watcher.set_enabled(session_id, enabled?)
 
   @doc """
@@ -667,39 +743,81 @@ defmodule Troupe do
   Turn watch mode on or off for a workspace.
 
   Watch is exclusive per workspace: two sessions watching the same files would both
-  act on the same marker.
+  act on the same marker. `session_id` names the session that watches; without one it
+  is the workspace's session that is no branch, since a branch a trigger started works
+  in the same checkout (Decision 844). Off turns off whichever session watches there.
   """
-  @spec set_watch(Path.t(), boolean()) ::
-          {:ok, :native | :poll | :off} | {:error, :already_watching | :no_session}
-  def set_watch(workspace, enabled?) do
-    sessions =
-      %{}
-      |> list_live_sessions()
-      |> Enum.filter(&(&1.workspace == workspace and &1.state == :active))
+  @spec set_watch(Path.t(), boolean(), String.t() | nil) ::
+          {:ok, :native | :poll | :off}
+          | {:error, :already_watching | :no_session | :not_local}
+  def set_watch(workspace, enabled?, session_id \\ nil) do
+    sessions = active_in(workspace)
+    watching = Enum.filter(sessions, &watching?(&1.id))
 
-    case sessions do
-      [] ->
+    cond do
+      sessions == [] ->
         {:error, :no_session}
 
-      [session] ->
-        watch(session.id, enabled?)
+      not enabled? ->
+        Enum.each(watching, &watch(&1.id, false))
+        {:ok, :off}
 
-      [session | _rest] when enabled? ->
-        if Enum.any?(sessions, &watching?(&1.id)) do
-          {:error, :already_watching}
-        else
-          watch(session.id, enabled?)
+      session_id != nil and Enum.any?(watching, &(&1.id != session_id)) ->
+        {:error, :already_watching}
+
+      true ->
+        case watcher_for(sessions, watching, session_id) do
+          nil -> {:error, :no_session}
+          session -> watch(session.id, true)
         end
-
-      [session | _rest] ->
-        watch(session.id, enabled?)
     end
   end
+
+  @doc """
+  Whether a workspace is watched, how, and by which session (Decision 844): `enabled`,
+  `backend` (`:native`, `:poll` or `:off`) and `session_id`, `nil` when none watches.
+  """
+  @spec watch_state(Path.t()) :: %{
+          enabled: boolean(),
+          backend: :native | :poll | :off,
+          session_id: String.t() | nil
+        }
+  def watch_state(workspace) do
+    case workspace |> active_in() |> Enum.find(&watching?(&1.id)) do
+      nil -> %{enabled: false, backend: :off, session_id: nil}
+      session -> %{enabled: true, backend: backend_of(session.id), session_id: session.id}
+    end
+  end
+
+  # A session records its workspace's real path; a client names it as it has it, which on
+  # Windows may be another spelling of the same directory.
+  defp active_in(workspace) do
+    names =
+      case Troupe.Workspace.new(workspace) do
+        {:ok, resolved} -> [workspace, resolved.root_real]
+        {:error, _} -> [workspace]
+      end
+
+    %{}
+    |> list_live_sessions()
+    |> Enum.filter(&(&1.workspace in names and &1.state == :active))
+  end
+
+  # The session already watching, the one named, or the workspace's that is no branch.
+  defp watcher_for(_sessions, [session | _], _session_id), do: session
+  defp watcher_for(sessions, [], nil), do: Enum.find(sessions, &is_nil(&1.parent)) || hd(sessions)
+  defp watcher_for(sessions, [], session_id), do: Enum.find(sessions, &(&1.id == session_id))
 
   defp watching?(session_id) do
     Watcher.enabled?(session_id)
   catch
     :exit, _ -> false
+  end
+
+  defp backend_of(session_id) do
+    Watcher.backend(session_id)
+  catch
+    :exit, _ -> :off
   end
 
   defp with_root(session_id, fun) do

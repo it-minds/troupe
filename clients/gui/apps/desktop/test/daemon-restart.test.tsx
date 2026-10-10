@@ -68,7 +68,9 @@ describe("a daemon that restarts while the app is open", () => {
 
     // The session open on screen, reading its history.
     daemon.say(session.id, "before the restart");
-    [...document.querySelectorAll<HTMLButtonElement>(".recent button")][0]!.click();
+    // "Connected" comes before the list's first answer; the row is there once it lands.
+    const row = await waitFor(() => document.querySelector<HTMLButtonElement>(".recent button"), "the session's row");
+    row.click();
     await waitFor(() => says("before the restart"), "the session on screen");
 
     const before = daemon.published;

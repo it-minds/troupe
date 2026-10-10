@@ -126,7 +126,7 @@ defmodule Troupe.CLI.Terminal do
 
   # A program that is not there, fails or takes over a second has no answer.
   defp command(program, args) do
-    with path when is_binary(path) <- System.find_executable(program) do
+    with path when is_binary(path) <- Troupe.OS.Process.executable(program) do
       task =
         Task.async(fn ->
           try do

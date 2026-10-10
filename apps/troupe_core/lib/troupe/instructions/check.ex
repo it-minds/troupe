@@ -3,7 +3,7 @@ defmodule Troupe.Instructions.Check do
   `troupe instructions check`: the instruction files a session in a workspace would read,
   checked against each other and against this machine (issue #123, Decision 810).
 
-  Four kinds of finding, each on one line with its file and line:
+  Six kinds of finding, each on one line with its file and line:
 
   - `contradiction`: two scopes name different commands for one subject, as the root's
     `npm test` and `frontend/AGENTS.md`'s `pnpm test` do. The subject (test, build, lint,
@@ -11,11 +11,18 @@ defmodule Troupe.Instructions.Check do
     held to the nearest scope around it that names the same subject in the same
     ecosystem, and the two disagree when they name no command in common.
   - `path`: a repository path a rule names, in a code span or a link, that is not there,
-    from the file's directory or from the repository root; and an `@` import the loader
-    found missing.
+    from the directory the file is about (the one holding its `.agents` or `.troupe`), its
+    own directory or the repository root; and an `@` import the loader found missing.
   - `command`: a command a rule names, in a code span or a fenced block, whose program is
     not on the `PATH` a session's commands run with.
   - `duplicate`: a rule, a paragraph or a list item, said again in another file.
+  - `drift`: a file onboarding wrote, under the workspace's `.troupe/` or the person's
+    config directory, whose source has changed or gone since (Decision 823), read from the
+    provenance the file recorded (`Troupe.Onboard.drift/2`), not from a search of its own.
+  - `outdated`: the workspace was onboarded under older onboarding rules than this
+    build's (Decision 827), on the line of `.troupe/onboarded.json`'s `onboarding`; `troupe
+    onboard` shows what the newer rules would write, and a run that answers every question
+    records them. Also `Troupe.Onboard.drift/2`'s.
 
   Each would rather miss a finding than make a false one: only what reads unmistakably as
   a command or a repository path is checked (`Troupe.Instructions.Check.Text`), and the
@@ -23,30 +30,34 @@ defmodule Troupe.Instructions.Check do
 
   The files are `Troupe.Instructions.load/3`'s, as a session that had worked on every file
   under the workspace would read them, so a nested `AGENTS.md` is checked wherever it is
-  and whatever else the loader reads comes with it. Which files, which alias and which
-  import are the loader's alone; this reads each file it read again, whole, for the lines.
-  The brief is Troupe's own, and not checked.
+  and whatever else the loader reads comes with it: `.agents/AGENTS.md` and
+  `.troupe/rules/*.md`, and none of the other tools' files it lists as skipped (Decision
+  828). Which files and which import are the loader's alone; this reads each file it read
+  again, whole, for the lines. The brief is Troupe's own, and not checked.
 
   `findings/2` is pure but for the two probes it is handed; `run/2` reads.
   """
 
-  alias Troupe.{Gitignore, Instructions, Paths, Reaper}
+  alias Troupe.{Executable, Gitignore, Instructions, Onboard, Paths, Reaper}
   alias Troupe.Instructions.Check.Text
 
-  @type kind :: :contradiction | :path | :command | :duplicate
+  @type kind :: :contradiction | :path | :command | :duplicate | :drift | :outdated
 
   @type finding :: %{path: Path.t(), line: pos_integer(), kind: kind(), message: String.t()}
 
   @typedoc """
   One file the loader read: its path, scope and directory as `Troupe.Instructions` gives
-  them, the imports it named that were not followed, and its whole content.
+  them, the imports it named that were not followed, and its whole content. `directory`
+  is the one the file is about, the loader's: an `.agents/AGENTS.md`'s or a rule's is the
+  directory that holds its `.agents` or `.troupe`, not the file's own.
   """
   @type source :: %{
-          path: Path.t(),
-          scope: atom(),
-          where: String.t() | nil,
-          unfollowed: [map()],
-          content: String.t()
+          required(:path) => Path.t(),
+          required(:scope) => atom(),
+          required(:where) => String.t() | nil,
+          required(:unfollowed) => [map()],
+          required(:content) => String.t(),
+          optional(:directory) => Path.t()
         }
 
   # What each subject is for, in the finding's words.
@@ -114,7 +125,8 @@ defmodule Troupe.Instructions.Check do
   Checks the instruction files a session in `workspace` would read, and answers what
   `troupe instructions check` prints and its exit status: 0 for no finding, 1 for any, 2
   when the workspace cannot be read. `json: true` prints the same as one object.
-  `executable?` replaces the `PATH` lookup, for a test.
+  `executable?` replaces the `PATH` lookup, and `config_dir` and `home` where onboarded
+  files and their sources are, for a test.
   """
   @spec run(Path.t(), keyword()) :: {String.t(), 0 | 1 | 2}
   def run(workspace, opts \\ []) do
@@ -125,7 +137,18 @@ defmodule Troupe.Instructions.Check do
       {:ok, _names} ->
         %{root: root, sources: sources, elsewhere?: elsewhere?} = sources(workspace)
         found = findings(sources, [root: root, elsewhere?: elsewhere?] ++ opts)
-        report(%{workspace: workspace, root: root, sources: sources, findings: found}, json?)
+        onboarded = Onboard.drift(workspace, Keyword.take(opts, [:config_dir, :home]))
+
+        report(
+          %{
+            workspace: workspace,
+            root: root,
+            sources: sources,
+            onboarded: onboarded.files,
+            findings: found ++ onboarded.findings
+          },
+          json?
+        )
 
       {:error, reason} ->
         unreadable(workspace, reason, json?)
@@ -153,9 +176,11 @@ defmodule Troupe.Instructions.Check do
 
     sources =
       for file <- loaded.files,
-          file.scope != :brief and file.status not in [:skipped, :outside],
+          file.scope != :brief and file.status not in [:skipped, :outside, :unreadable],
           {:ok, content} <- [File.read(file.path)] do
-        file |> Map.take([:path, :scope, :where, :unfollowed]) |> Map.put(:content, content)
+        file
+        |> Map.take([:path, :scope, :where, :unfollowed, :directory])
+        |> Map.put(:content, content)
       end
 
     %{root: root, sources: sources, elsewhere?: elsewhere(workspace, root, files, ignore)}
@@ -369,17 +394,20 @@ defmodule Troupe.Instructions.Check do
     ArgumentError -> target
   end
 
-  # Missing from the file's directory and from the root alike, and not one the repository
-  # has under another directory (a rule that names `client/link.ex` after naming
-  # `lib/troupe/`) or hides (`_build/`). A path that leads out of the repository is not
-  # judged at all. A link's target is a path whatever it looks like; a span's is not when
-  # its first directory is not here and nothing else says it is one (`origin/main`,
-  # `example.com/x.md`).
+  # Missing from the directory the file is about, its own and the root alike, and not one
+  # the repository has under another directory (a rule that names `client/link.ex` after
+  # naming `lib/troupe/`) or hides (`_build/`). A path that leads out of the repository is
+  # not judged at all. A link's target is a path whatever it looks like; a span's is not
+  # when its first directory is not here and nothing else says it is one (`origin/main`,
+  # `example.com/x.md`). The directory a file is about is its scope's: `web/` for
+  # `web/.agents/AGENTS.md` and a rule in `web/.troupe/rules`, the file's own for the rest.
   defp missing?(path, how, doc, root, %{exists?: exists?, elsewhere?: elsewhere?}) do
+    about = Map.get(doc, :directory) || Path.dirname(doc.path)
+
     {path, bases} =
       if String.starts_with?(path, "/"),
         do: {String.trim_leading(path, "/"), [root]},
-        else: {path, Enum.uniq([Path.dirname(doc.path), root])}
+        else: {path, Enum.uniq([about, Path.dirname(doc.path), root])}
 
     targets =
       for base <- bases, target = Path.expand(path, base), inside?(target, root), do: target
@@ -436,9 +464,8 @@ defmodule Troupe.Instructions.Check do
         _none -> System.get_env("PATH", "")
       end
 
-    fn program ->
-      :os.find_executable(String.to_charlist(program), String.to_charlist(path)) != false
-    end
+    # Looked for as the session's own commands are found: on the PATH alone (Decision 846).
+    fn program -> Executable.find(program, path: path) != nil end
   end
 
   ## Duplicates
@@ -552,7 +579,11 @@ defmodule Troupe.Instructions.Check do
     do: %{path: path, line: line, kind: kind, message: message}
 
   defp rank(kind),
-    do: Enum.find_index([:contradiction, :path, :command, :duplicate], &(&1 == kind))
+    do:
+      Enum.find_index(
+        [:contradiction, :path, :command, :duplicate, :drift, :outdated],
+        &(&1 == kind)
+      )
 
   defp report(result, true) do
     %{workspace: workspace, root: root, sources: sources, findings: found} = result
@@ -564,6 +595,11 @@ defmodule Troupe.Instructions.Check do
         Enum.map(
           sources,
           &%{"file" => shown(&1.path, root), "path" => &1.path, "scope" => to_string(&1.scope)}
+        ),
+      "onboarded" =>
+        Enum.map(
+          result.onboarded,
+          &%{"file" => shown(&1.file, root), "path" => &1.file, "imported_from" => &1.from}
         ),
       "findings" =>
         Enum.map(found, fn f ->
@@ -580,20 +616,32 @@ defmodule Troupe.Instructions.Check do
     {Jason.encode!(json, pretty: true) <> "\n", status(found)}
   end
 
-  defp report(%{sources: []} = result, false),
+  defp report(%{sources: [], onboarded: []} = result, false),
     do: {"no instruction files reach a session in #{Paths.display(result.workspace)}\n", 0}
 
-  defp report(%{findings: [], sources: sources, root: root}, false) do
-    files = Enum.map_join(sources, ", ", &shown(&1.path, root))
-    {"no findings in #{count(sources, "instruction file")}: #{files}\n", 0}
+  defp report(%{findings: [], sources: sources, onboarded: onboarded, root: root} = result, false) do
+    files =
+      Enum.map_join(
+        Enum.map(sources, & &1.path) ++ Enum.map(onboarded, & &1.file),
+        ", ",
+        &shown(&1, root)
+      )
+
+    {"no findings in #{counted(result)}: #{files}\n", 0}
   end
 
-  defp report(%{findings: found, sources: sources, root: root}, false) do
+  defp report(%{findings: found, root: root} = result, false) do
     lines =
       Enum.map_join(found, "\n", &"#{shown(&1.path, root)}:#{&1.line}: #{&1.kind}: #{&1.message}")
 
-    {lines <> "\n\n#{count(found, "finding")} in #{count(sources, "instruction file")}.\n", 1}
+    {lines <> "\n\n#{count(found, "finding")} in #{counted(result)}.\n", 1}
   end
+
+  # The files checked: the instruction files, and the onboarded ones when there are any.
+  defp counted(%{sources: sources, onboarded: []}), do: count(sources, "instruction file")
+
+  defp counted(%{sources: sources, onboarded: onboarded}),
+    do: "#{count(sources, "instruction file")} and #{count(onboarded, "onboarded file")}"
 
   defp unreadable(workspace, reason, json?) do
     message =

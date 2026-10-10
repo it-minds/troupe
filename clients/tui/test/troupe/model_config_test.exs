@@ -181,12 +181,23 @@ defmodule Troupe.ModelConfigTest do
     end
 
     test "an agent nothing has been heard from yet is still starting" do
-      model =
-        Model.rebuild("s-1", "/w", [event(:branch_spawned, %{name: "build", isolation: :shared})])
+      opened = %{name: "build", isolation: :shared, prompt: "fix the test"}
+      model = Model.rebuild("s-1", "/w", [event(:branch_spawned, opened)])
 
       [window] = Model.windows(model)
 
       assert Model.activity_line(window, "root", 0, 10) =~ "starting"
+    end
+
+    # A session's own window opens with no task: nothing asked of it, so nothing starting
+    # (TUI Decision 155), where it used to read `running` from its first frame.
+    test "a window nothing has been asked of is idle, and says nothing" do
+      model =
+        Model.rebuild("s-1", "/w", [event(:branch_spawned, %{name: "build", isolation: :shared})])
+
+      assert %{state: :idle} = window = Model.session_window(model)
+      assert Model.windows(model) == []
+      refute Model.activity_line(window, "root", 0, 10)
     end
 
     # The live idle: a turn that ended, as the log says it, is a window at rest.

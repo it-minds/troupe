@@ -15,13 +15,24 @@ defmodule Troupe.Workspace do
   """
 
   @enforce_keys [:root, :root_real, :root_key]
-  defstruct [:root, :root_real, :root_key, :mounts]
+  defstruct [
+    :root,
+    :root_real,
+    :root_key,
+    :mounts,
+    # Whether the session trusts this workspace, stamped once as it starts
+    # (`Troupe.Session.build_opts/1`): false unless someone vouches, so a workspace made
+    # anywhere else is not. What its `skills.json` may link from outside the repository
+    # waits on it (Decision 829).
+    trusted?: false
+  ]
 
   @type t :: %__MODULE__{
           root: Path.t(),
           root_real: Path.t(),
           root_key: String.t(),
-          mounts: Troupe.Mounts.t() | nil
+          mounts: Troupe.Mounts.t() | nil,
+          trusted?: boolean()
         }
 
   @max_link_hops 40
@@ -75,13 +86,18 @@ defmodule Troupe.Workspace do
   Resolve a tool-supplied path against the workspace, or reject it.
 
   Returns the resolved absolute path on success. Relative paths are taken from the
-  workspace root; absolute ones are allowed only when they resolve back inside it.
+  workspace root; absolute ones are allowed only when they resolve back inside it. A
+  write under a `.git` directory, or to a `.git` file, is refused (`git_dir?/2`).
   """
   @spec resolve(t(), String.t(), :read | :write) ::
-          {:ok, Path.t()} | {:error, {:outside_workspace, String.t()} | {:read_only_mount, String.t()}}
+          {:ok, Path.t()}
+          | {:error,
+             {:outside_workspace, String.t()}
+             | {:read_only_mount, String.t()}
+             | {:git_dir, String.t()}}
   def resolve(ws, path, mode \\ :read)
 
-  def resolve(%__MODULE__{mounts: nil} = ws, path, _mode) when is_binary(path) do
+  def resolve(%__MODULE__{mounts: nil} = ws, path, mode) when is_binary(path) do
     candidate =
       if absolute?(path) do
         Path.expand(path)
@@ -91,7 +107,11 @@ defmodule Troupe.Workspace do
 
     case real_path(candidate) do
       {:ok, real} ->
-        if inside?(ws, real), do: {:ok, real}, else: {:error, {:outside_workspace, path}}
+        cond do
+          not inside?(ws, real) -> {:error, {:outside_workspace, path}}
+          mode == :write and git_dir?(ws.root_real, real) -> {:error, {:git_dir, path}}
+          true -> {:ok, real}
+        end
 
       {:error, _reason} ->
         {:error, {:outside_workspace, path}}
@@ -104,8 +124,43 @@ defmodule Troupe.Workspace do
       # A read-only mount is a different answer from a path that does not exist here,
       # and a model that is told so can pick a different destination instead of retrying.
       {:error, {:read_only_mount, name}} -> {:error, {:read_only_mount, name}}
+      {:error, {:git_dir, _path}} -> {:error, {:git_dir, path}}
       {:error, _reason} -> {:error, {:outside_workspace, path}}
     end
+  end
+
+  @doc """
+  Whether `real`, a resolved path under `root`, is in a `.git` directory or is a `.git`
+  file there (Decision 833). The file tools write neither: git honours what the repository's
+  `.git` says, some of it runs a command, and Troupe runs git outside the sandbox. `.git`
+  is matched as the file systems Troupe runs on may spell it, the spellings git itself
+  refuses in a tree: any case, trailing dots or spaces and a stream name (NTFS), the
+  short name `git~1`, and the code points HFS+ ignores.
+  """
+  @spec git_dir?(Path.t(), Path.t()) :: boolean()
+  def git_dir?(root, real) do
+    real
+    |> components()
+    |> Enum.drop(length(components(root)))
+    |> any_git?()
+  end
+
+  @doc "`git_dir?/2` for a path relative to its root, as it was given."
+  @spec git_dir?(Path.t()) :: boolean()
+  def git_dir?(relative), do: relative |> components() |> any_git?()
+
+  defp any_git?(components), do: Enum.any?(components, &dot_git?/1)
+
+  defp dot_git?(component) do
+    name =
+      component
+      |> String.replace(~r/[\x{200C}-\x{200F}\x{202A}-\x{202E}\x{206A}-\x{206F}\x{FEFF}]/u, "")
+      |> String.downcase()
+      |> String.split(":", parts: 2)
+      |> hd()
+      |> String.replace(~r/[. ]+$/, "")
+
+    name == ".git" or Regex.match?(~r/^git~\d+$/, name)
   end
 
   @doc """
@@ -174,6 +229,48 @@ defmodule Troupe.Workspace do
       %{kind: :session} -> Path.relative_to(path, ws.root_real)
       nil -> path
       _entry -> Troupe.Mounts.display(ws.mounts, path)
+    end
+  end
+
+  @doc """
+  Whether `path` really is `root` or inside it, both judged where they really are, links
+  and junctions followed: how a workspace's own `.troupe/` files are held to it
+  (Decision 829). A path that does not resolve, a link loop, is not.
+  """
+  @spec within?(Path.t(), Path.t()) :: boolean()
+  def within?(path, root) do
+    case real_path(path) do
+      {:ok, real} -> under?(real, root)
+      {:error, _} -> false
+    end
+  end
+
+  @doc """
+  The files in `dir` whose names end in `ext`, in name order, held to `root` as
+  `within?/2` holds them: `{inside, outside}`, file names both. A `dir` that is itself
+  really outside `root` is `:outside` and is not looked into, so not even the names of
+  what is there are said. A directory that is not there has nothing in it.
+  """
+  @spec files_within(Path.t(), String.t(), Path.t()) :: {[String.t()], [String.t()]} | :outside
+  def files_within(dir, ext, root) do
+    cond do
+      not File.dir?(dir) ->
+        {[], []}
+
+      not within?(dir, root) ->
+        :outside
+
+      true ->
+        case File.ls(dir) do
+          {:ok, entries} ->
+            entries
+            |> Enum.filter(&String.ends_with?(&1, ext))
+            |> Enum.sort()
+            |> Enum.split_with(&within?(Path.join(dir, &1), root))
+
+          {:error, _} ->
+            {[], []}
+        end
     end
   end
 

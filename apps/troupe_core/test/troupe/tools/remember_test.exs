@@ -7,10 +7,14 @@ defmodule Troupe.Tools.RememberTest do
 
   use Troupe.SessionCase, async: true
 
+  alias Troupe.Memory.Facts
+  alias Troupe.Onboard.Notice
   alias Troupe.Session.Memory
   alias Troupe.Tools.Remember
 
-  test "a note written by one session opens the next session's system prompt", context do
+  # A note is not in every prompt any more (Decision 838): the next session's brief counts
+  # it and names `recall`, which answers it.
+  test "a note written by one session is the next session's to recall", context do
     %{session: first, fake: fake} =
       start_session(context,
         steps: [
@@ -27,7 +31,7 @@ defmodule Troupe.Tools.RememberTest do
     assert fake |> Fake.requests() |> List.first() |> Map.fetch!(:system) |> Kernel.=~("Project brief") == false
 
     path = Path.join(context.workspace, ".troupe/memory.md")
-    assert File.read!(path) =~ "root: the ledger is a fold over the log"
+    assert File.read!(path) =~ "build: the ledger is a fold over the log"
     assert Memory.status(context.workspace, Troupe.Config.load(context.workspace)) == :stale,
            "a note alone is not a built brief"
 
@@ -40,7 +44,14 @@ defmodule Troupe.Tools.RememberTest do
 
     system = fake2 |> Fake.requests() |> List.first() |> Map.fetch!(:system)
     assert system =~ "# Project brief"
-    assert system =~ "the ledger is a fold over the log"
+    assert system =~ "1 fact about this repository (1 note) is kept out of this prompt"
+
+    assert [
+             %{
+               "claim" => "the ledger is a fold over the log",
+               "evidence" => %{"by" => "agent:build"}
+             }
+           ] = Facts.recall(context.workspace, query: "ledger")
   end
 
   test "a curated section stamps the brief, and memory: false keeps it out of the prompt",
@@ -48,7 +59,7 @@ defmodule Troupe.Tools.RememberTest do
     assert :ok = Memory.put_section(context.workspace, "commands", "mix test")
     brief = Memory.brief(context.workspace)
     assert brief.built_at != nil
-    assert Troupe.Memory.section(brief, "Commands") == "mix test"
+    assert Troupe.Memory.section(brief, "Commands") == "- mix test"
 
     config = Troupe.Config.load(context.workspace)
     assert Memory.status(context.workspace, config) == :fresh
@@ -78,13 +89,16 @@ defmodule Troupe.Tools.RememberTest do
     assert Memory.status(context.workspace, config) == :fresh
     assert %{built_at: %DateTime{}, sections: ^before} = Memory.brief(context.workspace)
 
-    # A brief a person wrote, with no stamp, and the librarian calls `finish` on it.
+    # A brief a person wrote, with no stamp, and the librarian calls `finish` on it. What
+    # they wrote is added to the facts, and the note is not lost (Decision 838).
     write_file(context, ".troupe/memory.md", "## Overview\nWritten by hand.\n")
     assert Memory.status(context.workspace, config) == :stale
 
     librarian!(context, [{:tools, [{"finish", %{"summary" => "nothing to change"}}]}])
     assert Memory.status(context.workspace, config) == :fresh
-    assert %{sections: [{"Overview", "Written by hand."}]} = Memory.brief(context.workspace)
+    brief = Memory.brief(context.workspace)
+    assert Troupe.Memory.section(brief, "Overview") == "- Written by hand."
+    assert Troupe.Memory.section(brief, "Notes") =~ "the ledger is a fold over the log"
   end
 
   test "only a librarian's run that ended as it meant to stamps the brief", context do
@@ -107,6 +121,7 @@ defmodule Troupe.Tools.RememberTest do
   # through, and where the librarian writes nothing, in every session for good
   # (Decision 713).
   test "a librarian's run that failed holds off the next automatic refresh", context do
+    git_init!(context.workspace)
     config = Troupe.Config.load(context.workspace, state_dir: context.state_dir)
     write_file(context, ".troupe/memory.md", "## Overview\nWritten by hand.\n")
     assert Memory.refresh_due?(context.workspace, config)
@@ -117,6 +132,7 @@ defmodule Troupe.Tools.RememberTest do
   end
 
   test "and so does one that wrote nothing where there was no brief", context do
+    git_init!(context.workspace)
     config = Troupe.Config.load(context.workspace, state_dir: context.state_dir)
     assert Memory.refresh_due?(context.workspace, config)
 
@@ -125,7 +141,33 @@ defmodule Troupe.Tools.RememberTest do
     refute Memory.refresh_due?(context.workspace, config)
   end
 
+  # A start in a directory no repository holds (a home directory) is due nothing, as
+  # onboarding is not (Decision 835): a client that trusts the daemon starts no librarian
+  # there, and the start's plan says `none` for the brief (Decision 838).
+  test "outside a git repository the brief is due nothing", context do
+    config = Troupe.Config.load(context.workspace, state_dir: context.state_dir)
+    refute Memory.repository?(context.workspace)
+    assert Memory.status(context.workspace, config) == :absent
+    refute Memory.refresh_due?(context.workspace, config)
+    assert %{due: "none"} = Notice.brief(context.workspace, config: config)
+
+    # A stale brief there is not due either.
+    write_file(context, ".troupe/memory.md", "## Overview\nWritten by hand.\n")
+    assert Memory.status(context.workspace, config) == :stale
+    refute Memory.refresh_due?(context.workspace, config)
+    assert %{due: "none"} = Notice.brief(context.workspace, config: config)
+
+    # The same directory once it is a repository, and a directory inside it.
+    git_init!(context.workspace)
+    sub = Path.join(context.workspace, "lib")
+    File.mkdir_p!(sub)
+    assert Memory.repository?(sub)
+    assert Memory.refresh_due?(context.workspace, config)
+    assert %{due: "stale"} = Notice.brief(context.workspace, config: config)
+  end
+
   test "a try holds for memory_max_age_days, not past a build, and not past forget", context do
+    git_init!(context.workspace)
     config = Troupe.Config.load(context.workspace, state_dir: context.state_dir)
     days_ago = &DateTime.add(DateTime.utc_now(), -&1 * 86_400, :second)
 
@@ -142,16 +184,15 @@ defmodule Troupe.Tools.RememberTest do
     assert Memory.held_until(context.workspace, config) ==
              DateTime.add(tried, 7 * 86_400, :second)
 
-    # Built after that try and stale since, because the repository is not the one it
-    # counted: the try did not leave it stale, so it holds nothing off.
-    git_init!(context.workspace)
-    built = DateTime.to_iso8601(DateTime.utc_now())
-
-    write_file(
-      context,
-      ".troupe/memory.md",
-      "---\nbuilt_at: #{built}\nfiles: 100\n---\n\n## Overview\nOld.\n"
-    )
+    # Built after that try and stale since, because a command it holds rests on a file that
+    # changed: the try did not leave it stale, so it holds nothing off.
+    # An anchor is a file git tracks (Decision 839).
+    {_, 0} = System.cmd("git", ["add", "README.md"], cd: context.workspace)
+    claim = %{kind: "command", claim: "`make` builds it.", anchors: ["README.md"]}
+    {:ok, _} = Facts.put(context.workspace, claim, %{})
+    :ok = Memory.checked(context.workspace)
+    File.write!(Path.join(context.workspace, "README.md"), "# r, changed\n")
+    File.touch!(Path.join(context.workspace, "README.md"), System.os_time(:second) + 5)
 
     assert Memory.status(context.workspace, config) == :stale
     assert Memory.refresh_due?(context.workspace, config)
@@ -174,7 +215,9 @@ defmodule Troupe.Tools.RememberTest do
     assert :ok = Memory.checked(context.workspace)
 
     assert %{built_at: %DateTime{}} = brief = Memory.brief(context.workspace)
-    assert Troupe.Memory.render(%{brief | built_at: nil, head: nil, files: nil}) == text
+
+    assert Troupe.Memory.render(%{brief | built_at: nil, head: nil, files: nil, survey: nil}) ==
+             text
   end
 
   test "a worktree's brief is the repository's", context do
@@ -190,9 +233,82 @@ defmodule Troupe.Tools.RememberTest do
     {_, 0} = System.cmd("git", ["worktree", "add", "-q", "-b", "troupe/x", worktree], cd: repo)
 
     assert Memory.path(worktree) == Path.join(repo, ".troupe/memory.md")
+
+    for dir <- [Path.join(repo, "lib"), Path.join(worktree, "lib")] do
+      File.mkdir_p!(dir)
+      assert Memory.path(dir) == Path.join(repo, ".troupe/memory.md")
+    end
+
     assert :ok = Memory.note(worktree, "root", "written from the worktree")
     assert File.read!(Path.join(repo, ".troupe/memory.md")) =~ "written from the worktree"
     refute File.exists?(Path.join(worktree, ".troupe/memory.md"))
+  end
+
+  # #524: git takes a workspace's own `.git` at its word, so one whose git directory has a
+  # `commondir` naming another checkout's `.git` is, to git, a worktree of that checkout.
+  # The brief follows only a checkout that names the worktree back.
+  test "a .git that only claims another checkout keeps the brief in the workspace", context do
+    other = Path.join(context.base, "other")
+    File.mkdir_p!(other)
+    git_commit!(other)
+    wt = Path.join(context.base, "wt")
+    {_, 0} = System.cmd("git", ["worktree", "add", "-q", "-b", "wt", wt], cd: other)
+    theirs = "## Overview\nthe other workspace's brief\n"
+    File.mkdir_p!(Path.join(other, ".troupe"))
+    File.write!(Path.join(other, ".troupe/memory.md"), theirs)
+
+    forged = [
+      # a `.git` file naming a git directory of its own, whose `commondir` is the other's
+      fn ws ->
+        gitdir = Path.join(ws, "forged")
+        File.mkdir_p!(gitdir)
+        File.write!(Path.join(gitdir, "HEAD"), "ref: refs/heads/main\n")
+        File.write!(Path.join(gitdir, "commondir"), Path.join(other, ".git") <> "\n")
+        File.write!(Path.join(ws, ".git"), "gitdir: #{gitdir}\n")
+      end,
+      # a `.git` directory with a `commondir` in it
+      fn ws ->
+        File.mkdir_p!(Path.join(ws, ".git"))
+        File.write!(Path.join(ws, ".git/HEAD"), "ref: refs/heads/main\n")
+        File.write!(Path.join(ws, ".git/commondir"), Path.join(other, ".git") <> "\n")
+      end,
+      # a `.git` file naming the other checkout's real worktree, which names its own back
+      fn ws ->
+        File.write!(Path.join(ws, ".git"), "gitdir: #{Path.join(other, ".git/worktrees/wt")}\n")
+      end,
+      # the first, where the other checkout reads a worktree's own config: git's top level
+      # is then whatever that config says, here the other checkout
+      fn ws ->
+        {_, 0} = System.cmd("git", ["config", "extensions.worktreeConfig", "true"], cd: other)
+        gitdir = Path.join(ws, "forged")
+        File.mkdir_p!(gitdir)
+        File.write!(Path.join(gitdir, "HEAD"), "ref: refs/heads/main\n")
+        File.write!(Path.join(gitdir, "commondir"), Path.join(other, ".git") <> "\n")
+        File.write!(Path.join(gitdir, "config.worktree"), "[core]\n\tworktree = #{other}\n")
+        File.write!(Path.join(ws, ".git"), "gitdir: #{gitdir}\n")
+      end
+    ]
+
+    for {forge, n} <- Enum.with_index(forged) do
+      ws = Path.join(context.base, "forged-#{n}")
+      File.mkdir_p!(ws)
+      forge.(ws)
+
+      # git itself is taken in.
+      {common, 0} =
+        System.cmd("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], cd: ws)
+
+      assert String.trim(common) == Path.join(other, ".git")
+
+      assert Memory.path(ws) == Path.join(ws, ".troupe/memory.md")
+      assert Memory.brief(ws) == nil
+      assert Memory.prompt_section(ws, nil) == ""
+      assert :ok = Memory.note(ws, "root", "written from forged-#{n}")
+      assert File.read!(Path.join(ws, ".troupe/memory.md")) =~ "written from forged-#{n}"
+      assert :ok = Memory.forget(ws)
+      refute File.exists?(Path.join(ws, ".troupe/memory.md"))
+      assert File.read!(Path.join(other, ".troupe/memory.md")) == theirs
+    end
   end
 
   # Decision 798: a brief that is really somewhere else on the machine, through a link to
@@ -237,7 +353,8 @@ defmodule Troupe.Tools.RememberTest do
     assert {:error, "nothing to remember" <> _} =
              Remember.run(%{"section" => "note", "text" => "  "}, ctx)
 
-    assert {:ok, "project brief updated: Overview rewritten"} =
+    # The older form writes facts (Decision 839).
+    assert {:ok, "remembered 1 overview fact(s)" <> _} =
              Remember.run(%{"section" => "overview", "text" => "A thing."}, ctx)
   end
 
@@ -258,6 +375,14 @@ defmodule Troupe.Tools.RememberTest do
   defp git_init!(dir) do
     {_, 0} = System.cmd("git", ["init", "-q", "--initial-branch", "main"], cd: dir)
     File.write!(Path.join(dir, "README.md"), "# r\n")
+  end
+
+  defp git_commit!(dir) do
+    git_init!(dir)
+    {_, 0} = System.cmd("git", ["config", "user.email", "t@example.com"], cd: dir)
+    {_, 0} = System.cmd("git", ["config", "user.name", "t"], cd: dir)
+    {_, 0} = System.cmd("git", ["add", "."], cd: dir)
+    {_, 0} = System.cmd("git", ["commit", "-q", "-m", "first"], cd: dir)
   end
 
   defp ctx(session, context) do

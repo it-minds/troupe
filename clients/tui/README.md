@@ -13,10 +13,12 @@ it runs — `troupe_core`, `troupe_gateway` and `troupe_protocol` — is not in 
 directory: it is the umbrella's own source in `../../apps`, a path dependency at the same
 commit, and the root [ARCHITECTURE.md](../../ARCHITECTURE.md) describes it.
 
-A session has one agent, and a line that does not start with `/` is what you say to it.
-`/build fix the failing test` or `/worktree add rate limiting` opens a **branch** — a
-session of its own, in its own worktree when the checkout is busy — and returns control
-immediately. Every branch is a window in the TUI. Branches
+A session opens in **command mode**: not a chat with an agent, but one screen over
+everything the session has going. A line that does not start with `/` is work: Enter starts
+the default agent (`build`) on it in your checkout, as a **branch** — a session of its own
+— and returns control immediately; Ctrl-N chooses the agent instead, with its instruction
+on screen, and whether it works in a worktree of its own. `/plan look at the parser` or
+`/worktree add rate limiting` start one too. Every branch is a window in the TUI. Branches
 run concurrently; a window that needs you (an approval, a question) blinks; you activate
 it, answer, and go back to what you were doing. When nothing is running the harness is
 truly idle: zero LLM calls, zero tokens.
@@ -101,7 +103,7 @@ Every key, which file wins, and what is checked:
 `troupe config --explain` shows where each value came from, and
 `troupe config validate` checks the files.
 
-### Several providers, or reusing opencode
+### Several providers, or copying opencode's
 
 Name providers and address models as `<provider>/<model>`, so the expensive and
 the cheap model can live on different gateways:
@@ -185,20 +187,19 @@ workspace's own servers are commands a cloned repository would run, so the
 session asks before starting them — `deny`, `once` or `allow`, the last
 remembered for that workspace — and asks again when a command changes.
 
-If Troupe has no API key of its own, it reads the providers from opencode's
-`~/.config/opencode/opencode.jsonc` (keys also from its `auth.json`) and uses
-opencode's `model` as the default, so an existing opencode setup works with no
-Troupe config at all — `options.baseURL`, `options.apiKey`, `options.authToken`,
-and per model `id`, `limit.context`, `limit.output` and
-`options.reasoningEffort`. `{env:VAR}` and `{file:path}` in the first three are
-read as opencode reads them, and one whose variable is not set, or whose file
-cannot be read, refuses that provider. `variants`, `agent` and `permission` are not read;
-agents are files (see below). `troupe config` prints what was resolved with keys
-masked.
+Troupe does not read opencode's settings for a session. An existing opencode setup's
+providers are copied into `config.yaml` once, when you say so: `troupe config` and
+`troupe setup` offer it on a machine with no settings yet. The copy takes
+`options.baseURL`, `options.apiKey`, `options.authToken`, and per model `id`,
+`limit.context`, `limit.output` and `options.reasoningEffort` from
+`~/.config/opencode/opencode.jsonc` (keys also from its `auth.json`), and opencode's
+`model` as the default when you have none; an `{env:VAR}` stays a reference. `variants`,
+`agent` and `permission` are not copied; agents are files (see below), and `troupe
+onboard` brings opencode's in. `troupe config` prints what was resolved with keys masked.
 
 On a machine with no `config.yaml`, `troupe config` in a terminal sets one up instead.
 With opencode there, it offers to copy opencode's providers into `config.yaml`, keys as
-opencode has them written. Otherwise it offers three choices: set up a provider here
+opencode has them written. Otherwise, or if you say no, it offers three choices: set up a provider here
 (Anthropic first, then OpenAI or a gateway: provider, URL, key and a model from what the
 provider lists; Enter at every question is Anthropic, with
 `api_key: "{env:ANTHROPIC_API_KEY}"`), take your organisation's settings from a plane
@@ -299,17 +300,35 @@ each agent is a command, and so is each command you write:
 | `/ask <question>` | answer across finished branches with the cheap model |
 | `/<name> [arguments]` | a command you or the repository wrote as `<name>.md` in your config's `commands/` or the workspace's `.troupe/commands/`: sends its prompt, with what follows the name for `$ARGUMENTS` ([configuration](../../docs/user/configuration.md#your-own-commands)) |
 
-Keys: `1`–`9`, Enter, or a mouse click on its tile activate a window; Esc returns to the command line;
+Command mode, the screen with no window activated, lists what waits on you first (the
+start's questions, a window's approval or question, in the reserved colour), then a row
+per branch (its agent, state, how long it has run, the last line it produced, what it used
+and cost) and a row per worktree of the repository (its branch, `↑` ahead of and `↓`
+behind the checkout's, the lines `+` added and `−` removed, dirty or clean, whose session
+and whether it is alive), under the session's model, goal, watch and budget. The session's
+own lines (what its start said, what `!` printed) sit above the branches; its own agent is
+listed with them only once it has work of its own (`troupe run`'s task, a loop, a watch
+trigger, a session on a plane). Enter on a line starts it on `build` in the checkout, or on
+the agent Ctrl-N chose (↑↓ the agents, PgUp/PgDn its instruction, Enter, then `w` a
+worktree of its own or `c` the checkout); with nothing typed, Ctrl-N's choice waits for the
+task on the command line. On a session on a plane, which runs one agent, a line is said to
+it.
+
+Keys: `1`–`9`, Enter, or a mouse click on its row or tile activate a window; Esc returns to the command line;
 `y`/`n`/`a` answer an approval (allow / deny / allow for session); typing +
 Enter sends input or answers a question, and when a question offers options a
 digit picks one (with `multiple`, digits tick and untick and Enter sends the
 ticked set); Alt-Enter (or Ctrl-J) puts a newline in the box instead of
-sending; Tab switches the window's profile
-(`/plan` → Tab to `code` → "go" is plan-then-build); `xx` (x twice) cancels and removes the window; Tab on the command line completes command names and the window paths for `/merge`, `/discard`, `/cancel`, `/dismiss`; `dd`
+sending; Tab chooses the agent the window runs, each with its instruction beside it
+(`/plan` → Tab, `build` → "go" is plan-then-build; the window's title says which agent it
+runs); `xx` (x twice) cancels and removes the window; Tab on the command line completes command names and the window paths for `/merge`, `/discard`, `/cancel`, `/dismiss`; `dd`
 dismisses a finished window, keeping its worktree; `e` expands tool output; Ctrl-Y copies the
 transcript you are reading to the clipboard; `@file` completes paths;
 Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo complete <n>`, `/todo cancel <n>` (the task's
-number in the side panel) and `/todo add <text>` edit the activated branch's task list.
+number in the side panel) and `/todo add <text>` edit the activated branch's task list. Any other
+command typed into a window's box runs as it would on the command line, on that window where it
+takes one (`/copy`, `/merge`); a line that names no command (`/usr/bin is missing`) goes to the
+window's agent.
 
 `x` and `d` are double presses (`xx`, `dd`) because the window they act in is also where you type:
 the first press puts the letter in the input box and the box says what a second one would do, and
@@ -342,8 +361,9 @@ only, a window that needs you — its border and title (blinking, about once a s
 the `blink` setting turns that off), the approval or question waiting in it, and the
 status line's count; each theme keeps its own reserved colour (Signal's magenta,
 Footlight's amber, Limelight's lime) for the same thing. Every window carries the mark in
-its top right corner: ◐ ◓ ◑ ◒ turning while its agent works, ◑ in the reserved colour
-while it needs you, ⏺ done and not yet read, ○ at rest, ✗ failed. Troupe uses as many
+its top right corner, and at the start of its row in command mode: ◐ ◓ ◑ ◒ turning while
+its agent works, ◑ in the reserved colour while it needs you, ⏺ done and not yet read, ○ at
+rest or not yet asked anything, ✗ failed. Troupe uses as many
 colours as the terminal says it has: exact colours where `COLORTERM` is `truecolor` or
 `24bit` and in Windows Terminal, the nearest of 256 where `TERM` names `256color`, the
 terminal's own sixteen otherwise, and none under `NO_COLOR`. It never paints the
@@ -392,8 +412,7 @@ that agent's branch window, Esc goes back.
 ### Models
 
 Troupe detects every model it can address: the ones each provider declares in
-`config.yaml`, the ones opencode's config declares, and whatever `models.default`
-and `models.cheap` already name. `troupe config` prints the list with each
+`config.yaml`, and whatever `models.default` and `models.cheap` already name. `troupe config` prints the list with each
 model's context window, where it came from, and whether a key was found.
 
 `troupe models` asks the providers themselves what they serve and caches the
@@ -473,13 +492,20 @@ Environment variables still win over every file, so a setting masked by
 
 ### Watch mode
 
-Any comment ending in `AI!` is a change request and spawns a `/quick` branch;
-`AI?` is a question and spawns an `/answer` branch; bare `AI` comments are
-collected as context. Both profiles run on the cheap model with a small
-reasoning budget and few turns, because saving a comment is a cheap gesture and
-the branch it starts should be one too. Point them somewhere heavier with
-`watch.change_command` / `watch.question_command` (`code` and `plan` are the
-obvious ones) when a comment deserves the full treatment.
+Any comment ending in `AI!` is a change request and starts a `quick` branch;
+`AI?` is a question and starts an `answer` branch, which cannot edit; bare `AI`
+comments are collected as context. The branch works in the checkout the comment
+is in, its window opens as `quick-1` (and so on), and the line under the screen
+says which file and comment started it; the session's own agent is told nothing.
+Both agents run on the cheap model with few turns, because saving a comment is a
+cheap gesture and the branch it starts should be one too. For something heavier,
+redefine `quick` or `answer` in `.troupe/agents/` or your own `agents/`, which is
+what `/quick` starts too (root Decision 844).
+
+Anything that writes a file can write a comment, so a branch a comment started
+asks before every write, edit and shell command, whatever `auto_approve` says,
+until you set `watch_auto_approve: true`. The status line says whether the
+workspace is watched, whichever client turned it on, and `/watch` turns it off.
 
 On Linux, native watching needs `inotifywait`; without it Troupe falls back to
 polling and says so.
@@ -492,6 +518,17 @@ overrides the global `agents/` dir which overrides the built-ins (`code`,
 `worktree`, `plan`, `workflow`, `ask`, the watch-mode pair `quick` and `answer`,
 and the subagents `general`, `explore`, `implementer`, `reviewer` and
 `librarian`).
+
+`/agents` lists the primary ones with where each comes from, its model, its tools,
+whether it is read-only, its cap on turns and which windows run it; Enter reads one's
+whole instruction. `e` opens it in your editor (`VISUAL`, then `EDITOR`; Notepad or `vi`
+without either) and the daemon checks what you saved: refused, the errors are on the page
+and your edit is kept for the next `e`; accepted, you pick where it goes, `r` the
+repository's `.troupe/agents/` or `m` your own `agents/`, after it says which tools it
+would run without asking, and asks again when the save adds one. `c` copies one into the
+repository in one key, `n` starts one from a template, `x` deletes a copy and says what
+answers to the name after. A bundle's agents, and every agent on a pod, are read-only
+here and say where they are changed (TUI Decision 156).
 
 A definition's `model:` is `default`, `cheap`, `expensive`, or a model named
 outright, and
@@ -509,7 +546,9 @@ calls, or while there is a list, so a small task spends no calls on one; a
 definition that names them, as `plan` and `workflow` do, has them on every call.
 `write_file`, `edit_file`, `shell` and `web_fetch` ask before they run — `y` /
 `n` / `a` in the window, or `auto_approve` for the session — and the rest run
-unattended; a definition can change either with a `permissions:` block.
+unattended; a definition can change either with a `permissions:` block. A
+project's `.troupe/agents/` file setting a tool to `auto` is held back until the
+workspace is trusted (`troupe config trust`): until then the tool asks.
 `web_fetch` is a GET that returns a URL as text, HTML reduced to readable text
 with its links kept, so an agent can read the documentation it is pointed at
 instead of guessing; `explore` and `plan` have it as well.

@@ -78,9 +78,27 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
 - With mise's shims on `PATH` in WSL, the core suite's `FileToolsTest`, `ReadOutputTest`,
   `ReadRootsTest` and `BenchTest` fail as `BenchCLITest` does: the `rg` shim answers "No
   version is set" outside a mise directory.
+- Under full load, core `Troupe.Agent.CompactionTest` "a result the model has not answered
+  yet is sent whole" failed once (a 54-byte result where it waits for one over the inline
+  limit); it passes alone.
+- Under full load, core `ForkSessionTest` (a `Sessions.Index` call timing out),
+  `BudgetQuestionTest` ("a typed amount raises the limit"), `OnboardWriteTest` and
+  `DoctorTest`'s bench line fail now and then; all pass alone. `Session.ShellTest` "a
+  command that ends mid-turn ..." once found its workspace gone ("spawn: Could not cd").
+- Most of the `Sessions.Index` call timeouts above share one cause, D117.
+- `OnboardWriteTest` once answered another file's refusal ("`.claude/agents/reviewer.md` is
+  not there") for `nowhere/AGENTS.md`: order or shared state, not load.
+- The TUI's `daemon_client_test.exs` `hold_link_connection/0` calls `:sys.get_state` on
+  every pid `Connections.list()` gives; one that exits in between fails the test.
+- The TUI's `remote_ui_test` "session.resumed and config.upgraded" asserts the second
+  event straight after `eventually` on the first, so any call added at mount fails it.
+- Runs on one machine share WSL's `/tmp`: `DoctorCLITest`'s `bench_dirs() == []` fails
+  while another run has a `/tmp/troupe-bench-*` directory.
+- A pull request into a chunk branch builds the TUI but doesn't run its tests, so a TUI
+  regression is first seen on the chunk's pull request into `main`.
 
 Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23), in chunks 3 to 7, and by
-the chunk 24 fixers (2026-10-08).
+the chunk 24 and 26 fixers (2026-10-08/10).
 
 ### D23 - Small leftovers (low)
 
@@ -761,29 +779,26 @@ Found by the #460 fixer, 2026-10-06.
   (`:global.trans`) can leave a waiting reader asleep up to 8 s after the lock frees.
 - `/context` prints on the TUI's single status line, clipped at the terminal's width; a
   repository with several files left out won't fit (TUI Decision 148).
-- An instruction file that exists but can't be read only logs a warning and is missing from
-  `context.get`, so clients can't see it was dropped.
 
 Found by the chunk 22 fixers, 2026-10-06.
 
 ### D85 - Instruction files and Cursor rules: what the 0.9.0 slices of #123 left (low)
 
-- `.cursor/rules` is read as far as Decision 809 goes: not `.mdc` files in subdirectories of
-  `.cursor/rules`, not `.md` rules, not a rule's `@` file references, and a glob's `[...]`
-  character class is taken literally. Whether Cursor takes a nested rule's globs from its
-  own directory (809's choice) or from the root is unchecked.
+- `.troupe/rules` (where Decision 828 moved 809's reading) reads no rules in its
+  subdirectories, no `@` file references, and takes a glob's `[...]` character class
+  literally. Whether a nested rule's globs should come from its own directory (809's choice)
+  or the root is unchecked against Cursor, whose rules onboarding brings in.
 - `troupe instructions check` takes every file under the workspace as its focus; how that
-  attaches glob-scoped Cursor rules, and how a root rule compares with the root's
-  `AGENTS.md`, is untried now that the loader reads them (Decision 810 predates 809).
+  attaches glob-scoped rules, and how a root rule compares with the root's `AGENTS.md`, is
+  untried.
 - Left out of the check by its rule of preferring a missed finding to a false one: an
   `install` subject, whether a command's subcommand exists (#123's item 14), and files so
   long the budget will cut them (the loader already marks them `trimmed` or `dropped`).
   `troupe-daemon` has no `instructions check` of its own.
-- On this repository the check flags `clients/tui/CLAUDE.md`'s lines 39 and 83 (example
-  paths it reads as real ones) and, on Windows, line 20 (`mise` lives in WSL here);
-  rewording the two examples would let it run quiet in this repository's CI.
+- This repository's `clients/tui/CLAUDE.md` is no longer read by Troupe sessions (Decision
+  828): onboard it, or rename it `AGENTS.md`.
 
-Found by the chunk 23 fixers, 2026-10-07.
+Found by the chunk 23 fixers, 2026-10-07; brought up to date by the chunk 26 fixers.
 
 ### D86 - The TUI's themes and mark: small leftovers (low)
 
@@ -922,18 +937,6 @@ Found by the #371 fixer, 2026-10-08.
 
 Found by the #465 fixer and the coordinator's live run, 2026-10-08.
 
-### D93 - Tab completes a command name without its slash (low)
-
-`complete_command/2` in `clients/tui/lib/troupe/ui/tui/server.ex` (TUI Decision 38)
-completes a command name on a line with no slash: "mer" and Tab give "merge ", "hel" and
-Tab give "help ", and "merge 2" and Tab give "merge code-1". Since #496 a line without a
-slash goes to the agent, so Enter then sends those words to the agent instead of running
-the command. The palette's way ("/", "mer", Tab) still gives "/merge " and runs it.
-Putting the slash in when Tab completes a command name, or offering no command names on
-a line without one, would end it.
-
-Found by the #496 fixer, 2026-10-09.
-
 ### D94 - The installers after the start-at-login step (#504) (low)
 
 - `install.ps1` has no `[CmdletBinding()]`, so an unknown or misspelt switch is taken into
@@ -992,6 +995,283 @@ Found by the #390 fixer, 2026-10-09.
   though `mcp.list` now carries both.
 
 Found by the #60 fixer, 2026-10-09.
+
+### D98 - Onboarding after #516's first slices (low)
+
+- Onboarding proposes only a repository's files: the person's own `~/.claude/agents`,
+  `~/.claude/commands` and opencode's global agents (`target: :user`) are not proposed,
+  nor opencode's `command` block, its legacy `.opencode/mode(s)/` files, or files in
+  subdirectories (listed as skipped).
+- A rule that denies a tool for some uses only (Claude Code's `Read(./.env)`) becomes
+  `ask` for the whole tool, since Troupe allows a tool whole or not at all: that `.env` is
+  then asked about rather than refused.
+- An opencode `provider/model` whose provider isn't in `config.yaml` is sent whole to the
+  session's provider.
+- A command's positional arguments aren't filled: Troupe fills only `$ARGUMENTS`
+  (Decision 763), while Claude Code counts `$0`/`$ARGUMENTS[0]` from zero and opencode
+  `$1` from one; the importer notes them. #516's table says they already match.
+- `troupe onboard` calls a source's `proposals/2` and then `skipped/2`, so the agents and
+  commands source surveys the files twice a run.
+
+Found by the #516 fixers, 2026-10-09.
+
+### D100 - MCP import after #520 (low)
+
+- `agents.list` lists primary agents only, so the note on a `.troupe/agents` subagent whose
+  `auto` waits for trust reaches no client.
+- The desktop app's import hint and the `/mcp import` row of the CLI reference don't
+  mention Codex's `config.toml`.
+- A linked file's import warnings (Codex's `enabled_tools is not carried`) repeat on every
+  `mcp.list`.
+- Codex's top-level `scopes`/`auth` aren't folded into Troupe's `oauth`.
+- An imported `${HOME}` becomes `{env:HOME}`, which refuses the server on a machine where
+  `HOME` isn't set (Windows).
+
+Found by the #516 fixers, 2026-10-09.
+
+### D101 - Pods and worktrees after #523 (low)
+
+- A worktree reads its main checkout's committed agents and skills, but not its commands,
+  workflows or `mcp.json`.
+- `TroupePolicy` can't forbid a profile's `repositoryOverridesBundle`.
+
+Found by the #516 fixers, 2026-10-09.
+
+### D102 - Onboarding after #516's second half (low)
+
+- A retired file that has already been onboarded still says "not read: run troupe onboard"
+  in `context.get`; the loader doesn't consult `.troupe/onboarded.json`.
+- The first-session notice looks only for other tools' files at the root, so a repository
+  whose only such file is nested isn't told.
+- A second `troupe onboard` prints a "said already" skipped line for every instruction file,
+  every run, instead of counting them as unchanged.
+- An item `GEMINI.md` adds after `CLAUDE.md`'s list joins the proposed `AGENTS.md` as a
+  separate block, a loose list.
+- A glob in opencode's `instructions` is expanded with `Path.wildcard`, which ignores
+  `.gitignore` and `node_modules`: a broad `**/*.md` proposes every Markdown file. Nothing
+  is written unasked, but the proposal can be huge.
+- The person's global opencode `instructions` (`~/.config/opencode/opencode.json`) aren't
+  onboarded, only the workspace's.
+- On a machine a worker runs on (`TROUPE_WORKER_AUTOSTART=true`), `troupe bench` and `troupe
+  doctor --bench` fail the four onboarding scenarios with the pod refusal.
+- A first session start in a workspace with other tools' files walks the tree and surveys
+  the sources synchronously, once per onboarding version: a one-off delay in a very large
+  repository.
+- `Setup.detect/0` (`setup.get`) reads opencode's `auth.json`, which holds keys, only to
+  list provider names for the copy offer.
+
+Found by the #516 fixers, 2026-10-10.
+
+### D103 - Trust, confinement and MCP after #531 and #532 (low)
+
+- A copy-import into the person's own layer keeps a source file's `permission: auto`
+  without saying so.
+- `mcp.list`'s `trust` says "trusted" both when the workspace is trusted and when only the
+  start was allowed; since #522 those differ for `auto`. The `notes` carry the difference,
+  and neither client shows `notes` (nor `agents.list`'s).
+- Trust is read when a session starts, so after `troupe config trust` a running session
+  keeps asking until a new one starts.
+- `Troupe.Protocol.Bundle.list_skills_in/1` and `Skills.Local.skills_at` (`skills.add`,
+  `skills.remove`) still raise on an unreadable `SKILL.md`.
+- `skills.add` with `link` into an untrusted workspace answers `added` though the skills
+  aren't offered until the workspace is trusted.
+- `commands.list` and `workflows.list` carry no `skipped`; linked-out commands and
+  workflows are listed only in the session's `files_skipped` and the daemon log.
+- The TUI's `d` and `x` on a server whose layer is `session` or `request` say "a server
+  from config.yaml is ... there"; a typed `/skills remove <name>` on an `.agents` skill
+  still goes to the daemon and gets "no skill named".
+
+Found by the #519, #522 and client fixers, 2026-10-10.
+
+### D104 - Processes, the sandbox and git after #535, #537 and #540 (low)
+
+- `Troupe.Agent.ACPAgent` starts its program with `Port.open` directly, not under the
+  reaper; on a worker bubblewrap's `--die-with-parent` covers it, locally nothing does.
+- Inside the sandbox `shell`'s `HOME` is the workspace, so a committed `.gitconfig` or
+  `.npmrc` at the repository root is the user configuration of the commands it runs
+  (contained in the sandbox).
+- A worker doesn't check the sandbox when it starts, only at the first command, and `troupe
+  doctor` has no sandbox line. Where nodes forbid unprivileged user namespaces the operator
+  may need a pod security setting.
+- The gateway's `git worktree remove` without `--force` runs git's own status, which
+  recurses into a worktree's submodules under their own configuration.
+- `Worktrees.list` runs git status in whatever directory `.git/worktrees/*/gitdir` names;
+  it is neutral and confined, but tells that directory's dirty bit.
+- On Linux a working directory gone when a command starts gives exit status 2 and no
+  output ("spawn: Could not cd" on the VM's stderr) instead of the reaper's no-directory
+  sentence (Decision 733).
+- On Windows a port reports the exit status without waiting for end of file, so a
+  background child's later output is lost.
+- `troupe config` run with no daemon embeds one and leaves a `daemon.json` naming ports
+  nothing listens on once it exits.
+
+Found by the #528, #529 and #536 fixers, 2026-10-10.
+
+### D105 - Branch commands since a branch became a session of its own (medium)
+
+What the command audit ([command-audit.md](command-audit.md)) found the TUI's branch
+commands no longer doing, against their rows in `Troupe.Commands` and the TUI decisions
+that made them. The rest were fixed with Decision 843.
+
+- After `/merge`, `/discard` or `/dismiss` from the palette over the activated window, the
+  screen's focus still names the closed window until the next key.
+- `/ask`'s `read_branch`, with no branch finished, lists the others with their states and
+  never says that none has finished.
+
+Found by the #502 audit, 2026-10-10.
+
+### D107 - Commands from an activated window, and the palette's rows (low)
+
+For the palette (#503), whose slot owns these.
+
+- A repository command run while a branch's window is activated goes to the session's
+  own agent, not the window's (`Client.run_command/3`, by design in Decision 763); the
+  palette doesn't say so.
+- `explore`, `general`, `implementer` and `reviewer` ship as subagents, so they have no
+  row and nothing a person types starts one; #502 lists them as rows. `agents.list` lists
+  primaries only, so neither client's agents manager shows or edits them either, though
+  `agents.get` answers them by name.
+
+Found by the #502 audit, 2026-10-10.
+
+### D110 - The start-up flow after #546, #544 and #550 (low)
+
+- A workspace whose other tools' files give nothing to write (a `CLAUDE.md` linked to
+  `AGENTS.md`) is planned at every session start, since the notice now repeats until
+  answered.
+- `onboard.apply` and `onboard.decline` still act outside a git repository, where the plan
+  is empty; `troupe onboard` runs wherever it is asked (Decision 835 says so).
+- `memory.get` (scope `observe`) answers the brief at any path the daemon can read, as
+  `onboard.plan` did before it moved to `admin`.
+- No method answers "can a model be asked in this workspace": `setup.get`'s `usable` is
+  the machine's, so the desktop app's librarian start can't apply the workspace's own key
+  problem as the TUI does (`Config.key_problem`).
+- The desktop app logged React's "two children with the same key" for workspace paths on
+  every poll (`views/Local.tsx` keys rows by `path`), so `worktree.list` or
+  `workspace.recent` may answer one path twice on Windows (unconfirmed).
+
+Found by the #516 third-wave and #248 desktop fixers, 2026-10-10.
+
+### D111 - Repository memory after #553 and #557 (low)
+
+- Ignored and untracked anchors are refused when a fact is written, but an anchor read
+  back from a committed `facts.jsonl` (say `.env`) is still hashed to work out its status
+  at every prompt. Status is never stored or sent, so this tells only the local session
+  whether a committed hash matches; the fix is the tracked check on the read path, cached
+  by size and mtime (Decision 839 records it as not done).
+- `Troupe.Session.Memory.note/3` and `put_section/4` have no callers left in `lib`, and
+  write `by` as `agent:<path>` where `remember` writes `agent:<profile>`.
+- `remember` still takes the old `section`/`text` form, mapped onto facts, for one
+  release.
+- A fact's `scope` isn't checked to be a glob.
+- Two daemons on one repository each re-read before writing, but a write replaces the
+  whole `facts.jsonl`: the last writer wins a narrow race.
+- The tool definitions are 12,827 of the bench's 13,500 bytes since `recall`.
+- On Windows git's pathspecs are case-sensitive, so an anchor typed in another case than
+  the committed name is refused as untracked.
+- TUI Decision 54 still describes the file-count drift Decision 838 removed (a supersede
+  can't cross the two numberings).
+
+Found by the #248 fixers, 2026-10-10.
+
+### D112 - Agents after #549, #551 and #563 (low)
+
+- `agents.put` has no conflict guard (last write wins, Decision 841), and neither client
+  warns when `agents.changed` arrives for the agent open in its editor.
+- `agents.put` into the user scope takes `permission: auto` (`shell: auto` included) with
+  no confirmation at the daemon, and a user agent's `auto` isn't gated by trust: both
+  clients ask before such a save, a client of their own with `admin` need not.
+- `agents.put` and `agents.delete` in the project scope take any `workspace` the daemon's
+  user can write, as `mcp.add` does.
+- Each `agents.list` row's `worktree` is `session.create`'s rule, the same for every row.
+- An agent file that doesn't parse is listed with its reason, but nothing returns its
+  text, so neither manager can open it to mend it.
+- A save into a layer that a higher one hides counts as a new file and asks about every
+  `auto` (`agents.get`'s `also` gives paths, not permissions).
+- The TUI has two agent choosers, command mode's Ctrl-N and the window's Tab switcher.
+- The nearest-name suggestion for an unknown tool reads oddly ("teleport": import,
+  delegate, todo_write).
+
+Found by the #503 fixers, 2026-10-10.
+
+### D113 - Command mode and branches after #556 and #560 (medium)
+
+- An approval a branch asked for before its worker connection restarted can't be answered
+  from the parent's screen: `Daemon.call_target/2`'s `{:call, sid, call_id}` registration
+  died with the old worker, so the answer goes to the parent session (medium).
+- `/new --branch` forks the session's own log, which in command mode holds no
+  conversation; the work is in the branches.
+- After a real merge conflict the line says "resolve in your checkout", but the merge was
+  aborted (Decision 647): the branch has to be merged by hand.
+- A git failure in `worktree.remove` is answered `invalid_params` with an inspected
+  string, where merge and discard answer `internal_error`.
+- `worktree.list` runs about four git calls per tree; `status --porcelain=v2 --branch`
+  would do with one.
+- A branch's row doesn't say which model it runs (quick's is `cheap`), and a dismissed
+  branch's row in the picker is titled by its worktree path.
+- TUI Decision 39's diff stat when a person's own worktree finishes, and Decision 42's
+  `/merge <name>` acting on the name, aren't there since branches became sessions.
+
+Found by the #502 fixers, 2026-10-10.
+
+### D114 - Watch after #558 (low)
+
+- The desktop app's watch checkbox (`LocalControls.tsx`) is its own record
+  (`raw.config.watch`), not `watch.get` and `watch_changed`.
+- An `answer` branch can't remove its `AI?` comment, so each save of that file asks again.
+- A headless run prints nothing for `watch_triggered`.
+- A trigger fired while no TUI was attached is in the journal, but its window opens only
+  from a live event (not tested).
+
+Found by the #502 watch fixer, 2026-10-10.
+
+### D115 - Windows processes and connections after #552 and #562 (medium)
+
+- `troupe daemon open` run through the TUI on Windows leaves no daemon once it returns,
+  probably because the reaper's job object kills the detached daemon when `open` exits;
+  `troupe-daemon open` run directly keeps it (medium).
+- `Troupe.MCP.Stdio` on Windows crashes in `Port.command` (`badarg` or `epipe`) when a stdio
+  server exits or closes its input before `initialize` is written, so `mcp.check` and a
+  session's MCP start get an exit, not "exited with status N" (medium).
+- `clip.exe` probably reads the UTF-8 staged file in the console's code page, so text with
+  non-ASCII characters may arrive garbled (unconfirmed; staging UTF-16LE with a BOM is the
+  usual answer).
+- A custom `clipboard_command` on Windows runs through `OS.Process.shell`, which without Git
+  Bash is PowerShell, which has no `<`.
+- `Troupe.Protocol.Client` stops `:normal` with calls pending, so `troupe ctl` and other
+  callers exit instead of getting an error.
+- `/upload` reads the whole file before the size check refuses it.
+- `System.cmd/3` with a bare name still resolves through `:os.find_executable` (the
+  worker's `df`, the daemon CLI's `open`/`xdg-open`, the mix tasks' `zig`, `kubectl` and
+  `kubeconform`); none runs from a workspace, and the credo check of Decision 846 has no
+  test of its own.
+- On Windows (OTP 28) a raw `Port.open({:spawn_executable, ...})` of a console program
+  without `:hide` returns 0 and does nothing; `System.cmd` and `Troupe.OS.Process` pass it.
+
+Found by the #502 and #555 fixers, 2026-10-10.
+
+### D116 - A shell call's outcome after #545 (low)
+
+- The TUI and the desktop app show a check mark for a command that exited non-zero: they
+  read `ok`, not `exit_status`.
+- A model's `timeout_ms` for `shell` isn't capped below the harness's tool timeout, so a
+  long one ends as the generic "the tool timed out" (`ok: false`, no `timed_out`).
+- On a worker, bubblewrap failing to set up one command (a missing bind source) would read
+  as that command's `exit_status`.
+
+Found by the #248 fixer, 2026-10-10.
+
+### D117 - The sessions index blocks on a slow stop (medium)
+
+`Troupe.Sessions.Index`'s sweep calls `Watcher.enabled?`, `Troupe.snapshot` and
+`Troupe.stop_session` one session at a time, inside the index's own process, and a stop
+is `DynamicSupervisor.terminate_child` with a 30-second shutdown. Under load the index is
+busy for more than 15 seconds and every caller's 5-second call times out. That is the
+shared cause of most load flakes in D8 (`ReadBranchTest`, `CutShortTest`, `BlobsTest`,
+`ForkSessionTest`, `SleepTest`, `OnboardWriteTest`, `FactsTest`), and a daemon with many
+sessions would stall the same way.
+
+Found by the #502 watch fixer, 2026-10-10.
 
 ## Taken
 
@@ -1086,6 +1366,17 @@ Found by the #60 fixer, 2026-10-09.
 | D43's `troupe resume` item - with no id it opened the newest row, which could be a branch or an empty scratch session | #484, PR #495 |
 | D62's first item - uninstalling didn't run `troupe-daemon login off`, leaving the login entry pointing at nothing | #76, PR #504 |
 | D49's import item - importing MCP servers from other tools dropped their `headers` | #60, PR #507 |
+| D99 - `.agents/` and skills: the TUI's layer labels, the desktop app's remove, the clients' skipped lists, unreadable `SKILL.md` and `.agents/AGENTS.md`, and the check's paths in `.agents/AGENTS.md` | PRs #530, #532, #533 |
+| D101's first item - `files_skipped` shown as a bare line | PR #530 |
+| D100's first item - a linked `opencode.json` gave no servers | #522, PR #531 |
+| D98's librarian item - its prompt said other tools' files are in every prompt | #516, PR #534 |
+| D84's last item - an instruction file that couldn't be read only logged a warning | #516, PR #533 |
+| D93 - Tab completed a command name without its slash | #502's audit |
+| D105's first items - `/cancel` kept the window, `/worktree <existing>` and `<name>:` weren't read, a dismissed branch wasn't in `/sessions`, a refused merge said "conflicts", `read_branch` listed its parent, `/dismiss` on a pod, `worktree.remove` inside the tree | #502, PR #556 |
+| D106 - a watch trigger ran on the session's own agent with its permissions, unseen, with no state on the protocol | #502, PR #558 |
+| D107's first and palette items - a slash command typed in a window went to the agent, the palette dropped the window, Tab matched summaries, an argument hint ran empty, `/agents` listed `worktree` | #502 and #503, PRs #560 and #563 |
+| D108 - an upload over 16 MB, or a connection closed mid-call, took the connection or the screen down | #502, PR #552 |
+| D109 - `/copy` and Ctrl-Y on Windows | #502, PR #552 |
 
 ## Checked and not a defect
 

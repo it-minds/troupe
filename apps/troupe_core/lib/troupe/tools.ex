@@ -33,19 +33,29 @@ defmodule Troupe.Tools do
     Troupe.Tools.ReadBranch,
     # The project brief (Decision 649): the one file a tool may write unasked.
     Troupe.Tools.Remember,
+    # The repository's facts the prompt does not carry, asked for (Decision 838).
+    Troupe.Tools.Recall,
     # The rest of a cut shell or grep result (Decision 650).
     Troupe.Tools.ReadOutput,
     # The four the TUI's harness had and the core lacked (Decisions 651 and 652).
     Troupe.Tools.AskUser,
     Troupe.Tools.WebFetch,
     Troupe.Tools.GitRead,
-    Troupe.Tools.Glob
+    Troupe.Tools.Glob,
+    # Onboarding another tool's files into Troupe's own (Decision 823).
+    Troupe.Tools.OnboardWrite
   ]
 
   # The task list's tools, and the model calls a turn makes before a profile that did not
   # name them is offered them (Decision 793).
   @task_list ~w(todo_write todo_read)
   @task_list_after 10
+
+  # Tools a profile has only when it names them (Decision 823): `onboard_write` writes the
+  # files that decide what runs, which only a profile made for it does (the librarian no
+  # longer, Decision 835), and an agent with every tool (`build`) is neither offered it nor
+  # let call it.
+  @named_only ~w(onboard_write)
 
   @doc """
   Every tool available, built-ins plus anything registered in `:extra_tools`.
@@ -94,9 +104,16 @@ defmodule Troupe.Tools do
   @spec for_definition(Definition.t(), String.t() | nil) :: [Tool.handle()]
   def for_definition(%Definition{} = definition, session_id \\ nil) do
     Enum.filter(all(session_id), fn tool ->
-      Definition.permission(definition, Tool.name(tool), Tool.default_permission(tool)) != :deny
+      name = Tool.name(tool)
+
+      named?(definition, name) and
+        Definition.permission(definition, name, Tool.default_permission(tool)) != :deny
     end)
   end
+
+  # A named-only tool is a profile's when its list names it, not when it has every tool.
+  defp named?(%Definition{tools: :all}, name), do: name not in @named_only
+  defp named?(%Definition{}, _name), do: true
 
   @doc """
   The tools a profile may use in one agent's context: everything `for_definition/2`
@@ -117,7 +134,7 @@ defmodule Troupe.Tools do
     definition
     |> for_definition(ctx.session_id)
     |> entitled_servers(ctx.bundle)
-    |> Kernel.++(Skills.tools(ctx.bundle, definition, skills_root(ctx)))
+    |> Kernel.++(skill_tools(definition, ctx))
     |> Kernel.++(loop_tools(ctx))
     |> task_list(definition, ctx)
   end
@@ -135,9 +152,13 @@ defmodule Troupe.Tools do
   defp task_list(tools, _definition, _ctx), do: tools
 
   # The person's own skills are read beside the workspace (Decision 700), and only when
-  # there is one to read beside: a context built without a workspace has no layer.
-  defp skills_root(%Ctx{workspace: %Troupe.Workspace{root_real: root}}), do: root
-  defp skills_root(%Ctx{}), do: nil
+  # there is one to read beside: a context built without a workspace has no layer. What
+  # its `skills.json` links from outside the repository waits for the session to trust it
+  # (Decision 829).
+  defp skill_tools(definition, %Ctx{workspace: %Troupe.Workspace{} = ws} = ctx),
+    do: Skills.tools(ctx.bundle, definition, ws.root_real, trusted: ws.trusted?)
+
+  defp skill_tools(definition, %Ctx{} = ctx), do: Skills.tools(ctx.bundle, definition, nil)
 
   # A loop's structured verdict (Decision 679), on the turns a running loop started and
   # no others, and outside the profile's list: it changes nothing but whether the loop
@@ -234,7 +255,7 @@ defmodule Troupe.Tools do
 
       {:ok, tool} ->
         cond do
-          not Definition.allows_tool?(definition, name) ->
+          not (Definition.allows_tool?(definition, name) and named?(definition, name)) ->
             {:reject, Result.error(ctx.call_id, name, {:not_allowed, name})}
 
           Definition.permission(definition, name, Tool.default_permission(tool)) == :deny ->
@@ -252,7 +273,7 @@ defmodule Troupe.Tools do
   defp or_scoped({:ok, tool}, _name, _definition, _ctx), do: {:ok, tool}
 
   defp or_scoped({:error, reason}, name, definition, ctx) do
-    case Enum.find(Skills.tools(ctx.bundle, definition, skills_root(ctx)), &(Tool.name(&1) == name)) do
+    case Enum.find(skill_tools(definition, ctx), &(Tool.name(&1) == name)) do
       nil -> {:error, reason}
       tool -> {:ok, tool}
     end
@@ -268,9 +289,9 @@ defmodule Troupe.Tools do
   def run_task(tool, args, %Definition{} = definition, %Ctx{} = ctx) do
     name = Tool.name(tool)
 
-    case Definition.permission(definition, name, Tool.default_permission(tool)) do
-      :ask ->
-        case ask(ctx, name, args) do
+    case permission(tool, name, args, definition) do
+      ask when ask in [:ask, :must_ask] ->
+        case ask(ctx, name, args, ask == :must_ask) do
           :allow -> execute(tool, args, ctx)
           :deny -> Result.error(ctx.call_id, name, {:denied, name})
           {:deny, :unattended} -> Result.error(ctx.call_id, name, {:denied_unattended, name})
@@ -284,12 +305,23 @@ defmodule Troupe.Tools do
     end
   end
 
-  defp ask(ctx, name, args) do
+  # A call the tool says a person must answer (`onboard_write` into the config directory,
+  # Decision 823) is asked about whatever the profile grants, and the session's
+  # `auto_approve` does not answer it; a profile's `deny` still denies.
+  defp permission(tool, name, args, definition) do
+    case Definition.permission(definition, name, Tool.default_permission(tool)) do
+      :deny -> :deny
+      permission -> if Tool.must_ask?(tool, args), do: :must_ask, else: permission
+    end
+  end
+
+  defp ask(ctx, name, args, always?) do
     Approvals.request(ctx.session_id, %{
       call_id: ctx.call_id,
       tool: name,
       args: args,
-      agent_path: ctx.agent_path
+      agent_path: ctx.agent_path,
+      always: always?
     })
   end
 
@@ -308,6 +340,9 @@ defmodule Troupe.Tools do
       case Tool.invoke(tool, args, ctx) do
         {:ok, content} ->
           Result.ok(ctx.call_id, name, text(content))
+
+        {:ok, content, %{fields: fields} = updates} ->
+          Result.ok(ctx.call_id, name, text(content), meta(Map.delete(updates, :fields), fields))
 
         {:ok, content, updates} ->
           Result.ok(ctx.call_id, name, text(content), %{updates: updates})
@@ -335,6 +370,11 @@ defmodule Troupe.Tools do
         Result.error(ctx.call_id, name, {:tool_crashed, "exited with #{inspect(reason)}"})
     end
   end
+
+  # The fields for the call's event travel apart from the agent's updates, so a tool that
+  # returns only fields hands the agent no updates to apply (Decision 837).
+  defp meta(updates, fields) when map_size(updates) == 0, do: %{fields: fields}
+  defp meta(updates, fields), do: %{updates: updates, fields: fields}
 
   # A result goes into the log and to the model, both JSON, which holds only UTF-8. Bytes
   # that are not (what a command printed, a binary file, a cut inside a character) are

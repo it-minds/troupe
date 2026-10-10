@@ -13,7 +13,11 @@ defmodule Troupe.SandboxTest do
 
   use ExUnit.Case, async: false
 
-  alias Troupe.{Mounts, Sandbox}
+  import ExUnit.CaptureLog
+
+  alias Troupe.Agent.ACPAgent
+  alias Troupe.{Mounts, Reaper, Sandbox, Workspace}
+  alias Troupe.Tools.Shell
 
   @moduletag timeout: 60_000
 
@@ -123,6 +127,151 @@ defmodule Troupe.SandboxTest do
     assert output |> String.trim() |> String.to_integer() < 20
   end
 
+  test "host names resolve and the user has a name", context do
+    # What every command on a worker now runs in (Decision 832): without the files in
+    # `/etc` that name resolution and user lookup read, it resolved nothing.
+    assert {output, 0} = run(context, "getent hosts localhost && id -un")
+    assert output =~ "localhost"
+    refute output =~ "cannot find name"
+  end
+
+  describe "on a worker, `:always` (Decision 832)" do
+    setup context do
+      Application.put_env(:troupe_core, :sandbox, :always)
+      on_exit(fn -> Application.delete_env(:troupe_core, :sandbox) end)
+
+      theirs = Path.join(context.other_session, "theirs.txt")
+      %{theirs: theirs}
+    end
+
+    test "a session with only its own workspace is sandboxed", context do
+      local = Mounts.local(context.session)
+
+      assert Sandbox.enabled?(local) == true
+      assert Sandbox.check() == :ok
+      assert [bwrap | _] = Sandbox.wrap(["/bin/sh", "-c", "true"], local, cwd: context.session)
+      assert bwrap == Sandbox.executable()
+    end
+
+    test "a command the reaper starts with no table runs over its own directory alone",
+         context do
+      # git and ripgrep, as the tools start them: `$HOME` the private /tmp, so a file the
+      # repository carries is never their configuration.
+      assert {:ok, output, _status} =
+               Reaper.run(context.session, [
+                 "/bin/sh",
+                 "-c",
+                 "cat #{context.theirs}; echo home=$HOME; cat mine.txt; echo"
+               ])
+
+      assert output =~ "No such file or directory"
+      refute output =~ "the-other-sessions-work"
+      assert output =~ "home=/tmp"
+      assert output =~ "mine"
+    end
+
+    test "a last line without a newline comes out of the sandbox too (#536)", context do
+      # `mine.txt` is "mine", with no newline after it.
+      assert {:ok, "mine", 0} = Reaper.run(context.session, ["/bin/sh", "-c", "cat mine.txt"])
+
+      {:ok, workspace} = Workspace.new(context.session)
+      assert {:ok, "mine", 0} = Shell.execute("cat mine.txt", workspace, timeout_ms: 10_000)
+    end
+
+    test "`shell` runs over the session's table even with no mount besides its own", context do
+      {:ok, workspace} = Workspace.new(context.session)
+
+      assert {:ok, output, _status} =
+               Shell.execute("cat #{context.theirs}; cat mine.txt; echo", workspace,
+                 timeout_ms: 10_000
+               )
+
+      assert output =~ "No such file or directory"
+      refute output =~ "the-other-sessions-work"
+      assert output =~ "mine"
+    end
+
+    test "an MCP server's process starts in it too", context do
+      assert {:ok, port} =
+               Reaper.open_stdio(context.session, [
+                 "/bin/sh",
+                 "-c",
+                 "cat #{context.theirs} 2>&1; echo done"
+               ])
+
+      output = read_port(port, "")
+      assert output =~ "No such file or directory"
+      refute output =~ "the-other-sessions-work"
+    end
+
+    test "an ACP agent's program runs in it, over the session's mounts", context do
+      # An agent that, asked for anything, says what it read for itself next door.
+      agent = Path.join(context.session, "agent.sh")
+
+      File.write!(agent, """
+      #!/bin/sh
+      read line; echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}'
+      read line; echo '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"acp-1"}}'
+      read line
+      seen=$(cat "$1" 2>/dev/null || echo nothing)
+      echo '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"acp-1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"saw '"$seen"'"}}}}'
+      echo '{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}'
+      """)
+
+      ref = make_ref()
+
+      {:ok, _pid} =
+        ACPAgent.start_link(
+          session_id: "s-acp",
+          agent_path: ["root", "agent#1"],
+          workspace: %{Workspace.new!(context.session) | mounts: context.mounts},
+          entry: %{name: "agent", command: "/bin/sh", args: [agent, context.theirs], hash: nil},
+          task: "look next door",
+          parent: self(),
+          parent_ref: ref
+        )
+
+      assert_receive {:child_result, ^ref, {:ok, said, _usage}}, 20_000
+      assert said =~ "saw nothing"
+      refute said =~ "the-other-sessions-work"
+    end
+
+    test "a bubblewrap the kernel refuses is refused, with what it said, logged once",
+         context do
+      refused = Path.join(context.base, "bwrap")
+
+      File.write!(refused, """
+      #!/bin/sh
+      echo 'bwrap: No permissions to create a new namespace' >&2
+      exit 1
+      """)
+
+      File.chmod!(refused, 0o755)
+      Application.put_env(:troupe_core, :bwrap, refused)
+      on_exit(fn -> Application.delete_env(:troupe_core, :bwrap) end)
+
+      # The suite logs nothing below critical; this line is the one under test.
+      Logger.put_module_level(Sandbox, :error)
+      on_exit(fn -> Logger.delete_module_level(Sandbox) end)
+
+      log =
+        capture_log(fn ->
+          for _ <- 1..2 do
+            assert {:error, why} = Sandbox.check()
+
+            assert why =~
+                     "could not start one here (bwrap: No permissions to create a new namespace)"
+
+            assert {:error, {:sandbox, ^why}} =
+                     Reaper.run(context.session, ["/bin/sh", "-c", "touch ran-it"])
+          end
+        end)
+
+      refute File.exists?(Path.join(context.session, "ran-it"))
+      assert length(Regex.scan(~r/could not start one/, log)) == 1
+    end
+  end
+
   describe "when it is off" do
     test "the command is returned unchanged, so there is one code path", context do
       argv = ["/bin/sh", "-c", "true"]
@@ -151,5 +300,14 @@ defmodule Troupe.SandboxTest do
     argv = Sandbox.wrap(["/bin/sh", "-c", command], context.mounts, enabled?: true, cwd: context.session)
     [executable | args] = argv
     System.cmd(executable, args, cd: context.session, stderr_to_stdout: true)
+  end
+
+  defp read_port(port, acc) do
+    receive do
+      {^port, {:data, {_eol, line}}} -> read_port(port, acc <> line <> "\n")
+      {^port, {:exit_status, _status}} -> acc
+    after
+      10_000 -> flunk("the command never finished: #{acc}")
+    end
   end
 end

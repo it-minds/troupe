@@ -100,6 +100,17 @@ defmodule Troupe.Bench.Model do
     }
   end
 
+  @doc """
+  Everything a request tells the model in words: its system prompt, then the text of each
+  message. What a script looks in for an instruction, wherever the harness put it (the
+  system prompt, or the turn with `system_prompt: stable`, Decision 815).
+  """
+  @spec prompt_text(Request.t()) :: String.t()
+  def prompt_text(%Request{} = request) do
+    texts = for %Message{content: content} <- request.messages, %Text{text: t} <- content, do: t
+    Enum.join([request.system || "", request.system_tail || "" | texts], "\n")
+  end
+
   @doc "The text of the last tool result a request carries, or `nil`."
   @spec last_tool_result(Request.t()) :: String.t() | nil
   def last_tool_result(%Request{messages: messages}) do

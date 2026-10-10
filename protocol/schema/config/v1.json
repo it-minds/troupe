@@ -172,7 +172,7 @@
       ],
       "properties": {
         "default": {
-          "description": "The model every agent uses unless its definition names one. A bare id goes to the session-wide provider; `<provider>/<model>` goes to a named one, from `providers` or opencode. `troupe models` lists what this machine can address.",
+          "description": "The model every agent uses unless its definition names one. A bare id goes to the session-wide provider; `<provider>/<model>` goes to a named one, from `providers`. `troupe models` lists what this machine can address.",
           "default": "claude-sonnet-5",
           "type": [
             "string",
@@ -641,7 +641,7 @@
       }
     },
     "watch": {
-      "description": "Act on `AI!` and `AI?` comments in the workspace's files.",
+      "description": "Act on `AI!` and `AI?` comments in the workspace's files. Read from a project's file only in a trusted workspace.",
       "default": false,
       "type": [
         "boolean",
@@ -665,6 +665,14 @@
         "null"
       ],
       "minimum": 1
+    },
+    "watch_auto_approve": {
+      "description": "A branch an `AI!` or `AI?` comment starts runs its writes, edits, shell commands and MCP servers' tools without asking. Off, each asks, whatever `auto_approve`, the agent's own permissions and a server's `permission` say. Read from a project's file only in a trusted workspace.",
+      "default": false,
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "fs_events": {
       "description": "Record every file change in the workspace as an event.",
@@ -718,7 +726,7 @@
       "minimum": 1
     },
     "memory": {
-      "description": "Agents read the project brief, `.troupe/memory.md`, into every prompt and write it with `remember`. `/memory` shows it.",
+      "description": "The project brief: facts about the repository, kept in `.troupe/memory/facts.jsonl` and written with `remember`. Its commands and conventions are in every prompt, the rest comes through `recall`. `/memory` lists them.",
       "default": true,
       "type": [
         "boolean",
@@ -752,7 +760,7 @@
       "minimum": 1
     },
     "instructions_max_chars": {
-      "description": "How many characters of instruction files (`AGENTS.md` and its aliases, every scope together) go into a prompt; the nearest are kept whole first.",
+      "description": "How many characters of instruction files (`AGENTS.md`, `.agents/AGENTS.md` and `.troupe/rules`, every scope together) go into a prompt; the nearest are kept whole first.",
       "default": 16000,
       "type": [
         "integer",

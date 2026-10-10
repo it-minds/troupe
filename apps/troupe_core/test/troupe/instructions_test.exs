@@ -1,9 +1,9 @@
 defmodule Troupe.InstructionsTest do
   @moduledoc """
-  The instruction files a repository carries (Decisions 706, 798, 806 and 809): which are
-  read and in what order, the directories the conversation worked in, which alias wins in
-  a directory and which are listed as skipped and why, Copilot's file at the root only,
-  what an `@import` brings and where it stops, Cursor's rules and when each joins,
+  The instruction files a repository carries (Decisions 706, 798, 806, 809 and 828): which
+  are read and in what order, the directories the conversation worked in, the other tools'
+  files listed as skipped and why, Copilot's file below the root, a file that cannot be
+  read, what an `@import` brings and where it stops, `.troupe/rules` and when each joins,
   how the budget is shared with the nearest kept whole, where the repository root is,
   and how the digest follows the content. The loader alone; a real session's prompt is
   `instructions_prompt_test.exs`.
@@ -53,66 +53,148 @@ defmodule Troupe.InstructionsTest do
     refute prompt =~ "not on the path"
   end
 
-  test "in one directory the first alias is read and the rest are listed as skipped, saying why",
+  test "an .agents/AGENTS.md is read at its directory's scope, before that directory's own file",
        %{repo: repo} do
-    write!(repo, "CLAUDE.md", "claude's")
-    write!(repo, "AGENTS.md", "agents'")
-    write!(repo, ".github/copilot-instructions.md", "copilot's")
-    write!(repo, "lib/GEMINI.md", "gemini's")
-    write!(repo, "lib/CLAUDE.md", "nested claude")
+    write!(repo, ".agents/AGENTS.md", "the root's .agents")
+    write!(repo, "AGENTS.md", "the root's own")
+    write!(repo, "web/.agents/AGENTS.md", "web's .agents")
+    write!(repo, "api/.agents/AGENTS.md", "not on the way")
 
-    loaded = Instructions.load(Path.join(repo, "lib"), config())
-    agents = "skipped: AGENTS.md is used in this directory"
+    loaded = Instructions.load(repo, config(), ["web/a.ts"])
+
+    assert files(loaded, repo) == [
+             {:root, ".agents/AGENTS.md"},
+             {:root, "AGENTS.md"},
+             {:nested, "web/.agents/AGENTS.md"}
+           ]
+
+    assert [
+             %{scope: :root, status: :whole, reason: nil, skipped: []},
+             %{scope: :root, status: :whole, skipped: []},
+             %{scope: :nested, where: "web", status: :whole}
+           ] = Enum.reject(loaded.files, &(&1.scope == :brief))
+
+    prompt = Instructions.to_prompt(loaded)
+    assert [_head, agents, own, web] = String.split(prompt, "Contents of ")
+    assert agents =~ "(repository root):\nthe root's .agents"
+    assert own =~ "(repository root):\nthe root's own"
+    assert web =~ "(nearer: web/):\nweb's .agents"
+    refute prompt =~ "not on the way"
+
+    assert [
+             %{"scope" => "root", "path" => path, "status" => "whole", "reason" => nil},
+             %{"scope" => "root"},
+             %{"scope" => "nested"},
+             %{"scope" => "brief"}
+           ] = Instructions.provenance(loaded)["files"]
+
+    assert path == Path.join(repo, ".agents/AGENTS.md")
+  end
+
+  # A session that works on a file under `.agents/` walks `.agents` as a directory of its
+  # own; its `AGENTS.md` is the parent's `.agents/AGENTS.md`, read once, there.
+  test "an .agents/AGENTS.md is read once when the session works under .agents/", %{repo: repo} do
+    write!(repo, ".agents/AGENTS.md", "the root's .agents")
+    write!(repo, ".agents/skills/x/SKILL.md", "---\nname: x\n---\nA skill.")
+    write!(repo, "web/.agents/AGENTS.md", "web's .agents")
+
+    loaded =
+      Instructions.load(repo, config(), [".agents/skills/x/SKILL.md", "web/.agents/notes.md"])
+
+    assert files(loaded, repo) == [
+             {:root, ".agents/AGENTS.md"},
+             {:nested, "web/.agents/AGENTS.md"}
+           ]
+
+    assert loaded.used == String.length("the root's .agents") + String.length("web's .agents")
+  end
+
+  test "an .agents/AGENTS.md really outside the repository, through a linked .agents, is not read",
+       %{base: base, repo: repo} do
+    write!(base, "elsewhere/AGENTS.md", "a stand-in for a private file")
+    File.ln_s!(Path.join(base, "elsewhere"), Path.join(repo, ".agents"))
+    write!(repo, "AGENTS.md", "root rule")
+
+    loaded = Instructions.load(repo, config())
 
     assert [
              %{
                scope: :root,
-               text: "agents'",
-               reason: nil,
-               skipped: ["CLAUDE.md", ".github/copilot-instructions.md"]
+               status: :outside,
+               chars: 0,
+               hash: nil,
+               reason: "not read: outside the repository"
              },
-             %{scope: :root, status: :skipped, chars: 0, text: "", reason: ^agents},
-             %{scope: :root, status: :skipped, chars: 0, text: "", reason: ^agents},
-             %{scope: :nested, text: "nested claude", skipped: ["GEMINI.md"]},
-             %{
-               scope: :nested,
-               status: :skipped,
-               reason: "skipped: CLAUDE.md is used in this directory"
-             },
+             %{scope: :root, status: :whole, text: "root rule"},
              %{scope: :brief}
            ] = loaded.files
 
+    assert hd(loaded.files).path == Path.join(repo, ".agents/AGENTS.md")
+    refute Instructions.to_prompt(loaded) =~ "private"
+  end
+
+  # Decision 828: other tools' files are brought in once, by `troupe onboard`, and no
+  # longer read. Each one found is listed as skipped, saying so, and nothing of it is read.
+  test "CLAUDE.md, GEMINI.md, Copilot's file and Cursor's rules are listed as skipped, " <>
+         "never read",
+       %{repo: repo} do
+    write!(repo, "CLAUDE.md", "claude's")
+    write!(repo, "GEMINI.md", "gemini's")
+    write!(repo, ".github/copilot-instructions.md", "copilot's")
+    write!(repo, ".cursorrules", "legacy cursor")
+    write!(repo, ".cursor/rules/style.mdc", "---\nalwaysApply: true\n---\ncursor's")
+    write!(repo, ".cursor/rules/notes.txt", "not a rule")
+    write!(repo, "lib/AGENTS.md", "nested agents")
+    write!(repo, "lib/CLAUDE.md", "nested claude")
+    write!(repo, "lib/.cursor/rules/lib.mdc", "---\nalwaysApply: true\n---\nnested cursor")
+    write!(repo, "lib/.cursorrules", "a nested legacy file, never read by anyone")
+
+    loaded = Instructions.load(repo, config(), ["lib/a.ex"])
+    onboard = "not read: run troupe onboard"
+
     assert files(loaded, repo) == [
-             {:root, "AGENTS.md"},
              {:root, "CLAUDE.md"},
+             {:root, "GEMINI.md"},
              {:root, ".github/copilot-instructions.md"},
+             {:root, ".cursorrules"},
+             {:root, ".cursor/rules/style.mdc"},
+             {:nested, "lib/AGENTS.md"},
              {:nested, "lib/CLAUDE.md"},
-             {:nested, "lib/GEMINI.md"}
+             {:nested, "lib/.cursor/rules/lib.mdc"}
            ]
 
-    assert Instructions.aliases() == [
-             "AGENTS.md",
-             "CLAUDE.md",
-             "GEMINI.md",
-             ".github/copilot-instructions.md"
-           ]
+    {[agents], retired} =
+      loaded.files
+      |> Enum.reject(&(&1.scope == :brief))
+      |> Enum.split_with(&(Path.basename(&1.path) == "AGENTS.md"))
+
+    assert %{scope: :nested, status: :whole, text: "nested agents", skipped: []} = agents
+
+    for file <- retired do
+      assert %{status: :skipped, reason: ^onboard, size: 0, chars: 0, hash: nil, text: ""} = file
+      assert %{rule: nil, applies: nil} = file
+    end
+
+    assert loaded.used == String.length("nested agents")
 
     prompt = Instructions.to_prompt(loaded)
-    assert prompt =~ "agents'"
-    assert prompt =~ "nested claude"
-    refute prompt =~ "claude's"
-    refute prompt =~ "copilot's"
-    refute prompt =~ "gemini's"
+    assert prompt =~ "nested agents"
 
-    assert %{"status" => "skipped", "reason" => ^agents, "size" => 0, "hash" => nil} =
-             Enum.at(Instructions.provenance(loaded)["files"], 1)
+    for text <- ["claude's", "gemini's", "copilot's", "legacy", "cursor's", "nested claude"],
+        do: refute(prompt =~ text)
+
+    refute prompt =~ "nested cursor"
+
+    assert [%{"status" => "skipped", "reason" => ^onboard, "size" => 0, "hash" => nil} | _] =
+             Instructions.provenance(loaded)["files"]
   end
 
   # Decision 806: Copilot reads `.github/copilot-instructions.md` at the repository root
-  # and nowhere else, so a nested one is not read, and is listed saying why.
-  test "Copilot's file is read at the root only; a nested one is listed as skipped, with why", %{
-    repo: repo
-  } do
+  # and nowhere else, so a nested one was never read, and still says why; the root's is no
+  # longer read either (Decision 828).
+  test "Copilot's file is read nowhere: at the root it waits for troupe onboard, nested it " <>
+         "never counted",
+       %{repo: repo} do
     write!(repo, ".github/copilot-instructions.md", "copilot's at the root")
     write!(repo, "lib/.github/copilot-instructions.md", "copilot's nested")
     write!(repo, "lib/x/AGENTS.md", "agents' nested")
@@ -122,7 +204,13 @@ defmodule Troupe.InstructionsTest do
     reason = "not read: Copilot's file counts only at the root"
 
     assert [
-             %{scope: :root, status: :whole, text: "copilot's at the root", reason: nil},
+             %{
+               scope: :root,
+               status: :skipped,
+               chars: 0,
+               text: "",
+               reason: "not read: run troupe onboard"
+             },
              %{
                scope: :nested,
                where: "lib",
@@ -151,20 +239,96 @@ defmodule Troupe.InstructionsTest do
              {:nested, "lib/x/.github/copilot-instructions.md"}
            ]
 
-    assert loaded.used == String.length("copilot's at the root") + String.length("agents' nested")
+    assert loaded.used == String.length("agents' nested")
 
     prompt = Instructions.to_prompt(loaded)
-    assert prompt =~ "copilot's at the root"
-    refute prompt =~ "copilot's nested"
-    refute prompt =~ "copilot's beside it"
+    refute prompt =~ "copilot's"
 
     assert [
-             %{"status" => "whole", "reason" => nil},
+             %{"status" => "skipped", "reason" => "not read: run troupe onboard"},
              %{"status" => "skipped", "reason" => ^reason, "chars" => 0, "hash" => nil},
              %{"status" => "whole", "reason" => nil},
              %{"status" => "skipped", "reason" => ^reason},
              %{"scope" => "brief", "reason" => nil}
            ] = Instructions.provenance(loaded)["files"]
+  end
+
+  # Decision 828: Copilot's `.github/instructions/*.instructions.md` were never read, and
+  # onboarding brings them in (Decision 827), so they are listed as waiting for it, as
+  # every other tool's file is; at the root only, where Copilot reads them.
+  test "Copilot's .github/instructions files at the root are listed as skipped, never read",
+       %{base: base, repo: repo} do
+    write!(
+      repo,
+      ".github/instructions/ts.instructions.md",
+      "---\napplyTo: \"**\"\n---\ncopilot's rule"
+    )
+
+    write!(repo, ".github/instructions/notes.md", "not one of Copilot's")
+    write!(repo, "lib/.github/instructions/lib.instructions.md", "nested, never read")
+    write!(base, "elsewhere/x.instructions.md", "outside")
+
+    loaded = Instructions.load(repo, config(), ["lib/a.ex"])
+
+    assert files(loaded, repo) == [{:root, ".github/instructions/ts.instructions.md"}]
+
+    assert [
+             %{
+               status: :skipped,
+               reason: "not read: run troupe onboard",
+               size: 0,
+               chars: 0,
+               hash: nil,
+               text: "",
+               rule: nil
+             },
+             %{scope: :brief}
+           ] = loaded.files
+
+    refute Instructions.to_prompt(loaded) =~ "copilot's rule"
+
+    # A `.github/instructions` that is a link out is listed once, its files not named.
+    File.rm_rf!(Path.join(repo, ".github/instructions"))
+    :ok = File.ln_s(Path.join(base, "elsewhere"), Path.join(repo, ".github/instructions"))
+
+    assert [%{status: :outside, path: path}, %{scope: :brief}] =
+             Instructions.load(repo, config()).files
+
+    assert path == Path.join(repo, ".github/instructions")
+  end
+
+  # D84 and D99: a file that is there and cannot be read is listed with why, not only
+  # logged, so `context.get` shows it was left out.
+  test "an AGENTS.md or an .agents/AGENTS.md that cannot be read is listed, saying why", %{
+    repo: repo
+  } do
+    write!(repo, ".agents/AGENTS.md", "the root's .agents, unreadable")
+    write!(repo, "AGENTS.md", "the root's own, unreadable")
+    write!(repo, "web/AGENTS.md", "web's own")
+    File.chmod!(Path.join(repo, ".agents/AGENTS.md"), 0o000)
+    File.chmod!(Path.join(repo, "AGENTS.md"), 0o000)
+
+    loaded = Instructions.load(repo, config(), ["web/a.ts"])
+    denied = "not read: permission denied"
+
+    assert [
+             %{scope: :root, status: :unreadable, chars: 0, size: 0, hash: nil, reason: ^denied},
+             %{scope: :root, status: :unreadable, chars: 0, text: "", reason: ^denied},
+             %{scope: :nested, status: :whole, text: "web's own"},
+             %{scope: :brief}
+           ] = loaded.files
+
+    assert files(loaded, repo) == [
+             {:root, ".agents/AGENTS.md"},
+             {:root, "AGENTS.md"},
+             {:nested, "web/AGENTS.md"}
+           ]
+
+    assert loaded.used == String.length("web's own")
+    refute Instructions.to_prompt(loaded) =~ "unreadable"
+
+    assert [%{"status" => "unreadable", "reason" => ^denied, "chars" => 0} | _] =
+             Instructions.provenance(loaded)["files"]
   end
 
   test "the budget keeps the nearest whole first and says what it cut", %{repo: repo} do
@@ -220,7 +384,7 @@ defmodule Troupe.InstructionsTest do
   } do
     write!(repo, "AGENTS.md", "root rule")
     write!(repo, "frontend/AGENTS.md", "frontend rule")
-    write!(repo, "frontend/app/CLAUDE.md", "app rule")
+    write!(repo, "frontend/app/AGENTS.md", "app rule")
     write!(repo, "backend/AGENTS.md", "backend rule")
     write!(repo, "docs/AGENTS.md", "not worked in")
 
@@ -236,7 +400,7 @@ defmodule Troupe.InstructionsTest do
              {:root, "AGENTS.md"},
              {:nested, "backend/AGENTS.md"},
              {:nested, "frontend/AGENTS.md"},
-             {:nested, "frontend/app/CLAUDE.md"}
+             {:nested, "frontend/app/AGENTS.md"}
            ]
 
     assert Path.join(repo, "backend/lib") in loaded.searched
@@ -356,7 +520,7 @@ defmodule Troupe.InstructionsTest do
        %{base: base, repo: repo} do
     write!(base, "key", "a stand-in for a private key")
     File.ln_s!(Path.join(base, "key"), Path.join(repo, "AGENTS.md"))
-    write!(repo, "CLAUDE.md", "an alias the link hid")
+    write!(repo, "CLAUDE.md", "another tool's file, never read")
     File.mkdir_p!(Path.join(repo, "lib"))
     File.ln_s!(Path.join(base, "key"), Path.join(repo, "lib/AGENTS.md"))
     write!(repo, "docs/rules.md", "linked from inside")
@@ -377,15 +541,10 @@ defmodule Troupe.InstructionsTest do
                size: 0,
                chars: 0,
                hash: nil,
-               skipped: ["CLAUDE.md"],
+               skipped: [],
                reason: ^outside
              },
-             %{
-               scope: :root,
-               status: :skipped,
-               chars: 0,
-               reason: "skipped: AGENTS.md comes first in this directory"
-             },
+             %{scope: :root, status: :skipped, chars: 0, reason: "not read: run troupe onboard"},
              %{scope: :nested, where: "lib", status: :outside, chars: 0, reason: ^outside},
              %{scope: :nested, where: "web", status: :whole, text: "linked from inside"},
              %{
@@ -403,7 +562,7 @@ defmodule Troupe.InstructionsTest do
 
     prompt = Instructions.to_prompt(loaded)
     refute prompt =~ "private key"
-    refute prompt =~ "an alias the link hid"
+    refute prompt =~ "never read"
     refute prompt =~ "Contents of #{Path.join(repo, "AGENTS.md")}"
 
     assert [%{"status" => "outside", "size" => 0, "hash" => nil, "reason" => ^outside} | _] =
@@ -428,15 +587,14 @@ defmodule Troupe.InstructionsTest do
            ] = loaded.files
   end
 
-  # Decision 809: `.cursor/rules/*.mdc` as Cursor reads them, after the directory's own
-  # instruction file, in name order, and the legacy `.cursorrules` before them.
-  test "Cursor's rules: an always rule joins, a glob rule waits for a file it matches, a " <>
+  # Decisions 809 and 828: `.troupe/rules/*.md` as Cursor reads its rules, after the
+  # directory's own instruction file, in name order.
+  test "rules: an always rule joins, a glob rule waits for a file it matches, a " <>
          "description-only rule is listed, one with neither is not joined",
        %{repo: repo} do
     write!(repo, "AGENTS.md", "root rule")
-    write!(repo, ".cursorrules", "Legacy: be brief.")
 
-    write!(repo, ".cursor/rules/always.mdc", """
+    write!(repo, ".troupe/rules/always.md", """
     ---
     description: House style
     globs: lib/**
@@ -445,7 +603,7 @@ defmodule Troupe.InstructionsTest do
     Use tabs.
     """)
 
-    write!(repo, ".cursor/rules/ts.mdc", """
+    write!(repo, ".troupe/rules/ts.md", """
     ---
     description:
     globs: src/**/*.ts, *.tsx
@@ -454,7 +612,7 @@ defmodule Troupe.InstructionsTest do
     TypeScript: strict.
     """)
 
-    write!(repo, ".cursor/rules/db.mdc", """
+    write!(repo, ".troupe/rules/db.md", """
     ---
     description: "Writing a
       database migration"
@@ -464,20 +622,20 @@ defmodule Troupe.InstructionsTest do
     Migrations: reversible.
     """)
 
-    write!(repo, ".cursor/rules/manual.mdc", "---\nalwaysApply: false\n---\nOnly when named.")
-    write!(repo, ".cursor/rules/bare.mdc", "No front matter at all.")
-    write!(repo, ".cursor/rules/notes.md", "not a rule")
+    write!(repo, ".troupe/rules/manual.md", "---\nalwaysApply: false\n---\nOnly when named.")
+    write!(repo, ".troupe/rules/bare.md", "No front matter at all.")
+    write!(repo, ".troupe/rules/notes.txt", "not a rule")
+    write!(repo, ".troupe/rules/old.mdc", "---\nalwaysApply: true\n---\nnot a rule either")
 
     loaded = Instructions.load(repo, config(), ["lib/a.ex"])
 
     assert files(loaded, repo) == [
              {:root, "AGENTS.md"},
-             {:root, ".cursorrules"},
-             {:root, ".cursor/rules/always.mdc"},
-             {:root, ".cursor/rules/bare.mdc"},
-             {:root, ".cursor/rules/db.mdc"},
-             {:root, ".cursor/rules/manual.mdc"},
-             {:root, ".cursor/rules/ts.mdc"}
+             {:root, ".troupe/rules/always.md"},
+             {:root, ".troupe/rules/bare.md"},
+             {:root, ".troupe/rules/db.md"},
+             {:root, ".troupe/rules/manual.md"},
+             {:root, ".troupe/rules/ts.md"}
            ]
 
     manual = "not joined: no alwaysApply, globs or description"
@@ -485,7 +643,6 @@ defmodule Troupe.InstructionsTest do
 
     assert [
              %{rule: nil, applies: nil},
-             %{status: :whole, text: "Legacy: be brief.", rule: %{apply: :always}},
              %{status: :whole, text: "Use tabs.", applies: "always applied", reason: nil},
              %{status: :inactive, chars: 0, text: "", reason: ^manual, rule: %{apply: :manual}},
              %{
@@ -511,17 +668,16 @@ defmodule Troupe.InstructionsTest do
     assert size > 0
 
     assert loaded.used ==
-             String.length("root rule") + String.length("Legacy: be brief.") +
-               String.length("Use tabs.") + String.length("Writing a database migration")
+             String.length("root rule") + String.length("Use tabs.") +
+               String.length("Writing a database migration")
 
     prompt = Instructions.to_prompt(loaded)
-    always = Path.join(repo, ".cursor/rules/always.mdc")
-    db = Path.join(repo, ".cursor/rules/db.mdc")
+    always = Path.join(repo, ".troupe/rules/always.md")
+    db = Path.join(repo, ".troupe/rules/db.md")
 
     assert prompt =~
              "Contents of #{always} (repository root, a rule that always applies):\nUse tabs."
 
-    assert prompt =~ "Legacy: be brief."
     assert prompt =~ "Rule #{db} (repository root), to read when it applies: Writing a database"
     refute prompt =~ "alwaysApply"
     refute prompt =~ "strict"
@@ -531,7 +687,7 @@ defmodule Troupe.InstructionsTest do
     refute prompt =~ "not a rule"
 
     # The order of the prompt is the order of the files: the rules after the root's own.
-    assert [_head, "root rule", "Legacy" <> _, "Use tabs." <> _] =
+    assert [_head, "root rule", "Use tabs." <> _] =
              prompt |> String.split(~r/Contents of [^\n]+\n/) |> Enum.map(&String.trim/1)
 
     # A file worked on that a glob matches joins the rule, from the turn that reads it.
@@ -540,7 +696,7 @@ defmodule Troupe.InstructionsTest do
           {Path.join(repo, "web/App.tsx"), "web/App.tsx", "*.tsx"}
         ] do
       joined = Instructions.load(repo, config(), ["lib/a.ex", focus])
-      ts = Enum.find(joined.files, &String.ends_with?(&1.path, "ts.mdc"))
+      ts = Enum.find(joined.files, &String.ends_with?(&1.path, "ts.md"))
 
       assert %{
                status: :whole,
@@ -561,7 +717,6 @@ defmodule Troupe.InstructionsTest do
     assert [
              %{"rule" => nil, "applies" => nil},
              %{"rule" => %{"apply" => "always"}, "applies" => "always applied"},
-             _always,
              _bare,
              %{"status" => "listed", "chars" => 28, "rule" => %{"apply" => "requested"}},
              _manual,
@@ -583,16 +738,16 @@ defmodule Troupe.InstructionsTest do
   test "a rule's globs: a list in brackets or of lines, braces, a name anywhere, a path " <>
          "from the root, a directory",
        %{repo: repo} do
-    write!(repo, ".cursor/rules/flow.mdc", "---\nglobs: [\"docs/*.md\", 'Makefile']\n---\nflow")
+    write!(repo, ".troupe/rules/flow.md", "---\nglobs: [\"docs/*.md\", 'Makefile']\n---\nflow")
 
     write!(
       repo,
-      ".cursor/rules/block.mdc",
+      ".troupe/rules/block.md",
       "---\nglobs:\n  - \"lib/**\"\n- test/*.exs\n---\nblock"
     )
 
-    write!(repo, ".cursor/rules/brace.mdc", "---\nglobs: **/*.{ts,tsx}, a?.c\n---\nbrace")
-    write!(repo, ".cursor/rules/dir.mdc", "---\nglobs: ./priv/\n---\ndir")
+    write!(repo, ".troupe/rules/brace.md", "---\nglobs: **/*.{ts,tsx}, a?.c\n---\nbrace")
+    write!(repo, ".troupe/rules/dir.md", "---\nglobs: ./priv/\n---\ndir")
 
     globs = fn loaded ->
       for %{rule: %{globs: globs}, status: status} = f <- loaded.files,
@@ -600,10 +755,10 @@ defmodule Troupe.InstructionsTest do
     end
 
     assert globs.(Instructions.load(repo, config())) == [
-             {"block.mdc", ["lib/**", "test/*.exs"], :inactive},
-             {"brace.mdc", ["**/*.{ts,tsx}", "a?.c"], :inactive},
-             {"dir.mdc", ["./priv/"], :inactive},
-             {"flow.mdc", ["docs/*.md", "Makefile"], :inactive}
+             {"block.md", ["lib/**", "test/*.exs"], :inactive},
+             {"brace.md", ["**/*.{ts,tsx}", "a?.c"], :inactive},
+             {"dir.md", ["./priv/"], :inactive},
+             {"flow.md", ["docs/*.md", "Makefile"], :inactive}
            ]
 
     joined = fn focus ->
@@ -611,26 +766,26 @@ defmodule Troupe.InstructionsTest do
           do: Path.basename(f.path)
     end
 
-    assert joined.(["docs/guide.md"]) == ["flow.mdc"]
+    assert joined.(["docs/guide.md"]) == ["flow.md"]
     assert joined.(["docs/deep/guide.md"]) == []
-    assert joined.(["tools/Makefile"]) == ["flow.mdc"]
-    assert joined.(["lib/a/b.ex", "test/x_test.exs"]) == ["block.mdc"]
+    assert joined.(["tools/Makefile"]) == ["flow.md"]
+    assert joined.(["lib/a/b.ex", "test/x_test.exs"]) == ["block.md"]
     assert joined.(["test/deep/x_test.exs"]) == []
-    assert joined.(["x.tsx"]) == ["brace.mdc"]
-    assert joined.(["deep/x.ts"]) == ["brace.mdc"]
-    assert joined.(["src/ab.c"]) == ["brace.mdc"]
+    assert joined.(["x.tsx"]) == ["brace.md"]
+    assert joined.(["deep/x.ts"]) == ["brace.md"]
+    assert joined.(["src/ab.c"]) == ["brace.md"]
     assert joined.(["src/abc.c"]) == []
-    assert joined.(["priv/repo/seeds.exs"]) == ["dir.mdc"]
+    assert joined.(["priv/repo/seeds.exs"]) == ["dir.md"]
     assert joined.(["../priv/x", "lib.ex"]) == []
   end
 
-  test "a nested .cursor/rules applies once the session works under its directory, its " <>
+  test "a nested .troupe/rules applies once the session works under its directory, its " <>
          "globs from there",
        %{repo: repo} do
-    write!(repo, "web/.cursor/rules/web.mdc", "---\nalwaysApply: true\n---\nWeb: use pnpm.")
-    write!(repo, "web/.cursor/rules/ts.mdc", "---\nglobs: src/**\n---\nWeb TypeScript.")
-    write!(repo, "api/.cursor/rules/api.mdc", "---\nalwaysApply: true\n---\nnot worked in")
-    write!(repo, ".cursorrules.d/x.mdc", "not a rules directory")
+    write!(repo, "web/.troupe/rules/web.md", "---\nalwaysApply: true\n---\nWeb: use pnpm.")
+    write!(repo, "web/.troupe/rules/ts.md", "---\nglobs: src/**\n---\nWeb TypeScript.")
+    write!(repo, "api/.troupe/rules/api.md", "---\nalwaysApply: true\n---\nnot worked in")
+    write!(repo, ".troupe/rules.d/x.md", "not a rules directory")
 
     assert files(Instructions.load(repo, config()), repo) == []
 
@@ -660,34 +815,39 @@ defmodule Troupe.InstructionsTest do
     refute Instructions.to_prompt(loaded) =~ "not worked in"
   end
 
-  test "a rule, or a .cursor/rules, that is a link to outside the repository is not read", %{
-    base: base,
-    repo: repo
-  } do
+  test "a rule, a .troupe/rules or a .troupe that is a link to outside the repository is not " <>
+         "read, nor the names of what is there",
+       %{base: base, repo: repo} do
     write!(base, "key", "---\nalwaysApply: true\n---\na stand-in for a private key")
-    write!(base, "elsewhere/secret.mdc", "---\nalwaysApply: true\n---\nanother stand-in")
-    File.mkdir_p!(Path.join(repo, ".cursor/rules"))
-    File.ln_s!(Path.join(base, "key"), Path.join(repo, ".cursor/rules/linked.mdc"))
-    write!(repo, "docs/inside.mdc", "---\nalwaysApply: true\n---\nlinked from inside")
-    File.ln_s!(Path.join(repo, "docs/inside.mdc"), Path.join(repo, ".cursor/rules/inside.mdc"))
-    File.mkdir_p!(Path.join(repo, "lib/.cursor"))
-    File.ln_s!(Path.join(base, "elsewhere"), Path.join(repo, "lib/.cursor/rules"))
+    write!(base, "elsewhere/secret.md", "---\nalwaysApply: true\n---\nanother stand-in")
+    write!(base, "dot-troupe/rules/hidden.md", "---\nalwaysApply: true\n---\na third stand-in")
+    File.mkdir_p!(Path.join(repo, ".troupe/rules"))
+    File.ln_s!(Path.join(base, "key"), Path.join(repo, ".troupe/rules/linked.md"))
+    write!(repo, "docs/inside.md", "---\nalwaysApply: true\n---\nlinked from inside")
+    File.ln_s!(Path.join(repo, "docs/inside.md"), Path.join(repo, ".troupe/rules/inside.md"))
+    File.mkdir_p!(Path.join(repo, "lib/.troupe"))
+    File.ln_s!(Path.join(base, "elsewhere"), Path.join(repo, "lib/.troupe/rules"))
+    File.mkdir_p!(Path.join(repo, "web"))
+    File.ln_s!(Path.join(base, "dot-troupe"), Path.join(repo, "web/.troupe"))
 
-    loaded = Instructions.load(repo, config(), ["lib/a.ex"])
+    loaded = Instructions.load(repo, config(), ["lib/a.ex", "web/b.ts"])
     outside = "not read: outside the repository"
-    linked = Path.join(repo, ".cursor/rules/linked.mdc")
-    rules = Path.join(repo, "lib/.cursor/rules")
+    linked = Path.join(repo, ".troupe/rules/linked.md")
+    rules = Path.join(repo, "lib/.troupe/rules")
+    web = Path.join(repo, "web/.troupe/rules")
 
     assert [
              %{status: :whole, text: "linked from inside"},
              %{path: ^linked, status: :outside, size: 0, hash: nil, rule: nil, reason: ^outside},
              %{path: ^rules, scope: :nested, status: :outside, chars: 0, reason: ^outside},
+             %{path: ^web, scope: :nested, status: :outside, chars: 0, reason: ^outside},
              %{scope: :brief}
            ] = loaded.files
 
     prompt = Instructions.to_prompt(loaded)
     refute prompt =~ "stand-in"
-    refute inspect(Instructions.provenance(loaded)) =~ "secret.mdc"
+    refute inspect(Instructions.provenance(loaded)) =~ "secret.md"
+    refute inspect(Instructions.provenance(loaded)) =~ "hidden.md"
   end
 
   test "a rule counts against the budget as a file does, and a listed one is whole or out", %{
@@ -695,13 +855,13 @@ defmodule Troupe.InstructionsTest do
   } do
     write!(
       repo,
-      ".cursor/rules/a.mdc",
+      ".troupe/rules/a.md",
       "---\nalwaysApply: true\n---\n" <> String.duplicate("a", 30)
     )
 
     write!(
       repo,
-      ".cursor/rules/b.mdc",
+      ".troupe/rules/b.md",
       "---\ndescription: #{String.duplicate("b", 30)}\n---\nbody"
     )
 
@@ -753,16 +913,29 @@ defmodule Troupe.InstructionsTest do
     write!(repo, "AGENTS.md", "two")
     assert Instructions.load(repo, config()).digest != first.digest
 
-    write!(repo, ".troupe/memory.md", "## Overview\nA brief.\n")
+    # A brief's command that does not fit the cap: left out, counted, and named for
+    # `recall` (Decision 838). The size is the view's, as a person opens it.
+    write!(repo, ".troupe/memory.md", "## Commands\n- A brief.\n")
     with_brief = Instructions.load(repo, config(memory_max_chars: 3))
     assert with_brief.digest != first.digest
 
-    assert %{scope: :brief, status: :trimmed, budget: 3, size: size, hash: "sha256:" <> _} =
+    assert %{
+             scope: :brief,
+             status: :trimmed,
+             budget: 3,
+             size: size,
+             hash: "sha256:" <> _,
+             trimmed: trimmed
+           } =
              List.last(with_brief.files)
 
-    assert size == byte_size("## Overview\nA brief.\n")
-    assert Instructions.to_prompt(with_brief) =~ "# Project brief"
-    assert Instructions.to_prompt(with_brief) =~ "(brief truncated)"
+    assert size == File.stat!(Path.join(repo, ".troupe/memory.md")).size
+    assert trimmed == String.length("- A brief.")
+
+    assert Instructions.to_prompt(with_brief) =~
+             "# Project brief\n1 fact about this repository (1 command)"
+
+    refute Instructions.to_prompt(with_brief, recall: false) =~ "# Project brief"
 
     off = Instructions.load(repo, config(memory: false))
     assert %{scope: :brief, status: :disabled, chars: 0, text: ""} = List.last(off.files)

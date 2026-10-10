@@ -67,7 +67,10 @@ defmodule Troupe.Gateway.Connection do
     outbound_requests: %{},
     next_request: 1,
     outbound_bound: @outbound_bound,
-    durable_bound: @durable_bound
+    durable_bound: @durable_bound,
+    # The largest message this connection reads, and says it reads at `initialize`: a
+    # WebSocket's is its socket's, which closes on anything larger (Decision 845).
+    max_message_bytes: @max_message_bytes
   ]
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -113,7 +116,9 @@ defmodule Troupe.Gateway.Connection do
        endpoint: Keyword.fetch!(opts, :endpoint),
        bearer: Keyword.get(opts, :bearer),
        outbound_bound: Keyword.get(opts, :outbound_bound, @outbound_bound),
-       durable_bound: Keyword.get(opts, :durable_bound, @durable_bound)
+       durable_bound: Keyword.get(opts, :durable_bound, @durable_bound),
+       max_message_bytes:
+         min(Keyword.get(opts, :max_message_bytes, @max_message_bytes), @max_message_bytes)
      }}
   end
 
@@ -262,8 +267,8 @@ defmodule Troupe.Gateway.Connection do
   defp consume(buffer, state) do
     case String.split(buffer, "\n", parts: 2) do
       [partial] ->
-        if byte_size(partial) > @max_message_bytes do
-          error = Error.new(:payload_too_large, %{limit: @max_message_bytes})
+        if byte_size(partial) > state.max_message_bytes do
+          error = Error.new(:payload_too_large, %{limit: state.max_message_bytes})
           {:stop, send_control(state, {:error, nil, error})}
         else
           {:ok, %{state | buffer: partial}}
@@ -543,7 +548,7 @@ defmodule Troupe.Gateway.Connection do
       "principal" => principal,
       "scopes" => Enum.map(scopes, &Atom.to_string/1),
       "limits" => %{
-        "max_message_bytes" => @max_message_bytes,
+        "max_message_bytes" => state.max_message_bytes,
         "outbound_queue" => @durable_bound
       }
     }

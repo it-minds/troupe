@@ -95,6 +95,11 @@ defmodule Troupe.LoopClientTest do
     assert %{data: %{reason: "requested"}} = await_event("root", :loop_stopped, 10_000)
     eventually(fn -> not (status_line(pid, session, sid) =~ "loop 1/2") end)
 
+    # How it stopped is said in the transcript of the session's own window, which the loop
+    # gave work (TUI Decision 155).
+    press(pid, "1")
+    assert user_state(pid).focus == {:window, "root"}
+
     eventually(fn ->
       screen_text(pid, session) =~ "loop stopped after 1 iteration: stopped on request"
     end)
@@ -127,7 +132,10 @@ defmodule Troupe.LoopClientTest do
         line =~ "goal: the notes exist" and not (line =~ "loop 1/2")
       end)
 
-      # The transcript still says what ran before the daemon stopped.
+      # The transcript still says what ran before the daemon stopped, in the session's own
+      # window, which its loop gave work (TUI Decision 155).
+      press(pid, "1")
+      assert user_state(pid).focus == {:window, "root"}
       assert screen_text(pid, session) =~ "loop iteration 1/2"
     end
 

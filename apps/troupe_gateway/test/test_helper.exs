@@ -15,6 +15,10 @@ File.write!(
 
 System.at_exit(fn _ -> File.rm_rf!(config_home) end)
 
+# The person's own `~/.agents/skills` (Decision 822): an empty one of the suite's own, not
+# the developer's.
+Application.put_env(:troupe_core, :agents_home, Path.join(config_home, "home/.agents"))
+
 # The first run's `daemon` step writes a login entry (Decision 762): into a scratch home
 # here, never the developer's own login items.
 login_home =

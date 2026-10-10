@@ -12,13 +12,14 @@ defmodule Troupe.MemoryClientTest do
 
   alias Troupe.Client
 
-  @note {:tools, [{"remember", %{"section" => "note", "text" => "tests live under test/"}}]}
+  # The librarian writes no notes (root Decision 839): what it learns is a section's facts.
+  @layout {:tools, [{"remember", %{"section" => "layout", "text" => "tests live under test/"}}]}
   # A curated section stamps the brief as built; a note alone leaves it stale.
   @overview {:tools, [{"remember", %{"section" => "overview", "text" => "a fixture repository"}}]}
 
   test "/memory shows the brief's state, /memory refresh has the librarian write it, /memory forget removes it" do
-    # The same fake answers the session and the librarian branch: one note, then done.
-    {sid, _, ws} = start_session!(script: [@note, {:text, "recorded"}, {:finish, "ok"}])
+    # The same fake answers the session and the librarian branch: one layout, then done.
+    {sid, _, ws} = start_session!(script: [@layout, {:text, "recorded"}, {:finish, "ok"}])
 
     assert {:ok, "no project brief yet; /memory refresh writes one"} = Client.memory(sid, "")
 
@@ -30,7 +31,7 @@ defmodule Troupe.MemoryClientTest do
 
     assert File.read!(Path.join(ws, ".troupe/memory.md")) =~ "tests live under test/"
     today = Date.to_iso8601(Date.utc_today())
-    assert {:ok, "project brief (fresh, built " <> ^today <> "): Notes"} = Client.memory(sid, "")
+    assert {:ok, "project brief (fresh, built " <> ^today <> "): Layout"} = Client.memory(sid, "")
 
     assert {:ok, "project brief forgotten; " <> _} = Client.memory(sid, "forget")
     refute File.exists?(Path.join(ws, ".troupe/memory.md"))
@@ -108,7 +109,7 @@ defmodule Troupe.MemoryClientTest do
              "librarian-1"
            ].agents["librarian-1"].transcript
 
-    press(pid, "2")
+    press(pid, "1")
     eventually(fn -> screen_text(pid, session) =~ "session created as librarian" end)
   end
 

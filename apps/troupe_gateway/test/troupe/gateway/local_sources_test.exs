@@ -164,6 +164,56 @@ defmodule Troupe.Gateway.LocalSourcesTest do
       assert data["reason"] =~ "not a server name"
     end
 
+    # Decision 825, #508.
+    test "a server's environment: imported as the variables that read it, and listed by name only",
+         context do
+      from = Path.join(context.base, "claude/.mcp.json")
+      File.mkdir_p!(Path.dirname(from))
+
+      File.write!(
+        from,
+        Jason.encode!(%{
+          "mcpServers" => %{
+            "github" => %{
+              "command" => "npx",
+              "args" => ["-y", "github-mcp"],
+              "env" => %{"GITHUB_TOKEN" => "not-a-real-token", "HOME_DIR" => "${HOME}"}
+            }
+          }
+        })
+      )
+
+      for {scope, written} <- [
+            {"user", context.user_file},
+            {"workspace", Path.join(context.workspace, ".troupe/mcp.json")}
+          ] do
+        assert {:ok, imported} =
+                 Client.call(context.client, "mcp.add", %{
+                   "command_id" => "c-e-#{scope}",
+                   "scope" => scope,
+                   "workspace" => context.workspace,
+                   "from" => from
+                 })
+
+        assert imported["added"] == ["github"]
+
+        assert Enum.any?(
+                 imported["warnings"],
+                 &(&1 =~ "set GITHUB_GITHUB_TOKEN to the value in the file it came from")
+               )
+
+        refute inspect(imported) =~ "not-a-real-token"
+        assert File.read!(written) =~ "{env:GITHUB_GITHUB_TOKEN}"
+        refute File.read!(written) =~ "not-a-real-token"
+      end
+
+      assert {:ok, %{"servers" => [server]}} =
+               Client.call(context.client, "mcp.list", %{"workspace" => context.workspace})
+
+      assert server["env"] == ["GITHUB_TOKEN", "HOME_DIR"]
+      assert server["refused"] =~ "{env:GITHUB_GITHUB_TOKEN} is not set"
+    end
+
     # Decision 820.
     test "a server's headers: imported as the variables that read them, and listed by name only",
          context do
@@ -213,6 +263,99 @@ defmodule Troupe.Gateway.LocalSourcesTest do
       # The variables are not set here, so neither server will start, and each says why.
       assert Enum.find(servers, &(&1["name"] == "api"))["refused"] =~
                "{env:API_AUTHORIZATION} is not set"
+    end
+
+    # Decision 830, #522.
+    test "a workspace's server set to auto says it waits for the workspace to be trusted",
+         context do
+      File.mkdir_p!(Path.join(context.workspace, ".troupe"))
+
+      File.write!(
+        Path.join(context.workspace, ".troupe/mcp.json"),
+        Jason.encode!(%{
+          "mcpServers" => %{
+            "theirs" => %{"command" => "t", "permission" => "auto"},
+            "plain" => %{"command" => "p"}
+          }
+        })
+      )
+
+      File.write!(
+        context.user_file,
+        Jason.encode!(%{"mcpServers" => %{"mine" => %{"command" => "m", "permission" => "auto"}}})
+      )
+
+      list = fn ->
+        assert {:ok, %{"servers" => servers}} =
+                 Client.call(context.client, "mcp.list", %{"workspace" => context.workspace})
+
+        Map.new(servers, &{&1["name"], &1})
+      end
+
+      listed = list.()
+      assert listed["theirs"]["permission"] == "auto"
+      assert [%{"key" => "permission", "reason" => reason}] = listed["theirs"]["notes"]
+
+      assert reason =~
+               "theirs is set to permission: auto, which applies once this workspace is trusted"
+
+      assert reason =~ "troupe config trust "
+      assert reason =~ "until then its tools ask before each call"
+      assert listed["plain"]["notes"] == []
+      assert listed["mine"]["notes"] == []
+
+      config = Path.join([context.base, "config", "config.yaml"])
+
+      File.write!(
+        config,
+        File.read!(config) <> "trusted_workspaces:\n  - #{Jason.encode!(context.workspace)}\n"
+      )
+
+      assert Enum.all?(list.(), fn {_name, server} -> server["notes"] == [] end)
+    end
+
+    # Decision 830: a repository's file must not offer the person's own servers as its own.
+    test "a workspace's include from outside the repository is listed, not read, until trusted",
+         context do
+      own = Path.join(context.base, "home/.claude.json")
+      File.mkdir_p!(Path.dirname(own))
+
+      File.write!(
+        own,
+        Jason.encode!(%{
+          "mcpServers" => %{"mine" => %{"command" => "m", "env" => %{"TOKEN" => "x"}}}
+        })
+      )
+
+      File.mkdir_p!(Path.join(context.workspace, ".troupe"))
+
+      File.write!(
+        Path.join(context.workspace, ".troupe/mcp.json"),
+        Jason.encode!(%{"include" => [own]})
+      )
+
+      assert {:ok, %{"servers" => [], "warnings" => [held]}} =
+               Client.call(context.client, "mcp.list", %{"workspace" => context.workspace})
+
+      assert held =~ "includes #{own}, outside the repository: not read until"
+      assert held =~ "(troupe config trust #{context.workspace})"
+
+      assert {:error, %Error{message: "not_found"}} =
+               Client.call(context.client, "mcp.check", %{
+                 "workspace" => context.workspace,
+                 "name" => "mine"
+               })
+
+      config = Path.join([context.base, "config", "config.yaml"])
+
+      File.write!(
+        config,
+        File.read!(config) <> "trusted_workspaces:\n  - #{Jason.encode!(context.workspace)}\n"
+      )
+
+      assert {:ok,
+              %{"servers" => [%{"name" => "mine", "layer" => "workspace"}], "warnings" => []}} =
+               Client.call(context.client, "mcp.list", %{"workspace" => context.workspace})
     end
 
     test "a session's servers are joined onto the listing, and mcp.check brings one back",
@@ -277,6 +420,22 @@ defmodule Troupe.Gateway.LocalSourcesTest do
                  "link" => true
                })
 
+      # Outside the repository, the link waits for the workspace to be trusted
+      # (Decision 829), and says so.
+      assert {:ok, %{"skills" => [], "skipped" => [waiting]}} =
+               Client.call(context.client, "skills.list", %{"workspace" => context.workspace})
+
+      assert %{"name" => nil, "layer" => "workspace", "linked" => true, "status" => "outside"} =
+               waiting
+
+      assert waiting["reason"] =~ "troupe config trust"
+
+      File.write!(
+        Path.join([context.base, "config", "config.yaml"]),
+        "version: 1\nprovider: fake\nmodels:\n  default: fake-model\n" <>
+          "trusted_workspaces:\n  - #{Jason.encode!(context.workspace)}\n"
+      )
+
       assert {:ok, %{"skills" => [linked]}} =
                Client.call(context.client, "skills.list", %{"workspace" => context.workspace})
 
@@ -325,6 +484,37 @@ defmodule Troupe.Gateway.LocalSourcesTest do
                })
 
       assert data["reason"] =~ "not a directory"
+    end
+
+    # Decision 822: the repository's `.agents/skills` is a layer below Troupe's own, read in
+    # place; a name `.troupe/skills` has too is listed as skipped, saying which is used.
+    test "an .agents/skills skill is listed with its layer, and one .troupe/skills beats is " <>
+           "listed as skipped, with why",
+         context do
+      ws = Path.expand(context.workspace)
+
+      skill = fn dir, description ->
+        File.mkdir_p!(dir)
+        File.write!(Path.join(dir, "SKILL.md"), "---\ndescription: #{description}\n---\nDo it.")
+      end
+
+      skill.(Path.join(ws, ".agents/skills/deploy"), "From .agents")
+      skill.(Path.join(ws, ".agents/skills/review"), "Hidden by .troupe")
+      skill.(Path.join(ws, ".troupe/skills/review"), "From .troupe")
+
+      assert {:ok, %{"skills" => [deploy, review], "skipped" => [skipped]}} =
+               Client.call(context.client, "skills.list", %{"workspace" => ws})
+
+      assert %{"name" => "deploy", "layer" => "agents", "description" => "From .agents"} = deploy
+      assert deploy["source"] == Path.join(ws, ".agents/skills")
+
+      assert %{"name" => "review", "layer" => "workspace", "description" => "From .troupe"} =
+               review
+
+      assert %{"name" => "review", "layer" => "agents", "status" => "skipped"} = skipped
+      assert skipped["dir"] == Path.join(ws, ".agents/skills/review")
+      assert skipped["reason"] == "skipped: #{Path.join(ws, ".troupe/skills/review")} is used"
+      refute Map.has_key?(skipped, "description")
     end
   end
 

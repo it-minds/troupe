@@ -1,9 +1,9 @@
 // The command table the fakes answer `commands.list` with: a slice of the harness's
 // (`Troupe.Commands`), enough for a palette to have sections, aliases, a command that
 // needs an argument, one a pod cannot run, an agent, `/goal` with the `/loop` whose
-// summary names the goal too, and a command a repository's `.troupe/commands/review.md`
-// defines, which the fakes run as `commands.run` does: its prompt, `$ARGUMENTS` replaced,
-// as the session's input.
+// summary names the goal too, `/memory`, which opens the desktop app's memory view, and a
+// command a repository's `.troupe/commands/review.md` defines, which the fakes run as
+// `commands.run` does: its prompt, `$ARGUMENTS` replaced, as the session's input.
 
 import type { CommandEntry } from "../../src/types.js";
 
@@ -99,6 +99,18 @@ export const COMMANDS: CommandEntry[] = [
     example: "/upload notes.md",
   },
   {
+    name: "memory",
+    aliases: [],
+    section: "workspace",
+    summary: "The project brief: show, refresh or forget it",
+    usage: "/memory [refresh | forget]",
+    args: [arg("action", false, "text")],
+    availability: "local",
+    source: "builtin",
+    detail: "The brief in .troupe/memory.md is read into every agent's prompt. /memory says what it holds, /memory refresh asks the librarian to rewrite it, /memory forget deletes it.",
+    example: "/memory refresh",
+  },
+  {
     name: "settings",
     aliases: [],
     section: "setup",
@@ -123,6 +135,18 @@ export const COMMANDS: CommandEntry[] = [
     example: null,
   },
   {
+    name: "agents",
+    aliases: [],
+    section: "agents",
+    summary: "List the agents this session can start a branch on",
+    usage: "/agents",
+    args: [],
+    availability: "always",
+    source: "builtin",
+    detail: "The primary agents: the built-ins, this machine's agents/ and the project's .troupe/agents/. Each is a command of its own, below.",
+    example: null,
+  },
+  {
     name: "build",
     aliases: [],
     section: "agents",
@@ -132,6 +156,18 @@ export const COMMANDS: CommandEntry[] = [
     availability: "local",
     source: "agent",
     detail: "Implement a change in the checkout.",
+    example: null,
+  },
+  {
+    name: "plan",
+    aliases: [],
+    section: "agents",
+    summary: "Read-only investigation and planning.",
+    usage: "/plan <prompt>",
+    args: [arg("prompt", true, "text")],
+    availability: "local",
+    source: "agent",
+    detail: "Read-only investigation and planning. Writes the task list, never the code.",
     example: null,
   },
   {

@@ -13,20 +13,53 @@ defmodule Troupe.Skills.Local do
   of `include` is a directory of skills — `~/.claude/skills` — or one skill's own
   directory; both are read.
 
-  Names are resolved the way the MCP layers are: the workspace's skill wins over the
-  user's of the same name, and a layer's own directory wins over what it links. Unlike
-  a bundle's skills, which a profile lists by name because an admin published them for
-  particular agents, a person's own skills are offered to every agent of the session:
-  the person put them there, for their own work, and a skill nobody can call is not one.
-  The files beside a skill are read with `read_file`, so the layers' directories and
-  linked roots are read roots of the session (`Troupe.Session.build_opts/1`).
+  Below those two sit the `.agents/skills` directories of the convention other tools
+  read, in place and never written (Decision 822):
+
+      ~/.agents/skills/<name>/SKILL.md      the person's, on every workspace
+      <dir>/.agents/skills/<name>/SKILL.md  in the workspace and each directory above it,
+                                            up to the repository root
+
+  Names are resolved up one ladder, lowest first: `~/.agents/skills`, each
+  `.agents/skills` from the repository root down to the workspace, the user's layer, the
+  workspace's. A name higher up wins, so the nearest `.agents/skills` beats one farther
+  out, Troupe's own layers beat `.agents/`, and the workspace's beats the user's, as the
+  MCP layers do; within a layer its own directory wins over what it links. Each skill a
+  name higher up hid is listed as `skipped`, saying which one is used (`resolve/2`). An
+  `.agents/skills`, or a skill in it, that is really outside its edge (the repository
+  root, or `~/.agents` for the person's), through a link, is listed as `outside` and not
+  read, as instruction files are (Decision 798).
+
+  The workspace's layer has edges too (Decision 829). Its `.troupe/skills`, and each
+  skill in it, is held to the workspace as its other `.troupe/` files are, trusted or not:
+  reaching out is what `include` is for. What its `skills.json` includes from outside the
+  repository is read, and is a read root, only once the workspace is trusted (`trusted:
+  true`, which the session says as it starts); until then it is listed as `outside`, saying
+  so, and not looked into, and a root inside the repository is held to the repository. The
+  person's own layer and its links have no edge: the person put them there.
+
+  A `SKILL.md` that can't be read is listed as `unreadable`, with why, rather than dropped.
+
+  Unlike a bundle's skills, which a profile lists by name because an admin published
+  them for particular agents, a person's own skills are offered to every agent of the
+  session: the person put them there, for their own work, and a skill nobody can call
+  is not one. The files beside a skill are read with `read_file`, so the layers'
+  directories, the `.agents/skills` outside the workspace and the linked roots are read
+  roots of the session (`Troupe.Session.build_opts/1`).
   """
 
-  alias Troupe.Config.{JSONC, Migrate}
+  alias Troupe.Agent.Definitions
+  alias Troupe.Config.{JSONC, Migrate, Trust}
+  alias Troupe.Instructions
   alias Troupe.Protocol.{AgentDefinition, Bundle}
   alias Troupe.Workspace
 
-  @type layer :: :user | :workspace
+  @typedoc """
+  Where a skill comes from, lowest on the ladder first: `user_agents` (`~/.agents/skills`),
+  `agents` (an `.agents/skills` in the repository), `user` (`<config>/skills`) and
+  `workspace` (`.troupe/skills`). Only the last two are written to.
+  """
+  @type layer :: :user_agents | :agents | :user | :workspace
 
   @typedoc "One skill as the layers give it: what a prompt lists, and where it is."
   @type skill :: %{
@@ -38,12 +71,49 @@ defmodule Troupe.Skills.Local do
           linked?: boolean()
         }
 
+  @typedoc """
+  A skill the layers hold and do not offer, and why, in `reason`: `skipped` when a name
+  higher on the ladder hid it, or when its directory's name is not one a skill may have;
+  `outside` when it is really outside its edge, or is a workspace's link out of the
+  repository that waits for trust, and was not read; `unreadable` when its `SKILL.md`
+  can't be read. A directory of skills that is itself outside is one entry, with no
+  `name`, and is not looked into.
+  """
+  @type left_out :: %{
+          name: String.t() | nil,
+          layer: layer(),
+          dir: Path.t(),
+          source: Path.t(),
+          linked?: boolean(),
+          status: :skipped | :outside | :unreadable,
+          reason: String.t()
+        }
+
+  @outside_repository "not read: outside the repository"
+  @outside_home "not read: outside ~/.agents"
+  @not_a_name "skipped: not a skill name: lower-case letters, digits and dashes"
+
   # -- where -------------------------------------------------------------------------
 
   @doc "The user's skills directory, beside `config.yaml`."
   @spec user_dir(keyword()) :: Path.t()
   def user_dir(opts \\ []),
     do: Keyword.get(opts, :user_dir) || Path.join(Troupe.Paths.config_dir(), "skills")
+
+  @doc """
+  The person's own `.agents` directory, in their home, whose `skills/` is the user level
+  of the `.agents/skills` convention; `nil` when there is no home to look in. A test
+  names another with `agents_home:`, or for a whole suite the `:troupe_core, :agents_home`
+  setting.
+  """
+  @spec agents_home(keyword()) :: Path.t() | nil
+  def agents_home(opts \\ []) do
+    Keyword.get(opts, :agents_home) || Application.get_env(:troupe_core, :agents_home) ||
+      case System.user_home() do
+        nil -> nil
+        home -> Path.join(home, ".agents")
+      end
+  end
 
   @doc "A workspace's `.troupe/skills`."
   @spec workspace_dir(Path.t()) :: Path.t()
@@ -75,27 +145,67 @@ defmodule Troupe.Skills.Local do
   # -- reading -----------------------------------------------------------------------
 
   @doc """
-  Every skill the layers give a workspace, by name, the workspace's over the user's.
-  `nil` for the workspace reads the user's layer alone.
+  Every skill the layers give a workspace, by name, the one highest on the ladder.
+  `nil` for the workspace reads the person's layers alone.
   """
   @spec list(Path.t() | nil, keyword()) :: [skill()]
-  def list(workspace, opts \\ []) do
+  def list(workspace, opts \\ []), do: resolve(workspace, opts).skills
+
+  @doc """
+  What `list/2` offers, and every skill the layers hold and do not offer, with why
+  (Decision 822): each one a name higher on the ladder hid, saying which is used, and
+  each one outside its edge, never read. The ladder is enforced here and nowhere else;
+  `skipped` is in ladder order, lowest first. `trusted: true` says the workspace is
+  trusted, so what its `skills.json` links from outside the repository is read
+  (Decision 829); anything else is not.
+  """
+  @spec resolve(Path.t() | nil, keyword()) :: %{skills: [skill()], skipped: [left_out()]}
+  def resolve(workspace, opts \\ []) do
+    found = ladder(workspace, opts)
+
+    offered =
+      found
+      |> Enum.reject(&Map.has_key?(&1, :status))
+      |> Enum.reduce(%{}, fn skill, acc -> Map.put(acc, skill.name, skill) end)
+
+    skipped =
+      for entry <- found, Map.get(offered, entry.name) != entry, do: left_out(entry, offered)
+
+    %{skills: offered |> Map.values() |> Enum.sort_by(& &1.name), skipped: skipped}
+  end
+
+  # Lowest first: what is later in the list wins a name.
+  defp ladder(workspace, opts) do
+    agents =
+      Enum.flat_map(agents_dirs(workspace, opts), fn {layer, dir, edge, outside} ->
+        skills_in(layer, dir, edge, outside, false)
+      end)
+
     layers = [:user] ++ if(workspace, do: [:workspace], else: [])
 
-    layers
-    |> Enum.flat_map(fn layer ->
-      {:ok, paths} = layer_paths(layer, workspace, opts)
-      layer_skills(layer, paths)
-    end)
-    |> Enum.reduce(%{}, fn skill, acc -> Map.put(acc, skill.name, skill) end)
-    |> Map.values()
-    |> Enum.sort_by(& &1.name)
+    agents ++
+      Enum.flat_map(layers, fn layer ->
+        {:ok, paths} = layer_paths(layer, workspace, opts)
+        layer_skills(layer, paths, workspace, opts)
+      end)
+  end
+
+  defp left_out(%{status: _} = entry, _offered), do: Map.drop(entry, [:description])
+
+  defp left_out(skill, offered) do
+    used = Map.fetch!(offered, skill.name)
+
+    skill
+    |> Map.drop([:description])
+    |> Map.merge(%{status: :skipped, reason: "skipped: #{show(used.dir)} is used"})
   end
 
   @doc """
   The directories a session must be able to read for its local skills' files: the
-  user's layer and every linked root. The workspace's own layer is inside the workspace
-  already. Only what exists, since a read root that is not there resolves nothing.
+  user's layer, the `.agents/skills` inside their edges, and every linked root, the
+  workspace's from outside the repository only with `trusted: true` (Decision 829). The
+  workspace's own layer is inside the workspace already. Only what exists, since a read
+  root that is not there resolves nothing.
   """
   @spec roots(Path.t() | nil, keyword()) :: [Path.t()]
   def roots(workspace, opts \\ []) do
@@ -103,34 +213,187 @@ defmodule Troupe.Skills.Local do
 
     workspace_links =
       case workspace && layer_paths(:workspace, workspace, opts) do
-        {:ok, paths} -> links(paths.links)
-        _ -> []
+        {:ok, paths} ->
+          edge = link_edge(workspace, opts)
+          Enum.filter(links(paths.links), &(is_nil(edge) or under?(key(&1), key(edge))))
+
+        _ ->
+          []
       end
 
-    ([user.dir] ++ links(user.links) ++ workspace_links)
+    agents =
+      for {_layer, dir, edge, _outside} <- agents_dirs(workspace, opts),
+          File.dir?(dir) and under?(key(dir), key(edge)),
+          do: dir
+
+    (agents ++ [user.dir] ++ links(user.links) ++ workspace_links)
     |> Enum.filter(&File.dir?/1)
     |> Enum.uniq()
   end
 
-  # Linked roots first, then the layer's own directory, so the latter's names win.
-  defp layer_skills(layer, paths) do
-    linked =
-      paths.links
-      |> links()
-      |> Enum.flat_map(fn root ->
-        Enum.map(skills_at(root), &Map.merge(&1, %{source: root, linked?: true}))
-      end)
+  # Linked roots first, then the layer's own directory, so the latter's names win. The
+  # person's own have no edge. The workspace's `.troupe/skills` is held to the workspace,
+  # trusted or not, and its links to the repository until it is trusted (Decision 829).
+  defp layer_skills(:user, paths, _workspace, _opts) do
+    linked = Enum.flat_map(links(paths.links), &skills_in(:user, &1, nil, nil, true))
+    linked ++ skills_in(:user, paths.dir, nil, nil, false)
+  end
 
-    own =
-      Enum.map(
-        Bundle.list_skills_in(paths.dir),
-        &Map.merge(&1, %{source: paths.dir, linked?: false})
-      )
+  defp layer_skills(:workspace, paths, workspace, opts) do
+    edge = link_edge(workspace, opts)
+    waiting = edge && untrusted(workspace)
+    linked = Enum.flat_map(links(paths.links), &skills_in(:workspace, &1, edge, waiting, true))
+    own = skills_in(:workspace, paths.dir, workspace, Definitions.outside_workspace(), false)
+    linked ++ own
+  end
 
-    (linked ++ own)
-    |> Enum.map(&Map.put(&1, :layer, layer))
-    |> Enum.reduce(%{}, fn skill, acc -> Map.put(acc, skill.name, skill) end)
-    |> Map.values()
+  # What a workspace's links are held to: the repository until the workspace is trusted,
+  # and nothing once it is, as the person's own are.
+  defp link_edge(workspace, opts) do
+    if Keyword.get(opts, :trusted) == true,
+      do: nil,
+      else: workspace |> Path.expand() |> Instructions.repository_root()
+  end
+
+  defp untrusted(workspace) do
+    "not read: outside the repository, until this workspace is trusted " <>
+      "(#{Trust.command(Path.expand(workspace))})"
+  end
+
+  # -- .agents/skills ----------------------------------------------------------------
+
+  # Every `.agents/skills` to look in, lowest first, each with its edge and what to say of
+  # one outside it: the person's own, held to `~/.agents`, then the repository's from its
+  # root down to the workspace, held to the root, so the nearest comes last and wins. The
+  # root is the instruction files' (`Troupe.Instructions.repository_root/1`); the person's
+  # own directory is not read twice when the repository is their home. Where an edge
+  # really is is asked only of a directory that is there, since this runs at every turn.
+  defp agents_dirs(workspace, opts) do
+    user =
+      case agents_home(opts) do
+        nil -> []
+        home -> [{:user_agents, Path.join(home, "skills"), home, @outside_home}]
+      end
+
+    user ++ repository_agents_dirs(workspace, user)
+  end
+
+  defp repository_agents_dirs(nil, _user), do: []
+
+  defp repository_agents_dirs(workspace, user) do
+    workspace = Path.expand(workspace)
+    root = Instructions.repository_root(workspace)
+    theirs = for {_layer, dir, _edge, _outside} <- user, do: Workspace.compare_key(dir)
+
+    workspace
+    |> up_to(root)
+    |> Enum.reverse()
+    |> Enum.map(&Path.join(&1, ".agents/skills"))
+    |> Enum.reject(&(Workspace.compare_key(&1) in theirs))
+    |> Enum.map(&{:agents, &1, root, @outside_repository})
+  end
+
+  # `dir` and each directory above it up to `root`, nearest first.
+  defp up_to(dir, root) do
+    parent = Path.dirname(dir)
+
+    cond do
+      Workspace.compare_key(dir) == Workspace.compare_key(root) -> [dir]
+      parent == dir -> [dir]
+      true -> [dir | up_to(parent, root)]
+    end
+  end
+
+  # -- one directory of skills -------------------------------------------------------
+
+  @doc """
+  The skills in one directory of them, held to `edge` by where each really is
+  (Decision 829), and those left out, each with why (`reason`, as `resolve/2` gives
+  one): how `Troupe.Skills` reads a worktree's main checkout's `.troupe/skills`, held to
+  the checkout.
+  """
+  @spec held(Path.t(), Path.t(), String.t()) :: {[skill()], [left_out()]}
+  def held(dir, edge, outside) do
+    :workspace
+    |> skills_in(dir, edge, outside, false)
+    |> Enum.split_with(&(not Map.has_key?(&1, :status)))
+  end
+
+  # One directory of skills, held to `edge` when it has one: not there; wholly outside its
+  # edge (listed once, not looked into, so not even the names of what is there are said);
+  # or each skill in it, in name order. A skill is judged where its `SKILL.md` really is,
+  # so a skill directory or a manifest linked out is `outside` and its frontmatter is never
+  # read. A linked root may be one skill's own directory, which is that skill alone.
+  defp skills_in(layer, root, edge, outside, linked?) do
+    if File.dir?(root),
+      do: held_skills(layer, root, edge && key(edge), outside, linked?),
+      else: []
+  end
+
+  defp held_skills(layer, root, bound, outside, linked?) do
+    where = %{layer: layer, source: root, linked?: linked?}
+
+    if bound && not under?(key(root), bound) do
+      [Map.merge(where, %{name: nil, dir: root, status: :outside, reason: outside})]
+    else
+      root |> manifests(linked?) |> Enum.flat_map(&skill(&1, where, bound, outside))
+    end
+  end
+
+  defp manifests(root, linked?) do
+    if linked? and File.regular?(Path.join(root, "SKILL.md")) do
+      [Path.join(root, "SKILL.md")]
+    else
+      root
+      |> Troupe.Paths.glob_escape()
+      |> Path.join("*/SKILL.md")
+      |> Path.wildcard()
+      |> Enum.sort()
+    end
+  end
+
+  defp skill(manifest, where, bound, outside) do
+    dir = Path.dirname(manifest)
+    name = Path.basename(dir)
+    entry = Map.merge(where, %{name: name, dir: dir})
+
+    cond do
+      bound && not under?(key(manifest), bound) ->
+        [Map.merge(entry, %{status: :outside, reason: outside})]
+
+      not AgentDefinition.valid_name?(name) ->
+        [Map.merge(entry, %{status: :skipped, reason: @not_a_name})]
+
+      true ->
+        case File.read(manifest) do
+          {:ok, text} ->
+            [Map.put(entry, :description, description(text))]
+
+          {:error, reason} ->
+            why = "not read: its SKILL.md can't be read: #{:file.format_error(reason)}"
+            [Map.merge(entry, %{status: :unreadable, reason: why})]
+        end
+    end
+  end
+
+  # The frontmatter's description, as `Troupe.Protocol.Bundle.list_skills_in/1` reads it.
+  defp description(text) do
+    {frontmatter, _body} = AgentDefinition.split_frontmatter(text)
+
+    case YamlElixir.read_from_string(frontmatter) do
+      {:ok, %{"description" => description}} when is_binary(description) -> description
+      _ -> ""
+    end
+  end
+
+  defp under?(key, bound), do: key == bound or String.starts_with?(key, bound <> "/")
+
+  # Where a path really is, links followed, in the form the platform compares paths in.
+  defp key(path) do
+    case Workspace.real_path(path) do
+      {:ok, real} -> Workspace.compare_key(real)
+      {:error, _reason} -> Workspace.compare_key(Path.expand(path))
+    end
   end
 
   # A linked path is a directory of skills, or one skill's own directory.

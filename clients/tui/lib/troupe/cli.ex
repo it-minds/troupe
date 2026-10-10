@@ -27,6 +27,7 @@ defmodule Troupe.CLI do
           | :models
           | :doctor
           | :instructions_check
+          | :onboard
           | :bench
           | :login
           | :logout
@@ -176,12 +177,21 @@ defmodule Troupe.CLI do
      "check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure",
      [["doctor"], ["doctor", "--json"]]},
     {"troupe doctor --bench [--json]",
-     "the same, then a turn of tool calls, a cut output, a compaction, a cancel and a replay " <>
-       "against a scripted model: offline, in seconds",
+     "the same, then a turn of tool calls, a cut output, a compaction, a cancel, a replay, " <>
+       "four onboarded repositories and a memory whose command's file changed against a " <>
+       "scripted model: offline, in seconds",
      [["doctor", "--bench"], ["doctor", "--bench", "--json"]]},
     {"troupe instructions check [--workspace DIR] [--json]",
-     "check the instruction files a session here reads: contradictions, missing paths and programs, repeats; exits 1 on one",
+     "check the instruction files a session here reads: contradictions, missing paths and programs, repeats; " <>
+       "and onboarded files whose source has changed, or a workspace onboarded under older " <>
+       "rules; exits 1 on one",
      [["instructions", "check"], ["instructions", "check", "--workspace", ".", "--json"]]},
+    {"troupe onboard [--workspace DIR] [--yes] [--json] [--all]",
+     "bring other tools' instruction files, rules, agents and commands into AGENTS.md, " <>
+       ".troupe/ and your config, each shown as a diff and written only if you say yes; a new " <>
+       "AGENTS.md is its own question, never answered by --yes; --all asks again about what " <>
+       "you left out",
+     [["onboard"], ["onboard", "--workspace", ".", "--yes"], ["onboard", "--json", "--all"]]},
     {"troupe bench [--json [FILE]] [--md FILE]",
      "measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one",
      [["bench"], ["bench", "--json"], ["bench", "--json", "bench.json", "--md", "bench.md"]]},
@@ -360,6 +370,8 @@ defmodule Troupe.CLI do
   defp parse_rest(["instructions", "check"], base),
     do: {:ok, %{base | mode: :instructions_check}}
 
+  defp parse_rest(["onboard"], base), do: {:ok, %{base | mode: :onboard}}
+
   defp parse_rest(["bench"], base), do: {:ok, %{base | mode: :bench}}
 
   # `troupe resume` (Decision 812): no word is the picker on the newest session here;
@@ -432,7 +444,7 @@ defmodule Troupe.CLI do
 
     #{sections}
 
-    Each agent is a command too, /build <prompt> or /plan <prompt> (/agents lists them),
+    Each agent is a command too, /build <prompt> or /plan <prompt> (/agents manages them),
     and so is each <name>.md in your config's commands/ or the workspace's .troupe/commands/.\
     """
   end

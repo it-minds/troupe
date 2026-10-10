@@ -530,3 +530,43 @@ describe("the goal and its loop (issue #59)", () => {
     assert.equal(settleLoop(state.loop, null), state.loop);
   });
 });
+
+describe("the files a session did not read (troupe Decision 826)", () => {
+  it("says which agent and skill files a start left out, how many, and why, as a note", () => {
+    seq = 0;
+    const bundle = "the session's bundle has an agent named build, and on a pod the bundle's beats a repository's unless the profile allows the repository's";
+    const shipped = "plan is an agent Troupe ships, and on a pod Troupe's own beats a repository's unless the profile allows the repository's";
+    const state = foldAll([
+      durable("files_skipped", {
+        files: [
+          { kind: "agent", name: "build", path: "/w/.troupe/agents/build.md", reason: bundle },
+          { kind: "agent", name: "plan", path: "/w/.troupe/agents/plan.md", reason: shipped },
+        ],
+      }),
+    ]);
+    const note = state.entries.at(-1);
+    assert.equal(note?.kind, "system");
+    assert.equal(note?.kind === "system" ? note.text : "", `2 agents not read here: agent build (/w/.troupe/agents/build.md): ${bundle}; agent plan (/w/.troupe/agents/plan.md): ${shipped}`);
+
+    // A worktree's: one reason for every file the main checkout has not committed, said once.
+    const uncommitted = "not committed in /main, the checkout this worktree belongs to, and a worktree reads only what the checkout has committed: commit it to use it here";
+    const worktree = foldAll([
+      durable("files_skipped", {
+        files: [
+          { kind: "agent", name: "draft", path: "/main/.troupe/agents/draft.md", reason: uncommitted },
+          { kind: "skill", name: "tidy", path: "/main/.troupe/skills/tidy/SKILL.md", reason: uncommitted },
+        ],
+      }),
+    ]);
+    const said = worktree.entries.at(-1);
+    assert.equal(
+      said?.kind === "system" ? said.text : "",
+      `1 agent and 1 skill not read here: agent draft (/main/.troupe/agents/draft.md), skill tidy (/main/.troupe/skills/tidy/SKILL.md): ${uncommitted}`,
+    );
+
+    // An empty list is the files gone, or read now.
+    const gone = foldAll([durable("files_skipped", { files: [] })]);
+    const empty = gone.entries.at(-1);
+    assert.equal(empty?.kind === "system" ? empty.text : "", "no agent or skill file is skipped now");
+  });
+});

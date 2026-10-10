@@ -108,14 +108,33 @@ defmodule Troupe.Gateway.AutospawnTest do
     program = Path.join(dir, "troupe-daemon.cmd")
     File.write!(program, "")
 
-    assert Daemon.detach_line(program, {:win32, :nt}) ==
-             {:shell, ~s("start "troupe-daemon" /min cmd /c ""#{program}""")}
+    cmd = ~S"C:\WINDOWS\system32\cmd.exe"
 
-    assert Daemon.detach_line("troupe-daemon run", {:win32, :nt}) ==
-             {:shell, ~s("start "troupe-daemon" /min cmd /c "troupe-daemon run"")}
+    assert Daemon.detach_line(program, {:win32, :nt}, comspec: cmd) ==
+             {:shell, ~s("start "troupe-daemon" /min "#{cmd}" /c ""#{program}""")}
+
+    assert Daemon.detach_line("troupe-daemon run", {:win32, :nt}, comspec: cmd) ==
+             {:shell, ~s("start "troupe-daemon" /min "#{cmd}" /c "troupe-daemon run"")}
 
     assert {:exec, "/bin/sh", ["-c", "nohup troupe-daemon >/dev/null 2>&1 &"]} =
              Daemon.detach_line("troupe-daemon", {:unix, :linux})
+  end
+
+  # `start` looks for a bare `cmd` in the current directory first, which for a client
+  # started in a repository is the repository: the one it runs is cmd.exe by its absolute
+  # path, whatever the machine says (#555, Decision 846).
+  test "on Windows the cmd that start runs is never a bare name" do
+    assert {:shell, line} = Daemon.detach_line("troupe-daemon run", {:win32, :nt})
+    assert [_, cmd] = Regex.run(~r{/min "([^"]+)" /c }, line)
+    assert String.downcase(Path.basename(String.replace(cmd, "\\", "/"))) == "cmd.exe"
+    assert cmd =~ "\\"
+
+    assert Troupe.Executable.comspec(comspec: ~S"C:\Windows\System32\cmd.exe") ==
+             ~S"C:\Windows\System32\cmd.exe"
+
+    # A relative ComSpec is not taken; with no cmd.exe on PATH, the Windows directory's.
+    assert Troupe.Executable.comspec(comspec: "cmd.exe", path: "", system_root: ~S"D:\Win") ==
+             ~S"D:\Win\System32\cmd.exe"
   end
 
   # -- helpers ----------------------------------------------------------------

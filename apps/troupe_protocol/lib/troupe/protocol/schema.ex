@@ -179,11 +179,26 @@ defmodule Troupe.Protocol.Schema do
         "ok" => required(:boolean),
         # Text, or `{"blob", "size", "preview", "truncated"}` when it was too large to
         # put on the wire.
-        "content" => required(:text_or_blob)
+        "content" => required(:text_or_blob),
+        # How a `shell` call's command ended (Decision 837): `exit_status` when it exited,
+        # `timed_out: true` when its timeout killed it. Absent on every other tool and on
+        # a call that did not run; `ok` is true for a command that ran, whatever its status.
+        "exit_status" => optional(:integer),
+        "timed_out" => optional(:boolean)
       },
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
-      "profile_switched" => %{"from" => optional(:string), "to" => required(:string)},
+      # The agent a session or branch runs, changed (Decision 841): the layer the new one was
+      # read from, the tools it holds that the old did not and the other way round, and the
+      # switch's `command_id`. Written under whoever switched it.
+      "profile_switched" => %{
+        "from" => optional(:string),
+        "to" => required(:string),
+        "layer" => optional(:string),
+        "tools_added" => optional({:array, :string}),
+        "tools_removed" => optional({:array, :string}),
+        "command_id" => optional(:string)
+      },
       # What the agent's system prompt was read from at this turn (Decision 706): the
       # instruction files, what they import, and the brief, as `context.get` lists them,
       # each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`,
@@ -368,6 +383,12 @@ defmodule Troupe.Protocol.Schema do
       # What the session may touch: `[{name, kind, root, mode}]`. Resolved once, at
       # creation, and recorded so that a replay can tell what was allowed at the time.
       "mounts_resolved" => %{"mounts" => required(:array)},
+      # The agent and skill files a session found and did not read, each `{kind, name, path,
+      # reason}`: on a pod, a working copy's file of a name the bundle has or a built-in
+      # agent's, which those beat unless the profile allows the repository's; in a git
+      # worktree, one the main checkout has not committed (Decision 826). Written at a start
+      # whose list differs from the one the log last recorded, an empty list included.
+      "files_skipped" => %{"files" => required(:array)},
       # Something other than a person started this session, and this is the whole of what
       # that was: which of the seven sources, under which trigger document, on whose
       # authority, against which idempotency key, carrying what.
@@ -389,6 +410,56 @@ defmodule Troupe.Protocol.Schema do
         "hash" => required(:string),
         "bytes" => required(:integer),
         "direction" => required(:string)
+      },
+      # A file `onboard_write` wrote (Decision 823): under the workspace's `.troupe/`
+      # (`target: repo`), an `AGENTS.md` of the workspace's (`workspace`, Decision 827) or
+      # under the person's config directory (`user`), at `path` from that root, shown as
+      # `file`; from `source`, whose sha256 was `source_hash`; `action` is `created` or
+      # `replaced`.
+      "onboarded" => %{
+        "target" => required(:string),
+        "path" => required(:string),
+        "file" => required(:string),
+        "source" => required(:string),
+        "source_hash" => required(:string),
+        "action" => required(:string)
+      },
+      # What onboarding would do in the session's workspace, said at every start while it is
+      # due and the person has not said no for that version (Decisions 827 and 835); nothing
+      # was written. `reasons`: `first`
+      # (other tools' files, nothing onboarded: `proposals` counts what `troupe onboard`
+      # would propose by kind), `outdated` (onboarded under `onboarded_version` of the rules,
+      # older than `onboarding_version`) and `brief` (the brief written by `brief_version` of
+      # the librarian's survey, older than `survey_version`). `message` says it all in a
+      # line a client shows as it is; `command` is what to run. What a client's start asks
+      # next (Decision 835): `due` (`first`, `outdated` or `none`) for onboarding,
+      # `brief_due` (`first`, `stale`, `outdated` or `none`) for the brief, and `counts`, the
+      # workspace's files it would ask about (`files`, `write`, `create_agents_md`);
+      # `onboard.plan` lists them.
+      "onboarding_suggested" => %{
+        "reasons" => required({:array, :string}),
+        "message" => required(:string),
+        "workspace" => optional(:string),
+        "command" => optional(:string),
+        "proposals" => optional(:object),
+        "onboarding_version" => optional(:integer),
+        "onboarded_version" => optional(:integer),
+        "survey_version" => optional(:integer),
+        "brief_version" => optional(:integer),
+        "due" => optional(:string),
+        "brief_due" => optional(:string),
+        "counts" => optional(:object)
+      },
+      # A saved `AI!` or `AI?` comment started a branch of this session (Decision 844):
+      # `agent` (`quick` or `answer`) as the session `session_id`, in this session's
+      # checkout, for the comments in `markers` (`file`, `line`, `comment`); `mode` is
+      # `change` or `question`. `error` instead of `session_id` says why none started.
+      "watch_triggered" => %{
+        "agent" => required(:string),
+        "mode" => required(:string),
+        "markers" => required(:array),
+        "session_id" => optional(:string),
+        "error" => optional(:string)
       },
       "session_dormant" => %{"last_seq" => required(:integer)},
       "session_activated" => %{"epoch" => required(:string), "pod" => optional(:string)},
@@ -489,6 +560,9 @@ defmodule Troupe.Protocol.Schema do
       },
       "summary_diff" => %{"changed" => required(:object)},
       "watch_notice" => %{"message" => required(:string)},
+      # Watch went on or off for this session, or changed backend (Decision 844);
+      # `watch.get` says the same at any time.
+      "watch_changed" => %{"enabled" => required(:boolean), "backend" => required(:string)},
       # A person's command while it runs (Decision 813): started, then its output as it
       # comes. Its end is the durable `user_shell`, which carries the tail either way.
       "shell_started" => %{
@@ -527,6 +601,7 @@ defmodule Troupe.Protocol.Schema do
         "profile" => optional(:string),
         "prompt" => optional(:string),
         "worktree" => optional(:string),
+        "worktree_name" => optional(:string),
         "config" => optional(:object),
         "parent" => optional(:string),
         "workflow" => optional(:string),
@@ -649,6 +724,35 @@ defmodule Troupe.Protocol.Schema do
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "workflows.list" => %{"workspace" => required(:string)},
       "agents.list" => %{"workspace" => required(:string)},
+      # One agent whole, checked, written and taken away (#503, Decision 841). Reading and
+      # checking answer on a pod too; writing is the daemon's, and a pod refuses it.
+      # `scope` is `user` or `project` (`workspace` is taken as `project`).
+      "agents.get" => %{
+        "name" => required(:string),
+        "workspace" => optional(:string),
+        "session_id" => optional(:string)
+      },
+      "agents.validate" => %{
+        "source" => required(:string),
+        "name" => optional(:string),
+        "workspace" => optional(:string),
+        "session_id" => optional(:string)
+      },
+      "agents.put" => %{
+        "command_id" => required(:string),
+        "name" => required(:string),
+        "scope" => required(:string),
+        "source" => required(:string),
+        "workspace" => optional(:string),
+        "session_id" => optional(:string)
+      },
+      "agents.delete" => %{
+        "command_id" => required(:string),
+        "name" => required(:string),
+        "scope" => required(:string),
+        "workspace" => optional(:string),
+        "session_id" => optional(:string)
+      },
       # The slash commands a client may offer for a session, agents included; reading
       # the table wakes nothing.
       "commands.list" => %{"session_id" => required(:string)},
@@ -665,7 +769,31 @@ defmodule Troupe.Protocol.Schema do
       # of the budget (Decision 706); reading it wakes nothing.
       "context.get" => %{"session_id" => required(:string)},
       "mcp.status" => %{"session_id" => required(:string)},
-      "memory.forget" => %{"command_id" => required(:string), "workspace" => required(:string)},
+      # With `id`, one fact; without, the whole brief (Decision 839).
+      "memory.forget" => %{
+        "command_id" => required(:string),
+        "workspace" => required(:string),
+        "id" => optional(:string)
+      },
+      # A no to rewriting a brief an older survey wrote, remembered for that survey's
+      # version (Decision 835).
+      "memory.decline" => %{"workspace" => required(:string), "command_id" => optional(:string)},
+      # What a session's start asks, onboarding then the brief (Decision 835); the
+      # daemon's alone. `apply` and `decline` act on the items named by `ids`, or on all
+      # (`all: true`); `apply` with `all` never creates an `AGENTS.md` that is not there.
+      "onboard.plan" => %{"workspace" => required(:string)},
+      "onboard.apply" => %{
+        "workspace" => required(:string),
+        "ids" => optional({:array, :string}),
+        "all" => optional(:boolean),
+        "command_id" => optional(:string)
+      },
+      "onboard.decline" => %{
+        "workspace" => required(:string),
+        "ids" => optional({:array, :string}),
+        "all" => optional(:boolean),
+        "command_id" => optional(:string)
+      },
       "worktree.list" => %{"workspace" => optional(:string)},
       "worktree.remove" => %{
         "command_id" => required(:string),
@@ -686,8 +814,12 @@ defmodule Troupe.Protocol.Schema do
       "watch.set" => %{
         "command_id" => required(:string),
         "workspace" => required(:string),
-        "enabled" => optional(:boolean)
+        "enabled" => optional(:boolean),
+        "session_id" => optional(:string)
       },
+      # Whether a workspace is watched, how, and by which session (Decision 844); the
+      # daemon's, since a pod's session never watches.
+      "watch.get" => %{"workspace" => required(:string)},
       # Presence. No `command_id`: it is not an effect to be replayed, and a client that
       # retried one would be asserting something it no longer knows to be true.
       "presence.set" => %{
@@ -849,6 +981,7 @@ defmodule Troupe.Protocol.Schema do
   is nothing to dial back to, and a laptop behind a NAT could not be dialled anyway.
   `config.changed` is a notification, with no answer: the daemon telling every client
   that a settings file it writes has changed (#57), so one client shows what another set.
+  `agents.changed` is one too, for an agent a client saved or took away (Decision 841).
   """
   @spec server_requests() :: %{String.t() => shape()}
   def server_requests do
@@ -862,6 +995,15 @@ defmodule Troupe.Protocol.Schema do
         "scope" => required(:string),
         "path" => required(:string),
         "keys" => required({:array, :string}),
+        "workspace" => optional(:string)
+      },
+      # An agent a client saved or took away (Decision 841), told to every client so each
+      # list follows; `workspace` for a project one.
+      "agents.changed" => %{
+        "name" => required(:string),
+        "scope" => required(:string),
+        "path" => required(:string),
+        "action" => required(:string),
         "workspace" => optional(:string)
       }
     }

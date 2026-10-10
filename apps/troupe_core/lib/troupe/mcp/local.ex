@@ -10,10 +10,11 @@ defmodule Troupe.MCP.Local do
       <workspace>/.troupe/mcp.json   the workspace's, for whoever opens the repository
 
   Each file is `{"mcpServers": {name: entry}}`, so a Claude Code `.mcp.json`, a Cursor
-  or Claude Desktop file, or a VS Code `servers` file imports as it is
-  (`Troupe.MCP.Import`), and a file Troupe wrote is one the others can read. One key is
-  Troupe's own: `"include": [path]` reads another file in place — a *link* — so a
-  person who keeps their servers in `~/.claude/.mcp.json` need not keep two copies.
+  or Claude Desktop file, a VS Code `servers` file, an opencode `opencode.json` or a Codex
+  `config.toml` imports as it is (`Troupe.MCP.Import`), and a file Troupe wrote is one the
+  others can read. One key is Troupe's own: `"include": [path]` reads another file in
+  place — a *link* — so a person who keeps their servers in `~/.claude/.mcp.json` need
+  not keep two copies.
 
   The layers stack the way `config.yaml` does (Decision 686): the user's file, then the
   workspace's, an entry of the same name merged key by key with the higher layer's
@@ -26,9 +27,17 @@ defmodule Troupe.MCP.Local do
   `config.yaml`'s `mcp:` stays as it was, the lowest layer of the three. A `{env:VAR}`
   in any string is read as `Troupe.Config` reads it: unset refuses that server, naming
   the variable, and nothing is sent in its place.
+
+  A server the workspace's layer names, in its own file or one it links, that says
+  `permission: auto` runs its tools unasked only once the workspace is trusted
+  (`waits_for_trust?/1`, Decision 830): answering the question that starts it grants
+  starting it, as a workspace agent's `auto` waits (Decision 825). And the workspace's
+  layer reads nothing from outside the repository until then (`resolve/2`): what its file
+  includes from elsewhere, the person's own files among them, is listed, not read.
   """
 
-  alias Troupe.Config.{JSONC, Layers, Migrate}
+  alias Troupe.Config.{Layers, Migrate, Trust}
+  alias Troupe.Instructions
   alias Troupe.MCP.{Import, OAuth, Server}
   alias Troupe.Workspace
 
@@ -117,26 +126,21 @@ defmodule Troupe.MCP.Local do
     end
   end
 
+  # A linked Codex `config.toml` is read as TOML (Decision 825); every other file is JSON.
   defp decode(path, text) do
-    case JSONC.decode(text) do
-      {:ok, decoded} when is_map(decoded) ->
-        {:ok, decoded}
-
-      {:ok, _other} ->
-        {:error, "#{show(path)} is not a JSON object"}
-
-      {:error, %Jason.DecodeError{} = error} ->
-        {:error, "#{show(path)} is not JSON: " <> Exception.message(error)}
-
-      {:error, other} ->
-        {:error, "#{show(path)} is not JSON: #{inspect(other)}"}
+    case Import.decode(text, Import.format(path)) do
+      {:ok, decoded} when is_map(decoded) -> {:ok, decoded}
+      {:ok, _other} -> {:error, "#{show(path)} is not a JSON object"}
+      {:error, reason} -> {:error, "#{show(path)} is #{reason}"}
     end
   end
 
   # A file with only `include` is a file with no servers of its own, not a malformed one.
+  # A linked file is read under whichever key its tool keeps its servers, as an import
+  # reads it: opencode's `opencode.json` has them under `mcp` (Decision 830).
   defp servers_of(path, decoded) do
     wrapped =
-      case Map.take(decoded, ["mcpServers", "servers"]) do
+      case Map.take(decoded, ["mcpServers", "servers", "mcp", "mcp_servers"]) do
         empty when map_size(empty) == 0 -> %{"mcpServers" => %{}}
         some -> some
       end
@@ -163,6 +167,12 @@ defmodule Troupe.MCP.Local do
   Every server the two layers give a workspace, merged and sorted by name, with
   `config.yaml`'s `mcp:` underneath when `:base` carries it (`Troupe.Config.t/0`'s
   `mcp`). `nil` for the workspace reads the user's layer alone.
+
+  The workspace's layer is held to the repository, by where each file really is, until
+  the workspace is trusted (`trusted: true`, which the session says as it starts, and
+  anything else is not): a `.troupe/mcp.json` that is a link out, or a file it includes
+  from outside, is not read, and a warning names it and the command that trusts the
+  workspace (Decision 830). The person's own layer has no edge.
   """
   @spec resolve(Path.t() | nil, keyword()) :: {[server()], [String.t()]}
   def resolve(workspace, opts \\ []) do
@@ -172,12 +182,15 @@ defmodule Troupe.MCP.Local do
       |> Enum.map(fn {name, config} -> from_base(name, config) end)
 
     layers =
-      [{:user, user_path(opts)}] ++
-        if(workspace, do: [{:workspace, workspace_path(workspace)}], else: [])
+      [{:user, user_path(opts), nil}] ++
+        if(workspace,
+          do: [{:workspace, workspace_path(workspace), edge(workspace, opts)}],
+          else: []
+        )
 
     {entries, warnings} =
-      Enum.reduce(layers, {%{}, []}, fn {layer, path}, {acc, warnings} ->
-        case layer_entries(layer, path) do
+      Enum.reduce(layers, {%{}, []}, fn {layer, path, edge}, {acc, warnings} ->
+        case layer_entries(layer, path, edge) do
           {:ok, entries, warned} ->
             {Enum.reduce(entries, acc, &merge_entry/2), warnings ++ warned}
 
@@ -202,11 +215,17 @@ defmodule Troupe.MCP.Local do
   end
 
   # A layer's entries in reading order: each included file's, then the file's own.
-  defp layer_entries(layer, path) do
+  defp layer_entries(layer, path, edge) do
+    if outside?(path, edge),
+      do: {:ok, [], ["#{show(path)} is really outside the repository: #{edge.held}"]},
+      else: read_layer(layer, path, edge)
+  end
+
+  defp read_layer(layer, path, edge) do
     with {:ok, file} <- read(path) do
       {included, warnings} =
         Enum.reduce(file.include, {[], file.warnings}, fn included_path, {entries, warnings} ->
-          {more, warned} = included_entries(layer, path, included_path)
+          {more, warned} = included_entries(layer, path, included_path, edge)
           {entries ++ more, warnings ++ warned}
         end)
 
@@ -214,16 +233,59 @@ defmodule Troupe.MCP.Local do
     end
   end
 
-  defp included_entries(layer, path, included_path) do
-    case read(included_path) do
-      {:ok, %{exists?: false}} ->
-        {[], ["#{show(path)} includes #{show(included_path)}, which is not there"]}
+  defp included_entries(layer, path, included_path, edge) do
+    if outside?(included_path, edge) do
+      {[],
+       ["#{show(path)} includes #{show(included_path)}, outside the repository: #{edge.held}"]}
+    else
+      case read(included_path) do
+        {:ok, %{exists?: false}} ->
+          {[], ["#{show(path)} includes #{show(included_path)}, which is not there"]}
 
-      {:ok, included} ->
-        {tagged(included.servers, layer, included_path), included.warnings}
+        {:ok, included} ->
+          {tagged(included.servers, layer, included_path), included.warnings}
 
-      {:error, message} ->
-        {[], [message]}
+        {:error, message} ->
+          {[], [message]}
+      end
+    end
+  end
+
+  # What a workspace's layer is held to (Decision 830): the repository, until the
+  # workspace is trusted, and nothing once it is, as the person's own layer never is. A
+  # repository's file must not read one of the person's own (`~/.claude.json`) and offer
+  # their servers, their environment with them, as the workspace's, as a `skills.json`'s
+  # link waits (Decision 829).
+  defp edge(workspace, opts) do
+    if Keyword.get(opts, :trusted) == true do
+      nil
+    else
+      workspace = Path.expand(workspace)
+
+      %{
+        bound: workspace |> Instructions.repository_root() |> key(),
+        held: "not read until this workspace is trusted (#{Trust.command(workspace)})"
+      }
+    end
+  end
+
+  # Judged where the file really is, links followed. One that is not there has nothing to
+  # read, and `read/1` says so.
+  defp outside?(_path, nil), do: false
+
+  defp outside?(path, %{bound: bound}) do
+    case Workspace.real_path(path) do
+      {:ok, real} -> not under?(Workspace.compare_key(real), bound)
+      {:error, _reason} -> false
+    end
+  end
+
+  defp under?(key, bound), do: key == bound or String.starts_with?(key, bound <> "/")
+
+  defp key(path) do
+    case Workspace.real_path(path) do
+      {:ok, real} -> Workspace.compare_key(real)
+      {:error, _reason} -> Workspace.compare_key(Path.expand(path))
     end
   end
 
@@ -400,6 +462,31 @@ defmodule Troupe.MCP.Local do
   defp present(_value), do: nil
 
   @doc """
+  Whether a server's `permission: auto` waits for the workspace to be trusted
+  (`trusted_workspaces`, Decision 686) before its tools run unasked: one the workspace's
+  layer names, in `.troupe/mcp.json` or a file it links, since that came with a clone.
+  An entry the workspace's file changes over one of the person's own is the workspace's
+  too, since what would run unasked is then what the workspace says. The person's own
+  `mcp.json` and `config.yaml`'s `mcp:` keep what they say (Decision 830).
+  """
+  @spec waits_for_trust?(server()) :: boolean()
+  def waits_for_trust?(%{layer: :workspace, config: %{permission: :auto}}), do: true
+  def waits_for_trust?(_server), do: false
+
+  @doc """
+  What a held `auto` waits for, naming the servers and the command that trusts the
+  workspace: for the question that starts them and `mcp.list`'s note.
+  """
+  @spec held_reason([String.t()], Path.t()) :: String.t()
+  def held_reason(names, workspace) do
+    {is, its} = if match?([_], names), do: {"is", "its"}, else: {"are", "their"}
+
+    "#{Enum.join(names, ", ")} #{is} set to permission: auto, which applies once this " <>
+      "workspace is trusted (#{Trust.command(workspace)}); until then " <>
+      "#{its} tools ask before each call"
+  end
+
+  @doc """
   What would run, hashed: the command, its arguments, its environment, its directory or
   its URL. The trust store keeps this beside the name, so a server whose command changed
   under the same name is a new question, and a re-ordered file is not.
@@ -533,17 +620,21 @@ defmodule Troupe.MCP.Local do
   Bring another tool's servers in: copied into the layer's file (`link?: false`), or
   read in place by adding the file to `include` (`link?: true`). Either way the answer
   says which names the layer now has from it and what was skipped or translated. A copy
-  writes a header's value as the `{env:VAR}` that reads it, never the value itself, and
-  says which variable to set (`Troupe.MCP.Import.parse/2`, Decision 820); a link reads
-  the other tool's file as it is, where the value already was.
+  writes a header's or an environment variable's value as the `{env:VAR}` that reads it,
+  never the value itself, and says which variable to set (`Troupe.MCP.Import.parse/2`,
+  Decisions 820 and 825); a link reads the other tool's file as it is, where the value
+  already was. A Codex `config.toml` is read as TOML, and the person's own one goes into
+  their layer only.
   """
   @spec import(:user | :workspace, Path.t() | nil, Path.t(), boolean(), keyword()) ::
           {:ok, imported()} | {:error, String.t()}
   def import(scope, workspace, from, link?, opts \\ []) do
     from = Path.expand(from)
+    codex_path = Keyword.get_lazy(opts, :codex_path, &Import.codex_user_path/0)
 
     with {:ok, path} <- path(scope, workspace, opts),
          :ok <- not_itself(path, from),
+         :ok <- ones_own(scope, from, codex_path),
          {:ok, file} <- read(path),
          {:ok, source} <- read_source(from, copy: not link?) do
       names = source.servers |> Map.keys() |> Enum.sort()
@@ -573,10 +664,23 @@ defmodule Troupe.MCP.Local do
       else: :ok
   end
 
+  # The person's own Codex configuration is theirs (Decision 825): its servers go into
+  # their layer, and a workspace's file, which is committed, neither copies nor links it.
+  defp ones_own(:workspace, from, codex_path) do
+    if Workspace.compare_key(from) == Workspace.compare_key(Path.expand(codex_path)),
+      do:
+        {:error,
+         "#{show(from)} is your own Codex configuration; import it into your own mcp.json " <>
+           "(the user scope), not the workspace's, which goes wherever the repository goes"},
+      else: :ok
+  end
+
+  defp ones_own(_scope, _from, _codex_path), do: :ok
+
   defp read_source(from, opts) do
     case File.read(from) do
       {:ok, text} ->
-        case Import.parse(text, opts) do
+        case Import.parse(text, [format: Import.format(from)] ++ opts) do
           {:ok, parsed} -> {:ok, parsed}
           {:error, reason} -> {:error, "#{show(from)}: #{reason}"}
         end

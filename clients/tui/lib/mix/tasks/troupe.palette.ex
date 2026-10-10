@@ -84,6 +84,8 @@ defmodule Mix.Tasks.Troupe.Palette do
     {:ok, "status.allowed.fg", :green, "a tool that succeeded, a window done and not yet read"},
     {:error, "status.error.fg", :red, "a tool that failed, a window that failed"},
     {:offline, "status.offline.fg", :yellow, "a plane that does not answer"},
+    {:stale, ["status.offline.fg", "status.error.fg"], :yellow,
+     "a fact that may no longer be true: an anchor of it changed or went"},
     {:added, "diff.addedText", :green, "a line a diff adds"},
     {:removed, "diff.removedText", :red, "a line a diff removes"},
     {:hunk, "diff.hunkHeader", :dark_gray, "a diff's file and hunk headers"},

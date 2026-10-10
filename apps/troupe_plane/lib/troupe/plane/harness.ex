@@ -2375,33 +2375,45 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp bundle_params(session) do
-    with %{config_bundle_channel: channel} <- Fleet.get_profile(session.profile),
+    with %{config_bundle_channel: channel} = profile <- Fleet.get_profile(session.profile),
          resolved <- Bundles.resolve(channel, session.bundle_version) do
-      case resolved do
-        {:keep, bundle} ->
-          %{
-            "bundle_version" => bundle.version,
-            "bundle_hash" => bundle.hash,
-            "channel" => channel
-          }
+      pin =
+        case resolved do
+          {:keep, bundle} ->
+            %{
+              "bundle_version" => bundle.version,
+              "bundle_hash" => bundle.hash,
+              "channel" => channel
+            }
 
-        {:upgrade, from, bundle} ->
-          Sessions.pin_bundle(session.id, bundle.version)
+          {:upgrade, from, bundle} ->
+            Sessions.pin_bundle(session.id, bundle.version)
 
-          %{
-            "bundle_version" => bundle.version,
-            "bundle_hash" => bundle.hash,
-            "channel" => channel,
-            "bundle_upgraded_from" => from
-          }
+            %{
+              "bundle_version" => bundle.version,
+              "bundle_hash" => bundle.hash,
+              "channel" => channel,
+              "bundle_upgraded_from" => from
+            }
 
-        {:error, _reason} ->
-          %{"bundle_version" => session.bundle_version, "channel" => channel}
-      end
+          {:error, _reason} ->
+            %{"bundle_version" => session.bundle_version, "channel" => channel}
+        end
+
+      Map.put(pin, "repository_overrides_bundle", repository_overrides?(profile))
     else
       _ -> %{"bundle_version" => session.bundle_version}
     end
   end
+
+  # Whether the profile lets a repository's agents and skills replace its bundle's and the
+  # built-ins of the same name (Decision 826): `spec.repositoryOverridesBundle`, on only
+  # when it is `true`.
+  # It rides with the pin, as the entitlement set does, because the pod applies it wherever
+  # it reads the bundle; and it is read again at every activation, as the channel is, so a
+  # profile that turns it off reaches a session the next time it wakes.
+  defp repository_overrides?(%{spec: %{"repositoryOverridesBundle" => true}}), do: true
+  defp repository_overrides?(_profile), do: false
 
   defp team_name(%{team_id: nil}), do: nil
 

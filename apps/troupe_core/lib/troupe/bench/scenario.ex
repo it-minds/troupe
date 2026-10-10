@@ -18,6 +18,11 @@ defmodule Troupe.Bench.Scenario do
       0: a test passing)
     * `drive` — `nil` to type the prompt and wait for the turn to end, or a function
       of the run's context that does something else (cancel half way) and returns it
+    * `prepare` — `nil`, or a function run once the workspace has its files and before
+      the session starts, given `%{workspace, home, config_dir, state_dir}`, the run's
+      own directories, and answering the marks its measure reads: how an onboarding
+      scenario runs `troupe onboard` first (Decision 834); offline only
+    * `agent` — the agent the session starts on, `nil` for the default; offline only
     * `measure` — a function of the run's context answering `{metrics, checks}`: each
       metric `{name, label, unit, value}`, held to its budget when the budgets file has
       one, and each check `{name, label, passed?}`, for what is not a number
@@ -34,7 +39,9 @@ defmodule Troupe.Bench.Scenario do
     config: [],
     script: [],
     outcome: nil,
-    drive: nil
+    drive: nil,
+    prepare: nil,
+    agent: nil
   ]
 
   @type metric :: {String.t(), String.t(), String.t(), number()}
@@ -51,7 +58,9 @@ defmodule Troupe.Bench.Scenario do
           config: keyword(),
           script: [Troupe.Bench.Model.step()],
           outcome: outcome(),
-          drive: (map() -> map()) | nil
+          drive: (map() -> map()) | nil,
+          prepare: (map() -> map()) | nil,
+          agent: String.t() | nil
         }
 
   @doc "Write the scenario's files into a workspace."
@@ -75,7 +84,8 @@ defmodule Troupe.Bench.Scenario do
     do: holds?(workspace, relative, content)
 
   def outcome(%__MODULE__{outcome: {:command, [program | args]}}, workspace) do
-    case System.find_executable(program) do
+    # On the PATH alone, never the current directory (Decision 846).
+    case Troupe.Executable.find(program) do
       nil ->
         false
 

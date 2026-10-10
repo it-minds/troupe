@@ -1,14 +1,15 @@
 defmodule Troupe.InstructionsPromptTest do
   @moduledoc """
-  The instruction files in a real session's prompt (Decisions 706, 798, 806 and 809): a
-  repository with only an `AGENTS.md`, or only one of its aliases, needs no
-  Troupe-specific setup, an edit to it reaches the next turn and not the next call, a
-  nested file on the way to what a turn worked on is in the next turn's prompt (a nested
-  Copilot file is not, and the event says why), an import reaches it, the
-  `instructions_loaded` event is written when what was read changed and not otherwise
-  and says what the budget cut, the person's own `<config>/AGENTS.md` comes first, the
-  brief last, nothing reaches the prompt from a file without appearing in the
-  provenance, and Cursor's rules join it when their front matter says.
+  The instruction files in a real session's prompt (Decisions 706, 798, 806, 809 and 828):
+  a repository with only an `AGENTS.md` needs no Troupe-specific setup, and one with only
+  another tool's file reaches no prompt, the event saying to run `troupe onboard`; an edit
+  reaches the next turn and not the next call, a nested file on the way to what a turn
+  worked on is in the next turn's prompt (a nested Copilot file is not, and the event says
+  why), an import reaches it, the `instructions_loaded` event is written when what was
+  read changed and not otherwise and says what the budget cut, the person's own
+  `<config>/AGENTS.md` comes first, the brief last, nothing reaches the prompt from a file
+  without appearing in the provenance, and `.troupe/rules` join it when their front
+  matter says.
 
   `async: false`: one test writes the suite's shared config home.
   """
@@ -68,31 +69,43 @@ defmodule Troupe.InstructionsPromptTest do
     assert after_edit.data["files"] |> hd() |> Map.get("hash") != root["hash"]
   end
 
-  test "a repository with only a CLAUDE.md, a GEMINI.md or a copilot file needs no setup either",
+  # Decision 828: other tools' files are brought in once by `troupe onboard`, and a session
+  # reads none of them; the event names each, saying so.
+  test "a repository with only a CLAUDE.md, a GEMINI.md, a copilot file or Cursor's rules " <>
+         "reaches no prompt, and the event says to run troupe onboard",
        context do
-    for name <- ["CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md"] do
+    for name <- [
+          "CLAUDE.md",
+          "GEMINI.md",
+          ".github/copilot-instructions.md",
+          ".cursorrules",
+          ".cursor/rules/style.mdc"
+        ] do
       repo = %{context | workspace: Path.join(context.base, "repo-" <> Path.basename(name))}
-      write_file(repo, name, @haiku)
+      write_file(repo, name, "---\nalwaysApply: true\n---\n" <> @haiku)
 
-      %{session: session, fake: fake} =
-        start_session(repo, steps: [{:text, "one"}, {:text, "two"}])
-
+      %{session: session, fake: fake} = start_session(repo, steps: [{:text, "one"}])
       :ok = Troupe.subscribe(session.id)
       path = Path.join(Path.expand(repo.workspace), name)
 
       Troupe.send_input(session.id, "hello")
       await_event(session.id, :turn_ended)
       [first] = Fake.requests(fake)
+      refute first.system =~ "haiku"
+      refute first.system =~ "# Instruction files"
 
-      assert first.system =~
-               "Contents of #{path} (repository root):\n# Rules\n\nAlways answer in haiku."
+      assert [event] = events_of_type(session.id, :instructions_loaded)
 
-      write_file(repo, name, @limerick)
-      Troupe.send_input(session.id, "again")
-      await_event(session.id, :turn_ended)
-      [_first, second] = Fake.requests(fake)
-      assert second.system =~ "Always answer in limericks."
-      refute second.system =~ "haiku"
+      assert [
+               %{
+                 "scope" => "root",
+                 "path" => ^path,
+                 "status" => "skipped",
+                 "chars" => 0,
+                 "reason" => "not read: run troupe onboard"
+               },
+               %{"scope" => "brief"}
+             ] = event.data["files"]
 
       Troupe.stop_session(session.id)
     end
@@ -232,7 +245,7 @@ defmodule Troupe.InstructionsPromptTest do
   test "a nested Copilot file on the way to a file the turn read is not in the next turn's " <>
          "prompt, and the event says why",
        context do
-    write_file(context, ".github/copilot-instructions.md", @haiku)
+    write_file(context, "AGENTS.md", @haiku)
     write_file(context, "frontend/.github/copilot-instructions.md", "Frontend: use pnpm.\n")
     write_file(context, "frontend/app/main.ts", "export {}\n")
 
@@ -300,7 +313,7 @@ defmodule Troupe.InstructionsPromptTest do
     on_exit(fn -> File.rm(mine) end)
 
     write_file(context, "AGENTS.md", "Theirs: run mix check.\n")
-    write_file(context, ".troupe/memory.md", "## Overview\nA brief.\n")
+    write_file(context, ".troupe/memory.md", "## Commands\n- A brief.\n")
 
     %{session: session, fake: fake} = start_session(context, steps: [{:text, "ok"}])
     :ok = Troupe.subscribe(session.id)
@@ -348,13 +361,13 @@ defmodule Troupe.InstructionsPromptTest do
     refute request.system =~ "an alias nobody reads"
   end
 
-  # Decision 809: `.cursor/rules/*.mdc` as Cursor reads them. An `alwaysApply` rule is in
-  # every prompt; a `globs` rule joins the turn after one that read a matching file, and
-  # stays; a rule with only a description is listed by it, its body not joined.
+  # Decisions 809 and 828: `.troupe/rules/*.md` as Cursor read its rules. An `alwaysApply`
+  # rule is in every prompt; a `globs` rule joins the turn after one that read a matching
+  # file, and stays; a rule with only a description is listed by it, its body not joined.
   test "an always rule is in the first prompt, a glob rule joins the turn after a matching " <>
          "file is read and stays, a description-only rule is listed",
        context do
-    write_file(context, ".cursor/rules/style.mdc", """
+    write_file(context, ".troupe/rules/style.md", """
     ---
     description: House style
     alwaysApply: true
@@ -362,7 +375,7 @@ defmodule Troupe.InstructionsPromptTest do
     Always answer in haiku.
     """)
 
-    write_file(context, ".cursor/rules/ts.mdc", """
+    write_file(context, ".troupe/rules/ts.md", """
     ---
     globs: src/**/*.ts
     alwaysApply: false
@@ -370,7 +383,7 @@ defmodule Troupe.InstructionsPromptTest do
     TypeScript: no any.
     """)
 
-    write_file(context, ".cursor/rules/db.mdc", """
+    write_file(context, ".troupe/rules/db.md", """
     ---
     description: Writing a database migration
     alwaysApply: false
@@ -395,9 +408,9 @@ defmodule Troupe.InstructionsPromptTest do
     await_event(session.id, :turn_ended)
 
     [a, b] = Fake.requests(fake)
-    style = Path.join(Path.expand(context.workspace), ".cursor/rules/style.mdc")
-    ts = Path.join(Path.expand(context.workspace), ".cursor/rules/ts.mdc")
-    db = Path.join(Path.expand(context.workspace), ".cursor/rules/db.mdc")
+    style = Path.join(Path.expand(context.workspace), ".troupe/rules/style.md")
+    ts = Path.join(Path.expand(context.workspace), ".troupe/rules/ts.md")
+    db = Path.join(Path.expand(context.workspace), ".troupe/rules/db.md")
 
     assert a.system =~
              "Contents of #{style} (repository root, a rule that always applies):\n" <>

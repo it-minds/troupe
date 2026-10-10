@@ -2,10 +2,10 @@ defmodule Troupe.Watch.WatcherTest do
   @moduledoc """
   Watch mode, run once against each backend.
 
-  The agent is stood in for by the test process, registered under an agent path the
-  watcher will send to. That isolates what is being tested — markers, debouncing,
-  ignore rules and self-write suppression — from the agent loop, which has its own
-  tests.
+  The branch a trigger starts (`Troupe.Watch.Branch`) is stood in for by the test
+  process, which the watcher's `dispatch` sends each trigger to. That isolates what is
+  being tested — markers, debouncing, ignore rules and self-write suppression — from the
+  branch and its agent, which have tests of their own (`Troupe.Watch.WatchBranchTest`).
   """
 
   use ExUnit.Case, async: true
@@ -16,21 +16,36 @@ defmodule Troupe.Watch.WatcherTest do
   @stub_path ["stub"]
 
   setup do
-    root = Path.join(System.tmp_dir!(), "troupe-watch-#{System.unique_integer([:positive])}")
+    base = Path.join(System.tmp_dir!(), "troupe-watch-#{System.unique_integer([:positive])}")
+    root = Path.join(base, "workspace")
     File.mkdir_p!(root)
-    on_exit(fn -> File.rm_rf!(root) end)
+    on_exit(fn -> File.rm_rf!(base) end)
 
     # Ignore rules exist before watching starts, which is the realistic case; a
     # `.gitignore` written mid-session is covered separately below.
     File.write!(Path.join(root, ".gitignore"), "secret/\n*.log\n")
 
     {:ok, workspace} = Workspace.new(root)
-    session_id = "watch-#{System.unique_integer([:positive])}"
+    session_id = Session.generate_id()
 
-    # Stand in for the root agent so the watcher's delivery can be observed directly.
-    {:ok, _} = Registry.register(Troupe.Registry, {:agent, session_id, @stub_path}, nil)
+    # The log the watcher writes which branch a trigger started into.
+    start_supervised!(
+      {Session.Log,
+       session_id: session_id, workspace_root: root, state_dir: Path.join(base, "state")}
+    )
 
     %{root: root, workspace: workspace, session_id: session_id}
+  end
+
+  # Each trigger to the test process, in the shape an agent's input had, as a branch
+  # that started.
+  defp stub_dispatch do
+    test = self()
+
+    fn trigger, _opts ->
+      send(test, {:input, :watch, trigger, nil, %{}})
+      {:ok, %{id: Session.generate_id(), pid: test}}
+    end
   end
 
   for {name, backend} <- [native: FileSystemBackend, poll: PollBackend] do
@@ -76,7 +91,8 @@ defmodule Troupe.Watch.WatcherTest do
        enabled: true,
        backend: backend,
        debounce_ms: 150,
-       poll_interval_ms: 60}
+       poll_interval_ms: 60,
+       dispatch: stub_dispatch()}
     )
   end
 

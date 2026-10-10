@@ -98,7 +98,7 @@ defmodule Mix.Tasks.Troupe.Release.Check do
   defp run_step(:check), do: mix("check", [])
 
   defp run_step(:kubeconform) do
-    case System.find_executable("kubeconform") do
+    case Troupe.Executable.find("kubeconform") do
       nil ->
         {:not_run, "kubeconform is not on PATH — `brew install kubeconform`, or see its README"}
 
@@ -109,7 +109,7 @@ defmodule Mix.Tasks.Troupe.Release.Check do
 
   defp run_step(:e2e) do
     cond do
-      is_nil(System.find_executable("kubectl")) ->
+      is_nil(Troupe.Executable.find("kubectl")) ->
         {:not_run, "kubectl is not on PATH"}
 
       context() == nil ->

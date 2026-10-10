@@ -29,10 +29,12 @@ defmodule Troupe.Config do
 
   A pod is handed one provider and one key by its profile. A laptop has whatever the
   person has: a `providers:` block naming gateways by name, each with its own type, URL,
-  key and the models it serves; an opencode installation whose providers Troupe reuses
-  when it has no key of its own; and a cached model catalog that says what each model's
+  key and the models it serves; and a cached model catalog that says what each model's
   window and price are. A model is then addressed as `<provider>/<model>`, and
-  `target/2` is what turns that into the URL, key and wire id one request needs.
+  `target/2` is what turns that into the URL, key and wire id one request needs. An
+  opencode installation's providers are not read here: they are copied into
+  `providers:` once, when a person asks (`Troupe.Config.ModelSettings.import_opencode/1`,
+  Decision 828).
 
       providers:
         gateway:
@@ -48,7 +50,7 @@ defmodule Troupe.Config do
         windows: {some-bare-model: 128000}
   """
 
-  alias Troupe.Config.{Error, Explain, Issue, Layers, Migrate, OpenCode, Schema, Trust}
+  alias Troupe.Config.{Error, Explain, Issue, Layers, Migrate, Schema, Trust}
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
   alias Troupe.LLM.Endpoint
@@ -75,7 +77,7 @@ defmodule Troupe.Config do
             # URL reads is not set. A request to it fails with this rather than going out.
             refused: nil,
             # Named providers, addressable as `<name>/<model>`. From `providers:` in a
-            # config file, or from opencode when Troupe has no key of its own.
+            # config file.
             providers: %{},
             # Context windows declared by hand for bare model ids.
             windows: %{},
@@ -85,9 +87,6 @@ defmodule Troupe.Config do
             # What each provider last said about its models, from the cache file. Never
             # fetched here: loading a config must not depend on a provider answering.
             catalog: %{},
-            # Whether a file or the environment named the default model. When nothing
-            # did, opencode's own default may stand in.
-            models_explicit?: false,
             max_tokens: 8192,
             context_window: 200_000,
             compact_at: 0.75,
@@ -119,6 +118,10 @@ defmodule Troupe.Config do
             watch: false,
             watch_debounce_ms: 300,
             watch_poll_interval_ms: 1_000,
+            # Whether a branch an `AI!` or `AI?` comment started runs its writes unasked
+            # (Decision 844). Off, each asks, whatever `auto_approve`, an agent or an MCP
+            # server says: any process that writes a file can write a comment.
+            watch_auto_approve: false,
             # Durable `fs_changed` events for everything that happens in the workspace.
             # Off locally, where the user can see their own files; on in a pod, where a
             # client has no other way to know that `shell` wrote something.
@@ -291,7 +294,6 @@ defmodule Troupe.Config do
 
     with [] <- layers.errors,
          {:ok, config, layers} <- layers |> build() |> apply_overrides(overrides, layers) do
-      {config, layers} = apply_opencode(config, layers)
       config = apply_catalog(config)
       {:ok, %{config | warnings: Enum.map(layers.warnings ++ layers.refusals, &Issue.format/1)}, layers}
     else
@@ -418,7 +420,7 @@ defmodule Troupe.Config do
     |> put_model(:model, models["default"])
     |> put_model(:small_model, models["cheap"])
     |> put_model(:expensive_model, models["expensive"])
-    |> then(&%{&1 | windows: Map.get(models, "windows", %{}), models_explicit?: Map.has_key?(models, "default")})
+    |> then(&%{&1 | windows: Map.get(models, "windows", %{})})
     |> Map.put(:prices, Map.get(models, "prices", %{}))
   end
 
@@ -533,8 +535,6 @@ defmodule Troupe.Config do
   defp override_error(key, message),
     do: %Error{issues: [%Issue{level: :error, source: "command line", key: to_string(key), message: message}]}
 
-  defp override(config, :model, value) when is_binary(value), do: {:ok, %{config | model: value, models_explicit?: true}}
-
   defp override(config, key, value) when is_atom(key) do
     cond do
       key in [:__struct__, :warnings, :refused] or not Map.has_key?(config, key) ->
@@ -591,76 +591,11 @@ defmodule Troupe.Config do
     end
   end
 
-  # Without a key of its own, Troupe reuses opencode's providers, and — when nothing
-  # named a default model — opencode's own default, else the first provider with a key.
-  # A key the files name but the environment does not hold is not "no key": the provider
-  # is refused, and opencode does not stand in for it.
-  defp apply_opencode(%__MODULE__{} = config, layers) do
-    if is_nil(config.api_key) and is_nil(config.refused) and to_string(config.provider) in ["anthropic", "openai"] do
-      found = OpenCode.providers()
-      unshadowed = Map.keys(found) -- Map.keys(config.providers)
-      layers = unshadowed |> record_opencode(layers) |> refuse_opencode(Map.take(found, unshadowed))
-      providers = Map.merge(found, config.providers)
-      config = %{config | providers: providers}
-
-      cond do
-        providers == %{} -> {config, layers}
-        config.models_explicit? -> {config, layers}
-        true -> default_model_from(config, layers)
-      end
-    else
-      {config, layers}
-    end
-  end
-
-  defp record_opencode(names, layers) do
-    Enum.reduce(names, layers, &record(&2, ["providers", &1], :opencode, OpenCode.config_path(), "(opencode's)"))
-  end
-
-  # An opencode provider whose key cannot be read is refused, and says so beside the
-  # refusals the files' own providers get.
-  defp refuse_opencode(layers, found) do
-    refusals =
-      for {name, %{refused: why}} when is_binary(why) <- Enum.sort(found) do
-        %Issue{level: :refusal, source: OpenCode.config_path(), key: "providers.#{name}", message: why}
-      end
-
-    %{layers | refusals: layers.refusals ++ refusals}
-  end
-
-  defp default_model_from(config, layers) do
-    fallback =
-      config.providers
-      |> Enum.filter(fn {_name, p} -> present?(p.api_key) end)
-      |> Enum.map(&elem(&1, 0))
-      |> Enum.sort()
-      |> List.first()
-
-    default =
-      case OpenCode.default_model() do
-        nil when fallback != nil -> first_model(config.providers[fallback], fallback)
-        nil -> nil
-        model -> model
-      end
-
-    if default do
-      {%{config | model: default, small_model: config.small_model || default},
-       record(layers, ["models", "default"], :opencode, OpenCode.config_path(), default)}
-    else
-      {config, layers}
-    end
-  end
-
   # One more value on a key's ladder, from a layer that is not a file's.
   defp record(layers, path, layer, source, value) do
     entry = %{path: path, layer: layer, source: source, value: value, raw: nil, ignored: nil}
     %{layers | ladder: Map.update(layers.ladder, path, [entry], &(&1 ++ [entry]))}
   end
-
-  defp first_model(%{models: models}, name) when map_size(models) > 0,
-    do: name <> "/" <> (models |> Map.keys() |> Enum.sort() |> hd())
-
-  defp first_model(_provider, name), do: name <> "/"
 
   # The cached catalog, unless the caller passed one: an explicit option wins over every
   # file, here as everywhere else.
@@ -949,7 +884,7 @@ defmodule Troupe.Config do
   `models.prices` prices, and what only the catalog knows — so the value in use is
   always in the list. Each says what it costs and who said so (`price/2`), and where its
   facts came from: `:catalog` when the provider's own list has it, else the files that
-  named it (`:config`, or a named provider's `:yaml` or `:opencode`).
+  named it (`:config`, or a named provider's `:yaml`).
   """
   @spec models(t()) :: [model_choice()]
   def models(%__MODULE__{} = config) do
@@ -1074,7 +1009,7 @@ defmodule Troupe.Config do
       """
       models Troupe can address (use one as models.default; prices are $ per million tokens in/out):
       #{describe_choices(config, sources, answered)}
-      config dir: #{Troupe.Paths.display(Troupe.Paths.config_dir())}   opencode: #{Troupe.Paths.display(OpenCode.config_path())}
+      config dir: #{Troupe.Paths.display(Troupe.Paths.config_dir())}
       catalog cache: #{Troupe.Paths.display(Store.path())}
       """ <> describe_warnings(config.warnings, command) <> describe_next_step(config, command)
   end
@@ -1142,8 +1077,7 @@ defmodule Troupe.Config do
   defp describe_providers(%__MODULE__{providers: providers} = config)
        when map_size(providers) == 0 do
     if key_problem(config),
-      do:
-        "other named providers: none configured (add `providers:` to config.yaml, or set up opencode)\n",
+      do: "other named providers: none configured (add `providers:` to config.yaml)\n",
       else: ""
   end
 
@@ -1301,7 +1235,6 @@ defmodule Troupe.Config do
   defp facts_from(%{source: :catalog, provider: provider}, answered),
     do: if(provider in answered, do: "from the provider", else: "from the cache")
 
-  defp facts_from(%{source: :opencode}, _answered), do: "from opencode"
   defp facts_from(%{source: _config}, _answered), do: "from your config"
 
   defp in_use(config, id) do

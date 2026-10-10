@@ -144,6 +144,61 @@ defmodule Troupe.Gateway.BranchesTest do
     assert String.trim(status) == "", "the checkout is clean again after the abort"
   end
 
+  # git refuses a merge that would overwrite what the person has not committed in the
+  # checkout: nothing conflicted and there is nothing to resolve, so the answer says which
+  # it was (Decision 843). Both trees are left as they were, as after a conflict.
+  test "a merge refused for the checkout's uncommitted changes says so", context do
+    client = connect(context)
+
+    {:ok, parent} = create(client, context.workspace)
+    {:ok, branch} = create(client, context.workspace, %{"parent" => parent["session_id"]})
+    path = branch["worktree"]
+
+    File.write!(Path.join(path, "README.md"), "# the branch's version\n")
+    File.write!(Path.join(context.workspace, "README.md"), "# the person's, not committed\n")
+
+    assert {:error, %Error{message: "conflict", data: data}} =
+             Client.call(client, "worktree.merge", %{
+               "command_id" => Client.command_id(),
+               "workspace" => context.workspace,
+               "path" => path
+             })
+
+    assert data["reason"] == "local changes in the checkout"
+    assert data["output"] =~ "README.md"
+
+    assert File.read!(Path.join(context.workspace, "README.md")) ==
+             "# the person's, not committed\n"
+
+    assert File.dir?(path)
+  end
+
+  # The merge has landed by the time the tree is removed, so a removal git cannot finish
+  # is not the answer's whole story: it is a merge, said with what was left (Decision 843).
+  test "a merge that landed but whose worktree could not be removed says both", context do
+    client = connect(context)
+
+    {:ok, parent} = create(client, context.workspace)
+    {:ok, branch} = create(client, context.workspace, %{"parent" => parent["session_id"]})
+    locked = Path.join(branch["worktree"], "locked")
+    File.mkdir_p!(locked)
+    File.write!(Path.join(locked, "kept.txt"), "landed\n")
+    File.chmod!(locked, 0o555)
+    on_exit(fn -> File.chmod(locked, 0o755) end)
+
+    assert {:ok, result} =
+             Client.call(client, "worktree.merge", %{
+               "command_id" => Client.command_id(),
+               "workspace" => context.workspace,
+               "path" => branch["worktree"]
+             })
+
+    assert %{"merged" => true, "removed" => false, "branch" => name} = result
+    assert name == branch["branch"]
+    assert result["removal_error"] =~ Path.basename(branch["worktree"])
+    assert File.read!(Path.join(context.workspace, "locked/kept.txt")) == "landed\n"
+  end
+
   test "worktree.discard removes the tree and its branch, work and all", context do
     client = connect(context)
 
@@ -164,6 +219,33 @@ defmodule Troupe.Gateway.BranchesTest do
     refute File.exists?(Path.join(context.workspace, "scratch.txt"))
     {branches, 0} = git(context.workspace, ["branch", "--list", name])
     assert String.trim(branches) == ""
+  end
+
+  # On Windows git cannot delete a worktree it was started in, and anywhere a file it
+  # cannot delete stops it: either way the caller is told, and the connection that asked
+  # stays up (it used to be closed under the client, and the TUI with it).
+  test "a worktree git cannot remove is an internal error the caller is told", context do
+    client = connect(context)
+
+    {:ok, parent} = create(client, context.workspace)
+    {:ok, branch} = create(client, context.workspace, %{"parent" => parent["session_id"]})
+    locked = Path.join(branch["worktree"], "locked")
+    File.mkdir_p!(locked)
+    File.write!(Path.join(locked, "kept.txt"), "git cannot delete this\n")
+    File.chmod!(locked, 0o555)
+    on_exit(fn -> File.chmod(locked, 0o755) end)
+
+    assert {:error, %Error{message: "internal_error", data: %{"reason" => reason}}} =
+             Client.call(client, "worktree.discard", %{
+               "command_id" => Client.command_id(),
+               "workspace" => context.workspace,
+               "path" => branch["worktree"]
+             })
+
+    assert reason =~ Path.basename(branch["worktree"])
+
+    assert {:ok, %{"id" => _}} =
+             Client.call(client, "session.get", %{"session_id" => parent["session_id"]})
   end
 
   test "a path that is not a worktree is refused", context do

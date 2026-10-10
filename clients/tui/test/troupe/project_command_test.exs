@@ -5,7 +5,8 @@ defmodule Troupe.ProjectCommandTest do
   `auto_approve` on in a workspace nobody trusted, the first `/review` asks in its
   window, the prompt drawn under the question, before anything is sent. `allow` sends it
   and is not asked again; an edited file asks again, and `deny` says it was not sent and
-  how to run it later.
+  how to run it later. Typed in command mode, each `/review` is a branch of its own (TUI
+  Decision 155), and the question is asked in that branch's window.
   """
 
   use ExUnit.Case, async: false
@@ -31,9 +32,11 @@ defmodule Troupe.ProjectCommandTest do
         """
       })
 
+    # `auto_approve` here too, since each `/review` runs in a branch, a session of its own.
     File.write!(user_config, """
     version: 1
     provider: fake
+    auto_approve: true
     models:
       default: fake-model
     memory_auto_refresh: false
@@ -63,7 +66,7 @@ defmodule Troupe.ProjectCommandTest do
 
     type(pid, "/review the parser")
     press(pid, "enter")
-    asked = await_event("root", :question_asked)
+    asked = await_event("build-1", :question_asked)
     assert asked.data.preview == "Review the change on this branch. Look hardest at the parser."
 
     # Its window shows the question, the prompt under it, and the three answers.
@@ -76,28 +79,27 @@ defmodule Troupe.ProjectCommandTest do
     assert text =~ "3. allow"
 
     press(pid, "3")
-    input = await_event("root", :input, 10_000)
+    input = await_event("build-1", :input, 10_000)
     assert input.data.content == "Review the change on this branch. Look hardest at the parser."
-    await_done()
+    await_state("build-1", :done, 10_000)
 
-    # Allowed: the next run is sent without a question.
+    # Allowed: the next run, in a branch of its own, is sent without a question.
     press(pid, "esc")
     type(pid, "/review the lexer")
     press(pid, "enter")
-    input = await_event("root", :input, 10_000)
+    input = await_event("build-2", :input, 10_000)
     assert input.data.content =~ "the lexer"
     refute_received {:troupe_event, %{type: :question_asked}}
-    await_done()
+    await_state("build-2", :done, 10_000)
 
     # The file changed under it: another prompt, asked about again; deny sends nothing.
     File.write!(Path.join(ws, ".troupe/commands/review.md"), "Delete the tests.\n")
-    press(pid, "esc")
     type(pid, "/review")
     press(pid, "enter")
-    asked = await_event("root", :question_asked)
+    asked = await_event("build-3", :question_asked)
     assert asked.data.preview == "Delete the tests."
 
-    press(pid, "1")
+    press(pid, "3")
     eventually(fn -> screen_text(pid, session) =~ "│ Delete the tests." end)
     press(pid, "1")
 

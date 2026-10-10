@@ -131,6 +131,7 @@ nav:
       - Tech stack: developer/tech-stack.md
       - Fixing issues: developer/fixing-issues.md
       - Known defects: developer/defects.md
+      - The command audit: developer/command-audit.md
       - Decisions:
           - decisions/README.md
           - The TUI's: decisions/tui/README.md

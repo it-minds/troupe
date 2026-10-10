@@ -10,7 +10,7 @@ defmodule Troupe.Tools.Grep do
 
   @behaviour Troupe.Tool
 
-  alias Troupe.{Config, Gitignore, Paths, Reaper, Tool, Workspace}
+  alias Troupe.{Config, Executable, Gitignore, Paths, Reaper, Tool, Workspace}
   alias Troupe.Tools.Output
 
   @max_matches 200
@@ -80,7 +80,9 @@ defmodule Troupe.Tools.Grep do
     end
   end
 
-  defp ripgrep_path, do: System.find_executable("rg")
+  # On the PATH alone: a repository's `rg.bat` in the daemon's current directory is not
+  # ripgrep (Decision 846).
+  defp ripgrep_path, do: Executable.find("rg")
 
   # Through reaper, like every other OS process: a search over a huge tree is exactly
   # as cancellable as a shell command because it is started the same way.

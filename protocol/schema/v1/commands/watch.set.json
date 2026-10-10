@@ -9,6 +9,9 @@
     "enabled": {
       "type": "boolean"
     },
+    "session_id": {
+      "type": "string"
+    },
     "workspace": {
       "type": "string"
     }

@@ -3,8 +3,10 @@
 `troupe bench` measures the harness against budgets kept in this repository: how many
 model calls a turn makes, what each prompt is made of and how it grows, where a tool result
 is cut, when compaction comes, what a cancel leaves running, and whether the log is the
-session (issue #390, Decision 772). It is about the harness's shape, not about what a model
-answers.
+session (issue #390, Decision 772); and, for each other tool `troupe onboard` brings in,
+whether that tool's instructions reach a session's prompt once onboarded, and what they
+take of it (issue #516, Decision 834). It is about the harness's shape, not about what a
+model answers.
 
 The suite is offline. Each scenario runs against a scripted model, so it costs nothing,
 needs no network, and gives the same numbers every time: the JSON of two runs of one build
@@ -35,7 +37,8 @@ Each scenario runs in its own directories (workspace, config, state) under a new
 one, removed afterwards, and while it runs `TROUPE_CONFIG_HOME` and `TROUPE_STATE_HOME`
 name them and opencode's two files name none: nothing of the person running it (their
 config, keys, agents, skills, instruction files, sessions) reaches the prompt being
-measured. The session is the harness's own, in the same VM; `troupe bench` never asks the
+measured. One that onboards has a home directory of its own as well, which onboarding is
+given for `~`, so none of the person's own files (`~/.claude/CLAUDE.md`) is read. The session is the harness's own, in the same VM; `troupe bench` never asks the
 machine's daemon, which could be another version.
 
 ## Reading the table
@@ -48,8 +51,10 @@ machine's daemon, which could be another version.
 | tool_calls | growth per tool round trip | 484 bytes | 550 | ok |
 ...
 | replay | outcome: hello.txt holds what was asked for | yes |  | ok |
+| onboard_claude_code | instructions in the first prompt | 519 bytes | 570 | ok |
+...
 
-troupe bench 0.8.1-beta, offline: 5 scenarios, every measure within its budget.
+troupe bench 0.9.3-beta, offline: 10 scenarios, every measure within its budget.
 ```
 
 A row is a measure (a number, held to its budget when it has one) or a check (yes or no).
@@ -68,6 +73,8 @@ were 11,814 bytes on Windows and 12,390 on Linux), and the budgets are set above
 | `compaction` | in a window of 16,000 tokens, compaction fires once the prompt reaches `compact_at`'s default share of it, never before, and within one round trip after; how much smaller the next prompt is |
 | `cancel` | a cancel during a model call ends the call's task, no call is made afterwards, the agent rests and answers the next input |
 | `replay` | the log on disk folds as the running log does, its hashes chain, a client replaying from the start sees each event once, a resumed agent has the conversation it had; and the file it was asked to write holds what was asked for |
+| `onboard_claude_code`, `onboard_opencode`, `onboard_cursor`, `onboard_copilot` | a repository with one other tool's files only, `troupe onboard`'s plan accepted whole, a new `AGENTS.md` included; then a note written under the house rule the tool's files carry, which the scripted model follows only when it finds it in its prompt. What the instructions took of the first prompt (for opencode, the onboarded agent's prompt, which the session starts on), the files onboarding wrote, and the tool's files it left out; a fixture whose onboarding writes nothing, or loses the rule, fails |
+| `memory_stale_anchor` | a repository whose memory holds a command anchored on `mix.exs`, checked by a librarian, and the `check` alias changed since (#248, Decision 838): the first prompt marks the command "may no longer be true" and names `recall` for the other facts, and the scripted model asks `recall`, which answers it with the same status, only when it finds the mark. What the brief took of the first prompt |
 
 **What a token is here.** The scripted model counts four bytes of the prompt as a token,
 rounded up, and reports that as the call's input. It is not a tokeniser; it is what makes
@@ -151,6 +158,8 @@ A scenario is a `Troupe.Bench.Scenario` in `Troupe.Bench.Scenarios`:
 | `script` | the scripted model's steps: `{:text, t}`, `{:tools, [{name, input}]}`, `{:delay, ms, step}`, or a function of the request that answers one (how `cut_output` passes on the id the cut result named); a request with no tools is the summariser's and gets a summary |
 | `outcome` | what a script can check afterwards, whoever answered: `{:file, path, content}`, the file's text, line endings and trailing whitespace aside, or `{:command, argv}`, run in the workspace, passing on exit 0 (a test passing), and in a release without the VM's own runtime first on its `PATH`, where an `elixir` would start on it and find no boot file; or `nil` |
 | `drive` | `nil` to type the prompt and wait for the turn to end, or a function that does something else (cancel half way) |
+| `prepare` | `nil`, or a function run once the workspace has its files and before the session starts, given the run's `workspace`, `home`, `config_dir` and `state_dir`, answering the marks the measure reads (`ctx.marks`): how the onboarding scenarios run `troupe onboard` first |
+| `agent` | the agent the session starts on; `nil` for the default |
 | `measure` | a function of the run answering `{metrics, checks}`: `{name, label, unit, value}` and `{name, label, passed?}` |
 
 To add one: write it, add it to `all/0`, give its measures budgets, run `mix troupe.bench

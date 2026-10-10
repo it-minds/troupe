@@ -15,7 +15,7 @@ defmodule Troupe.UI.TUI.Server do
   alias Troupe.Protocol.Glob
   alias Troupe.Settings
   alias Troupe.UI.HQ
-  alias Troupe.UI.TUI.{Input, Model, Theme, View}
+  alias Troupe.UI.TUI.{AgentChooser, Agents, Input, Model, Theme, View}
 
   @tick_ms 33
   @mailbox_threshold 50
@@ -34,13 +34,28 @@ defmodule Troupe.UI.TUI.Server do
             | :sessions
             | :files
             | :mcp
+            | :memory
             | :hq
-            | :palette,
+            | :palette
+            | :chooser
+            | :agents
+            | :switcher,
+          default_agent: String.t(),
+          branches?: boolean(),
+          facts: %{model: String.t() | nil},
+          chooser: chooser() | nil,
+          choice: %{agent: String.t(), where: :worktree | :checkout} | nil,
+          worktrees: [map()],
+          worktrees_loading: boolean(),
+          worktrees_stale: boolean(),
           cmd_text: String.t(),
           cmd_pos: non_neg_integer(),
           win_text: String.t(),
           win_pos: non_neg_integer(),
           agents: [String.t()],
+          agent_rows: %{optional(String.t()) => map()},
+          agents_page: Agents.page() | nil,
+          switcher: AgentChooser.t() | nil,
           commands: [Client.command()],
           palette: palette() | nil,
           tick: non_neg_integer(),
@@ -59,6 +74,7 @@ defmodule Troupe.UI.TUI.Server do
           sessions: sessions() | nil,
           files: files() | nil,
           mcp_cursor: non_neg_integer(),
+          memory: memory() | nil,
           hq: HQ.t() | nil,
           shell: shell() | nil,
           theme: Theme.t(),
@@ -124,6 +140,17 @@ defmodule Troupe.UI.TUI.Server do
   @type picker :: %{choices: [Settings.choice()], cursor: non_neg_integer(), typed?: boolean()}
 
   @typedoc """
+  `/memory`'s page (root Decision 839): the facts as the daemon answered them, the
+  brief's status, and the cursor over the facts, kind by kind as the page lists them.
+  """
+  @type memory :: %{
+          facts: [map()],
+          status: String.t(),
+          path: String.t() | nil,
+          cursor: non_neg_integer()
+        }
+
+  @typedoc """
   Command-palette state (Decision 119): the filter typed so far, the cursor over the
   rows it leaves, and where the palette was opened from — a command picked from a
   window acts on that window, and Esc goes back there. The rows themselves are a view
@@ -133,6 +160,23 @@ defmodule Troupe.UI.TUI.Server do
           query: String.t(),
           cursor: non_neg_integer(),
           return_to: :command | {:window, String.t()}
+        }
+
+  @typedoc """
+  Command mode's chooser (TUI Decision 155): the primary agents a branch can start on
+  (`agents.list`'s rows), the one selected, each one's instruction as `agents.get` read it
+  once it was shown (`shown`, by name), how far that is scrolled, and the step: the agent,
+  then where it works (`where`, 0 for a worktree of its own, 1 for the checkout). `prompt`
+  is what was typed before it opened, which starts the branch as soon as both are chosen.
+  """
+  @type chooser :: %{
+          step: :agent | :where,
+          agents: [map()],
+          cursor: non_neg_integer(),
+          where: 0 | 1,
+          scroll: non_neg_integer(),
+          shown: %{optional(String.t()) => map()},
+          prompt: String.t()
         }
 
   @typedoc """
@@ -195,11 +239,22 @@ defmodule Troupe.UI.TUI.Server do
       back: nil,
       model: model,
       focus: :command,
+      chooser: nil,
+      choice: nil,
+      worktrees: [],
+      worktrees_loading: false,
+      worktrees_stale: false,
       cmd_text: prompt,
       cmd_pos: String.length(prompt),
       win_text: "",
       win_pos: 0,
       agents: Client.commands(sid),
+      # `agents.list`'s rows by name, for the palette's agent rows (TUI Decision 156): read
+      # when the palette first opens, not before the first frame.
+      agent_rows: %{},
+      agents_page: nil,
+      # Tab's chooser of the agent a window runs (TUI Decision 156).
+      switcher: nil,
       commands: Client.command_table(sid),
       palette: nil,
       tick: 0,
@@ -221,6 +276,7 @@ defmodule Troupe.UI.TUI.Server do
       # The sign-in URL the daemon last answered, `%{name, url}`, shown on the page in
       # full for a person whose browser did not open (troupe-remote Decision 741).
       mcp_sign_in: nil,
+      memory: nil,
       hq: nil,
       shell: nil,
       # The person's theme, from `ui.theme` (`read_appearance/1`), and the value last said
@@ -228,6 +284,10 @@ defmodule Troupe.UI.TUI.Server do
       theme: Theme.current(),
       theme_warned: nil,
       quitting: false,
+      # Whether the screen reports the mouse, given back to it after a terminal editor; and
+      # a frame drawn blank once an editor has had the terminal, so the next is drawn whole.
+      mouse: Keyword.get(opts, :mouse_capture, false),
+      repaint: false,
       size: initial_size(opts),
       slow_render_ms: Keyword.get(opts, :slow_render_ms, 0),
       on_quit: Keyword.get(opts, :on_quit, fn -> :ok end)
@@ -242,10 +302,43 @@ defmodule Troupe.UI.TUI.Server do
         _ -> state
       end
 
-    {:ok, state |> read_appearance() |> recheck_loop() |> schedule_tick()}
+    {:ok,
+     state
+     |> Map.merge(command_mode(sid))
+     |> read_appearance()
+     |> recheck_loop()
+     |> refresh_worktrees()
+     |> schedule_tick()}
   end
 
+  # What command mode needs to know of a session (TUI Decision 155): whether it starts
+  # branches (a pod runs one agent and starts none), the agent a plain line starts, and
+  # the model its configuration names. A pod's configuration is its plane's, which this
+  # machine does not read: its model is the one its agent says it called.
+  defp command_mode(sid) do
+    {_workspace, config} = Client.context(sid)
+    branches? = not Client.remote?(sid)
+
+    %{
+      branches?: branches?,
+      default_agent: config.default_agent || "build",
+      facts: %{model: if(branches?, do: config.model)}
+    }
+  end
+
+  # After an editor has had the terminal, the screen it gives back is blank while the
+  # renderer remembers the last frame, and draws only what differs from it: one blank
+  # frame first makes the two agree, and the next is drawn whole (TUI Decision 156).
   @impl true
+  def render(%{repaint: true}, frame) do
+    send(self(), :repainted)
+
+    [
+      {%ExRatatui.Widgets.Clear{},
+       %ExRatatui.Layout.Rect{x: 0, y: 0, width: frame.width, height: frame.height}}
+    ]
+  end
+
   def render(state, frame) do
     if state.slow_render_ms > 0, do: Process.sleep(state.slow_render_ms)
     trace_first_frame()
@@ -325,6 +418,48 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # An agent was saved or deleted, here or in the desktop app (root Decision 841): the
+  # palette's rows, and the `/agents` page when it is open, are read again.
+  def handle_info({:troupe_agents_changed, _changed}, state) do
+    {:noreply, schedule_tick(%{agents_changed(state) | dirty: true}), render?: false}
+  end
+
+  # The palette's agent rows, asked for when it first opened (`ask_agent_rows/1`); an
+  # answer for a session no longer on screen is not this screen's.
+  def handle_info({:agent_rows, sid, rows}, %{session_id: sid} = state),
+    do: {:noreply, schedule_tick(%{state | agent_rows: rows, dirty: true}), render?: false}
+
+  def handle_info({:agent_rows, _sid, _rows}, state), do: {:noreply, state, render?: false}
+
+  def handle_info(:repainted, state), do: {:noreply, %{state | repaint: false}, render?: true}
+
+  # The editor runs once the frame that says so is drawn (TUI Decision 156): it holds the
+  # terminal, or a window of its own, until the person closes it.
+  def handle_info({:run_editor, request}, %{agents_page: %{} = page} = state) do
+    # A name typed for a new agent is not yet checked, so it never makes the path; and the
+    # file is new and unguessable, never one somebody left in the shared temp directory.
+    slug = String.replace(request.name, ~r/[^A-Za-z0-9_-]/, "_")
+    nonce = 9 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+    path = Path.join(System.tmp_dir!(), "troupe-agent-#{slug}-#{nonce}.md")
+
+    {terminal?, outcome} =
+      case write_temp(path, request.text) do
+        :ok ->
+          edited = edit_temp(path, state.mouse)
+          File.rm(path)
+          edited
+
+        {:error, _reason} = failed ->
+          {false, failed}
+      end
+
+    page = Agents.edited(%{page | status: nil}, state.session_id, request, outcome)
+    state = %{state | agents_page: page, repaint: terminal?, dirty: true}
+    {:noreply, schedule_tick(state), render?: false}
+  end
+
+  def handle_info({:run_editor, _request}, state), do: {:noreply, state, render?: false}
+
   def handle_info(:force_render, state),
     do: {:noreply, %{state | now: System.system_time(:millisecond), dirty: false}, render?: true}
 
@@ -342,6 +477,45 @@ defmodule Troupe.UI.TUI.Server do
       {:error, _reason} ->
         {:noreply, state, render?: false}
     end
+  end
+
+  # A branch command mode said it was starting (TUI Decision 155), started once that line
+  # has been drawn: the session it creates takes a moment, and the person has been told.
+  def handle_info({:start_command, sid, agent, name, args}, %{session_id: sid} = state) do
+    state =
+      case Client.start_command(sid, agent, name, args, "never") do
+        {:ok, _window} -> state
+        {:error, reason} -> notice(state, "/#{name} did not start: " <> to_message(reason))
+      end
+
+    {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
+  end
+
+  def handle_info({:start_branch, sid, agent, where, prompt}, %{session_id: sid} = state) do
+    mode = if where == :worktree, do: "always", else: "never"
+
+    state =
+      case Client.dispatch(sid, agent, %{prompt: prompt, worktree: mode}) do
+        {:ok, _window} -> state
+        {:error, reason} -> notice(state, "#{agent} did not start: " <> to_message(reason))
+      end
+
+    {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
+  end
+
+  # The worktrees command mode lists, as the daemon last said them; a refresh asked for
+  # while one was out is made now.
+  def handle_info({:worktrees, sid, answer}, %{session_id: sid} = state) do
+    state = %{state | worktrees_loading: false}
+
+    state =
+      case answer do
+        {:ok, trees} -> %{state | worktrees: trees}
+        {:error, _reason} -> state
+      end
+
+    state = if state.worktrees_stale, do: refresh_worktrees(state), else: state
+    {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
   end
 
   def handle_info(_msg, state), do: {:noreply, state, render?: false}
@@ -389,8 +563,21 @@ defmodule Troupe.UI.TUI.Server do
       ),
       do: {:noreply, open_palette(%{state | quit_armed: false})}
 
-  def handle_event(%Key{} = key, %{focus: :command} = state),
-    do: finish(command_key(key, %{state | quit_armed: false}))
+  # Ctrl-N chooses the agent what is typed starts on, and where (TUI Decision 155).
+  def handle_event(%Key{code: "n", modifiers: ["ctrl"]}, %{focus: :command} = state),
+    do: {:noreply, open_chooser(%{state | quit_armed: false})}
+
+  def handle_event(%Key{} = key, %{focus: :chooser} = state),
+    do: {:noreply, chooser_key(key, %{state | quit_armed: false})}
+
+  def handle_event(%Key{} = key, %{focus: :command} = state) do
+    state = %{state | quit_armed: false}
+
+    case local_answer(key, state, nil) do
+      {:answered, state} -> finish(state)
+      :pass -> finish(command_key(key, state))
+    end
+  end
 
   def handle_event(%Key{} = key, %{focus: :palette} = state),
     do: finish(palette_key(key, %{state | quit_armed: false}))
@@ -410,13 +597,29 @@ defmodule Troupe.UI.TUI.Server do
   def handle_event(%Key{} = key, %{focus: :mcp} = state),
     do: {:noreply, mcp_key(key, %{state | quit_armed: false})}
 
+  def handle_event(%Key{} = key, %{focus: :memory} = state),
+    do: {:noreply, memory_key(key, %{state | quit_armed: false})}
+
   def handle_event(%Key{} = key, %{focus: :hq} = state),
     do: {:noreply, hq_key(key, %{state | quit_armed: false})}
 
+  def handle_event(%Key{} = key, %{focus: :agents} = state),
+    do: {:noreply, agents_key(key, %{state | quit_armed: false})}
+
+  def handle_event(%Key{} = key, %{focus: :switcher} = state),
+    do: {:noreply, switcher_key(key, %{state | quit_armed: false})}
+
   def handle_event(%Key{} = key, %{focus: {:window, path}} = state) do
-    if Map.has_key?(state.model.windows, path),
-      do: {:noreply, window_key(key, path, disarm(%{state | quit_armed: false}, key))},
-      else: handle_event(key, to_command_line(state))
+    if Map.has_key?(state.model.windows, path) do
+      state = disarm(%{state | quit_armed: false}, key)
+
+      case local_answer(key, state, path) do
+        {:answered, state} -> {:noreply, state}
+        :pass -> {:noreply, window_key(key, path, state)}
+      end
+    else
+      handle_event(key, to_command_line(state))
+    end
   end
 
   # A reflow moves every wrapped row, so transcript coordinates no longer point at
@@ -449,11 +652,23 @@ defmodule Troupe.UI.TUI.Server do
       :mcp ->
         {:noreply, state, render?: false}
 
+      :memory ->
+        {:noreply, state, render?: false}
+
       :hq ->
         {:noreply, state, render?: false}
 
       :palette ->
         {:noreply, state, render?: false}
+
+      :chooser ->
+        {:noreply, state, render?: false}
+
+      :switcher ->
+        {:noreply, state, render?: false}
+
+      :agents ->
+        {:noreply, %{state | agents_page: Agents.paste(state.agents_page, content)}}
 
       :settings ->
         {:noreply, paste_into_settings(state, content)}
@@ -461,7 +676,19 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   def handle_event(%Mouse{kind: "down"}, %{focus: focus} = state)
-      when focus in [:settings, :observer, :sessions, :files, :mcp, :hq, :palette],
+      when focus in [
+             :settings,
+             :observer,
+             :sessions,
+             :files,
+             :mcp,
+             :memory,
+             :hq,
+             :palette,
+             :agents,
+             :chooser,
+             :switcher
+           ],
       do: {:noreply, state, render?: false}
 
   # Click-drag inside the transcript selects text: with mouse reporting on the
@@ -558,6 +785,15 @@ defmodule Troupe.UI.TUI.Server do
       :palette ->
         {:noreply, move_cursor(state, div(step, 3))}
 
+      :chooser ->
+        {:noreply, scroll_instruction(state, step)}
+
+      :agents ->
+        {:noreply, agents_key(%Key{code: if(step < 0, do: "up", else: "down")}, state)}
+
+      :switcher ->
+        {:noreply, switcher_key(%Key{code: if(step < 0, do: "up", else: "down")}, state)}
+
       _ ->
         {:noreply, state, render?: false}
     end
@@ -609,6 +845,9 @@ defmodule Troupe.UI.TUI.Server do
     View.pane_point(g, x, y)
   end
 
+  # Command mode has rows, not tiles: a click on a branch's opens it (TUI Decision 155).
+  defp clicked_window(%{focus: :command} = state, x, y), do: View.branch_at(state, x, y)
+
   # Hit-test a click against the tiles using the same layout the view draws.
   defp clicked_window(%{size: {w, h}} = state, x, y) do
     windows = Model.windows(state.model)
@@ -644,6 +883,8 @@ defmodule Troupe.UI.TUI.Server do
 
   # Esc kills the command this screen ran while it runs, and leaves what is typed.
   defp command_key(%Key{code: "esc"}, %{shell: %{} = run} = state), do: kill_shell(state, run)
+  # An agent chosen for the next line is forgotten before what is typed is.
+  defp command_key(%Key{code: "esc"}, %{choice: %{}} = state), do: %{state | choice: nil}
   defp command_key(%Key{code: "esc"}, state), do: put_cmd(state, "")
 
   defp command_key(%Key{code: "tab"}, state),
@@ -760,19 +1001,25 @@ defmodule Troupe.UI.TUI.Server do
         name == "" ->
           :palette
 
-        # A line with no slash is what the person wants to say to the session's agent,
-        # whatever its first word (Decision 101): "help me fix the test" is a request, not
-        # `/help`. One agent per session, so there is one place for it to go. A slash
-        # names a command, and one this table does not know is asked of the client (a
-        # profile to dispatch, where the client supports that).
+        # A line with no slash is work to start, whatever its first word (Decision 101):
+        # "help me fix the test" is a request, not `/help`. Command mode is no chat with
+        # the session's own agent (TUI Decision 155): the line starts a branch, on the agent
+        # Ctrl-N chose or the default one in the checkout. A slash names a command, and one
+        # this table does not know is asked of the client (a profile to dispatch, where the
+        # client supports that).
         not slash? ->
-          Client.send_input(sid, "root", typed)
+          plain_line(state, typed)
 
         name in @builtins ->
           builtin(name, args, state, target)
 
         # A command a markdown file defines is the harness's to run (Decision 763): it
-        # sends the file's prompt, and the line comes back as the session's own input.
+        # sends the file's prompt. In command mode that is work like a plain line, so it
+        # starts a branch on the agent its file names, never the session's own agent (TUI
+        # Decision 155); from a window, and on a pod, it goes to the session's agent.
+        defined?(state, name) and state.focus == :command and state.branches? ->
+          command_line_command(state, name, args)
+
         defined?(state, name) ->
           Client.run_command(sid, name, args)
 
@@ -780,13 +1027,19 @@ defmodule Troupe.UI.TUI.Server do
           Client.dispatch(sid, name, args)
       end
 
+    kept = state
     state = put_cmd(state, "")
 
     case result do
+      {:keep, text} -> notice(kept, text)
+      {:start, agent, where, prompt} -> start_branch(state, agent, where, prompt)
+      {:start_command, agent, name, args} -> start_command(state, agent, name, args)
       :quit -> %{state | quitting: true}
       :palette -> open_palette(state)
       :files -> toggle_files(state)
       :mcp -> open_mcp(state)
+      :agents -> open_agents(state)
+      :memory -> open_memory(state)
       {:mcp, text} -> state |> notice(text) |> open_mcp(state.mcp_cursor)
       {:mcp_sign_in, _name, _url, _text} = signing -> signing_in(state, signing)
       {:hq, arg} -> open_hq(state, plane_arg(arg))
@@ -797,6 +1050,7 @@ defmodule Troupe.UI.TUI.Server do
       {:sessions, arg} -> resume_by_arg(state, arg)
       {:new, arg} -> new_session(state, arg)
       :back -> go_back(state)
+      {:watch, said} -> watch_toggled(state, said)
       {:ok, _} -> state
       :ok -> state
       {:notice, text} -> notice(state, text)
@@ -816,6 +1070,194 @@ defmodule Troupe.UI.TUI.Server do
 
   defp defined?(state, name),
     do: Enum.any?(state.commands, &(&1["name"] == name and &1["source"] in ["user", "project"]))
+
+  ## Command mode (TUI Decision 155)
+
+  # A plain line starts work, never a chat with the session's own agent: on the agent
+  # Ctrl-N chose, or the default one in the checkout. The start's questions come first
+  # (TUI Decision 154), so the line waits, as typed, until they are answered. A session
+  # that starts no branches, a pod's, runs one agent, and the line is said to it.
+  defp plain_line(state, text) do
+    cond do
+      Model.asking(state.model) ->
+        {:keep, "answer the start's question first; then Enter starts what you typed"}
+
+      not state.branches? ->
+        Client.send_input(state.session_id, "root", text)
+
+      choice = state.choice ->
+        {:start, choice.agent, choice.where, text}
+
+      true ->
+        {:start, state.default_agent, :checkout, text}
+    end
+  end
+
+  # A command a file defines, typed in command mode: a branch in the checkout on the agent
+  # the file names, or the default one, once the start's questions are answered.
+  defp command_line_command(state, name, args) do
+    if Model.asking(state.model) do
+      {:keep, "answer the start's question first; then Enter starts what you typed"}
+    else
+      entry = Enum.find(state.commands, &(&1["name"] == name)) || %{}
+      {:start_command, entry["agent"] || state.default_agent, name, args}
+    end
+  end
+
+  defp start_command(state, agent, name, args) do
+    send(self(), {:start_command, state.session_id, agent, name, args})
+    notice(state, "starting /#{name} on #{agent} in the checkout")
+  end
+
+  # Said first, on the notice line, then started once that line is on screen.
+  defp start_branch(state, agent, where, prompt) do
+    send(self(), {:start_branch, state.session_id, agent, where, prompt})
+
+    said =
+      if state.choice,
+        do: "starting #{agent} in #{View.where_words(where)}",
+        else:
+          "starting #{agent} in #{View.where_words(where)}: a line without / starts it there; " <>
+            "Ctrl-N chooses the agent and a worktree"
+
+    notice(%{state | choice: nil}, said)
+  end
+
+  # The chooser opens on the agents a branch can start on, the default one selected, with
+  # what was typed kept as the task.
+  defp open_chooser(%{branches?: false} = state),
+    do: notice(state, "a remote session runs one profile; create another session from HQ")
+
+  defp open_chooser(state) do
+    prompt =
+      if String.starts_with?(state.cmd_text, ["/", "!"]), do: "", else: String.trim(state.cmd_text)
+
+    case Client.profiles({:local, state.workspace}) do
+      {:ok, [_ | _] = agents} ->
+        cursor = Enum.find_index(agents, &(&1.name == state.default_agent)) || 0
+
+        chooser = %{
+          step: :agent,
+          agents: agents,
+          cursor: cursor,
+          where: 0,
+          scroll: 0,
+          shown: %{},
+          prompt: prompt
+        }
+
+        show_instruction(%{state | focus: :chooser, chooser: chooser})
+
+      {:ok, []} ->
+        notice(state, "no agent here to start a branch on")
+
+      {:error, reason} ->
+        notice(state, "the agents could not be listed: " <> to_message(reason))
+    end
+  end
+
+  # The selected agent's instruction, read the first time it is shown.
+  defp show_instruction(%{chooser: c} = state) do
+    %{name: name} = Enum.at(c.agents, c.cursor)
+
+    shown =
+      case c.shown do
+        %{^name => _} ->
+          c.shown
+
+        shown ->
+          case Client.agent_definition(state.session_id, name) do
+            {:ok, agent} -> Map.put(shown, name, agent)
+            {:error, reason} -> Map.put(shown, name, %{error: to_message(reason)})
+          end
+      end
+
+    %{state | chooser: %{c | shown: shown, scroll: 0}}
+  end
+
+  defp chooser_key(%Key{code: "esc"}, %{chooser: %{step: :where} = c} = state),
+    do: %{state | chooser: %{c | step: :agent}}
+
+  defp chooser_key(%Key{code: "esc"}, state), do: %{state | focus: :command, chooser: nil}
+
+  defp chooser_key(%Key{code: code}, %{chooser: %{step: :agent} = c} = state)
+       when code in ["up", "k", "down", "j"] do
+    step = if code in ["up", "k"], do: -1, else: 1
+    cursor = (c.cursor + step) |> max(0) |> min(length(c.agents) - 1)
+    show_instruction(%{state | chooser: %{c | cursor: cursor}})
+  end
+
+  defp chooser_key(%Key{code: "enter"}, %{chooser: %{step: :agent} = c} = state),
+    do: %{state | chooser: %{c | step: :where}}
+
+  defp chooser_key(%Key{code: code}, %{chooser: %{step: :where} = c} = state)
+       when code in ["up", "k", "down", "j"],
+       do: %{state | chooser: %{c | where: if(code in ["up", "k"], do: 0, else: 1)}}
+
+  defp chooser_key(%Key{code: "w"}, %{chooser: %{step: :where}} = state),
+    do: chosen(state, :worktree)
+
+  defp chooser_key(%Key{code: "c"}, %{chooser: %{step: :where}} = state),
+    do: chosen(state, :checkout)
+
+  defp chooser_key(%Key{code: "enter"}, %{chooser: %{step: :where, where: where}} = state),
+    do: chosen(state, if(where == 0, do: :worktree, else: :checkout))
+
+  defp chooser_key(%Key{code: "page_up"}, state), do: scroll_instruction(state, -10)
+  defp chooser_key(%Key{code: "page_down"}, state), do: scroll_instruction(state, 10)
+  defp chooser_key(_key, state), do: state
+
+  defp scroll_instruction(%{chooser: %{} = c} = state, by),
+    do: %{state | chooser: %{c | scroll: max(c.scroll + by, 0)}}
+
+  defp scroll_instruction(state, _by), do: state
+
+  # Both chosen: with a task typed it starts now; without one the command line asks for it,
+  # and Enter starts it there.
+  defp chosen(%{chooser: c} = state, where) do
+    %{name: agent} = Enum.at(c.agents, c.cursor)
+    state = %{state | focus: :command, chooser: nil, choice: %{agent: agent, where: where}}
+
+    case c.prompt do
+      "" -> put_cmd(state, "")
+      prompt -> state |> put_cmd("") |> start_branch(agent, where, prompt)
+    end
+  end
+
+  # The worktrees command mode lists, asked of the daemon away from the screen's process;
+  # one asked for while another is out is asked once that one is back.
+  defp refresh_worktrees(%{worktrees_loading: true} = state), do: %{state | worktrees_stale: true}
+
+  defp refresh_worktrees(state) do
+    server = self()
+    sid = state.session_id
+
+    _ =
+      Task.start(fn ->
+        answer =
+          try do
+            Client.worktree_status(sid)
+          catch
+            :exit, reason -> {:error, reason}
+          end
+
+        send(server, {:worktrees, sid, answer})
+      end)
+
+    %{state | worktrees_loading: true, worktrees_stale: false}
+  end
+
+  # What may have moved a worktree: a branch opening, ending a turn or going, a worktree
+  # made, merged or thrown away, and a command the person ran.
+  @moves_trees ~w(branch_spawned window_dismissed worktree_created worktree_merged
+                  worktree_discarded user_shell)a
+
+  defp trees_moved?(%{type: type}) when type in @moves_trees, do: true
+
+  defp trees_moved?(%{type: :agent_state, transient?: false, data: %{to: to}}),
+    do: to in [:idle, :done]
+
+  defp trees_moved?(_event), do: false
 
   ## Shell mode (Decision 152)
 
@@ -869,8 +1311,10 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("back", _args, _state, _target), do: :back
   defp builtin("hq", args, _state, _target), do: {:hq, args}
 
+  # Toggled from what the daemon says now (D106), not from what this screen last set: a
+  # watch the desktop app turned on is turned off here.
   defp builtin("watch", _args, state, _target),
-    do: toggle_watch(state.session_id, state.model.watch.enabled)
+    do: {:watch, toggle_watch(state.session_id, Client.watch_status(state.session_id).enabled)}
 
   defp builtin("cancel", _args, state, target),
     do: with_target(target.(), &Client.cancel_branch(state.session_id, &1))
@@ -878,17 +1322,25 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("dismiss", _args, state, target),
     do: with_target(target.(), &Client.dismiss(state.session_id, &1))
 
+  # The window goes either way, so what landed or went is said on the notice line.
   defp builtin("merge", _args, state, target),
-    do: with_target(target.(), &Client.merge(state.session_id, &1))
+    do: with_target(target.(), &notice_of(Client.merge(state.session_id, &1)))
 
   defp builtin("discard", _args, state, target),
-    do: with_target(target.(), &Client.discard(state.session_id, &1))
+    do: with_target(target.(), &notice_of(Client.discard(state.session_id, &1)))
 
-  defp builtin("agents", _args, state, _target),
-    do: {:notice, "agents: " <> Enum.join(state.agents, ", ")}
+  # The manager (TUI Decision 156): the agents `agents.list` answers, never `/worktree`,
+  # which is a command that starts one.
+  defp builtin("agents", _args, _state, _target), do: :agents
 
-  defp builtin("memory", args, state, _target),
-    do: notice_of(Client.memory(state.session_id, String.trim(args)))
+  # `/memory` alone opens the facts' page (root Decision 839); `refresh` and `forget` are
+  # the client's answer on the notice line.
+  defp builtin("memory", args, state, _target) do
+    case String.trim(args) do
+      "" -> :memory
+      args -> notice_of(Client.memory(state.session_id, args))
+    end
+  end
 
   defp builtin("context", _args, state, _target),
     do: notice_of(Client.instructions(state.session_id))
@@ -926,6 +1378,10 @@ defmodule Troupe.UI.TUI.Server do
         [] -> Client.command_table(state.session_id)
         commands -> commands
       end
+
+    # The agent rows' badges are asked for the first time the palette opens, off the
+    # screen's process: a daemon slow to answer never holds the palette (TUI Decision 156).
+    if state.agent_rows == %{}, do: ask_agent_rows(state.session_id)
 
     %{
       state
@@ -972,12 +1428,19 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # A new query starts on the row that matches it exactly, so `/q` + Enter quits as it
-  # always did; else on the first row.
+  # always did; else on the first whose name or alias it begins, so `wor` and Tab give
+  # `/worktree`, not `/merge` for the word in its description (D107); else on the first row.
   defp put_query(state, query) do
     state = put_palette(state, query: query, cursor: 0)
     {rows, _cursor} = View.palette_view(state)
     exact = Enum.find_index(rows, fn %{entry: e} -> query == e["name"] or query in e["aliases"] end)
-    put_palette(state, cursor: exact || 0)
+
+    begun =
+      Enum.find_index(rows, fn %{entry: e} ->
+        Enum.any?([e["name"] | e["aliases"]], &String.starts_with?(&1, query))
+      end)
+
+    put_palette(state, cursor: exact || begun || 0)
   end
 
   defp put_palette(state, changes),
@@ -992,15 +1455,26 @@ defmodule Troupe.UI.TUI.Server do
     case Enum.at(rows, cursor) do
       nil when query == "" -> state
       nil -> run_command(close_palette(state), "/" <> query)
-      %{status: {:window, _reason}} -> take_command(state, :tab)
+      %{status: {:window, _reason}, entry: entry} -> to_line(state, "/" <> entry["name"] <> " ")
       %{status: {:no, reason}} -> notice(close_palette(state), reason)
       %{entry: entry} -> run_or_take(state, entry)
     end
   end
 
+  # A row that wants words after its name is put where they are typed: one that insists on
+  # them, and a command a file defines whose file asks for them (its `argument-hint`, the
+  # usage the table writes from it), whose `$ARGUMENTS` would otherwise go out empty
+  # (D107). One that only may take them (`[arguments]`) runs, as it did.
   defp run_or_take(state, entry) do
-    if Enum.any?(entry["args"], & &1["required"]),
-      do: take_command(state, :tab),
+    name = entry["name"]
+
+    takes_text? =
+      Enum.any?(entry["args"], & &1["required"]) or
+        (entry["source"] in ["user", "project"] and
+           entry["usage"] not in ["/" <> name, "/" <> name <> " [arguments]"])
+
+    if takes_text?,
+      do: to_line(state, "/" <> entry["name"] <> " "),
       else: run_command(close_palette(state), "/" <> entry["name"])
   end
 
@@ -1026,6 +1500,15 @@ defmodule Troupe.UI.TUI.Server do
       nil ->
         state
     end
+  end
+
+  # Opened over a window, the palette leaves what it takes in that window's box, where Enter
+  # runs it on that window as a command typed there is (D107, TUI Decisions 155 and 156);
+  # else on the command line.
+  defp to_line(%{palette: %{return_to: {:window, path}}} = state, text) do
+    if Map.has_key?(state.model.windows, path),
+      do: put_win(%{state | focus: {:window, path}, palette: nil}, text),
+      else: state |> close_palette() |> to_command_line() |> put_cmd(text)
   end
 
   defp to_line(state, text), do: state |> close_palette() |> to_command_line() |> put_cmd(text)
@@ -1067,7 +1550,7 @@ defmodule Troupe.UI.TUI.Server do
 
         case Client.fs_upload(sid, target, content) do
           :ok -> {:ok, "uploaded #{path} to #{target}"}
-          {:error, reason} -> {:error, to_message(reason)}
+          {:error, reason} -> {:error, "#{path} not uploaded: #{to_message(reason)}"}
         end
 
       {:error, reason} ->
@@ -1217,19 +1700,30 @@ defmodule Troupe.UI.TUI.Server do
   # Sessions this window offers to switch to: the ones the daemon has for the directory
   # the TUI was opened in that did something, spoke to a model or started a branch, plus
   # the session on screen (which may still be empty) so the list always says where you
-  # are, and the one `/back` returns to, which `/new` left. A branch is not one of them: it
-  # is a window of its parent's, counted on its row.
+  # are, and the one `/back` returns to, which `/new` left. A branch is not one of them
+  # while it is a window of its parent's, counted on its row; one whose window was
+  # dismissed is, after them, named for the window it was (the row of `/dismiss`).
   defp pickable_sessions(state) do
     case Client.sessions({:local, here(state)}) do
       {:ok, sessions} ->
-        Enum.filter(
-          sessions,
-          &(&1.id in [state.session_id, state.back] or (&1.parent == nil and worked?(&1)))
-        )
+        listed =
+          Enum.filter(
+            sessions,
+            &(&1.id in [state.session_id, state.back] or (&1.parent == nil and worked?(&1)))
+          )
+
+        listed ++ dismissed_branches(state, MapSet.new(listed, & &1.id))
 
       {:error, _reason} ->
         []
     end
+  end
+
+  defp dismissed_branches(state, listed) do
+    for %{window: window, session_id: id} <- Client.dismissed_branches(state.session_id),
+        not MapSet.member?(listed, id),
+        {:ok, row} <- [Client.get_session({:local, here(state)}, id)],
+        do: %{row | title: "#{window}, dismissed: #{row.title}"}
   end
 
   defp worked?(entry), do: entry.branches != [] or (entry.tokens || 0) > 0
@@ -1361,6 +1855,9 @@ defmodule Troupe.UI.TUI.Server do
         model: rebuild(sid),
         workspace: workspace_of(sid),
         agents: Client.commands(sid),
+        agent_rows: %{},
+        agents_page: nil,
+        switcher: nil,
         commands: Client.command_table(sid),
         palette: nil,
         focus: :command,
@@ -1374,11 +1871,22 @@ defmodule Troupe.UI.TUI.Server do
         settings: nil,
         observer: nil,
         sessions: nil,
+        chooser: nil,
+        choice: nil,
+        # The answer to a listing asked for the session left is dropped when it comes.
+        worktrees: [],
+        worktrees_loading: false,
+        worktrees_stale: false,
         dirty: true
     }
 
     retire(previous)
-    state |> recheck_loop() |> notice(said || "resumed #{sid}")
+
+    state
+    |> Map.merge(command_mode(sid))
+    |> recheck_loop()
+    |> refresh_worktrees()
+    |> notice(said || "resumed #{sid}")
   end
 
   ## New sessions and the way back
@@ -1528,7 +2036,7 @@ defmodule Troupe.UI.TUI.Server do
     page =
       case Client.sources(state.session_id) do
         {:ok, sources} -> sources
-        {:error, reason} -> %{servers: [], skills: [], warnings: [to_message(reason)]}
+        {:error, reason} -> %{servers: [], skills: [], skipped: [], warnings: [to_message(reason)]}
       end
 
     model =
@@ -1698,7 +2206,7 @@ defmodule Troupe.UI.TUI.Server do
 
   # The opener is configurable so the suite opens no browser: `:troupe, :open_url`.
   defp open_url(url) do
-    opener = Application.get_env(:troupe, :open_url, &Troupe.UI.Browser.open/1)
+    opener = Application.get_env(:troupe, :open_url, &Client.open_url/1)
     opener.(url)
   end
 
@@ -1784,13 +2292,36 @@ defmodule Troupe.UI.TUI.Server do
       {:server, _server} ->
         {:error, "a server from config.yaml is removed there"}
 
-      {:skill, skill} ->
-        remove_source(state, "skills", %{name: skill.name}, Atom.to_string(skill.layer))
+      {kind, %{name: name, layer: layer}}
+      when kind in [:skill, :skipped] and layer in [:user, :workspace] and is_binary(name) ->
+        remove_source(state, "skills", %{name: name}, Atom.to_string(layer))
+
+      {_kind, skill} ->
+        {:error, not_ours(skill)}
 
       nil ->
         nil
     end
   end
+
+  # A skill in an `.agents/skills` is read where it is and never written (root Decision
+  # 822): nothing in Troupe's own files to remove, so the notice says whose it is.
+  defp not_ours(%{name: nil, dir: dir, reason: reason}),
+    do: "#{dir} is not read (#{reason}), so there is nothing of it to remove"
+
+  defp not_ours(%{name: name, layer: :agents} = skill),
+    do:
+      "#{name} is the repository's, in #{skill.dir}: Troupe reads .agents/skills where it is " <>
+        "and never writes there, so remove it from the repository, or give .troupe/skills " <>
+        "a skill of that name to use instead"
+
+  defp not_ours(%{name: name, layer: :user_agents} = skill),
+    do:
+      "#{name} is in your #{skill.dir}, which other tools read too: Troupe reads " <>
+        "~/.agents/skills where it is and never writes there, so remove it there"
+
+  defp not_ours(%{name: name, layer: layer}),
+    do: "#{name} comes from the #{layer} layer, which Troupe does not write"
 
   defp load_files(state, path) do
     case Client.fs_list(state.session_id, path) do
@@ -1873,6 +2404,177 @@ defmodule Troupe.UI.TUI.Server do
   defp mcp_key(%Key{code: "o"}, state), do: mcp_act(state, mcp_sign_out_selected(state))
 
   defp mcp_key(_key, state), do: state
+
+  ## Agents (TUI Decision 156)
+
+  defp ask_agent_rows(sid) do
+    server = self()
+    {:ok, _task} = Task.start(fn -> send(server, {:agent_rows, sid, agent_rows(sid)}) end)
+    :ok
+  end
+
+  # `agents.list`'s rows by name, which the palette's agent rows carry their badges from.
+  defp agent_rows(sid) do
+    case Client.agents(sid, "agents.list") do
+      {:ok, %{"agents" => rows}} when is_list(rows) -> Map.new(rows, &{&1["name"], &1})
+      _none -> %{}
+    end
+  end
+
+  # An agent written or taken away: the table (whose agent rows are the session's agents,
+  # read from their files) and the rows are read again, and an open page with them.
+  defp agents_changed(state) do
+    sid = state.session_id
+
+    state = %{
+      state
+      | agents: Client.commands(sid),
+        commands: Client.command_table(sid),
+        agent_rows: agent_rows(sid)
+    }
+
+    case state.agents_page do
+      %{} = page -> %{state | agents_page: Agents.reload(page, sid)}
+      nil -> state
+    end
+  end
+
+  defp open_agents(state),
+    do: %{put_cmd(state, "") | focus: :agents, agents_page: Agents.open(state.session_id)}
+
+  defp agents_key(key, %{agents_page: page} = state) do
+    case Agents.key(page, key, state.session_id) do
+      {:ok, page} ->
+        %{state | agents_page: page}
+
+      {:close, _page} ->
+        %{state | focus: :command, agents_page: nil}
+
+      {:changed, page} ->
+        agents_changed(%{state | agents_page: page})
+
+      # The frame that says the editor is open is drawn before it opens.
+      {:edit, page, request} ->
+        send(self(), {:run_editor, request})
+
+        %{
+          state
+          | agents_page: %{page | status: "editing #{request.name}: close the editor to come back"}
+        }
+    end
+  end
+
+  defp write_temp(path, text) do
+    case File.write(path, text, [:exclusive]) do
+      :ok -> :ok
+      {:error, reason} -> {:error, "could not write #{path}: #{:file.format_error(reason)}"}
+    end
+  end
+
+  defp edit_temp(path, mouse?) do
+    {terminal?, outcome} =
+      case Client.edit_file(path, mouse: mouse?) do
+        {:terminal, outcome} -> {true, outcome}
+        outcome -> {false, outcome}
+      end
+
+    case outcome do
+      :ok -> {terminal?, read_temp(path)}
+      {:error, _reason} = failed -> {terminal?, failed}
+    end
+  end
+
+  defp read_temp(path) do
+    case File.read(path) do
+      {:ok, text} -> {:ok, text}
+      {:error, reason} -> {:error, "could not read #{path} back: #{:file.format_error(reason)}"}
+    end
+  end
+
+  # Tab in a window opens the agent chooser over it, the cursor on the agent the window runs.
+  defp open_switcher(state, path) do
+    w = Map.fetch!(state.model.windows, path)
+
+    case AgentChooser.open(state.session_id, w.profile,
+           title: " the agent #{path} runs ",
+           for: {:window, path}
+         ) do
+      {:ok, switcher} -> %{state | focus: :switcher, switcher: switcher}
+      {:error, reason} -> notice(state, reason)
+    end
+  end
+
+  # The window keeps its conversation; the agent picked runs it from its next turn, and the
+  # switch is in its transcript once the daemon has made it (root Decision 841).
+  defp switcher_key(key, %{switcher: %{for: {:window, path}} = chooser} = state) do
+    back = %{state | focus: {:window, path}, switcher: nil}
+
+    case AgentChooser.key(chooser, key, state.session_id) do
+      {:ok, chooser} ->
+        %{state | switcher: chooser}
+
+      :close ->
+        back
+
+      {:pick, name} when name == chooser.current ->
+        notice(back, "#{path} runs #{name} already")
+
+      {:pick, name} ->
+        case Client.switch_profile(state.session_id, path, name) do
+          :ok -> notice(back, "#{path} runs #{name} from its next turn; its conversation stays")
+          {:error, reason} -> notice(back, "#{path} is not switched: " <> to_message(reason))
+        end
+    end
+  end
+
+  ## Memory page (root Decision 839)
+
+  # `/memory` opens the page on a live `memory.get`: the facts kind by kind with their
+  # status, the selected one's evidence beside them. A daemon from before facts, or a
+  # brief that is off, is answered on the notice line as `/memory` always was. `r` reads
+  # it again, keeping the cursor.
+  defp open_memory(state, cursor \\ 0) do
+    case Client.memory_facts(state.session_id) do
+      {:ok, page} ->
+        state = %{put_cmd(state, "") | focus: :memory, memory: Map.put(page, :cursor, 0)}
+        move_memory(state, cursor)
+
+      :no_facts ->
+        notice(state, state.session_id |> Client.memory("") |> notice_text())
+
+      {:error, reason} ->
+        notice(state, to_message(reason))
+    end
+  end
+
+  defp notice_text({:ok, text}), do: text
+  defp notice_text({:error, reason}), do: to_message(reason)
+
+  defp memory_key(%Key{code: "esc"}, state), do: to_command_line(state)
+  defp memory_key(%Key{code: code}, state) when code in ["up", "k"], do: move_memory(state, -1)
+  defp memory_key(%Key{code: code}, state) when code in ["down", "j"], do: move_memory(state, 1)
+  defp memory_key(%Key{code: "r"}, state), do: open_memory(state, state.memory.cursor)
+  defp memory_key(%Key{code: "x"}, state), do: forget_selected(state)
+  defp memory_key(_key, state), do: state
+
+  defp move_memory(state, step) do
+    last = max(length(View.memory_facts(state)) - 1, 0)
+    %{state | memory: %{state.memory | cursor: (state.memory.cursor + step) |> max(0) |> min(last)}}
+  end
+
+  # One fact, by its id; what it said goes on the notice line.
+  defp forget_selected(state) do
+    case Enum.at(View.memory_facts(state), state.memory.cursor) do
+      nil ->
+        state
+
+      fact ->
+        case Client.forget_fact(state.session_id, fact["id"]) do
+          :ok -> state |> open_memory(state.memory.cursor) |> notice("forgot: #{fact["claim"]}")
+          {:error, reason} -> notice(state, to_message(reason))
+        end
+    end
+  end
 
   defp preview(state, entry) do
     path = mount_of(state.files.path) <> entry.path
@@ -2163,6 +2865,14 @@ defmodule Troupe.UI.TUI.Server do
 
   defp paste_into_settings(state, _content), do: state
 
+  # What the screen holds about watch is what the next `/watch` toggles and the status line
+  # shows, so it is read back once the daemon has answered, either way: left as it was, a
+  # second `/watch` turned watch on again rather than off.
+  defp watch_toggled(state, {_said, text}) do
+    watch = Client.watch_status(state.session_id)
+    notice(%{state | model: %{state.model | watch: watch}}, to_message(text))
+  end
+
   defp toggle_watch(sid, true) do
     case Client.watch(sid, false) do
       {:error, reason} -> {:error, reason}
@@ -2225,23 +2935,9 @@ defmodule Troupe.UI.TUI.Server do
   defp window_key(%Key{code: code}, path, %{win_text: ""} = state) when code in ["left", "right"],
     do: cycle_agent(state, path, if(code == "right", do: 1, else: -1))
 
-  defp window_key(%Key{code: "tab"}, path, %{win_text: ""} = state) do
-    w = Map.fetch!(state.model.windows, path)
-
-    case state.agents do
-      [] ->
-        state
-
-      agents ->
-        idx = Enum.find_index(agents, &(&1 == w.profile)) || -1
-        next = Enum.at(agents, rem(idx + 1, length(agents)))
-
-        case Client.switch_profile(state.session_id, path, next) do
-          :ok -> state
-          {:error, reason} -> notice(state, to_message(reason))
-        end
-    end
-  end
+  # Tab with nothing typed chooses the agent the window runs, from the primary agents with
+  # what each may do, rather than stepping blind to the next name (TUI Decision 156).
+  defp window_key(%Key{code: "tab"}, path, %{win_text: ""} = state), do: open_switcher(state, path)
 
   defp window_key(%Key{code: "tab"}, _path, state),
     do: put_win(state, complete_file(state.win_text, state.model.workspace))
@@ -2333,7 +3029,36 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  defp window_key(%Key{code: "enter"}, path, %{win_text: text} = state) when text != "" do
+  # A line in a window's box that names a command runs it, on this window where it takes
+  # one, as the command line would (TUI Decision 155, D107); one that does not is said to
+  # the window's agent, `/usr/bin is missing` included.
+  defp window_key(%Key{code: "enter"}, _path, %{win_text: "/" <> line = text} = state)
+       when line != "" do
+    if window_command?(state, line),
+      do: run_command(clear_input(state), String.trim(text)),
+      else: window_line(state, text)
+  end
+
+  defp window_key(%Key{code: "enter"}, _path, %{win_text: text} = state) when text != "",
+    do: window_line(state, text)
+
+  defp window_key(%Key{code: code, modifiers: mods} = key, _path, state)
+       when mods in [[], ["shift"]] do
+    if String.length(code) == 1,
+      do: put_win(state, Input.insert(win_input(state), code)),
+      else: editing_key(key, state)
+  end
+
+  defp window_key(key, _path, state), do: editing_key(key, state)
+
+  # `/todo` edits this window's own task list, which no table lists: it is the window's.
+  defp window_command?(state, line) do
+    {name, _args} = split_first(line)
+    name = canonical(state, name)
+    name != "todo" and (name in @builtins or defined?(state, name) or name in state.agents)
+  end
+
+  defp window_line(%{focus: {:window, path}} = state, text) do
     sid = state.session_id
     w = Map.fetch!(state.model.windows, path)
 
@@ -2347,9 +3072,6 @@ defmodule Troupe.UI.TUI.Server do
       String.starts_with?(text, "/todo add ") ->
         Client.edit_todo(sid, path, {:add, String.trim_leading(text, "/todo add ")})
 
-      String.starts_with?(text, "/upload ") ->
-        upload(sid, String.trim(String.trim_leading(text, "/upload ")))
-
       question = pending_of(w, state.pane.agent || path, [:question, :budget]) ->
         Client.answer(sid, question.call_id, text)
 
@@ -2361,15 +3083,6 @@ defmodule Troupe.UI.TUI.Server do
     # with fresh input, so a half-built selection is stale either way.
     follow(%{put_win(state, "") | answer: nil})
   end
-
-  defp window_key(%Key{code: code, modifiers: mods} = key, _path, state)
-       when mods in [[], ["shift"]] do
-    if String.length(code) == 1,
-      do: put_win(state, Input.insert(win_input(state), code)),
-      else: editing_key(key, state)
-  end
-
-  defp window_key(key, _path, state), do: editing_key(key, state)
 
   # y/n/a answers approvals — a delegated subagent raises them too, and its pending
   # item lives in the branch's window like the root's. When more than one is
@@ -2404,6 +3117,47 @@ defmodule Troupe.UI.TUI.Server do
       :ok -> follow(state)
       {:error, reason} -> notice(follow(state), approval_error(reason))
     end
+  end
+
+  # A question the session's start asks (onboarding, then the brief: TUI Decision 154) is
+  # the first thing on a new session's screen, before anything is typed or a window is
+  # opened, so its keys answer it from the command line as from its window, and Enter is
+  # its default, while nothing is typed. `path` is the window focused, `nil` for the
+  # command line, which answers whichever window asks.
+  defp local_answer(%Key{code: code, modifiers: mods}, state, path) when mods in [[], ["shift"]] do
+    with true <- typed(state, path) == "",
+         {window, question} <- asked(state, path),
+         key when is_binary(key) <- local_key(code, question) do
+      case Client.answer_local(state.session_id, question.call_id, key) do
+        :ok -> {:answered, if(path, do: follow(state), else: state)}
+        {:error, reason} -> {:answered, notice(state, "#{window}: " <> to_message(reason))}
+      end
+    else
+      _ -> :pass
+    end
+  end
+
+  defp local_answer(_key, _state, _path), do: :pass
+
+  defp typed(state, nil), do: state.cmd_text
+  defp typed(state, _path), do: state.win_text
+
+  # Whichever window asks it, the session's own among them, which command mode does not
+  # list (TUI Decision 155).
+  defp asked(state, nil), do: Model.asking(state.model)
+
+  defp asked(state, path) do
+    case Model.local_question(Map.fetch!(state.model.windows, path)) do
+      nil -> nil
+      q -> {path, q}
+    end
+  end
+
+  defp local_key("enter", question), do: question.default
+
+  defp local_key(code, question) do
+    key = String.downcase(code)
+    if key in question.keys, do: key
   end
 
   defp pending_of(w, viewed, kinds) do
@@ -2641,9 +3395,34 @@ defmodule Troupe.UI.TUI.Server do
         _ -> model
       end
 
-    state = shell_ended(%{state | model: model}, event)
+    state = %{state | model: model} |> shell_ended(event) |> watch_triggered(event)
+    state = if trees_moved?(event), do: refresh_worktrees(state), else: state
     if event.type == :remote_status, do: recheck_loop(state), else: state
   end
+
+  # A saved comment started a branch in the daemon (root Decision 844): its window opens
+  # as one started here does, and the line under the screen says which file and comment
+  # started which window. Only as it happens; a journal read back opens nothing.
+  defp watch_triggered(state, %{type: :watch_triggered, data: %{session_id: child} = d})
+       when is_binary(child) do
+    prompt = d.markers |> List.first(%{}) |> Map.get("comment", "")
+
+    case Client.adopt_branch(state.session_id, child, d.agent, prompt) do
+      {:ok, window} ->
+        notice(state, Model.watch_line(%{d | agent: window}))
+
+      {:error, reason} ->
+        notice(
+          state,
+          Model.watch_line(d) <> ", but its window did not open: " <> to_message(reason)
+        )
+    end
+  end
+
+  defp watch_triggered(state, %{type: :watch_triggered, data: d}),
+    do: notice(state, Model.watch_line(d))
+
+  defp watch_triggered(state, _event), do: state
 
   # The loop on the status line is the journal's, and a daemon that stopped mid-loop left
   # the journal saying it runs: `loop_stopped interrupted` is written only when the
@@ -2731,11 +3510,16 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   @doc """
-  Tab completion on the command line: command names (`wor` → `worktree `), window paths
+  Tab completion on the command line: command names (`wor` → `/worktree `), window paths
   for the commands whose first argument is a window — `/merge`, `/discard`, `/cancel`,
   `/dismiss`, `/copy` as the table has them (repeated Tab cycles through the matches) —
   and `@file` paths anywhere. `/merge` and `/discard` only offer worktree branches that
   have finished and are neither merged nor discarded.
+
+  What Tab completes is a command, so it comes back with its slash whether or not one was
+  typed: a line without one is said to the agent (TUI Decision 101), and `mer` completed to
+  `merge ` used to send "merge" there on Enter (D93). A Tab that finds nothing leaves the
+  line as it was typed.
   """
   @spec complete_command(String.t(), map()) :: String.t()
   def complete_command(text, state) do
@@ -2744,27 +3528,27 @@ defmodule Troupe.UI.TUI.Server do
         complete_file(text, state.model.workspace)
 
       not String.contains?(text, " ") ->
-        complete_name(text, command_names(state))
+        slashed(text, complete_name(String.trim_leading(text, "/"), command_names(state)))
 
       true ->
         [name, arg] = String.split(text, " ", parts: 2)
-        # A name the palette put on the line carries its slash; the completion keeps it.
-        {slash, name} =
-          if String.starts_with?(name, "/"),
-            do: {"/", String.trim_leading(name, "/")},
-            else: {"", name}
+        name = String.trim_leading(name, "/")
 
         cond do
           takes_window?(state, name) ->
-            slash <> complete_path(name, String.trim(arg), state)
+            slashed(text, complete_path(name, String.trim(arg), state))
 
           name == "worktree" and not String.contains?(String.trim(arg), " ") ->
-            slash <> complete_worktree(arg, state)
+            slashed(text, complete_worktree(arg, state))
 
           true ->
             text
         end
     end
+  end
+
+  defp slashed(text, completed) do
+    if completed == String.trim_leading(text, "/"), do: text, else: "/" <> completed
   end
 
   # What Tab completes on the line: the table's names and aliases (Decision 698), agents

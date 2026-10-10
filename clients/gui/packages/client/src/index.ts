@@ -27,6 +27,41 @@ export type { AttachOptions, AttachStatus } from "./attach.js";
 export { ServerOffer, offeredName } from "./offer.js";
 export type { OfferAsk, OfferOptions, OfferState } from "./offer.js";
 export {
+  LIBRARIAN_PROMPT,
+  LIBRARIAN_REWRITING,
+  LIBRARIAN_WRITING,
+  StartQuestions,
+  briefQuestion,
+  createQuestion,
+  describeItem,
+  onboardQuestion,
+} from "./onboard.js";
+export {
+  FACT_KINDS,
+  LIBRARIAN_FIRST_PROMPT,
+  factStatusLine,
+  factsByKind,
+  learnedBy,
+  librarianBarred,
+  librarianDone,
+  mayNoLongerBeTrue,
+  refreshNow,
+  refreshStep,
+} from "./memory.js";
+export type { FactAnchor, FactEvidence, FactKind, FactStatus, LibrarianBarred, MemoryBrief, MemoryFact, Refreshed, RefreshStep } from "./memory.js";
+export type {
+  BriefDue,
+  OnboardApplied,
+  OnboardItem,
+  OnboardPlan,
+  OnboardSkipped,
+  OnboardingDue,
+  StartAnswer,
+  StartOptions,
+  StartQuestion,
+  StartState,
+} from "./onboard.js";
+export {
   fold,
   addPending,
   dropPending,
@@ -52,6 +87,7 @@ export type {
   PresenceMember,
   QuestionOption,
   LoopState,
+  OnboardingSuggested,
   TokenUsage,
   TurnCost,
 } from "./transcript.js";
@@ -97,6 +133,35 @@ export type {
   Trigger,
   TriggerRun,
 } from "./admin.js";
+export {
+  agentRefusal,
+  agentTemplate,
+  findingsFor,
+  layerOf,
+  layerWords,
+  parseAgent,
+  permissionsOf,
+  validAgentName,
+  widenedAutos,
+  withBody,
+  withFields,
+} from "./agents.js";
+export type {
+  AgentCheck,
+  AgentDefinition,
+  AgentDeleted,
+  AgentFields,
+  AgentFinding,
+  AgentLayer,
+  AgentPermission,
+  AgentRow,
+  AgentScope,
+  AgentSkippedFile,
+  AgentSource,
+  AgentsChanged,
+  AgentWritten,
+  ProfileSwitch,
+} from "./agents.js";
 export { DaemonClient, DaemonSource, claimRefusal, daemonUrl, rowFromDaemon } from "./daemon.js";
 export type {
   ClaimResult,
@@ -116,6 +181,7 @@ export type {
   ServerToolResult,
   ServerTools,
   SignInStarted,
+  SkippedSkill,
   SourceLayer,
   SourceScope,
   Worktree,

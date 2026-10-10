@@ -185,8 +185,8 @@ defmodule Troupe.Config.Schema do
                "default",
                :string,
                "The model every agent uses unless its definition names one. A bare id goes to the " <>
-                 "session-wide provider; `<provider>/<model>` goes to a named one, from `providers` or " <>
-                 "opencode. `troupe models` lists what this machine can address.",
+                 "session-wide provider; `<provider>/<model>` goes to a named one, from `providers`. " <>
+                 "`troupe models` lists what this machine can address.",
                default: "claude-sonnet-5",
                field: :model,
                label: "model"
@@ -377,6 +377,7 @@ defmodule Troupe.Config.Schema do
       group("Watching", [
         spec("watch", :boolean, "Act on `AI!` and `AI?` comments in the workspace's files.",
           default: false,
+          scope: :trusted,
           field: :watch,
           label: "watch mode"
         ),
@@ -387,6 +388,17 @@ defmodule Troupe.Config.Schema do
         spec("watch_poll_interval_ms", {:integer, 1}, "How often watch mode polls where it cannot be told.",
           default: 1_000,
           field: :watch_poll_interval_ms
+        ),
+        spec(
+          "watch_auto_approve",
+          :boolean,
+          "A branch an `AI!` or `AI?` comment starts runs its writes, edits, shell commands and MCP servers' tools " <>
+            "without asking. Off, each asks, whatever `auto_approve`, the agent's own permissions and a server's " <>
+            "`permission` say.",
+          default: false,
+          scope: :trusted,
+          field: :watch_auto_approve,
+          label: "watch auto approve"
         ),
         spec("fs_events", :boolean, "Record every file change in the workspace as an event.",
           default: false,
@@ -414,8 +426,9 @@ defmodule Troupe.Config.Schema do
         spec(
           "memory",
           :boolean,
-          "Agents read the project brief, `.troupe/memory.md`, into every prompt and write it with " <>
-            "`remember`. `/memory` shows it.",
+          "The project brief: facts about the repository, kept in `.troupe/memory/facts.jsonl` " <>
+            "and written with `remember`. Its commands and conventions are in every prompt, " <>
+            "the rest comes through `recall`. `/memory` lists them.",
           default: true,
           field: :memory,
           label: "project brief"
@@ -439,7 +452,7 @@ defmodule Troupe.Config.Schema do
         spec(
           "instructions_max_chars",
           {:integer, 1},
-          "How many characters of instruction files (`AGENTS.md` and its aliases, every scope together) go into a prompt; the nearest are kept whole first.",
+          "How many characters of instruction files (`AGENTS.md`, `.agents/AGENTS.md` and `.troupe/rules`, every scope together) go into a prompt; the nearest are kept whole first.",
           default: 16_000,
           field: :instructions_max_chars
         )

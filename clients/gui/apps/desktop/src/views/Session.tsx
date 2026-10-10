@@ -10,7 +10,7 @@
 // the stream, because the stream's order is the server's and a reconnect must not
 // reshuffle what somebody has already read.
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import { isBlobRef, isBusy, needsYou, openApprovals, openQuestions, rootState, settleLoop, unseenSummary } from "@troupe/client";
 import type {
@@ -22,12 +22,12 @@ import type {
   FleetRow,
   LoopInfo,
   LoopState,
-  ProfileOffering,
   SessionKind,
   TranscriptState,
 } from "@troupe/client";
-import { useProfiles, useSessionView } from "../hooks";
+import { useSessionView, useStartQuestions } from "../hooks";
 import type { SessionHandle } from "../hooks";
+import { AgentSwitch } from "./AgentSwitch";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
 import { CommandPalette } from "./CommandPalette";
@@ -35,8 +35,20 @@ import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
+import { MemoryPane } from "./Memory";
+import type { MemoryAsk } from "./Memory";
 import { OfferLine, OfferPanel } from "./Offer";
+import { StartLine, StartPanel } from "./Onboard";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
+
+/** A backstage pane: the running order, the files, or the repository's memory. */
+type Pane = "tasks" | "files" | "memory";
+
+/** A line this app says in the transcript, after the event it was said at. */
+interface Note {
+  after: number;
+  text: string;
+}
 
 export function Session({
   auth,
@@ -45,10 +57,12 @@ export function Session({
   row,
   sessionId,
   created,
+  startedIn,
   onBack,
   onGo,
+  onAgents,
 }: {
-  /** The plane, for a team session and its profiles. Null in local mode. */
+  /** The plane, for a team session. Null in local mode. */
   auth: AuthSession | null;
   daemon: DaemonClient | null;
   /** Who the daemon records this person as, which is "you" in a session on this computer. */
@@ -57,9 +71,13 @@ export function Session({
   sessionId: string;
   /** Where it was just made, for a session opened straight from the start screen. */
   created?: SessionKind | undefined;
+  /** The workspace a session on this computer was just started in, from the start screen: its start goes on to the librarian. */
+  startedIn?: string | undefined;
   onBack: () => void;
   /** Leave for another screen, for the palette's Navigate and Setup commands. */
   onGo?: (screen: PaletteScreen) => void;
+  /** Open the agents manager on this session's workspace, at one agent if named: a session on this computer's. */
+  onAgents?: ((agent?: string) => void) | undefined;
 }): JSX.Element {
   // Where it runs decides which socket it is reached over and nothing else about this
   // screen: the transcript, the approvals and the composer are the same protocol either
@@ -68,9 +86,10 @@ export function Session({
   // otherwise a team session only where there is a team to have one.
   const kind = row?.kind ?? created ?? (auth ? "team" : "local");
   const view = useSessionView(auth, sessionId, { daemon, kind });
-  const { profiles } = useProfiles(auth);
   const [backstage, setBackstage] = useState(true);
-  const [pane, setPane] = useState<"tasks" | "files">("tasks");
+  const [pane, setPane] = useState<Pane>("tasks");
+  // What `/memory refresh` or `/memory forget` asked of the memory pane, until it takes it.
+  const [memoryAsk, setMemoryAsk] = useState<MemoryAsk | null>(null);
   const [palette, setPalette] = useState(false);
   const self = (kind === "team" ? auth?.me?.subject : (machineUser ?? auth?.me?.subject)) ?? undefined;
 
@@ -84,6 +103,14 @@ export function Session({
   // a session that stopped mid-loop records the interruption only when it wakes.
   const loop = settleLoop(view.state.loop, useLoopAnswer(view.view));
   const [away, seenAway] = useAway(sessionId, row);
+  // Onboarding, then the brief, as the session's start found them due (Decision 835), and
+  // the librarian for a session started here; what they came to is said in the transcript.
+  const start = useStartQuestions(daemon, sessionId, view.state.onboarding, { local: kind !== "team", canAnswer: !readOnly, startedIn });
+  const notes = useStartNotes(daemon, sessionId, start.state?.said, view.state.lastSeq);
+  // Where a session on this computer works: what the start screen was told, what the list
+  // says, or what the start's event named; the memory pane asks about its repository.
+  const workspace =
+    kind === "team" ? undefined : (startedIn ?? (row?.raw as { workspace?: string } | undefined)?.workspace ?? view.state.onboarding?.workspace);
 
   // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen.
   useEffect(() => {
@@ -110,7 +137,13 @@ export function Session({
               setBackstage(true);
               setPane("files");
             },
+            showMemory: (what) => {
+              setBackstage(true);
+              setPane("memory");
+              if (what) setMemoryAsk((a) => ({ what, n: (a?.n ?? 0) + 1 }));
+            },
             transcript: () => transcriptText(view.state),
+            ...(kind !== "team" && onAgents ? { agents: () => onAgents() } : {}),
           }}
         />
       )}
@@ -119,24 +152,34 @@ export function Session({
         row={row}
         sessionId={sessionId}
         state={view.state}
-        profiles={profiles}
         self={self}
         backstage={backstage}
         onBack={onBack}
         onToggleBackstage={() => setBackstage((b) => !b)}
-        onSwitch={(p) => void view.switchProfile(p)}
         loop={loop}
         canChange={!readOnly}
         view={view}
+        agent={
+          <AgentSwitch
+            view={view}
+            daemon={daemon}
+            kind={kind}
+            workspace={kind !== "team" ? workspaceOf(row) : null}
+            current={agentOf(view.state, row)}
+            canChange={!readOnly}
+            onAbout={kind !== "team" ? onAgents : undefined}
+          />
+        }
       />
 
       <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
       <OfferLine offer={view.offer} />
+      <StartLine state={start.state} />
       {away && <Away summary={away} onSeen={seenAway} />}
 
       <div className="stagearea">
         <div className="conversation">
-          <Stream state={view.state} self={self} local={kind === "local"} readBlob={view.readBlob} onSetup={onGo ? () => onGo("setup") : undefined} />
+          <Stream state={view.state} notes={notes} self={self} local={kind === "local"} readBlob={view.readBlob} onSetup={onGo ? () => onGo("setup") : undefined} />
 
           {/* Sticky, so scrolling up to read the context never loses the decision. */}
           {open.map((entry) => (
@@ -150,6 +193,9 @@ export function Session({
 
           {/* The session's question about your own servers, before it takes their tools. */}
           {view.offer.state === "asking" && <OfferPanel ask={view.offer.ask} onAnswer={view.answerOffer} />}
+
+          {/* What the start found due on this computer: onboarding, then the brief. */}
+          {start.state && <StartPanel state={start.state} onAnswer={start.answer} />}
 
           {readOnly ? (
             <ReadOnly />
@@ -167,10 +213,60 @@ export function Session({
           )}
         </div>
 
-        {backstage && <Backstage view={view} daemon={daemon} row={row} self={self} pane={pane} onPane={setPane} />}
+        {backstage && (
+          <Backstage
+            view={view}
+            daemon={daemon}
+            row={row}
+            self={self}
+            pane={pane}
+            onPane={setPane}
+            memory={
+              daemon && kind !== "team"
+                ? {
+                    daemon,
+                    workspace,
+                    sessionId,
+                    librarians: start.state?.librarian ? [start.state.librarian] : [],
+                    ask: memoryAsk,
+                    onAsked: () => setMemoryAsk(null),
+                  }
+                : null
+            }
+          />
+        )}
       </div>
     </section>
   );
+}
+
+// The start's lines by daemon connection and session, each where it was said, for as long
+// as the app runs: a session left and opened again shows them where they were, not under
+// its replay's head.
+const anchored = new WeakMap<DaemonClient, Map<string, Note[]>>();
+
+/**
+ * The start's lines (what onboarding did, the librarian it started or why none), each
+ * placed after the event the transcript had reached when it was said, as the terminal
+ * client writes them into the session's window as it goes. They are this app's, not the
+ * session's log, so a start asked again (the app opened again) has its own.
+ */
+function useStartNotes(daemon: DaemonClient | null, sessionId: string, said: string[] | undefined, lastSeq: number): Note[] {
+  const [, redraw] = useState(0);
+  const at = useRef(lastSeq);
+  at.current = lastSeq;
+  useEffect(() => {
+    if (!daemon || !said) return;
+    const notes = anchored.get(daemon) ?? new Map<string, Note[]>();
+    anchored.set(daemon, notes);
+    const had = notes.get(sessionId) ?? [];
+    const same = had.length <= said.length && had.every((n, i) => n.text === said[i]);
+    if (same && had.length === said.length) return;
+    const kept = same ? had : [];
+    notes.set(sessionId, [...kept, ...said.slice(kept.length).map((text) => ({ after: at.current, text }))]);
+    redraw((n) => n + 1);
+  }, [daemon, sessionId, said]);
+  return (daemon && anchored.get(daemon)?.get(sessionId)) || [];
 }
 
 /** What was said, for `/copy`: the people's and the agent's words, not the tool traffic. */
@@ -185,33 +281,47 @@ function transcriptText(state: TranscriptState): string {
  * it works towards; who is here; and the controls, with the loop beside the status
  * while one runs.
  */
+/**
+ * The agent a window runs: as its transcript says (`session_created`, then each
+ * `profile_switched`), and until that has arrived, as a daemon's row says it. A plane's row
+ * names the plane's profile, which is not an agent, so it is not shown as one.
+ */
+function agentOf(state: TranscriptState, row: FleetRow | undefined): string | null {
+  return state.profile ?? (row && row.kind !== "team" ? row.profile : null) ?? null;
+}
+
+/** Where a session on this computer works, as its row says. */
+function workspaceOf(row: FleetRow | undefined): string | null {
+  const workspace = (row?.raw as { workspace?: unknown } | undefined)?.workspace;
+  return typeof workspace === "string" && workspace ? workspace : null;
+}
+
 function Header({
   row,
   sessionId,
   state,
-  profiles,
   self,
   backstage,
   onBack,
   onToggleBackstage,
-  onSwitch,
   loop,
   canChange,
   view,
+  agent,
 }: {
   row: FleetRow | undefined;
   sessionId: string;
   state: TranscriptState;
-  profiles: ProfileOffering[];
   self: string | undefined;
   backstage: boolean;
   onBack: () => void;
   onToggleBackstage: () => void;
-  onSwitch: (p: string) => void;
   loop: LoopState | undefined;
   /** Whether this person may set the goal and start or stop a loop: not a reader's. */
   canChange: boolean;
   view: SessionHandle;
+  /** The agent it runs, and the switch (`AgentSwitch`). */
+  agent: JSX.Element;
 }): JSX.Element {
   const working = rootState(state);
   const here = state.presence.filter((p) => p.subject);
@@ -235,7 +345,9 @@ function Header({
               </span>
             </>
           )}
-          <span className="profile">{state.profile ?? row?.profile ?? "—"}</span>
+          <span className="profile" title="The agent this window runs">
+            {agentOf(state, row) ?? "—"}
+          </span>
           <span className="sep" aria-hidden="true">
             /
           </span>
@@ -274,17 +386,8 @@ function Header({
 
         <LoopStatus loop={loop} canStop={canChange} onStop={view.stopLoop} />
 
-        {/* The profiles are the plane's. With no plane there are none to switch to, and an
-            empty control is a broken one. */}
-        {profiles.length > 0 && (
-          <select value={state.profile ?? ""} onChange={(e) => onSwitch(e.target.value)} aria-label="Profile" title="Applied at the next turn">
-            {profiles.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        )}
+        {/* The agent this window runs, and the switch to another from the next turn. */}
+        {agent}
 
         <button className="tab" onClick={onToggleBackstage} aria-pressed={backstage}>
           {backstage ? "Hide backstage" : "Show backstage"}
@@ -405,12 +508,15 @@ function useLoopAnswer(view: SessionHandle["view"]): LoopInfo | null | undefined
 
 function Stream({
   state,
+  notes,
   self,
   local,
   readBlob,
   onSetup,
 }: {
   state: TranscriptState;
+  /** This app's own lines, each after the event it was said at. */
+  notes: Note[];
   self: string | undefined;
   /** A session on this computer, whose model settings are this person's to change. */
   local: boolean;
@@ -422,14 +528,18 @@ function Stream({
   useEffect(() => {
     // Scrolling is not focus: an arriving event must never move the caret.
     bottom.current?.scrollIntoView({ block: "end" });
-  }, [state.entries.length, state.streaming, state.pending.length]);
+  }, [state.entries.length, state.streaming, state.pending.length, notes.length]);
 
   return (
     <div className="stream" aria-live="polite">
       {state.entries.length === 0 && <Loading what="Reading the session. The newest part arrives first." />}
 
-      {state.entries.map((e) => (
-        <StreamEntry key={`${e.kind}-${e.seq}`} entry={e} self={self} local={local} readBlob={readBlob} onSetup={onSetup} />
+      <NotesAt notes={notes} from={-Infinity} to={state.entries[0]?.seq ?? Infinity} />
+      {state.entries.map((e, i) => (
+        <Fragment key={`${e.kind}-${e.seq}`}>
+          <StreamEntry entry={e} self={self} local={local} readBlob={readBlob} onSetup={onSetup} />
+          <NotesAt notes={notes} from={e.seq} to={state.entries[i + 1]?.seq ?? Infinity} />
+        </Fragment>
       ))}
 
       {state.thinking && (
@@ -462,6 +572,21 @@ function Stream({
 
       <div ref={bottom} />
     </div>
+  );
+}
+
+/** This app's lines said at or after `from` and before `to`. */
+function NotesAt({ notes, from, to }: { notes: Note[]; from: number; to: number }): JSX.Element | null {
+  const here = notes.filter((n) => n.after >= from && n.after < to);
+  if (here.length === 0) return null;
+  return (
+    <>
+      {here.map((n, i) => (
+        <p key={`${n.after}-${i}-${n.text}`} className="note start-note">
+          {n.text}
+        </p>
+      ))}
+    </>
   );
 }
 
@@ -541,7 +666,11 @@ function StreamEntry({
       const step = local && entry.type === "llm_error" ? modelErrorStep(entry.text) : null;
       return (
         <>
-          <p className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" || entry.type === "agent_failed" ? "error" : ""}`}>{entry.text}</p>
+          <p
+            className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" || entry.type === "agent_failed" ? "error" : ""} ${entry.type === "profile_switched" ? "switched" : ""}`}
+          >
+            {entry.text}
+          </p>
           {step && (
             <p className="note">
               {step}
@@ -715,31 +844,63 @@ function Backstage({
   self,
   pane,
   onPane,
+  memory,
 }: {
   view: SessionHandle;
   daemon: DaemonClient | null;
   row: FleetRow | undefined;
   self: string | undefined;
-  /** Which pane is up: the session's, so `/files` from the palette can open it. */
-  pane: "tasks" | "files";
-  onPane: (pane: "tasks" | "files") => void;
+  /** Which pane is up: the session's, so `/files` and `/memory` from the palette can open it. */
+  pane: Pane;
+  onPane: (pane: Pane) => void;
+  /**
+   * What the memory pane needs: a session on this computer's daemon, workspace, id and the
+   * librarian its start began; null for a team session's.
+   */
+  memory: {
+    daemon: DaemonClient;
+    workspace: string | undefined;
+    sessionId: string;
+    librarians: string[];
+    ask: MemoryAsk | null;
+    onAsked: () => void;
+  } | null;
 }): JSX.Element {
   const agents = Object.entries(view.state.agentState).filter(([path]) => path !== "");
+  // A team session's memory is its pod's, and `memory.get` is this computer's daemon's.
+  const shown: Pane = pane === "memory" && !memory ? "tasks" : pane;
 
   return (
     <aside className="backstage">
       <section>
         <div className="tabs">
-          <button className="tab" aria-selected={pane === "tasks"} onClick={() => onPane("tasks")}>
+          <button className="tab" aria-selected={shown === "tasks"} onClick={() => onPane("tasks")}>
             Tasks
           </button>
-          <button className="tab" aria-selected={pane === "files"} onClick={() => onPane("files")}>
+          <button className="tab" aria-selected={shown === "files"} onClick={() => onPane("files")}>
             Files
           </button>
+          {memory && (
+            <button className="tab" aria-selected={shown === "memory"} onClick={() => onPane("memory")}>
+              Memory
+            </button>
+          )}
         </div>
       </section>
 
-      {pane === "tasks" ? (
+      {shown === "memory" && memory ? (
+        <section>
+          <h3>Memory</h3>
+          <MemoryPane
+            daemon={memory.daemon}
+            workspace={memory.workspace}
+            sessionId={memory.sessionId}
+            librarians={memory.librarians}
+            ask={memory.ask}
+            onAsked={memory.onAsked}
+          />
+        </section>
+      ) : shown === "tasks" ? (
         <section>
           <h3>Running order</h3>
           {view.state.todo.length === 0 ? (

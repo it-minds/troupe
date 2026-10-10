@@ -19,7 +19,8 @@ defmodule Troupe.Gateway.Worktrees do
   worktree, because the tree would move under its agent.
   """
 
-  alias Troupe.Reaper
+  alias Troupe.Config.Trust
+  alias Troupe.{Git, Workspace}
 
   @type resolved :: %{path: Path.t(), worktree: Path.t() | nil, branch: String.t() | nil}
 
@@ -27,13 +28,14 @@ defmodule Troupe.Gateway.Worktrees do
   Decide where a new session should work.
 
   `mode` is `"auto"` (branch only when the workspace is busy), `"never"`, or
-  `"always"`.
+  `"always"`. A `name` is a worktree of that name (`named/2`), whatever the mode.
   """
-  @spec resolve(Path.t(), String.t()) :: {:ok, resolved()} | {:error, term()}
-  def resolve(workspace, mode) do
+  @spec resolve(Path.t(), String.t(), String.t() | nil) :: {:ok, resolved()} | {:error, term()}
+  def resolve(workspace, mode, name \\ nil) do
     workspace = Path.expand(workspace)
 
     cond do
+      is_binary(name) -> named(workspace, name)
       mode == "never" -> {:ok, plain(workspace)}
       not git_repository?(workspace) -> {:ok, plain(workspace)}
       mode == "always" -> create(workspace)
@@ -42,12 +44,32 @@ defmodule Troupe.Gateway.Worktrees do
     end
   end
 
+  @doc """
+  Whether a session started in `workspace` now would get a worktree of its own, as
+  `resolve/2` decides it for `"auto"`: what `agents.list` says of each agent (Decision 841).
+  """
+  @spec auto?(Path.t()) :: boolean()
+  def auto?(workspace) do
+    workspace = Path.expand(workspace)
+    git_repository?(workspace) and busy?(workspace)
+  end
+
   defp plain(workspace), do: %{path: workspace, worktree: nil, branch: nil}
 
   defp busy?(workspace) do
+    workspace
+    |> live_in()
+    |> Enum.any?(&(&1.state == :active))
+  end
+
+  # The live sessions working in a directory, however it is spelled: git writes `C:/…`
+  # where a session's workspace is `c:/…` or `C:\…`, and a link to it is it too.
+  defp live_in(path) do
+    key = same_key(path)
+
     %{}
     |> Troupe.list_live_sessions()
-    |> Enum.any?(&(&1.workspace == workspace and &1.state == :active))
+    |> Enum.filter(&(same_key(&1.workspace) == key))
   end
 
   @doc "Create a worktree for a workspace on a fresh `troupe/<slug>` branch."
@@ -64,7 +86,82 @@ defmodule Troupe.Gateway.Worktrees do
     end
   end
 
-  @doc "Every worktree of a workspace, with the session using it and whether it is dirty."
+  @doc """
+  The worktree of that name (TUI Decision 42, Decision 843): `<checkout>-<name>` on
+  `troupe/<name>`, made the first time and the same tree after, and made again from its
+  branch when only the directory has gone. Refused while a session is working in it, as a
+  merge is, since two agents would be writing one tree; and refused for a name git would
+  not take as a branch or that would leave the directory beside the checkout.
+  """
+  @spec named(Path.t(), String.t()) ::
+          {:ok, resolved()} | {:error, {:bad_name, String.t()} | {:busy, String.t()} | term()}
+  def named(workspace, name) do
+    workspace = Path.expand(workspace)
+    branch = "troupe/" <> name
+    path = Path.join(Path.dirname(workspace), Path.basename(workspace) <> "-" <> name)
+
+    cond do
+      not name?(name) ->
+        {:error, {:bad_name, name}}
+
+      registered?(workspace, path) and File.dir?(path) ->
+        with :ok <- resting(path), do: {:ok, %{path: path, worktree: path, branch: branch}}
+
+      true ->
+        # A tree whose directory went is still registered until git is told; its branch,
+        # and the work committed on it, is what it is made again from.
+        _ = git(workspace, ["worktree", "prune"])
+        from = if branch?(workspace, branch), do: [path, branch], else: ["-b", branch, path]
+
+        case git(workspace, ["worktree", "add" | from]) do
+          {:ok, _output, 0} -> {:ok, %{path: path, worktree: path, branch: branch}}
+          {:ok, output, _status} -> {:error, {:worktree_failed, String.trim(output)}}
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  # A name is one path segment that is also a branch name git takes, and starts with
+  # neither a dot nor a dash.
+  defp name?(name) do
+    String.match?(name, ~r/^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$/) and
+      not String.contains?(name, "..") and not String.ends_with?(name, [".", ".lock"])
+  end
+
+  defp registered?(workspace, path) do
+    case git(workspace, ["worktree", "list", "--porcelain"]) do
+      {:ok, output, 0} ->
+        key = same_key(path)
+        output |> parse_porcelain() |> Enum.any?(&(same_key(&1["worktree"]) == key))
+
+      _ ->
+        false
+    end
+  end
+
+  defp branch?(workspace, branch) do
+    ref = "refs/heads/" <> branch
+    match?({:ok, _, 0}, git(workspace, ["rev-parse", "--verify", "--quiet", ref]))
+  end
+
+  defp same_key(path) do
+    path = Path.expand(path)
+
+    case Workspace.real_path(path) do
+      {:ok, real} -> Workspace.compare_key(real)
+      {:error, _} -> Workspace.compare_key(path)
+    end
+  end
+
+  @doc """
+  Every worktree of a workspace, with the session using it, whether it is dirty, and how
+  it stands against the checkout (Decision 840): `ahead` and `behind`, the commits its
+  branch has that the checkout's branch has not and the other way round (for the checkout
+  itself, against its upstream), and `added` and `removed`, the lines it would bring:
+  its changes since its branch left the checkout's, uncommitted and untracked files
+  included, as a merge would commit them (for the checkout, what it has not committed).
+  Each is `nil` where git cannot say: a checkout with no upstream, a detached one.
+  """
   @spec list(Path.t() | nil) :: [map()]
   def list(nil) do
     %{}
@@ -78,12 +175,22 @@ defmodule Troupe.Gateway.Worktrees do
     workspace = Path.expand(workspace)
 
     case git(workspace, ["worktree", "list", "--porcelain"]) do
-      {:ok, output, 0} -> output |> parse_porcelain() |> Enum.map(&annotate/1)
-      _ -> []
+      {:ok, output, 0} ->
+        # git lists the main worktree first: its branch is the one the others left.
+        entries = parse_porcelain(output)
+        main = List.first(entries)
+        Enum.map(entries, &annotate(&1, main))
+
+      _ ->
+        []
     end
   end
 
-  @doc "Remove a worktree. Refuses a dirty one unless `force`."
+  @doc """
+  Remove a worktree. Refuses a dirty one unless `force`. git runs from the checkout the
+  tree belongs to, as `merge/3` and `discard/2` remove it: on Windows git cannot delete
+  the directory it was started in.
+  """
   @spec remove(Path.t(), boolean()) :: :ok | {:error, :dirty | term()}
   def remove(path, force?) do
     path = Path.expand(path)
@@ -98,7 +205,9 @@ defmodule Troupe.Gateway.Worktrees do
       true ->
         args = ["worktree", "remove"] ++ if(force?, do: ["--force"], else: []) ++ [path]
 
-        case git(path, args) do
+        # The checkout a worktree's `.git` names and that names it back; a directory that
+        # is no linked worktree is its own, and git says what it makes of it.
+        case git(Trust.root(path), args) do
           {:ok, _output, 0} -> :ok
           {:ok, output, _} -> {:error, String.trim(output)}
           {:error, reason} -> {:error, reason}
@@ -112,9 +221,21 @@ defmodule Troupe.Gateway.Worktrees do
   `opts[:message]` is the commit message for work left uncommitted in the worktree;
   the default names the branch. Returns the branch, whether anything had to be
   committed first, and git's own account of the merge.
+
+  Once the merge has landed it is a merge, whatever follows: a tree git then cannot
+  remove is said beside it (`"removed" => false`, `"removal_error"`), with the tree and
+  its branch left, rather than answered as an error that reads as though nothing
+  happened. A merge git refuses to start because the checkout's own uncommitted changes
+  are in its way is `{:local_changes, output}`, not a conflict: nothing conflicted
+  (Decision 843).
   """
   @spec merge(Path.t(), Path.t(), keyword()) ::
-          {:ok, map()} | {:error, {:conflicts, String.t()} | {:busy, String.t()} | term()}
+          {:ok, map()}
+          | {:error,
+             {:conflicts, String.t()}
+             | {:local_changes, String.t()}
+             | {:busy, String.t()}
+             | term()}
   def merge(workspace, path, opts \\ []) do
     workspace = Path.expand(workspace)
     path = Path.expand(path)
@@ -123,12 +244,21 @@ defmodule Troupe.Gateway.Worktrees do
          :ok <- resting(path),
          {:ok, branch} <- branch_of(path),
          {:ok, committed?} <- commit_pending(path, Keyword.get(opts, :message) || "troupe: #{branch}"),
-         {:ok, output} <- merge_branch(workspace, branch),
-         :ok <- remove_tree(path),
-         :ok <- delete_branch(workspace, branch, "-d") do
-      {:ok, %{"branch" => branch, "committed" => committed?, "output" => output}}
+         {:ok, output} <- merge_branch(workspace, branch) do
+      merged = %{"branch" => branch, "committed" => committed?, "output" => output}
+
+      with :ok <- remove_tree(workspace, path),
+           :ok <- delete_branch(workspace, branch, "-d") do
+        {:ok, Map.put(merged, "removed", true)}
+      else
+        {:error, reason} ->
+          {:ok, Map.merge(merged, %{"removed" => false, "removal_error" => describe(reason)})}
+      end
     end
   end
+
+  defp describe({:git, output}), do: output
+  defp describe(reason), do: Git.explain(reason)
 
   @doc "Throw a worktree away: the tree, its branch, and any work not yet merged."
   @spec discard(Path.t(), Path.t()) :: {:ok, map()} | {:error, {:busy, String.t()} | term()}
@@ -139,7 +269,7 @@ defmodule Troupe.Gateway.Worktrees do
     with :ok <- worktree_at(path),
          :ok <- resting(path),
          {:ok, branch} <- branch_of(path),
-         :ok <- remove_tree(path),
+         :ok <- remove_tree(workspace, path),
          :ok <- delete_branch(workspace, branch, "-D") do
       {:ok, %{"branch" => branch}}
     end
@@ -157,9 +287,9 @@ defmodule Troupe.Gateway.Worktrees do
   # agent is not disturbed by the tree going away: its next turn, if any, fails loudly
   # rather than editing files nobody will look at.
   defp resting(path) do
-    %{}
-    |> Troupe.list_live_sessions()
-    |> Enum.filter(&(&1.workspace == path and &1.state == :active))
+    path
+    |> live_in()
+    |> Enum.filter(&(&1.state == :active))
     |> Enum.find(&working?(&1.id))
     |> case do
       nil -> :ok
@@ -212,17 +342,37 @@ defmodule Troupe.Gateway.Worktrees do
         {:ok, String.trim(output)}
 
       {:ok, output, _status} ->
-        # Leave the checkout as it was: a half-applied merge is worse than a refused one.
-        _ = git(workspace, ["merge", "--abort"])
-        {:error, {:conflicts, String.trim(output)}}
+        refused(workspace, String.trim(output))
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  defp remove_tree(path) do
-    case git(path, ["worktree", "remove", "--force", path]) do
+  # A merge git started and stopped has a MERGE_HEAD, and is aborted: the checkout is left
+  # as it was, since a half-applied merge is worse than a refused one. One git would not
+  # start has none and nothing to abort; in a checkout with uncommitted changes, they are
+  # what was in its way (git names the files), and the person keeps them.
+  defp refused(workspace, output) do
+    started? = match?({:ok, _, 0}, git(workspace, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]))
+
+    cond do
+      started? ->
+        _ = git(workspace, ["merge", "--abort"])
+        {:error, {:conflicts, output}}
+
+      dirty?(workspace) ->
+        {:error, {:local_changes, output}}
+
+      true ->
+        {:error, {:git, output}}
+    end
+  end
+
+  # Run from the checkout, not the tree: on Windows git cannot delete the directory it was
+  # started in, and the merge or discard stopped half done, the tree unregistered but left.
+  defp remove_tree(workspace, path) do
+    case git(workspace, ["worktree", "remove", "--force", path]) do
       {:ok, _, 0} -> :ok
       {:ok, output, _} -> {:error, {:git, String.trim(output)}}
       {:error, reason} -> {:error, reason}
@@ -246,18 +396,133 @@ defmodule Troupe.Gateway.Worktrees do
     end
   end
 
-  defp annotate(%{"worktree" => path} = entry) do
-    session =
-      %{}
-      |> Troupe.list_live_sessions()
-      |> Enum.find(&(&1.workspace == path))
+  defp annotate(%{"worktree" => path} = entry, main) do
+    session = path |> live_in() |> List.first()
+
+    status = status(path)
 
     %{
       "path" => path,
       "branch" => entry |> Map.get("branch", "") |> String.replace_prefix("refs/heads/", ""),
       "session_id" => session && session.id,
-      "dirty" => dirty?(path)
+      "dirty" => status != []
     }
+    |> Map.merge(standing(path, entry == main, main["branch"], status))
+  end
+
+  # `git status` a line a path, every untracked file named (not its directory), or `[]`
+  # where git could not say.
+  defp status(path) do
+    case git(path, ["status", "--porcelain", "--untracked-files=all"]) do
+      {:ok, output, 0} -> String.split(output, ~r/\r?\n/, trim: true)
+      _ -> []
+    end
+  end
+
+  # The checkout against its upstream, and what it has not committed.
+  defp standing(path, true, _base, status) do
+    {behind, ahead} = counts(path, "@{upstream}...HEAD")
+    {added, removed} = changed(path, "HEAD", status)
+    %{"ahead" => ahead, "behind" => behind, "added" => added, "removed" => removed}
+  end
+
+  # A linked worktree against the checkout's branch: what its branch has that that one has
+  # not and the other way round, and the lines since it left it.
+  defp standing(path, false, "refs/heads/" <> _ = base, status) do
+    {behind, ahead} = counts(path, base <> "...HEAD")
+
+    {added, removed} =
+      case git(path, ["merge-base", base, "HEAD"]) do
+        {:ok, sha, 0} -> changed(path, String.trim(sha), status)
+        _ -> {nil, nil}
+      end
+
+    %{"ahead" => ahead, "behind" => behind, "added" => added, "removed" => removed}
+  end
+
+  defp standing(_path, false, _base, _status),
+    do: %{"ahead" => nil, "behind" => nil, "added" => nil, "removed" => nil}
+
+  # `left...right` as `{only left, only right}`, or `{nil, nil}` where git cannot say.
+  defp counts(path, range) do
+    with {:ok, output, 0} <- git(path, ["rev-list", "--left-right", "--count", range]),
+         [left, right] <- String.split(output),
+         {left, ""} <- Integer.parse(left),
+         {right, ""} <- Integer.parse(right) do
+      {left, right}
+    else
+      _ -> {nil, nil}
+    end
+  end
+
+  # Lines added and removed since `from`, the working tree's included, and the lines of
+  # every untracked file, which a merge commits too (`git add -A`, `commit_pending/2`).
+  defp changed(path, from, status) do
+    case git(path, ["diff", "--numstat", from]) do
+      {:ok, output, 0} ->
+        {added, removed} =
+          output |> String.split(~r/\r?\n/, trim: true) |> Enum.reduce({0, 0}, &numstat/2)
+
+        {added + untracked_lines(path, status), removed}
+
+      _ ->
+        {nil, nil}
+    end
+  end
+
+  # One `--numstat` line, `added<TAB>removed<TAB>file`, added to the sums.
+  defp numstat(line, {added, removed}) do
+    case String.split(line, "\t", parts: 3) do
+      [plus, minus, _file] -> {added + number(plus), removed + number(minus)}
+      _ -> {added, removed}
+    end
+  end
+
+  # A binary file is `-` in `--numstat`, and counts for no lines.
+  defp number(text) do
+    case Integer.parse(text) do
+      {n, ""} -> n
+      _ -> 0
+    end
+  end
+
+  @untracked_files 200
+  @untracked_bytes 1_000_000
+
+  # The lines of the untracked files `git status` named, each read only while it is a
+  # small text file inside the tree: a count for a screen, not an inventory.
+  defp untracked_lines(path, status) do
+    root = Path.expand(path)
+
+    # git quotes a name with unusual characters in it; such a file is left out of the
+    # count rather than read by a name worked out here.
+    status
+    |> Enum.flat_map(fn
+      "?? \"" <> _quoted -> []
+      "?? " <> file -> [file]
+      _ -> []
+    end)
+    |> Enum.take(@untracked_files)
+    |> Enum.reduce(0, fn file, acc ->
+      full = Path.expand(file, root)
+
+      with true <- String.starts_with?(full, root <> "/"),
+           {:ok, %File.Stat{type: :regular, size: size}} when size <= @untracked_bytes <-
+             File.lstat(full),
+           {:ok, text} <- File.read(full),
+           true <- String.valid?(text) do
+        acc + lines_of(text)
+      else
+        _ -> acc
+      end
+    end)
+  end
+
+  defp lines_of(""), do: 0
+
+  defp lines_of(text) do
+    newlines = text |> :binary.matches("\n") |> length()
+    if String.ends_with?(text, "\n"), do: newlines, else: newlines + 1
   end
 
   defp parse_porcelain(output) do
@@ -283,10 +548,12 @@ defmodule Troupe.Gateway.Worktrees do
   end
 
   # Through reaper like every other OS process, so a hung git cannot outlive the
-  # command that started it.
+  # command that started it; and neutralised, so no hook, filter or merge driver the
+  # repository's own `.git` names runs, and confined to the checkout's own `.git`
+  # (Decision 833).
   defp git(cwd, args) do
     if File.dir?(cwd) do
-      Reaper.run(cwd, ["git" | args], timeout_ms: 30_000)
+      Git.run(cwd, args, timeout_ms: 30_000)
     else
       {:error, :not_found}
     end

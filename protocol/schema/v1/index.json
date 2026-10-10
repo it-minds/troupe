@@ -1,6 +1,11 @@
 {
   "documents": [
+    "commands/agents.changed.json",
+    "commands/agents.delete.json",
+    "commands/agents.get.json",
     "commands/agents.list.json",
+    "commands/agents.put.json",
+    "commands/agents.validate.json",
     "commands/approval.respond.json",
     "commands/blob.get.json",
     "commands/commands.list.json",
@@ -30,8 +35,12 @@
     "commands/mcp.sign_out.json",
     "commands/mcp.status.json",
     "commands/mcp.tools.json",
+    "commands/memory.decline.json",
     "commands/memory.forget.json",
     "commands/memory.get.json",
+    "commands/onboard.apply.json",
+    "commands/onboard.decline.json",
+    "commands/onboard.plan.json",
     "commands/presence.set.json",
     "commands/profile.switch.json",
     "commands/question.answer.json",
@@ -64,6 +73,7 @@
     "commands/tools.unregister.json",
     "commands/turn.cancel.json",
     "commands/unsubscribe.json",
+    "commands/watch.get.json",
     "commands/watch.set.json",
     "commands/workflows.list.json",
     "commands/workspace.recent.json",
@@ -90,6 +100,7 @@
     "events/compacted.json",
     "events/config_upgraded.json",
     "events/delegation_started.json",
+    "events/files_skipped.json",
     "events/fs_changed.json",
     "events/goal_cleared.json",
     "events/goal_set.json",
@@ -106,6 +117,8 @@
     "events/loop_started.json",
     "events/loop_stopped.json",
     "events/mounts_resolved.json",
+    "events/onboarded.json",
+    "events/onboarding_suggested.json",
     "events/presence.json",
     "events/profile_switched.json",
     "events/progress.json",
@@ -139,7 +152,9 @@
     "events/turn_ended.json",
     "events/user_input.json",
     "events/user_shell.json",
-    "events/watch_notice.json"
+    "events/watch_changed.json",
+    "events/watch_notice.json",
+    "events/watch_triggered.json"
   ],
   "version": "1"
 }

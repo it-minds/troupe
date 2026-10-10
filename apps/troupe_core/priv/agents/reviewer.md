@@ -12,6 +12,7 @@ tools:
   - shell
   - delegate
   - remember
+  - recall
   - finish
 permissions:
   write_file: deny

@@ -64,6 +64,24 @@ defmodule Troupe.WorkerCommandsTest do
     assert File.read!(Path.join(ws, "after.txt")) == "still connected"
   end
 
+  # D108: a file larger than the daemon's socket takes in one message went out whole, the
+  # daemon closed the connection at its frame ceiling, and the upload said "the daemon is
+  # not reachable". `initialize` says how large a message may be, and nothing larger is sent.
+  test "fs.upload refuses a file over the daemon's 16 MiB a message, and the connection stays up" do
+    {sid, _, ws} = start_session!(script: [])
+
+    big = String.duplicate("a", 17 * 1024 * 1024)
+    assert {:error, reason} = Client.fs_upload(sid, "session:/big.txt", big)
+    assert reason =~ "17.0 MiB"
+    assert reason =~ "the daemon takes at most 16.0 MiB in one message"
+    assert reason =~ "nothing was sent"
+    refute File.exists?(Path.join(ws, "big.txt"))
+
+    assert Client.capability(sid).up?
+    assert :ok = Client.fs_upload(sid, "session:/after.txt", "still connected")
+    assert File.read!(Path.join(ws, "after.txt")) == "still connected"
+  end
+
   test "fs.list says which entries are directories, the way the files panel needs" do
     ws = tmp_workspace(%{"lib/a.ex" => "defmodule A, do: nil\n", "README.md" => "# hi\n"})
     {sid, _, _} = start_session!(workspace: ws, script: [])
@@ -78,17 +96,18 @@ defmodule Troupe.WorkerCommandsTest do
     test "/todo add puts the item on the agent's task list" do
       {sid, _, _} = start_session!(script: [{:text, "noted"}])
       {pid, session} = start_tui(sid)
-      eventually(fn -> user_state(pid).model.windows["root"] != nil end)
+      {:ok, "build-1"} = Client.dispatch(sid, "build", "")
+      eventually(fn -> user_state(pid).model.windows["build-1"] != nil end)
       press(pid, "1")
 
       type(pid, "/todo add write the tests")
       press(pid, "enter")
 
-      added = await_event("root", :todo_updated)
+      added = await_event("build-1", :todo_updated)
       assert [%{text: "write the tests"}] = added.data.items
       # The side panel's line for it, not the transcript's note saying it was added.
       eventually(fn -> screen_text(pid, session) =~ "[ ] write the tests" end)
-      await_done()
+      await_state("build-1", :done, 10_000)
     end
 
     # An item's id is the model's, or a hash of its text, and is never on screen: the side
@@ -96,14 +115,15 @@ defmodule Troupe.WorkerCommandsTest do
     test "/todo cancel takes the number the side panel shows beside the task" do
       {sid, _, _} = start_session!(script: [{:text, "noted"}, {:text, "noted"}, {:text, "noted"}])
       {pid, session} = start_tui(sid)
-      eventually(fn -> user_state(pid).model.windows["root"] != nil end)
+      {:ok, "build-1"} = Client.dispatch(sid, "build", "")
+      eventually(fn -> user_state(pid).model.windows["build-1"] != nil end)
       press(pid, "1")
 
       for task <- ["write the tests", "ship it"] do
         type(pid, "/todo add " <> task)
         press(pid, "enter")
-        await_event("root", :todo_updated)
-        await_done()
+        await_event("build-1", :todo_updated)
+        await_state("build-1", :done, 10_000)
       end
 
       eventually(fn -> screen_text(pid, session) =~ "2. [ ] ship it" end)
@@ -111,28 +131,29 @@ defmodule Troupe.WorkerCommandsTest do
       type(pid, "/todo cancel 2")
       press(pid, "enter")
 
-      cancelled = await_event("root", :todo_updated)
+      cancelled = await_event("build-1", :todo_updated)
 
       assert [%{text: "write the tests", status: :pending}, %{text: "ship it", status: :cancelled}] =
                cancelled.data.items
 
       eventually(fn -> screen_text(pid, session) =~ "2. [-] ship it" end)
       assert screen_text(pid, session) =~ "1. [ ] write the tests"
-      await_done()
+      await_state("build-1", :done, 10_000)
     end
 
     # `todo.edit` has always taken `complete`; the window had no way to send it.
     test "/todo complete takes the number too, and ticks the task off" do
       {sid, _, _} = start_session!(script: [{:text, "noted"}, {:text, "noted"}, {:text, "noted"}])
       {pid, session} = start_tui(sid)
-      eventually(fn -> user_state(pid).model.windows["root"] != nil end)
+      {:ok, "build-1"} = Client.dispatch(sid, "build", "")
+      eventually(fn -> user_state(pid).model.windows["build-1"] != nil end)
       press(pid, "1")
 
       for task <- ["write the tests", "ship it"] do
         type(pid, "/todo add " <> task)
         press(pid, "enter")
-        await_event("root", :todo_updated)
-        await_done()
+        await_event("build-1", :todo_updated)
+        await_state("build-1", :done, 10_000)
       end
 
       eventually(fn -> screen_text(pid, session) =~ "1. [ ] write the tests" end)
@@ -140,13 +161,13 @@ defmodule Troupe.WorkerCommandsTest do
       type(pid, "/todo complete 1")
       press(pid, "enter")
 
-      completed = await_event("root", :todo_updated)
+      completed = await_event("build-1", :todo_updated)
 
       assert [%{text: "write the tests", status: :completed}, %{text: "ship it", status: :pending}] =
                completed.data.items
 
       eventually(fn -> screen_text(pid, session) =~ "1. [x] write the tests" end)
-      await_done()
+      await_state("build-1", :done, 10_000)
     end
 
     test "/upload puts a file from this machine into the session's workspace" do
@@ -162,6 +183,25 @@ defmodule Troupe.WorkerCommandsTest do
 
       eventually(fn -> screen_text(pid, session) =~ "uploaded" end)
       assert File.read!(Path.join(ws, "notes.md")) == "from this machine"
+    end
+
+    # D108, as the audit ran it: a 20 MB `/upload` said "the daemon is not reachable".
+    test "/upload of a file larger than the daemon takes says so, and the window stays connected" do
+      {sid, _, ws} = start_session!(script: [])
+      eventually(fn -> Client.capability(sid).up? end)
+
+      path = Path.join(tmp_workspace(), "big.txt")
+      File.write!(path, String.duplicate("a", 20 * 1024 * 1024))
+
+      {pid, session} = start_tui(sid)
+      type(pid, "/upload " <> path)
+      press(pid, "enter")
+
+      eventually(fn -> screen_text(pid, session) =~ "nothing was sent" end)
+      assert screen_text(pid, session) =~ "big.txt"
+      refute screen_text(pid, session) =~ "not reachable"
+      refute File.exists?(Path.join(ws, "big.txt"))
+      assert Client.capability(sid).up?
     end
   end
 

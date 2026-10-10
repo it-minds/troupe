@@ -5,10 +5,15 @@ defmodule Troupe.Bench.Scenarios do
   Each scenario is about the harness's shape, not about what a model says: how many calls
   a turn makes and what each one sends, what happens to a tool result too big to send,
   when compaction comes, what a cancel leaves behind, and whether the log is the session.
-  The numbers each is held to are in `priv/bench/budgets.json`.
+  Then one for each other tool whose files `troupe onboard` brings in, onboarded first,
+  whose task holds only when the instructions reached the prompt
+  (`Troupe.Bench.Onboarding`, Decision 834). Last, one whose memory holds a command whose
+  file changed, which the prompt has to mark and `recall` has to answer as maybe untrue
+  (`Troupe.Bench.Memory`, Decision 838). The numbers each is held to are in
+  `priv/bench/budgets.json`.
   """
 
-  alias Troupe.Bench.{Model, Runner, Scenario}
+  alias Troupe.Bench.{Memory, Model, Onboarding, Runner, Scenario}
   alias Troupe.LLM.Message
   alias Troupe.Log.Fold
   alias Troupe.Protocol.Event
@@ -16,7 +21,10 @@ defmodule Troupe.Bench.Scenarios do
 
   @doc "Every scenario, in report order."
   @spec all() :: [Scenario.t()]
-  def all, do: [tool_calls(), cut_output(), compaction(), cancel(), replay()]
+  def all,
+    do:
+      [tool_calls(), cut_output(), compaction(), cancel(), replay()] ++
+        Onboarding.all() ++ Memory.all()
 
   # -- a turn of thirty tool calls --------------------------------------------------
 

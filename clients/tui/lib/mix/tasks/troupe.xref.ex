@@ -33,10 +33,12 @@ defmodule Mix.Tasks.Troupe.Xref do
       Troupe.Commands                               the command table, which `troupe --help` prints
       Troupe.Paths                                  where state and config live
       Troupe.Reaper                                 the helper every OS process runs under
+      Troupe.Executable                             where a program is on the PATH, alone (Decision 846)
       Troupe.LLM.Catalog.Store                      the model catalog, refreshed when stale or asked
       Troupe.Doctor                                 the checks `troupe doctor` prints, read from the files
       Troupe.Instructions.Check                     what `troupe instructions check` finds in the instruction files
-      Troupe.Bench                                  the offline suite `troupe bench` runs on this binary's harness
+      Troupe.Onboard                                what `troupe onboard` proposes, and the one writer of it
+      Troupe.Bench                                 the offline suite `troupe bench` runs on this binary's harness
 
   A new call into, say, the agent tree or the session log fails here, and the way to add
   one is to put it in the protocol. What the import table cannot see is a module named as
@@ -72,9 +74,11 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Commands,
     Troupe.Paths,
     Troupe.Reaper,
+    Troupe.Executable,
     Troupe.LLM.Catalog.Store,
     Troupe.Doctor,
     Troupe.Instructions.Check,
+    Troupe.Onboard,
     Troupe.Bench
   ]
 

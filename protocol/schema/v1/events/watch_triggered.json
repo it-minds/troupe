@@ -1,0 +1,29 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/watch_triggered.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "agent": {
+      "type": "string"
+    },
+    "error": {
+      "type": "string"
+    },
+    "markers": {
+      "type": "array"
+    },
+    "mode": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "agent",
+    "markers",
+    "mode"
+  ],
+  "title": "watch_triggered",
+  "type": "object"
+}

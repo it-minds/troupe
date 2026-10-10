@@ -38,8 +38,9 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe models [--refresh]` | what each provider serves, its window and its price; asked again when stale, or now with --refresh |
 | `troupe models --json [--workspace DIR] [--refresh]` | the same as one JSON object for a program: models, roles, catalog, providers; never a key |
 | `troupe doctor [--json]` | check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure |
-| `troupe doctor --bench [--json]` | the same, then a turn of tool calls, a cut output, a compaction, a cancel and a replay against a scripted model: offline, in seconds |
-| `troupe instructions check [--workspace DIR] [--json]` | check the instruction files a session here reads: contradictions, missing paths and programs, repeats; exits 1 on one |
+| `troupe doctor --bench [--json]` | the same, then a turn of tool calls, a cut output, a compaction, a cancel, a replay, four onboarded repositories and a memory whose command's file changed against a scripted model: offline, in seconds |
+| `troupe instructions check [--workspace DIR] [--json]` | check the instruction files a session here reads: contradictions, missing paths and programs, repeats; and onboarded files whose source has changed, or a workspace onboarded under older rules; exits 1 on one |
+| `troupe onboard [--workspace DIR] [--yes] [--json] [--all]` | bring other tools' instruction files, rules, agents and commands into AGENTS.md, .troupe/ and your config, each shown as a diff and written only if you say yes; a new AGENTS.md is its own question, never answered by --yes; --all asks again about what you left out |
 | `troupe bench [--json [FILE]] [--md FILE]` | measure what a turn costs and does, offline, against the budgets CI holds; exits 1 past one |
 | `troupe bench --live [--suite smoke\|standard] [--scenario NAME,...] [--repeat N] [--model M] [--yes] [--keep DIR] [--json [FILE]] [--md FILE]` | tasks against your own provider, under a cap it prints and asks about first; scored, and kept in a history |
 | `troupe bench --compare [VERSION\|MODEL]` | the last live bench against the one before it, or against a version's or a model's |
@@ -75,7 +76,7 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 | --- | --- | --- |
 | `/new [--private \| --remote PROFILE \| --branch]` | Start a fresh session here, without leaving the client. Opens a new session in this workspace and takes the screen; the one you left keeps running, stays in /sessions, and /back returns to it. --private makes it a private session, --remote PROFILE starts it on that profile of the plane you are signed in to, and --branch forks the one on screen: a session of its own that starts from this conversation as it stands. Type its first line on the command line it opens with. For example `/new --branch`. |  |
 | `/cancel [window]` | Stop a branch mid-turn and remove its window. Stops the agent in the activated window, or in the one named by its tile number or path, and removes the window; a worktree Troupe made for it goes too. For example `/cancel 2`. | a window: the activated one, or one named |
-| `/dismiss [window]` | Let go of a window. Closes the activated window, or the one named. This session's own window lets go of the session; a branch's window closes for good and its session stays in the daemon, where /sessions still lists it. For example `/dismiss 3`. | a window: the activated one, or one named |
+| `/dismiss [window]` | Let go of a window. Closes the activated window, or the one named: a branch's window closes for good and its session stays in the daemon, where /sessions still lists it. This session's own window stays; /back, /sessions or /new leave the session. For example `/dismiss 3`. | a window: the activated one, or one named |
 | `/merge [window]` | Land a worktree branch on the checkout. Commits whatever the branch left uncommitted, merges its branch into the checkout with a merge commit, and removes the worktree and the window. A merge git cannot complete is left for you to resolve. Tab completes the branches that have finished. For example `/merge 2`. | a session on this machine |
 | `/discard [window]` | Throw a worktree branch away. Removes the branch's worktree and deletes its branch, uncommitted work included, and closes the window. For example `/discard 2`. | a session on this machine |
 | `/goal [text \| clear]` | Set, show or clear the session's goal. Every later turn works towards the goal and the status line shows it. /goal alone shows it, /goal clear clears it. For example `/goal make the suite green`. |  |
@@ -97,9 +98,9 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 | --- | --- | --- |
 | `/upload <path>` | Send a local file into the session's own mount. The file is read on this machine and written to session:/&lt;name&gt;; a worker never sees this machine's disk. For example `/upload notes.md`. |  |
 | `/copy [window]` | Copy a transcript to the clipboard. The activated window's transcript, or tile n's; a mouse selection in the pane copies on release. For example `/copy 2`. | a window: the activated one, or one named |
-| `/memory [refresh \| forget]` | The project brief: show, refresh or forget it. The brief in .troupe/memory.md is read into every agent's prompt. /memory says what it holds, /memory refresh asks the librarian to rewrite it, /memory forget deletes it. For example `/memory refresh`. | a session on this machine |
-| `/context` | Every instruction file and Cursor rule, why each is in or left out, and its share of the budget. The files the next turn's system prompt is read from: your own AGENTS.md, the repository's, one in each directory down to the workspace and to the files the conversation worked on, the files they import with @path, the repository's Cursor rules (always, or once a matching file is read or edited), and the project brief, each with its scope, size and share of the budget; and every file left out, with why: an alias (CLAUDE.md, GEMINI.md, copilot-instructions.md) another name hid, a Copilot file below the root, a file outside the repository, an import not followed, a rule whose files haven't been touched or that only describes itself. |  |
-| `/watch` | Toggle watch mode: act on AI! and AI? comments. A comment ending in AI! starts a change and AI? starts an answer. One session per workspace watches at a time. | a session on this machine |
+| `/memory [refresh \| forget]` | The project brief: show, refresh or forget it. The brief is made of facts, each anchored on the files it was read from; its commands and conventions are read into every agent's prompt. /memory lists the facts by kind, says which may no longer be true and where each came from, and forgets one; /memory refresh asks the librarian to re-verify and rewrite them, /memory forget deletes the whole brief. For example `/memory refresh`. | a session on this machine |
+| `/context` | Every instruction file and rule, why each is in or left out, and its share of the budget. The files the next turn's system prompt is read from: your own AGENTS.md, the repository's, one in each directory down to the workspace and to the files the conversation worked on, the files they import with @path, the repository's rules in .troupe/rules (always, or once a matching file is read or edited), and the project brief, each with its scope, size and share of the budget; and every file left out, with why: another tool's file (CLAUDE.md, GEMINI.md, copilot-instructions.md, Cursor's rules), which troupe onboard brings in, a Copilot file below the root, a file outside the repository or one that can't be read, an import not followed, a rule whose files haven't been touched or that only describes itself. |  |
+| `/watch` | Toggle watch mode: act on AI! and AI? comments. A comment ending in AI! starts a quick branch in this checkout and AI? an answer one; their writes ask first. One session per workspace watches at a time. | a session on this machine |
 
 ### Setup
 
@@ -115,7 +116,7 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 
 | command | what it does | needs |
 | --- | --- | --- |
-| `/agents` | List the agents this session can start a branch on. The primary agents: the built-ins, this machine's agents/ and the project's .troupe/agents/. Each is a command of its own, below. |  |
+| `/agents` | Read, copy, create, edit and delete the agents. The primary agents, each with where it comes from (built in, a bundle, yours or the repository's), its model, its tools, whether it is read-only and which windows run it; Enter reads its whole instruction. An edit opens your editor and is checked and saved by the daemon into your agents/ or the repository's .troupe/agents/; c copies one into the repository, n starts a new one, x deletes a copy. Each is a command of its own, below, and Tab in a window switches the agent it runs. |  |
 | `/worktree [name:] <prompt>` | Run the default agent on a branch in a worktree of its own. /worktree &lt;prompt&gt; works in a fresh worktree, to /merge or /discard later; /worktree &lt;name&gt;: &lt;prompt&gt; in a Troupe worktree of that name, created the first time and reused after; /worktree &lt;existing&gt; &lt;prompt&gt; in one you checked out (Tab completes them). For example `/worktree fix the flaky test`. | a session on this machine |
 
 ### Quit
@@ -127,6 +128,6 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 
 Besides these, each agent is a command that starts a branch on it: `/build <prompt>`,
 `/plan <prompt>`, and whichever agents your config, your team's bundle or the
-repository's `.troupe/agents/` add (`/agents` lists them). So is each command you or the
+repository's `.troupe/agents/` add (`/agents` manages them). So is each command you or the
 repository write as a markdown file, `/<name> [arguments]`, under `Custom` in the palette
 ([your own commands](configuration.md#your-own-commands)).

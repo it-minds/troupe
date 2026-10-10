@@ -20,7 +20,7 @@ defmodule Troupe.Tools.Shell do
 
   @behaviour Troupe.Tool
 
-  alias Troupe.{Config, Reaper, Sandbox, Tool}
+  alias Troupe.{Config, Executable, Mounts, Reaper, Tool}
   alias Troupe.Tools.Output
 
   @impl Troupe.Tool
@@ -73,11 +73,19 @@ defmodule Troupe.Tools.Shell do
       timeout = Tool.fetch_int(args, "timeout_ms", ctx.timeout_ms) || 120_000
 
       case execute(command, ctx.workspace, timeout_ms: timeout) do
-        {:ok, output, status} -> {:ok, render(output, status, ctx)}
+        {:ok, output, status} -> {:ok, render(output, status, ctx), %{fields: outcome(status)}}
         {:error, reason} -> {:error, reason}
       end
     end
   end
+
+  # How the command ended, as fields of the call's `tool_call_completed` beside `ok`, which
+  # stays true for a command that ran, whatever it exited with: a fold tells a failing
+  # command from a passing one without reading `content`, and the model reads the text it
+  # always did (#248, Decision 837).
+  defp outcome(:timeout), do: %{"timed_out" => true}
+  defp outcome(:killed), do: %{}
+  defp outcome(status), do: %{"exit_status" => status}
 
   @typedoc "How a command ended: its exit status, the timeout, or `kill/1`."
   @type ending :: non_neg_integer() | :timeout | :killed
@@ -96,19 +104,18 @@ defmodule Troupe.Tools.Shell do
   @spec execute(String.t(), Troupe.Workspace.t(), keyword()) ::
           {:ok, binary(), ending()} | {:error, String.t()}
   def execute(command, workspace, opts) do
-    with :ok <- Sandbox.check() do
-      {shell, flag} = shell()
+    {shell, flag} = shell()
 
-      # Path checks are not the enforcement here and cannot be: a shell command can do
-      # anything a process can. The mount table the file tools resolve against is also
-      # the bind list for the sandbox, so a read-only team volume is read-only to the
-      # kernel and another team's volume is absent from the namespace entirely.
-      argv = Sandbox.wrap([shell, flag, command], workspace.mounts, cwd: workspace.root_real)
+    # Path checks are not the enforcement here and cannot be: a shell command can do
+    # anything a process can. The mount table the file tools resolve against is also
+    # the bind list for the sandbox, so a read-only team volume is read-only to the
+    # kernel and another team's volume is absent from the namespace entirely. The reaper
+    # asks the sandbox about it, and on a worker always builds one (Decision 832).
+    mounts = workspace.mounts || Mounts.local(workspace.root_real)
 
-      case Reaper.open(workspace.root_real, argv) do
-        {:ok, port} -> collect(port, opts)
-        {:error, reason} -> {:error, unavailable(reason)}
-      end
+    case Reaper.open(workspace.root_real, [shell, flag, command], mounts: mounts) do
+      {:ok, port} -> collect(port, opts)
+      {:error, reason} -> {:error, unavailable(reason)}
     end
   end
 
@@ -154,8 +161,10 @@ defmodule Troupe.Tools.Shell do
           more(port, deadline, acc, stream, data)
 
         {^port, {:exit_status, status}} ->
-          flush(stream)
-          {:ok, output(acc), status}
+          # A last line without a newline comes after the exit status (#536).
+          rest = Reaper.rest(port)
+          flush(pend(stream, rest))
+          {:ok, output([rest | acc]), status}
 
         @kill ->
           ended(port, acc, stream, :killed)
@@ -173,6 +182,10 @@ defmodule Troupe.Tools.Shell do
     due? = System.monotonic_time(:millisecond) - stream.at >= stream.every
     do_collect(port, deadline, [data | acc], if(due?, do: flush(stream), else: stream))
   end
+
+  defp pend(%{fun: nil} = stream, _data), do: stream
+  defp pend(stream, ""), do: stream
+  defp pend(stream, data), do: %{stream | pending: [data | stream.pending]}
 
   # Output waiting to be streamed is sent when its interval is up even if nothing more
   # comes, so a command that prints and then sleeps is seen to have printed.
@@ -215,20 +228,24 @@ defmodule Troupe.Tools.Shell do
     end
   end
 
-  @doc "The shell and its command flag for this host."
+  @doc """
+  The shell and its command flag for this host, each program found on the `PATH` alone,
+  never in the current directory (`Troupe.Executable`, Decision 846).
+  """
   @spec shell() :: {String.t(), String.t()}
   def shell do
     case :os.type() do
       {:win32, _} -> windows_shell()
-      _ -> {System.find_executable("bash") || "/bin/sh", "-c"}
+      _ -> {Executable.find("bash") || "/bin/sh", "-c"}
     end
   end
 
+  # `cmd.exe` by name: the reaper looks it up as it looks up every name.
   defp windows_shell do
     cond do
       bash = windows_bash(System.get_env()) -> {bash, "-c"}
-      pwsh = System.find_executable("pwsh") -> {pwsh, "-Command"}
-      ps = System.find_executable("powershell.exe") -> {ps, "-Command"}
+      pwsh = Executable.find("pwsh") -> {pwsh, "-Command"}
+      ps = Executable.find("powershell.exe") -> {ps, "-Command"}
       true -> {"cmd.exe", "/c"}
     end
   end
@@ -243,6 +260,10 @@ defmodule Troupe.Tools.Shell do
   operating system, with that system's programs, where the Windows `elixir` finds no
   `erl`, while the tool's description tells the model it is on Windows. `env` is the
   environment, its names in any case, and `exists?` says whether a file is there.
+
+  Only the `PATH`'s absolute entries are looked in (Decision 846): a relative one is the
+  current directory, where a repository's `git.exe` would have made its `bin/bash.exe`
+  the shell.
   """
   @spec windows_bash(%{String.t() => String.t()}, (Path.t() -> boolean())) :: Path.t() | nil
   def windows_bash(env, exists? \\ &File.regular?/1) do
@@ -250,7 +271,7 @@ defmodule Troupe.Tools.Shell do
       env
       |> env_var("PATH")
       |> Kernel.||("")
-      |> String.split(";", trim: true)
+      |> Executable.dirs({:win32, :nt})
       |> Enum.map(&slashes/1)
 
     beside_git =
@@ -323,6 +344,9 @@ defmodule Troupe.Tools.Shell do
     "The shell tool is unavailable: #{Reaper.explain(reason)}, so no command can run on " <>
       "this machine until it does. `troupe doctor` shows the same to the person."
   end
+
+  # A worker that cannot start the sandbox runs nothing outside it (Decision 832).
+  defp unavailable({:sandbox, why}), do: "The shell tool did not run the command: #{why}."
 
   defp unavailable(reason),
     do: "The shell tool could not run the command: #{Reaper.explain(reason)}."

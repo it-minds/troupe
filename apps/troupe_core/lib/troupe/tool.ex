@@ -102,6 +102,12 @@ defmodule Troupe.Tool.Result do
       "#{name} is mounted read-only for this session and cannot be written to. " <>
         "Write to session:/ instead, and use `publish` if it needs to go to #{name}."
 
+  def describe({:git_dir, path}),
+    do:
+      "#{path} is inside a .git directory (or is a .git file), which holds the repository's " <>
+        "own settings and history, and the file tools do not write there. Change the " <>
+        "repository with git commands instead."
+
   def describe({:not_allowed, tool}),
     do: "The tool #{tool} is not available in the current profile."
 
@@ -165,15 +171,24 @@ defmodule Troupe.Tool do
       constants: `delegate` lists the subagents actually loaded, `shell` names the
       host OS and shell.
 
+    * `must_ask?/1` — a call a person must answer whatever the profile's permission or
+      the session's `auto_approve` says (a profile's `deny` still denies):
+      `onboard_write` into the config directory (Decision 823).
+
   `run/2` returns `{:ok, content}` or `{:error, reason}`; inline tools may also return
   `{:ok, content, updates}` to change agent state, or `{:defer, instruction}` to hand
-  an effect to the agent and have the call completed later.
+  an effect to the agent and have the call completed later. Any tool may return
+  `{:ok, content, %{fields: fields}}`: the call's `tool_call_completed` carries `fields`
+  beside `ok`, and the model never sees them (`shell`'s `exit_status` or `timed_out`,
+  Decision 837).
   """
 
   alias Troupe.Tool.Ctx
 
   @type content :: String.t()
-  @type updates :: %{optional(:todos) => [Troupe.Todo.t()]}
+  @typedoc "What a call's `tool_call_completed` carries beside `ok`; never the model's."
+  @type fields :: %{String.t() => String.t() | integer() | boolean()}
+  @type updates :: %{optional(:todos) => [Troupe.Todo.t()], optional(:fields) => fields()}
   @type instruction ::
           {:delegate, agent :: String.t(), task :: String.t()}
           | {:finish, summary :: String.t()}
@@ -191,8 +206,9 @@ defmodule Troupe.Tool do
 
   @callback mode() :: :task | :inline
   @callback describe(Ctx.t()) :: String.t()
+  @callback must_ask?(args :: map()) :: boolean()
 
-  @optional_callbacks mode: 0, describe: 1
+  @optional_callbacks mode: 0, describe: 1, must_ask?: 1
 
   @typedoc """
   A tool, as the harness holds one.
@@ -227,6 +243,14 @@ defmodule Troupe.Tool do
   end
 
   def mode(%{}), do: :task
+
+  @doc "Whether this call must be asked about whatever the profile and the session say."
+  @spec must_ask?(handle(), map()) :: boolean()
+  def must_ask?(module, args) when is_atom(module) do
+    function_exported?(module, :must_ask?, 1) and module.must_ask?(args) == true
+  end
+
+  def must_ask?(%{}, _args), do: false
 
   @doc "A tool's description for this session, context-sensitive when the tool asks."
   @spec describe(handle(), Ctx.t()) :: String.t()

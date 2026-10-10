@@ -774,12 +774,58 @@ defmodule Troupe.FakeRemote do
       }}, state}
   end
 
+  # A pod's harness lists the command table a daemon does (the worker's
+  # `harness_auth_test`), with the bundle's agents beside the built-ins; the palette greys
+  # the rows only a session on this machine can run.
+  defp dispatch(state, :worker, "commands.list", _params, _pid),
+    do: {{:ok, %{"commands" => Troupe.Commands.list([])}}, state}
+
+  # A pod's agents are its bundle's (root Decision 841): listed and read whole as a
+  # worker's harness answers them, and never written there.
+  defp dispatch(state, :worker, "agents.list", _params, _pid),
+    do: {{:ok, %{"agents" => [pod_agent()], "skipped" => []}}, state}
+
+  defp dispatch(state, :worker, "agents.get", %{"name" => "build"}, _pid) do
+    {{:ok,
+      Map.merge(pod_agent(), %{
+        "mode" => "primary",
+        "tools" => "all",
+        "permissions" => %{},
+        "prompt" => "You build what the team asks for.",
+        "path" => "/bundle/agents/build.md",
+        "text" => "---\nmode: primary\n---\nYou build what the team asks for.\n",
+        "editable" => false,
+        "editable_reason" =>
+          "On a pod the agents come from the profile's bundle and are read-only here: " <>
+            "change them in the console",
+        "also" => [],
+        "running" => []
+      })}, state}
+  end
+
   defp dispatch(state, _kind, method, _params, _pid)
        when method in ["turn.cancel", "approval.respond", "todo.edit", "profile.switch"],
        do: {{:ok, %{"accepted" => true}}, state}
 
   defp dispatch(state, _kind, _method, _params, _pid),
     do: {{:error, -32_601, "method not found"}, state}
+
+  defp pod_agent do
+    %{
+      "name" => "build",
+      "description" => "The team's build agent.",
+      "source" => "bundle",
+      "layer" => "bundle",
+      "model" => nil,
+      "tool_count" => 19,
+      "read_only" => false,
+      "max_turns" => nil,
+      "worktree" => false,
+      "available" => true,
+      "reason" => nil,
+      "notes" => []
+    }
+  end
 
   # A pod answers `not_found` for a session it does not hold, before it runs anything:
   # one that went dormant there, or that the plane placed on another pod.

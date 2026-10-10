@@ -430,6 +430,33 @@ defmodule Troupe.Daemon.CLITest do
 
       assert CLI.browse_line("u", {:win32, :nt}, ~S"C:\b\rec.cmd") == {:shell, ~S(""C:\b\rec.cmd" "u"")}
     end
+
+    # cmd.exe looks for a name in the current directory first, and `open` runs wherever the
+    # person is: a BROWSER given by name is found on the PATH alone (#555, Decision 846).
+    @tag :tmp_dir
+    test "on Windows a BROWSER given by name is its path on the PATH, never the current directory's",
+         %{tmp_dir: dir} do
+      bin = Path.join(dir, "bin")
+      here = Path.join(dir, "here")
+      File.mkdir_p!(bin)
+      File.mkdir_p!(here)
+      File.write!(Path.join(here, "rec.cmd"), "")
+      windows = {:win32, :nt}
+
+      File.cd!(here, fn ->
+        assert {:error, message} = CLI.browser("rec", windows, path: Enum.join([".", bin], ";"))
+        assert message =~ "BROWSER names rec, which is not a program on the PATH"
+
+        File.write!(Path.join(bin, "rec.cmd"), "")
+
+        assert CLI.browser("rec", windows, path: Enum.join([".", bin], ";"), pathext: ".CMD") ==
+                 {:ok, String.replace(Path.join(bin, "rec.cmd"), "/", "\\")}
+      end)
+
+      assert CLI.browser(~S"C:\b\rec.cmd", windows) == {:ok, ~S"C:\b\rec.cmd"}
+      assert CLI.browser(nil, windows) == {:ok, nil}
+      assert CLI.browser("firefox --new-tab", {:unix, :linux}) == {:ok, "firefox --new-tab"}
+    end
   end
 
   defp start_daemon do

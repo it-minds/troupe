@@ -228,6 +228,130 @@ defmodule Troupe.MCP.ImportTest do
     end
   end
 
+  describe "env (Decision 825)" do
+    test "a copy writes a variable written out as the {env:VAR} that reads it, and says which to set" do
+      text = """
+      {"mcpServers": {
+        "Git Hub": {"command": "npx", "args": ["-y", "github-mcp"],
+                    "env": {"GITHUB_TOKEN": "not-a-real-token", "PORT": 8080, "DEBUG": true,
+                            "HOME_DIR": "${HOME}", "AUTH": "Bearer also-not-real", "EMPTY": ""}}
+      }}
+      """
+
+      # Read where it is, the values are as written.
+      assert {:ok, read} = Import.parse(text)
+      assert read.servers["git-hub"]["env"]["GITHUB_TOKEN"] == "not-a-real-token"
+      assert read.warnings == ["Git Hub is imported as git-hub"]
+
+      assert {:ok, copied} = Import.parse(text, copy: true)
+
+      assert copied.servers["git-hub"]["env"] == %{
+               "GITHUB_TOKEN" => "{env:GIT_HUB_GITHUB_TOKEN}",
+               "PORT" => "{env:GIT_HUB_PORT}",
+               "DEBUG" => "{env:GIT_HUB_DEBUG}",
+               "HOME_DIR" => "{env:HOME}",
+               "AUTH" => "Bearer {env:GIT_HUB_AUTH}",
+               "EMPTY" => ""
+             }
+
+      refute inspect(copied) =~ "not-a-real-token"
+      refute inspect(copied) =~ "also-not-real"
+
+      assert ("git-hub: the variable GITHUB_TOKEN is copied as {env:GIT_HUB_GITHUB_TOKEN}, " <>
+                "not as its value; set GIT_HUB_GITHUB_TOKEN to the value in the file it came from") in copied.warnings
+
+      assert Enum.any?(
+               copied.warnings,
+               &(&1 =~ "set GIT_HUB_AUTH to the credential after Bearer")
+             )
+    end
+  end
+
+  describe "Codex's config.toml (Decision 825)" do
+    @codex """
+    model = "a-model"
+
+    [mcp_servers.docs]
+    command = "docs-server"
+    args = ["--port", "4000"]
+    cwd = "tools"
+    env_vars = ["PATH_EXTRA"]
+    startup_timeout_sec = 20
+    tool_timeout_sec = 90
+    enabled_tools = ["search"]
+
+    [mcp_servers.docs.env]
+    LOG_LEVEL = "${LEVEL}"
+
+    [mcp_servers.Figma]
+    url = "https://mcp.example.com/mcp"
+    bearer_token_env_var = "FIGMA_TOKEN"
+    http_headers = { "X-Region" = "us" }
+    env_http_headers = { "X-Org" = "FIGMA_ORG" }
+    http_headers_helper = "print-headers"
+    enabled = false
+
+    [mcp_servers.broken]
+    url = "https://broken.example.com/mcp"
+    env_http_headers = { "X-Org" = "not a name" }
+    """
+
+    test "its [mcp_servers] tables import as the others' entries, and what is not carried is said" do
+      assert {:ok, parsed} = Import.parse(@codex, format: :toml)
+
+      assert parsed.servers["docs"] == %{
+               "command" => "docs-server",
+               "args" => ["--port", "4000"],
+               "cd" => "tools",
+               "env" => %{"LOG_LEVEL" => "{env:LEVEL}"},
+               "timeout_ms" => 90_000
+             }
+
+      assert parsed.servers["figma"] == %{
+               "url" => "https://mcp.example.com/mcp",
+               "headers" => %{
+                 "Authorization" => "Bearer {env:FIGMA_TOKEN}",
+                 "X-Region" => "us",
+                 "X-Org" => "{env:FIGMA_ORG}"
+               },
+               "disabled" => true
+             }
+
+      assert [%{name: "broken", reason: reason}] = parsed.skipped
+      assert reason == "env_http_headers is not a map of header to variable name"
+
+      assert "docs: enabled_tools is not carried: every tool the server lists is offered, and each asks before it runs" in parsed.warnings
+
+      assert Enum.any?(
+               parsed.warnings,
+               &(&1 =~ "figma: http_headers_helper is a command Troupe does not run")
+             )
+
+      assert "Figma is imported as figma" in parsed.warnings
+    end
+
+    test "a copy writes a header written out as the {env:VAR} that reads it" do
+      assert {:ok, copied} = Import.parse(@codex, format: :toml, copy: true)
+
+      assert copied.servers["figma"]["headers"] == %{
+               "Authorization" => "Bearer {env:FIGMA_TOKEN}",
+               "X-Region" => "{env:FIGMA_X_REGION}",
+               "X-Org" => "{env:FIGMA_ORG}"
+             }
+    end
+
+    test "a file with no [mcp_servers], or one that is not TOML, says so" do
+      assert {:error, "not a config.toml with [mcp_servers] tables"} =
+               Import.parse("model = \"x\"\n", format: :toml)
+
+      assert {:error, "not TOML: line 1: expected a key"} =
+               Import.parse("{\"mcpServers\": {}}", format: :toml)
+
+      assert Import.format("/home/me/.codex/config.toml") == :toml
+      assert Import.format("/home/me/.mcp.json") == :json
+    end
+  end
+
   test "Troupe's own permission and timeout are kept; a bad permission is the default" do
     assert {:ok, %{servers: %{"a" => a, "b" => b}}} =
              Import.parse(

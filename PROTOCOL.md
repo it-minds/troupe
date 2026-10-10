@@ -77,6 +77,12 @@ framing, no batching. Binary frames are not used. The token goes in the
 `Authorization: Bearer` header, or in `auth.token` on `initialize` where headers are
 unavailable.
 
+A frame is one message whatever whitespace it holds, newlines between its tokens
+included. A frame larger than the socket's ceiling, 16 MiB unless the server is
+configured otherwise, closes the connection before it is read; `initialize` says what the
+ceiling is (`limits.max_message_bytes`), and a client does not send a message larger
+than that (Decision 845).
+
 ---
 
 ## 2. Framing: JSON-RPC 2.0
@@ -153,13 +159,18 @@ The response:
 }}
 ```
 
+`limits.max_message_bytes` is the largest message this connection reads: 64 MiB on the
+socket and TCP transports, the socket's ceiling over a WebSocket (16 MiB by default). A
+larger one ends the connection, with `payload_too_large` on a socket and without a word
+on a WebSocket, so a client checks a message against it before sending one.
+
 The server's `capabilities`:
 
 | key | meaning |
 | --- | --- |
 | `worktrees` | this server can make a git worktree for a session |
 | `branches` | `session.create` takes `parent`, `session.list` filters on it, `worktree.merge` / `worktree.discard` end a branch's worktree, and an agent has `read_branch` |
-| `watch` | `watch.set` is served, and `fs_changed` events arrive |
+| `watch` | `watch.set` and `watch.get` are served, a saved `AI!` or `AI?` comment starts a branch (`watch_triggered`), and `fs_changed` events arrive |
 | `remote` | this is a worker pod rather than a local daemon |
 | `private_sessions` | this server can seal a session under the caller's own key, so a client may offer to make one |
 
@@ -266,11 +277,11 @@ Durable:
 | `llm_error` | `reason` — a sentence a person can act on: a blown context window, rejected credentials, an unknown model, a rate limit the backoff outlasted, with the provider's words in brackets; `note` — a root's, the words its conversation was given about the failure, which a replay puts back; `stopped` — the call the agent gave up on when it did not answer within `llm_timeout_ms`, and stopped (see below) |
 | `truncated` | `reason` (`max_tokens`: the output cap cut the reply; `empty`: it had neither text nor a tool call), then one of `note` (the model was asked again), `calls` (tool calls cut mid-argument, answered with an error and not run) or `final: true` (asked once already; the agent ends `output_truncated` or `empty_reply`) |
 | `tool_call_started` | `call_id`, `name`, `args`, `identity`, `principal` |
-| `tool_call_completed` | `call_id`, `name`, `ok`, `content` |
+| `tool_call_completed` | `call_id`, `name`, `ok`, `content`; `exit_status` or `timed_out` — how a `shell` call's command ended: `exit_status` when it exited, `timed_out: true` when its timeout killed it. Absent on every other tool and on a `shell` call that ran no command. `ok` is true for a command that ran, whatever its status, and the model reads `content` alone, which still ends in `[exit status N]` for a non-zero exit, so a reader that tells a failing command from a passing one reads `exit_status` rather than the text |
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
-| `profile_switched` | `from`, `to` |
-| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases, and Cursor's rules) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `reason`, `trimmed`, `skipped`, `imported_by`, `unfollowed`, `rule`, `applies` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
+| `profile_switched` | `from`, `to`; and `layer` (`builtin`, `bundle`, `user` or `project`, where the new agent was read from), `tools_added` and `tools_removed` (the tool names the new agent holds that the old did not, and the other way round) and the switch's `command_id`, under the actor who switched it (Decision 841) |
+| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md`, `.agents/AGENTS.md` and `.troupe/rules`, and the other tools' files listed as not read) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `reason`, `trimmed`, `skipped`, `imported_by`, `unfollowed`, `rule`, `applies` and `hash`. Read as the turn began and held for the rest of it. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
 | `goal_set` | `text`, `command_id` — the session's goal, written by the root agent under the actor who set it (`session.goal.set`) |
 | `goal_cleared` | `command_id` |
 | `loop_started` | `loop_id` (`loop-<n>`), `max_iterations`, `max_failures`, `goal`, `command_id` — a loop towards the goal, written by the session under the actor who started it (`session.loop.start`) |
@@ -317,15 +328,22 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple`, `preview` — the agent's `ask_user`; answered with `question.answer`. `preview`, where there is one, is text the question is about, for a client to show as it is beneath it: the prompt a workspace's command would send, when it asks before it is first sent (`commands.run`). Open until its `question_answered`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no answer), or a `cancelled` on the agent that asked or on one above it. The budget's and the failure guard's question have no call; each also ends with its `budget_ask_answered` or `tool_failures_ask_answered`, the only word there is when nobody is there to ask, and one a cancel ended is asked again at the next turn with another `question_asked` under the same `call_id` |
 | `question_answered` | `call_id`, `text`, `actor` |
 | `command_declined` | `name`, `reason`, `command_id` — a workspace's command that asked before it was first sent (see `commands.run`) and was not: `reason` says why and how to run it later, and `command_id` is the `commands.run` that asked |
+| `onboarded` | `target` (`repo`: the workspace's `.troupe/`; `workspace`: an `AGENTS.md` of the workspace's, Decision 827; `user`: the person's config directory), `path` (from that root), `file` (as a person reads it), `source` (the other tool's file it was made from: relative to the workspace, or `~/`), `source_hash` (the sha256 of that file, lowercase hex), `action` (`created` or `replaced`) — a file the `onboard_write` tool wrote, which asks first (Decision 823); the file records the same provenance itself, or `.troupe/onboarded.json` does for it |
+| `onboarding_suggested` | `reasons`, `message`, `workspace`, `command`, `proposals`, `onboarding_version`, `onboarded_version`, `survey_version`, `brief_version`, `due`, `brief_due`, `counts` — what onboarding would do in the session's workspace, said at every start while onboarding is due or the brief is outdated and the person has not said no for that version (Decisions 827 and 835); nothing was written. `due` is onboarding's (`first`, `outdated` or `none`) and `brief_due` the brief's (`first`, `stale`, `outdated` or `none`), as `onboard.plan` has them; `counts` is the workspace's files a client would ask about (`files`, `write`, `create_agents_md`), and `onboard.plan` lists them. `reasons` holds `first` (other tools' files are there and nothing is onboarded: `proposals` counts what `troupe onboard` would propose by kind, `instructions`, `rules`, `agents`, `commands`, `skills`, `workflows`, `mcp`), `outdated` (the workspace was onboarded under `onboarded_version` of the onboarding rules, older than this build's `onboarding_version`) and `brief` (the brief was written by `brief_version` of the librarian's survey, older than `survey_version`). `message` says all of it in one line for a client to show as it is; `command` is what to run. Not on a pod |
+| `watch_triggered` | `agent`, `mode`, `markers`, `session_id`, `error` — a saved `AI!` or `AI?` comment started a branch of this session (Decision 844): `agent` (`quick` for a change, `answer` when every comment was a question; `mode` is `change` or `question`) as the session `session_id`, whose `parent` is this one, in this session's checkout, for the comments in `markers`, each `{file, line, comment}`. The session's own agent is told nothing. `error` in place of `session_id` says why no branch started. A client opens the branch as it opens one it started, and says which file and comment started it. The branch asks before every write, edit and shell command unless `watch_auto_approve` is on, and does not watch |
 | `session_dormant` | `last_seq` |
 | `session_activated` | `epoch`, `pod` |
 | `session_resumed` | `dormant_ms`, `moved` |
 | `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
+| `files_skipped` | `files` — the agent, skill, command and workflow files a session found at a start and did not read, each `{kind, name, path, reason}`: on a pod, a working copy's file of a name its bundle has or a built-in agent's, which those beat unless the profile sets `repositoryOverridesBundle`; in a git worktree, one the main checkout has not committed (Decision 826); a workspace's `.troupe/` file, or directory, that is a link out of it, a skill whose `SKILL.md` can't be read, and what a workspace's `skills.json` links from outside the repository while the workspace is not trusted (Decision 829). A directory not looked into has a null `name`. Written when the list differs from the one the log last recorded, so an empty list says the files went away |
 | `fs_changed` | `path`, `hash`, `size` |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
 Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`, and `shell_started` and
-`shell_output` while a person's command runs (`shell.run`).
+`shell_output` while a person's command runs (`shell.run`); `watch_notice` (`message`)
+when watch mode falls back to polling or cannot start, and `watch_changed` (`enabled`,
+`backend`: `native`, `poll` or `off`) on the session whose watch went on or off or
+changed backend, which `watch.get` answers at any time.
 
 `budget_warning` — `dimension` (`turns`, `input`, `output`, `wall`, `context`), `used`,
 `limit`, `fraction`, `detail` (`input tokens 4.9M/6.0M (82%)`) — is written once per
@@ -587,6 +605,13 @@ brings to the same shape, in `session.create` and in a first `session.register`.
 workspace already has a live session; `"never"` reuses the directory; `"always"`
 always branches.
 
+`worktree_name`: work in the worktree of that name, whatever `worktree` says:
+`<workspace>-<name>` on `troupe/<name>`, made the first time, the same tree after, and
+made again from its branch when only the directory has gone. A name is one path segment
+of letters, digits, `.`, `_` and `-`, not starting with `.` or `-` (`invalid_params`,
+field `worktree_name`, otherwise); refused with `conflict` while a session is working
+in that tree.
+
 `workflow`: run the prompt as a named **workflow**: the step list at
 `<workspace>/.troupe/workflows/<name>.json` (or the built-in `default` pipeline) is
 rendered around the prompt as the plan the `workflow` agent starts from, and `profile`
@@ -833,6 +858,22 @@ run that has ended, or was never this session's, is `not_found` with `kind: "run
 #### `profile.switch` → `{"command_id", "session_id", "profile": "plan"}`. Applied at
 the next turn boundary.
 
+→ `{"accepted": true, "profile": "plan", "layer": "builtin"}`. It changes the agent a
+session runs, its root's, and so a branch's (a branch is a session, Decision 646): the
+conversation stays, and from the next model call the tools, permissions, prompt, model and
+`max_turns` are the new definition's; a tool it no longer holds is not offered and a call
+to one is refused (Decision 841). The definition is read from its file when the switch is
+asked, so an agent saved with `agents.put` a moment ago, or edited since the session
+started, is the one switched to, and a restarted agent comes back on it. A workspace's
+agent's `auto` still waits for the workspace to be trusted (Decision 825). An agent that
+has finished (`agent_done`) takes the switch at once, and its next input runs on the new
+agent; otherwise it waits for the turn boundary. The effect is `profile_switched`, written
+under the actor who switched it and carrying this `command_id`, and `session.list` says
+the new `profile` from then on. A name nothing defines is `not_found` with `kind:
+"agent"`; a subagent's is `invalid_params` with `field: "profile"` (a session or a branch
+runs a primary agent, `agents.list`'s); nothing is written for either. Before Decision 841
+every name was accepted and an unknown one did nothing.
+
 #### `session.goal.set`, `session.goal.get`, `session.goal.clear`
 ```json
 {"command_id": "c-6", "session_id": "s-9f", "text": "the release notes build on Windows"}
@@ -1049,11 +1090,135 @@ the client that uploaded it, not the session.
 ```json
 {"workspace": "/home/me/project"}
 ```
-→ `{"agents": [{"name", "description", "source"}]}` — the primary agents a session in that
+→ `{"agents": [{"name", "description", "source", "notes", "layer", "model", "tool_count",
+"read_only", "max_turns", "worktree", "available", "reason"}], "skipped": [{"name", "path",
+"reason"}]}` — the primary agents a session in that
 workspace may be created with, resolved as `session.create` resolves them (built-ins, the
 machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `global`
 or `project`. A worker answers from its bundle instead, so a client offers exactly what
-`profile` may name wherever the session will run.
+`profile` may name wherever the session will run. `skipped` is each agent file found and
+not read, with why: one that is a link out of the workspace (`not read: outside the
+workspace`; a `.troupe/agents` linked out whole is one entry with a null `name`,
+Decision 829), in a git worktree one the main checkout has not committed, or one that does
+not parse, with what is wrong in words (`not read: mode must be primary or subagent, not
+"main"`, Decision 841), which the session's `files_skipped` carries too. Additive.
+
+`notes` is what a person should know about how an agent is read, each `{"key",
+"reason"}` with the reason in words, and empty for most. A `project` agent whose
+`permissions:` set a tool to `auto` in a workspace that is not trusted has one with the
+`key` `permissions`: the `auto` applies once the workspace is trusted, the tool asks until
+then, and the reason names the command that trusts it (Decision 825). A daemon trusts a
+workspace as its user's `trusted_workspaces` says, and a worker trusts none. The key is
+additive; a client that does not know it shows the agent as before.
+
+What decides whether a person wants an agent, on each row (Decision 841, additive):
+`layer` is where it is read from, `builtin`, `bundle`, `user` (the person's `agents/`,
+which `source` calls `global`) or `project`, the last two the `scope` `agents.put` writes;
+`model` as the definition names it (`null` is the session's own); `tool_count`, the tools
+it holds (an MCP server's or a client's are counted only by a session that runs them);
+`read_only`, true when it denies `write_file`, `edit_file` and `shell`; `max_turns`
+(`null` for no cap of its own); `worktree`, whether a session started on it here now would
+get a worktree of its own (a git repository with a session already working in it, as
+`session.create`'s `"auto"` decides, so the same for every row today); `available`, false
+with `reason` in words when a session could not run it here, which today is a model the
+provider does not serve by the list the daemon keeps (Decision 778); a list never fetched
+says nothing either way.
+
+#### `agents.get`, `agents.validate`, `agents.put`, `agents.delete`, and `agents.changed`
+
+An agent read whole, checked, written and taken away (#503, Decision 841). Both clients
+manage one set through these and never write the directories themselves, so the checks
+and the choice of layer happen in one place. Reading and checking answer on a daemon and
+on a worker; writing is the daemon's, like `mcp.*` (Decision 700), and on a pod
+`agents.put` and `agents.delete` are `forbidden` with `reason` "On a pod the agents come
+from the profile's bundle and are read-only here: change them in the console".
+
+```json
+{"name": "plan", "workspace": "/home/me/project"}
+```
+`agents.get` (`observe`; `workspace` or `session_id`, or neither for the person's own and
+the built-ins) → one definition, as the session would run it: every key of an
+`agents.list` row, plus `mode` (`primary` or `subagent`), `tools` (`"all"` or the list),
+`permissions` (`{"<tool>": "auto"|"ask"|"deny"}`), `budget_share`, `skills` (`"all"` or
+the list), `prompt` (the instruction, the file's body), `path` (the file, `null` for a
+bundle's ACP agent), `text` (the file as it is on disk, frontmatter and all, for an
+editor), `editable` and `editable_reason` (`null` when editable; otherwise a sentence: a
+built-in is changed by a copy in a scope, a bundle's agent in the console, and on a pod
+none here), `also` (`[{"layer", "path"}]`, the files of the same name in lower layers this
+one hides, nearest first: what answers once this one is taken away) and `running`
+(`[{"session_id", "parent"}]`, with a `session_id`: the windows of that session's family,
+the session, its branches and, for a branch, the session it came from and its other
+branches, that run this agent now; empty without one). With a `session_id` the
+definitions are that session's (on a pod its bundle's), read again from their files as a
+switch would read them. A name nothing defines is `not_found` with `kind: "agent"`.
+
+```json
+{"source": "---\nmode: primary\n---\nYou review.\n", "name": "review", "workspace": "/home/me/project"}
+```
+`agents.validate` (`observe`) → `{"ok": false, "errors": [{"field", "message"}],
+"warnings": [{"field", "message"}]}`, writing nothing. `field` is a frontmatter key
+(`mode`, `tools`, `model`, …), `permissions.<tool>` for one permission, `frontmatter`
+when it is not YAML, `name`, or `prompt` and `description` for the warnings. Errors: a key
+no agent has (the keys are `description`, `mode`, `model`, `tools`, `permissions`,
+`max_turns`, `budget_share`, `skills` and `override`, and onboarding's `imported_*`);
+`mode` missing or not `primary`/`subagent`; `tools` or `skills` not `"all"` or a list; a
+tool that does not exist (with the nearest that do); a permission not `auto`, `ask` or
+`deny`; a permission that grants (`auto` or `ask`) a tool `tools` does not list, which
+could never apply (a `deny` of one is allowed, as the built-ins write it); a model the
+provider does not serve, by the list the daemon keeps (Decision 778), with the nearest it
+does; `max_turns` not a whole number above 0; `budget_share` not a number above 0;
+`override` not true or false; a name an agent may not have. Warnings: an MCP server's
+(`mcp.<server>.<tool>`) or a client's (`client.<name>`) tool, which is known only once it
+runs; a model when the provider has never listed its models on this machine; a
+`budget_share` above 1 (read as 1); an empty description or instruction. `name` is the
+name it would be saved under; the configuration the model is checked against is the
+workspace's (or the session's).
+
+```json
+{"command_id": "c-30", "name": "review", "scope": "project", "workspace": "/home/me/project",
+ "source": "---\ndescription: Reviews.\nmode: primary\n---\nYou review.\n"}
+```
+`agents.put` (`admin`) checks `source` as `agents.validate` does and writes it as it is,
+as `<config>/agents/<name>.md` (`scope: "user"`) or `<workspace>/.troupe/agents/<name>.md`
+(`scope: "project"`; `"workspace"` is taken as the same, the word `mcp.*` uses; it needs
+`workspace` or `session_id`) → `{"name", "scope", "layer", "path", "action": "created" |
+"replaced", "warnings"}`. One with an error is `invalid_params` with `reason` (the first
+error, and how many more), `errors` and `warnings`, and nothing is written. The file goes
+through the writer onboarding writes with (Decision 823), judged where it really is: a
+project file must be under the workspace's real `.troupe/`, so a `.troupe` or
+`.troupe/agents` that is a link out of the workspace, or an `<name>.md` that is one, is
+`invalid_params` with a `reason` naming where it resolves (Decision 829's edge, held by the
+writer too); a temporary file is renamed over it. A name an agent may not have is
+`invalid_params` with `field: "name"`, a bad `scope` with `field: "scope"`. A built-in is
+changed by a copy: a `put` of its text, under its name (which then hides it) or another,
+into either scope. A user agent that the workspace's `.troupe/agents` has a file of the
+same name for is written, with a warning that the repository's is the one that runs there.
+
+```json
+{"command_id": "c-31", "name": "review", "scope": "project", "workspace": "/home/me/project"}
+```
+`agents.delete` (`admin`) takes `<name>.md` away from the scope's directory (a link
+itself, not what it points at) → `{"name", "scope", "path", "deleted": true, "layer"}`,
+`layer` being the one that answers to the name now (`builtin` once a copy of a built-in is
+gone), or `null`. A built-in's name with no copy in that scope is `forbidden` with a
+`reason`: a built-in is not deleted. Any other name with no file there is `not_found` with
+`kind: "agent"`.
+
+`agents.changed` (a notification, server → client) is sent to every client attached once
+an `agents.put` or `agents.delete` has written, the one that made it included, so one
+client's list follows what another saved:
+
+```json
+{"jsonrpc": "2.0", "method": "agents.changed",
+ "params": {"name": "review", "scope": "project", "path": "/home/me/project/.troupe/agents/review.md",
+            "action": "created", "workspace": "/home/me/project"}}
+```
+`action` is `created`, `replaced` or `deleted`; `workspace` is there for `project`. A
+file edited by hand is not announced: `agents.list` and `agents.get` read the files each
+time they are asked.
+
+A session's agent, or a branch's, is changed with `profile.switch` (Steering, above): the
+same method, read from the file at the switch.
 
 #### `commands.list`
 ```json
@@ -1082,7 +1247,9 @@ The `custom` section is the commands markdown files define: `<config>/commands/<
 frontmatter's `description` its summary (the prompt's first line without one) and its
 `argument-hint` what `usage` says follows the name; `detail` names the file, and `body`,
 which only these entries carry, is the prompt it sends as the file has it, `$ARGUMENTS`
-and all, for a palette to show before it runs (Decision 814). A name a
+and all, for a palette to show before it runs (Decision 814). `agent`, only where the
+frontmatter names one, is the agent the file says it runs on, which a client that starts a
+branch for it starts it on (the terminal client's command mode, TUI Decision 155). A name a
 built-in, an alias or one of the session's agents has stays theirs, and the file is
 skipped. The files are read when the table is asked for, so one written a moment ago is
 listed. A client runs one with `commands.run` (Steering, above) and needs no code of its
@@ -1100,23 +1267,114 @@ it can and shows the rest greyed with the reason. Reading the table wakes nothin
 ```
 → `{"status": "fresh", "path": "/home/me/project/.troupe/memory.md",
 "built_at": "2026-09-20T10:00:00Z", "sections": ["Overview", "Layout", "Commands",
-"Conventions", "Notes"], "text": "...", "refresh_due": false, "refresh_held_until": null}`
+"Conventions", "Notes"], "text": "...", "refresh_due": false, "refresh_held_until": null,
+"generated": true, "facts": [{"id": "f_5c0d9a3e71b2", "kind": "command", "claim": "The gate is
+`mix check`", "scope": null, "anchors": [{"path": "mix.exs", "hash": "9f2c...e1"}],
+"evidence": {"session": "s_01J...", "seq": 412, "head": "7f8a221", "exit_status": 0, "by":
+"librarian"}, "created_at": "2026-10-10T09:00:00Z", "verified_at": "2026-10-10T09:00:00Z",
+"status": "current"}]}`
 
 The **project brief**: what earlier agents learned about the repository, read into
 every agent's system prompt and written by the `remember` tool and the `librarian`
-agent. `status` is `absent`, `stale` (never built, older than `memory_max_age_days`, or
-the tracked file count drifted), `fresh` or `disabled` (`memory: false` in the workspace
+agent. `status` is `absent` (no facts), `stale` (never built, older than
+`memory_max_age_days`, or a command or convention it holds rests on a file that changed or
+went since it was last checked, Decision 838), `fresh` or `disabled` (`memory: false` in the workspace
 config). A `librarian`'s run that ends as it meant to builds it, whether or not it
 rewrote any of it.
 One brief per repository: a worktree's is the main checkout's. `refresh_due` is whether
 a client should start a `librarian` session on the workspace now, which is what
-`memory_auto_refresh` asks of it: the brief is `absent` or `stale`, and no librarian has
+`memory_auto_refresh` asks of it: the workspace is in a git repository (never true in a
+directory none holds, such as a home directory), the brief is `absent` or `stale`, and no librarian has
 started on it in the last `memory_max_age_days` without its being built since. A
 librarian's run that failed, was cancelled or wrote nothing is tried again that much
 later, not in every new session; `refresh_held_until` is when (or `null`), for a
 client to say why it started none. `memory.forget` forgets that try with the brief.
 
-#### `memory.forget` → `{"command_id", "workspace"}` deletes the brief. `admin`.
+The brief is made of **facts** (Decision 839), and `facts` lists every one, kind by kind
+(`overview`, `layout`, `command`, `convention`, `negative`, `note`), oldest first within a
+kind. `claim` is the fact in a sentence or two; `scope` a glob of the paths it applies to,
+or `null` for the whole repository; `anchors` the files it was read from, each by its
+`path` from the repository's top and the lowercase hex SHA-256 of what the file held when
+the fact was written, which Troupe took and no model gave. `evidence` is where it came
+from: the `session` and the `seq` of the `remember` call that wrote it, the repository's
+`head` then (`null` outside git), `exit_status` when it is a command the session ran
+(absent otherwise), and `by`: `librarian`, `agent:<name>`, `person` (a hand edit of the
+brief, read back) or `migrated` (from a brief written before facts). `id` names the fact
+for `memory.forget`; `created_at` is when it was first written and `verified_at` when it
+was last checked. `status` is computed as the answer is made, never stored: `current`
+(every anchor holds what it did), `moved` (an anchor changed) or `missing` (one is gone),
+both of which a client shows as "may no longer be true", and `unanchored` (no anchors: it
+ages out by `verified_at`). `generated: true` says `text` and `sections` are a view of the
+facts, rewritten whenever they change. A daemon from before facts sends neither key, and a
+client shows the brief as it did.
+
+#### `memory.forget` → `{"command_id", "workspace", "id"}` (`id` optional)
+
+With an `id`, forgets that fact alone and answers `{"forgotten": true, "id": "f_5c0d9a3e71b2"}`;
+an `id` no fact has is `not_found`. Without one, deletes the whole brief, as before:
+`{"forgotten": true}`. `admin`.
+
+#### `memory.decline` → `{"workspace"}` (`command_id` optional)
+→ `{"declined": true}`. The person said no to rewriting a brief an older version of the
+librarian's survey wrote (`onboard.plan`'s `brief.due` `outdated`): it is not due again
+until the survey changes. Kept in the state directory under the brief's path, so every
+checkout of the repository shares it. `control`.
+
+#### `onboard.plan`
+```json
+{"workspace": "/home/me/project"}
+```
+→ `{"onboarding": {"due": "first", "recorded": null, "version": 2, "tools": ["Claude Code",
+"Cursor"], "items": [{"id": "3f1c0a9e5b7d2c41", "target": "workspace", "path": "AGENTS.md",
+"shown": "AGENTS.md", "status": "new", "question": "create_agents_md", "source": "CLAUDE.md",
+"also_from": [], "was": null, "notes": [], "diff": "+ # AGENTS.md\n..."}, {"id":
+"9a0be4f27c1d3e58", "target": "repo", "path": "rules/style.md", "shown":
+".troupe/rules/style.md", "status": "new", "question": "write", "source":
+".cursor/rules/style.mdc", ...}], "skipped": []}, "brief": {"due": "first", "recorded":
+null, "version": 1}, "refusal": null}`
+
+What a session's start asks, in this order (Decision 835): onboarding other tools' files
+into Troupe's own, then the brief. The daemon's alone; `admin`, since it answers with what
+other tools' files hold, the person's own among them. **Onboarding** is `due` `first` when
+the workspace is in a git repository, has other tools' files, nothing has been onboarded
+there and nothing declined; `outdated` when it was onboarded under an older version of the
+onboarding rules (`recorded`) than this build's (`version`); `none` otherwise: outside a
+git repository (the home directory, whose `.claude/` is Claude Code's own), and once the
+person has said no for this version. While it is due, `items` lists every file onboarding
+would write, the workspace's and the person's own (into their config directory), each as
+`troupe onboard` shows it: `target` (`workspace`, `repo` or `user`), `path` under it,
+`shown`, `status` (`new` or `changed`), `question` (`write`, or `create_agents_md` for an
+`AGENTS.md` that is not there, which is always asked on its own, Decision 827), `source`
+and `also_from` (the other tool's files it is made from), `was` (what it was onboarded from
+before), `notes` (one sentence per key left out or changed) and `diff`; `tools` names the
+other tools they come from, and `skipped` is each file found and not proposed, with its
+`reason`. While it is not, `items`, `tools` and `skipped` are empty and no source is
+asked, so a start where nothing is due does not walk the workspace. An `id` names a file as it was shown: once its source or the
+file changes it names nothing. **The brief** is `due` `first` (none) or `stale` when a
+`librarian` should start, as `memory.get`'s `refresh_due` says; `outdated` when an older
+survey wrote it (`recorded`, `0` for one from before there were versions) and the person
+has not said no to rewriting it (`memory.decline`); `none` otherwise. Whether to start
+anything at all is the client's (`memory_auto_refresh`). When onboarding is due, a client
+starts the librarian only once onboarding is answered, so it reads what was written. On a
+machine a worker runs on onboarding is never due, and `refusal` is the sentence saying it
+runs on the person's own machine.
+
+#### `onboard.apply` → `{"workspace", "ids": [...]}` or `{"workspace", "all": true}` (`command_id` optional)
+→ `{"written": [{"id", "shown", "action"}], "refused": [{"id", "reason"}]}`. Writes the
+files named, or with `all` every one whose `question` is `write` (an `AGENTS.md` that is not
+there is written only when its id is named), each with its provenance (Decision 823), and
+never over a file that changed since it was shown. `action` is `created` or `replaced`; an
+id that names no file the plan holds now is refused with a sentence. Once a call has
+answered every file the plan held, the workspace is recorded as onboarded under this
+build's rules. `admin`: it writes into the repository and into the person's config
+directory.
+
+#### `onboard.decline` → `{"workspace", "ids": [...]}` or `{"workspace", "all": true}` (`command_id` optional)
+→ `{"declined": n}`. Says no to the files named, or to all of them: each is not proposed
+again until its source changes (`troupe onboard --all` offers it anyway), and `all` also
+remembers the no to onboarding the workspace under this version of the rules, so a start
+does not ask again until they change. Nothing is written but the person's answer, in the
+state directory. `control`.
 
 #### `context.get`
 ```json
@@ -1125,11 +1383,11 @@ client to say why it started none. `memory.forget` forgets that try with the bri
 → `{"budget": 16000, "used": 1234, "searched": ["/home/me/.config/troupe", "/home/me/project"],
 "files": [{"scope": "root", "path": "/home/me/project/AGENTS.md", "size": 812, "chars": 800,
 "budget": 16000, "share": 0.05, "status": "whole", "reason": null, "trimmed": 0,
-"skipped": ["CLAUDE.md"], "imported_by": null,
+"skipped": [], "imported_by": null,
 "unfollowed": [{"import": "docs/gone.md", "reason": "missing"}], "hash": "sha256:…"},
 {"scope": "root", "path": "/home/me/project/CLAUDE.md", "size": 0, "chars": 0,
 "budget": 16000, "share": 0.0, "status": "skipped",
-"reason": "skipped: AGENTS.md is used in this directory", "trimmed": 0, "skipped": [],
+"reason": "not read: run troupe onboard", "trimmed": 0, "skipped": [],
 "imported_by": null, "unfollowed": [], "hash": null},
 {"scope": "brief", "path": "/home/me/project/.troupe/memory.md",
 "size": 0, "chars": 0, "budget": 6000, "share": 0.0, "status": "absent", "reason": null,
@@ -1151,26 +1409,30 @@ nearest wins where two disagree. `status` is `whole`; `trimmed`, with `trimmed` 
 how many characters were cut, the nearest scope (a file and what it imports) being kept
 whole first; `dropped`, the budget was spent before it; `outside`, the file found (the brief
 too) is really outside the repository (or, for the person's own, the config directory),
-through a link, and was not read, its `size` and `chars` 0 and its `hash` null; `skipped`,
-found and not read, with `size` and `chars` 0 and `hash` null too; or, for the brief,
-`absent` or `disabled` as `memory.get` has it. `AGENTS.md`, `CLAUDE.md` and `GEMINI.md`
-are the same file under other tools' names, and at the repository root so is
-`.github/copilot-instructions.md`: in one directory the first that exists is read, its
-`skipped` names the others, and each of them is listed after it as `skipped`, so nobody
-debugs a file that was never loaded. Copilot reads its file at the repository root only,
-so one in any other directory is listed as `skipped` and hides nothing (Decision 806).
+through a link, and was not read, its `size` and `chars` 0 and its `hash` null;
+`unreadable`, the file is there and could not be read, the same; `skipped`, found and not
+read, with `size` and `chars` 0 and `hash` null too; or, for the brief, `absent` or
+`disabled` as `memory.get` has it. Other tools' files are not read (Decision 828): a
+`CLAUDE.md` or `GEMINI.md` in one of those directories, `.github/copilot-instructions.md`
+at the repository root, and Cursor's root `.cursorrules` and `.cursor/rules/*.mdc` are
+each listed after the directory's own file as `skipped`, so nobody debugs a file that was
+never loaded. Copilot reads its file at the repository root only, so one in any other
+directory is listed as `skipped` with a reason of its own (Decision 806). `skipped` on a
+file is always empty now that no other name stands for `AGENTS.md`, kept for the clients
+that read it. An `.agents/AGENTS.md` in the root or one of those directories (Decision
+822) comes right before that directory's file, in its scope.
 `reason` says in words why a file is left out, the same words `/context` prints, and is
 null for a file that reached the prompt and for a brief `absent` or `disabled`: `not
-read: outside the repository` (`outside
-the config directory` for the person's own), `skipped: AGENTS.md is used in this
-directory` (`comes first`, when that file was itself not read), `not read: Copilot's
-file counts only at the root`, or `left out: the budget was spent on nearer files`.
-A Cursor rule (Decision 809), each `.cursor/rules/*.mdc` in the root and in a directory on
-the way to where the session works, and the legacy root `.cursorrules`, comes after that
-directory's file and its imports, in name order, in the directory's scope, with its front
-matter in `rule`: `apply` (`always`, `globs`, `requested` for a rule with only a
-`description`, or `manual` for one with none), `globs`, `description`, and `matched`, the
-file worked on that a glob matched, from the directory that holds `.cursor`. One that
+read: run troupe onboard`, `not read: outside the repository` (`outside the config
+directory` for the person's own), `not read: permission denied` (or another reason the
+system gave), `not read: Copilot's file counts only at the root`, or `left out: the
+budget was spent on nearer files`.
+A rule (Decisions 809 and 828), each `.troupe/rules/*.md` in the root and in a directory
+on the way to where the session works, comes after that directory's file and its
+imports, in name order, in the directory's scope, with its front matter in `rule`:
+`apply` (`always`, `globs`, `requested` for a rule with only a `description`, or `manual`
+for one with none), `globs`, `description`, and `matched`, the file worked on that a glob
+matched, from the directory that holds `.troupe`. One that
 reached the prompt says why in `applies` (`always applied`, `applied: src/a.ts matches
 src/**/*.ts`). One that did not is `inactive`, `chars` 0, with `reason` `applies when a
 file matching src/**/*.ts is read or edited` or `not joined: no alwaysApply, globs or
@@ -1228,16 +1490,17 @@ reads. There is no second settings file.
 "cheap", "expensive"}, "overrides": [{"source", "detail"}], "workspace", "trusted",
 "files", "keys", "warnings", "errors"}`. The first fields are what the user's **file**
 says, since that is what the model panel's save changes. The key is never in the answer:
-`api_key_set` says whether one is in force and `api_key_source` where from (`file`, `env`,
-`opencode` or null). `overrides` names what beats the file anyway: a project's
-`.troupe/config.yaml` (only when `workspace` is given), a `TROUPE_*` variable, or the
-opencode fallback that applies while no key is saved. `config_dir` and `path` are written
+`api_key_set` says whether one is in force and `api_key_source` where from (`file`, `env`
+or null; a daemon before Decision 828 also said `opencode`). `overrides` names what beats
+the file anyway: a project's `.troupe/config.yaml` (only when `workspace` is given) or a
+`TROUPE_*` variable; opencode's settings beat nothing, being copied in (`config.import`)
+and never read for a session. `config_dir` and `path` are written
 as a person on the daemon's platform writes them, for a screen to print.
 
 `keys` is every key the schema knows (`protocol/schema/config/v1.json`), as a session in
 `workspace` would read it (`troupe config --explain`): `{"key", "value", "layer",
 "source", "default", "scopes", "secret", "label", "doc"}`. `layer` is the one that set the
-value in effect — `default`, `user`, `project`, `local`, `env`, `cli` or `opencode` — and
+value in effect — `default`, `user`, `project`, `local`, `env` or `cli` — and
 `source` its file or variable. A secret's `value` is `****`, or the `{env:VAR}` a file
 wrote when the variable is not set; never the secret. `scopes` are the scopes `config.set`
 writes the key to here: only `user` without a workspace, for the trust list, and for a key
@@ -1310,9 +1573,9 @@ of its own is stale, and a screen sees the edit the next time it asks.
 `config.import` (`admin`) → the `config.get` answer after the write, plus `"imported":
 {"from", "providers", "kept", "default"}`. Copies opencode's providers into the file's
 `providers:` block (type, base URL, auth style, models, and the key as opencode has it
-written: an `{env:VAR}` stays a reference, a literal key is copied) so the machine stops
-depending on opencode's config. A provider the file already names is kept as it is and
-listed under `kept`; opencode's default model becomes `models.default` only when the file
+written: an `{env:VAR}` stays a reference, a literal key is copied), once: a session never
+reads opencode's config (Decision 828). A provider the file already names is kept as it is
+and listed under `kept`; opencode's default model becomes `models.default` only when the file
 has none. `from` is `opencode`, the only source; with no opencode providers the call fails
 with `invalid_params`. Nothing is written when nothing would change.
 
@@ -1386,13 +1649,20 @@ for a panel to print.
 ```
 `mcp.list` (`observe`; both optional) → `{"servers": [{"name", "layer", "source",
 "transport", "command", "args", "url", "cd", "env", "headers", "permission", "disabled",
-"refused", "trust", "oauth", "auth", "state", "tools", "error"}], "warnings": [...]}` —
+"refused", "trust", "notes", "oauth", "auth", "state", "tools", "error"}], "warnings": [...]}` —
 every server the layers give the workspace, merged by name, the workspace's file over
 the user's over `config.yaml`. `layer` is `config`, `user` or `workspace` and `source`
 the file; `env` is the names of its variables and `headers` the names of the headers it
 is sent (Decision 820), never their values; `refused` says why one will not start (an
 unset `{env:VAR}`, an `oauth` with no `client_id`, a header Troupe sends itself); `trust` is
-`trusted` or `pending` for a workspace-level server and null otherwise. For a server
+`trusted` or `pending` for a workspace-level server and null otherwise. `notes` is
+`[{"key", "reason"}]`, as `agents.list`'s: a workspace-level server set to `permission:
+auto` in a workspace not on `trusted_workspaces` has one `permission` note, since its tools
+ask until the workspace is trusted, whatever its start's answer (Decision 830);
+`permission` stays what the entry says. The workspace's layer reads nothing from outside
+the repository until the workspace is trusted: an `include` from elsewhere (the person's
+own `~/.claude.json`, say), or a `.troupe/mcp.json` that is a link out, gives no servers,
+and `warnings` names it with the command that trusts the workspace (Decision 830). For a server
 that wants the person signed in, `oauth` is `{"client_id", "scopes"?, "issuer"?}` as its
 entry says, and `auth` is how their sign-in stands — `{"state", "account", "error"}`,
 `state` one of `signed_out`, `signing_in` (a browser is out), `signed_in` and `expired`
@@ -1448,7 +1718,18 @@ stdio server that does not answer `initialize` within twenty seconds is `error`.
 {"workspace": "/home/me/project"}
 ```
 `skills.list` (`observe`; `workspace` optional) → `{"skills": [{"name", "description",
-"layer", "source", "dir", "linked"}]}`, the workspace's over the user's by name.
+"layer", "source", "dir", "linked"}], "skipped": [{"name", "layer", "source", "dir",
+"linked", "status", "reason"}]}`. `layer` is, lowest first, `user_agents`
+(`~/.agents/skills`), `agents` (an `.agents/skills` from the repository root down to the
+workspace, the nearest highest), `user` or `workspace`, and a name is the highest
+layer's. `skipped` is every skill the layers hold and do not offer, lowest first:
+`status` `skipped` with `reason` naming the directory used (`skipped: <dir> is used`), or
+`outside` (`not read: outside the repository`), a link out never read; an
+`.agents/skills` linked out whole is one entry with a null `name`. The workspace's
+`.troupe/skills` is held to the workspace (`not read: outside the workspace`), and what its
+`skills.json` includes from outside the repository is `outside` until the workspace is
+trusted, the `reason` naming the command that trusts it, one entry with a null `name`
+(Decision 829); `unreadable` is a `SKILL.md` that can't be read, the `reason` saying why.
 
 ```json
 {"command_id": "c-17", "scope": "user", "from": "/home/me/.claude/skills", "link": true}
@@ -1542,27 +1823,44 @@ made twice.
 ```
 → `{"workspaces": [{"path", "score"}]}`
 
-#### `worktree.list` → `{"worktrees": [{"path", "branch", "session_id", "dirty"}]}`
+#### `worktree.list` → `{"worktrees": [{"path", "branch", "session_id", "dirty", "ahead", "behind", "added", "removed"}]}`
+
+Every worktree of the workspace's repository, the checkout first, with the live session
+working in it (`session_id`, `null` for none) and whether it has uncommitted or untracked
+files. How it stands against the checkout (Decision 840, additive): `ahead` and `behind`
+are the commits its branch has that the checkout's branch has not, and the other way
+round, and `added` and `removed` the lines it would bring, counted since its branch left
+the checkout's, its uncommitted changes and untracked files included, as `worktree.merge`
+would commit them. For the checkout itself `ahead` and `behind` are against its upstream
+and `added` and `removed` what it has not committed. Each is `null` where git cannot say
+(no upstream, a detached checkout). A binary file adds no lines, and an untracked file
+over 1 MB or past the first 200 is not counted.
+
 #### `worktree.remove`
 ```json
 {"command_id": "c-8", "path": "/home/me/project/../project-troupe-abc", "force": false}
 ```
-Refuses a dirty tree with `conflict` unless `force` is true.
+Refuses a dirty tree with `conflict` unless `force` is true. git runs from the checkout
+the tree belongs to, not inside the tree.
 
 #### `worktree.merge`
 ```json
 {"command_id": "c-9", "workspace": "/home/me/project",
  "path": "/home/me/project-troupe-abc", "message": "troupe: fix the test"}
 ```
-→ `{"merged": true, "branch": "troupe/abc", "committed": true, "output": "..."}`
+→ `{"merged": true, "branch": "troupe/abc", "committed": true, "output": "...", "removed": true}`
 
 Lands a branch's work on the checkout it came from: anything uncommitted in the
 worktree is committed first (as `message`, or a default naming the branch), the branch
 is merged into `workspace` with a merge commit (`--no-ff`), and the worktree and branch
 are removed. A merge git cannot complete is aborted and answered with `conflict`
 (`reason: "merge conflicts"`, `output`: git's words); the worktree is untouched, so the
-person can resolve it by hand. Refused with `conflict` while the session in that
-worktree is mid-turn (`reason` names the session).
+person can resolve it by hand. One git will not start because uncommitted changes in
+the checkout are in its way is `conflict` with `reason: "local changes in the checkout"`
+(`output` names the files); nothing is changed. A merge that landed and whose tree git
+then could not remove is still answered as a merge, with `"removed": false` and
+`removal_error` (git's words); the tree and its branch are left. Refused with
+`conflict` while the session in that worktree is mid-turn (`reason` names the session).
 
 #### `worktree.discard`
 ```json
@@ -1576,9 +1874,17 @@ while its session is working.
 ### Fleet
 
 #### `fleet.get` → the same shape `subscribe` to `fleet` would replay as a snapshot.
-#### `watch.set` → `{"command_id", "workspace", "enabled": true}`. Watch mode is
+#### `watch.set` → `{"command_id", "workspace", "enabled": true, "session_id"}`. Watch mode is
 **exclusive per workspace**; enabling it where another session already watches returns
-`conflict`.
+`conflict`. `session_id`, optional, names the session that watches; without it, the
+workspace's session that is no branch. Enabling it where the same session watches is
+answered as it stands; disabling turns off whichever session watches there. A pod's session
+never watches (`forbidden`). → `{"enabled", "backend"}`.
+
+#### `watch.get` → `{"workspace"}`. Whether the workspace is watched (Decision 844):
+`{"enabled": true, "backend": "native", "session_id": "s-3a"}`, or `enabled: false`,
+`backend: "off"` and a null `session_id`. `observe`; the daemon's only. What a status line
+shows and what the next toggle turns; `watch_changed` says when it changes.
 
 ### Session states, dormancy, and activation
 
@@ -1694,9 +2000,9 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
-| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
+| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or
@@ -1753,8 +2059,8 @@ require `session_id` (§6) but the five below: `session.get`, `input.send`, `tur
 `question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
 `mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register`, `tools.unregister`, `shell.run` and `shell.cancel`. Everything else a
 worker serves is about the pod or a path on it — `session.create`, `agents.list`,
-`workflows.list`, `memory.get`, `memory.forget`, `workspace.recent`, `workspace.search`,
-`worktree.*`, `watch.set`, `identity.*`, `config.*`, `skills.*` and the `mcp.*` methods
+`workflows.list`, `memory.get`, `memory.forget`, `memory.decline`, `workspace.recent`, `workspace.search`,
+`worktree.*`, `watch.*`, `identity.*`, `config.*`, `skills.*` and the `mcp.*` methods
 but `mcp.status` — and a token for one session is
 refused it with `forbidden` and `data.method` naming it. A method a worker does not have
 is `method_not_found`, whatever the token, and `initialize` and `auth.refresh` belong to

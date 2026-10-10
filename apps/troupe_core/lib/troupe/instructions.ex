@@ -1,22 +1,32 @@
 defmodule Troupe.Instructions do
   @moduledoc """
-  The instruction files a repository already carries for coding agents, read into every
-  agent's system prompt (Decisions 706, 798 and 806).
+  The instruction files a repository carries for coding agents, read into every agent's
+  system prompt (Decisions 706, 798, 806 and 828).
 
   `AGENTS.md` is the file the tools settled on, and a repository that has one has told
   agents how to work in it. Troupe reads it the way the others do: the person's own
   `<config>/AGENTS.md` first, then the repository root's, then one in each directory on
-  the way from the root to where the session works, and Troupe's own brief
-  (`.troupe/memory.md`) last. Where the session works is its workspace and the directory
-  of every file its conversation has read, edited or written (`focus/1`), so a
+  the way from the root to where the session works, and Troupe's own brief (the commands
+  and conventions of the repository's facts, Decision 838) last. Where the session works
+  is its workspace and the directory of every file its conversation has read, edited or
+  written (`focus/1`), so a
   `frontend/AGENTS.md` applies once the agent has opened something under `frontend/`.
   Every one applies; where two disagree the nearer wins, which is why the nearer comes
-  later in the prompt. In one directory `AGENTS.md`, `CLAUDE.md` and `GEMINI.md` are the
-  same file under other tools' names, and at the repository root so is
-  `.github/copilot-instructions.md`, which Copilot reads there and nowhere else: the
-  first that exists is read and the rest are listed as skipped, each saying why, so
-  nobody debugs a file that was never loaded. A Copilot file below the root is listed as
-  skipped too, saying it counts only at the root.
+  later in the prompt.
+
+  Other tools' files are not read (Decision 828): `troupe onboard` brings what they say
+  into Troupe's own files once. A `CLAUDE.md` or a `GEMINI.md` in one of those
+  directories, Copilot's `.github/copilot-instructions.md` and
+  `.github/instructions/*.instructions.md` at the root, and Cursor's `.cursorrules` and
+  `.cursor/rules/*.mdc` are each listed as skipped, saying so, so nobody debugs a file
+  that was never loaded. A Copilot file below the root never counted
+  (Decision 806), and says that instead. A file that is there and cannot be read is
+  listed too, with why.
+
+  An `.agents/AGENTS.md` in the repository root, or in a directory on the way to where
+  the session works, is that directory's too (Decision 822): read right before the
+  directory's own file, in its scope, so where the two disagree the directory's own wins.
+  The person's own directory has none.
 
   A file may import another with `@path/to/file.md`, as Claude Code's do: resolved from
   the importing file's directory, followed five deep, each file read once, and never
@@ -26,16 +36,16 @@ defmodule Troupe.Instructions do
   directories are held to the same edge: one that is really elsewhere, through a link,
   is listed as `outside` and not read.
 
-  Cursor's rules are read as Cursor reads them (Decision 809): each `.cursor/rules/*.mdc`
-  in the repository root, and in a directory on the way to where the session works, comes
-  after that directory's instruction file, its front matter saying when it applies. A
-  rule with `alwaysApply: true` is in every prompt, as is the legacy root `.cursorrules`;
-  one with `globs` joins once the session has worked on a file one of them matches, the
-  globs taken from the directory that holds `.cursor`; one with only a `description` is
-  listed in the prompt by it, for the agent to read when it applies, its body not
-  joined; one with none of them is not joined. Each says why it applies (`applies`) or
-  why not (`reason`), and is held to the repository's edge as every other file is. A
-  rule's `@` is not followed as an import.
+  Troupe's own rules are read as Cursor reads its rules (Decisions 809 and 828): each
+  `.troupe/rules/*.md` in the repository root, and in a directory on the way to where the
+  session works, comes after that directory's instruction file, its front matter saying
+  when it applies. A rule with `alwaysApply: true` is in every prompt; one with `globs`
+  joins once the session has worked on a file one of them matches, the globs taken from
+  the directory that holds `.troupe`; one with only a `description` is listed in the
+  prompt by it, for the agent to read when it applies, its body not joined; one with none
+  of them is not joined. Each says why it applies (`applies`) or why not (`reason`), and
+  is held to the repository's edge as every other file is. A rule's `@` is not followed
+  as an import.
 
   Read from disk when asked, which the agent does as a turn begins, so an edit takes
   effect on the next turn. What was read is summed up in a digest, and the agent writes
@@ -53,21 +63,30 @@ defmodule Troupe.Instructions do
   """
 
   alias Troupe.{Config, Memory, Paths, Workspace}
+  alias Troupe.Instructions.FrontMatter
   alias Troupe.LLM.{Message, ToolUse}
   alias Troupe.Session.Memory, as: Brief
 
-  require Logger
-
-  @copilot ".github/copilot-instructions.md"
-  @aliases ["AGENTS.md", "CLAUDE.md", "GEMINI.md", @copilot]
-  @copilot_reason "not read: Copilot's file counts only at the root"
+  @agents "AGENTS.md"
+  @dot_agents ".agents/AGENTS.md"
   @budget_reason "left out: the budget was spent on nearer files"
   @default_max_chars 16_000
 
-  # Where Cursor keeps its rules, and the single file it read before them, which counts at
-  # the repository root only.
-  @rules_dir ".cursor/rules"
+  # Other tools' names for the same file, read until Decision 828 and now listed, when one
+  # is found, as waiting for `troupe onboard`. Copilot's counts at the root only, and below
+  # it says so (Decision 806).
+  @retired ["CLAUDE.md", "GEMINI.md"]
+  @copilot ".github/copilot-instructions.md"
+  @onboard_reason "not read: run troupe onboard"
+  @copilot_reason "not read: Copilot's file counts only at the root"
+
+  # Troupe's own rules; and Cursor's, the single file Cursor read before them at the
+  # repository root, and Copilot's at the root, none of them read (Decision 828).
+  @rules_dir ".troupe/rules"
+  @cursor_rules ".cursor/rules"
   @legacy_rules ".cursorrules"
+  @copilot_rules ".github/instructions"
+  @copilot_ext ".instructions.md"
   @requested_reason "requested by description only: listed in the prompt, not joined"
   @manual_reason "not joined: no alwaysApply, globs or description"
 
@@ -97,24 +116,30 @@ defmodule Troupe.Instructions do
   @typedoc """
   One file in force. `size` is its bytes on disk; `chars` what reached the prompt, which
   counts against `budget`; `status` is `whole`, `trimmed` (`trimmed` characters cut),
-  `dropped`, `outside` (a file that is really outside the repository, not read) or
-  `skipped` (an alias another name hid, or a Copilot file below the root, not read) for
-  an instruction file, and for the brief what `Troupe.Session.Memory` says of it, or
-  `outside` too. `reason` says in words why a file was left out (`nil` for one read):
-  what `context.get` answers and `/context` prints. `skipped` names the aliases the file
-  hid in its directory; `where` is the directory's path from the repository root, for
-  the prompt to name it by. `imported_by` is the file whose `@` import brought this one
-  in, and `unfollowed` the imports this file names that were not read, with why:
-  `missing`, `outside` the directory imports may come from, `depth` past five, or a
-  `cycle`.
+  `dropped`, `outside` (a file that is really outside the repository, not read),
+  `unreadable` (one that is there and could not be read) or `skipped` (another tool's
+  file, or a Copilot file below the root, not read) for an instruction file, and for the
+  brief what `Troupe.Session.Memory` says of it, or `outside` too. `reason` says in words
+  why a file was left out (`nil` for one read): what `context.get` answers and `/context`
+  prints. `skipped` is always empty now that no other name stands for `AGENTS.md`
+  (Decision 828), kept for the clients that read it; `where` is the directory's path from
+  the repository root, for the prompt to name it by. `imported_by` is the file whose `@`
+  import brought this one in, and `unfollowed` the imports this file names that were not
+  read, with why: `missing`, `outside` the directory imports may come from, `depth` past
+  five, or a `cycle`.
 
-  A Cursor rule has its front matter in `rule` (`nil` for every other file) and a
+  A rule has its front matter in `rule` (`nil` for every other file) and a
   `status` of its own while it is not joined: `inactive` (a `globs` rule no file worked
   on matches yet, or one with nothing that says when it applies), or `listed` (one with
   only a `description`, which is its `text`, listed in the prompt by it). One that is
   joined says why in `applies` (`nil` for every other file and every rule not joined).
   """
   @type file :: %{
+          optional(:memory) => %{
+            text: String.t(),
+            recall: String.t() | nil,
+            trimmed: non_neg_integer()
+          },
           scope: scope(),
           path: Path.t(),
           directory: Path.t(),
@@ -135,10 +160,10 @@ defmodule Troupe.Instructions do
         }
 
   @typedoc """
-  A Cursor rule's front matter, and when it applies: `always` (`alwaysApply: true`, or
-  the legacy `.cursorrules`), `globs`, `requested` (only a `description`) or `manual`
-  (none of them). `matched` is the file worked on that a glob matched, from the
-  directory that holds `.cursor`, while the rule is joined by it.
+  A rule's front matter, and when it applies: `always` (`alwaysApply: true`), `globs`,
+  `requested` (only a `description`) or `manual` (none of them). `matched` is the file
+  worked on that a glob matched, from the directory that holds `.troupe`, while the rule
+  is joined by it.
   """
   @type rule :: %{
           apply: :always | :globs | :requested | :manual,
@@ -154,13 +179,6 @@ defmodule Troupe.Instructions do
           used: non_neg_integer(),
           digest: String.t()
         }
-
-  @doc """
-  The names one directory may carry, in the order the first of them is taken; the last,
-  Copilot's, at the repository root only.
-  """
-  @spec aliases() :: [String.t()]
-  def aliases, do: @aliases
 
   @doc """
   The files a conversation has read, edited or written, as its calls named them, each
@@ -181,7 +199,7 @@ defmodule Troupe.Instructions do
   Reads every instruction file in force for a workspace, farthest scope first, and the
   brief after them. `focus` is the files the session is working on (`focus/1`), relative
   to the workspace or absolute: the directories on the way to each are read as well as
-  those on the way to the workspace, and they are what a Cursor rule's globs match.
+  those on the way to the workspace, and they are what a rule's globs match.
   `searched` is every directory looked in, whether or not it had one.
   """
   @spec load(Path.t(), Config.t() | nil, [Path.t()]) :: t()
@@ -198,7 +216,10 @@ defmodule Troupe.Instructions do
     # bring it in.
     seen =
       for file <- found,
-          not match?(%{status: status} when status in [:skipped, :inactive, :listed], file),
+          not match?(
+            %{status: status} when status in [:skipped, :unreadable, :inactive, :listed],
+            file
+          ),
           into: MapSet.new(),
           do: key(file.path)
 
@@ -222,12 +243,15 @@ defmodule Troupe.Instructions do
 
   @doc """
   The system prompt's `# Instruction files` block, then the brief's own block, or `""`
-  when there is neither.
+  when there is neither. `recall: false` leaves out the brief's line naming the `recall`
+  tool, for an agent that does not have it (Decision 838).
   """
-  @spec to_prompt(t() | nil) :: String.t()
-  def to_prompt(nil), do: ""
+  @spec to_prompt(t() | nil, keyword()) :: String.t()
+  def to_prompt(loaded, opts \\ [])
+  def to_prompt(nil, _opts), do: ""
 
-  def to_prompt(%{files: files}) do
+  def to_prompt(%{files: files}, opts) do
+    recall? = Keyword.get(opts, :recall, true)
     {briefs, instructions} = Enum.split_with(files, &(&1.scope == :brief))
 
     blocks =
@@ -241,17 +265,32 @@ defmodule Troupe.Instructions do
         _ -> "# Instruction files\n#{@preamble}\n" <> Enum.join(blocks, "\n\n")
       end
 
-    [section | Enum.map(briefs, & &1.text)]
+    [section | Enum.map(briefs, &brief_text(&1, recall?))]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
+  end
+
+  defp brief_text(%{memory: %{} = prompt}, recall?), do: Memory.compose(prompt, recall?)
+  defp brief_text(file, _recall?), do: file.text
+
+  @doc """
+  Whether a glob, as a rule's `globs` and a fact's `scope` are written, matches a path from
+  the directory it is read from: `**` crosses directories, `*` and `?` do not, `{a,b}` is
+  either, and one without a `/` matches a file's name in any directory.
+  """
+  @spec glob_match?(String.t(), String.t()) :: boolean()
+  def glob_match?(glob, path) do
+    case glob_regex(glob) do
+      {:ok, regex} -> Regex.match?(regex, path)
+      {:error, _} -> false
+    end
   end
 
   @doc """
   What `context.get` answers and the `instructions_loaded` event carries: every file, in
   the order it is read, with its scope, size, the characters that reached the prompt,
-  the budget they count against and its share of it, and for a Cursor rule its front
-  matter (`rule`) and why it applies (`applies`) or not (`reason`). Wire-shaped, string
-  keys.
+  the budget they count against and its share of it, and for a rule its front matter
+  (`rule`) and why it applies (`applies`) or not (`reason`). Wire-shaped, string keys.
   """
   @spec provenance(t()) :: map()
   def provenance(%{} = loaded) do
@@ -307,7 +346,13 @@ defmodule Troupe.Instructions do
     end
   end
 
-  defp repository_root(workspace) do
+  @doc """
+  The repository a workspace is in, as the instruction files are read up to it: the
+  nearest directory with a `.git` (a worktree's `.git` file counts), or the workspace
+  itself without one. `Troupe.Skills.Local` reads `.agents/skills` up to the same root.
+  """
+  @spec repository_root(Path.t()) :: Path.t()
+  def repository_root(workspace) do
     workspace
     |> ancestors()
     |> Enum.find(workspace, &File.exists?(Path.join(&1, ".git")))
@@ -322,59 +367,64 @@ defmodule Troupe.Instructions do
 
   ## Reading
 
-  # The first name found in a directory is read, and each other one is listed after it as
-  # skipped, naming the first. Copilot reads its file at the repository root and nowhere
-  # else (Decision 806), so in any other directory it is no alias: it hides nothing, and
-  # is listed as skipped, saying so.
+  # A directory's `AGENTS.md`, after its `.agents/AGENTS.md`, and then the other tools'
+  # files found beside it, listed and not read (Decision 828). An `.agents` directory,
+  # walked when the session works under it, has no file of its own: its `AGENTS.md` is
+  # its parent's `.agents/AGENTS.md`, read there.
   defp find({scope, dir, where}, bounds) do
-    names = if scope == :root, do: @aliases, else: List.delete(@aliases, @copilot)
     fields = %{scope: scope, where: where}
 
-    found =
-      case Enum.filter(names, &File.regular?(Path.join(dir, &1))) do
-        [] ->
-          []
+    own =
+      if Path.basename(dir) != ".agents" and File.regular?(Path.join(dir, @agents)),
+        do: read(dir, @agents, fields, bound(scope, bounds)),
+        else: []
 
-        [name | skipped] ->
-          read = read(dir, name, skipped, fields, bound(scope, bounds))
-          read ++ Enum.map(skipped, &hidden(dir, &1, name, read, fields))
-      end
+    dot_agents(scope, dir, fields, bounds) ++ own ++ retired(scope, dir, fields)
+  end
 
-    if scope != :root and File.regular?(Path.join(dir, @copilot)),
-      do: found ++ [unread(Path.join(dir, @copilot), dir, fields, :skipped, @copilot_reason)],
-      else: found
+  # A directory's `.agents/AGENTS.md`, before its own file and in its scope, so that file
+  # is the nearer of the two (Decision 822); confined as any found file is. Not in the
+  # person's own directory, whose file is `<config>/AGENTS.md`.
+  defp dot_agents(:user, _dir, _fields, _bounds), do: []
+
+  defp dot_agents(scope, dir, fields, bounds) do
+    if File.regular?(Path.join(dir, @dot_agents)),
+      do: read(dir, @dot_agents, fields, bound(scope, bounds)),
+      else: []
+  end
+
+  # Another tool's file in this directory: listed with nothing of it read, not even where
+  # a link points, saying `troupe onboard` brings it in. Copilot's below the root was never
+  # read, and keeps saying why (Decision 806).
+  defp retired(scope, dir, fields) do
+    copilot = if scope == :root, do: @onboard_reason, else: @copilot_reason
+    names = for(name <- @retired, do: {name, @onboard_reason}) ++ [{@copilot, copilot}]
+
+    for {name, reason} <- names,
+        path = Path.join(dir, name),
+        File.regular?(path),
+        do: unread(path, dir, fields, :skipped, reason)
   end
 
   # A file found in a directory is confined as an import is: one that is really somewhere
   # outside the repository (or, for the person's own, the config directory), a link out
   # or a directory linked out, is not read, and is listed as `outside` with nothing of it
-  # in the prompt, not even its size.
-  defp read(dir, name, skipped, fields, bound) do
+  # in the prompt, not even its size. One that cannot be read is listed with why.
+  defp read(dir, name, fields, bound) do
     path = Path.join(dir, name)
-    fields = Map.put(fields, :skipped, skipped)
 
     if under?(key(path), bound) do
       case entry(path, fields) do
         {:ok, file} -> [%{file | directory: dir}]
-        :error -> []
+        {:error, reason} -> [unreadable(path, dir, fields, reason)]
       end
     else
       [unread(path, dir, fields, :outside, outside_reason(fields.scope))]
     end
   end
 
-  # An alias the first name hid. Read, the first is "used"; a link out, it was not, and
-  # still came first (Decision 798).
-  defp hidden(dir, name, first, read, fields) do
-    reason =
-      case read do
-        [%{status: :outside}] -> "skipped: #{first} comes first in this directory"
-        [_file] -> "skipped: #{first} is used in this directory"
-        [] -> "skipped: #{first} comes first in this directory"
-      end
-
-    unread(Path.join(dir, name), dir, fields, :skipped, reason)
-  end
+  defp unreadable(path, dir, fields, reason),
+    do: unread(path, dir, fields, :unreadable, "not read: #{:file.format_error(reason)}")
 
   # A file found and not read: listed with nothing of it in the prompt, not even its size,
   # and with why in words.
@@ -405,56 +455,65 @@ defmodule Troupe.Instructions do
   defp bound(_scope, bounds), do: bounds.repository
 
   defp entry(path, fields) do
-    case File.read(path) do
-      {:ok, content} ->
-        {:ok,
-         Map.merge(
-           %{
-             path: path,
-             directory: Path.dirname(path),
-             size: byte_size(content),
-             hash: hash(content),
-             reason: nil,
-             skipped: [],
-             imported_by: nil,
-             unfollowed: [],
-             rule: nil,
-             applies: nil,
-             text: content |> String.replace("\r\n", "\n") |> String.trim()
-           },
-           fields
-         )}
-
-      {:error, reason} ->
-        Logger.warning("instructions: ignoring unreadable #{path}: #{inspect(reason)}")
-        :error
+    with {:ok, content} <- File.read(path) do
+      {:ok,
+       Map.merge(
+         %{
+           path: path,
+           directory: Path.dirname(path),
+           size: byte_size(content),
+           hash: hash(content),
+           reason: nil,
+           skipped: [],
+           imported_by: nil,
+           unfollowed: [],
+           rule: nil,
+           applies: nil,
+           text: content |> String.replace("\r\n", "\n") |> String.trim()
+         },
+         fields
+       )}
     end
   end
 
-  ## Cursor's rules
+  ## Rules
 
-  # A directory's `.cursor/rules/*.mdc`, in name order, after its instruction file, and at
-  # the repository root the legacy `.cursorrules` before them (Decision 809). Not in the
-  # person's own directory: Cursor keeps a person's rules in its settings, not in files.
+  # A directory's `.troupe/rules/*.md`, in name order, after its instruction file
+  # (Decisions 809 and 828), then the other tools' rules found there, listed and not read:
+  # the legacy `.cursorrules` at the repository root, each `.cursor/rules/*.mdc`, and
+  # Copilot's `.github/instructions/*.instructions.md` at the root, the only place Copilot
+  # reads them. Not in the person's own directory, whose own file is `<config>/AGENTS.md`.
   defp rules({:user, _dir, _where}, _bounds, _worked_on), do: []
 
   defp rules({scope, dir, where}, bounds, worked_on) do
     fields = %{scope: scope, where: where}
-    path = Path.join(dir, @legacy_rules)
+    bound = bounds.repository
+    legacy = Path.join(dir, @legacy_rules)
+    listed = fn path -> [unread(path, dir, fields, :skipped, @onboard_reason)] end
 
     legacy =
-      if scope == :root and File.regular?(path),
-        do: rule(path, dir, fields, bounds.repository, worked_on),
+      if scope == :root and File.regular?(legacy),
+        do: listed.(legacy),
         else: []
 
-    legacy ++ cursor_rules(dir, fields, bounds.repository, worked_on)
+    copilot =
+      if scope == :root,
+        do:
+          in_rules_dir(Path.join(dir, @copilot_rules), @copilot_ext, dir, fields, bound, listed),
+        else: []
+
+    in_rules_dir(Path.join(dir, @rules_dir), ".md", dir, fields, bound, fn path ->
+      rule(path, dir, fields, bound, worked_on)
+    end) ++
+      legacy ++
+      in_rules_dir(Path.join(dir, @cursor_rules), ".mdc", dir, fields, bound, listed) ++
+      copilot
   end
 
-  # A `.cursor/rules` that is really outside the repository is listed once, as `outside`,
-  # and not looked into, so not even the names of what is there reach the log.
-  defp cursor_rules(dir, fields, bound, worked_on) do
-    rules_dir = Path.join(dir, @rules_dir)
-
+  # Each file in a rules directory whose name ends with the extension, in name order,
+  # through `each`. One that is really outside the repository is listed once, as
+  # `outside`, and not looked into, so not even the names of what is there reach the log.
+  defp in_rules_dir(rules_dir, extension, dir, fields, bound, each) do
     cond do
       not File.dir?(rules_dir) ->
         []
@@ -469,17 +528,22 @@ defmodule Troupe.Instructions do
           {:ok, names} -> names
           {:error, _reason} -> []
         end
-        |> Enum.filter(&(String.downcase(Path.extname(&1)) == ".mdc"))
+        |> Enum.filter(&rule_name?(&1, extension))
         |> Enum.sort()
         |> Enum.map(&Path.join(rules_dir, &1))
         |> Enum.filter(&File.regular?/1)
-        |> Enum.flat_map(&rule(&1, dir, fields, bound, worked_on))
+        |> Enum.flat_map(each)
     end
+  end
+
+  defp rule_name?(name, extension) do
+    name = String.downcase(name)
+    String.ends_with?(name, extension) and byte_size(name) > byte_size(extension)
   end
 
   # One rule, confined as a found file is, then read and judged against the files the
   # session worked on. A rule's globs are taken from `dir`, the directory that holds its
-  # `.cursor` (the repository root's, as Cursor has it).
+  # `.troupe` (the repository root's, as Cursor had it for `.cursor`).
   defp rule(path, dir, fields, bound, worked_on) do
     if under?(key(path), bound) do
       case entry(path, fields) do
@@ -487,8 +551,8 @@ defmodule Troupe.Instructions do
           {rule, body} = front_matter(file)
           [judge(%{file | directory: dir}, rule, body, worked_on)]
 
-        :error ->
-          []
+        {:error, reason} ->
+          [unreadable(path, dir, fields, reason)]
       end
     else
       [unread(path, dir, fields, :outside, outside_reason(fields.scope))]
@@ -579,39 +643,12 @@ defmodule Troupe.Instructions do
   defp translate(<<char::utf8, rest::binary>>, depth),
     do: Regex.escape(<<char::utf8>>) <> translate(rest, depth)
 
-  # A rule's front matter and its body. The legacy `.cursorrules` is all body and always
-  # applies. An `.mdc`'s front matter is read a line per key, as Cursor writes it and YAML
-  # would not always read it (`globs: *.ts` is an alias to YAML): `globs` a
-  # comma-separated string, a `[...]` list or a list of `- ` lines.
-  defp front_matter(%{path: path, text: text}) do
-    if Path.basename(path) == @legacy_rules do
-      {rule_from(true, [], nil), text}
-    else
-      text = String.trim_leading(text, "\uFEFF")
-      text |> String.split("\n") |> split_front_matter(text)
-    end
-  end
+  # A rule's front matter and its body, read by the one reader onboarding reads Cursor's
+  # and Copilot's rules with (`Troupe.Instructions.FrontMatter`, Decision 809's way).
+  defp front_matter(%{text: text}) do
+    {fields, body} = FrontMatter.split(text)
+    %{always: always, globs: globs, description: description} = FrontMatter.rule(fields)
 
-  defp split_front_matter([first | rest], text) do
-    with "---" <- String.trim(first),
-         {front, [_close | body]} <- Enum.split_while(rest, &(String.trim(&1) != "---")) do
-      fields = keys(front)
-      always = String.downcase(scalar(fields["alwaysApply"])) == "true"
-
-      description =
-        case scalar(fields["description"]) do
-          "" -> nil
-          description -> description
-        end
-
-      rule = rule_from(always, globs(fields["globs"]), description)
-      {rule, body |> Enum.join("\n") |> String.trim()}
-    else
-      _no_front_matter -> {rule_from(false, [], nil), text}
-    end
-  end
-
-  defp rule_from(always, globs, description) do
     apply =
       cond do
         always -> :always
@@ -620,77 +657,7 @@ defmodule Troupe.Instructions do
         true -> :manual
       end
 
-    %{apply: apply, globs: globs, description: description, matched: nil}
-  end
-
-  # Each `key:` line and the lines after it that are indented or a list's `-`, trimmed.
-  defp keys(lines) do
-    lines
-    |> Enum.reduce({%{}, nil}, fn line, {fields, key} ->
-      case Regex.run(~r/^([A-Za-z][\w-]*)\s*:\s*(.*)$/, line) do
-        [_line, name, value] -> {Map.put(fields, name, [String.trim(value)]), name}
-        nil when key != nil -> {continue(fields, key, line), key}
-        nil -> {fields, nil}
-      end
-    end)
-    |> elem(0)
-  end
-
-  defp continue(fields, key, line) do
-    if line =~ ~r/^(\s+\S|-)/,
-      do: Map.update!(fields, key, &(&1 ++ [String.trim(line)])),
-      else: fields
-  end
-
-  defp scalar(nil), do: ""
-
-  defp scalar([block | lines]) when block in ["|", ">", "|-", ">-"],
-    do: lines |> Enum.join(" ") |> unquote_value()
-
-  defp scalar(lines), do: lines |> Enum.join(" ") |> unquote_value()
-
-  defp globs(nil), do: []
-
-  defp globs(["" | lines]) do
-    for "-" <> item <- lines, item = unquote_value(item), item != "", do: item
-  end
-
-  defp globs(lines) do
-    value = lines |> Enum.join(" ") |> String.trim()
-
-    value =
-      if String.starts_with?(value, "[") and String.ends_with?(value, "]"),
-        do: String.slice(value, 1..-2//1),
-        else: value
-
-    for item <- split_globs(value), item = unquote_value(item), item != "", do: item
-  end
-
-  # On the commas outside braces, so `**/*.{ts,tsx}` stays one glob.
-  defp split_globs(value) do
-    {items, current, _depth} =
-      value
-      |> String.graphemes()
-      |> Enum.reduce({[], "", 0}, fn
-        ",", {items, current, 0} -> {[current | items], "", 0}
-        "{", {items, current, depth} -> {items, current <> "{", depth + 1}
-        "}", {items, current, depth} -> {items, current <> "}", max(depth - 1, 0)}
-        char, {items, current, depth} -> {items, current <> char, depth}
-      end)
-
-    Enum.reverse([current | items])
-  end
-
-  defp unquote_value(value) do
-    value = String.trim(value)
-
-    case value do
-      <<q, rest::binary>> when q in [?", ?'] and byte_size(rest) > 0 ->
-        if String.ends_with?(rest, <<q>>), do: String.slice(rest, 0..-2//1), else: value
-
-      _other ->
-        value
-    end
+    {%{apply: apply, globs: globs, description: description, matched: nil}, body}
   end
 
   ## Imports
@@ -698,7 +665,7 @@ defmodule Troupe.Instructions do
   # A file and what it imports, depth first, each import right after the file that names
   # it. `seen` is every file already in the prompt, so each is read once; the person's
   # own file imports from the config directory, every other from the repository. A
-  # Cursor rule's `@` names a file for Cursor's context, not an import, and is left alone.
+  # rule's `@` names a file to attach, as Cursor took it, not an import, and is left alone.
   defp imports(%{rule: %{}} = file, seen, _bounds), do: {[file], seen}
 
   defp imports(file, seen, bounds),
@@ -749,7 +716,7 @@ defmodule Troupe.Instructions do
 
     case entry(path, fields) do
       {:ok, child} -> {:read, child}
-      :error -> missing(spec)
+      {:error, _reason} -> missing(spec)
     end
   end
 
@@ -816,7 +783,7 @@ defmodule Troupe.Instructions do
   end
 
   defp fit(%{status: status} = file, budget, _left)
-       when status in [:outside, :skipped, :inactive],
+       when status in [:outside, :unreadable, :skipped, :inactive],
        do: Map.merge(file, %{chars: 0, trimmed: 0, budget: budget})
 
   # A rule listed by its description is listed whole or not at all.
@@ -865,33 +832,38 @@ defmodule Troupe.Instructions do
     end
   end
 
-  # The brief as `Troupe.Session.Memory` puts it in the prompt, with its own budget and
-  # status: listed here so one table says everything a prompt was read from. Its path is
-  # asked for once, since that is a `git` call and this runs at every turn. A brief that is
-  # a link out of its repository is `outside`, as an instruction file is, and not read.
+  # The brief as `Troupe.Session.Memory` puts it in the prompt, the core of the
+  # repository's facts (Decision 838), with its own budget and status: listed here so one
+  # table says everything a prompt was read from. Where the facts are is asked for once,
+  # since that is a `git` call and this runs at every turn. A brief that is a link out of
+  # its repository is `outside`, as an instruction file is, and not read. Its `path` is the
+  # view a person opens, `.troupe/memory.md`, and `hash` that file's; what reached the
+  # prompt is in the digest by itself, since an anchor's file changing changes the prompt
+  # and not the view.
   defp brief(workspace, config) do
-    path = Brief.path(workspace)
+    where = Brief.locate(workspace)
+    path = Brief.view_path(where)
     max = memory_max_chars(config)
 
     if Brief.inside?(path) do
-      brief(path, max, config)
+      brief(where, path, max, config)
     else
       fields = %{scope: :brief, where: nil, chars: 0, budget: max, trimmed: 0}
       unread(path, Path.dirname(path), fields, :outside, outside_reason(:brief))
     end
   end
 
-  defp brief(path, max, config) do
+  defp brief(where, path, max, config) do
+    core = if memory_enabled?(config), do: Brief.core(where)
+    prompt = Memory.prompt(core, Brief.prompt_opts(config))
+    text = Memory.compose(prompt, true)
     {size, hash} = stat(path)
-    brief = Brief.read(path)
-    text = Brief.to_prompt(brief, config)
-    overflow = Memory.overflow(brief, max_chars: max)
 
     status =
       cond do
         not memory_enabled?(config) -> :disabled
-        size == nil -> :absent
-        overflow > 0 -> :trimmed
+        text == "" -> :absent
+        prompt.trimmed > 0 -> :trimmed
         true -> :whole
       end
 
@@ -906,13 +878,14 @@ defmodule Troupe.Instructions do
       hash: hash,
       status: status,
       reason: nil,
-      trimmed: if(status == :trimmed, do: overflow, else: 0),
+      trimmed: if(status == :trimmed, do: prompt.trimmed, else: 0),
       skipped: [],
       imported_by: nil,
       unfollowed: [],
       rule: nil,
       applies: nil,
-      text: text
+      text: text,
+      memory: prompt
     }
   end
 
@@ -931,7 +904,8 @@ defmodule Troupe.Instructions do
     files
     |> Enum.map_join("\n", fn f ->
       unfollowed = Enum.map(f.unfollowed, &"#{&1.import}:#{&1.reason}")
-      fields = [f.path, f.hash || "", f.status, f.chars, f.trimmed, f.imported_by || ""]
+      text = :crypto.hash(:sha256, f.text) |> Base.encode16(case: :lower)
+      fields = [f.path, f.hash || "", f.status, f.chars, f.trimmed, f.imported_by || "", text]
       Enum.join(fields ++ [f.applies || ""] ++ f.skipped ++ unfollowed, "\t")
     end)
     |> then(&:crypto.hash(:sha256, &1))

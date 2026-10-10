@@ -10,7 +10,7 @@ defmodule Troupe.Gateway.WorktreesTest do
 
   use ExUnit.Case, async: false
 
-  alias Troupe.Gateway.Daemon
+  alias Troupe.Gateway.{Daemon, Worktrees}
   alias Troupe.Protocol.{Client, Endpoint, Error}
 
   @moduletag timeout: 120_000
@@ -108,6 +108,61 @@ defmodule Troupe.Gateway.WorktreesTest do
     refute File.dir?(second["worktree"])
   end
 
+  # The desktop app removes a worktree with `worktree.remove`, and on Windows git cannot
+  # delete the directory it was started in (Decision 843): the git that removes the tree is
+  # started in the checkout it belongs to. A stand-in for git on PATH says where it was
+  # started, which nothing here would otherwise show.
+  test "worktree.remove runs git from the checkout, not inside the tree it removes", context do
+    client = connect(context)
+
+    {:ok, _first} = create(client, context.workspace)
+    {:ok, second} = create(client, context.workspace)
+    started_in = record_removals(context.base)
+
+    assert {:ok, %{"removed" => true}} =
+             Client.call(client, "worktree.remove", %{
+               "command_id" => Client.command_id(),
+               "path" => second["worktree"]
+             })
+
+    refute File.dir?(second["worktree"])
+    assert [cwd] = started_in.()
+    assert cwd == real!(context.workspace)
+  end
+
+  # TUI Decision 42, in the daemon: `/worktree login: …` works in `<checkout>-login` on
+  # `troupe/login`, the same tree every time, made again from its branch when only the
+  # directory went.
+  test "a named worktree is made on troupe/<name> the first time and is the same one after",
+       context do
+    client = connect(context)
+
+    {:ok, _first} = create(client, context.workspace)
+    assert {:ok, named} = create(client, context.workspace, "always", "login")
+    assert named["branch"] == "troupe/login"
+    assert Path.basename(named["worktree"]) == "repo-login"
+    assert named["workspace"] == named["worktree"]
+    File.write!(Path.join(named["worktree"], "kept.txt"), "still here\n")
+    Troupe.stop_session(named["session_id"])
+
+    assert {:ok, again} = create(client, context.workspace, "always", "login")
+    assert again["worktree"] == named["worktree"]
+    assert File.read!(Path.join(again["worktree"], "kept.txt")) == "still here\n"
+    Troupe.stop_session(again["session_id"])
+
+    File.rm_rf!(named["worktree"])
+    assert {:ok, back} = create(client, context.workspace, "always", "login")
+    assert back["worktree"] == named["worktree"]
+    assert back["branch"] == "troupe/login"
+    assert File.dir?(back["worktree"])
+
+    for bad <- ["../up", "two words", "-x", "a..b", ".hidden", "x.lock", ""] do
+      assert {:error, %Error{message: "invalid_params", data: %{"field" => "worktree_name"}}} =
+               create(client, context.workspace, "always", bad),
+             bad
+    end
+  end
+
   test "worktree: never keeps the second session in the repository itself", context do
     client = connect(context)
 
@@ -118,7 +173,133 @@ defmodule Troupe.Gateway.WorktreesTest do
     assert second["workspace"] == context.workspace
   end
 
+  # A directory is the session's however it is spelled (Decision 840): on Windows git writes
+  # `C:/` where the session's workspace is `c:/`; here a link to the checkout stands for the
+  # other spelling. The live session is found, so the checkout is busy, and its row names it.
+  test "a session is found in its checkout however the path is spelled", context do
+    client = connect(context)
+    workspace = context.workspace
+    link = Path.join(context.base, "link")
+    :ok = File.ln_s(workspace, link)
+
+    refute Worktrees.auto?(link)
+    {:ok, %{"session_id" => sid}} = create(client, workspace, "never")
+
+    assert Worktrees.auto?(link)
+    assert [%{"session_id" => ^sid}] = Worktrees.list(link)
+  end
+
+  # Decision 840: what command mode's worktree rows say, from the daemon that has the trees.
+  test "worktree.list says how far each worktree stands from the checkout, and what it changed",
+       context do
+    workspace = context.workspace
+    client = connect(context)
+
+    assert {:ok, %{path: wt, branch: branch}} = Worktrees.create(workspace)
+    on_exit(fn -> File.rm_rf!(wt) end)
+
+    # A commit on the worktree's branch, a change on top of it nobody committed, and a new
+    # file git does not track yet; and a commit on the checkout's branch it has not got.
+    File.write!(Path.join(wt, "README.md"), "# repo\nmore\n")
+    {_, 0} = git(wt, ["commit", "-qam", "more"])
+    File.write!(Path.join(wt, "README.md"), "# repo, changed\nmore\n")
+    File.write!(Path.join(wt, "new.txt"), "one\ntwo\n")
+    File.write!(Path.join(workspace, "other.txt"), "x\n")
+    {_, 0} = git(workspace, ["add", "other.txt"])
+    {_, 0} = git(workspace, ["commit", "-qm", "other"])
+
+    assert {:ok, %{"worktrees" => trees}} =
+             Client.call(client, "worktree.list", %{"workspace" => workspace})
+
+    tree = Enum.find(trees, &(&1["branch"] == branch))
+    checkout = Enum.find(trees, &(&1["branch"] == "main"))
+
+    # Since it left `main`: `# repo` became two lines, and `new.txt` is two more.
+    assert %{"ahead" => 1, "behind" => 1, "added" => 4, "removed" => 1, "dirty" => true} = tree
+
+    # The checkout has nothing uncommitted, and no upstream to be ahead of or behind.
+    assert %{"ahead" => nil, "behind" => nil, "added" => 0, "removed" => 0, "dirty" => false} =
+             checkout
+  end
+
+  # #529 (Decision 833): the gateway's own git runs none of the commands the repository's
+  # `.git` names, as it makes a worktree, commits what was left in it and merges it.
+  describe "a repository whose own .git runs commands" do
+    setup %{base: base, workspace: workspace} do
+      marker = Path.join(base, "marker")
+      script = Path.join(base, "mark.sh")
+      File.write!(script, "#!/bin/sh\necho \"$*\" >> '#{marker}'\ncat\n")
+      File.chmod!(script, 0o755)
+
+      File.write!(Path.join(workspace, ".gitattributes"), "*.txt merge=mark filter=mark\n")
+      File.write!(Path.join(workspace, "notes.txt"), "one\n")
+      quiet!(workspace, ["add", "."])
+      quiet!(workspace, ["commit", "-q", "-m", "notes"])
+
+      {_, 0} = git(workspace, ["config", "core.fsmonitor", "#{script} fsmonitor"])
+      {_, 0} = git(workspace, ["config", "merge.mark.driver", "#{script} merge %O %A %B"])
+      {_, 0} = git(workspace, ["config", "filter.mark.smudge", "#{script} smudge"])
+      {_, 0} = git(workspace, ["config", "filter.mark.clean", "#{script} clean"])
+      hooks = Path.join(workspace, ".git/hooks")
+      File.mkdir_p!(hooks)
+
+      named = ~w(post-checkout pre-commit commit-msg post-commit pre-merge-commit post-merge)
+
+      for hook <- named ++ ~w(reference-transaction post-index-change) do
+        File.write!(Path.join(hooks, hook), "#!/bin/sh\n#{script} hook #{hook} </dev/null\n")
+        File.chmod!(Path.join(hooks, hook), 0o755)
+      end
+
+      %{marker: marker}
+    end
+
+    test "a worktree is made, its work committed and merged without running any", context do
+      %{workspace: workspace, marker: marker} = context
+
+      assert {:ok, %{path: wt, branch: branch}} = Worktrees.create(workspace)
+      on_exit(fn -> File.rm_rf!(wt) end)
+      assert File.read!(Path.join(wt, "notes.txt")) == "one\n"
+      File.write!(Path.join(wt, "feature.md"), "new\n")
+
+      assert [%{"dirty" => false}, %{"dirty" => true}] =
+               Worktrees.list(workspace) |> Enum.sort_by(& &1["path"])
+
+      assert {:ok, %{"branch" => ^branch, "committed" => true}} = Worktrees.merge(workspace, wt)
+
+      assert File.read!(Path.join(workspace, "feature.md")) == "new\n"
+      refute File.exists?(marker), "ran: #{ran(marker)}"
+    end
+
+    test "a file only the repository's merge driver would merge is a conflict", context do
+      %{workspace: workspace, marker: marker} = context
+
+      assert {:ok, %{path: wt}} = Worktrees.create(workspace)
+      on_exit(fn -> File.rm_rf!(wt) end)
+      File.write!(Path.join(wt, "notes.txt"), "one\ntwo\n")
+      File.write!(Path.join(workspace, "notes.txt"), "zero\none\n")
+      quiet!(workspace, ["commit", "-q", "-am", "zero"])
+
+      assert {:error, {:conflicts, output}} = Worktrees.merge(workspace, wt)
+      assert output =~ "notes.txt"
+      assert File.read!(Path.join(workspace, "notes.txt")) == "zero\none\n"
+      refute File.exists?(marker), "ran: #{ran(marker)}"
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
+
+  defp ran(marker) do
+    case File.read(marker) do
+      {:ok, ran} -> ran
+      {:error, _} -> ""
+    end
+  end
+
+  # The test's own git, which would run what the repository names.
+  defp quiet!(cwd, args) do
+    off = ~w(core.fsmonitor=false core.hooksPath=/dev/null filter.mark.clean= filter.mark.smudge=)
+    {_, 0} = git(cwd, Enum.flat_map(off, &["-c", &1]) ++ args)
+  end
 
   defp connect(context) do
     {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: context.endpoint, spawn: false)
@@ -126,14 +307,50 @@ defmodule Troupe.Gateway.WorktreesTest do
     client
   end
 
-  defp create(client, workspace, worktree \\ "auto") do
-    result =
-      Client.call(client, "session.create", %{
+  # A `git` first on PATH that writes where it was started for every `worktree remove`,
+  # then runs the real one; the function reads those back. PATH is the VM's own, and this
+  # module is not async.
+  defp record_removals(base) do
+    real_git = System.find_executable("git")
+    bin = Path.join(base, "bin")
+    log = Path.join(base, "removals.log")
+    File.mkdir_p!(bin)
+
+    File.write!(Path.join(bin, "git"), """
+    #!/bin/sh
+    case "$*" in *"worktree remove"*) pwd -P >> '#{log}' ;; esac
+    exec '#{real_git}' "$@"
+    """)
+
+    File.chmod!(Path.join(bin, "git"), 0o755)
+    path = System.get_env("PATH")
+    System.put_env("PATH", bin <> ":" <> path)
+    on_exit(fn -> System.put_env("PATH", path) end)
+
+    fn ->
+      case File.read(log) do
+        {:ok, text} -> String.split(text, "\n", trim: true)
+        {:error, _} -> []
+      end
+    end
+  end
+
+  defp real!(path) do
+    {:ok, real} = Troupe.Workspace.real_path(path)
+    real
+  end
+
+  defp create(client, workspace, worktree \\ "auto", name \\ nil) do
+    params =
+      %{
         "command_id" => Client.command_id(),
         "workspace" => workspace,
         "worktree" => worktree,
         "config" => %{"auto_approve" => true}
-      })
+      }
+
+    params = if name, do: Map.put(params, "worktree_name", name), else: params
+    result = Client.call(client, "session.create", params)
 
     with {:ok, %{"session_id" => id}} <- result do
       on_exit(fn -> Troupe.stop_session(id) end)

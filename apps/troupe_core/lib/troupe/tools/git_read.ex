@@ -8,12 +8,16 @@ defmodule Troupe.Tools.GitRead do
   the repository: the index and the worktree are only ever touched through `shell`,
   behind its approval. `ref` and `path` may not start with `-`, so a flag cannot be
   smuggled in as an argument.
+
+  It runs without asking, outside the sandbox, so through `Troupe.Git` (Decision 833):
+  nothing the repository's own `.git` names runs, and a workspace whose `.git` points at
+  another checkout's repository is not read.
   """
 
   @behaviour Troupe.Tool
 
   alias Troupe.Config
-  alias Troupe.Reaper
+  alias Troupe.Git
   alias Troupe.Tool
   alias Troupe.Tools.Output
 
@@ -108,11 +112,12 @@ defmodule Troupe.Tools.GitRead do
   defp pathspec(path), do: ["--", path]
 
   defp git(argv, ctx) do
-    case Reaper.run(ctx.workspace.root_real, ["git", "--no-pager" | argv], timeout_ms: @timeout_ms) do
+    case Git.run(ctx.workspace.root_real, argv, timeout_ms: @timeout_ms) do
       {:ok, "", 0} -> {:ok, "(no output)"}
       {:ok, out, 0} -> {:ok, Output.cap(String.replace(out, "\r\n", "\n"), cap(ctx), ctx)}
       {:ok, out, code} -> {:error, "git exited #{code}: #{String.trim(out)}"}
-      {:error, reason} -> {:error, "git could not run: #{Reaper.explain(reason)}"}
+      {:error, {:elsewhere, _, _} = reason} -> {:error, "git was not run: #{Git.explain(reason)}"}
+      {:error, reason} -> {:error, "git could not run: #{Git.explain(reason)}"}
     end
   end
 

@@ -22,5 +22,28 @@
   "cancel": {
     "calls_after_cancel": 0,
     "tasks_left_running": 0
+  },
+  "onboard_claude_code": {
+    "instruction_bytes": 570,
+    "files_written": 3,
+    "files_left_out": 1
+  },
+  "onboard_opencode": {
+    "instruction_bytes": 130,
+    "files_written": 3,
+    "files_left_out": 1
+  },
+  "onboard_cursor": {
+    "instruction_bytes": 560,
+    "files_written": 2,
+    "files_left_out": 1
+  },
+  "onboard_copilot": {
+    "instruction_bytes": 530,
+    "files_written": 2,
+    "files_left_out": 0
+  },
+  "memory_stale_anchor": {
+    "brief_bytes": 830
   }
 }

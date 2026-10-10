@@ -196,13 +196,14 @@ defmodule Troupe.StartAtLogin do
 
   @doc """
   The `troupe-daemon` an entry starts: `:command`, then `TROUPE_DAEMON_COMMAND`, then
-  `troupe-daemon` on the `PATH` — the shim the installers put there, which keeps its path
-  across an upgrade — and last the wrapper of the release this runs in.
+  `troupe-daemon` on the `PATH` (alone, not the current directory: Decision 846) — the shim
+  the installers put there, which keeps its path across an upgrade — and last the wrapper
+  of the release this runs in.
   """
   @spec command(keyword()) :: {:ok, Path.t()} | {:error, String.t()}
   def command(opts \\ []) do
     opts = options(opts)
-    find = Keyword.get(opts, :find, &System.find_executable/1)
+    find = Keyword.get(opts, :find, &Troupe.Executable.find/1)
     root = Keyword.get_lazy(opts, :release_root, fn -> to_string(:code.root_dir()) end)
     given = env(opts, "TROUPE_DAEMON_COMMAND")
 

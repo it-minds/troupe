@@ -14,10 +14,11 @@ defmodule Troupe.Gateway.Dispatch do
   effect.
   """
 
-  alias Troupe.Agent.Definitions
+  alias Troupe.Agent.{Definitions, Local}
   alias Troupe.Config.{ModelSettings, Settings}
 
   alias Troupe.Gateway.{
+    Agents,
     ClientTool,
     Commands,
     Connections,
@@ -33,7 +34,9 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Identity
   alias Troupe.LLM.Provider
+  alias Troupe.Memory.Facts
   alias Troupe.Mounts
+  alias Troupe.Onboard.Start, as: Onboarding
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
@@ -77,11 +80,27 @@ defmodule Troupe.Gateway.Dispatch do
     "fs.upload" => :control,
     "workspace.recent" => :observe,
     "agents.list" => :observe,
+    # An agent whole, and checked without writing (#503, Decision 841); writing one or
+    # taking it away is `admin`, as `mcp.add` is: a definition decides what runs.
+    "agents.get" => :observe,
+    "agents.validate" => :observe,
+    "agents.put" => :admin,
+    "agents.delete" => :admin,
     "commands.list" => :observe,
     # A command a file defines sends the session its prompt, so it takes what input does.
     "commands.run" => :control,
     "workflows.list" => :observe,
     "memory.get" => :observe,
+    # A no to rewriting a brief an older survey wrote (Decision 835): it writes only the
+    # person's own answer, in the state directory.
+    "memory.decline" => :control,
+    # What a session's start asks (Decision 835), the daemon's alone. The plan answers with
+    # the contents of other tools' files at the path it is given, the person's own among
+    # them, and a yes writes into the repository and into the person's config directory:
+    # both take what `config.set` and `memory.forget` take. A no writes only their answer.
+    "onboard.plan" => :admin,
+    "onboard.decline" => :control,
+    "onboard.apply" => :admin,
     "context.get" => :observe,
     "mcp.status" => :observe,
     "workspace.search" => :observe,
@@ -132,6 +151,8 @@ defmodule Troupe.Gateway.Dispatch do
     # Deleting what every agent on the repository starts from.
     "memory.forget" => :admin,
     "watch.set" => :admin,
+    # Whether a workspace is watched says nothing a status line may not show.
+    "watch.get" => :observe,
     # Saying who this machine's user is changes the name on every subsequent event, so
     # it takes the scope that everything else which changes the daemon takes. Reading it
     # back does not, because a client needs to know whether to offer the control at all.
@@ -364,7 +385,9 @@ defmodule Troupe.Gateway.Dispatch do
   # The project brief, as a client shows it: status, where it is, when it was built and
   # what it covers, and the text itself for a client that renders it. `refresh_due` is
   # whether a client that refreshes it by itself should start a librarian now, and
-  # `refresh_held_until` until when a try that built nothing holds that off.
+  # `refresh_held_until` until when a try that built nothing holds that off. `facts` are
+  # what the brief is now made of, each with its status as read now, and `generated` says
+  # `text` is their view (Decision 839).
   defp handle("memory.get", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          workspace = Path.expand(workspace),
@@ -380,13 +403,27 @@ defmodule Troupe.Gateway.Dispatch do
          "sections" => if(brief, do: Troupe.Memory.titles(brief), else: []),
          "text" => brief && Troupe.Memory.render(brief),
          "refresh_due" => Troupe.Session.Memory.refresh_due?(workspace, config),
-         "refresh_held_until" => held && DateTime.to_iso8601(held)
+         "refresh_held_until" => held && DateTime.to_iso8601(held),
+         "facts" => Facts.list(workspace),
+         "generated" => true
        }}
     end
   end
 
-  # With the record of a librarian's try at it, which is kept where the workspace's
-  # config keeps state; a config that cannot be read leaves that under the default.
+  # One fact, by its `id`, or with none the whole brief with the record of a librarian's
+  # try at it, which is kept where the workspace's config keeps state; a config that
+  # cannot be read leaves that under the default.
+  defp handle("memory.forget", %{"id" => id} = params, _context) when is_binary(id) do
+    with {:ok, workspace} <- fetch(params, "workspace") do
+      workspace = Path.expand(workspace)
+
+      case Facts.delete(workspace, id) do
+        :ok -> {:ok, %{"forgotten" => true, "id" => id}}
+        {:error, reason} -> {:error, not_forgotten(workspace, id, reason)}
+      end
+    end
+  end
+
   defp handle("memory.forget", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace") do
       workspace = Path.expand(workspace)
@@ -399,6 +436,19 @@ defmodule Troupe.Gateway.Dispatch do
 
       :ok = Troupe.Session.Memory.forget(workspace, state_dir)
       {:ok, %{"forgotten" => true}}
+    end
+  end
+
+  # The person said no to rewriting a brief an older survey wrote (Decision 835): not asked
+  # again until the survey changes. Kept where the workspace's config keeps state.
+  defp handle("memory.decline", params, _context) do
+    with {:ok, workspace} <- fetch(params, "workspace"),
+         workspace = Path.expand(workspace),
+         {:ok, config} <- workspace_config(workspace) do
+      case Onboarding.decline_brief(workspace, config: config) do
+        :ok -> {:ok, %{"declined" => true}}
+        {:error, reason} -> {:error, Error.new(:internal, %{reason: reason})}
+      end
     end
   end
 
@@ -444,28 +494,9 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  # The agents a session in this workspace could run: the built-ins, the machine's
-  # `agents/`, the project's `.troupe/agents/` — resolved the way `session.create` will
-  # resolve them, so a picker offers exactly what a `profile` may name.
-  defp handle("agents.list", params, _context) do
-    with {:ok, workspace} <- fetch(params, "workspace") do
-      agents =
-        workspace
-        |> Path.expand()
-        |> Definitions.load()
-        |> Definitions.primaries()
-        |> Enum.map(
-          &%{
-            "name" => &1.name,
-            "description" => &1.description,
-            "source" => Atom.to_string(&1.source)
-          }
-        )
-        |> Enum.sort_by(& &1["name"])
-
-      {:ok, %{"agents" => agents}}
-    end
-  end
+  # The agents a session here could run, each whole, checked, written and taken away
+  # (`Troupe.Gateway.Agents`, Decisions 825, 829 and 841). Writing them is the daemon's.
+  defp handle("agents." <> _ = method, params, _context), do: Agents.call(method, params)
 
   # The slash commands a client may offer for this session (Decision 698): the harness's
   # table, then one entry per primary agent, described by its definition. The agents are
@@ -642,12 +673,41 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # A session's agent, its root's, which is a branch's too: a branch is a session (Decision
+  # 646). Read from its file now, so an agent saved a moment ago is one to switch to, and
+  # applied at the turn boundary; a name nothing defines, or a subagent's, is refused with
+  # nothing written (Decision 841). The effect is `profile_switched`, carrying this
+  # `command_id`.
   defp handle("profile.switch", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, profile} <- fetch(params, "profile"),
          :ok <- activate(session_id, context) do
-      Troupe.switch_profile(session_id, profile)
-      {:ok, %{"accepted" => true}}
+      opts = [actor: actor(context)] ++ command_opts(params)
+
+      case Troupe.switch_profile(session_id, profile, opts) do
+        {:ok, definition} ->
+          {:ok,
+           %{
+             "accepted" => true,
+             "profile" => definition.name,
+             "layer" => Local.layer(definition)
+           }}
+
+        {:error, {:unknown_agent, name}} ->
+          {:error, Error.new(:not_found, %{kind: "agent", name: name})}
+
+        {:error, {:not_primary, name}} ->
+          {:error,
+           Error.new(:invalid_params, %{
+             field: "profile",
+             reason:
+               "#{name} is a subagent, which an agent delegates to: a session or a branch " <>
+                 "runs a primary agent"
+           })}
+
+        {:error, :no_session} ->
+          {:error, Error.new(:unavailable, %{reason: "the session is not running"})}
+      end
     end
   end
 
@@ -837,7 +897,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("session.create", params, context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          {:ok, parent} <- parent_of(params),
-         {:ok, resolved} <- Worktrees.resolve(workspace, Map.get(params, "worktree", "auto")) do
+         {:ok, resolved} <- where(workspace, params) do
       private? = Map.get(params, "private", false) == true
       {profile, task} = workflow_of(params, workspace)
 
@@ -980,6 +1040,10 @@ defmodule Troupe.Gateway.Dispatch do
         {:error, {:conflicts, output}} ->
           {:error, Error.new(:conflict, %{reason: "merge conflicts", output: output})}
 
+        {:error, {:local_changes, output}} ->
+          {:error,
+           Error.new(:conflict, %{reason: "local changes in the checkout", output: output})}
+
         {:error, reason} ->
           worktree_error(reason)
       end
@@ -1000,16 +1064,34 @@ defmodule Troupe.Gateway.Dispatch do
     with {:ok, workspace} <- fetch(params, "workspace") do
       enabled = Map.get(params, "enabled", true)
 
-      case Troupe.set_watch(workspace, enabled) do
+      case Troupe.set_watch(workspace, enabled, Map.get(params, "session_id")) do
         {:ok, backend} ->
           {:ok, %{"enabled" => enabled, "backend" => to_string(backend)}}
 
         {:error, :already_watching} ->
           {:error, Error.new(:conflict, %{reason: "watch is exclusive per workspace"})}
 
+        {:error, :not_local} ->
+          {:error, Error.new(:forbidden, %{reason: "watch mode runs where the files are"})}
+
         {:error, reason} ->
           {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
       end
+    end
+  end
+
+  # What a status line shows, and what the next `/watch` toggles (Decision 844): the
+  # session that watches the workspace, if one does, and with which backend.
+  defp handle("watch.get", params, _context) do
+    with {:ok, workspace} <- fetch(params, "workspace") do
+      state = Troupe.watch_state(workspace)
+
+      {:ok,
+       %{
+         "enabled" => state.enabled,
+         "backend" => to_string(state.backend),
+         "session_id" => state.session_id
+       }}
     end
   end
 
@@ -1101,9 +1183,61 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Onboarding, then the brief, at a session's start (Decision 835): the daemon's alone, as
+  # the settings are, since what it writes is the person's machine's. On a machine a worker
+  # runs on the plan says the pod's sentence and the rest refuse with it.
+  defp handle("onboard." <> _ = method, params, _context) do
+    with true <- Process.whereis(Troupe.Gateway.Daemon) != nil,
+         {:ok, workspace} <- fetch(params, "workspace"),
+         workspace = Path.expand(workspace),
+         {:ok, config} <- workspace_config(workspace) do
+      onboard(method, params, workspace, config)
+    else
+      false -> {:error, Error.new(:method_not_found, %{method: method})}
+      {:error, _error} = error -> error
+    end
+  end
+
   defp handle(method, _params, _context) do
     {:error, Error.new(:method_not_found, %{method: method})}
   end
+
+  defp onboard("onboard.plan", _params, workspace, config),
+    do: {:ok, Onboarding.plan(workspace, config: config)}
+
+  defp onboard(method, params, workspace, config) do
+    with {:ok, selection} <- onboard_selection(params) do
+      answer =
+        case method do
+          "onboard.apply" -> Onboarding.accept(workspace, selection, config: config)
+          "onboard.decline" -> Onboarding.decline(workspace, selection, config: config)
+          _other -> :unknown
+        end
+
+      case answer do
+        {:ok, result} -> {:ok, result}
+        {:error, reason} -> {:error, Error.new(:invalid_params, %{reason: reason})}
+        :unknown -> {:error, Error.new(:method_not_found, %{method: method})}
+      end
+    end
+  end
+
+  # `ids`, the items to act on, or `all: true`; one of the two.
+  defp onboard_selection(%{"all" => true}), do: {:ok, :all}
+
+  defp onboard_selection(%{"ids" => ids}) when is_list(ids) and ids != [] do
+    if Enum.all?(ids, &(is_binary(&1) and &1 != "")),
+      do: {:ok, ids},
+      else: {:error, Error.new(:invalid_params, %{field: "ids", reason: "a list of item ids"})}
+  end
+
+  defp onboard_selection(_params),
+    do:
+      {:error,
+       Error.new(:invalid_params, %{
+         field: "ids",
+         reason: "name the items by id, or pass all: true"
+       })}
 
   defp local_sources(method, params) do
     if Process.whereis(Troupe.Gateway.Daemon),
@@ -1315,8 +1449,35 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Where a new session works: the workspace, a fresh worktree, or the one `worktree_name`
+  # names (TUI Decision 42, Decision 843). A worktree git would not make is answered as an
+  # error the connection can send, not handed back raw.
+  defp where(workspace, params) do
+    case Worktrees.resolve(
+           workspace,
+           Map.get(params, "worktree", "auto"),
+           Map.get(params, "worktree_name")
+         ) do
+      {:ok, resolved} ->
+        {:ok, resolved}
+
+      {:error, {:bad_name, _name}} ->
+        {:error,
+         Error.new(:invalid_params, %{
+           field: "worktree_name",
+           reason: "one path segment of letters, digits, '.', '_' and '-', not starting with '.' or '-'"
+         })}
+
+      {:error, reason} ->
+        worktree_error(reason)
+    end
+  end
+
   defp worktree_error({:busy, session_id}),
     do: {:error, Error.new(:conflict, %{reason: "session #{session_id} is still working there"})}
+
+  defp worktree_error({:worktree_failed, output}),
+    do: {:error, Error.new(:internal_error, %{reason: output})}
 
   defp worktree_error(:not_found),
     do: {:error, Error.new(:not_found, %{kind: "worktree"})}
@@ -1325,7 +1486,7 @@ defmodule Troupe.Gateway.Dispatch do
     do: {:error, Error.new(:invalid_params, %{field: "path", reason: "not a worktree"})}
 
   defp worktree_error({:git, output}),
-    do: {:error, Error.new(:internal, %{reason: output})}
+    do: {:error, Error.new(:internal_error, %{reason: output})}
 
   defp worktree_error(reason),
     do: {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
@@ -1368,6 +1529,14 @@ defmodule Troupe.Gateway.Dispatch do
       {:ok, config, _layers} -> {:ok, config}
       {:error, error} -> {:error, Error.new(:invalid_params, %{field: "config", reason: Exception.message(error)})}
     end
+  end
+
+  # `memory.forget` of a fact (Decision 839): an id no fact has is `not_found`; one that is
+  # there and could not be forgotten (its file could not be written) is the store's reason.
+  defp not_forgotten(workspace, id, reason) do
+    if Enum.any?(Facts.list(workspace), &(&1["id"] == id)),
+      do: Error.new(:internal, %{reason: inspect(reason)}),
+      else: Error.new(:not_found, %{kind: "fact", id: id})
   end
 
   defp fetch(params, key) do
@@ -1546,9 +1715,11 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Read again from their files, as a switch reads them (Decision 841), so an agent saved
+  # since the session started is offered beside the rest.
   defp session_definitions(session_id, session) do
     case Troupe.definitions(session_id) do
-      {:ok, definitions} -> definitions
+      {:ok, definitions} -> Definitions.reload(definitions)
       {:error, :no_agent} -> session.workspace |> Path.expand() |> Definitions.load()
     end
   end

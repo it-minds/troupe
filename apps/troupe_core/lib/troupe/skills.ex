@@ -21,11 +21,23 @@ defmodule Troupe.Skills do
   A bundle's skills are gated by the profile's `skills:` list and the team's
   entitlements, since an admin published them for particular agents. A person's own
   skills are offered to every agent of the session, because the person put them there
-  for their own work; a workspace's skill of the same name as a bundle's shadows it,
-  the nearer layer winning as it does for everything else.
+  for their own work. A skill on the disk of the same name as one of the bundle's is not
+  read, whether or not this agent may consult the bundle's: a bundle is the plane's word,
+  only a pod has one, and a file that arrived with a clone does not stand in for a skill
+  an admin published, as an agent's does not (Decision 826). `skipped/2` lists such a
+  file with the reason. A profile that lets a repository's skills replace the bundle's
+  puts the nearer layer back on top, as it was before.
+
+  In a git worktree the workspace's layer is the worktree's own `.troupe/skills/` over
+  the main checkout's committed ones (`Troupe.Worktree`), held to the checkout.
+
+  `trusted: true` in the options says the session's workspace is trusted, as the session
+  stamps it when it starts (`Troupe.Workspace`'s `trusted?`): only then is what the
+  workspace's `skills.json` links from outside the repository read (Decision 829).
   """
 
-  alias Troupe.Agent.Definition
+  alias Troupe.Agent.{Definition, Definitions}
+  alias Troupe.{Paths, Workspace, Worktree}
   alias Troupe.Protocol.Bundle
   alias Troupe.Skills.Local
 
@@ -45,17 +57,22 @@ defmodule Troupe.Skills do
   end
 
   @typedoc """
-  What a session knows about its bundle: `%{version, hash, channel, dir, entitlements}`.
+  What a session knows about its bundle: `%{version, hash, channel, dir, entitlements,
+  repository_overrides}`.
 
   `entitlements` is the set the plane resolved for this session's team, by name, or
   `nil` for no restriction — which is what a local session, a laptop and every grant
-  nobody has narrowed all send.
+  nobody has narrowed all send. `repository_overrides` is `true` where the profile lets
+  a repository's agents and skills replace the bundle's and the built-ins (Decision 826);
+  anything else is those winning. A pod whose channel has nothing published is pinned to
+  nothing: `version` and `dir` nil.
   """
   @type bundle :: %{
           optional(:version) => term(),
           optional(:hash) => String.t() | nil,
           optional(:channel) => String.t() | nil,
           optional(:entitlements) => map() | nil,
+          optional(:repository_overrides) => boolean(),
           required(:dir) => Path.t() | nil
         }
 
@@ -87,17 +104,18 @@ defmodule Troupe.Skills do
   absent; the plane refused such a definition at publish, so here it can only mean a
   bundle that was materialised by hand. The person's own skills (`Troupe.Skills.Local`)
   come from the config directory and the workspace given, every one of them, whatever
-  the definition lists; `nil` reads no local layer.
+  the definition lists, but for those of a name the bundle has where the bundle wins
+  (`Troupe.Agent.Definitions.bundle_wins?/1`); `nil` reads no local layer.
   """
   @type listed :: %{
           name: String.t(),
           description: String.t(),
-          layer: :bundle | :user | :workspace,
+          layer: :bundle | Local.layer(),
           dir: Path.t()
         }
 
-  @spec available(bundle() | nil, Definition.t(), Path.t() | nil) :: [listed()]
-  def available(bundle, %Definition{} = definition, workspace \\ nil) do
+  @spec available(bundle() | nil, Definition.t(), Path.t() | nil, keyword()) :: [listed()]
+  def available(bundle, %Definition{} = definition, workspace \\ nil, opts \\ []) do
     from_bundle =
       case {definition.skills, bundle} do
         {[], _} ->
@@ -114,16 +132,140 @@ defmodule Troupe.Skills do
           []
       end
 
-    local =
-      case workspace do
-        nil -> []
-        root -> root |> Local.list() |> Enum.map(&Map.take(&1, [:name, :description, :layer, :dir]))
-      end
+    {local, _skipped} = local(bundle, workspace, opts)
 
     (from_bundle ++ local)
+    |> by_name()
+    |> Enum.sort_by(& &1.name)
+  end
+
+  @doc """
+  The skills found on disk that a session does not offer, each with why: on a pod, one
+  of a name the bundle has (Decision 826); in a worktree, one the main checkout has not
+  committed; anywhere, one not read because it is outside its edge or waits for the
+  workspace to be trusted, or whose `SKILL.md` can't be read (Decision 829). Shaped as
+  `Troupe.Agent.Definitions.skipped/1` gives an agent.
+  """
+  @spec skipped(bundle() | nil, Path.t() | nil, keyword()) :: [Definitions.skipped()]
+  def skipped(bundle, workspace, opts \\ []) do
+    {_local, skipped} = local(bundle, workspace, opts)
+    Enum.sort_by(skipped, & &1.name)
+  end
+
+  @doc """
+  The directories a session reads its own skills' files from: the person's layers and
+  the roots they link (`Troupe.Skills.Local.roots/2`, the workspace's from outside the
+  repository only with `trusted: true`), and in a worktree the main checkout's
+  `.troupe/skills`, whose committed skills it offers, when it really is in the checkout.
+  """
+  @spec roots(Path.t(), keyword()) :: [Path.t()]
+  def roots(workspace, opts \\ []) do
+    checkout =
+      with main when is_binary(main) <- Worktree.main(workspace),
+           dir = Path.join(Paths.project_dir(main), "skills"),
+           true <- Workspace.within?(dir, main) do
+        [dir]
+      else
+        _ -> []
+      end
+
+    (Local.roots(workspace, opts) ++ checkout) |> Enum.filter(&File.dir?/1) |> Enum.uniq()
+  end
+
+  # The person's own skills and the repository's, with the main checkout's committed ones
+  # below the worktree's own; then, where the bundle wins, every one of a name the bundle
+  # has taken out, whichever layer it came from. What was not read at all is listed too.
+  defp local(_bundle, nil, _opts), do: {[], []}
+
+  defp local(bundle, root, opts) do
+    %{skills: skills, skipped: left_out} = Local.resolve(root, opts)
+    # Not what a name higher up hid, nor a folder no skill may be called: what was not read.
+    unread = for %{status: status} = entry <- left_out, status != :skipped, do: unread(entry)
+
+    {listed, uncommitted} =
+      skills
+      |> Enum.map(&Map.take(&1, [:name, :description, :layer, :dir]))
+      |> with_checkout(root)
+
+    # Troupe ships no skills of its own, so the bundle's are the only names that win here;
+    # one it shipped would win as a built-in agent does.
+    if Definitions.bundle_wins?(bundle) do
+      taken = MapSet.new(bundle_skills(bundle), & &1.name)
+      {lost, kept} = Enum.split_with(listed, &MapSet.member?(taken, &1.name))
+
+      {kept,
+       unread ++
+         uncommitted ++ Enum.map(lost, &skip(&1, Definitions.lost_to_bundle(:skill, &1.name)))}
+    else
+      {listed, unread ++ uncommitted}
+    end
+  end
+
+  # Above every lower layer and below the worktree's own `.troupe/skills`, as the
+  # checkout's `.troupe/skills` is above them there, and held to the checkout.
+  defp with_checkout(listed, root) do
+    own = for %{layer: :workspace, name: name} <- listed, into: MapSet.new(), do: name
+
+    case Worktree.main(root) do
+      nil ->
+        {listed, []}
+
+      main ->
+        {found, left_out} =
+          main
+          |> Paths.project_dir()
+          |> Path.join("skills")
+          |> Local.held(main, Definitions.outside_checkout())
+
+        found = Enum.reject(found, &MapSet.member?(own, &1.name))
+
+        unread =
+          for %{status: status} = entry <- left_out,
+              status != :skipped and not MapSet.member?(own, entry.name),
+              do: unread(entry)
+
+        {checkout, drafts} = committed(found, main)
+        {lower, nearest} = Enum.split_with(listed, &(&1.layer != :workspace))
+
+        {by_name(lower ++ checkout ++ nearest),
+         unread ++ Enum.map(drafts, &skip(&1, Worktree.uncommitted(main)))}
+    end
+  end
+
+  # What the checkout has committed, as the workspace's layer, and what it has not.
+  defp committed([], _main), do: {[], []}
+
+  defp committed(found, main) do
+    committed = Worktree.committed(main, ".troupe/skills")
+
+    {kept, drafts} =
+      Enum.split_with(found, &MapSet.member?(committed, ".troupe/skills/#{&1.name}/SKILL.md"))
+
+    checkout = for skill <- kept, do: Map.take(skill, [:name, :description, :dir])
+    {Enum.map(checkout, &Map.put(&1, :layer, :workspace)), drafts}
+  end
+
+  # A skill not read at all, as the log lists it: a directory not looked into by itself.
+  defp unread(%{name: nil, dir: dir, reason: reason}),
+    do: %{kind: :skill, name: nil, path: dir, reason: reason}
+
+  defp unread(entry), do: skip(entry, entry.reason)
+
+  # A pin with nothing pinned, or no directory on this pod, has no skills.
+  defp bundle_skills(bundle) do
+    case dir(bundle) do
+      nil -> []
+      path -> Bundle.list_skills_in(path)
+    end
+  end
+
+  defp skip(skill, reason),
+    do: %{kind: :skill, name: skill.name, path: Path.join(skill.dir, "SKILL.md"), reason: reason}
+
+  defp by_name(skills) do
+    skills
     |> Enum.reduce(%{}, fn skill, acc -> Map.put(acc, skill.name, skill) end)
     |> Map.values()
-    |> Enum.sort_by(& &1.name)
   end
 
   defp allowed(skills, definition) do
@@ -148,9 +290,9 @@ defmodule Troupe.Skills do
   and a profile that lists at least one of them, or a skill of the person's own. A model
   that sees the tool can call it; one that does not has nothing it could ask for.
   """
-  @spec tools(bundle() | nil, Definition.t(), Path.t() | nil) :: [Tool.t()]
-  def tools(bundle, %Definition{} = definition, workspace \\ nil) do
-    case available(bundle, definition, workspace) do
+  @spec tools(bundle() | nil, Definition.t(), Path.t() | nil, keyword()) :: [Tool.t()]
+  def tools(bundle, %Definition{} = definition, workspace \\ nil, opts \\ []) do
+    case available(bundle, definition, workspace, opts) do
       [] -> []
       skills -> [tool(skills)]
     end
@@ -163,9 +305,9 @@ defmodule Troupe.Skills do
   profile with thirty skills costs thirty lines of prompt rather than thirty
   documents, and the log says which of them the model actually read.
   """
-  @spec prompt_section(bundle() | nil, Definition.t(), Path.t() | nil) :: String.t()
-  def prompt_section(bundle, %Definition{} = definition, workspace \\ nil) do
-    case available(bundle, definition, workspace) do
+  @spec prompt_section(bundle() | nil, Definition.t(), Path.t() | nil, keyword()) :: String.t()
+  def prompt_section(bundle, %Definition{} = definition, workspace \\ nil, opts \\ []) do
+    case available(bundle, definition, workspace, opts) do
       [] ->
         ""
 

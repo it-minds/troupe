@@ -303,9 +303,9 @@ defmodule Troupe.Commands do
         args: [window()],
         availability: "window",
         detail:
-          "Closes the activated window, or the one named. This session's own window lets " <>
-            "go of the session; a branch's window closes for good and its session stays in " <>
-            "the daemon, where /sessions still lists it.",
+          "Closes the activated window, or the one named: a branch's window closes for " <>
+            "good and its session stays in the daemon, where /sessions still lists it. " <>
+            "This session's own window stays; /back, /sessions or /new leave the session.",
         example: "/dismiss 3"
       ),
       entry("merge", "session", "Land a worktree branch on the checkout",
@@ -401,31 +401,37 @@ defmodule Troupe.Commands do
         args: [arg("action", false, "text")],
         availability: "local",
         detail:
-          "The brief in .troupe/memory.md is read into every agent's prompt. /memory says " <>
-            "what it holds, /memory refresh asks the librarian to rewrite it, /memory forget " <>
-            "deletes it.",
+          "The brief is made of facts, each anchored on the files it was read from; its " <>
+            "commands and conventions are read into every agent's prompt. /memory lists the " <>
+            "facts by kind, says which may no longer be true and where each came from, and " <>
+            "forgets one; /memory refresh asks the librarian to re-verify and rewrite them, " <>
+            "/memory forget deletes the whole brief.",
         example: "/memory refresh"
       ),
-      entry("context", "workspace", "Every instruction file and Cursor rule, why each is in or left out, and its share of the budget",
+      entry(
+        "context",
+        "workspace",
+        "Every instruction file and rule, why each is in or left out, and its share of the budget",
         usage: "/context",
         detail:
           "The files the next turn's system prompt is read from: your own AGENTS.md, the " <>
             "repository's, one in each directory down to the workspace and to the files " <>
             "the conversation worked on, the files they import with @path, the " <>
-            "repository's Cursor rules (always, or once a matching file is read or " <>
-            "edited), and the project brief, each with its scope, size and share of the " <>
+            "repository's rules in .troupe/rules (always, or once a matching file is read " <>
+            "or edited), and the project brief, each with its scope, size and share of the " <>
             "budget; and every " <>
-            "file left out, with why: an alias (CLAUDE.md, GEMINI.md, " <>
-            "copilot-instructions.md) another name hid, a Copilot file below the root, a " <>
-            "file outside the repository, an import not followed, a rule whose files " <>
-            "haven't been touched or that only describes itself."
+            "file left out, with why: another tool's file (CLAUDE.md, GEMINI.md, " <>
+            "copilot-instructions.md, Cursor's rules), which troupe onboard brings in, a " <>
+            "Copilot file below the root, a file outside the repository or one that can't " <>
+            "be read, an import not followed, a rule whose files haven't been touched or " <>
+            "that only describes itself."
       ),
       entry("watch", "workspace", "Toggle watch mode: act on AI! and AI? comments",
         usage: "/watch",
         availability: "local",
         detail:
-          "A comment ending in AI! starts a change and AI? starts an answer. One session " <>
-            "per workspace watches at a time."
+          "A comment ending in AI! starts a quick branch in this checkout and AI? an answer " <>
+            "one; their writes ask first. One session per workspace watches at a time."
       ),
       entry("settings", "setup", "Settings, and the keys and concepts worth knowing",
         usage: "/settings",
@@ -462,11 +468,16 @@ defmodule Troupe.Commands do
           "Type to filter by name, alias or description; ↑↓ move, Enter runs, Tab puts " <>
             "the command on the line, Esc closes. / on an empty line opens it too."
       ),
-      entry("agents", "agents", "List the agents this session can start a branch on",
+      entry("agents", "agents", "Read, copy, create, edit and delete the agents",
         usage: "/agents",
         detail:
-          "The primary agents: the built-ins, this machine's agents/ and the project's " <>
-            ".troupe/agents/. Each is a command of its own, below."
+          "The primary agents, each with where it comes from (built in, a bundle, yours or " <>
+            "the repository's), its model, its tools, whether it is read-only and which " <>
+            "windows run it; Enter reads its whole instruction. An edit opens your editor " <>
+            "and is checked and saved by the daemon into your agents/ or the repository's " <>
+            ".troupe/agents/; c copies one into the repository, n starts a new one, x " <>
+            "deletes a copy. Each is a command of its own, below, and Tab in a window " <>
+            "switches the agent it runs."
       ),
       entry("worktree", "agents", "Run the default agent on a branch in a worktree of its own",
         usage: "/worktree [name:] <prompt>",
@@ -527,7 +538,13 @@ defmodule Troupe.Commands do
     # What it sends, as its file has it (Decision 814): its description is the file's
     # say-so, and a palette shows the prompt itself before it first runs.
     |> Map.put("body", command.body)
+    |> put_agent(command)
   end
+
+  # The agent its file says it runs on, where it names one: what a branch started for it
+  # runs on (TUI Decision 155).
+  defp put_agent(entry, %{agent: agent}) when is_binary(agent), do: Map.put(entry, "agent", agent)
+  defp put_agent(entry, _command), do: entry
 
   # Where a command is changed: a workspace's by its place in the repository, a person's
   # in full.

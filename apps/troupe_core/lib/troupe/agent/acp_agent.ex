@@ -17,7 +17,9 @@ defmodule Troupe.Agent.ACPAgent do
   **through `Troupe.Workspace`**, which resolves through the mounts. A subprocess somebody
   else wrote gets the session's mounts at their modes rather than the pod's disk, and a
   path outside them fails the way any other tool call fails — not by a check written here,
-  but by the same `Mounts.resolve/3` every tool goes through.
+  but by the same `Mounts.resolve/3` every tool goes through. And on a worker the
+  subprocess itself runs in the sandbox over those mounts (Decision 832), so a file it
+  opens for itself, rather than through its client, is the session's too.
 
   That is the argument for doing it here. A client that ran the agent itself would be
   handing it a laptop; this hands it a session.
@@ -36,8 +38,8 @@ defmodule Troupe.Agent.ACPAgent do
   # already has its answer. The parent has had its report, or turns the `:DOWN` into one.
   use GenServer, restart: :temporary
 
+  alias Troupe.{Executable, Mounts, Sandbox, Workspace}
   alias Troupe.LLM.Usage
-  alias Troupe.Workspace
 
   require Logger
 
@@ -188,6 +190,14 @@ defmodule Troupe.Agent.ACPAgent do
       "code" => -32_602,
       "message" => "that mount is read-only",
       "data" => %{"mount" => name, "path" => path}
+    }
+  end
+
+  defp refusal({:git_dir, _path}, path) do
+    %{
+      "code" => -32_602,
+      "message" => "that path is in a .git directory, which is not written through the client",
+      "data" => %{"path" => path}
     }
   end
 
@@ -380,22 +390,36 @@ defmodule Troupe.Agent.ACPAgent do
 
   # The command and its arguments come from the bundle and nothing else. No shell: an
   # argument a bundle carried would otherwise be a place to put a pipeline, and the bundle
-  # is signed for what it says rather than for what a shell makes of it.
+  # is signed for what it says rather than for what a shell makes of it. A name is found
+  # on the PATH alone and a relative path is the workspace's, never the daemon's current
+  # directory (Decision 846).
   defp open_port(entry, workspace) do
-    case System.find_executable(entry.command) do
-      nil ->
-        {:error, {:not_on_path, entry.command}}
+    with {:ok, executable} <- Executable.resolve(entry.command, workspace.root_real),
+         {:ok, [program | args]} <- confine([executable | entry.args], workspace) do
+      {:ok,
+       Port.open({:spawn_executable, program}, [
+         :binary,
+         :exit_status,
+         {:args, args},
+         {:cd, workspace.root_real},
+         :use_stdio,
+         :hide
+       ])}
+    else
+      {:error, why} when is_binary(why) -> {:error, {:sandbox, why}}
+      {:error, not_found} -> {:error, not_found}
+    end
+  end
 
-      executable ->
-        {:ok,
-         Port.open({:spawn_executable, executable}, [
-           :binary,
-           :exit_status,
-           {:args, entry.args},
-           {:cd, workspace.root_real},
-           :use_stdio,
-           :hide
-         ])}
+  # On a worker the program runs in the sandbox over the session's mounts, as every
+  # command there does (Decision 832): what it reads and writes for itself, not only what
+  # it asks its client for, is the session's. Its `$HOME` is the sandbox's private `/tmp`.
+  defp confine(argv, workspace) do
+    if Sandbox.required?() do
+      mounts = workspace.mounts || Mounts.local(workspace.root_real)
+      Sandbox.command(argv, mounts, cwd: workspace.root_real, home: "/tmp")
+    else
+      {:ok, argv}
     end
   end
 end

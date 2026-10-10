@@ -1,21 +1,24 @@
 defmodule Troupe.Session.Memory do
   @moduledoc """
-  Owns `.troupe/memory.md`, the project brief every agent's system prompt opens with.
+  The project brief every agent's system prompt opens with: a repository's facts
+  (`Troupe.Memory.Facts`, Decision 838) and the view of them, `.troupe/memory.md`.
 
   One brief per repository: the path is the repository's main checkout, so a session in
-  a worktree reads and writes the same file as the session whose branch it is, and a
-  later session on either finds what both learned. Writes go through a VM-wide
-  transaction keyed by the path, re-read the file before merging, and replace it by
-  rename — so two agents in one daemon cannot clobber each other's note, and a hand
-  edit made between two calls survives. Two daemons on one repository are last-write-
-  wins per section; that is deliberate, and cheaper than locking state nobody is racing
-  for in practice.
+  a worktree reads and writes the same facts as the session whose branch it is, and a
+  later session on either finds what both learned. A worktree is one its checkout names
+  back, as trust has it (`Troupe.Config.Trust.root/1`): a `.git` a workspace wrote itself,
+  giving another checkout's `.git` as its common directory, leaves the brief in the
+  workspace (Decision 831). A fact's anchors are read from the top of the checkout or
+  worktree the session is in, so a branch whose `mix.exs` differs says so.
 
-  No process of its own: the brief is a file, the daemon has many sessions, and a
-  function over a path is what both want.
+  The facts have one writer, their store's process; this module says where they are,
+  whether the brief is worth (re)building, and keeps the record of a librarian's try in
+  the state directory.
   """
 
-  alias Troupe.{Config, Memory, Paths, Reaper, Workspace}
+  alias Troupe.{Config, Git, Instructions, Memory, Paths, Workspace}
+  alias Troupe.Config.Trust
+  alias Troupe.Memory.Facts
 
   require Logger
 
@@ -24,17 +27,35 @@ defmodule Troupe.Session.Memory do
   # When a librarian last started on each brief, filed under the brief's path.
   @attempts "librarian.json"
 
-  @doc "Where the brief lives for a workspace: its repository's main checkout."
-  @spec path(Path.t()) :: Path.t()
-  def path(workspace), do: Path.join([repository_root(workspace), ".troupe", "memory.md"])
+  @doc """
+  Where a workspace's facts are kept (`root`, its repository's main checkout) and where
+  their anchors are read from (`top`, the checkout or worktree the workspace is in); the
+  workspace itself for both outside git, or where its `.git` names a checkout that does
+  not name it back.
+  """
+  @spec locate(Path.t()) :: %{root: Path.t(), top: Path.t()}
+  def locate(workspace), do: repository_root(workspace)
 
-  @doc "The parsed brief, or `nil` when there is no readable one."
-  @spec brief(Path.t()) :: Memory.t() | nil
-  def brief(workspace), do: workspace |> path() |> read()
+  @doc "Where the brief's view lives for a workspace: its repository's main checkout."
+  @spec path(Path.t()) :: Path.t()
+  def path(workspace), do: workspace |> locate() |> view_path()
+
+  @doc "The view's path at a location `locate/1` gave."
+  @spec view_path(%{root: Path.t()}) :: Path.t()
+  def view_path(%{root: root}), do: Path.join([root, ".troupe", "memory.md"])
 
   @doc """
-  The parsed brief at a path `path/1` gave, or `nil`: for a caller that needs the path
-  as well, since finding the repository's main checkout is a `git` call. A brief that is
+  The brief's view, parsed, or `nil` when there are no facts: read after its store has
+  read the files again, so a person's edit or a brief from before facts is in it.
+  """
+  @spec brief(Path.t()) :: Memory.t() | nil
+  def brief(workspace) do
+    where = locate(workspace)
+    if safely(fn -> Facts.count(where) end, 0) > 0, do: read(view_path(where))
+  end
+
+  @doc """
+  The parsed view at a path `path/1` gave, or `nil`, as the file is now. A view that is
   not `inside?/1` its repository is `nil` too.
   """
   @spec read(Path.t()) :: Memory.t() | nil
@@ -63,9 +84,11 @@ defmodule Troupe.Session.Memory do
   stand for a file elsewhere. One that does not exist yet is inside.
   """
   @spec inside?(Path.t()) :: boolean()
-  def inside?(path) do
-    root = path |> Path.dirname() |> Path.dirname()
+  def inside?(path), do: inside?(path, path |> Path.dirname() |> Path.dirname())
 
+  @doc "Whether `path` is really under `root`, links followed: `inside?/1` for any file of the memory."
+  @spec inside?(Path.t(), Path.t()) :: boolean()
+  def inside?(path, root) do
     with {:ok, real} <- Workspace.real_path(path),
          {:ok, real_root} <- Workspace.real_path(root) do
       key = Workspace.compare_key(real)
@@ -76,60 +99,87 @@ defmodule Troupe.Session.Memory do
     end
   end
 
-  @doc "The `# Project brief` block for a system prompt; `\"\"` when absent or disabled."
-  @spec prompt_section(Path.t(), Config.t() | nil) :: String.t()
-  def prompt_section(workspace, config) do
+  @doc "The `# Project brief` block for a system prompt; `\"\"` when there are no facts or it is off."
+  @spec prompt_section(Path.t(), Config.t() | nil, keyword()) :: String.t()
+  def prompt_section(workspace, config, opts \\ []) do
     if enabled?(config),
-      do: workspace |> brief() |> to_prompt(config),
+      do: workspace |> core() |> Memory.to_prompt(prompt_opts(config) ++ opts),
       else: ""
   end
 
-  @doc "`prompt_section/2` for a brief already read."
-  @spec to_prompt(Memory.t() | nil, Config.t() | nil) :: String.t()
-  def to_prompt(brief, config) do
-    if enabled?(config),
-      do: Memory.to_prompt(brief, max_chars: max_chars(config)),
-      else: ""
-  end
+  @doc "The core a prompt carries (`Troupe.Memory.Facts.core/1`), or nothing when it cannot be read."
+  @spec core(Path.t() | %{root: Path.t(), top: Path.t()}) :: Memory.core() | nil
+  def core(where), do: safely(fn -> Facts.core(where) end, nil)
 
-  @doc "Whether the brief is worth (re)building."
+  @doc "What `Troupe.Memory.prompt/2` is told under a config: the cap and the age a fact keeps."
+  @spec prompt_opts(Config.t() | nil) :: keyword()
+  def prompt_opts(config), do: [max_chars: max_chars(config), max_age_days: max_age(config)]
+
+  @doc """
+  Whether the brief is worth (re)building: `absent` with no facts, `stale` when it was
+  never built, is older than `memory_max_age_days`, or a command or convention it holds
+  rests on a file that changed or went since it was built (`Troupe.Memory.stale?/3`),
+  `fresh` otherwise.
+  """
   @spec status(Path.t(), Config.t() | nil) :: status()
   def status(workspace, config) do
-    brief = brief(workspace)
+    if enabled?(config),
+      do: workspace |> locate() |> status_at(config),
+      else: :disabled
+  end
 
-    cond do
-      not enabled?(config) -> :disabled
-      is_nil(brief) -> :absent
-      Memory.stale?(brief, files: tracked_files(workspace), max_age_days: max_age(config)) -> :stale
-      true -> :fresh
+  defp status_at(where, config) do
+    case core(where) do
+      nil -> :absent
+      %{facts: [], others: others} when map_size(others) == 0 -> :absent
+      %{facts: facts} -> if stale?(where, facts, config), do: :stale, else: :fresh
     end
   end
 
-  @doc "Appends a dated note from `agent`."
-  @spec note(Path.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
-  def note(workspace, agent, text), do: mutate(workspace, &Memory.add_note(&1, agent, text))
+  defp stale?(where, facts, config) do
+    built_at = safely(fn -> where |> Facts.meta() |> Map.get(:built_at) end, nil)
+    Memory.stale?(built_at, facts, max_age_days: max_age(config))
+  end
 
-  @doc "Replaces a curated section and stamps the brief as rebuilt."
-  @spec put_section(Path.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
-  def put_section(workspace, title, text) do
-    mutate(workspace, fn brief ->
-      brief
-      |> Memory.put_section(title, text)
-      |> Memory.stamp(head(workspace), tracked_files(workspace))
-    end)
+  @doc "Appends a note from `agent`, as a fact of kind `note`."
+  @spec note(Path.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
+  def note(workspace, agent, text) do
+    claim = text |> to_string() |> String.split() |> Enum.join(" ")
+
+    case Facts.put(workspace, %{"kind" => "note", "claim" => claim}, %{by: "agent:" <> agent}) do
+      {:ok, _fact} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Replaces a section's facts with one per item of `text` and stamps the brief as rebuilt,
+  as writing a whole section did before there were facts. `by` says who wrote it.
+  """
+  @spec put_section(Path.t(), String.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
+  def put_section(workspace, title, text, by \\ "librarian") do
+    case Memory.kind_of_title(title) do
+      nil ->
+        {:error, "unknown section #{title}"}
+
+      kind ->
+        Facts.replace(workspace, kind, Memory.claims(text), %{by: by, head: head(workspace)})
+    end
   end
 
   @doc """
   Stamps the brief as checked against the repository now, and changes no word of it: what
-  a librarian's run leaves when it found nothing to rewrite (Decision 696). A repository
-  with no readable brief is left as it is.
+  a librarian's run leaves when it found nothing to rewrite (Decision 696). Its unanchored
+  facts count as checked again; a moved one stays moved. A repository with no facts is
+  left as it is.
   """
   @spec checked(Path.t()) :: :ok | {:error, String.t()}
-  def checked(workspace) do
-    if brief(workspace),
-      do: mutate(workspace, &Memory.stamp(&1, head(workspace), tracked_files(workspace))),
-      else: :ok
-  end
+  def checked(workspace),
+    do:
+      safely(
+        fn -> Facts.stamp(workspace, head(workspace)) end,
+        {:error, "the facts could not be read"}
+      )
 
   @doc """
   Records that a librarian started on the brief at `at`, now unless told: what holds
@@ -144,14 +194,31 @@ defmodule Troupe.Session.Memory do
 
   @doc """
   Whether a client that keeps the brief up by itself (`memory_auto_refresh`) should
-  start a librarian now: the brief is absent or stale, and no librarian has tried it in
+  start a librarian now: the workspace is in a git repository (`repository?/1`), the brief
+  is absent or stale, and no librarian has tried it in
   the last `memory_max_age_days` without its being built since. So a run that failed,
   was cancelled or wrote nothing where there was no brief is tried again that much
   later, not in every new session (Decision 713).
   """
   @spec refresh_due?(Path.t(), Config.t() | nil) :: boolean()
   def refresh_due?(workspace, config) do
-    status(workspace, config) in [:absent, :stale] and held_until(workspace, config) == nil
+    repository?(workspace) and status(workspace, config) in [:absent, :stale] and
+      held_until(workspace, config) == nil
+  end
+
+  @doc """
+  Whether a workspace is in a git repository: a `.git` (a worktree's file too) in it or in
+  a directory above, as the instruction files and onboarding have it
+  (`Troupe.Instructions.repository_root/1`). Outside one the brief is due nothing, so no
+  client that trusts the daemon starts a librarian in a home directory.
+  """
+  @spec repository?(Path.t()) :: boolean()
+  def repository?(workspace) do
+    workspace
+    |> Path.expand()
+    |> Instructions.repository_root()
+    |> Path.join(".git")
+    |> File.exists?()
   end
 
   @doc """
@@ -164,7 +231,7 @@ defmodule Troupe.Session.Memory do
 
     # A try holds while it is younger than the age a brief may reach, and only when nothing
     # built the brief after it: a librarian that got through stamped it, and a brief stale
-    # since then, say because the repository grew, is due at once.
+    # since then, say because a file a command rests on changed, is due at once.
     with %DateTime{} = at <- attempted_at(path, state_dir(config)),
          until = DateTime.add(at, max_age(config) * 86_400, :second),
          true <- DateTime.compare(DateTime.utc_now(), until) != :gt,
@@ -175,16 +242,39 @@ defmodule Troupe.Session.Memory do
     end
   end
 
-  @doc "Deletes the brief, and the record of a librarian's try at it."
+  @doc "Forgets the brief, every fact with it, and the record of a librarian's try at it."
   @spec forget(Path.t(), Path.t() | nil) :: :ok
   def forget(workspace, state_dir \\ nil) do
-    path = path(workspace)
-    _ = if inside?(path), do: File.rm(path)
-    _ = update_attempts(state_dir, &Map.delete(&1, attempt_key(path)))
+    where = locate(workspace)
+    _ = safely(fn -> Facts.clear(where) end, :ok)
+    _ = update_attempts(state_dir, &Map.delete(&1, attempt_key(view_path(where))))
     :ok
   end
 
+  @doc "HEAD in the workspace, short, or `nil` outside git."
+  @spec head(Path.t()) :: String.t() | nil
+  def head(workspace) do
+    case git(Path.expand(workspace), ["rev-parse", "--short", "HEAD"]) do
+      {:ok, out} -> String.trim(out)
+      :error -> nil
+    end
+  end
+
   ## Internals
+
+  # The store is a process: a read that finds it gone or failing reads as no brief rather
+  # than taking the prompt, or the client asking, down with it.
+  defp safely(fun, default) do
+    fun.()
+  rescue
+    error ->
+      Logger.warning("memory: the facts could not be read: #{Exception.message(error)}")
+      default
+  catch
+    :exit, reason ->
+      Logger.warning("memory: the facts could not be read: #{inspect(reason)}")
+      default
+  end
 
   defp enabled?(%Config{memory: enabled}), do: enabled != false
   defp enabled?(_config), do: true
@@ -226,7 +316,7 @@ defmodule Troupe.Session.Memory do
   end
 
   # One daemon may start two librarians at once, on two repositories: the file is read
-  # and replaced inside a transaction on its path, as the brief is.
+  # and replaced inside a transaction on its path.
   defp update_attempts(state_dir, fun) do
     file = attempts_path(state_dir)
 
@@ -243,86 +333,47 @@ defmodule Troupe.Session.Memory do
     end)
   end
 
-  # Re-read before merging, inside a transaction on the path: another session in this
-  # daemon, or the person's editor, may have touched the file since anyone looked. A brief
-  # that is a link out is not written: the write would copy what it points at into the
-  # repository, or, through a linked `.troupe`, write elsewhere.
-  defp mutate(workspace, fun) do
-    path = path(workspace)
-
-    if inside?(path), do: transact(path, fun), else: refuse_outside(path)
-  end
-
-  defp refuse_outside(path) do
-    Logger.warning("memory: not writing #{path}: it is a link to outside its repository")
-    {:error, "not written: #{path} is a link to outside its repository"}
-  end
-
-  defp transact(path, fun) do
-    :global.trans({{__MODULE__, path}, self()}, fn ->
-      brief = fun.(read(path) || Memory.empty())
-
-      case write(path, brief) do
-        :ok ->
-          :ok
-
-        {:error, reason} ->
-          Logger.warning("memory: cannot write #{path}: #{inspect(reason)}")
-          {:error, "cannot write #{path}: #{inspect(reason)}"}
-      end
-    end)
-  end
-
-  defp write(path, brief) do
-    tmp = path <> ".tmp"
-
-    with :ok <- File.mkdir_p(Path.dirname(path)),
-         :ok <- File.write(tmp, Memory.render(brief)) do
-      File.rename(tmp, path)
-    end
-  end
-
   # The main checkout of the repository a workspace is in: a worktree's brief is the
-  # repository's, not a copy that disappears with the worktree.
+  # repository's, not a copy that disappears with the worktree. git takes a `.git` at its
+  # word, and one a workspace wrote itself can give any checkout's `.git` as its common
+  # directory, so that checkout is the brief's only when trust finds it for git's top
+  # level, which must hold the workspace: the top level is then the checkout itself, or a
+  # worktree the checkout's `.git/worktrees/<name>` names back. Otherwise the brief is the
+  # workspace's own (Decision 831). The top level is where anchors are read.
   defp repository_root(workspace) do
     workspace = Path.expand(workspace)
+    args = ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"]
 
-    case git(workspace, ["rev-parse", "--path-format=absolute", "--git-common-dir"]) do
-      {:ok, common} ->
-        common = common |> String.trim() |> Path.expand()
-        if Path.basename(common) == ".git", do: Path.dirname(common), else: workspace
-
-      :error ->
-        workspace
+    with {:ok, out} <- git(workspace, args),
+         [top, common] <- String.split(out, "\n", trim: true),
+         common = Path.expand(common),
+         ".git" <- Path.basename(common),
+         checkout = Path.dirname(common),
+         true <- within?(workspace, top),
+         true <- key(Trust.root(top)) == key(checkout) do
+      %{root: checkout, top: Path.expand(top)}
+    else
+      _ -> %{root: workspace, top: workspace}
     end
   end
 
-  defp head(workspace) do
-    case git(workspace, ["rev-parse", "--short", "HEAD"]) do
-      {:ok, out} -> String.trim(out)
-      :error -> nil
-    end
-  end
+  defp within?(path, root),
+    do: key(path) == key(root) or String.starts_with?(key(path), key(root) <> "/")
 
-  defp tracked_files(workspace) do
-    case git(workspace, ["ls-files", "--cached", "--others", "--exclude-standard"]) do
-      {:ok, out} ->
-        out
-        |> String.split("\n", trim: true)
-        |> Enum.reject(&String.starts_with?(&1, ".troupe/"))
-        |> length()
-
-      :error ->
-        nil
+  defp key(path) do
+    case Workspace.real_path(path) do
+      {:ok, real} -> Workspace.compare_key(real)
+      {:error, _} -> Workspace.compare_key(path)
     end
   end
 
   # Not a repository, git missing or failing, and a reaper that will not start all read
   # as no repository: this runs before every model call, and the reaper logs its own
-  # failure once (Decision 733).
+  # failure once (Decision 733). So does a `.git` naming another checkout's repository,
+  # and nothing the repository's own `.git` names runs (Decision 833).
   defp git(workspace, args) do
     if File.dir?(workspace) do
-      case Reaper.run(workspace, ["git" | args], timeout_ms: 10_000) do
+      case Git.run(workspace, args, timeout_ms: 10_000) do
         {:ok, out, 0} -> {:ok, out}
         _other -> :error
       end

@@ -1,3 +1,4 @@
+import type { AgentsChanged } from "./agents.js";
 import type {
   AuthExpiring,
   ConfigChanged,
@@ -77,6 +78,8 @@ export interface ConnectionHooks {
   onAuthExpiring?: (a: AuthExpiring) => void;
   /** A daemon's settings file changed, from this client or another (troupe #57). */
   onConfigChanged?: (c: ConfigChanged) => void;
+  /** An agent file the daemon writes changed, from this client or another (troupe #503). */
+  onAgentsChanged?: (c: AgentsChanged) => void;
   /** Serve a `tool.invoke`. Return the result, or throw to answer with an error. */
   onToolInvoke?: (invoke: ToolInvoke) => Promise<unknown>;
   onClose?: (reason: string) => void;
@@ -306,6 +309,9 @@ export class TroupeConnection {
           return;
         case "config.changed":
           this.hooks.onConfigChanged?.(params as ConfigChanged);
+          return;
+        case "agents.changed":
+          this.hooks.onAgentsChanged?.(params as AgentsChanged);
           return;
         case "tool.invoke": {
           const id = (msg as JsonRpcRequest).id;

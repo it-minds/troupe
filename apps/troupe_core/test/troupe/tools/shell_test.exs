@@ -75,6 +75,28 @@ defmodule Troupe.Tools.ShellTest do
     assert Shell.windows_bash(env, exists(files)) ==
              "C:/Users/me/AppData/Local/Programs/Git/bin/bash.exe"
   end
+
+  # A relative entry is the daemon's current directory, often a repository: its `git.exe`
+  # would have made its `bin/bash.exe` the shell (#555, Decision 846).
+  test "a relative entry of the PATH is never looked in" do
+    env = %{
+      "PATH" => ".;tools\\git\\cmd;C:\\Program Files\\Git\\cmd",
+      "SystemRoot" => "C:\\WINDOWS"
+    }
+
+    files = [
+      "./git.exe",
+      "./bin/bash.exe",
+      "./bash.exe",
+      "tools/git/cmd/git.exe",
+      "tools/git/bin/bash.exe",
+      "C:/Program Files/Git/cmd/git.exe",
+      "C:/Program Files/Git/bin/bash.exe"
+    ]
+
+    assert Shell.windows_bash(env, exists(files)) == "C:/Program Files/Git/bin/bash.exe"
+    assert Shell.windows_bash(%{env | "PATH" => ".;tools\\git\\cmd"}, exists(files)) == nil
+  end
 end
 
 defmodule Troupe.Tools.ShellReleasePathTest do
@@ -137,8 +159,74 @@ defmodule Troupe.Tools.ShellReleasePathTest do
     assert [{"PATH", path}] = Reaper.child_env()
     refute erts_bin in String.split(path, ":")
 
-    assert {:ok, output} = Shell.run(%{"command" => "echo \"$PATH\""}, ctx)
+    assert {:ok, output, _outcome} = Shell.run(%{"command" => "echo \"$PATH\""}, ctx)
     refute erts_bin in (output |> String.trim() |> String.split(":"))
     assert output =~ "/usr/bin"
+  end
+end
+
+defmodule Troupe.Tools.ShellLastLineTest do
+  @moduledoc """
+  The `shell` tool, and the runner a person's own command shares with it (Decision 813),
+  answer with a last line that has no newline after it (#536): `printf x` answered
+  "(no output)", because the port lets go of such a line only after the exit status.
+  With the host's shell, so on Windows with Git for Windows' bash. `async: false`:
+  `Troupe.ReaperTest` points the whole VM at a helper that will not start.
+  """
+
+  use ExUnit.Case, async: false
+
+  alias Troupe.Tool.Ctx
+  alias Troupe.Tools.Shell
+  alias Troupe.Workspace
+
+  @moduletag :tmp_dir
+
+  setup %{tmp_dir: root} do
+    {:ok, workspace} = Workspace.new(root)
+
+    ctx = %Ctx{
+      session_id: "s-#{System.unique_integer([:positive])}",
+      agent_path: ["root"],
+      workspace: workspace,
+      call_id: "call_1",
+      agent_pid: self(),
+      config: %Troupe.Config{}
+    }
+
+    %{ctx: ctx}
+  end
+
+  test "printf x answers x", %{ctx: ctx} do
+    assert {:ok, "x", %{fields: %{"exit_status" => 0}}} =
+             Shell.run(%{"command" => "printf x"}, ctx)
+
+    assert {:ok, "x\n\n[exit status 3]", %{fields: %{"exit_status" => 3}}} =
+             Shell.run(%{"command" => "printf x; exit 3"}, ctx)
+  end
+
+  test "cat reads a file without a final newline whole", %{ctx: ctx, tmp_dir: root} do
+    File.write!(Path.join(root, "notes.txt"), "one\ntwo\nthree")
+    assert {:ok, "one\ntwo\nthree", _outcome} = Shell.run(%{"command" => "cat notes.txt"}, ctx)
+  end
+
+  test "the runner streams the last line too", %{ctx: ctx} do
+    me = self()
+
+    assert {:ok, "one\ntwo", 0} =
+             Shell.execute("printf 'one\\ntwo'", ctx.workspace,
+               timeout_ms: 10_000,
+               on_output: &send(me, {:streamed, &1})
+             )
+
+    assert streamed() == "one\ntwo"
+  end
+
+  defp streamed(acc \\ "") do
+    receive do
+      {:streamed, chunk} -> streamed(acc <> chunk)
+    after
+      0 -> acc
+    end
   end
 end

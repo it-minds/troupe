@@ -8,17 +8,24 @@ defmodule Troupe.Commands.Local do
   The file name is the command: `review.md` is `/review`. The file has the shape other
   tools' command files have — optional YAML frontmatter, then the body — so one written
   for another tool reads here as it is. The frontmatter's `description` is what a palette
-  shows, and `argument-hint` what its usage line says follows the name; other keys are
-  left alone. The body is the prompt the command sends, with `$ARGUMENTS` standing for
-  whatever was typed after the name (`expand/2`).
+  shows, `argument-hint` what its usage line says follows the name, and `agent` the agent
+  it runs on where a client starts a branch for it (the terminal client's command mode,
+  TUI Decision 155); other keys are left alone. The body is the prompt the command sends,
+  with `$ARGUMENTS` standing for whatever was typed after the name (`expand/2`).
 
   The layers resolve the way the skills' do (Decision 700): the workspace's command wins
   over the user's of the same name. A command is a prompt, sent only when somebody types
   it, and does nothing the same words typed by hand would not, so a workspace's are read
   whether or not the workspace is trusted, as its `.troupe/agents/` are.
+
+  A workspace's are held to it by where each file really is, as its agents are
+  (Decision 829): a file that is a link out of the workspace, or a `.troupe/commands`
+  that is one, is not read, and `skipped/1` says so.
   """
 
+  alias Troupe.Agent.Definitions
   alias Troupe.Protocol.AgentDefinition
+  alias Troupe.Workspace
 
   require Logger
 
@@ -29,6 +36,7 @@ defmodule Troupe.Commands.Local do
           name: String.t(),
           description: String.t(),
           hint: String.t() | nil,
+          agent: String.t() | nil,
           body: String.t(),
           layer: layer(),
           path: Path.t()
@@ -52,11 +60,29 @@ defmodule Troupe.Commands.Local do
   """
   @spec list(Path.t(), keyword()) :: [command()]
   def list(workspace, opts \\ []) do
-    (in_dir(user_dir(opts), :user) ++ in_dir(workspace_dir(workspace), :project))
+    (in_dir(user_dir(opts), :user) ++ in_workspace(workspace))
     |> Enum.reduce(%{}, fn command, acc -> Map.put(acc, command.name, command) end)
     |> Map.values()
     |> Enum.sort_by(& &1.name)
   end
+
+  @doc """
+  The workspace's command files that are not read because they are really outside it,
+  links followed, each with why, shaped as `Troupe.Agent.Definitions.skipped/1` gives an
+  agent: a `.troupe/commands` that is a link out is one entry with no name.
+  """
+  @spec skipped(Path.t()) :: [Definitions.skipped()]
+  def skipped(workspace) do
+    dir = workspace_dir(workspace)
+
+    case Workspace.files_within(dir, ".md", workspace) do
+      :outside -> [skip(nil, dir)]
+      {_inside, outside} -> Enum.map(outside, &skip(Path.basename(&1, ".md"), Path.join(dir, &1)))
+    end
+  end
+
+  defp skip(name, path),
+    do: %{kind: :command, name: name, path: path, reason: Definitions.outside_workspace()}
 
   @doc """
   The prompt a command sends: its body with every `$ARGUMENTS` replaced by what was typed
@@ -78,6 +104,15 @@ defmodule Troupe.Commands.Local do
   @spec takes_arguments?(command()) :: boolean()
   def takes_arguments?(%{body: body, hint: hint}),
     do: hint != nil or String.contains?(body, @placeholder)
+
+  defp in_workspace(workspace) do
+    dir = workspace_dir(workspace)
+
+    case Workspace.files_within(dir, ".md", workspace) do
+      :outside -> []
+      {inside, _outside} -> Enum.flat_map(inside, &read(Path.join(dir, &1), :project))
+    end
+  end
 
   defp in_dir(dir, layer) do
     case File.ls(dir) do
@@ -104,6 +139,7 @@ defmodule Troupe.Commands.Local do
           name: name,
           description: text_of(meta["description"]) || "",
           hint: text_of(meta["argument-hint"]),
+          agent: text_of(meta["agent"]),
           body: body,
           layer: layer,
           path: path
