@@ -6,9 +6,9 @@
 // one place on the screen a person is waited on: one question for the lot, each file's
 // diff a click away, a new `AGENTS.md` asked on its own (Decision 827), and after that the
 // brief, when an older survey wrote it. The plan and the writing are the daemon's
-// (`StartQuestions` in the client library); this draws them. Afterwards a line says what
-// was done, and where onboarding may not run, the daemon's sentence says why and nothing
-// is asked.
+// (`StartQuestions` in the client library); this draws them. Afterwards a line in the
+// transcript says what was done, and where onboarding may not run, the daemon's sentence
+// says why and nothing is asked.
 
 import type { JSX } from "react";
 import { describeItem } from "@troupe/client";
@@ -127,7 +127,11 @@ function Diff({ text }: { text: string }): JSX.Element {
   );
 }
 
-/** What the start's questions came to, or why none were asked. Nothing while a question waits with nothing said yet. */
+/**
+ * Why the start asks nothing, where onboarding may not run, or why it could not go on.
+ * What it came to (what onboarding wrote, the librarian it started) is a line in the
+ * transcript instead, where the terminal client writes it too (`Session.tsx`).
+ */
 export function StartLine({ state }: { state: StartState | null }): JSX.Element | null {
   if (!state) return null;
   if (state.refusal) {
@@ -144,12 +148,5 @@ export function StartLine({ state }: { state: StartState | null }): JSX.Element 
       </div>
     );
   }
-  if (state.said.length === 0) return null;
-  return (
-    <div className="banner offered" role="status">
-      {state.said.map((sentence) => (
-        <p key={sentence}>{sentence}</p>
-      ))}
-    </div>
-  );
+  return null;
 }
