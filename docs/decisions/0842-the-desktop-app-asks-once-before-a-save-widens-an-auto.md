@@ -47,7 +47,10 @@ issue and 841 leave to the client.
   and a plane profile is not an agent: `profile.switch` names the agent, and since 841 an
   unknown name is refused. A refusal is said beside the switch; a switch that took is the
   transcript's to say, from `profile_switched` with its layer and the tools gained and
-  lost.
+  lost. The agent shown is the transcript's (`session_created`, whose `profile` a pod
+  writes as the agent it runs, `Troupe.Session` taking the plane's `agent` or the default,
+  then each `profile_switched`), and until that arrives a daemon row's `profile`, never a
+  plane row's, which names the plane's profile.
 - **Proof:** `clients/gui/apps/desktop/test/agents-manager.test.tsx` against the fake
   daemon (the list's facts and running windows, a built-in copied in one press, an unknown
   tool refused at its field with nothing written, a mended edit that leaves the other lines

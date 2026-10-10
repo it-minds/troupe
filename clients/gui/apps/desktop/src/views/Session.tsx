@@ -138,7 +138,7 @@ export function Session({
             daemon={daemon}
             kind={kind}
             workspace={kind !== "team" ? workspaceOf(row) : null}
-            current={view.state.profile ?? row?.profile ?? null}
+            current={agentOf(view.state, row)}
             canChange={!readOnly}
             onAbout={kind !== "team" ? onAgents : undefined}
           />
@@ -204,6 +204,15 @@ function transcriptText(state: TranscriptState): string {
  * it works towards; who is here; and the controls, with the loop beside the status
  * while one runs.
  */
+/**
+ * The agent a window runs: as its transcript says (`session_created`, then each
+ * `profile_switched`), and until that has arrived, as a daemon's row says it. A plane's row
+ * names the plane's profile, which is not an agent, so it is not shown as one.
+ */
+function agentOf(state: TranscriptState, row: FleetRow | undefined): string | null {
+  return state.profile ?? (row && row.kind !== "team" ? row.profile : null) ?? null;
+}
+
 /** Where a session on this computer works, as its row says. */
 function workspaceOf(row: FleetRow | undefined): string | null {
   const workspace = (row?.raw as { workspace?: unknown } | undefined)?.workspace;
@@ -260,7 +269,7 @@ function Header({
             </>
           )}
           <span className="profile" title="The agent this window runs">
-            {state.profile ?? row?.profile ?? "—"}
+            {agentOf(state, row) ?? "—"}
           </span>
           <span className="sep" aria-hidden="true">
             /

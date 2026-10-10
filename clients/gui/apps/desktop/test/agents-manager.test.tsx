@@ -275,12 +275,15 @@ describe("each window's agent", () => {
       await waitFor(() => says("Welcome, Ada."), "the first sign-in's theme");
       button("Continue")!.click();
       (await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Rewrite the placement loop")), "the session")).click();
-      const select = await waitFor(() => document.querySelector<HTMLSelectElement>('.session-head select[aria-label="Agent"]'), "the agent switch");
-      // The bundle's agents, from the session's own commands.list; dev is a profile, shown as where it stands.
-      expect([...select.options].map((o) => o.value)).toEqual(["dev", "build"]);
-      choose(select, "build");
-      await waitFor(() => harness.worker.calls.some((c) => c.method === "profile.switch" && c.params["profile"] === "build"), "profile.switch on the pod");
-      await waitFor(() => says("agent dev → build, from the next turn"), "the switch in the transcript");
+      const head = await waitFor(() => document.querySelector<HTMLElement>(".session-head"), "the session");
+      // The agent the pod runs, from its log; the plane's profile, dev, is never shown as one.
+      const select = await waitFor(() => (head.querySelector<HTMLSelectElement>('select[aria-label="Agent"]')?.value === "build" ? head.querySelector<HTMLSelectElement>('select[aria-label="Agent"]') : null), "the agent switch on build");
+      expect([...select.options].map((o) => o.value)).toEqual(["build", "plan"]);
+      expect(head.querySelector(".crumbs .profile")!.textContent).toBe("build");
+      choose(select, "plan");
+      await waitFor(() => harness.worker.calls.some((c) => c.method === "profile.switch" && c.params["profile"] === "plan"), "profile.switch on the pod");
+      await waitFor(() => says("agent build → plan (built in), from the next turn; no longer holds remember, write_file, edit_file, shell"), "the switch in the transcript");
+      expect(head.querySelector(".crumbs .profile")!.textContent).toBe("plan");
     } finally {
       delete window.troupe;
       unmount?.();

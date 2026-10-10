@@ -147,6 +147,18 @@ export const COMMANDS: CommandEntry[] = [
     example: null,
   },
   {
+    name: "plan",
+    aliases: [],
+    section: "agents",
+    summary: "Read-only investigation and planning.",
+    usage: "/plan <prompt>",
+    args: [arg("prompt", true, "text")],
+    availability: "local",
+    source: "agent",
+    detail: "Read-only investigation and planning. Writes the task list, never the code.",
+    example: null,
+  },
+  {
     name: "review",
     aliases: [],
     section: "custom",
