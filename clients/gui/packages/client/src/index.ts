@@ -26,7 +26,7 @@ export { SessionAttachment, waitOn } from "./attach.js";
 export type { AttachOptions, AttachStatus } from "./attach.js";
 export { ServerOffer, offeredName } from "./offer.js";
 export type { OfferAsk, OfferOptions, OfferState } from "./offer.js";
-export { LIBRARIAN_PROMPT, StartQuestions, briefQuestion, createQuestion, onboardQuestion } from "./onboard.js";
+export { LIBRARIAN_PROMPT, StartQuestions, briefQuestion, createQuestion, describeItem, onboardQuestion } from "./onboard.js";
 export type {
   BriefDue,
   OnboardApplied,

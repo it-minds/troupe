@@ -11,7 +11,8 @@
 // is asked.
 
 import type { JSX } from "react";
-import type { OnboardItem, StartAnswer, StartQuestion, StartState } from "@troupe/client";
+import { describeItem } from "@troupe/client";
+import type { StartAnswer, StartQuestion, StartState } from "@troupe/client";
 import { Pill } from "./bits";
 import { Mask } from "./brand";
 
@@ -79,7 +80,7 @@ function Body({ asking }: { asking: StartQuestion }): JSX.Element {
           <ul className="onboard-files" aria-label="The files">
             {asking.items.map((item) => (
               <li key={item.id}>
-                <span className="mono">{item.shown}</span> <span className="muted">{described(item)}</span>
+                <span className="mono">{item.shown}</span> <span className="muted">{describeItem(item)}</span>
               </li>
             ))}
           </ul>
@@ -95,7 +96,7 @@ function Body({ asking }: { asking: StartQuestion }): JSX.Element {
       return (
         <>
           <p className="consequence">
-            {described(asking.item)}
+            {describeItem(asking.item)}
             {asking.kind === "review" && ` · file ${asking.index} of ${asking.total}`}
           </p>
           {asking.item.notes.length > 0 && (
@@ -111,12 +112,6 @@ function Body({ asking }: { asking: StartQuestion }): JSX.Element {
     case "brief":
       return <p className="consequence">{asking.detail}</p>;
   }
-}
-
-/** "new, from CLAUDE.md": what the file is to what is there, and what it is made from. */
-function described(item: OnboardItem): string {
-  const status = item.question === "create_agents_md" ? "new, and not there yet" : item.status === "new" ? "new" : "adds to the one that is there";
-  return `${status}, from ${item.source}`;
 }
 
 /** The plan's line diff: what is added and taken away in the diff colours, the rest as context. */

@@ -201,6 +201,8 @@ export interface FakeOnboardItem {
   status: "new" | "changed";
   question: "write" | "create_agents_md";
   source: string;
+  also_from: string[];
+  was: string | null;
   notes: string[];
   diff: string;
 }
@@ -241,6 +243,8 @@ export function exampleOnboarding(opts: { briefOutdated?: boolean } = {}): FakeO
         status: "new",
         question: "create_agents_md",
         source: "CLAUDE.md",
+        also_from: [".claude/CLAUDE.md"],
+        was: null,
         notes: ["the first heading named CLAUDE.md and is written # AGENTS.md"],
         diff: "+ # AGENTS.md\n+ \n+ Run the tests with `make test` before you push.",
       },
@@ -252,6 +256,8 @@ export function exampleOnboarding(opts: { briefOutdated?: boolean } = {}): FakeO
         status: "changed",
         question: "write",
         source: "web/CLAUDE.md",
+        also_from: [],
+        was: null,
         notes: [],
         diff: "  # web\n  \n+ Components live in src/components, one per file.",
       },
@@ -263,6 +269,8 @@ export function exampleOnboarding(opts: { briefOutdated?: boolean } = {}): FakeO
         status: "new",
         question: "write",
         source: ".cursor/rules/style.mdc",
+        also_from: [],
+        was: null,
         notes: [],
         diff: '+ ---\n+ globs: ["src/**/*.ts"]\n+ ---\n+ Prefer named exports.',
       },
@@ -274,6 +282,8 @@ export function exampleOnboarding(opts: { briefOutdated?: boolean } = {}): FakeO
         status: "new",
         question: "write",
         source: ".cursorrules",
+        also_from: [],
+        was: null,
         notes: ["the legacy file is always applied"],
         diff: "+ ---\n+ alwaysApply: true\n+ ---\n+ Write in British English.",
       },
@@ -557,12 +567,14 @@ export class FakeDaemon {
     const due = plan.onboarding.due;
     const briefDue = plan.brief.due;
     if (due === "none" && briefDue !== "outdated" && !o.refusal) return null;
-    const counts: Record<string, number> = {};
-    for (const item of plan.onboarding.items) {
-      const kind = item.target === "workspace" ? "instructions" : (item.path.split("/")[0] ?? "other").replace(/\.json$/, "");
-      counts[kind] = (counts[kind] ?? 0) + 1;
-    }
-    const n = plan.onboarding.items.length;
+    // The workspace's own files only, as the notice counts them: what a client would ask about.
+    const own = plan.onboarding.items.filter((i) => i.target !== "user");
+    const counts = {
+      files: own.length,
+      write: own.filter((i) => i.question === "write").length,
+      create_agents_md: own.filter((i) => i.question === "create_agents_md").length,
+    };
+    const n = own.length;
     const sentences = [
       ...(due === "first"
         ? [`Other tools' files are here: \`troupe onboard\` would bring in ${n === 1 ? "1 file" : `${n} files`} as Troupe's own files. Run it in this workspace to see each as a diff and choose; nothing is written until you do.`]
@@ -615,25 +627,24 @@ export class FakeDaemon {
     const open = this.openItems(workspace);
     const answered = (o.recorded !== null && o.recorded >= o.version) || this.onboardDeclined.get(workspace) === o.version || open.length === 0;
     const due = answered ? "none" : o.recorded === null ? "first" : "outdated";
-    return {
-      onboarding: { due, recorded: o.recorded, version: o.version, tools: o.tools, items: due === "none" ? [] : open, skipped: o.skipped ?? [] },
-      brief,
-      refusal: null,
-    };
+    // Listed only while onboarding is due: with nothing due no source is asked.
+    if (due === "none") return { onboarding: { due, recorded: o.recorded, version: o.version, tools: [], items: [], skipped: [] }, brief, refusal: null };
+    return { onboarding: { due, recorded: o.recorded, version: o.version, tools: o.tools, items: open, skipped: o.skipped ?? [] }, brief, refusal: null };
   }
 
   /**
    * `onboard.plan`, `onboard.apply`, `onboard.decline` and `memory.decline`, with the
-   * contract's semantics: `all` writes every open file that is only a write and never a new
-   * `AGENTS.md` (Decision 827), which is written only when named; a no is remembered for
-   * this version; the version is recorded once no file is left unanswered.
+   * daemon's semantics (`Troupe.Onboard.Start`): `all` writes every open file that is only
+   * a write and never a new `AGENTS.md` (Decision 827), which is written only when named; the
+   * first write records the workspace as onboarded under this version, so the plan says
+   * nothing is due from then on while the files it listed can still be answered by id; a no
+   * is remembered for this version; `command_id` is optional.
    */
   private onboardCall(ws: WebSocket, id: unknown, method: string, params: Record<string, unknown>): void {
     const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
     const workspace = String(params["workspace"] ?? "");
     if (!workspace) return invalid("workspace is required");
     if (method === "onboard.plan") return reply(ws, id, this.planOf(workspace));
-    if (!params["command_id"]) return invalid("command_id is required");
     const o = this.onboarding[workspace];
 
     if (method === "memory.decline") {
@@ -649,7 +660,7 @@ export class FakeDaemon {
       : Array.isArray(params["ids"])
         ? params["ids"].map(String)
         : null;
-    if (!ids) return invalid("name the files with ids, or say all: true");
+    if (!ids) return invalid("name the items by id, or pass all: true");
     const stamp = (): void => {
       if (o && this.openItems(workspace).length === 0) o.recorded = o.version;
     };
@@ -660,12 +671,17 @@ export class FakeDaemon {
       for (const itemId of ids) {
         const item = open.find((i) => i.id === itemId);
         if (!item) {
-          refused.push({ id: itemId, reason: "no file of the plan has that id; ask onboard.plan again" });
+          refused.push({
+            id: itemId,
+            reason: "it is not proposed as it was shown any more: its source or the file changed, or it was written or left out since; ask for the plan again",
+          });
           continue;
         }
         this.onboarded.set(`${workspace} ${itemId}`, "written");
         written.push({ id: itemId, shown: item.shown, action: item.status === "new" ? "created" : "replaced" });
       }
+      // The manifest a write leaves says the workspace is onboarded, under this version.
+      if (o && written.length > 0) o.recorded = o.version;
       stamp();
       return reply(ws, id, { written, refused });
     }

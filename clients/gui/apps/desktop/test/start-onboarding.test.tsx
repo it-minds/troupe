@@ -93,7 +93,7 @@ describe("a session's start in a workspace onboarding is due in", () => {
     expect(says("Other tools' files are here")).toBe(true);
     // The files it is about, and what it passed over.
     expect([...question.querySelectorAll(".onboard-files li")].map((li) => li.textContent)).toEqual([
-      "AGENTS.md new, and not there yet, from CLAUDE.md",
+      "AGENTS.md new, and not there yet, from CLAUDE.md with .claude/CLAUDE.md",
       "web/AGENTS.md adds to the one that is there, from web/CLAUDE.md",
       ".troupe/rules/style.md new, from .cursor/rules/style.mdc",
       ".troupe/rules/legacy.md new, from .cursorrules",

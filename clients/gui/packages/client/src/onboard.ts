@@ -37,6 +37,10 @@ export interface OnboardItem {
   question: "write" | "create_agents_md";
   /** The other tool's file it is made from. */
   source: string;
+  /** The other files it is made from too: `.claude/settings.json` beside an agent's file. */
+  also_from?: string[];
+  /** Where the file there now was onboarded from, when onboarding wrote it; null otherwise. */
+  was?: string | null;
   /** One sentence per key left out or changed. */
   notes: string[];
   /** A line diff against what the file holds: `+ `, `- `, `  `; all `+` for a new file. */
@@ -148,6 +152,26 @@ export function briefQuestion(brief: OnboardPlan["brief"]): string {
   return `The librarian's survey changed (${was} to v${brief.version}): rewrite the brief now?`;
 }
 
+/**
+ * What a file is to what is there, and what it is made from, in `troupe onboard`'s words
+ * (`Troupe.CLI.Onboard.describe/1`): "adds to the one that is there, from web/CLAUDE.md".
+ */
+export function describeItem(item: OnboardItem): string {
+  const status =
+    item.question === "create_agents_md"
+      ? "new, and not there yet"
+      : item.status === "new"
+        ? "new"
+        : !item.was
+          ? item.target === "workspace"
+            ? "adds to the one that is there"
+            : "replaces a file onboarding did not write"
+          : "its source has changed";
+  const also = item.also_from && item.also_from.length > 0 ? ` with ${item.also_from.join(", ")}` : "";
+  const was = item.was && item.was !== item.source ? `, was from ${item.was}` : "";
+  return `${status}, from ${item.source}${also}${was}`;
+}
+
 /** A new `AGENTS.md`, asked in Decision 827's words. */
 export function createQuestion(item: OnboardItem): string {
   return `${item.shown} is not there. Create it? Every coding tool reads AGENTS.md, not only Troupe.`;
@@ -155,8 +179,11 @@ export function createQuestion(item: OnboardItem): string {
 
 /**
  * The start's questions for one session: `start` once `onboarding_suggested` arrives,
- * then `answer` each question the state asks. A daemon too old to plan leaves the event's
- * own line to say it, and nothing is asked.
+ * then `answer` each question the state asks. The plan is asked for once: every later
+ * question (a new `AGENTS.md` after Onboard, each file under Review) is about the first
+ * plan's items, by id, since after the first write the daemon's plan says nothing is due
+ * and lists nothing. A daemon too old to plan leaves the event's own line to say it, and
+ * nothing is asked.
  */
 export class StartQuestions {
   private state: StartState = { asking: null, busy: false, said: [], refusal: null, error: null };

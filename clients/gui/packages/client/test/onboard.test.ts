@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
-import { DaemonClient, LIBRARIAN_PROMPT, StartQuestions, emptyTranscript, fold } from "../src/index.js";
+import { DaemonClient, LIBRARIAN_PROMPT, StartQuestions, describeItem, emptyTranscript, fold } from "../src/index.js";
 import type { StartAnswer, StartState, TroupeEvent } from "../src/index.js";
 import { FakeDaemon, exampleOnboarding } from "./support/daemon.js";
 
@@ -60,13 +60,12 @@ describe("the onboarding methods, over the daemon", () => {
     assert.equal(apply?.params["all"], true);
     assert.match(String(apply?.params["command_id"]), /^c-/, "a command, so the daemon can tell a resend");
 
-    // The new AGENTS.md is left, and the plan is not answered until it is.
+    // The first write says the workspace is onboarded: the plan lists nothing from now on,
+    // and the new AGENTS.md left is still written by the id the first plan gave it.
     const left = await client.onboardPlan(REPO);
-    assert.equal(left.onboarding.due, "first");
-    assert.deepEqual(
-      left.onboarding.items.map((i) => i.id),
-      ["p1"],
-    );
+    assert.equal(left.onboarding.due, "none");
+    assert.deepEqual(left.onboarding.items, []);
+    assert.deepEqual(left.onboarding.tools, []);
 
     const named = await client.onboardApply(REPO, ["p1"]);
     assert.deepEqual(
@@ -278,6 +277,17 @@ describe("the start's questions", () => {
   });
 });
 
+describe("a file as the questions describe it", () => {
+  it("says what it is to what is there and what it is made from, in troupe onboard's words", () => {
+    const [create, add, rule] = exampleOnboarding().items;
+    assert.equal(describeItem(create!), "new, and not there yet, from CLAUDE.md with .claude/CLAUDE.md");
+    assert.equal(describeItem(add!), "adds to the one that is there, from web/CLAUDE.md");
+    assert.equal(describeItem(rule!), "new, from .cursor/rules/style.mdc");
+    assert.equal(describeItem({ ...rule!, status: "changed" }), "replaces a file onboarding did not write, from .cursor/rules/style.mdc");
+    assert.equal(describeItem({ ...rule!, status: "changed", was: ".cursor/rules/old.mdc" }), "its source has changed, from .cursor/rules/style.mdc, was from .cursor/rules/old.mdc");
+  });
+});
+
 describe("onboarding_suggested in the transcript", () => {
   it("is the harness's line, and keeps where and what is due for the screen that asks", () => {
     const event = {
@@ -286,7 +296,7 @@ describe("onboarding_suggested in the transcript", () => {
       type: "onboarding_suggested",
       agent: ["root"],
       actor: { kind: "system" },
-      data: { workspace: REPO, due: "first", brief_due: "outdated", counts: { rules: 2 }, message: "Other tools' files are here.", reasons: ["first", "brief"] },
+      data: { workspace: REPO, due: "first", brief_due: "outdated", counts: { files: 2, write: 2, create_agents_md: 0 }, message: "Other tools' files are here.", reasons: ["first", "brief"] },
     } as unknown as TroupeEvent;
     const state = fold(emptyTranscript, event);
     assert.deepEqual(state.onboarding, { seq: 2, workspace: REPO, due: "first", briefDue: "outdated" });
