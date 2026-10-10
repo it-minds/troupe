@@ -34,6 +34,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Identity
   alias Troupe.LLM.Provider
   alias Troupe.Mounts
+  alias Troupe.Onboard.Start, as: Onboarding
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
@@ -82,6 +83,16 @@ defmodule Troupe.Gateway.Dispatch do
     "commands.run" => :control,
     "workflows.list" => :observe,
     "memory.get" => :observe,
+    # A no to rewriting a brief an older survey wrote (Decision 835): it writes only the
+    # person's own answer, in the state directory.
+    "memory.decline" => :control,
+    # What a session's start asks (Decision 835), the daemon's alone. The plan reads the
+    # person's own files beside the workspace's and a no writes only their answer; a yes
+    # writes into the repository and into the person's config directory, which is what
+    # `config.set` and `memory.forget` take.
+    "onboard.plan" => :control,
+    "onboard.decline" => :control,
+    "onboard.apply" => :admin,
     "context.get" => :observe,
     "mcp.status" => :observe,
     "workspace.search" => :observe,
@@ -399,6 +410,19 @@ defmodule Troupe.Gateway.Dispatch do
 
       :ok = Troupe.Session.Memory.forget(workspace, state_dir)
       {:ok, %{"forgotten" => true}}
+    end
+  end
+
+  # The person said no to rewriting a brief an older survey wrote (Decision 835): not asked
+  # again until the survey changes. Kept where the workspace's config keeps state.
+  defp handle("memory.decline", params, _context) do
+    with {:ok, workspace} <- fetch(params, "workspace"),
+         workspace = Path.expand(workspace),
+         {:ok, config} <- workspace_config(workspace) do
+      case Onboarding.decline_brief(workspace, config: config) do
+        :ok -> {:ok, %{"declined" => true}}
+        {:error, reason} -> {:error, Error.new(:internal, %{reason: reason})}
+      end
     end
   end
 
@@ -1118,9 +1142,61 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # Onboarding, then the brief, at a session's start (Decision 835): the daemon's alone, as
+  # the settings are, since what it writes is the person's machine's. On a machine a worker
+  # runs on the plan says the pod's sentence and the rest refuse with it.
+  defp handle("onboard." <> _ = method, params, _context) do
+    with true <- Process.whereis(Troupe.Gateway.Daemon) != nil,
+         {:ok, workspace} <- fetch(params, "workspace"),
+         workspace = Path.expand(workspace),
+         {:ok, config} <- workspace_config(workspace) do
+      onboard(method, params, workspace, config)
+    else
+      false -> {:error, Error.new(:method_not_found, %{method: method})}
+      {:error, _error} = error -> error
+    end
+  end
+
   defp handle(method, _params, _context) do
     {:error, Error.new(:method_not_found, %{method: method})}
   end
+
+  defp onboard("onboard.plan", _params, workspace, config),
+    do: {:ok, Onboarding.plan(workspace, config: config)}
+
+  defp onboard(method, params, workspace, config) do
+    with {:ok, selection} <- onboard_selection(params) do
+      answer =
+        case method do
+          "onboard.apply" -> Onboarding.accept(workspace, selection, config: config)
+          "onboard.decline" -> Onboarding.decline(workspace, selection, config: config)
+          _other -> :unknown
+        end
+
+      case answer do
+        {:ok, result} -> {:ok, result}
+        {:error, reason} -> {:error, Error.new(:invalid_params, %{reason: reason})}
+        :unknown -> {:error, Error.new(:method_not_found, %{method: method})}
+      end
+    end
+  end
+
+  # `ids`, the items to act on, or `all: true`; one of the two.
+  defp onboard_selection(%{"all" => true}), do: {:ok, :all}
+
+  defp onboard_selection(%{"ids" => ids}) when is_list(ids) and ids != [] do
+    if Enum.all?(ids, &(is_binary(&1) and &1 != "")),
+      do: {:ok, ids},
+      else: {:error, Error.new(:invalid_params, %{field: "ids", reason: "a list of item ids"})}
+  end
+
+  defp onboard_selection(_params),
+    do:
+      {:error,
+       Error.new(:invalid_params, %{
+         field: "ids",
+         reason: "name the items by id, or pass all: true"
+       })}
 
   defp local_sources(method, params) do
     if Process.whereis(Troupe.Gateway.Daemon),

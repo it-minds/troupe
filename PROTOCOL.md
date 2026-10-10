@@ -318,7 +318,7 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `question_answered` | `call_id`, `text`, `actor` |
 | `command_declined` | `name`, `reason`, `command_id` — a workspace's command that asked before it was first sent (see `commands.run`) and was not: `reason` says why and how to run it later, and `command_id` is the `commands.run` that asked |
 | `onboarded` | `target` (`repo`: the workspace's `.troupe/`; `workspace`: an `AGENTS.md` of the workspace's, Decision 827; `user`: the person's config directory), `path` (from that root), `file` (as a person reads it), `source` (the other tool's file it was made from: relative to the workspace, or `~/`), `source_hash` (the sha256 of that file, lowercase hex), `action` (`created` or `replaced`) — a file the `onboard_write` tool wrote, which asks first (Decision 823); the file records the same provenance itself, or `.troupe/onboarded.json` does for it |
-| `onboarding_suggested` | `reasons`, `message`, `workspace`, `command`, `proposals`, `onboarding_version`, `onboarded_version`, `survey_version`, `brief_version` — what onboarding would do in the session's workspace, said at a start, once per workspace and version; nothing was written (Decision 827). `reasons` holds `first` (other tools' files are there and nothing is onboarded: `proposals` counts what `troupe onboard` would propose by kind, `instructions`, `rules`, `agents`, `commands`, `skills`, `workflows`, `mcp`), `outdated` (the workspace was onboarded under `onboarded_version` of the onboarding rules, older than this build's `onboarding_version`) and `brief` (the brief was written by `brief_version` of the librarian's survey, older than `survey_version`). `message` says all of it in one line for a client to show as it is; `command` is what to run. Not on a pod |
+| `onboarding_suggested` | `reasons`, `message`, `workspace`, `command`, `proposals`, `onboarding_version`, `onboarded_version`, `survey_version`, `brief_version`, `due`, `brief_due`, `counts` — what onboarding would do in the session's workspace, said at every start while onboarding is due or the brief is outdated and the person has not said no for that version (Decisions 827 and 835); nothing was written. `due` is onboarding's (`first`, `outdated` or `none`) and `brief_due` the brief's (`first`, `stale`, `outdated` or `none`), as `onboard.plan` has them; `counts` is the workspace's files a client would ask about (`files`, `write`, `create_agents_md`), and `onboard.plan` lists them. `reasons` holds `first` (other tools' files are there and nothing is onboarded: `proposals` counts what `troupe onboard` would propose by kind, `instructions`, `rules`, `agents`, `commands`, `skills`, `workflows`, `mcp`), `outdated` (the workspace was onboarded under `onboarded_version` of the onboarding rules, older than this build's `onboarding_version`) and `brief` (the brief was written by `brief_version` of the librarian's survey, older than `survey_version`). `message` says all of it in one line for a client to show as it is; `command` is what to run. Not on a pod |
 | `session_dormant` | `last_seq` |
 | `session_activated` | `epoch`, `pod` |
 | `session_resumed` | `dormant_ms`, `moved` |
@@ -1133,6 +1133,66 @@ client to say why it started none. `memory.forget` forgets that try with the bri
 
 #### `memory.forget` → `{"command_id", "workspace"}` deletes the brief. `admin`.
 
+#### `memory.decline` → `{"workspace"}` (`command_id` optional)
+→ `{"declined": true}`. The person said no to rewriting a brief an older version of the
+librarian's survey wrote (`onboard.plan`'s `brief.due` `outdated`): it is not due again
+until the survey changes. Kept in the state directory under the brief's path, so every
+checkout of the repository shares it. `control`.
+
+#### `onboard.plan`
+```json
+{"workspace": "/home/me/project"}
+```
+→ `{"onboarding": {"due": "first", "recorded": null, "version": 2, "tools": ["Claude Code",
+"Cursor"], "items": [{"id": "3f1c0a9e5b7d2c41", "target": "workspace", "path": "AGENTS.md",
+"shown": "AGENTS.md", "status": "new", "question": "create_agents_md", "source": "CLAUDE.md",
+"also_from": [], "was": null, "notes": [], "diff": "+ # AGENTS.md\n..."}, {"id":
+"9a0be4f27c1d3e58", "target": "repo", "path": "rules/style.md", "shown":
+".troupe/rules/style.md", "status": "new", "question": "write", "source":
+".cursor/rules/style.mdc", ...}], "skipped": []}, "brief": {"due": "first", "recorded":
+null, "version": 1}, "refusal": null}`
+
+What a session's start asks, in this order (Decision 835): onboarding other tools' files
+into Troupe's own, then the brief. The daemon's alone; `control`. **Onboarding** is `due`
+`first` when the workspace has other tools' files, nothing has been onboarded there and
+nothing declined; `outdated` when it was onboarded under an older version of the
+onboarding rules (`recorded`) than this build's (`version`); `none` otherwise, and once the
+person has said no for this version. While it is due, `items` lists every file onboarding
+would write, the workspace's and the person's own (into their config directory), each as
+`troupe onboard` shows it: `target` (`workspace`, `repo` or `user`), `path` under it,
+`shown`, `status` (`new` or `changed`), `question` (`write`, or `create_agents_md` for an
+`AGENTS.md` that is not there, which is always asked on its own, Decision 827), `source`
+and `also_from` (the other tool's files it is made from), `was` (what it was onboarded from
+before), `notes` (one sentence per key left out or changed) and `diff`; `tools` names the
+other tools they come from, and `skipped` is each file found and not proposed, with its
+`reason`. While it is not, `items`, `tools` and `skipped` are empty and no source is
+asked, so a start where nothing is due does not walk the workspace. An `id` names a file as it was shown: once its source or the
+file changes it names nothing. **The brief** is `due` `first` (none) or `stale` when a
+`librarian` should start, as `memory.get`'s `refresh_due` says; `outdated` when an older
+survey wrote it (`recorded`, `0` for one from before there were versions) and the person
+has not said no to rewriting it (`memory.decline`); `none` otherwise. Whether to start
+anything at all is the client's (`memory_auto_refresh`). When onboarding is due, a client
+starts the librarian only once onboarding is answered, so it reads what was written. On a
+machine a worker runs on onboarding is never due, and `refusal` is the sentence saying it
+runs on the person's own machine.
+
+#### `onboard.apply` → `{"workspace", "ids": [...]}` or `{"workspace", "all": true}` (`command_id` optional)
+→ `{"written": [{"id", "shown", "action"}], "refused": [{"id", "reason"}]}`. Writes the
+files named, or with `all` every one whose `question` is `write` (an `AGENTS.md` that is not
+there is written only when its id is named), each with its provenance (Decision 823), and
+never over a file that changed since it was shown. `action` is `created` or `replaced`; an
+id that names no file the plan holds now is refused with a sentence. Once a call has
+answered every file the plan held, the workspace is recorded as onboarded under this
+build's rules. `admin`: it writes into the repository and into the person's config
+directory.
+
+#### `onboard.decline` → `{"workspace", "ids": [...]}` or `{"workspace", "all": true}` (`command_id` optional)
+→ `{"declined": n}`. Says no to the files named, or to all of them: each is not proposed
+again until its source changes (`troupe onboard --all` offers it anyway), and `all` also
+remembers the no to onboarding the workspace under this version of the rules, so a start
+does not ask again until they change. Nothing is written but the person's answer, in the
+state directory. `control`.
+
 #### `context.get`
 ```json
 {"session_id": "s-9f"}
@@ -1733,8 +1793,8 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | scope | grants |
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
-| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
+| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.decline`, `onboard.plan`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or
@@ -1791,7 +1851,7 @@ require `session_id` (§6) but the five below: `session.get`, `input.send`, `tur
 `question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
 `mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register`, `tools.unregister`, `shell.run` and `shell.cancel`. Everything else a
 worker serves is about the pod or a path on it — `session.create`, `agents.list`,
-`workflows.list`, `memory.get`, `memory.forget`, `workspace.recent`, `workspace.search`,
+`workflows.list`, `memory.get`, `memory.forget`, `memory.decline`, `workspace.recent`, `workspace.search`,
 `worktree.*`, `watch.set`, `identity.*`, `config.*`, `skills.*` and the `mcp.*` methods
 but `mcp.status` — and a token for one session is
 refused it with `forbidden` and `data.method` naming it. A method a worker does not have

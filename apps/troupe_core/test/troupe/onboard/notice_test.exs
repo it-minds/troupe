@@ -1,10 +1,13 @@
 defmodule Troupe.Onboard.NoticeTest do
   @moduledoc """
-  A session's first start in a workspace with other tools' files and nothing onboarded
-  says what `troupe onboard` would propose, counted by kind, once, and writes nothing; a
-  workspace onboarded, or whose brief was written, under older rules than the build's is
-  told to run them again, once (#516, slice 2; Decision 827). On the chunk's tip a session
-  started over a `CLAUDE.md` said nothing of onboarding.
+  A session's start in a workspace with other tools' files and nothing onboarded says what
+  `troupe onboard` would propose, counted by kind, and writes nothing; a workspace
+  onboarded, or whose brief was written, under older rules than the build's is told to run
+  them again (#516, slice 2; Decision 827). Each is said at every start until it is
+  answered or declined for that version, with what a client's start asks next (Decision
+  835). On the chunk's tip before 827 a session started over a `CLAUDE.md` said nothing of
+  onboarding; before 835 the notice was said once per version, and a person who closed the
+  client before answering was never asked again.
   """
 
   use Troupe.SessionCase, async: true
@@ -14,7 +17,7 @@ defmodule Troupe.Onboard.NoticeTest do
 
   @claude "# Rules\n\nRun the tests with `mix test` before you commit.\n"
 
-  test "the first session in a workspace with other tools' files says what troupe onboard would propose, once",
+  test "a session in a workspace with other tools' files says what troupe onboard would propose, at every start until it is answered",
        context do
     write_file(context, "CLAUDE.md", @claude)
     write_file(context, ".cursor/rules/style.mdc", "---\nalwaysApply: true\n---\nBe brief.\n")
@@ -44,27 +47,31 @@ defmodule Troupe.Onboard.NoticeTest do
                "and 1 agent as Troupe's own files. Run it in this workspace to see each as a " <>
                "diff and choose; nothing is written until you do."
 
-    # Nothing written in the workspace: no AGENTS.md, no .troupe/.
+    # Nothing written in the workspace (no AGENTS.md, no .troupe/), nor in the state
+    # directory: the notice writes nothing.
     refute File.exists?(Path.join(context.workspace, "AGENTS.md"))
     refute File.exists?(Path.join(context.workspace, ".troupe"))
+    refute File.exists?(Path.join(context.state_dir, "onboard.json"))
 
-    # Remembered in the state directory, not the repository, so the next start is quiet.
-    state = Jason.decode!(File.read!(Path.join(context.state_dir, "onboard.json")))
-    version = Onboard.version()
-    assert [%{"onboarding" => ^version}] = Map.values(state["suggested"])
-
+    # Nobody answered, so the next start says it again (Decision 835): a person who closed
+    # the client before answering is asked at the next one. Under Decision 827 it was said
+    # once, and the next start was quiet.
     %{session: %{id: again}} = start_session(context)
-    assert events_of_type(again, :onboarding_suggested) == []
+
+    assert [%Event{data: %{"reasons" => ["first"], "due" => "first"}}] =
+             events_of_type(again, :onboarding_suggested)
+
+    # Once the person has said no for this version, it is quiet.
+    :ok = Notice.decline_onboarding(context.workspace, state_dir: context.state_dir)
+    %{session: %{id: declined}} = start_session(context)
+    assert events_of_type(declined, :onboarding_suggested) == []
   end
 
   test "a workspace with none of their files, or on a pod, is told nothing", context do
     write_file(context, "README.md", "# A project\n")
     %{session: %{id: sid}} = start_session(context)
     assert events_of_type(sid, :onboarding_suggested) == []
-
-    # Only that the brief was looked at is remembered: nothing about onboarding was said.
-    state = Jason.decode!(File.read!(Path.join(context.state_dir, "onboard.json")))
-    assert Map.values(state["suggested"]) == [%{"survey" => Troupe.Memory.survey_version()}]
+    refute File.exists?(Path.join(context.state_dir, "onboard.json"))
 
     write_file(context, "CLAUDE.md", @claude)
     %{session: %{id: pod}} = start_session(context, kind: :team)
@@ -126,18 +133,16 @@ defmodule Troupe.Onboard.NoticeTest do
     assert Enum.map(proposals, & &1.proposal.target) == [:workspace, :user]
   end
 
-  test "a CLAUDE.md that is AGENTS.md under another name gives nothing to say, and is looked at once",
-       context do
+  test "a CLAUDE.md that is AGENTS.md under another name gives nothing to say", context do
     write_file(context, "AGENTS.md", @claude)
     :ok = File.ln_s("AGENTS.md", Path.join(context.workspace, "CLAUDE.md"))
 
     %{session: %{id: sid}} = start_session(context)
     assert events_of_type(sid, :onboarding_suggested) == []
+    assert %{due: "none"} = Notice.onboarding(context.workspace, state_dir: context.state_dir)
 
-    # The look was taken for this version: the next start does not plan again.
-    state = Jason.decode!(File.read!(Path.join(context.state_dir, "onboard.json")))
-    version = Onboard.version()
-    assert [%{"onboarding" => ^version}] = Map.values(state["suggested"])
+    %{session: %{id: again}} = start_session(context)
+    assert events_of_type(again, :onboarding_suggested) == []
   end
 
   test "a workspace onboarded, or where the person said no to something, is not told again",
@@ -159,7 +164,7 @@ defmodule Troupe.Onboard.NoticeTest do
     assert events_of_type(onboarded, :onboarding_suggested) == []
   end
 
-  test "a workspace onboarded under older rules is told to run troupe onboard again, once",
+  test "a workspace onboarded under older rules is told to run troupe onboard again, until the no is said",
        context do
     write_file(context, "CLAUDE.md", @claude)
 
@@ -184,7 +189,13 @@ defmodule Troupe.Onboard.NoticeTest do
     refute File.exists?(Path.join(context.workspace, "AGENTS.md"))
 
     %{session: %{id: again}} = start_session(context)
-    assert events_of_type(again, :onboarding_suggested) == []
+
+    assert [%Event{data: %{"reasons" => ["outdated"], "due" => "outdated"}}] =
+             events_of_type(again, :onboarding_suggested)
+
+    :ok = Notice.decline_onboarding(context.workspace, state_dir: context.state_dir)
+    %{session: %{id: declined}} = start_session(context)
+    assert events_of_type(declined, :onboarding_suggested) == []
   end
 
   test "a brief an older survey wrote is told to be written again, in the same notice", context do
@@ -211,11 +222,91 @@ defmodule Troupe.Onboard.NoticeTest do
     # The brief is as it was.
     assert read_file(context, ".troupe/memory.md") =~ "built_at: 2026-10-01T00:00:00Z\n---"
 
+    # Said again at the next start, until the person says no to rewriting it.
+    %{session: %{id: again}} = start_session(context)
+
+    assert [%Event{data: %{"reasons" => ["first", "brief"]}}] =
+             events_of_type(again, :onboarding_suggested)
+
+    :ok = Notice.decline_brief(context.workspace, state_dir: context.state_dir)
+    %{session: %{id: declined}} = start_session(context)
+
+    assert [%Event{data: %{"reasons" => ["first"]}}] =
+             events_of_type(declined, :onboarding_suggested)
+
     # A brief this build's survey wrote says nothing.
     :ok = Troupe.Session.Memory.put_section(context.workspace, "overview", "A project.")
 
     assert read_file(context, ".troupe/memory.md") =~
              "survey: #{Troupe.Memory.survey_version()}\n"
+  end
+
+  # Decision 835: the notice says what a client's start asks next, onboarding first.
+  test "the notice says what a start asks next: due, brief_due and the files it would ask about",
+       context do
+    write_file(context, "CLAUDE.md", @claude)
+    write_file(context, ".cursor/rules/style.mdc", "---\nalwaysApply: true\n---\nBe brief.\n")
+
+    %{session: %{id: sid}} = start_session(context)
+
+    assert [%Event{data: data}] = events_of_type(sid, :onboarding_suggested)
+    assert data["due"] == "first"
+    assert data["brief_due"] == "first"
+    assert data["counts"] == %{"files" => 2, "write" => 1, "create_agents_md" => 1}
+  end
+
+  test "onboarding is due first, outdated under older rules, and not once the person said no for this version",
+       context do
+    opts = [state_dir: context.state_dir]
+    write_file(context, "CLAUDE.md", @claude)
+
+    assert %{due: "first", recorded: nil, plan: %{proposals: [_agents]}} =
+             Notice.onboarding(context.workspace, opts)
+
+    :ok = Notice.decline_onboarding(context.workspace, opts)
+    assert %{due: "none", plan: nil} = Notice.onboarding(context.workspace, opts)
+
+    state = Jason.decode!(File.read!(Path.join(context.state_dir, "onboard.json")))
+    assert Map.values(state["onboarding_declined"]) == [Onboard.version()]
+
+    # Another workspace, onboarded under older rules: outdated until its no is said.
+    older = Path.join(context.base, "older")
+    File.mkdir_p!(Path.join(older, ".troupe"))
+    File.write!(Path.join(older, ".troupe/onboarded.json"), ~s({"version": 1, "onboarding": 1}\n))
+
+    assert %{due: "outdated", recorded: 1} = Notice.onboarding(older, opts)
+    :ok = Notice.decline_onboarding(older, opts)
+    assert %{due: "none", recorded: 1} = Notice.onboarding(older, opts)
+  end
+
+  test "the brief is due first when there is none, outdated when an older survey wrote it, and not once declined",
+       context do
+    opts = [state_dir: context.state_dir]
+    survey = Troupe.Memory.survey_version()
+
+    assert %{due: "first", recorded: nil, version: ^survey} =
+             Notice.brief(context.workspace, opts)
+
+    built = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
+    write_file(
+      context,
+      ".troupe/memory.md",
+      "---\nbuilt_at: #{built}\n---\n\n## Overview\nA project.\n"
+    )
+
+    assert %{due: "outdated", recorded: 0} = Notice.brief(context.workspace, opts)
+
+    :ok = Notice.decline_brief(context.workspace, opts)
+    assert %{due: "none", recorded: 0} = Notice.brief(context.workspace, opts)
+
+    # A brief this build's survey wrote is not outdated, and one turned off is never due.
+    File.rm!(Path.join(context.state_dir, "onboard.json"))
+    :ok = Troupe.Session.Memory.put_section(context.workspace, "overview", "A project.")
+    assert %{due: "none", recorded: ^survey} = Notice.brief(context.workspace, opts)
+
+    assert %{due: "none", recorded: nil} =
+             Notice.brief(context.workspace, [memory: false] ++ opts)
   end
 
   # Every path this process hands `:file` while `fun` runs, as it handed it: a call traced

@@ -105,6 +105,7 @@ defmodule Troupe.Client do
   @callback shell_cancel(session_id(), String.t()) :: :ok | {:error, term()}
   @callback approve(session_id(), String.t(), decision()) :: :ok | {:error, term()}
   @callback answer(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
+  @callback answer_local(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback edit_todo(session_id(), String.t(), term()) :: :ok | {:error, term()}
   @callback switch_profile(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback goal(session_id()) :: {:ok, String.t() | nil} | {:error, term()}
@@ -241,6 +242,15 @@ defmodule Troupe.Client do
 
   @spec answer(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   def answer(sid, call_id, text), do: impl(sid).answer(sid, call_id, text)
+
+  @doc """
+  Answers a question this client asked at the session's start (`:local_question`, TUI
+  Decision 154: onboarding, then the brief) with one of its `keys`; what the answer leads
+  to (a write, a no remembered, the next question, the librarian) happens before this
+  returns.
+  """
+  @spec answer_local(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
+  def answer_local(sid, id, key), do: impl(sid).answer_local(sid, id, key)
 
   @spec edit_todo(session_id(), String.t(), term()) :: :ok | {:error, term()}
   def edit_todo(sid, path, change), do: impl(sid).edit_todo(sid, path, change)

@@ -50,8 +50,9 @@ defmodule Troupe.Tools do
   @task_list_after 10
 
   # Tools a profile has only when it names them (Decision 823): `onboard_write` writes the
-  # files that decide what runs, which is the librarian's job, and an agent with every
-  # tool (`build`) is neither offered it nor let call it.
+  # files that decide what runs, which only a profile made for it does (the librarian no
+  # longer, Decision 835), and an agent with every tool (`build`) is neither offered it nor
+  # let call it.
   @named_only ~w(onboard_write)
 
   @doc """

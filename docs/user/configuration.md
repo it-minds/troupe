@@ -435,22 +435,27 @@ in Troupe's state directory, never in the repository). A changed source is offer
 diff against the file you have, and nothing is overwritten unasked. `--yes` writes every
 proposal without asking, and `--json` prints them as one object and writes nothing unless
 `--yes` is given too. It exits 1 when a proposal was refused or a write failed, and 2 when
-there was nobody to ask. Inside a session the librarian writes the same files with the
-`onboard_write` tool, which asks before each one; into your config directory, and into an
-`AGENTS.md`, it asks even with `auto_approve` on, since what lands there runs in every
-session without a question, or is read by every tool.
+there was nobody to ask. Inside a session, an agent whose profile names the
+`onboard_write` tool writes the same files with it, asking before each one; into your
+config directory, and into an `AGENTS.md`, it asks even with `auto_approve` on, since what
+lands there runs in every session without a question, or is read by every tool.
 
-Onboarding proposes by itself and never writes by itself. The first session in a
-workspace that has other tools' files and nothing onboarded says, in one line, what
-`troupe onboard` would bring in (`1 AGENTS.md, 2 rules and 1 agent`) and how to run it.
-The rules onboarding follows have a version, recorded in `.troupe/onboarded.json` as
-`onboarding` when a workspace is first onboarded and again by a `troupe onboard` run that
-answered every question; a session in a workspace onboarded under older rules than its
-build's suggests running `troupe onboard` again, and one whose brief an older version of
-the librarian's survey wrote (its `survey` in `.troupe/memory.md`) suggests `/memory
-refresh`, in the same line. Each is said once per workspace and version, and remembered in
-Troupe's state directory (`onboard.json`), never in the repository; saying no to a
-proposal in a workspace, or onboarding it, ends the first one. Nothing re-runs by itself.
+Onboarding proposes by itself and never writes by itself. A session in a workspace that
+has other tools' files and nothing onboarded says, in one line, what `troupe onboard` would
+bring in (`1 AGENTS.md, 2 rules and 1 agent`), and the terminal client and the desktop app
+ask about it as the session starts, before the librarian: `Onboard 3 files from Claude
+Code and Cursor into Troupe's own? [Y/n/r]`. Yes writes them, and then asks on its own
+about each `AGENTS.md` that is not there yet; `r` shows each file as `troupe onboard` does
+and asks for it; no leaves them all. The rules onboarding follows have a version,
+recorded in `.troupe/onboarded.json` as `onboarding` when a workspace is first onboarded
+and again once every question is answered; a session in a workspace onboarded under older
+rules than its build's asks `Onboarding rules changed since this repository was onboarded
+(v1 to v2). Re-run now? [Y/n]`, and one whose brief an older version of the librarian's
+survey wrote (its `survey` in `.troupe/memory.md`) asks whether to rewrite it, Yes the
+default for both. Only then does the librarian start, so it reads what onboarding wrote.
+Each is asked at every start until it is answered, and a no is remembered for that
+version in Troupe's state directory (`onboard.json`), never in the repository. Nothing
+re-runs by itself, and a headless run (`troupe run`) prints the line and asks nothing.
 
 ## Instruction files
 
