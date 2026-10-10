@@ -26,6 +26,8 @@ export interface PaletteActions {
   go: (screen: PaletteScreen) => void;
   /** Show the backstage's Files pane. */
   showFiles: () => void;
+  /** Show the backstage's Memory pane: the repository's facts. */
+  showMemory: () => void;
   /** The transcript as text, for /copy. */
   transcript: () => string;
 }
@@ -77,6 +79,8 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
   sessions: ({ go }) => void go("sessions"),
   hq: ({ go }) => void go("sessions"),
   files: ({ showFiles }) => void showFiles(),
+  // The memory view, whatever follows the name: a fact is forgotten there, one at a time.
+  memory: ({ showMemory }) => void showMemory(),
   settings: ({ go }) => void go("local"),
   models: ({ go }) => void go("local"),
   copy: async ({ transcript }) => {
@@ -95,7 +99,6 @@ const NOT_HERE: Record<string, string> = {
   dismiss: "there are no windows to dismiss here",
   observer: "not in the desktop app yet",
   upload: "not in the desktop app yet",
-  memory: "not in the desktop app yet",
   watch: "on This computer, under this session's controls",
   mcp: "not in the desktop app yet",
   worktree: "start a branch from the terminal client, or a new session from the list",

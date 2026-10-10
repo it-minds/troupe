@@ -108,7 +108,10 @@ organisation defaults* on the models panel has something to fill in;
 It also starts the fake daemon the tests use, and prints the address to open the app at
 (`#daemon=<port>:<token>`). A new session there in `/home/ada/repo` starts as a
 repository with Claude Code's and Cursor's files does: it asks to onboard them, each as
-a diff under Review, then to have the librarian rewrite a brief an older survey wrote.
+a diff under Review, then to have the librarian rewrite a brief an older survey wrote;
+`/memory` there opens the backstage's Memory pane on the repository's facts, one of each
+status. A new session in `/home/ada/project`, which has no brief, starts the librarian
+by itself and says so in the transcript.
 
 ### Your own daemon beside the fake plane
 

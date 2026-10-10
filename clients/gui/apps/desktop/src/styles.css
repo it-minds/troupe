@@ -1831,6 +1831,91 @@ details.advanced > summary {
   padding: var(--space-3);
 }
 
+/* -- memory ----------------------------------------------------------------- */
+
+/* The repository's facts by kind. A fact whose file changed or went since it was written
+   is marked along its edge and in its words in the caution colour, which is the offline
+   status's: the design has no warning token, and the reserved colour is for a person
+   being waited on. */
+.memory {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.memory .note {
+  margin: 0;
+}
+.memory .doubtful {
+  color: var(--offline-fg);
+}
+.memory .fact-kind h4 {
+  margin: 0 0 var(--space-1);
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+.memory .fact-kind ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.memory .fact {
+  border-left: var(--bw-marker) solid transparent;
+}
+.memory .fact.moved,
+.memory .fact.missing {
+  border-left-color: var(--offline-bd);
+}
+.memory .fact .claim {
+  width: 100%;
+  min-height: var(--touch-target);
+  border: none;
+  padding: var(--space-1) var(--space-2);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  font: var(--t-note);
+  color: var(--text-body);
+}
+.memory .fact .claim:hover {
+  filter: none;
+  background: var(--bg-hover);
+}
+.memory .fact .claim[aria-expanded="true"] {
+  background: var(--bg-selected);
+}
+.memory .evidence-of {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-2);
+}
+.memory .evidence-of .facts {
+  align-self: stretch;
+}
+.memory .anchor {
+  display: block;
+  word-break: break-all;
+}
+.memory .forget-answers {
+  display: flex;
+  gap: var(--space-2);
+}
+.memory .brief-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font: var(--t-code-small);
+  color: var(--text-secondary);
+}
+
 /* -- inbox ------------------------------------------------------------------ */
 
 .inbox {

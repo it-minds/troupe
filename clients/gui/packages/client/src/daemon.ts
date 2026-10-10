@@ -17,6 +17,7 @@ import type { ConnectOptions, ConnectionHooks } from "./connection.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
+import type { MemoryBrief } from "./memory.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
 import type { ConfigChanged, EventEnvelope, Principal, SessionCreateResult, ToolInvoke, TroupeEvent } from "./types.js";
@@ -793,6 +794,19 @@ export class DaemonClient {
   /** Say no to rewriting a brief an older survey wrote: remembered for this survey's version. */
   declineBrief(workspace: string): Promise<unknown> {
     return this.command("memory.decline", { workspace });
+  }
+
+  /**
+   * A repository's brief (troupe #248): its status, whether a librarian is due, and its
+   * facts with their status, which a daemon from before facts leaves out for the text.
+   */
+  memory(workspace: string): Promise<MemoryBrief> {
+    return this.call<MemoryBrief>("memory.get", { workspace });
+  }
+
+  /** Forget one fact of a repository's memory, by its id; `memory.md` is written again without it. */
+  forgetFact(workspace: string, id: string): Promise<unknown> {
+    return this.command("memory.forget", { workspace, id });
   }
 
   /**

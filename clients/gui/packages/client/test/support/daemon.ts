@@ -19,6 +19,9 @@
 //   it onboards other tools'     a start says `onboarding_suggested`, and `onboard.plan`,
 //   files, then the brief        `onboard.apply`, `onboard.decline` and `memory.decline`
 //                                answer what is due and take the person's answers
+//   it keeps each repository's   `memory.get` answers the brief, whether a librarian is
+//   brief, as facts              due, and its facts with their status; `memory.forget`
+//                                forgets one fact by id, or the whole brief
 //
 // It implements the protocol rather than imitating a screen, for the same reason the
 // fake worker does: a test that passes against a fake that agrees with the client by
@@ -293,6 +296,93 @@ export function exampleOnboarding(opts: { briefOutdated?: boolean } = {}): FakeO
   };
 }
 
+/**
+ * One fact of a repository's memory, as `memory.get` lists it (troupe #248): a claim with
+ * the files it rests on and their hashes when it was written, how it was learned, and its
+ * status, which the daemon works out when it is read.
+ */
+export interface FakeFact {
+  id: string;
+  kind: "command" | "convention" | "overview" | "layout" | "note" | "negative";
+  claim: string;
+  scope: string | null;
+  anchors: Array<{ path: string; hash: string }>;
+  evidence: { session: string | null; seq: number | null; head: string | null; exit_status?: number; by: string };
+  created_at: string;
+  verified_at: string;
+  status: "current" | "moved" | "missing" | "unanchored";
+}
+
+/**
+ * A repository's brief as the daemon keeps it. `facts` absent is a daemon from before
+ * troupe #248, whose `memory.get` answers the brief's text and no facts. `refresh_due`
+ * left out is worked out as the daemon does: absent or stale, and no try held off.
+ */
+export interface FakeMemory {
+  status: "absent" | "stale" | "fresh";
+  text?: string | null;
+  built_at?: string | null;
+  refresh_due?: boolean;
+  /** Until when a librarian's try that built nothing holds the next one off. */
+  refresh_held_until?: string | null;
+  facts?: FakeFact[];
+}
+
+/**
+ * A repository's memory with a fact of each status: the gate's command, current; a
+ * convention whose file changed since; an overview whose file is gone; and a note that
+ * rests on no file.
+ */
+export function exampleFacts(): FakeFact[] {
+  const at = "2026-10-08T09:00:00Z";
+  return [
+    {
+      id: "f-check",
+      kind: "command",
+      claim: "The gate is `mix check`: compile, credo, boundaries, tests",
+      scope: null,
+      anchors: [{ path: "mix.exs", hash: "3f9a6c0e2b7d41a58c9e0f1d2a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d" }],
+      evidence: { session: "s-41", seq: 412, head: "7f8a221", exit_status: 0, by: "librarian" },
+      created_at: at,
+      verified_at: at,
+      status: "current",
+    },
+    {
+      id: "f-style",
+      kind: "convention",
+      claim: "Components live in src/components, one per file",
+      scope: "src/**",
+      anchors: [{ path: "src/components/index.ts", hash: "aa01bb02cc03dd04ee05ff060718293a4b5c6d7e8f90a1b2c3d4e5f60718293a" }],
+      evidence: { session: "s-41", seq: 433, head: "7f8a221", by: "agent:build" },
+      created_at: at,
+      verified_at: at,
+      status: "moved",
+    },
+    {
+      id: "f-layout",
+      kind: "overview",
+      claim: "The protocol's schema is generated from schema.ex",
+      scope: null,
+      anchors: [{ path: "protocol/schema.ex", hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }],
+      evidence: { session: "s-41", seq: 450, head: "7f8a221", by: "librarian" },
+      created_at: at,
+      verified_at: at,
+      status: "missing",
+    },
+    {
+      id: "f-note",
+      kind: "note",
+      claim: "Ask before touching the release workflow",
+      scope: null,
+      anchors: [],
+      evidence: { session: null, seq: null, head: null, by: "person" },
+      created_at: at,
+      verified_at: at,
+      status: "unanchored",
+    },
+  ];
+}
+
 /** The librarian as `session.create` was asked to start it: on which workspace, from which session, with what. */
 export interface FakeLibrarian {
   sessionId: string;
@@ -428,6 +518,13 @@ export class FakeDaemon {
   readonly briefDeclined = new Map<string, number>();
   /** Every librarian `session.create` started, oldest first. */
   readonly librarians: FakeLibrarian[] = [];
+  /** Each repository's brief and facts (troupe #248); a workspace not here has a fresh brief with no facts yet. */
+  memory: Record<string, FakeMemory> = {};
+  /** The directories git knows, which `worktree.list` answers a main checkout for; any other is a plain directory. */
+  readonly repositories = new Set<string>(["/home/ada/project", "/home/ada/repo"]);
+  /** The config's `memory` and `memory_auto_refresh`, as `config.get` reports them; both default on. */
+  memoryOn = true;
+  memoryAutoRefresh = true;
 
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -698,6 +795,49 @@ export class FakeDaemon {
     return reply(ws, id, { declined });
   }
 
+  /**
+   * `memory.get` and `memory.forget` (troupe #248), with the daemon's shapes: the brief's
+   * status, path and text, whether a librarian started by itself is due and until when a
+   * try that built nothing holds it off, and the facts with their status and `generated`,
+   * which a daemon from before facts leaves out. `memory.forget` with an `id` forgets that
+   * fact; without one, the whole brief.
+   */
+  private memoryCall(ws: WebSocket, id: unknown, method: string, params: Record<string, unknown>): void {
+    const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
+    const workspace = String(params["workspace"] ?? "");
+    if (!workspace) return invalid("workspace is required");
+    const memory = this.memory[workspace];
+
+    if (method === "memory.get") {
+      const m = memory ?? { status: "fresh" as const, facts: [] };
+      const status = this.memoryOn ? m.status : "disabled";
+      const held = m.refresh_held_until ?? null;
+      const facts = m.facts;
+      return reply(ws, id, {
+        status,
+        path: `${workspace}/.troupe/memory.md`,
+        built_at: m.built_at ?? null,
+        sections: facts ? [...new Set(facts.map((f) => f.kind))] : [],
+        text: m.text ?? (facts && facts.length > 0 ? `# Project brief\n\n${facts.map((f) => `- ${f.claim}`).join("\n")}` : null),
+        refresh_due: m.refresh_due ?? ((status === "absent" || status === "stale") && held === null),
+        refresh_held_until: held,
+        ...(facts ? { facts, generated: true } : {}),
+      });
+    }
+
+    // memory.forget
+    if (!params["command_id"]) return invalid("command_id is required");
+    const factId = params["id"];
+    if (typeof factId === "string") {
+      const at = memory?.facts?.findIndex((f) => f.id === factId) ?? -1;
+      if (at < 0) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "fact", id: factId } });
+      memory!.facts!.splice(at, 1);
+      return reply(ws, id, { forgotten: true, id: factId });
+    }
+    this.memory[workspace] = { status: "absent", text: null, ...(memory?.facts ? { facts: [] } : {}) };
+    return reply(ws, id, { forgotten: true });
+  }
+
   /** A command's prompt, sent as the session's input under the `commands.run` that asked. */
   private sendCommand(session: Session, text: string, commandId: string): void {
     const actor = { kind: "user", subject: this.principal.subject };
@@ -933,6 +1073,8 @@ export class FakeDaemon {
           // The fake librarian builds the brief at once, under this build's survey.
           const brief = this.onboarding[workspace]?.brief;
           if (brief) Object.assign(brief, { due: "none", recorded: brief.version });
+          const memory = this.memory[workspace];
+          if (memory && memory.status !== "fresh") Object.assign(memory, { status: "fresh", refresh_due: false, built_at: new Date().toISOString() });
         } else {
           // What a start finds due, said once in the new session's log (Decisions 827, 835).
           this.suggest(created.id);
@@ -1114,12 +1256,21 @@ export class FakeDaemon {
           })),
         });
 
-      case "worktree.list":
-        return reply(ws, id, {
-          worktrees: [...this.sessions.values()]
-            .filter((s) => s.branch)
-            .map((s) => ({ path: `${s.workspace}-troupe`, branch: s.branch, session_id: s.id, dirty: false })),
-        });
+      case "worktree.list": {
+        const workspace = typeof params["workspace"] === "string" ? params["workspace"] : null;
+        const branches = [...this.sessions.values()]
+          .filter((s) => s.branch && (workspace === null || s.workspace === workspace))
+          .map((s) => ({ path: `${s.workspace}-troupe`, branch: s.branch, session_id: s.id, dirty: false }));
+        if (workspace === null) return reply(ws, id, { worktrees: branches });
+        // `git worktree list` in the directory: its main checkout first, and nothing at all
+        // in a directory git does not know.
+        const main = { path: workspace, branch: "main", session_id: null, dirty: false };
+        return reply(ws, id, { worktrees: this.repositories.has(workspace) ? [main, ...branches] : [] });
+      }
+
+      case "memory.get":
+      case "memory.forget":
+        return this.memoryCall(ws, id, method, params);
 
       case "watch.set": {
         const workspace = String(params["workspace"] ?? "");
@@ -1699,6 +1850,8 @@ export class FakeDaemon {
         key("ui.theme", this.ui["ui.theme"], UI_DEFAULTS["ui.theme"], "theme"),
         key("ui.mode", this.ui["ui.mode"], UI_DEFAULTS["ui.mode"], "light or dark"),
         key("ui.notifications", this.ui["ui.notifications"], UI_DEFAULTS["ui.notifications"], "notifications"),
+        key("memory", this.memoryOn ? undefined : false, true, "project brief"),
+        key("memory_auto_refresh", this.memoryAutoRefresh ? undefined : false, true, "refresh the brief"),
       ],
       warnings: [],
       errors: [],
