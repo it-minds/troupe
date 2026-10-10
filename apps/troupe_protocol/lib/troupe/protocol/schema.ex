@@ -397,9 +397,10 @@ defmodule Troupe.Protocol.Schema do
         "direction" => required(:string)
       },
       # A file `onboard_write` wrote (Decision 823): under the workspace's `.troupe/`
-      # (`target: repo`) or the person's config directory (`user`), at `path` from that
-      # root, shown as `file`; from `source`, whose sha256 was `source_hash`; `action` is
-      # `created` or `replaced`.
+      # (`target: repo`), an `AGENTS.md` of the workspace's (`workspace`, Decision 827) or
+      # under the person's config directory (`user`), at `path` from that root, shown as
+      # `file`; from `source`, whose sha256 was `source_hash`; `action` is `created` or
+      # `replaced`.
       "onboarded" => %{
         "target" => required(:string),
         "path" => required(:string),
@@ -407,6 +408,24 @@ defmodule Troupe.Protocol.Schema do
         "source" => required(:string),
         "source_hash" => required(:string),
         "action" => required(:string)
+      },
+      # What onboarding would do in the session's workspace, said at a start and once per
+      # workspace and version (Decision 827); nothing was written. `reasons`: `first`
+      # (other tools' files, nothing onboarded: `proposals` counts what `troupe onboard`
+      # would propose by kind), `outdated` (onboarded under `onboarded_version` of the rules,
+      # older than `onboarding_version`) and `brief` (the brief written by `brief_version` of
+      # the librarian's survey, older than `survey_version`). `message` says it all in a
+      # line a client shows as it is; `command` is what to run.
+      "onboarding_suggested" => %{
+        "reasons" => required({:array, :string}),
+        "message" => required(:string),
+        "workspace" => optional(:string),
+        "command" => optional(:string),
+        "proposals" => optional(:object),
+        "onboarding_version" => optional(:integer),
+        "onboarded_version" => optional(:integer),
+        "survey_version" => optional(:integer),
+        "brief_version" => optional(:integer)
       },
       "session_dormant" => %{"last_seq" => required(:integer)},
       "session_activated" => %{"epoch" => required(:string), "pod" => optional(:string)},

@@ -1,0 +1,43 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/onboarding_suggested.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "brief_version": {
+      "type": "integer"
+    },
+    "command": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "onboarded_version": {
+      "type": "integer"
+    },
+    "onboarding_version": {
+      "type": "integer"
+    },
+    "proposals": {
+      "type": "object"
+    },
+    "reasons": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "survey_version": {
+      "type": "integer"
+    },
+    "workspace": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "message",
+    "reasons"
+  ],
+  "title": "onboarding_suggested",
+  "type": "object"
+}

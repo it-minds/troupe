@@ -17,10 +17,17 @@ defmodule Troupe.Memory do
           built_at: DateTime.t() | nil,
           head: String.t() | nil,
           files: non_neg_integer() | nil,
+          survey: non_neg_integer() | nil,
           sections: [section()]
         }
 
-  defstruct built_at: nil, head: nil, files: nil, sections: []
+  defstruct built_at: nil, head: nil, files: nil, survey: nil, sections: []
+
+  # The version of the librarian's survey: what it reads and what the brief leaves to other
+  # files. Recorded as `survey` when a brief is built, and raised whenever the survey would
+  # write a different brief for the same repository, so a session can say that a brief was
+  # written under an older one (Decision 827). Nothing rebuilds a brief for it.
+  @survey 1
 
   @canonical ~w(Overview Layout Commands Conventions Notes)
   @notes "Notes"
@@ -52,6 +59,10 @@ defmodule Troupe.Memory do
   @spec canonical_titles() :: [String.t()]
   def canonical_titles, do: @canonical
 
+  @doc "The version of the librarian's survey this build has, which `stamp/3` records."
+  @spec survey_version() :: pos_integer()
+  def survey_version, do: @survey
+
   ## Parse and render
 
   @spec parse(String.t()) :: {:ok, t()} | {:error, term()}
@@ -63,6 +74,7 @@ defmodule Troupe.Memory do
            built_at: parse_ts(Map.get(meta, "built_at")),
            head: maybe_string(Map.get(meta, "head")),
            files: parse_int(Map.get(meta, "files")),
+           survey: parse_int(Map.get(meta, "survey")),
            sections: sections(body)
          }}
 
@@ -147,10 +159,10 @@ defmodule Troupe.Memory do
   def titles(%__MODULE__{sections: sections}),
     do: sections |> Enum.map(&elem(&1, 0)) |> Enum.reject(&(&1 == ""))
 
-  @doc "Stamps the build metadata a refresh records."
+  @doc "Stamps the build metadata a refresh records, the survey's version with it."
   @spec stamp(t(), String.t() | nil, non_neg_integer() | nil) :: t()
   def stamp(%__MODULE__{} = m, head, files) do
-    %__MODULE__{m | built_at: DateTime.utc_now(), head: head, files: files}
+    %__MODULE__{m | built_at: DateTime.utc_now(), head: head, files: files, survey: @survey}
   end
 
   ## Staleness
@@ -238,14 +250,15 @@ defmodule Troupe.Memory do
 
   ## Frontmatter
 
-  defp frontmatter(%__MODULE__{built_at: nil, head: nil, files: nil}), do: ""
+  defp frontmatter(%__MODULE__{built_at: nil, head: nil, files: nil, survey: nil}), do: ""
 
   defp frontmatter(%__MODULE__{} = m) do
     lines =
       [
         m.built_at && "built_at: #{DateTime.to_iso8601(m.built_at)}",
         m.head && "head: #{m.head}",
-        m.files && "files: #{m.files}"
+        m.files && "files: #{m.files}",
+        m.survey && "survey: #{m.survey}"
       ]
       |> Enum.reject(&is_nil/1)
 

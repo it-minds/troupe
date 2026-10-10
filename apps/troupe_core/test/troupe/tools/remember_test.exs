@@ -174,7 +174,9 @@ defmodule Troupe.Tools.RememberTest do
     assert :ok = Memory.checked(context.workspace)
 
     assert %{built_at: %DateTime{}} = brief = Memory.brief(context.workspace)
-    assert Troupe.Memory.render(%{brief | built_at: nil, head: nil, files: nil}) == text
+
+    assert Troupe.Memory.render(%{brief | built_at: nil, head: nil, files: nil, survey: nil}) ==
+             text
   end
 
   test "a worktree's brief is the repository's", context do

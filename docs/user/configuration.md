@@ -373,17 +373,54 @@ against what is there:
 Write .troupe/agents/reviewer.md? [y/N]
 ```
 
+What it brings in:
+
+- **Instruction files.** What a `CLAUDE.md` or `GEMINI.md` says, at the root or in a
+  directory, and Claude Code's `.claude/CLAUDE.md` and Copilot's
+  `.github/copilot-instructions.md` at the root, is proposed as an addition to the
+  `AGENTS.md` in the same directory: the file that is there stays as it is, and only what
+  it does not already say is added after it, under the heading it was under. Said already means the same text, spaces aside, or the same rule as `troupe
+  instructions check` calls a duplicate; anything reworded is proposed and you read the
+  diff. A line that only imports `AGENTS.md` (`@AGENTS.md`) is left out. When there is
+  nothing left to add, nothing is proposed and the file is listed as `skipped:`, saying so.
+- **Your own instruction files.** Your config directory's `CLAUDE.md` and `GEMINI.md`, and
+  Claude Code's `~/.claude/CLAUDE.md`, are proposed as additions to your own
+  `<config>/AGENTS.md` in the same way, never to a repository's. `CLAUDE.local.md` is
+  yours and usually not committed, so it is not proposed anywhere: move what it says into
+  `<config>/AGENTS.md` by hand, or keep it.
+- **Rules.** Cursor's `.cursor/rules/*.mdc` (the root's and a directory's), its legacy
+  `.cursorrules`, and Copilot's `.github/instructions/*.instructions.md` become
+  `.troupe/rules/<name>.md`, with the front matter Cursor's rules have, `description`,
+  `globs` and `alwaysApply`, meaning what it meant there. A directory's rule has its globs
+  written from the root (`src/**` under `web/` is `web/src/**`); Copilot's `applyTo` is
+  its globs, and `applyTo: "**"` is `alwaysApply: true`.
+- **Agents and commands**, Claude Code's and opencode's, become `.troupe/agents/` and
+  `.troupe/commands/` files.
+
+**Creating an `AGENTS.md` is a question of its own.** Every coding tool reads that file,
+not only Troupe, so when the directory has none, `troupe onboard` asks `AGENTS.md is not
+there. Create it?` rather than its usual question, and `--yes` never answers it: the file
+is left for a run at a terminal, and the summary says so. `--json` marks each proposal
+with `question`, `create_agents_md` for a new `AGENTS.md` and `write` for the rest, and
+with `--yes` gives a new `AGENTS.md` `"written": false` and the reason, which does not make
+the run fail. Adding to an `AGENTS.md` that is there is an ordinary proposal.
+
 Only what you answer yes to is written, one file at a time. Onboarding writes two places
-and nothing else: the workspace's `.troupe/`, from the repository's files, and your config
-directory, from files in your home directory, never one into the other; and there only
-`agents/<name>.md`, `commands/<name>.md`, `skills/<name>/...`, `workflows/<name>.json`,
-`mcp.json` and your own `AGENTS.md`. A file that would land anywhere else, through a `..`
-or a `.troupe` that is a link to elsewhere, is refused. Each file written says where it
-came from, `imported_from`, `imported_hash` and `imported_at`, and `imported_also` for any
-other file it was made from (an agent's permissions in `.claude/settings.json`, say): in
-its frontmatter, for a Markdown file, and for anything else (and your `AGENTS.md`, which
-is read whole into the prompt) in `onboarded.json` beside it. A file a source found and
-made nothing of is listed first, as `skipped:` with the reason.
+and nothing else, and one file between them: the workspace's `.troupe/`, from the
+repository's files, and your config directory, from files in your home directory, never
+one into the other; and there only `agents/<name>.md`, `commands/<name>.md`,
+`rules/<name>.md` (the repository's), `skills/<name>/...`, `workflows/<name>.json`,
+`mcp.json` and your own `AGENTS.md`; and an `AGENTS.md` at the workspace's root or in one
+of its directories that is there and not hidden. A file that would land anywhere else,
+through a `..` or a `.troupe` that is a link to elsewhere, is refused. Each file written
+says where it came from, `imported_from`, `imported_hash` and `imported_at`,
+`imported_also` for any other file it was made from (an agent's permissions in
+`.claude/settings.json`, say, or the `GEMINI.md` an `AGENTS.md` took from too), and
+`imported_version`, the version of the onboarding rules that wrote it: in its
+frontmatter, for a Markdown file, and for anything else, and an `AGENTS.md`, which is read
+whole into the prompt, in `onboarded.json` (the workspace's `.troupe/onboarded.json` for
+an `AGENTS.md` of the workspace's). A file a source found and made nothing of is listed
+first, as `skipped:` with the reason.
 
 Run it again and it proposes nothing until a source changes: a file onboarded from an
 unchanged source is left alone, your own edits to it included, and a file you said no to
@@ -393,8 +430,21 @@ diff against the file you have, and nothing is overwritten unasked. `--yes` writ
 proposal without asking, and `--json` prints them as one object and writes nothing unless
 `--yes` is given too. It exits 1 when a proposal was refused or a write failed, and 2 when
 there was nobody to ask. Inside a session the librarian writes the same files with the
-`onboard_write` tool, which asks before each one; into your config directory it asks even
-with `auto_approve` on, since what lands there runs in every session without a question.
+`onboard_write` tool, which asks before each one; into your config directory, and into an
+`AGENTS.md`, it asks even with `auto_approve` on, since what lands there runs in every
+session without a question, or is read by every tool.
+
+Onboarding proposes by itself and never writes by itself. The first session in a
+workspace that has other tools' files and nothing onboarded says, in one line, what
+`troupe onboard` would bring in (`1 AGENTS.md, 2 rules and 1 agent`) and how to run it.
+The rules onboarding follows have a version, recorded in `.troupe/onboarded.json` as
+`onboarding` when a workspace is first onboarded and again by a `troupe onboard` run that
+answered every question; a session in a workspace onboarded under older rules than its
+build's suggests running `troupe onboard` again, and one whose brief an older version of
+the librarian's survey wrote (its `survey` in `.troupe/memory.md`) suggests `/memory
+refresh`, in the same line. Each is said once per workspace and version, and remembered in
+Troupe's state directory (`onboard.json`), never in the repository; saying no to a
+proposal in a workspace, or onboarding it, ends the first one. Nothing re-runs by itself.
 
 ## Instruction files
 
@@ -515,6 +565,9 @@ frontend/AGENTS.md:9: duplicate: the same rule as AGENTS.md:5
   source, or another file it was made from, has changed or gone since, read from the
   `imported_from`, `imported_hash` and `imported_also` it recorded; `troupe onboard` shows
   what changed.
+- **outdated**: the workspace was onboarded under older onboarding rules than this
+  build's (`.troupe/onboarded.json`'s `onboarding`); `troupe onboard` shows what they would
+  write now, and a run that answers every question records the new version.
 
 It would rather miss a finding than make a false one. It exits 0 when it finds nothing, 1
 on a finding and 2 when it cannot read the workspace, so a repository can run it in CI on
