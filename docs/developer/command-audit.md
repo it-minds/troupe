@@ -56,7 +56,7 @@ palette's run of every built-in holds the row.
 | `hq` (`remote`) | HQ opens; with no plane, on this machine's sessions | as Line | as Line | HQ opens | `remote_hq_test.exs` |
 | `observer` | the agent tree opens | as Line | as Line | as Line | smoke only (`command_palette_test.exs`) |
 | `files` | the files panel opens on `session:/` | as Line | as Line | the worker's checkout | `remote_ui_test.exs`, smoke |
-| `upload` | the file lands in the workspace; **one over about 16 MB fails with "the daemon is not reachable"** | the palette puts `/upload ` on the line and lets the window go | as Line | sent to the worker | `worker_commands_test.exs`, `remote_ui_test.exs`; D108, D107 |
+| `upload` | the file lands in the workspace; **one over about 16 MB fails with "the daemon is not reachable"** | the palette put `/upload ` on the line and let the window go; now it is put in the window's box and sent from there (TUI Decision 156) | as Line | sent to the worker | `worker_commands_test.exs`, `remote_ui_test.exs`, `agents_palette_test.exs`; D108 |
 | `copy` | notice: no window given | the window's transcript is copied (WSL); **on Windows "clip exited 1: The syntax of the command is incorrect"** | as Line | as local | "a window command picked from the palette acts on the activated window"; `clipboard_test.exs`; D109 |
 | `memory` | says what the brief holds | as Line | the brief of the main checkout (Decision 831) | refused: the brief lives on the worker | `memory_client_test.exs`; "a local-only command says why it cannot run there" |
 | `context` | one line: files read and left out | as Line | names the main checkout's brief | asked of the worker (`context.get`), as `goal` | `context_command_test.exs` |
@@ -66,13 +66,13 @@ palette's run of every built-in holds the row.
 | `mcp` | the servers page opens | as Line | as Line | the page opens (a pod's servers are its profile's) | `mcp_page_test.exs` |
 | `skills` | the same page, on the skills | as Line | as Line | as `mcp` | `mcp_page_test.exs` |
 | `help` (`?`) | the palette opens | as Line | as Line | as Line | `command_palette_test.exs`, `plain_line_test.exs` |
-| `agents` | notice: the primary agents, **with `worktree` among them** | as Line | as Line | the plane's profiles | smoke only; D107 |
-| `worktree` | the default agent in a fresh worktree; **`<existing>` and `<name>:` are not read**, the whole line is the prompt | the palette puts `/worktree ` on the line and lets the window go | branches made beside the linked worktree | refused: one profile per pod session | `branch_commands_test.exs` (Decision 843); D107; "a local-only command says why it cannot run there" |
+| `agents` | notice: the primary agents, **with `worktree` among them**; now the manager (TUI Decision 156), without it | as Line | as Line | the plane's profiles; now the bundle's agents, read-only, saying why | `agents_manager_test.exs` |
+| `worktree` | the default agent in a fresh worktree; **`<existing>` and `<name>:` are not read**, the whole line is the prompt | the palette put `/worktree ` on the line and let the window go; now in the window's box | branches made beside the linked worktree | refused: one profile per pod session | `branch_commands_test.exs` (Decision 843), `agents_palette_test.exs`; "a local-only command says why it cannot run there" |
 | `quit` (`exit`, `q`) | the screen exits, the session carries on | as Line | as Line | as Line | `command_palette_test.exs` (the row); the driver |
-| `answer`, `ask`, `build`, `plan`, `quick`, `workflow` | a branch in its own worktree, its window opens and finishes | the palette puts `/<agent> ` on the line and lets the window go | worktrees beside the linked worktree | refused: one profile per pod session | `branch_client_test.exs` (`build`, `workflow`); D107; `read_branch_test.exs` (core) for `ask`, Decision 843, and D105 for what is left |
+| `answer`, `ask`, `build`, `plan`, `quick`, `workflow` | a branch in its own worktree, its window opens and finishes | the palette put `/<agent> ` on the line and let the window go; now in the window's box | worktrees beside the linked worktree | refused: one profile per pod session | `branch_client_test.exs` (`build`, `workflow`), `agents_palette_test.exs`; `read_branch_test.exs` (core) for `ask`, Decision 843, and D105 for what is left |
 | `librarian` | a branch in the checkout itself (it writes only the brief) | as the others | in the linked worktree | as the others | `memory_client_test.exs` |
 | `explore`, `general`, `implementer`, `reviewer` | no row: subagents (`mode: subagent`), started by `delegate`, not by a person | - | - | - | D107 |
-| `custom` (`/review README.md`) | its prompt, `$ARGUMENTS` filled, goes to the session's own agent | the palette runs it at once with `$ARGUMENTS` empty, to the session's agent, not the window's | as Line | sent to the worker (`commands.run`) | `command_palette_test.exs`, `project_command_test.exs`; D107 |
+| `custom` (`/review README.md`) | its prompt, `$ARGUMENTS` filled, goes to the session's own agent | the palette ran it at once with `$ARGUMENTS` empty, and now asks for them first; it goes to the session's agent, not the window's | as Line | sent to the worker (`commands.run`) | `command_palette_test.exs`, `project_command_test.exs`, `agents_palette_test.exs`; D107 |
 
 ## `/watch`, end to end
 

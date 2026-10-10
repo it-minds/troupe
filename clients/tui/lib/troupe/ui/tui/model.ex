@@ -384,6 +384,12 @@ defmodule Troupe.UI.TUI.Model do
       :remote_note ->
         push(ensure_agent(w, path), path, {:system, d.text})
 
+      # The agent the window's own agent is, as it started and whenever it is switched (root
+      # Decision 841): what its header says it runs (TUI Decision 156). The transcript
+      # says so in the note beside this.
+      :agent_named when path == w.path and is_binary(d.name) ->
+        %{w | profile: d.name}
+
       # A saved comment started a branch of this session (root Decision 844): said in the
       # session's own transcript, where the person would otherwise see nothing of it.
       :watch_triggered ->

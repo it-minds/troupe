@@ -438,8 +438,13 @@ defmodule Troupe.Remote.Translate do
       "agent.state" ->
         {[emit.(:agent_state, %{to: state_atom(data["to"] || data["state"])})], memory}
 
+      # What the window runs is named by the agent itself, whatever the window is called
+      # (TUI Decision 156).
       "agent_started" ->
-        {[emit.(:remote_note, %{text: "agent started" <> as(data)})], memory}
+        {[
+           emit.(:remote_note, %{text: "agent started" <> as(data)}),
+           emit.(:agent_named, %{name: data["profile"]})
+         ], memory}
 
       "agent_restarted" ->
         {[emit.(:remote_note, %{text: "agent restarted"})], memory}
@@ -495,8 +500,13 @@ defmodule Troupe.Remote.Translate do
            })
          ], memory}
 
+      # The transcript says when the rules changed and what they took away or gave (root
+      # Decision 841); the window's header follows the agent it runs now (TUI Decision 156).
       "profile_switched" ->
-        {[emit.(:remote_note, %{text: "profile switched" <> switch(data)})], memory}
+        {[
+           emit.(:remote_note, %{text: "profile switched" <> switch(data) <> tools_changed(data)}),
+           emit.(:agent_named, %{name: data["to"]})
+         ], memory}
 
       # The session's goal (issue #59): its own events, because the window keeps it and the
       # status line shows it for as long as it is set, not only when it is announced.
@@ -540,7 +550,10 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:remote_note, %{text: "delegated" <> to_child(data)})], memory}
 
       "session_created" ->
-        {[emit.(:remote_note, %{text: "session created" <> as(data)})], memory}
+        {[
+           emit.(:remote_note, %{text: "session created" <> as(data)}),
+           emit.(:agent_named, %{name: data["profile"]})
+         ], memory}
 
       type when type in ["input_after_done", "trigger_fired"] ->
         {[emit.(:remote_note, %{text: generic(type, data)})], memory}
@@ -733,6 +746,19 @@ defmodule Troupe.Remote.Translate do
 
   defp switch(%{"to" => to}) when is_binary(to), do: " to #{to}"
   defp switch(_data), do: ""
+
+  # `(project) · gains shell · loses write_file, edit_file`, from what a daemon since
+  # Decision 841 says of a switch; an older one's says neither.
+  defp tools_changed(data) do
+    layer = if is_binary(data["layer"]), do: " (#{data["layer"]})", else: ""
+
+    [{"gains", data["tools_added"]}, {"loses", data["tools_removed"]}]
+    |> Enum.flat_map(fn
+      {word, [_ | _] = tools} -> [" · #{word} " <> Enum.join(tools, ", ")]
+      {_word, _none} -> []
+    end)
+    |> then(&Enum.join([layer | &1]))
+  end
 
   defp to_child(%{"child_path" => [_ | _] = path}), do: " to " <> Enum.join(path, "/")
   defp to_child(%{"agent" => agent}) when is_binary(agent), do: " to #{agent}"

@@ -204,6 +204,33 @@ defmodule Troupe.Client.Remote do
   def manage_sources(_sid, _method, _params),
     do: {:error, "a remote session's MCP servers and skills are its profile's"}
 
+  # A pod's agents are its profile's bundle (root Decision 841): the worker reads and checks
+  # them, and says so in the same words it refuses a write with, which are never sent.
+  @pod_agents "On a pod the agents come from the profile's bundle and are read-only here: " <>
+                "change them in the console"
+
+  @impl true
+  def agents(sid, "agents.list", params) do
+    case Worker.rpc(sid, "agents.list", params) do
+      {:ok, %{} = listed} -> {:ok, Map.put(listed, "read_only", @pod_agents)}
+      {:ok, other} -> {:error, "unexpected agents.list answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  def agents(sid, method, params) when method in ~w(agents.get agents.validate) do
+    case Worker.rpc(sid, method, Map.put(params, :session_id, sid)) do
+      {:ok, %{} = answer} -> {:ok, answer}
+      {:ok, other} -> {:error, "unexpected #{method} answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  def agents(_sid, method, _params) when method in ~w(agents.put agents.delete),
+    do: {:error, @pod_agents}
+
+  def agents(_sid, method, _params), do: {:error, "unknown method #{method}"}
+
   @impl true
   def memory(_sid, _command), do: {:error, "the project brief lives on the worker"}
 

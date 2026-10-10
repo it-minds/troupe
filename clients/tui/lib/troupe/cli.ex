@@ -444,7 +444,7 @@ defmodule Troupe.CLI do
 
     #{sections}
 
-    Each agent is a command too, /build <prompt> or /plan <prompt> (/agents lists them),
+    Each agent is a command too, /build <prompt> or /plan <prompt> (/agents manages them),
     and so is each <name>.md in your config's commands/ or the workspace's .troupe/commands/.\
     """
   end
