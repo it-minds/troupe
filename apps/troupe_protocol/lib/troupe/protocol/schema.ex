@@ -564,6 +564,7 @@ defmodule Troupe.Protocol.Schema do
         "profile" => optional(:string),
         "prompt" => optional(:string),
         "worktree" => optional(:string),
+        "worktree_name" => optional(:string),
         "config" => optional(:object),
         "parent" => optional(:string),
         "workflow" => optional(:string),

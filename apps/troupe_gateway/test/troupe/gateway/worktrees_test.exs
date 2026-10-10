@@ -108,6 +108,61 @@ defmodule Troupe.Gateway.WorktreesTest do
     refute File.dir?(second["worktree"])
   end
 
+  # The desktop app removes a worktree with `worktree.remove`, and on Windows git cannot
+  # delete the directory it was started in (Decision 843): the git that removes the tree is
+  # started in the checkout it belongs to. A stand-in for git on PATH says where it was
+  # started, which nothing here would otherwise show.
+  test "worktree.remove runs git from the checkout, not inside the tree it removes", context do
+    client = connect(context)
+
+    {:ok, _first} = create(client, context.workspace)
+    {:ok, second} = create(client, context.workspace)
+    started_in = record_removals(context.base)
+
+    assert {:ok, %{"removed" => true}} =
+             Client.call(client, "worktree.remove", %{
+               "command_id" => Client.command_id(),
+               "path" => second["worktree"]
+             })
+
+    refute File.dir?(second["worktree"])
+    assert [cwd] = started_in.()
+    assert cwd == real!(context.workspace)
+  end
+
+  # TUI Decision 42, in the daemon: `/worktree login: …` works in `<checkout>-login` on
+  # `troupe/login`, the same tree every time, made again from its branch when only the
+  # directory went.
+  test "a named worktree is made on troupe/<name> the first time and is the same one after",
+       context do
+    client = connect(context)
+
+    {:ok, _first} = create(client, context.workspace)
+    assert {:ok, named} = create(client, context.workspace, "always", "login")
+    assert named["branch"] == "troupe/login"
+    assert Path.basename(named["worktree"]) == "repo-login"
+    assert named["workspace"] == named["worktree"]
+    File.write!(Path.join(named["worktree"], "kept.txt"), "still here\n")
+    Troupe.stop_session(named["session_id"])
+
+    assert {:ok, again} = create(client, context.workspace, "always", "login")
+    assert again["worktree"] == named["worktree"]
+    assert File.read!(Path.join(again["worktree"], "kept.txt")) == "still here\n"
+    Troupe.stop_session(again["session_id"])
+
+    File.rm_rf!(named["worktree"])
+    assert {:ok, back} = create(client, context.workspace, "always", "login")
+    assert back["worktree"] == named["worktree"]
+    assert back["branch"] == "troupe/login"
+    assert File.dir?(back["worktree"])
+
+    for bad <- ["../up", "two words", "-x", "a..b", ".hidden", "x.lock", ""] do
+      assert {:error, %Error{message: "invalid_params", data: %{"field" => "worktree_name"}}} =
+               create(client, context.workspace, "always", bad),
+             bad
+    end
+  end
+
   test "worktree: never keeps the second session in the repository itself", context do
     client = connect(context)
 
@@ -203,14 +258,50 @@ defmodule Troupe.Gateway.WorktreesTest do
     client
   end
 
-  defp create(client, workspace, worktree \\ "auto") do
-    result =
-      Client.call(client, "session.create", %{
+  # A `git` first on PATH that writes where it was started for every `worktree remove`,
+  # then runs the real one; the function reads those back. PATH is the VM's own, and this
+  # module is not async.
+  defp record_removals(base) do
+    real_git = System.find_executable("git")
+    bin = Path.join(base, "bin")
+    log = Path.join(base, "removals.log")
+    File.mkdir_p!(bin)
+
+    File.write!(Path.join(bin, "git"), """
+    #!/bin/sh
+    case "$*" in *"worktree remove"*) pwd -P >> '#{log}' ;; esac
+    exec '#{real_git}' "$@"
+    """)
+
+    File.chmod!(Path.join(bin, "git"), 0o755)
+    path = System.get_env("PATH")
+    System.put_env("PATH", bin <> ":" <> path)
+    on_exit(fn -> System.put_env("PATH", path) end)
+
+    fn ->
+      case File.read(log) do
+        {:ok, text} -> String.split(text, "\n", trim: true)
+        {:error, _} -> []
+      end
+    end
+  end
+
+  defp real!(path) do
+    {:ok, real} = Troupe.Workspace.real_path(path)
+    real
+  end
+
+  defp create(client, workspace, worktree \\ "auto", name \\ nil) do
+    params =
+      %{
         "command_id" => Client.command_id(),
         "workspace" => workspace,
         "worktree" => worktree,
         "config" => %{"auto_approve" => true}
-      })
+      }
+
+    params = if name, do: Map.put(params, "worktree_name", name), else: params
+    result = Client.call(client, "session.create", params)
 
     with {:ok, %{"session_id" => id}} <- result do
       on_exit(fn -> Troupe.stop_session(id) end)

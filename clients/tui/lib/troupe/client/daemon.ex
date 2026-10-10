@@ -46,6 +46,10 @@ defmodule Troupe.Client.Daemon do
   @first_prompt "There is no project brief yet. Survey this repository and write one."
   # The journal keys its directory by where the session lives; a daemon session lives here.
   @journal_key "daemon"
+  # What this session's own window is called, as a window command names it.
+  @own_window [nil, "root", "session", "session-1"]
+  # How long a cancelled branch is waited on to come to rest before its worktree is kept.
+  @cancel_wait_ms 60_000
 
   ## Session-scoped
 
@@ -148,16 +152,50 @@ defmodule Troupe.Client.Daemon do
   # `/build fix the test` starts a branch: a session of its own in this workspace
   # (decision 7.3 b), with `parent` set to this one and its own worktree when the
   # checkout is busy — which it is, since this session works in it — shown here as the
-  # window `build-1`. `/worktree …` is the default agent, always in a worktree.
+  # window `build-1`. `/worktree …` is the default agent, always in a worktree: a fresh
+  # one, the Troupe worktree `<name>:` names, or one the person checked out.
   @impl true
   def dispatch(sid, name, args) do
     with {:ok, profile, mode, kind} <- branch_profile(sid, name),
-         {workflow, prompt} = workflow_and_prompt(sid, kind, prompt_of(args)),
+         {place, prompt} = placement(sid, name, mode, prompt_of(args)),
+         {workflow, prompt} = workflow_and_prompt(sid, kind, prompt),
          window = Branch.next_name(window_names(sid), name),
-         {:ok, child} <- create_branch(sid, profile, prompt, mode, workflow),
+         {:ok, child} <- create_branch(sid, profile, prompt, place, workflow),
          {:ok, _} <- open_branch(sid, child, window, profile, prompt) do
       {:ok, window}
     end
+  end
+
+  # Where a branch works: where its agent's mode puts it, and for `/worktree` what its
+  # first word says. A word ending in a colon names a Troupe worktree, made the first time
+  # and the same one after (TUI Decision 42: the colon is what makes it a name, so
+  # `/worktree fix the login bug` makes no worktree called `fix`); a word naming a
+  # worktree the person checked out, by its directory or its branch, is that one (TUI
+  # Decision 39). Anything else is the prompt, whole, in a fresh worktree.
+  defp placement(sid, "worktree", mode, prompt) do
+    {word, rest} =
+      case String.split(prompt, ~r/\s+/, parts: 2) do
+        [word, rest] -> {word, String.trim(rest)}
+        [word] -> {word, ""}
+      end
+
+    cond do
+      String.ends_with?(word, ":") and word != ":" ->
+        {%{worktree: mode, name: String.trim_trailing(word, ":")}, rest}
+
+      tree = word != "" && their_worktree(sid, word) ->
+        {%{worktree: "never", theirs: tree}, rest}
+
+      true ->
+        {%{worktree: mode}, prompt}
+    end
+  end
+
+  defp placement(_sid, _name, mode, prompt), do: {%{worktree: mode}, prompt}
+
+  defp their_worktree(sid, word) do
+    {theirs, _troupe} = worktrees(workspace(sid))
+    Enum.find(theirs, &(word in [&1.rel, &1.branch]))
   end
 
   @impl true
@@ -230,22 +268,81 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def stop_loop(sid), do: describe(Worker.stop_loop(sid))
 
+  # `/cancel` and `x x` on a branch (TUI Decision 57): its turn is cancelled, and once it is
+  # at rest the worktree Troupe made for it is discarded and the window closed, so nothing
+  # is writing the tree as it goes. That waits on the daemon, which refuses the discard
+  # while the branch still works, so it is asked again until it is not; a worktree that
+  # is still kept after that says so in this session's window. A branch in the checkout,
+  # or in a worktree the person checked out, keeps its files and loses its window. On this
+  # session's own window `/cancel` cancels its turn and nothing more.
   @impl true
-  def cancel_branch(sid, path), do: route(sid, path, &Worker.cancel/1)
-
-  # Dismissing this session's own window lets go of the session; dismissing a branch's
-  # closes the window for good and leaves the session to the daemon, where the picker
-  # still lists it.
-  @impl true
-  def dismiss(sid, path) do
+  def cancel_branch(sid, path) do
     case branch(sid, path) do
       nil ->
-        Worker.detach(sid)
-        :ok
+        route(sid, path, &Worker.cancel/1)
+
+      %{worktree: tree, managed: true} = branch when is_binary(tree) ->
+        _ = Worker.cancel(branch.session_id)
+        deadline = System.monotonic_time(:millisecond) + @cancel_wait_ms
+        task = {Task, fn -> discard_at_rest(sid, branch, deadline) end}
+
+        case DynamicSupervisor.start_child(Troupe.Remote.Sessions, task) do
+          {:ok, _pid} -> :ok
+          {:error, reason} -> {:error, message(reason)}
+        end
 
       branch ->
+        _ = Worker.cancel(branch.session_id)
+        close_branch(sid, branch, %{cancelled: true})
+        :ok
+    end
+  end
+
+  defp discard_at_rest(sid, branch, deadline) do
+    case discard_worktree(sid, branch) do
+      :ok ->
+        :ok
+
+      {:error, "conflict: session " <> _} ->
+        if System.monotonic_time(:millisecond) < deadline do
+          Process.sleep(200)
+          discard_at_rest(sid, branch, deadline)
+        else
+          kept(sid, branch, "it had not stopped a minute later")
+        end
+
+      {:error, reason} ->
+        kept(sid, branch, reason)
+    end
+  end
+
+  defp kept(sid, branch, why) do
+    _ =
+      Worker.note(
+        sid,
+        "#{branch.window} was cancelled and its worktree kept (#{why}); " <>
+          "/discard #{branch.window} removes it"
+      )
+
+    :ok
+  end
+
+  # Dismissing a branch's window closes it for good and leaves the session to the daemon,
+  # where the picker still lists it. This session's own window stays (Decision 843):
+  # letting go of the session left the screen on one it no longer reached. `/back`,
+  # `/sessions` and `/new` leave it.
+  @impl true
+  def dismiss(sid, path) do
+    case {path, branch(sid, path)} do
+      {_path, %{} = branch} ->
         close_branch(sid, branch)
         :ok
+
+      {path, nil} when path in @own_window ->
+        {:error, Troupe.Client.own_window()}
+
+      {path, nil} ->
+        {:error, "no window #{path}"}
     end
   end
 
@@ -267,11 +364,17 @@ defmodule Troupe.Client.Daemon do
           })
 
           close_branch(sid, branch)
-          {:ok, "merged #{branch.git_branch} into the checkout"}
+          {:ok, merged(branch, result)}
 
-        {:error, "conflict" <> _ = reason} ->
+        {:error, "conflict: merge conflicts" <> _ = reason} ->
           record(sid, branch.window, :worktree_merged, %{output: reason, conflicts: true})
           {:error, "merge conflicts; resolve in your checkout: #{reason}"}
+
+        # git would not start it: nothing conflicted, and the checkout is as it was.
+        {:error, "conflict: local changes" <> _} ->
+          {:error,
+           "#{branch.window} is not merged: the checkout has uncommitted changes the merge " <>
+             "would overwrite; commit or stash them, then /merge again"}
 
         {:error, reason} ->
           {:error, message(reason)}
@@ -279,24 +382,38 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # A merge that landed is said as one, and a tree git then could not remove beside it.
+  defp merged(branch, %{"removed" => false} = result) do
+    "merged #{branch.git_branch} into the checkout, but its worktree #{branch.worktree} " <>
+      "could not be removed and is left with its branch: #{result["removal_error"]}"
+  end
+
+  defp merged(branch, _result), do: "merged #{branch.git_branch} into the checkout"
+
   @impl true
   def discard(sid, path) do
-    with {:ok, branch} <- worktree_branch(sid, path, "discard") do
-      params = %{
-        workspace: workspace(sid),
-        path: branch.worktree,
-        command_id: Troupe.Remote.RPC.command_id()
-      }
+    with {:ok, branch} <- worktree_branch(sid, path, "discard"),
+         :ok <- discard_worktree(sid, branch) do
+      {:ok, "discarded #{branch.git_branch}"}
+    end
+  end
 
-      case Link.call("worktree.discard", params) do
-        {:ok, _} ->
-          record(sid, branch.window, :worktree_discarded, %{})
-          close_branch(sid, branch)
-          {:ok, "discarded #{branch.git_branch}"}
+  # The worktree and its branch go, then the window.
+  defp discard_worktree(sid, branch) do
+    params = %{
+      workspace: workspace(sid),
+      path: branch.worktree,
+      command_id: Troupe.Remote.RPC.command_id()
+    }
 
-        {:error, reason} ->
-          {:error, message(reason)}
-      end
+    case Link.call("worktree.discard", params) do
+      {:ok, _} ->
+        record(sid, branch.window, :worktree_discarded, %{})
+        close_branch(sid, branch)
+        :ok
+
+      {:error, reason} ->
+        {:error, message(reason)}
     end
   end
 
@@ -873,20 +990,66 @@ defmodule Troupe.Client.Daemon do
 
   ## Helpers the UI needs and cannot reach itself
 
-  @doc "The worktrees this workspace has. The daemon manages them; none are the TUI's own."
+  @doc """
+  The worktrees `/worktree` works in beside this workspace, as the daemon lists them: the
+  ones the person checked out, each by its directory's name and its branch (TUI Decision
+  39), and the names of Troupe's own, on `troupe/<name>` (TUI Decision 42). The checkout
+  itself, which git lists first, is neither, and nor is the workspace asked about.
+  """
   @spec worktrees(String.t()) :: {[map()], [String.t()]}
   def worktrees(workspace) do
     case Link.call("worktree.list", %{workspace: workspace}) do
-      {:ok, %{"worktrees" => list}} ->
-        {Enum.map(
-           list,
-           &%{rel: Path.basename(&1["path"] || ""), path: &1["path"], branch: &1["branch"]}
-         ), []}
+      {:ok, %{"worktrees" => [_checkout | linked]}} ->
+        {troupe, theirs} =
+          linked
+          |> Enum.reject(&same_dir?(&1["path"], workspace))
+          |> Enum.map(
+            &%{rel: Path.basename(&1["path"] || ""), path: &1["path"], branch: &1["branch"]}
+          )
+          |> Enum.split_with(&String.starts_with?(&1.branch || "", "troupe/"))
+
+        {theirs, Enum.map(troupe, &String.replace_prefix(&1.branch, "troupe/", ""))}
 
       _ ->
         {[], []}
     end
   end
+
+  defp same_dir?(a, b) when is_binary(a) and is_binary(b), do: dir_key(a) == dir_key(b)
+  defp same_dir?(_a, _b), do: false
+
+  # git lists a tree by its real path; a workspace may be named through a link.
+  defp dir_key(path) do
+    path = Path.expand(path)
+
+    case Troupe.Workspace.real_path(path) do
+      {:ok, real} -> Troupe.Workspace.compare_key(real)
+      {:error, _} -> Troupe.Workspace.compare_key(path)
+    end
+  end
+
+  @doc """
+  This session's branches whose windows were dismissed, by window and session id: each is
+  still a session in the daemon, which the picker lists (the row of `/dismiss`). One
+  merged, discarded or cancelled is not: it was ended, not let go.
+  """
+  @spec dismissed_branches(String.t()) :: [%{window: String.t(), session_id: String.t()}]
+  def dismissed_branches(sid) do
+    events = Journal.all(sid)
+    open = MapSet.new(branches(events), & &1.window)
+    ended = for event <- events, ended?(event), into: MapSet.new(), do: event.agent_path
+
+    for %{type: :branch_spawned, agent_path: window, data: %{session_id: child}} <- events,
+        is_binary(child),
+        not MapSet.member?(open, window),
+        not MapSet.member?(ended, window),
+        do: %{window: window, session_id: child}
+  end
+
+  defp ended?(%{type: :worktree_discarded}), do: true
+  defp ended?(%{type: :worktree_merged, data: %{conflicts: false}}), do: true
+  defp ended?(%{type: :window_dismissed, data: %{cancelled: true}}), do: true
+  defp ended?(_event), do: false
 
   @doc "The text a multiple-choice answer is sent as."
   @spec answer_text([String.t()]) :: String.t()
@@ -942,7 +1105,9 @@ defmodule Troupe.Client.Daemon do
           profile: data[:name],
           prompt: data[:prompt] || "",
           worktree: data[:worktree],
-          git_branch: data[:git_branch]
+          git_branch: data[:git_branch],
+          # A worktree the person checked out is theirs (TUI Decision 39).
+          managed: data[:managed] != false
         })
 
       %{type: :window_dismissed, agent_path: window}, acc ->
@@ -975,7 +1140,7 @@ defmodule Troupe.Client.Daemon do
   defp route(sid, path, fun) do
     case {path, branch(sid, path)} do
       {_, %{session_id: child}} -> describe(fun.(child))
-      {path, nil} when path in [nil, "root", "session", "session-1"] -> describe(fun.(sid))
+      {path, nil} when path in @own_window -> describe(fun.(sid))
       {path, nil} -> {:error, "no window #{path}"}
     end
   end
@@ -1045,13 +1210,18 @@ defmodule Troupe.Client.Daemon do
   defp prompt_of(%{} = args), do: prompt_of(args[:prompt] || args["prompt"] || "")
   defp prompt_of(_args), do: ""
 
-  defp create_branch(sid, profile, prompt, mode, workflow) do
+  # A branch in a worktree the person checked out is a session in that directory, which
+  # the daemon makes no worktree for; its window still names the tree and its branch.
+  defp create_branch(sid, profile, prompt, place, workflow) do
+    theirs = place[:theirs]
+
     body =
       %{
-        workspace: workspace(sid),
+        workspace: if(theirs, do: theirs.path, else: workspace(sid)),
         profile: profile,
         prompt: blank_to_nil(prompt),
-        worktree: mode,
+        worktree: place.worktree,
+        worktree_name: place[:name],
         parent: sid,
         workflow: workflow,
         config: %{},
@@ -1061,13 +1231,24 @@ defmodule Troupe.Client.Daemon do
       |> Map.new()
 
     case Link.call("session.create", body) do
+      {:ok, %{"session_id" => child} = result} when theirs != nil ->
+        {:ok,
+         %{
+           id: child,
+           workspace: result["workspace"] || theirs.path,
+           worktree: theirs.path,
+           git_branch: theirs.branch,
+           managed: false
+         }}
+
       {:ok, %{"session_id" => child} = result} ->
         {:ok,
          %{
            id: child,
            workspace: result["workspace"] || workspace(sid),
            worktree: result["worktree"],
-           git_branch: result["branch"]
+           git_branch: result["branch"],
+           managed: true
          }}
 
       {:ok, other} ->
@@ -1090,14 +1271,15 @@ defmodule Troupe.Client.Daemon do
       prompt: prompt,
       session_id: child.id,
       worktree: child.worktree,
-      git_branch: child.git_branch
+      git_branch: child.git_branch,
+      managed: child.managed
     })
 
     if child.worktree do
       record(sid, window, :worktree_created, %{
         path: child.worktree,
         git_branch: child.git_branch,
-        managed: true
+        managed: child.managed
       })
     end
 
@@ -1226,16 +1408,25 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
-  defp close_branch(sid, branch) do
+  defp close_branch(sid, branch, said \\ %{}) do
     Worker.detach(branch.session_id)
-    record(sid, branch.window, :window_dismissed, %{})
+    record(sid, branch.window, :window_dismissed, said)
   end
 
   defp worktree_branch(sid, path, verb) do
     case branch(sid, path) do
-      nil -> {:error, "no branch #{path}"}
-      %{worktree: nil} -> {:error, "#{path} shares this checkout; there is nothing to #{verb}"}
-      branch -> {:ok, branch}
+      nil ->
+        {:error, "no branch #{path}"}
+
+      %{worktree: nil} ->
+        {:error, "#{path} shares this checkout; there is nothing to #{verb}"}
+
+      %{managed: false} = branch ->
+        {:error,
+         "#{path} works in your own worktree #{branch.worktree}; Troupe does not #{verb} it"}
+
+      branch ->
+        {:ok, branch}
     end
   end
 

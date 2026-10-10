@@ -147,11 +147,10 @@ defmodule Troupe.Client.Remote do
   @impl true
   def cancel_branch(sid, _path), do: describe(Worker.cancel(sid))
 
+  # A pod session has one window, its own, which stays: letting go of it under the screen
+  # sent what was typed next to this machine's daemon (Decision 843).
   @impl true
-  def dismiss(sid, _path) do
-    Worker.detach(sid)
-    :ok
-  end
+  def dismiss(_sid, _path), do: {:error, Troupe.Client.own_window()}
 
   @impl true
   def merge(_sid, _path), do: {:error, "a remote session has no local worktree to merge"}
