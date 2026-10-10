@@ -173,6 +173,22 @@ defmodule Troupe.Gateway.WorktreesTest do
     assert second["workspace"] == context.workspace
   end
 
+  # A directory is the session's however it is spelled (Decision 840): on Windows git writes
+  # `C:/` where the session's workspace is `c:/`; here a link to the checkout stands for the
+  # other spelling. The live session is found, so the checkout is busy, and its row names it.
+  test "a session is found in its checkout however the path is spelled", context do
+    client = connect(context)
+    workspace = context.workspace
+    link = Path.join(context.base, "link")
+    :ok = File.ln_s(workspace, link)
+
+    refute Worktrees.auto?(link)
+    {:ok, %{"session_id" => sid}} = create(client, workspace, "never")
+
+    assert Worktrees.auto?(link)
+    assert [%{"session_id" => ^sid}] = Worktrees.list(link)
+  end
+
   # Decision 840: what command mode's worktree rows say, from the daemon that has the trees.
   test "worktree.list says how far each worktree stands from the checkout, and what it changed",
        context do

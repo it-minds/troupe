@@ -533,7 +533,13 @@ defmodule Troupe.Commands do
     # What it sends, as its file has it (Decision 814): its description is the file's
     # say-so, and a palette shows the prompt itself before it first runs.
     |> Map.put("body", command.body)
+    |> put_agent(command)
   end
+
+  # The agent its file says it runs on, where it names one: what a branch started for it
+  # runs on (TUI Decision 155).
+  defp put_agent(entry, %{agent: agent}) when is_binary(agent), do: Map.put(entry, "agent", agent)
+  defp put_agent(entry, _command), do: entry
 
   # Where a command is changed: a workspace's by its place in the repository, a person's
   # in full.

@@ -215,6 +215,41 @@ defmodule Troupe.CommandModeTest do
     GenServer.stop(pid, :normal)
   end
 
+  # TUI Decision 155, amending Decision 763 in command mode: a command a file defines is
+  # work like a plain line, so it starts a branch, on the agent its file names or the
+  # default one, and the command runs there; the session's own agent hears nothing.
+  test "a repository's command typed in command mode starts a branch on the agent its file names" do
+    ws =
+      tmp_workspace(%{
+        ".troupe/commands/review.md" =>
+          "---\ndescription: Review it\nagent: plan\n---\nReview $ARGUMENTS and say what you would change.\n",
+        ".troupe/commands/standup.md" => "Say what changed since yesterday.\n"
+      })
+
+    {sid, _, _} = start_session!(workspace: ws, script: [{:text, "Reviewed."}, {:text, "Said."}])
+    {pid, _session} = start_tui(sid)
+    ready(pid)
+    eventually(fn -> Enum.any?(user_state(pid).commands, &(&1["name"] == "review")) end)
+
+    type(pid, "/review the parser")
+    press(pid, "enter")
+
+    assert %{data: %{name: "plan", isolation: :shared}} = await_event("plan-1", :branch_spawned)
+    assert Enum.any?(notices(pid), &(&1 =~ "starting /review on plan in the checkout"))
+
+    input = await_event("plan-1", :input, 10_000)
+    assert input.data.content == "Review the parser and say what you would change."
+
+    type(pid, "/standup")
+    press(pid, "enter")
+    assert %{data: %{name: "build"}} = await_event("build-1", :branch_spawned)
+    assert %{data: %{content: "Say what changed since yesterday."}} = await_event("build-1", :input)
+
+    assert events_of(sid, "root", :input) == []
+
+    GenServer.stop(pid, :normal)
+  end
+
   test "a slash command typed into a window's box runs as a command, and other words reach its agent" do
     {sid, _, _} = start_session!(script: [{:text, "done"}, {:text, "noted"}])
     {pid, _session} = start_tui(sid)

@@ -107,6 +107,8 @@ defmodule Troupe.Client do
   @callback dispatch(session_id(), String.t(), String.t() | map()) ::
               {:ok, String.t()} | {:error, term()}
   @callback agent_definition(session_id(), String.t()) :: {:ok, map()} | {:error, term()}
+  @callback start_command(session_id(), String.t(), String.t(), String.t(), String.t()) ::
+              {:ok, String.t()} | {:error, term()}
   @callback worktree_status(session_id()) :: {:ok, [map()]} | {:error, term()}
   @callback send_input(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
@@ -256,6 +258,16 @@ defmodule Troupe.Client do
   """
   @spec run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   def run_command(sid, name, arguments), do: impl(sid).run_command(sid, name, arguments)
+
+  @doc """
+  Runs a command a markdown file defines in a branch of its own (TUI Decision 155): a
+  branch on `agent`, in the checkout (`"never"`) or a worktree (`"always"`), with the
+  command run there rather than in the session. Answers the window it opened in.
+  """
+  @spec start_command(session_id(), String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def start_command(sid, agent, name, arguments, mode),
+    do: impl(sid).start_command(sid, agent, name, arguments, mode)
 
   @doc """
   Runs a command the person typed (`!cmd`) where the session runs, in its workspace

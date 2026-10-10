@@ -171,7 +171,8 @@ defmodule Troupe.CommandPaletteTest do
 
   # A command a repository defines (Decision 763): `.troupe/commands/review.md` is a row of
   # a section of its own with its file's description, and running it sends its prompt
-  # with what was typed after the name, which comes back as the session's input.
+  # with what was typed after the name, which comes back as the input of the branch it
+  # starts in command mode (TUI Decision 155).
   test "a command a file defines is in the palette with its description, and runs" do
     ws =
       tmp_workspace(%{
@@ -208,7 +209,8 @@ defmodule Troupe.CommandPaletteTest do
     type(pid, "the parser")
     press(pid, "enter")
 
-    input = await_event("root", :input, 10_000)
+    # In command mode it runs in a branch of its own (TUI Decision 155).
+    input = await_event("build-1", :input, 10_000)
     assert input.data.content == "Review the change on this branch. Look hardest at the parser."
     assert user_state(pid).focus == :command
   end

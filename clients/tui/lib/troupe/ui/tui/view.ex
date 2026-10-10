@@ -387,7 +387,7 @@ defmodule Troupe.UI.TUI.View do
     [
       String.pad_trailing(indent <> label, 22),
       String.pad_trailing("(#{name})", 10),
-      String.pad_trailing(state_text(st, state), 12),
+      String.pad_trailing(state_text(st, state, row.root? and row.window.badge), 12),
       String.pad_trailing(Model.agent_elapsed(row, state.now), 6),
       String.pad_leading(Model.tokens(row.agent), 15),
       detail
@@ -397,10 +397,16 @@ defmodule Troupe.UI.TUI.View do
     |> needs_you_line(st == :needs_input)
   end
 
-  defp state_text(:needs_input, state), do: if(blink?(state), do: "▶ you", else: "needs you")
-  defp state_text(:done_unread, _), do: "done ●"
-  defp state_text(:failed_unread, _), do: "failed ●"
-  defp state_text(state, _), do: to_string(state)
+  # The word beside the mark says what the mark says: `●` while the end has not been read,
+  # gone once the window has been opened (`badge`), as the mark goes from ⏺ to ○.
+  defp state_text(:needs_input, state, _badge?),
+    do: if(blink?(state), do: "▶ you", else: "needs you")
+
+  defp state_text(:done_unread, _, true), do: "done ●"
+  defp state_text(:done_unread, _, _badge?), do: "done"
+  defp state_text(:failed_unread, _, true), do: "failed ●"
+  defp state_text(:failed_unread, _, _badge?), do: "failed"
+  defp state_text(state, _, _badge?), do: to_string(state)
 
   defp detail_text(nil, _state),
     do: "No agents yet.\n\nDispatch one from the command line, e.g. /code fix the failing test."
@@ -1725,7 +1731,7 @@ defmodule Troupe.UI.TUI.View do
       |> Enum.with_index(1)
       |> Enum.map(fn {w, n} ->
         %Span{content: glyph, style: style} = mark(w, state)
-        word = state_text(w.state, state)
+        word = state_text(w.state, state, w.badge)
         used = String.trim("#{Model.tokens(w)}  #{Model.cost(w)}")
 
         left =

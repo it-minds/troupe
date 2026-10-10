@@ -412,6 +412,16 @@ defmodule Troupe.UI.TUI.Server do
 
   # A branch command mode said it was starting (TUI Decision 155), started once that line
   # has been drawn: the session it creates takes a moment, and the person has been told.
+  def handle_info({:start_command, sid, agent, name, args}, %{session_id: sid} = state) do
+    state =
+      case Client.start_command(sid, agent, name, args, "never") do
+        {:ok, _window} -> state
+        {:error, reason} -> notice(state, "/#{name} did not start: " <> to_message(reason))
+      end
+
+    {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
+  end
+
   def handle_info({:start_branch, sid, agent, where, prompt}, %{session_id: sid} = state) do
     mode = if where == :worktree, do: "always", else: "never"
 
@@ -915,7 +925,12 @@ defmodule Troupe.UI.TUI.Server do
           builtin(name, args, state, target)
 
         # A command a markdown file defines is the harness's to run (Decision 763): it
-        # sends the file's prompt, and the line comes back as the session's own input.
+        # sends the file's prompt. In command mode that is work like a plain line, so it
+        # starts a branch on the agent its file names, never the session's own agent (TUI
+        # Decision 155); from a window, and on a pod, it goes to the session's agent.
+        defined?(state, name) and state.focus == :command and state.branches? ->
+          command_line_command(state, name, args)
+
         defined?(state, name) ->
           Client.run_command(sid, name, args)
 
@@ -929,6 +944,7 @@ defmodule Troupe.UI.TUI.Server do
     case result do
       {:keep, text} -> notice(kept, text)
       {:start, agent, where, prompt} -> start_branch(state, agent, where, prompt)
+      {:start_command, agent, name, args} -> start_command(state, agent, name, args)
       :quit -> %{state | quitting: true}
       :palette -> open_palette(state)
       :files -> toggle_files(state)
@@ -985,6 +1001,22 @@ defmodule Troupe.UI.TUI.Server do
       true ->
         {:start, state.default_agent, :checkout, text}
     end
+  end
+
+  # A command a file defines, typed in command mode: a branch in the checkout on the agent
+  # the file names, or the default one, once the start's questions are answered.
+  defp command_line_command(state, name, args) do
+    if Model.asking(state.model) do
+      {:keep, "answer the start's question first; then Enter starts what you typed"}
+    else
+      entry = Enum.find(state.commands, &(&1["name"] == name)) || %{}
+      {:start_command, entry["agent"] || state.default_agent, name, args}
+    end
+  end
+
+  defp start_command(state, agent, name, args) do
+    send(self(), {:start_command, state.session_id, agent, name, args})
+    notice(state, "starting /#{name} on #{agent} in the checkout")
   end
 
   # Said first, on the notice line, then started once that line is on screen.

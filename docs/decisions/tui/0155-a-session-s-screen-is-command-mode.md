@@ -15,7 +15,11 @@ paths:
   - clients/tui/test/troupe/command_mode_test.exs
   - clients/tui/README.md
   - clients/tui/CLAUDE.md
+  - apps/troupe_core/lib/troupe/commands/local.ex
+  - clients/tui/test/troupe/project_command_test.exs
 symbols:
+  - Troupe.Client.start_command/5
+  - Troupe.Commands.defined/1
   - Troupe.UI.TUI.Model.windows/1
   - Troupe.UI.TUI.Model.session_window/1
   - Troupe.UI.TUI.Model.asking/1
@@ -78,6 +82,16 @@ a window's box was sent to its agent as words (D107).
   task, and Esc forgets it. A workflow keeps its worktree whatever is chosen. Not a slash
   command: `/agents` is #503's manager. Ctrl-N is no binding of the box's editor (88), and
   Ctrl with a letter rather than Ctrl-Alt, which is AltGr on international layouts.
+- **A command a file defines starts a branch too** (amends Decision 763 for command
+  mode): typed on the command line or picked from the palette with no window activated,
+  `/review the parser` is work like a plain line, so it opens a branch in the checkout on
+  the agent the file's frontmatter names (`agent: plan`, which `commands.list` now carries
+  in the row) or on the default agent, and runs the command there (`commands.run` on the
+  branch's session, so the daemon expands the prompt and asks first where Decision 814
+  says it does, in that window); never on the session's own agent. From a window, and on
+  a pod, it goes to the session's agent as 763 has it.
+- **The word beside the mark follows it**: `done ●` and `failed ●` lose the `●` once the
+  window has been read, as ⏺ becomes ○, in command mode's row and in the observer.
 - **A slash command in a window's box runs as a command**, on that window where it takes
   one, when its first word names a built-in, a file's command or an agent; `/todo` stays
   the window's own; anything else that starts with `/` (`/usr/bin is missing`) is still
@@ -99,7 +113,12 @@ instruction as `agents.get` serves it, `w` starts `quick-1` in a worktree, and i
 worktree's row says `↑0 ↓0`, `+2 −0`, dirty and `quick-1 · alive`; Ctrl-N with nothing
 typed leaves the choice waiting for the task; `/goal` typed in a branch's window sets the
 goal and `/usr/bin is missing` reaches its agent; a pod session's agent is its row and a
-plain line goes to it. On the chunk's tip a reproduction showed the fresh screen's `root ·
+plain line goes to it; `/review the parser`, its file naming `agent: plan`, opens `plan-1`
+in the checkout whose input is the expanded prompt, and `/standup`, naming none, opens
+`build-1`, with nothing said to the session's own agent (`project_command_test.exs` asks
+814's question in each branch's window). `commands_test.exs` in core: a file's `agent` is
+in its row, and one that names none has no `agent`. `tui_theme_test.exs`: `done ●` loses
+its `●` once read, in the row and the observer. On the chunk's tip a reproduction showed the fresh screen's `root ·
 running` and the line typed reaching `root` as input. Tests that typed to root on the
 command line now say it to the session's own agent (`say!/2`, as a headless run does) or
 type into a branch's window; the theme's corner tests draw the tray, and one checks the

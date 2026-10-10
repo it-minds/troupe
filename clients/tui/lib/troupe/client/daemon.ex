@@ -204,6 +204,18 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def run_command(sid, name, arguments), do: describe(Worker.run_command(sid, name, arguments))
 
+  # In command mode a command a file defines starts a branch, as a plain line does (TUI
+  # Decision 155, amending Decision 763 there): a branch with no prompt of its own, on the
+  # agent the file names, and the command run in it, so the daemon expands its prompt and
+  # asks first where it would (Decision 814), in that window.
+  @impl true
+  def start_command(sid, agent, name, arguments, mode) do
+    with {:ok, window} <- dispatch(sid, agent, %{prompt: "", worktree: mode}),
+         :ok <- route(sid, window, &Worker.run_command(&1, name, arguments)) do
+      {:ok, window}
+    end
+  end
+
   # The person's own command runs in the daemon, in the session's workspace, as the agent's
   # shell does (root Decision 813); this session's, whatever window is activated.
   @impl true

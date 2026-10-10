@@ -351,7 +351,10 @@ you would change before changing anything.
 
 `/review the parser` sends that prompt with `the parser` in place of `$ARGUMENTS`, as if
 you had typed it; a prompt without the placeholder gets what you typed as a paragraph
-of its own. Both the terminal UI's and the desktop app's palettes list the commands in a
+of its own. In the terminal UI's command mode, with no window open, a command is work
+like any line you type there: it starts a branch in your checkout on the agent its
+frontmatter's `agent` names (`agent: plan`), or on the default agent without one, and the
+prompt goes to that branch. Both the terminal UI's and the desktop app's palettes list the commands in a
 Custom section, each with its description, the file it came from and what it sends: the
 detail under the list shows the prompt's first lines and how many more the file holds,
 since a description is only what the file says of itself. The repository's

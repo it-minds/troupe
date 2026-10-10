@@ -57,9 +57,19 @@ defmodule Troupe.Gateway.Worktrees do
   defp plain(workspace), do: %{path: workspace, worktree: nil, branch: nil}
 
   defp busy?(workspace) do
+    workspace
+    |> live_in()
+    |> Enum.any?(&(&1.state == :active))
+  end
+
+  # The live sessions working in a directory, however it is spelled: git writes `C:/…`
+  # where a session's workspace is `c:/…` or `C:\…`, and a link to it is it too.
+  defp live_in(path) do
+    key = same_key(path)
+
     %{}
     |> Troupe.list_live_sessions()
-    |> Enum.any?(&(&1.workspace == workspace and &1.state == :active))
+    |> Enum.filter(&(same_key(&1.workspace) == key))
   end
 
   @doc "Create a worktree for a workspace on a fresh `troupe/<slug>` branch."
@@ -277,9 +287,9 @@ defmodule Troupe.Gateway.Worktrees do
   # agent is not disturbed by the tree going away: its next turn, if any, fails loudly
   # rather than editing files nobody will look at.
   defp resting(path) do
-    %{}
-    |> Troupe.list_live_sessions()
-    |> Enum.filter(&(&1.workspace == path and &1.state == :active))
+    path
+    |> live_in()
+    |> Enum.filter(&(&1.state == :active))
     |> Enum.find(&working?(&1.id))
     |> case do
       nil -> :ok
@@ -387,13 +397,7 @@ defmodule Troupe.Gateway.Worktrees do
   end
 
   defp annotate(%{"worktree" => path} = entry, main) do
-    # git writes `C:/…` where a session's workspace is `c:/…` or `C:\…`: the same directory.
-    key = same_key(path)
-
-    session =
-      %{}
-      |> Troupe.list_live_sessions()
-      |> Enum.find(&(same_key(&1.workspace) == key))
+    session = path |> live_in() |> List.first()
 
     status = status(path)
 

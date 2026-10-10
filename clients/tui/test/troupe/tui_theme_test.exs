@@ -491,6 +491,28 @@ defmodule Troupe.TUIThemeTest do
     assert {steady.symbol, steady.fg} == {"◑", amber}
   end
 
+  # TUI Decision 155: the word beside the mark says what the mark says, in command mode's
+  # row and in the observer's tree alike.
+  test "the state's ● goes once the window is read, as the mark's ⏺ does" do
+    theme = %{depth: :none, mode: :dark}
+    done = fold(started() ++ [{"turn_ended", %{}}])
+    read = Model.seen(done, "root")
+
+    text = fn model, opts ->
+      model
+      |> draw(theme, opts)
+      |> Enum.group_by(& &1.row)
+      |> Enum.map_join("\n", fn {_r, cs} -> line(cs) end)
+    end
+
+    assert text.(done, focus: :command) =~ "done ●"
+    refute text.(read, focus: :command) =~ "done ●"
+    assert text.(read, focus: :command) =~ ~r/1 root\s+\S+\s+done\s/
+    assert text.(done, focus: :observer, observer: %{cursor: 0}) =~ "done ●"
+    refute text.(read, focus: :observer, observer: %{cursor: 0}) =~ "done ●"
+    assert text.(read, focus: :observer, observer: %{cursor: 0}) =~ ~r/\)\s+done\s/
+  end
+
   test "a window done and not yet read: ⏺ in one cell; read, ○; failed, ✗" do
     theme = %{name: :signal, depth: :truecolor, mode: :dark}
     done = fold(started() ++ [{"turn_ended", %{}}])
@@ -575,6 +597,7 @@ defmodule Troupe.TUIThemeTest do
       answer: nil,
       size: {width, height},
       hq: Keyword.get(opts, :hq),
+      observer: Keyword.get(opts, :observer),
       theme: theme
     }
 

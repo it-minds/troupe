@@ -33,6 +33,12 @@ the confined git, says it, additively, on the call the clients already make.
   had to quote is left out rather than unquoted here. A binary file in `--numstat` (`-`)
   counts no lines. Every call is `Troupe.Git.run/3`, so none runs what the repository's
   `.git` names.
+- **One directory, however spelled.** A tree's live session is found by the directory's
+  key (`Workspace.compare_key/2` of its real path, as Decision 843's named worktrees
+  compare), not by the path as written: git writes `C:/` where a session's workspace is
+  `c:/` or `C:\`, and on Windows every row read "no session". `busy?/1` (a new session's
+  `auto` worktree) and `resting/1` (no merge or discard under a working agent) find their
+  sessions the same way.
 - **When.** Only when asked: the terminal client asks at a screen's start and when an
   event says a tree may have moved, never on a timer.
 
@@ -41,5 +47,8 @@ checkout, and what it changed": a worktree one commit ahead and one behind, with
 top of its commit and a new two-line file, reads `ahead 1, behind 1, added 4, removed 1`,
 dirty; the clean checkout with no upstream reads `null` for both counts and `0` lines. The
 same file's "a repository whose own .git runs commands" lists through the new calls and its
-marker stays unwritten. The terminal client's `command_mode_test.exs` draws a worktree's row
-from it.
+marker stays unwritten. "a session is found in its checkout however the path is spelled": a
+link to the checkout stands for the other spelling, and the checkout is busy through it,
+where before it was not. The terminal client's
+`command_mode_test.exs` draws a worktree's row from it, and the installed build on Windows
+named `quick-1 · alive` once the key was compared.

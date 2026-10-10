@@ -87,6 +87,10 @@ defmodule Troupe.Client.Remote do
   def worktree_status(_sid), do: {:ok, []}
 
   @impl true
+  def start_command(_sid, _agent, _name, _arguments, _mode),
+    do: {:error, "a remote session runs one profile; create another session from HQ"}
+
+  @impl true
   def send_input(sid, _path, text), do: describe(Worker.input(sid, text))
 
   @impl true
