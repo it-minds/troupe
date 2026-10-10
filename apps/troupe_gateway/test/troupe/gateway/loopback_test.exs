@@ -13,7 +13,8 @@ defmodule Troupe.Gateway.LoopbackTest do
 
   alias Troupe.Gateway.Daemon
   alias Troupe.Identity
-  alias Troupe.Protocol.{Client, Endpoint}
+  alias Troupe.Protocol.{Client, Endpoint, JSONRPC}
+  alias Troupe.Protocol.Client.Transport
 
   setup context do
     base = Path.join(System.tmp_dir!(), "troupe-loopback-#{System.unique_integer([:positive])}")
@@ -41,6 +42,18 @@ defmodule Troupe.Gateway.LoopbackTest do
       nil -> System.delete_env("TROUPE_ALLOWED_ORIGINS")
       origins -> System.put_env("TROUPE_ALLOWED_ORIGINS", origins)
     end
+
+    # A socket's ceiling is read as the listener starts.
+    frame_bytes = Application.get_env(:troupe_gateway, :max_frame_bytes)
+
+    if limit = context[:max_frame_bytes],
+      do: Application.put_env(:troupe_gateway, :max_frame_bytes, limit)
+
+    on_exit(fn ->
+      if frame_bytes,
+        do: Application.put_env(:troupe_gateway, :max_frame_bytes, frame_bytes),
+        else: Application.delete_env(:troupe_gateway, :max_frame_bytes)
+    end)
 
     endpoint = %Endpoint{kind: :unix, path: Path.join(base, "daemon.sock")}
 
@@ -93,6 +106,53 @@ defmodule Troupe.Gateway.LoopbackTest do
 
     test "a client with the wrong token is refused", context do
       assert {:error, _reason} = connect_ws(context.ws, token: "not-the-token")
+    end
+
+    # D108: `initialize` said 64 MiB, the connection's own limit, and the socket closed at
+    # its 16 MiB frame ceiling, so a client that believed it lost the connection and every
+    # call waiting on it. Over a WebSocket the largest message is the socket's ceiling.
+    @tag max_frame_bytes: 65_536
+    test "initialize says what the socket takes, and a message that size is read", context do
+      {:ok, client} = connect_ws(context.ws)
+      assert Client.info(client).limits["max_message_bytes"] == 65_536
+
+      # Exactly that long, frame header aside: answered (a method nobody serves), and the
+      # connection is still there for the next call.
+      unpadded = JSONRPC.encode({:request, 1, "nothing.here", %{"pad" => ""}})
+      pad = String.duplicate("a", 65_536 - byte_size(unpadded))
+      assert {:error, %{code: -32_601}} = Client.call(client, "nothing.here", %{"pad" => pad})
+      assert {:ok, %{"linked" => false}} = Client.call(client, "identity.get", %{})
+      Client.close(client)
+
+      # The socket transport takes what it always took.
+      {address, port} = Endpoint.connect_args(context.endpoint)
+      {:ok, native} = Client.connect(address: address, port: port)
+      assert Client.info(native).limits["max_message_bytes"] == 64 * 1024 * 1024
+      Client.close(native)
+    end
+
+    # A frame is one message. Pretty-printed JSON has newlines between its tokens, and the
+    # connection, which frames by lines, cut the frame at them and answered nothing.
+    test "a frame is one message whatever whitespace it holds, newlines too", context do
+      url = "ws://127.0.0.1:#{context.ws.port}/v1/socket"
+      {:ok, transport} = Transport.connect([url: url, token: context.ws.token], 5_000)
+
+      initialize = """
+      {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+       "params": {"protocol_version": "1",
+                  "client_info": {"name": "pretty", "version": "1"},
+                  "capabilities": {},
+                  "auth": {"token": "#{context.ws.token}"}}}
+      """
+
+      transport = send_frame(transport, initialize)
+      {transport, %{"result" => %{"protocol_version" => "1"}}} = answer(transport, 1)
+
+      get = ~s({"jsonrpc": "2.0", "id": 2, "method": "identity.get", "params": {\r\n}})
+      transport = send_frame(transport, get)
+      {transport, %{"result" => %{"linked" => false}}} = answer(transport, 2)
+
+      Transport.close(transport)
     end
 
     test "an upgrade from an unknown origin is refused at the handshake", context do
@@ -161,6 +221,35 @@ defmodule Troupe.Gateway.LoopbackTest do
 
       # Once a minute for one origin: a page left open dials again every few seconds.
       assert capture_log(fn -> status(context.ws, "https://refused.example.test") end) == ""
+    end
+  end
+
+  # One text frame, written as it is: the protocol client would encode it again.
+  defp send_frame({:ws, conn, ref, websocket}, text) do
+    {:ok, websocket, data} = Mint.WebSocket.encode(websocket, {:text, text})
+    {:ok, conn} = Mint.WebSocket.stream_request_body(conn, ref, data)
+    {:ws, conn, ref, websocket}
+  end
+
+  # The answer to request `id`, passing over anything else the daemon sends first.
+  defp answer(transport, id) do
+    receive do
+      message ->
+        case Transport.handle(transport, message) do
+          {:ok, transport, texts} ->
+            case texts |> Enum.map(&Jason.decode!/1) |> Enum.find(&(&1["id"] == id)) do
+              nil -> answer(transport, id)
+              found -> {transport, found}
+            end
+
+          :unknown ->
+            answer(transport, id)
+
+          {:closed, _transport, reason, _texts} ->
+            flunk("the connection closed (#{inspect(reason)}) before request #{id} was answered")
+        end
+    after
+      5_000 -> flunk("no answer to request #{id}")
     end
   end
 

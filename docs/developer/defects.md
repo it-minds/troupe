@@ -1171,35 +1171,6 @@ For command mode (#502 parts A and 3) and the palette (#503), whose slots own th
 
 Found by the #502 audit, 2026-10-10.
 
-### D108 - A dropped connection: a large `/upload`, and a call in flight (medium)
-
-- `/upload` of a file over about 16 MB fails with "the daemon is not reachable": the TUI
-  reads the whole file and sends it as one `fs.upload` frame, and the daemon's WebSocket
-  listener closes the connection at its 16 MiB frame limit (`max_frame_bytes`,
-  `TROUPE_MAX_FRAME_BYTES`; Bandit logs `{:deserializing, :max_frame_size_exceeded}`).
-  `initialize` advertises `max_message_bytes` as 64 MiB, the socket transport's limit, and
-  the TUI checks neither before sending. The connection comes back by itself, but any call
-  in flight on it is lost.
-- When the daemon closes the connection while a call is waiting on it,
-  `Troupe.Client.Daemon.Link` exits with its connection and the caller's `GenServer.call`
-  exits too: a TUI that ran the command is gone. Seen with `/merge` on Windows before the
-  audit's fix to the gateway (a git failure there closed the connection).
-
-Found by the #502 audit, 2026-10-10.
-
-### D109 - `/copy` and Ctrl-Y fail on Windows (medium)
-
-`Troupe.Clipboard` feeds `clip` through `cmd.exe /c "clip < <file>"`, run by the TUI's
-`Troupe.OS.Process.run/3`, and on Windows that runner gets "The syntax of the command is
-incorrect." from `cmd.exe` for any command, `echo hi` included; core's
-`Troupe.Reaper.run/3` runs the same `cmd.exe /c echo hi`, and PowerShell runs through
-`OS.Process`. So the installed TUI's `/copy` says "clip exited 1: The syntax of the command
-is incorrect." and copies nothing. The suite sets its own clipboard command, and the
-`ClipboardTest` runs on Linux only. Not tried against a person's clipboard, which a copy
-that works would overwrite.
-
-Found by the #502 audit, 2026-10-10.
-
 ## Taken
 
 | Defect | Taken by |
