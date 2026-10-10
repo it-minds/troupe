@@ -53,7 +53,8 @@ defmodule Troupe.Reaper do
   Open a Port running `command` under reaper, owned by the calling process.
 
   Returns the Port. The caller reads `{port, {:data, _}}` and `{port, {:exit_status, _}}`
-  as usual; closing the port, or dying, reaps the tree. A helper that will not start is
+  as usual, then `rest/2` for a last line without a newline, which comes after the exit
+  status; closing the port, or dying, reaps the tree. A helper that will not start is
   `{:error, {:reaper_unstartable, reason}}`, logged once.
 
   `:mounts` is the mount table the command may see, which `shell` passes, and the
@@ -248,12 +249,44 @@ defmodule Troupe.Reaper do
         {^port, {:data, {:eol, line}}} -> collect(port, deadline, ["\n", line | acc])
         {^port, {:data, {:noeol, chunk}}} -> collect(port, deadline, [chunk | acc])
         {^port, {:data, data}} when is_binary(data) -> collect(port, deadline, [data | acc])
-        {^port, {:exit_status, status}} -> {:ok, flatten(acc), status}
+        {^port, {:exit_status, status}} -> {:ok, flatten([rest(port) | acc]), status}
       after
         remaining ->
           close(port)
           {:ok, flatten(acc), :timeout}
       end
+    end
+  end
+
+  @doc """
+  What `port` still says once its `{:exit_status, _}` has been read: a last line that no
+  newline ended, or `""`.
+
+  A port in line mode holds a line until its newline and lets go of what is left only as
+  it closes, which is after it has reported the exit status: `printf x` is
+  `{:exit_status, 0}`, then `{:data, {:noeol, "x"}}`. A reader that stopped at the exit
+  status lost it (#536). The port closes right after, so this reads until it has, and
+  closes it itself after `wait_ms` if it has not.
+  """
+  @spec rest(port(), timeout()) :: binary()
+  def rest(port, wait_ms \\ 1_000) do
+    ref = Port.monitor(port)
+    drain(port, ref, System.monotonic_time(:millisecond) + wait_ms, [])
+  end
+
+  # The port's last messages come before its `DOWN`, as every signal from one sender
+  # does; one already closed answers the monitor with a `DOWN` after them too.
+  defp drain(port, ref, deadline, acc) do
+    receive do
+      {^port, {:data, {:eol, line}}} -> drain(port, ref, deadline, ["\n", line | acc])
+      {^port, {:data, {:noeol, chunk}}} -> drain(port, ref, deadline, [chunk | acc])
+      {^port, {:data, data}} when is_binary(data) -> drain(port, ref, deadline, [data | acc])
+      {:DOWN, ^ref, :port, ^port, _reason} -> flatten(acc)
+    after
+      max(deadline - System.monotonic_time(:millisecond), 0) ->
+        Port.demonitor(ref, [:flush])
+        close(port)
+        flatten(acc)
     end
   end
 

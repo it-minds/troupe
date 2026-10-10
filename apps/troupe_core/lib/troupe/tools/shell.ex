@@ -153,8 +153,10 @@ defmodule Troupe.Tools.Shell do
           more(port, deadline, acc, stream, data)
 
         {^port, {:exit_status, status}} ->
-          flush(stream)
-          {:ok, output(acc), status}
+          # A last line without a newline comes after the exit status (#536).
+          rest = Reaper.rest(port)
+          flush(pend(stream, rest))
+          {:ok, output([rest | acc]), status}
 
         @kill ->
           ended(port, acc, stream, :killed)
@@ -172,6 +174,10 @@ defmodule Troupe.Tools.Shell do
     due? = System.monotonic_time(:millisecond) - stream.at >= stream.every
     do_collect(port, deadline, [data | acc], if(due?, do: flush(stream), else: stream))
   end
+
+  defp pend(%{fun: nil} = stream, _data), do: stream
+  defp pend(stream, ""), do: stream
+  defp pend(stream, data), do: %{stream | pending: [data | stream.pending]}
 
   # Output waiting to be streamed is sent when its interval is up even if nothing more
   # comes, so a command that prints and then sleeps is seen to have printed.
