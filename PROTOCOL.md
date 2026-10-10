@@ -266,7 +266,7 @@ Durable:
 | `llm_error` | `reason` — a sentence a person can act on: a blown context window, rejected credentials, an unknown model, a rate limit the backoff outlasted, with the provider's words in brackets; `note` — a root's, the words its conversation was given about the failure, which a replay puts back; `stopped` — the call the agent gave up on when it did not answer within `llm_timeout_ms`, and stopped (see below) |
 | `truncated` | `reason` (`max_tokens`: the output cap cut the reply; `empty`: it had neither text nor a tool call), then one of `note` (the model was asked again), `calls` (tool calls cut mid-argument, answered with an error and not run) or `final: true` (asked once already; the agent ends `output_truncated` or `empty_reply`) |
 | `tool_call_started` | `call_id`, `name`, `args`, `identity`, `principal` |
-| `tool_call_completed` | `call_id`, `name`, `ok`, `content` |
+| `tool_call_completed` | `call_id`, `name`, `ok`, `content`; `exit_status` or `timed_out` — how a `shell` call's command ended: `exit_status` when it exited, `timed_out: true` when its timeout killed it. Absent on every other tool and on a `shell` call that ran no command. `ok` is true for a command that ran, whatever its status, and the model reads `content` alone, which still ends in `[exit status N]` for a non-zero exit, so a reader that tells a failing command from a passing one reads `exit_status` rather than the text |
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to` |
