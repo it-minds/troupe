@@ -192,7 +192,8 @@ has it as a toggle. The plane reads it at every activation and sends it with the
 pin, so changing it reaches a session the next time it wakes and restarts no pod. An `ssh`
 profile has it too: it rides the activation, not the pod's environment.
 
-Onboarding (`troupe onboard`, and the tool the librarian onboards with) refuses on a pod
+Onboarding (`troupe onboard`, the question a session's start asks, and the `onboard_write`
+tool) refuses on a pod
 and says to onboard on your own machine and commit the result: the working copy is a clone
 the bundle beats, and the config directory is the pod's, read by every session it runs.
 

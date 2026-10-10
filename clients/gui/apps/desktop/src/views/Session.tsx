@@ -26,7 +26,7 @@ import type {
   SessionKind,
   TranscriptState,
 } from "@troupe/client";
-import { useProfiles, useSessionView } from "../hooks";
+import { useProfiles, useSessionView, useStartQuestions } from "../hooks";
 import type { SessionHandle } from "../hooks";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
@@ -36,6 +36,7 @@ import { Files } from "./Files";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
 import { OfferLine, OfferPanel } from "./Offer";
+import { StartLine, StartPanel } from "./Onboard";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
 
 export function Session({
@@ -84,6 +85,8 @@ export function Session({
   // a session that stopped mid-loop records the interruption only when it wakes.
   const loop = settleLoop(view.state.loop, useLoopAnswer(view.view));
   const [away, seenAway] = useAway(sessionId, row);
+  // Onboarding, then the brief, as the session's start found them due (Decision 835).
+  const start = useStartQuestions(daemon, sessionId, view.state.onboarding, { local: kind !== "team", canAnswer: !readOnly });
 
   // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen.
   useEffect(() => {
@@ -132,6 +135,7 @@ export function Session({
 
       <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
       <OfferLine offer={view.offer} />
+      <StartLine state={start.state} />
       {away && <Away summary={away} onSeen={seenAway} />}
 
       <div className="stagearea">
@@ -150,6 +154,9 @@ export function Session({
 
           {/* The session's question about your own servers, before it takes their tools. */}
           {view.offer.state === "asking" && <OfferPanel ask={view.offer.ask} onAnswer={view.answerOffer} />}
+
+          {/* What the start found due on this computer: onboarding, then the brief. */}
+          {start.state && <StartPanel state={start.state} onAnswer={start.answer} />}
 
           {readOnly ? (
             <ReadOnly />

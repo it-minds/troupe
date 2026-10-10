@@ -45,6 +45,9 @@ defmodule Troupe.Agent.Definition do
     # What a person should know about how it is read, each `%{key, reason}` with the
     # reason in words: an `auto` held back until the workspace is trusted.
     notes: [],
+    # The file it was read from, set by `Troupe.Agent.Definitions.load/2`; `nil` for one
+    # built from text or a bundle's ACP entry. What `agents.get` names (Decision 841).
+    path: nil,
     # Set only for a bundle's `acp_agents` entry: the command, its arguments and the hash
     # of what it should be. An agent definition carries a prompt for a model to run; this
     # one carries a program to run instead, and is otherwise an ordinary subagent — which
@@ -71,6 +74,7 @@ defmodule Troupe.Agent.Definition do
           source: source(),
           trusted?: boolean(),
           notes: [note()],
+          path: Path.t() | nil,
           acp: map() | nil
         }
 

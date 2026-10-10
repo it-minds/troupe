@@ -26,6 +26,19 @@ export { SessionAttachment, waitOn } from "./attach.js";
 export type { AttachOptions, AttachStatus } from "./attach.js";
 export { ServerOffer, offeredName } from "./offer.js";
 export type { OfferAsk, OfferOptions, OfferState } from "./offer.js";
+export { LIBRARIAN_PROMPT, StartQuestions, briefQuestion, createQuestion, describeItem, onboardQuestion } from "./onboard.js";
+export type {
+  BriefDue,
+  OnboardApplied,
+  OnboardItem,
+  OnboardPlan,
+  OnboardSkipped,
+  OnboardingDue,
+  StartAnswer,
+  StartOptions,
+  StartQuestion,
+  StartState,
+} from "./onboard.js";
 export {
   fold,
   addPending,
@@ -52,6 +65,7 @@ export type {
   PresenceMember,
   QuestionOption,
   LoopState,
+  OnboardingSuggested,
   TokenUsage,
   TurnCost,
 } from "./transcript.js";

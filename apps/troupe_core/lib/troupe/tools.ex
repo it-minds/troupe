@@ -50,8 +50,9 @@ defmodule Troupe.Tools do
   @task_list_after 10
 
   # Tools a profile has only when it names them (Decision 823): `onboard_write` writes the
-  # files that decide what runs, which is the librarian's job, and an agent with every
-  # tool (`build`) is neither offered it nor let call it.
+  # files that decide what runs, which only a profile made for it does (the librarian no
+  # longer, Decision 835), and an agent with every tool (`build`) is neither offered it nor
+  # let call it.
   @named_only ~w(onboard_write)
 
   @doc """
@@ -338,6 +339,9 @@ defmodule Troupe.Tools do
         {:ok, content} ->
           Result.ok(ctx.call_id, name, text(content))
 
+        {:ok, content, %{fields: fields} = updates} ->
+          Result.ok(ctx.call_id, name, text(content), meta(Map.delete(updates, :fields), fields))
+
         {:ok, content, updates} ->
           Result.ok(ctx.call_id, name, text(content), %{updates: updates})
 
@@ -364,6 +368,11 @@ defmodule Troupe.Tools do
         Result.error(ctx.call_id, name, {:tool_crashed, "exited with #{inspect(reason)}"})
     end
   end
+
+  # The fields for the call's event travel apart from the agent's updates, so a tool that
+  # returns only fields hands the agent no updates to apply (Decision 837).
+  defp meta(updates, fields) when map_size(updates) == 0, do: %{fields: fields}
+  defp meta(updates, fields), do: %{updates: updates, fields: fields}
 
   # A result goes into the log and to the model, both JSON, which holds only UTF-8. Bytes
   # that are not (what a command printed, a binary file, a cut inside a character) are
