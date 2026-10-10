@@ -177,13 +177,18 @@ defmodule Troupe.Tool do
 
   `run/2` returns `{:ok, content}` or `{:error, reason}`; inline tools may also return
   `{:ok, content, updates}` to change agent state, or `{:defer, instruction}` to hand
-  an effect to the agent and have the call completed later.
+  an effect to the agent and have the call completed later. Any tool may return
+  `{:ok, content, %{fields: fields}}`: the call's `tool_call_completed` carries `fields`
+  beside `ok`, and the model never sees them (`shell`'s `exit_status` or `timed_out`,
+  Decision 837).
   """
 
   alias Troupe.Tool.Ctx
 
   @type content :: String.t()
-  @type updates :: %{optional(:todos) => [Troupe.Todo.t()]}
+  @typedoc "What a call's `tool_call_completed` carries beside `ok`; never the model's."
+  @type fields :: %{String.t() => String.t() | integer() | boolean()}
+  @type updates :: %{optional(:todos) => [Troupe.Todo.t()], optional(:fields) => fields()}
   @type instruction ::
           {:delegate, agent :: String.t(), task :: String.t()}
           | {:finish, summary :: String.t()}

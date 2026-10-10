@@ -32,7 +32,7 @@ defmodule Troupe.Tools.ReadOutputTest do
   end
 
   test "a cut shell result keeps the whole run, and read_output pages it from the top", %{ctx: ctx} do
-    assert {:ok, output} = Shell.run(%{"command" => "seq 1 300"}, ctx)
+    assert {:ok, output, _outcome} = Shell.run(%{"command" => "seq 1 300"}, ctx)
 
     assert output =~ "300", "the tail is what the agent sees"
     refute output =~ "\n1\n2\n", "the head was cut"
@@ -63,7 +63,7 @@ defmodule Troupe.Tools.ReadOutputTest do
   end
 
   test "output that fits is untouched, and only a kept id is read", %{ctx: ctx} do
-    assert {:ok, "hello\n"} = Shell.run(%{"command" => "echo hello"}, ctx)
+    assert {:ok, "hello\n", _outcome} = Shell.run(%{"command" => "echo hello"}, ctx)
 
     assert {:error, "not an output id: out_7f3a"} = ReadOutput.run(%{"id" => "out_7f3a"}, ctx)
 

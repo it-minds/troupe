@@ -179,7 +179,12 @@ defmodule Troupe.Protocol.Schema do
         "ok" => required(:boolean),
         # Text, or `{"blob", "size", "preview", "truncated"}` when it was too large to
         # put on the wire.
-        "content" => required(:text_or_blob)
+        "content" => required(:text_or_blob),
+        # How a `shell` call's command ended (Decision 837): `exit_status` when it exited,
+        # `timed_out: true` when its timeout killed it. Absent on every other tool and on
+        # a call that did not run; `ok` is true for a command that ran, whatever its status.
+        "exit_status" => optional(:integer),
+        "timed_out" => optional(:boolean)
       },
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
