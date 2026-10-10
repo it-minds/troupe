@@ -85,14 +85,16 @@ defmodule Troupe.DoctorCLITest do
           {"onboard_claude_code", "Claude Code's files onboarded, and its rule in the prompt"},
           {"onboard_opencode", "opencode's files onboarded, and its rule in the prompt"},
           {"onboard_cursor", "Cursor's files onboarded, and its rule in the prompt"},
-          {"onboard_copilot", "Copilot's files onboarded, and its rule in the prompt"}
+          {"onboard_copilot", "Copilot's files onboarded, and its rule in the prompt"},
+          {"memory_stale_anchor",
+           "a command whose file changed is marked in the prompt, and recall says so"}
         ] do
       assert bench =~ ~r/^ok    bench #{name} +#{title}$/m
     end
 
     assert [_, seconds] =
              Regex.run(
-               ~r/^ok    bench +9 of 9 passed in ([\d.]+) s, offline: a scripted model in this program's harness, no provider, key or network$/m,
+               ~r/^ok    bench +10 of 10 passed in ([\d.]+) s, offline: a scripted model in this program's harness, no provider, key or network$/m,
                bench
              )
 
