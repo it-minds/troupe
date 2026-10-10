@@ -212,7 +212,7 @@ defmodule Troupe.Bench.Onboarding do
         Map.get(ctx.marks, :left_out, 0)}
      ],
      [
-       {"onboarded", "onboarding wrote every file it proposed",
+       {"onboarded", "onboarding wrote files, every one it proposed",
         written > 0 and Map.get(ctx.marks, :failed, 0) == 0}
      ]}
   end
