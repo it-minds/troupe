@@ -124,7 +124,7 @@ defmodule Troupe.Gateway.Worktrees do
          {:ok, branch} <- branch_of(path),
          {:ok, committed?} <- commit_pending(path, Keyword.get(opts, :message) || "troupe: #{branch}"),
          {:ok, output} <- merge_branch(workspace, branch),
-         :ok <- remove_tree(path),
+         :ok <- remove_tree(workspace, path),
          :ok <- delete_branch(workspace, branch, "-d") do
       {:ok, %{"branch" => branch, "committed" => committed?, "output" => output}}
     end
@@ -139,7 +139,7 @@ defmodule Troupe.Gateway.Worktrees do
     with :ok <- worktree_at(path),
          :ok <- resting(path),
          {:ok, branch} <- branch_of(path),
-         :ok <- remove_tree(path),
+         :ok <- remove_tree(workspace, path),
          :ok <- delete_branch(workspace, branch, "-D") do
       {:ok, %{"branch" => branch}}
     end
@@ -221,8 +221,10 @@ defmodule Troupe.Gateway.Worktrees do
     end
   end
 
-  defp remove_tree(path) do
-    case git(path, ["worktree", "remove", "--force", path]) do
+  # Run from the checkout, not the tree: on Windows git cannot delete the directory it was
+  # started in, and the merge or discard stopped half done, the tree unregistered but left.
+  defp remove_tree(workspace, path) do
+    case git(workspace, ["worktree", "remove", "--force", path]) do
       {:ok, _, 0} -> :ok
       {:ok, output, _} -> {:error, {:git, String.trim(output)}}
       {:error, reason} -> {:error, reason}

@@ -1342,7 +1342,7 @@ defmodule Troupe.Gateway.Dispatch do
     do: {:error, Error.new(:invalid_params, %{field: "path", reason: "not a worktree"})}
 
   defp worktree_error({:git, output}),
-    do: {:error, Error.new(:internal, %{reason: output})}
+    do: {:error, Error.new(:internal_error, %{reason: output})}
 
   defp worktree_error(reason),
     do: {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
