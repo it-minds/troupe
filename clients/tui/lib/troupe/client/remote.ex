@@ -77,6 +77,15 @@ defmodule Troupe.Client.Remote do
   def dispatch(_sid, _name, _args),
     do: {:error, "a remote session runs one profile; create another session from HQ"}
 
+  # A pod starts no branches, so command mode's chooser has nothing to start here
+  # (TUI Decision 155), and the pod's checkout is its only one.
+  @impl true
+  def agent_definition(_sid, _name),
+    do: {:error, "a remote session runs one profile; create another session from HQ"}
+
+  @impl true
+  def worktree_status(_sid), do: {:ok, []}
+
   @impl true
   def send_input(sid, _path, text), do: describe(Worker.input(sid, text))
 

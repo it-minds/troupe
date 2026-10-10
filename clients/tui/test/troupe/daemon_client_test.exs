@@ -162,15 +162,17 @@ defmodule Troupe.DaemonClientTest do
       {sid, _, _} = start_session!(workspace: ws, script: script, auto_approve: false)
       {pid, session} = start_tui(sid)
 
+      # A plain line starts the default agent in the checkout (TUI Decision 155).
       type(pid, "please write a note")
       press(pid, "enter")
 
-      await_event("root", :approval_requested)
-      # The strip flags the window; the prompt shows in the activated pane.
+      await_event("build-1", :approval_requested)
+      # Command mode flags the window; the prompt shows in the activated pane.
+      eventually(fn -> screen_text(pid, session) =~ "approval: write_file" end)
       press(pid, "1")
       eventually(fn -> screen_text(pid, session) =~ "APPROVAL: write_file" end)
       press(pid, "y")
-      await_done()
+      await_state("build-1", :done, 10_000)
 
       eventually(fn -> screen_text(pid, session) =~ "Done writing." end)
       text = screen_text(pid, session)

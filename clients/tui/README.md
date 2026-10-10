@@ -13,10 +13,12 @@ it runs — `troupe_core`, `troupe_gateway` and `troupe_protocol` — is not in 
 directory: it is the umbrella's own source in `../../apps`, a path dependency at the same
 commit, and the root [ARCHITECTURE.md](../../ARCHITECTURE.md) describes it.
 
-A session has one agent, and a line that does not start with `/` is what you say to it.
-`/build fix the failing test` or `/worktree add rate limiting` opens a **branch** — a
-session of its own, in its own worktree when the checkout is busy — and returns control
-immediately. Every branch is a window in the TUI. Branches
+A session opens in **command mode**: not a chat with an agent, but one screen over
+everything the session has going. A line that does not start with `/` is work: Enter starts
+the default agent (`build`) on it in your checkout, as a **branch** — a session of its own
+— and returns control immediately; Ctrl-N chooses the agent instead, with its instruction
+on screen, and whether it works in a worktree of its own. `/plan look at the parser` or
+`/worktree add rate limiting` start one too. Every branch is a window in the TUI. Branches
 run concurrently; a window that needs you (an approval, a question) blinks; you activate
 it, answer, and go back to what you were doing. When nothing is running the harness is
 truly idle: zero LLM calls, zero tokens.
@@ -298,7 +300,21 @@ each agent is a command, and so is each command you write:
 | `/ask <question>` | answer across finished branches with the cheap model |
 | `/<name> [arguments]` | a command you or the repository wrote as `<name>.md` in your config's `commands/` or the workspace's `.troupe/commands/`: sends its prompt, with what follows the name for `$ARGUMENTS` ([configuration](../../docs/user/configuration.md#your-own-commands)) |
 
-Keys: `1`–`9`, Enter, or a mouse click on its tile activate a window; Esc returns to the command line;
+Command mode, the screen with no window activated, lists what waits on you first (the
+start's questions, a window's approval or question, in the reserved colour), then a row
+per branch (its agent, state, how long it has run, the last line it produced, what it used
+and cost) and a row per worktree of the repository (its branch, `↑` ahead of and `↓`
+behind the checkout's, the lines `+` added and `−` removed, dirty or clean, whose session
+and whether it is alive), under the session's model, goal, watch and budget. The session's
+own lines (what its start said, what `!` printed) sit above the branches; its own agent is
+listed with them only once it has work of its own (`troupe run`'s task, a loop, a watch
+trigger, a session on a plane). Enter on a line starts it on `build` in the checkout, or on
+the agent Ctrl-N chose (↑↓ the agents, PgUp/PgDn its instruction, Enter, then `w` a
+worktree of its own or `c` the checkout); with nothing typed, Ctrl-N's choice waits for the
+task on the command line. On a session on a plane, which runs one agent, a line is said to
+it.
+
+Keys: `1`–`9`, Enter, or a mouse click on its row or tile activate a window; Esc returns to the command line;
 `y`/`n`/`a` answer an approval (allow / deny / allow for session); typing +
 Enter sends input or answers a question, and when a question offers options a
 digit picks one (with `multiple`, digits tick and untick and Enter sends the
@@ -308,7 +324,10 @@ sending; Tab switches the window's profile
 dismisses a finished window, keeping its worktree; `e` expands tool output; Ctrl-Y copies the
 transcript you are reading to the clipboard; `@file` completes paths;
 Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo complete <n>`, `/todo cancel <n>` (the task's
-number in the side panel) and `/todo add <text>` edit the activated branch's task list.
+number in the side panel) and `/todo add <text>` edit the activated branch's task list. Any other
+command typed into a window's box runs as it would on the command line, on that window where it
+takes one (`/copy`, `/merge`); a line that names no command (`/usr/bin is missing`) goes to the
+window's agent.
 
 `x` and `d` are double presses (`xx`, `dd`) because the window they act in is also where you type:
 the first press puts the letter in the input box and the box says what a second one would do, and
@@ -341,8 +360,9 @@ only, a window that needs you — its border and title (blinking, about once a s
 the `blink` setting turns that off), the approval or question waiting in it, and the
 status line's count; each theme keeps its own reserved colour (Signal's magenta,
 Footlight's amber, Limelight's lime) for the same thing. Every window carries the mark in
-its top right corner: ◐ ◓ ◑ ◒ turning while its agent works, ◑ in the reserved colour
-while it needs you, ⏺ done and not yet read, ○ at rest, ✗ failed. Troupe uses as many
+its top right corner, and at the start of its row in command mode: ◐ ◓ ◑ ◒ turning while
+its agent works, ◑ in the reserved colour while it needs you, ⏺ done and not yet read, ○ at
+rest or not yet asked anything, ✗ failed. Troupe uses as many
 colours as the terminal says it has: exact colours where `COLORTERM` is `truecolor` or
 `24bit` and in Windows Terminal, the nearest of 256 where `TERM` names `256color`, the
 terminal's own sixteen otherwise, and none under `NO_COLOR`. It never paints the

@@ -1642,7 +1642,19 @@ made twice.
 ```
 → `{"workspaces": [{"path", "score"}]}`
 
-#### `worktree.list` → `{"worktrees": [{"path", "branch", "session_id", "dirty"}]}`
+#### `worktree.list` → `{"worktrees": [{"path", "branch", "session_id", "dirty", "ahead", "behind", "added", "removed"}]}`
+
+Every worktree of the workspace's repository, the checkout first, with the live session
+working in it (`session_id`, `null` for none) and whether it has uncommitted or untracked
+files. How it stands against the checkout (Decision 840, additive): `ahead` and `behind`
+are the commits its branch has that the checkout's branch has not, and the other way
+round, and `added` and `removed` the lines it would bring, counted since its branch left
+the checkout's, its uncommitted changes and untracked files included, as `worktree.merge`
+would commit them. For the checkout itself `ahead` and `behind` are against its upstream
+and `added` and `removed` what it has not committed. Each is `null` where git cannot say
+(no upstream, a detached checkout). A binary file adds no lines, and an untracked file
+over 1 MB or past the first 200 is not counted.
+
 #### `worktree.remove`
 ```json
 {"command_id": "c-8", "path": "/home/me/project/../project-troupe-abc", "force": false}

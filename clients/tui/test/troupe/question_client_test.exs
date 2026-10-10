@@ -52,11 +52,14 @@ defmodule Troupe.QuestionClientTest do
     {sid, _, _ws} = start_session!(script: @script)
     {pid, session} = start_tui(sid)
 
-    type(pid, "pick a colour")
-    press(pid, "enter")
+    # The session's own agent asks it, as a headless run's does; a line typed on the
+    # command line would start a branch instead (TUI Decision 155).
+    say!(sid, "pick a colour")
 
     await_event("root", :question_asked)
+    eventually(fn -> Map.has_key?(user_state(pid).model.windows, "root") end)
     press(pid, "1")
+    assert user_state(pid).focus == {:window, "root"}
     eventually(fn -> screen_text(pid, session) =~ "Which colour?" end)
     eventually(fn -> screen_text(pid, session) =~ "blue" end)
 

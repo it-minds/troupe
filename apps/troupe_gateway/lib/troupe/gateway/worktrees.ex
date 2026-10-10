@@ -64,7 +64,15 @@ defmodule Troupe.Gateway.Worktrees do
     end
   end
 
-  @doc "Every worktree of a workspace, with the session using it and whether it is dirty."
+  @doc """
+  Every worktree of a workspace, with the session using it, whether it is dirty, and how
+  it stands against the checkout (Decision 840): `ahead` and `behind`, the commits its
+  branch has that the checkout's branch has not and the other way round (for the checkout
+  itself, against its upstream), and `added` and `removed`, the lines it would bring:
+  its changes since its branch left the checkout's, uncommitted and untracked files
+  included, as a merge would commit them (for the checkout, what it has not committed).
+  Each is `nil` where git cannot say: a checkout with no upstream, a detached one.
+  """
   @spec list(Path.t() | nil) :: [map()]
   def list(nil) do
     %{}
@@ -78,8 +86,14 @@ defmodule Troupe.Gateway.Worktrees do
     workspace = Path.expand(workspace)
 
     case git(workspace, ["worktree", "list", "--porcelain"]) do
-      {:ok, output, 0} -> output |> parse_porcelain() |> Enum.map(&annotate/1)
-      _ -> []
+      {:ok, output, 0} ->
+        # git lists the main worktree first: its branch is the one the others left.
+        entries = parse_porcelain(output)
+        main = List.first(entries)
+        Enum.map(entries, &annotate(&1, main))
+
+      _ ->
+        []
     end
   end
 
@@ -248,18 +262,135 @@ defmodule Troupe.Gateway.Worktrees do
     end
   end
 
-  defp annotate(%{"worktree" => path} = entry) do
+  defp annotate(%{"worktree" => path} = entry, main) do
     session =
       %{}
       |> Troupe.list_live_sessions()
       |> Enum.find(&(&1.workspace == path))
 
+    status = status(path)
+
     %{
       "path" => path,
       "branch" => entry |> Map.get("branch", "") |> String.replace_prefix("refs/heads/", ""),
       "session_id" => session && session.id,
-      "dirty" => dirty?(path)
+      "dirty" => status != []
     }
+    |> Map.merge(standing(path, entry == main, main["branch"], status))
+  end
+
+  # `git status` a line a path, every untracked file named (not its directory), or `[]`
+  # where git could not say.
+  defp status(path) do
+    case git(path, ["status", "--porcelain", "--untracked-files=all"]) do
+      {:ok, output, 0} -> String.split(output, ~r/\r?\n/, trim: true)
+      _ -> []
+    end
+  end
+
+  # The checkout against its upstream, and what it has not committed.
+  defp standing(path, true, _base, status) do
+    {behind, ahead} = counts(path, "@{upstream}...HEAD")
+    {added, removed} = changed(path, "HEAD", status)
+    %{"ahead" => ahead, "behind" => behind, "added" => added, "removed" => removed}
+  end
+
+  # A linked worktree against the checkout's branch: what its branch has that that one has
+  # not and the other way round, and the lines since it left it.
+  defp standing(path, false, "refs/heads/" <> _ = base, status) do
+    {behind, ahead} = counts(path, base <> "...HEAD")
+
+    {added, removed} =
+      case git(path, ["merge-base", base, "HEAD"]) do
+        {:ok, sha, 0} -> changed(path, String.trim(sha), status)
+        _ -> {nil, nil}
+      end
+
+    %{"ahead" => ahead, "behind" => behind, "added" => added, "removed" => removed}
+  end
+
+  defp standing(_path, false, _base, _status),
+    do: %{"ahead" => nil, "behind" => nil, "added" => nil, "removed" => nil}
+
+  # `left...right` as `{only left, only right}`, or `{nil, nil}` where git cannot say.
+  defp counts(path, range) do
+    with {:ok, output, 0} <- git(path, ["rev-list", "--left-right", "--count", range]),
+         [left, right] <- String.split(output),
+         {left, ""} <- Integer.parse(left),
+         {right, ""} <- Integer.parse(right) do
+      {left, right}
+    else
+      _ -> {nil, nil}
+    end
+  end
+
+  # Lines added and removed since `from`, the working tree's included, and the lines of
+  # every untracked file, which a merge commits too (`git add -A`, `commit_pending/2`).
+  defp changed(path, from, status) do
+    case git(path, ["diff", "--numstat", from]) do
+      {:ok, output, 0} ->
+        {added, removed} =
+          output
+          |> String.split(~r/\r?\n/, trim: true)
+          |> Enum.reduce({0, 0}, fn line, {a, r} ->
+            case String.split(line, "\t", parts: 3) do
+              [plus, minus, _file] -> {a + number(plus), r + number(minus)}
+              _ -> {a, r}
+            end
+          end)
+
+        {added + untracked_lines(path, status), removed}
+
+      _ ->
+        {nil, nil}
+    end
+  end
+
+  # A binary file is `-` in `--numstat`, and counts for no lines.
+  defp number(text) do
+    case Integer.parse(text) do
+      {n, ""} -> n
+      _ -> 0
+    end
+  end
+
+  @untracked_files 200
+  @untracked_bytes 1_000_000
+
+  # The lines of the untracked files `git status` named, each read only while it is a
+  # small text file inside the tree: a count for a screen, not an inventory.
+  defp untracked_lines(path, status) do
+    root = Path.expand(path)
+
+    # git quotes a name with unusual characters in it; such a file is left out of the
+    # count rather than read by a name worked out here.
+    status
+    |> Enum.flat_map(fn
+      "?? \"" <> _quoted -> []
+      "?? " <> file -> [file]
+      _ -> []
+    end)
+    |> Enum.take(@untracked_files)
+    |> Enum.reduce(0, fn file, acc ->
+      full = Path.expand(file, root)
+
+      with true <- String.starts_with?(full, root <> "/"),
+           {:ok, %File.Stat{type: :regular, size: size}} when size <= @untracked_bytes <-
+             File.lstat(full),
+           {:ok, text} <- File.read(full),
+           true <- String.valid?(text) do
+        acc + lines_of(text)
+      else
+        _ -> acc
+      end
+    end)
+  end
+
+  defp lines_of(""), do: 0
+
+  defp lines_of(text) do
+    newlines = text |> :binary.matches("\n") |> length()
+    if String.ends_with?(text, "\n"), do: newlines, else: newlines + 1
   end
 
   defp parse_porcelain(output) do

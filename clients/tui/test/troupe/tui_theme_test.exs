@@ -319,7 +319,7 @@ defmodule Troupe.TUIThemeTest do
 
     text = cells |> Enum.group_by(& &1.row) |> Enum.map_join("\n", fn {_r, cs} -> line(cs) end)
     assert text =~ "troupe"
-    assert text =~ "No branches. Type a command:"
+    assert text =~ "Nothing running. Type what you want done"
   end
 
   test "a session nobody has spoken to wears the mask in its window, and loses it at the first line" do
@@ -457,11 +457,15 @@ defmodule Troupe.TUIThemeTest do
 
     corners =
       for now <- [0, 250, 500, 750, 1000] do
-        working() |> draw(theme, focus: :command, now: now) |> corner()
+        working() |> draw(theme, now: now) |> corner()
       end
 
     assert Enum.map(corners, & &1.symbol) == ~w(◐ ◓ ◑ ◒ ◐)
     assert Enum.all?(corners, &(&1.fg == Theme.color(:working, theme)))
+
+    # Command mode's row for it starts with the same mark (TUI Decision 155).
+    row = working() |> draw(theme, focus: :command, now: 250) |> row_of("1 root")
+    assert %{symbol: "◓"} = Enum.find(row, &(&1.symbol in ~w(◐ ◓ ◑ ◒)))
   end
 
   test "the activity line turns with it, at the same pace" do
@@ -491,7 +495,7 @@ defmodule Troupe.TUIThemeTest do
     theme = %{name: :signal, depth: :truecolor, mode: :dark}
     done = fold(started() ++ [{"turn_ended", %{}}])
     failed = fold(started() ++ [{"turn_ended", %{"reason" => "tool_failures"}}])
-    mark = fn model -> model |> draw(theme, focus: :command) |> corner() end
+    mark = fn model -> model |> draw(theme) |> corner() end
 
     assert %{symbol: "⏺︎"} = unread = mark.(done)
     assert unread.fg == Theme.color(:ok, theme)
@@ -506,7 +510,7 @@ defmodule Troupe.TUIThemeTest do
   end
 
   test "with no colour the mark still says which: the glyph and the word, never the colour alone" do
-    cells = draw(approval_model(), %{depth: :none, mode: :dark}, focus: :command)
+    cells = draw(approval_model(), %{depth: :none, mode: :dark})
     top = cells |> Enum.filter(&(&1.row == 0)) |> line()
 
     assert corner(cells).symbol == "◑"
@@ -530,6 +534,14 @@ defmodule Troupe.TUIThemeTest do
   end
 
   @marks ~w(◐ ◓ ◑ ◒ ⏺︎ ○ ✗)
+
+  # The cells of the row whose text holds `text`, in column order.
+  defp row_of(cells, text) do
+    cells
+    |> Enum.group_by(& &1.row)
+    |> Enum.map(fn {_row, cs} -> Enum.sort_by(cs, & &1.col) end)
+    |> Enum.find(fn cs -> line(cs) =~ text end)
+  end
 
   # The mark in the first window's corner: the one cell of its top border that is a mark.
   defp corner(cells) do
