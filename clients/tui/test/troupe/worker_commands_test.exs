@@ -245,8 +245,8 @@ defmodule Troupe.WorkerCommandsTest do
   # them, as a large tool output would have been, and read back by range.
   test "blob.get asks for a byte range and reads the bytes the daemon sends" do
     {sid, _, _} = start_session!(script: [])
-    workspace = Troupe.get_session(sid).workspace
-    digest = Troupe.Session.Blobs.store(sid, workspace, "0123456789")
+    session = Troupe.get_session(sid)
+    digest = Troupe.Session.Blobs.store(sid, session.workspace, session.state_dir, "0123456789")
 
     assert {:ok, %{"data" => data, "size" => 10}} = Worker.blob(sid, digest, 2, 3)
     assert Base.decode64!(data) == "234"

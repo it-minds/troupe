@@ -18,6 +18,7 @@ defmodule Troupe.Tools.ReadOutput do
 
   alias Troupe.Session.Blobs
   alias Troupe.Tool
+  alias Troupe.Tools.Output
 
   @default_limit 200
   @id ~r/^sha256:[0-9a-f]{64}$/
@@ -78,7 +79,7 @@ defmodule Troupe.Tools.ReadOutput do
   defp check_id(id), do: if(Regex.match?(@id, id), do: :ok, else: {:error, "not an output id: #{id}"})
 
   defp fetch(ctx, id) do
-    case Blobs.read(ctx.session_id, ctx.workspace.root_real, id) do
+    case Blobs.read(ctx.session_id, ctx.workspace.root_real, Output.state_dir(ctx), id) do
       {:ok, text, _size} -> {:ok, text}
       {:error, :not_found} -> {:error, "no kept output #{id} (it may be from another session)"}
     end

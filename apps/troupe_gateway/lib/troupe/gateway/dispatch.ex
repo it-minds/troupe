@@ -1717,11 +1717,22 @@ defmodule Troupe.Gateway.Dispatch do
   # Through the endpoint's own activation where it has one. On a pod only the plane brings
   # a session back, so there `not_found` is the answer for one with no tree running, and
   # the client asks the plane where the session is (PROTOCOL.md §6, "A session that moves").
+  #
+  # A session whose stop has run past the wait for it is said in words (Decision 855).
   defp activate(session_id, %Context{activate: activate} = context) do
     case (activate || (&Troupe.activate(&1, client: context.client))).(session_id) do
-      {:ok, _pid} -> :ok
-      {:error, :not_found} -> {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
-      {:error, reason} -> {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
+      {:ok, _pid} ->
+        :ok
+
+      {:error, :not_found} ->
+        {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
+
+      {:error, :stopping} ->
+        reason = "session #{session_id} is stopping; try again"
+        {:error, Error.new(:unavailable, %{reason: reason})}
+
+      {:error, reason} ->
+        {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
     end
   end
 

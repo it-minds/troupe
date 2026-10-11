@@ -11,8 +11,10 @@ defmodule Troupe.Sessions.IndexTest do
   `Troupe.Sessions.Index` on short clocks, as in `Troupe.Session.SleepTest`, and the test
   follows the session's events as `:internal`, so that nobody counts as watching.
 
-  Not async: a held stop holds `Troupe.Sessions` too, whose `terminate_child` runs the whole
-  shutdown, and no other test's session should wait on this one's.
+  Not async: a held stop held `Troupe.Sessions` too, whose `terminate_child` ran the whole
+  shutdown until Decision 855, and on a tree without that no other test's session should
+  wait on this one's. The rest of the index's life after D117 is Decision 855's: an agent
+  slow to answer, the state directories it reads, and the rows it keeps between listings.
   """
 
   use Troupe.SessionCase, async: false
@@ -112,7 +114,134 @@ defmodule Troupe.Sessions.IndexTest do
     end
   end
 
+  # Decision 855: an agent that does not answer its snapshot within five seconds is busy
+  # with something, not gone. Taken for gone, its entry was dropped while its tree ran on:
+  # listed as dormant, and never swept again.
+  describe "an agent slow to answer the sweep" do
+    test "is kept as running, and put to sleep once it answers", context do
+      %{session: slow} = start_session(context)
+      follow(slow.id)
+
+      agent = Registry.agent_pid(slow.id, ["root"])
+      :ok = :sys.suspend(agent)
+      index = sweep(context, [slow])
+
+      # Longer than a snapshot's five seconds, and many sweeps' worth.
+      Process.sleep(6_500)
+      assert slow.id in GenServer.call(index, :live_ids)
+      assert %{state: :active} = GenServer.call(index, {:get, slow.id})
+
+      :ok = :sys.resume(agent)
+      await_event(slow.id, :session_dormant, 15_000)
+      gone(slow.id, 10_000)
+    end
+  end
+
+  # Decision 855: the index reads the state directory `config.yaml` names as well as the
+  # platform's, and every one a session it was told of was started with.
+  describe "a dormant session outside the platform's state directory" do
+    test "is listed and found when it is in the state directory config.yaml names", context do
+      configured = Path.join(context.base, "configured")
+      user = Path.join(context.base, "user/config.yaml")
+      File.mkdir_p!(Path.dirname(user))
+      File.write!(user, "version: 1\nstate_dir: #{Jason.encode!(configured)}\n")
+      recorded(configured, context.workspace, "configured-open", "open")
+
+      index =
+        index(context, [],
+          session_idle_ms: :infinity,
+          detached_idle_ms: :infinity,
+          user_path: user
+        )
+
+      assert %{state: :dormant, status: :waiting} =
+               index |> GenServer.call({:list, %{}}) |> Enum.find(&(&1.id == "configured-open"))
+
+      assert %{state: :dormant} = GenServer.call(index, {:get, "configured-open"})
+    end
+
+    test "is listed once it stops when it was started with a state directory of its own",
+         context do
+      %{session: session} = start_session(context)
+      elsewhere = Path.join(context.base, "elsewhere")
+      File.mkdir_p!(elsewhere)
+
+      opts = [state_dir: elsewhere, session_idle_ms: :infinity, detached_idle_ms: :infinity]
+
+      index =
+        start_supervised!(%{
+          id: {Index, make_ref()},
+          start: {GenServer, :start_link, [Index, opts]}
+        })
+
+      GenServer.cast(
+        index,
+        {:register, session.id, session.pid,
+         %{workspace: context.workspace, profile: "build", state_dir: context.state_dir}}
+      )
+
+      assert session.id in GenServer.call(index, :live_ids)
+      :ok = Troupe.stop_session(session.id)
+      gone(session.id, 5_000)
+
+      assert %{state: :dormant} =
+               index |> GenServer.call({:list, %{}}) |> Enum.find(&(&1.id == session.id))
+    end
+  end
+
+  # Decision 855: a listing reads a dormant session's log when the log is new to it or has
+  # changed since, by its size and modification time, and otherwise uses what it read then.
+  describe "a dormant session's row" do
+    test "is read from its log once, and again when the log changes", context do
+      path = recorded(context.state_dir, context.workspace, "recorded-open", "open")
+      index = listing(context, [])
+
+      assert %{status: :waiting} = row(index, "recorded-open")
+
+      # Other bytes of the same size at the same time: not read again.
+      %File.Stat{mtime: mtime, size: size} = File.stat!(path, time: :posix)
+      File.write!(path, String.duplicate(" ", size))
+      File.touch!(path, mtime)
+      assert %{status: :waiting} = row(index, "recorded-open")
+
+      # Another log: read again.
+      File.cp!(fixture("decided"), path)
+      assert %{status: :idle} = row(index, "recorded-open")
+    end
+
+    # A reader that comes and goes within a second rewrites the mark with as many digits
+    # at the same time; what is unseen follows the mark's value.
+    test "follows the seen mark beside the log, rewritten within the same second", context do
+      path = recorded(context.state_dir, context.workspace, "recorded-seen", "open")
+      seen = Path.join(Path.dirname(path), "seen")
+      File.write!(seen, "1")
+      index = listing(context, [])
+
+      assert %{unseen: %{approvals: 1}} = row(index, "recorded-seen")
+
+      %File.Stat{mtime: mtime} = File.stat!(seen, time: :posix)
+      File.write!(seen, "8")
+      File.touch!(seen, mtime)
+      assert %{unseen: %{approvals: 0}} = row(index, "recorded-seen")
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
+
+  @fixtures Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "approvals"]))
+
+  defp fixture(name), do: Path.join(@fixtures, name <> ".jsonl")
+
+  # A session real sessions recorded, put in a state directory as its log.
+  defp recorded(state_dir, workspace, id, name) do
+    dir = Troupe.Paths.session_dir(workspace, id, state_dir)
+    File.mkdir_p!(dir)
+    path = Path.join(dir, "events.jsonl")
+    File.cp!(fixture(name), path)
+    path
+  end
+
+  defp row(index, id), do: index |> GenServer.call({:list, %{}}) |> Enum.find(&(&1.id == id))
 
   # Seeing the session's events without counting as somebody watching it.
   defp follow(sid), do: :ok = Events.subscribe(sid, :internal)

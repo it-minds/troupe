@@ -43,10 +43,11 @@ defmodule Troupe.Sessions.Unseen do
   @doc """
   Record that a client has read the session up to its head, running or not.
 
-  `state_dir` is where a dormant session's log is looked for; `nil` is the daemon's own.
-  A session with no log yet, or none any more, has nothing to mark.
+  `state_dir` is where a dormant session's log is looked for, or a list of the places to
+  look (`Troupe.Session.Log.locate/2`); `nil` is the daemon's own. A session with no log
+  yet, or none any more, has nothing to mark.
   """
-  @spec seen(String.t(), Path.t() | nil) :: :ok
+  @spec seen(String.t(), Path.t() | [Path.t() | nil] | nil) :: :ok
   def seen(session_id, state_dir \\ nil) do
     case log(session_id, state_dir) do
       nil ->
@@ -69,12 +70,34 @@ defmodule Troupe.Sessions.Unseen do
   """
   @spec of(String.t(), Path.t(), (-> [Event.t()])) :: t()
   def of(session_id, dir, events) do
-    mark = mark(dir)
+    if Events.attached?(session_id), do: none(), else: since_mark(mark(dir), events)
+  end
 
-    cond do
-      Events.attached?(session_id) -> none()
-      mark == nil -> none()
-      true -> count(events.(), mark)
+  @doc """
+  `of/3` for nobody attached: what is unseen counting from `mark`, the mark `mark/1`
+  read. What a listing keeps of a dormant session between reads of its log, with the mark
+  it was counted from, asking who is attached each time it answers (`unseen_now/2`).
+  """
+  @spec since_mark(non_neg_integer() | nil, (-> [Event.t()])) :: t()
+  def since_mark(nil, _events), do: none()
+  def since_mark(mark, events), do: count(events.(), mark)
+
+  @doc "What `since_mark/2` counted, as `of/3` answers it now: nothing while one is attached."
+  @spec unseen_now(String.t(), t()) :: t()
+  def unseen_now(session_id, unseen),
+    do: if(Events.attached?(session_id), do: none(), else: unseen)
+
+  @doc """
+  The head `seq` the mark in a session's directory holds, or `nil` with no mark: read by
+  its value, since a mark rewritten within a second can keep its size and its time.
+  """
+  @spec mark(Path.t()) :: non_neg_integer() | nil
+  def mark(dir) do
+    with {:ok, contents} <- File.read(Path.join(dir, @seen)),
+         {seq, _rest} <- Integer.parse(String.trim(contents)) do
+      seq
+    else
+      _ -> nil
     end
   end
 
@@ -101,15 +124,6 @@ defmodule Troupe.Sessions.Unseen do
     |> Enum.map(& &1.data["call_id"])
     |> Enum.uniq()
     |> length()
-  end
-
-  defp mark(dir) do
-    with {:ok, contents} <- File.read(Path.join(dir, @seen)),
-         {seq, _rest} <- Integer.parse(String.trim(contents)) do
-      seq
-    else
-      _ -> nil
-    end
   end
 
   # The running log's own path, else the file on disk.
