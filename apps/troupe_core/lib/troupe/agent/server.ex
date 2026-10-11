@@ -1238,6 +1238,7 @@ defmodule Troupe.Agent.Server do
       |> apply_input(source, content, actor, meta.command_id)
       |> show_todos()
       |> instructions_due()
+      |> Map.put(:turn_tools, nil)
     else
       Logger.debug("troupe: ignoring #{inspect(source)} input of #{inspect(content)}")
       state
@@ -1365,6 +1366,7 @@ defmodule Troupe.Agent.Server do
           |> fold_shell()
           |> fold_child_reports()
           |> load_instructions()
+          |> hold_turn_tools()
           |> attach_turn_context()
 
         definition = effective_definition(state)
@@ -1466,10 +1468,18 @@ defmodule Troupe.Agent.Server do
     %{own | tools: tools, permissions: Map.merge(own.permissions, denied)}
   end
 
-  # The tools are offered knowing the model they go to: one that binds its thinking to
-  # them is offered the same on every call (Decision 867).
+  # The MCP servers' and the person's clients' tools, taken as a turn's first call begins
+  # and held for the rest of the turn (Decision 871, as 798 holds the instruction files):
+  # what comes or goes in the middle of a turn is offered, or not, from the next one.
+  defp hold_turn_tools(%State{turn_tools: nil} = state),
+    do: %{state | turn_tools: Tools.mcp(state.session_id)}
+
+  defp hold_turn_tools(state), do: state
+
+  # The tools are offered knowing whether the model they go to binds its thinking to them:
+  # one that does is offered the same on every call (Decisions 867 and 871).
   defp build_request(state, definition) do
-    ctx = %{base_ctx(state, "") | model: Config.target(state.config, definition.model).model}
+    ctx = base_ctx(state, "")
     tools = Tools.specs(definition, ctx)
 
     %Request{
@@ -2204,7 +2214,7 @@ defmodule Troupe.Agent.Server do
     state = reclaim_run_grant(%{state | turn_mode: nil})
     data = if(reason, do: %{"reason" => reason}, else: %{})
     log(state, :turn_ended, Map.put(data, "turn", Spend.to_json(state.turn)))
-    state = %{state | turn: %Spend{}}
+    state = %{state | turn: %Spend{}, turn_tools: nil}
     publish_state(state, :idle)
     if state.child_reports != [] and reason == nil, do: send(self(), :child_reports)
     {:next_state, :idle, state}
@@ -2379,8 +2389,10 @@ defmodule Troupe.Agent.Server do
       config: state.config,
       timeout_ms: state.config.shell_timeout_ms,
       # Only on a turn a loop started, and only while that loop still runs: it is what
-      # offers `goal_complete` (Decision 679).
-      loop: if(state.turn_mode == :loop, do: state.loop)
+      # offers `goal_complete` (Decision 679), and what lets a call to it run (871).
+      loop: if(state.turn_mode == :loop, do: state.loop),
+      binds_thinking: binds_thinking?(state),
+      turn_tools: state.turn_tools
     }
   end
 
@@ -3573,8 +3585,8 @@ defmodule Troupe.Agent.Server do
   # the compaction once, until a later one summarised the blocks away. Kept without them,
   # as the API asks of a compaction's tail (D92, Decision 867). On any other model a block
   # still holds, and an Anthropic model thinking with an effort set may need its last one.
-  defp binds_thinking?(state),
-    do: Catalog.binds_thinking?(Config.target(state.config, state.definition.model).model)
+  # Its config's `binds_thinking` before its name (Decision 871).
+  defp binds_thinking?(state), do: Config.binds_thinking?(state.config, state.definition.model)
 
   # A message that was nothing but thinking is left as it was rather than sent empty.
   defp without_thinking(%Message{role: :assistant, content: blocks} = message) do

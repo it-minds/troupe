@@ -460,7 +460,13 @@ defmodule Troupe.Bench.Live do
       started = now()
       prompts = [scenario.prompt | scenario.follow_ups]
       deadline = started + deadline(plan.limits)
-      {ending, acc} = turns(sid, prompts, deadline, plan.run_cap_micros, new_acc())
+
+      {ending, acc} =
+        case loop_turn(sid, scenario.loop, deadline, plan.run_cap_micros, new_acc()) do
+          {:went_on, acc} -> turns(sid, prompts, deadline, plan.run_cap_micros, acc)
+          ending -> ending
+        end
+
       {sid, ending, acc, now() - started, Troupe.events(sid)}
     after
       Troupe.unsubscribe(sid)
@@ -477,6 +483,23 @@ defmodule Troupe.Bench.Live do
     case watch(sid, deadline, cap, acc) do
       {{:ended, %Event{type: "turn_ended", data: data}}, acc} = ending when rest != [] ->
         if data["reason"], do: ending, else: turns(sid, rest, deadline, cap, acc)
+
+      ending ->
+        ending
+    end
+  end
+
+  # A scenario's `/loop` turn, before anything is typed (Decision 871): its goal set, and a
+  # loop of one iteration towards it, whose turn ends by itself before the prompts go.
+  defp loop_turn(_sid, nil, _deadline, _cap, acc), do: {:went_on, acc}
+
+  defp loop_turn(sid, goal, deadline, cap, acc) do
+    :ok = Troupe.set_goal(sid, goal)
+    {:ok, _loop} = Troupe.start_loop(sid, nil, max_iterations: 1)
+
+    case watch(sid, deadline, cap, acc) do
+      {{:ended, %Event{type: "turn_ended", data: data}}, acc} = ending ->
+        if data["reason"], do: ending, else: {:went_on, acc}
 
       ending ->
         ending

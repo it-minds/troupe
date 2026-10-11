@@ -9,10 +9,10 @@ defmodule Troupe.Tools do
   """
 
   alias Troupe.Agent.Definition
-  alias Troupe.LLM.Catalog
   alias Troupe.Session.{Approvals, ClientTools}
   alias Troupe.{Skills, Tool}
   alias Troupe.Tool.{Ctx, Result}
+  alias Troupe.Tools.GoalComplete
 
   @builtins [
     Troupe.Tools.ReadFile,
@@ -72,8 +72,17 @@ defmodule Troupe.Tools do
   to one person on one session, and a pod-wide list would hand it to everybody.
   """
   @spec all(String.t() | nil) :: [Tool.handle()]
-  def all(session_id \\ nil),
-    do: @builtins ++ extra() ++ remote() ++ local(session_id) ++ hosted(session_id)
+  def all(session_id \\ nil), do: @builtins ++ extra() ++ mcp(session_id)
+
+  @doc """
+  The tools that come and go during a session: the pod's and the session's MCP servers'
+  and those a person's client offers. An agent takes them as a turn's first model call
+  finds them and offers those for the rest of the turn (`Ctx.turn_tools`, Decision 871),
+  so a server that comes back with another list, a sign-in that completes or a person's
+  tools leaving change the tools at the next turn, not in the middle of one.
+  """
+  @spec mcp(String.t() | nil) :: [Tool.handle()]
+  def mcp(session_id), do: remote() ++ local(session_id) ++ hosted(session_id)
 
   defp hosted(nil), do: []
   defp hosted(session_id), do: ClientTools.list(session_id)
@@ -105,8 +114,11 @@ defmodule Troupe.Tools do
 
   @doc "The tools a profile may use, in a stable order."
   @spec for_definition(Definition.t(), String.t() | nil) :: [Tool.handle()]
-  def for_definition(%Definition{} = definition, session_id \\ nil) do
-    Enum.filter(all(session_id), fn tool ->
+  def for_definition(%Definition{} = definition, session_id \\ nil),
+    do: profile_tools(all(session_id), definition)
+
+  defp profile_tools(tools, definition) do
+    Enum.filter(tools, fn tool ->
       name = Tool.name(tool)
 
       named?(definition, name) and
@@ -135,7 +147,7 @@ defmodule Troupe.Tools do
   @spec available(Definition.t(), Ctx.t()) :: [Tool.handle()]
   def available(%Definition{} = definition, %Ctx{} = ctx) do
     definition
-    |> for_definition(ctx.session_id)
+    |> offered(ctx)
     |> entitled_servers(ctx.bundle)
     |> Kernel.++(skill_tools(definition, ctx))
     |> Kernel.++(loop_tools(ctx))
@@ -154,12 +166,19 @@ defmodule Troupe.Tools do
   # a session makes every thinking block before it one an enforced account refuses.
   defp task_list(tools, %Definition{tools: :all}, %Ctx{todos: [], turn_calls: calls} = ctx)
        when calls < @task_list_after do
-    if Catalog.binds_thinking?(ctx.model),
+    if ctx.binds_thinking,
       do: tools,
       else: Enum.reject(tools, &(Tool.name(&1) in @task_list))
   end
 
   defp task_list(tools, _definition, _ctx), do: tools
+
+  # The profile's tools, with the MCP servers' and the person's clients' as the turn's
+  # first call found them (Decision 871).
+  defp offered(definition, %Ctx{turn_tools: held}) when is_list(held),
+    do: profile_tools(@builtins ++ extra() ++ held, definition)
+
+  defp offered(definition, %Ctx{} = ctx), do: for_definition(definition, ctx.session_id)
 
   # The person's own skills are read beside the workspace (Decision 700), and only when
   # there is one to read beside: a context built without a workspace has no layer. What
@@ -173,7 +192,10 @@ defmodule Troupe.Tools do
   # A loop's structured verdict (Decision 679), on the turns a running loop started and
   # no others, and outside the profile's list: it changes nothing but whether the loop
   # goes on, and a loop whose agent could not say "done" would only ever stop at its cap.
-  defp loop_tools(%Ctx{loop: loop}) when is_binary(loop), do: [Troupe.Tools.GoalComplete]
+  # To a model that binds its thinking to its tools, on every call of the root agent, which
+  # is the one a loop runs on (Decision 871), and refused outside a loop's turns.
+  defp loop_tools(%Ctx{loop: loop}) when is_binary(loop), do: [GoalComplete]
+  defp loop_tools(%Ctx{binds_thinking: true, agent_path: ["root"]}), do: [GoalComplete]
   defp loop_tools(%Ctx{}), do: []
 
   defp entitled_servers(tools, %{entitlements: %{"mcp_servers" => names}}) when is_list(names) do
@@ -254,12 +276,13 @@ defmodule Troupe.Tools do
   def authorize(name, %Definition{} = definition, %Ctx{} = ctx) do
     case Enum.find(loop_tools(ctx), &(Tool.name(&1) == name)) do
       nil -> authorize_listed(name, definition, ctx)
-      tool -> {:run, tool, Tool.mode(tool)}
+      tool when is_binary(ctx.loop) -> {:run, tool, Tool.mode(tool)}
+      _outside_a_loop -> {:reject, Result.error(ctx.call_id, name, {:no_loop, name})}
     end
   end
 
   defp authorize_listed(name, definition, ctx) do
-    case fetch(name, ctx.session_id) |> or_scoped(name, definition, ctx) do
+    case fetch(name, ctx.session_id) |> or_scoped(name, definition, ctx) |> or_gone(name, ctx) do
       {:error, reason} ->
         {:reject, Result.error(ctx.call_id, name, reason)}
 
@@ -288,6 +311,15 @@ defmodule Troupe.Tools do
       tool -> {:ok, tool}
     end
   end
+
+  # A tool this turn was offered whose server or client has gone since (Decision 871): it
+  # is still in the tools the model is sent until the turn ends, and a call to it is told so.
+  defp or_gone({:error, {:unknown_tool, _name}} = unknown, name, %Ctx{turn_tools: held})
+       when is_list(held) do
+    if Enum.any?(held, &(Tool.name(&1) == name)), do: {:error, {:tool_gone, name}}, else: unknown
+  end
+
+  defp or_gone(found, _name, _ctx), do: found
 
   @doc """
   Run a `:task` tool, blocking on approval if the profile asks for one.

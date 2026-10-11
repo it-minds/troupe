@@ -18,7 +18,9 @@ live, and the maintainer chose on 2026-10-11 (Decision 863):
   for an account that refuses a stale block, on the prefix changes option 2 cannot remove:
   an `AI?` turn's `plan` prompt, a profile or model switch. The largest such change, the
   task list's tools offered at a turn's eleventh call (Decision 793), and the tail a
-  compaction keeps are gone on a model that binds its thinking (#590, Decision 867).
+  compaction keeps are gone on a model that binds its thinking (#590, Decision 867), and
+  so is a `/loop`'s `goal_complete`; an MCP tool that comes or goes waits for the next
+  turn on every model (#606, Decision 871).
 - **`thinking_binding: error`** asks the API for the refusal an enforced account gets, on
   any account, so that refusal can be measured without a patched build (#591).
 
@@ -34,6 +36,8 @@ question, and gives the numbers from the live runs with the commands that produc
 | the goal in the system prompt | the call after it was set or cleared | 678 | turn context |
 | the `plan` prompt added to the profile's | an `AI?` watch turn | | changes |
 | the tools | the call after the task list's tools are first offered: once there is a list, or after ten calls of a turn | 793 | the same on a model that binds its thinking: the list's tools from the first call (867); changes on others |
+| `goal_complete` among the tools | the first call of a `/loop` turn, and of the turn after one | 679 | the same on a model that binds its thinking: offered on every call of the root agent, refused outside a loop (871); changes on others |
+| an MCP server's tools, or those a person's client offers | the first call of the turn after a server came back with another list, a sign-in completed, or a person's tools came or went | 654, 741, 861 | changes, at a turn's first call and never in the middle of one (871) |
 | the conversation | a compaction, which keeps a tail of it | 774 | changes; on a model that binds its thinking the tail goes without the blocks made in front of what the summary replaced, so no later call is refused (867) |
 | the turn context put before | an agent restarted, or a session resumed | 815 | the same: the blocks are in the log (863) |
 
@@ -110,9 +114,11 @@ call carried.
 What it costs:
 
 - **The prefix still changes** where the system prompt was not the cause: a compaction,
-  an `AI?` turn's `plan` prompt, and on a model that does not bind its thinking the tools
-  when the task list's are first offered (793). On one that does, the list's tools are
-  there from the first call and a compaction's tail keeps no thinking (867).
+  an `AI?` turn's `plan` prompt, an MCP tool that comes or goes (at the next turn, 871),
+  and on a model that does not bind its thinking the tools when the task list's are first
+  offered (793) and `goal_complete` with a loop's turns (679). On one that does, the
+  list's tools and `goal_complete` are there from the first call and a compaction's tail
+  keeps no thinking (867, 871).
   An agent restarted, or a session resumed, sends what it sent before: each block is on
   its call's `llm_request` as `turn_context_block` and folded back on replay (863).
 - **Tokens.** A changed section is added to the conversation each time it changes, and
@@ -362,6 +368,55 @@ enough to compact (three compactions before, seven after, none refused) the firs
 block was always in what the summary replaced; in those runs (three compactions before, seven
 after) no call after a compaction was refused. The stand-in, which binds as the
 documentation says, is the proof for the tail (`BoundThinkingTest`).
+
+## What is left, and when (#606)
+
+On a model that binds its thinking (by its name, or `binds_thinking` in the config for a
+name that hides it, Decision 871), these are all that still change what is in front of a
+call's thinking:
+
+- **An MCP tool that comes or goes**, on every model: a server that comes back with
+  another list (an edited file, a server checked again), a sign-in that completes, a
+  person's client that offers its tools or closes. The agent takes the MCP servers' and
+  the clients' tools as a turn's first call begins and offers those for the rest of the
+  turn, so the change is at the next turn's first call. A tool that went in the meantime
+  stays in the list until then, and a call to it is an error result saying it went.
+- **A compaction**, whose summary replaces what came before; its tail goes without the
+  thinking made in front of that (867).
+- **A skill added or removed** where the session reads skills (the person's layer, the
+  workspace's): the `skill` tool names every skill in its schema, and they are read on
+  every call, so the change is at the next call, mid-turn or not. Not held by 871, which
+  is about the tools that come and go from outside the session.
+- **An `AI?` turn's `plan` prompt**, and **a profile or a model switched**.
+
+Not the system prompt (863), the task list's tools (867) or `/loop`'s `goal_complete`,
+which such a model's root agent is offered on every call and refused outside a loop (871).
+On a model that does not bind, the list's tools still come at a turn's eleventh call (793)
+and `goal_complete` with a loop's turns (679): a cache write each, and nothing refused.
+
+**What a change at the boundary costs on an account that enforces the binding.** Every
+later call carries a block made under the tools before it, so each is refused once and sent
+again without its thinking, for the rest of the session or until a compaction (805; D92 in
+`defects.md` says what would end it). Against the stand-in as Claude Sonnet 5.5 with
+`thinking_binding: error` (`StableToolsTest`): three turns of three, two and one calls, and
+a person's tool offered while the first turn's first call ran.
+
+| | tools taken on every call (0.13.0) | held to the turn (871) |
+|---|---:|---:|
+| calls whose tools changed | 1, the first turn's second | 1, the second turn's first |
+| refused, and sent again without thinking | 5 | 3 |
+| HTTP requests | 11 | 9 |
+
+The hold saves the refusals of the rest of the turn a tool came in, and the model never
+sees its tools change under a turn's reasoning. It does not save the turns after: on an
+enforced account a tool that comes or goes still costs a refusal on every later call.
+
+`loop_turn`, a live scenario by name, is a `/loop` turn of one iteration and then a
+person's turn in the same session. Against the same stand-in with `error`
+(`BenchLiveTest`), three calls each: with `goal_complete` offered on the loop's turn alone,
+as a model that does not bind still has it (the stand-in binds every model's thinking),
+the person's turn changed the tools and each of its three calls was refused once, nine
+requests for six calls; offered on every call, six requests and nothing refused.
 
 ## Live numbers
 

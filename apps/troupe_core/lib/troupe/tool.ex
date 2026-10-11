@@ -29,9 +29,13 @@ defmodule Troupe.Tool.Ctx do
     # The model calls this agent's turn has made so far, its subagents' included: what
     # offers the task list to a profile that did not ask for it by name (Decision 793).
     turn_calls: 0,
-    # The model the call goes to, as its provider names it, when the tools are being
-    # offered: on one that binds its thinking to them they never change (Decision 867).
-    model: nil,
+    # Whether the model the agent's calls go to binds its thinking to the tools among the
+    # rest (Decisions 867 and 871): on one that does, they never change.
+    binds_thinking: false,
+    # The MCP servers' and the person's clients' tools as the turn's first model call found
+    # them (Decision 871), offered for the rest of the turn; `nil` before it, which is the
+    # tools as they are now.
+    turn_tools: nil,
     depth: 0,
     max_depth: 3,
     budget: nil,
@@ -53,7 +57,8 @@ defmodule Troupe.Tool.Ctx do
           todos: [Troupe.Todo.t()],
           children: [String.t()],
           turn_calls: non_neg_integer(),
-          model: String.t() | nil,
+          binds_thinking: boolean(),
+          turn_tools: [Troupe.Tool.handle()] | nil,
           depth: non_neg_integer(),
           max_depth: pos_integer(),
           budget: Troupe.Budget.t() | nil,
@@ -151,6 +156,17 @@ defmodule Troupe.Tool.Result do
 
   def describe({:unknown_agent, name}), do: "There is no agent named #{name}."
   def describe({:unknown_tool, name}), do: "There is no tool named #{name}."
+
+  # Decision 871: offered for the rest of the turn, gone from where it ran.
+  def describe({:tool_gone, name}),
+    do:
+      "The tool #{name} went during this turn: the server or the client that offered it " <>
+        "no longer does. It did not run. Do the work another way, or say what is left undone."
+
+  def describe({:no_loop, name}),
+    do:
+      "#{name} ends a /loop, and no loop is running on this turn, so there is nothing for it " <>
+        "to end. Carry on with what was asked."
 
   def describe({:invalid_args, detail}), do: "Invalid arguments: #{detail}"
 

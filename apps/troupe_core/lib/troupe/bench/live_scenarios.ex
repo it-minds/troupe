@@ -25,7 +25,9 @@ defmodule Troupe.Bench.LiveScenarios do
   three turns on the `plan` agent, each after the first beginning with the task list the
   turn before left. `long_turn`, also by name, is one turn of thirteen calls on `build`
   with no list, where the task list's tools were offered from the eleventh (issue #590,
-  Decision 867).
+  Decision 867). `loop_turn`, by name, is a `/loop` turn and then a person's turn in the
+  same session, where `goal_complete` was offered on the loop's turn alone (issue #606,
+  Decision 871).
   """
 
   alias Troupe.Bench.Scenario
@@ -52,7 +54,8 @@ defmodule Troupe.Bench.LiveScenarios do
       answer_only(),
       follow_up(),
       task_list(),
-      long_turn()
+      long_turn(),
+      loop_turn()
     ]
   end
 
@@ -670,6 +673,37 @@ defmodule Troupe.Bench.LiveScenarios do
       end
     }
   end
+
+  # -- a /loop turn, then a person's turn ---------------------------------------------
+
+  # Issue #606 (Decision 871): `goal_complete` was offered on a loop's turns and no others
+  # (Decision 679), so a person's turn after a loop's sent other tools, in front of the
+  # thinking the loop's turn hands back. The loop's one iteration works a number out
+  # without a tool, which is what makes a model think, writes it and says the goal is met;
+  # the person's turn then reads it back and writes the next one.
+  defp loop_turn do
+    %Scenario{
+      name: "loop_turn",
+      title: "a /loop turn, then a person's turn in the same session",
+      loop: """
+      out/n.txt holds N, the sum of the prime numbers below 60, and nothing else. Work N out yourself, with no tool.\
+      """,
+      prompt: """
+      Now read out/n.txt with read_file, and write N plus 1 to out/next.txt with write_file, the number and nothing else. Say so in one short sentence.\
+      """,
+      outcome: {:file, "out/next.txt", "441\n"},
+      measure: fn ctx ->
+        {[],
+         [
+           {"loop", "the loop's turn said the goal is met", loop_met?(ctx.events)},
+           {"person", "the person's turn was taken", typed(ctx.events) == 1}
+         ]}
+      end
+    }
+  end
+
+  defp loop_met?(events),
+    do: Enum.any?(events, &(&1.type == "loop_stopped" and &1.data["reason"] == "goal_complete"))
 
   # The task list as the run left it.
   defp last_list(events) do

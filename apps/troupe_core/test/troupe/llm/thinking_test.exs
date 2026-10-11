@@ -145,6 +145,72 @@ defmodule Troupe.LLM.ThinkingTest do
       end
     end
 
+    # Decision 871: a name that hides the model is said to bind by its entry, its provider
+    # or the provider's own list, in that order, before the name is read.
+    test "binds_thinking on a model's entry, its provider or its listing comes before its name" do
+      smart = %{id: "smart", context: nil, max_output: nil, reasoning_effort: nil}
+      said = Map.put(smart, :binds_thinking, true)
+      sonnet = %{smart | id: "eu.anthropic.claude-sonnet-5-5"}
+      listed = %{"gw/smart" => %Catalog{id: "gw/smart", binds_thinking: true}}
+
+      binds? = fn provider_flag, models, catalog ->
+        provider =
+          %{type: :anthropic, base_url: "https://gw.example.test", api_key: "k", auth: :api_key}
+          |> Map.merge(%{source: :yaml, models: models})
+
+        provider =
+          if is_boolean(provider_flag),
+            do: Map.put(provider, :binds_thinking, provider_flag),
+            else: provider
+
+        config = %Troupe.Config{providers: %{"gw" => provider}, catalog: catalog}
+        Troupe.Config.binds_thinking?(config, "gw/" <> hd(Map.keys(models)))
+      end
+
+      refute binds?.(nil, %{"smart" => smart}, %{})
+      assert binds?.(true, %{"smart" => smart}, %{})
+      assert binds?.(nil, %{"smart" => said}, %{})
+      refute binds?.(true, %{"smart" => %{said | binds_thinking: false}}, %{})
+      assert binds?.(nil, %{"smart" => smart}, listed)
+      refute binds?.(false, %{"smart" => smart}, listed)
+
+      # Its name, last: the wire id a gateway renamed it to, and a bare id.
+      assert binds?.(nil, %{"sonnet" => sonnet}, %{})
+      refute binds?.(false, %{"sonnet" => sonnet}, %{})
+      assert Troupe.Config.binds_thinking?(%Troupe.Config{}, "claude-opus-5-5")
+      refute Troupe.Config.binds_thinking?(%Troupe.Config{}, "claude-opus-5")
+    end
+
+    test "binds_thinking is read from a provider's and a model's entry, and a listing's" do
+      dir = Path.join(System.tmp_dir!(), "troupe-binds-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      File.write!(Path.join(dir, "config.yaml"), """
+      providers:
+        gw:
+          type: anthropic
+          base_url: https://gw.example.test
+          binds_thinking: true
+          models:
+            smart: {id: smart}
+            plain: {id: plain, binds_thinking: false}
+      """)
+
+      config = Troupe.Config.load(nil, [], user_path: Path.join(dir, "config.yaml"))
+      assert config.providers["gw"].binds_thinking
+      assert Troupe.Config.binds_thinking?(config, "gw/smart")
+      refute Troupe.Config.binds_thinking?(config, "gw/plain")
+      refute Map.has_key?(config.providers["gw"].models["smart"], :binds_thinking)
+
+      group = %{"model_group" => "smart", "mode" => "chat", "max_input_tokens" => 1000}
+      [entry] = Catalog.parse(:litellm, %{"data" => [Map.put(group, "binds_thinking", true)]})
+      assert entry.binds_thinking
+      assert [%Catalog{binds_thinking: nil}] = Catalog.parse(:litellm, %{"data" => [group]})
+      assert %Catalog{binds_thinking: true} = Catalog.from_map("smart", Catalog.to_map(entry))
+      assert %Catalog{binds_thinking: nil} = Catalog.from_map("smart", %{"context" => 1000})
+    end
+
     test "an effort of none sends no thinking field, and the thinking the model did goes back" do
       for effort <- ["none", "off"] do
         body = sent(%{request("claude-opus-5-5", effort) | messages: tool_turn(thought())})

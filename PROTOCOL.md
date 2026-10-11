@@ -921,9 +921,12 @@ session with no goal answers `conflict` with `needs: "goal"`, and one with a loo
 running answers `conflict` with its `loop_id`. It activates a dormant session.
 
 Each iteration ends with the agent's own verdict, given as a tool call and never read
-from its prose: on the loop's turns, and only there, the agent is offered
-`goal_complete {summary}`, and an iteration in which it completes that call ends the
-loop with reason `goal_complete`. An iteration that ends without one is followed by
+from its prose: on the loop's turns the agent is offered `goal_complete {summary}`, and an
+iteration in which it completes that call ends the loop with reason `goal_complete`. A
+model that binds its thinking to its tools (Claude Fable 5.1, Opus 5.5, Sonnet 5.5, or
+one whose config says `binds_thinking`) is offered it on every turn, so its tools never
+change, and a call to it on a turn that is not the loop's fails with a sentence saying no
+loop is running. An iteration that ends without one is followed by
 the next. The loop also stops when it has run `max_iterations`; when `loop_max_failures`
 (3) iterations in a row fail (the model request failed, the agent ended short or
 crashed, or the failure guard stopped the turn); when the budget question is asked (`budget`: the question stays with whoever
@@ -2230,8 +2233,11 @@ it was serving is parked for a grace (`TROUPE_CLIENT_TOOL_GRACE_SECONDS`, 60 s,
 registers the tool again inside it — through a fresh consent, as always — is sent to that
 client as the same `tool.invoke`: same `call_id`, same `arguments`. Nobody inside the
 grace, and the call fails once, with a result naming the tool, saying its client left and
-that the call may have run on its machine before it did (Decision 861); the tool is off
-the model's list by then (`tools_unregistered`, reason `disconnected`). Troupe's own
+that the call may have run on its machine before it did (Decision 861). The registration
+is gone by then (`tools_unregistered`, reason `disconnected`), and the tool leaves the
+model's list at its next turn: a tool registered or gone in the middle of a turn changes
+the list the turn after, so the tools in front of the turn's thinking stay as they were,
+and a call to a gone one fails with a result saying so (Decision 871). Troupe's own
 clients send no `tools.unregister` when the person leaves a session: leaving is a drop.
 The grace comes out of the call's own timeout, so a dropped laptop is never a hung turn.
 
