@@ -103,7 +103,9 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
   - the gateway's `LoopbackTest` "a refused upgrade is logged at warning level".
 
   With the default 64 cases on a busy machine many more core tests time out, and all pass at
-  `--max-cases 8`.
+  `--max-cases 8`. The `Sessions.Index` list timeouts among them (5 to 7 tests a full run
+  in chunk 28: `ReadBranchTest`, `WatchSessionTest`, `LocalPricingTest`,
+  `DelegateContractTest`, `ForkSessionTest`) are #589.
 - `Troupe.BenchTest` measures the tool definitions of the test build, which registers four
   test-only tools (about 582 bytes), so the budget gates a list nobody ships and `mix
   troupe.bench` in dev reads that much lower.
@@ -1260,6 +1262,14 @@ Found by the D117 and session lifecycle fixers, 2026-10-11.
 - **Headless duplicate.** The headless printer once printed `spawned /build (shared)` twice (a race between reading the journal and the live stream).
 
 Found by the chunk 27 fixers, 2026-10-11.
+
+### D121 - Keys, MCP servers and limits after chunk 28's fixes (low)
+
+- **A malformed initialize answer.** `Troupe.MCP.Stdio`'s `after_initialize/2` matches an answer with a `result` or an `error`, and nothing else. A stdio server that answers `initialize` with neither crashes the server's process with a `FunctionClauseError`, where a status ("answered initialize with neither a result nor an error") would do.
+- **The live bench's key.** `troupe bench --live` hands its key to sessions in `config_overrides`, which sits unredacted in the sessions supervisor's child spec and in a watch branch's start options. Decision 0857 redacts the `Config`, `MCP.Stdio` and `Session.MCP` states; these two places are plain maps.
+- **Default limits.** The default limits #389 named were set, not tuned against measured runs: the tool output cap, the compaction threshold, and a turn's budget. #389 closed with that owed. #465's measurement (chunk 28) gave the first numbers for Anthropic's models, but none of them was tuned from it.
+
+Found by the chunk 28 fixers and the coordinator, 2026-10-11.
 
 ## Taken
 
