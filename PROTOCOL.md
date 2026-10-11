@@ -2098,6 +2098,11 @@ The role in a token is a claim about the moment it was minted. **Access is check
 on every command** against the ACL the plane has pushed to the pod, so a collaborator
 whose access is revoked is refused on their next command with `forbidden` and
 `data.reason` of `access revoked` — even though the token in their hand still verifies.
+A role the plane narrows is held the same way: the next command runs with the scopes of
+the role the pod was told, so an owner made a collaborator is refused `shell.run` with
+`forbidden` and `data.required_scope` of `admin` without waiting for the token to expire.
+The ACL narrows and never widens; a wider role arrives with the next token
+(`auth.refresh`).
 
 **A token is for its session and no other.** A pod holds several people's sessions, so a
 request that names another — as `session_id`, a branch's `parent`, or the id in a

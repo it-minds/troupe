@@ -372,7 +372,8 @@ would make pods interchangeable, which is what a leaked token wants. Workers ver
 against a cached JWKS, warn with `auth.expiring` two minutes out and accept `auth.refresh`
 on the open socket. The role in a token is a claim about the moment it was minted; access
 is checked again on every command against the ACL mirror the plane pushes, so a revoked
-collaborator is refused on their next command.
+collaborator is refused on their next command, and a narrowed one runs it with the
+narrower role's scopes.
 
 ### 6.2 A worker pod
 

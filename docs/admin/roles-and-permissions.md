@@ -103,7 +103,11 @@ team member `control` when the team's `members_may_control` is set, else `observ
 `session.grant` is for the owner or a team admin. Revoking a team's grant on a profile
 freezes its sessions read-only: a running one is put to sleep on its pod, and one still
 waiting for a worker is never started. Workers re-check the ACL on every command, so a
-revoked collaborator is refused before their token expires.
+revoked collaborator is refused before their token expires, and a role you narrow with
+`session.grant` (an owner made a collaborator, a collaborator made a viewer) holds at their
+next command on the pod: the token they hold still says the old role, and the pod no longer
+takes its word for it. Widening a role takes effect with their next token, at most 15
+minutes later.
 
 ## 6. How each surface authenticates
 

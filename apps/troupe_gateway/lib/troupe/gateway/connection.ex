@@ -363,7 +363,7 @@ defmodule Troupe.Gateway.Connection do
        send_control(state, {:error, id, Error.new(:unauthenticated, %{reason: "expired"})})}
     else
       case guard(state, method, params) do
-        :ok -> dispatch_request(id, method, params, state, opts)
+        {:ok, scopes} -> dispatch_request(id, method, params, state, scopes, opts)
         {:error, reason} -> {:ok, send_control(state, {:error, id, as_error(reason)})}
       end
     end
@@ -408,8 +408,8 @@ defmodule Troupe.Gateway.Connection do
   # pending for whoever else is attached.
   defp apply_permission(_session_id, _call_id, {:error, _error}), do: :ok
 
-  defp dispatch_request(id, method, params, state, opts) do
-    case Dispatch.call(method, params, context(state)) do
+  defp dispatch_request(id, method, params, state, scopes, opts) do
+    case Dispatch.call(method, params, context(state, scopes)) do
       {:ok, result} ->
         answer(id, narrow(state, method, result), state, opts)
 
@@ -705,12 +705,18 @@ defmodule Troupe.Gateway.Connection do
 
   # Asked before every command on a remote endpoint. A token is minted once and an ACL
   # can change while it is still valid, so the role a token carries is a claim about
-  # the moment it was issued and not a standing permission.
+  # the moment it was issued and not a standing permission. The answer is the scopes this
+  # one command runs with: the connection's, or fewer when the guard knows the role has
+  # been narrowed since. Never more — a wider role needs a token that says so.
   defp guard(%{endpoint: %{guard: guard}} = state, method, params) when is_function(guard, 3) do
-    guard.(state.auth && state.auth[:claims], method, params)
+    case guard.(state.auth && state.auth[:claims], method, params) do
+      :ok -> {:ok, state.scopes}
+      {:ok, scopes} -> {:ok, Enum.filter(state.scopes, &(&1 in scopes))}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
-  defp guard(_state, _method, _params), do: :ok
+  defp guard(state, _method, _params), do: {:ok, state.scopes}
 
   # And after it, on the answer: a listing is about every session on a pod, and a token
   # for one of them may see that one.
@@ -755,10 +761,10 @@ defmodule Troupe.Gateway.Connection do
     end
   end
 
-  defp context(state) do
+  defp context(state, scopes) do
     %Dispatch.Context{
       principal: state.principal,
-      scopes: state.scopes,
+      scopes: scopes,
       connection: self(),
       next_subscription_id: "sub-#{state.next_subscription}",
       activate: state.endpoint.activate,
