@@ -85,6 +85,11 @@ export type Entry =
       childPath: string[];
       task: string;
       brief: Array<[string, string]>;
+      /**
+       * Started in the background (`wait: false`, troupe Decision 853): its call answered at
+       * once, and its end reaches its parent later, once, as a `user_input` from `subagent`.
+       */
+      background: boolean;
     }
   /**
    * That brief as the subagent was handed it, its first message: from the agent that
@@ -542,7 +547,7 @@ function systemText(d: DurableEvent): string {
     case "budget_warning":
       return `nearly out: ${str(d.data["detail"], str(d.data["dimension"], "a limit"))}`;
     case "agent_done":
-      return `done: ${str(d.data["reason"], "finished")}`;
+      return ENDED_BY_PARENT[str(d.data["reason"])] ?? `done: ${str(d.data["reason"], "finished")}`;
     case "input_after_done":
       return "input after the agent had finished; it picked the conversation back up";
     case "cancelled":
@@ -568,6 +573,32 @@ function systemText(d: DurableEvent): string {
     default:
       return d.type;
   }
+}
+
+/**
+ * A child in the background its parent ended (troupe Decision 853), by its `agent_done`
+ * reason, in the terminal client's words.
+ */
+const ENDED_BY_PARENT: Record<string, string> = {
+  stopped: "stopped by its parent",
+  cancelled: "stopped by the cancel",
+  failed: "failed past its restarts",
+};
+
+/** How a child in the background ended, by the `ended` its end was handed over with. */
+const ENDED: Record<string, string> = {
+  finished: "finished",
+  cut_short: "ended before it finished",
+  stopped: "stopped by its parent",
+  cancelled: "stopped by the cancel",
+  interrupted: "stopped by a restart",
+  failed: "failed past its restarts",
+};
+
+/** A child's end, handed to the agent that started it in the background, as the terminal client says it. */
+function subagentEndText(d: DurableEvent): string {
+  const path = Array.isArray(d.data["child_path"]) ? d.data["child_path"].map((p) => str(p)).join("/") : "a subagent";
+  return `${path}, in the background: ${ENDED[str(d.data["ended"])] ?? "ended before it finished"}; its end reached its parent`;
 }
 
 /** Where an agent was read from, as `profile_switched`'s `layer` names it (troupe Decision 841). */
@@ -669,6 +700,12 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
           ...started,
           entries: [...state.entries, { kind: "system", ...base, type: "harness_note", text: `the harness said: ${str(d.data["text"])}` }],
         };
+      }
+      // The end of a child the agent started in the background, handed to it once (troupe
+      // Decision 853): whose and how it ended, in a line. What it had done is the child's own
+      // `agent_done`, and its agent's next answer.
+      if (str(d.data["source"]) === "subagent") {
+        return { ...started, entries: [...state.entries, { kind: "system", ...base, type: "subagent_end", text: subagentEndText(d) }] };
       }
       // A subagent's first message is the brief it was handed, which its delegation has
       // already said, or will say as soon as it is written (the two race).
@@ -795,6 +832,7 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
         childPath,
         task: str(d.data["task"]),
         brief: partsOf(d.data["brief"], BRIEF_PARTS),
+        background: d.data["wait"] === false,
       };
       // The child's first message may have been written first: it is the brief, not a
       // person's turn.

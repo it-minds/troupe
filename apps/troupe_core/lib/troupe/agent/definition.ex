@@ -90,10 +90,15 @@ defmodule Troupe.Agent.Definition do
   Whether this profile may call a tool at all.
 
   The allowlist is enforced here, in the harness, never by trusting the model to
-  respect the tool list it was given.
+  respect the tool list it was given. A list that names `delegate` holds `stop_child` too:
+  stopping a subagent started in the background goes with starting one (Decision 853).
   """
   @spec allows_tool?(t(), String.t()) :: boolean()
   def allows_tool?(%__MODULE__{tools: :all}, _name), do: true
+
+  def allows_tool?(%__MODULE__{tools: list}, "stop_child"),
+    do: "stop_child" in list or "delegate" in list
+
   def allows_tool?(%__MODULE__{tools: list}, name), do: name in list
 
   @doc """

@@ -686,10 +686,12 @@ function StreamEntry({
       );
 
     // The brief's goal says what it is for in a line; the parts are in the delegate call's.
+    // One in the background says so: its call answered at once (troupe Decision 853).
     case "delegation":
       return (
         <p className="note">
-          Handed to {entry.child}: {entry.brief.find(([name]) => name === "goal")?.[1] ?? entry.task}
+          Handed to {entry.child}
+          {entry.background ? ", in the background" : ""}: {entry.brief.find(([name]) => name === "goal")?.[1] ?? entry.task}
         </p>
       );
 
@@ -763,7 +765,7 @@ function modelErrorStep(text: string): string | null {
  */
 function ToolActivity({ entry, readBlob }: { entry: Extract<Entry, { kind: "tool" }>; readBlob: (b: string) => Promise<string> }): JSX.Element {
   const args = (entry.args ?? {}) as Record<string, unknown>;
-  const target = ["path", "file", "command", "query", "url", "agent"].map((k) => args[k]).find((v) => typeof v === "string") as string | undefined;
+  const target = ["path", "file", "command", "query", "url", "agent", "child"].map((k) => args[k]).find((v) => typeof v === "string") as string | undefined;
   const running = entry.ok === undefined;
   // A brief and a finish are read as their parts, each under its name, not as JSON
   // (troupe Decision 847); a call from before they had parts has none, and stays JSON.

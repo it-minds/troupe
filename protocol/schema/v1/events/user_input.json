@@ -3,7 +3,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "child_path": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "command_id": {
+      "type": "string"
+    },
+    "ended": {
       "type": "string"
     },
     "source": {

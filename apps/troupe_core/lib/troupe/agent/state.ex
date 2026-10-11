@@ -114,6 +114,14 @@ defmodule Troupe.Agent.State do
     pending: %{},
     call_order: [],
     monitors: %{},
+    # The subagents this agent started in the background that still run (Decision 853), by
+    # the ref they report under: `%{path, pid, monitor}`. Not folded: a restart takes them
+    # down with this agent's Node, and closes them.
+    background: %{},
+    # Their ends not yet given to the model, oldest first, each `Background.ended()`: given
+    # before the next model call, as a `user_input` from `subagent`. A restart holds again
+    # the ends the log has no such `user_input` for.
+    child_reports: [],
     child_seq: 0,
     last_input_tokens: 0,
     # What the turn this agent is on has cost so far (Decision 769): its own calls, folded,
@@ -213,6 +221,8 @@ defmodule Troupe.Agent.State do
           pending: %{optional(String.t()) => Call.t()},
           call_order: [String.t()],
           monitors: %{optional(reference()) => term()},
+          background: %{optional(reference()) => map()},
+          child_reports: [Troupe.Agent.Background.ended()],
           child_seq: non_neg_integer(),
           last_input_tokens: non_neg_integer(),
           turn: Spend.t(),
@@ -249,6 +259,11 @@ defmodule Troupe.Agent.State do
   @doc "Whether this agent reports to a parent rather than to the user."
   @spec subagent?(t()) :: boolean()
   def subagent?(%__MODULE__{parent: parent}), do: is_pid(parent)
+
+  @doc "The subagents this agent runs in the background, as `root/general#1`, in order."
+  @spec background_paths(t()) :: [String.t()]
+  def background_paths(%__MODULE__{background: background}),
+    do: background |> Map.values() |> Enum.map(&Enum.join(&1.path, "/")) |> Enum.sort()
 
   @doc "Every call whose result has not arrived."
   @spec outstanding(t()) :: [Call.t()]

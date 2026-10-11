@@ -417,7 +417,7 @@ defmodule Troupe.Sessions.Index do
 
   defp agent_state(session_id) do
     case Troupe.snapshot(session_id) do
-      %{state: state} when state in [:idle, :done] -> :idle
+      %{state: state} when state in [:idle, :done] -> at_rest(session_id)
       %{state: state} when state in [:acting, :waiting] -> parked_or_busy(session_id)
       %{state: _} -> :busy
       _ -> :gone
@@ -453,6 +453,13 @@ defmodule Troupe.Sessions.Index do
   end
 
   defp done_agent?(session_id, path), do: match?(%{state: :done}, Troupe.snapshot(session_id, path))
+
+  # A root at rest while a subagent it started in the background still works (Decision 853)
+  # is not idle: the subagent's end is its next turn, and a sleep would stop it.
+  defp at_rest(session_id) do
+    subagents = Troupe.agent_tree(session_id) -- [Session.root_path()]
+    if Enum.all?(subagents, &done_agent?(session_id, &1)), do: :idle, else: :busy
+  end
 
   defp now_ms, do: System.monotonic_time(:millisecond)
 
