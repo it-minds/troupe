@@ -101,6 +101,22 @@ defmodule Troupe.RemoteClientToolsTest do
              FakeRemote.invoke_tool(remote, "notes.search", %{"topic" => "again"}, "call-2")
   end
 
+  test "leaving the session takes the person's tools with it, and the pod has nothing left to call",
+       %{remote: remote, origin: origin} do
+    sid = attach!(origin, "s-tools")
+    :ok = Client.subscribe(sid)
+
+    assert_receive {:troupe_event, %{type: :approval_requested, data: %{call_id: ask}}}, 15_000
+    :ok = Client.approve(sid, ask, :allow)
+    eventually(fn -> FakeRemote.registered_tools(remote) == ["notes.search"] end)
+
+    # The window closes: its socket goes, and the registration with it. Nothing of the
+    # person's stays with the session to be called later.
+    :ok = Client.stop_session(sid)
+    eventually(fn -> FakeRemote.registered_tools(remote) == [] end)
+    assert {:error, :not_registered} = FakeRemote.invoke_tool(remote, "notes.search", %{})
+  end
+
   test "a no holds for the attachment: nothing is registered, then or after a drop",
        %{remote: remote, origin: origin} do
     sid = attach!(origin, "s-tools")
