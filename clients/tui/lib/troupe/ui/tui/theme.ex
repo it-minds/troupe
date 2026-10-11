@@ -23,9 +23,11 @@ defmodule Troupe.UI.TUI.Theme do
 
   **The canvas is not painted.** A terminal has a background of its own, and a dark
   slab laid over it fights whatever the person chose, so nothing here sets one; text
-  that is not in a role keeps the terminal's own ink. Which of the tokens' two modes the
-  colours come from follows the background the terminal reports, dark when it says
-  nothing.
+  that is not in a role keeps the terminal's own ink. The one background is a frame's
+  (`on_surface/1`, TUI Decision 161): rendered output sits one step from the canvas, at
+  truecolor and 256, and on the canvas behind its rail with fewer. Which of the tokens'
+  two modes the colours come from follows the background the terminal reports, dark when
+  it says nothing.
 
   **The reserved colour means one thing.** `:needs_you` and `:needs_you_edge` are for a
   person being needed and `:brand` for the mask's lit half — Afterglow's pink, Signal's
@@ -171,6 +173,14 @@ defmodule Troupe.UI.TUI.Theme do
   def style(role, modifiers \\ [])
   def style(nil, modifiers), do: %Style{modifiers: modifiers}
   def style(role, modifiers), do: %Style{fg: {:role, role}, modifiers: modifiers}
+
+  @doc """
+  A style laid on the rendered surface (TUI Decision 161): its background the `:surface`
+  role, one step from the terminal's own, which `paint/2` draws at truecolor and 256 and
+  leaves out with sixteen colours or none, where the frame's rail carries it alone.
+  """
+  @spec on_surface(Style.t()) :: Style.t()
+  def on_surface(%Style{} = style), do: %{style | bg: {:role, :surface}}
 
   @doc """
   The colour a role is drawn in, in a theme at its depth and mode; `nil` is the terminal

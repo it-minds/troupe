@@ -241,9 +241,13 @@ defmodule Troupe.DaemonClientTest do
       await_state("build-1", :done, 10_000)
 
       eventually(fn -> screen_text(pid, session) =~ "Done writing." end)
-      text = screen_text(pid, session)
-      assert text =~ "Let me write that."
-      assert text =~ "write_file"
+
+      # The turn's working is one strip above its answer (TUI Decision 161), and `e` opens
+      # the turn to show the rest of what the daemon streamed.
+      assert screen_text(pid, session) =~ "▸ 1 step · write_file"
+      press(pid, "e")
+      eventually(fn -> screen_text(pid, session) =~ "Let me write that." end)
+      assert screen_text(pid, session) =~ "✓ write_file note.txt"
       assert File.read!(Path.join(ws, "note.txt")) == "from the daemon\n"
     end
   end

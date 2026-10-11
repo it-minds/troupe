@@ -295,6 +295,9 @@ defmodule Troupe.CommandSeamsTest do
 
       press(pid, digit(pid, "root"))
       assert user_state(pid).focus == {:window, "root"}
+
+      # Quiet keeps the calls to one strip (TUI Decision 161); `e` opens the turn to read them.
+      press(pid, "e")
       text = screen_text(pid, session)
 
       assert text =~ "explore#1 (explore)"

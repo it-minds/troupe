@@ -1161,4 +1161,6 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `ui.blink` | boolean | `true` | any | blink | What waits on you blinks: the terminal UI's mark and border of a window that needs you. Off holds them lit. |
 | `ui.mode` | `system` \| `light` \| `dark` | `system` | any | light or dark | Light or dark in the desktop app, or `system` to follow the computer. |
 | `ui.notifications` | boolean | `true` | any | notifications | The desktop app says when a session nobody is reading finishes a turn or waits for you. |
+| `transcript` | settings |  | any |  | How the clients draw a transcript. The daemon keeps it and acts on none of it. |
+| `transcript.detail` | `quiet` \| `tools` \| `everything` | `quiet` | any | transcript detail | How much of a turn the clients draw open: `quiet`, its answer with its working one strip above it; `tools`, its tool calls open and its reasoning collapsed; `everything`, nothing collapsed. A failed call, an approval, a question and what follows a budget stop are open at every level. `/detail` changes it for one session. |
 <!-- config-keys:end -->

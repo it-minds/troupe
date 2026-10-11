@@ -387,6 +387,15 @@ defmodule Troupe.Commands do
             "Enter opens one, and a newer version reads itself again.",
         example: "/scratch plan.md"
       ),
+      entry("detail", "navigate", "How much of a transcript is open: quiet, tools or everything",
+        usage: "/detail [quiet | tools | everything]",
+        args: [arg("level", false, "text")],
+        detail:
+          "Quiet shows a turn's answer with its working one strip above it; tools opens the " <>
+            "tool calls; everything collapses nothing. For this session's screen; the " <>
+            "transcript.detail setting is the default.",
+        example: "/detail everything"
+      ),
       entry("upload", "workspace", "Send a local file into the session's own mount",
         usage: "/upload <path>",
         args: [arg("path", true, "file")],

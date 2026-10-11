@@ -16,7 +16,7 @@ defmodule Troupe.UI.TUI.Model do
   alias Troupe.Event
   alias Troupe.UI.ModelError
 
-  @typedoc "A tool call in a transcript. `lines` is `result` split for rendering; `preview` is the approval preview (a diff for edits), when one was shown."
+  @typedoc "A tool call in a transcript. `lines` is `result` split for rendering; `preview` is the approval preview (a diff for edits), when one was shown; `started_at` and `ended_at` are the times its events carried, for the duration its frame's header says (TUI Decision 161)."
   @type tool_entry :: %{
           id: String.t(),
           name: String.t(),
@@ -26,8 +26,16 @@ defmodule Troupe.UI.TUI.Model do
           lines: [String.t()],
           body: [line()],
           preview: String.t() | nil,
-          summary: String.t()
+          summary: String.t(),
+          started_at: integer() | nil,
+          ended_at: integer() | nil
         }
+
+  @typedoc """
+  What the model thought before it answered, drawn as a reasoning frame (TUI Decision
+  161): its lines, and how long it thought when the live deltas said when it began.
+  """
+  @type reasoning :: %{lines: [line()], ms: non_neg_integer() | nil}
 
   @typedoc """
   A command the person ran (`!cmd`, Decision 152): what they typed, what it printed
@@ -66,7 +74,7 @@ defmodule Troupe.UI.TUI.Model do
   @type entry ::
           {:user, String.t()}
           | {:assistant, [line()]}
-          | {:reasoning, [line()]}
+          | {:reasoning, reasoning()}
           | {:tool, tool_entry()}
           | {:shell, shell_entry()}
           | {:scratch, scratch_card()}
@@ -109,16 +117,23 @@ defmodule Troupe.UI.TUI.Model do
           unpriced: non_neg_integer()
         }
 
+  @typedoc """
+  One agent of a window. `reasoning_at` is when the reasoning being streamed began;
+  `open_from` the first entry after a budget stop, from which nothing in its transcript is
+  collapsed (TUI Decision 161).
+  """
   @type agent :: %{
           transcript: [entry()],
           streaming: String.t(),
           streaming_reasoning: String.t(),
+          reasoning_at: integer() | nil,
           todos: [map()],
           name: String.t() | nil,
           model: String.t() | nil,
           usage: usage(),
           started_at: integer() | nil,
-          ended_at: integer() | nil
+          ended_at: integer() | nil,
+          open_from: non_neg_integer() | nil
         }
 
   @typedoc "What a window's turns cost so far: their model calls, the micro-dollars priced, and the calls nobody priced."
@@ -150,6 +165,9 @@ defmodule Troupe.UI.TUI.Model do
   branch's own session, when its window was opened with one, and `cost` what its own
   agent's turns cost, as the events that end them say (Decision 139); `last_turn` is the
   last of those turns, from its end until the next one starts (TUI Decision 160).
+  `curtain` counts the phases of each kind the window's own agent has been through in its
+  turn (thinking, acting, compacting), which choose the curtain line's flourish so none
+  repeats within a turn (TUI Decision 161).
   """
   @type window :: %{
           path: String.t(),
@@ -176,7 +194,8 @@ defmodule Troupe.UI.TUI.Model do
           worktree: map() | nil,
           unconfirmed: %{optional(String.t()) => String.t()},
           drawn_inputs: %{optional(String.t()) => String.t()},
-          warnings: %{optional(atom()) => map()}
+          warnings: %{optional(atom()) => map()},
+          curtain: %{optional(atom()) => pos_integer()}
         }
 
   defstruct session_id: nil,
@@ -247,7 +266,8 @@ defmodule Troupe.UI.TUI.Model do
           unconfirmed: %{},
           # The lines drawn for inputs the agent has not yet taken, by command id.
           drawn_inputs: %{},
-          warnings: %{}
+          warnings: %{},
+          curtain: %{}
         }
 
         order = if e.agent_path in m.order, do: m.order, else: m.order ++ [e.agent_path]
@@ -389,6 +409,7 @@ defmodule Troupe.UI.TUI.Model do
         |> ensure_agent(path)
         |> update_agent(path, fn a -> %{a | ended_at: nil} end)
         |> working()
+        |> new_curtain(path)
 
       :input when d.source in [:user, :watch] ->
         w
@@ -397,6 +418,7 @@ defmodule Troupe.UI.TUI.Model do
         |> update_agent(path, fn a -> %{a | ended_at: nil} end)
         |> unconfirmed(d)
         |> working()
+        |> new_curtain(path)
 
       # A remote session renders your own input before the server has seen it;
       # `input.accepted` carrying the same command id is what confirms it.
@@ -409,11 +431,14 @@ defmodule Troupe.UI.TUI.Model do
         push(
           ensure_agent(w, path),
           path,
-          {:tool, new_tool(d.call_id, d.name, summarize_input(d.name, d.input))}
+          {:tool, new_tool(d.call_id, d.name, summarize_input(d.name, d.input), ts)}
         )
 
+      # A budget that ran out is a stop: nothing after it is collapsed (TUI Decision 161).
       :remote_note ->
-        push(ensure_agent(w, path), path, {:system, d.text})
+        w = ensure_agent(w, path)
+        w = if budget_stop?(d.text), do: open_from_here(w, path), else: w
+        push(w, path, {:system, d.text})
 
       # The `show` call that wrote it becomes its card, so the transcript never holds the
       # document's words; one whose call is not on screen gets a card of its own.
@@ -473,7 +498,10 @@ defmodule Troupe.UI.TUI.Model do
         |> ensure_agent(path)
         |> update_agent(path, fn a ->
           if d[:reasoning] do
+            at = if a.streaming_reasoning in ["", nil], do: ts, else: Map.get(a, :reasoning_at)
+
             %{a | streaming_reasoning: (a.streaming_reasoning || "") <> d.text}
+            |> Map.put(:reasoning_at, at)
           else
             %{a | streaming: a.streaming <> d.text}
           end
@@ -486,6 +514,7 @@ defmodule Troupe.UI.TUI.Model do
         errors = if d.to in [nil, :idle], do: errors, else: Map.delete(errors, path)
 
         w
+        |> curtain_phase(path, d.to)
         |> Map.merge(%{
           activity: Map.put(w.activity, path, d.to),
           activity_since: ts,
@@ -509,6 +538,7 @@ defmodule Troupe.UI.TUI.Model do
         text = Message.text(d.content)
         used = used(Map.get(d, :usage) || %{})
         reasoning = reasoning_so_far(w, path)
+        thought = thought(w, path, ts)
 
         w =
           w
@@ -521,6 +551,7 @@ defmodule Troupe.UI.TUI.Model do
                 usage: add(a.usage, used),
                 model: Map.get(d, :model) || a.model
             }
+            |> Map.put(:reasoning_at, nil)
           end)
           |> then(fn w ->
             cond do
@@ -528,20 +559,24 @@ defmodule Troupe.UI.TUI.Model do
                 w
 
               text == "" ->
-                push(w, path, {:reasoning, markdown(reasoning)})
+                push(w, path, {:reasoning, %{lines: markdown(reasoning), ms: thought}})
 
               reasoning == "" ->
-                push(w, path, {:assistant, markdown(sanitize(text))})
+                push(w, path, {:assistant, text |> sanitize() |> markdown() |> frame()})
 
               true ->
                 w
-                |> push(path, {:reasoning, markdown(reasoning)})
-                |> push(path, {:assistant, markdown(sanitize(text))})
+                |> push(path, {:reasoning, %{lines: markdown(reasoning), ms: thought}})
+                |> push(path, {:assistant, text |> sanitize() |> markdown() |> frame()})
             end
           end)
 
         Enum.reduce(Message.tool_uses(d.content), %{w | usage: add(w.usage, used)}, fn tu, acc ->
-          push(acc, path, {:tool, new_tool(tu.id, tu.name, summarize_input(tu.name, tu.input))})
+          push(
+            acc,
+            path,
+            {:tool, new_tool(tu.id, tu.name, summarize_input(tu.name, tu.input), ts)}
+          )
         end)
 
       # A model call that drew no reply, the summariser's (root Decision 769): counted as a
@@ -562,7 +597,7 @@ defmodule Troupe.UI.TUI.Model do
         %{w | pending: Enum.reject(w.pending, ended?)}
         |> ensure_agent(path)
         |> update_agent(path, fn a ->
-          %{a | transcript: Enum.map(a.transcript, &complete_tool(&1, d))}
+          %{a | transcript: Enum.map(a.transcript, &complete_tool(&1, d, ts))}
         end)
 
       :approval_requested ->
@@ -592,8 +627,13 @@ defmodule Troupe.UI.TUI.Model do
 
       # The budget question (Decision 120): its words and options come from the question
       # it rides on, which the translation folds into this event.
+      # A budget stop: from here on nothing in the agent's transcript is collapsed (TUI
+      # Decision 161), so what happened after the money ran out is all on screen.
       :budget_ask_started ->
-        ask(w, %{
+        w
+        |> ensure_agent(path)
+        |> open_from_here(path)
+        |> ask(%{
           kind: :budget,
           call_id: d.call_id,
           agent_path: path,
@@ -730,7 +770,8 @@ defmodule Troupe.UI.TUI.Model do
   # The window's own agent's turn carries what its subagents spent (root Decision 769), so
   # only that one is added to what the window cost: a subagent's would count twice. It is
   # also the window's `last_turn`, which the side box says (TUI Decision 160); where that
-  # box is drawn, the view leaves the line out (`without_turn_lines/1`).
+  # box is drawn, the view draws the line as nothing (`transcript_blocks/3`), and the line
+  # still ends its turn (TUI Decision 161).
   defp turn_cost(w, path, %{turn: %{calls: calls} = turn}, false) when calls > 0 do
     w = if path == w.path, do: %{w | cost: spent(w.cost, turn), last_turn: turn}, else: w
     w |> ensure_agent(path) |> push(path, {:system, turn_line(turn)})
@@ -793,7 +834,7 @@ defmodule Troupe.UI.TUI.Model do
     %{w | agents: agents, activity: Map.reject(w.activity, fn {p, _to} -> under?.(p) end)}
   end
 
-  defp new_tool(id, name, input) do
+  defp new_tool(id, name, input, ts) do
     %{
       id: id,
       name: name,
@@ -803,13 +844,15 @@ defmodule Troupe.UI.TUI.Model do
       lines: [],
       body: [],
       preview: nil,
-      summary: ""
+      summary: "",
+      started_at: ts,
+      ended_at: nil
     }
   end
 
   # A result's trailing newlines are not lines: a command that ends its output with
   # two or three of them would draw that many blank rows under it (issue #182).
-  defp complete_tool({:tool, %{id: id} = t}, %{call_id: id} = d) do
+  defp complete_tool({:tool, %{id: id} = t}, %{call_id: id} = d, ts) do
     result =
       (d.content || "")
       |> String.slice(0, @result_cap)
@@ -818,11 +861,48 @@ defmodule Troupe.UI.TUI.Model do
 
     status = if d.ok, do: :ok, else: :error
     t = %{t | status: status, result: result, lines: String.split(result, "\n")}
-    t = %{t | summary: summary(t)}
-    {:tool, %{t | body: build_body(t)}}
+    t = t |> Map.put(:ended_at, ts) |> then(&%{&1 | summary: summary(&1)})
+    {:tool, %{t | body: t |> build_body() |> frame()}}
   end
 
-  defp complete_tool(entry, _), do: entry
+  defp complete_tool(entry, _d, _ts), do: entry
+
+  # How long the reasoning that ends with this message took, when its first delta said
+  # when it began; a replayed log has no deltas, and so no duration.
+  defp thought(%{agents: agents}, path, ts) do
+    case agents do
+      %{^path => %{reasoning_at: at}} when is_integer(at) and is_integer(ts) -> max(ts - at, 0)
+      _ -> nil
+    end
+  end
+
+  defp budget_stop?(text), do: String.starts_with?(text, "budget exhausted")
+
+  # The first budget stop holds: everything from there on is open.
+  defp open_from_here(w, path) do
+    update_agent(w, path, fn a ->
+      Map.put(a, :open_from, Map.get(a, :open_from) || length(a.transcript))
+    end)
+  end
+
+  # The curtain line's phases start again with each turn of the window's own agent.
+  defp new_curtain(%{path: path} = w, path), do: Map.put(w, :curtain, %{})
+  defp new_curtain(w, _path), do: w
+
+  # A phase is a change of what the window's own agent does: thinking, acting, compacting.
+  # The count of each kind picks the flourish (`Frames.curtain/3`), so the third time it
+  # thinks in a turn reads differently from the first.
+  @phases [:thinking, :acting, :compacting]
+
+  defp curtain_phase(%{path: path, activity: activity} = w, path, to) when to in @phases do
+    if Map.get(activity, path) == to do
+      w
+    else
+      Map.update(w, :curtain, %{to => 1}, &Map.update(&1, to, 1, fn n -> n + 1 end))
+    end
+  end
+
+  defp curtain_phase(w, _path, _to), do: w
 
   defp card_for({:tool, %{id: id}}, id, card), do: {:scratch, card}
   defp card_for(entry, _id, _card), do: entry
@@ -972,12 +1052,14 @@ defmodule Troupe.UI.TUI.Model do
         transcript: [],
         streaming: "",
         streaming_reasoning: "",
+        reasoning_at: nil,
         todos: [],
         name: nil,
         model: nil,
         usage: empty_usage(),
         started_at: nil,
-        ended_at: nil
+        ended_at: nil,
+        open_from: nil
       },
       attrs
     )
@@ -1329,13 +1411,13 @@ defmodule Troupe.UI.TUI.Model do
             "#{spinner} compacting context (#{since})"
 
           state == :acting and tools != [] ->
-            "#{spinner} running #{Enum.join(tools, ", ")} (#{since})"
+            "#{spinner} running #{how_many(tools)} (#{since})"
 
           state == :acting ->
             "#{spinner} working (#{since})"
 
           state in [nil, :idle] and tools != [] ->
-            "#{spinner} running #{Enum.join(tools, ", ")}"
+            "#{spinner} running #{how_many(tools)}"
 
           # Stopped, not starting: no spinner, and the reason where the user is looking.
           state in [nil, :idle] and is_map_key(Map.get(w, :model_errors, %{}), path) ->
@@ -1363,6 +1445,10 @@ defmodule Troupe.UI.TUI.Model do
       end
     end
   end
+
+  # What runs and how many (TUI Decision 161): one call by itself, several with their count.
+  defp how_many([one]), do: one
+  defp how_many(tools), do: "#{length(tools)} tools: " <> Enum.join(tools, ", ")
 
   defp child_summary(children) do
     Enum.map_join(children, ", ", fn {p, s} ->
@@ -1557,6 +1643,8 @@ defmodule Troupe.UI.TUI.Model do
   agent's transcript, for a screen wide enough for the side box, which says it there (TUI
   Decision 160). The fold keeps them, for the narrow screen that has no side box. A
   subagent's line says what its own task cost, which the side box does not, and stays.
+  The pane and the tiles draw those lines as nothing instead (`transcript_blocks/3` with
+  `turn_lines: false`), since each still ends its turn (TUI Decision 161).
   """
   @spec without_turn_lines(window()) :: window()
   def without_turn_lines(%{path: path, agents: agents} = w) do
@@ -1658,69 +1746,390 @@ defmodule Troupe.UI.TUI.Model do
   defp status_glyph(:ok), do: "✓"
   defp status_glyph(:error), do: "✗"
 
+  ## Frames (TUI Decision 161)
+
+  @typedoc """
+  How much of a transcript is drawn open (TUI Decision 161, `docs/design/frames.md`).
+  `detail` is the session's `transcript.detail`: `:quiet`, a turn's answer with its working
+  one strip above it; `:tools`, tool frames open and reasoning collapsed; `:everything`,
+  nothing collapsed. `open` holds the turns `e` turned the other way, by their number in
+  the agent's transcript. `turn_lines` false leaves out the lines that say what the
+  window's own agent's turns cost, which the side box says where it is drawn (TUI
+  Decision 160). `now` times what still runs.
+  """
+  @type view :: %{
+          detail: :quiet | :tools | :everything,
+          open: MapSet.t(non_neg_integer()),
+          turn_lines: boolean(),
+          now: integer()
+        }
+
+  @details [:quiet, :tools, :everything]
+
+  @doc "What `transcript.detail` takes, the default first."
+  @spec details() :: [atom()]
+  def details, do: @details
+
+  @doc "The level a `transcript.detail` value names, or `nil` for one that names none."
+  @spec detail(term()) :: :quiet | :tools | :everything | nil
+  def detail(value) when is_atom(value) and value in @details, do: value
+
+  def detail(value) when is_binary(value),
+    do: Enum.find(@details, &(Atom.to_string(&1) == String.downcase(String.trim(value))))
+
+  def detail(_value), do: nil
+
+  @doc """
+  A view from what a caller has: a map of the view's keys, or `true` for everything open
+  and `false` for quiet, which is how a pane was drawn before there were levels.
+  """
+  @spec view(map() | boolean()) :: view()
+  def view(true), do: view(%{detail: :everything})
+  def view(false), do: view(%{detail: :quiet})
+
+  def view(%{} = v),
+    do: Map.merge(%{detail: :quiet, open: MapSet.new(), turn_lines: true, now: 0}, v)
+
+  # Every frame body past `@frame_cap` lines keeps its first `@frame_keep` and says how many
+  # more there are, expanding in place when its turn is opened.
+  @frame_cap 24
+  @frame_keep 20
+  @frame_rail "▎ "
+
   @doc """
   Everything the activated pane shows for one agent, as blocks of tagged
   logical lines: one block per transcript entry, then the text being streamed,
-  the activity line and whatever the window is waiting on. Blocks let the view
-  keep the same entry at the top when tool output is expanded or collapsed.
+  the curtain line and whatever the window is waiting on. Blocks let the view
+  keep the same entry at the top when a turn is opened or closed.
 
-  `selection` is the reader's in-progress answer to a multiple-choice question
-  (`%{call_id, selected}`), which lives in the UI process rather than the log:
-  it is a cursor, not a decision, and it dies with the frame if the question is
-  answered elsewhere. `gate` is the reader's draft of an answer to a delegation at the
-  gate (`gate_draft/2`, TUI Decision 157), a cursor of the same kind.
+  `view` says how much is drawn open (`view/1`); `true` and `false` still mean
+  everything and quiet. `selection` is the reader's in-progress answer to a
+  multiple-choice question (`%{call_id, selected}`), which lives in the UI process
+  rather than the log: it is a cursor, not a decision, and it dies with the frame if the
+  question is answered elsewhere. `gate` is the reader's draft of an answer to a
+  delegation at the gate (`gate_draft/2`, TUI Decision 157), a cursor of the same kind.
   """
   @spec pane_blocks(
           window(),
           String.t(),
-          boolean(),
+          map() | boolean(),
           non_neg_integer(),
           integer(),
           map() | nil,
           map() | nil
         ) :: [[line()]]
-  def pane_blocks(w, agent_path, expanded?, tick, now, selection \\ nil, gate \\ nil) do
-    agent = Map.get(w.agents, agent_path, new_agent())
-    entries = Enum.map(agent.transcript, &entry_lines(&1, expanded?))
+  def pane_blocks(w, agent_path, view, tick, now, selection \\ nil, gate \\ nil) do
+    view = view |> view() |> Map.put(:now, now)
 
-    reasoning =
-      if agent.streaming_reasoning in ["", nil],
-        do: [],
-        else: [reasoning_lines(agent.streaming_reasoning, expanded?)]
-
-    streaming =
-      if agent.streaming == "",
-        do: [],
-        else: [streaming_lines(agent.streaming)]
-
-    pending = pending_blocks(w, agent_path, selection, gate)
-
-    activity =
-      case pending == [] && activity_line(w, agent_path, tick, now) do
-        line when is_binary(line) -> [[{:blank, ""}, {:activity, activity_segments(line)}]]
-        _ -> []
-      end
-
-    entries ++ reasoning ++ streaming ++ activity ++ pending
+    Enum.map(transcript_blocks(w, agent_path, view), &elem(&1, 1)) ++
+      live_blocks(w, agent_path, view, tick, now, selection, gate)
   end
 
   @doc """
-  A window tile's body: the root transcript with tool calls collapsed, then the activity
-  line, then the question the start asks when it asks one there; `asked?` false leaves
-  the question to whoever draws it on its own (command mode's "waiting for you").
+  The transcript's part of `pane_blocks/7`: one `{key, block}` per entry, in order. The key
+  is the entry with how it is drawn, and decides the block, so a height measured for a key
+  holds for as long as the key comes back the same (`View`'s memory of heights).
+
+  A transcript is read as turns (`turn_starts/1`): what follows a person's line, a
+  command they ran or a loop's iteration, up to the line that says what the turn cost.
+  Within a turn the answer is the model's prose after its last call (a `finish` aside);
+  its working is the reasoning, the calls and the prose between them. Quiet draws the
+  working as one strip where it began, `▸ 7 steps · grep, read_file · 14s`, and the
+  answer as a prose frame; `tools` opens the tool frames under a `▾` strip and keeps
+  reasoning to its header; `everything` collapses nothing. A failed call is drawn open
+  at every level, and so is everything after a budget stop.
   """
-  @spec tile_lines(window(), non_neg_integer(), integer(), boolean(), boolean()) :: [line()]
-  def tile_lines(w, tick, now, spacer?, asked? \\ true) do
-    agent = Map.get(w.agents, w.path, new_agent())
-    lines = Enum.flat_map(agent.transcript, &entry_lines(&1, false))
+  @spec transcript_blocks(window(), String.t(), map() | boolean()) :: [{term(), [line()]}]
+  def transcript_blocks(w, agent_path, view) do
+    view = view(view)
+    agent = Map.get(w.agents, agent_path, new_agent())
+
+    ctx = %{
+      open_from: Map.get(agent, :open_from),
+      hide_cost?: not view.turn_lines and agent_path == w.path,
+      now: view.now
+    }
+
+    agent.transcript
+    |> turns()
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {{first, entries}, n} ->
+      turn_blocks(entries, first, turn_level(view, n), ctx)
+    end)
+  end
+
+  @doc """
+  Where each turn of a transcript begins, by entry: a person's line, a command they ran
+  (`!`), a loop's iteration, and whatever follows the line saying what the last turn cost.
+  `e` opens and closes a turn by its place in this list.
+  """
+  @spec turn_starts([entry()]) :: [non_neg_integer()]
+  def turn_starts(transcript), do: transcript |> turns() |> Enum.map(&elem(&1, 0))
+
+  @doc "The number of the turn entry `index` is in, given `turn_starts/1`."
+  @spec turn_of([non_neg_integer()], non_neg_integer()) :: non_neg_integer()
+  def turn_of(starts, index), do: max(Enum.count(starts, &(&1 <= index)) - 1, 0)
+
+  @doc "The level a turn is drawn at: the session's, or the other way when `e` turned it."
+  @spec turn_level(view(), non_neg_integer()) :: :quiet | :tools | :everything
+  def turn_level(view, n) do
+    if MapSet.member?(view.open, n), do: flip(view.detail), else: view.detail
+  end
+
+  defp flip(:everything), do: :quiet
+  defp flip(_level), do: :everything
+
+  defp turns([]), do: []
+
+  defp turns(transcript) do
+    {done, current, _closed?} =
+      transcript
+      |> Enum.with_index()
+      |> Enum.reduce({[], [], false}, fn {entry, i}, {done, current, closed?} ->
+        if current != [] and (closed? or opens_turn?(entry)),
+          do: {[Enum.reverse(current) | done], [{entry, i}], closes_turn?(entry)},
+          else: {done, [{entry, i} | current], closes_turn?(entry)}
+      end)
+
+    [Enum.reverse(current) | done]
+    |> Enum.reverse()
+    |> Enum.map(fn [{_entry, first} | _] = pairs -> {first, Enum.map(pairs, &elem(&1, 0))} end)
+  end
+
+  defp opens_turn?({kind, _}) when kind in [:user, :shell], do: true
+  defp opens_turn?({:system, "loop iteration" <> _}), do: true
+  defp opens_turn?(_entry), do: false
+
+  defp closes_turn?(entry), do: turn_entry?(entry)
+
+  defp turn_blocks(entries, first, level, ctx) do
+    indexed = Enum.with_index(entries, first)
+    at = fn i -> if ctx.open_from != nil and i >= ctx.open_from, do: :everything, else: level end
+
+    last_call =
+      Enum.reduce(indexed, nil, fn
+        {{:tool, %{name: name}}, i}, _last when name != "finish" -> i
+        _other, last -> last
+      end)
+
+    steps = for {{:tool, t}, i} <- indexed, at.(i) == level, t.name != "finish", do: t
+    strip = if steps != [], do: strip_line(steps, level, ctx.now)
+
+    strip_at =
+      strip &&
+        Enum.find_value(indexed, fn {entry, i} ->
+          at.(i) == level and role(entry, i, last_call) not in [:other, :answer] and i
+        end)
+
+    Enum.map(indexed, fn {entry, i} ->
+      role = role(entry, i, last_call)
+      mode = {role, at.(i), strip != nil and at.(i) == level, ctx.hide_cost?}
+      above = if i == strip_at, do: [strip], else: []
+      {{entry, mode, above}, above ++ entry_block(entry, mode)}
+    end)
+  end
+
+  # What an entry is to its turn: the answer, the working (reasoning, the prose between
+  # calls, a call), a call that failed, or none of those (a person's line, a note, a card).
+  defp role({:assistant, _}, i, last_call) when last_call == nil or i > last_call, do: :answer
+  defp role({:assistant, _}, _i, _last_call), do: :narration
+  defp role({:reasoning, _}, _i, _last_call), do: :reasoning
+  defp role({:tool, %{status: :error}}, _i, _last_call), do: :failed
+  defp role({:tool, _}, _i, _last_call), do: :step
+  defp role(_entry, _i, _last_call), do: :other
+
+  # `{role, level, stripped?, hide_cost?}`: stripped is whether the working at this level
+  # went into the turn's strip.
+  defp entry_block({:system, "turn: " <> _}, {_role, _level, _stripped?, true}), do: []
+  defp entry_block({:assistant, lines}, {_role, :everything, _, _}), do: prose_frame(lines, :full)
+  defp entry_block({:assistant, lines}, {:answer, _level, _, _}), do: prose_frame(lines, :capped)
+  defp entry_block({:assistant, _lines}, {:narration, :quiet, true, _}), do: []
+  defp entry_block({:assistant, lines}, {:narration, _level, _, _}), do: prose_frame(lines, :capped)
+  defp entry_block({:reasoning, r}, {_role, :everything, _, _}), do: reasoning_frame(r)
+  defp entry_block({:reasoning, _r}, {_role, :quiet, true, _}), do: []
+  defp entry_block({:reasoning, r}, _mode), do: [reasoning_head(r.ms, false)]
+  defp entry_block({:tool, t}, {_role, :everything, _, _}), do: tool_frame(t, :full)
+  defp entry_block({:tool, t}, {:failed, _level, _, _}), do: tool_frame(t, :capped)
+  defp entry_block({:tool, t}, {:step, :tools, _, _}), do: tool_frame(t, :capped)
+  defp entry_block({:tool, _t}, {:step, :quiet, _, _}), do: []
+  defp entry_block(entry, {_role, level, _, _}), do: entry_lines(entry, level == :everything)
+
+  # The strip: what the working of a turn came to, where it began, closed (▸) at quiet and
+  # open (▾) above the frames it stands for otherwise.
+  defp strip_line(steps, level, now) do
+    n = length(steps)
+    failed = Enum.count(steps, &(&1.status == :error))
+    names = steps |> Enum.map(& &1.name) |> Enum.uniq()
+    shown = Enum.take(names, 4)
+    more = length(names) - length(shown)
+
+    {:strip,
+     [
+       {:strip_glyph, if(level == :quiet, do: "▸ ", else: "▾ ")},
+       {:strip, "#{n} #{if n == 1, do: "step", else: "steps"}"}
+     ] ++
+       if(failed > 0, do: [{:strip_failed, " · #{failed} failed"}], else: []) ++
+       [
+         {:strip,
+          " · " <> Enum.join(shown, ", ") <> if(more > 0, do: " and #{more} more", else: "")}
+       ] ++ took(span(steps, now))}
+  end
+
+  # From the first call's start to the last one's end, or to now while one still runs.
+  defp span(steps, now) do
+    starts = for %{started_at: at} <- steps, is_integer(at), do: at
+    ends = for s <- steps, do: Map.get(s, :ended_at) || if(s.status == :running, do: now)
+    ends = Enum.filter(ends, &is_integer/1)
+    if starts != [] and ends != [], do: Enum.max(ends) - Enum.min(starts)
+  end
+
+  # A duration under a second says nothing a person reads for.
+  defp took(ms) when is_integer(ms) and ms >= 1000, do: [{:strip, " · " <> seconds(ms)}]
+  defp took(_ms), do: []
+
+  @doc "A duration as a frame's header says it: `14s`, `4m 2s`."
+  @spec seconds(non_neg_integer()) :: String.t()
+  def seconds(ms) do
+    s = div(ms, 1000)
+    if s < 60, do: "#{s}s", else: "#{div(s, 60)}m #{rem(s, 60)}s"
+  end
+
+  # The model's prose on the rendered surface, framed as it was folded (`frame/1`): every
+  # line behind the frame's rail, a code, diff or data block inside it a frame of its own
+  # with its label and no second surface.
+  defp prose_frame(lines, mode), do: cap_nested(lines, mode)
+
+  # A call: its head on the chat, what came back on the surface under it, framed as the
+  # call completed.
+  defp tool_frame(t, mode), do: [{head_kind(t.status), head_segments(t)} | cap(t.body, mode)]
+
+  defp reasoning_frame(%{lines: lines, ms: ms}) do
+    body = Enum.map(lines, &{:reasoning_body, line_text(&1)})
+    [reasoning_head(ms, true) | frame(body)]
+  end
+
+  defp reasoning_head(ms, open?) do
+    {:reasoning_head,
+     [
+       {:reasoning_marker, if(open?, do: "▾ ", else: "▸ ")},
+       {:reasoning_title, "thinking"}
+     ] ++
+       if(is_integer(ms) and ms >= 1000, do: [{:reasoning_title, " · " <> seconds(ms)}], else: [])}
+  end
+
+  @doc """
+  Lines behind the rendered surface's rail (TUI Decision 161): a `:frame` segment first,
+  which wrapping repeats on every row and the view draws on the surface's background
+  where the terminal has one. Copying leaves it out, as it does every rail.
+  """
+  @spec frame([line()]) :: [line()]
+  def frame(lines), do: Enum.map(lines, &framed/1)
+
+  defp framed({kind, text}) when is_binary(text), do: {kind, [{:frame, @frame_rail}, {kind, text}]}
+  defp framed({kind, segments}), do: {kind, [{:frame, @frame_rail} | segments]}
+
+  # Framed lines past the cap: the first of them and a framed line saying how many more.
+  defp cap(lines, :full), do: lines
+
+  defp cap(lines, :capped) do
+    case length(lines) - @frame_keep do
+      more when length(lines) > @frame_cap ->
+        Enum.take(lines, @frame_keep) ++ [framed(more_line(more))]
+
+      _ ->
+        lines
+    end
+  end
+
+  defp more_line(1), do: {:more, "… 1 more line"}
+  defp more_line(n), do: {:more, "… #{n} more lines"}
+
+  # A block between its rules inside prose collapses past the cap as any frame does; the
+  # prose around it never does, since it is the answer. Most replies have no such block,
+  # and are handed back as they were folded rather than rebuilt at every frame.
+  defp cap_nested(lines, :full), do: lines
+
+  defp cap_nested(lines, :capped),
+    do: if(long_block?(lines, nil), do: cap_nested(lines, [], nil), else: lines)
+
+  defp long_block?([], _count), do: false
+  defp long_block?([{:code_head, _} | rest], nil), do: long_block?(rest, 0)
+  defp long_block?([{:code_tail, _} | rest], n) when is_integer(n), do: long_block?(rest, nil)
+  defp long_block?([_line | _rest], n) when is_integer(n) and n >= @frame_cap, do: true
+  defp long_block?([_line | rest], n) when is_integer(n), do: long_block?(rest, n + 1)
+  defp long_block?([_line | rest], nil), do: long_block?(rest, nil)
+
+  defp cap_nested([], acc, nil), do: Enum.reverse(acc)
+  defp cap_nested([], acc, inner), do: Enum.reverse(acc, Enum.reverse(inner))
+
+  defp cap_nested([{:code_head, _} = head | rest], acc, nil), do: cap_nested(rest, [head | acc], [])
+
+  defp cap_nested([{:code_tail, _} = tail | rest], acc, inner) when is_list(inner),
+    do: cap_nested(rest, [tail | Enum.reverse(cap(Enum.reverse(inner), :capped), acc)], nil)
+
+  defp cap_nested([line | rest], acc, nil), do: cap_nested(rest, [line | acc], nil)
+  defp cap_nested([line | rest], acc, inner), do: cap_nested(rest, acc, [line | inner])
+
+  @doc """
+  What is still arriving, after the transcript's blocks: the reasoning being streamed (at
+  the level of the turn it belongs to), the reply being written on the surface it lands
+  on, the curtain line, and what the window waits on, which is never collapsed.
+  """
+  @spec live_blocks(
+          window(),
+          String.t(),
+          map() | boolean(),
+          non_neg_integer(),
+          integer(),
+          map() | nil,
+          map() | nil
+        ) :: [[line()]]
+  def live_blocks(w, agent_path, view, tick, now, selection \\ nil, gate \\ nil) do
+    view = view(view)
+    agent = Map.get(w.agents, agent_path, new_agent())
+    level = turn_level(view, max(length(turn_starts(agent.transcript)) - 1, 0))
 
     reasoning =
-      if agent.streaming_reasoning in ["", nil],
-        do: [],
-        else: reasoning_lines(agent.streaming_reasoning, false)
+      case {agent.streaming_reasoning, level} do
+        {text, _level} when text in ["", nil] -> []
+        {_text, :quiet} -> []
+        {text, level} -> [live_reasoning(text, Map.get(agent, :reasoning_at), now, level)]
+      end
+
+    streaming = if agent.streaming == "", do: [], else: [frame(streaming_lines(agent.streaming))]
+    pending = pending_blocks(w, agent_path, selection, gate)
+
+    activity =
+      case pending == [] && curtain_segments(w, agent_path, tick, now) do
+        [_ | _] = segments -> [[{:blank, ""}, {:activity, segments}]]
+        _ -> []
+      end
+
+    reasoning ++ streaming ++ activity ++ pending
+  end
+
+  defp live_reasoning(text, at, now, level) do
+    ms = if is_integer(at), do: max(now - at, 0)
+    head = reasoning_head(ms, level == :everything)
+    if level == :everything, do: [head | frame(reasoning_body(text))], else: [head]
+  end
+
+  @doc """
+  A window tile's body: the root transcript as quiet draws it, then the activity line,
+  then the question the start asks when it asks one there; `asked?` false leaves the
+  question to whoever draws it on its own (command mode's "waiting for you"), and
+  `turn_lines?` false leaves out the lines a side box says (TUI Decision 160). A tile is a
+  glance: it says what is running in facts alone, and the pane draws the curtain line.
+  """
+  @spec tile_lines(window(), non_neg_integer(), integer(), boolean(), boolean(), boolean()) ::
+          [line()]
+  def tile_lines(w, tick, now, spacer?, asked? \\ true, turn_lines? \\ true) do
+    agent = Map.get(w.agents, w.path, new_agent())
+    view = view(%{detail: :quiet, turn_lines: turn_lines?, now: now})
+    lines = w |> transcript_blocks(w.path, view) |> Enum.flat_map(&elem(&1, 1))
 
     streaming =
-      if agent.streaming == "", do: [], else: streaming_lines(agent.streaming)
+      if agent.streaming == "", do: [], else: frame(streaming_lines(agent.streaming))
 
     # Waiting on nothing but the start's question, where it is drawn elsewhere, is no
     # activity of the window's own: command mode says it once, under "waiting for you".
@@ -1743,7 +2152,7 @@ defmodule Troupe.UI.TUI.Model do
         _none -> []
       end
 
-    lines ++ reasoning ++ streaming ++ activity ++ asked
+    lines ++ streaming ++ activity ++ asked
   end
 
   # Text still arriving is shown plain: it changes on every frame, and it becomes
@@ -1751,16 +2160,88 @@ defmodule Troupe.UI.TUI.Model do
   defp streaming_lines(text),
     do: text |> sanitize() |> String.split("\n") |> Enum.map(&{:text, &1})
 
-  # Reasoning is collapsible: the header line always shows (that the model is
-  # thinking is itself worth seeing), and the body only when `e` has expanded
-  # output. The same shape renders a folded-in `{:reasoning, lines}` entry.
-  defp reasoning_lines(text, expanded?) do
-    head = {:reasoning_head, [{:reasoning_marker, "💭 "}, {:reasoning_title, "reasoning"}]}
-    if expanded?, do: [head | reasoning_body(text)], else: [head]
-  end
-
   defp reasoning_body(text),
     do: text |> sanitize() |> String.split("\n") |> Enum.map(&{:reasoning_body, &1})
+
+  ## The curtain line (TUI Decision 161)
+
+  # The flourish, by what the window's own agent is doing and how many times it has done
+  # that this turn: the second time it thinks reads differently from the first, and past
+  # the end of a list the line is its facts alone. Theatre, dry, never sorry and never a
+  # person; the set is `docs/design/frames.md`'s, and nowhere else: not the headless
+  # printer, `troupe bench`, CI or `--json`, which never draw this line.
+  @curtain %{
+    starting: ["the house lights go down"],
+    thinking: [
+      "the actors are powdering their nose",
+      "running lines in the wings",
+      "the prompter finds the page"
+    ],
+    acting: ["fetching props", "shifting the scenery", "the stagehands are at it"],
+    reading: ["reading the script", "checking the prompt book", "rereading the second act"],
+    compacting: ["cutting the second act", "trimming for time"]
+  }
+
+  @reads ~w(read_file grep glob list_files git_read read_branch read_output recall web_fetch)
+
+  @doc "The curtain line's written set, by what it is said over."
+  @spec curtain_set() :: %{atom() => [String.t()]}
+  def curtain_set, do: @curtain
+
+  @doc """
+  The curtain line the pane draws while a turn runs (TUI Decision 161): the flourish as a
+  prefix, then the facts, `activity_line/4`'s words, which are always there and always in
+  the same place — `◐ the actors are powdering their nose — thinking (00:12)`. Waiting on
+  a person, a model error and a subagent's own pane get the facts alone, and so does a
+  phase past the end of its list; `nil` when nothing runs.
+  """
+  @spec curtain_line(window(), String.t(), non_neg_integer(), integer()) :: String.t() | nil
+  def curtain_line(w, path, tick, now) do
+    case curtain_segments(w, path, tick, now) do
+      [] -> nil
+      segments -> segment_text(segments)
+    end
+  end
+
+  defp curtain_segments(w, path, tick, now) do
+    case activity_line(w, path, tick, now) do
+      line when is_binary(line) ->
+        case {activity_segments(line), flourish(w, path)} do
+          {[{:activity_glyph, glyph}, {:activity, facts}], words} when is_binary(words) ->
+            [{:activity_glyph, glyph}, {:curtain, " " <> words <> " —"}, {:activity, facts}]
+
+          {segments, _none} ->
+            segments
+        end
+
+      nil ->
+        []
+    end
+  end
+
+  defp flourish(%{path: path} = w, path) do
+    agent = Map.get(w.agents, path, new_agent())
+    kind = Map.get(w.activity, path)
+    count = Map.get(Map.get(w, :curtain, %{}), kind, 1)
+
+    case {kind, running_names(agent)} do
+      {nil, []} -> Enum.at(@curtain.starting, 0)
+      {nil, names} -> Enum.at(phrases(names), 0)
+      {:thinking, _names} -> Enum.at(@curtain.thinking, count - 1)
+      {:compacting, _names} -> Enum.at(@curtain.compacting, count - 1)
+      {:acting, [_ | _] = names} -> Enum.at(phrases(names), count - 1)
+      {:acting, []} -> Enum.at(@curtain.acting, count - 1)
+      _other -> nil
+    end
+  end
+
+  defp flourish(_w, _path), do: nil
+
+  defp phrases(names),
+    do: if(Enum.all?(names, &(&1 in @reads)), do: @curtain.reading, else: @curtain.acting)
+
+  defp running_names(agent),
+    do: for({:tool, %{status: :running, name: name}} <- agent.transcript, do: name)
 
   defp entry_lines({:user, text}, _expanded?) do
     text
@@ -1774,12 +2255,8 @@ defmodule Troupe.UI.TUI.Model do
 
   defp entry_lines({:assistant, lines}, _expanded?), do: lines
 
-  # A folded-in reasoning block collapses exactly like streaming reasoning, with
-  # the header plus the body when output is expanded.
-  defp entry_lines({:reasoning, lines}, expanded?) do
-    head = {:reasoning_head, [{:reasoning_marker, "💭 "}, {:reasoning_title, "reasoning"}]}
-    if expanded?, do: [head | lines], else: [head]
-  end
+  defp entry_lines({:reasoning, %{ms: ms} = r}, expanded?),
+    do: if(expanded?, do: reasoning_frame(r), else: [reasoning_head(ms, false)])
 
   defp entry_lines({:system, text}, _expanded?),
     do: Enum.map(String.split(text, "\n"), &{:system, "· " <> &1})
@@ -1803,7 +2280,7 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   # The person's command, marked as theirs with its `!`, then what it printed: the last
-  # rows of it, or all with output expanded (`e`), since a person ran it to read it.
+  # rows of it, or all with the turn opened (`e`), since a person ran it to read it.
   defp entry_lines({:shell, s}, expanded?) do
     head = {:user, [{:user_marker, "! "}, {:user, s.command}] ++ shell_notes(s)}
     [head | shell_body(s.lines, expanded?)]
@@ -1888,12 +2365,23 @@ defmodule Troupe.UI.TUI.Model do
 
   defp shell_body(lines, _expanded?), do: plain(lines)
 
-  defp head_segments(%{status: status, name: name, input: input, summary: summary}) do
+  # A tool frame's header (TUI Decision 161): glyph, name, target, outcome and, from a
+  # second up, how long it took.
+  defp head_segments(%{status: status, name: name, input: input, summary: summary} = t) do
+    took =
+      case {Map.get(t, :started_at), Map.get(t, :ended_at)} do
+        {from, to} when is_integer(from) and is_integer(to) and to - from >= 1000 ->
+          [{:tool_note, " · " <> seconds(to - from)}]
+
+        _ ->
+          []
+      end
+
     [
       {:tool_glyph, status_glyph(status)},
       {:tool_name, " " <> name},
       {:tool_arg, " " <> input}
-    ] ++ if(summary == "", do: [], else: [{:tool_note, " · " <> summary}])
+    ] ++ if(summary == "", do: [], else: [{:tool_note, " · " <> summary}]) ++ took
   end
 
   defp activity_segments(line) do
@@ -1988,6 +2476,13 @@ defmodule Troupe.UI.TUI.Model do
   own kind, and the rest is prose with inline code and bold picked out. A blank
   line beside a fence, or at either end of the message, is dropped: the rules
   already set the block apart, and each one was a blank row (issue #182).
+
+  A frame of its own inside the prose (TUI Decision 161) for each fenced block: code with
+  its language, and its path when the fence names one (```` ```elixir lib/p.ex ````); a
+  `diff` with its path and `+n −m`; `csv`, `tsv` and `json` as data, a table with its row
+  count when it parses as one and source when it does not. A pipe table is drawn as a
+  table, and a nested list indents with its marker. What this does not draw is left as
+  written: raw HTML, images, footnotes, and a table wider than 100 columns, which says so.
   """
   @spec markdown(String.t()) :: [line()]
   def markdown(text) when is_binary(text),
@@ -2008,10 +2503,15 @@ defmodule Troupe.UI.TUI.Model do
   defp block(["```" <> info | rest], acc) do
     {code, after_code} = Enum.split_while(rest, &(not fence?(&1)))
     rest = after_code |> Enum.drop(1) |> Enum.drop_while(&blank?/1)
-    block(rest, Enum.reverse(code_block(code, info)) ++ Enum.drop_while(acc, &blank_prose?/1))
+    block(rest, Enum.reverse(fenced(code, info)) ++ Enum.drop_while(acc, &blank_prose?/1))
   end
 
-  defp block([line | rest], acc), do: block(rest, [prose(line) | acc])
+  defp block([line | rest] = lines, acc) do
+    case pipe_table(lines) do
+      {table, rest} -> block(rest, Enum.reverse(table) ++ acc)
+      nil -> block(rest, [prose(line) | acc])
+    end
+  end
 
   # The blank lines already emitted before a fence: prose with nothing in it.
   defp blank_prose?({:text, [{:text, text}]}), do: blank?(text)
@@ -2019,20 +2519,233 @@ defmodule Troupe.UI.TUI.Model do
 
   defp fence?(line), do: line |> String.trim() |> String.starts_with?("```")
 
-  defp code_block(code, info) do
-    label = info |> String.trim() |> String.split(~r/\s/) |> hd()
+  # What a fence holds, by its info string's first word; a second word that looks like a
+  # path is the path the block's header names.
+  defp fenced(body, info) do
+    [label | more] = info |> String.trim() |> String.split(~r/\s+/)
+    path = Enum.find(more, &(&1 =~ ~r/[\/.]/))
+
+    case String.downcase(label) do
+      kind when kind in ["diff", "patch"] -> diff_block(body, path)
+      "csv" -> data_block(body, "csv", ",", path)
+      "tsv" -> data_block(body, "tsv", "\t", path)
+      "json" -> json_block(body, path)
+      _code -> code_block(body, label, path)
+    end
+  end
+
+  defp code_block(code, label, path) do
     language = if label == "", do: nil, else: label
     highlighted = highlight(Enum.join(code, "\n"), language, length(code))
 
-    [rule_above(label)] ++
-      Enum.map(highlighted, &{:code, &1}) ++
-      [{:code_tail, [{:muted, "└"}, {:fill, "─"}]}]
+    [rule_above(label, path && " · " <> path)] ++
+      Enum.map(highlighted, &{:code, &1}) ++ [rule_below()]
   end
 
-  defp rule_above(""), do: {:code_head, [{:muted, "┌"}, {:fill, "─"}]}
+  defp rule_above("", nil), do: {:code_head, [{:muted, "┌"}, {:fill, "─"}]}
+  defp rule_above("", note), do: rule_above("code", note)
 
-  defp rule_above(label),
-    do: {:code_head, [{:muted, "┌─ "}, {:code_lang, label}, {:muted, " "}, {:fill, "─"}]}
+  defp rule_above(label, note) do
+    {:code_head,
+     [{:muted, "┌─ "}, {:code_lang, label}] ++
+       if(note, do: [{:muted, note}], else: []) ++ [{:muted, " "}, {:fill, "─"}]}
+  end
+
+  defp rule_below, do: {:code_tail, [{:muted, "└"}, {:fill, "─"}]}
+
+  # A diff in a fence: its path (the fence's, else its own `+++` line's) and what it adds
+  # and removes, then its lines coloured as an edit's are.
+  defp diff_block(body, path) do
+    path =
+      path ||
+        Enum.find_value(body, fn
+          "+++ " <> to -> to |> String.trim() |> String.replace_prefix("b/", "")
+          _line -> nil
+        end)
+
+    added = Enum.count(body, &(String.starts_with?(&1, "+") and not String.starts_with?(&1, "+++")))
+    gone = Enum.count(body, &(String.starts_with?(&1, "-") and not String.starts_with?(&1, "---")))
+    note = if(path, do: " · " <> path, else: "") <> " +#{added} −#{gone}"
+
+    [rule_above("diff", note)] ++
+      Enum.map(body, fn line -> {:code, [diff_line(line)]} end) ++ [rule_below()]
+  end
+
+  # Comma- or tab-separated rows: a table under its header row when every row has as many
+  # cells as the header, the source as written when they do not.
+  defp data_block(body, label, sep, path) do
+    rows = body |> Enum.reject(&blank?/1) |> Enum.map(&csv_cells(&1, sep))
+
+    case rows do
+      [head | [_ | _] = rest] ->
+        if Enum.all?(rest, &(length(&1) == length(head))),
+          do: data_table(label, head, rest, body, path),
+          else: code_block(body, label, path)
+
+      _ ->
+        code_block(body, label, path)
+    end
+  end
+
+  # An array of flat objects is a table, its columns the keys in the order they first
+  # appear; anything else JSON can say is shown as its source.
+  defp json_block(body, path) do
+    with {:ok, [_ | _] = items} <- Jason.decode(Enum.join(body, "\n"), objects: :ordered_objects),
+         true <- Enum.all?(items, &flat_object?/1) do
+      columns =
+        items
+        |> Enum.flat_map(fn %Jason.OrderedObject{values: v} -> Enum.map(v, &elem(&1, 0)) end)
+        |> Enum.uniq()
+
+      rows =
+        Enum.map(items, fn %Jason.OrderedObject{values: v} ->
+          Enum.map(columns, fn key ->
+            v |> List.keyfind(key, 0, {key, nil}) |> elem(1) |> scalar()
+          end)
+        end)
+
+      data_table("json", columns, rows, body, path)
+    else
+      _ -> code_block(body, "json", path)
+    end
+  end
+
+  defp flat_object?(%Jason.OrderedObject{values: values}),
+    do: Enum.all?(values, fn {_key, v} -> not is_list(v) and not is_struct(v) end)
+
+  defp flat_object?(_item), do: false
+
+  defp scalar(nil), do: ""
+  defp scalar(value) when is_binary(value), do: value
+  defp scalar(value), do: to_string(value)
+
+  defp data_table(label, head, rows, body, path) do
+    n = length(rows)
+    note = " · #{n} #{if n == 1, do: "row", else: "rows"}" <> if(path, do: " · " <> path, else: "")
+
+    case table_lines(head, List.duplicate(:left, length(head)), rows, :code) do
+      nil -> code_block(body, label, path)
+      lines -> [rule_above(label, note) | lines] ++ [rule_below()]
+    end
+  end
+
+  defp csv_cells(line, sep), do: line |> String.graphemes() |> csv(sep, "", [], false)
+
+  defp csv([], _sep, cell, cells, _quoted?),
+    do: [cell | cells] |> Enum.reverse() |> Enum.map(&String.trim/1)
+
+  defp csv(["\"", "\"" | rest], sep, cell, cells, true),
+    do: csv(rest, sep, cell <> "\"", cells, true)
+
+  defp csv(["\"" | rest], sep, cell, cells, quoted?), do: csv(rest, sep, cell, cells, not quoted?)
+  defp csv([sep | rest], sep, cell, cells, false), do: csv(rest, sep, "", [cell | cells], false)
+  defp csv([c | rest], sep, cell, cells, quoted?), do: csv(rest, sep, cell <> c, cells, quoted?)
+
+  # A pipe table: a row of cells, the rule under it (`|---|:--:|`), and the rows that
+  # follow while each has a pipe in it.
+  defp pipe_table([head, rule | rest]) do
+    if String.contains?(head, "|") and table_rule?(rule) do
+      {rows, rest} = Enum.split_while(rest, &(String.contains?(&1, "|") and not blank?(&1)))
+      aligns = rule |> pipe_cells() |> Enum.map(&align/1)
+      head = pipe_cells(head)
+      rows = Enum.map(rows, &pipe_cells/1)
+
+      case table_lines(head, aligns, rows, :table) do
+        nil -> {too_wide([head | rows]), rest}
+        lines -> {lines, rest}
+      end
+    end
+  end
+
+  defp pipe_table(_lines), do: nil
+
+  defp table_rule?(line), do: line =~ ~r/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/
+
+  defp pipe_cells(line) do
+    line
+    |> String.trim()
+    |> String.trim_leading("|")
+    |> String.trim_trailing("|")
+    |> String.split("|")
+    |> Enum.map(&String.trim/1)
+  end
+
+  defp align(cell) do
+    case {String.starts_with?(cell, ":"), String.ends_with?(cell, ":")} do
+      {true, true} -> :center
+      {false, true} -> :right
+      _ -> :left
+    end
+  end
+
+  # Said plainly rather than drawn badly: a table too wide for a terminal is its source.
+  defp too_wide(rows) do
+    [{:text, [{:muted, "(a table too wide to draw here, as written:)"}]}] ++
+      Enum.map(rows, &{:table, [{:muted, "| " <> Enum.join(&1, " | ") <> " |"}]})
+  end
+
+  @cell_cap 32
+  @table_max 100
+
+  # A table's lines, the header bold over a rule, each column as wide as its widest cell
+  # up to a cap past which a cell is cut with `…`; `nil` when it is wider than a terminal
+  # can be expected to show. `kind` is the lines' kind: `:table` in prose, `:code` inside
+  # a data frame's rules.
+  defp table_lines(head, aligns, rows, kind) do
+    columns = Enum.max([length(head) | Enum.map(rows, &length/1)])
+    pad = fn cells -> cells ++ List.duplicate("", columns - length(cells)) end
+    cells = Enum.map([head | rows], fn row -> row |> pad.() |> Enum.map(&cell_text/1) end)
+    aligns = pad_aligns(aligns, columns)
+
+    widths =
+      cells
+      |> Enum.zip_with(& &1)
+      |> Enum.map(fn column ->
+        column |> Enum.map(&cell_width/1) |> Enum.max() |> min(@cell_cap)
+      end)
+
+    if Enum.sum(widths) + 3 * (columns - 1) > @table_max do
+      nil
+    else
+      [head_cells | row_cells] = cells
+
+      rule =
+        {kind, [{:table_rail, Enum.map_join(widths, "─┼─", &String.duplicate("─", &1))}]}
+
+      [{kind, table_row(head_cells, widths, aligns, :strong)}, rule] ++
+        Enum.map(row_cells, &{kind, table_row(&1, widths, aligns, :text)})
+    end
+  end
+
+  defp pad_aligns(aligns, columns),
+    do: Enum.take(aligns ++ List.duplicate(:left, columns), columns)
+
+  defp cell_text(cell) do
+    if cell_width(cell) > @cell_cap,
+      do: elem(take_cells(cell, @cell_cap - 1), 0) <> "…",
+      else: cell
+  end
+
+  defp table_row(cells, widths, aligns, tag) do
+    [cells, widths, aligns]
+    |> Enum.zip()
+    |> Enum.map(fn {cell, width, align} -> {tag, aligned(cell, width, align)} end)
+    |> Enum.intersperse({:table_rail, " │ "})
+  end
+
+  defp aligned(cell, width, :left), do: cell <> spaces(width - cell_width(cell))
+  defp aligned(cell, width, :right), do: spaces(width - cell_width(cell)) <> cell
+
+  defp aligned(cell, width, :center) do
+    room = width - cell_width(cell)
+    spaces(div(room, 2)) <> cell <> spaces(room - div(room, 2))
+  end
+
+  defp spaces(n), do: String.duplicate(" ", max(n, 0))
+
+  # A nested list's marker changes with its depth, two columns a level, and the rows an
+  # item wraps onto line up under its text (`rails/1`).
+  @markers ~w(• ◦ ▪)
 
   defp prose(line) do
     cond do
@@ -2042,11 +2755,14 @@ defmodule Troupe.UI.TUI.Model do
 
       match = Regex.run(~r/^(\s*)([-*+])\s+(.*)$/, line) ->
         [_, lead, _marker, text] = match
-        {:bullet, [{:bullet_marker, lead <> "• "} | inline(text)]}
+        depth = div(cell_width(lead), 2)
+        marker = Enum.at(@markers, rem(depth, length(@markers)))
+        {:bullet, [{:bullet_marker, spaces(2 * depth) <> marker <> " "} | inline(text)]}
 
       match = Regex.run(~r/^(\s*)(\d+[.)])\s+(.*)$/, line) ->
         [_, lead, marker, text] = match
-        {:bullet, [{:bullet_marker, lead <> marker <> " "} | inline(text)]}
+        depth = div(cell_width(lead), 2)
+        {:bullet, [{:bullet_marker, spaces(2 * depth) <> marker <> " "} | inline(text)]}
 
       match = Regex.run(~r/^>\s?(.*)$/, line) ->
         [_, text] = match
@@ -2502,13 +3218,18 @@ defmodule Troupe.UI.TUI.Model do
   def height(line, width, _mode) when byte_size(line) <= width, do: 1
   def height(line, width, mode), do: length(wrap(line, width, mode))
 
-  @doc "The plain text of a line or of a list of segments."
+  @doc "The plain text of a line or of a list of segments, a frame's rail left out."
   @spec line_text(line() | [segment()]) :: String.t()
   def line_text({_kind, text}) when is_binary(text), do: text
   def line_text({_kind, segments}) when is_list(segments), do: segment_text(segments)
   def line_text(segments) when is_list(segments), do: segment_text(segments)
 
-  defp segment_text(segments), do: Enum.map_join(segments, fn {_tag, text} -> text end)
+  defp segment_text(segments) do
+    Enum.map_join(segments, fn
+      {:frame, _rail} -> ""
+      {_tag, text} -> text
+    end)
+  end
 
   @doc "A line's segments, tagged with its own kind when it is plain text."
   @spec segments(line()) :: [segment()]
@@ -2517,7 +3238,7 @@ defmodule Troupe.UI.TUI.Model do
 
   # Segment tags that draw a rail or gutter rather than content: they are dropped
   # when a slice of a row is copied.
-  @rail_tags [:gutter, :code_rail, :quote_rail, :linenum]
+  @rail_tags [:frame, :gutter, :code_rail, :quote_rail, :linenum]
 
   @doc """
   Splits one *wrapped* row's segments at two cell columns into
@@ -2580,7 +3301,7 @@ defmodule Troupe.UI.TUI.Model do
   def rail(kind) when kind in [:code_head, :code_tail], do: {nil, nil}
   def rail(:bullet), do: {nil, gutter()}
   def rail(:quote), do: {{:quote_rail, "▏"}, {:quote_rail, "▏"}}
-  def rail(kind) when kind in [:reasoning_head, :reasoning_body], do: {gutter(), gutter()}
+  def rail(:reasoning_body), do: {gutter(), gutter()}
   def rail(_kind), do: {nil, nil}
 
   defp gutter, do: {:gutter, "  "}
@@ -2635,8 +3356,8 @@ defmodule Troupe.UI.TUI.Model do
   # Measuring never builds a string, and a line whose bytes fit its first row is
   # one row without any character work at all: a cell is never more than a byte.
   defp line_height({kind, _} = line, width) do
-    {first, rest} = rail(kind)
-    segs = segments(line)
+    {lead, segs, first, rest} = rails(line)
+    width = room(width, lead)
     first_w = room(width, first)
 
     cond do
@@ -2659,18 +3380,44 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   defp wrap_line({kind, _} = line, width) do
-    {first, rest} = rail(kind)
+    {lead, segs, first, rest} = rails(line)
+    width = room(width, lead)
     first_w = room(width, first)
     rest_w = room(width, rest)
 
-    line
-    |> segments()
+    segs
     |> wrap_segments(first_w, rest_w, wrap_mode(kind))
     |> Enum.with_index()
     |> Enum.map(fn
-      {row, 0} -> {kind, prepend(first, row)}
-      {row, _} -> {kind, prepend(rest, row)}
+      {row, 0} -> {kind, prepend(lead, prepend(first, row))}
+      {row, _} -> {kind, prepend(lead, prepend(rest, row))}
     end)
+  end
+
+  # A line's rails as wrapping draws them: a frame's rail outermost, on every row (TUI
+  # Decision 161); inside it the kind's own, save the plain gutter, which the frame's takes
+  # the place of; and a list item's later rows indented as far as its text, however deep
+  # the list is nested.
+  defp rails({kind, _} = line) do
+    case segments(line) do
+      [{:frame, _} = frame | segs] ->
+        {first, rest} = kind_rails(kind, segs, true)
+        {frame, segs, first, rest}
+
+      segs ->
+        {first, rest} = kind_rails(kind, segs, false)
+        {nil, segs, first, rest}
+    end
+  end
+
+  defp kind_rails(:bullet, [{:bullet_marker, marker} | _], _framed?),
+    do: {nil, {:gutter, String.duplicate(" ", cell_width(marker))}}
+
+  defp kind_rails(kind, _segs, framed?) do
+    case rail(kind) do
+      {{:gutter, _}, {:gutter, _}} when framed? -> {nil, nil}
+      rails -> rails
+    end
   end
 
   # A fill stretches into whatever is left, so it never decides how tall a line is.
@@ -2777,7 +3524,7 @@ defmodule Troupe.UI.TUI.Model do
 
   defp rev_join(acc), do: acc |> Enum.reverse() |> Enum.join()
 
-  defp wrap_mode(k) when k in [:body, :diff_add, :diff_del, :diff_meta, :code, :code_num],
+  defp wrap_mode(k) when k in [:body, :diff_add, :diff_del, :diff_meta, :code, :code_num, :table],
     do: :char
 
   defp wrap_mode(_), do: :word

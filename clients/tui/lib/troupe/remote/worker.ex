@@ -1294,13 +1294,15 @@ defmodule Troupe.Remote.Worker do
 
   defp flush_deltas(%{deltas: deltas} = state) when map_size(deltas) == 0, do: state
 
-  # Coalescing keeps the reasoning flag bound to the text that earned it: a
-  # flushed event is reasoning iff *every* buffered chunk was reasoning. Mixing
-  # the two into one text would blur the boundary the UI collapses on.
+  # Coalescing keeps the reasoning flag bound to the text that earned it: each run of
+  # reasoning and each run of text in a frame is flushed as its own event, in order.
+  # Mixing the two into one text blurred the boundary the UI collapses on: a model that
+  # thinks and answers within one frame had its reasoning streamed as its answer, and
+  # never drawn as reasoning (TUI Decision 161).
   defp flush_deltas(state) do
-    for {agent, chunks} <- state.deltas do
-      text = chunks |> Enum.reverse() |> Enum.map_join(&elem(&1, 0))
-      reasoning? = Enum.all?(chunks, &elem(&1, 1))
+    for {agent, chunks} <- state.deltas,
+        [{_text, reasoning?} | _] = run <- chunks |> Enum.reverse() |> Enum.chunk_by(&elem(&1, 1)) do
+      text = Enum.map_join(run, &elem(&1, 0))
       data = if reasoning?, do: %{text: text, reasoning: true}, else: %{text: text}
       notify(state, agent, :llm_delta, data)
     end
