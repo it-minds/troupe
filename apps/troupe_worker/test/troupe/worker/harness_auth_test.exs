@@ -180,6 +180,79 @@ defmodule Troupe.Worker.HarnessAuthTest do
       assert error.message == "forbidden"
       assert error.data["reason"] == "only the session's owner can run commands on it"
     end
+
+    # The token in hand still says `owner` and still verifies; the role the plane pushed
+    # since is the one the pod holds the next command to, without waiting for the token
+    # to expire (issue #494).
+    test "an owner the plane narrows to a collaborator is refused a command at once, and a viewer steering",
+         context do
+      assert {:ok, _} = activate(context)
+
+      {:ok, lead} =
+        connect(
+          context,
+          token(context, role: "owner", session_id: context.session_id, sub: "lead@example.test")
+        )
+
+      :ok = Auth.put_acl(context.auth, context.session_id, "lead@example.test", "collaborator")
+
+      assert {:error, error} =
+               Client.call(lead, "shell.run", %{
+                 "session_id" => context.session_id,
+                 "command" => "echo no-longer-yours"
+               })
+
+      assert error.message == "forbidden"
+      assert error.data["required_scope"] == "admin"
+
+      # A collaborator still steers.
+      assert {:ok, _} =
+               Client.call(lead, "input.send", %{
+                 "session_id" => context.session_id,
+                 "text" => "hello"
+               })
+
+      :ok = Auth.put_acl(context.auth, context.session_id, "lead@example.test", "viewer")
+
+      assert {:error, error} =
+               Client.call(lead, "input.send", %{
+                 "session_id" => context.session_id,
+                 "text" => "and again"
+               })
+
+      assert error.message == "forbidden"
+      assert error.data["required_scope"] == "control"
+
+      # A viewer still watches.
+      assert {:ok, _} = Client.call(lead, "session.get", %{"session_id" => context.session_id})
+    end
+
+    # The mirror narrows and never widens: a wider role needs a token that says so.
+    test "a collaborator the plane makes an owner keeps their token's scopes until the next one",
+         context do
+      assert {:ok, _} = activate(context)
+
+      {:ok, mate} =
+        connect(
+          context,
+          token(context,
+            role: "collaborator",
+            session_id: context.session_id,
+            sub: "mate@example.test"
+          )
+        )
+
+      :ok = Auth.put_acl(context.auth, context.session_id, "mate@example.test", "owner")
+
+      assert {:error, error} =
+               Client.call(mate, "shell.run", %{
+                 "session_id" => context.session_id,
+                 "command" => "echo not-yet"
+               })
+
+      assert error.message == "forbidden"
+      assert error.data["required_scope"] == "admin"
+    end
   end
 
   describe "one session per token" do

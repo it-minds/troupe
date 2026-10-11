@@ -19,7 +19,10 @@ defmodule Troupe.Worker.Auth do
   still holds a token that verifies perfectly, so the role in it is a claim about the
   past and cannot be the standing permission. Every command is checked against the
   mirror, which the plane updates by push and which `acl_granted` and `acl_revoked`
-  events in the session log also feed.
+  events in the session log also feed. A revoked subject is refused; a narrowed one runs
+  the command with the scopes of the role the mirror holds, so an owner made a
+  collaborator loses `admin` at their next command rather than at their next token. The
+  mirror narrows and never widens: a token's scopes are the most a connection gets.
   """
 
   use GenServer
@@ -123,8 +126,14 @@ defmodule Troupe.Worker.Auth do
     end
   end
 
-  @doc "A guard for `Troupe.Protocol.Endpoint.remote/3`: the ACL as it stands now."
-  @spec guard(GenServer.server()) :: (map() | nil, String.t(), map() -> :ok | {:error, Error.t()})
+  @doc """
+  A guard for `Troupe.Protocol.Endpoint.remote/3`: the ACL as it stands now.
+
+  `{:ok, scopes}` when the mirror holds a role for the caller: the command runs with that
+  role's scopes and none of the token's beyond them.
+  """
+  @spec guard(GenServer.server()) ::
+          (map() | nil, String.t(), map() -> :ok | {:ok, [atom()]} | {:error, Error.t()})
   def guard(server \\ __MODULE__) do
     fn claims, method, params -> check(server, claims, method, params) end
   end
@@ -261,18 +270,15 @@ defmodule Troupe.Worker.Auth do
     named = named_sessions(params)
 
     case claims["session_id"] do
-      nil -> Enum.find_value(named, :ok, &acl_refusal(state, claims["sub"], &1))
+      nil -> held_to_acl(state, claims["sub"], named)
       session_id -> confined(state, claims["sub"], session_id, method, named)
     end
   end
 
   defp confined(state, subject, session_id, method, named) do
     case Enum.find(named, fn {_field, id} -> id != session_id end) do
-      nil ->
-        method_refusal(method) || acl_refusal(state, subject, {"session_id", session_id}) || :ok
-
-      {field, _other} ->
-        another_session(field)
+      nil -> method_refusal(method) || held_to_acl(state, subject, [{"session_id", session_id}])
+      {field, _other} -> another_session(field)
     end
   end
 
@@ -285,14 +291,22 @@ defmodule Troupe.Worker.Auth do
       do: not_about_the_session(method)
   end
 
-  defp acl_refusal(state, subject, {_field, session_id}) do
-    case get_in(state.acl, [session_id, subject]) do
-      # No mirrored entry: the token is the only word on the subject, and it verified.
-      nil -> nil
-      role when is_binary(role) -> nil
-      _revoked -> revoked(session_id)
-    end
+  # Each session a request names, as the mirror has it now: a revocation refuses, and a
+  # role narrows the command to that role's scopes — to the fewest of them when a token
+  # with no session in it names several.
+  defp held_to_acl(state, subject, named) do
+    Enum.reduce_while(named, :ok, fn {_field, session_id}, held ->
+      case get_in(state.acl, [session_id, subject]) do
+        # No mirrored entry: the token is the only word on the subject, and it verified.
+        nil -> {:cont, held}
+        role when is_binary(role) -> {:cont, narrowed(held, Token.scopes_for(role))}
+        _revoked -> {:halt, revoked(session_id)}
+      end
+    end)
   end
+
+  defp narrowed(:ok, scopes), do: {:ok, scopes}
+  defp narrowed({:ok, held}, scopes), do: {:ok, Enum.filter(held, &(&1 in scopes))}
 
   # Every place a request names a session: its `session_id`, a branch's `parent`, and the
   # id in a `session:` or `presence:` topic. The `fleet` topic is every session on the pod
