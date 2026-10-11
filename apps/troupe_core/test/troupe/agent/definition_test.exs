@@ -1,7 +1,7 @@
 defmodule Troupe.Agent.DefinitionTest do
   use ExUnit.Case, async: true
 
-  alias Troupe.Agent.{Definition, Definitions}
+  alias Troupe.Agent.{Definition, Definitions, Validate}
 
   test "parses frontmatter and body" do
     md = """
@@ -48,6 +48,29 @@ defmodule Troupe.Agent.DefinitionTest do
              Definition.parse("x", "---\npermissions:\n  shell: maybe\n---\nbody", :project)
   end
 
+  # Decision 850: a delegation to this agent asks first, or runs at once as it always did.
+  test "delegation is ask or auto, auto when absent, and reads back as written" do
+    assert {:ok, %Definition{delegation: :auto}} = Definition.parse("x", "body", :project)
+
+    assert {:ok, %Definition{delegation: :ask} = asking} =
+             Definition.parse("x", "---\ndelegation: ask\n---\nbody", :project)
+
+    assert Definition.render(asking) =~ "\ndelegation: ask\n"
+    assert Definition.parse("x", Definition.render(asking), :project) == {:ok, asking}
+    refute Definition.render(%{asking | delegation: :auto}) =~ "delegation"
+
+    assert {:error, {:bad_delegation, "maybe"}} =
+             Definition.parse("x", "---\ndelegation: maybe\n---\nbody", :project)
+
+    assert %{ok: false, errors: [%{field: "delegation", message: message}]} =
+             Validate.check("---\nmode: subagent\ndescription: d\ndelegation: maybe\n---\nbody")
+
+    assert message == "delegation must be ask or auto, not \"maybe\""
+
+    assert %{ok: true} =
+             Validate.check("---\nmode: subagent\ndescription: d\ndelegation: ask\n---\nbody")
+  end
+
   test "allowlist and permission resolution" do
     {:ok, restricted} = Definition.parse("r", "---\ntools:\n  - read_file\n---\nbody", :project)
 
@@ -85,6 +108,24 @@ defmodule Troupe.Agent.DefinitionTest do
       assert Definition.permission(plan, "read_file", :auto) == :auto
     end
 
+    # #554 slice 3, Decision 850: a primary to choose, never the one a session starts with.
+    test "orchestrate delegates and never edits, and build stays the default", %{defs: defs} do
+      orchestrate = Definitions.fetch!(defs, "orchestrate")
+      assert orchestrate.mode == :primary
+      assert Definition.allows_tool?(orchestrate, "delegate")
+      assert Definition.allows_tool?(orchestrate, "read_branch")
+      assert Definition.allows_tool?(orchestrate, "read_file")
+
+      for tool <- ~w(write_file edit_file shell),
+          do: assert(Definition.permission(orchestrate, tool, :ask) == :deny)
+
+      assert orchestrate.prompt =~ "Read to brief"
+      assert orchestrate.prompt =~ "Delegate to execute"
+      assert orchestrate.prompt =~ "reviewer"
+      assert %Troupe.Config{}.default_agent == "build"
+      assert %Troupe.Config{}.max_depth == 3
+    end
+
     test "explore is read-only", %{defs: defs} do
       explore = Definitions.fetch!(defs, "explore")
       refute Definition.allows_tool?(explore, "write_file")
@@ -93,7 +134,7 @@ defmodule Troupe.Agent.DefinitionTest do
 
     test "primaries and subagents are partitioned", %{defs: defs} do
       assert Enum.map(Definitions.primaries(defs), & &1.name) ==
-               ["answer", "ask", "build", "librarian", "plan", "quick", "workflow"]
+               ["answer", "ask", "build", "librarian", "orchestrate", "plan", "quick", "workflow"]
 
       assert Enum.map(Definitions.subagents(defs), & &1.name) ==
                ["explore", "general", "implementer", "reviewer"]

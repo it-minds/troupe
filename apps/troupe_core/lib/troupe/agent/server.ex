@@ -878,6 +878,17 @@ defmodule Troupe.Agent.Server do
     {:keep_state_and_data, []}
   end
 
+  # A delegation the person was asked about (Decision 850), answered.
+  def acting(:info, {:delegation_answer, call_id, answer}, state) do
+    case Map.fetch(state.pending, call_id) do
+      {:ok, %Call{result: nil, child_ref: nil} = call} ->
+        {:keep_state, delegation_answered(state, call, answer)}
+
+      _ ->
+        {:keep_state_and_data, []}
+    end
+  end
+
   def acting(:info, :cancel, state), do: cancel_everything(state)
 
   def acting(:info, {:input, _source, _content, _actor, _meta} = event, state),
@@ -2184,7 +2195,11 @@ defmodule Troupe.Agent.Server do
   end
 
   defp defer(state, call, {:delegate, agent_name, brief}) do
-    spawn_child(state, call, agent_name, brief)
+    definition = Definitions.fetch!(state.definitions, agent_name)
+
+    if Delegate.asks?(definition, state.config),
+      do: ask_to_delegate(state, call, definition, brief),
+      else: spawn_child(state, call, agent_name, brief)
   end
 
   defp defer(state, call, {:finish, parts}) do
@@ -2838,6 +2853,92 @@ defmodule Troupe.Agent.Server do
 
   # -- delegation -------------------------------------------------------------
 
+  # A delegation the person asked to see first waits at the session's approval gate
+  # (Decision 850), in a task as an asking tool's call does, so this agent goes on
+  # collecting its other calls meanwhile and a cancel ends the wait with the task. No
+  # timer: a child has none, and a person reading a brief may take longer than a tool.
+  defp ask_to_delegate(state, call, definition, brief) do
+    where = %{
+      depth: State.depth(state),
+      max_depth: state.config.max_depth,
+      session_id: state.session_id
+    }
+
+    req = %{
+      call_id: call.id,
+      tool: call.name,
+      args: call.args,
+      agent_path: state.agent_path,
+      delegation: Delegate.gate(definition, brief, state.definitions, where)
+    }
+
+    agent = self()
+    session_id = state.session_id
+
+    {:ok, pid} =
+      Task.Supervisor.start_child(tasks(state), fn ->
+        send(agent, {:delegation_answer, call.id, Approvals.request(session_id, req)})
+      end)
+
+    monitor = Process.monitor(pid)
+    call = %{call | task_pid: pid, monitor: monitor}
+
+    %{state | pending: Map.put(state.pending, call.id, call)}
+    |> State.watch(monitor, {:tool, call.id})
+  end
+
+  # The person's answer: the child starts, as the delegate asked or as they changed it, or
+  # the delegate call is answered no, with their word back when they gave one.
+  defp delegation_answered(state, call, answer) do
+    if call.monitor, do: Process.demonitor(call.monitor, [:flush])
+    state = if call.monitor, do: State.unwatch(state, call.monitor), else: state
+    call = %{call | task_pid: nil, monitor: nil}
+    state = %{state | pending: Map.put(state.pending, call.id, call)}
+
+    case answer do
+      {:allow, given} -> run_as_answered(state, call, given)
+      {:deny, :unattended} -> answer_call(state, call, {:denied_unattended, call.name})
+      {:deny, given} -> answer_call(state, call, denied(call, given))
+    end
+  end
+
+  defp run_as_answered(state, call, given) do
+    {:ok, asked} = Delegate.brief(call.args)
+    agent = given["agent"] || call.args["agent"]
+    brief = given["brief"] || asked
+
+    case Definitions.fetch(state.definitions, agent) do
+      {:ok, %Definition{mode: :subagent}} ->
+        note = answered_note(call.args["agent"], agent, given["edited"] || [])
+        spawn_child(state, %{call | note: note}, agent, brief)
+
+      _other ->
+        answer_call(state, call, "#{agent} is not a subagent here, so the delegation did not run")
+    end
+  end
+
+  defp answer_call(state, call, reason) do
+    send(self(), {:tool_result, call.id, Result.error(call.id, call.name, reason)})
+    state
+  end
+
+  defp denied(call, given) do
+    case given["reason"] do
+      nil -> "The person denied this delegation to #{call.args["agent"]}."
+      reason -> "The person denied this delegation to #{call.args["agent"]} and said: #{reason}"
+    end
+  end
+
+  # Said to the parent before the child's report, so it knows the work it judges is not
+  # quite what it asked for.
+  defp answered_note(asked, asked, []), do: nil
+
+  defp answered_note(asked, agent, edited) do
+    switched = if agent != asked, do: ["sent it to #{agent} rather than #{asked}"], else: []
+    parts = if edited != [], do: ["edited its #{Finish.and_list(edited)}"], else: []
+    "[The person #{Enum.join(switched ++ parts, " and ")} before it ran.]"
+  end
+
   # The child is handed its brief as its first message, the parts under their names, and
   # `delegation_started` carries the parts as well, for a client to show them as parts
   # (Decision 847).
@@ -2929,18 +3030,21 @@ defmodule Troupe.Agent.Server do
   end
 
   defp child_result_to_result(call, {:ok, summary, _usage}) do
-    Result.ok(call.id, call.name, summary)
+    Result.ok(call.id, call.name, noted(call, summary))
   end
 
   # Partial work still comes back as a successful tool result: the content says it was
   # cut short, and an error result would throw the findings away.
   defp child_result_to_result(call, {:partial, summary, _usage}) do
-    Result.ok(call.id, call.name, summary)
+    Result.ok(call.id, call.name, noted(call, summary))
   end
 
   defp child_result_to_result(call, {:error, reason}) do
     Result.error(call.id, call.name, {:child_failed, reason})
   end
+
+  defp noted(%Call{note: nil}, summary), do: summary
+  defp noted(%Call{note: note}, summary), do: note <> "\n\n" <> summary
 
   defp charge_child_usage(state, {kind, _summary, spent}) when kind in [:ok, :partial],
     do: charge_child(state, spent)

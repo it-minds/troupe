@@ -133,8 +133,8 @@ export function InlineApprovals({
           entry={entry}
           canAnswer={row.yourRole !== "viewer"}
           others={[]}
-          onAnswer={async (d) => {
-            await view?.respondApproval(entry.callId, d);
+          onAnswer={async (d, a) => {
+            await view?.respondApproval(entry.callId, d, a);
             onAnswered();
           }}
         />

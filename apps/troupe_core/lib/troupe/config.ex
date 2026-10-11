@@ -166,6 +166,10 @@ defmodule Troupe.Config do
             # no `:auto` here: a session that approves its own shell commands with
             # nobody watching is the thing this refuses to be.
             approvals: :wait,
+            # The agents a `delegate` to asks the person first, by name: `delegation.ask` in a
+            # file (Decision 850). An agent's own definition can ask too, with `delegation:
+            # ask`. Empty, the default, and a delegation runs at once.
+            delegation_ask: [],
             # What a session does when its tree comes back after a restart. `false` —
             # the default — means it comes back interrupted and makes no model call
             # until someone asks it to carry on, because a crash loop that resumes
@@ -429,6 +433,9 @@ defmodule Troupe.Config do
 
   defp put_key(config, %{key: "mcp"}, servers, layers),
     do: %{config | mcp: parse_mcp(servers, layers.refused.mcp)}
+
+  defp put_key(config, %{key: "delegation"}, delegation, _layers),
+    do: %{config | delegation_ask: Enum.filter(delegation["ask"] || [], &is_binary/1)}
 
   defp put_key(config, %{field: nil}, _value, _layers), do: config
   defp put_key(config, %{field: field}, value, _layers), do: Map.put(config, field, field_value(field, value))

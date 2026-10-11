@@ -17,6 +17,12 @@ defmodule Troupe.Workflow do
   prompt, so every existing mechanism — worktrees, approvals, budgets, resume — applies
   unchanged.
 
+  A step follows the delegation's contract (#554, Decisions 847 and 850): its prompt is
+  what the orchestrator turns into a brief in five parts, its result is the subagent's
+  finish in parts, and a step to an agent the person asked to see first stops at the
+  same gate any delegation does. `workflow` runs a repository's declared steps;
+  `orchestrate` is the same contract with no step list, for work nobody wrote one for.
+
   ## Defining a workflow
 
   A workflow lives at `.troupe/workflows/<name>.json` in the workspace as a JSON array
@@ -255,8 +261,8 @@ defmodule Troupe.Workflow do
 
     #{rules(steps)}
 
-    When every step is complete, call `finish` with a summary of what changed
-    and how it was verified.
+    When every step is complete, call `finish`: what changed and which agent
+    did it, what ran, what passed, what is still unverified, and what you need.
     """
   end
 
@@ -274,16 +280,21 @@ defmodule Troupe.Workflow do
 
     """
     Rules:
-    - #{parallel}Every delegate prompt must stand alone. The subagent sees only
-      what you write: restate the task, name the files and commands the earlier
-      steps found, and say exactly what to produce. It cannot see your
-      transcript or another subagent's.
+    - #{parallel}A step's prompt is a brief, and the subagent sees only the brief:
+      its goal (the step's result, checkable), its context (the files, commands
+      and findings the earlier steps gave you), its constraints (the files it may
+      touch), its deliverable (what to produce and report) and its do_not (what
+      belongs to another step). It cannot see your transcript or another
+      subagent's.
     - Never delegate two concurrent steps that write the same file.
-    - Carry each step's result into the next prompt: a subagent's `finish`
-      summary is all you get back from it, so quote what the next step needs.
-    - When a step reports a failure, decide what to do — re-delegate it with the
-      failure quoted, hand it to a different agent, or change the plan — and say
-      why in your summary. Do not skip a test or verify step silently.
+    - A step's result is its finish: its summary, what changed, what ran, what
+      passed, what is unverified, and what it needs. Judge the step by what
+      passed and what is unverified, and carry into the next brief's context
+      what that step needs from it.
+    - When a step reports a failure, or leaves unverified what the step was for,
+      decide what to do — re-delegate it with the failure quoted, hand it to a
+      different agent, or change the plan — and say why in your finish. Do not
+      skip a test or verify step silently.
     - You read, search and plan; subagents write, run and verify. Delegate
       research to `explore` rather than reading the tree yourself.
     """

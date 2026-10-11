@@ -1650,6 +1650,24 @@ details.advanced > summary {
   font: var(--t-note);
 }
 
+/* A delegation at the gate (troupe Decision 850): what the subagent gets, as facts, and
+   the brief's parts, each changed in place. */
+.approval .facts.gate,
+.approval .facts.brief {
+  font: var(--t-note);
+  letter-spacing: normal;
+}
+.approval .facts.brief .gate-part {
+  display: contents;
+}
+.approval .facts.brief .gate-text {
+  white-space: pre-wrap;
+}
+.approval .facts.brief textarea {
+  flex: 1 1 100%;
+  font: var(--t-note);
+}
+
 /* Answered: the panel transforms in place rather than vanishing. */
 .approval.answered {
   border-color: var(--border-hairline);

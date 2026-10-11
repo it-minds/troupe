@@ -525,7 +525,8 @@ defmodule Troupe.UI.TUI.Model do
           call_id: d.call_id,
           agent_path: path,
           name: d.name,
-          preview: d.preview
+          preview: d.preview,
+          delegation: d[:delegation]
         })
         |> update_agent(path, fn a ->
           %{a | transcript: Enum.map(a.transcript, &attach_preview(&1, d))}
@@ -1554,11 +1555,19 @@ defmodule Troupe.UI.TUI.Model do
   `selection` is the reader's in-progress answer to a multiple-choice question
   (`%{call_id, selected}`), which lives in the UI process rather than the log:
   it is a cursor, not a decision, and it dies with the frame if the question is
-  answered elsewhere.
+  answered elsewhere. `gate` is the reader's draft of an answer to a delegation at the
+  gate (`gate_draft/2`, TUI Decision 157), a cursor of the same kind.
   """
-  @spec pane_blocks(window(), String.t(), boolean(), non_neg_integer(), integer(), map() | nil) ::
-          [[line()]]
-  def pane_blocks(w, agent_path, expanded?, tick, now, selection \\ nil) do
+  @spec pane_blocks(
+          window(),
+          String.t(),
+          boolean(),
+          non_neg_integer(),
+          integer(),
+          map() | nil,
+          map() | nil
+        ) :: [[line()]]
+  def pane_blocks(w, agent_path, expanded?, tick, now, selection \\ nil, gate \\ nil) do
     agent = Map.get(w.agents, agent_path, new_agent())
     entries = Enum.map(agent.transcript, &entry_lines(&1, expanded?))
 
@@ -1572,7 +1581,7 @@ defmodule Troupe.UI.TUI.Model do
         do: [],
         else: [streaming_lines(agent.streaming)]
 
-    pending = pending_blocks(w, agent_path, selection)
+    pending = pending_blocks(w, agent_path, selection, gate)
 
     activity =
       case pending == [] && activity_line(w, agent_path, tick, now) do
@@ -1942,14 +1951,18 @@ defmodule Troupe.UI.TUI.Model do
 
   # Whatever the window waits on, shown at the end of every agent's pane so the
   # keys that answer it (y / n / a, Enter) are explained where the reader looks.
-  defp pending_blocks(%{pending: []}, _path, _selection), do: []
+  defp pending_blocks(%{pending: []}, _path, _selection, _gate), do: []
 
-  defp pending_blocks(w, path, selection) do
+  defp pending_blocks(w, path, selection, gate) do
     [
       Enum.flat_map(w.pending, fn item ->
         who = if item.agent_path == path, do: "", else: "[#{item.agent_path}] "
 
         case item do
+          # A delegation a person asked to see first (root Decision 850, TUI Decision 157).
+          %{kind: :approval, delegation: %{} = _delegation} ->
+            gate_lines(item, who, gate)
+
           %{kind: :approval, name: name, preview: preview} ->
             [
               {:blank, ""},
@@ -1999,6 +2012,147 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   defp indent_line({tag, text}), do: {tag, "  " <> text}
+
+  ## The delegation gate (root Decision 850, TUI Decision 157)
+
+  @gate_parts [
+    {"goal", "Goal"},
+    {"context", "Context"},
+    {"constraints", "Constraints"},
+    {"deliverable", "Deliverable"},
+    {"do_not", "Do not"}
+  ]
+
+  @doc "The brief's parts in order, each with the name the gate shows it by."
+  @spec gate_parts() :: [{String.t(), String.t()}]
+  def gate_parts, do: @gate_parts
+
+  @doc """
+  The person's draft of an answer to the delegation the gate shows: the parts they edited
+  (`edits`), the subagent they switched it to (`agent`), and where the keys are (`step`:
+  `nil`; `:edit`, choosing a part; `{:edit, part}`, editing one in the box; `:switch`,
+  choosing an agent; `:deny`, typing a word back). A draft for another call is a fresh one.
+  """
+  @spec gate_draft(map() | nil, map()) :: map()
+  def gate_draft(%{call_id: id} = draft, %{call_id: id}), do: draft
+  def gate_draft(_draft, item), do: %{call_id: item.call_id, edits: %{}, agent: nil, step: nil}
+
+  @doc "The subagent a draft sends the brief to: the one switched to, else the one asked for."
+  @spec gate_agent(map(), map()) :: String.t()
+  def gate_agent(draft, item), do: draft.agent || item.delegation["agent"]
+
+  @doc "A part of the brief as the draft has it: as edited, else as the agent wrote it."
+  @spec gate_part(map(), map(), String.t()) :: String.t()
+  def gate_part(draft, item, part),
+    do: Map.get(draft.edits, part) || get_in(item.delegation, ["brief", part]) || ""
+
+  @doc """
+  What `approval.respond` carries for a draft besides its word: `agent` when it was
+  switched, `brief` with the parts edited; nothing when neither.
+  """
+  @spec gate_answer(map(), map()) :: map()
+  def gate_answer(draft, item) do
+    agent = gate_agent(draft, item)
+
+    %{}
+    |> then(&if(agent != item.delegation["agent"], do: Map.put(&1, "agent", agent), else: &1))
+    |> then(&if(draft.edits != %{}, do: Map.put(&1, "brief", draft.edits), else: &1))
+  end
+
+  # The whole thing before the child starts: the agent and where its definition is, the
+  # tools and permissions it will hold, its depth and budget share, the brief's five parts
+  # as they will be sent, and what the keys do now.
+  defp gate_lines(item, who, draft) do
+    d = item.delegation
+    draft = gate_draft(draft, item)
+    asked = d["agent"]
+    agent = gate_agent(draft, item)
+
+    [
+      {:blank, ""},
+      {:pending,
+       "#{who}DELEGATE to #{agent}#{if agent != asked, do: " (switched from #{asked})", else: ""}: " <>
+         "run it? (y run · e edit · s switch · n deny · a always for #{agent})"},
+      {:system, "  /agents #{asked} opens its definition: #{definition_where(d["definition"])}"},
+      {:system,
+       "  depth #{d["depth"]} of #{d["max_depth"]} · #{share(d["budget_share"])} of the budget · " <>
+         "tools: #{gate_tools(d["tools"])}"}
+    ] ++ switched_line(d, agent, asked) ++ brief_lines(draft, item) ++ step_lines(draft, item)
+  end
+
+  defp definition_where(definition) when is_map(definition) do
+    [definition["layer"], definition["path"]]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" ")
+  end
+
+  defp definition_where(_none), do: "its definition"
+
+  defp share(n) when is_number(n), do: "#{round(n * 100)}%"
+  defp share(_none), do: "a share"
+
+  defp gate_tools(tools) when is_list(tools) and tools != [] do
+    Enum.map_join(tools, ", ", fn tool -> "#{tool["name"]} #{tool["permission"]}" end)
+  end
+
+  defp gate_tools(_none), do: "its own"
+
+  defp switched_line(_d, agent, agent), do: []
+
+  defp switched_line(d, agent, _asked) do
+    about = Enum.find_value(d["agents"] || [], "", &(&1["name"] == agent && &1["description"]))
+    [{:system, "  #{agent} runs it instead, with its own tools and budget: #{about}"}]
+  end
+
+  defp brief_lines(draft, item) do
+    Enum.flat_map(@gate_parts, fn {part, label} ->
+      edited? = Map.has_key?(draft.edits, part)
+      tag = if edited?, do: :diff_add, else: :body
+      [first | rest] = draft |> gate_part(item, part) |> sanitize() |> String.split("\n")
+      mark = if edited?, do: " (edited)", else: ""
+      [{tag, "#{label}#{mark}: #{first}"} | Enum.map(rest, &{tag, "  " <> &1})]
+    end)
+  end
+
+  defp step_lines(%{step: nil}, _item), do: []
+
+  defp step_lines(%{step: :edit}, _item) do
+    parts =
+      @gate_parts |> Enum.with_index(1) |> Enum.map_join(" · ", fn {{_p, l}, n} -> "#{n} #{l}" end)
+
+    [{:system, "edit which part? #{parts} · Esc back"}]
+  end
+
+  defp step_lines(%{step: {:edit, part}}, _item) do
+    {_part, label} = List.keyfind(@gate_parts, part, 0, {part, part})
+
+    [
+      {:system,
+       "editing #{label}: change it in the box; Enter keeps it, Shift-Enter starts a line · Esc back"}
+    ]
+  end
+
+  defp step_lines(%{step: :switch}, item) do
+    agents =
+      (item.delegation["agents"] || [])
+      |> Enum.with_index(1)
+      |> Enum.map(fn {a, n} ->
+        {:body,
+         [
+           {:bullet_marker, "  #{n}. "},
+           {:body, a["name"] || ""},
+           {:muted, " — " <> (a["description"] || "")}
+         ]}
+      end)
+
+    agents ++ [{:system, "a digit sends the brief there · Esc back"}]
+  end
+
+  defp step_lines(%{step: :deny}, _item),
+    do: [
+      {:system,
+       "deny: type a word back for the agent that delegated, or nothing, then Enter · Esc back"}
+    ]
 
   defp keys_label(item),
     do: Enum.map_join(item.keys, "/", &if(&1 == item.default, do: String.upcase(&1), else: &1))

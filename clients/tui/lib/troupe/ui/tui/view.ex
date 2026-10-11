@@ -229,7 +229,18 @@ defmodule Troupe.UI.TUI.View do
         agent = viewed_agent(w, state.pane.agent)
         transcript = Map.get(w.agents, agent, %{transcript: []}).transcript
         entries = length(transcript)
-        blocks = Model.pane_blocks(w, agent, state.expanded, state.tick, state.now, state.answer)
+
+        blocks =
+          Model.pane_blocks(
+            w,
+            agent,
+            state.expanded,
+            state.tick,
+            state.now,
+            state.answer,
+            Map.get(state, :gate)
+          )
+
         heights = block_heights(transcript, blocks, inner_w, state.expanded)
         total = Enum.sum(heights)
         max_off = max(total - inner_h, 0)
@@ -513,6 +524,10 @@ defmodule Troupe.UI.TUI.View do
   # side panel. The catch-all clause is load-bearing: an unmatched `kind` raises
   # inside `render/2`, which ExRatatui rescues by dropping the frame — the screen
   # would freeze on stale content while the app kept consuming keys.
+  # A delegation at the gate (TUI Decision 157) has five answers, not three.
+  defp pending_summary(%{kind: :approval, delegation: %{"agent" => agent}}, _keys),
+    do: "delegation to #{agent} (y / e / s / n / a in the window)"
+
   defp pending_summary(%{kind: :approval, name: name}, keys), do: "approval: #{name} (#{keys})"
 
   defp pending_summary(%{kind: :budget} = p, keys),
@@ -2263,7 +2278,8 @@ defmodule Troupe.UI.TUI.View do
   defp hint_title(g, state) do
     w = g.window
     agents = length(Model.agent_paths(w))
-    approval? = Enum.any?(w.pending, &(&1.kind in [:approval, :budget]))
+    delegation? = Enum.any?(w.pending, &match?(%{kind: :approval, delegation: %{}}, &1))
+    approval? = not delegation? and Enum.any?(w.pending, &(&1.kind in [:approval, :budget]))
     verb = if state.expanded, do: "collapses", else: "expands"
     selection? = Map.get(state, :selection) != nil
 
@@ -2271,10 +2287,12 @@ defmodule Troupe.UI.TUI.View do
       {true, ["PgUp/PgDn ↑↓ scroll", "PgUp/PgDn scroll", "PgUp/PgDn"]},
       {not g.follow?, ["End follows the tail", "End follows", "End"]},
       {agents > 1, ["←→ other agents", "←→ agents", "←→"]},
-      {true, ["e #{verb} output", "e #{verb}", "e"]},
+      {not delegation?, ["e #{verb} output", "e #{verb}", "e"]},
       {selection?, ["Ctrl-Y copies the selection", "Ctrl-Y copies selection", "Ctrl-Y sel"]},
       {not selection?, ["drag selects · Ctrl-Y copies all", "drag · Ctrl-Y copy", nil]},
       {approval?, ["y/n/a approve", "y/n/a", "y/n/a"]},
+      # A delegation at the gate (TUI Decision 157): run, edit, switch, deny, always.
+      {delegation?, ["y/e/s/n/a delegation", "y/e/s/n/a", "y/e/s/n/a"]},
       {armed?(state, w.path, "x"), ["x again cancels & removes", "x again cancels", "x again"]},
       {armed?(state, w.path, "d"), ["d again dismisses", "d again dismisses", "d again"]},
       {not armed?(state, w.path, "x") and w.state in [:running, :needs_input],

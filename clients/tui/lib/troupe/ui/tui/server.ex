@@ -69,6 +69,7 @@ defmodule Troupe.UI.TUI.Server do
           selection: selection() | nil,
           size: {non_neg_integer(), non_neg_integer()},
           answer: answer() | nil,
+          gate: map() | nil,
           settings: settings() | nil,
           observer: %{cursor: non_neg_integer()} | nil,
           sessions: sessions() | nil,
@@ -268,6 +269,8 @@ defmodule Troupe.UI.TUI.Server do
       selection: nil,
       settings: nil,
       answer: nil,
+      # The draft of an answer to a delegation at the gate (TUI Decision 157).
+      gate: nil,
       observer: nil,
       sessions: nil,
       files: nil,
@@ -2968,6 +2971,12 @@ defmodule Troupe.UI.TUI.Server do
 
   ## Window keys
 
+  # A step of the delegation gate (TUI Decision 157) is left with Esc, the draft kept: the
+  # parts edited and the agent switched to stay until the gate is answered.
+  defp window_key(%Key{code: "esc"}, _path, %{gate: %{step: step} = draft} = state)
+       when step != nil,
+       do: clear_input(Map.put(state, :gate, %{draft | step: nil}))
+
   # Esc clears a selection before it leaves the window, so a mis-drag can be
   # cancelled without losing the pane.
   defp window_key(%Key{code: "esc"}, _path, %{selection: %{}} = state),
@@ -3002,6 +3011,34 @@ defmodule Troupe.UI.TUI.Server do
   defp window_key(%Key{code: "tab"}, _path, state),
     do: put_win(state, complete_file(state.win_text, state.model.workspace))
 
+  # While the gate waits for words, a part of the brief or a word back, every key types:
+  # the letters that answer the gate are text then (TUI Decision 157).
+  defp window_key(%Key{code: code, modifiers: mods}, _path, %{gate: %{step: step}} = state)
+       when (step == :deny or is_tuple(step)) and mods in [[], ["shift"]] and byte_size(code) == 1,
+       do: put_win(state, Input.insert(win_input(state), code))
+
+  # A delegation at the gate: `e` edits the brief and `s` sends it to another subagent;
+  # anywhere else `e` expands output and `s` is a letter.
+  defp window_key(%Key{code: code, modifiers: []}, path, %{win_text: ""} = state)
+       when code in ["e", "s"] do
+    w = Map.fetch!(state.model.windows, path)
+
+    case answerable(w, state.pane.agent || path) do
+      %{delegation: %{}} = item -> gate_key(state, item, code)
+      _ when code == "e" -> toggle_expanded(state)
+      _ -> put_win(state, code)
+    end
+  end
+
+  # A digit picks the part to edit, or the subagent to switch to, while the gate asks which.
+  defp window_key(
+         %Key{code: <<d>>, modifiers: []},
+         path,
+         %{win_text: "", gate: %{step: step}} = state
+       )
+       when d in ?1..?9 and step in [:edit, :switch],
+       do: gate_pick(state, path, d - ?0)
+
   defp window_key(%Key{code: code, modifiers: []}, path, %{win_text: ""} = state)
        when code in ["y", "n", "a"] do
     w = Map.fetch!(state.model.windows, path)
@@ -3009,6 +3046,9 @@ defmodule Troupe.UI.TUI.Server do
     case answerable(w, state.pane.agent || path) do
       nil ->
         put_win(state, code)
+
+      %{delegation: %{}} = item ->
+        gate_key(state, item, code)
 
       %{call_id: call_id} ->
         decision = %{"y" => :allow, "n" => :deny, "a" => :allow_session}[code]
@@ -3074,6 +3114,11 @@ defmodule Troupe.UI.TUI.Server do
 
   defp window_key(%Key{code: "j", modifiers: ["ctrl"]}, _path, state),
     do: put_win(state, Input.insert(win_input(state), "\n"))
+
+  # Enter keeps a part as edited, or sends the denial with its word back.
+  defp window_key(%Key{code: "enter"}, path, %{gate: %{step: step}} = state)
+       when step == :deny or is_tuple(step),
+       do: gate_enter(state, path)
 
   # Enter with nothing typed sends the ticked options of a multiple-choice
   # question. With none ticked there is nothing to send, so it falls through.
@@ -3151,6 +3196,104 @@ defmodule Troupe.UI.TUI.Server do
   # by digit or by typing, never by one of these letters (Decision 120): an amount typed
   # in a person's own words — `no limit` — must not stop the session on its first key.
   defp answerable(w, viewed), do: pending_of(w, viewed, [:approval])
+
+  # The delegation gate's keys (root Decision 850, TUI Decision 157): `y` runs it and `a`
+  # runs it and lets that agent run unasked for the session, either with the draft's edits
+  # and switch; `n` asks for a word back; `e` asks which part to edit; `s` which agent.
+  defp gate_key(state, item, code) do
+    draft = Model.gate_draft(Map.get(state, :gate), item)
+
+    case code do
+      "y" -> answer_gate(state, item, draft, :allow, Model.gate_answer(draft, item))
+      "a" -> answer_gate(state, item, draft, :allow_session, Model.gate_answer(draft, item))
+      "n" -> state |> Map.put(:gate, %{draft | step: :deny}) |> clear_input()
+      "e" -> Map.put(state, :gate, %{draft | step: :edit})
+      "s" -> Map.put(state, :gate, %{draft | step: :switch})
+    end
+  end
+
+  defp answer_gate(state, item, draft, decision, answer) do
+    case Client.approve(state.session_id, item.call_id, decision, answer) do
+      :ok ->
+        state |> Map.put(:gate, nil) |> clear_input() |> follow()
+
+      {:error, reason} ->
+        state |> Map.put(:gate, %{draft | step: nil}) |> follow() |> notice(approval_error(reason))
+    end
+  end
+
+  # A part to edit goes into the box as it stands, to be changed in place; an agent to
+  # switch to is taken at once, and the gate shows it.
+  defp gate_pick(state, path, n) do
+    w = Map.fetch!(state.model.windows, path)
+
+    with %{delegation: delegation} = item <- answerable(w, state.pane.agent || path),
+         draft = Model.gate_draft(Map.get(state, :gate), item),
+         {:ok, state} <- gate_choice(state, item, delegation, draft, n) do
+      state
+    else
+      _ -> state
+    end
+  end
+
+  defp gate_choice(state, item, _delegation, %{step: :edit} = draft, n) do
+    case Enum.at(Model.gate_parts(), n - 1) do
+      {part, _label} ->
+        state = Map.put(state, :gate, %{draft | step: {:edit, part}})
+        {:ok, put_win(state, Model.gate_part(draft, item, part))}
+
+      nil ->
+        :none
+    end
+  end
+
+  defp gate_choice(state, _item, delegation, %{step: :switch} = draft, n) do
+    case Enum.at(delegation["agents"] || [], n - 1) do
+      %{"name" => name} -> {:ok, Map.put(state, :gate, %{draft | agent: name, step: nil})}
+      _ -> :none
+    end
+  end
+
+  defp gate_choice(_state, _item, _delegation, _draft, _n), do: :none
+
+  defp gate_enter(%{gate: draft} = state, path) do
+    w = Map.fetch!(state.model.windows, path)
+
+    case answerable(w, state.pane.agent || path) do
+      %{delegation: %{}, call_id: id} = item when id == draft.call_id ->
+        case draft.step do
+          :deny -> answer_gate(state, item, draft, :deny, word_back(state.win_text))
+          {:edit, part} -> keep_part(state, item, draft, part)
+        end
+
+      _ ->
+        state |> Map.put(:gate, nil) |> clear_input()
+    end
+  end
+
+  defp word_back(text) do
+    case String.trim(text) do
+      "" -> %{}
+      word -> %{"reason" => word}
+    end
+  end
+
+  # A part kept as typed: the shape still holds, so an empty one is refused here, as the
+  # daemon would refuse it, and the edit stays open. One typed back as it was is no edit.
+  defp keep_part(state, item, draft, part) do
+    text = String.trim(state.win_text)
+
+    edits =
+      if text == get_in(item.delegation, ["brief", part]),
+        do: Map.delete(draft.edits, part),
+        else: Map.put(draft.edits, part, text)
+
+    if text == "" do
+      notice(state, "a part of the brief cannot be empty: write none where it has nothing")
+    else
+      state |> Map.put(:gate, %{draft | edits: edits, step: nil}) |> clear_input()
+    end
+  end
 
   # A single-choice question is answered by the digit itself; a multiple-choice
   # one accumulates ticks until Enter, and re-pressing a digit unticks it.
@@ -3241,6 +3384,7 @@ defmodule Troupe.UI.TUI.Server do
         pane: fresh_pane(agent),
         selection: nil
     }
+    |> Map.put(:gate, nil)
   end
 
   defp fresh_pane(agent \\ nil), do: %{agent: agent, scroll: :follow, seen_entries: 0}

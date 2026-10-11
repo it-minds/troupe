@@ -420,15 +420,22 @@ defmodule Troupe do
     Questions.answer(session_id, call_id, text, actor)
   end
 
-  @doc "Answer an outstanding approval. First response wins."
+  @doc """
+  Answer an outstanding approval. First response wins.
+
+  `answer` is what a delegation's answer carries besides its word (Decision 850):
+  `agent`, the subagent it goes to instead; `brief`, the parts the person edited; `reason`,
+  a word back with a denial. A wrong one is `{:error, sentence}`, and the request waits on.
+  """
   @spec approve(
           String.t(),
           String.t(),
           :allow | :deny | :allow_session,
-          Troupe.Protocol.Event.Actor.t() | nil
-        ) :: :ok
-  def approve(session_id, call_id, decision, actor \\ nil) do
-    Approvals.decide(session_id, call_id, decision, actor)
+          Troupe.Protocol.Event.Actor.t() | nil,
+          map()
+        ) :: :ok | {:error, String.t()}
+  def approve(session_id, call_id, decision, actor \\ nil, answer \\ %{}) do
+    Approvals.decide(session_id, call_id, decision, actor, answer)
   end
 
   @doc "Receive `{:troupe_event, session_id, event}` for everything the session does."

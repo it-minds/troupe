@@ -313,12 +313,16 @@ defmodule Troupe.Remote.Translate do
            ] ->
         {[], memory}
 
+      # A delegation a person asked to see first (root Decision 850) carries what the gate
+      # shows, as the daemon wrote it: the agent, its definition, the brief, the tools, the
+      # budget and the depth, and the subagents it could go to instead.
       type when type in ["approval.requested", "approval_requested"] ->
         {[
            emit.(:approval_requested, %{
              call_id: call_id(data),
              name: data["name"] || data["tool"] || "tool",
-             preview: preview(data)
+             preview: preview(data),
+             delegation: if(is_map(data["delegation"]), do: data["delegation"])
            })
          ], memory}
 

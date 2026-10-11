@@ -256,8 +256,8 @@ defmodule Troupe.Client.Daemon do
   def shell_cancel(sid, run_id), do: describe(Worker.shell_cancel(sid, run_id))
 
   @impl true
-  def approve(sid, call_id, decision),
-    do: describe(Worker.approve(call_target(sid, call_id), call_id, decision))
+  def approve(sid, call_id, decision, answer),
+    do: describe(Worker.approve(call_target(sid, call_id), call_id, decision, answer))
 
   @impl true
   def answer(sid, call_id, text),

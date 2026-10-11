@@ -322,8 +322,8 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
 | `cancelled` | `turn` — what the cancelled turn had cost (see below); `stopped` — the model call the cancel stopped, when one was in flight (see below) |
 | `turn_ended` | `reason` — the agent's turn is over and it waits for input: the model answered without asking for a tool, or a root's request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done`. `reason` is there only when the harness ended the turn: `tool_failures`, a tool kept failing and the answer to `tool_failures_ask_started` was `stop`; `agent_failed`, the root agent crashed as often as it may be restarted, `detail` says what it raised, and the session stops after it, to come back dormant (Decision 727). Neither turn is taken up again by a restart. `turn` — what the turn cost (see below); absent from an `agent_failed` one |
-| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it |
-| `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
+| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it. A delegation a person asked to see first (`delegation.ask` in a config file, or `delegation: ask` in the agent's definition; Decision 850) asks with `tool: "delegate"`, the call's arguments as `args`, and `delegation`: what the gate shows — `agent`; `definition` (`name`, `layer`, `path`, `description`; `agents.get` by that name opens it, and the gate never edits one); `brief` (`goal`, `context`, `constraints`, `deliverable`, `do_not`); `tools` (`[{name, permission}]`, what the child will hold); `budget_share`; `depth` (the child's) and `max_depth`; `agents` (`[{name, description}]`, the subagents it could go to instead). `auto_approve` does not answer one |
+| `approval_decided` | `call_id`, `tool`, `decision`, `actor`; for a delegation, `agent` (the subagent it went to, when allowed), `brief` and `edited` (the brief as the person edited it, and which parts), `reason` (the person's word back with a denial) |
 | `approval_resolved` | `call_id`, `resolved_by` |
 | `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple`, `preview` — the agent's `ask_user`; answered with `question.answer`. `preview`, where there is one, is text the question is about, for a client to show as it is beneath it: the prompt a workspace's command would send, when it asks before it is first sent (`commands.run`). Open until its `question_answered`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no answer), or a `cancelled` on the agent that asked or on one above it. The budget's and the failure guard's question have no call; each also ends with its `budget_ask_answered` or `tool_failures_ask_answered`, the only word there is when nobody is there to ask, and one a cancel ended is asked again at the next turn with another `question_asked` under the same `call_id` |
 | `question_answered` | `call_id`, `text`, `actor` |
@@ -949,6 +949,19 @@ dormant. A daemon configured to resume (`resume_on_restart`) resumes the loop to
 one receives an `approval_resolved` event naming who resolved it, and has no second
 effect.
 
+A delegation's request (`approval_requested` with `delegation`, Decision 850) takes three
+more, each optional: `agent`, one of the subagents its `delegation.agents` offers, to send
+the same brief there instead; `brief`, the parts the person edited (`{"constraints": "…"}`),
+laid over the brief and held to its shape, so a part sent blank is refused; `reason`, a
+word back with `deny`, which the agent that delegated receives as the call's answer.
+`allow_session` lets the agent it goes to run unasked for the rest of the session. A wrong
+one is `invalid_params` with a `reason` saying why, and the request waits on.
+
+```json
+{"command_id": "c-6", "session_id": "s-9f", "call_id": "call_7",
+ "decision": "allow", "agent": "explore", "brief": {"constraints": "Read only."}}
+```
+
 #### `question.answer`
 ```json
 {"command_id": "c-5", "session_id": "s-9f", "call_id": "call_4", "text": "the blue one"}
@@ -1146,7 +1159,8 @@ from the profile's bundle and are read-only here: change them in the console".
 `agents.get` (`observe`; `workspace` or `session_id`, or neither for the person's own and
 the built-ins) → one definition, as the session would run it: every key of an
 `agents.list` row, plus `mode` (`primary` or `subagent`), `tools` (`"all"` or the list),
-`permissions` (`{"<tool>": "auto"|"ask"|"deny"}`), `budget_share`, `skills` (`"all"` or
+`permissions` (`{"<tool>": "auto"|"ask"|"deny"}`), `budget_share`, `delegation` (`ask` when
+a delegation to it asks first by its own file, else `auto`; Decision 850), `skills` (`"all"` or
 the list), `prompt` (the instruction, the file's body), `path` (the file, `null` for a
 bundle's ACP agent), `text` (the file as it is on disk, frontmatter and all, for an
 editor), `hash` (`"sha256:<hex>"` of `text`, `null` with no file: what `agents.put`'s
@@ -1178,7 +1192,8 @@ link out of the workspace, a main checkout's draft, one a bundle's name beats) i
 (`mode`, `tools`, `model`, …), `permissions.<tool>` for one permission, `frontmatter`
 when it is not YAML, `name`, or `prompt` and `description` for the warnings. Errors: a key
 no agent has (the keys are `description`, `mode`, `model`, `tools`, `permissions`,
-`max_turns`, `budget_share`, `skills` and `override`, and onboarding's `imported_*`);
+`max_turns`, `budget_share`, `skills`, `override` and `delegation`, and onboarding's
+`imported_*`); `delegation` not `ask` or `auto`;
 `mode` missing or not `primary`/`subagent`; `tools` or `skills` not `"all"` or a list; a
 tool that does not exist (with the nearest that do); a permission not `auto`, `ask` or
 `deny`; a permission that grants (`auto` or `ask`) a tool `tools` does not list, which

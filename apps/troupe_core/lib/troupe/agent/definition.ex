@@ -37,6 +37,9 @@ defmodule Troupe.Agent.Definition do
     max_turns: nil,
     budget_share: 0.25,
     skills: [],
+    # Whether a `delegate` to this agent asks the person first (Decision 850): `:ask`, or
+    # `:auto`, the default, which runs it at once unless `delegation.ask` names it.
+    delegation: :auto,
     source: :builtin,
     # Whether the workspace a `:project` definition came from is trusted, so its `auto`
     # applies (Decision 825). Set by whoever loads it for a session (`trust/3`); one
@@ -71,6 +74,7 @@ defmodule Troupe.Agent.Definition do
           max_turns: pos_integer() | nil,
           budget_share: float(),
           skills: :all | [String.t()],
+          delegation: :auto | :ask,
           source: source(),
           trusted?: boolean(),
           notes: [note()],
@@ -201,7 +205,8 @@ defmodule Troupe.Agent.Definition do
            {tool, Atom.to_string(permission)}
          end), %{}},
         {"max_turns", definition.max_turns, nil},
-        {"budget_share", definition.budget_share, 0.25}
+        {"budget_share", definition.budget_share, 0.25},
+        {"delegation", Atom.to_string(definition.delegation), "auto"}
       ]
       |> Enum.reject(fn {_key, value, absent} -> value == absent end)
       |> Enum.reduce("", fn {key, value, _absent}, text -> put(text, key, value) end)
@@ -233,6 +238,7 @@ defmodule Troupe.Agent.Definition do
       max_turns: parsed.max_turns,
       budget_share: parsed.budget_share,
       skills: parsed.skills,
+      delegation: Map.get(parsed, :delegation, :auto),
       source: source
     }
   end

@@ -199,7 +199,14 @@ export function Session({
 
           {/* Sticky, so scrolling up to read the context never loses the decision. */}
           {open.map((entry) => (
-            <ApprovalPanel key={entry.callId} entry={entry} canAnswer={!readOnly} others={others} onAnswer={(d) => view.respond(entry.callId, d)} />
+            <ApprovalPanel
+              key={entry.callId}
+              entry={entry}
+              canAnswer={!readOnly}
+              others={others}
+              onAnswer={(d, a) => view.respond(entry.callId, d, a)}
+              onDefinition={kind !== "team" ? onAgents : undefined}
+            />
           ))}
 
           {/* The agent's questions and the harness's budget question, in the same place. */}
