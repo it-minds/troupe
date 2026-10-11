@@ -53,6 +53,7 @@ export const ErrorCodes = {
   consent_required: -32013,
   budget_exhausted: -32014,
   managed_by_gitops: -32015,
+  update_required: -32016,
 } as const;
 
 export type Scope = "observe" | "control" | "admin";

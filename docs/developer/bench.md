@@ -195,8 +195,9 @@ The first four are the `smoke` suite, the default; the next six with them are `s
 (Decision 815), whose second turn begins with an instruction file the first brought in,
 and [prompt-prefix.md](prompt-prefix.md) says how it is run with each of that issue's
 settings. `task_list` is in neither suite either: that issue's other change, each turn after
-the first beginning with the task list the turn before left in the system prompt
-(Decision 792), on the `plan` agent, which always has the list's tools. A scenario's
+the first beginning with the task list the turn before left (Decision 792; in the system
+prompt with `system_prompt: per_turn`, with the turn by default, Decision 863), on the
+`plan` agent, which always has the list's tools. A scenario's
 `follow_ups` are typed one after another, each once the turn
 before has ended by itself, under the run's one deadline and cap.
 `LiveScenarios.select/2` takes a suite or a list of names, which may come from either, and
@@ -256,7 +257,7 @@ Schema 1, with `"mode": "live"`, and these added:
 |---|---|---|
 | the report | `model`, `repeat`, `cap_micros`, `started_at`, `skipped[]` | what ran against what, how often, under what cap; the scenarios left out, `{name, why}` |
 | the report | `live_suite`, `kept_in` | `smoke`, `standard`, or `only` for scenarios named; where `--keep` left the runs, else `null` (Decision 775) |
-| the report, a history line | `experiment` | issue #465's two settings the runs had, `thinking_binding` and `system_prompt`, from the person's configuration or `TROUPE_THINKING_BINDING` and `TROUPE_SYSTEM_PROMPT` (Decision 815) |
+| the report, a history line | `experiment` | issue #465's two settings the runs had, `thinking_binding` and `system_prompt`, from the person's configuration or `TROUPE_THINKING_BINDING` and `TROUPE_SYSTEM_PROMPT` (Decisions 815 and 863) |
 | a run, the `summary` | `prefix` | `Troupe.Bench.Prefix.count/1` of the run's log, added up in the summary: `model_calls`, `system_changes`, `tools_changes`, `inferred`, `thinking_resent`, `thinking_dropped`, `calls_dropping`, `turn_contexts` ([prompt-prefix.md](prompt-prefix.md)) |
 | the report | `summary` | every run together: `scenarios`, `runs`, `succeeded`, `success_rate`, `success_low`, `success_high` (the 95% Wilson interval), `cost_micros`, `cost_per_run_micros`, `cost_per_success_micros`, `model_calls`, `input_tokens`, `cached_tokens`, `output_tokens`, `tokens_per_success`, `wall_ms`, `median_wall_ms` |
 | a scenario | `metrics[]` | taken over its runs, with no budget: `success_rate` with `success_low` and `success_high`, `median_cost`, `worst_cost` and `cost_per_success` (in dollars), and the medians `median_wall_ms`, `median_call_ms`, `median_first_token_ms`, `median_model_calls`, `median_input_tokens`, `median_cached_tokens`, `median_output_tokens`, `median_largest_tool_result` (bytes) |

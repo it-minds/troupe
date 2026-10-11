@@ -23,7 +23,9 @@ defmodule Troupe.Bench.LiveScenarios do
   is what changes a prompt between turns and what issue #465's two options are measured
   on (Decision 815). `task_list`, in neither suite either, is that issue's other change:
   three turns on the `plan` agent, each after the first beginning with the task list the
-  turn before left.
+  turn before left. `long_turn`, also by name, is one turn of thirteen calls on `build`
+  with no list, where the task list's tools were offered from the eleventh (issue #590,
+  Decision 867).
   """
 
   alias Troupe.Bench.Scenario
@@ -49,7 +51,8 @@ defmodule Troupe.Bench.LiveScenarios do
       follow_steps(),
       answer_only(),
       follow_up(),
-      task_list()
+      task_list(),
+      long_turn()
     ]
   end
 
@@ -619,6 +622,50 @@ defmodule Troupe.Bench.LiveScenarios do
             length(items) == 3 and Enum.all?(items, &(&1["status"] == "completed"))},
            {"answer", "the last reply names b.txt and 440",
             answer =~ "b.txt" and answer =~ ~r/\b440\b/}
+         ]}
+      end
+    }
+  end
+
+  # -- one turn of more than ten calls, on an agent with every tool ---------------------
+
+  # Twelve files, each holding a number and naming the next.
+  @chain ~w(start k7 b2 x9 m4 q1 d8 r3 h6 t5 w0 z2)
+  @chain_numbers [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8]
+
+  defp chain do
+    nexts = Enum.map(tl(@chain), &"chain/#{&1}.txt") ++ ["none"]
+
+    [@chain, @chain_numbers, nexts]
+    |> Enum.zip()
+    |> Enum.map(fn {name, n, next} -> {"chain/#{name}.txt", "number: #{n}\nnext: #{next}\n"} end)
+  end
+
+  # Issue #590 (Decision 867): an agent with every tool is offered the task list's tools
+  # once its turn has made ten model calls (Decision 793), and the tools are the start of
+  # every prompt, in front of any thinking a turn hands back. One turn on `build` with no
+  # list: the first call works a number out without a tool, which is what makes a model
+  # think and hand back a block every later call carries; then twelve files read one after
+  # another, each naming the next, so no two reads go in one response. The eleventh call
+  # and those after it are the ones a change of tools would make stale.
+  defp long_turn do
+    %Scenario{
+      name: "long_turn",
+      title: "one turn of more than ten calls, on an agent with every tool",
+      config: [max_turns: 20],
+      prompt: """
+      First work out N, the sum of the prime numbers below 60, yourself, with no tool. Then read chain/start.txt with read_file. Each file holds a number and names the next file to read: read that one, one file a response, until a file says next: none. Then say in one short sentence what N is and what the numbers you read add up to.\
+      """,
+      files: Map.new(chain()),
+      measure: fn ctx ->
+        answer = reply(ctx)
+        calls = Enum.count(ctx.events, &(&1.type == "llm_request" and &1.agent == ["root"]))
+
+        {[],
+         [
+           {"answer", "the reply names 440 and #{Enum.sum(@chain_numbers)}",
+            answer =~ ~r/\b440\b/ and answer =~ ~r/\b#{Enum.sum(@chain_numbers)}\b/},
+           {"long", "the turn made more than ten model calls", calls > 10}
          ]}
       end
     }

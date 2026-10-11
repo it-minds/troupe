@@ -54,11 +54,13 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
   # A thinking block the conversation no longer vouches for is answered by the same call
   # with no thinking in it, once (Decision 805), and the response says it was, for the log
-  # to count (Decision 815).
+  # to count (Decision 815), with what the refusal's header said of why (Decision 863).
   defp post_kept(request, key, reply_to, ref) do
-    with :bound_elsewhere <- post(request, key, reply_to, ref, :first),
-         {:ok, response} <- post(request, key, reply_to, ref, :without_thinking),
-         do: {:ok, %{response | thinking_resent: true}}
+    with {:bound_elsewhere, mismatch} <- post(request, key, reply_to, ref, :first),
+         {:ok, response} <- post(request, key, reply_to, ref, :without_thinking) do
+      {:ok,
+       %{response | thinking_resent: true, prefix_mismatch: response.prefix_mismatch || mismatch}}
+    end
   end
 
   defp post(request, key, reply_to, ref, pass) do
@@ -69,7 +71,7 @@ defmodule Troupe.LLM.Providers.Anthropic do
     options = [
       url: Endpoint.build(base_url(request), "/v1/messages"),
       method: :post,
-      json: request |> body(thinking, keep_thinking?) |> bind_blocks(bind?),
+      json: request |> body(thinking, keep_thinking?) |> bind_blocks(bind?, request),
       headers:
         [
           auth_header(request, key),
@@ -103,8 +105,8 @@ defmodule Troupe.LLM.Providers.Anthropic do
       {:ok, %Req.Response{status: status, body: body}} when status >= 500 ->
         {:retry, {:http_status, status, detail(body, key)}}
 
-      {:ok, %Req.Response{status: 400, body: body}} ->
-        refused(detail(body, key), thinking, request, keep_thinking?)
+      {:ok, %Req.Response{status: 400, body: body} = response} ->
+        refused(detail(body, key), thinking, request, keep_thinking?, response)
 
       {:ok, %Req.Response{status: status, body: body}} ->
         {:error, {:http_status, status, detail(body, key)}}
@@ -165,9 +167,16 @@ defmodule Troupe.LLM.Providers.Anthropic do
       %{acc: acc} ->
         # The gateway's headers are read here rather than in the collector because they
         # belong to the HTTP response and not to the event stream: a gateway sends them
-        # once, before the first chunk, and the collector never sees them.
+        # once, before the first chunk, and the collector never sees them. The API's own
+        # word on a dropped block is a header too (Decision 863).
         answer = Collector.to_response(acc)
-        {:ok, %{answer | gateway: Gateway.from_headers(response.headers)}}
+
+        {:ok,
+         %{
+           answer
+           | gateway: Gateway.from_headers(response.headers),
+             prefix_mismatch: prefix_mismatch(response)
+         }}
     end
   end
 
@@ -369,22 +378,27 @@ defmodule Troupe.LLM.Providers.Anthropic do
   # Issue #465's first option, when `thinking_binding: drop_block` asks for it (Decision
   # 815): Anthropic's beta, and in the thinking field the API's leave to drop a kept block
   # whose conversation changed since it was made — and every thinking block after it — in
-  # place of the 400 that `post_kept/4` answers by sending the call again. A request that
-  # hands no thinking back has nothing to bind and goes as it would. With no effort the
-  # field is adaptive thinking with nothing else in it, which is what a model that thinks
-  # unasked does with no field at all; with one, the binding goes beside what it asks for.
+  # place of the 400 that `post_kept/4` answers by sending the call again. `error` (issue
+  # #591, Decision 863) asks for that 400 instead, on any account, which is what an
+  # account the check is enforced for gets without the beta. A request that hands no
+  # thinking back has nothing to bind and goes as it would. With no effort the field is
+  # adaptive thinking with nothing else in it, which is what a model that thinks unasked
+  # does with no field at all; with one, the binding goes beside what it asks for.
   @binding_beta "thinking-binding-controls-2026-08-01"
 
-  defp bind?(%Request{thinking_binding: "drop_block"}, keep_thinking?), do: keep_thinking?
+  defp bind?(%Request{thinking_binding: binding}, keep_thinking?)
+       when binding in ["drop_block", "error"],
+       do: keep_thinking?
+
   defp bind?(_request, _keep_thinking?), do: false
 
   defp binding_header(false), do: []
   defp binding_header(true), do: [{"anthropic-beta", @binding_beta}]
 
-  defp bind_blocks(body, false), do: body
+  defp bind_blocks(body, false, _request), do: body
 
-  defp bind_blocks(body, true) do
-    binding = %{prefix_mismatch_behavior: "drop_block"}
+  defp bind_blocks(body, true, %Request{thinking_binding: behavior}) do
+    binding = %{prefix_mismatch_behavior: behavior}
 
     Map.update(
       body,
@@ -392,6 +406,37 @@ defmodule Troupe.LLM.Providers.Anthropic do
       %{type: "adaptive", block_binding: binding},
       &Map.put(&1, :block_binding, binding)
     )
+  end
+
+  # Issue #591 (Decision 863): on a mismatch the API may say what kind of edit it saw and
+  # where it begins, in a header it has not published, `key=value` pairs apart by `;`. The
+  # response keeps it for the log, in the API's own words only: the pairs whose name is one
+  # of its diagnosis's and whose value is a word, a path into the request or a list of
+  # them. Whatever else a later version puts there, a quotation included, goes no further;
+  # a header with none of those is kept as having been there.
+  @mismatch_header "anthropic-thinking-prefix-mismatch"
+  @mismatch_keys ~w(kind pattern sections changed_validated position)
+  @mismatch_word ~r/\A[A-Za-z0-9_.,\-]{1,64}\z/
+
+  defp prefix_mismatch(%Req.Response{} = response) do
+    case Req.Response.get_header(response, @mismatch_header) do
+      [] -> nil
+      [value | _rest] -> diagnosis(value)
+    end
+  end
+
+  defp diagnosis(value) do
+    kept =
+      for part <- String.split(value, ";"),
+          [name, word] <- [part |> String.split("=", parts: 2) |> Enum.map(&String.trim/1)],
+          name in @mismatch_keys and Regex.match?(@mismatch_word, word),
+          do: name <> "=" <> word
+
+    cond do
+      kept != [] -> Enum.join(kept, "; ")
+      Regex.match?(@mismatch_word, String.trim(value)) -> String.trim(value)
+      true -> "unrecognised"
+    end
   end
 
   # A 400 that is about the thinking this request carried is said in words that name the
@@ -406,13 +451,13 @@ defmodule Troupe.LLM.Providers.Anthropic do
   # longer vouches for — after an edit to the system prompt, say — with a 400 that says
   # so. The API's documented way on is the request again with no thinking in it, which is
   # what every one of these requests was before Decision 805: `:bound_elsewhere` asks for
-  # it.
+  # it, with what the API's header said of the edit (Decision 863).
   @bound_elsewhere "Invalid `signature` in `thinking` block"
 
-  defp refused(detail, thinking, request, keep_thinking?) do
+  defp refused(detail, thinking, request, keep_thinking?, response) do
     cond do
       keep_thinking? and String.contains?(detail, @bound_elsewhere) ->
-        :bound_elsewhere
+        {:bound_elsewhere, prefix_mismatch(response)}
 
       thinking && String.contains?(detail, @thinking_words) ->
         {:error, {:thinking_refused, refusal(thinking, request), detail}}

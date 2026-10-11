@@ -1,0 +1,12 @@
+# The minisign public keys a release is signed with (#66, Decision 865), one base64 line
+# (`RW...`) each. Every troupe and troupe-daemon is built with these and installs only a
+# release whose manifest one of them signed; nothing at run time adds one.
+#
+# The first is the current key: CI signs with it (the `release` environment's secret
+# RELEASE_MINISIGN_KEY), and `scripts/release-installers` writes it into the installers
+# attached to a release. A key being rotated out stays below it for one release, signed
+# with RELEASE_MINISIGN_KEY_PREVIOUS as well, so that a client built before the rotation
+# can still check that release.
+#
+# The release key, created by the maintainer on 2026-10-11 (key id 513B504E4D472FED).
+RWTtL0dNTlA7UdUhY1AQD8uF2Px0iQAlw3UwznjEgirTPjJ2BR9g2fDg

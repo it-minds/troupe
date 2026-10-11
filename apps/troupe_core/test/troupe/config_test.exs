@@ -115,6 +115,26 @@ defmodule Troupe.ConfigTest do
     test "a missing file is not an error", %{root: root} do
       assert %Config{} = Config.load(root)
     end
+
+    # Issue #465, decided (Decision 863): a stable system prompt unless a person chose the
+    # old one by its name; and #591's third value of thinking_binding.
+    test "the prompt-prefix settings: stable by default, per_turn and error by name",
+         %{root: root} do
+      config = Config.load(root)
+      assert config.system_prompt == "stable"
+      assert config.thinking_binding == "default"
+      assert Schema.at(["system_prompt"]).default == "stable"
+
+      File.write!(Path.join(root, ".troupe/config.yaml"), """
+      system_prompt: per_turn
+      thinking_binding: error
+      """)
+
+      config = Config.load(root)
+      assert config.system_prompt == "per_turn"
+      assert config.thinking_binding == "error"
+      assert config.warnings == []
+    end
   end
 
   # Seven of the shipped profiles name a model by alias — `cheap` for the librarian, the

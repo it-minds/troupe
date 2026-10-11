@@ -9,6 +9,8 @@ defmodule Troupe.Remote.RPC do
   tools it offered a session (`Troupe.Remote.Offer`).
   """
 
+  alias Troupe.Protocol.ClientUpdate
+
   @type incoming ::
           {:result, term(), term()}
           | {:error, term(), map()}
@@ -104,7 +106,8 @@ defmodule Troupe.Remote.RPC do
     -32_012 => :payload_too_large,
     -32_013 => :consent_required,
     -32_014 => :budget_exhausted,
-    -32_015 => :managed_by_gitops
+    -32_015 => :managed_by_gitops,
+    -32_016 => :update_required
   }
 
   @doc "The contract's error table (PROTOCOL.md §10): each code and its token."
@@ -124,6 +127,10 @@ defmodule Troupe.Remote.RPC do
   the table, and nobody can act on it. A server that words its message keeps its words.
   """
   @spec describe(map()) :: String.t()
+  # A plane that does not serve this version says what to run (Decision 868), and that is
+  # the whole of what a person needs: one sentence, worded as the daemon words it too.
+  def describe(%{code: -32_016} = error), do: ClientUpdate.sentence(error[:data])
+
   def describe(%{message: message} = error) when is_binary(message) and message != "" do
     reason = reason(error)
     worded = if message == token(reason), do: nil, else: message

@@ -936,13 +936,16 @@ Found by the #371 fixer, 2026-10-08.
   dropped on every call with `drop_block`. Once a call is refused or reports drops,
   sending the leading run of pre-change blocks no more would end it (Anthropic accepts a
   leading run removed oldest first).
-- Decision 793 offers the todo tools once a list exists or after 10 calls, which changes
-  `tools` mid-turn: that invalidates every kept block on the newest models and the cache.
-  `llm_request.tools_changed` counts it.
-- Unchecked: whether `split_for_compaction` strips thinking from the tail compaction
-  keeps; Anthropic's documentation says a kept tail breaks the binding unless it does.
-- With `system_prompt: stable`, the turn contexts live in the agent's state, not the log,
-  so an agent restarted mid-session edits its history once.
+- On a model that does not bind its thinking, Decision 793 still offers the todo tools once
+  a list exists or after 10 calls, which changes `tools` mid-turn and costs a cache write
+  (`llm_request.tools_changed` counts it). A model that binds has them from the first call,
+  and a compaction's kept tail goes without its thinking there (Decision 867). A loop
+  turn's `goal_complete` and MCP tools that come and go still change `tools` on a binding
+  model: #606.
+- A log written before 0.13.0 has no `turn_context_block` to fold (Decision 863): a session
+  that ran `system_prompt: stable` then sends its first call after a resume without the
+  turn contexts it had put, and one that ran 0.12.0's `per_turn` default changes its system
+  prompt at that call; once either way.
 - Unchecked: whether LiteLLM carries `anthropic-beta` into Amazon Bedrock's
   `anthropic_beta` body field.
 
@@ -1270,6 +1273,34 @@ Found by the chunk 27 fixers, 2026-10-11.
 - **Default limits.** The default limits #389 named were set, not tuned against measured runs: the tool output cap, the compaction threshold, and a turn's budget. #389 closed with that owed. #465's measurement (chunk 28) gave the first numbers for Anthropic's models, but none of them was tuned from it.
 
 Found by the chunk 28 fixers and the coordinator, 2026-10-11.
+
+### D122 - Updates, the prompt prefix and the plane's checks after chunk 29 (low)
+
+- **Building a test release key.** Restoring `apps/troupe_core/priv/release-keys.txt` with a copy keeps the file's old timestamp, so `Troupe.Release.Keys` isn't rebuilt. A worktree's `_build/prod` can then trust only a throwaway test key, and an install from it would refuse every real release. After a test build, touch the file or delete `_build/prod/lib/troupe_core` (Decision 865's test-build method).
+- **Pre-releases aren't signed.** `prerelease.yml` can be dispatched on any branch, so it has no access to the release key, and `troupe update` refuses its builds. Whether pre-releases get a key of their own is undecided.
+- **Releases reach `troupe update` only once marked Latest.** `release.yml` publishes a `-beta` version as a GitHub pre-release, and `/releases/latest` skips pre-releases. A machine with no plane, and the installers' default, see a release only after it's marked Latest by hand. A signed-in client follows its plane's `recommended` (Decision 868).
+- **The daemon's own update.**
+  - A machine with only the daemon (the desktop app's) has no updater: `troupe-daemon` can't replace the directory it runs from on Windows.
+  - A turn can start in the 250 ms between `daemon.stop` answering and the stop, and a client can restart the old daemon before the swap. Decision 865 records both.
+- **What the plane's version check is.**
+  - Client versions are what the client says, so `update_required` is a service to the person, not access control: a client that lies, a script, or a client from before 0.13.0 is never refused.
+  - Only `initialize` judges; a connected client isn't re-checked when the policy changes.
+  - The TUI doesn't show `client_update.action: "suggest"` yet.
+  - The plane doesn't record which version each client runs.
+  - The desktop app neither calls `initialize` nor shows `update_required`.
+- **Wording.**
+  - The no-key refusal says the same thing twice ("installs no release; nothing is installed").
+  - `troupe login` against a plane that refuses the version keeps the credentials and exits 1 with the sentence, where "signed in, but..." would read better.
+- **`notify_url`.**
+  - A network-specific NAT64 prefix (`64:ff9b:1::/48`, a provider's own) and Teredo (`2001::/32`) also carry an IPv4 address that neither `Reach` nor the plane reads; covering them needs a setting naming the cluster's prefix.
+  - An `https` receiver, which gets its name through Mint's `hostname` for SNI and the certificate check, has no test.
+- **The prompt prefix.**
+  - The summariser's refused-and-resent call isn't logged (`compacted` has no `thinking_resent` or `prefix_mismatch`), so `Troupe.Bench.Prefix.count/1` misses it.
+  - With a context window close to the base prompt's size, compaction fires before every call, since what is left stays over the threshold, and nothing stops the loop.
+  - `llm_request.prompt_bytes.brief` is 0 under the stable prompt (the brief counts as conversation bytes, Decision 815), so Decision 769's breakdown no longer shows it.
+- **The live bench.** Its plan text and cost cap ignore a scenario's own config, such as `long_turn`'s `max_turns: 20`.
+
+Found by the chunk 29 fixers, 2026-10-11.
 
 ## Taken
 

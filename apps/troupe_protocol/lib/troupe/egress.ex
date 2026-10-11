@@ -147,7 +147,9 @@ defmodule Troupe.Egress do
       host: nil,
       setting: "notify_url (per trigger)",
       why:
-        "where a trigger posts its outcome. Absolute and not loopback, checked at save and again at send"
+        "where a trigger posts its outcome. Absolute; not loopback, link-local, a cloud metadata " <>
+          "address or in 100.64.0.0/10, by address or by what its name resolves to; checked at " <>
+          "save and again at send, and posted to the address the second check passed"
     },
 
     # -- what the operator dials ---------------------------------------------

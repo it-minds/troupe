@@ -46,6 +46,11 @@ defmodule Troupe.Plane.Web.Live.Policy do
 
   The panels and the fields both come from the answer to `admin.settings.list`, so a
   setting added to `Troupe.Plane.Settings` appears here without this file changing.
+
+  **Client versions** has a small panel of its own here (`admin.clients.get` and
+  `admin.clients.put`, Decision 868): per component the recommended version, the minimum
+  and the blocked list. It is a policy rather than a setting — three values a client is
+  judged by together — and the console's redo (#56) gives it a screen, with who runs what.
   """
 
   use Phoenix.LiveView, layout: false
@@ -76,7 +81,8 @@ defmodule Troupe.Plane.Web.Live.Policy do
        laddered: [],
        effective: [],
        teams: [],
-       as_team: nil
+       as_team: nil,
+       clients: %{}
      )
      |> load()}
   end
@@ -109,6 +115,27 @@ defmodule Troupe.Plane.Web.Live.Policy do
          socket
          |> forget(key)
          |> assign(notice: "#{key} is back to #{inspect(applied.value)}, from the deployment.")
+         |> load()}
+
+      {:error, error} ->
+        {:noreply, assign(socket, error: describe(error), notice: nil)}
+    end
+  end
+
+  # One component's version policy, as the form holds it: every field is sent, so what the
+  # form shows is what is saved, and a field left blank clears that value (Decision 868).
+  def handle_event("save-clients", %{"component" => component} = params, socket) do
+    policy = %{
+      "recommended" => presence(params["recommended"]),
+      "minimum" => presence(params["minimum"]),
+      "blocked" => versions(params["blocked"])
+    }
+
+    case Admin.clients_put(socket.assigns.actor, component, policy) do
+      {:ok, now} ->
+        {:noreply,
+         socket
+         |> assign(notice: "#{client_name(component)}: #{policy_line(now)}.", error: nil)
          |> load()}
 
       {:error, error} ->
@@ -157,10 +184,42 @@ defmodule Troupe.Plane.Web.Live.Policy do
         )
         |> resolve()
         |> teams()
+        |> clients()
 
       {:error, error} ->
         assign(socket, groups: [], settings: [], error: describe(error))
     end
+  end
+
+  defp clients(socket) do
+    case Admin.clients_get(socket.assigns.actor) do
+      {:ok, %{clients: clients}} -> assign(socket, clients: clients)
+      {:error, _error} -> assign(socket, clients: %{})
+    end
+  end
+
+  # In the order a reader thinks of them, rather than the map's.
+  defp client_rows(clients) do
+    for component <- ~w(tui daemon desktop), policy = clients[component], do: {component, policy}
+  end
+
+  defp client_name("tui"), do: "troupe"
+  defp client_name("daemon"), do: "troupe-daemon"
+  defp client_name("desktop"), do: "the desktop app"
+
+  defp policy_line(policy) do
+    [
+      "recommended #{shown_value(policy.recommended)}",
+      "minimum #{shown_value(policy.minimum)}",
+      "blocked #{if policy.blocked == [], do: "none", else: Enum.join(policy.blocked, ", ")}"
+    ]
+    |> Enum.join(", ")
+  end
+
+  defp versions(nil), do: []
+
+  defp versions(text) do
+    text |> String.split([",", " "], trim: true) |> Enum.map(&String.trim/1)
   end
 
   # One call per laddered setting, which is five. Asked through `Admin` like everything
@@ -318,6 +377,58 @@ defmodule Troupe.Plane.Web.Live.Policy do
           accepted and quietly clamped — a form that took a number the system is not using
           has told somebody a lie it knew about.
         </p>
+      </section>
+
+      <section id="client-versions" class="panel">
+        <h2>Client versions</h2>
+        <p class="lede">
+          Which versions of troupe, troupe-daemon and the desktop app this plane serves. A
+          client below the minimum, or on a blocked version, is refused when it connects and
+          told to run <code>troupe update</code>, which installs the recommended version for a
+          person signed in here, and only if the release key signed it. Versions are written as
+          releases are numbered, such as <code>0.13.0-beta</code>; a blank field is no value.
+        </p>
+
+        <form
+          :for={{component, policy} <- client_rows(@clients)}
+          id={"clients-#{component}"}
+          class="setting"
+          phx-submit="save-clients"
+        >
+          <input type="hidden" name="component" value={component} />
+          <h3>{client_name(component)}</h3>
+
+          <label>
+            recommended
+            <input
+              name="recommended"
+              value={policy.recommended}
+              disabled={@actor.role != :platform_admin}
+            />
+          </label>
+          <label>
+            minimum
+            <input name="minimum" value={policy.minimum} disabled={@actor.role != :platform_admin} />
+          </label>
+          <label>
+            blocked
+            <input
+              name="blocked"
+              value={Enum.join(policy.blocked, ", ")}
+              disabled={@actor.role != :platform_admin}
+            />
+          </label>
+
+          <p class="micro">
+            {if policy.updated_by,
+              do: "set by #{policy.updated_by}",
+              else: "nothing set: every version is served"}
+          </p>
+
+          <div class="setting__actions">
+            <button type="submit" disabled={@actor.role != :platform_admin}>save</button>
+          </div>
+        </form>
       </section>
 
       <section :for={group <- @groups} class="panel">

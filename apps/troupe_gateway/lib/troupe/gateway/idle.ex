@@ -11,6 +11,9 @@ defmodule Troupe.Gateway.Idle do
   an unanswered approval or question is as durable as the rest of its log. This is the
   last rung of the ladder from a running turn to the daemon's exit, every clock of which
   is set in one place: [troupe-daemon](../../../../troupe_daemon/README.md#how-long-it-stays-up).
+
+  It is also what stops the daemon when `troupe update` asks it to, between turns, so its
+  release can be replaced (`daemon.stop`, Decision 865): the same stop, on request.
   """
 
   use GenServer
@@ -29,6 +32,19 @@ defmodule Troupe.Gateway.Idle do
   @spec busy?() :: boolean()
   def busy?, do: Connections.count() > 0 or Troupe.any_active_sessions?()
 
+  @doc """
+  Stop the daemon now, for `daemon.stop` (Decision 865), when it was started to be
+  stopped so: `stop_on_request: true`, which `troupe-daemon run` passes and a TUI that
+  runs the daemon inside itself does not. `:not_stoppable` otherwise. The stop comes a
+  moment after the answer, so the answer reaches the client that asked.
+  """
+  @spec stop_on_request() :: :ok | :not_stoppable
+  def stop_on_request, do: GenServer.call(__MODULE__, :stop_on_request)
+
+  @doc "Whether `stop_on_request/0` would stop this daemon."
+  @spec stoppable?() :: boolean()
+  def stoppable?, do: GenServer.call(__MODULE__, :stoppable?)
+
   @impl GenServer
   def init(opts) do
     Process.set_label("troupe idle watch")
@@ -37,11 +53,24 @@ defmodule Troupe.Gateway.Idle do
       idle_ms: Keyword.get(opts, :idle_shutdown_ms, @default_idle_ms),
       interval_ms: Keyword.get(opts, :idle_check_ms, @check_interval_ms),
       stop: Keyword.get(opts, :on_idle, &default_stop/0),
+      on_request: Keyword.get(opts, :stop_on_request, false),
       quiet_since: now()
     }
 
     schedule(state)
     {:ok, state}
+  end
+
+  @impl GenServer
+  def handle_call(:stoppable?, _from, state), do: {:reply, state.on_request, state}
+
+  def handle_call(:stop_on_request, _from, %{on_request: false} = state),
+    do: {:reply, :not_stoppable, state}
+
+  def handle_call(:stop_on_request, _from, state) do
+    Logger.info("troupe: asked to stop between turns (daemon.stop), shutting down")
+    Process.send_after(self(), :stop_now, 250)
+    {:reply, :ok, state}
   end
 
   @impl GenServer
@@ -61,6 +90,11 @@ defmodule Troupe.Gateway.Idle do
       end
 
     schedule(state)
+    {:noreply, state}
+  end
+
+  def handle_info(:stop_now, state) do
+    state.stop.()
     {:noreply, state}
   end
 

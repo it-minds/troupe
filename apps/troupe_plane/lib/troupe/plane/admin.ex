@@ -37,6 +37,7 @@ defmodule Troupe.Plane.Admin do
     Breakglass,
     Budget,
     Bundles,
+    ClientVersions,
     ClusterPolicy,
     Connections,
     Drain,
@@ -1632,6 +1633,49 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # -- which client versions this plane serves -------------------------------
+
+  @doc """
+  Every component's version policy: the recommended version, the minimum, the blocked list,
+  and who set them last (Decision 868).
+
+  Readable by a team admin, because "why is my team's terminal refused" is their question;
+  changing it is a platform admin's, since it holds every team's clients alike.
+  """
+  @spec clients_get(actor()) :: result()
+  def clients_get(actor) do
+    with :ok <- require_admin(actor), do: {:ok, %{clients: ClientVersions.all()}}
+  end
+
+  @doc """
+  Change one component's version policy.
+
+  Partial: the keys sent change, a key sent as `null` is cleared, and `blocked` is the whole
+  list. Refused, with nothing written, for a version SemVer cannot read, a minimum newer
+  than the recommended version, or a recommended version that is blocked. Audited with the
+  diff. A client is held to it at its next `initialize`.
+  """
+  @spec clients_put(actor(), String.t(), map()) :: result()
+  def clients_put(actor, component, policy) do
+    with :ok <- require_platform_admin(actor) do
+      case ClientVersions.put(component, policy || %{}, actor.subject) do
+        {:ok, %{before: before, now: now}} ->
+          changes = Audit.diff(policy_fields(before), policy_fields(now))
+          {:ok, _} = Audit.record(actor.subject, "clients.put", component, changes)
+          {:ok, Map.put(now, :changes, changes)}
+
+        {:error, why} ->
+          {:error, Error.new(:invalid_params, why)}
+      end
+    end
+  end
+
+  @doc "The keys a component's policy takes, as `admin.clients.put` declares them."
+  @spec client_policy_keys() :: [String.t()]
+  def client_policy_keys, do: ClientVersions.keys()
+
+  defp policy_fields(policy), do: Map.take(policy, [:recommended, :minimum, :blocked])
+
   # -- the identity provider --------------------------------------------------
 
   @sign_in_keys ~w(issuer client_id client_secret authorization_endpoint device_authorization_endpoint token_endpoint scopes mcp_scope)
@@ -2741,9 +2785,11 @@ defmodule Troupe.Plane.Admin do
     `ClusterPolicy.egress_allowed?/1` a pod's NetworkPolicy is generated from. A host in a
     bundle that the policy refuses is a tool that will fail at the moment somebody uses it,
     and this is where that is visible before then rather than after.
-  * **Notification targets**, with the rule they are held to: absolute, and not loopback.
-    A relative target resolved against the plane's own base URL is the advisory LangGraph
-    shipped in 2026, and it is cheaper to have this check than to explain it.
+  * **Notification targets**, with the rule they are held to: absolute, and not at an
+    address a worker is refused (loopback, link-local, a cloud's metadata service) nor in
+    the shared address space, `100.64.0.0/10` (`Troupe.Plane.Triggers.Notify`, Decision
+    866). A relative target resolved against the plane's own base URL is the advisory
+    LangGraph shipped in 2026, and it is cheaper to have this check than to explain it.
 
   Read-only. The allowlist is generated from what each component declares it dials, and an
   allowlist edited in two places is an allowlist nobody trusts — so this page says where

@@ -170,7 +170,8 @@ defmodule Troupe.Plane.AdminParityTest do
       {"admin.principal.create", "principal"} => Principals.create_keys(),
       {"admin.team.update", "attrs"} => Admin.team_keys(),
       {"admin.team.enable", "attrs"} => ["name" | Admin.team_keys()],
-      {"admin.host.register", "host"} => Admin.host_keys()
+      {"admin.host.register", "host"} => Admin.host_keys(),
+      {"admin.clients.put", "policy"} => Admin.client_policy_keys()
     }
   end
 

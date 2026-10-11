@@ -30,6 +30,9 @@ defmodule Troupe.Test.FakeTransport do
     * `:fail_body` — the error message those failures carry (default "slow down")
     * `:transport_error` — fail this many attempts with a transport error first
     * `:record` — a pid to send `{:request, %Req.Request{}}` to on each attempt
+    * `:headers` — response headers the stream answers with beside its content type,
+      `%{"name" => ["value"]}`
+    * `:fail_headers` — the same for the failures
   """
   @spec adapter(keyword()) :: {module(), map()}
   def adapter(opts \\ []) do
@@ -56,10 +59,11 @@ defmodule Troupe.Test.FakeTransport do
 
       attempt < transport_errors + status_errors ->
         status = Map.get(config, :fail_status, 429)
-        error_response(request, status, Map.get(config, :fail_body, "slow down"))
+        message = Map.get(config, :fail_body, "slow down")
+        error_response(request, status, message, Map.get(config, :fail_headers, %{}))
 
       true ->
-        stream(request, Map.get(config, :chunks, []))
+        stream(request, Map.get(config, :chunks, []), Map.get(config, :headers, %{}))
     end
   end
 
@@ -78,15 +82,16 @@ defmodule Troupe.Test.FakeTransport do
   def body(%Req.Request{body: body}) when is_binary(body), do: Jason.decode!(body)
   def body(%Req.Request{body: body}), do: body |> IO.iodata_to_binary() |> Jason.decode!()
 
-  defp stream(request, chunks) do
-    response = Req.Response.new(status: 200, headers: %{"content-type" => ["text/event-stream"]})
+  defp stream(request, chunks, extra) do
+    headers = Map.merge(%{"content-type" => ["text/event-stream"]}, extra)
+    response = Req.Response.new(status: 200, headers: headers)
     feed(request, response, chunks)
   end
 
   # An error's body goes to `into: fun` too, as the real transport sends it whatever the
   # status, and not into the response (#436, Decision 791).
-  defp error_response(request, status, message) do
-    headers = %{"content-type" => ["application/json"]}
+  defp error_response(request, status, message, extra) do
+    headers = Map.merge(%{"content-type" => ["application/json"]}, extra)
     response = Req.Response.new(status: status, headers: headers)
     feed(request, response, [Jason.encode!(%{"error" => %{"message" => message}})])
   end

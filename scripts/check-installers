@@ -101,10 +101,58 @@ tar -czf "$release/troupe-daemon-$version-$target.tar.gz" -C "$work/daemon" bin 
 ) >"$work/SHA256SUMS"
 mv "$work/SHA256SUMS" "$release/SHA256SUMS"
 
+# The release's signature (Decision 865). A copy of install.sh with a release key written
+# in, as scripts/release-installers writes one; a manifest naming the release's files as
+# scripts/release-manifest.exs does, one to a line; and two minisign stand-ins, one saying
+# the signature holds and one that it does not, each writing down how it was asked. A second
+# release has a manifest whose sha256 for the daemon is not the file's, which SHA256SUMS
+# still names: a file changed where the release key did not sign it.
+key=RWQcheckinstallerscheckinstallerscheckinstallerscheckin
+keyed=$work/install-keyed.sh
+sed "s|^RELEASE_KEY=\"\"|RELEASE_KEY=\"$key\"|" "$installer" >"$keyed"
+grep -qxF "RELEASE_KEY=\"$key\"" "$keyed" || { echo "error: install.sh has no RELEASE_KEY line to write a key into" >&2; exit 1; }
+sha_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'; }
+manifest() {
+  printf '{\n  "format": 1,\n  "version": "%s",\n  "artifacts": [\n' "$version"
+  sep=
+  for f in "$release/troupe-$version-$target" "$release/troupe-daemon-$version-$target.tar.gz"; do
+    sha=$(sha_of "$f")
+    case "$f" in *daemon*) sha=${1:-$sha} ;; esac
+    printf '%s    {"component": "x", "target": "%s", "file": "%s", "size": %s, "sha256": "%s"}' \
+      "$sep" "$target" "${f##*/}" "$(wc -c <"$f" | tr -d ' ')" "$sha"
+    sep=',
+'
+  done
+  printf '\n  ]\n}\n'
+}
+release_changed=$work/release-changed
+cp -R "$release" "$release_changed"
+manifest >"$release/manifest.json"
+manifest 0000000000000000000000000000000000000000000000000000000000000000 >"$release_changed/manifest.json"
+for r in "$release" "$release_changed"; do echo "a stand-in signature" >"$r/manifest.json.minisig"; done
+mkdir -p "$work/minisign-ok" "$work/minisign-bad"
+cat >"$work/minisign-ok/minisign" <<'EOF'
+#!/bin/sh
+printf 'minisign %s\n' "$*" >>"$TROUPE_CHECK_LOG"
+echo "Signature and comment signature verified"
+EOF
+cat >"$work/minisign-bad/minisign" <<'EOF'
+#!/bin/sh
+printf 'minisign %s\n' "$*" >>"$TROUPE_CHECK_LOG"
+echo "Signature verification failed" >&2
+exit 1
+EOF
+chmod +x "$work/minisign-ok/minisign" "$work/minisign-bad/minisign"
+
 # run NAME SHELL [ARG...]: install.sh under SHELL in NAME's home, which a later run of the
 # same NAME finds as this one left it. What it printed lands in $home/out, what the daemon
 # was asked in $home/log, its exit status in $status. $answers, when set, is typed at its
-# questions; $daemon is the stand-in's TROUPE_CHECK_DAEMON.
+# questions; $daemon is the stand-in's TROUPE_CHECK_DAEMON. $use_installer runs another
+# copy of install.sh, $check_release downloads from another release, and $extra_path goes
+# first on the PATH.
+use_installer=
+check_release=
+extra_path=
 run() {
   name=$1
   shell=$2
@@ -112,14 +160,14 @@ run() {
   home=$work/$shell/$name
   mkdir -p "$home"
   : >"$home/log"
-  set -- env -i "HOME=$home" "PATH=$stubs:/usr/local/bin:/usr/bin:/bin" TERM=dumb \
+  set -- env -i "HOME=$home" "PATH=${extra_path:+$extra_path:}$stubs:/usr/local/bin:/usr/bin:/bin" TERM=dumb \
     "XDG_CONFIG_HOME=$home/.config" "XDG_DATA_HOME=$home/.local/share" "XDG_STATE_HOME=$home/.local/state" \
     "TROUPE_VERSION=$version" TROUPE_RELEASE_URL=https://release.invalid \
     "TROUPE_OPENCODE_CONFIG=$home/no-opencode.jsonc" \
-    "TROUPE_CHECK_RELEASE=$release" "TROUPE_CHECK_LOG=$home/log" \
+    "TROUPE_CHECK_RELEASE=${check_release:-$release}" "TROUPE_CHECK_LOG=$home/log" \
     "TROUPE_CHECK_ENTRY=$home/login-entry" "TROUPE_CHECK_TUI=$home/.local/bin/troupe" \
     "TROUPE_CHECK_DAEMON=$daemon" \
-    "$shell" "$installer" "$@"
+    "$shell" "${use_installer:-$installer}" "$@"
   if [ -n "$answers" ]; then
     command=
     for word in "$@"; do command="$command '$(printf '%s' "$word" | sed "s/'/'\\\\''/g")'"; done
@@ -147,6 +195,7 @@ expect() {
 not() { ! "$@"; }
 succeeded() { [ "$status" = 0 ]; }
 asked() { grep -qxF -- "$1" "$home/log"; }
+logged() { grep -q -- "$1" "$home/log"; }
 asked_about_login() { grep -q '^login' "$home/log"; }
 said() { grep -qF -- "$1" "$home/out"; }
 # The daemon was asked $1 before $2.
@@ -172,6 +221,37 @@ for shell in "$@"; do
   expect "-y installs the daemon" succeeded
   expect "-y does not turn starting at login on" not asked "login on"
   expect "-y says how to turn it on" said "troupe-daemon login on"
+  expect "a copy with no release key says it checks SHA256SUMS only" said "carries no release key"
+
+  # The release's signature (Decision 865).
+  use_installer=$keyed
+  run no-minisign "$shell" -y
+  expect "with the release key and no minisign, it installs" succeeded
+  expect "... saying the signature is not checked, only SHA256SUMS" said "minisign is not installed"
+
+  extra_path=$work/minisign-ok
+  run signed "$shell" -y --tui
+  expect "with minisign, the plan says the signature is checked" said "check the release's signature with minisign"
+  expect "... minisign checks the manifest against the release key" logged "^minisign -Vm .*/manifest.json -x .*/manifest.json.minisig -P $key\$"
+  expect "... it says so" said "manifest.json signed by the release key ok"
+  expect "... and installs what the signed manifest names" succeeded
+  expect "... the daemon and the TUI" exists .local/bin/troupe
+
+  extra_path=$work/minisign-bad
+  run unsigned "$shell" -y
+  expect "a signature that does not verify installs nothing" not succeeded
+  expect "... saying so" said "does not verify against the release key"
+  expect "... and nothing is there" gone .local/lib/troupe-daemon
+
+  extra_path=$work/minisign-ok
+  check_release=$release_changed
+  run changed "$shell" -y
+  expect "a file that is not as the signed manifest names it installs nothing" not succeeded
+  expect "... saying so" said "is not the file the signed manifest names"
+  expect "... and nothing is there" gone .local/lib/troupe-daemon
+  use_installer=
+  extra_path=
+  check_release=
 
   run on "$shell" -y --start-at-login
   expect "--start-at-login installs" succeeded

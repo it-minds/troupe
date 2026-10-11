@@ -22,6 +22,7 @@ defmodule Troupe.Gateway.Dispatch do
     ClientTool,
     Commands,
     Connections,
+    Idle,
     LocalSources,
     Plane,
     Presence,
@@ -41,7 +42,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
   alias Troupe.Session.MCP, as: LocalMCP
-  alias Troupe.Sessions.Unseen
+  alias Troupe.Sessions.{Index, Unseen}
   alias Troupe.Todo.Edit
   alias Troupe.Tool.Result
   alias Troupe.Workflow
@@ -192,7 +193,10 @@ defmodule Troupe.Gateway.Dispatch do
     "mcp.call" => :admin,
     "skills.list" => :observe,
     "skills.add" => :admin,
-    "skills.remove" => :admin
+    "skills.remove" => :admin,
+    # Stopping the daemon between turns, so `troupe update` can replace its release
+    # (Decision 865): the machine's own, and it ends every client's connection.
+    "daemon.stop" => :admin
   }
 
   # Every way a registration can fail for want of consent. All three answer with a fresh
@@ -1120,8 +1124,15 @@ defmodule Troupe.Gateway.Dispatch do
 
   # -- identity ---------------------------------------------------------------
 
+  # With the plane's refusal of this daemon's version, when there is one: the sentence a
+  # client shows, saying what to run (Decision 868).
   defp handle("identity.get", _params, _context) do
-    {:ok, Identity.to_json(Identity.get())}
+    identity = Identity.to_json(Identity.get())
+
+    case Plane.refusal() do
+      nil -> {:ok, identity}
+      sentence -> {:ok, Map.put(identity, "update_required", sentence)}
+    end
   end
 
   defp handle("identity.link", params, context) do
@@ -1221,8 +1232,40 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # `troupe update` replaces the daemon's release only once it has stopped, and it stops
+  # only between turns (Decision 865): while a session has a turn at work the answer says
+  # which, and the client asks again. A daemon a TUI runs inside itself is that TUI's and
+  # says so; a worker has none to stop.
+  defp handle("daemon.stop" = method, _params, _context) do
+    cond do
+      Process.whereis(Troupe.Gateway.Daemon) == nil ->
+        {:error, Error.new(:method_not_found, %{method: method})}
+
+      not Idle.stoppable?() ->
+        {:ok, %{"stopping" => false, "reason" => "embedded"}}
+
+      (at_work = Index.at_work()) != [] ->
+        {:ok,
+         %{
+           "stopping" => false,
+           "reason" => "at_work",
+           "at_work" => Enum.map(at_work, &at_work_row/1)
+         }}
+
+      true ->
+        {:ok, %{"stopping" => Idle.stop_on_request() == :ok}}
+    end
+  end
+
   defp handle(method, _params, _context) do
     {:error, Error.new(:method_not_found, %{method: method})}
+  end
+
+  defp at_work_row(session_id) do
+    case Index.get(session_id) do
+      %{workspace: workspace} -> %{"id" => session_id, "workspace" => workspace}
+      _gone -> %{"id" => session_id, "workspace" => nil}
+    end
   end
 
   defp onboard("onboard.plan", _params, workspace, config),
@@ -1417,10 +1460,19 @@ defmodule Troupe.Gateway.Dispatch do
   # none, and a session made while nobody had linked was never registered (Decision 764).
   # Not waited for: the link answers now, and a plane that cannot be reached is asked again
   # at the next one, which a client makes whenever its token is renewed.
+  # First the plane's word on this daemon's version (Decision 868): one it refuses seals
+  # nothing and asks nothing more of it until the next link, and says why in its log and in
+  # `identity.get`. A plane that could not be asked is not a refusal.
   defp erasures(%{"plane_token" => token}) when is_binary(token) and token != "" do
     Task.start(fn ->
-      Private.apply_erasures()
-      Private.resume()
+      case Plane.handshake() do
+        {:error, {:update_required, _sentence}} ->
+          :ok
+
+        _served_or_unknown ->
+          Private.apply_erasures()
+          Private.resume()
+      end
     end)
   end
 

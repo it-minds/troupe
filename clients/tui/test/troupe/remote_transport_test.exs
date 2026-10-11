@@ -52,7 +52,10 @@ defmodule Troupe.RemoteTransportTest do
       eventually(fn -> Enum.any?(Client.events(sid), &(&1.type == :input_accepted)) end)
     end
 
-    test "the handshake is `me`, and /rpc is shown the plane token /auth/exchange minted" do
+    # A plane from before the version policy has no `initialize` on `/rpc`, and `me` is the
+    # handshake there (Decision 93); one with it answers `initialize` (Decision 868), which
+    # `Troupe.PlaneVersionTest` holds.
+    test "the handshake falls back to `me`, and /rpc is shown the plane token /auth/exchange minted" do
       {remote, url} = start_remote!(transport: :http, sessions: [fixture()])
       login!(remote, url)
       {:ok, origin} = Client.connect_plane(url)
@@ -60,7 +63,13 @@ defmodule Troupe.RemoteTransportTest do
 
       calls = FakeRemote.calls(remote)
       assert Enum.any?(calls, &match?({"auth.exchange", %{"id_token" => _}}, &1))
-      refute Enum.any?(calls, &match?({"initialize", _}, &1))
+
+      assert Enum.any?(
+               calls,
+               &match?({"initialize", %{"client_info" => %{"name" => "troupe"}}}, &1)
+             )
+
+      assert Enum.any?(calls, &match?({"me", _}, &1))
 
       # the principal comes out of `me`, in the live plane's spelling
       assert %{"sub" => "alice", "name" => "Alice"} = Client.fleet_status(origin).principal

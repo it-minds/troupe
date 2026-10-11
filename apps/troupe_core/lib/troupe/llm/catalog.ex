@@ -162,6 +162,31 @@ defmodule Troupe.LLM.Catalog do
 
   def thinks_unasked?(_model), do: false
 
+  @doc """
+  Whether a model binds each thinking block to the conversation it was made in (the tools,
+  the system prompt and every message before it), so that an account the check is enforced
+  for refuses a block sent back after any of those changed, by its name (Decisions 805 and
+  867): Claude Fable from 5.1, Opus and Sonnet from 5.5, and later versions of the three,
+  found inside a gateway's renaming as `thinking/1` finds them.
+  """
+  @spec binds_thinking?(String.t() | nil) :: boolean()
+  def binds_thinking?(model) when is_binary(model) do
+    case Regex.run(~r/claude-(opus|sonnet|fable)-(\d+)(?:-(\d{1,2}))?(?![0-9])/, model) do
+      [_whole, family, major | minor] -> version(major, minor) >= binding_since(family)
+      nil -> false
+    end
+  end
+
+  def binds_thinking?(_model), do: false
+
+  defp version(major, [minor]) when minor != "",
+    do: {String.to_integer(major), String.to_integer(minor)}
+
+  defp version(major, _no_minor), do: {String.to_integer(major), 0}
+
+  defp binding_since("fable"), do: {5, 1}
+  defp binding_since(_opus_or_sonnet), do: {5, 5}
+
   defp before_adaptive?([_whole, major]), do: String.to_integer(major) < 5
   defp before_adaptive?([_whole, major, ""]), do: String.to_integer(major) < 5
 

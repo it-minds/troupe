@@ -115,6 +115,36 @@ defmodule Troupe.LLM.ThinkingTest do
       end
     end
 
+    # Decision 867: the ones whose blocks are bound to the conversation, the tools among it,
+    # by name as `thinks_unasked?/1` reads it.
+    test "Fable from 5.1, Opus and Sonnet from 5.5 bind their thinking, and later versions" do
+      for model <- [
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-fable-5-1",
+            "claude-opus-6",
+            "claude-sonnet-5-6-20261101",
+            "eu.anthropic.claude-sonnet-5-5-v1:0",
+            "anthropic/claude-fable-5-1"
+          ] do
+        assert Catalog.binds_thinking?(model), model
+      end
+
+      for model <- [
+            "claude-opus-5",
+            "claude-opus-5-20260301",
+            "claude-sonnet-5",
+            "claude-fable-5",
+            "claude-mythos-5-1",
+            "claude-opus-4-8",
+            "claude-haiku-5-5",
+            "qwen3-235b",
+            nil
+          ] do
+        refute Catalog.binds_thinking?(model), inspect(model)
+      end
+    end
+
     test "an effort of none sends no thinking field, and the thinking the model did goes back" do
       for effort <- ["none", "off"] do
         body = sent(%{request("claude-opus-5-5", effort) | messages: tool_turn(thought())})
@@ -231,6 +261,90 @@ defmodule Troupe.LLM.ThinkingTest do
       assert {:ok, plain} = run(request("claude-opus-5-5", nil))
       assert Map.get(plain, :thinking_resent) == false
       assert Map.get(plain, :thinking_dropped) == 0
+    end
+
+    # Issue #591: `error` asks the API for the refusal an enforced account gets, so the live
+    # bench can measure one without a patched build; the refusal is answered as one is.
+    test "thinking_binding: error carries the header and asks for the refusal" do
+      sent = sent_request(bound("claude-opus-5-5", nil, "error"))
+
+      assert Req.Request.get_header(sent, "anthropic-beta") == [
+               "thinking-binding-controls-2026-08-01"
+             ]
+
+      assert FakeTransport.body(sent)["thinking"] == %{
+               "type" => "adaptive",
+               "block_binding" => %{"prefix_mismatch_behavior" => "error"}
+             }
+
+      body = FakeTransport.body(sent_request(bound("claude-opus-5-5", "high", "error")))
+      assert body["thinking"]["block_binding"] == %{"prefix_mismatch_behavior" => "error"}
+      assert body["thinking"]["type"] == "adaptive"
+
+      # Refused, the call goes once more with no thinking, so nothing to bind (Decision 805).
+      refused_once = bound("claude-opus-5-5", nil, "error", fail: @bound_elsewhere, fail_first: 1)
+      assert {:ok, response} = run(refused_once)
+      assert Map.get(response, :thinking_resent) == true
+      [refused, resent] = FakeTransport.drain_requests()
+      assert FakeTransport.body(refused)["thinking"]["block_binding"]
+      assert replayed(FakeTransport.body(resent)) == ["tool_use"]
+      assert Req.Request.get_header(resent, "anthropic-beta") == []
+      refute Map.has_key?(FakeTransport.body(resent), "thinking")
+
+      # A request that hands no thinking back has nothing to bind.
+      sent = sent_request(bound("claude-opus-4-8", nil, "error"))
+      assert Req.Request.get_header(sent, "anthropic-beta") == []
+    end
+
+    # Issue #591: what the API says about a mismatch, in its response header, is kept on the
+    # response: its own words for the kind of edit and where it is, and nothing else.
+    test "the API's prefix-mismatch header is kept, cut to the words it diagnoses with" do
+      header = "anthropic-thinking-prefix-mismatch"
+
+      diagnosis =
+        "kind=system_changed; pattern=system_rerendered; sections=system; " <>
+          "changed_validated=system.0; item=Answer in one sentence.; note=\"the user's words\""
+
+      kept =
+        "kind=system_changed; pattern=system_rerendered; sections=system; changed_validated=system.0"
+
+      # On the refusal, carried to the call sent again without the thinking.
+      refused_once =
+        bound("claude-opus-5-5", nil, "error",
+          fail: @bound_elsewhere,
+          fail_first: 1,
+          fail_headers: %{header => [diagnosis]}
+        )
+
+      assert {:ok, response} = run(refused_once)
+      assert Map.get(response, :prefix_mismatch) == kept
+
+      # On a response whose blocks the beta dropped.
+      dropped =
+        ~s(event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":5,"output_tokens":1},"input_transformations":[{"type":"thinking_dropped","path":"messages.1.content.0","reason":"prefix_binding_mismatch"}]}}\n\n)
+
+      request =
+        bound("claude-opus-5-5", nil, "drop_block",
+          chunks: [dropped | tl(text_only())],
+          headers: %{
+            header => ["kind=tools_changed; pattern=tool_set_changed; changed_validated=tools"]
+          }
+        )
+
+      assert {:ok, response} = run(request)
+
+      assert Map.get(response, :prefix_mismatch) ==
+               "kind=tools_changed; pattern=tool_set_changed; changed_validated=tools"
+
+      # A header with nothing in its words is kept as having been there; none, as nothing.
+      request =
+        bound("claude-opus-5-5", nil, "drop_block", headers: %{header => ["the user's words"]})
+
+      assert {:ok, response} = run(request)
+      assert Map.get(response, :prefix_mismatch) == "unrecognised"
+
+      assert {:ok, plain} = run(request("claude-opus-5-5", nil))
+      assert Map.get(plain, :prefix_mismatch) == nil
     end
   end
 
@@ -483,7 +597,11 @@ defmodule Troupe.LLM.ThinkingTest do
     transport =
       case Keyword.get(opts, :fail) do
         nil ->
-          FakeTransport.adapter(chunks: Keyword.get(opts, :chunks, text_only()), record: self())
+          FakeTransport.adapter(
+            chunks: Keyword.get(opts, :chunks, text_only()),
+            headers: Keyword.get(opts, :headers, %{}),
+            record: self()
+          )
 
         refusal ->
           FakeTransport.adapter(
@@ -491,6 +609,7 @@ defmodule Troupe.LLM.ThinkingTest do
             fail_first: Keyword.get(opts, :fail_first, 99),
             fail_status: 400,
             fail_body: refusal,
+            fail_headers: Keyword.get(opts, :fail_headers, %{}),
             record: self()
           )
       end

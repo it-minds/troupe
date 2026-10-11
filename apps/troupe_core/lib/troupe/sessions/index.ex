@@ -140,6 +140,15 @@ defmodule Troupe.Sessions.Index do
   def live_ids, do: GenServer.call(__MODULE__, :live_ids)
 
   @doc """
+  The live sessions with a turn at work, as the sweep reads them: an agent that is busy,
+  or does not say. Idle, done, or parked on a person is not at work, for the same reason
+  the sweep may stop it: nothing is running to lose. What `daemon.stop` waits on (Decision
+  865). Each session is asked from the calling process, never from this one (Decision 848).
+  """
+  @spec at_work() :: [String.t()]
+  def at_work, do: Enum.filter(live_ids(), &(agent_state(&1) in [:busy, :unknown]))
+
+  @doc """
   Every state directory sessions are kept under, as far as this daemon knows (Decision
   855): the platform's, the one `config.yaml` named when it started, and each one a session
   it was told of was started with. Where a session that is not running is looked for.

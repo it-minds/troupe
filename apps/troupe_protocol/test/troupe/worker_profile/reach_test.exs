@@ -242,15 +242,89 @@ defmodule Troupe.WorkerProfile.ReachTest do
     end
   end
 
+  test "what a refused address is called, from a host as written or an address as :inet gives it" do
+    # The plane refuses a trigger's notify_url from the same list (issue #588), with the
+    # addresses DNS answered, so the one list answers for both.
+    for {host, kind} <- [
+          {"127.8.9.1", "loopback"},
+          {"::1", "loopback"},
+          {"0.0.0.0", "unspecified"},
+          {"::", "unspecified"},
+          {"169.254.169.254", "link-local"},
+          {"FE80::2", "link-local"},
+          {"::ffff:169.254.169.254", "link-local"},
+          {"fd00:ec2::254", "cloud metadata"},
+          {"FD00:EC2:0:0::254", "cloud metadata"},
+          {"100.100.100.200", "cloud metadata"},
+          {"::ffff:100.100.100.200", "cloud metadata"}
+        ] do
+      {:ok, address} = :inet.parse_strict_address(String.to_charlist(host))
+
+      assert Reach.refusal(host) == kind, host
+      assert Reach.refusal(address) == kind, host
+    end
+
+    for host <- ~w(100.100.100.201 100.64.0.1 fd00:ec2::253 10.20.0.5 ::ffff:10.20.0.5
+                   metadata.example.test) do
+      assert Reach.refusal(host) == nil, host
+    end
+
+    assert Reach.refusal({100, 100, 100, 201}) == nil
+  end
+
+  test "an IPv4 address in another IPv6 spelling is refused as that address" do
+    # NAT64's well-known prefix, IPv4-compatible and 6to4 each name a v4 address, and a
+    # profile's endpoint or a notify_url written so is refused as that address is.
+    for {host, kind} <- [
+          {"64:ff9b::a9fe:a9fe", "link-local"},
+          {"64:ff9b::169.254.169.254", "link-local"},
+          {"64:ff9b::6464:64c8", "cloud metadata"},
+          {"64:ff9b::7f00:1", "loopback"},
+          {"::100.100.100.200", "cloud metadata"},
+          {"::a9fe:a9fe", "link-local"},
+          {"::127.0.0.1", "loopback"},
+          {"2002:6464:64c8::", "cloud metadata"},
+          {"2002:a9fe:a9fe:1::5", "link-local"},
+          # `::` and `::1` are their own addresses, not 0.0.0.0 and 0.0.0.1.
+          {"::1", "loopback"},
+          {"::", "unspecified"}
+        ] do
+      assert Reach.refusal(host) == kind, host
+      assert Reach.refused?(host), host
+    end
+
+    for host <- ~w(64:ff9b::cb00:7105 2002:cb00:7105::1 ::cb00:7105 ::2) do
+      assert Reach.refusal(host) == nil, host
+    end
+
+    assert Reach.ipv4({0x64, 0xFF9B, 0, 0, 0, 0, 0xA9FE, 0xA9FE}) == {169, 254, 169, 254}
+    assert Reach.ipv4({0, 0, 0, 0, 0, 0, 0, 1}) == {0, 0, 0, 0, 0, 0, 0, 1}
+
+    assert Reach.ipv4({0xFD00, 0xEC2, 0, 0, 0, 0, 0, 0x254}) ==
+             {0xFD00, 0xEC2, 0, 0, 0, 0, 0, 0x254}
+
+    # Reached as IPv6, through a translator, so an endpoint there is admitted as written.
+    assert Reach.unreachable([{:llm, "http://[64:ff9b::a9fe:a9fe]/v1"}]) == [
+             "llm.endpoint http://[64:ff9b::a9fe:a9fe]/v1 is at 64:ff9b::a9fe:a9fe, a link-local address"
+           ]
+
+    assert Reach.admitted([{:llm, "https://[64:ff9b::cb00:7105]/v1"}]) ==
+             [{"64:ff9b::cb00:7105/128", [443]}]
+  end
+
   describe "what a worker reaches by no name" do
     # With Cilium a name is admitted at whatever address its DNS answer carries, so the
-    # CiliumNetworkPolicy denies these whatever the allowlist says (issue #361).
+    # CiliumNetworkPolicy denies these whatever the allowlist says (issue #361), and the
+    # v4 ones as NAT64's well-known prefix spells them, which a DNS64 resolver answers
+    # (issue #588).
     test "is link-local in both families and the metadata addresses outside it" do
       assert Reach.denied([]) == [
                {"169.254.0.0/16", []},
                {"fe80::/10", []},
                {"fd00:ec2::254/128", []},
-               {"100.100.100.200/32", []}
+               {"100.100.100.200/32", []},
+               {"64:ff9b::a9fe:0/112", []},
+               {"64:ff9b::6464:64c8/128", []}
              ]
     end
 
@@ -259,8 +333,14 @@ defmodule Troupe.WorkerProfile.ReachTest do
                {"169.254.0.0/16", ["169.254.20.10/32"]},
                {"fe80::/10", ["fe80::7/128"]},
                {"fd00:ec2::254/128", []},
-               {"100.100.100.200/32", []}
+               {"100.100.100.200/32", []},
+               {"64:ff9b::a9fe:0/112", []},
+               {"64:ff9b::6464:64c8/128", []}
              ]
+
+      # One given in NAT64 spelling is kept out of that block alone.
+      assert {"64:ff9b::a9fe:0/112", ["64:ff9b::a9fe:707/128"]} =
+               List.keyfind(Reach.denied(["64:ff9b::a9fe:707"]), "64:ff9b::a9fe:0/112", 0)
 
       # An address that is a whole block is no block at all.
       assert {"100.100.100.200/32", _} =

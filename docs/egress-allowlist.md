@@ -37,7 +37,7 @@ Three kinds, and the difference is what an operator needs:
 | `DATABASE_URL` | named by a setting | the index, the ledger and the audit trail |
 | `TROUPE_BAO_ADDR` | named by a setting | the key manager: signing session tokens, and the per-person credential paths |
 | `object_store.endpoint` | named by a setting | the bucket a session's log and workspace live in |
-| `notify_url (per trigger)` | named by a setting | where a trigger posts its outcome. Absolute and not loopback, checked at save and again at send |
+| `notify_url (per trigger)` | named by a setting | where a trigger posts its outcome. Absolute; not loopback, link-local, a cloud metadata address or in 100.64.0.0/10, by address or by what its name resolves to; checked at save and again at send, and posted to the address the second check passed |
 
 ## operator
 

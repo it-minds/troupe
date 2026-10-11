@@ -1,0 +1,22 @@
+{
+  "about": "Test vectors for a release's signed manifest (Decision 865), written by scripts/release-vectors.exs with throwaway keys. A verifier accepts a case whose expect is ok and refuses the rest: a signature case checks signature against manifest with only the trusted keys; an artifact case checks file against the manifest's entry for artifact, its size and then its sha256.",
+  "signatures": [
+    {"name":"signed by the current key","signature":"signatures/current.minisig","manifest":"manifest.json","trusted":["keys/current.pub"],"expect":"ok"},
+    {"name":"a key rotation: both keys sign, the current first; a client built after it","signature":"signatures/rotation.minisig","manifest":"manifest.json","trusted":["keys/current.pub"],"expect":"ok"},
+    {"name":"a key rotation, read by a client built before it, which trusts only the previous key","signature":"signatures/rotation.minisig","manifest":"manifest.json","trusted":["keys/previous.pub"],"expect":"ok"},
+    {"name":"a key rotation, read by a client that trusts both","signature":"signatures/rotation.minisig","manifest":"manifest.json","trusted":["keys/current.pub","keys/previous.pub"],"expect":"ok"},
+    {"name":"signed by the previous key alone, read by a client that trusts only the current one","signature":"signatures/previous.minisig","manifest":"manifest.json","trusted":["keys/current.pub"],"expect":"refused"},
+    {"name":"the minisign signature without a hash (\"Ed\"), which minisign once wrote","signature":"signatures/legacy.minisig","manifest":"manifest.json","trusted":["keys/current.pub"],"expect":"ok"},
+    {"name":"the manifest changed after it was signed","signature":"signatures/current.minisig","manifest":"manifest-tampered.json","trusted":["keys/current.pub"],"expect":"refused"},
+    {"name":"signed by a key the client does not trust","signature":"signatures/other.minisig","manifest":"manifest.json","trusted":["keys/current.pub"],"expect":"refused"},
+    {"name":"the trusted comment changed after it was signed","signature":"signatures/comment-changed.minisig","manifest":"manifest.json","trusted":["keys/current.pub"],"expect":"refused"},
+    {"name":"no signature: an empty .minisig","signature":"signatures/empty.minisig","manifest":"manifest.json","trusted":["keys/current.pub"],"expect":"refused"},
+    {"name":"a .minisig that is not minisign's","signature":"signatures/not-minisign.minisig","manifest":"manifest.json","trusted":["keys/current.pub"],"expect":"refused"},
+    {"name":"a client that trusts no key","signature":"signatures/current.minisig","manifest":"manifest.json","trusted":[],"expect":"refused"}
+  ],
+  "artifacts": [
+    {"name":"the artifact as the manifest names it","file":"artifacts/troupe-9.9.9-test-linux_x86_64","artifact":"troupe-9.9.9-test-linux_x86_64","manifest":"manifest.json","expect":"ok"},
+    {"name":"one byte changed: the size holds, the sha256 does not","file":"tampered/troupe-9.9.9-test-linux_x86_64","artifact":"troupe-9.9.9-test-linux_x86_64","manifest":"manifest.json","expect":"refused"},
+    {"name":"one byte short: the size does not hold","file":"short/troupe-9.9.9-test-linux_x86_64","artifact":"troupe-9.9.9-test-linux_x86_64","manifest":"manifest.json","expect":"refused"}
+  ]
+}

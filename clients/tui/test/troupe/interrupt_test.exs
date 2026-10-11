@@ -61,7 +61,9 @@ defmodule Troupe.InterruptTest do
           ["login", "https://plane.example"],
           ["whoami"],
           ["models", "--refresh"],
-          ["doctor"]
+          ["doctor"],
+          # It may wait on a turn at work before it replaces the daemon (Decision 865).
+          ["update"]
         ] do
       assert Runner.interruptible?(CLI.parse(argv)), inspect(argv)
     end

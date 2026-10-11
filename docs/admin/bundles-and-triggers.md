@@ -134,7 +134,7 @@ repository holds the triggers' definitions as well ([below](#triggers-from-a-rep
 | `visibility` | `private` or `team` | `team` |
 | `review` | `required` or `none` | `required` |
 | `notify` | subjects granted `collaborator` on every run's session | `[]` |
-| `notify_url` | an absolute `http` or `https` URL posted the run's outcome when it ends, never its content; not loopback or link-local, and a host the policy's egress allows, checked when saved and again at send | none |
+| `notify_url` | an absolute `http` or `https` URL posted the run's outcome when it ends, never its content; not loopback, link-local, a cloud metadata address (`fd00:ec2::254`, `100.100.100.200`) or in `100.64.0.0/10`, by address, in any IPv6 spelling of one, or by a name that resolves there (Decision 866), and a host the policy's egress allows, checked when saved and again at send, and posted to the address the second check passed | none |
 | `concurrency` | cap on live runs, 1–100; a firing over it records a `skipped` run | 1 |
 
 **Cron** is five fields (`*`, `*/n`, `n`, `a,b`, `a-b`, `a-b/n`; day-of-week 0–7), **UTC

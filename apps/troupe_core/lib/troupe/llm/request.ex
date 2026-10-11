@@ -37,7 +37,8 @@ defmodule Troupe.LLM.Request do
     thinking: nil,
     # `"drop_block"` when the config's `thinking_binding` asks Anthropic to drop a kept
     # thinking block whose conversation changed rather than refuse the call (issue #465,
-    # Decision 815). Only the Anthropic adapter reads it.
+    # Decision 815), `"error"` when it asks for the refusal (issue #591, Decision 863).
+    # Only the Anthropic adapter reads it.
     thinking_binding: nil,
     base_url: nil,
     # `{:refused, why}` when the provider may not be used — a `{env:VAR}` its key or URL
@@ -173,9 +174,11 @@ defmodule Troupe.LLM.Response do
             # What became of the thinking the request handed back (issue #465, Decision
             # 815): refused as bound to another conversation and the call sent again
             # without it (Decision 805), or how many blocks Anthropic's thinking-binding
-            # beta dropped.
+            # beta dropped. And, when the API's response header said, the kind of edit
+            # it saw and where it begins, in its own words (issue #591, Decision 863).
             thinking_resent: false,
-            thinking_dropped: 0
+            thinking_dropped: 0,
+            prefix_mismatch: nil
 
   @type stop_reason :: :end_turn | :tool_use | :max_tokens | :stop_sequence | :refusal | :other
   @type t :: %__MODULE__{
@@ -185,7 +188,8 @@ defmodule Troupe.LLM.Response do
           model: String.t() | nil,
           gateway: Gateway.t(),
           thinking_resent: boolean(),
-          thinking_dropped: non_neg_integer()
+          thinking_dropped: non_neg_integer(),
+          prefix_mismatch: String.t() | nil
         }
 
   @doc "The response as an assistant message to append to the conversation."

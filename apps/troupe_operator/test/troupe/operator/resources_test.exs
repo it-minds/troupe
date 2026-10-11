@@ -792,6 +792,7 @@ defmodule Troupe.Operator.ResourcesTest do
           mcpServers: [
             %{"name" => "meta", "url" => "http://[fd00:ec2::254]/latest"},
             %{"name" => "mapped", "url" => "http://[::ffff:100.100.100.200]/latest"},
+            %{"name" => "nat64", "url" => "http://[64:ff9b::6464:64c8]/latest"},
             %{"name" => "self", "url" => "http://0.0.0.0:9000/mcp"},
             %{"name" => "tailnet", "url" => "https://100.101.2.3:8443/mcp"}
           ],
@@ -841,12 +842,16 @@ defmodule Troupe.Operator.ResourcesTest do
       assert cidrs(resources) == []
 
       # The node's DNS cache, where a cluster runs one at its usual link-local address, is
-      # left out of the deny, so an installation's own policy admitting it still does.
+      # left out of the deny, so an installation's own policy admitting it still does. The
+      # v4 blocks are denied as NAT64 spells them too, which a DNS64 resolver answers with
+      # (issue #588).
       assert denied(resources) == [
                %{"cidr" => "169.254.0.0/16", "except" => ["169.254.20.10/32"]},
                %{"cidr" => "fe80::/10"},
                %{"cidr" => "fd00:ec2::254/128"},
-               %{"cidr" => "100.100.100.200/32"}
+               %{"cidr" => "100.100.100.200/32"},
+               %{"cidr" => "64:ff9b::a9fe:0/112"},
+               %{"cidr" => "64:ff9b::6464:64c8/128"}
              ]
     end
 
@@ -859,7 +864,8 @@ defmodule Troupe.Operator.ResourcesTest do
         |> Resources.for_profile(policy, %Settings{cilium_available: true})
 
       assert Enum.map(denied(resources), & &1["cidr"]) ==
-               ["169.254.0.0/16", "fe80::/10", "fd00:ec2::254/128", "100.100.100.200/32"]
+               ["169.254.0.0/16", "fe80::/10", "fd00:ec2::254/128", "100.100.100.200/32"] ++
+                 ["64:ff9b::a9fe:0/112", "64:ff9b::6464:64c8/128"]
     end
 
     test "with Cilium, the installation's own endpoint at a link-local address stays reached",
@@ -882,7 +888,9 @@ defmodule Troupe.Operator.ResourcesTest do
                  "except" => ["169.254.20.10/32", "169.254.7.7/32"]
                },
                %{"cidr" => "fe80::/10"},
-               %{"cidr" => "100.100.100.200/32"}
+               %{"cidr" => "100.100.100.200/32"},
+               %{"cidr" => "64:ff9b::a9fe:0/112"},
+               %{"cidr" => "64:ff9b::6464:64c8/128"}
              ]
     end
 

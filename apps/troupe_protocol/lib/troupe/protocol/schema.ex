@@ -126,7 +126,11 @@ defmodule Troupe.Protocol.Schema do
         "prompt_bytes" => optional(:object),
         "system_changed" => optional(:boolean),
         "tools_changed" => optional(:boolean),
-        "turn_context" => optional({:array, :string})
+        "turn_context" => optional({:array, :string}),
+        # The block that call put into the conversation: `at`, the index of the message it
+        # goes after, `text`, and `sent`, each section's digest; folded on replay so a
+        # restarted agent sends the prefix it sent before (Decision 863).
+        "turn_context_block" => optional(:object)
       },
       "llm_response" => %{
         "message" => required(:object),
@@ -140,9 +144,12 @@ defmodule Troupe.Protocol.Schema do
         "gateway" => optional(:object),
         # What became of the thinking the call handed back, present only when anything
         # did: refused as bound to another conversation and the call sent again without it
-        # (Decision 805), or the blocks the thinking-binding beta dropped (Decision 815).
+        # (Decision 805), or the blocks the thinking-binding beta dropped (Decision 815);
+        # and what the API's `anthropic-thinking-prefix-mismatch` header said of the edit,
+        # its `key=value` pairs cut to its own words (Decision 863).
         "thinking_resent" => optional(:boolean),
-        "thinking_dropped" => optional(:integer)
+        "thinking_dropped" => optional(:integer),
+        "prefix_mismatch" => optional(:string)
       },
       # `reason` is a sentence a person can act on (Decision 659), not a term. `note` is a
       # root's: what its conversation was told, which a replay puts back (Decision 693).
@@ -1017,7 +1024,10 @@ defmodule Troupe.Protocol.Schema do
         "workspace" => optional(:string),
         "name" => optional(:string),
         "include" => optional(:string)
-      }
+      },
+      # Stop between turns, for `troupe update` (Decision 865) — the daemon's only; a
+      # worker answers `method_not_found`. The answer is `stopping`, or why not.
+      "daemon.stop" => %{}
     }
   end
 

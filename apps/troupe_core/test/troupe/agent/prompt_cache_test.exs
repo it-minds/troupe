@@ -107,19 +107,17 @@ defmodule Troupe.Agent.PromptCacheTest do
     assert [_one] = Enum.uniq(systems)
   end
 
-  test "the next input's calls show the list the turn before left in the system prompt",
+  test "with system_prompt: per_turn the next input's calls show the list the turn before left in the system prompt",
        context do
-    stand_in =
-      start_stand_in(fn
-        1, _body -> write(1)
-        2, _body -> {:text, "listed"}
-        3, _body -> read(3)
-        4, _body -> write(4)
-        5, _body -> read(5)
-        6, _body -> {:text, "done"}
-      end)
+    stand_in = start_stand_in(&two_turns/2)
 
-    sid = start_turn(context, stand_in, provider: "anthropic", model: "claude-sonnet-5")
+    sid =
+      start_turn(context, stand_in,
+        provider: "anthropic",
+        model: "claude-sonnet-5",
+        system_prompt: "per_turn"
+      )
+
     Troupe.send_input(sid, "carry on")
     await_idle(sid)
 
@@ -147,6 +145,42 @@ defmodule Troupe.Agent.PromptCacheTest do
       assert current.cache_read == Usage.total_input(previous)
     end
   end
+
+  # Decision 863: by default the list the turn before left goes with the next turn's input,
+  # and the system prompt in front of the conversation never changes, so the next turn's
+  # first call reads all of the call before it, as every other call does.
+  test "by default the next input's calls carry the list with the turn, and read all of the call before",
+       context do
+    stand_in = start_stand_in(&two_turns/2)
+    sid = start_turn(context, stand_in, provider: "anthropic", model: "claude-sonnet-5")
+    Troupe.send_input(sid, "carry on")
+    await_idle(sid)
+
+    requests = PromptCacheStandIn.drain()
+    assert [_, _, {3, _, third, _}, _, {5, _, fifth, _}, _] = requests
+
+    assert [_one] =
+             requests
+             |> Enum.map(fn {_n, _path, body, _usage} -> body["system"] end)
+             |> Enum.uniq()
+
+    assert system_list(third) == nil
+    assert turn_list(third) == rendered(todos(1))
+    assert latest_list(fifth) == rendered(todos(4))
+
+    [usage_2 | later] = requests |> Enum.drop(1) |> Enum.map(&usage/1)
+
+    for {previous, current} <- Enum.zip([usage_2 | later], later) do
+      assert current.cache_read == Usage.total_input(previous)
+    end
+  end
+
+  defp two_turns(1, _body), do: write(1)
+  defp two_turns(2, _body), do: {:text, "listed"}
+  defp two_turns(3, _body), do: read(3)
+  defp two_turns(4, _body), do: write(4)
+  defp two_turns(5, _body), do: read(5)
+  defp two_turns(6, _body), do: {:text, "done"}
 
   test "on an OpenAI-compatible wire a rewritten task list leaves the cached conversation alone",
        context do
@@ -245,7 +279,8 @@ defmodule Troupe.Agent.PromptCacheTest do
   end
 
   # Decision 792, against the scripted model: which list the system prompt shows when the
-  # turn is not a plain run of calls.
+  # turn is not a plain run of calls, with `system_prompt: per_turn` (the default sends the
+  # list with the turn, Decision 863).
   describe "the task list in the system prompt" do
     test "is the list as it is now once a compaction has rewritten the conversation", context do
       steps = [
@@ -258,7 +293,9 @@ defmodule Troupe.Agent.PromptCacheTest do
         {:text, "done"}
       ]
 
-      %{session: session, fake: fake} = start_session(context, steps: steps)
+      %{session: session, fake: fake} =
+        start_session(context, steps: steps, config_overrides: [system_prompt: "per_turn"])
+
       Troupe.subscribe(session.id)
       Enum.each(["first", "second", "write the list"], &turn(session.id, &1))
 
@@ -280,7 +317,9 @@ defmodule Troupe.Agent.PromptCacheTest do
         {:text, "done after the restart"}
       ]
 
-      %{session: session, fake: fake} = start_session(context, steps: steps)
+      %{session: session, fake: fake} =
+        start_session(context, steps: steps, config_overrides: [system_prompt: "per_turn"])
+
       Troupe.subscribe(session.id)
       turn(session.id, "write the list")
 
@@ -356,6 +395,29 @@ defmodule Troupe.Agent.PromptCacheTest do
     text = body["system"] |> List.wrap() |> Enum.map_join("\n", &block_text/1)
 
     case Regex.run(~r/<task_list>\n(.*?)\n<\/task_list>/s, text) do
+      [_, section] ->
+        section
+        |> String.split("\n")
+        |> Enum.filter(&String.starts_with?(&1, "["))
+        |> Enum.join("\n")
+
+      nil ->
+        nil
+    end
+  end
+
+  # The items of the newest `<task_list>` the conversation's turn contexts carry.
+  defp turn_list(body) do
+    texts =
+      for %{"content" => blocks} <- body["messages"],
+          is_list(blocks),
+          %{"type" => "text", "text" => text} <- blocks,
+          do: text
+
+    texts
+    |> Enum.flat_map(&Regex.scan(~r/<task_list>\n(.*?)\n<\/task_list>/s, &1))
+    |> List.last()
+    |> case do
       [_, section] ->
         section
         |> String.split("\n")

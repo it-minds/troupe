@@ -52,6 +52,7 @@ defmodule Troupe.Agent.Server do
     Gateway,
     Message,
     Provider,
+    Reasoning,
     Request,
     Response,
     Text,
@@ -368,6 +369,12 @@ defmodule Troupe.Agent.Server do
   defp fold_event(%Event{type: "delegation_started", data: data}, state),
     do: %{state | child_seq: child_seq(state, data["child_path"])}
 
+  # The turn context a call put into the conversation, put back where it was, so the call
+  # after a restart sends the prefix the one before it sent (Decision 863). A call that put
+  # none, and a log written before 0.13.0, fold as they did.
+  defp fold_event(%Event{type: "llm_request", data: %{"turn_context_block" => %{} = put}}, state),
+    do: put_context(state, put)
+
   # The note a root's failed request left in its conversation (Decision 693). A log written
   # before the note was, has none, and replays as it always did. A call the agent gave up
   # on is counted as it was live (Decision 788).
@@ -459,10 +466,17 @@ defmodule Troupe.Agent.Server do
   # conversation that has moved on.
   # What the conversation was compacted to, and the budget's own history (Decision 660):
   # a grant survives a restart, and a question without its answer is still owed.
+  # The turn context the conversation carried goes with it (Decision 863), as it does live.
   defp fold_limits(state, "compacted", data) do
     conversation = Enum.map(data["conversation"], &resolve_results(state, &1))
 
-    %{state | conversation: conversation, compacted_through: compacted_through(conversation)}
+    %{
+      state
+      | conversation: conversation,
+        compacted_through: compacted_through(conversation),
+        turn_context: %{},
+        context_sent: %{}
+    }
     |> show_todos()
     |> fold_summary_call(data)
   end
@@ -1422,8 +1436,10 @@ defmodule Troupe.Agent.Server do
 
   defp digest(term), do: :crypto.hash(:sha256, :erlang.term_to_binary(term, [:deterministic]))
 
-  defp put_attached(data, []), do: data
-  defp put_attached(data, sections), do: Map.put(data, "turn_context", sections)
+  defp put_attached(data, nil), do: data
+
+  defp put_attached(data, {sections, put}),
+    do: data |> Map.put("turn_context", sections) |> Map.put("turn_context_block", put)
 
   # The profile in force for this turn. Normally the agent's own; during an `AI?` watch
   # turn, the agent's own under the plan permission set (Decision 844): its model, prompt
@@ -1450,8 +1466,10 @@ defmodule Troupe.Agent.Server do
     %{own | tools: tools, permissions: Map.merge(own.permissions, denied)}
   end
 
+  # The tools are offered knowing the model they go to: one that binds its thinking to
+  # them is offered the same on every call (Decision 867).
   defp build_request(state, definition) do
-    ctx = base_ctx(state, "")
+    ctx = %{base_ctx(state, "") | model: Config.target(state.config, definition.model).model}
     tools = Tools.specs(definition, ctx)
 
     %Request{
@@ -1496,7 +1514,8 @@ defmodule Troupe.Agent.Server do
         max_tokens: min(request.max_tokens, target.max_output || request.max_tokens),
         reasoning_effort: target.reasoning_effort,
         thinking: Config.thinking(config, model),
-        thinking_binding: if(config.thinking_binding == "drop_block", do: "drop_block"),
+        thinking_binding:
+          if(config.thinking_binding in ["drop_block", "error"], do: config.thinking_binding),
         provider: adapter_for(target.provider, state),
         timeout_ms: config.llm_timeout_ms,
         identify: config.identify != false,
@@ -1551,9 +1570,10 @@ defmodule Troupe.Agent.Server do
   # behind the prompt cache's mark (Decision 770), and the list as the turn began, so a
   # rewrite within the turn leaves the cached conversation after it alone (Decision 792).
   #
-  # With `system_prompt: stable` (issue #465's second option, Decision 815) the instruction
-  # files and the brief, the goal and the task list are left out of it, so it is the same
-  # on every call of the session, and go with the turn instead (`attach_turn_context/1`).
+  # With `system_prompt: stable` (issue #465's second option, Decision 815, the default
+  # since Decision 863) the instruction files and the brief, the goal and the task list are
+  # left out of it, so it is the same on every call of the session, and go with the turn
+  # instead (`attach_turn_context/1`). `per_turn`, chosen by name, is the prompt as it was.
   defp system_prompt(state, definition) do
     stable? = stable?(state)
 
@@ -1578,47 +1598,64 @@ defmodule Troupe.Agent.Server do
   defp recall?(%Definition{} = definition),
     do: Definition.permission(definition, "recall", :auto) != :deny
 
-  # Issue #465's second option (Decision 815). What the system prompt would have changed
-  # by between turns goes into the conversation instead, as a text block after what the
-  # turn's last user message holds — the person's input as a turn begins, after a tool's
-  # results when a compaction or a goal comes in the middle of one — and stays there,
+  # Issue #465's second option (Decision 815), the default (Decision 863). What the system
+  # prompt would have changed by between turns goes into the conversation instead, as a
+  # text block after what the turn's last user message holds — the person's input as a
+  # turn begins, after a tool's results when a compaction or a goal comes in the middle
+  # of one — and stays there,
   # where it was put, on every later call: a request is then the one before with
   # something added, which is what keeps a kept thinking block valid and the cached
   # conversation readable. A section goes again only when it changed since the copy the
-  # conversation already carries; one that emptied says so. Not folded: an agent
-  # restarted sends its next call without the blocks it had put before, which is one
-  # edit of the conversation, and puts the sections again as they are then. A compaction
-  # rewrites the conversation, and they are put again after it.
+  # conversation already carries; one that emptied says so. A compaction rewrites the
+  # conversation, and they are put again after it.
+  #
+  # Each block put is on its call's `llm_request` (`turn_context_block`: where, the text,
+  # and the digest of each section it carried) and folded back on replay (`put_context/2`),
+  # so an agent restarted, or a session resumed, sends the prefix it sent before (Decision
+  # 863).
+  @nothing_sent "sha256:" <> Base.encode16(:crypto.hash(:sha256, ""), case: :lower)
+
   defp attach_turn_context(%State{} = state) do
     if stable?(state),
       do: attach_changed(state, last_user_index(state.conversation)),
-      else: {state, []}
+      else: {state, nil}
   end
 
-  defp attach_changed(state, nil), do: {state, []}
+  defp attach_changed(state, nil), do: {state, nil}
 
   defp attach_changed(state, index) do
     changed =
       Enum.reject(turn_sections(state), fn {name, text} ->
-        Map.get(state.context_sent, name, "") == text
+        Map.get(state.context_sent, name, @nothing_sent) == section_digest(text)
       end)
 
     case changed do
       [] ->
-        {state, []}
+        {state, nil}
 
       changed ->
-        block = render_turn_context(changed)
-
-        state = %{
-          state
-          | turn_context: Map.update(state.turn_context, index, block, &(&1 <> "\n\n" <> block)),
-            context_sent: Map.merge(state.context_sent, Map.new(changed))
+        put = %{
+          "at" => index,
+          "text" => render_turn_context(changed),
+          "sent" => Map.new(changed, fn {name, text} -> {name, section_digest(text)} end)
         }
 
-        {state, Enum.map(changed, &elem(&1, 0))}
+        {put_context(state, put), {Enum.map(changed, &elem(&1, 0)), put}}
     end
   end
+
+  # A block put after what the message at `at` holds, after any put there before; the
+  # same live and on replay.
+  defp put_context(state, %{"at" => at, "text" => text, "sent" => sent}) do
+    %{
+      state
+      | turn_context: Map.update(state.turn_context, at, text, &(&1 <> "\n\n" <> text)),
+        context_sent: Map.merge(state.context_sent, sent)
+    }
+  end
+
+  defp section_digest(text),
+    do: "sha256:" <> Base.encode16(:crypto.hash(:sha256, text), case: :lower)
 
   defp turn_sections(state) do
     [
@@ -1747,13 +1784,19 @@ defmodule Troupe.Agent.Server do
 
   # What became of the thinking the call handed back, when anything did (issue #465,
   # Decision 815): refused as bound to another conversation and the call sent again
-  # without it (Decision 805), or the blocks Anthropic's thinking-binding beta dropped.
+  # without it (Decision 805), or the blocks Anthropic's thinking-binding beta dropped;
+  # and what the API's header said of why, in its own words (issue #591, Decision 863).
   defp put_thinking_kept(data, %Response{} = response) do
     data
     |> then(&if response.thinking_resent, do: Map.put(&1, "thinking_resent", true), else: &1)
     |> then(fn data ->
       if response.thinking_dropped > 0,
         do: Map.put(data, "thinking_dropped", response.thinking_dropped),
+        else: data
+    end)
+    |> then(fn data ->
+      if is_binary(response.prefix_mismatch),
+        do: Map.put(data, "prefix_mismatch", response.prefix_mismatch),
         else: data
     end)
   end
@@ -3425,10 +3468,14 @@ defmodule Troupe.Agent.Server do
   # What the summariser reads: the stretch it replaces, with each tool call and result
   # written out as text (Decision 779). Its request defines no tools, and Anthropic's API
   # refuses a tool block in a request that defines none (#404). A result's tool is named
-  # by the calls in the message before it, as `Output.stub_behind/3` names it.
+  # by the calls in the message before it, as `Output.stub_behind/3` names it. Anthropic's
+  # thinking is not sent: it says nothing a summary can read, and on a model that binds it
+  # to the conversation it was made in, the summariser's is not that one (Decision 867).
   defp written_out(messages) do
     {written, _calls} =
-      Enum.map_reduce(messages, %{}, fn %Message{content: blocks} = message, calls ->
+      messages
+      |> Enum.map(&without_thinking/1)
+      |> Enum.map_reduce(%{}, fn %Message{content: blocks} = message, calls ->
         {%{message | content: Enum.map(blocks, &as_text(&1, calls))},
          Map.new(Message.tool_uses(message), &{&1.id, &1.name})}
       end)
@@ -3485,6 +3532,7 @@ defmodule Troupe.Agent.Server do
     summary = Message.text(Response.to_message(response))
     gateway = gateway_json(response.gateway, state, response, "cheap")
     {keep, _drop} = split_for_compaction(state.conversation)
+    keep = if binds_thinking?(state), do: Enum.map(keep, &without_thinking/1), else: keep
 
     conversation = [
       Message.user("Summary of earlier work in this session:\n\n" <> summary)
@@ -3518,6 +3566,25 @@ defmodule Troupe.Agent.Server do
     |> show_todos()
     |> instructions_due()
   end
+
+  # What a compaction keeps was said after the messages the summary replaces, so each
+  # thinking block in it is bound to a conversation no later request has: on a model that
+  # binds its thinking, an account the check is enforced for would refuse every call after
+  # the compaction once, until a later one summarised the blocks away. Kept without them,
+  # as the API asks of a compaction's tail (D92, Decision 867). On any other model a block
+  # still holds, and an Anthropic model thinking with an effort set may need its last one.
+  defp binds_thinking?(state),
+    do: Catalog.binds_thinking?(Config.target(state.config, state.definition.model).model)
+
+  # A message that was nothing but thinking is left as it was rather than sent empty.
+  defp without_thinking(%Message{role: :assistant, content: blocks} = message) do
+    case Enum.reject(blocks, &match?(%Reasoning{provider: :anthropic}, &1)) do
+      [] -> message
+      kept -> %{message | content: kept}
+    end
+  end
+
+  defp without_thinking(message), do: message
 
   # What a compaction leaves behind it ends at the model's last reply in what it kept
   # (Decision 771). A result after that reply, the one a compaction in the middle of a turn

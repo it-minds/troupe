@@ -51,6 +51,11 @@ clients to add, and `-y` / `-Yes` asks nothing. A private repository answers
 `scripts/build-local` builds one for this host and installs it as `troupe` in
 `~/.local/bin`.
 
+`troupe update` installs a newer release over `troupe` and `troupe-daemon` once its
+signature checks against the release key this build carries, replacing the daemon only
+between turns; `--check` says what it would do and `--rollback` puts the previous ones back
+([updating](../../docs/user/updating.md)).
+
 `troupe` uses the daemon already running on this machine, found through its
 `daemon.json` as every client finds it, and starts the same daemon inside itself when
 none is. `troupe daemon run` starts the standalone `troupe-daemon` instead — found through

@@ -219,18 +219,25 @@ defmodule Troupe.Bench.Onboarding do
 
   @section "# Instruction files\n"
 
-  # What the instructions took of a request's system prompt, the scratch workspace's path
-  # written `<workspace>` as everywhere in the bench: the instruction files' section and,
-  # for a session on an agent the workspace defines, that agent's own prompt before it,
-  # both ending where the environment's section starts.
+  # What the instructions took of a request's prompt, the scratch workspace's path written
+  # `<workspace>` as everywhere in the bench: the instruction files' section and, for a
+  # session on an agent the workspace defines, that agent's own prompt before it, both
+  # ending where the environment's section starts. With a stable system prompt, the
+  # default, the section goes with the turn (Decision 863) and is read from there.
   defp instruction_bytes(request, ctx) do
     system = String.replace(request.system || "", ctx.workspace, "<workspace>")
     [head | _] = String.split(system, "\n\n<environment>", parts: 2)
 
+    turn =
+      request
+      |> Model.turn_context()
+      |> String.replace(ctx.workspace, "<workspace>")
+      |> Model.section(@section)
+
     case {ctx.scenario.agent, :binary.match(head, @section)} do
       {nil, {at, _length}} -> byte_size(head) - at
-      {nil, :nomatch} -> 0
-      {_agent, _section} -> byte_size(head)
+      {nil, :nomatch} -> byte_size(turn)
+      {_agent, _section} -> byte_size(head) + byte_size(turn)
     end
   end
 end

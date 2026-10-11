@@ -63,7 +63,7 @@ defmodule Troupe.Log.Fold do
   def witnessed_types do
     ~w(
       agent_started agent_done agent_woken agent_restarted
-      user_input llm_response llm_error
+      user_input llm_request llm_response llm_error
       tool_call_started tool_call_completed tool_results
       todo_updated profile_switched compacted
       goal_set goal_cleared cancelled
@@ -150,6 +150,13 @@ defmodule Troupe.Log.Fold do
   defp agent_fold(agent, %Event{type: "user_shell", data: %{"agent" => true}}),
     do: Map.update(agent, "shell_notes", 1, &(&1 + 1))
 
+  # The turn context a call put into the conversation (Decision 863), which a restarted
+  # agent puts back: how many blocks the conversation carries since its last compaction.
+  # Present only once one was put, as the goal is, so a log without one folds to the map it
+  # always did.
+  defp agent_fold(agent, %Event{type: "llm_request", data: %{"turn_context_block" => %{}}}),
+    do: Map.update(agent, "turn_contexts", 1, &(&1 + 1))
+
   defp agent_fold(agent, %Event{type: "llm_response", data: data}) do
     usage = data["usage"] || %{}
 
@@ -211,7 +218,8 @@ defmodule Troupe.Log.Fold do
   # Compaction replaces the conversation rather than appending to it, which is the one
   # place the message count can go *down* — and therefore the one place a fold that
   # ignored it would drift silently. The summariser's tokens are the agent's (Decision
-  # 769); a `compacted` written before it carries none, and adds nothing.
+  # 769); a `compacted` written before it carries none, and adds nothing. The turn context
+  # goes with the conversation it was put in (Decision 863).
   defp agent_fold(agent, %Event{type: "compacted", data: data}) do
     usage = data["usage"] || %{}
 
@@ -222,6 +230,7 @@ defmodule Troupe.Log.Fold do
         "input_tokens" => agent["input_tokens"] + (usage["input_tokens"] || 0),
         "output_tokens" => agent["output_tokens"] + (usage["output_tokens"] || 0)
     }
+    |> Map.delete("turn_contexts")
   end
 
   # The note a root's failed request left in its conversation (Decision 693), a message
