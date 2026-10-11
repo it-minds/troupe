@@ -50,11 +50,10 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
   `input.accepted` and never a `user_input`, so the remote session tests don't exercise
   the real sequence.
 - Under full load, core `WatcherTest` "poll backend a gitignored file's marker is ignored"
-  and `ReadBranchTest` (an `Index` call timeout) fail now and then; both pass alone.
-- On the 0.6.3 tip under full load, core `BlobsTest` and `CutShortTest` (an `Index` call
-  timeout), the worker's `ReaderLogTest` "a log an activation has taken over" and the
-  gateway's `RestartTest` (once with a `FunctionClauseError` in `Troupe.LLM.Fake.render/2`)
-  each failed once; all pass alone.
+  fails now and then; it passes alone.
+- On the 0.6.3 tip under full load, the worker's `ReaderLogTest` "a log an activation has
+  taken over" and the gateway's `RestartTest` (once with a `FunctionClauseError` in
+  `Troupe.LLM.Fake.render/2`) each failed once; both pass alone.
 - The worker suite's plane-backed tests share `troupe_plane_test` with the plane suite, so
   running both at once can deadlock in Postgres (`40P01` in `plane_link_test.exs`).
 - Under full load, the TUI's `ClipboardTest` and `TUISelectionTest` (Ctrl-Y copy) fail
@@ -67,10 +66,9 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
 - The desktop app's tests time out now and then when the machine is busy (goal-loop,
   local-mode, onboarding, command-palette); local-mode sends before its session is
   attached ("not attached").
-- Under full load, core `SleepTest` ("sleeps on a spent budget's question") and two of the
-  gateway's `PrivateTest` tests ("a seal with nobody linked", "carrying on another
-  person's link") failed now and then, the latter beside `session_ids_test` and
-  `daemon_test`; all pass alone. Core `Session.ShellTest` "a restart puts back a note ...
+- Under full load, two of the gateway's `PrivateTest` tests ("a seal with nobody linked",
+  "carrying on another person's link") failed now and then, beside `session_ids_test` and
+  `daemon_test`; both pass alone. Core `Session.ShellTest` "a restart puts back a note ...
   gives it once" is the other way round: it fails alone and passes in the full run.
 - CI's umbrella dev-check job can wait on "Waiting for lock on the build directory" until
   its 20-minute timeout, the lock held by an orphan `beam.smp` the runner kills at the
@@ -81,11 +79,9 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
 - Under full load, core `Troupe.Agent.CompactionTest` "a result the model has not answered
   yet is sent whole" failed once (a 54-byte result where it waits for one over the inline
   limit); it passes alone.
-- Under full load, core `ForkSessionTest` (a `Sessions.Index` call timing out),
-  `BudgetQuestionTest` ("a typed amount raises the limit"), `OnboardWriteTest` and
-  `DoctorTest`'s bench line fail now and then; all pass alone. `Session.ShellTest` "a
-  command that ends mid-turn ..." once found its workspace gone ("spawn: Could not cd").
-- Most of the `Sessions.Index` call timeouts above share one cause, D117.
+- Under full load, core `DoctorTest`'s bench line fails now and then; it passes alone.
+  `Session.ShellTest` "a command that ends mid-turn ..." once found its workspace gone
+  ("spawn: Could not cd").
 - `OnboardWriteTest` once answered another file's refusal ("`.claude/agents/reviewer.md` is
   not there") for `nowhere/AGENTS.md`: order or shared state, not load.
 - The TUI's `daemon_client_test.exs` `hold_link_connection/0` calls `:sys.get_state` on
@@ -1249,18 +1245,6 @@ Found by the #502 and #555 fixers, 2026-10-10.
   as that command's `exit_status`.
 
 Found by the #248 fixer, 2026-10-10.
-
-### D117 - The sessions index blocks on a slow stop (medium)
-
-`Troupe.Sessions.Index`'s sweep calls `Watcher.enabled?`, `Troupe.snapshot` and
-`Troupe.stop_session` one session at a time, inside the index's own process, and a stop
-is `DynamicSupervisor.terminate_child` with a 30-second shutdown. Under load the index is
-busy for more than 15 seconds and every caller's 5-second call times out. That is the
-shared cause of most load flakes in D8 (`ReadBranchTest`, `CutShortTest`, `BlobsTest`,
-`ForkSessionTest`, `SleepTest`, `OnboardWriteTest`, `FactsTest`), and a daemon with many
-sessions would stall the same way.
-
-Found by the #502 watch fixer, 2026-10-10.
 
 ## Taken
 
