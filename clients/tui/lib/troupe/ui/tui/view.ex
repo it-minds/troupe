@@ -321,12 +321,6 @@ defmodule Troupe.UI.TUI.View do
   @spec turn_open?(geometry()) :: boolean()
   def turn_open?(g), do: Model.turn_level(g.view, turn_in_view(g)) == :everything
 
-  # Where the side box is drawn it says what the window's last turn cost (TUI Decision
-  # 160), so the window's tile in the tray leaves out the line that said it under the turn
-  # (the pane does the same through its view); a screen too narrow for the box keeps it.
-  defp turn_lines_moved?(true), do: false
-  defp turn_lines_moved?(false), do: true
-
   # Following shows the end of the transcript — except when the last block is what the
   # branch is waiting on and it is taller than the pane: then its header (`APPROVAL: …`
   # and the diff's `--- path`) matters more than its last rows, so start at its top.
@@ -2178,12 +2172,15 @@ defmodule Troupe.UI.TUI.View do
   defp strip(windows, rect, state) do
     shown = Enum.take(windows, 9)
     rects = tile_rects(rect, length(shown))
+    # Where the side box is drawn it says what the window's last turn cost (TUI Decision
+    # 160), so a tile, like the pane, draws the line that said it under the turn as
+    # nothing; a screen too narrow for the box keeps it.
     moved? = rect.width >= @side_box
 
     shown
     |> Enum.with_index(1)
     |> Enum.zip(rects)
-    |> Enum.flat_map(fn {{w, n}, r} -> window_tile(w, n, r, state, turn_lines_moved?(moved?)) end)
+    |> Enum.flat_map(fn {{w, n}, r} -> window_tile(w, n, r, state, not moved?) end)
   end
 
   # Nothing started yet: the mask and the word over what to type, when the screen has

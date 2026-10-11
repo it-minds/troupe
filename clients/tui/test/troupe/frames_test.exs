@@ -693,6 +693,33 @@ defmodule Troupe.FramesTest do
     GenServer.stop(pid)
   end
 
+  # The daemon's deltas are coalesced per frame, and a model that thinks and answers within
+  # one frame used to have its reasoning flushed as the start of its answer, never folded
+  # into a reasoning frame.
+  test "against the daemon: reasoning that streams in the frame its answer starts in is reasoning" do
+    {sid, _, _} = start_session!(script: [%{"reasoning" => "think hard about it", "text" => "hi"}])
+    {pid, session} = start_tui(sid)
+    _ = :sys.get_state(pid)
+    say!(sid, "go")
+
+    eventually(fn ->
+      Enum.any?(
+        user_state(pid).model.windows["root"].agents["root"].transcript,
+        &match?({:reasoning, _}, &1)
+      )
+    end)
+
+    press(pid, "1")
+    eventually(fn -> screen_text(pid, session) =~ "▸ thinking" end)
+    refute screen_text(pid, session) =~ "think hard about it"
+    assert screen_text(pid, session) =~ "▎ hi"
+
+    press(pid, "e")
+    eventually(fn -> screen_text(pid, session) =~ "▎ think hard about it" end)
+    assert screen_text(pid, session) =~ "▾ thinking"
+    GenServer.stop(pid)
+  end
+
   test "transcript.detail on the config ladder is the screen's default" do
     script = [{:text_and_tools, "Looking.", [{"list_files", %{}}]}, {:text, "All good."}]
 

@@ -13,6 +13,7 @@ paths:
   - clients/tui/lib/troupe/ui/tui/palette.ex
   - clients/tui/lib/mix/tasks/troupe.palette.ex
   - clients/tui/lib/troupe/settings.ex
+  - clients/tui/lib/troupe/remote/worker.ex
   - apps/troupe_core/lib/troupe/config/schema.ex
   - clients/tui/test/troupe/frames_test.exs
 symbols:
@@ -36,6 +37,14 @@ grammar the design page writes down (`┌─ elixir · lib/p.ex`, `diff · path 
 call's entry keeps the times its events carried (`started_at`, `ended_at`), and a reasoning
 entry how long the reasoning streamed, for the durations; a log replayed has no deltas and
 says `thinking` alone.
+
+**Reasoning reaches its frame.** Reasoning is live only (TUI Decision 36): the fold keeps
+it when the message it came before lands. The link coalesces deltas per frame, and it
+joined a frame's reasoning and text into one delta that was reasoning only when all of
+it was, so a model that thought and began to answer within one frame — the scripted model
+always, a real one at the seam — had its reasoning streamed as its answer and never
+drawn as reasoning. Each run of reasoning and each run of text in a frame is now flushed
+as its own delta, in order.
 
 **The surface.** The view paints one background, a frame's: the new `surface` role, the
 theme's `bg.hover` token, generated like every role (`mix troupe.palette`), drawn out to
@@ -115,6 +124,8 @@ the fold unchanged; a long frame cut and opened in place; a budget stop, an appr
 scratchpad card; tables, nested lists, data and diff fences, a table too wide; the curtain
 line's prefix, its facts, its order within a turn and its start again, and no flourish
 where there must be none, in a tile or from the headless printer; and against the daemon,
-`e`, `/detail` and the log unchanged, and `transcript.detail` from a project's file.
+`e`, `/detail` and the log unchanged, reasoning streamed in the frame its answer starts in
+drawn as reasoning (on the tip it arrived as the answer's first words), and
+`transcript.detail` from a project's file.
 `transcript_rows_test.exs`, `tui_theme_test.exs` and the rest of the suite updated to the
 frames.
