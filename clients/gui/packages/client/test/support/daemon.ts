@@ -605,6 +605,11 @@ export class FakeDaemon {
   async stop(): Promise<void> {
     for (const c of this.clients) c.ws.close();
     this.clients.clear();
+    // A close is a handshake. A client that never answers it (one unmounted mid-call), or
+    // one that connected while this stops and so is in no list above, would hold both
+    // closes below open for `ws`'s 30 s: give the handshake a moment, then end what is left.
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    for (const ws of this.wss?.clients ?? []) ws.terminate();
     await new Promise<void>((resolve) => this.wss?.close(() => resolve()));
     await new Promise<void>((resolve) => this.server?.close(() => resolve()));
   }
