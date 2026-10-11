@@ -200,14 +200,15 @@ defmodule Troupe.MCP.Stdio do
   def handle_info(_message, state), do: {:noreply, state}
 
   # A crash report prints the state, and the server's environment can hold a credential
-  # (Decision 857): it prints the names, as `Troupe.Session.MCP` does.
+  # (Decision 857): it prints the names, as `Troupe.Session.MCP` does. The report's
+  # stacktrace prints the state too, as an argument of the call that failed, which no
+  # `format_status/1` reaches: the `Inspect` below the module does.
   @impl GenServer
   def format_status(status), do: Map.replace_lazy(status, :state, &redacted/1)
 
-  defp redacted(%__MODULE__{config: config} = state),
-    do: %{state | config: Config.redacted_server(config)}
-
-  defp redacted(state), do: state
+  @doc false
+  @spec redacted(%__MODULE__{}) :: %__MODULE__{}
+  def redacted(%__MODULE__{config: config} = state), do: %{state | config: Config.redacted_server(config)}
 
   # Only callers are answered; the lifecycle requests (`:initialize`, `:tools_list`) have
   # nobody waiting.
@@ -373,4 +374,8 @@ defmodule Troupe.MCP.Stdio do
   end
 
   defp version, do: to_string(Application.spec(:troupe_core, :vsn) || "dev")
+end
+
+defimpl Inspect, for: Troupe.MCP.Stdio do
+  def inspect(state, opts), do: Inspect.Any.inspect(Troupe.MCP.Stdio.redacted(state), opts)
 end

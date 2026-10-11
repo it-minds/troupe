@@ -470,15 +470,17 @@ defmodule Troupe.Session.MCP do
   def handle_info(_message, state), do: {:noreply, state}
 
   # A crash report prints the state, and a server's environment and headers can hold a
-  # credential (Decision 820): it prints their names.
+  # credential (Decision 820): it prints their names. The report's stacktrace prints the
+  # state as an argument of the call that failed, which no `format_status/1` reaches: the
+  # `Inspect` below the module does (Decision 857).
   @impl GenServer
   def format_status(status), do: Map.replace_lazy(status, :state, &redacted/1)
 
-  defp redacted(%__MODULE__{servers: servers} = state) do
+  @doc false
+  @spec redacted(%__MODULE__{}) :: %__MODULE__{}
+  def redacted(%__MODULE__{servers: servers} = state) do
     %{state | servers: Map.new(servers, fn {name, entry} -> {name, redacted_entry(entry)} end)}
   end
-
-  defp redacted(state), do: state
 
   defp redacted_entry(%{record: %{config: config} = record} = entry),
     do: %{entry | record: %{record | config: Config.redacted_server(config)}}
@@ -664,4 +666,8 @@ defmodule Troupe.Session.MCP do
     do: %{server | oauth: OAuth.binding(server.name, server.url, oauth, state_dir)}
 
   defp with_oauth(server, _none, _state_dir), do: server
+end
+
+defimpl Inspect, for: Troupe.Session.MCP do
+  def inspect(state, opts), do: Inspect.Any.inspect(Troupe.Session.MCP.redacted(state), opts)
 end

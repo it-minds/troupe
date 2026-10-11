@@ -125,8 +125,9 @@ defmodule Troupe.CrashReportTest do
       %{session: session}
     end
 
+    # The agent answers a request it does not know, so it is ended as a crash ends it.
     test "the root agent's names the keys and prints no value", %{session: session} do
-      log = crash(Troupe.Registry.agent(session.id, ["root"]))
+      log = crash(Troupe.Registry.agent(session.id, ["root"]), :terminate)
 
       assert log =~ "api_key"
       assert log =~ "STUB_TOKEN"
@@ -134,6 +135,8 @@ defmodule Troupe.CrashReportTest do
       refute_secrets(log)
     end
 
+    # The others fail on a request they do not know, so the report's stacktrace carries the
+    # state as the argument of the call that failed, as well as printing the state.
     test "the session's loop prints no value", %{session: session} do
       log = crash(Troupe.Registry.loop(session.id))
 
@@ -141,9 +144,16 @@ defmodule Troupe.CrashReportTest do
       refute_secrets(log)
     end
 
-    test "an MCP server on its standard streams names its env and prints no value", %{
-      session: session
-    } do
+    test "the session's MCP servers' holder names their env and headers and prints no value",
+         %{session: session} do
+      log = crash(Troupe.Registry.session_mcp(session.id))
+
+      assert log =~ "STUB_TOKEN"
+      assert log =~ "X-Api-Key"
+      refute_secrets(log)
+    end
+
+    test "an MCP server on its standard streams names its env and prints no value", %{session: session} do
       log = crash(Troupe.Registry.mcp_server(session.id, "stub"))
 
       assert log =~ "STUB_TOKEN"
@@ -158,11 +168,12 @@ defmodule Troupe.CrashReportTest do
     end
   end
 
-  # Ends the process as a crash does, and returns what the log said of it. A report
-  # prints the process's state only when the logger's level is `debug`, which is the level
-  # a person turns on to report a bug; the suite's is `critical`, so it is lowered for the
-  # report and put back.
-  defp crash(name) do
+  # Ends the process as a crash does, and returns what the log said of it: `:call` with a
+  # request it has no clause for, `:terminate` through `:sys`, which writes the same report.
+  # A report prints the process's state only when the logger's level is `debug`, which is
+  # the level a person turns on to report a bug; the suite's is `critical`, so it is
+  # lowered for the report and put back.
+  defp crash(name, how \\ :call) do
     pid = GenServer.whereis(name)
     assert is_pid(pid)
     ref = Process.monitor(pid)
@@ -173,8 +184,12 @@ defmodule Troupe.CrashReportTest do
         Logger.configure(level: :debug)
 
         capture_log(fn ->
-          spawn(fn -> :sys.terminate(pid, :boom) end)
-          assert_receive {:DOWN, ^ref, :process, ^pid, :boom}, 5_000
+          case how do
+            :call -> spawn(fn -> GenServer.call(pid, :not_a_request) end)
+            :terminate -> spawn(fn -> :sys.terminate(pid, :boom) end)
+          end
+
+          assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 5_000
           # The report is written before the process goes; give the handler a moment.
           Process.sleep(200)
         end)
@@ -184,6 +199,7 @@ defmodule Troupe.CrashReportTest do
 
     assert log =~ "terminating"
     assert log =~ "State: "
+    if how == :call, do: assert(log =~ "FunctionClauseError")
     log
   end
 
