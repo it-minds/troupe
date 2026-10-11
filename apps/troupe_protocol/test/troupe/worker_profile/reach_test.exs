@@ -2,9 +2,10 @@ defmodule Troupe.WorkerProfile.ReachTest do
   @moduledoc """
   What a worker without Cilium reaches of a profile's own endpoints (Decisions 749 and
   752): a name on 443 and 80 through the public rule, a name on another port as the public
-  rule's addresses on that port, an address as that one address, and a loopback or
-  link-local address not at all, nor with Cilium (Decision 758). A name is taken at its
-  word, since what it resolves to is not known where it is typed.
+  rule's addresses on that port, an address as that one address, and a loopback,
+  link-local or cloud metadata address not at all, nor with Cilium (Decisions 758 and
+  856). A name is taken at its word, since what it resolves to is not known where it is
+  typed; with Cilium what no name reaches is denied by address (`denied/1`).
   """
 
   use ExUnit.Case, async: true
@@ -65,12 +66,44 @@ defmodule Troupe.WorkerProfile.ReachTest do
       end
     end
 
+    test "at a cloud's metadata address outside the link-local ranges is refused" do
+      # Issue #361: one cloud's metadata service answers at a unique-local IPv6 address,
+      # another's in the shared address space, and either was admitted as its one address.
+      cases = [
+        {"http://[fd00:ec2::254]/latest", "at fd00:ec2::254, a cloud metadata address"},
+        {"http://[FD00:EC2:0:0::254]/latest", "at FD00:EC2:0:0::254, a cloud metadata address"},
+        {"http://100.100.100.200/latest", "at 100.100.100.200, a cloud metadata address"},
+        {"http://[::ffff:100.100.100.200]/latest",
+         "at ::ffff:100.100.100.200, a cloud metadata address"}
+      ]
+
+      for {url, where} <- cases do
+        assert Reach.unreachable([{:llm, url}]) == ["llm.endpoint #{url} is #{where}"], url
+        assert Reach.admitted([{:llm, url}]) == [], url
+      end
+    end
+
+    test "at an unspecified address, which is the pod itself, is refused" do
+      cases = [
+        {"http://0.0.0.0:4000/v1", "at 0.0.0.0, an unspecified address"},
+        {"http://[::]:4000/v1", "at ::, an unspecified address"}
+      ]
+
+      for {url, where} <- cases do
+        assert Reach.unreachable([{:llm, url}]) == ["llm.endpoint #{url} is #{where}"], url
+        assert Reach.admitted([{:llm, url}]) == [], url
+      end
+    end
+
     test "at the edges of those ranges is admitted" do
       for {url, block} <- [
             {"https://128.0.0.1/v1", "128.0.0.1/32"},
             {"https://169.253.255.255/v1", "169.253.255.255/32"},
             {"https://169.255.0.1/v1", "169.255.0.1/32"},
-            {"https://[fec0::1]/v1", "fec0::1/128"}
+            {"https://[fec0::1]/v1", "fec0::1/128"},
+            {"https://0.0.0.1/v1", "0.0.0.1/32"},
+            {"https://100.100.100.201/v1", "100.100.100.201/32"},
+            {"https://[fd00:ec2::253]/v1", "fd00:ec2::253/128"}
           ] do
         assert Reach.unreachable([{:llm, url}]) == [], url
         assert Reach.admitted([{:llm, url}]) == [{block, [443]}], url
@@ -182,25 +215,58 @@ defmodule Troupe.WorkerProfile.ReachTest do
   test "the public rule is read from here, so the rule and the judgement cannot drift" do
     assert Reach.public_ports() == [443, 80]
 
+    # The shared address space too (issue #361): a cloud's metadata service answers in it,
+    # and a cluster's pods may live in it.
     assert Reach.excepted() == [
              "10.0.0.0/8",
              "172.16.0.0/12",
              "192.168.0.0/16",
-             "169.254.0.0/16"
+             "169.254.0.0/16",
+             "100.64.0.0/10"
            ]
   end
 
-  test "a host at a loopback or link-local address is refused with Cilium too, as an address" do
+  test "a host at a loopback, link-local or metadata address is refused with Cilium too, as an address" do
     # The CiliumNetworkPolicy leaves such a host out of its `toCIDR` rule (Decision 758),
     # whichever of the profile's hosts it is, and asks this.
     for host <- ~w(169.254.169.254 127.0.0.1 127.8.9.1 ::1 fe80::1 FE80::2 febf::1
-                   ::ffff:169.254.169.254 ::ffff:127.0.0.1) do
+                   ::ffff:169.254.169.254 ::ffff:127.0.0.1 fd00:ec2::254 100.100.100.200
+                   ::ffff:100.100.100.200 0.0.0.0 ::) do
       assert Reach.refused?(host), host
     end
 
     for host <- ~w(10.20.0.5 203.0.113.5 169.253.255.255 169.255.0.1 128.0.0.1 fec0::1
-                   2001:db8::9 metadata.example.test tools.mcp.svc *.example.test) do
+                   2001:db8::9 100.64.0.1 fd00:ec2::253 metadata.example.test
+                   tools.mcp.svc *.example.test) do
       refute Reach.refused?(host), host
+    end
+  end
+
+  describe "what a worker reaches by no name" do
+    # With Cilium a name is admitted at whatever address its DNS answer carries, so the
+    # CiliumNetworkPolicy denies these whatever the allowlist says (issue #361).
+    test "is link-local in both families and the metadata addresses outside it" do
+      assert Reach.denied([]) == [
+               {"169.254.0.0/16", []},
+               {"fe80::/10", []},
+               {"fd00:ec2::254/128", []},
+               {"100.100.100.200/32", []}
+             ]
+    end
+
+    test "except the addresses given, which the installation chose" do
+      assert Reach.denied(["169.254.20.10", "objects.example.test", "FE80::7", "10.1.2.3"]) == [
+               {"169.254.0.0/16", ["169.254.20.10/32"]},
+               {"fe80::/10", ["fe80::7/128"]},
+               {"fd00:ec2::254/128", []},
+               {"100.100.100.200/32", []}
+             ]
+
+      # An address that is a whole block is no block at all.
+      assert {"100.100.100.200/32", _} =
+               List.keyfind(Reach.denied(["fd00:ec2::254"]), "100.100.100.200/32", 0)
+
+      refute List.keyfind(Reach.denied(["fd00:ec2::254"]), "fd00:ec2::254/128", 0)
     end
   end
 
@@ -215,6 +281,7 @@ defmodule Troupe.WorkerProfile.ReachTest do
     assert explained =~ "with Cilium its CiliumNetworkPolicy"
     assert explained =~ "the pod itself"
     assert explained =~ "metadata"
+    assert explained =~ "unspecified"
     assert explained =~ "<service>.<namespace>.svc"
   end
 end

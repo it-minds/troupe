@@ -14,8 +14,10 @@ defmodule Troupe.WorkerProfile.Reach do
   the operator writes them.
 
   Except at a loopback or a link-local address, in either family and however it is
-  spelled. From a pod, loopback is the pod itself, and link-local is its node's, where a
-  cloud's metadata service answers, so no rule admits a profile's endpoint there.
+  spelled, or at one of the two metadata addresses outside those ranges. From a pod,
+  loopback is the pod itself (as the unspecified address is), and link-local is its
+  node's, where a cloud's metadata service answers, so no rule admits a profile's endpoint
+  there.
   `unreachable/1` says which, a sentence each, for the plane to refuse such a profile
   where it is set up and for the operator to report one nothing could refuse (Decision
   749). Both read one judgement of each endpoint, so what is refused is exactly what is
@@ -29,24 +31,38 @@ defmodule Troupe.WorkerProfile.Reach do
   With Cilium the rest of this does not apply: the `CiliumNetworkPolicy` admits each
   endpoint by name or by address, on any port. But not at a loopback or link-local address
   either (`refused?/1`), so a profile naming one is refused and reported in both modes
-  alike (Decision 758).
+  alike (Decision 758). And since a name is admitted there at whatever address its DNS
+  answer carries, that policy also denies link-local and the metadata addresses outright
+  (`denied/1`), whatever name leads to them (Decision 856).
   """
 
   alias Troupe.WorkerProfile, as: Profile
 
-  # What the public rule leaves out of `0.0.0.0/0`, as the operator writes it.
-  @excepted ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
+  # What the public rule leaves out of `0.0.0.0/0`, as the operator writes it. The shared
+  # address space is not public either: a cloud's metadata service answers in it, and a
+  # cluster's pods may live in it.
+  @excepted ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10"]
 
   # What the public rule is open on, and so where a name with no port is reached.
   @public_ports [443, 80]
 
-  # Where no rule admits a profile's endpoint, and what each is called in a sentence.
+  # Where no rule admits a profile's endpoint, and what each is called in a sentence. The
+  # unspecified address, connected to, is the host connecting. A cloud's metadata service
+  # answers outside the link-local ranges too: EC2's over IPv6, at a unique-local address,
+  # and Alibaba Cloud's, in the shared address space.
   @refused [
     {"127.0.0.0/8", "loopback"},
     {"::1/128", "loopback"},
+    {"0.0.0.0/32", "unspecified"},
+    {"::/128", "unspecified"},
     {"169.254.0.0/16", "link-local"},
-    {"fe80::/10", "link-local"}
+    {"fe80::/10", "link-local"},
+    {"fd00:ec2::254/128", "cloud metadata"},
+    {"100.100.100.200/32", "cloud metadata"}
   ]
+
+  # What no worker reaches by any name: the link-local ranges and the metadata addresses.
+  @denied for {block, kind} <- @refused, kind in ["link-local", "cloud metadata"], do: block
 
   @typedoc "One endpoint a profile names, as `admitted/1` and `unreachable/1` take it."
   @type endpoint ::
@@ -125,6 +141,24 @@ defmodule Troupe.WorkerProfile.Reach do
   @spec refused?(String.t()) :: boolean()
   def refused?(host), do: refusal(host) != nil
 
+  @doc """
+  The blocks a worker's `CiliumNetworkPolicy` denies whatever admits them, the link-local
+  ranges and the metadata addresses outside them, each with the addresses among `kept`
+  inside it, as blocks of one, left out of it. A `toFQDNs` rule admits a name at whatever
+  address its DNS answer carries, so these are denied by address as well as refused as
+  one. `kept` are hosts the installation chose; a name among them is passed over, and an
+  address that is a whole block takes that block out.
+  """
+  @spec denied([String.t()]) :: [{String.t(), [String.t()]}]
+  def denied(kept) do
+    kept = for host <- kept, {:ok, address} <- [address(host)], uniq: true, do: address
+
+    for block <- @denied,
+        inside = for(address <- kept, within?(address, block), do: block(address)),
+        block not in inside,
+        do: {block, inside}
+  end
+
   @doc "A profile's endpoints, as `admitted/1` and `unreachable/1` take them."
   @spec endpoints(Profile.t()) :: [endpoint()]
   def endpoints(%Profile{} = profile) do
@@ -148,8 +182,9 @@ defmodule Troupe.WorkerProfile.Reach do
     Enum.join(problems, "; ") <>
       ": a worker's NetworkPolicy, or with Cilium its CiliumNetworkPolicy, admits a " <>
       "profile's endpoint by name or as its one address, but no rule opens a loopback " <>
-      "address, which from a pod is the pod itself, or a link-local one, which is the " <>
-      "node's and where a cloud's metadata service answers. Give the endpoint as a pod " <>
+      "or unspecified address, which from a pod is the pod itself, a link-local one, " <>
+      "which is the node's and where a cloud's metadata service answers, or a cloud's " <>
+      "metadata address outside that range. Give the endpoint as a pod " <>
       "reaches it: by name, at another address, or, for one in the cluster, as its " <>
       "Service (<service>.<namespace>.svc), which is reached on its own port."
   end
@@ -180,6 +215,7 @@ defmodule Troupe.WorkerProfile.Reach do
   defp judge_host(label, host, port) do
     case refusal(host) do
       nil -> {:admitted, admission(host, if(port, do: [port], else: @public_ports))}
+      "unspecified" -> {:refused, "#{label} is at #{host}, an unspecified address"}
       kind -> {:refused, "#{label} is at #{host}, a #{kind} address"}
     end
   end

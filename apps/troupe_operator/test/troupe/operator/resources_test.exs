@@ -521,8 +521,11 @@ defmodule Troupe.Operator.ResourcesTest do
 
       assert [%{"ipBlock" => %{"cidr" => "0.0.0.0/0", "except" => except}}] = public["to"]
 
+      # The shared address space as well (issue #361), where a cloud's metadata service
+      # answers on 80.
       assert Enum.sort(except) == [
                "10.0.0.0/8",
+               "100.64.0.0/10",
                "169.254.0.0/16",
                "172.16.0.0/12",
                "192.168.0.0/16"
@@ -776,6 +779,111 @@ defmodule Troupe.Operator.ResourcesTest do
       # A public address and a private one stay that one address, and a name a name.
       assert Enum.sort(cidrs(resources)) == ["10.20.0.5/32", "203.0.113.5/32"]
       assert Enum.sort(fqdn_names(resources)) == ["github.com"]
+    end
+
+    test "without Cilium, a profile's endpoint at a cloud's metadata address is admitted by nothing",
+         %{policy: policy} do
+      # Issue #361: one cloud's metadata service answers at a unique-local IPv6 address and
+      # another's in the shared address space, and each became a rule of its one address.
+      # Another address in that space is the profile's to name, as a private one is.
+      rules =
+        [
+          llm: %{"endpoint" => "http://100.100.100.200/latest"},
+          mcpServers: [
+            %{"name" => "meta", "url" => "http://[fd00:ec2::254]/latest"},
+            %{"name" => "mapped", "url" => "http://[::ffff:100.100.100.200]/latest"},
+            %{"name" => "self", "url" => "http://0.0.0.0:9000/mcp"},
+            %{"name" => "tailnet", "url" => "https://100.101.2.3:8443/mcp"}
+          ],
+          egress: %{"fqdns" => ["fd00:ec2::254", "100.100.100.200:8080"]}
+        ]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: false})
+        |> egress()
+
+      assert Enum.sort(address_rules(rules)) ==
+               Enum.sort([
+                 public_addresses_on([443, 80]),
+                 one_address_on("100.101.2.3/32", 8443)
+               ])
+    end
+
+    test "without Cilium, the installation's own endpoint in the shared address space is that address",
+         %{profile: profile, policy: policy} do
+      # The public rule no longer reaches 100.64.0.0/10, so an object store there is admitted
+      # as an object store at a private address is (Decision 724).
+      settings = %Settings{
+        cilium_available: false,
+        object_store_endpoint: "https://100.118.2.3"
+      }
+
+      rules = profile |> Resources.for_profile(policy, settings) |> egress()
+      assert one_address_on("100.118.2.3/32", 443) in address_rules(rules)
+    end
+
+    test "with Cilium, a name whose answer is link-local or a metadata address is not reached",
+         %{policy: policy} do
+      # Issue #361: a `toFQDNs` rule admits whatever address the DNS answer carries, so a
+      # name in `allowedEgress` pointed at the node's metadata service reached it. The deny
+      # is taken before any allow, of this policy or another, whatever the name.
+      resources =
+        [
+          egress: %{"fqdns" => ["metadata.example.test"]},
+          mcpServers: [%{"name" => "meta", "url" => "http://[fd00:ec2::254]/latest"}],
+          llm: %{"endpoint" => "http://100.100.100.200/latest"}
+        ]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: true})
+
+      assert "metadata.example.test" in fqdn_names(resources)
+      assert cidrs(resources) == []
+
+      # The node's DNS cache, where a cluster runs one at its usual link-local address, is
+      # left out of the deny, so an installation's own policy admitting it still does.
+      assert denied(resources) == [
+               %{"cidr" => "169.254.0.0/16", "except" => ["169.254.20.10/32"]},
+               %{"cidr" => "fe80::/10"},
+               %{"cidr" => "fd00:ec2::254/128"},
+               %{"cidr" => "100.100.100.200/32"}
+             ]
+    end
+
+    test "with Cilium, a profile that names nothing is denied the same",
+         %{policy: policy} do
+      resources =
+        [llm: nil, mcpServers: [], egress: %{}]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: true})
+
+      assert Enum.map(denied(resources), & &1["cidr"]) ==
+               ["169.254.0.0/16", "fe80::/10", "fd00:ec2::254/128", "100.100.100.200/32"]
+    end
+
+    test "with Cilium, the installation's own endpoint at a link-local address stays reached",
+         %{profile: profile, policy: policy} do
+      # OpenBao and the object store are the installation's choice (Decision 758), and the
+      # deny would take back the `toCIDR` that admits them.
+      settings = %Settings{
+        cilium_available: true,
+        bao_address: "http://169.254.7.7:8200",
+        object_store_endpoint: "http://[fd00:ec2::254]:9000"
+      }
+
+      resources = Resources.for_profile(profile, policy, settings)
+
+      assert Enum.sort(cidrs(resources)) == ["169.254.7.7/32", "fd00:ec2::254/128"]
+
+      assert denied(resources) == [
+               %{
+                 "cidr" => "169.254.0.0/16",
+                 "except" => ["169.254.20.10/32", "169.254.7.7/32"]
+               },
+               %{"cidr" => "fe80::/10"},
+               %{"cidr" => "100.100.100.200/32"}
+             ]
     end
 
     test "DNS is the cluster's resolver in kube-system, and nothing that merely carries its label",
@@ -1347,6 +1455,12 @@ defmodule Troupe.Operator.ResourcesTest do
     cilium |> get_in(["spec", "egress"]) |> Enum.flat_map(&(&1["toCIDR"] || []))
   end
 
+  # And every block it denies, whatever else admits it.
+  defp denied(resources) do
+    [cilium] = all(resources, "CiliumNetworkPolicy")
+    cilium |> get_in(["spec", "egressDeny"]) |> Enum.flat_map(&(&1["toCIDRSet"] || []))
+  end
+
   defp namespace_rule(namespace, port) do
     %{
       "to" => [
@@ -1374,7 +1488,13 @@ defmodule Troupe.Operator.ResourcesTest do
         %{
           "ipBlock" => %{
             "cidr" => "0.0.0.0/0",
-            "except" => ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
+            "except" => [
+              "10.0.0.0/8",
+              "172.16.0.0/12",
+              "192.168.0.0/16",
+              "169.254.0.0/16",
+              "100.64.0.0/10"
+            ]
           }
         }
       ],
