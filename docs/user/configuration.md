@@ -325,10 +325,10 @@ you had is used, and if you say no at the provider you keep it.
 
 `/mcp sign-out wiki`, `o`, or **Sign out** forgets the sign-in on this machine and asks the
 provider to revoke it, so a copy of Troupe's state directory can no longer renew it.
-Troupe says whether the provider was told: one that refuses or does not answer within a
-few seconds is not, and one that offers no way to revoke a sign-in is named as such; in
-both cases the sign-in is still forgotten here, and the provider takes it until it runs
-out. `troupe logout`, without a plane named, does the same for every server you are
+The terminal UI says whether the provider was told: one that refuses or does not answer
+within a few seconds is not, and one that offers no way to revoke a sign-in is named as
+such; in both cases the sign-in is still forgotten here, and the provider takes it until
+it runs out. `troupe logout`, without a plane named, does the same for every server you are
 signed in to, and says so for each; if the daemon is not running it says your sign-ins
 were kept.
 
