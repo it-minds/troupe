@@ -604,28 +604,6 @@ defmodule Troupe.Memory.FactsTest do
     refute Memory.stale?(old.built_at, [], max_age_days: 3)
   end
 
-  test "a section written whole replaces its kind and stamps the brief", context do
-    ws = context.workspace
-
-    :ok =
-      Brief.put_section(ws, "commands", "- `mix check` is the gate.\n- `mix test` runs tests.")
-
-    assert Enum.map(Facts.list(ws), & &1["claim"]) == [
-             "`mix check` is the gate.",
-             "`mix test` runs tests."
-           ]
-
-    assert %{built_at: %DateTime{}, survey: survey, head: head} = Facts.meta(ws)
-    assert survey == Memory.survey_version()
-    assert head == context.head
-
-    :ok = Brief.put_section(ws, "Commands", "- `make` builds it.")
-
-    assert Enum.map(Facts.list(ws), &{&1["kind"], &1["claim"], &1["evidence"]["by"]}) == [
-             {"command", "`make` builds it.", "librarian"}
-           ]
-  end
-
   test "a view claim of many lines, a list or a fence reads back as itself" do
     claims = [
       "one line",

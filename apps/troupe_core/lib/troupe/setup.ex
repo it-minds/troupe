@@ -181,19 +181,19 @@ defmodule Troupe.Setup do
 
   @doc """
   What is already on this machine, for the questions to offer: which vendor variables
-  are set (names, never values), opencode's providers, the `config.yaml` there is and
+  are set (names, never values), opencode's providers by name (its config alone: the keys
+  in its `auth.json` are not read for a list of names), the `config.yaml` there is and
   whether a model can be asked through it, and the plane the daemon is linked to.
   """
   @spec detect() :: map()
   def detect do
     file = ModelSettings.describe()
-    opencode = OpenCode.providers()
 
     %{
       "env" => Enum.filter(@vendor_vars, &present?(System.get_env(&1))),
       "opencode" => %{
         "path" => OpenCode.config_path(),
-        "providers" => opencode |> Map.keys() |> Enum.sort(),
+        "providers" => OpenCode.provider_names(),
         "default" => OpenCode.default_model()
       },
       "config" =>

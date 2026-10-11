@@ -27,9 +27,16 @@ defmodule Troupe.Memory.Facts do
     one into `.git`, the memory's own files, a directory and a file over 10 MiB are each
     refused with a sentence, and in a git repository so is a file git does not track (an
     ignored `.env`), whose hash should not reach a `facts.jsonl` that may be committed
-    (Decision 839). An anchor read back from the file is held to the workspace, `.git` and
-    the memory's own files before it is hashed, so a repository's `facts.jsonl` cannot have
-    Troupe read elsewhere.
+    (Decision 839). On Windows a path typed in another case than the committed name is
+    that file, and is stored by the committed name. An anchor read back from the file is
+    held to the workspace, `.git`, the memory's own files and, in a repository, what git
+    tracks before it is hashed, so a repository's `facts.jsonl` cannot have Troupe read
+    elsewhere or hash a file it would not have written (Decision 854): such an anchor is
+    `missing`. What git tracks is asked once for every anchor a read has not asked about
+    since the index last changed, and kept beside the hashes by the index's size and
+    mtime, so a prompt makes no git call while the index stands still.
+  - **A scope is a glob** of paths from the repository's top, one word: not a sentence,
+    not absolute, not through `..`, its braces closed.
   """
 
   alias Troupe.Git
@@ -47,7 +54,10 @@ defmodule Troupe.Memory.Facts do
   @max_anchors 8
   @max_anchor_bytes 10 * 1024 * 1024
   @max_claim 4_000
+  @max_scope 200
   @recall_limit 20
+  # How many paths one `git ls-files` is asked about, so a command line stays short.
+  @tracked_batch 200
 
   @doc """
   Writes a fact and answers it as written, with its `status`. `attrs`: `kind`, `claim`,
@@ -68,7 +78,7 @@ defmodule Troupe.Memory.Facts do
          {:ok, claim} <- claim(attrs["claim"]),
          {:ok, scope} <- scope(attrs["scope"]),
          {:ok, paths} <- anchor_paths(attrs["anchors"]),
-         {:ok, anchors} <- anchors(paths, from, where.top),
+         {:ok, anchors} <- anchors(paths, from, where),
          {:ok, by} <- by(ctx[:by]) do
       now = now()
 
@@ -83,7 +93,8 @@ defmodule Troupe.Memory.Facts do
         "verified_at" => now
       }
 
-      with {:ok, stored} <- call(where, {:put, fact}), do: {:ok, read(where, stored)}
+      with {:ok, stored} <- call(where, {:put, fact}),
+           do: {:ok, read(with_tracked(where, [stored]), stored)}
     end
   end
 
@@ -94,9 +105,10 @@ defmodule Troupe.Memory.Facts do
   @spec list(Path.t() | where(), keyword()) :: [fact()]
   def list(workspace, filter \\ []) do
     where = loaded(workspace)
+    facts = all(where)
+    where = with_tracked(where, facts)
 
-    where
-    |> all()
+    facts
     |> Enum.map(&read(where, &1))
     |> Enum.filter(&keep?(&1, filter))
     |> Enum.sort_by(&order/1)
@@ -117,11 +129,16 @@ defmodule Troupe.Memory.Facts do
     words = words(opts[:query])
     path = opts[:path] && relative_path(opts[:path], from(workspace, where), where.top)
 
-    where
-    |> all()
-    |> Enum.filter(&wanted?(&1, opts[:kind], path))
-    |> Enum.map(&{&1, score(&1, words)})
-    |> Enum.reject(fn {_fact, score} -> words != [] and score == 0 end)
+    scored =
+      where
+      |> all()
+      |> Enum.filter(&wanted?(&1, opts[:kind], path))
+      |> Enum.map(&{&1, score(&1, words)})
+      |> Enum.reject(fn {_fact, score} -> words != [] and score == 0 end)
+
+    where = with_tracked(where, Enum.map(scored, &elem(&1, 0)))
+
+    scored
     |> Enum.map(fn {fact, score} -> {read(where, fact), score} end)
     |> Enum.filter(fn {fact, _score} ->
       opts[:status] in [nil, ""] or fact["status"] == opts[:status]
@@ -135,7 +152,8 @@ defmodule Troupe.Memory.Facts do
 
   @doc "A fact's status now: `current`, `moved`, `missing` or `unanchored`."
   @spec status(Path.t() | where(), fact()) :: String.t()
-  def status(workspace, fact), do: workspace |> loaded() |> check(fact) |> elem(0)
+  def status(workspace, fact),
+    do: workspace |> loaded() |> with_tracked([fact]) |> check(fact) |> elem(0)
 
   @doc "Forgets one fact."
   @spec delete(Path.t() | where(), String.t()) :: :ok | {:error, String.t()}
@@ -152,6 +170,7 @@ defmodule Troupe.Memory.Facts do
   def core(workspace) do
     where = loaded(workspace)
     {core, others} = where |> all() |> Enum.split_with(&(&1["kind"] in Memory.core_kinds()))
+    where = with_tracked(where, core)
 
     %{
       facts:
@@ -178,39 +197,6 @@ defmodule Troupe.Memory.Facts do
   """
   @spec stamp(Path.t() | where(), String.t() | nil) :: :ok | {:error, String.t()}
   def stamp(workspace, head), do: workspace |> locate() |> call({:stamp, head, now()})
-
-  @doc """
-  Replaces every fact of `kind` with one per claim, as writing a whole section of the brief
-  did before there were facts, and stamps the brief as built.
-  """
-  @spec replace(Path.t() | where(), String.t(), [String.t()], map() | keyword()) ::
-          :ok | {:error, String.t()}
-  def replace(workspace, kind, claims, ctx \\ %{}) do
-    where = locate(workspace)
-    from = from(workspace, where)
-    ctx = ctx |> Map.new() |> Map.put_new_lazy(:head, fn -> Brief.head(from) end)
-
-    with {:ok, kind} <- kind(kind),
-         {:ok, by} <- by(ctx[:by]) do
-      now = now()
-
-      facts =
-        for claim <- claims, {:ok, claim} <- [claim(claim)] do
-          %{
-            "id" => new_id(),
-            "kind" => kind,
-            "claim" => claim,
-            "scope" => nil,
-            "anchors" => [],
-            "evidence" => evidence(ctx, by, from),
-            "created_at" => now,
-            "verified_at" => now
-          }
-        end
-
-      call(where, {:replace, kind, facts, ctx[:head], now})
-    end
-  end
 
   @doc "Forgets every fact, and the view with them."
   @spec clear(Path.t() | where()) :: :ok | {:error, String.t()}
@@ -259,8 +245,7 @@ defmodule Troupe.Memory.Facts do
         {"unanchored", [], [], nil}
 
       anchors ->
-        tables = tables(where)
-        states = Enum.map(anchors, &anchor_state(&1, where.top, tables))
+        states = Enum.map(anchors, &anchor_state(&1, where))
         changed = for {path, :changed, _at} <- states, do: path
         gone = for {path, :gone, _at} <- states, do: path
 
@@ -281,17 +266,28 @@ defmodule Troupe.Memory.Facts do
     end
   end
 
-  defp anchor_state(%{"path" => path, "hash" => hash}, top, tables)
+  # An anchor git does not track is not hashed: it is `missing` as of the file's own mtime,
+  # so a brief built since does not count it again.
+  defp anchor_state(%{"path" => path, "hash" => hash}, where)
        when is_binary(path) and is_binary(hash) do
-    with {:ok, file} <- confined(path, top),
-         {:ok, now, mtime} <- Store.hash(tables, file) do
+    with {:ok, file} <- confined(path, where.top),
+         {:tracked, true} <- {:tracked, tracked?(where, path)},
+         {:ok, now, mtime} <- Store.hash(tables(where), file) do
       if now == hash, do: {path, :same, nil}, else: {path, :changed, mtime}
     else
-      _gone -> {path, :gone, went(Path.join(top, path), top)}
+      {:tracked, false} -> {path, :gone, mtime(Path.join(where.top, path))}
+      _gone -> {path, :gone, went(Path.join(where.top, path), where.top)}
     end
   end
 
-  defp anchor_state(anchor, _top, _tables), do: {inspect(anchor), :gone, nil}
+  defp anchor_state(anchor, _where), do: {inspect(anchor), :gone, nil}
+
+  defp mtime(file) do
+    case File.stat(file, time: :posix) do
+      {:ok, %{mtime: mtime}} -> DateTime.from_unix!(mtime)
+      {:error, _} -> nil
+    end
+  end
 
   # When a file went, as near as the files say: the mtime of the nearest directory still
   # there, which changed when the file (or the directory it was in) was removed.
@@ -319,23 +315,31 @@ defmodule Troupe.Memory.Facts do
 
   defp anchor_paths(_other), do: {:error, "anchors are a list of file paths"}
 
-  # Each path resolved from the workspace, held to it, and hashed; stored from the top.
-  defp anchors(paths, from, top) do
-    Enum.reduce_while(paths, {:ok, []}, fn path, {:ok, acc} ->
-      case anchor(path, from, top) do
+  # Each path resolved from the workspace, held to it, and hashed; stored from the top, by
+  # the name git commits it under.
+  defp anchors(paths, from, where) do
+    paths
+    |> Enum.reduce_while({:ok, []}, fn path, {:ok, acc} ->
+      case anchor(path, from, where) do
         {:ok, anchor} -> {:cont, {:ok, acc ++ [anchor]}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
+    |> case do
+      {:ok, anchors} -> {:ok, Enum.uniq_by(anchors, & &1["path"])}
+      error -> error
+    end
   end
 
-  defp anchor(path, from, top) do
+  defp anchor(path, from, where) do
+    top = where.top
+
     with rel when is_binary(rel) <- relative_path(path, from, top) || {:error, outside(path)},
          :ok <- within(Path.expand(path, from), from, path),
          {:ok, file} <- confined(rel, top),
          {:ok, bytes} <- read_anchor(file, path),
-         :ok <- tracked(rel, top) do
-      {:ok, %{"path" => rel, "hash" => sha256(bytes)}}
+         {:ok, name} <- tracked(where, rel) do
+      {:ok, %{"path" => name, "hash" => sha256(bytes)}}
     end
   end
 
@@ -343,24 +347,138 @@ defmodule Troupe.Memory.Facts do
   # file, a `.env`, would go into a `facts.jsonl` that may be committed, and a hash is an
   # oracle for what a file holds. Outside a repository nothing is committed, so nothing is
   # held back; inside one where git cannot answer, the anchor is refused rather than guessed.
-  defp tracked(rel, top) do
-    case Git.run(top, ["ls-files", "--cached", "-z", "--", ":(literal)" <> rel],
-           timeout_ms: 10_000
-         ) do
-      {:ok, out, 0} ->
-        listed = out |> String.split(<<0>>, trim: true) |> Enum.map(&Workspace.compare_key/1)
+  # The answer is the committed name, which on Windows may differ in case from the one typed.
+  defp tracked(where, rel) do
+    case where |> tracked_names([rel]) |> lookup(rel) do
+      name when is_binary(name) ->
+        {:ok, name}
 
-        if Workspace.compare_key(rel) in listed,
-          do: :ok,
-          else:
-            {:error,
-             "#{rel} is not a file git tracks (it is ignored or was never added): anchor a " <>
-               "file the repository commits"}
+      false ->
+        {:error,
+         "#{rel} is not a file git tracks (it is ignored or was never added): anchor a " <>
+           "file the repository commits"}
+
+      :unknown ->
+        {:error, "git could not say whether it tracks #{rel}, so it is no anchor"}
+    end
+  end
+
+  ## What git tracks
+
+  # The facts' anchors that git tracks in the checkout or worktree they are read from, in
+  # `where.tracked`, so a status hashes none it does not (Decision 854).
+  defp with_tracked(where, facts) do
+    paths =
+      for fact <- facts,
+          %{"path" => path} when is_binary(path) <- List.wrap(fact["anchors"]),
+          uniq: true,
+          do: path
+
+    Map.put(where, :tracked, if(paths == [], do: %{}, else: tracked_names(where, paths)))
+  end
+
+  defp tracked?(%{tracked: tracked} = where, path) do
+    case lookup(tracked, path) do
+      nil -> where |> tracked_names([path]) |> lookup(path) |> is_binary()
+      name -> is_binary(name)
+    end
+  end
+
+  defp tracked?(where, path), do: where |> tracked_names([path]) |> lookup(path) |> is_binary()
+
+  defp lookup(:all, path), do: path
+  defp lookup(names, path), do: Map.get(names, path)
+
+  # `:all` outside a repository, where nothing is held back; otherwise each path to the name
+  # git commits it under, `false` for one it does not track, or `:unknown` when git could
+  # not say. A path asked about since the index last changed is answered from the cache
+  # beside the hashes; the rest are asked of git together, in one listing per batch.
+  defp tracked_names(where, paths) do
+    top = where.top
+
+    if Brief.repository?(top) do
+      tables = tables(where)
+      top_key = Workspace.compare_key(top)
+      at = System.os_time(:second)
+      sig = index_sig(top)
+      {known, ask} = Enum.split_with(paths, &(cached(tables, top_key, sig, &1) != nil))
+
+      asked = ask_git(top, ask)
+      if sig != :none, do: remember(tables, top_key, sig, at, asked)
+
+      known
+      |> Map.new(&{&1, cached(tables, top_key, sig, &1)})
+      |> Map.merge(asked)
+    else
+      :all
+    end
+  end
+
+  # The answer kept for a path against the index as it is now, or `nil`: never one taken in
+  # the second the index was last written, which a later write in that second would not show.
+  defp cached(_tables, _top_key, :none, _path), do: nil
+
+  defp cached(tables, top_key, {_size, mtime} = sig, path) do
+    case :ets.lookup(tables.hashes, {:tracked, top_key, path}) do
+      [{_key, ^sig, at, name}] when mtime < at -> name
+      _other -> nil
+    end
+  end
+
+  defp remember(tables, top_key, sig, at, asked) do
+    for {path, name} <- asked, name != :unknown do
+      :ets.insert(tables.hashes, {{:tracked, top_key, path}, sig, at, name})
+    end
+  end
+
+  defp ask_git(_top, []), do: %{}
+
+  defp ask_git(top, paths) do
+    paths
+    |> Enum.chunk_every(@tracked_batch)
+    |> Enum.map(&ask_batch(top, &1))
+    |> Enum.reduce(%{}, &Map.merge/2)
+  end
+
+  # Without case where the platform compares paths without it, so a name typed in another
+  # case than the committed one is that file, answered by its committed name.
+  defp ask_batch(top, paths) do
+    magic = if Workspace.compare_key("A") == "a", do: ":(literal,icase)", else: ":(literal)"
+    specs = Enum.map(paths, &(magic <> &1))
+
+    case Git.run(top, ["ls-files", "--cached", "-z", "--" | specs], timeout_ms: 10_000) do
+      {:ok, out, 0} ->
+        listed = String.split(out, <<0>>, trim: true)
+        Map.new(paths, &{&1, committed(&1, listed)})
 
       _other ->
-        if Brief.repository?(top),
-          do: {:error, "git could not say whether it tracks #{rel}, so it is no anchor"},
-          else: :ok
+        Map.new(paths, &{&1, :unknown})
+    end
+  end
+
+  defp committed(path, listed) do
+    if path in listed,
+      do: path,
+      else: Enum.find(listed, false, &(Workspace.compare_key(&1) == Workspace.compare_key(path)))
+  end
+
+  # The size and mtime of the index git lists tracked files from: the checkout's
+  # `.git/index`, or the one a worktree's `.git` file names; `:none` when it cannot be found.
+  defp index_sig(top) do
+    dot_git = Path.join(top, ".git")
+
+    index =
+      case File.read(dot_git) do
+        {:ok, "gitdir: " <> dir} -> Path.join(Path.expand(String.trim(dir), top), "index")
+        {:ok, _other} -> nil
+        {:error, _directory} -> Path.join(dot_git, "index")
+      end
+
+    with index when is_binary(index) <- index,
+         {:ok, %{type: :regular, size: size, mtime: mtime}} <- File.stat(index, time: :posix) do
+      {size, mtime}
+    else
+      _ -> :none
     end
   end
 
@@ -458,10 +576,47 @@ defmodule Troupe.Memory.Facts do
 
   defp claim(_other), do: {:error, "nothing to remember: the claim is empty"}
 
+  # A glob of paths from the repository's top, as `recall` matches it
+  # (`Troupe.Instructions.glob_match?/2`): one word of at most 200 characters, not absolute,
+  # not through `..`, with `/` between directories and its braces closed.
   defp scope(nil), do: {:ok, nil}
-  defp scope(""), do: {:ok, nil}
-  defp scope(scope) when is_binary(scope), do: {:ok, String.trim(scope)}
+
+  defp scope(scope) when is_binary(scope) do
+    scope = String.trim(scope)
+
+    cond do
+      scope == "" -> {:ok, nil}
+      why = not_a_glob(scope) -> {:error, why}
+      true -> {:ok, scope}
+    end
+  end
+
   defp scope(_other), do: {:error, "scope is a glob, as a string"}
+
+  defp not_a_glob(scope) do
+    cond do
+      String.length(scope) > @max_scope ->
+        "a scope is a glob of at most #{@max_scope} characters"
+
+      scope =~ ~r/[\s\x00-\x1f]/u ->
+        "scope #{inspect(scope)} is not a glob: one pattern of paths, as `lib/**` or `*.ex`"
+
+      Workspace.absolute?(scope) or String.starts_with?(scope, "~") ->
+        "scope #{scope} is not relative: a glob from the repository's top, as `lib/**`"
+
+      String.contains?(scope, "\\") ->
+        "scope #{scope} has a backslash: write a glob with /"
+
+      ".." in String.split(scope, "/") ->
+        "scope #{scope} goes up through ..: a glob from the repository's top"
+
+      not Troupe.Instructions.glob?(scope) ->
+        "scope #{scope} is not a glob: a { is not closed"
+
+      true ->
+        nil
+    end
+  end
 
   defp by(nil), do: {:ok, "person"}
   defp by(by) when by in ["librarian", "person", "migrated"], do: {:ok, by}

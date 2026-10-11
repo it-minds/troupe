@@ -64,8 +64,10 @@ has never been given (`git ls-files --cached`; an added file counts): the hash o
 would otherwise go into a `facts.jsonl` that may be committed, and a hash is an oracle for a
 short secret. Where git cannot answer inside a repository the anchor is refused, not
 guessed. Outside a repository nothing is held back: nothing there is committed, and such a
-workspace has no brief due (838). Not done: the same check when an anchor is read back from
-a committed `facts.jsonl` to work out its status, which runs at every prompt.
+workspace has no brief due (838). Done since, by Decision 854: the same check when an anchor
+is read back from a committed `facts.jsonl` to work out its status, which runs at every
+prompt (an untracked anchor reads `missing` and is not hashed, and what git tracks is cached
+by the index's size and mtime).
 
 **`replaces` re-verifies.** With a claim, the new fact is written and the one it names is
 dropped once it is; alone, it drops that fact. The same kind and claim written again is
@@ -96,7 +98,7 @@ arguments are accepted and no longer offered in the schema: a model calls the ol
 because a prompt told it to, not because the schema offers it, and every request pays for
 what the schema offers (the offline bench's tool-definition budget, which the first draft
 with both offered and a longer description went over). Remove them in the release after
-this one.
+this one: done by Decision 854, which refuses them with the form that replaced them.
 
 **The librarian.** Its tools gain `recall`, and `recall` gains a `status` filter
 (`Facts.recall/2` too): asked by words or with none it answers at most twenty facts with

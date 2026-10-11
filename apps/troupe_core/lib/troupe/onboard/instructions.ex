@@ -63,7 +63,7 @@ defmodule Troupe.Onboard.Instructions do
   @behaviour Troupe.Onboard.Source
 
   alias Troupe.Config.JSONC
-  alias Troupe.{Gitignore, Paths, Workspace}
+  alias Troupe.{Git, Gitignore, Paths, Workspace}
   alias Troupe.Instructions.Check.Text
   alias Troupe.Instructions.FrontMatter
   alias Troupe.Protocol.AgentDefinition
@@ -94,12 +94,39 @@ defmodule Troupe.Onboard.Instructions do
   @typedoc "One file onboarding may write, and what it came from."
   @type proposal :: Troupe.Onboard.Source.proposal()
 
-  @doc "Whether the workspace's root has any of the files this source reads: a look, not a read."
+  @doc """
+  Whether the workspace has any of the files this source reads: a look, not a read. At the
+  root by name; below it, the names a directory may hold (`CLAUDE.md`, `GEMINI.md`, a
+  `.cursor/rules/*.mdc`) in git's own listing of the files it tracks and those it would
+  (Decision 854), held to the walk's bounds, so a start in a large repository with none
+  costs one listing and no walk.
+  """
   @spec found?(Path.t()) :: boolean()
   @impl Troupe.Onboard.Source
   def found?(workspace) do
     (@aliases ++ [@claude_dir, @copilot, @legacy, @copilot_rules, @cursor_rules] ++ @opencode)
-    |> Enum.any?(&File.exists?(Path.join(workspace, &1)))
+    |> Enum.any?(&File.exists?(Path.join(workspace, &1))) or nested?(workspace)
+  end
+
+  # Below the root, tracked or untracked and not ignored: `.gitignore` as git reads it, then
+  # what the walk leaves out besides (`node_modules`, a hidden directory but the two it
+  # enters). A nested repository's files are not in its listing. Where git cannot answer,
+  # only the root was looked at.
+  defp nested?(workspace) do
+    specs = for name <- @aliases ++ [@cursor_rules <> "/*.mdc"], do: ":(glob)**/" <> name
+    args = ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--" | specs]
+
+    case Git.run(workspace, args, timeout_ms: 10_000) do
+      {:ok, out, 0} -> out |> String.split(<<0>>, trim: true) |> Enum.any?(&walked?/1)
+      _other -> false
+    end
+  end
+
+  defp walked?(path) do
+    path
+    |> String.split("/")
+    |> Enum.drop(-1)
+    |> Enum.all?(&(&1 != "node_modules" and (not String.starts_with?(&1, ".") or &1 in @entered)))
   end
 
   @doc """
@@ -127,8 +154,12 @@ defmodule Troupe.Onboard.Instructions do
 
     {proposals, skipped} =
       case Workspace.real_path(root) do
-        {:ok, real} -> survey(root, real, find(root))
-        {:error, _reason} -> {[], []}
+        {:ok, real} ->
+          ignore = Gitignore.load(root)
+          survey(root, real, find(root, ignore), ignore)
+
+        {:error, _reason} ->
+          {[], []}
       end
 
     %{
@@ -144,7 +175,7 @@ defmodule Troupe.Onboard.Instructions do
   defp target_rank(:repo), do: 1
   defp target_rank(:user), do: 2
 
-  defp survey(root, real, found) do
+  defp survey(root, real, found, ignore) do
     {inside, outside} = Enum.split_with(found, fn {_kind, path} -> inside?(root, real, path) end)
 
     outside =
@@ -166,7 +197,7 @@ defmodule Troupe.Onboard.Instructions do
     {files, rules} =
       Enum.split_with(inside, fn {kind, _path} -> kind in [:alias, :claude_dir, :copilot] end)
 
-    {named, named_rules, named_skips} = opencode(root, real, found)
+    {named, named_rules, named_skips} = opencode(root, real, found, ignore)
     {agents_md, agents_md_skips} = agents_md(root, real, files, named)
     {rule_files, rule_skips} = rules(root, rules ++ named_rules)
 
@@ -175,9 +206,7 @@ defmodule Troupe.Onboard.Instructions do
 
   ## Finding
 
-  defp find(root) do
-    ignore = Gitignore.load(root)
-
+  defp find(root, ignore) do
     (walk(root, "", ignore) ++ at_root(root))
     |> Enum.uniq()
     |> Enum.sort()
@@ -404,10 +433,15 @@ defmodule Troupe.Onboard.Instructions do
     if Enum.all?(added, fn {_s, _b, text, _n} -> text == "" end) do
       said = if spot.also, do: "#{spot.shown} or #{spot.also_shown}", else: spot.shown
 
+      # `said_in` lets the plan count a file the `AGENTS.md` was onboarded from as
+      # unchanged, not skipped, at every later run (Decision 854).
       {[],
        for(
          {source, _b, _t, _n} <- added,
-         do: skip(source, "everything it says is in #{said} already")
+         do:
+           source
+           |> skip("everything it says is in #{said} already")
+           |> Map.put(:said_in, %{target: spot.target, path: spot.path})
        )}
     else
       {[proposal(spot, added)], []}
@@ -1071,14 +1105,16 @@ defmodule Troupe.Onboard.Instructions do
   # each entry a path or a glob from the root, as opencode reads it there: `{path, config}`
   # for one whose substance goes into the root's AGENTS.md, in the order named;
   # `{{:opencode_rule, config}, path}` for one whose own front matter scopes it with globs;
-  # and what is not onboarded, with why. `found` is what the rest of this source found.
-  defp opencode(root, real, found) do
+  # and what is not onboarded, with why. `found` is what the rest of this source found, and
+  # `ignore` the workspace's `.gitignore`, which a glob's matches are held to.
+  defp opencode(root, real, found, ignore) do
     taken = MapSet.new(found, &elem(&1, 1))
+    look = %{root: root, real: real, taken: taken, ignore: ignore}
 
     {named, skips} =
       for config <- @opencode, entry <- instructions(root, real, config), reduce: {[], []} do
         {named, skips} ->
-          {more, more_skips} = named(root, real, config, entry, taken)
+          {more, more_skips} = named(look, config, entry)
           {named ++ more, skips ++ more_skips}
       end
 
@@ -1106,10 +1142,10 @@ defmodule Troupe.Onboard.Instructions do
 
   # The files one entry names here, each `{path, config}`, and each it names that is not
   # onboarded from it, as a skipped entry naming `config`.
-  defp named(_root, _real, config, entry, _taken) when not is_binary(entry),
+  defp named(_look, config, entry) when not is_binary(entry),
     do: {[], [not_named(config, "#{Jason.encode!(entry)}, which is not a path")]}
 
-  defp named(root, real, config, entry, taken) do
+  defp named(look, config, entry) do
     cond do
       entry =~ ~r{^[a-z][a-z0-9+.-]*://}i ->
         {[],
@@ -1119,11 +1155,11 @@ defmodule Troupe.Onboard.Instructions do
         {[], [not_named(config, "#{entry}, #{outside_workspace()}")]}
 
       true ->
-        matches(root, real, config, entry, taken)
+        matches(look, config, entry)
     end
   end
 
-  defp matches(root, real, config, entry, taken) do
+  defp matches(%{root: root, real: real} = look, config, entry) do
     {inside, outside} =
       root
       |> Path.join(entry)
@@ -1134,6 +1170,7 @@ defmodule Troupe.Onboard.Instructions do
       |> Enum.map(&relative(root, &1))
       |> Enum.split_with(&is_binary/1)
 
+    {hidden, inside} = Enum.split_with(inside, &held_back?(look, entry, &1))
     {linked, inside} = Enum.split_with(inside, &(not inside?(root, real, &1)))
     files = Enum.filter(inside, &File.regular?(Path.join(root, &1)))
 
@@ -1144,15 +1181,40 @@ defmodule Troupe.Onboard.Instructions do
           do: skip(path, "it is a link to outside the workspace, and is not read")
         )
 
-    if files == [] and skips == [] do
-      {[], [not_named(config, "#{entry}: no file here matches it")]}
-    else
-      {named, more} =
-        files
-        |> Enum.map(&judge_named(&1, config, taken))
-        |> Enum.split_with(&is_tuple/1)
+    cond do
+      files == [] and skips == [] and hidden != [] ->
+        {[],
+         [
+           not_named(
+             config,
+             "#{entry}, which matches only files .gitignore hides or under node_modules"
+           )
+         ]}
 
-      {named, skips ++ more}
+      files == [] and skips == [] ->
+        {[], [not_named(config, "#{entry}: no file here matches it")]}
+
+      true ->
+        {named, more} =
+          files
+          |> Enum.map(&judge_named(&1, config, look.taken))
+          |> Enum.split_with(&is_tuple/1)
+
+        {named, skips ++ more}
+    end
+  end
+
+  # What a glob matches is held to what the walk would find (Decision 854): not a file
+  # `.gitignore` hides, or one in an ignored directory, and nothing under `node_modules`,
+  # so `**/*.md` proposes the repository's Markdown and not its dependencies'. A path
+  # named outright is taken as opencode would take it.
+  defp held_back?(%{ignore: ignore}, entry, path) do
+    if entry =~ ~r/[*?\[{]/ do
+      parts = String.split(path, "/")
+      prefixes = for n <- 1..length(parts), do: parts |> Enum.take(n) |> Enum.join("/")
+      "node_modules" in parts or Enum.any?(prefixes, &Gitignore.ignored?(ignore, &1))
+    else
+      false
     end
   end
 

@@ -141,32 +141,6 @@ defmodule Troupe.Session.Memory do
     Memory.stale?(built_at, facts, max_age_days: max_age(config))
   end
 
-  @doc "Appends a note from `agent`, as a fact of kind `note`."
-  @spec note(Path.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
-  def note(workspace, agent, text) do
-    claim = text |> to_string() |> String.split() |> Enum.join(" ")
-
-    case Facts.put(workspace, %{"kind" => "note", "claim" => claim}, %{by: "agent:" <> agent}) do
-      {:ok, _fact} -> :ok
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @doc """
-  Replaces a section's facts with one per item of `text` and stamps the brief as rebuilt,
-  as writing a whole section did before there were facts. `by` says who wrote it.
-  """
-  @spec put_section(Path.t(), String.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
-  def put_section(workspace, title, text, by \\ "librarian") do
-    case Memory.kind_of_title(title) do
-      nil ->
-        {:error, "unknown section #{title}"}
-
-      kind ->
-        Facts.replace(workspace, kind, Memory.claims(text), %{by: by, head: head(workspace)})
-    end
-  end
-
   @doc """
   Stamps the brief as checked against the repository now, and changes no word of it: what
   a librarian's run leaves when it found nothing to rewrite (Decision 696). Its unanchored

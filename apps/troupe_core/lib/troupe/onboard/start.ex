@@ -25,10 +25,15 @@ defmodule Troupe.Onboard.Start do
     for this version of the rules (`Notice.decline_onboarding/2`). Once a call has
     answered everything its plan held, the workspace is recorded as onboarded under this
     build's rules (`Troupe.Onboard.stamp/1`), as `troupe onboard` records it.
+  - **Only in a git repository**, as the plan has it (Decision 835): outside one the plan
+    is due nothing, and apply and decline refuse with a sentence rather than write or
+    remember anything there (Decision 854). `troupe onboard` still runs wherever it is
+    asked to.
   """
 
-  alias Troupe.Onboard
+  alias Troupe.{Onboard, Paths}
   alias Troupe.Onboard.{Notice, Pod}
+  alias Troupe.Session.Memory, as: Brief
 
   @all_targets [:workspace, :repo, :user]
 
@@ -93,7 +98,7 @@ defmodule Troupe.Onboard.Start do
     workspace = Path.expand(workspace)
     opts = with_state_dir(opts)
 
-    with :ok <- allowed() do
+    with :ok <- allowed(workspace) do
       plan = Onboard.plan(workspace, onboard_opts(opts) ++ [targets: @all_targets])
       {chosen, unknown} = choose(plan.proposals, selection, &(&1.question == :write))
 
@@ -116,7 +121,7 @@ defmodule Troupe.Onboard.Start do
     workspace = Path.expand(workspace)
     opts = with_state_dir(opts)
 
-    with :ok <- allowed() do
+    with :ok <- allowed(workspace) do
       plan = Onboard.plan(workspace, onboard_opts(opts) ++ [targets: @all_targets])
       {chosen, _unknown} = choose(plan.proposals, selection, fn _item -> true end)
       declined = Enum.count(chosen, &(Onboard.decline(&1, onboard_opts(opts)) == :ok))
@@ -205,10 +210,20 @@ defmodule Troupe.Onboard.Start do
     end
   end
 
-  defp allowed do
-    case Pod.refusal(nil) do
-      nil -> :ok
-      sentence -> {:error, sentence}
+  # Not on a pod, and only in a git repository, where the plan has something due.
+  defp allowed(workspace) do
+    cond do
+      sentence = Pod.refusal(nil) ->
+        {:error, sentence}
+
+      not Brief.repository?(workspace) ->
+        {:error,
+         "#{Paths.display(workspace)} is in no git repository: onboarding brings a " <>
+           "repository's files in, and a session's start asks about it only in one; run " <>
+           "troupe onboard there to onboard it anyway"}
+
+      true ->
+        :ok
     end
   end
 

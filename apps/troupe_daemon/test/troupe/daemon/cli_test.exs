@@ -209,6 +209,28 @@ defmodule Troupe.Daemon.CLITest do
     assert Enum.all?(String.to_charlist(described <> explained), &(&1 < 128))
   end
 
+  # D68, Decision 854: set but empty is unset. On the chunk's tip the daemon took `""` for a
+  # socket's path and died at once with `listen_failed unix: eafnosupport`.
+  test "an empty TROUPE_DAEMON_SOCKET means unset, and the daemon starts as it would without it" do
+    unset = Endpoint.default()
+
+    for empty <- ["", "  "] do
+      System.put_env("TROUPE_DAEMON_SOCKET", empty)
+      assert %Endpoint{kind: kind, path: path} = Endpoint.default()
+      assert kind == unset.kind
+      assert path == unset.path
+    end
+
+    start_supervised!(
+      {Troupe.Gateway.Daemon, Keyword.put(CLI.run_opts(), :idle_shutdown_ms, :timer.hours(1))}
+    )
+
+    assert capture_io(fn -> assert CLI.main(:status) == 0 end) =~ "is running at"
+
+    System.put_env("TROUPE_DAEMON_SOCKET", "tcp")
+    assert %Endpoint{kind: :tcp} = Endpoint.default()
+  end
+
   test "status says not running when nothing is, and where when something is" do
     assert capture_io(fn -> assert CLI.main(:status) == 1 end) =~ "not running"
 

@@ -12,6 +12,7 @@ defmodule Troupe.GitTest do
 
   use ExUnit.Case, async: true
 
+  alias Troupe.Memory.Facts
   alias Troupe.{Onboard, Workspace, Worktree}
   alias Troupe.Session.Memory
   alias Troupe.Tool.{Ctx, Result}
@@ -62,9 +63,21 @@ defmodule Troupe.GitTest do
     end
 
     test "does not run it through the project brief", c do
-      # The brief's HEAD, stamped as a section is written and read back (the file count it
-      # was stamped with too is gone, Decision 838).
-      assert :ok = Memory.put_section(c.root, "Overview", "a repository")
+      # The brief's HEAD, stamped as a librarian's run stamps it and read back (the file count
+      # it was stamped with too is gone, Decision 838), and whether git tracks an anchor, on
+      # the way in and on the way back (Decision 854).
+      assert {:ok, _} =
+               Facts.put(c.root, %{kind: "overview", claim: "a repository"}, %{by: "librarian"})
+
+      assert {:ok, %{"status" => "current"}} =
+               Facts.put(
+                 c.root,
+                 %{kind: "layout", claim: "a readme", anchors: ["README.md"]},
+                 %{}
+               )
+
+      assert :ok = Memory.checked(c.root)
+      assert [_, _] = Facts.list(c.root)
       assert Memory.status(c.root, nil) == :fresh
       assert %{head: head, files: nil} = Memory.brief(c.root)
       assert is_binary(head)
@@ -175,7 +188,10 @@ defmodule Troupe.GitTest do
           refute message =~ "the other workspace's commit"
         end
 
-        assert Memory.put_section(ws, "Overview", "forged #{n}") == :ok
+        assert {:ok, _} =
+                 Facts.put(ws, %{kind: "overview", claim: "forged #{n}"}, %{by: "librarian"})
+
+        assert Memory.checked(ws) == :ok
         assert Memory.brief(ws).head == nil
       end
     end
