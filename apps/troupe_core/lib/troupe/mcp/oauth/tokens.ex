@@ -55,9 +55,21 @@ defmodule Troupe.MCP.OAuth.Tokens do
   @spec failed(OAuth.binding(), String.t()) :: :ok | {:error, String.t()}
   def failed(binding, why), do: call({:failed, binding, why})
 
-  @doc "Forget a sign-in."
-  @spec forget(OAuth.binding()) :: :ok | {:error, String.t()}
-  def forget(binding), do: call({:forget, binding})
+  @doc """
+  The server wanted `scopes` on top of what the sign-in granted (Decision 872): kept
+  beside it for the next sign-in to ask for. The tokens stay, and are used until that
+  sign-in lands, whose entry replaces this one.
+  """
+  @spec step_up(OAuth.binding(), [String.t()]) :: :ok | {:error, String.t()}
+  def step_up(binding, scopes), do: call({:step_up, binding, scopes})
+
+  @doc """
+  Forget a sign-in, answering what it was, so a sign-out tells the provider about the
+  very token no refresh can spend any more.
+  """
+  @spec take(%{key: String.t(), state_dir: Path.t() | nil}) ::
+          {:ok, map() | nil} | {:error, String.t()}
+  def take(binding), do: call({:take, binding})
 
   @doc "Whether a kept sign-in can still be used: a token that has not run out, or a refresh token."
   @spec usable?(map()) :: boolean()
@@ -119,6 +131,7 @@ defmodule Troupe.MCP.OAuth.Tokens do
         "client_id" => binding.config.client_id,
         "issuer" => plan.issuer,
         "token_endpoint" => plan.token_endpoint,
+        "revocation_endpoint" => Map.get(plan, :revocation_endpoint),
         "resource" => plan.resource,
         "scopes" => plan.scopes,
         "signed_in_at" =>
@@ -133,8 +146,33 @@ defmodule Troupe.MCP.OAuth.Tokens do
     {:reply, Store.put(binding.state_dir, binding.key, Map.put(entry, "error", why)), state}
   end
 
-  def handle_call({:forget, binding}, _from, state) do
-    {:reply, Store.put(binding.state_dir, binding.key, nil), state}
+  def handle_call({:step_up, binding, scopes}, _from, state) do
+    reply =
+      case Store.get(binding.state_dir, binding.key) do
+        %{"access_token" => token} = entry when is_binary(token) ->
+          wanted = Enum.uniq(List.wrap(entry["step_up"]) ++ scopes)
+
+          if wanted == entry["step_up"],
+            do: :ok,
+            else: Store.put(binding.state_dir, binding.key, Map.put(entry, "step_up", wanted))
+
+        _none ->
+          :ok
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:take, binding}, _from, state) do
+    entry = Store.get(binding.state_dir, binding.key)
+
+    reply =
+      case Store.put(binding.state_dir, binding.key, nil) do
+        :ok -> {:ok, entry}
+        {:error, why} -> {:error, why}
+      end
+
+    {:reply, reply, state}
   end
 
   defp refresh(binding, entry) do

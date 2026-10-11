@@ -31,7 +31,7 @@ defmodule Troupe.MCP.OAuth.SignIn do
 
   @doc """
   Listen for the answer and say where to send the person: `%{url, redirect_uri,
-  expires_at}`.
+  expires_at, scopes}`, the scopes being what the person is asked to grant.
   """
   @spec start(OAuth.binding(), OAuth.plan()) :: {:ok, map()} | {:error, String.t()}
   def start(binding, plan) do
@@ -121,7 +121,8 @@ defmodule Troupe.MCP.OAuth.SignIn do
       %{
         url: state.url,
         redirect_uri: state.redirect_uri,
-        expires_at: DateTime.to_iso8601(state.expires_at)
+        expires_at: DateTime.to_iso8601(state.expires_at),
+        scopes: state.plan.scopes
       }}, state}
   end
 

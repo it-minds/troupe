@@ -1010,6 +1010,10 @@ defmodule Troupe.UI.TUI.View do
   defp mcp_summary(%{state: :sign_in}), do: "sign in — s"
   defp mcp_summary(%{state: nil}), do: "not in this session yet — c starts it"
 
+  # A tool wanted a scope the sign-in did not grant (troupe-remote Decision 872).
+  defp mcp_summary(%{state: :ready, tools: tools, auth: %{step_up: scope}}) when is_binary(scope),
+    do: "#{length(tools)} tools · wants #{scope} — s"
+
   defp mcp_summary(%{state: :ready, tools: tools, auth: %{state: :signed_in, account: account}})
        when is_binary(account),
        do: "#{length(tools)} tools · #{account}"
@@ -1033,6 +1037,9 @@ defmodule Troupe.UI.TUI.View do
       transport_field(server),
       field("state", server.state || "not started in this session"),
       if(auth, do: field("sign-in", sign_in_text(auth))),
+      if(auth && Map.get(auth, :step_up),
+        do: field("wants", "#{auth.step_up} on top of the sign-in — s signs in for it")
+      ),
       if(auth && auth.error, do: field("last sign-in", auth.error)),
       sign_in_url(server, auth, sign_in),
       field("tools", Enum.join(server.tools, ", ")),

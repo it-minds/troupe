@@ -25,7 +25,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe resume SESSION_ID\|latest\|--private --headless "message"` | one turn on that session, printed as run --headless prints it, then exit |
 | `troupe --remote [PLANE_URL]` | open HQ: teams, profiles and sessions on a plane |
 | `troupe login PLANE_URL` | sign in to a plane with the device flow |
-| `troupe logout [PLANE_URL]` | forget a plane's credentials and sign this machine's daemon out of it (--all: every plane) |
+| `troupe logout [PLANE_URL]` | forget a plane's credentials and sign this machine's daemon out of it (--all: every plane); without a plane named, out of your own MCP servers too, revoked at their providers |
 | `troupe whoami [PLANE_URL]` | print who the plane says you are, and your teams |
 | `troupe setup` | set up the provider, its key, the models, a first project and the daemon at login, one screen at a time; Esc leaves with nothing written |
 | `troupe config` | show the resolved providers and models (keys masked); with none, set them up |

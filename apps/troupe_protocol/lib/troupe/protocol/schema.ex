@@ -988,9 +988,12 @@ defmodule Troupe.Protocol.Schema do
         "workspace" => optional(:string),
         "session_id" => optional(:string)
       },
+      # Signing out asks the provider to revoke the refresh token first (Decision 872);
+      # `all` signs out of every server signed in to on this machine, for `troupe logout`.
       "mcp.sign_out" => %{
         "command_id" => required(:string),
-        "name" => required(:string),
+        "name" => optional(:string),
+        "all" => optional(:boolean),
         "workspace" => optional(:string),
         "session_id" => optional(:string)
       },
