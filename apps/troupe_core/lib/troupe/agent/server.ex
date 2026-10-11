@@ -687,7 +687,7 @@ defmodule Troupe.Agent.Server do
       call_id: completed["call_id"],
       name: completed["name"],
       ok?: completed["ok"] == true,
-      content: Blobs.resolve(state.session_id, state.workspace.root_real, completed["content"])
+      content: resolve_payload(state, completed["content"])
     }
 
     %Call{
@@ -2819,12 +2819,16 @@ defmodule Troupe.Agent.Server do
 
   # Anything over the inline limit goes to content-addressed storage and travels as a
   # reference. A 40 MB test log belongs in the session directory, not in every
-  # subscriber's socket and not in the log line that every replay reads.
+  # subscriber's socket and not in the log line that every replay reads: the session's own
+  # directory, under the state directory its config names (Decision 855).
   defp store_payload(state, content) when is_binary(content) do
-    Blobs.maybe_store(state.session_id, state.workspace.root_real, content)
+    Blobs.maybe_store(state.session_id, state.workspace.root_real, state.config.state_dir, content)
   end
 
   defp store_payload(_state, content), do: content
+
+  defp resolve_payload(state, content),
+    do: Blobs.resolve(state.session_id, state.workspace.root_real, state.config.state_dir, content)
 
   # Any message: its tool results are stored, every other block passes through, so a
   # `compacted` conversation goes the same way (Decision 774).
@@ -2846,7 +2850,7 @@ defmodule Troupe.Agent.Server do
   end
 
   defp resolve_block(state, %{"type" => "tool_result", "content" => content} = block) do
-    %{block | "content" => Blobs.resolve(state.session_id, state.workspace.root_real, content)}
+    %{block | "content" => resolve_payload(state, content)}
   end
 
   defp resolve_block(_state, block), do: block
