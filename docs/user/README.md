@@ -188,7 +188,9 @@ prompt cache served at a fraction of the price, and the money is what the gatewa
 what the model's price comes to (`no price` when nothing prices it). The window's own
 `↑ ↓` count is the whole session's. The session's log keeps the same figures for every
 turn, and for every call what its prompt was made of: the system prompt, the instruction
-files and brief, the tool definitions, the conversation and the tool results.
+files and brief when the system prompt carries them (`system_prompt: per_turn`; by default
+they go with the turn and count in the conversation), the tool definitions, the
+conversation and the tool results.
 
 **Bundle.** The agents, skills and MCP servers a profile's sessions carry, published in
 versions. A session is pinned to the version current when it started.

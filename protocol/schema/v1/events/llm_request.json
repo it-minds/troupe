@@ -32,6 +32,9 @@
         "type": "string"
       },
       "type": "array"
+    },
+    "turn_context_block": {
+      "type": "object"
     }
   },
   "required": [

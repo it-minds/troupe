@@ -189,4 +189,13 @@ defmodule Troupe.SessionCase do
   @doc "The persisted event types in order, for asserting a whole sequence."
   @spec event_types(String.t()) :: [String.t()]
   def event_types(session_id), do: session_id |> Troupe.events() |> Enum.map(& &1.type)
+
+  @doc """
+  Everything a request tells the model in words: its system prompt, then the text of each
+  message. Where to look for the instruction files, the brief, the goal and the task list,
+  which go with the turn by default and in the system prompt with `system_prompt: per_turn`
+  (Decisions 815 and 863).
+  """
+  @spec prompt_text(Troupe.LLM.Request.t()) :: String.t()
+  defdelegate prompt_text(request), to: Troupe.Bench.Model
 end

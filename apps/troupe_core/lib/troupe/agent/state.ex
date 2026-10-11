@@ -99,9 +99,10 @@ defmodule Troupe.Agent.State do
     # next call's `llm_request` is compared with (issue #465, Decision 815). Not folded: an
     # agent restarted says nothing about its first call.
     prefix: nil,
-    # With `system_prompt: stable` (Decision 815): the turn context put on the
-    # conversation, by the index of the user message it goes after, and each section as
-    # the conversation last carried it. Not folded, and emptied by a compaction.
+    # With `system_prompt: stable` (Decisions 815 and 863): the turn context put on the
+    # conversation, by the index of the user message it goes after, and the digest of each
+    # section as the conversation last carried it. Folded from each `llm_request`'s
+    # `turn_context_block`, and emptied by a compaction.
     turn_context: %{},
     context_sent: %{},
     llm_text: "",

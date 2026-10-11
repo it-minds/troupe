@@ -93,7 +93,7 @@ defmodule Troupe.Session.LoopTest do
       requests = Fake.requests(fake)
       assert length(requests) == 3
       assert Enum.all?(requests, &("goal_complete" in tool_names(&1)))
-      assert Enum.all?(requests, &(&1.system =~ @goal))
+      assert Enum.all?(requests, &(prompt_text(&1) =~ @goal))
       assert hd(requests).messages |> List.last() |> Message.text() =~ "Loop iteration 1 of 5"
 
       flush()

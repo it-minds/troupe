@@ -84,9 +84,11 @@ defmodule Troupe.Bench.Memory do
       else: {:text, "The gate is mix check."}
   end
 
+  # The brief is in the system prompt with `per_turn`, and with the turn by default
+  # (Decision 863): the first prompt's words, wherever the harness put them.
   defp measure(ctx) do
     [{first, _task, _usage} | rest] = ctx.requests
-    system = first.system || ""
+    system = Model.prompt_text(first)
 
     recalled =
       Enum.any?(rest, fn {request, _task, _usage} ->
@@ -102,15 +104,7 @@ defmodule Troupe.Bench.Memory do
      ]}
   end
 
-  # From the brief's heading to the environment's section that follows it.
-  defp brief_bytes(system) do
-    case String.split(system, "# Project brief\n", parts: 2) do
-      [_before, brief] ->
-        [brief | _] = String.split(brief, "\n\n<environment>", parts: 2)
-        byte_size("# Project brief\n" <> brief)
-
-      [_none] ->
-        0
-    end
-  end
+  # From the brief's heading to the section that follows it: the environment's in a system
+  # prompt, the next one or the end in a turn context.
+  defp brief_bytes(text), do: text |> Model.section("# Project brief\n") |> byte_size()
 end

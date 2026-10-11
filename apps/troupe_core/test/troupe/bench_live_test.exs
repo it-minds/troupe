@@ -326,17 +326,121 @@ defmodule Troupe.BenchLiveTest do
   # thinks unasked, binds each thinking block to the conversation it was made in and
   # refuses one sent back after that changed, as Claude Opus 5.5 does for an account the
   # check is enforced for; and caches what is marked. `follow_up`'s second turn begins
-  # with docs/AGENTS.md among the instruction files, which its first brought in.
-  describe "issue #465's experiments" do
-    test "by default the second turn's calls are each refused once and sent again without thinking",
+  # with docs/AGENTS.md among the instruction files, which its first brought in. A stable
+  # system prompt is the default since Decision 863; `per_turn` is the prompt as it was.
+  describe "issue #465's settings" do
+    test "a fresh config: neither follow_up nor task_list changes anything in front of what was sent" do
+      fake = start_fake()
+
+      {:ok, plan} =
+        Bench.plan(config: anthropic(fake), only: ["follow_up", "task_list"], history: nil)
+
+      refute Bench.describe_plan(plan) =~ "issue #465"
+
+      report = Bench.live(plan)
+      assert Bench.passed?(report), Bench.markdown(report)
+
+      assert report["experiment"] == %{
+               "thinking_binding" => "default",
+               "system_prompt" => "stable"
+             }
+
+      for name <- ["follow_up", "task_list"] do
+        [run] = scenario(report, name)["runs"]
+
+        assert %{"system_changes" => 0, "tools_changes" => 0, "thinking_resent" => 0} =
+                 run["prefix"],
+               name
+
+        assert run["prefix"]["turn_contexts"] == 2, name
+      end
+
+      requests = FakeOpenAI.requests(fake)
+      assert Enum.all?(requests, &(&1.status == 200 and &1.thinking == :kept))
+      assert Enum.all?(requests, &(&1.beta == nil))
+    end
+
+    # Issue #591: `error` is an enforced account's refusal asked for by name, and the API's
+    # word on each refusal is on the call's `llm_response`.
+    test "with thinking_binding: error, per_turn is refused as an enforced account is, and says why",
          %{tmp_dir: dir} do
       fake = start_fake()
       keep = Path.join(dir, "kept")
 
       {:ok, plan} =
-        Bench.plan(config: anthropic(fake), only: ["follow_up"], keep: keep, history: nil)
+        Bench.plan(
+          config: anthropic(fake, thinking_binding: "error", system_prompt: "per_turn"),
+          only: ["follow_up"],
+          keep: keep,
+          history: nil
+        )
 
-      refute Bench.describe_plan(plan) =~ "issue #465"
+      assert Bench.describe_plan(plan) =~
+               "With issue #465's settings changed: thinking_binding error, system_prompt per_turn."
+
+      report = Bench.live(plan)
+      assert Bench.passed?(report), Bench.markdown(report)
+      [run] = scenario(report, "follow_up")["runs"]
+      assert %{"system_changes" => 1, "thinking_resent" => 2} = run["prefix"]
+
+      requests = FakeOpenAI.requests(fake)
+      assert [200, 200, 200, 400, 200, 400, 200] = Enum.map(requests, & &1.status)
+
+      # Each request that may hand thinking back asks for the refusal; the call sent again
+      # without its thinking has nothing to bind.
+      assert Enum.map(requests, & &1.binding) ==
+               ["error", "error", "error", "error", nil, "error", nil]
+
+      # The refusal's header, on the answer the call ended with, and nothing else of it.
+      responses =
+        keep
+        |> Path.join("**/events.jsonl")
+        |> Path.wildcard()
+        |> Enum.flat_map(&(&1 |> File.read!() |> String.split("\n", trim: true)))
+        |> Enum.map(&Jason.decode!/1)
+        |> Enum.filter(&(&1["type"] == "llm_response"))
+
+      mismatched = Enum.filter(responses, & &1["data"]["prefix_mismatch"])
+      assert length(mismatched) == 2
+      assert Enum.all?(mismatched, & &1["data"]["thinking_resent"])
+
+      assert Enum.uniq(Enum.map(mismatched, & &1["data"]["prefix_mismatch"])) == [
+               "kind=system_changed; pattern=system_rerendered; sections=system; changed_validated=system.0"
+             ]
+    end
+
+    test "with thinking_binding: error and a stable system prompt nothing is refused" do
+      fake = start_fake()
+
+      {:ok, plan} =
+        Bench.plan(
+          config: anthropic(fake, thinking_binding: "error"),
+          only: ["follow_up", "task_list"],
+          history: nil
+        )
+
+      report = Bench.live(plan)
+      assert Bench.passed?(report), Bench.markdown(report)
+      assert report["summary"]["prefix"]["thinking_resent"] == 0
+      assert report["summary"]["prefix"]["system_changes"] == 0
+
+      requests = FakeOpenAI.requests(fake)
+      assert Enum.all?(requests, &(&1.status == 200 and &1.thinking == :kept))
+      assert Enum.any?(requests, &(&1.binding == "error"))
+    end
+
+    test "with system_prompt: per_turn the second turn's calls are each refused once and sent again without thinking",
+         %{tmp_dir: dir} do
+      fake = start_fake()
+      keep = Path.join(dir, "kept")
+
+      {:ok, plan} =
+        Bench.plan(
+          config: anthropic(fake, system_prompt: "per_turn"),
+          only: ["follow_up"],
+          keep: keep,
+          history: nil
+        )
 
       report = Bench.live(plan)
       assert Bench.passed?(report), Bench.markdown(report)
@@ -376,13 +480,13 @@ defmodule Troupe.BenchLiveTest do
 
       {:ok, plan} =
         Bench.plan(
-          config: anthropic(fake, thinking_binding: "drop_block"),
+          config: anthropic(fake, thinking_binding: "drop_block", system_prompt: "per_turn"),
           only: ["follow_up"],
           history: nil
         )
 
       assert Bench.describe_plan(plan) =~
-               "With issue #465's experiments: thinking_binding drop_block, system_prompt per_turn."
+               "With issue #465's settings changed: thinking_binding drop_block, system_prompt per_turn."
 
       report = Bench.live(plan)
       assert Bench.passed?(report), Bench.markdown(report)
@@ -403,6 +507,9 @@ defmodule Troupe.BenchLiveTest do
       assert Enum.all?(requests, &(&1.beta == "thinking-binding-controls-2026-08-01"))
       thinking = Enum.map(requests, & &1.thinking)
       assert thinking == [:kept, :kept, :kept, {:dropped, 3}, {:dropped, 4}]
+
+      assert [nil, nil, nil, "kind=system_changed" <> _, "kind=system_changed" <> _] =
+               Enum.map(requests, & &1[:mismatch])
     end
 
     test "with system_prompt: stable nothing changes in front of what was sent, and the cache reads it" do

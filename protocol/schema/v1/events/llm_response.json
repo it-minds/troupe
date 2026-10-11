@@ -12,6 +12,9 @@
     "model": {
       "type": "string"
     },
+    "prefix_mismatch": {
+      "type": "string"
+    },
     "stop_reason": {
       "type": "string"
     },

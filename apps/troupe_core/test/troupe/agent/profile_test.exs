@@ -1,7 +1,7 @@
 defmodule Troupe.Agent.ProfileTest do
   use Troupe.SessionCase, async: true
 
-  alias Troupe.LLM.{Message, Request}
+  alias Troupe.LLM.Message
   alias Troupe.Todo
 
   describe "profiles" do
@@ -73,10 +73,10 @@ defmodule Troupe.Agent.ProfileTest do
       assert "write_file" in build_tools
       assert "shell" in build_tools
 
-      # The conversation survived the switch, and the todo list rides at the end of the
-      # system prompt so the build agent sees what the plan agent decided.
+      # The conversation survived the switch, and the todo list rides with the turn so the
+      # build agent sees what the plan agent decided.
       assert length(build_request.messages) >= 4
-      assert Request.system_text(build_request) =~ "do the work"
+      assert prompt_text(build_request) =~ "do the work"
       assert Troupe.snapshot(session.id).profile == "build"
     end
 
@@ -209,9 +209,9 @@ defmodule Troupe.Agent.ProfileTest do
       last = fake |> Fake.requests() |> List.last()
 
       # The change reaches the model twice over: as a user message saying what the
-      # human did, and in the task list at the end of the system prompt.
+      # human did, and in the task list that goes with the turn.
       assert Enum.any?(last.messages, &(Message.text(&1) =~ "cancelled task b"))
-      assert last.system_tail =~ "[-] [b] drop this"
+      assert prompt_text(last) =~ "[-] [b] drop this"
 
       todos = Troupe.snapshot(session.id).todos
       assert Enum.find(todos, &(&1.id == "b")).status == :cancelled

@@ -13,7 +13,7 @@ say something the loader does not do.
 | user | `~/.config/troupe/config.yaml`; `%APPDATA%\troupe\config.yaml` on Windows; `$TROUPE_CONFIG_HOME/config.yaml` when that is set | this machine: providers, keys, the models you use |
 | project | `<workspace>/.troupe/config.yaml` | what a repository wants, committed with it |
 | local | `<workspace>/.troupe/config.local.yaml` | one person's settings for one repository, such as a key; add it to `.gitignore` |
-| environment | `TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_AUTH`, `TROUPE_AUTH_TOKEN`, `TROUPE_MODEL`, `TROUPE_SMALL_MODEL`, `TROUPE_EXPENSIVE_MODEL`, `TROUPE_MODEL_PRICES` (`models.prices` as JSON), `TROUPE_FAKE_SCRIPT`; `TROUPE_THINKING_BINDING` and `TROUPE_SYSTEM_PROMPT`, the two experiments of issue #465 | a provider for one shell, or for a pod; an experiment for one `troupe bench --live` |
+| environment | `TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_AUTH`, `TROUPE_AUTH_TOKEN`, `TROUPE_MODEL`, `TROUPE_SMALL_MODEL`, `TROUPE_EXPENSIVE_MODEL`, `TROUPE_MODEL_PRICES` (`models.prices` as JSON), `TROUPE_FAKE_SCRIPT`; `TROUPE_THINKING_BINDING` and `TROUPE_SYSTEM_PROMPT`, issue #465's two settings | a provider for one shell, or for a pod; a setting changed for one `troupe bench --live` |
 | command line | `--auto-approve`, `--watch`, `--full-send`, and what a client asks for | one session |
 
 Each layer beats the ones above it: the defaults, then the user file, the project file,
@@ -485,9 +485,11 @@ re-runs by itself, and a headless run (`troupe run`) prints the line and asks no
 ## Instruction files
 
 A repository that carries an `AGENTS.md` has told coding agents how to work in it, and
-Troupe reads it the way the other tools do, with no setup of its own. Every agent's
-system prompt opens with these, in this order, each read from disk as a turn begins, so
-an edit takes effect on the next turn:
+Troupe reads it the way the other tools do, with no setup of its own. Every agent is
+given these, in this order, each read from disk as a turn begins, so an edit takes effect
+on the next turn. They go with the turn's message, the first turn's and again a later
+one's when one changed, so the system prompt stays the same all session; with
+`system_prompt: per_turn` they open the system prompt instead, rewritten each turn:
 
 1. `<config>/AGENTS.md` — your own, for every repository.
 2. `AGENTS.md` at the repository root (the nearest directory with a `.git`; a worktree
@@ -865,11 +867,12 @@ which says how much of the prompt came from the cache. A call priced from the ca
 `models.prices` is priced at its `cache_read` and `cache_write` rates (a LiteLLM gateway's
 catalog quotes both), or at the input price where those are not set.
 
-The agent's task list ends the system prompt, as it stood when the turn began. A rewrite
-within the turn reaches the model in the `todo_write` call's result and leaves the cached
-prompt as it was, whatever the provider. A list the turn before changed is new at the
-next turn's first call, which writes the conversation to the cache again; Anthropic still
-reads the tools and the system prompt in front of the list.
+The agent's task list goes with the turn, as it stood when the turn began, and again only
+when it changed. A rewrite within the turn reaches the model in the `todo_write` call's
+result and leaves the cached prompt as it was, whatever the provider. With
+`system_prompt: per_turn` the list ends the system prompt instead: a list the turn before
+changed is new at the next turn's first call, which writes the conversation to the cache
+again, and Anthropic still reads the tools and the system prompt in front of the list.
 
 ## How hard a model thinks
 
@@ -972,8 +975,8 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `compact_at` | number, 0 to 1 | `0.75` | any | compact at | The share of the window at which an agent summarises older turns. A tool result over 16 KiB it read before then is sent from then on as a stub `read_output` expands. |
 | `llm_timeout_ms` | integer ≥ 1 | `300000` | any |  | How long one model call may take before it is given up on. |
 | `identify` | boolean | `true` | user; project if trusted |  | Every model call names Troupe: a User-Agent with the version and the client, LiteLLM's tags and the session's id to a gateway, OpenRouter's app headers to OpenRouter; never a person, a path or a repository. `false` sends none of it. `troupe doctor` prints what goes out. |
-| `thinking_binding` | `default` \| `drop_block` | `default` | any |  | An experiment, Anthropic only: `drop_block` sends the `thinking-binding-controls-2026-08-01` beta and asks the API to drop a thinking block whose conversation changed since it was made, instead of refusing the call. |
-| `system_prompt` | `per_turn` \| `stable` | `per_turn` | any |  | An experiment: `stable` keeps the system prompt the same for the whole session, and sends the instruction files, the brief, the goal and the task list with the turn instead, each again only when it changed. |
+| `thinking_binding` | `default` \| `drop_block` \| `error` | `default` | any |  | Anthropic only. `drop_block` sends the `thinking-binding-controls-2026-08-01` beta and asks the API to drop a thinking block whose conversation changed since it was made, instead of refusing the call: the fallback for an account that refuses one, on what a stable system prompt cannot keep the same (a compaction, an `AI?` turn's plan prompt, the task list's tools). `error` asks for the refusal an enforced account gets, on any account, so it can be measured; Troupe sends the call again without its thinking. |
+| `system_prompt` | `stable` \| `per_turn` | `stable` | any |  | `stable` keeps the system prompt the same for the whole session, and sends the instruction files, the brief, the goal and the task list with the turn instead, each again only when it changed. `per_turn` puts them in the system prompt, rewritten as each turn begins. |
 
 ### Budget
 

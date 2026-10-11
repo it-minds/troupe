@@ -22,8 +22,10 @@
 # #465's experiments (Decision 815): the same scripts, each answer after a thinking block
 # whose signature binds it to the conversation it was made in. A request that hands back a
 # block whose conversation changed since is refused with Anthropic's 400, unless it asks for
-# `drop_block` under the thinking-binding beta; and the usage is a prompt cache's, read where
-# a `cache_control` mark wrote it. A provider of `type: anthropic` pointed at it is one.
+# `drop_block` under the thinking-binding beta; either way its
+# `anthropic-thinking-prefix-mismatch` header says whether the system prompt, the tools or
+# the messages changed (Decision 863); and the usage is a prompt cache's, read where a
+# `cache_control` mark wrote it. A provider of `type: anthropic` pointed at it is one.
 unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
   defmodule Troupe.Test.FakeOpenAI do
     @model "standin-1"
@@ -57,7 +59,10 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
             print: Keyword.get(opts, :print, false),
             requests: [],
             # Anthropic's prompt cache: the prefixes a mark wrote, by their hash.
-            cached: MapSet.new()
+            cached: MapSet.new(),
+            # The system prompt and tools each thinking block was made under, by its
+            # signature: what the mismatch header says changed (Decision 863).
+            minted: %{}
           }
         end)
 
@@ -78,8 +83,8 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
     `caller` is what it said about itself (`user_agent`, `tags`, `spend_metadata`,
     `referer`, `title`, `user`, `metadata`). One to `/v1/messages` also has `beta` (its
     `anthropic-beta` header), `binding` (its `prefix_mismatch_behavior`), `thinking`
-    (`:kept`, `:refused` or `{:dropped, n}`), `system` (the system prompt's texts) and
-    `usage`.
+    (`:kept`, `:refused` or `{:dropped, n}`), `system` (the system prompt's texts),
+    `usage`, and `mismatch` (the diagnosis header it answered with) on a refusal or a drop.
     """
     def requests(fake), do: fake.agent |> Agent.get(& &1.requests) |> Enum.reverse()
 
@@ -520,13 +525,40 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
 
           {k, _path} when binding == "drop_block" ->
             {seen, dropped} = drop_thinking(request, k)
+            wire = Map.put(wire, :mismatch, mismatch(request, k, state.minted))
             answer(socket, agent, head, request, state, seen, dropped, wire)
 
-          {_k, path} ->
+          {k, path} ->
+            wire = Map.put(wire, :mismatch, mismatch(request, k, state.minted))
             refuse(socket, agent, head, request, wire, bound_elsewhere(path, beta?))
         end
       end
     end
+
+    # What the API's diagnosis header says, in its words, of the `k`th block's conversation:
+    # the system prompt it was made under changed, or the tools, or else the messages.
+    defp mismatch(request, k, minted) do
+      {_i, _j, block} = request |> thinking_blocks() |> Enum.at(k)
+
+      case Map.get(minted, block["signature"]) do
+        nil ->
+          "kind=unrelated; pattern=foreign_prefix"
+
+        made ->
+          cond do
+            made.system != system_texts(request) ->
+              "kind=system_changed; pattern=system_rerendered; sections=system; changed_validated=system.0"
+
+            made.tools != tool_names(request) ->
+              "kind=tools_changed; pattern=tool_set_changed; sections=tools; changed_validated=tools"
+
+            true ->
+              "kind=messages_changed; pattern=unknown; sections=messages"
+          end
+      end
+    end
+
+    defp tool_names(request), do: MapSet.new(request["tools"] || [], & &1["name"])
 
     # As Anthropic words it; the last sentence only without the beta.
     defp bound_elsewhere(path, beta?) do
@@ -552,9 +584,14 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
       :gen_tcp.send(
         socket,
         "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: " <>
-          "#{byte_size(body)}\r\nconnection: close\r\n\r\n" <> body
+          "#{byte_size(body)}\r\n#{mismatch_header(wire)}connection: close\r\n\r\n" <> body
       )
     end
+
+    defp mismatch_header(%{mismatch: diagnosis}) when is_binary(diagnosis),
+      do: "anthropic-thinking-prefix-mismatch: #{diagnosis}\r\n"
+
+    defp mismatch_header(_wire), do: ""
 
     defp answer(socket, agent, head, request, state, seen, dropped, wire) do
       body_messages = seen["messages"] || []
@@ -567,6 +604,8 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
 
       usage = cache_usage(agent, seen)
       signature = sign(seen, length(body_messages), 0, last_signature(seen))
+      made = %{system: system_texts(request), tools: tool_names(request)}
+      Agent.update(agent, &%{&1 | minted: Map.put(&1.minted, signature, made)})
       thinking = if dropped == [], do: :kept, else: {:dropped, length(dropped)}
       note(agent, head, request, 200, Map.merge(wire, %{thinking: thinking, usage: usage}))
 
@@ -608,7 +647,8 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
 
       :gen_tcp.send(
         socket,
-        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n"
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n" <>
+          "#{mismatch_header(wire)}connection: close\r\n\r\n"
       )
 
       [first | rest] = events

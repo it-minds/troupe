@@ -137,12 +137,13 @@ defmodule Troupe.Config do
             # connection that created or woke it, the worker on a pod. Never from a file.
             identify: true,
             client: nil,
-            # Issue #465's two experiments (Decision 815), each off until set: Anthropic's
-            # beta that drops a thinking block whose conversation changed rather than
-            # refusing the call, and a system prompt that stays the same all session, with
-            # what changes between turns sent with the turn instead.
+            # What keeps a kept thinking block valid and the cached prompt readable (issue
+            # #465). A system prompt that stays the same all session, with what changes
+            # between turns sent with the turn instead, is the default (Decision 863);
+            # `per_turn` is the prompt as it was. Anthropic's beta that drops a thinking
+            # block whose conversation changed, or asks for the refusal, is set by name.
             thinking_binding: "default",
-            system_prompt: "per_turn",
+            system_prompt: "stable",
             # The limits the plane's terms set for a session on a pod, by the budget's
             # name for them (`max_turns`, `wall_clock`): a ceiling the session may not
             # raise itself past when its budget asks (Decision 699). `nil` on a laptop;

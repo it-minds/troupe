@@ -111,6 +111,40 @@ defmodule Troupe.Bench.Model do
     Enum.join([request.system || "", request.system_tail || "" | texts], "\n")
   end
 
+  @doc """
+  The `<turn_context>` blocks a request's messages carry, in order: where the instruction
+  files, the brief, the goal and the task list are with a stable system prompt, the
+  default (Decisions 815 and 863). `""` when there is none.
+  """
+  @spec turn_context(Request.t()) :: String.t()
+  def turn_context(%Request{} = request) do
+    texts =
+      for %Message{content: content} <- request.messages,
+          %Text{text: "<turn_context>" <> _ = t} <- content,
+          do: t
+
+    Enum.join(texts, "\n")
+  end
+
+  @doc """
+  The part of `text` from `heading` to where its section ends: the environment's section
+  after it in a system prompt, the next section or the end of a `<turn_context>`. `""`
+  when `text` has no such heading.
+  """
+  @spec section(String.t(), String.t()) :: String.t()
+  def section(text, heading) do
+    case String.split(text, heading, parts: 2) do
+      [_before, rest] ->
+        [body | _] =
+          String.split(rest, ~r/\n\n<(environment|goal|task_list)>|\n<\/turn_context>/, parts: 2)
+
+        heading <> body
+
+      [_none] ->
+        ""
+    end
+  end
+
   @doc "The text of the last tool result a request carries, or `nil`."
   @spec last_tool_result(Request.t()) :: String.t() | nil
   def last_tool_result(%Request{messages: messages}) do

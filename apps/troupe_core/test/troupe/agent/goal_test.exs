@@ -4,7 +4,8 @@ defmodule Troupe.Agent.GoalTest do
   and carried into the context of every turn after it is set rather than only the next.
 
   The model is the scripted fake, so what reached "the context" is read off the requests
-  it was sent: the goal rides in the system prompt beside the task list.
+  it was sent: the goal rides with the turn beside the task list (Decision 863), or in the
+  system prompt with `system_prompt: per_turn`.
   """
 
   use Troupe.SessionCase, async: true
@@ -34,11 +35,11 @@ defmodule Troupe.Agent.GoalTest do
 
       requests = Fake.requests(fake)
       assert length(requests) == 3
-      assert Enum.all?(requests, &(&1.system =~ "<goal>" and &1.system =~ @goal))
+      assert Enum.all?(requests, &(prompt_text(&1) =~ "<goal>" and prompt_text(&1) =~ @goal))
       assert Troupe.snapshot(session.id).goal == @goal
     end
 
-    test "clearing it is an event, and takes it out of the next turn's context", context do
+    test "clearing it is an event, and the next turn's context says it is gone", context do
       %{session: session, fake: fake} =
         start_session(context, steps: [{:text, "with"}, {:text, "without"}])
 
@@ -56,9 +57,10 @@ defmodule Troupe.Agent.GoalTest do
       await_state(session.id, [:idle])
 
       [while_set, once_cleared] = Fake.requests(fake)
-      assert while_set.system =~ @goal
+      assert prompt_text(while_set) =~ @goal
+      # The turn it was set in still holds it; the next turn's context says it is gone.
+      assert prompt_text(once_cleared) =~ "<goal>\nNo goal is set now.\n</goal>"
       refute once_cleared.system =~ @goal
-      refute once_cleared.system =~ "<goal>"
       assert Troupe.goal(session.id) == nil
     end
 
@@ -87,8 +89,8 @@ defmodule Troupe.Agent.GoalTest do
       Troupe.send_input(session.id, "go")
       await_state(session.id, [:idle])
       [request] = Fake.requests(fake)
-      assert request.system =~ "third goal"
-      refute request.system =~ "second goal"
+      assert prompt_text(request) =~ "third goal"
+      refute prompt_text(request) =~ "second goal"
     end
 
     test "a goal set while a turn is in flight reaches the model's next request", context do
@@ -109,8 +111,8 @@ defmodule Troupe.Agent.GoalTest do
       await_state(session.id, [:idle])
 
       [first, second] = Fake.requests(fake)
-      refute first.system =~ @goal
-      assert second.system =~ @goal
+      refute prompt_text(first) =~ @goal
+      assert prompt_text(second) =~ @goal
     end
 
     test "only the root agent carries the goal; a subagent is given its task", context do
@@ -131,8 +133,8 @@ defmodule Troupe.Agent.GoalTest do
       Troupe.send_input(session.id, "explore")
       await_state(session.id, [:idle], 10_000)
 
-      assert Enum.all?(Fake.requests_for(fake, "root"), &(&1.system =~ @goal))
-      refute Enum.any?(Fake.requests_for(fake, "explore"), &(&1.system =~ @goal))
+      assert Enum.all?(Fake.requests_for(fake, "root"), &(prompt_text(&1) =~ @goal))
+      refute Enum.any?(Fake.requests_for(fake, "explore"), &(prompt_text(&1) =~ @goal))
     end
   end
 
@@ -158,7 +160,7 @@ defmodule Troupe.Agent.GoalTest do
       Troupe.send_input(session.id, "carry on")
       await_event(session.id, :llm_response)
       [request] = Fake.requests(fake)
-      assert request.system =~ @goal
+      assert prompt_text(request) =~ @goal
     end
 
     test "a stopped session keeps its goal in the log, and a resumed one in its context",
@@ -190,7 +192,7 @@ defmodule Troupe.Agent.GoalTest do
       Troupe.send_input(session.id, "and now")
       await_event(session.id, :llm_response)
       [request] = Fake.requests(fake)
-      assert request.system =~ @goal
+      assert prompt_text(request) =~ @goal
     end
 
     test "the fold witnesses the goal, and a log without one folds as it always did" do
