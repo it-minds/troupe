@@ -44,6 +44,7 @@ defmodule Troupe.Session.MCP do
 
   use GenServer
 
+  alias Troupe.Config
   alias Troupe.MCP.{Client, Local, OAuth, Server, Sessions, Stdio, Tool, Trust}
   alias Troupe.Session.Questions
 
@@ -206,7 +207,15 @@ defmodule Troupe.Session.MCP do
       hold_auto?: Keyword.get(opts, :hold_auto, false) == true
     }
 
-    {:ok, state, {:continue, {:start, Keyword.get(opts, :servers, %{})}}}
+    # The servers come inside the session's config, which prints them by name (Decision
+    # 857): the session's child spec holds what this was started with.
+    servers =
+      case Keyword.get(opts, :config) do
+        %Config{mcp: servers} -> servers
+        nil -> %{}
+      end
+
+    {:ok, state, {:continue, {:start, servers}}}
   end
 
   @impl GenServer
@@ -471,19 +480,10 @@ defmodule Troupe.Session.MCP do
 
   defp redacted(state), do: state
 
-  defp redacted_entry(%{record: %{config: config} = record} = entry) do
-    config = config |> names_only(:env) |> names_only(:headers)
-    %{entry | record: %{record | config: config}}
-  end
+  defp redacted_entry(%{record: %{config: config} = record} = entry),
+    do: %{entry | record: %{record | config: Config.redacted_server(config)}}
 
   defp redacted_entry(entry), do: entry
-
-  defp names_only(config, key) do
-    case config do
-      %{^key => %{} = values} -> Map.put(config, key, values |> Map.keys() |> Enum.sort())
-      _other -> config
-    end
-  end
 
   defp decision({:ok, text}) when is_binary(text) do
     case text |> String.trim() |> String.downcase() do

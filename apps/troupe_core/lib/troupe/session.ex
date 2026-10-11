@@ -91,7 +91,7 @@ defmodule Troupe.Session do
         {Troupe.Session.MCP,
          session_id: session_id,
          workspace: workspace.root_real,
-         servers: config.mcp,
+         config: config,
          local: Keyword.get(opts, :kind, :local) == :local,
          trusted: Config.Trust.trusted?(workspace.root_real, config.trusted_workspaces),
          managed_only: config.managed_mcp_servers_only,

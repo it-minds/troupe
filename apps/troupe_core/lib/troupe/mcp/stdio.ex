@@ -15,7 +15,7 @@ defmodule Troupe.MCP.Stdio do
 
   use GenServer
 
-  alias Troupe.{Executable, MCP, Reaper}
+  alias Troupe.{Config, Executable, MCP, Reaper}
   alias Troupe.MCP.Tool
 
   require Logger
@@ -198,6 +198,16 @@ defmodule Troupe.MCP.Stdio do
     do: {:noreply, stopped(state, ended(reason))}
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  # A crash report prints the state, and the server's environment can hold a credential
+  # (Decision 857): it prints the names, as `Troupe.Session.MCP` does.
+  @impl GenServer
+  def format_status(status), do: Map.replace_lazy(status, :state, &redacted/1)
+
+  defp redacted(%__MODULE__{config: config} = state),
+    do: %{state | config: Config.redacted_server(config)}
+
+  defp redacted(state), do: state
 
   # Only callers are answered; the lifecycle requests (`:initialize`, `:tools_list`) have
   # nobody waiting.
