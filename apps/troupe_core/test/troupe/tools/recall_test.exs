@@ -83,8 +83,8 @@ defmodule Troupe.Tools.RecallTest do
       await_event(session.id, :turn_ended)
 
       request = fake |> Fake.requests() |> List.first()
-      assert request.system =~ "- `make` builds it.", agent
-      assert request.system =~ line == named?, agent
+      assert prompt_text(request) =~ "- `make` builds it.", agent
+      assert prompt_text(request) =~ line == named?, agent
       assert Enum.any?(request.tools, &(&1.name == "recall")) == named?, agent
     end
   end

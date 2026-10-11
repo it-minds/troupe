@@ -1,10 +1,11 @@
 defmodule Troupe.Agent.StablePromptTest do
   @moduledoc """
-  Issue #465's second option (Decision 815): with `system_prompt: stable` the system prompt
-  is the same on every call of a session, and what changes between turns (the task list,
-  the instruction files and the brief, the goal) goes with the turn instead, in a block
-  of the turn's own message that stays where it was put. By default it is in the system
-  prompt, as Decisions 792 and 798 have it, and changes it between turns.
+  Issue #465's second option (Decision 815), the default since Decision 863: with
+  `system_prompt: stable` the system prompt is the same on every call of a session, and
+  what changes between turns (the task list, the instruction files and the brief, the
+  goal) goes with the turn instead, in a block of the turn's own message that stays where
+  it was put. With `per_turn` it is in the system prompt, as Decisions 792 and 798 have
+  it, and changes it between turns.
 
   The log says, per call, whether the system prompt and the tools changed since the
   agent's call before, which is what `Troupe.Bench.Prefix` counts.
@@ -32,9 +33,25 @@ defmodule Troupe.Agent.StablePromptTest do
     :ok
   end
 
-  test "by default the task list a turn left changes the system prompt the next turn begins with",
+  # Issue #465, decided (Decision 863): a fresh config is stable. The second turn begins with
+  # the list the first left and with the instruction files the first had; neither moves
+  # the system prompt.
+  test "a fresh config sends one system prompt for the whole session", context do
+    {sid, requests} = two_turns(context, [])
+
+    assert [{system, nil}] = requests |> Enum.map(&{&1.system, &1.system_tail}) |> Enum.uniq()
+    refute system =~ "Answer in one sentence."
+    refute system =~ "<task_list>"
+
+    assert changes(sid) == [nil, {false, true}, {false, false}, {false, false}]
+
+    assert sid |> events_of_type(:llm_request) |> Enum.map(& &1.data["turn_context"]) ==
+             [["instructions"], nil, ["task_list"], nil]
+  end
+
+  test "with system_prompt: per_turn the task list a turn left changes the system prompt the next turn begins with",
        context do
-    {sid, [first, second, third, fourth]} = two_turns(context, [])
+    {sid, [first, second, third, fourth]} = two_turns(context, system_prompt: "per_turn")
 
     # The list joins the system prompt at the next turn (Decision 792), held for that turn.
     assert Enum.map([first, second], & &1.system_tail) == ["", ""]

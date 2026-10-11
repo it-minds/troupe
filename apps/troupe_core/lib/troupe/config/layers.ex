@@ -70,8 +70,8 @@ defmodule Troupe.Config.Layers do
     # prices of the models it serves, since a pod has no file of its own.
     {"TROUPE_MODEL_PRICES", {:json, ["models", "prices"]}},
     {"TROUPE_FAKE_SCRIPT", ["fake_script"]},
-    # Issue #465's experiments, which is how a live bench is run with one on without a
-    # file of the person's being changed (Decision 815).
+    # Issue #465's settings, which is how a live bench is run with one changed without a
+    # file of the person's being changed (Decisions 815 and 863).
     {"TROUPE_THINKING_BINDING", ["thinking_binding"]},
     {"TROUPE_SYSTEM_PROMPT", ["system_prompt"]}
   ]

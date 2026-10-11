@@ -248,22 +248,26 @@ defmodule Troupe.Config.Schema do
           scope: :trusted,
           field: :identify
         ),
-        # The two ways issue #465 could go, each off until set, so a live bench can measure
-        # them before one is chosen (Decision 815).
+        # The two ways issue #465 could go (Decision 815): a stable system prompt is the
+        # default, and the beta a fallback set by name (Decision 863).
         spec(
           "thinking_binding",
-          {:enum, ~w(default drop_block)},
-          "An experiment, Anthropic only: `drop_block` sends the `thinking-binding-controls-2026-08-01` beta and asks " <>
-            "the API to drop a thinking block whose conversation changed since it was made, instead of refusing the call.",
+          {:enum, ~w(default drop_block error)},
+          "Anthropic only. `drop_block` sends the `thinking-binding-controls-2026-08-01` beta and asks the API to " <>
+            "drop a thinking block whose conversation changed since it was made, instead of refusing the call: the " <>
+            "fallback for an account that refuses one, on what a stable system prompt cannot keep the same (a " <>
+            "compaction, an `AI?` turn's plan prompt, an agent restarted). `error` asks for the refusal an enforced " <>
+            "account gets, on any account, so it can be measured; Troupe sends the call again without its thinking.",
           default: "default",
           field: :thinking_binding
         ),
         spec(
           "system_prompt",
-          {:enum, ~w(per_turn stable)},
-          "An experiment: `stable` keeps the system prompt the same for the whole session, and sends the instruction " <>
-            "files, the brief, the goal and the task list with the turn instead, each again only when it changed.",
-          default: "per_turn",
+          {:enum, ~w(stable per_turn)},
+          "`stable` keeps the system prompt the same for the whole session, and sends the instruction files, the " <>
+            "brief, the goal and the task list with the turn instead, each again only when it changed. `per_turn` " <>
+            "puts them in the system prompt, rewritten as each turn begins.",
+          default: "stable",
           field: :system_prompt
         )
       ]),

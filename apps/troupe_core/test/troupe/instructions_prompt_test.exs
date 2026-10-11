@@ -11,12 +11,18 @@ defmodule Troupe.InstructionsPromptTest do
   without appearing in the provenance, and `.troupe/rules` join it when their front
   matter says.
 
+  The instruction files are read off the system prompt here, so these run with
+  `system_prompt: per_turn`; with the default they go with the turn instead, which
+  `Troupe.Agent.StablePromptTest` and the live bench's `follow_up` cover (Decision 863).
+
   `async: false`: one test writes the suite's shared config home.
   """
 
   use Troupe.SessionCase, async: false
 
   alias Troupe.{Instructions, Paths}
+
+  @per_turn [system_prompt: "per_turn"]
 
   @haiku "# Rules\n\nAlways answer in haiku.\n"
   @limerick "# Rules\n\nAlways answer in limericks.\n"
@@ -26,7 +32,10 @@ defmodule Troupe.InstructionsPromptTest do
     write_file(context, "AGENTS.md", @haiku)
 
     %{session: session, fake: fake} =
-      start_session(context, steps: [{:text, "one"}, {:text, "two"}, {:text, "three"}])
+      start_session(context,
+        config_overrides: @per_turn,
+        steps: [{:text, "one"}, {:text, "two"}, {:text, "three"}]
+      )
 
     :ok = Troupe.subscribe(session.id)
     path = Path.join(Path.expand(context.workspace), "AGENTS.md")
@@ -84,7 +93,9 @@ defmodule Troupe.InstructionsPromptTest do
       repo = %{context | workspace: Path.join(context.base, "repo-" <> Path.basename(name))}
       write_file(repo, name, "---\nalwaysApply: true\n---\n" <> @haiku)
 
-      %{session: session, fake: fake} = start_session(repo, steps: [{:text, "one"}])
+      %{session: session, fake: fake} =
+        start_session(repo, config_overrides: @per_turn, steps: [{:text, "one"}])
+
       :ok = Troupe.subscribe(session.id)
       path = Path.join(Path.expand(repo.workspace), name)
 
@@ -123,6 +134,7 @@ defmodule Troupe.InstructionsPromptTest do
 
     %{session: session, fake: fake} =
       start_session(context,
+        config_overrides: @per_turn,
         steps: [
           {:tools, [{"read_file", %{"path" => "frontend/app/main.ts"}}]},
           {:tools, [{"write_file", %{"path" => "AGENTS.md", "content" => @limerick}}]},
@@ -169,7 +181,7 @@ defmodule Troupe.InstructionsPromptTest do
     %{session: session, fake: fake} =
       start_session(context,
         steps: [{:text, "ok"}],
-        config_overrides: [instructions_max_chars: 40]
+        config_overrides: [instructions_max_chars: 40] ++ @per_turn
       )
 
     :ok = Troupe.subscribe(session.id)
@@ -210,7 +222,9 @@ defmodule Troupe.InstructionsPromptTest do
     File.ln_s!(outside, mine)
     on_exit(fn -> File.rm(mine) end)
 
-    %{session: session, fake: fake} = start_session(context, steps: [{:text, "ok"}])
+    %{session: session, fake: fake} =
+      start_session(context, config_overrides: @per_turn, steps: [{:text, "ok"}])
+
     :ok = Troupe.subscribe(session.id)
     Troupe.send_input(session.id, "hello")
     await_event(session.id, :turn_ended)
@@ -251,6 +265,7 @@ defmodule Troupe.InstructionsPromptTest do
 
     %{session: session, fake: fake} =
       start_session(context,
+        config_overrides: @per_turn,
         steps: [
           {:tools, [{"read_file", %{"path" => "frontend/app/main.ts"}}]},
           {:text, "one"},
@@ -296,7 +311,9 @@ defmodule Troupe.InstructionsPromptTest do
       File.rm_rf(Path.dirname(extra))
     end)
 
-    %{session: session, fake: fake} = start_session(context, steps: [{:text, "ok"}])
+    %{session: session, fake: fake} =
+      start_session(context, config_overrides: @per_turn, steps: [{:text, "ok"}])
+
     :ok = Troupe.subscribe(session.id)
     Troupe.send_input(session.id, "hello")
     await_event(session.id, :turn_ended)
@@ -315,7 +332,9 @@ defmodule Troupe.InstructionsPromptTest do
     write_file(context, "AGENTS.md", "Theirs: run mix check.\n")
     write_file(context, ".troupe/memory.md", "## Commands\n- A brief.\n")
 
-    %{session: session, fake: fake} = start_session(context, steps: [{:text, "ok"}])
+    %{session: session, fake: fake} =
+      start_session(context, config_overrides: @per_turn, steps: [{:text, "ok"}])
+
     :ok = Troupe.subscribe(session.id)
     Troupe.send_input(session.id, "hello")
     await_event(session.id, :turn_ended)
@@ -338,7 +357,9 @@ defmodule Troupe.InstructionsPromptTest do
     write_file(context, "AGENTS.md", "root\n")
     write_file(context, "CLAUDE.md", "an alias nobody reads\n")
 
-    %{session: session, fake: fake} = start_session(context, steps: [{:text, "ok"}])
+    %{session: session, fake: fake} =
+      start_session(context, config_overrides: @per_turn, steps: [{:text, "ok"}])
+
     :ok = Troupe.subscribe(session.id)
     Troupe.send_input(session.id, "hello")
     await_event(session.id, :turn_ended)
@@ -395,6 +416,7 @@ defmodule Troupe.InstructionsPromptTest do
 
     %{session: session, fake: fake} =
       start_session(context,
+        config_overrides: @per_turn,
         steps: [
           {:tools, [{"read_file", %{"path" => "src/app/main.ts"}}]},
           {:text, "one"},

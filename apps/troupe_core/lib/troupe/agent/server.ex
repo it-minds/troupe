@@ -1496,7 +1496,8 @@ defmodule Troupe.Agent.Server do
         max_tokens: min(request.max_tokens, target.max_output || request.max_tokens),
         reasoning_effort: target.reasoning_effort,
         thinking: Config.thinking(config, model),
-        thinking_binding: if(config.thinking_binding == "drop_block", do: "drop_block"),
+        thinking_binding:
+          if(config.thinking_binding in ["drop_block", "error"], do: config.thinking_binding),
         provider: adapter_for(target.provider, state),
         timeout_ms: config.llm_timeout_ms,
         identify: config.identify != false,
@@ -1551,9 +1552,10 @@ defmodule Troupe.Agent.Server do
   # behind the prompt cache's mark (Decision 770), and the list as the turn began, so a
   # rewrite within the turn leaves the cached conversation after it alone (Decision 792).
   #
-  # With `system_prompt: stable` (issue #465's second option, Decision 815) the instruction
-  # files and the brief, the goal and the task list are left out of it, so it is the same
-  # on every call of the session, and go with the turn instead (`attach_turn_context/1`).
+  # With `system_prompt: stable` (issue #465's second option, Decision 815, the default
+  # since Decision 863) the instruction files and the brief, the goal and the task list are
+  # left out of it, so it is the same on every call of the session, and go with the turn
+  # instead (`attach_turn_context/1`). `per_turn`, chosen by name, is the prompt as it was.
   defp system_prompt(state, definition) do
     stable? = stable?(state)
 
@@ -1578,10 +1580,11 @@ defmodule Troupe.Agent.Server do
   defp recall?(%Definition{} = definition),
     do: Definition.permission(definition, "recall", :auto) != :deny
 
-  # Issue #465's second option (Decision 815). What the system prompt would have changed
-  # by between turns goes into the conversation instead, as a text block after what the
-  # turn's last user message holds — the person's input as a turn begins, after a tool's
-  # results when a compaction or a goal comes in the middle of one — and stays there,
+  # Issue #465's second option (Decision 815), the default (Decision 863). What the system
+  # prompt would have changed by between turns goes into the conversation instead, as a
+  # text block after what the turn's last user message holds — the person's input as a
+  # turn begins, after a tool's results when a compaction or a goal comes in the middle
+  # of one — and stays there,
   # where it was put, on every later call: a request is then the one before with
   # something added, which is what keeps a kept thinking block valid and the cached
   # conversation readable. A section goes again only when it changed since the copy the
@@ -1747,13 +1750,19 @@ defmodule Troupe.Agent.Server do
 
   # What became of the thinking the call handed back, when anything did (issue #465,
   # Decision 815): refused as bound to another conversation and the call sent again
-  # without it (Decision 805), or the blocks Anthropic's thinking-binding beta dropped.
+  # without it (Decision 805), or the blocks Anthropic's thinking-binding beta dropped;
+  # and what the API's header said of why, in its own words (issue #591, Decision 863).
   defp put_thinking_kept(data, %Response{} = response) do
     data
     |> then(&if response.thinking_resent, do: Map.put(&1, "thinking_resent", true), else: &1)
     |> then(fn data ->
       if response.thinking_dropped > 0,
         do: Map.put(data, "thinking_dropped", response.thinking_dropped),
+        else: data
+    end)
+    |> then(fn data ->
+      if is_binary(response.prefix_mismatch),
+        do: Map.put(data, "prefix_mismatch", response.prefix_mismatch),
         else: data
     end)
   end

@@ -265,26 +265,26 @@ defmodule Troupe.Bench.Live do
     |> Enum.join("\n")
   end
 
-  # Issue #465's experiments, said only when one is on (Decision 815).
+  # Issue #465's settings, said only when one is off its default (Decisions 815 and 863).
   defp experiment_line(%Plan{} = plan) do
     case experiment(plan) do
-      %{"thinking_binding" => "default", "system_prompt" => "per_turn"} ->
+      %{"thinking_binding" => "default", "system_prompt" => "stable"} ->
         nil
 
       %{"thinking_binding" => binding, "system_prompt" => system} ->
-        "With issue #465's experiments: thinking_binding #{binding}, system_prompt #{system}."
+        "With issue #465's settings changed: thinking_binding #{binding}, system_prompt #{system}."
     end
   end
 
   @doc """
-  Issue #465's two settings a plan's runs have (Decision 815): `thinking_binding` and
-  `system_prompt`, as the person's configuration or the environment set them.
+  Issue #465's two settings a plan's runs have (Decisions 815 and 863): `thinking_binding`
+  and `system_prompt`, as the person's configuration or the environment set them.
   """
   @spec experiment(Plan.t()) :: map()
   def experiment(%Plan{settings: settings}) do
     %{
       "thinking_binding" => Keyword.get(settings, :thinking_binding, "default"),
-      "system_prompt" => Keyword.get(settings, :system_prompt, "per_turn")
+      "system_prompt" => Keyword.get(settings, :system_prompt, "stable")
     }
   end
 

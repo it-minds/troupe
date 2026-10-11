@@ -8,22 +8,34 @@ turns, and since Decision 805 each such refusal costs a refused request and the 
 sent again without any thinking. The same edits make every provider that caches write the
 conversation behind them to the cache again.
 
-The issue names two ways out and asks for numbers before one is chosen. Both are built,
-each behind a setting that is off unless set (Decision 815), so a live bench can run each
-and the log of any session can say how often it would have mattered. This page says what
-each does and costs, gives the offline numbers, answers the gateway question, and gives
-the numbers from a live run on Claude Opus 5.5 with the commands that produce them.
+The issue names two ways out. Both were built behind settings (Decision 815) and measured
+live, and the maintainer chose on 2026-10-11 (Decision 863):
 
-## What changes today
+- **Option 2, a stable system prompt, is the default.** What changes during a session
+  reaches the model as turn context, appended to the conversation, and nothing rewrites
+  the system prompt mid-session. `system_prompt: per_turn` is the old prompt, by name.
+- **Option 1, Anthropic's beta, is an opt-in fallback** (`thinking_binding: drop_block`)
+  for an account that refuses a stale block, on the prefix changes option 2 cannot remove:
+  a compaction, an `AI?` turn's `plan` prompt, an agent restarted mid-session. The
+  largest such change today, the task list's tools offered at a turn's eleventh call
+  (Decision 793), is #590.
+- **`thinking_binding: error`** asks the API for the refusal an enforced account gets, on
+  any account, so that refusal can be measured without a patched build (#591).
 
-| What | When | Decision |
-|---|---|---|
-| the task list in the system prompt | the first call of a turn after the list changed | 792 |
-| the instruction files and the brief in the system prompt | the first call of a turn after a file was edited, or after the turn before worked in a directory with its own `AGENTS.md` | 798 |
-| the goal in the system prompt | the call after it was set or cleared | 678 |
-| the `plan` prompt added to the profile's | an `AI?` watch turn | |
-| the tools | the call after the task list's tools are first offered: once there is a list, or after ten calls of a turn | 793 |
-| the conversation | a compaction, which keeps a tail of it | 774 |
+This page says what each does and costs, gives the offline numbers, answers the gateway
+question, and gives the numbers from the live runs with the commands that produce them.
+
+## What changes in front of a prompt
+
+| What | When | Decision | With `stable` |
+|---|---|---|---|
+| the task list in the system prompt | the first call of a turn after the list changed | 792 | turn context |
+| the instruction files and the brief in the system prompt | the first call of a turn after a file was edited, or after the turn before worked in a directory with its own `AGENTS.md` | 798 | turn context |
+| the goal in the system prompt | the call after it was set or cleared | 678 | turn context |
+| the `plan` prompt added to the profile's | an `AI?` watch turn | | changes |
+| the tools | the call after the task list's tools are first offered: once there is a list, or after ten calls of a turn | 793 | changes (#590) |
+| the conversation | a compaction, which keeps a tail of it | 774 | changes |
+| the turn context put before | an agent restarted in the middle of a session | 815 | changes |
 
 On an account the check is enforced for, every call after one of these that carries a
 block from before it is refused, and sent again with no thinking at all. Troupe's history
@@ -32,15 +44,16 @@ compaction: two requests a call, and no reasoning from before the change, nor an
 turn makes after it, reaches the model. On an account that is not enforced the blocks
 reach the model as they are.
 
-## Turning each on
+## The settings
 
-| Option | Setting | For one shell, or one bench |
+| Setting | Values, the default first | For one shell, or one bench |
 |---|---|---|
-| 1. Anthropic's thinking-binding beta | `thinking_binding: drop_block` | `TROUPE_THINKING_BINDING=drop_block` |
-| 2. A stable system prompt | `system_prompt: stable` | `TROUPE_SYSTEM_PROMPT=stable` |
+| `system_prompt` | `stable` (option 2); `per_turn`, the prompt as it was before 0.13.0 | `TROUPE_SYSTEM_PROMPT=per_turn` |
+| `thinking_binding` | `default`, nothing sent; `drop_block` (option 1); `error`, the refusal asked for | `TROUPE_THINKING_BINDING=drop_block` |
 
-Both may be on together. Off (`default`, `per_turn`), no request changes: the provider
-tests, the prompt tests and `mix troupe.bench` give what they gave before.
+Both may be set together. `system_prompt` from a file or the environment is read as it is
+written: a person's `per_turn` stays `per_turn`, and a file that never set it is `stable`
+from 0.13.0 on. With `per_turn` and `default`, no request changes from what 0.12.0 sent.
 
 ## Option 1: `drop_block`
 
@@ -69,13 +82,20 @@ What it costs:
   `/chat/completions` among them, sends no thinking blocks back at all (its adapter hands
   back only its own provider's `reasoning_content`), so there is nothing to bind there.
 
+`thinking_binding: error` sends the same header and `block_binding:
+{prefix_mismatch_behavior: "error"}`: the API refuses a stale block with the 400 an
+enforced account gets without the beta, and Troupe answers it as it answers that one, by
+sending the call once more without its thinking (Decision 805). On an account that is not
+enforced, it is how the enforced column of a live bench is measured; on one that is, it
+changes nothing but the header.
+
 What it points at, and is not built: once a response says blocks were dropped, or a call
 was refused, Troupe could stop sending the leading run of blocks from before the change.
 The API allows taking out a leading run, oldest first, and the blocks made after it then
 stay valid; with or without the beta that would keep the reasoning a turn makes after a
 change.
 
-## Option 2: `system_prompt: stable`
+## Option 2: `system_prompt: stable`, the default
 
 The system prompt leaves out the instruction files and the brief, the goal and the task
 list, and is the same on every call of the session. Each of those goes, as a section of a
@@ -95,17 +115,17 @@ What it costs:
   not the log, so its next call goes without them once and puts the sections again.
 - **Tokens.** A changed section is added to the conversation each time it changes, and
   stays there until a compaction: the task list once for each turn that began with a new
-  one, the instruction files when a turn brings in a nested file or one was edited. Today
-  they are rewritten in place in the system prompt, which adds nothing but writes
-  everything behind it to the cache again.
+  one, the instruction files when a turn brings in a nested file or one was edited. With
+  `per_turn` they are rewritten in place in the system prompt, which adds nothing but
+  writes everything behind it to the cache again.
 - **How well instructions are followed.** In the system prompt the instruction files speak
   with the operator's voice; in the turn they are text in the person's message, read last
   before the model answers. A model may weigh them less, or more, than it does now. The
   live bench's `follow_up` is what says: its outcome is the second turn's file under the
   rules of both instruction files, one sent with the first turn and one with the second,
   and its check the first turn's file under the root's rule. Its success rate with
-  `stable` against without, over five runs or more, is the measure, and `smoke` or
-  `standard` with and without says whether tasks without instruction files moved. If
+  `stable` against `per_turn`, over five runs or more, is the measure, and `smoke` or
+  `standard` with each says whether tasks without instruction files moved. If
   `stable` follows them less well, Anthropic's mid-conversation `role: "system"` message
   carries operator authority without editing the prefix, on every model of the three but
   not on Sonnet 5 and not on an OpenAI-compatible wire; it is not built.
@@ -117,8 +137,20 @@ What it costs:
 Per model call (PROTOCOL.md): `llm_request.system_changed` and `tools_changed` against the
 agent's call before; `llm_request.turn_context` with `stable`; and on `llm_response`,
 `thinking_resent: true` when the call was refused as bound to another conversation and
-sent again (805's path, written nowhere before), and `thinking_dropped`, the blocks the beta
-dropped.
+sent again (805's path, written nowhere before), `thinking_dropped`, the blocks the beta
+dropped, and `prefix_mismatch`, what the API's `anthropic-thinking-prefix-mismatch` header
+said of the edit (Decision 863).
+
+That header is Anthropic's diagnosis, on a refusal or on a response that dropped blocks,
+and unpublished: it may change or stop, and a proxy may not pass it on. Its value is
+`key=value` pairs apart by `;`, such as `kind=system_changed; pattern=system_rerendered;
+sections=system; changed_validated=system.0`. The event keeps only the pairs named `kind`,
+`pattern`, `sections`, `changed_validated` and `position` whose value is a word, a path into
+the request or a list of them, so nothing of the conversation reaches the log however the
+header grows; a header that is one such word is kept as it is, and one with neither is
+`unrecognised`. `pattern` is the shape of the edit (`system_rerendered`, `tool_set_changed`,
+`compaction_summary`, `tail_kept` and others), and `changed_validated` where in the request
+it begins.
 
 `Troupe.Bench.Prefix.count/1` adds them up. A live bench run carries it as `prefix`, the
 report's `summary.prefix` adds the runs up, and the table prints a `prompt prefix` row.
@@ -291,30 +323,34 @@ and it sent 26% fewer uncached tokens and cost 11% less. Most of that difference
 `write_file` ($0.045 against $0.024); the other three tasks cost within a few tenths of
 a cent of each other.
 
-To run it again, in PowerShell, where `$m` is the model as `troupe models` addresses it:
+To run it again, in PowerShell, where `$m` is the model as `troupe models` addresses it.
+The table's baseline is the 0.12.0 default, which from 0.13.0 on is `per_turn` by name:
 
 ```powershell
 $m = "anthropic/claude-opus-5-5"
 $out = "$env:TEMP\troupe-465"; New-Item -ItemType Directory -Force $out | Out-Null
-Remove-Item Env:\TROUPE_THINKING_BINDING, Env:\TROUPE_SYSTEM_PROMPT -ErrorAction SilentlyContinue
+$env:TROUPE_THINKING_BINDING = $null; $env:TROUPE_SYSTEM_PROMPT = $null
 
 # The baseline, then each option, then both: follow_up five times each.
+$env:TROUPE_SYSTEM_PROMPT = "per_turn"
 troupe bench --live --scenario follow_up --repeat 5 --model $m --yes --keep "$out\keep-baseline" --json "$out\baseline.json"
 $env:TROUPE_THINKING_BINDING = "drop_block"
 troupe bench --live --scenario follow_up --repeat 5 --model $m --yes --keep "$out\keep-drop_block" --json "$out\drop_block.json"
-Remove-Item Env:\TROUPE_THINKING_BINDING
-$env:TROUPE_SYSTEM_PROMPT = "stable"
+$env:TROUPE_THINKING_BINDING = $null; $env:TROUPE_SYSTEM_PROMPT = $null
 troupe bench --live --scenario follow_up --repeat 5 --model $m --yes --keep "$out\keep-stable" --json "$out\stable.json"
 $env:TROUPE_THINKING_BINDING = "drop_block"
 troupe bench --live --scenario follow_up --repeat 5 --model $m --yes --keep "$out\keep-both" --json "$out\both.json"
-Remove-Item Env:\TROUPE_THINKING_BINDING, Env:\TROUPE_SYSTEM_PROMPT
+$env:TROUPE_THINKING_BINDING = $null
 
-# Whether a stable prompt moves tasks with no instruction files: smoke, with and without.
+# Whether a stable prompt moves tasks with no instruction files: smoke, with each.
+$env:TROUPE_SYSTEM_PROMPT = "per_turn"
 troupe bench --live --repeat 3 --model $m --yes --json "$out\smoke-baseline.json"
-$env:TROUPE_SYSTEM_PROMPT = "stable"
+$env:TROUPE_SYSTEM_PROMPT = $null
 troupe bench --live --repeat 3 --model $m --yes --json "$out\smoke-stable.json"
-Remove-Item Env:\TROUPE_SYSTEM_PROMPT
 ```
+
+An enforced account's column, on any account: the same runs with
+`$env:TROUPE_THINKING_BINDING = "error"`.
 
 Each run prints its cap before it starts. Reading the numbers, a row a configuration:
 

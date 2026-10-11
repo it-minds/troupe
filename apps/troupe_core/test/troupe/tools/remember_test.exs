@@ -29,7 +29,7 @@ defmodule Troupe.Tools.RememberTest do
     assert_receive {:troupe_event, _, %Event{type: "agent_done", agent: ["root"]}}, 5_000
 
     # The first agent's own prompt had no brief: there was none when it started.
-    assert fake |> Fake.requests() |> List.first() |> Map.fetch!(:system) |> Kernel.=~("Project brief") == false
+    refute fake |> Fake.requests() |> List.first() |> prompt_text() =~ "Project brief"
 
     path = Path.join(context.workspace, ".troupe/memory.md")
     assert File.read!(path) =~ "build: the ledger is a fold over the log"
@@ -43,7 +43,7 @@ defmodule Troupe.Tools.RememberTest do
     Troupe.send_input(second.id, "hello")
     assert_receive {:troupe_event, _, %Event{type: "agent_done", agent: ["root"]}}, 5_000
 
-    system = fake2 |> Fake.requests() |> List.first() |> Map.fetch!(:system)
+    system = fake2 |> Fake.requests() |> List.first() |> prompt_text()
     assert system =~ "# Project brief"
     assert system =~ "1 fact about this repository (1 note) is kept out of this prompt"
 

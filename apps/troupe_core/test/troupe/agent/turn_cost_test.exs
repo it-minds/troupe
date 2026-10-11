@@ -52,12 +52,15 @@ defmodule Troupe.Agent.TurnCostTest do
     assert Enum.sum(Enum.map(responses, & &1.data["gateway"]["cost_micros"])) == 945
   end
 
+  # With the brief in the system prompt (`per_turn`); by default it goes with the turn and
+  # counts in the conversation (Decisions 815 and 863), below.
   test "each call says what its prompt was made of, in bytes", context do
     write_file(context, "AGENTS.md", "Run the tests before you say you are done.\n")
 
     sid =
       run(context,
-        steps: [{:text_and_tools, "one", [{"todo_read", %{}}]}, {:text, "done"}]
+        steps: [{:text_and_tools, "one", [{"todo_read", %{}}]}, {:text, "done"}],
+        config_overrides: [system_prompt: "per_turn"]
       )
 
     await_event(sid, :turn_ended, 10_000)
@@ -85,6 +88,20 @@ defmodule Troupe.Agent.TurnCostTest do
     assert second["tool_results"] in 1..(second["conversation"] - first["conversation"])
     assert second["system"] == first["system"]
     assert second["tools"] == first["tools"]
+  end
+
+  test "by default the instruction files count in the conversation, which carries them",
+       context do
+    write_file(context, "AGENTS.md", "Run the tests before you say you are done.\n")
+    sid = run(context, steps: [{:text, "done"}])
+    await_event(sid, :turn_ended, 10_000)
+
+    [first] = Enum.map(events_of_type(sid, :llm_request), & &1.data["prompt_bytes"])
+    go = "go" |> Message.user() |> Message.to_json() |> Jason.encode!() |> byte_size()
+
+    assert first["brief"] == 0
+    assert first["conversation"] > go + byte_size("Run the tests before you say you are done.")
+    assert first["total"] == first["system"] + first["tools"] + first["conversation"]
   end
 
   test "the call that writes a compaction's summary is counted, and says what it was made of",

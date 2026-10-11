@@ -69,13 +69,13 @@ defmodule Troupe.Memory.FactsTest do
     assert Brief.status(ws, context.config) == :stale
     assert Brief.refresh_due?(ws, context.config)
 
-    # And the next agent's system prompt is that prompt.
+    # And the next agent's prompt is that prompt.
     %{session: session, fake: fake} = start_session(context, steps: [{:text, "ok"}])
     :ok = Troupe.subscribe(session.id)
     Troupe.send_input(session.id, "hello")
     await_event(session.id, :turn_ended)
 
-    system = fake |> Fake.requests() |> List.first() |> Map.fetch!(:system)
+    system = fake |> Fake.requests() |> List.first() |> prompt_text()
     assert system =~ "(may no longer be true: `mix.exs` changed since it was checked)"
     assert system =~ "check it\nbefore you rely on it"
     refute system =~ "treat it as correct"

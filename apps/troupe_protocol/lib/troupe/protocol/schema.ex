@@ -140,9 +140,12 @@ defmodule Troupe.Protocol.Schema do
         "gateway" => optional(:object),
         # What became of the thinking the call handed back, present only when anything
         # did: refused as bound to another conversation and the call sent again without it
-        # (Decision 805), or the blocks the thinking-binding beta dropped (Decision 815).
+        # (Decision 805), or the blocks the thinking-binding beta dropped (Decision 815);
+        # and what the API's `anthropic-thinking-prefix-mismatch` header said of the edit,
+        # its `key=value` pairs cut to its own words (Decision 863).
         "thinking_resent" => optional(:boolean),
-        "thinking_dropped" => optional(:integer)
+        "thinking_dropped" => optional(:integer),
+        "prefix_mismatch" => optional(:string)
       },
       # `reason` is a sentence a person can act on (Decision 659), not a term. `note` is a
       # root's: what its conversation was told, which a replay puts back (Decision 693).
