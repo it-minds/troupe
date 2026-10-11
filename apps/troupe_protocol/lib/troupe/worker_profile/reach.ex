@@ -142,6 +142,27 @@ defmodule Troupe.WorkerProfile.Reach do
   def refused?(host), do: refusal(host) != nil
 
   @doc """
+  What `host` is called in a sentence when it is an address no rule admits, `"loopback"`,
+  `"unspecified"`, `"link-local"` or `"cloud metadata"`, or `nil`: a host as a profile
+  names it, or an address as `:inet` gives one. The plane refuses a trigger's
+  `notify_url` at the same addresses, read from here (Decision 866), so an address added
+  to this list is refused there as well.
+  """
+  @spec refusal(String.t() | :inet.ip_address()) :: String.t() | nil
+  def refusal(host) when is_binary(host) do
+    case address(host) do
+      {:ok, address} -> refusal(address)
+      :error -> nil
+    end
+  end
+
+  def refusal(address) when tuple_size(address) in [4, 8] do
+    address = v4(address)
+
+    Enum.find_value(@refused, fn {block, kind} -> if within?(address, block), do: kind end)
+  end
+
+  @doc """
   The blocks a worker's `CiliumNetworkPolicy` denies whatever admits them, the link-local
   ranges and the metadata addresses outside them, each with the addresses among `kept`
   inside it, as blocks of one, left out of it. A `toFQDNs` rule admits a name at whatever
@@ -220,32 +241,23 @@ defmodule Troupe.WorkerProfile.Reach do
     end
   end
 
-  # What a host at an address no rule admits is called in a sentence, or `nil`.
-  defp refusal(host) do
-    with {:ok, address} <- address(host),
-         {_block, kind} <- Enum.find(@refused, fn {block, _kind} -> within?(address, block) end) do
-      kind
-    else
-      _admitted -> nil
-    end
-  end
-
   # Strictly: `:inet.parse_address/1` also takes `10.1` for an address, which nobody
-  # writing an endpoint means by it. A v4 address in v6 spelling (`::ffff:169.254.169.254`)
-  # is the v4 address it names, which is where a pod's connection to it goes.
+  # writing an endpoint means by it.
   defp address(host) do
     case :inet.parse_strict_address(String.to_charlist(host)) do
-      {:ok, {0, 0, 0, 0, 0, 0xFFFF, high, low}} ->
-        <<a, b, c, d>> = <<high::16, low::16>>
-        {:ok, {a, b, c, d}}
-
-      {:ok, address} ->
-        {:ok, address}
-
-      {:error, _name} ->
-        :error
+      {:ok, address} -> {:ok, v4(address)}
+      {:error, _name} -> :error
     end
   end
+
+  # A v4 address in v6 spelling (`::ffff:169.254.169.254`) is the v4 address it names,
+  # which is where a pod's connection to it goes.
+  defp v4({0, 0, 0, 0, 0, 0xFFFF, high, low}) do
+    <<a, b, c, d>> = <<high::16, low::16>>
+    {a, b, c, d}
+  end
+
+  defp v4(address), do: address
 
   # The one address, as a block of one in its shortest form.
   defp block({_a, _b, _c, _d} = address), do: "#{:inet.ntoa(address)}/32"

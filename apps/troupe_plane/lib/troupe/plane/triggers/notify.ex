@@ -15,15 +15,21 @@ defmodule Troupe.Plane.Triggers.Notify do
   because the request never left the process that was trusted. Here a URL with no scheme
   and no host is not a URL, and is refused before it is stored.
 
-  **Not loopback, not link-local.** `http://127.0.0.1:4000/rpc` is the same attack
-  written out in full, and `http://169.254.169.254/` is the cloud metadata endpoint,
-  which is where credentials live. Both are refused by address, so a hostname that
-  resolves to one is refused as surely as a literal.
+  **Not loopback, not link-local, not a cloud's metadata service.**
+  `http://127.0.0.1:4000/rpc` is the same attack written out in full, and
+  `http://169.254.169.254/` is the cloud metadata endpoint, which is where credentials
+  live. Two clouds answer outside link-local too, at `fd00:ec2::254` and
+  `100.100.100.200`. All of them are refused by address, so a hostname that resolves to
+  one is refused as surely as a literal. The list is the one a worker is held to
+  (`Troupe.WorkerProfile.Reach.refusal/1`, Decision 856), so an address added there is
+  refused here as well (Decision 866).
 
   Other private ranges are *not* refused here. A plane in a cluster has legitimate
   internal targets on private addresses — somebody's own webhook receiver in the next
   namespace — and refusing 10/8 outright would break them. What governs those is the
-  egress allowlist, which an administrator sets deliberately.
+  egress allowlist, which an administrator sets deliberately. The shared address space,
+  `100.64.0.0/10`, is the exception: one metadata service answers in it and other
+  internal services of a provider may, and the plane's own egress is not restricted.
 
   **On the egress allowlist.** The same list a pod's egress is held to. A plane that
   could reach hosts its own workers cannot would be the widest hole in the deployment,
@@ -41,6 +47,7 @@ defmodule Troupe.Plane.Triggers.Notify do
   alias Troupe.Plane.ClusterPolicy
   alias Troupe.Plane.Triggers.{Run, Trigger}
   alias Troupe.Protocol.Error
+  alias Troupe.WorkerProfile.Reach
 
   require Logger
 
@@ -181,14 +188,22 @@ defmodule Troupe.Plane.Triggers.Notify do
   # is refused by the caller rather than treated as reachable.
   defp addresses(host) do
     case parse_address(host) do
-      {:ok, address} ->
-        [address]
+      {:ok, address} -> [address]
+      :error -> host |> strip_brackets() |> resolve()
+    end
+  end
 
-      :error ->
-        charlist = host |> strip_brackets() |> String.to_charlist()
+  # What DNS answers for a name, in both families. `:notify_resolver` in the application
+  # environment, a function of a hostname to its addresses, stands in for DNS where a test
+  # must say what a name answers without asking the network.
+  defp resolve(host) do
+    case Application.get_env(:troupe_plane, :notify_resolver) do
+      fun when is_function(fun, 1) ->
+        fun.(host)
 
+      nil ->
         for family <- [:inet, :inet6],
-            {:ok, list} <- [:inet.getaddrs(charlist, family)],
+            {:ok, list} <- [:inet.getaddrs(String.to_charlist(host), family)],
             address <- list,
             do: address
     end
@@ -201,29 +216,38 @@ defmodule Troupe.Plane.Triggers.Notify do
     end
   end
 
-  defp address_allowed({127, _b, _c, _d}), do: {:error, "is not loopback"}
-  defp address_allowed({0, 0, 0, 0}), do: {:error, "is not the unspecified address"}
-  defp address_allowed({169, 254, _c, _d}), do: {:error, "is not link-local"}
-  defp address_allowed({a, _b, _c, _d}) when a >= 224, do: {:error, "is not multicast"}
-  defp address_allowed({0, 0, 0, 0, 0, 0, 0, 1}), do: {:error, "is not loopback"}
-  defp address_allowed({0, 0, 0, 0, 0, 0, 0, 0}), do: {:error, "is not the unspecified address"}
-
-  # `fe80::/10` and `ff00::/8`: link-local and multicast, the v6 spellings of the two
-  # above. Written as a range rather than a pattern because the prefix is ten bits.
-  defp address_allowed({a, _b, _c, _d, _e, _f, _g, _h})
-       when a >= 0xFE80 and a <= 0xFEBF,
-       do: {:error, "is not link-local"}
-
-  defp address_allowed({a, _b, _c, _d, _e, _f, _g, _h}) when a >= 0xFF00,
-    do: {:error, "is not multicast"}
-
   # `::ffff:127.0.0.1` and friends: a v4 address wearing a v6 hat, which is the one that
   # gets past a check written only for the eight-tuple.
   defp address_allowed({0, 0, 0, 0, 0, 0xFFFF, g, h}) do
     address_allowed({div(g, 256), rem(g, 256), div(h, 256), rem(h, 256)})
   end
 
-  defp address_allowed(_address), do: :ok
+  # What no worker reaches, the plane does not post to: loopback, the unspecified
+  # address, link-local and the metadata addresses, from the one list
+  # `Troupe.WorkerProfile.Reach` keeps (not `Troupe.Plane.Reach`, which asks it of profiles).
+  defp address_allowed(address) do
+    case Reach.refusal(address) do
+      nil -> beyond_reach(address)
+      kind -> {:error, said(kind)}
+    end
+  end
+
+  defp said("unspecified"), do: "is not the unspecified address"
+  defp said("cloud metadata"), do: "is not a cloud metadata address"
+  defp said(kind), do: "is not #{kind}"
+
+  # And what is the plane's own to refuse. Multicast in both families, `ff00::/8` written
+  # as a range; and the shared address space, `100.64.0.0/10`: a worker reaches it only at
+  # an address it was given (Decision 856), and the chart leaves the plane's egress open.
+  defp beyond_reach({a, _b, _c, _d}) when a >= 224, do: {:error, "is not multicast"}
+
+  defp beyond_reach({100, b, _c, _d}) when b in 64..127,
+    do: {:error, "is not in the shared address space"}
+
+  defp beyond_reach({a, _b, _c, _d, _e, _f, _g, _h}) when a >= 0xFF00,
+    do: {:error, "is not multicast"}
+
+  defp beyond_reach(_address), do: :ok
 
   defp strip_brackets("[" <> rest), do: String.trim_trailing(rest, "]")
   defp strip_brackets(host), do: host

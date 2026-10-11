@@ -242,6 +242,36 @@ defmodule Troupe.WorkerProfile.ReachTest do
     end
   end
 
+  test "what a refused address is called, from a host as written or an address as :inet gives it" do
+    # The plane refuses a trigger's notify_url from the same list (issue #588), with the
+    # addresses DNS answered, so the one list answers for both.
+    for {host, kind} <- [
+          {"127.8.9.1", "loopback"},
+          {"::1", "loopback"},
+          {"0.0.0.0", "unspecified"},
+          {"::", "unspecified"},
+          {"169.254.169.254", "link-local"},
+          {"FE80::2", "link-local"},
+          {"::ffff:169.254.169.254", "link-local"},
+          {"fd00:ec2::254", "cloud metadata"},
+          {"FD00:EC2:0:0::254", "cloud metadata"},
+          {"100.100.100.200", "cloud metadata"},
+          {"::ffff:100.100.100.200", "cloud metadata"}
+        ] do
+      {:ok, address} = :inet.parse_strict_address(String.to_charlist(host))
+
+      assert Reach.refusal(host) == kind, host
+      assert Reach.refusal(address) == kind, host
+    end
+
+    for host <- ~w(100.100.100.201 100.64.0.1 fd00:ec2::253 10.20.0.5 ::ffff:10.20.0.5
+                   metadata.example.test) do
+      assert Reach.refusal(host) == nil, host
+    end
+
+    assert Reach.refusal({100, 100, 100, 201}) == nil
+  end
+
   describe "what a worker reaches by no name" do
     # With Cilium a name is admitted at whatever address its DNS answer carries, so the
     # CiliumNetworkPolicy denies these whatever the allowlist says (issue #361).
