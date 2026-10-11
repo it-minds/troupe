@@ -684,7 +684,8 @@ defmodule Troupe.Client.Daemon do
   end
 
   # How the person's sign-in to a server that wants them stands (troupe-remote
-  # Decision 741), or `nil` for a server that takes none.
+  # Decision 741), or `nil` for a server that takes none; `step_up`, the scope the server
+  # wanted on top of it, which the next sign-in asks for (Decision 872).
   defp auth_entry(%{"state" => state} = auth) do
     %{
       state:
@@ -695,7 +696,8 @@ defmodule Troupe.Client.Daemon do
           _other -> :signed_out
         end,
       account: auth["account"],
-      error: auth["error"]
+      error: auth["error"],
+      step_up: auth["step_up"]
     }
   end
 
@@ -843,6 +845,15 @@ defmodule Troupe.Client.Daemon do
       {:ok, %{"content_base64" => b64}} -> {:ok, Base.decode64!(b64)}
       {:ok, other} -> {:error, "unexpected fs.read answer: #{inspect(other)}"}
       {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  # A branch's documents are on its own session's scratchpad, beside its own log.
+  @impl true
+  def scratch_read(sid, window, path) do
+    case branch(sid, window) do
+      %{session_id: child} -> fs_read(child, path)
+      nil -> fs_read(sid, path)
     end
   end
 

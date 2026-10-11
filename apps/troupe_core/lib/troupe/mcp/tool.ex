@@ -92,13 +92,15 @@ defmodule Troupe.MCP.Tool do
   A server that wants the person signed in (Decision 741) gets the daemon's token,
   refreshed and tried again once on a `401`. A sign-in that has run out is, like an
   unconnected person-mode server, a fact the model can relay rather than a failure to
-  retry: the person signs in again and the next call works.
+  retry: the person signs in again and the next call works. So is a tool that wants a
+  scope the sign-in did not grant (Decision 872), with the scope it named.
   """
   @spec invoke(Server.t(), String.t(), map(), map()) :: Troupe.Tool.result()
   def invoke(%Server{credential_mode: :profile} = server, remote_name, args, meta) do
     case OAuth.authorized(server, &Client.call_tool(&1, remote_name, args, meta)) do
       {:ok, result} -> {:ok, render(result)}
       {:error, :sign_in_required} -> {:ok, sign_in_required(server)}
+      {:error, {:sign_in_required, scope}} -> {:ok, scope_required(server, scope)}
       {:error, reason} -> {:error, describe(reason)}
     end
   end
@@ -125,6 +127,21 @@ defmodule Troupe.MCP.Tool do
         "#{server.name} acts as the person who runs this session, and their sign-in to it " <>
           "has run out or was never made: they sign in with /mcp sign-in #{server.name} in " <>
           "the terminal, or Sign in on the desktop app's Servers and skills panel, then ask again"
+    })
+  end
+
+  # The same answer, for a sign-in that is good but grants less than this tool wants. The
+  # person decides whether to grant it; nothing signs in for them.
+  defp scope_required(server, scope) do
+    Jason.encode!(%{
+      "error" => "sign_in_required",
+      "server" => server.name,
+      "scope" => scope,
+      "hint" =>
+        "#{server.name} acts as the person who runs this session, and this tool wants more " <>
+          "than their sign-in grants: the scope #{scope}. If they choose to grant it, they " <>
+          "sign in again with /mcp sign-in #{server.name} in the terminal, or Sign in on the " <>
+          "desktop app's Servers and skills panel, which asks for it, then ask again"
     })
   end
 
@@ -166,6 +183,18 @@ defmodule Troupe.MCP.Tool do
 
   defp describe({:unexpected_status, 403, _body}),
     do: "the MCP server answered 403: the identity this call went out as may not use this tool"
+
+  defp describe({:insufficient_scope, challenge}) do
+    case OAuth.challenge(challenge)["scope"] do
+      scope when is_binary(scope) and scope != "" ->
+        "the MCP server answered 403: this tool wants the scope #{scope}, which the " <>
+          "credential this call went out with was not granted"
+
+      _none ->
+        "the MCP server answered 403: this tool wants a scope the credential this call " <>
+          "went out with was not granted, and did not say which"
+    end
+  end
 
   defp describe({:unexpected_status, status, _body}), do: "the MCP server answered #{status}"
   defp describe(reason), do: "the MCP server could not be reached: #{inspect(reason)}"

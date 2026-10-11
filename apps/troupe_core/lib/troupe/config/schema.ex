@@ -17,6 +17,14 @@ defmodule Troupe.Config.Schema do
   file trusts, and a session on a pod never reads them from a project's file. `:user`
   keys are read only from the user file: the trust list itself.
 
+  ## What an organisation may enforce
+
+  A key with `enforce` is one an organisation may hold people's machines to (#122,
+  Decision 869): `:ceiling`, a number a lower layer may not raise; `:order`, a value a
+  lower layer may not loosen (`approvals`, the two `managed_*` switches); `:fixed`, the
+  provider and its URL. Nothing else can be enforced, and the list is
+  `Troupe.Protocol.Organisation`'s, which the plane checks an administrator's set by.
+
   ## Old spellings
 
   `aliases/0` lists the spellings that still load through version 1, each with a
@@ -59,6 +67,7 @@ defmodule Troupe.Config.Schema do
           field: atom() | nil,
           group: String.t() | nil,
           label: String.t() | nil,
+          enforce: :ceiling | :order | :fixed | nil,
           doc: String.t()
         }
 
@@ -73,6 +82,11 @@ defmodule Troupe.Config.Schema do
         "reasoning_effort",
         :effort,
         "How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a thinking budget in tokens. An Anthropic model gets it in the form it takes."
+      ),
+      spec(
+        "binds_thinking",
+        :boolean,
+        "Whether the model binds its thinking to the conversation it was made in, as Claude Fable 5.1, Opus 5.5 and Sonnet 5.5 do, so its tools stay the same all session: for a name that hides the model. Unset: the provider's, else what its model list says, else its name."
       )
     ]
   end
@@ -100,6 +114,11 @@ defmodule Troupe.Config.Schema do
       ),
       spec("models", {:map, {:object, model_entry()}}, "The models it serves, by the name Troupe addresses them with.",
         default: %{}
+      ),
+      spec(
+        "binds_thinking",
+        :boolean,
+        "Whether the models it serves bind their thinking to the conversation, unless a model's entry says. Unset: what its model list says, else each model's name."
       )
     ]
   end
@@ -153,11 +172,13 @@ defmodule Troupe.Config.Schema do
         spec("provider", {:enum, ~w(anthropic openai fake)}, "The session-wide provider's API.",
           default: "anthropic",
           scope: :trusted,
-          field: :provider
+          field: :provider,
+          enforce: :fixed
         ),
         spec("base_url", :string, "The session-wide provider's URL. Unset: the vendor's own endpoint.",
           scope: :trusted,
-          field: :base_url
+          field: :base_url,
+          enforce: :fixed
         ),
         spec("api_key", :string, "The session-wide provider's key. `{env:VAR}` reads it from the environment.",
           scope: :trusted,
@@ -216,7 +237,8 @@ defmodule Troupe.Config.Schema do
         ),
         spec("max_tokens", {:integer, 1}, "The most output tokens one model call asks for.",
           default: 8192,
-          field: :max_tokens
+          field: :max_tokens,
+          enforce: :ceiling
         ),
         spec(
           "context_window",
@@ -275,7 +297,8 @@ defmodule Troupe.Config.Schema do
         spec("max_turns", {:integer, 1}, "Model calls an agent may make before its budget stops it.",
           default: 40,
           field: :max_turns,
-          label: "max turns"
+          label: "max turns",
+          enforce: :ceiling
         ),
         spec("max_input_tokens", {:integer, 1}, "Input tokens an agent may spend.",
           default: 2_000_000,
@@ -285,11 +308,16 @@ defmodule Troupe.Config.Schema do
           default: 400_000,
           field: :max_output_tokens
         ),
-        spec("wall_clock_ms", {:integer, 1}, "How long an agent may run.", default: 1_800_000, field: :wall_clock_ms),
+        spec("wall_clock_ms", {:integer, 1}, "How long an agent may run.",
+          default: 1_800_000,
+          field: :wall_clock_ms,
+          enforce: :ceiling
+        ),
         spec("max_depth", {:integer, 0}, "How deep agents may delegate; 1 means the root alone may.",
           default: 3,
           field: :max_depth,
-          label: "delegation depth"
+          label: "delegation depth",
+          enforce: :ceiling
         ),
         spec("budget_warn_at", :fraction, "The share of any limit at which the agent is warned.",
           default: 0.8,
@@ -323,7 +351,8 @@ defmodule Troupe.Config.Schema do
         spec("approvals", {:enum, ~w(wait deny)}, "What a call that asks does with nobody attached: wait, or be denied.",
           default: "wait",
           scope: :trusted,
-          field: :approvals
+          field: :approvals,
+          enforce: :order
         ),
         # Decision 850: asking before a delegation is opt-in, per agent.
         spec(
@@ -347,12 +376,14 @@ defmodule Troupe.Config.Schema do
         spec("managed_permission_rules_only", :boolean, "A session may not allow a tool for itself.",
           default: false,
           scope: :trusted,
-          field: :managed_permission_rules_only
+          field: :managed_permission_rules_only,
+          enforce: :order
         ),
         spec("managed_mcp_servers_only", :boolean, "A client may not offer a session its own tools.",
           default: false,
           scope: :trusted,
-          field: :managed_mcp_servers_only
+          field: :managed_mcp_servers_only,
+          enforce: :order
         )
       ]),
       group("Tools", [
@@ -371,6 +402,14 @@ defmodule Troupe.Config.Schema do
           default: 32_768,
           field: :tool_output_limit,
           label: "tool output limit"
+        ),
+        spec("scratch_max_bytes", {:integer, 1}, "Bytes one document `show` puts on the session's scratchpad may hold.",
+          default: 262_144,
+          field: :scratch_max_bytes
+        ),
+        spec("scratch_max_documents", {:integer, 1}, "Documents one session's scratchpad may hold.",
+          default: 50,
+          field: :scratch_max_documents
         ),
         spec(
           "tool_failures_note_at",
@@ -556,7 +595,8 @@ defmodule Troupe.Config.Schema do
       secret: Keyword.get(opts, :secret, false),
       field: Keyword.get(opts, :field),
       group: nil,
-      label: Keyword.get(opts, :label)
+      label: Keyword.get(opts, :label),
+      enforce: Keyword.get(opts, :enforce)
     }
   end
 
@@ -628,6 +668,10 @@ defmodule Troupe.Config.Schema do
     end)
     |> Enum.find(fn {_path, spec} -> spec.field == field end)
   end
+
+  @doc "The keys an organisation may enforce, each with what enforcing it means (Decision 869)."
+  @spec enforceable() :: [{String.t(), :ceiling | :order | :fixed}]
+  def enforceable, do: for(%{enforce: kind} = spec <- table(), kind != nil, do: {spec.key, kind})
 
   @doc """
   The keys a settings page shows, each with its path, in the reference's order: every
@@ -770,11 +814,16 @@ defmodule Troupe.Config.Schema do
     ordered(base ++ json_type(spec.type, spec))
   end
 
-  defp description(%{scope: :trusted} = spec),
+  defp description(spec), do: scoped(spec) <> enforced(spec)
+
+  defp scoped(%{scope: :trusted} = spec),
     do: spec.doc <> " Read from a project's file only in a trusted workspace."
 
-  defp description(%{scope: :user} = spec), do: spec.doc <> " Read only from the user's config.yaml."
-  defp description(spec), do: spec.doc
+  defp scoped(%{scope: :user} = spec), do: spec.doc <> " Read only from the user's config.yaml."
+  defp scoped(spec), do: spec.doc
+
+  defp enforced(%{enforce: nil}), do: ""
+  defp enforced(%{enforce: _kind}), do: " An organisation may enforce it, and nothing on this machine then goes past it."
 
   defp json_type(:string, _spec), do: [{"type", ["string", "null"]}]
   defp json_type(:boolean, _spec), do: [{"type", ["boolean", "null"]}]
@@ -893,7 +942,12 @@ defmodule Troupe.Config.Schema do
   defp show_default(%{default: value}) when is_binary(value), do: "`#{value}`"
   defp show_default(%{default: value}), do: "`#{inspect(value)}`"
 
-  defp who(%{scope: :trusted}), do: "user; project if trusted"
-  defp who(%{scope: :user}), do: "user file only"
-  defp who(_spec), do: "any"
+  defp who(spec), do: who_scope(spec) <> who_enforce(spec)
+
+  defp who_scope(%{scope: :trusted}), do: "user; project if trusted"
+  defp who_scope(%{scope: :user}), do: "user file only"
+  defp who_scope(_spec), do: "any"
+
+  defp who_enforce(%{enforce: nil}), do: ""
+  defp who_enforce(%{enforce: _kind}), do: "; an organisation may enforce"
 end

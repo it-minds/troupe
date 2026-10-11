@@ -146,6 +146,8 @@ defmodule Troupe.Client do
   @callback instructions(session_id()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  @callback scratch_read(session_id(), String.t() | nil, String.t()) ::
+              {:ok, String.t()} | {:error, term()}
   @callback fs_upload(session_id(), String.t(), binary()) :: :ok | {:error, term()}
   @callback upload_fits(session_id(), non_neg_integer()) :: :ok | {:error, String.t()}
   @callback stop_session(session_id()) :: :ok | {:error, term()}
@@ -419,6 +421,24 @@ defmodule Troupe.Client do
   def manage_sources(sid, method, params), do: impl(sid).manage_sources(sid, method, params)
 
   @doc """
+  What signing out of a person's own server told its provider, as `mcp.sign_out`'s
+  `revocation` says it (troupe-remote Decision 872), in the words the `/mcp` page and
+  `troupe logout` both use.
+  """
+  @spec revocation_text(map() | nil) :: String.t()
+  def revocation_text(%{"state" => "revoked"}), do: "the provider revoked the sign-in"
+
+  def revocation_text(%{"state" => "failed"} = revocation) do
+    why = if is_binary(revocation["reason"]), do: " (#{revocation["reason"]})", else: ""
+    "the provider was not told#{why}, so the sign-in stays good there until it runs out"
+  end
+
+  def revocation_text(%{"state" => "unsupported"}),
+    do: "the provider offers no way to revoke it, so the sign-in stays good there until it runs out"
+
+  def revocation_text(_none), do: "nothing was held to revoke"
+
+  @doc """
   The agents the session's workspace has, through the daemon (root Decision 841):
   `agents.list`, `agents.get` (with the session, so its answer names the windows of the
   session's family that run it), `agents.validate`, `agents.put` and `agents.delete`,
@@ -465,6 +485,14 @@ defmodule Troupe.Client do
 
   @spec fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def fs_read(sid, path), do: impl(sid).fs_read(sid, path)
+
+  @doc """
+  A scratchpad document's words (root Decision 870): `fs.read` of its `scratch:/` path,
+  in the session of the window its card is in, a branch's own where it has one.
+  """
+  @spec scratch_read(session_id(), String.t() | nil, String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def scratch_read(sid, window, path), do: impl(sid).scratch_read(sid, window, path)
 
   @spec fs_upload(session_id(), String.t(), binary()) :: :ok | {:error, term()}
   def fs_upload(sid, path, content), do: impl(sid).fs_upload(sid, path, content)

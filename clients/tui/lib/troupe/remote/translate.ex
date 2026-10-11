@@ -596,6 +596,11 @@ defmodule Troupe.Remote.Translate do
       type when type in ["fs.changed", "fs_changed"] ->
         {[emit.(:fs_changed, %{paths: paths(data)})], memory}
 
+      # A document `show` put on the session's scratchpad (root Decision 870): a card where
+      # the call was, and a row of `/scratch` (TUI Decision 159).
+      "scratch_updated" ->
+        {[emit.(:scratch_updated, scratch(data))], memory}
+
       type when type in ["acl.granted", "acl_granted"] ->
         {[emit.(:remote_note, %{text: "access granted" <> subject(data)})], memory}
 
@@ -923,6 +928,21 @@ defmodule Troupe.Remote.Translate do
 
   defp paths(data) do
     data |> Map.get("paths", List.wrap(data["path"])) |> List.wrap() |> Enum.filter(&is_binary/1)
+  end
+
+  # Everything a card and a row show of a document; its words are read when it is opened.
+  defp scratch(data) do
+    name = if is_binary(data["name"]), do: data["name"], else: ""
+
+    %{
+      call_id: data["call_id"],
+      name: name,
+      path: if(is_binary(data["path"]), do: data["path"], else: "scratch:/" <> name),
+      kind: if(is_binary(data["kind"]), do: data["kind"], else: "text"),
+      title: if(is_binary(data["title"]) and data["title"] != "", do: data["title"], else: name),
+      size: if(is_integer(data["size"]), do: data["size"], else: 0),
+      version: if(is_integer(data["version"]), do: data["version"], else: 1)
+    }
   end
 
   defp state_atom(value) when is_binary(value) do

@@ -1881,6 +1881,36 @@ You build."}
       assert html =~ "newer than the recommended version"
       assert ClientVersions.policy("daemon").minimum == nil
     end
+
+    # What people's own machines may not go past (Decision 869): a field of the client
+    # defaults panel, saved as the JSON typed, and a key an organisation may not enforce
+    # refused with the reason.
+    test "the enforced set for people's machines is saved, and a key that cannot be enforced is refused",
+         context do
+      on_exit(fn -> Settings.reset("client_enforced", "test") end)
+
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/policy")
+
+      assert html =~ "client_enforced"
+      assert html =~ "What people&#39;s own machines talk to"
+
+      html =
+        view
+        |> element("#setting-client_enforced")
+        |> render_submit(%{"key" => "client_enforced", "value" => ~s|{"auto_approve": false}|})
+
+      assert html =~ "auto_approve is not a key an organisation may enforce"
+      assert Settings.get("client_enforced") == nil
+
+      html =
+        view
+        |> element("#setting-client_enforced")
+        |> render_submit(%{"key" => "client_enforced", "value" => ~s|{"approvals": "deny"}|})
+
+      assert html =~ ~s|client_enforced is now {&quot;approvals&quot;:&quot;deny&quot;}|
+      assert Settings.get("client_enforced") == %{"approvals" => "deny"}
+    end
   end
 
   # -- helpers ----------------------------------------------------------------

@@ -642,7 +642,10 @@ defmodule Troupe do
          {:ok, %{events: events}} <- Fork.chain(parent_id, history, chain_opts),
          child_id = Keyword.fetch!(session_opts, :session_id),
          root = Keyword.fetch!(session_opts, :workspace).root_real,
-         :ok <- Log.write_new(Troupe.Paths.session_dir(root, child_id, state_dir), events) do
+         child_dir = Troupe.Paths.session_dir(root, child_id, state_dir),
+         :ok <- Log.write_new(child_dir, events),
+         # The scratchpad documents the history it carries shows (Decision 870).
+         :ok <- Troupe.Scratch.carry(parent_id, events, child_dir) do
       resume(child_id, start)
     end
   end

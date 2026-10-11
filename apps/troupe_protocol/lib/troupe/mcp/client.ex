@@ -248,11 +248,23 @@ defmodule Troupe.MCP.Client do
   defp session_header(_none), do: []
 
   # A `401` comes back with what the server wants instead, its `WWW-Authenticate`,
-  # which is where a person's sign-in starts (Decision 741).
+  # which is where a person's sign-in starts (Decision 741), and a `403` for a scope the
+  # token lacks with the scope it wants (Decision 872).
   defp answer({:ok, %{status: status} = response}) when status in 200..299, do: decode(response)
 
   defp answer({:ok, %{status: 401} = response}),
     do: {:error, {:unauthorized, challenge(response)}}
+
+  # A `403` whose challenge says `insufficient_scope` is the specification's step-up: the
+  # token is good, and the call wants a scope it was not granted, which the challenge
+  # names. Any other `403` is a refusal like any other status.
+  defp answer({:ok, %{status: 403, body: body} = response}) do
+    header = challenge(response)
+
+    if is_binary(header) and Regex.match?(~r/\berror\s*=\s*"?insufficient_scope\b/i, header),
+      do: {:error, {:insufficient_scope, header}},
+      else: {:error, {:unexpected_status, 403, body}}
+  end
 
   defp answer({:ok, %{status: status, body: body}}),
     do: {:error, {:unexpected_status, status, body}}

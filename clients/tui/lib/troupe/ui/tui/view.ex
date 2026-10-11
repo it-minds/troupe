@@ -30,6 +30,10 @@ defmodule Troupe.UI.TUI.View do
   @input_content 5
   @input_rows @input_content + 2
 
+  # The side panel is drawn from this many columns (Decision 48), and where it is, it says
+  # what the window's last turn cost and the transcript does not (TUI Decision 160).
+  @side_box 100
+
   @doc """
   The frame's widgets, coloured for the terminal: `state.theme` when the state carries
   one (a test drawing at a given depth), otherwise what the environment says.
@@ -74,6 +78,12 @@ defmodule Troupe.UI.TUI.View do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
     files_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
+  end
+
+  defp draw(%{focus: :scratch} = state, frame) do
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+    [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
+    scratch_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
   defp draw(%{focus: :mcp} = state, frame) do
@@ -178,7 +188,7 @@ defmodule Troupe.UI.TUI.View do
 
   @doc "Splits the pane into the transcript and the side panel; below 100 columns there is no side panel."
   @spec pane_split(Rect.t()) :: {Rect.t(), Rect.t() | nil}
-  def pane_split(%Rect{width: width} = rect) when width < 100, do: {rect, nil}
+  def pane_split(%Rect{width: width} = rect) when width < @side_box, do: {rect, nil}
 
   def pane_split(%Rect{width: width} = rect) do
     side_w = width |> div(4) |> max(30) |> min(60)
@@ -224,6 +234,7 @@ defmodule Troupe.UI.TUI.View do
           layout(width, height, true, length(Model.windows(state.model)), box_height(height))
 
         {left, side} = pane_split(pane_rect)
+        w = turn_lines_moved(w, side != nil)
         inner_w = max(left.width - 2, 1)
         inner_h = max(left.height - 2, 1)
         agent = viewed_agent(w, state.pane.agent)
@@ -270,6 +281,12 @@ defmodule Troupe.UI.TUI.View do
   end
 
   def pane_geometry(_state, _size), do: nil
+
+  # Where the side box is drawn it says what the window's last turn cost (TUI Decision
+  # 160), so the window's transcript, in its pane and on its tile, leaves out the line that
+  # said it under the turn; a screen too narrow for the box keeps the line.
+  defp turn_lines_moved(w, true), do: Model.without_turn_lines(w)
+  defp turn_lines_moved(w, false), do: w
 
   # Following shows the end of the transcript — except when the last block is what the
   # branch is waiting on and it is taller than the pane: then its header (`APPROVAL: …`
@@ -893,6 +910,90 @@ defmodule Troupe.UI.TUI.View do
     )
   end
 
+  ## Scratchpad
+
+  @doc "`/scratch`'s documents, from the model's cards, and the clamped cursor (TUI Decision 159)."
+  @spec scratch_view(map()) :: {[map()], non_neg_integer()}
+  def scratch_view(%{scratch: %{cursor: cursor}} = state) do
+    docs = Model.scratch_documents(state.model)
+    {docs, min(cursor, max(length(docs) - 1, 0))}
+  end
+
+  def scratch_view(_state), do: {[], 0}
+
+  # The documents on the left, each its title, name and how often it was written; the
+  # open one on the right, Markdown drawn as a reply is, or the selected one's details.
+  defp scratch_page(state, rect) do
+    {docs, cursor} = scratch_view(state)
+    [list_rect, detail_rect] = Layout.split(rect, :horizontal, [{:fill, 2}, {:fill, 3}])
+    width = max(list_rect.width - 4, 12)
+
+    list = %ExRatatui.Widgets.List{
+      items: Enum.map(docs, &clip("#{&1.title} · #{&1.name} · #{Model.scratch_note(&1)}", width)),
+      selected: if(docs == [], do: nil, else: cursor),
+      highlight_symbol: "▸ ",
+      highlight_style: selected(),
+      block: %Block{
+        title: fit([" scratchpad ", " scratch "], list_rect.width - 2),
+        borders: [:all],
+        border_type: :double
+      }
+    }
+
+    [{list, list_rect}, {scratch_detail(state, Enum.at(docs, cursor), detail_rect), detail_rect}]
+  end
+
+  defp scratch_detail(%{scratch: %{error: error}}, _doc, _rect) when is_binary(error),
+    do: %Paragraph{text: error, wrap: true, block: %Block{title: " scratchpad ", borders: [:all]}}
+
+  defp scratch_detail(%{scratch: %{open: %{} = open}}, _doc, rect) do
+    width = max(rect.width - 2, 1)
+    height = max(rect.height - 2, 1)
+    offset = min(open.scroll, max(Model.row_count(open.lines, width) - height, 0))
+
+    %Paragraph{
+      text: styled(Model.rows(open.lines, width, offset, height)),
+      wrap: false,
+      block: %Block{
+        title: clip(" #{open.title} · #{open.name} — Esc closes ", width),
+        borders: [:all]
+      }
+    }
+  end
+
+  defp scratch_detail(_state, nil, _rect) do
+    %Paragraph{
+      text:
+        "Nothing on the scratchpad yet. An agent puts a plan, a report or a table here with show.",
+      wrap: true,
+      block: %Block{title: " scratchpad ", borders: [:all]}
+    }
+  end
+
+  defp scratch_detail(_state, doc, _rect) do
+    %Paragraph{
+      text:
+        Enum.join(
+          [
+            field("title", doc.title),
+            field("name", doc.name),
+            field("kind", doc.kind),
+            field("size", Model.scratch_note(doc)),
+            field("window", doc.window),
+            field("path", doc.path)
+          ],
+          "\n"
+        ),
+      wrap: false,
+      block: %Block{title: " Enter opens · Esc closes ", borders: [:all]}
+    }
+  end
+
+  defp scratch_footer(%{scratch: %{open: %{}}}),
+    do: " scratchpad — ↑↓ PgUp PgDn scroll · Esc back to the list "
+
+  defp scratch_footer(_state), do: " scratchpad — ↑↓ move · Enter opens · Esc back "
+
   defp human_size(size) when is_integer(size) and size >= 1_000_000,
     do: "#{Float.round(size / 1_000_000, 1)} MB"
 
@@ -1010,6 +1111,10 @@ defmodule Troupe.UI.TUI.View do
   defp mcp_summary(%{state: :sign_in}), do: "sign in — s"
   defp mcp_summary(%{state: nil}), do: "not in this session yet — c starts it"
 
+  # A tool wanted a scope the sign-in did not grant (troupe-remote Decision 872).
+  defp mcp_summary(%{state: :ready, tools: tools, auth: %{step_up: scope}}) when is_binary(scope),
+    do: "#{length(tools)} tools · wants #{scope} — s"
+
   defp mcp_summary(%{state: :ready, tools: tools, auth: %{state: :signed_in, account: account}})
        when is_binary(account),
        do: "#{length(tools)} tools · #{account}"
@@ -1033,6 +1138,9 @@ defmodule Troupe.UI.TUI.View do
       transport_field(server),
       field("state", server.state || "not started in this session"),
       if(auth, do: field("sign-in", sign_in_text(auth))),
+      if(auth && Map.get(auth, :step_up),
+        do: field("wants", "#{auth.step_up} on top of the sign-in — s signs in for it")
+      ),
       if(auth && auth.error, do: field("last sign-in", auth.error)),
       sign_in_url(server, auth, sign_in),
       field("tools", Enum.join(server.tools, ", ")),
@@ -1232,15 +1340,18 @@ defmodule Troupe.UI.TUI.View do
     [list_rect, help_rect] = Layout.split(rect, :horizontal, [{:fill, 2}, {:fill, 3}])
 
     # Each value with the layer that set it, when that is not the default: what the
-    # daemon says a session here would read (#57).
+    # daemon says a session here would read (#57). A key the organisation enforces says
+    # so, whichever layer's value is in effect under it (root Decision 869).
     items =
       Enum.map(Settings.fields(), fn field ->
         value = Settings.format(s.view, s.config, field.key)
 
         from =
-          case Settings.layer(s.view, field.key) do
-            layer when layer in [nil, "default"] -> ""
-            layer -> "  · " <> layer
+          cond do
+            Settings.enforced(s.view, field.key) -> "  · set by your organisation"
+            Settings.layer(s.view, field.key) in [nil, "default"] -> ""
+            Settings.layer(s.view, field.key) == "org" -> "  · organisation"
+            true -> "  · " <> Settings.layer(s.view, field.key)
           end
 
         "#{String.pad_trailing(field.label, 26)} #{value}#{from}"
@@ -1641,15 +1752,33 @@ defmodule Troupe.UI.TUI.View do
   # Where the selected setting's change goes: the scope and its file.
   defp settings_title(s) do
     field = Enum.at(Settings.fields(), s.cursor)
-    scope = Settings.target(s.view, field.key, s.scope)
-    "a change goes to #{scope}: #{Map.get(s.view.files, scope, "config.yaml")}"
+
+    if Settings.enforced(s.view, field.key) do
+      "#{field.label} is set by your organisation"
+    else
+      scope = Settings.target(s.view, field.key, s.scope)
+      "a change goes to #{scope}: #{Map.get(s.view.files, scope, "config.yaml")}"
+    end
   end
 
   defp where_line(s, key) do
+    enforced = Settings.enforced(s.view, key)
+
     case Settings.layer(s.view, key) do
-      nil -> "set by: unknown to this daemon"
-      "default" -> "set by: nobody; this is the default"
-      layer -> "set by: #{layer} (#{get_in(s.view.keys, [key, "source"])})"
+      _layer when is_map(enforced) ->
+        "set by: your organisation (#{enforced["source"]}), which enforces it; it cannot be changed here"
+
+      nil ->
+        "set by: unknown to this daemon"
+
+      "default" ->
+        "set by: nobody; this is the default"
+
+      "org" ->
+        "set by: your organisation's defaults (#{get_in(s.view.keys, [key, "source"])}); a change here wins over them"
+
+      layer ->
+        "set by: #{layer} (#{get_in(s.view.keys, [key, "source"])})"
     end
   end
 
@@ -2002,11 +2131,12 @@ defmodule Troupe.UI.TUI.View do
   defp strip(windows, rect, state) do
     shown = Enum.take(windows, 9)
     rects = tile_rects(rect, length(shown))
+    moved? = rect.width >= @side_box
 
     shown
     |> Enum.with_index(1)
     |> Enum.zip(rects)
-    |> Enum.flat_map(fn {{w, n}, r} -> window_tile(w, n, r, state) end)
+    |> Enum.flat_map(fn {{w, n}, r} -> window_tile(turn_lines_moved(w, moved?), n, r, state) end)
   end
 
   # Nothing started yet: the mask and the word over what to type, when the screen has
@@ -2239,7 +2369,7 @@ defmodule Troupe.UI.TUI.View do
     side =
       if g.side do
         inner_w = max(g.side.width - 2, 1)
-        lines = side_lines(w, g.agent)
+        lines = side_lines(w, g.agent, inner_w)
 
         [
           {%Paragraph{
@@ -2430,7 +2560,7 @@ defmodule Troupe.UI.TUI.View do
 
   ## Side panel
 
-  defp side_lines(w, viewed) do
+  defp side_lines(w, viewed, width) do
     todos = todo_lines(w, w.path, "")
     paths = Model.agent_paths(w)
 
@@ -2465,11 +2595,27 @@ defmodule Troupe.UI.TUI.View do
             Enum.map(items, &{:pending, "  " <> pending_summary(&1, "y / n / a")})
       end
 
-    [{:system, "Tokens:"}] ++
-      Enum.map(Model.token_lines(w), &{:text, "  " <> &1}) ++
+    # What the last turn cost and, beneath it, the session (TUI Decision 160), indented
+    # two columns inside the box.
+    room = max(width - 2, 1)
+
+    [{:system, "This turn:"}] ++
+      this_turn(w, room) ++
+      [{:system, "Session:"}] ++
+      Enum.map(Model.session_box(w, room), &{:text, "  " <> &1}) ++
       [{:blank, ""}, {:system, "Tasks:"}] ++
       if(todos == [], do: [{:text, "  (none)"}], else: todos) ++
       agents ++ pending
+  end
+
+  # The window's last turn once it has ended; while the next one runs, that its figures
+  # come when it ends, and never a running count (Decision 139).
+  defp this_turn(w, room) do
+    case Map.get(w, :last_turn) do
+      %{} = turn -> Enum.map(Model.turn_box(turn, room), &{:text, "  " <> &1})
+      nil when w.state in [:running, :needs_input] -> [{:text, "  said when it ends"}]
+      nil -> [{:text, "  (none)"}]
+    end
   end
 
   # An item as `Troupe.Remote.Translate` spells it: `text`, `status`, `id`.
@@ -2739,6 +2885,9 @@ defmodule Troupe.UI.TUI.View do
 
         :files ->
           {"", " files — ↑↓ move · Enter opens · ← up · r reloads · Esc back "}
+
+        :scratch ->
+          {"", scratch_footer(state)}
 
         :mcp ->
           {"", " mcp — ↑↓ move · r reload · c check · d enable/disable · x remove · Esc back "}

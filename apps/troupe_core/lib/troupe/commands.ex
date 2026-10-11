@@ -379,6 +379,14 @@ defmodule Troupe.Commands do
           "Enter opens a file, ← goes up, r reloads; a change the session makes reloads " <>
             "the listing by itself."
       ),
+      entry("scratch", "navigate", "The documents an agent showed you beside the chat",
+        usage: "/scratch [name]",
+        args: [arg("name", false, "text")],
+        detail:
+          "Plans, reports and tables the agent put on the session's scratchpad with show; " <>
+            "Enter opens one, and a newer version reads itself again.",
+        example: "/scratch plan.md"
+      ),
       entry("upload", "workspace", "Send a local file into the session's own mount",
         usage: "/upload <path>",
         args: [arg("path", true, "file")],

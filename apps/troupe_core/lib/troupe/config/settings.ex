@@ -30,22 +30,29 @@ defmodule Troupe.Config.Settings do
   @doc """
   Every key for a workspace (`nil`: the user's file and the environment), as
   `config.get` answers it: `workspace`, `trusted`, `files` (each scope's file and
-  whether it exists), `keys` and the `warnings` loading gave. A file that is refused
-  answers no keys and the reasons as `errors`.
+  whether it exists), `organisation` (where the organisation's layer is read from: the
+  managed file, and a plane's document by its URL with `fetched_at`, Decision 869),
+  `keys` and the `warnings` loading gave. A file that is refused answers no keys and the
+  reasons as `errors`.
 
-  Each key is `key`, `value`, `layer` (`default`, `user`, `project`, `local`, `env` or
-  `cli`), `source` (the file, or the variable), `default`, `scopes` (the
-  scopes `set/4` writes it to here), `secret`, `label` (the name a settings page shows
-  it by, or null) and `doc`.
+  Each key is `key`, `value`, `layer` (`default`, `org`, `user`, `project`, `local`,
+  `env`, `cli` or `enforced`), `source` (the file, the variable, or the plane's URL),
+  `default`, `scopes` (the scopes `set/4` writes it to here: none for a key the
+  organisation enforces), `enforced` (`{value, source}` where the organisation enforces
+  the key, else null), `secret`, `label` (the name a settings page shows it by, or null)
+  and `doc`.
   """
   @spec describe(Path.t() | nil) :: %{String.t() => term()}
   def describe(workspace \\ nil) do
     case Config.resolve(workspace) do
       {:ok, _config, layers} ->
+        {org, files} = Enum.split_with(layers.files, &(&1.layer == :org))
+
         %{
           "workspace" => workspace,
           "trusted" => layers.trusted?,
-          "files" => Enum.map(layers.files, &file_json/1),
+          "files" => Enum.map(files, &file_json/1),
+          "organisation" => Enum.map(org, &file_json/1),
           "keys" =>
             layers |> Explain.rows() |> Enum.map(&key_json(&1, workspace, layers.trusted?)),
           "warnings" => Enum.map(layers.warnings ++ layers.refusals, &Issue.format/1),
@@ -57,6 +64,7 @@ defmodule Troupe.Config.Settings do
           "workspace" => workspace,
           "trusted" => workspace != nil and Config.trusted?(workspace),
           "files" => files(workspace),
+          "organisation" => [],
           "keys" => [],
           "warnings" => [],
           "errors" => Enum.map(error.issues, &Issue.format/1)
@@ -64,12 +72,16 @@ defmodule Troupe.Config.Settings do
     end
   end
 
-  defp file_json(file),
-    do: %{
+  # The organisation's, which no client writes, are `organisation` rather than `files`:
+  # the managed file, and a plane's document by its URL, with when it was fetched.
+  defp file_json(file) do
+    %{
       "scope" => Atom.to_string(file.layer),
       "path" => shown(file.path),
       "exists" => file.exists?
     }
+    |> Map.merge(if file[:fetched_at], do: %{"fetched_at" => file.fetched_at}, else: %{})
+  end
 
   defp files(workspace) do
     for scope <- @scopes, {:ok, path} <- [path_for(scope, workspace)] do
@@ -77,10 +89,13 @@ defmodule Troupe.Config.Settings do
     end
   end
 
+  # A key the organisation enforces is written to no scope: `config.set` refuses it, and
+  # a settings page shows it as the organisation's (Decision 869).
   defp key_json(row, workspace, trusted?) do
     path = String.split(row.key, ".")
     spec = Schema.at(path)
     secret? = spec != nil and spec.secret
+    enforced = Explain.enforced(row)
 
     %{
       "key" => row.key,
@@ -88,7 +103,8 @@ defmodule Troupe.Config.Settings do
       "layer" => Atom.to_string(row.layer),
       "source" => source_json(row),
       "default" => spec && spec.default,
-      "scopes" => scopes(path, workspace, trusted?),
+      "scopes" => if(enforced, do: [], else: scopes(path, workspace, trusted?)),
+      "enforced" => enforced && %{"value" => enforced.value, "source" => shown(enforced.source)},
       "secret" => secret?,
       "label" => spec && spec.label,
       "doc" => spec && spec.doc
@@ -108,7 +124,7 @@ defmodule Troupe.Config.Settings do
   defp as_written(value), do: value
 
   defp source_json(%{layer: layer, source: source})
-       when layer in [:user, :project, :local] and is_binary(source),
+       when layer in [:org, :user, :project, :local, :enforced] and is_binary(source),
        do: shown(source)
 
   defp source_json(%{source: source}), do: source
@@ -134,7 +150,8 @@ defmodule Troupe.Config.Settings do
   the key out of that file, so the layer below shows through.
 
   Refused, with the reason, and nothing written: a key the schema does not know, one
-  only the writer sets, a scope that may not set it (`trusted_workspaces` outside the
+  only the writer sets, one the organisation enforces ("set by your organisation",
+  Decision 869), a scope that may not set it (`trusted_workspaces` outside the
   user's file, a trusted key in a workspace that is not trusted), a value the loader
   would refuse or warn about, and a file that does not parse.
   """
@@ -144,6 +161,7 @@ defmodule Troupe.Config.Settings do
     scope = scope || "user"
 
     with {:ok, path} <- known(key),
+         :ok <- not_enforced(path),
          {:ok, file} <- path_for(scope, workspace),
          :ok <- allowed(path, scope, workspace),
          :ok <- valid(path, value, scope),
@@ -223,6 +241,23 @@ defmodule Troupe.Config.Settings do
 
   defp path_for(scope, _workspace),
     do: {:error, "scope must be user, project or local, not #{inspect(scope)}"}
+
+  # Whatever the scope, and whatever the value: what the organisation enforces is not a
+  # person's to set here (Decision 869).
+  defp not_enforced([top | _] = path) do
+    case Layers.organisation().enforced[[top]] do
+      nil ->
+        :ok
+
+      %{value: value, source: source} ->
+        {:error,
+         "#{Enum.join(path, ".")} is set by your organisation (#{show(value)}, from #{shown(source)}); " <>
+           "it cannot be changed here"}
+    end
+  end
+
+  defp show(value) when is_binary(value), do: value
+  defp show(value), do: inspect(value)
 
   defp allowed(_path, "user", _workspace), do: :ok
 

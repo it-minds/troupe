@@ -1376,6 +1376,85 @@ details.advanced > summary {
   cursor: pointer;
 }
 
+/* -- the scratchpad ---------------------------------------------------------- */
+
+/* What an agent put in the scratchpad with `show` (issue #472): a card in the stream where
+   the call would be, ruled like a tool call, and pressed to open the document in a panel
+   beside the conversation with a tab for each one. */
+.scratch-card {
+  align-self: flex-start;
+  max-width: var(--measure-reading);
+  min-height: 0;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  text-align: left;
+  border-color: var(--border-hairline);
+  background: var(--bg-sunken);
+}
+.scratch-card .title {
+  font: var(--t-name);
+  color: var(--text-primary);
+}
+.scratch-card .meta {
+  font: var(--t-code-small);
+  color: var(--text-secondary);
+}
+.scratchpad {
+  flex: 2 1 360px;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-canvas);
+}
+.scratchpad > header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+}
+/* The label and Close on one line, the tabs on the line under them. */
+.scratchpad > header > button.link {
+  margin-left: auto;
+}
+.scratchpad .tabs {
+  order: 1;
+  flex: 1 1 100%;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* A tab is the document's name as the agent gave it, so it keeps its case. */
+.scratchpad .tabs button.tab {
+  text-transform: none;
+}
+.scratchpad .doc {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.scratchpad .doc > .note {
+  margin: 0;
+}
+.scratchpad .doc > pre.payload {
+  padding: var(--space-3);
+  background: var(--bg-sunken);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  font: var(--t-code-small);
+  overflow: auto;
+}
+
 /* -- the backstage ----------------------------------------------------------- */
 
 .backstage {

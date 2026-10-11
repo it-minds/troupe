@@ -10,15 +10,54 @@ say something the loader does not do.
 
 | Layer | Where | What it is for |
 |---|---|---|
+| org | the organisation's `defaults:`, from the plane you are signed in to (kept as `organisation.json` in the state directory) and from a managed file (`%ProgramData%\troupe\managed.yaml` on Windows, `/Library/Application Support/troupe/managed.yaml` on macOS, `/etc/troupe/managed.yaml` elsewhere) | what your organisation suggests: a provider, a gateway, the models |
 | user | `~/.config/troupe/config.yaml`; `%APPDATA%\troupe\config.yaml` on Windows; `$TROUPE_CONFIG_HOME/config.yaml` when that is set | this machine: providers, keys, the models you use |
 | project | `<workspace>/.troupe/config.yaml` | what a repository wants, committed with it |
 | local | `<workspace>/.troupe/config.local.yaml` | one person's settings for one repository, such as a key; add it to `.gitignore` |
 | environment | `TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_AUTH`, `TROUPE_AUTH_TOKEN`, `TROUPE_MODEL`, `TROUPE_SMALL_MODEL`, `TROUPE_EXPENSIVE_MODEL`, `TROUPE_MODEL_PRICES` (`models.prices` as JSON), `TROUPE_FAKE_SCRIPT`; `TROUPE_THINKING_BINDING` and `TROUPE_SYSTEM_PROMPT`, issue #465's two settings | a provider for one shell, or for a pod; a setting changed for one `troupe bench --live` |
 | command line | `--auto-approve`, `--watch`, `--full-send`, and what a client asks for | one session |
+| enforced | the organisation's `enforced:`, from the same two places | what your organisation does not let a machine go past |
 
-Each layer beats the ones above it: the defaults, then the user file, the project file,
-the local file, the environment, and the command line last. A file that is not there is
-not an error.
+Each layer beats the ones above it: the defaults, then the organisation's defaults, the
+user file, the project file, the local file, the environment, the command line, and what
+the organisation enforces last. A file that is not there is not an error.
+
+## Your organisation's defaults and limits
+
+An organisation speaks at both ends of the ladder. Its **defaults** sit below your own
+file: they are what a machine starts with, and anything you set wins over them. What it
+**enforces** sits above everything, the command line included, and nothing on this machine
+goes past it.
+
+Only these keys can be enforced, and each one is a ceiling:
+
+| Key | Enforced, it means |
+|---|---|
+| `max_tokens`, `max_turns`, `wall_clock_ms`, `max_depth` | the most it may be: you may set a lower number, not a higher one |
+| `approvals` | `deny` may not be loosened to `wait` |
+| `managed_mcp_servers_only`, `managed_permission_rules_only` | on may not be turned off |
+| `provider`, `base_url` | what it is; a named provider at another URL, or of another type, is refused too |
+
+A file, a variable or a flag that tries to go past an enforced value is held to it, with
+one warning that names the file, the key and the organisation's value. The settings pages
+show such a key as set by your organisation and do not change it, and `config.set` refuses
+it. `troupe config --explain KEY` shows both ends with where they came from:
+
+```text
+max_turns = 25
+  default  40
+  user     80                             /home/me/.config/troupe/config.yaml
+           ignored: held to 25 by your organisation (https://plane.example.com)
+  enforced 25                             https://plane.example.com  <- in effect
+```
+
+The organisation's word comes from two places. Signed in to a plane (`troupe login`), the
+daemon fetches its document whenever a client connects and keeps a copy, used as it is
+when the plane cannot be reached; `troupe config pull` fetches it now. Without a plane, an
+administrator writes a managed file at the path above. Where both say something, the
+plane's defaults win over the file's, the stricter of two limits holds, and a provider or
+URL both fix is the managed file's. The format, and how an administrator sets either, is
+in the administrator's [configuration page](../admin/configuration.md#defaults-and-limits-for-peoples-machines).
 
 ## How the layers merge
 
@@ -312,9 +351,25 @@ page says "signed in as …", and a session waiting for the server gets its tool
 The sign-in is kept in Troupe's state directory (`mcp-oauth.json`, readable by you
 alone), never in `mcp.json`, and refreshed when it runs out. When the provider stops
 taking it, the server's line says to sign in again, and a tool the model calls answers
-`sign_in_required` instead of failing. `/mcp sign-out wiki`, `o`, or **Sign out**
-forgets it. A workspace's server is signed in to only after the workspace's servers are
-allowed, since its `oauth` came with the repository.
+`sign_in_required` instead of failing. A workspace's server is signed in to only after
+the workspace's servers are allowed, since its `oauth` came with the repository.
+
+Some tools want more than you granted when you signed in: writing where you signed in to
+read, say. The server answers such a call `403` naming the scope it wants, and the model
+is told `sign_in_required` with that scope, to tell you. Nothing signs in for you: the
+server's line on the `/mcp` page says what it wants (`wants notes.write — s`), and when
+you choose to grant it, `s` (or `/mcp sign-in wiki`, or **Sign in**) asks for what you
+granted before and the new scope, at the same provider. Until that sign-in lands, the one
+you had is used, and if you say no at the provider you keep it.
+
+`/mcp sign-out wiki`, `o`, or **Sign out** forgets the sign-in on this machine and asks the
+provider to revoke it, so a copy of Troupe's state directory can no longer renew it.
+The terminal UI says whether the provider was told: one that refuses or does not answer
+within a few seconds is not, and one that offers no way to revoke a sign-in is named as
+such; in both cases the sign-in is still forgotten here, and the provider takes it until
+it runs out. `troupe logout`, without a plane named, does the same for every server you are
+signed in to, and says so for each; if the daemon is not running it says your sign-ins
+were kept.
 
 A session on your team's pod gets them from the desktop app. Open the session and it asks
 whether to take your signed-in servers' tools, naming them; **Offer them** registers
@@ -680,9 +735,10 @@ it is about every repository, and theirs is about this one.
 
 Two things stand beside the ladder rather than on it: a built-in command's name, or an
 agent's, stays theirs whatever a file says ([Your own commands](#your-own-commands)), and
-`config.yaml`'s settings have the environment and the command line above them ([The
-files](#the-files)), a workspace's own files setting the trusted keys only once you trust
-it ([Trusted workspaces](#trusted-workspaces)).
+`config.yaml`'s settings have the organisation's defaults below them and the environment,
+the command line and what the organisation enforces above them ([The files](#the-files)),
+a workspace's own files setting the trusted keys only once you trust it ([Trusted
+workspaces](#trusted-workspaces)).
 
 ## Old spellings
 
@@ -718,6 +774,7 @@ troupe config validate              # every file a session here would read; exit
 troupe config validate .troupe/config.yaml
 troupe config migrate [--write]
 troupe config trust --list          # the workspaces whose own files set the trusted keys
+troupe config pull                  # your organisation's defaults and limits, from the plane, now
 ```
 
 Secrets are masked everywhere. `troupe-daemon config` takes the same arguments.
@@ -743,6 +800,11 @@ next session either of them starts reads it.
   key marked trusted in its project or local file, such as `auto_approve`. The writer is
   the one every settings screen uses: the key's own line changes and the rest of the
   file stays.
+- **Your organisation's.** A value from the organisation's defaults is shown as the
+  organisation's, and a change you make wins over it. A key it enforces is shown as set by
+  your organisation, with where from, and the terminal UI's page does not change it;
+  `config.set` refuses it in any file. The desktop app does not show where a setting came
+  from yet.
 - **One name and one help for each.** A key a settings page shows has a name for it, the
   `Shown as` column in the reference below, and its help is the `What it does` there. Both
   clients read them from the same table, so they cannot describe one setting two ways.
@@ -904,6 +966,31 @@ think at their own default effort, and what they thought is handed back to them 
 next call, as it is when an effort is set, so a turn of tool calls goes on from the
 reasoning it started with.
 
+Claude Fable 5.1, Opus 5.5 and Sonnet 5.5, and later versions, bind what they thought to
+the conversation it was made in, the tools among it: an account that enforces the check
+refuses a call whose earlier thinking was made under other tools, and Troupe sends it
+again without that thinking. For those, an agent's tools stay the same for the whole
+session: the task list's tools are offered from the first call, and `/loop`'s
+`goal_complete` on every call of the session's main agent, refused outside a loop. Troupe
+tells these models by name. A gateway's alias that hides the name, such as `smart`
+for Sonnet 5.5, is said to bind with `binds_thinking`, on the model's entry or for every
+model of the provider; `false` says a model does not:
+
+```yaml
+providers:
+  gateway:
+    type: anthropic
+    base_url: https://llm.example.com
+    models:
+      smart: {reasoning_effort: medium, binds_thinking: true}
+```
+
+The tools of an MCP server, and those a person's client offers a session, may still come
+or go while a session runs: a server that comes back with another list, a sign-in that
+completes, a person who closes the window. Whatever the model, those changes reach the
+model at its next turn, never in the middle of one. A tool that went in the meantime stays
+in the list until the turn ends, and a call to it is told it is gone.
+
 ## What Troupe tells the provider
 
 Every model call names the software that made it, so whoever runs the gateway can see
@@ -946,8 +1033,8 @@ shows a key by, in the desktop app and the terminal UI alike.
 
 | Key | Type | Default | Set by | Shown as | What it does |
 |---|---|---|---|---|---|
-| `provider` | `anthropic` \| `openai` \| `fake` | `anthropic` | user; project if trusted |  | The session-wide provider's API. |
-| `base_url` | string |  | user; project if trusted |  | The session-wide provider's URL. Unset: the vendor's own endpoint. |
+| `provider` | `anthropic` \| `openai` \| `fake` | `anthropic` | user; project if trusted; an organisation may enforce |  | The session-wide provider's API. |
+| `base_url` | string |  | user; project if trusted; an organisation may enforce |  | The session-wide provider's URL. Unset: the vendor's own endpoint. |
 | `api_key` | string |  | user; project if trusted |  | The session-wide provider's key. `{env:VAR}` reads it from the environment. |
 | `auth` | `api_key` \| `bearer` | `api_key` | user; project if trusted |  | How the key is sent: the vendor's own header, or `Authorization: Bearer`. |
 | `providers` | map of name to settings |  | user; project if trusted |  | Named providers. A model spelled `<provider>/<model>` goes to that provider. |
@@ -960,6 +1047,8 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `providers.<name>.models.<model>.context` | integer ≥ 1 |  | user; project if trusted |  | The model's context window, in tokens. |
 | `providers.<name>.models.<model>.max_output` | integer ≥ 1 |  | user; project if trusted |  | The most output tokens to ask for. |
 | `providers.<name>.models.<model>.reasoning_effort` | string or integer |  | user; project if trusted |  | How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a thinking budget in tokens. An Anthropic model gets it in the form it takes. |
+| `providers.<name>.models.<model>.binds_thinking` | boolean |  | user; project if trusted |  | Whether the model binds its thinking to the conversation it was made in, as Claude Fable 5.1, Opus 5.5 and Sonnet 5.5 do, so its tools stay the same all session: for a name that hides the model. Unset: the provider's, else what its model list says, else its name. |
+| `providers.<name>.binds_thinking` | boolean |  | user; project if trusted |  | Whether the models it serves bind their thinking to the conversation, unless a model's entry says. Unset: what its model list says, else each model's name. |
 | `models` | settings |  | any |  | Which model each role uses. |
 | `models.default` | string | `claude-sonnet-5` | any | model | The model every agent uses unless its definition names one. A bare id goes to the session-wide provider; `<provider>/<model>` goes to a named one, from `providers`. `troupe models` lists what this machine can address. |
 | `models.cheap` | string |  | any | cheap model | The model for small jobs, compaction summaries among them. Unset: the default model. |
@@ -970,7 +1059,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `models.prices.<model>.output` | number ≥ 0 |  | any |  | Dollars per million output tokens. |
 | `models.prices.<model>.cache_read` | number ≥ 0 |  | any |  | Dollars per million prompt tokens read from the cache. Unset: the input price. |
 | `models.prices.<model>.cache_write` | number ≥ 0 |  | any |  | Dollars per million prompt tokens written to the cache. Unset: the input price. |
-| `max_tokens` | integer ≥ 1 | `8192` | any |  | The most output tokens one model call asks for. |
+| `max_tokens` | integer ≥ 1 | `8192` | any; an organisation may enforce |  | The most output tokens one model call asks for. |
 | `context_window` | integer ≥ 1 | `200000` | any | context window | The window, in tokens, assumed when neither a provider nor the catalog says; compaction is planned against it. |
 | `compact_at` | number, 0 to 1 | `0.75` | any | compact at | The share of the window at which an agent summarises older turns. A tool result over 16 KiB it read before then is sent from then on as a stub `read_output` expands. |
 | `llm_timeout_ms` | integer ≥ 1 | `300000` | any |  | How long one model call may take before it is given up on. |
@@ -982,11 +1071,11 @@ shows a key by, in the desktop app and the terminal UI alike.
 
 | Key | Type | Default | Set by | Shown as | What it does |
 |---|---|---|---|---|---|
-| `max_turns` | integer ≥ 1 | `40` | any | max turns | Model calls an agent may make before its budget stops it. |
+| `max_turns` | integer ≥ 1 | `40` | any; an organisation may enforce | max turns | Model calls an agent may make before its budget stops it. |
 | `max_input_tokens` | integer ≥ 1 | `2000000` | any |  | Input tokens an agent may spend. |
 | `max_output_tokens` | integer ≥ 1 | `400000` | any |  | Output tokens an agent may spend. |
-| `wall_clock_ms` | integer ≥ 1 | `1800000` | any |  | How long an agent may run. |
-| `max_depth` | integer ≥ 0 | `3` | any | delegation depth | How deep agents may delegate; 1 means the root alone may. |
+| `wall_clock_ms` | integer ≥ 1 | `1800000` | any; an organisation may enforce |  | How long an agent may run. |
+| `max_depth` | integer ≥ 0 | `3` | any; an organisation may enforce | delegation depth | How deep agents may delegate; 1 means the root alone may. |
 | `budget_warn_at` | number, 0 to 1 | `0.8` | any |  | The share of any limit at which the agent is warned. |
 | `full_send` | boolean | `false` | any | full send | No budget warnings: an agent nearing a limit says nothing until the limit stops it. `troupe --full-send` sets it for one run. |
 | `budget_asks` | boolean | `true` | any |  | A spent budget asks the person attached, rather than stopping. |
@@ -996,11 +1085,11 @@ shows a key by, in the desktop app and the terminal UI alike.
 | Key | Type | Default | Set by | Shown as | What it does |
 |---|---|---|---|---|---|
 | `auto_approve` | boolean | `false` | user; project if trusted | auto approve | Run every tool call without asking. Off, a write, an edit or a shell command waits until a person allows it, once or for the rest of the session, or denies it. |
-| `approvals` | `wait` \| `deny` | `wait` | user; project if trusted |  | What a call that asks does with nobody attached: wait, or be denied. |
+| `approvals` | `wait` \| `deny` | `wait` | user; project if trusted; an organisation may enforce |  | What a call that asks does with nobody attached: wait, or be denied. |
 | `delegation` | settings |  | user; project if trusted |  | Delegating to subagents. |
 | `delegation.ask` | list of strings |  | user; project if trusted |  | The subagents a `delegate` to asks you first, by name: you see the brief, the tools and the budget the child would get, and run it, edit the brief, send it to another agent, deny it with a word back, or let that agent run unasked for the session. `auto_approve` does not answer it. An agent's own definition asks too with `delegation: ask`. Unset: every delegation runs at once. |
-| `managed_permission_rules_only` | boolean | `false` | user; project if trusted |  | A session may not allow a tool for itself. |
-| `managed_mcp_servers_only` | boolean | `false` | user; project if trusted |  | A client may not offer a session its own tools. |
+| `managed_permission_rules_only` | boolean | `false` | user; project if trusted; an organisation may enforce |  | A session may not allow a tool for itself. |
+| `managed_mcp_servers_only` | boolean | `false` | user; project if trusted; an organisation may enforce |  | A client may not offer a session its own tools. |
 
 ### Tools
 
@@ -1008,6 +1097,8 @@ shows a key by, in the desktop app and the terminal UI alike.
 |---|---|---|---|---|---|
 | `shell_timeout_ms` | integer ≥ 1 | `120000` | any | shell timeout (ms) | How long a shell command may run before it, and everything it started, is stopped. |
 | `tool_output_limit` | integer ≥ 1 | `32768` | any | tool output limit | Bytes of a tool's output the model sees; the rest is kept, and read_output pages it back. |
+| `scratch_max_bytes` | integer ≥ 1 | `262144` | any |  | Bytes one document `show` puts on the session's scratchpad may hold. |
+| `scratch_max_documents` | integer ≥ 1 | `50` | any |  | Documents one session's scratchpad may hold. |
 | `tool_failures_note_at` | integer ≥ 0 | `5` | any |  | Failures of one tool in a row after which the model is told to stop and reconsider; 0 never. |
 | `tool_failures_stop_at` | integer ≥ 0 | `10` | any |  | Failures of one tool in a row that stop the turn and ask whether it goes on, budget or not; 0 never. |
 | `read_roots` | list of strings |  | user; project if trusted |  | Directories outside the workspace the read tools may reach. |

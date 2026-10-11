@@ -89,11 +89,12 @@ defmodule Troupe.Sessions.Unseen do
 
   @doc """
   The head `seq` the mark in a session's directory holds, or `nil` with no mark: read by
-  its value, since a mark rewritten within a second can keep its size and its time.
+  its value, since a mark rewritten within a second can keep its size and its time. Read
+  in the calling process, as a listing reads everything it reads for every session (#589).
   """
   @spec mark(Path.t()) :: non_neg_integer() | nil
   def mark(dir) do
-    with {:ok, contents} <- File.read(Path.join(dir, @seen)),
+    with {:ok, contents} <- :file.read_file(Path.join(dir, @seen), [:raw]),
          {seq, _rest} <- Integer.parse(String.trim(contents)) do
       seq
     else

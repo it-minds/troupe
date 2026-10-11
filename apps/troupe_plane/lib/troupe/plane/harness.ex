@@ -264,21 +264,32 @@ defmodule Troupe.Plane.Harness do
 
   # What a person's own machine should talk to, for a client to offer as a starting
   # point. Anybody signed in may read it, which is exactly why there is no key in it.
+  #
+  # And the organisation's document (Decision 869), in a config file's shape: `defaults`,
+  # what a machine reads below its person's own file, and `enforced`, what it holds every
+  # layer to. Beside the fields a client from before it reads, which stay as they were.
   defp handle("me.client_defaults", _params, _context) do
     provider = Settings.get("client_provider")
 
+    models = %{
+      "default" => blank_to_nil(Settings.get("client_model_default")),
+      "cheap" => blank_to_nil(Settings.get("client_model_cheap")),
+      "expensive" => blank_to_nil(Settings.get("client_model_expensive"))
+    }
+
+    old = %{
+      "configured" => not is_nil(provider),
+      "provider" => provider && to_string(provider),
+      "base_url" => blank_to_nil(Settings.get("client_base_url")),
+      "auth" => provider && to_string(Settings.get("client_auth")),
+      "models" => models
+    }
+
     {:ok,
-     %{
-       "configured" => not is_nil(provider),
-       "provider" => provider && to_string(provider),
-       "base_url" => blank_to_nil(Settings.get("client_base_url")),
-       "auth" => provider && to_string(Settings.get("client_auth")),
-       "models" => %{
-         "default" => blank_to_nil(Settings.get("client_model_default")),
-         "cheap" => blank_to_nil(Settings.get("client_model_cheap")),
-         "expensive" => blank_to_nil(Settings.get("client_model_expensive"))
-       }
-     }}
+     Map.merge(old, %{
+       "defaults" => client_defaults(old, models),
+       "enforced" => Settings.get("client_enforced") || %{}
+     })}
   end
 
   # Each component's version policy, for `troupe update` to choose what to install by:
@@ -2495,6 +2506,20 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp blank_to_nil(_value), do: nil
+
+  # The organisation's defaults for `me.client_defaults` (Decision 869): only what is set,
+  # since a key left out is the machine's own to decide.
+  defp client_defaults(old, models) do
+    set = models |> Enum.reject(fn {_role, model} -> is_nil(model) end) |> Map.new()
+
+    %{
+      "provider" => old["provider"],
+      "base_url" => old["provider"] && old["base_url"],
+      "auth" => old["auth"],
+      "models" => if(set == %{}, do: nil, else: set)
+    }
+    |> Map.reject(fn {_key, value} -> is_nil(value) end)
+  end
 
   # What `initialize` says to one client about its version: the component's policy, with
   # what it means for that version, or the refusal.

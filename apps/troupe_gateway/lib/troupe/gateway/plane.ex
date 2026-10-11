@@ -37,6 +37,10 @@ defmodule Troupe.Gateway.Plane do
   reaching the plane, the sentence saying what to run. It is logged once, `identity.get`
   carries it, and the next link's handshake asks again. A plane from before the policy has
   no `initialize`, and holds this daemon to nothing.
+
+  A plane that serves this version is then asked for the organisation's document
+  (`me.client_defaults`), which the daemon keeps for every later session's defaults and
+  limits (Decision 869, `Troupe.Gateway.Dispatch`).
   """
 
   use GenServer
@@ -92,6 +96,10 @@ defmodule Troupe.Gateway.Plane do
   @doc "Who the plane thinks this machine's person is, if anybody has said."
   @spec subject(GenServer.server()) :: String.t() | nil
   def subject(server \\ @name), do: GenServer.call(server, :subject)
+
+  @doc "Where the plane linked to is, if anybody has said."
+  @spec url(GenServer.server()) :: String.t() | nil
+  def url(server \\ @name), do: GenServer.call(server, :url)
 
   @doc """
   One JSON-RPC call to the plane's `/rpc`.
@@ -216,6 +224,7 @@ defmodule Troupe.Gateway.Plane do
   end
 
   def handle_call(:subject, _from, state), do: {:reply, state.subject, state}
+  def handle_call(:url, _from, state), do: {:reply, state.url, state}
 
   def handle_call(:state, _from, %__MODULE__{url: url, token: token} = state)
       when is_binary(url) and is_binary(token) do

@@ -50,7 +50,11 @@
 # neither it installs the latest release, which GitHub names at /releases/latest. A private
 # repository answers that only to somebody signed in: set TROUPE_VERSION, and
 # TROUPE_RELEASE_URL to wherever your organisation mirrors releases. TROUPE_BIN_DIR and
-# TROUPE_LIB_DIR move the two directories.
+# TROUPE_LIB_DIR move the two directories. An install whose programs are moved so is one of
+# its own: its --uninstall and --clean-install remove and stop only what is in its
+# directories or names them (the menu entry, the PATH line, what starts a daemon at login),
+# and leave the TUI's unpacked payload, the TUIs running from it, the desktop app in
+# ~/Applications and the licence copies to the install in ~/.local/bin.
 set -eu
 
 # Set in the copy attached to a release (scripts/release-installers); empty in the repository.
@@ -81,6 +85,14 @@ CONFIG_DIR="${TROUPE_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/troupe}"
 OS=$(uname -s)
 # Where the TUI's Burrito wrapper unpacks itself on first run, once per version.
 if [ "$OS" = Darwin ]; then BURRITO_DIR="$HOME/Library/Application Support/.burrito"; else BURRITO_DIR="$DATA_DIR/.burrito"; fi
+# Whether this is the default install, whose programs are in ~/.local/bin. It alone owns
+# what every install for this person shares (Decision 873): the TUI's unpacked payload,
+# which every `troupe` of a version unpacks to the same place, and the TUIs running from it;
+# on macOS the desktop app in ~/Applications; the menu entry and the licence copies; and the
+# entry that starts a daemon at login. An install elsewhere, a second one or a test of this
+# script, removes and stops what is in its own directories and what names them.
+at_default=0
+if [ "${BIN_DIR%/}" = "$HOME/.local/bin" ]; then at_default=1; fi
 MARK='# added by troupe installer'
 # The VS Code extension: its id, and the file a release attaches.
 VSCODE_EXTENSION="objective-mj.troupe"
@@ -140,8 +152,16 @@ daemon_version() {
   fi
 }
 
+# This install's desktop app: on macOS the default install's alone, since every install puts
+# it in the same place.
 gui_installed() {
-  if [ "$OS" = Darwin ]; then [ -d "$MAC_APP" ]; else [ -e "$GUI" ]; fi
+  if [ "$OS" = Darwin ]; then [ "$at_default" = 1 ] && [ -d "$MAC_APP" ]; else [ -e "$GUI" ]; fi
+}
+
+# Whether the menu entry starts this install's desktop app. The default install's is its own
+# whichever it starts, as it always was.
+menu_entry_mine() {
+  [ "$at_default" = 1 ] || { [ -f "$DESKTOP_FILE" ] && grep -qxF "Exec=$GUI" "$DESKTOP_FILE"; }
 }
 
 installed_summary() {
@@ -189,6 +209,11 @@ pids_of() {
 }
 DAEMON_MATCH="$LIB_DIR[^ /]*/erts-"
 TUI_MATCH="$BURRITO_DIR/troupe_"
+# A TUI runs from the unpacked payload whichever `troupe` started it, so the default
+# install's alone to stop.
+payload_tui_pids() {
+  if [ "$at_default" = 1 ]; then pids_of "$TUI_MATCH"; fi
+}
 
 stop_pids() {
   if [ -z "$2" ]; then return 0; fi
@@ -238,20 +263,25 @@ add_to_path() {
   say "added $BIN_DIR to PATH in $rc"
 }
 
+# The line add_to_path wrote. An install elsewhere takes out only one naming its own
+# directory: the one there is usually the default install's (Decision 873).
 remove_path_line() {
+  if [ "$at_default" = 1 ]; then line=$MARK; else line="\"$BIN_DIR:\$PATH\" $MARK"; fi
   for rc in "${ZDOTDIR:-$HOME}/.zshrc" "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do
     [ -f "$rc" ] || continue
-    if grep -q "$MARK" "$rc" 2>/dev/null; then
+    if grep -qF -- "$line" "$rc" 2>/dev/null; then
       scratch=$(mktemp)
-      grep -v "$MARK" "$rc" >"$scratch" || true
+      grep -vF -- "$line" "$rc" >"$scratch" || true
       cat "$scratch" >"$rc"
       rm -f "$scratch"
     fi
   done
-  rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/troupe.fish"
+  fish="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/troupe.fish"
+  if [ "$at_default" = 1 ] || grep -qF -- "\"$BIN_DIR\"" "$fish" 2>/dev/null; then rm -f "$fish"; fi
 }
 
 clear_tui_payload() {
+  [ "$at_default" = 1 ] || return 0
   [ -d "$BURRITO_DIR" ] || return 0
   for dir in "$BURRITO_DIR"/troupe_*; do
     if [ -d "$dir" ]; then rm -rf "$dir"; fi
@@ -261,18 +291,32 @@ clear_tui_payload() {
 # What this installer (or scripts/install-local) put on the machine, bar config and state,
 # and bar the PATH line: a clean install puts everything back in the same place.
 remove_installed() {
-  rm -f "$BIN" "$TUI" "$TUI.previous" "$GUI" "$GUI.previous" "$DESKTOP_FILE" "$ICON"
-  rm -rf "$LIB_DIR" "$LIB_DIR.previous" "$LIB_DIR.new" "$DOC_DIR"
-  if [ "$OS" = Darwin ]; then rm -rf "$MAC_APP"; fi
+  if menu_entry_mine; then rm -f "$DESKTOP_FILE" "$ICON"; fi
+  rm -f "$BIN" "$TUI" "$TUI.previous" "$GUI" "$GUI.previous"
+  rm -rf "$LIB_DIR" "$LIB_DIR.previous" "$LIB_DIR.new"
+  if [ "$at_default" = 1 ]; then
+    rm -rf "$DOC_DIR"
+    if [ "$OS" = Darwin ]; then rm -rf "$MAC_APP"; fi
+  fi
   clear_tui_payload
 }
 
 plan_removal() {
   dv=$(daemon_version)
   if [ -n "$dv" ]; then item "remove troupe-daemon $dv ($LIB_DIR, $BIN)"; fi
-  if [ -e "$TUI" ]; then item "remove troupe ($TUI) and its unpacked payload"; fi
+  if [ -e "$TUI" ]; then
+    if [ "$at_default" = 1 ]; then item "remove troupe ($TUI) and its unpacked payload"; else item "remove troupe ($TUI); its unpacked payload, which every troupe of its version shares, stays"; fi
+  fi
   if gui_installed; then
-    if [ "$OS" = Darwin ]; then item "remove the desktop app ($MAC_APP)"; else item "remove the desktop app ($GUI) and its menu entry"; fi
+    if [ "$OS" = Darwin ]; then
+      item "remove the desktop app ($MAC_APP)"
+    elif menu_entry_mine; then
+      item "remove the desktop app ($GUI) and its menu entry"
+    else
+      item "remove the desktop app ($GUI); the menu entry starts another install's, and stays"
+    fi
+  elif [ "$OS" = Darwin ] && [ -d "$MAC_APP" ]; then
+    item "leave the desktop app alone ($MAC_APP): it is not installed in $BIN_DIR"
   fi
   if [ "$mode" = uninstall ] && [ "$ext" = 1 ]; then item "remove the VS Code extension ($VSCODE_EXTENSION)"; fi
   if [ "$1" = 1 ]; then
@@ -301,17 +345,21 @@ uninstall() {
     return 0
   fi
   daemon_pids=$(pids_of "$DAEMON_MATCH")
-  tui_pids=$(pids_of "$TUI_MATCH")
-  if entry=$(login_entry); then item "remove what starts troupe-daemon at login ($entry)"; fi
+  tui_pids=$(payload_tui_pids)
+  own_login=0
+  if own_login_entry; then own_login=1; fi
+  if entry=$(login_entry); then
+    if [ "$own_login" = 1 ]; then item "remove what starts troupe-daemon at login ($entry)"; else item "leave what starts troupe-daemon at login alone ($entry): it starts another install's"; fi
+  fi
   if [ -n "$daemon_pids" ]; then item "stop troupe-daemon (pid $daemon_pids); the sessions it runs end"; fi
   if [ -n "$tui_pids" ]; then item "stop troupe (pid $tui_pids)"; fi
   plan_removal "$purge"
   item "take the PATH line out of your shell profile, if this installer added one"
   if [ "$purge" = 1 ]; then go_ahead n; else go_ahead y; fi
 
-  stop_at_login
+  if [ "$own_login" = 1 ]; then stop_at_login; fi
   stop_pids troupe-daemon "$(pids_of "$DAEMON_MATCH")"
-  stop_pids troupe "$(pids_of "$TUI_MATCH")"
+  stop_pids troupe "$(payload_tui_pids)"
   remove_installed
   if [ "$ext" = 1 ]; then
     "$(code_cli)" --uninstall-extension "$VSCODE_EXTENSION" >/dev/null 2>&1 || say "warning: could not remove the VS Code extension; remove it in VS Code"
@@ -555,6 +603,16 @@ stop_at_login() {
   say "warning: troupe-daemon login off failed ($(printf '%s\n' "$said" | head -n 1)); what starts it at login may be left behind"
 }
 
+# Whether `login off` is this install's to run. There is one entry per person, and `login
+# off` removes it whichever daemon it starts (on Linux both kinds), so an install elsewhere
+# runs it only when the entry login_entry names starts this install's daemon (Decision 873).
+own_login_entry() {
+  [ "$at_default" = 1 ] && return 0
+  entry=$(login_entry) || return 1
+  [ -f "$entry" ] || return 1
+  grep -qF -- "$BIN" "$entry" || grep -qF -- "$LIB_DIR/bin/troupe-daemon" "$entry"
+}
+
 install() {
   if [ "$purge" = 1 ] && [ "$clean" = 0 ]; then die "--purge goes with --uninstall or --clean-install"; fi
   target=$(detect_target)
@@ -611,7 +669,7 @@ install() {
   if [ "$with_tui" = 1 ] || [ "$clean" = 1 ]; then stop_tui=1; fi
   daemon_pids=$(pids_of "$DAEMON_MATCH")
   tui_pids=
-  if [ "$stop_tui" = 1 ]; then tui_pids=$(pids_of "$TUI_MATCH"); fi
+  if [ "$stop_tui" = 1 ]; then tui_pids=$(payload_tui_pids); fi
 
   heading "Plan"
   what="troupe-daemon"
@@ -671,7 +729,7 @@ install() {
 
   heading "Install"
   stop_pids troupe-daemon "$(pids_of "$DAEMON_MATCH")"
-  if [ "$stop_tui" = 1 ]; then stop_pids troupe "$(pids_of "$TUI_MATCH")"; fi
+  if [ "$stop_tui" = 1 ]; then stop_pids troupe "$(payload_tui_pids)"; fi
   if [ "$clean" = 1 ]; then
     say "removing the current install"
     remove_installed

@@ -95,6 +95,12 @@ defmodule Troupe.Agent.State do
     # input was taken or the conversation compacted since they were read.
     instructions: nil,
     instructions_due: true,
+    # The MCP servers' and the person's clients' tools as this turn's first model call
+    # found them (Decision 871), offered for the rest of the turn, so a server that comes
+    # back with another list, a sign-in or a person's tools leaving change the tools at the
+    # next turn and not in the middle of this one. `nil` until that call takes them; a turn
+    # that ends, or an input taken, empties it. Not folded: a restart takes them afresh.
+    turn_tools: nil,
     # Digests of the system prompt and the tools this agent's last call sent, which its
     # next call's `llm_request` is compared with (issue #465, Decision 815). Not folded: an
     # agent restarted says nothing about its first call.
@@ -212,6 +218,7 @@ defmodule Troupe.Agent.State do
           prompt_todos: [Troupe.Todo.t()],
           goal: String.t() | nil,
           loop: String.t() | nil,
+          turn_tools: [Troupe.Tool.handle()] | nil,
           prefix: %{system: binary(), tools: binary()} | nil,
           turn_context: %{optional(non_neg_integer()) => String.t()},
           context_sent: %{optional(String.t()) => String.t()},

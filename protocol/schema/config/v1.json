@@ -23,7 +23,7 @@
       ]
     },
     "provider": {
-      "description": "The session-wide provider's API. Read from a project's file only in a trusted workspace.",
+      "description": "The session-wide provider's API. Read from a project's file only in a trusted workspace. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": "anthropic",
       "enum": [
         "anthropic",
@@ -33,7 +33,7 @@
       ]
     },
     "base_url": {
-      "description": "The session-wide provider's URL. Unset: the vendor's own endpoint. Read from a project's file only in a trusted workspace.",
+      "description": "The session-wide provider's URL. Unset: the vendor's own endpoint. Read from a project's file only in a trusted workspace. An organisation may enforce it, and nothing on this machine then goes past it.",
       "type": [
         "string",
         "null"
@@ -141,6 +141,13 @@
                     "integer",
                     "null"
                   ]
+                },
+                "binds_thinking": {
+                  "description": "Whether the model binds its thinking to the conversation it was made in, as Claude Fable 5.1, Opus 5.5 and Sonnet 5.5 do, so its tools stay the same all session: for a name that hides the model. Unset: the provider's, else what its model list says, else its name.",
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 }
               },
               "patternProperties": {
@@ -148,6 +155,13 @@
               },
               "additionalProperties": false
             }
+          },
+          "binds_thinking": {
+            "description": "Whether the models it serves bind their thinking to the conversation, unless a model's entry says. Unset: what its model list says, else each model's name.",
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "auth_token": {
             "description": "Old spelling of api_key with auth: bearer.",
@@ -273,7 +287,7 @@
       "additionalProperties": false
     },
     "max_tokens": {
-      "description": "The most output tokens one model call asks for.",
+      "description": "The most output tokens one model call asks for. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": 8192,
       "type": [
         "integer",
@@ -337,7 +351,7 @@
       ]
     },
     "max_turns": {
-      "description": "Model calls an agent may make before its budget stops it.",
+      "description": "Model calls an agent may make before its budget stops it. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": 40,
       "type": [
         "integer",
@@ -364,7 +378,7 @@
       "minimum": 1
     },
     "wall_clock_ms": {
-      "description": "How long an agent may run.",
+      "description": "How long an agent may run. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": 1800000,
       "type": [
         "integer",
@@ -373,7 +387,7 @@
       "minimum": 1
     },
     "max_depth": {
-      "description": "How deep agents may delegate; 1 means the root alone may.",
+      "description": "How deep agents may delegate; 1 means the root alone may. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": 3,
       "type": [
         "integer",
@@ -416,7 +430,7 @@
       ]
     },
     "approvals": {
-      "description": "What a call that asks does with nobody attached: wait, or be denied. Read from a project's file only in a trusted workspace.",
+      "description": "What a call that asks does with nobody attached: wait, or be denied. Read from a project's file only in a trusted workspace. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": "wait",
       "enum": [
         "wait",
@@ -451,7 +465,7 @@
       "additionalProperties": false
     },
     "managed_permission_rules_only": {
-      "description": "A session may not allow a tool for itself. Read from a project's file only in a trusted workspace.",
+      "description": "A session may not allow a tool for itself. Read from a project's file only in a trusted workspace. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": false,
       "type": [
         "boolean",
@@ -459,7 +473,7 @@
       ]
     },
     "managed_mcp_servers_only": {
-      "description": "A client may not offer a session its own tools. Read from a project's file only in a trusted workspace.",
+      "description": "A client may not offer a session its own tools. Read from a project's file only in a trusted workspace. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": false,
       "type": [
         "boolean",
@@ -478,6 +492,24 @@
     "tool_output_limit": {
       "description": "Bytes of a tool's output the model sees; the rest is kept, and read_output pages it back.",
       "default": 32768,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "scratch_max_bytes": {
+      "description": "Bytes one document `show` puts on the session's scratchpad may hold.",
+      "default": 262144,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "scratch_max_documents": {
+      "description": "Documents one session's scratchpad may hold.",
+      "default": 50,
       "type": [
         "integer",
         "null"

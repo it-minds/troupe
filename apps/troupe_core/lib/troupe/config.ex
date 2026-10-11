@@ -2,9 +2,11 @@ defmodule Troupe.Config do
   @moduledoc """
   Resolved settings for one session.
 
-  Layered lowest to highest: built-in defaults, the user's `config.yaml`, the project's
-  `.troupe/config.yaml`, the project's git-ignored `.troupe/config.local.yaml`,
-  environment variables, then explicit options from the CLI or the client API. Maps
+  Layered lowest to highest: built-in defaults, the organisation's defaults
+  (`Troupe.Config.Org`), the user's `config.yaml`, the project's `.troupe/config.yaml`,
+  the project's git-ignored `.troupe/config.local.yaml`, environment variables, explicit
+  options from the CLI or the client API, then what the organisation enforces, which
+  nothing below goes past (Decision 869). Maps
   merge by key (RFC 7396): a project file that adds one provider keeps the user's
   others, `null` removes what a lower layer set, and a list replaces. Every key, its
   type and which files may set it are in `Troupe.Config.Schema`; how the files are read
@@ -50,7 +52,7 @@ defmodule Troupe.Config do
         windows: {some-bare-model: 128000}
   """
 
-  alias Troupe.Config.{Error, Explain, Issue, Layers, Migrate, Schema, Trust}
+  alias Troupe.Config.{Error, Explain, Issue, Layers, Migrate, Org, Schema, Trust}
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
   alias Troupe.LLM.Endpoint
@@ -115,6 +117,9 @@ defmodule Troupe.Config do
             # Bytes of a tool's result the model is sent; the rest is one `read_output`
             # call away. 32 KiB, from a live bench's numbers (Decision 781).
             tool_output_limit: 32_768,
+            # The scratchpad's caps (Decision 870): bytes a document, documents a session.
+            scratch_max_bytes: 262_144,
+            scratch_max_documents: 50,
             watch: false,
             watch_debounce_ms: 300,
             watch_poll_interval_ms: 1_000,
@@ -235,19 +240,23 @@ defmodule Troupe.Config do
           required(:auth) => auth(),
           required(:models) => %{optional(String.t()) => model()},
           required(:source) => :yaml | :opencode,
-          optional(:refused) => String.t() | nil
+          optional(:refused) => String.t() | nil,
+          optional(:binds_thinking) => boolean() | nil
         }
 
   @typedoc """
   One model a provider declares, keyed by the name Troupe addresses it with. `id` is
   what goes on the wire — a gateway usually renames models — and `context` is the
-  window it declares, `nil` when it declares none.
+  window it declares, `nil` when it declares none. `binds_thinking` says whether it binds
+  its thinking to the conversation, for a name that hides it (Decision 871), `nil` when
+  the entry does not say.
   """
   @type model :: %{
-          id: String.t(),
-          context: pos_integer() | nil,
-          max_output: pos_integer() | nil,
-          reasoning_effort: String.t() | nil
+          required(:id) => String.t(),
+          required(:context) => pos_integer() | nil,
+          required(:max_output) => pos_integer() | nil,
+          required(:reasoning_effort) => String.t() | nil,
+          optional(:binds_thinking) => boolean() | nil
         }
 
   @typedoc """
@@ -299,6 +308,8 @@ defmodule Troupe.Config do
 
     with [] <- layers.errors,
          {:ok, config, layers} <- layers |> build() |> apply_overrides(overrides, layers) do
+      # What the organisation enforces is above the command line (Decision 869).
+      {config, layers} = Org.hold(config, layers)
       config = apply_catalog(config)
       {:ok, %{config | warnings: Enum.map(layers.warnings ++ layers.refusals, &Issue.format/1)}, layers}
     else
@@ -461,7 +472,7 @@ defmodule Troupe.Config do
         source: :yaml
       }
 
-      {name, with_refusal(provider, refused[name])}
+      {name, provider |> put_flag(:binds_thinking, p["binds_thinking"]) |> with_refusal(refused[name])}
     end)
   end
 
@@ -679,6 +690,44 @@ defmodule Troupe.Config do
         _ -> nil
       end
     end)
+  end
+
+  @doc """
+  Whether `model` binds each thinking block to the conversation it was made in, so that
+  its tools must not change during a session (Decisions 867 and 871). Its `models:` entry's
+  `binds_thinking` first, then its provider's, then what the provider's own list says of
+  it, and last its name (`Catalog.binds_thinking?/1`): a gateway's alias that hides the
+  name is said to bind with `binds_thinking: true`, and `false` says one that looks as if
+  it does, does not.
+  """
+  @spec binds_thinking?(t(), String.t() | nil) :: boolean()
+  def binds_thinking?(%__MODULE__{} = config, model) do
+    model = resolve_model(config, model || config.model)
+    wire = target(config, model).model
+
+    {said, listed} =
+      case split_model(config, model) do
+        {nil, _bare} ->
+          {[], wire}
+
+        {provider, bare} ->
+          entry = Map.get(provider.models, bare, %{})
+          name = hd(String.split(model, "/", parts: 2))
+          {[entry[:binds_thinking], provider[:binds_thinking]], name <> "/" <> wire}
+      end
+
+    listing =
+      Enum.map(Enum.uniq([model, listed]), fn name ->
+        case Map.get(config.catalog, name) do
+          %Catalog{binds_thinking: flag} -> flag
+          _ -> nil
+        end
+      end)
+
+    case Enum.find(said ++ listing, &is_boolean/1) do
+      nil -> Catalog.binds_thinking?(wire)
+      flag -> flag
+    end
   end
 
   @doc """
@@ -1347,11 +1396,16 @@ defmodule Troupe.Config do
          context: positive(Map.get(m, "context")),
          max_output: positive(Map.get(m, "max_output")),
          reasoning_effort: effort(Map.get(m, "reasoning_effort"))
-       }}
+       }
+       |> put_flag(:binds_thinking, Map.get(m, "binds_thinking"))}
     end)
   end
 
   def parse_models(_other), do: %{}
+
+  # Only where the file says it (Decision 871), so every other entry is what it was.
+  defp put_flag(map, key, value) when is_boolean(value), do: Map.put(map, key, value)
+  defp put_flag(map, _key, _unset), do: map
 
   @doc false
   @spec positive(term()) :: pos_integer() | nil

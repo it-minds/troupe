@@ -9,8 +9,12 @@
 # discovery only at the path-appended place, so discovery has to try the other two
 # first; there is no dynamic registration, so only the one pre-registered client id is
 # taken; PKCE is S256 and checked; the resource indicator is checked against the server;
-# refresh tokens rotate and a spent one is refused. Every request is sent to the test
-# process as `{:fake_oauth, request}`, so a test can read what crossed the wire.
+# refresh tokens rotate and a spent one is refused. A token carries the scopes its sign-in
+# asked for, and the server's `write` tool wants `notes.write` on top of them, answering
+# `403 insufficient_scope` without it (issue #586). The authorization server revokes a
+# token at its `revocation_endpoint` (RFC 7009, issue #587), or refuses to, or is slow, or
+# names none. Every request is sent to the test process as `{:fake_oauth, request}`, so a
+# test can read what crossed the wire.
 unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
   defmodule Troupe.Test.FakeOAuth do
     @client_id "troupe-test-client"
@@ -22,7 +26,10 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
     @doc """
     Start one. Options: `expires_in` (seconds, 3600), `deny` (the person refuses),
     `challenge_metadata` (whether the 401 names the metadata, true), `require_resource`
-    (true).
+    (true), `write_tool` (whether `tools/list` names `write`, false; it can be called
+    either way), `revocation` (`:ok`, `:refuse`, `:slow` or `:none`, which names no
+    endpoint; `:ok`) and `revocation_endpoint` (a URL the metadata names instead of its
+    own).
     """
     def start(test, opts \\ []) do
       {:ok, listener} =
@@ -40,9 +47,13 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
             deny: Keyword.get(opts, :deny, false),
             challenge_metadata: Keyword.get(opts, :challenge_metadata, true),
             require_resource: Keyword.get(opts, :require_resource, true),
+            write_tool: Keyword.get(opts, :write_tool, false),
+            revocation: Keyword.get(opts, :revocation, :ok),
+            revocation_endpoint: Keyword.get(opts, :revocation_endpoint),
             codes: %{},
-            access: MapSet.new(),
-            refresh: MapSet.new(),
+            # Each token with the scopes it was granted.
+            access: %{},
+            refresh: %{},
             refuse_refresh: false,
             issued: 0
           }
@@ -68,7 +79,10 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
     end
 
     @doc "Every access token stops working, as a revocation or a clock would make it."
-    def revoke_access(fake), do: Agent.update(fake.agent, &%{&1 | access: MapSet.new()})
+    def revoke_access(fake), do: Agent.update(fake.agent, &%{&1 | access: %{}})
+
+    @doc "Whether the authorization server would still take this refresh token."
+    def refresh_token?(fake, token), do: Agent.get(fake.agent, &Map.has_key?(&1.refresh, token))
 
     @doc "Refresh tokens are refused from now on: the person has to sign in again."
     def refuse_refresh(fake), do: Agent.update(fake.agent, &%{&1 | refuse_refresh: true})
@@ -137,15 +151,48 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
     end
 
     defp route(%{method: "GET", path: "/tenant/.well-known/openid-configuration"}, agent) do
+      state = Agent.get(agent, & &1)
+      base = state.base
+
+      revocation =
+        case state do
+          %{revocation: :none} -> %{}
+          %{revocation_endpoint: url} when is_binary(url) -> %{"revocation_endpoint" => url}
+          _named -> %{"revocation_endpoint" => base <> "/tenant/revoke"}
+        end
+
+      json(
+        200,
+        Map.merge(
+          %{
+            "issuer" => base <> "/tenant",
+            "authorization_endpoint" => base <> "/tenant/authorize",
+            "token_endpoint" => base <> "/tenant/token",
+            "scopes_supported" => [
+              "openid",
+              "profile",
+              "offline_access",
+              "notes.read",
+              "notes.write"
+            ],
+            "code_challenge_methods_supported" => ["S256"]
+          },
+          revocation
+        )
+      )
+    end
+
+    # What a `403` names as its metadata, pointing somewhere else: a step-up must not be
+    # sent there (issue #586).
+    defp route(%{method: "GET", path: "/.well-known/oauth-protected-resource/elsewhere"}, agent) do
       base = Agent.get(agent, & &1.base)
 
-      json(200, %{
-        "issuer" => base <> "/tenant",
-        "authorization_endpoint" => base <> "/tenant/authorize",
-        "token_endpoint" => base <> "/tenant/token",
-        "scopes_supported" => ["openid", "profile", "offline_access", "notes.read"],
-        "code_challenge_methods_supported" => ["S256"]
-      })
+      json(200, %{"resource" => base <> "/mcp", "authorization_servers" => [base <> "/elsewhere"]})
+    end
+
+    defp route(%{method: "POST", path: "/tenant/revoke", body: body}, agent) do
+      form = URI.decode_query(body)
+      revoke(form, agent)
     end
 
     defp route(%{method: "GET", path: "/tenant/authorize", query: query}, agent) do
@@ -172,9 +219,10 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
 
       case request.headers["authorization"] do
         "Bearer " <> token ->
-          if MapSet.member?(state.access, token),
-            do: mcp(Jason.decode!(request.body)),
-            else: unauthorized(state, ~s(, error="invalid_token"))
+          case Map.fetch(state.access, token) do
+            {:ok, scopes} -> mcp(Jason.decode!(request.body), scopes, state)
+            :error -> unauthorized(state, ~s(, error="invalid_token"))
+          end
 
         _none ->
           unauthorized(state, "")
@@ -231,7 +279,7 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
           Agent.update(agent, &%{&1 | codes: codes})
 
           case redeem_refusal(form, issued, state) do
-            nil -> json(200, issue(agent, id_token: true))
+            nil -> json(200, issue(agent, String.split(issued["scope"] || ""), id_token: true))
             refusal -> refusal
           end
       end
@@ -267,11 +315,12 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
     defp refresh(form, agent) do
       state = Agent.get(agent, & &1)
 
-      if not state.refuse_refresh and MapSet.member?(state.refresh, form["refresh_token"]) and
+      if not state.refuse_refresh and Map.has_key?(state.refresh, form["refresh_token"]) and
            form["client_id"] == @client_id do
-        # Rotated: the token just spent is no good again.
-        Agent.update(agent, &%{&1 | refresh: MapSet.delete(&1.refresh, form["refresh_token"])})
-        json(200, issue(agent, id_token: false))
+        # Rotated: the token just spent is no good again. The new one has its scopes.
+        scopes = state.refresh[form["refresh_token"]]
+        Agent.update(agent, &%{&1 | refresh: Map.delete(&1.refresh, form["refresh_token"])})
+        json(200, issue(agent, scopes, id_token: false))
       else
         json(400, %{
           "error" => "invalid_grant",
@@ -280,7 +329,8 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
       end
     end
 
-    defp issue(agent, opts) do
+    # Granted what was asked for.
+    defp issue(agent, scopes, opts) do
       n = Agent.get_and_update(agent, &{&1.issued + 1, %{&1 | issued: &1.issued + 1}})
       access = "at-#{n}"
       refresh = "rt-#{n}"
@@ -288,8 +338,8 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
       Agent.update(agent, fn state ->
         %{
           state
-          | access: MapSet.put(state.access, access),
-            refresh: MapSet.put(state.refresh, refresh)
+          | access: Map.put(state.access, access, scopes),
+            refresh: Map.put(state.refresh, refresh, scopes)
         }
       end)
 
@@ -298,9 +348,40 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
         "token_type" => "Bearer",
         "expires_in" => Agent.get(agent, & &1.expires_in),
         "refresh_token" => refresh,
-        "scope" => "notes.read offline_access"
+        "scope" => Enum.join(scopes, " ")
       }
       |> then(&if(opts[:id_token], do: Map.put(&1, "id_token", id_token()), else: &1))
+    end
+
+    # RFC 7009: the client's own token goes, and the access token of the same grant with a
+    # refresh token; an unknown token is answered 200 as well.
+    defp revoke(form, agent) do
+      case Agent.get(agent, & &1.revocation) do
+        :refuse ->
+          json(400, %{"error" => "invalid_request", "error_description" => "not today"})
+
+        mode ->
+          if mode == :slow, do: Process.sleep(2_000)
+
+          if form["client_id"] == @client_id do
+            forget(agent, form["token"] || "")
+            respond(200, "text/plain", "", [])
+          else
+            json(401, %{"error" => "invalid_client"})
+          end
+      end
+    end
+
+    defp forget(agent, token) do
+      paired = String.replace_prefix(token, "rt-", "at-")
+
+      Agent.update(agent, fn state ->
+        %{
+          state
+          | refresh: Map.delete(state.refresh, token),
+            access: state.access |> Map.delete(token) |> Map.delete(paired)
+        }
+      end)
     end
 
     defp id_token do
@@ -323,30 +404,53 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
 
     # A notification is accepted with no body, as the specification has a server do: the
     # handshake sends one (Decision 746).
-    defp mcp(%{"method" => "notifications/" <> _}), do: respond(202, "text/plain", "", [])
+    defp mcp(%{"method" => "notifications/" <> _}, _scopes, _state),
+      do: respond(202, "text/plain", "", [])
 
-    defp mcp(%{"id" => id, "method" => "tools/list"}) do
-      rpc(id, %{
-        "tools" => [
-          %{
-            "name" => "search",
-            "description" => "Search my notes.",
-            "inputSchema" => %{
-              "type" => "object",
-              "properties" => %{"topic" => %{"type" => "string"}}
-            }
-          }
-        ]
-      })
+    defp mcp(%{"id" => id, "method" => "tools/list"}, _scopes, state) do
+      topic = %{"type" => "object", "properties" => %{"topic" => %{"type" => "string"}}}
+      search = %{"name" => "search", "description" => "Search my notes.", "inputSchema" => topic}
+      write = %{"name" => "write", "description" => "Write a note.", "inputSchema" => topic}
+
+      rpc(id, %{"tools" => if(state.write_tool, do: [search, write], else: [search])})
     end
 
-    defp mcp(%{"id" => id, "method" => "tools/call", "params" => %{"arguments" => args}}) do
+    defp mcp(
+           %{"id" => id, "method" => "tools/call", "params" => %{"name" => "write"} = params},
+           scopes,
+           state
+         ) do
+      if "notes.write" in scopes do
+        text = "wrote a note on #{params["arguments"]["topic"]}, for #{@account}"
+        rpc(id, %{"content" => [%{"type" => "text", "text" => text}]})
+      else
+        insufficient_scope(state)
+      end
+    end
+
+    defp mcp(
+           %{"id" => id, "method" => "tools/call", "params" => %{"arguments" => args}},
+           _scopes,
+           _state
+         ) do
       rpc(id, %{
         "content" => [%{"type" => "text", "text" => "notes on #{args["topic"]}, for #{@account}"}]
       })
     end
 
-    defp mcp(%{"id" => id}), do: rpc(id, %{})
+    defp mcp(%{"id" => id}, _scopes, _state), do: rpc(id, %{})
+
+    # The MCP authorization specification's step-up: the scope the call needs, and the
+    # metadata, here pointing at an authorization server the sign-in never used.
+    defp insufficient_scope(state) do
+      elsewhere = state.base <> "/.well-known/oauth-protected-resource/elsewhere"
+
+      respond(403, "application/json", ~s({"error":"insufficient_scope"}), [
+        {"www-authenticate",
+         ~s(Bearer error="insufficient_scope", scope="notes.write", ) <>
+           ~s(resource_metadata="#{elsewhere}", error_description="writing needs notes.write")}
+      ])
+    end
 
     defp rpc(id, result), do: json(200, %{"jsonrpc" => "2.0", "id" => id, "result" => result})
 

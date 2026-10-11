@@ -99,13 +99,10 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
   - `WatchSessionTest`;
   - `RememberFactsTest` ("README.md is not there");
   - `StoppedCallTest` (Finch's "excess queuing");
-  - `DelegateContractTest`'s branch diff (a `list` timeout);
   - the gateway's `LoopbackTest` "a refused upgrade is logged at warning level".
 
   With the default 64 cases on a busy machine many more core tests time out, and all pass at
-  `--max-cases 8`. The `Sessions.Index` list timeouts among them (5 to 7 tests a full run
-  in chunk 28: `ReadBranchTest`, `WatchSessionTest`, `LocalPricingTest`,
-  `DelegateContractTest`, `ForkSessionTest`) are #589.
+  `--max-cases 8`.
 - `Troupe.BenchTest` measures the tool definitions of the test build, which registers four
   test-only tools (about 582 bytes), so the budget gates a list nobody ships and `mix
   troupe.bench` in dev reads that much lower.
@@ -939,9 +936,7 @@ Found by the #371 fixer, 2026-10-08.
 - On a model that does not bind its thinking, Decision 793 still offers the todo tools once
   a list exists or after 10 calls, which changes `tools` mid-turn and costs a cache write
   (`llm_request.tools_changed` counts it). A model that binds has them from the first call,
-  and a compaction's kept tail goes without its thinking there (Decision 867). A loop
-  turn's `goal_complete` and MCP tools that come and go still change `tools` on a binding
-  model: #606.
+  and a compaction's kept tail goes without its thinking there (Decision 867).
 - A log written before 0.13.0 has no `turn_context_block` to fold (Decision 863): a session
   that ran `system_prompt: stable` then sends its first call after a resume without the
   turn contexts it had put, and one that ran 0.12.0's `per_turn` default changes its system
@@ -1301,6 +1296,43 @@ Found by the chunk 28 fixers and the coordinator, 2026-10-11.
 - **The live bench.** Its plan text and cost cap ignore a scenario's own config, such as `long_turn`'s `max_turns: 20`.
 
 Found by the chunk 29 fixers, 2026-10-11.
+
+### D123 - Tools, the scratchpad, sign-in and installs after chunk 30 (low)
+
+- **What an organisation enforces** (Decision 869).
+  - The enforced set is a guardrail Troupe honours, not a lock. The plane's cached copy (`organisation.json`) is a file in the person's own state directory, which they can edit or delete, and `TROUPE_STATE_HOME` moves it. Only a managed file owned by an administrator, on a machine its person doesn't administer, is the strong form. A plane-signed document with an expiry (#66's channel document) would close this.
+  - The desktop app's model panel still writes `provider` and `base_url` into the user file under an enforced provider. The value is held on load, with a warning.
+  - The desktop app's settings view doesn't show where a value came from (#57, #56).
+  - `managed.yaml` has no JSON Schema of its own.
+- **Binding models.**
+  - `binds_thinking` says a model binds, but doesn't bring an alias's thinking back between calls (Decision 805 decides that by effort or name). An alias of a binding model with no `reasoning_effort` still drops its reasoning.
+  - A tool that comes or goes now changes the tools only at a turn boundary (Decision 871), but on an enforcing account every later call of the session is still refused once, until a compaction. D92's "stop sending the leading run of stale blocks after a refusal" would make that cheap.
+  - The live bench's worst-case estimate for one configuration can exceed a slot's spend cap; its guard is the estimate only.
+- **The scratchpad.**
+  - A `show` call whose arguments exceed 16 KiB arrives as a blob reference. Until `scratch_updated` arrives a moment later, the TUI's card reads " · " and the desktop app's card is disabled.
+  - If a profile sets `show` to `ask`, the approval shows the whole document.
+  - Sizes read "2.3 kB" in the TUI (1000-based) and "2.3 KB" in the desktop app (1024-based).
+  - `Troupe.fork_session/2` copies the log but not the parent's blobs, so a fork's events that refer to a blob may read as missing. Not verified.
+- **The pod's session-token guard.** `Troupe.Worker.Auth`'s `@session_methods` is a hand-kept copy of "every command whose schema requires `session_id`". A new session-scoped method must be added there too, and only the worker's `auth_test` catches a miss, in the full suite only. `scratch.list` was missed once (#614). Deriving the list from the protocol schema, or a test comparing the two, would close it.
+- **A person's own MCP server's sign-in.**
+  - A sign-in still waiting in the browser isn't stopped by `mcp.sign_out` or `troupe logout`; if it completes afterwards, the server is signed in again.
+  - `troupe logout` revokes one provider after another, up to 5 s each, so several unresponsive providers can outlast the client's call timeout and report the sign-ins kept although they were forgotten.
+  - A server that keeps answering `insufficient_scope` for a scope already granted makes every sign-in ask again; nothing notices the loop.
+- **The sessions index.**
+  - A listing still asks each running session's summary one after another, each with a 5 s timeout.
+  - The core suite's global index reads the developer's real state directory (`test_helper` unsets `TROUPE_STATE_HOME`).
+  - `Troupe.erase_session`'s `named_dirs` still walks through the file server (`Path.wildcard`); it runs only on erase.
+  - `WatchSessionTest` can also time out on the watcher's `set_enabled` call under load.
+- **An install elsewhere** (Decision 873).
+  - It stops its own `troupe.exe`, but the runtime that program started from the shared payload can keep running until its window closes; PowerShell 5.1 can't tell which install a payload process belongs to.
+  - `-Purge` still deletes the shared config and state directories, as the plan says.
+  - On Linux, `--gui` overwrites the shared menu entry to point at its own app, and its uninstall then removes that entry.
+- **The terminal UI.**
+  - The side box's title, " tokens · tasks · agents · pending ", is cut at 30 columns.
+  - "This turn" shows the window's own agent; while ←→ views a subagent, that subagent's turn line stays in its transcript.
+  - In tests, `TUIHelpers.resize/4` doesn't change the size the headless runtime renders at; start a new server, or call `View.render` directly.
+
+Found by the chunk 30 fixers, 2026-10-11.
 
 ## Taken
 

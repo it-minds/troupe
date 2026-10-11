@@ -17,7 +17,7 @@ defmodule Troupe.MCPOAuthTest do
 
   use Troupe.SessionCase, async: true
 
-  alias Troupe.MCP.{Import, Local, OAuth}
+  alias Troupe.MCP.{Client, Import, Local, OAuth, Server}
   alias Troupe.MCP.OAuth.{Store, Tokens}
   alias Troupe.Session.MCP
   alias Troupe.Test.FakeOAuth
@@ -89,6 +89,14 @@ defmodule Troupe.MCPOAuthTest do
       0 -> []
     end
   end
+
+  defp signed_in(context) do
+    {200, _page} = context |> sign_in() |> Map.fetch!(:url) |> FakeOAuth.browse()
+    _ = requests()
+    sign_in_of(context)
+  end
+
+  defp revocations, do: Enum.filter(requests(), &(&1.path == "/tenant/revoke"))
 
   describe "a local session" do
     test "waits for the sign-in, and once it is made asks with the person's token", context do
@@ -227,6 +235,95 @@ defmodule Troupe.MCPOAuthTest do
                Tool.invoke(search, %{"topic" => "cars"}, ctx(session, context))
     end
 
+    # Issue #586: the MCP authorization specification's step-up.
+    @tag fake: [write_tool: true]
+    test "a 403 insufficient_scope asks the person to sign in for the wider scope, the tokens held are kept till then, and the call then goes through",
+         context do
+      %{session: session} = with_server(context)
+      {200, _page} = context |> sign_in() |> Map.fetch!(:url) |> FakeOAuth.browse()
+      assert %{tools: ["search", "write"]} = wait_for_state(session.id, "notes", [:ready])
+      search = tool(session.id)
+      write = Enum.find(MCP.tools(session.id), &(Tool.name(&1) == "mcp.notes.write"))
+      _ = requests()
+
+      # The server wants notes.write, which the sign-in did not ask for: the model gets the
+      # answer a run-out sign-in gets, with the scope the server named.
+      assert {:ok, output} = Tool.invoke(write, %{"topic" => "boats"}, ctx(session, context))
+
+      assert %{
+               "error" => "sign_in_required",
+               "server" => "notes",
+               "scope" => "notes.write",
+               "hint" => hint
+             } = Jason.decode!(output)
+
+      assert hint =~ "notes.write"
+      assert hint =~ "/mcp sign-in notes"
+
+      # Nothing signed in on its own, and nothing went where the 403 pointed.
+      crossed = requests()
+      refute OAuth.status(sign_in_of(context)).state == :signing_in
+      refute Enum.any?(crossed, &String.starts_with?(&1.path, "/tenant/"))
+      refute Enum.any?(crossed, &(&1.path =~ "elsewhere"))
+
+      # The sign-in held is kept, and says what the server wants on top of it.
+      assert %{"access_token" => "at-1", "refresh_token" => "rt-1", "step_up" => ["notes.write"]} =
+               Store.get(context.state_dir, sign_in_of(context).key)
+
+      assert %{state: :signed_in, step_up: "notes.write"} = OAuth.status(sign_in_of(context))
+      assert %{state: :ready} = wait_for_state(session.id, "notes", [:ready])
+
+      assert {:ok, "notes on trains" <> _} =
+               Tool.invoke(search, %{"topic" => "trains"}, ctx(session, context))
+
+      # The person signs in again, at the authorization server the server's metadata names,
+      # for what was granted and what the server named.
+      started = sign_in(context)
+      params = started.url |> URI.parse() |> Map.get(:query) |> URI.decode_query()
+      assert String.starts_with?(started.url, context.fake.issuer <> "/authorize?")
+      wanted = ~w(notes.read offline_access notes.write)
+      assert Enum.sort(String.split(params["scope"])) == Enum.sort(wanted)
+      assert Enum.sort(started.scopes) == Enum.sort(wanted)
+      refute Enum.any?(requests(), &(&1.path =~ "elsewhere"))
+
+      # Until it lands, the tokens held are the ones used.
+      assert {:ok, "notes on planes" <> _} =
+               Tool.invoke(search, %{"topic" => "planes"}, ctx(session, context))
+
+      assert {200, _page} = FakeOAuth.browse(started.url)
+      assert %{state: :ready} = wait_for_state(session.id, "notes", [:ready])
+
+      assert {:ok, "wrote a note on boats, for ada@example.test"} =
+               Tool.invoke(write, %{"topic" => "boats"}, ctx(session, context))
+
+      refute Map.has_key?(Store.get(context.state_dir, sign_in_of(context).key), "step_up")
+      assert %{state: :signed_in, step_up: nil} = OAuth.status(sign_in_of(context))
+    end
+
+    @tag fake: [write_tool: true]
+    test "a step-up the person refuses leaves the sign-in held as it was", context do
+      %{session: session} = with_server(context)
+      {200, _page} = context |> sign_in() |> Map.fetch!(:url) |> FakeOAuth.browse()
+      wait_for_state(session.id, "notes", [:ready])
+      write = Enum.find(MCP.tools(session.id), &(Tool.name(&1) == "mcp.notes.write"))
+
+      assert {:ok, output} = Tool.invoke(write, %{"topic" => "x"}, ctx(session, context))
+      assert %{"error" => "sign_in_required", "scope" => "notes.write"} = Jason.decode!(output)
+
+      FakeOAuth.set(context.fake, :deny, true)
+      assert {200, page} = context |> sign_in() |> Map.fetch!(:url) |> FakeOAuth.browse()
+      assert page =~ "access_denied"
+
+      assert %{"access_token" => "at-1", "refresh_token" => "rt-1", "step_up" => ["notes.write"]} =
+               Store.get(context.state_dir, sign_in_of(context).key)
+
+      assert %{state: :signed_in, step_up: "notes.write", error: "the authorization server" <> _} =
+               OAuth.status(sign_in_of(context))
+
+      assert {:ok, "notes on y" <> _} =
+               Tool.invoke(tool(session.id), %{"topic" => "y"}, ctx(session, context))
+    end
+
     test "a server with no oauth that answers 401 says what it wants", context do
       write_file(
         context,
@@ -279,7 +376,7 @@ defmodule Troupe.MCPOAuthTest do
       assert {200, _page} = FakeOAuth.browse(second.url)
       assert OAuth.status(sign_in_of(context)).state == :signed_in
 
-      assert :ok = OAuth.sign_out(sign_in_of(context))
+      assert {:ok, %{state: :revoked}} = OAuth.sign_out(sign_in_of(context))
       assert %{state: :signed_out, account: nil} = OAuth.status(sign_in_of(context))
       assert Store.get(context.state_dir, sign_in_of(context).key) == nil
     end
@@ -318,6 +415,95 @@ defmodule Troupe.MCPOAuthTest do
       assert started.redirect_uri == "http://localhost:#{port}/back"
       assert {200, page} = FakeOAuth.browse(started.url)
       assert page =~ "Signed in"
+    end
+  end
+
+  # Issue #587: signing out ends the sign-in at the provider too (RFC 7009), or says it
+  # could not; either way it is forgotten here.
+  describe "signing out" do
+    test "revokes the refresh token at the provider, then forgets the sign-in", context do
+      binding = signed_in(context)
+
+      assert {:ok, %{state: :revoked, reason: nil}} = OAuth.sign_out(binding)
+
+      assert [revoke] = revocations()
+
+      assert URI.decode_query(revoke.body) == %{
+               "token" => "rt-1",
+               "token_type_hint" => "refresh_token",
+               "client_id" => FakeOAuth.client_id()
+             }
+
+      refute FakeOAuth.refresh_token?(context.fake, "rt-1")
+      assert Store.get(context.state_dir, binding.key) == nil
+      assert %{state: :signed_out} = OAuth.status(binding)
+    end
+
+    @tag fake: [revocation: :refuse]
+    test "a provider that refuses is said not to have been told, and the sign-in is forgotten anyway",
+         context do
+      binding = signed_in(context)
+
+      assert {:ok, %{state: :failed, reason: reason}} = OAuth.sign_out(binding)
+      assert reason =~ "invalid_request"
+      assert [_revoke] = revocations()
+      assert Store.get(context.state_dir, binding.key) == nil
+      assert FakeOAuth.refresh_token?(context.fake, "rt-1")
+    end
+
+    @tag fake: [revocation: :slow]
+    test "a provider that does not answer in time is said not to have been told", context do
+      binding = signed_in(context)
+      started = System.monotonic_time(:millisecond)
+
+      assert {:ok, %{state: :failed, reason: reason}} = OAuth.sign_out(binding, timeout_ms: 300)
+      assert System.monotonic_time(:millisecond) - started < 1_500
+      assert reason =~ "could not be reached"
+      assert Store.get(context.state_dir, binding.key) == nil
+    end
+
+    @tag fake: [revocation: :none]
+    test "a provider with no revocation endpoint is named as such", context do
+      binding = signed_in(context)
+
+      assert {:ok, %{state: :unsupported, reason: nil}} = OAuth.sign_out(binding)
+      assert revocations() == []
+      assert Store.get(context.state_dir, binding.key) == nil
+    end
+
+    @tag fake: [revocation_endpoint: "https://169.254.169.254/latest/revoke"]
+    test "a revocation endpoint at a link-local address is not sent the token", context do
+      binding = signed_in(context)
+
+      assert {:ok, %{state: :failed, reason: reason}} = OAuth.sign_out(binding)
+      assert reason =~ "link-local"
+      assert Store.get(context.state_dir, binding.key) == nil
+    end
+
+    test "a sign-in kept before revocation was looked for finds the endpoint in the metadata",
+         context do
+      binding = signed_in(context)
+      entry = Store.get(context.state_dir, binding.key)
+      :ok = Store.put(context.state_dir, binding.key, Map.delete(entry, "revocation_endpoint"))
+
+      assert {:ok, %{state: :revoked}} = OAuth.sign_out(binding)
+      assert [_revoke] = revocations()
+    end
+
+    test "nothing held is nothing to tell", context do
+      assert {:ok, %{state: :none}} = OAuth.sign_out(sign_in_of(context))
+      assert revocations() == []
+    end
+
+    test "every sign-in at once, for troupe logout", context do
+      binding = signed_in(context)
+
+      assert {:ok, [%{server: "notes", state: :revoked}]} =
+               OAuth.sign_out_all(context.state_dir)
+
+      assert Store.all(context.state_dir) == %{}
+      refute FakeOAuth.refresh_token?(context.fake, "rt-1")
+      assert %{state: :signed_out} = OAuth.status(binding)
     end
   end
 
@@ -413,6 +599,35 @@ defmodule Troupe.MCPOAuthTest do
       assert :ok = OAuth.secure("http://127.0.0.1:4000/mcp", "the server")
       assert {:ok, {"127.0.0.1", 0, "/"}} = OAuth.loopback_redirect("http://127.0.0.1")
       assert :error = OAuth.loopback_redirect("http://192.0.2.1:80/cb")
+    end
+
+    test "a token goes to no link-local, metadata or unspecified address (Decision 856's list)" do
+      assert :ok = OAuth.outbound("https://login.example.com/oauth2/revoke", "the endpoint")
+      assert :ok = OAuth.outbound("http://127.0.0.1:4000/revoke", "the endpoint")
+      assert :ok = OAuth.outbound("https://10.0.0.5/revoke", "the endpoint")
+
+      assert {:error, "the revocation endpoint (https://169.254.169.254/r) is link-local"} =
+               OAuth.outbound("https://169.254.169.254/r", "the revocation endpoint")
+
+      for url <- ~w(https://[fe80::1]/r https://[::ffff:169.254.169.254]/r
+                    https://100.100.100.200/r https://[fd00:ec2::254]/r https://0.0.0.0/r
+                    http://login.example.com/r) do
+        assert {:error, _why} = OAuth.outbound(url, "the endpoint"), url
+      end
+    end
+
+    test "a 403 that wants a scope comes back as one, with the challenge that names it",
+         context do
+      binding = signed_in(context)
+      token = Store.get(context.state_dir, binding.key)["access_token"]
+
+      server = Server.from_config(%{"name" => "notes", "url" => context.fake.mcp_url})
+
+      assert {:error, {:insufficient_scope, header}} =
+               Client.call_tool(%{server | credential: token}, "write", %{})
+
+      assert %{"error" => "insufficient_scope", "scope" => "notes.write"} =
+               OAuth.challenge(header)
     end
   end
 

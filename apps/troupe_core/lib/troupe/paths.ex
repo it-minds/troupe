@@ -75,6 +75,10 @@ defmodule Troupe.Paths do
   """
   @spec display(Path.t(), {atom(), atom()}) :: String.t()
   def display(path, os_type \\ :os.type())
+  # A plane's address, which names where a cached organisation document came from
+  # (Decision 869), is a URL wherever it is shown.
+  def display("http://" <> _ = url, _os_type), do: url
+  def display("https://" <> _ = url, _os_type), do: url
   def display(path, {:win32, _}), do: path |> to_string() |> String.replace("/", "\\") |> drive()
   def display(path, _os_type), do: to_string(path)
 
@@ -93,6 +97,44 @@ defmodule Troupe.Paths do
   """
   @spec glob_escape(Path.t()) :: String.t()
   defdelegate glob_escape(path), to: Troupe.Protocol.Glob, as: :escape
+
+  @doc """
+  `Path.wildcard/1`, listing and reading the directories from the calling process (#589).
+
+  Every file operation in the VM that takes a name, `File.stat/1`, `File.ls/1` and
+  `Path.wildcard/1` among them, is a call to one process, the file server, which answers
+  them one at a time. A glob over a state directory is one call for every directory it goes
+  through, thousands with a few thousand sessions, and each waits behind every other
+  process's file operations: under load a listing took longer than its callers' fifteen
+  seconds. Here the directories are listed and the names stat'ed in the caller, so a glob
+  costs its own system calls and waits on nobody's. It matches what `Path.wildcard/1`
+  matches, hidden files left out.
+  """
+  @spec wildcard(Path.t()) :: [Path.t()]
+  def wildcard(glob) do
+    glob
+    |> String.to_charlist()
+    |> :filelib.wildcard(Troupe.Paths.Local)
+    |> Enum.map(&IO.chardata_to_string/1)
+  end
+
+  defmodule Local do
+    @moduledoc false
+    # What `:filelib.wildcard/2` asks of a file module, answered without the file server:
+    # `:raw` where `:file` takes it, and `:prim_file` for a directory's names, which is what
+    # the file server itself calls. Hidden names are dropped, as `Path.wildcard/1` drops them.
+
+    def read_file_info(file), do: :file.read_file_info(file, [:raw])
+
+    def read_link_info(file), do: :file.read_link_info(file, [:raw])
+
+    def list_dir(dir) do
+      case :prim_file.list_dir(dir) do
+        {:ok, files} -> {:ok, for(file <- files, hd(file) != ?., do: file)}
+        other -> other
+      end
+    end
+  end
 
   defp override(var) do
     case System.get_env(var) do

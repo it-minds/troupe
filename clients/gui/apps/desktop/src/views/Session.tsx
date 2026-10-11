@@ -22,6 +22,8 @@ import {
   openQuestions,
   partsOf,
   rootState,
+  scratchSize,
+  scratchVersion,
   settleLoop,
   unseenSummary,
 } from "@troupe/client";
@@ -34,7 +36,9 @@ import type {
   FleetRow,
   LoopInfo,
   LoopState,
+  ScratchDocument,
   SessionKind,
+  SessionView,
   TranscriptState,
 } from "@troupe/client";
 import { useSessionView, useStartQuestions } from "../hooks";
@@ -103,6 +107,9 @@ export function Session({
   // What `/memory refresh` or `/memory forget` asked of the memory pane, until it takes it.
   const [memoryAsk, setMemoryAsk] = useState<MemoryAsk | null>(null);
   const [palette, setPalette] = useState(false);
+  // The scratchpad document open beside the conversation, by name; null while it is closed.
+  const [scratch, setScratch] = useState<string | null>(null);
+  useEffect(() => setScratch(null), [sessionId]);
   const self = (kind === "team" ? auth?.me?.subject : (machineUser ?? auth?.me?.subject)) ?? undefined;
 
   const readOnly = row?.state === "read_only" || row?.yourRole === "viewer";
@@ -172,6 +179,11 @@ export function Session({
         backstage={backstage}
         onBack={onBack}
         onToggleBackstage={() => setBackstage((b) => !b)}
+        scratchpad={
+          view.state.scratch.length > 0
+            ? { open: scratch !== null, onToggle: () => setScratch((s) => (s === null ? latest(view.state.scratch) : null)) }
+            : null
+        }
         loop={loop}
         canChange={!readOnly}
         view={view}
@@ -195,7 +207,15 @@ export function Session({
 
       <div className="stagearea">
         <div className="conversation">
-          <Stream state={view.state} notes={notes} self={self} local={kind === "local"} readBlob={view.readBlob} onSetup={onGo ? () => onGo("setup") : undefined} />
+          <Stream
+            state={view.state}
+            notes={notes}
+            self={self}
+            local={kind === "local"}
+            readBlob={view.readBlob}
+            onSetup={onGo ? () => onGo("setup") : undefined}
+            onScratch={setScratch}
+          />
 
           {/* Sticky, so scrolling up to read the context never loses the decision. */}
           {open.map((entry) => (
@@ -235,6 +255,8 @@ export function Session({
             />
           )}
         </div>
+
+        {scratch !== null && <Scratchpad view={view.view} docs={view.state.scratch} open={scratch} onOpen={setScratch} onClose={() => setScratch(null)} />}
 
         {backstage && (
           <Backstage
@@ -327,6 +349,7 @@ function Header({
   backstage,
   onBack,
   onToggleBackstage,
+  scratchpad,
   loop,
   canChange,
   view,
@@ -339,6 +362,8 @@ function Header({
   backstage: boolean;
   onBack: () => void;
   onToggleBackstage: () => void;
+  /** Whether the scratchpad is open, and the switch; null while it has no document. */
+  scratchpad: { open: boolean; onToggle: () => void } | null;
   loop: LoopState | undefined;
   /** Whether this person may set the goal and start or stop a loop: not a reader's. */
   canChange: boolean;
@@ -411,6 +436,12 @@ function Header({
 
         {/* The agent this window runs, and the switch to another from the next turn. */}
         {agent}
+
+        {scratchpad && (
+          <button className="tab" onClick={scratchpad.onToggle} aria-pressed={scratchpad.open}>
+            {scratchpad.open ? "Hide scratchpad" : "Show scratchpad"}
+          </button>
+        )}
 
         <button className="tab" onClick={onToggleBackstage} aria-pressed={backstage}>
           {backstage ? "Hide backstage" : "Show backstage"}
@@ -536,6 +567,7 @@ function Stream({
   local,
   readBlob,
   onSetup,
+  onScratch,
 }: {
   state: TranscriptState;
   /** This app's own lines, each after the event it was said at. */
@@ -546,6 +578,8 @@ function Stream({
   readBlob: (blob: string) => Promise<string>;
   /** Leave for the Setup screen, offered under a model error a first run can fix. */
   onSetup?: (() => void) | undefined;
+  /** Open the scratchpad on a document, by name. */
+  onScratch: (name: string) => void;
 }): JSX.Element {
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -560,7 +594,7 @@ function Stream({
       <NotesAt notes={notes} from={-Infinity} to={state.entries[0]?.seq ?? Infinity} />
       {state.entries.map((e, i) => (
         <Fragment key={`${e.kind}-${e.seq}`}>
-          <StreamEntry entry={e} self={self} local={local} readBlob={readBlob} onSetup={onSetup} />
+          <StreamEntry entry={e} self={self} local={local} readBlob={readBlob} onSetup={onSetup} onScratch={onScratch} />
           <NotesAt notes={notes} from={e.seq} to={state.entries[i + 1]?.seq ?? Infinity} />
         </Fragment>
       ))}
@@ -619,12 +653,14 @@ function StreamEntry({
   local,
   readBlob,
   onSetup,
+  onScratch,
 }: {
   entry: Entry;
   self: string | undefined;
   local: boolean;
   readBlob: (blob: string) => Promise<string>;
   onSetup?: (() => void) | undefined;
+  onScratch: (name: string) => void;
 }): JSX.Element | null {
   switch (entry.kind) {
     case "user": {
@@ -657,6 +693,9 @@ function StreamEntry({
 
     case "tool":
       return <ToolActivity entry={entry} readBlob={readBlob} />;
+
+    case "scratch":
+      return <ScratchCard entry={entry} onOpen={onScratch} />;
 
     // A subagent's first message is the brief it was handed: from the agent that delegated,
     // never a person's turn, its parts under their names (troupe Decision 852). A brief
@@ -839,11 +878,125 @@ function LargeResult({ reference, readBlob }: { reference: BlobRef; readBlob: (b
 }
 
 /**
+ * A document an agent put in the scratchpad with `show` (issue #472), where its call would
+ * be: the title, then the name, the size and which write of the name it was, and a press
+ * opens it in the scratchpad beside the conversation. Its text is never in the stream. A
+ * call that failed says why, and there is nothing to open.
+ */
+function ScratchCard({ entry, onOpen }: { entry: Extract<Entry, { kind: "scratch" }>; onOpen: (name: string) => void }): JSX.Element {
+  if (entry.ok === false) {
+    return (
+      <p className="note error">
+        Could not show {entry.name || "a document"}: {entry.error ?? "the call failed"}
+      </p>
+    );
+  }
+  const facts = [entry.name, entry.size === undefined ? undefined : scratchSize(entry.size), scratchVersion(entry.version)].filter(Boolean);
+  return (
+    <button type="button" className="scratch-card" disabled={!entry.name} onClick={() => onOpen(entry.name)} title="Open it in the scratchpad">
+      <span className="title">{entry.title || entry.name || "A document"}</span>
+      <span className="meta">{facts.join(" · ")}</span>
+    </button>
+  );
+}
+
+/** The document written last, which the header's switch opens the scratchpad on. */
+function latest(docs: ScratchDocument[]): string | null {
+  return docs.reduce<ScratchDocument | null>((last, d) => (!last || d.updated_at >= last.updated_at ? d : last), null)?.name ?? null;
+}
+
+/**
+ * The session's scratchpad (issue #472): a tab for each document, in the order each was
+ * first written, and the open one's text, read when its tab opens and again when a newer
+ * version of it is written. A markdown document is rendered as an answer is; the other
+ * kinds are shown as they were written. Read-only, like the session's files.
+ */
+function Scratchpad({
+  view,
+  docs,
+  open,
+  onOpen,
+  onClose,
+}: {
+  view: SessionView | null;
+  docs: ScratchDocument[];
+  /** The open document's name. */
+  open: string;
+  onOpen: (name: string) => void;
+  onClose: () => void;
+}): JSX.Element {
+  const doc = docs.find((d) => d.name === open);
+  const read = useScratchText(view, doc);
+  return (
+    <aside className="scratchpad" aria-label="Scratchpad">
+      <header>
+        <span className="screen">Scratchpad</span>
+        <div className="tabs" role="tablist">
+          {docs.map((d) => (
+            <button key={d.name} type="button" role="tab" className="tab" aria-selected={d.name === open} title={d.title} onClick={() => onOpen(d.name)}>
+              {d.name}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="link" onClick={onClose}>
+          Close
+        </button>
+      </header>
+      {doc ? (
+        <div className="doc" role="tabpanel">
+          <h3>{doc.title}</h3>
+          <p className="note">{[doc.name, scratchSize(doc.size), scratchVersion(doc.version)].join(" · ")}</p>
+          {read.error ? (
+            <p className="note error">{read.error}</p>
+          ) : read.content === null ? (
+            <Loading what="Reading the document…" />
+          ) : doc.kind === "markdown" ? (
+            // Laid out as an answer is, which is what a turn's body is styled for.
+            <article className="turn">
+              <Markdown text={read.content} />
+            </article>
+          ) : (
+            <pre className="payload">{read.content}</pre>
+          )}
+        </div>
+      ) : (
+        <p className="note doc">Nothing is written under {open} yet.</p>
+      )}
+    </aside>
+  );
+}
+
+/**
+ * A scratchpad document's text, read with `fs.read` when it is opened and again for each
+ * newer version. What an older version said stays on screen until the newer one is read.
+ */
+function useScratchText(view: SessionView | null, doc: ScratchDocument | undefined): { content: string | null; error: string | null } {
+  const [read, setRead] = useState<{ name: string; content: string | null; error: string | null } | null>(null);
+  const name = doc?.name;
+  const path = doc?.path;
+  const version = doc?.version;
+  useEffect(() => {
+    if (!view || !name || !path) return;
+    let live = true;
+    view
+      .scratchRead({ path })
+      .then((file) => live && setRead({ name, content: file.content, error: null }))
+      .catch((e: unknown) => live && setRead({ name, content: null, error: e instanceof Error ? e.message : String(e) }));
+    return () => {
+      live = false;
+    };
+  }, [view, name, path, version]);
+  return read && read.name === name ? read : { content: null, error: null };
+}
+
+/**
  * The small part of markdown an answer actually uses. Rendered, never dumped into a
  * `<pre>` — a wall of preformatted text is not what the agent wrote.
  */
 function Markdown({ text }: { text: string }): JSX.Element {
-  const blocks = text.split(/\n{2,}/);
+  // A text that ends with a newline, as a file does, would leave its last block a line
+  // short of a list.
+  const blocks = text.replace(/\s+$/, "").split(/\n{2,}/);
   return (
     <div className="body">
       {blocks.map((block, i) => {

@@ -180,7 +180,8 @@ defmodule Troupe.Gateway.LocalSources do
              "server" => server.name,
              "url" => started.url,
              "redirect_uri" => started.redirect_uri,
-             "expires_at" => started.expires_at
+             "expires_at" => started.expires_at,
+             "scopes" => started.scopes
            }}
 
         {:error, why} ->
@@ -189,15 +190,40 @@ defmodule Troupe.Gateway.LocalSources do
     end
   end
 
+  # Forgotten on this machine, and the provider asked to revoke the refresh token
+  # (Decision 872): `revocation` says whether it was told. `all` is every server signed in
+  # to here, by whatever name and in whatever workspace, for `troupe logout`.
+  defp sign_out(%{"all" => true}) do
+    case OAuth.sign_out_all(nil) do
+      {:ok, outcomes} ->
+        {:ok,
+         %{
+           "servers" =>
+             Enum.map(outcomes, &%{"server" => &1.server, "revocation" => revocation_json(&1)})
+         }}
+
+      {:error, why} ->
+        invalid(why)
+    end
+  end
+
   defp sign_out(params) do
     with {:ok, server} <- signable(params),
-         :ok <- server |> sign_in_of() |> OAuth.sign_out() do
-      {:ok, %{"server" => server.name, "auth" => auth_json(server)}}
+         {:ok, revocation} <- server |> sign_in_of() |> OAuth.sign_out() do
+      {:ok,
+       %{
+         "server" => server.name,
+         "auth" => auth_json(server),
+         "revocation" => revocation_json(revocation)
+       }}
     else
       {:error, %Error{} = error} -> {:error, error}
       {:error, why} -> invalid(why)
     end
   end
+
+  defp revocation_json(%{state: state, reason: reason}),
+    do: %{"state" => to_string(state), "reason" => reason}
 
   defp signable(%{"name" => name} = params) when is_binary(name) and name != "" do
     with {:ok, workspace} <- workspace_of(params) do
@@ -307,10 +333,16 @@ defmodule Troupe.Gateway.LocalSources do
   end
 
   # How the person's sign-in stands: never a token, only the state, whose account it is,
-  # and why the last attempt failed.
+  # why the last attempt failed, and the scope the server wanted on top of it.
   defp auth_json(%{config: %{oauth: %{}, url: url}} = server) when is_binary(url) do
     status = server |> sign_in_of() |> OAuth.status()
-    %{"state" => to_string(status.state), "account" => status.account, "error" => status.error}
+
+    %{
+      "state" => to_string(status.state),
+      "account" => status.account,
+      "error" => status.error,
+      "step_up" => status.step_up
+    }
   end
 
   defp auth_json(_server), do: nil

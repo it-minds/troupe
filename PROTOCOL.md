@@ -337,6 +337,7 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
 | `files_skipped` | `files` — the agent, skill, command and workflow files a session found at a start and did not read, each `{kind, name, path, reason}`: on a pod, a working copy's file of a name its bundle has or a built-in agent's, which those beat unless the profile sets `repositoryOverridesBundle`; in a git worktree, one the main checkout has not committed (Decision 826); a workspace's `.troupe/` file, or directory, that is a link out of it, a skill whose `SKILL.md` can't be read, and what a workspace's `skills.json` links from outside the repository while the workspace is not trusted (Decision 829). A directory not looked into has a null `name`. Written when the list differs from the one the log last recorded, so an empty list says the files went away |
 | `fs_changed` | `path`, `hash`, `size` |
+| `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870): a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
 Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`, and `shell_started` and
@@ -921,9 +922,12 @@ session with no goal answers `conflict` with `needs: "goal"`, and one with a loo
 running answers `conflict` with its `loop_id`. It activates a dormant session.
 
 Each iteration ends with the agent's own verdict, given as a tool call and never read
-from its prose: on the loop's turns, and only there, the agent is offered
-`goal_complete {summary}`, and an iteration in which it completes that call ends the
-loop with reason `goal_complete`. An iteration that ends without one is followed by
+from its prose: on the loop's turns the agent is offered `goal_complete {summary}`, and an
+iteration in which it completes that call ends the loop with reason `goal_complete`. A
+model that binds its thinking to its tools (Claude Fable 5.1, Opus 5.5, Sonnet 5.5, or
+one whose config says `binds_thinking`) is offered it on every turn, so its tools never
+change, and a call to it on a turn that is not the loop's fails with a sentence saying no
+loop is running. An iteration that ends without one is followed by
 the next. The loop also stops when it has run `max_iterations`; when `loop_max_failures`
 (3) iterations in a row fail (the model request failed, the agent ended short or
 crashed, or the failure guard stopped the turn); when the budget question is asked (`budget`: the question stays with whoever
@@ -1099,7 +1103,9 @@ what the agent may see and a path that climbs out of a mount is refused with
 
 `hash` is the `sha256:…` of the bytes, the same one `fs_changed` carries, so a client
 can check that the file it read is the file the event announced. Reading a directory,
-or a file larger than the server's cap, is `invalid_params`.
+or a file larger than the server's cap, is `invalid_params`. A `path` of
+`scratch:/<name>` reads a scratchpad document (`scratch.list`), whose `hash` is the one
+its `scratch_updated` carries.
 
 #### `fs.upload`
 ```json
@@ -1110,7 +1116,24 @@ written.
 
 Needs `control`: putting a file into a workspace is steering the session. The write is
 recorded as an `fs_changed` event, carrying the file's `hash` and `size`, whose actor is
-the client that uploaded it, not the session.
+the client that uploaded it, not the session. `scratch:/` is read-only to it: only the
+agent's `show` puts a document on the scratchpad.
+
+#### `scratch.list`
+```json
+{"session_id": "s-9f"}
+```
+→ `{"documents": [{"name", "path", "kind", "title", "size", "hash", "version",
+"updated_at"}]}`
+
+The session's scratchpad (Decision 870): the documents its agents showed the person with
+the `show` tool, the latest version of each name, in the order each was first shown.
+Each row is what that name's last `scratch_updated` said, and `updated_at` when it was
+written. It is a fold over the log, so a dormant session answers it as a running one
+does, and a client that attaches late has the same rows from its replay. Read a
+document's words with `fs.read` of its `path`, the one read path there is. The documents
+are the session's own, beside its log rather than in its workspace: an erasure takes
+them, and a fork carries the ones its history shows.
 
 #### `agents.list`
 ```json
@@ -1536,7 +1559,7 @@ tools are `mcp.<server>.<tool>` like every other MCP tool.
 `.troupe/workflows/<name>.json` files in the workspace, each a JSON array of
 `{"name", "prompt", "agent"?, "parallel"?}` steps.
 
-#### `config.get`, `config.models`, `config.set`, `config.import`, and `config.changed`
+#### `config.get`, `config.models`, `config.set`, `config.import`, `config.organisation`, and `config.changed`
 
 The machine's own settings — the provider, key and models every local session starts
 from, and every other key of `config.yaml` — for a settings screen, so the desktop app and
@@ -1566,18 +1589,24 @@ as a person on the daemon's platform writes them, for a screen to print.
 
 `keys` is every key the schema knows (`protocol/schema/config/v1.json`), as a session in
 `workspace` would read it (`troupe config --explain`): `{"key", "value", "layer",
-"source", "default", "scopes", "secret", "label", "doc"}`. `layer` is the one that set the
-value in effect — `default`, `user`, `project`, `local`, `env` or `cli` — and
-`source` its file or variable. A secret's `value` is `****`, or the `{env:VAR}` a file
-wrote when the variable is not set; never the secret. `scopes` are the scopes `config.set`
-writes the key to here: only `user` without a workspace, for the trust list, and for a key
-marked trusted while the workspace is not; none for `version` and `$schema`. `label` is
-the name a settings page shows the key by and `doc` its help, the same in both clients and
-in the generated reference. `files` is each scope's file, `{"scope", "path", "exists"}`;
-`trusted` whether the workspace is; `warnings` what loading warned about. A file that is
-refused leaves `keys` empty and says why in `errors`. These fields were added for #57; a
-daemon from before answers without them, and a client that finds no `keys` sets no single
-key (below).
+"source", "default", "scopes", "enforced", "secret", "label", "doc"}`. `layer` is the one
+that set the value in effect — `default`, `org`, `user`, `project`, `local`, `env`, `cli`
+or `enforced` — and `source` its file or variable, or for `org` and `enforced` the plane's
+URL or the managed file's path (Decision 869). `enforced` is `{"value", "source"}` where the
+organisation enforces the key, whether or not that value is the one in effect (a lower
+value within a ceiling is), and null otherwise. A secret's `value` is `****`, or the
+`{env:VAR}` a file wrote when the variable is not set; never the secret. `scopes` are the
+scopes `config.set` writes the key to here: only `user` without a workspace, for the trust
+list, and for a key marked trusted while the workspace is not; none for `version` and
+`$schema`, and none for a key the organisation enforces. `label` is the name a settings
+page shows the key by and `doc` its help, the same in both clients and in the generated
+reference. `files` is each scope's file, `{"scope", "path", "exists"}`; `organisation` is
+where the organisation's layer is read from, `{"scope": "org", "path", "exists"}` for the
+managed file and, when the daemon keeps one, the plane's document with its URL as `path`
+and `fetched_at`; `trusted` whether the workspace is; `warnings` what loading warned about.
+A file that is refused leaves `keys` empty and says why in `errors`. These fields were added
+for #57, and `enforced` and `organisation` for #122; a daemon from before answers without
+them, and a client that finds no `keys` sets no single key (below).
 
 ```json
 {"provider": "openai", "base_url": "https://llm-gw.example/v1", "api_key": "sk-...", "auth": "bearer"}
@@ -1614,7 +1643,9 @@ JSON, and null takes the key out of that file so the layer below shows through. 
 is `user` (the default), `project` or `local`; the last two need `workspace`. The answer
 carries `"written": {"key", "scope", "path"}`. It is refused with `invalid_params` and the
 reason, and nothing written, for a key the schema does not know (with the nearest one
-that it does), `version` and `$schema`, which the writer keeps, a value the loader would
+that it does), `version` and `$schema`, which the writer keeps, a key the organisation
+enforces, whatever the scope and the value ("set by your organisation", with its value and
+where from), a value the loader would
 refuse or warn about, a scope that may not set the key — `trusted_workspaces` outside the
 user's file, a key marked trusted in the project or local file of a workspace that is not
 trusted, which names `troupe config trust` — and a file that does not parse. The same
@@ -1630,6 +1661,8 @@ client that made the change included, so a screen in one client shows what anoth
 ```
 `keys` are the keys whose values differ in that file, read before and after the write; a
 save that changed nothing sends nothing. `workspace` is there for `project` and `local`.
+When the daemon keeps a new copy of the organisation's document (below), `scope` is `org`,
+`path` the plane's URL, and `keys` the keys its defaults or its enforced set changed.
 A client reads `config.get` again for the values. A file edited by hand is not announced:
 the daemon reads the files when a session starts and at every `config.get`, so nothing
 of its own is stale, and a screen sees the edit the next time it asks.
@@ -1645,6 +1678,24 @@ reads opencode's config (Decision 828). A provider the file already names is kep
 and listed under `kept`; opencode's default model becomes `models.default` only when the file
 has none. `from` is `opencode`, the only source; with no opencode providers the call fails
 with `invalid_params`. Nothing is written when nothing would change.
+
+```json
+{"command_id": "c-15", "plane_url": "https://plane.example.com",
+ "document": {"configured": true, "provider": "openai", "defaults": {"provider": "openai", "models": {"default": "glm-5.2"}},
+              "enforced": {"approvals": "deny", "max_turns": 100}}}
+```
+`config.organisation` (`admin`; `workspace` optional) keeps a plane's `me.client_defaults`
+answer (§ the plane's methods) as this machine's copy of the organisation's document
+(Decision 869): its `defaults`, read below the user's file, and `enforced`, which holds
+every layer. A client signed in to the plane fetches it and hands it over (`troupe config
+pull`); the daemon also fetches it itself after every `identity.link` that brings a plane
+token, once the plane has served its version. An answer from a plane with no `defaults`
+is read from its old fields. It is checked as the loader reads it, and a document the
+loader would refuse is refused with `invalid_params` and the reason, the copy before it
+kept. → `{"version", "plane_url", "fetched_at", "defaults", "enforced", "path",
+"warnings", "shadowed"}`: what was kept, where (`path`, as the platform writes it), what
+reading it warns about (a key it enforces that this Troupe cannot), and `shadowed`, the
+keys its defaults set that the person's own files or variables set too and win on.
 
 #### `setup.get`, `setup.answer`
 
@@ -1716,7 +1767,8 @@ for a panel to print.
 ```
 `mcp.list` (`observe`; both optional) → `{"servers": [{"name", "layer", "source",
 "transport", "command", "args", "url", "cd", "env", "headers", "permission", "disabled",
-"refused", "trust", "notes", "oauth", "auth", "state", "tools", "error"}], "warnings": [...]}` —
+"refused", "trust", "notes", "oauth", "auth", "state", "tools", "error"}], "warnings": [...]}`
+(`auth` is `{"state", "account", "error", "step_up"}`, below) —
 every server the layers give the workspace, merged by name, the workspace's file over
 the user's over `config.yaml`. `layer` is `config`, `user` or `workspace` and `source`
 the file; `env` is the names of its variables and `headers` the names of the headers it
@@ -1837,17 +1889,40 @@ state directory and are never in an answer, an event or a log.
 {"command_id": "c-19", "name": "wiki", "workspace": "/home/me/project"}
 ```
 `mcp.sign_in` (`admin`; `workspace` or `session_id` optional, as for `mcp.list`) →
-`{"server", "url", "redirect_uri", "expires_at"}`: open `url` in a browser on the
-daemon's machine; the answer comes back to `redirect_uri`, and the daemon stops waiting
-at `expires_at`, five minutes on. `mcp.list`'s `auth` says how it stands, and every
-local session that waits for the server asks it for its tools once the sign-in lands. A
-second `mcp.sign_in` for the same server replaces the first. A server with no `oauth`,
-one whose `oauth` is refused, and a workspace-level server the workspace's question has
-not approved are `invalid_params`; a name the layers do not give is `not_found`.
+`{"server", "url", "redirect_uri", "expires_at", "scopes"}`: open `url` in a browser on
+the daemon's machine; the answer comes back to `redirect_uri`, and the daemon stops
+waiting at `expires_at`, five minutes on. `scopes` is what the person is asked to grant.
+`mcp.list`'s `auth` says how it stands, and every local session that waits for the
+server asks it for its tools once the sign-in lands. A second `mcp.sign_in` for the same
+server replaces the first. A server with no `oauth`, one whose `oauth` is refused, and a
+workspace-level server the workspace's question has not approved are `invalid_params`; a
+name the layers do not give is `not_found`.
 
-`mcp.sign_out` (`admin`, the same parameters) → `{"server", "auth"}`: the sign-in is
-forgotten on this machine, and the server's sessions show `sign_in` again. The
-provider's own session in the browser is the provider's.
+**A wider scope** (Decision 872). A server that answers a call `403` with
+`WWW-Authenticate: Bearer error="insufficient_scope", scope="…"` wants a scope the
+sign-in was not granted. The call's answer is the `sign_in_required` note with `scope`,
+the scope the server named, and `mcp.list`'s `auth` carries it as `step_up` until a
+sign-in lands. Nothing signs in by itself: the next `mcp.sign_in` the person asks for asks
+for what was granted and what the server named, at the authorization server the
+server's own metadata names (a `resource_metadata` in the `403` is not followed), and the
+tokens held are used until it lands.
+
+```json
+{"command_id": "c-22", "all": true}
+```
+`mcp.sign_out` (`admin`, the same parameters, or `all`) → `{"server", "auth",
+"revocation"}`: the sign-in is forgotten on this machine, and the server's sessions show
+`sign_in` again. Then the provider is asked to revoke the refresh token (RFC 7009) when
+its authorization server's metadata names a `revocation_endpoint`, held to the rules the
+token endpoint is (`https`, or `http` on loopback; not link-local, a cloud metadata
+address or the unspecified one), with a five-second wait. `revocation` is `{"state",
+"reason"}`: `revoked`; `failed`, with `reason`, when it refused, did not answer in time or
+could not be reached — the sign-in is forgotten all the same, and the provider still
+takes it until it runs out; `unsupported` when the metadata names no revocation endpoint;
+`none` when nothing was held. With `all: true` and no `name` it is every server signed in
+to on this machine, by whatever name and in whatever workspace, as `troupe logout` asks →
+`{"servers": [{"server", "revocation"}]}`. The provider's own session in the browser is the
+provider's.
 
 #### `mcp.tools`, `mcp.call`
 
@@ -1877,7 +1952,8 @@ its tools as a local session asks, with the person's sign-in, `state` and `error
 refreshed and made once more on a `401`, and `content` what a local session's model
 reads from the same tool — the server's text, anything else named — down to the
 `sign_in_required` note once the sign-in has run out, which `mcp.list`'s `auth` then
-shows as `expired`. A call the server could not take is `unavailable`, with
+shows as `expired`, or when the tool wants a scope the sign-in did not grant, with
+`scope` (above). A call the server could not take is `unavailable`, with
 `data.reason`. A client serving a pod's `tool.invoke` answers it with `{"content"}` as it
 came, and names the call in `command_id` by the session and the pod's `call_id`, so a
 call the pod sends again after a drop (section 8) is answered from the first rather than
@@ -2077,9 +2153,9 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `config.organisation`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or
@@ -2138,7 +2214,7 @@ ACL of each session a request names.
 `unsubscribe` on its own topics, the two listings above, and every command whose params
 require `session_id` (§6) but the five below: `session.get`, `input.send`, `turn.cancel`,
 `profile.switch`, `session.goal.*`, `session.loop.*`, `approval.respond`,
-`question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
+`question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `scratch.list`, `blob.get`,
 `mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register`, `tools.unregister`, `shell.run` and `shell.cancel`. Everything else a
 worker serves is about the pod or a path on it — `session.create`, `agents.list`,
 `workflows.list`, `memory.get`, `memory.forget`, `memory.decline`, `workspace.recent`, `workspace.search`,
@@ -2230,8 +2306,11 @@ it was serving is parked for a grace (`TROUPE_CLIENT_TOOL_GRACE_SECONDS`, 60 s,
 registers the tool again inside it — through a fresh consent, as always — is sent to that
 client as the same `tool.invoke`: same `call_id`, same `arguments`. Nobody inside the
 grace, and the call fails once, with a result naming the tool, saying its client left and
-that the call may have run on its machine before it did (Decision 861); the tool is off
-the model's list by then (`tools_unregistered`, reason `disconnected`). Troupe's own
+that the call may have run on its machine before it did (Decision 861). The registration
+is gone by then (`tools_unregistered`, reason `disconnected`), and the tool leaves the
+model's list at its next turn: a tool registered or gone in the middle of a turn changes
+the list the turn after, so the tools in front of the turn's thinking stay as they were,
+and a call to a gone one fails with a result saying so (Decision 871). Troupe's own
 clients send no `tools.unregister` when the person leaves a session: leaving is a drop.
 The grace comes out of the call's own timeout, so a dropped laptop is never a hung turn.
 
@@ -2439,7 +2518,7 @@ than an admin uses them:
 | `session.review` | control | anybody who can see the session | `{session_id}` → sets `reviewed_by`/`reviewed_at` on the session and its run, audited as `session.review` |
 | `initialize` | observe | anybody | `{protocol_version, client_info: {name, version}, capabilities}` → `{protocol_version, server_info: {name: "troupe-plane", version}, principal, client_update}`: the handshake over `/rpc`, where `principal` is what `me` answers and `client_update` is this plane's word on the client's version, or `update_required` ([Client versions](#client-versions)) |
 | `me.client_versions` | observe | anybody | `{}` → `{tui, daemon, desktop}`, each `{recommended, minimum, blocked}`: what `troupe update` installs by, asked on its own because the client that most needs it is the one `initialize` refuses |
-| `me.client_defaults` | observe | anybody | `{}` → `{configured, provider, base_url, auth, models: {default, cheap, expensive}}` — what an administrator says people's own machines should talk to (the *Client defaults* settings), for a client to pre-fill its model settings with. **Never a key**: anybody signed in may ask, so each person supplies their own. `configured` is false, and the rest null, until a provider is set |
+| `me.client_defaults` | observe | anybody | `{}` → `{configured, provider, base_url, auth, models: {default, cheap, expensive}, defaults, enforced}` — what an administrator says people's own machines should talk to (the *Client defaults* settings), for a client to pre-fill its model settings with. **Never a key**: anybody signed in may ask, so each person supplies their own. `configured` is false, and the rest null, until a provider is set. `defaults` is the same in a config file's shape, only what is set, and `enforced` the `client_enforced` setting, `{}` when unset: the organisation's document a machine reads below its person's file and holds every layer to (Decision 869, `config.organisation`). A plane from before them answers without the two, and a client reads its old fields as the defaults |
 | `me.connections.list` | observe | anybody | the MCP servers on the caller's profiles that act as *them*, each with its `slot` and whether they have `connected` it. Whether, never what: the plane can see that a slot has a version and cannot read one |
 | `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own name at the key manager (`name`, the segment of `path` under `troupe/people/`, not always their subject: Decision 755). The client exchanges it with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
 | `session.register` | control | anybody, for their own private sessions | `{session_id, device, epoch, head_hash, last_seq, object_bytes, workspace_bytes, title, claim}` → the session row. Idempotent on the id: the first call mints epoch 1, a later one is a seal report. A seal carries the `epoch` the device holds and is refused with `stale_version` if another device has moved past it; `last_seq` never goes backwards. `claim: true` takes the session over on this device, bumping the epoch conditionally — two devices sending the same `epoch` produce one winner, and the loser learns it lost on its next seal rather than by being told, and stops sealing (issue #433) |

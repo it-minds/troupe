@@ -51,6 +51,11 @@ defmodule Troupe.Plane.Web.Live.Policy do
   `admin.clients.put`, Decision 868): per component the recommended version, the minimum
   and the blocked list. It is a policy rather than a setting — three values a client is
   judged by together — and the console's redo (#56) gives it a screen, with who runs what.
+
+  What people's own machines may not go past (`client_enforced`, Decision 869) is a
+  setting of the *client defaults* group, so it is that panel's field like the others: a
+  JSON object, refused with the reason when it names a key an organisation may not
+  enforce. #56's redo gives the organisation's document a screen of its own.
   """
 
   use Phoenix.LiveView, layout: false
@@ -100,7 +105,7 @@ defmodule Troupe.Plane.Web.Live.Policy do
         {:noreply,
          socket
          |> forget(key)
-         |> assign(notice: "#{key} is now #{inspect(applied.value)}. #{applied.effect}")
+         |> assign(notice: "#{key} is now #{applied_value(applied.value)}. #{applied.effect}")
          |> load()}
 
       {:error, error} ->
@@ -246,6 +251,11 @@ defmodule Troupe.Plane.Web.Live.Policy do
       {:error, _error} -> assign(socket, teams: [])
     end
   end
+
+  # The enforced set for people's machines (Decision 869) is an object, said as the JSON
+  # it was typed as.
+  defp applied_value(value) when is_map(value), do: Jason.encode!(value)
+  defp applied_value(value), do: inspect(value)
 
   defp presence(nil), do: nil
   defp presence(""), do: nil

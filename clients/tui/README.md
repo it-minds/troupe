@@ -393,15 +393,32 @@ the latest output.
 Tokens are counted sent and received, not as one number: a tile reads
 `↑4.4k ↓3.1k`, and `↑` is what the provider billed at close to full price.
 Input it served from its prompt cache — most of a long conversation's prompt,
-at a fraction of the price — is reported separately, in the activated pane's
-side panel (`⟳ 148.0k from cache`) and in the observer's detail. Budgets spend
+at a fraction of the price — is reported separately, as `cached` in the
+activated pane's side panel and in the observer's detail. Budgets spend
 the billed part, so re-reading a cached prompt does not exhaust
 `max_input_tokens`.
 
-Those counts are the whole session's. What one turn cost is the line under it
-when it ends, never a running figure while it works:
-`turn: 3 calls · ↑ 300 sent · 3.0k cached · ↓ 120 received · $0.04`, its
-subagents' calls included, and `no price` when nothing prices the model.
+Those counts are the whole session's. What one turn cost is said when it
+ends, never as a running figure while it works, its subagents' calls included
+and `no price` when nothing prices the model. The side panel says it under
+`This turn`, with the session's totals under `Session` and, once a limit is
+near, how near:
+
+```
+This turn:
+  3 calls · $0.04
+  ↑ 300 sent · 3.0k cached
+  ↓ 120 received
+Session:
+  41 calls · $0.61
+  ↑ 1.2M sent · 310.0k cached
+  ↓ 19.0k received
+  ⚠ 82% of input tokens
+```
+
+While the next turn runs, `This turn` says `said when it ends`. Below 100 columns
+there is no side panel, and the turn's cost is a line in the transcript under the
+turn instead: `turn: 3 calls · ↑ 300 sent · 3.0k cached · ↓ 120 received · $0.04`.
 
 ### Observer
 

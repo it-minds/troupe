@@ -205,8 +205,11 @@ describe("the agents manager after #503 (D107, D112)", () => {
 
     await waitFor(() => says(`Replaced review in this repository's .troupe/agents: ${REPO}/.troupe/agents/review.md.`), "the mended file saved");
     expect(puts()[0]!["if_hash"]).toMatch(/^sha256:/);
-    await waitFor(() => agentRow("review"), "review listed");
-    expect(document.querySelector('button[aria-label="Open review to mend it"]')).toBeNull();
+    // Waited for, not asserted at once: the row that said "not read" is a row named review
+    // too, so the listing is only read again once the button to mend it has gone.
+    const mended = () => document.querySelector('button[aria-label="Open review to mend it"]') === null;
+    await waitFor(() => mended() && agentRow("review"), "review listed, with nothing left to mend");
+    expect(mended()).toBe(true);
   });
 });
 

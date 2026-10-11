@@ -25,7 +25,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe resume SESSION_ID\|latest\|--private --headless "message"` | one turn on that session, printed as run --headless prints it, then exit |
 | `troupe --remote [PLANE_URL]` | open HQ: teams, profiles and sessions on a plane |
 | `troupe login PLANE_URL` | sign in to a plane with the device flow |
-| `troupe logout [PLANE_URL]` | forget a plane's credentials and sign this machine's daemon out of it (--all: every plane) |
+| `troupe logout [PLANE_URL]` | forget a plane's credentials and sign this machine's daemon out of it (--all: every plane); without a plane named, out of your own MCP servers too, revoked at their providers |
 | `troupe whoami [PLANE_URL]` | print who the plane says you are, and your teams |
 | `troupe setup` | set up the provider, its key, the models, a first project and the daemon at login, one screen at a time; Esc leaves with nothing written |
 | `troupe config` | show the resolved providers and models (keys masked); with none, set them up |
@@ -34,7 +34,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe config migrate [--write] [PATH]` | show, or make, the rewrite to the current spellings |
 | `troupe config trust [PATH]` | let a workspace's own files set the trusted keys; --list shows them |
 | `troupe config untrust [PATH]` | take a workspace's trust back |
-| `troupe config pull [PLANE_URL]` | save the plane's default provider and models here (never a key) |
+| `troupe config pull [PLANE_URL]` | fetch the organisation's defaults and limits from the plane now (never a key) |
 | `troupe models [--refresh]` | what each provider serves, its window and its price; asked again when stale, or now with --refresh |
 | `troupe models --json [--workspace DIR] [--refresh]` | the same as one JSON object for a program: models, roles, catalog, providers; never a key |
 | `troupe doctor [--json]` | check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure |
@@ -93,6 +93,7 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 | `/hq [plane]`, `/remote` | HQ: a plane's teams, profiles and sessions. This machine's own sessions are listed alongside. Names a plane by URL; without one, the plane this machine is logged in to. For example `/hq https://troupe.example`. |  |
 | `/observer`, `/agents-tree`, `/tree` | The agent tree: every branch and subagent. Each with its state, worktree and tokens; Enter opens the agent's transcript. |  |
 | `/files` | The session's files, live. Enter opens a file, ← goes up, r reloads; a change the session makes reloads the listing by itself. |  |
+| `/scratch [name]` | The documents an agent showed you beside the chat. Plans, reports and tables the agent put on the session's scratchpad with show; Enter opens one, and a newer version reads itself again. For example `/scratch plan.md`. |  |
 
 ### Workspace
 

@@ -27,7 +27,9 @@ defmodule Troupe.Gateway.FakePlane do
 
   And `initialize`, the handshake a daemon makes when a token arrives (Decision 868): a
   method this plane does not have, as a plane from before the version policy, unless
-  `initialize_with/2` says what it answers.
+  `initialize_with/2` says what it answers. And `me.client_defaults`, the organisation's
+  document a daemon fetches after it (Decision 869), unanswered unless
+  `client_defaults_with/2` says what it is.
 
   It takes one plane token at a time, `"plane-token"` unless told otherwise, and
   `renew/2` replaces it, as a plane token running out and a client renewing it does: the
@@ -82,6 +84,13 @@ defmodule Troupe.Gateway.FakePlane do
   """
   @spec initialize_with(pid(), {:ok, map()} | {:refuse, map()}) :: :ok
   def initialize_with(state, answer), do: Agent.update(state, &Map.put(&1, :initialize, answer))
+
+  @doc """
+  What `me.client_defaults` answers from now on: the organisation's document (Decision
+  869). Never set, the plane does not answer it, and a daemon keeps the copy it had.
+  """
+  @spec client_defaults_with(pid(), map()) :: :ok
+  def client_defaults_with(state, answer), do: Agent.update(state, &Map.put(&1, :client_defaults, answer))
 
   @doc "Take `token` from now on, and refuse the one taken before."
   @spec renew(pid(), String.t()) :: :ok
@@ -331,6 +340,13 @@ defmodule Troupe.Gateway.FakePlane do
 
       nil ->
         {:rpc_error, -32_601, "method_not_found", %{"method" => "initialize"}}
+    end
+  end
+
+  defp dispatch(state, "me.client_defaults", _params) do
+    case Agent.get(state, &Map.get(&1, :client_defaults)) do
+      nil -> {:rpc_error, -32_601, "method_not_found", %{"method" => "me.client_defaults"}}
+      answer -> {:ok, answer}
     end
   end
 
