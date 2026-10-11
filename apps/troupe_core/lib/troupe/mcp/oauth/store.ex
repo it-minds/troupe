@@ -14,8 +14,9 @@ defmodule Troupe.MCP.OAuth.Store do
   user's own on Windows), and never kept as a `.previous` copy.
 
   An entry holds the tokens and what refreshing them needs (the token endpoint, the
-  client id, the resource), the account for showing, and the last failure, if the last
-  sign-in failed. Nothing else in Troupe reads this file, and nothing writes it but
+  client id, the resource), where to revoke them on signing out, the account for
+  showing, the scope a server wanted on top of the sign-in (Decision 872), and the last
+  failure, if the last sign-in failed. Nothing else in Troupe reads this file, and nothing writes it but
   `Troupe.MCP.OAuth.Tokens`, which is what keeps two refreshes from racing.
   """
 

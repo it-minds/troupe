@@ -421,6 +421,24 @@ defmodule Troupe.Client do
   def manage_sources(sid, method, params), do: impl(sid).manage_sources(sid, method, params)
 
   @doc """
+  What signing out of a person's own server told its provider, as `mcp.sign_out`'s
+  `revocation` says it (troupe-remote Decision 872), in the words the `/mcp` page and
+  `troupe logout` both use.
+  """
+  @spec revocation_text(map() | nil) :: String.t()
+  def revocation_text(%{"state" => "revoked"}), do: "the provider revoked the sign-in"
+
+  def revocation_text(%{"state" => "failed"} = revocation) do
+    why = if is_binary(revocation["reason"]), do: " (#{revocation["reason"]})", else: ""
+    "the provider was not told#{why}, so the sign-in stays good there until it runs out"
+  end
+
+  def revocation_text(%{"state" => "unsupported"}),
+    do: "the provider offers no way to revoke it, so the sign-in stays good there until it runs out"
+
+  def revocation_text(_none), do: "nothing was held to revoke"
+
+  @doc """
   The agents the session's workspace has, through the daemon (root Decision 841):
   `agents.list`, `agents.get` (with the session, so its answer names the windows of the
   session's family that run it), `agents.validate`, `agents.put` and `agents.delete`,

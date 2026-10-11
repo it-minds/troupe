@@ -1739,7 +1739,8 @@ for a panel to print.
 ```
 `mcp.list` (`observe`; both optional) → `{"servers": [{"name", "layer", "source",
 "transport", "command", "args", "url", "cd", "env", "headers", "permission", "disabled",
-"refused", "trust", "notes", "oauth", "auth", "state", "tools", "error"}], "warnings": [...]}` —
+"refused", "trust", "notes", "oauth", "auth", "state", "tools", "error"}], "warnings": [...]}`
+(`auth` is `{"state", "account", "error", "step_up"}`, below) —
 every server the layers give the workspace, merged by name, the workspace's file over
 the user's over `config.yaml`. `layer` is `config`, `user` or `workspace` and `source`
 the file; `env` is the names of its variables and `headers` the names of the headers it
@@ -1860,17 +1861,40 @@ state directory and are never in an answer, an event or a log.
 {"command_id": "c-19", "name": "wiki", "workspace": "/home/me/project"}
 ```
 `mcp.sign_in` (`admin`; `workspace` or `session_id` optional, as for `mcp.list`) →
-`{"server", "url", "redirect_uri", "expires_at"}`: open `url` in a browser on the
-daemon's machine; the answer comes back to `redirect_uri`, and the daemon stops waiting
-at `expires_at`, five minutes on. `mcp.list`'s `auth` says how it stands, and every
-local session that waits for the server asks it for its tools once the sign-in lands. A
-second `mcp.sign_in` for the same server replaces the first. A server with no `oauth`,
-one whose `oauth` is refused, and a workspace-level server the workspace's question has
-not approved are `invalid_params`; a name the layers do not give is `not_found`.
+`{"server", "url", "redirect_uri", "expires_at", "scopes"}`: open `url` in a browser on
+the daemon's machine; the answer comes back to `redirect_uri`, and the daemon stops
+waiting at `expires_at`, five minutes on. `scopes` is what the person is asked to grant.
+`mcp.list`'s `auth` says how it stands, and every local session that waits for the
+server asks it for its tools once the sign-in lands. A second `mcp.sign_in` for the same
+server replaces the first. A server with no `oauth`, one whose `oauth` is refused, and a
+workspace-level server the workspace's question has not approved are `invalid_params`; a
+name the layers do not give is `not_found`.
 
-`mcp.sign_out` (`admin`, the same parameters) → `{"server", "auth"}`: the sign-in is
-forgotten on this machine, and the server's sessions show `sign_in` again. The
-provider's own session in the browser is the provider's.
+**A wider scope** (Decision 872). A server that answers a call `403` with
+`WWW-Authenticate: Bearer error="insufficient_scope", scope="…"` wants a scope the
+sign-in was not granted. The call's answer is the `sign_in_required` note with `scope`,
+the scope the server named, and `mcp.list`'s `auth` carries it as `step_up` until a
+sign-in lands. Nothing signs in by itself: the next `mcp.sign_in` the person asks for asks
+for what was granted and what the server named, at the authorization server the
+server's own metadata names (a `resource_metadata` in the `403` is not followed), and the
+tokens held are used until it lands.
+
+```json
+{"command_id": "c-22", "all": true}
+```
+`mcp.sign_out` (`admin`, the same parameters, or `all`) → `{"server", "auth",
+"revocation"}`: the sign-in is forgotten on this machine, and the server's sessions show
+`sign_in` again. Then the provider is asked to revoke the refresh token (RFC 7009) when
+its authorization server's metadata names a `revocation_endpoint`, held to the rules the
+token endpoint is (`https`, or `http` on loopback; not link-local, a cloud metadata
+address or the unspecified one), with a five-second wait. `revocation` is `{"state",
+"reason"}`: `revoked`; `failed`, with `reason`, when it refused, did not answer in time or
+could not be reached — the sign-in is forgotten all the same, and the provider still
+takes it until it runs out; `unsupported` when the metadata names no revocation endpoint;
+`none` when nothing was held. With `all: true` and no `name` it is every server signed in
+to on this machine, by whatever name and in whatever workspace, as `troupe logout` asks →
+`{"servers": [{"server", "revocation"}]}`. The provider's own session in the browser is the
+provider's.
 
 #### `mcp.tools`, `mcp.call`
 
@@ -1900,7 +1924,8 @@ its tools as a local session asks, with the person's sign-in, `state` and `error
 refreshed and made once more on a `401`, and `content` what a local session's model
 reads from the same tool — the server's text, anything else named — down to the
 `sign_in_required` note once the sign-in has run out, which `mcp.list`'s `auth` then
-shows as `expired`. A call the server could not take is `unavailable`, with
+shows as `expired`, or when the tool wants a scope the sign-in did not grant, with
+`scope` (above). A call the server could not take is `unavailable`, with
 `data.reason`. A client serving a pod's `tool.invoke` answers it with `{"content"}` as it
 came, and names the call in `command_id` by the session and the pod's `call_id`, so a
 call the pod sends again after a drop (section 8) is answered from the first rather than

@@ -16,6 +16,8 @@ defmodule Troupe.MCPPageTest do
   import Troupe.TUIHelpers
 
   alias Troupe.Client
+  alias Troupe.Client.Daemon.Link
+  alias Troupe.Remote.RPC
 
   @stub Path.expand("../support/mcp_stub.exs", __DIR__)
 
@@ -138,9 +140,107 @@ defmodule Troupe.MCPPageTest do
     assert screen_text(pid, session) =~ "signed in as ada@example.test"
     assert [%{name: "notes", state: :ready, tools: 1}] = Client.mcp_status(sid)
 
+    # troupe-remote Decision 872: a tool that wants more than the sign-in granted. The
+    # page says what it wants, and `s` signs in for it, saying what it asks for.
+    {:ok, %{"content" => content}} =
+      Link.call("mcp.call", %{
+        name: "notes",
+        tool: "write",
+        arguments: %{"topic" => "x"},
+        command_id: RPC.command_id()
+      })
+
+    assert content =~ "notes.write"
+
+    eventually(
+      fn ->
+        press(pid, "r")
+        screen_text(pid, session) =~ "wants notes.write — s"
+      end,
+      10_000,
+      250
+    )
+
+    press(pid, "s")
+    assert_receive {:opened, wider}, 10_000
+    assert URI.decode_query(URI.parse(wider).query)["scope"] =~ "notes.write"
+    eventually(fn -> screen_text(pid, session) =~ "asking for notes.read" end)
+    assert {200, _page} = Troupe.Test.FakeOAuth.browse(wider)
+
+    eventually(
+      fn ->
+        press(pid, "r")
+        screen_text(pid, session) =~ "✓ notes  [user]  1 tools · ada@example.test"
+      end,
+      10_000,
+      250
+    )
+
     press(pid, "o")
     eventually(fn -> screen_text(pid, session) =~ "notes: signed out on this machine" end)
+    assert screen_text(pid, session) =~ "the provider revoked"
     eventually(fn -> screen_text(pid, session) =~ "sign in — s" end)
+  end
+
+  # troupe-remote Decision 872: signing out of Troupe as a whole signs the daemon out of
+  # the person's own servers too, and their provider revokes the sign-in.
+  test "troupe logout signs out of the person's own servers, and their provider is told",
+       context do
+    fake = Troupe.Test.FakeOAuth.start(self())
+    on_exit(fn -> Troupe.Test.FakeOAuth.stop(fake) end)
+
+    File.write!(
+      Path.join(context.config_home, "mcp.json"),
+      Jason.encode!(%{
+        "mcpServers" => %{
+          "notes" => %{
+            "url" => fake.mcp_url,
+            "oauth" => %{"client_id" => Troupe.Test.FakeOAuth.client_id()}
+          }
+        }
+      })
+    )
+
+    {:ok, %{"url" => url}} =
+      Link.call("mcp.sign_in", %{name: "notes", command_id: RPC.command_id()})
+
+    assert {200, _page} = Troupe.Test.FakeOAuth.browse(url)
+    assert Troupe.Test.FakeOAuth.refresh_token?(fake, "rt-1")
+    me = self()
+
+    # A daemon that is not running is not started to be told, and the sign-in is said to
+    # be kept, and why.
+    for {_id, daemon, _type, _modules} <- DynamicSupervisor.which_children(Troupe.Client.Daemons),
+        is_pid(daemon),
+        do: DynamicSupervisor.terminate_child(Troupe.Client.Daemons, daemon)
+
+    eventually(fn -> not Troupe.Protocol.Daemon.running?() end)
+
+    assert 0 == Troupe.CLI.Remote.logout(nil, say: &send(me, {:said, &1}))
+    assert Enum.any?(said(), &(&1 =~ "your sign-ins to 1 MCP server(s) are kept"))
+    refute Troupe.Protocol.Daemon.running?()
+    assert Troupe.Test.FakeOAuth.refresh_token?(fake, "rt-1")
+
+    # With it running, it signs out of the server and tells the provider.
+    {:ok, _identity} = Link.call("identity.get", %{})
+    assert 0 == Troupe.CLI.Remote.logout(nil, say: &send(me, {:said, &1}))
+
+    assert Enum.any?(
+             said(),
+             &(&1 == "signed out of the MCP server notes; the provider revoked the sign-in")
+           )
+
+    refute Troupe.Test.FakeOAuth.refresh_token?(fake, "rt-1")
+    {:ok, %{"servers" => servers}} = Link.call("mcp.list", %{})
+    assert %{"auth" => %{"state" => "signed_out"}} = Enum.find(servers, &(&1["name"] == "notes"))
+  end
+
+  defp said do
+    receive do
+      {:said, line} -> [line | said()]
+    after
+      0 -> []
+    end
   end
 
   # Decision 822's layers: a skill in the repository's `.agents/skills` and one in

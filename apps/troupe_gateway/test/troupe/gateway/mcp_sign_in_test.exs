@@ -103,14 +103,42 @@ defmodule Troupe.Gateway.MCPSignInTest do
     assert {:ok, %{"server" => %{"state" => "ready", "tools" => ["search"]}}} =
              Client.call(context.client, "mcp.check", %{"name" => "notes"})
 
-    assert {:ok, %{"server" => "notes", "auth" => %{"state" => "signed_out"}}} =
+    # Signing out tells the provider, which revokes the refresh token (Decision 872).
+    assert {:ok,
+            %{
+              "server" => "notes",
+              "auth" => %{"state" => "signed_out"},
+              "revocation" => %{"state" => "revoked", "reason" => nil}
+            }} =
              Client.call(context.client, "mcp.sign_out", %{
                "command_id" => "c-2",
                "name" => "notes"
              })
 
+    assert_received {:fake_oauth, %{path: "/tenant/revoke", body: body}}
+    assert URI.decode_query(body)["token"] == "rt-1"
+
     assert {:ok, %{"server" => %{"state" => "sign_in", "tools" => []}}} =
              Client.call(context.client, "mcp.check", %{"name" => "notes"})
+  end
+
+  test "every server signed in to is signed out of at once, as troupe logout asks", context do
+    {:ok, %{"url" => url, "scopes" => scopes}} =
+      Client.call(context.client, "mcp.sign_in", %{"command_id" => "c-6", "name" => "notes"})
+
+    assert "notes.read" in scopes
+    {200, _page} = FakeOAuth.browse(url)
+
+    assert {:ok,
+            %{"servers" => [%{"server" => "notes", "revocation" => %{"state" => "revoked"}}]}} =
+             Client.call(context.client, "mcp.sign_out", %{"command_id" => "c-7", "all" => true})
+
+    assert %{"auth" => %{"state" => "signed_out"}} = notes(context.client)
+    refute FakeOAuth.refresh_token?(context.fake, "rt-1")
+
+    # Nothing left is nothing to say.
+    assert {:ok, %{"servers" => []}} =
+             Client.call(context.client, "mcp.sign_out", %{"command_id" => "c-8", "all" => true})
   end
 
   test "a server with no oauth, one nobody named, and an untrusted workspace's are not signed in to",

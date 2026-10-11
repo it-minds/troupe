@@ -634,6 +634,17 @@ defmodule Troupe.Session.MCP do
             "sign in to #{name}: /mcp sign-in #{name}, or Sign in on the desktop app's Servers and skills"
         }
 
+      # Listing its tools wants a scope the sign-in did not grant (Decision 872).
+      {:error, {:sign_in_required, scope}} ->
+        %{
+          server: server,
+          tools: [],
+          sign_in: true,
+          error:
+            "#{name} wants the scope #{scope} on top of your sign-in: sign in again with " <>
+              "/mcp sign-in #{name}, or Sign in on the desktop app's Servers and skills"
+        }
+
       {:error, {:unauthorized, _challenge}} ->
         %{
           server: server,
