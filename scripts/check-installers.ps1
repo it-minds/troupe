@@ -48,15 +48,49 @@ function Invoke-WebRequest {
   Copy-Item -LiteralPath $from -Destination $OutFile
 }
 
-# The desktop app's uninstall entry is in the registry, which a check cannot redirect.
+# The desktop app's uninstall entry is in the registry, which a check cannot redirect: it
+# reads as absent, or as the stand-in a check puts in $CheckDesktop.Entry.
+$CheckDesktop = @{ Entry = $null; Uninstaller = $null }
 function Get-ChildItem {
-  if ("$args" -match "HKCU:|HKLM:|Registry::") { return }
+  if ("$args" -match "HKCU:|HKLM:|Registry::") {
+    if ($CheckDesktop.Entry) { return [pscustomobject]@{ PSPath = "check-installers:desktop" } }
+    return
+  }
   Microsoft.PowerShell.Management\Get-ChildItem @args
 }
+function Get-ItemProperty {
+  if ("$args" -eq "check-installers:desktop") { return $CheckDesktop.Entry }
+  Microsoft.PowerShell.Management\Get-ItemProperty @args
+}
 
-# A check starts no setup or uninstaller and stops no process.
-function Start-Process { [void]$CheckTripped.Add("Start-Process $args"); throw "check-installers: Start-Process $args" }
-function Stop-Process { [void]$CheckTripped.Add("Stop-Process $args"); throw "check-installers: Stop-Process $args" }
+# The processes running, which are the machine's, or the stand-ins a check puts in
+# $CheckProcesses, which alone are then listed.
+$CheckProcesses = New-Object System.Collections.ArrayList
+$CheckStopped = New-Object System.Collections.ArrayList
+$CheckRan = New-Object System.Collections.ArrayList
+function Get-Process {
+  if ($CheckProcesses.Count -gt 0) { return @($CheckProcesses) }
+  Microsoft.PowerShell.Management\Get-Process @args
+}
+
+# A check starts no setup or uninstaller and stops no process. The stand-in desktop app's
+# uninstaller is written down instead, and takes its entry away as the real one does, and
+# so is the stop of a stand-in process.
+function Start-Process {
+  if ($CheckDesktop.Entry -and "$args".Contains($CheckDesktop.Uninstaller)) {
+    [void]$CheckRan.Add($CheckDesktop.Uninstaller)
+    $CheckDesktop.Entry = $null
+    return
+  }
+  [void]$CheckTripped.Add("Start-Process $args"); throw "check-installers: Start-Process $args"
+}
+function Stop-Process {
+  $id = $null
+  for ($i = 0; $i -lt $args.Count - 1; $i++) { if ("$($args[$i])" -eq "-Id") { $id = $args[$i + 1] } }
+  $standIn = @($CheckProcesses | Where-Object { $_.Id -eq $id }) | Select-Object -First 1
+  if ($standIn) { [void]$CheckStopped.Add($standIn.Path); return }
+  [void]$CheckTripped.Add("Stop-Process $args"); throw "check-installers: Stop-Process $args"
+}
 
 function Read-Host([string]$Prompt) {
   [void]$CheckAsked.Add($Prompt)
@@ -95,7 +129,7 @@ exit /b 1
 1>&2 echo could not write the entry: permission denied
 exit /b 1
 :on
->"%TROUPE_CHECK_ENTRY%" echo entry
+>"%TROUPE_CHECK_ENTRY%" echo start "troupe-daemon" /min cmd /c ""%~f0" run"
 echo troupe-daemon starts at login: %TROUPE_CHECK_ENTRY%
 exit /b 0
 :off
@@ -171,15 +205,19 @@ function Set-ProcessEnv([string]$Name, $Value) {
   else { Set-Item "Env:\$Name" "$Value" }
 }
 
-# The environment one run sees, in $Home_; what it was before comes back afterwards.
-function Use-Home([string]$Name, [string]$Daemon) {
+# The environment one run sees, in $Home_; what it was before comes back afterwards. The
+# install is in the home's bin and lib, moved there by TROUPE_BIN_DIR and TROUPE_LIB_DIR,
+# or with -AtDefault where it goes when nothing moves it: under the home's LOCALAPPDATA.
+function Use-Home([string]$Name, [string]$Daemon, [switch]$AtDefault) {
   $script:Home_ = Join-Path $Work $Name
   New-Item -ItemType Directory -Force -Path $script:Home_ | Out-Null
   $script:Log = Join-Path $script:Home_ "daemon.log"
   [System.IO.File]::WriteAllText($script:Log, "")
+  $script:Bin = if ($AtDefault) { Join-Path $script:Home_ "Local\Programs\troupe" } else { Join-Path $script:Home_ "bin" }
+  $script:Lib = if ($AtDefault) { Join-Path $script:Home_ "Local\Programs\troupe-daemon" } else { Join-Path $script:Home_ "lib\troupe-daemon" }
   $vars = @{
-    TROUPE_BIN_DIR = (Join-Path $script:Home_ "bin")
-    TROUPE_LIB_DIR = (Join-Path $script:Home_ "lib\troupe-daemon")
+    TROUPE_BIN_DIR = $(if (-not $AtDefault) { $script:Bin })
+    TROUPE_LIB_DIR = $(if (-not $AtDefault) { $script:Lib })
     TROUPE_STATE_HOME = (Join-Path $script:Home_ "state")
     TROUPE_CONFIG_HOME = (Join-Path $script:Home_ "config")
     TROUPE_OPENCODE_CONFIG = (Join-Path $script:Home_ "no-opencode.jsonc")
@@ -190,7 +228,7 @@ function Use-Home([string]$Name, [string]$Daemon) {
     LOCALAPPDATA = (Join-Path $script:Home_ "Local")
     TROUPE_CHECK_LOG = $script:Log
     TROUPE_CHECK_ENTRY = (Join-Path $script:Home_ "login-entry")
-    TROUPE_CHECK_TUI = (Join-Path $script:Home_ "bin\troupe.exe")
+    TROUPE_CHECK_TUI = (Join-Path $script:Bin "troupe.exe")
     TROUPE_CHECK_DAEMON = $Daemon
     TROUPE_REPO = $null
     TROUPE_DAEMON_COMMAND = $null
@@ -209,11 +247,11 @@ function Restore-Env($Saved) { foreach ($k in $Saved.Keys) { Set-ProcessEnv $k $
 # install.ps1 with these switches (-Yes always, and -NoModifyPath on an install) in NAME's
 # home, which a later run of the same NAME finds as this one left it. What it printed is
 # in $Out, whether it threw in $Threw.
-function Invoke-Installer([string]$Name, [hashtable]$Switches, [string]$Daemon = "") {
+function Invoke-Installer([string]$Name, [hashtable]$Switches, [string]$Daemon = "", [switch]$AtDefault) {
   $Switches = $Switches.Clone()
   $Switches["Yes"] = $true
   if (-not $Switches["Uninstall"]) { $Switches["NoModifyPath"] = $true }
-  $saved = Use-Home $Name $Daemon
+  $saved = Use-Home $Name $Daemon -AtDefault:$AtDefault
   $lines = New-Object System.Collections.ArrayList
   $script:Threw = $false
   $script_ = if ($UseInstaller) { $UseInstaller } else { $Installer }
@@ -275,11 +313,54 @@ function Test-InOrder([string]$First, [string]$Second) {
   return ($a -ge 0) -and ($b -gt $a)
 }
 function Test-There([string]$Relative) { Test-Path -LiteralPath (Join-Path $script:Home_ $Relative) }
-# An entry as `troupe-daemon login on` leaves one, from whichever client wrote it.
-function Set-Entry([string]$In = $script:Home_) {
+# An entry as `troupe-daemon login on` leaves one, from whichever client wrote it: starting
+# the daemon installed in the home, or the one -Starts names.
+function Set-Entry([string]$In = $script:Home_, [string]$Starts = "") {
+  if (-not $Starts) { $Starts = Join-Path $script:Lib "bin\troupe-daemon.cmd" }
   New-Item -ItemType Directory -Force -Path $In | Out-Null
-  Set-Content -Encoding ASCII -Path (Join-Path $In "login-entry") -Value "entry"
+  Set-Content -Encoding ASCII -Path (Join-Path $In "login-entry") -Value "start `"troupe-daemon`" /min cmd /c `"`"$Starts`" run`""
 }
+
+# What an install elsewhere shares with the default one (Decision 873), as stand-ins in the
+# home: the TUI's unpacked payload in both places Burrito puts it, the desktop app's entry,
+# and processes running from the payload, from the desktop app and from troupe.exe in the
+# home's bin. The desktop app is in the default place unless -DesktopIn says where.
+function Set-Shared([string]$Bin, [string]$DesktopIn = "") {
+  $script:Payloads = @(
+    (Join-Path $script:Home_ "Roaming\.burrito\troupe_erts-0_0.0.0-check"),
+    (Join-Path $script:Home_ "Local\.burrito\troupe_erts-0_0.0.0-check"))
+  foreach ($p in $script:Payloads) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $p "bin") | Out-Null
+    Set-Content -Encoding ASCII -Path (Join-Path $p "bin\erl.exe") -Value "a stand-in"
+  }
+  if (-not $DesktopIn) { $DesktopIn = Join-Path $script:Home_ "Local\Programs\troupe-desktop" }
+  $script:DesktopExe = Join-Path $DesktopIn "Troupe.exe"
+  $CheckDesktop.Uninstaller = Join-Path $DesktopIn "uninstall.exe"
+  $CheckDesktop.Entry = [pscustomobject]@{
+    DisplayName = "Troupe"
+    DisplayVersion = "0.0.0-check"
+    UninstallString = "`"$($CheckDesktop.Uninstaller)`""
+    DisplayIcon = "`"$($script:DesktopExe)`""
+  }
+  $script:TuiAt = Join-Path $Bin "troupe.exe"
+  Set-Content -Encoding ASCII -Path $script:TuiAt -Value "a stand-in"
+  $script:PayloadTui = Join-Path $script:Payloads[0] "bin\erl.exe"
+  $CheckProcesses.Clear()
+  $id = 900001
+  foreach ($path in @($script:PayloadTui, $script:DesktopExe, $script:TuiAt)) {
+    [void]$CheckProcesses.Add([pscustomobject]@{ Id = $id; Path = $path })
+    $id++
+  }
+  $CheckStopped.Clear()
+  $CheckRan.Clear()
+}
+
+function Clear-Shared {
+  $CheckDesktop.Entry = $null
+  $CheckProcesses.Clear()
+}
+
+function Test-Payloads { @($script:Payloads | Where-Object { Test-Path -LiteralPath $_ }).Count -eq $script:Payloads.Count }
 
 # -- the checks -------------------------------------------------------------------------
 
@@ -369,12 +450,13 @@ try {
   Expect "... so the entry is gone" { -not (Test-There "login-entry") }
   Expect "... and so is the daemon" { -not (Test-There "lib\troupe-daemon") }
 
-  Invoke-Installer "old" @{}
-  Invoke-Installer "old" @{ Uninstall = $true } "old"
+  # The default install's: one elsewhere asks login off only of an entry its daemon names.
+  Invoke-Installer "old" @{} -AtDefault
+  Invoke-Installer "old" @{ Uninstall = $true } "old" -AtDefault
   Expect "-Uninstall of a daemon from before login on uninstalls" { -not $Threw }
   Expect "... asking it login off" { Test-Asked "login off" }
   Expect "... and saying nothing about its answer" { -not (Test-Said "warning") }
-  Expect "... and the daemon is gone" { -not (Test-There "lib\troupe-daemon") }
+  Expect "... and the daemon is gone" { -not (Test-There "Local\Programs\troupe-daemon") }
 
   Invoke-Installer "stuck" @{}
   Set-Entry
@@ -382,6 +464,50 @@ try {
   Expect "-Uninstall goes on when login off fails" { -not $Threw }
   Expect "... saying why" { Test-Said "permission denied" }
   Expect "... and the daemon is gone" { -not (Test-There "lib\troupe-daemon") }
+
+  # Decision 873: an install elsewhere, which every one above is (TROUPE_BIN_DIR and
+  # TROUPE_LIB_DIR in the home), removes and stops only what is in its own directories.
+  Invoke-Installer "elsewhere" @{}
+  Set-Shared $Bin
+  Set-Entry -Starts (Join-Path $Home_ "Local\Programs\troupe\troupe-daemon.cmd")
+  Invoke-Installer "elsewhere" @{ Uninstall = $true }
+  Expect "-Uninstall elsewhere uninstalls" { -not $Threw -and -not (Test-There "lib\troupe-daemon") -and -not (Test-Path $TuiAt) }
+  Expect "... stopping its own troupe first" { $CheckStopped -contains $TuiAt }
+  Expect "... and no troupe running from the unpacked payload, nor the desktop app" { $CheckStopped.Count -eq 1 }
+  Expect "... leaving the unpacked payload" { Test-Payloads }
+  Expect "... and the desktop app: its uninstaller is not run" { $CheckRan.Count -eq 0 }
+  Expect "... which the plan says" { Test-Said "leave the desktop app alone" }
+  Expect "... and another install's login entry" { (Test-There "login-entry") -and -not (Test-Asked "login off") }
+  Expect "... which the plan says too" { Test-Said "it starts another install's" }
+  Clear-Shared
+
+  Invoke-Installer "elsewhere-clean" @{}
+  Set-Shared $Bin
+  Invoke-Installer "elsewhere-clean" @{ CleanInstall = $true }
+  Expect "-CleanInstall elsewhere installs again" { -not $Threw -and (Test-There "lib\troupe-daemon") }
+  Expect "... having stopped and removed its own troupe" { ($CheckStopped -contains $TuiAt) -and -not (Test-Path $TuiAt) }
+  Expect "... and nothing else" { $CheckStopped.Count -eq 1 }
+  Expect "... leaving the unpacked payload and the desktop app" { (Test-Payloads) -and $CheckRan.Count -eq 0 }
+  Clear-Shared
+
+  Invoke-Installer "elsewhere-desktop" @{}
+  Set-Shared $Bin -DesktopIn (Join-Path $Bin "desktop")
+  Invoke-Installer "elsewhere-desktop" @{ Uninstall = $true }
+  Expect "a desktop app installed in its directories goes with an install elsewhere" { -not $Threw -and $CheckRan.Count -eq 1 }
+  Expect "... stopped first" { $CheckStopped -contains $DesktopExe }
+  Expect "... and the unpacked payload still stays" { Test-Payloads }
+  Clear-Shared
+
+  Invoke-Installer "default" @{} -AtDefault
+  Set-Shared $Bin
+  Set-Entry -Starts (Join-Path $Home_ "bin\troupe-daemon.cmd")
+  Invoke-Installer "default" @{ Uninstall = $true } -AtDefault
+  Expect "-Uninstall of the default install uninstalls" { -not $Threw -and -not (Test-There "Local\Programs\troupe-daemon") }
+  Expect "... running the desktop app's uninstaller" { $CheckRan.Count -eq 1 }
+  Expect "... clearing the unpacked payload" { @($Payloads | Where-Object { Test-Path -LiteralPath $_ }).Count -eq 0 }
+  Expect "... having stopped troupe, troupe running from the payload and the desktop app" { $CheckStopped.Count -eq 3 }
+  Expect "... and taking back the login entry, whichever daemon it starts" { Test-Asked "login off" }
+  Clear-Shared
 
   Expect "nothing was started or stopped" { $CheckTripped.Count -eq 0 }
 
