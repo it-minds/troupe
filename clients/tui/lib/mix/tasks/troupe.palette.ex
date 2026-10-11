@@ -92,7 +92,13 @@ defmodule Mix.Tasks.Troupe.Palette do
     {:muted, "text.muted", :dark_gray,
      "what is there to be read second: the status line, greyed rows, reasoning, tool notes"},
     {:rail, "border.strong", :dark_gray,
-     "code and quote rails, line numbers, the scrollbar, an unfocused box"}
+     "code and quote rails, line numbers, the scrollbar, an unfocused box"},
+    # A background, the one the TUI paints (TUI Decision 161). The hover step is the one
+    # token that moves away from both a dark terminal's black and a light one's white in
+    # every theme, which a terminal whose own background is unknown needs; with sixteen
+    # colours there is no step to take, and the frame's rail carries it alone.
+    {:surface, "bg.hover", nil,
+     "the rendered surface under a frame's rows: one step from the terminal's own background"}
   ]
 
   # Two cuts of the mask, by width in cells: the empty screen's and HQ's header.

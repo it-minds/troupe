@@ -327,7 +327,7 @@ ticked set); Alt-Enter (or Ctrl-J) puts a newline in the box instead of
 sending; Tab chooses the agent the window runs, each with its instruction beside it
 (`/plan` → Tab, `build` → "go" is plan-then-build; the window's title says which agent it
 runs); `xx` (x twice) cancels and removes the window; Tab on the command line completes command names and the window paths for `/merge`, `/discard`, `/cancel`, `/dismiss`; `dd`
-dismisses a finished window, keeping its worktree; `e` expands tool output; Ctrl-Y copies the
+dismisses a finished window, keeping its worktree; `e` opens the turn you are reading, every frame of it, and closes it again; Ctrl-Y copies the
 transcript you are reading to the clipboard; `@file` completes paths;
 Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo complete <n>`, `/todo cancel <n>` (the task's
 number in the side panel) and `/todo add <text>` edit the activated branch's task list. Any other
@@ -350,13 +350,52 @@ on iTerm2 and Terminal.app, Shift on GNOME Terminal, Konsole and most X11 termin
 pane still scrolls with PgUp/PgDn, ↑/↓ and End. With nothing selected, `Ctrl-Y` and `/copy` copy a
 whole transcript, which no drag across a scrolling pane can.
 
-Reading a transcript: replies are rendered rather than printed raw. Headings,
-bullets, quotes and rules read as such, `inline code` and **bold** keep their
-emphasis without their markers, and a fenced code block gets a rule with its
-language on it, a rail down its left and full syntax highlighting. A file an
-agent read is shown as numbered source, its line numbers in their own column
-and its indentation intact. The same colours run through diffs and tool calls,
-by outcome.
+Reading a transcript: a turn shows its answer, not its working. Everything rendered from
+something is a frame — the model's prose, a code block, a diff, a tool call and what came
+back, reasoning, data — on a surface of its own, one step from the terminal's background,
+with a rail, `▎`, down its left; what you typed and the notes between turns are not on it.
+By default (`quiet`) a turn's reasoning, its calls and the prose between them are one
+line where they began, above the answer:
+
+```
+> fix the failing test
+▸ 7 steps · 1 failed · grep, read_file, edit_file · 14s
+✗ read_file nope · no such file: nope · 2s
+▎ ## Fixed
+▎ The parser keeps the last line now.
+```
+
+`e` opens the turn you are reading (the last one while the pane follows the tail, the one
+at the top of the view when you have scrolled) with every frame in it, as `everything`
+draws it, and `e` again closes it. `/detail quiet`, `/detail tools` or
+`/detail everything` changes how much of every turn is open for this session's screen,
+and draws the whole history again: `tools` opens each call's frame under the strip and
+keeps reasoning to its header (`▸ thinking · 12s`), `everything` collapses nothing, which
+is what a bug report wants. The default for every session is the `transcript.detail`
+setting, in `/settings`. Nothing in the session's log changes either way. Whatever the
+level, a call that failed is open with its error, an approval or a question waits in the
+reserved colour, and everything after a budget ran out is open. A frame longer than 24
+lines shows its first 20 and `… 42 more lines`, and opening its turn shows the rest in
+place; a scratchpad document stays a card that `/scratch` opens.
+
+Replies are rendered rather than printed raw. Headings, lists (nested ones indented, each
+level its own marker, `•` `◦` `▪`), tables, quotes and rules read as such, `inline code`
+and **bold** keep their emphasis without their markers, and a fenced block is a frame of
+its own inside the reply: code with its language (and its path when the fence names one),
+a rail down its left and full syntax highlighting; a `diff` with its path and `+n −m`;
+`csv`, `tsv` or `json` as a table with its row count, or as written when it is not one. A
+file an agent read is shown as numbered source, its line numbers in their own column and
+its indentation intact. What the TUI does not draw it leaves as written: raw HTML, images,
+footnotes, and a table wider than 100 columns, under a line that says so. The same
+colours run through diffs and tool calls, by outcome.
+
+While a turn works, the line under it says what is running, how many and for how long,
+after a few words from the theatre: `◐ the actors are powdering their nose — thinking
+(00:12)`, `◐ reading the script — running 2 tools: read_file a.ex, list_files lib
+(00:06)`. The facts are always there; the words never repeat within a turn, and are not
+there at all when a turn waits on you, in a window's tile, or in `troupe run --headless`,
+`troupe bench` or anything `--json` prints. The design behind all of this, which the
+desktop app follows too, is [docs/design/frames.md](../../docs/design/frames.md).
 
 Colours are the GUI's themes, generated from the same design tokens: Afterglow by
 default, or Signal, Footlight or Limelight — the `theme` setting in `/settings`, which is
@@ -371,9 +410,11 @@ its agent works, ◑ in the reserved colour while it needs you, ⏺ done and not
 rest or not yet asked anything, ✗ failed. Troupe uses as many
 colours as the terminal says it has: exact colours where `COLORTERM` is `truecolor` or
 `24bit` and in Windows Terminal, the nearest of 256 where `TERM` names `256color`, the
-terminal's own sixteen otherwise, and none under `NO_COLOR`. It never paints the
-background, so it sits on whatever theme the terminal already has; a light background
-reported in `COLORFGBG` gets the light values. `TROUPE_COLORS` overrides what the
+terminal's own sixteen otherwise, and none under `NO_COLOR`. It paints no background but
+a frame's, one step from the terminal's own, with exact colours and 256 (with sixteen or
+none the rail alone marks a frame, in the same rows and columns), so it sits on whatever
+theme the terminal already has; a light background reported in `COLORFGBG` gets the light
+values. `TROUPE_COLORS` overrides what the
 terminal says: `truecolor`, `256`, `16` or `none`, and `light` or `dark`
 (`TROUPE_COLORS=256,light`).
 
@@ -381,8 +422,8 @@ The activated pane follows the tail until you scroll —
 PgUp/PgDn, Home/End, ↑/↓ (while nothing is typed) or the mouse wheel; the
 title says where you are (`↕ 120–150/400 · 12 new`) and End (or scrolling to
 the bottom, sending input, answering) follows again. Tool output keeps its
-indentation, tabs included; a collapsed tool line says what came back
-(`· 300 lines`, `· +3 -1`, `· exit 1 (12 lines)`) and `e` opens it in full,
+indentation, tabs included; a tool's header says what came back and how long it took
+(`· 300 lines`, `· +3 -1`, `· exit 1 (12 lines) · 4s`), and its frame holds the output,
 with the diff for an edit you were asked to approve. Whatever a branch is
 waiting on is the last thing in the transcript, diff and all, so it can be
 read at any width. `←`/`→` switch between the branch's agents so a subagent's
@@ -502,7 +543,9 @@ change goes, PgUp/PgDn or the wheel scrolls the help, Esc goes back.
 The daemon says what each setting is, and writes a change (`config.get` and
 `config.set`), so the page and the desktop app always agree; a change made in one
 shows on the other while it is open. Watch mode applies to the running session
-immediately; everything else to the sessions and branches started from then on. A
+immediately, and so do the theme, blinking and `transcript detail` (a menu of `quiet`,
+`tools` and `everything`), which this screen draws by at once unless `/detail` set this
+session's own; everything else to the sessions and branches started from then on. A
 change is written, under its current name (`models.default`, never the old
 `model`), to the file the value on screen came from — the project's
 `.troupe/config.yaml`, its `config.local.yaml`, or your own `config.yaml` — and a

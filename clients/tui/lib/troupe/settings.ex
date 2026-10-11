@@ -17,15 +17,16 @@ defmodule Troupe.Settings do
   A change is `config.set` with the scope it is written to, which `target/3` picks: the
   one the person chose on the page, else the file the value on screen came from, else the
   user's own. Nothing here writes a file. `watch` is the one setting a session takes live,
-  through the protocol (`Troupe.Client.put_setting/4`), and the theme and blinking are
-  the TUI's own, which it takes the moment the daemon says they changed; everything else
-  is for the next session.
+  through the protocol (`Troupe.Client.put_setting/4`), and the theme, blinking and
+  `transcript.detail` (TUI Decision 161, a menu of its three levels) are the TUI's own,
+  which it takes the moment the daemon says they changed; everything else is for the next
+  session.
   """
 
   alias Troupe.Config
   alias Troupe.Config.Schema
 
-  @type type :: :bool | :int | :float | :string | :model | :theme
+  @type type :: :bool | :int | :float | :string | :model | :theme | :detail
   @type effect :: :now | :next_run
 
   @type field :: %{
@@ -51,8 +52,8 @@ defmodule Troupe.Settings do
           files: %{String.t() => String.t()}
         }
 
-  # The one setting a running session takes at once, and the two the TUI takes itself.
-  @live ["watch", "ui.theme", "ui.blink"]
+  # The one setting a running session takes at once, and the three the TUI takes itself.
+  @live ["watch", "ui.theme", "ui.blink", "transcript.detail"]
 
   # The `ui` keys the terminal acts on; the rest are the desktop app's.
   @terminal_ui [["ui", "theme"], ["ui", "blink"]]
@@ -77,6 +78,7 @@ defmodule Troupe.Settings do
 
   defp type(["models" | _], :string), do: :model
   defp type(["ui", "theme"], :string), do: :theme
+  defp type(["transcript", "detail"], {:enum, _levels}), do: :detail
   defp type(_path, :boolean), do: :bool
   defp type(_path, {:integer, _min}), do: :int
   defp type(_path, :fraction), do: :float
@@ -226,6 +228,13 @@ defmodule Troupe.Settings do
     end
   end
 
+  def parse(%{type: :detail, key: key}, text) do
+    case Troupe.UI.TUI.Model.detail(text) do
+      nil -> {:error, "#{key} is quiet, tools or everything"}
+      level -> {:ok, Atom.to_string(level)}
+    end
+  end
+
   def parse(%{type: type, key: key}, text) when type in [:string, :model, :theme] do
     case String.trim(text) do
       "" -> {:error, "#{key} cannot be empty"}
@@ -267,6 +276,18 @@ defmodule Troupe.Settings do
         notes: [theme.description, "#{theme.reserved} when you are needed", theme.reserved]
       }
     end
+  end
+
+  # How much of a transcript is open (TUI Decision 161), one of three.
+  def choices(%{type: :detail}, _cfg, _current) do
+    [
+      {"quiet", "a turn's answer, its working one strip above it", "the answer, a strip"},
+      {"tools", "tool calls open, reasoning collapsed", "tool calls open"},
+      {"everything", "nothing collapsed, as a bug report wants it", "nothing collapsed"}
+    ]
+    |> Enum.map(fn {value, long, short} ->
+      %{value: value, label: value, notes: [long, short, ""]}
+    end)
   end
 
   def choices(_field, _cfg, _current), do: []

@@ -36,6 +36,7 @@ defmodule Troupe.UI.TUI.Palette do
     * `:hunk` — a diff's file and hunk headers
     * `:muted` — what is there to be read second: the status line, greyed rows, reasoning, tool notes
     * `:rail` — code and quote rails, line numbers, the scrollbar, an unfocused box
+    * `:surface` — the rendered surface under a frame's rows: one step from the terminal's own background
   """
   @type role ::
           :needs_you
@@ -53,6 +54,7 @@ defmodule Troupe.UI.TUI.Palette do
           | :hunk
           | :muted
           | :rail
+          | :surface
 
   @typedoc "A pixel of the mask: `?o` edge, `?f` lit half, `?e` solid eye, `?c` cut eye, `?.` none."
   @type mask :: [String.t()]
@@ -179,6 +181,12 @@ defmodule Troupe.UI.TUI.Palette do
         dark: %{rgb: {104, 100, 98}, x256: 241},
         light: %{rgb: {146, 142, 135}, x256: 245},
         x16: :dark_gray
+      },
+      surface: %{
+        token: "bg.hover",
+        dark: %{rgb: {28, 28, 43}, x256: 234},
+        light: %{rgb: {236, 227, 207}, x256: 254},
+        x16: nil
       }
     },
     signal: %{
@@ -271,6 +279,12 @@ defmodule Troupe.UI.TUI.Palette do
         dark: %{rgb: {58, 66, 76}, x256: 238},
         light: %{rgb: {151, 158, 167}, x256: 247},
         x16: :dark_gray
+      },
+      surface: %{
+        token: "bg.hover",
+        dark: %{rgb: {36, 41, 49}, x256: 235},
+        light: %{rgb: {228, 232, 237}, x256: 254},
+        x16: nil
       }
     },
     footlight: %{
@@ -363,6 +377,12 @@ defmodule Troupe.UI.TUI.Palette do
         dark: %{rgb: {54, 72, 93}, x256: 238},
         light: %{rgb: {152, 167, 182}, x256: 248},
         x16: :dark_gray
+      },
+      surface: %{
+        token: "bg.hover",
+        dark: %{rgb: {34, 48, 64}, x256: 236},
+        light: %{rgb: {226, 233, 241}, x256: 254},
+        x16: nil
       }
     },
     limelight: %{
@@ -455,6 +475,12 @@ defmodule Troupe.UI.TUI.Palette do
         dark: %{rgb: {74, 69, 52}, x256: 238},
         light: %{rgb: {154, 146, 124}, x256: 101},
         x16: :dark_gray
+      },
+      surface: %{
+        token: "bg.hover",
+        dark: %{rgb: {44, 41, 33}, x256: 235},
+        light: %{rgb: {231, 225, 209}, x256: 254},
+        x16: nil
       }
     }
   }
