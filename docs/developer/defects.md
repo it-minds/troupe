@@ -554,8 +554,6 @@ Found by the #410 fixer, 2026-10-04.
   running and holding the pipe.
 - `troupe bench --live` prints the history path with mixed separators on Windows;
   `Troupe.Paths.display/1` would print it the platform's way.
-- The embedded daemon on Windows with `TROUPE_DAEMON_SOCKET` set but empty fails with
-  `{:listen_failed, "unix:", :eafnosupport}`; an empty value should count as unset.
 - A daemon started with only the `TROUPE_*_HOME` variables pointing at scratch still
   writes `%LOCALAPPDATA%\troupe\daemon.json`, which then names a daemon that is gone.
 - `scripts/dev-check` doesn't run `mix troupe.bench` (about 10 s), so a change past a
@@ -1035,17 +1033,8 @@ Found by the #516 fixers, 2026-10-09.
 
 ### D102 - Onboarding after #516's second half (low)
 
-- A retired file that has already been onboarded still says "not read: run troupe onboard"
-  in `context.get`; the loader doesn't consult `.troupe/onboarded.json`.
-- The first-session notice looks only for other tools' files at the root, so a repository
-  whose only such file is nested isn't told.
-- A second `troupe onboard` prints a "said already" skipped line for every instruction file,
-  every run, instead of counting them as unchanged.
 - An item `GEMINI.md` adds after `CLAUDE.md`'s list joins the proposed `AGENTS.md` as a
   separate block, a loose list.
-- A glob in opencode's `instructions` is expanded with `Path.wildcard`, which ignores
-  `.gitignore` and `node_modules`: a broad `**/*.md` proposes every Markdown file. Nothing
-  is written unasked, but the proposal can be huge.
 - The person's global opencode `instructions` (`~/.config/opencode/opencode.json`) aren't
   onboarded, only the workspace's.
 - On a machine a worker runs on (`TROUPE_WORKER_AUTOSTART=true`), `troupe bench` and `troupe
@@ -1053,8 +1042,6 @@ Found by the #516 fixers, 2026-10-09.
 - A first session start in a workspace with other tools' files walks the tree and surveys
   the sources synchronously, once per onboarding version: a one-off delay in a very large
   repository.
-- `Setup.detect/0` (`setup.get`) reads opencode's `auth.json`, which holds keys, only to
-  list provider names for the copy offer.
 
 Found by the #516 fixers, 2026-10-10.
 
@@ -1121,13 +1108,9 @@ Found by the #502 audit, 2026-10-10.
 - A workspace whose other tools' files give nothing to write (a `CLAUDE.md` linked to
   `AGENTS.md`) is planned at every session start, since the notice now repeats until
   answered.
-- `onboard.apply` and `onboard.decline` still act outside a git repository, where the plan
-  is empty; `troupe onboard` runs wherever it is asked (Decision 835 says so).
-- `memory.get` (scope `observe`) answers the brief at any path the daemon can read, as
-  `onboard.plan` did before it moved to `admin`.
-- No method answers "can a model be asked in this workspace": `setup.get`'s `usable` is
-  the machine's, so the desktop app's librarian start can't apply the workspace's own key
-  problem as the TUI does (`Config.key_problem`).
+- The desktop app's librarian start still reads `setup.get`'s `usable`, which is the
+  machine's; `memory.get`'s `model` now says whether a model can be asked under the
+  workspace's own config (Decision 854), as the TUI's `Config.key_problem` check does.
 - The desktop app logged React's "two children with the same key" for workspace paths on
   every poll (`views/Local.tsx` keys rows by `path`), so `worktree.list` or
   `workspace.recent` may answer one path twice on Windows (unconfirmed).
@@ -1136,21 +1119,9 @@ Found by the #516 third-wave and #248 desktop fixers, 2026-10-10.
 
 ### D111 - Repository memory after #553 and #557 (low)
 
-- Ignored and untracked anchors are refused when a fact is written, but an anchor read
-  back from a committed `facts.jsonl` (say `.env`) is still hashed to work out its status
-  at every prompt. Status is never stored or sent, so this tells only the local session
-  whether a committed hash matches; the fix is the tracked check on the read path, cached
-  by size and mtime (Decision 839 records it as not done).
-- `Troupe.Session.Memory.note/3` and `put_section/4` have no callers left in `lib`, and
-  write `by` as `agent:<path>` where `remember` writes `agent:<profile>`.
-- `remember` still takes the old `section`/`text` form, mapped onto facts, for one
-  release.
-- A fact's `scope` isn't checked to be a glob.
 - Two daemons on one repository each re-read before writing, but a write replaces the
   whole `facts.jsonl`: the last writer wins a narrow race.
 - The tool definitions are 12,827 of the bench's 13,500 bytes since `recall`.
-- On Windows git's pathspecs are case-sensitive, so an anchor typed in another case than
-  the committed name is refused as untracked.
 - TUI Decision 54 still describes the file-count drift Decision 838 removed (a supersede
   can't cross the two numberings).
 

@@ -2,9 +2,10 @@ defmodule Troupe.Config.OpenCode do
   @moduledoc """
   Reads provider definitions from opencode's `opencode.jsonc` (and keys from its
   `auth.json`) for the one-time copy into Troupe's own `config.yaml`
-  (`Troupe.Config.ModelSettings.import_opencode/1`), and for the first run to offer it
-  (`Troupe.Setup.detect/0`). Nothing else reads them: a session's configuration never
-  comes from opencode's files (Decision 828).
+  (`Troupe.Config.ModelSettings.import_opencode/1`), and their names alone for the first
+  run to offer it (`Troupe.Setup.detect/0`, through `provider_names/0`, which reads no
+  key). Nothing else reads them: a session's configuration never comes from opencode's
+  files (Decision 828).
 
   Read from `provider.<name>`: `options.baseURL`, `options.apiKey`, `options.authToken`
   (a bearer token, which is how a gateway in front of the Anthropic API is usually
@@ -70,6 +71,24 @@ defmodule Troupe.Config.OpenCode do
 
       _ ->
         %{}
+    end
+  end
+
+  @doc """
+  The names of the providers opencode's config defines, sorted, and nothing else: what a
+  first run offers to copy (`Troupe.Setup.detect/0`). Neither `auth.json`, which holds
+  keys, nor a `{file:path}` a provider's options name is read, nor a variable looked at
+  (Decision 854): naming a provider needs none of them, and the copy reads them when the
+  person asks for it.
+  """
+  @spec provider_names() :: [String.t()]
+  def provider_names, do: provider_names(config_path())
+
+  @spec provider_names(String.t()) :: [String.t()]
+  def provider_names(config_path) do
+    case read_config(config_path) do
+      %{"provider" => provs} when is_map(provs) -> provs |> Map.keys() |> Enum.sort()
+      _ -> []
     end
   end
 

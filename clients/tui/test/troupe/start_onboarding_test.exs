@@ -16,7 +16,7 @@ defmodule Troupe.StartOnboardingTest do
 
   @claude "# Rules\n\nRun the tests with `mix test` before you commit.\n"
   @style "---\nalwaysApply: true\n---\nBe brief.\n"
-  @overview {:tools, [{"remember", %{"section" => "overview", "text" => "a fixture repository"}}]}
+  @overview {:tools, [{"remember", %{"kind" => "overview", "claim" => "a fixture repository"}}]}
 
   defp fixture(files), do: git_init!(tmp_workspace(files))
 

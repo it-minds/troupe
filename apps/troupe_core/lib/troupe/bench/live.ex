@@ -441,7 +441,7 @@ defmodule Troupe.Bench.Live do
       ctx = %{scenario: scenario, workspace: root, events: events, marks: %{}}
       ctx = Map.put(ctx, :outcome, Scenario.outcome(scenario, root))
       {_metrics, checks} = scenario.measure.(ctx)
-      tool_calls = tool_calls(events, acc.tool_ms, &Blobs.resolve(sid, root, &1))
+      tool_calls = tool_calls(events, acc.tool_ms, &Blobs.resolve(sid, root, state_dir, &1))
       record(plan, ctx, acc, wall, error(ending, events, plan), checks, tool_calls)
     after
       :telemetry.detach(handler)

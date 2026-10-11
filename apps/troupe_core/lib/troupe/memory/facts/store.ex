@@ -211,18 +211,6 @@ defmodule Troupe.Memory.Facts.Store do
       else: {:reply, {:error, "no fact #{id} is kept in this repository's memory"}, tables}
   end
 
-  def handle_call({:replace, kind, new, head, now}, _from, tables) do
-    tables = fresh(tables)
-    kept = Enum.reject(facts(tables), &(&1["kind"] == kind))
-
-    facts =
-      Enum.reduce(new, kept, fn fact, acc ->
-        if Enum.any?(acc, &same?(&1, fact)), do: acc, else: acc ++ [fact]
-      end)
-
-    reply(tables, verified(facts, now), stamped(meta(tables), head, now), :ok)
-  end
-
   def handle_call({:stamp, head, now}, _from, tables) do
     tables = fresh(tables)
 

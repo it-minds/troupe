@@ -1316,7 +1316,7 @@ it can and shows the rest greyed with the reason. Reading the table wakes nothin
 `mix check`", "scope": null, "anchors": [{"path": "mix.exs", "hash": "9f2c...e1"}],
 "evidence": {"session": "s_01J...", "seq": 412, "head": "7f8a221", "exit_status": 0, "by":
 "librarian"}, "created_at": "2026-10-10T09:00:00Z", "verified_at": "2026-10-10T09:00:00Z",
-"status": "current"}]}`
+"status": "current"}], "model": {"usable": true, "reason": null}}`
 
 The **project brief**: what earlier agents learned about the repository, read into
 every agent's system prompt and written by the `remember` tool and the `librarian`
@@ -1350,7 +1350,15 @@ was last checked. `status` is computed as the answer is made, never stored: `cur
 both of which a client shows as "may no longer be true", and `unanchored` (no anchors: it
 ages out by `verified_at`). `generated: true` says `text` and `sections` are a view of the
 facts, rewritten whenever they change. A daemon from before facts sends neither key, and a
-client shows the brief as it did.
+client shows the brief as it did. In a repository an anchor git does not track (ignored, or
+never added) is `missing` and never hashed, as `remember` refuses to write one.
+
+`model` says whether a model can be asked under the workspace's own config (Decision 854):
+`usable`, and when it is `false` the `reason` in words (`anthropic has no key, so no model
+can be asked`, or why a `{env:VAR}` the key reads was refused). `setup.get`'s `usable` is
+the machine's; a client starting a `librarian` on the workspace reads this one. A daemon
+from before it sends no `model`. `control`: the path is any the client names, and reading a
+brief there may migrate it, or read a person's edit back, into facts.
 
 #### `memory.forget` → `{"command_id", "workspace", "id"}` (`id` optional)
 
@@ -1411,7 +1419,9 @@ never over a file that changed since it was shown. `action` is `created` or `rep
 id that names no file the plan holds now is refused with a sentence. Once a call has
 answered every file the plan held, the workspace is recorded as onboarded under this
 build's rules. `admin`: it writes into the repository and into the person's config
-directory.
+directory. Outside a git repository, where the plan is due nothing, it and
+`onboard.decline` are refused (`invalid_params`, with the sentence) and nothing is written
+or remembered (Decision 854); `troupe onboard` still runs wherever it is asked to.
 
 #### `onboard.decline` → `{"workspace", "ids": [...]}` or `{"workspace", "all": true}` (`command_id` optional)
 → `{"declined": n}`. Says no to the files named, or to all of them: each is not proposed
@@ -2044,8 +2054,8 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
-| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
+| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all

@@ -56,7 +56,10 @@ defmodule Troupe do
         profile: profile,
         parent: Keyword.get(session_opts, :parent),
         kind: kind_of(previously, session_opts),
-        owner: owner_of(previously, session_opts)
+        owner: owner_of(previously, session_opts),
+        # Where its log and blobs are, which the index reads it from once it is dormant and
+        # an erasure deletes (Decision 855).
+        state_dir: Keyword.fetch!(session_opts, :config).state_dir
       })
 
       # The event that says what this session is, so a listing can be rebuilt from the
@@ -454,12 +457,12 @@ defmodule Troupe do
   @spec attach(String.t()) :: :ok
   def attach(session_id) do
     Events.attach(session_id)
-    Unseen.seen(session_id)
+    Unseen.seen(session_id, state_dirs())
   end
 
   @spec detach(String.t()) :: :ok
   def detach(session_id) do
-    Unseen.seen(session_id)
+    Unseen.seen(session_id, state_dirs())
     Events.detach(session_id)
   end
 
@@ -520,7 +523,18 @@ defmodule Troupe do
   def events(session_id) do
     Log.replay(session_id)
   catch
-    :exit, _ -> Log.read_session(session_id)
+    :exit, _ -> off_disk(session_id)
+  end
+
+  # A session that is not running, read from its log wherever its config put it: under
+  # any state directory this daemon keeps sessions in (Decision 855).
+  defp off_disk(session_id), do: Log.read_session(session_id, state_dirs())
+
+  # Those state directories, or the platform's alone while the index is not there to say.
+  defp state_dirs do
+    Index.roots()
+  catch
+    :exit, _ -> [nil]
   end
 
   @doc "Turn watch mode on or off, reporting which backend took over; a pod's session refuses."
@@ -533,29 +547,52 @@ defmodule Troupe do
   The session itself is not gone: it becomes dormant, which is a state its log
   records, so a client that reconnects can tell "stopped on purpose" from "the daemon
   died".
+
+  In the calling process, and answered once the tree is gone (Decision 855): the stop is
+  claimed first (`Troupe.Sessions.stopping?/1`), so `activate/2` does not hand a command
+  to a tree on its way down; then `session_dormant` is written; then the tree is shut
+  down, and killed after thirty seconds, without holding up any other session's start or
+  stop. A second stop of a session already being stopped waits for that one and writes
+  nothing.
   """
   @spec stop_session(String.t()) :: :ok | {:error, :not_found}
   def stop_session(session_id) do
-    # The last word before the tree comes down, and only where there is still somewhere
-    # to write it. A live session does not imply a live log: the tree is `rest_for_one`
-    # with `Log` first, so a session already on its way down has lost its log while its
-    # supervisor is still terminating — and two callers stopping the same session, which
-    # is ordinary at shutdown, race exactly there. Asking the registry for the log rather
-    # than for the session is the difference between a quiet no-op and an exit in
-    # whoever called this.
+    case Registry.whereis({:session, session_id}) do
+      nil -> {:error, :not_found}
+      pid -> stop_tree(session_id, pid)
+    end
+  end
+
+  defp stop_tree(session_id, pid) do
+    if Registry.first?({:stopping, session_id}) do
+      try do
+        dormant(session_id)
+        Sessions.stop_session(session_id)
+      after
+        Registry.release({:stopping, session_id})
+      end
+    else
+      Sessions.await_down(pid)
+    end
+  end
+
+  # The last word before the tree comes down, and only where there is still somewhere to
+  # write it. A live session does not imply a live log: the tree is `rest_for_one` with
+  # `Log` first, so a session already on its way down has lost its log while its
+  # supervisor is still terminating. Asking the registry for the log rather than for the
+  # session is the difference between a quiet no-op and an exit in whoever called this.
+  defp dormant(session_id) do
     if Registry.whereis({:log, session_id}) do
       Log.append(session_id, Session.root_path(), :session_dormant, %{
         "last_seq" => head_seq(session_id)
       })
     end
-
-    Sessions.stop_session(session_id)
   catch
     # The log went between the lookup and the call. Nothing is lost that was not already
     # lost: the events are on disk and `session_dormant` is a marker, not a fact anything
     # is rebuilt from.
-    :exit, {:noproc, _} -> Sessions.stop_session(session_id)
-    :exit, {:normal, _} -> Sessions.stop_session(session_id)
+    :exit, {:noproc, _} -> :ok
+    :exit, {:normal, _} -> :ok
   end
 
   @doc "Sessions recorded on disk for a workspace, newest first."
@@ -619,18 +656,50 @@ defmodule Troupe do
   dormant.
 
   `:client` is the client that woke it, which its model calls name (Decision 787).
+
+  A session being stopped is not handed out (Decision 855): the command waits for its
+  tree to be gone, up to five seconds, and wakes it afresh, which is what it would have
+  done a moment later; a stop that takes longer than that is `{:error, :stopping}`, for
+  the client to say the session is stopping and to try again.
   """
-  @spec activate(String.t(), keyword()) :: {:ok, pid()} | {:error, :not_found | term()}
+  @spec activate(String.t(), keyword()) ::
+          {:ok, pid()} | {:error, :not_found | :stopping | term()}
   def activate(session_id, opts \\ []) do
     case Registry.whereis({:session, session_id}) do
-      pid when is_pid(pid) ->
-        {:ok, pid}
-
       nil ->
-        case Index.get(session_id) do
-          nil -> {:error, :not_found}
-          meta -> restore(session_id, meta, Keyword.take(opts, [:client]))
+        wake(session_id, opts)
+
+      pid ->
+        cond do
+          Sessions.stopping?(session_id) -> after_stop(session_id, pid, opts)
+          Process.alive?(pid) -> {:ok, pid}
+          # Gone, and its name not yet given back: a lookup does not ask whether the
+          # process it names is alive.
+          true -> wake(session_id, opts)
         end
+    end
+  end
+
+  # Long enough for a stop with nothing slow in it, and well inside a client's own timeout
+  # for the call that is waiting.
+  @stop_wait_ms 5_000
+
+  defp after_stop(session_id, pid, opts) do
+    ref = Process.monitor(pid)
+
+    receive do
+      {:DOWN, ^ref, :process, _pid, _reason} -> wake(session_id, opts)
+    after
+      @stop_wait_ms ->
+        Process.demonitor(ref, [:flush])
+        {:error, :stopping}
+    end
+  end
+
+  defp wake(session_id, opts) do
+    case Index.get(session_id) do
+      nil -> {:error, :not_found}
+      meta -> restore(session_id, meta, Keyword.take(opts, [:client]))
     end
   end
 
@@ -647,6 +716,10 @@ defmodule Troupe do
         })
 
         {:ok, session.pid}
+
+      # Another command woke it first, as two do that waited on the same stop.
+      {:error, {:already_started, pid}} ->
+        {:ok, pid}
 
       error ->
         error
@@ -675,7 +748,7 @@ defmodule Troupe do
     Log.head_seq(session_id)
   catch
     :exit, _ ->
-      case Log.read_session(session_id) do
+      case off_disk(session_id) do
         [] -> 0
         events -> List.last(events).seq || 0
       end
@@ -687,7 +760,7 @@ defmodule Troupe do
     Log.replay_from(session_id, from_seq)
   catch
     :exit, _ ->
-      session_id |> Log.read_session() |> Enum.filter(&(&1.seq && &1.seq > from_seq))
+      session_id |> off_disk() |> Enum.filter(&(&1.seq && &1.seq > from_seq))
   end
 
   @doc "Read a stored blob, optionally a byte range."
@@ -695,8 +768,11 @@ defmodule Troupe do
           {:ok, binary(), non_neg_integer()} | {:error, :not_found}
   def read_blob(session_id, digest, range \\ nil) do
     case get_session(session_id) do
-      nil -> {:error, :not_found}
-      session -> Blobs.read(session_id, session.workspace, digest, range)
+      nil ->
+        {:error, :not_found}
+
+      session ->
+        Blobs.read(session_id, session.workspace, Map.get(session, :state_dir), digest, range)
     end
   end
 
@@ -730,6 +806,10 @@ defmodule Troupe do
   Local sessions have no key to destroy — the user's disk encryption is the boundary —
   so erasure here is deletion. The remote tier destroys the session key instead, which
   is what makes erasure survive a backup.
+
+  What is deleted is the session's directory under its own state directory, the one its
+  config named, log and blobs and all, and every other directory named for it under any
+  state directory this daemon keeps sessions in (Decision 855).
   """
   @spec erase_session(String.t()) :: :ok
   def erase_session(session_id) do
@@ -737,13 +817,36 @@ defmodule Troupe do
     stop_session(session_id)
     Index.forget(session_id)
 
-    if session do
-      session.workspace
-      |> Troupe.Paths.session_dir(session_id)
-      |> File.rm_rf()
-    end
+    state_dirs = [session && Map.get(session, :state_dir) | state_dirs()]
+
+    session
+    |> own_dir(session_id)
+    |> Kernel.++(named_dirs(session_id, state_dirs))
+    |> Enum.each(&File.rm_rf/1)
 
     :ok
+  end
+
+  defp own_dir(nil, _session_id), do: []
+
+  defp own_dir(session, session_id),
+    do: [Troupe.Paths.session_dir(session.workspace, session_id, Map.get(session, :state_dir))]
+
+  # Found by its name, which is a glob here: only a name of the shape the harness gives,
+  # so that `..` or `*` names nothing.
+  defp named_dirs(session_id, state_dirs) do
+    if Session.valid_id?(session_id) do
+      state_dirs
+      |> Enum.map(&Troupe.Paths.state_dir/1)
+      |> Enum.uniq()
+      |> Enum.flat_map(fn state_dir ->
+        [Troupe.Paths.glob_escape(state_dir), "sessions", "*", session_id]
+        |> Path.join()
+        |> Path.wildcard()
+      end)
+    else
+      []
+    end
   end
 
   @doc """
