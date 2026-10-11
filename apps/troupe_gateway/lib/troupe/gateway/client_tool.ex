@@ -58,12 +58,20 @@ defmodule Troupe.Gateway.ClientTool do
 
   defp remaining(ctx, started), do: max(ctx.timeout_ms - (now() - started), 0)
 
+  # The call ran on the client's machine, and may have done its work there before the
+  # answer was lost with the connection: the model is told so, since doing it again
+  # another way could do it twice (Decision 861).
   defp gone(name, 0) do
-    "The client hosting #{name} left mid-call. That tool is gone for this session; do the work another way."
+    "The client hosting #{name} left mid-call. " <> gone_after()
   end
 
   defp gone(name, grace_ms) do
     "The client hosting #{name} left mid-call and did not come back within #{seconds(grace_ms)}. " <>
+      gone_after()
+  end
+
+  defp gone_after do
+    "The call may have run on their machine before they left, so check before doing it again. " <>
       "That tool is gone for this session; do the work another way."
   end
 

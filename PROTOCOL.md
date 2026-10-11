@@ -2206,8 +2206,10 @@ it was serving is parked for a grace (`TROUPE_CLIENT_TOOL_GRACE_SECONDS`, 60 s,
 [troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)) and, when a client
 registers the tool again inside it — through a fresh consent, as always — is sent to that
 client as the same `tool.invoke`: same `call_id`, same `arguments`. Nobody inside the
-grace, and the call fails once, with a result naming the tool and saying its client left;
-the tool is off the model's list by then (`tools_unregistered`, reason `disconnected`).
+grace, and the call fails once, with a result naming the tool, saying its client left and
+that the call may have run on its machine before it did (Decision 861); the tool is off
+the model's list by then (`tools_unregistered`, reason `disconnected`). Troupe's own
+clients send no `tools.unregister` when the person leaves a session: leaving is a drop.
 The grace comes out of the call's own timeout, so a dropped laptop is never a hung turn.
 
 **The session is tainted, visibly.** `session_tainted` is durable and appears in every
