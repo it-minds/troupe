@@ -23,7 +23,9 @@ defmodule Troupe.Sessions.Index do
   None of it waits on a session (Decision 848). The sweep asks the sessions how they are
   from a task and decides here, from the answers, which to stop; a stop runs in a task of
   its own, and a session being stopped reads as dormant until its tree is gone. A read is
-  answered from a task too, since a listing asks every live session's summary.
+  answered from a task too, since a listing asks every live session's summary. Nor does a
+  read wait on the file server, the one process every other file operation in the VM goes
+  through: it lists the state directories and reads the logs from its task, raw (#589).
 
   The state directory is more than one (Decision 855): the platform's, the one the
   person's `config.yaml` names, and every one a session it was told of was started with,
@@ -705,15 +707,18 @@ defmodule Troupe.Sessions.Index do
     end)
   end
 
+  # Without the file server, as is everything a read does on disk (#589): a listing goes
+  # through every session directory, and through the file server under load each of those
+  # thousands of calls waited behind every other process's file operations.
   defp logs(root, id_pattern) do
     [Paths.glob_escape(root), "sessions", "*", id_pattern, "events.jsonl"]
     |> Path.join()
-    |> Path.wildcard()
+    |> Paths.wildcard()
   end
 
   # The state directories that are there; this process is told of the ones that are not.
   defp present(view) do
-    {present, gone} = Enum.split_with(view.roots, &File.dir?/1)
+    {present, gone} = Enum.split_with(view.roots, &File.dir?(&1, [:raw]))
     if gone != [], do: send(view.index, {:roots_gone, gone})
     present
   end
@@ -742,9 +747,13 @@ defmodule Troupe.Sessions.Index do
   end
 
   defp file_stamp(path) do
-    case File.stat(path, time: :posix) do
-      {:ok, %File.Stat{size: size, mtime: mtime}} -> {size, mtime}
-      {:error, _} -> nil
+    case :file.read_file_info(path, [:raw, time: :posix]) do
+      {:ok, info} ->
+        %File.Stat{size: size, mtime: mtime} = File.Stat.from_record(info)
+        {size, mtime}
+
+      {:error, _} ->
+        nil
     end
   end
 
