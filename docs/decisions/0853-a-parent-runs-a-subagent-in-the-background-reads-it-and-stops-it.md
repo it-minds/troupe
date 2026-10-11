@@ -126,4 +126,14 @@ Decision 847's brief and finish and Decision 850's gate are unchanged; this buil
   fitted in fewer bytes, but a call that ends processes would have hidden behind a read's
   name and its permission, and `wait` needs its line for a model to use it.
 - **Proof:** `Troupe.Agent.BackgroundDelegationTest`, whose first test failed on the chunk's
-  tip (`5636f38`: the root's second model call came after its child's `agent_done`).
+  tip (`5636f38`: the root's second model call came after its child's `agent_done`): the end
+  handed once to a resting and to a busy parent; a running child read; a stop in both logs
+  with what it had changed, handed over as stopped; a sibling running on while one is
+  stopped, and the stopped one's own child stopped with it; a subagent refused `finish`
+  while its helper runs, resting, and finishing with one sum; a cancel; a parent restart; a
+  child failing past its restarts; `stop_child` with `delegate`; a session at rest with a
+  child at work not put to sleep. `Troupe.BenchTest` within the raised budgets. The TUI's
+  `remote_translate_test` and the desktop app's `transcript.test.ts` and
+  `background-child.test.tsx` for the lines. The installed daemon with a fake-provider
+  script: two children in the background, one read and stopped, the other's finish handed
+  over while the root worked; the installed TUI and the desktop app's web build showing it.
