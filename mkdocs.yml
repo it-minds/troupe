@@ -144,6 +144,7 @@ nav:
           - Design: clients/gui/docs/design/DESIGN.md
           - Themes: clients/gui/docs/design/themes/THEMES.md
       - The console's design: design/admin/DESIGN.md
+      - Frames for rendered output: design/frames.md
       - Plans:
           - The admin surface: plans/admin-surface.md
           - The console: program/control-panel.md
