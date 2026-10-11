@@ -14,10 +14,15 @@
 // save lets a tool run without asking that did not before: an agent in the person's own
 // layer is read by every session on this computer, and its `auto` waits for no
 // workspace's trust (Decision 825 gates only a repository's).
+//
+// The subagents an agent delegates to are listed under the primaries and changed the same
+// way; a save names the hash of the file it was opened from, so one over a file somebody
+// else saved meanwhile is refused and said, as is another client's save of the agent open
+// in the editor; and a file that does not parse opens to be mended (troupe Decision 852).
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import { agentRefusal, agentTemplate, layerOf, layerWords, permissionsOf, widenedAutos } from "@troupe/client";
+import { agentConflict, agentRefusal, agentTemplate, layerOf, layerWords, permissionsOf, widenedAutos } from "@troupe/client";
 import type { AgentDefinition, AgentLayer, AgentRow, AgentScope, AgentSkippedFile, DaemonClient, FleetRow } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import { shell } from "../shell";
@@ -55,6 +60,8 @@ interface SaveTarget {
   before: Record<string, string>;
   /** From the editor, whose fields show what the daemon found. */
   fromEditor: boolean;
+  /** The hash of the file the save replaces, as it was read, when it goes back into that file. */
+  ifHash?: string;
 }
 
 export function Agents({
@@ -133,6 +140,8 @@ function Manager({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
+  // A save of this screen's own is under way: its `agents.changed` is not news to the editor.
+  const saving = useRef(false);
   const ws = workspace.trim();
 
   // The workspaces somebody has used, and the newest of them when nothing named one.
@@ -152,23 +161,49 @@ function Manager({
     };
   }, [client]);
 
-  // Another client's save, or this one's, is the list's news.
-  useEffect(() => client.onAgentsChanged(() => setRound((n) => n + 1)), [client]);
+  // Another client's save, or this one's, is the list's news; another's of the agent open
+  // in the editor is the editor's too, since its save is now over a file it was not
+  // opened from.
+  useEffect(
+    () =>
+      client.onAgentsChanged((changed) => {
+        setRound((n) => n + 1);
+        if (saving.current) return;
+        setEditing((ed) =>
+          ed && ed.kind !== "new" && ed.name === changed.name
+            ? {
+                ...ed,
+                elsewhere: `${changed.name} was ${changed.action === "deleted" ? "deleted" : "saved"} elsewhere while you had it open (${changed.path}). Saving yours is refused once, so you can read it first; the next save replaces it.`,
+              }
+            : ed,
+        );
+      }),
+    [client],
+  );
 
   const load = useCallback(
-    () => (ws ? client.listAgents(ws) : Promise.resolve({ agents: [] as AgentRow[], skipped: [] as AgentSkippedFile[] })),
+    () => (ws ? client.listAgents(ws, { subagents: true }) : Promise.resolve({ agents: [] as AgentRow[], skipped: [] as AgentSkippedFile[] })),
     [client, ws],
   );
   const { data, loading, error: readError } = useAdminQuery(load, [load, round]);
 
   const detail = useAgent(client, selected, ws, round);
+  const primaries = (data?.agents ?? []).filter((a) => a.mode !== "subagent");
+  const subagents = (data?.agents ?? []).filter((a) => a.mode === "subagent");
 
   const save = async (target: SaveTarget): Promise<void> => {
     setBusy(true);
+    saving.current = true;
     setError(null);
     setOutcome(null);
     try {
-      const written = await client.putAgent({ name: target.name, scope: target.scope, source: target.text, ...(ws ? { workspace: ws } : {}) });
+      const written = await client.putAgent({
+        name: target.name,
+        scope: target.scope,
+        source: target.text,
+        ...(ws ? { workspace: ws } : {}),
+        ...(target.ifHash ? { if_hash: target.ifHash } : {}),
+      });
       const warned = written.warnings.length ? ` ${written.warnings.map((w) => w.message).join("; ")}.` : "";
       setOutcome(`${written.action === "created" ? "Saved" : "Replaced"} ${written.name} in ${scopeWords(written.scope)}: ${written.path}.${warned}`);
       setEditing(null);
@@ -176,10 +211,43 @@ function Manager({
       setRound((n) => n + 1);
     } catch (e) {
       const refused = agentRefusal(e);
-      if (refused && target.fromEditor) setEditing((ed) => (ed ? { ...ed, findings: refused } : ed));
-      else setError(refused ? refused.reason : e instanceof Error ? e.message : String(e));
+      const conflict = agentConflict(e);
+      if (conflict && target.fromEditor) {
+        // Said, and the edit kept; its next save is over the file as it is now.
+        setEditing((ed) => (ed ? { ...ed, conflict: conflict.reason, elsewhere: null, base: { scope: target.scope, hash: conflict.hash } } : ed));
+      } else if (refused && target.fromEditor) setEditing((ed) => (ed ? { ...ed, findings: refused } : ed));
+      else setError(conflict ? conflict.reason : refused ? refused.reason : e instanceof Error ? e.message : String(e));
     } finally {
+      saving.current = false;
       setBusy(false);
+    }
+  };
+
+  // A file that does not parse, opened as the daemon has it, to be saved back where it is.
+  const mend = async (skipped: AgentSkippedFile): Promise<void> => {
+    if (!skipped.name) return;
+    setError(null);
+    setOutcome(null);
+    try {
+      const broken = await client.brokenAgent({ name: skipped.name, ...(ws ? { workspace: ws } : {}) });
+      if (!broken) {
+        setError(`${skipped.path} is not read (${skipped.reason}), and is not one this screen can open: fix it by hand.`);
+        return;
+      }
+      setSelected(null);
+      setEditing({
+        kind: "mend",
+        name: skipped.name,
+        scope: broken.scope,
+        text: broken.text,
+        original: null,
+        findings: null,
+        checked: false,
+        base: { scope: broken.scope, hash: broken.hash },
+        reason: broken.reason,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -245,8 +313,13 @@ function Manager({
           {outcome && <p className="note">{outcome}</p>}
           {!ws && <p className="note">Name a workspace to see what a session there could run.</p>}
           {ws && loading && !data && <Loading what="Reading the agents…" />}
-          {data && data.agents.length > 0 && (
-            <AgentTable agents={data.agents} rows={rows} workspace={ws} selected={selected} onSelect={setSelected} onOpenSession={onOpenSession} />
+          {primaries.length > 0 && <AgentTable agents={primaries} rows={rows} workspace={ws} selected={selected} onSelect={setSelected} onOpenSession={onOpenSession} />}
+          {subagents.length > 0 && (
+            <>
+              <h4 className="instruction-head">Subagents</h4>
+              <p className="note">What an agent delegates to: nothing a person types starts one. Each is read, copied and edited as any other.</p>
+              <AgentTable agents={subagents} rows={rows} workspace={ws} selected={selected} onSelect={setSelected} onOpenSession={onOpenSession} />
+            </>
           )}
           {ws && (
             <div className="actions start-actions">
@@ -262,12 +335,19 @@ function Manager({
             </div>
           )}
           {data && (data.skipped ?? []).length > 0 && (
-            <Table head={["Not read", "File", "Why"]}>
+            <Table head={["Not read", "File", "Why", ""]}>
               {(data.skipped ?? []).map((s) => (
                 <tr key={s.path}>
                   <th scope="row">{s.name ?? "(the whole directory)"}</th>
                   <td className="mono micro">{s.path}</td>
                   <td>{s.reason}</td>
+                  <td>
+                    {s.name && (
+                      <button className="link" onClick={() => void mend(s)} disabled={busy} aria-label={`Open ${s.name} to mend it`}>
+                        Mend
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </Table>
@@ -295,7 +375,10 @@ function Manager({
             busy={busy}
             planeUrl={planeUrl}
             onOpenSession={onOpenSession}
-            onEdit={(def) => setEditing({ kind: "edit", name: def.name, scope: def.layer === "project" ? "project" : "user", text: def.text ?? "", original: def, findings: null, checked: false })}
+            onEdit={(def) => {
+              const scope: AgentScope = def.layer === "project" ? "project" : "user";
+              setEditing({ kind: "edit", name: def.name, scope, text: def.text ?? "", original: def, findings: null, checked: false, base: { scope, hash: def.hash ?? null } });
+            }}
             onNewFrom={(def) => setEditing({ kind: "new", name: "", scope: "project", text: def.text ?? "", original: def, findings: null, checked: false })}
             onCopy={copy}
             onDelete={setDeleting}

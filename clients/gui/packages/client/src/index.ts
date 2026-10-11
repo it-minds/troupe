@@ -139,6 +139,7 @@ export type {
   TriggerRun,
 } from "./admin.js";
 export {
+  agentConflict,
   agentRefusal,
   agentTemplate,
   findingsFor,
@@ -152,6 +153,7 @@ export {
   withFields,
 } from "./agents.js";
 export type {
+  AgentBroken,
   AgentCheck,
   AgentDefinition,
   AgentDeleted,
@@ -189,6 +191,7 @@ export type {
   SkippedSkill,
   SourceLayer,
   SourceScope,
+  WatchState,
   Worktree,
 } from "./daemon.js";
 export {

@@ -389,6 +389,13 @@ defmodule Troupe.UI.TUI.Model do
       # says so in the note beside this.
       :agent_named when path == w.path and is_binary(d.name) ->
         %{w | profile: d.name}
+        |> ensure_agent(path)
+        |> update_agent(path, &%{&1 | name: d.name})
+
+      # A subagent is named by the agent it runs as it starts, so the window's side panel
+      # says `explore#1 (explore)`, not the window's own agent (D113).
+      :agent_named when is_binary(d.name) ->
+        w |> ensure_agent(path) |> update_agent(path, &%{&1 | name: d.name})
 
       # A saved comment started a branch of this session (root Decision 844): said in the
       # session's own transcript, where the person would otherwise see nothing of it.
@@ -636,6 +643,8 @@ defmodule Troupe.UI.TUI.Model do
           | worktree: %{path: d.path, git_branch: d.git_branch, managed: Map.get(d, :managed, true)}
         }
 
+      # A merge that conflicted was aborted, the checkout left as it was (Decision 647):
+      # there is nothing to resolve there, and the branch is merged by hand or not at all.
       :worktree_merged ->
         w = %{w | worktree: w.worktree && Map.put(w.worktree, :merged, not d.conflicts)}
 
@@ -644,7 +653,8 @@ defmodule Troupe.UI.TUI.Model do
           path,
           {:system,
            if(d.conflicts,
-             do: "merge had conflicts; resolve in your checkout",
+             do:
+               "merge aborted: it conflicts with the checkout, which is as it was; " <> by_hand(w),
              else: "merged into checkout"
            )}
         )
@@ -867,6 +877,11 @@ defmodule Troupe.UI.TUI.Model do
 
   defp diff_stat(_), do: nil
 
+  defp by_hand(%{worktree: %{git_branch: branch}}) when is_binary(branch),
+    do: "merge #{branch} by hand"
+
+  defp by_hand(_w), do: "merge its branch by hand"
+
   defp summarize_input("shell", %{"command" => c}), do: c
   defp summarize_input("web_fetch", %{"url" => u}), do: u
 
@@ -874,10 +889,25 @@ defmodule Troupe.UI.TUI.Model do
     do: "#{length(items)} items"
 
   defp summarize_input(_, %{"path" => p}), do: p
+  defp summarize_input("read_branch", %{} = input), do: read_branch_input(input)
   defp summarize_input("delegate", %{"agent" => a}), do: a
   defp summarize_input("finish", %{"summary" => s}), do: String.slice(s, 0, 60)
   defp summarize_input("ask_user", %{"question" => q}), do: q
   defp summarize_input(_, input), do: input |> Jason.encode!() |> String.slice(0, 60)
+
+  # What `read_branch` was asked to read, in words: the list, a branch, a subagent of it,
+  # and its diff when that was asked for, rather than the call's JSON (D113).
+  defp read_branch_input(input) do
+    what =
+      case {input["session_id"], input["child"]} do
+        {id, child} when is_binary(id) and is_binary(child) -> "#{id}, subagent #{child}"
+        {id, _} when is_binary(id) -> id
+        {_, child} when is_binary(child) -> "subagent #{child}"
+        _ -> "the branches"
+      end
+
+    if input["diff"] == true, do: what <> ", with its diff", else: what
+  end
 
   defp new_agent(attrs \\ %{}) do
     Map.merge(

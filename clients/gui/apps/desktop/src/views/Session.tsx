@@ -10,7 +10,7 @@
 // the stream, because the stream's order is the server's and a reconnect must not
 // reshuffle what somebody has already read.
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import {
   BRIEF_PARTS,
@@ -123,6 +123,9 @@ export function Session({
   // says, or what the start's event named; the memory pane asks about its repository.
   const workspace =
     kind === "team" ? undefined : (startedIn ?? (row?.raw as { workspace?: string } | undefined)?.workspace ?? view.state.onboarding?.workspace);
+  // The palette's agent rows carry their facts from the daemon's `agents.list` for this
+  // workspace (troupe #565); a session on the platform has its commands.list alone.
+  const agentRows = useMemo(() => (daemon && workspace ? () => daemon.listAgents(workspace).then((r) => r.agents) : undefined), [daemon, workspace]);
 
   // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen.
   useEffect(() => {
@@ -156,6 +159,7 @@ export function Session({
             },
             transcript: () => transcriptText(view.state),
             ...(kind !== "team" && onAgents ? { agents: () => onAgents() } : {}),
+            ...(agentRows ? { agentRows } : {}),
           }}
         />
       )}
@@ -654,6 +658,33 @@ function StreamEntry({
     case "tool":
       return <ToolActivity entry={entry} readBlob={readBlob} />;
 
+    // A subagent's first message is the brief it was handed: from the agent that delegated,
+    // never a person's turn, its parts under their names (troupe Decision 852). A brief
+    // from before the parts is the text it was.
+    case "brief":
+      return (
+        <article className="turn brief" aria-label={`The brief ${entry.child} was handed`}>
+          <div className="byline">
+            <span className="name">Brief</span>
+            <span className="micro muted">
+              from {entry.from.length > 1 ? entry.from.slice(1).join(" › ") : "the session's agent"} to {entry.agent.slice(1).join(" › ")}
+            </span>
+          </div>
+          {entry.parts.length > 0 ? (
+            <dl className="facts wide parts">
+              {entry.parts.map(([name, text]) => (
+                <Fragment key={name}>
+                  <dt>{name.replace("_", " ")}</dt>
+                  <dd>{text}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          ) : (
+            <div className="body">{entry.text}</div>
+          )}
+        </article>
+      );
+
     // The brief's goal says what it is for in a line; the parts are in the delegate call's.
     case "delegation":
       return (
@@ -971,7 +1002,7 @@ function Backstage({
         </section>
       )}
 
-      {daemon && row && row.kind !== "team" && <LocalControls daemon={daemon} row={row} />}
+      {daemon && row && row.kind !== "team" && <LocalControls daemon={daemon} row={row} session={view.view} />}
 
       <section>
         <h3>This session</h3>

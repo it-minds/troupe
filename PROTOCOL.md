@@ -1103,9 +1103,9 @@ the client that uploaded it, not the session.
 ```json
 {"workspace": "/home/me/project"}
 ```
-→ `{"agents": [{"name", "description", "source", "notes", "layer", "model", "tool_count",
-"read_only", "max_turns", "worktree", "available", "reason"}], "skipped": [{"name", "path",
-"reason"}]}` — the primary agents a session in that
+→ `{"agents": [{"name", "description", "source", "notes", "mode", "layer", "model",
+"tool_count", "read_only", "max_turns", "worktree", "available", "reason"}], "skipped":
+[{"name", "path", "reason"}]}` — the primary agents a session in that
 workspace may be created with, resolved as `session.create` resolves them (built-ins, the
 machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `global`
 or `project`. A worker answers from its bundle instead, so a client offers exactly what
@@ -1115,6 +1115,13 @@ workspace`; a `.troupe/agents` linked out whole is one entry with a null `name`,
 Decision 829), in a git worktree one the main checkout has not committed, or one that does
 not parse, with what is wrong in words (`not read: mode must be primary or subagent, not
 "main"`, Decision 841), which the session's `files_skipped` carries too. Additive.
+
+With `"subagents": true` the subagents an agent delegates to are listed as well, after the
+primaries, each in the same shape (Decision 852): what an agents manager asks, so a person
+can read and change `explore` or `reviewer`; a picker of what a session runs never asks,
+since `session.create` and `profile.switch` refuse a subagent. Every row says its `mode`,
+`primary` or `subagent`. Both are additive: a daemon before them lists the primaries alone
+and its rows have no `mode`.
 
 `notes` is what a person should know about how an agent is read, each `{"key",
 "reason"}` with the reason in words, and empty for most. A `project` agent whose
@@ -1156,7 +1163,8 @@ the built-ins) → one definition, as the session would run it: every key of an
 a delegation to it asks first by its own file, else `auto`; Decision 850), `skills` (`"all"` or
 the list), `prompt` (the instruction, the file's body), `path` (the file, `null` for a
 bundle's ACP agent), `text` (the file as it is on disk, frontmatter and all, for an
-editor), `editable` and `editable_reason` (`null` when editable; otherwise a sentence: a
+editor), `hash` (`"sha256:<hex>"` of `text`, `null` with no file: what `agents.put`'s
+`if_hash` names, Decision 852), `editable` and `editable_reason` (`null` when editable; otherwise a sentence: a
 built-in is changed by a copy in a scope, a bundle's agent in the console, and on a pod
 none here), `also` (`[{"layer", "path"}]`, the files of the same name in lower layers this
 one hides, nearest first: what answers once this one is taken away) and `running`
@@ -1165,6 +1173,16 @@ the session, its branches and, for a branch, the session it came from and its ot
 branches, that run this agent now; empty without one). With a `session_id` the
 definitions are that session's (on a pod its bundle's), read again from their files as a
 switch would read them. A name nothing defines is `not_found` with `kind: "agent"`.
+
+`broken` (Decision 852) is the person's or the workspace's file of that name that was found
+and does not parse, the one that would answer once mended, for an editor to open: `{"scope",
+"layer", "path", "text", "hash", "reason"}`, `scope` being where `agents.put` writes it back
+(`user` or `project`) and `reason` the words `agents.list`'s `skipped` gives; `null` when
+there is none. It is beside what answers to the name (a `.troupe/agents/plan.md` that does
+not parse leaves the built-in `plan` answering), and when nothing answers the answer is
+`{"name", "broken"}` alone rather than `not_found`. A file not read for another reason (a
+link out of the workspace, a main checkout's draft, one a bundle's name beats) is never
+`broken`: it is not at the place `agents.put` writes.
 
 ```json
 {"source": "---\nmode: primary\n---\nYou review.\n", "name": "review", "workspace": "/home/me/project"}
@@ -1208,6 +1226,17 @@ writer too); a temporary file is renamed over it. A name an agent may not have i
 changed by a copy: a `put` of its text, under its name (which then hides it) or another,
 into either scope. A user agent that the workspace's `.troupe/agents` has a file of the
 same name for is written, with a warning that the repository's is the one that runs there.
+
+`if_hash` (optional, Decision 852) is the `hash` `agents.get` gave for the file this save
+replaces, which a client sends when it saves an edit back into the file it was opened from.
+When the file there holds anything else now, saved by another client or by hand, or is gone,
+nothing is written and the answer is `conflict` with a `reason` in words ("…/review.md
+changed since it was opened, saved from somewhere else: nothing is written. Read it again
+to see the change; saving over it replaces that change", or that it "was taken away since
+it was opened") and `hash`, what the file holds now (`null` when gone), which a save that
+means to replace it sends as its `if_hash`. It is checked in the same transaction as the
+write. Without it the last write wins, as before; a copy into another scope, or a new
+agent, sends none.
 
 ```json
 {"command_id": "c-31", "name": "review", "scope": "project", "workspace": "/home/me/project"}

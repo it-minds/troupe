@@ -1250,6 +1250,20 @@ main {
 .turn.agent .byline .name {
   color: var(--p-agent);
 }
+/* A subagent's brief, from the agent that delegated it, its parts under their names
+   (troupe Decision 852): the agent's colour, set off as a person's turn is. */
+.turn.brief .byline .name {
+  color: var(--p-agent);
+}
+.turn.brief .parts,
+.turn.brief .body {
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-panel);
+  border-left: var(--bw-edge) solid var(--p-agent);
+}
+.turn.brief .parts dd {
+  white-space: pre-wrap;
+}
 /* Held: not in the stream until the server says it is. Amber, and a dashed edge. */
 .turn.queued .byline .name {
   color: var(--text-secondary);
@@ -3095,7 +3109,7 @@ pre.instruction {
 .palette .row {
   min-height: 0;
   display: grid;
-  grid-template-columns: 12ch 1fr;
+  grid-template-columns: 12ch 11ch 1fr;
   gap: var(--space-3);
   align-items: baseline;
   padding: var(--space-2) var(--space-4) var(--space-2) calc(var(--space-4) - var(--bw-marker));
@@ -3109,11 +3123,33 @@ pre.instruction {
   font: var(--t-note);
   color: var(--text-secondary);
 }
+/* Three kinds of row, each drawn as what it is (troupe #565): Troupe's own commands
+   muted, an agent in the accent, a file's command in the colour of whose it is. */
+.palette .row .kind {
+  font: var(--t-code-small);
+  color: var(--text-muted);
+}
+.palette .row.kind-agent .kind {
+  color: var(--accent);
+}
+.palette .row.kind-repository .kind {
+  color: var(--p-agent);
+}
+.palette .row.kind-yours .kind {
+  color: var(--p-self);
+}
+.palette .row .badges {
+  margin-right: var(--space-2);
+  font: var(--t-code-small);
+  color: var(--text-primary);
+}
 .palette .row[aria-selected="true"] {
   background: var(--bg-selected);
   border-left-color: var(--accent);
 }
 .palette .row.unavailable .name,
+.palette .row.unavailable .kind,
+.palette .row.unavailable .badges,
 .palette .row.unavailable .summary {
   color: var(--text-muted);
 }

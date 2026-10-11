@@ -422,8 +422,15 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # An agent was saved or deleted, here or in the desktop app (root Decision 841): the
-  # palette's rows, and the `/agents` page when it is open, are read again.
-  def handle_info({:troupe_agents_changed, _changed}, state) do
+  # palette's rows, and the `/agents` page when it is open, are read again, and an edit
+  # open on that agent is told (root Decision 852).
+  def handle_info({:troupe_agents_changed, changed}, state) do
+    state =
+      case state.agents_page do
+        %{} = page -> %{state | agents_page: Agents.heard(page, changed)}
+        nil -> state
+      end
+
     {:noreply, schedule_tick(%{agents_changed(state) | dirty: true}), render?: false}
   end
 
@@ -1723,11 +1730,20 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # Titled by what the branch was first asked, as the window was: the daemon's own title for
+  # it is the worktree it worked in (D113).
   defp dismissed_branches(state, listed) do
-    for %{window: window, session_id: id} <- Client.dismissed_branches(state.session_id),
+    for %{window: window, session_id: id} = branch <- Client.dismissed_branches(state.session_id),
         not MapSet.member?(listed, id),
         {:ok, row} <- [Client.get_session({:local, here(state)}, id)],
-        do: %{row | title: "#{window}, dismissed: #{row.title}"}
+        do: %{row | title: "#{window}, dismissed: #{asked(branch.prompt) || row.title}"}
+  end
+
+  defp asked(prompt) do
+    case prompt |> to_string() |> String.trim() |> String.split("\n", parts: 2) do
+      [""] -> nil
+      [line | _] -> String.trim(line)
+    end
   end
 
   defp worked?(entry), do: entry.branches != [] or (entry.tokens || 0) > 0
@@ -1916,16 +1932,59 @@ defmodule Troupe.UI.TUI.Server do
 
   # Here: the session on screen's directory, or with a plane's on screen the one this
   # window was opened in, which is also the directory the picker lists. A branch is a fork
-  # of the session on screen, wherever it is.
+  # of the work on screen, wherever it is.
   defp open_new(state, :local), do: create_here(state, false)
   defp open_new(state, :private), do: create_here(state, true)
-  defp open_new(state, :branch), do: Client.fork_session(state.session_id)
+
+  defp open_new(state, :branch) do
+    with {:ok, sid} <- fork_of(state), do: Client.fork_session(sid)
+  end
 
   defp open_new(_state, {:remote, profile}) do
     case ensure_plane(Client.default_plane()) do
       nil -> {:error, "no plane; run troupe login <plane-url> first"}
       origin -> Client.create_session(origin, %{profile: profile})
     end
+  end
+
+  # What `--branch` forks (root Decision 812): the branch whose window is activated, its own
+  # session; the session itself from its own window, or when its agent has work of its own
+  # (a pod's, a `troupe run`'s). In command mode the session's own log holds no
+  # conversation, the work being in its branches, so with no window activated it says which
+  # one it needs rather than fork an empty log (D113, TUI Decision 158).
+  @own_log "this session's own log holds no conversation"
+
+  defp fork_of(%{focus: {:window, path}} = state) do
+    case state.model.windows[path] do
+      %{session_id: child} when is_binary(child) -> {:ok, child}
+      _own -> {:ok, state.session_id}
+    end
+  end
+
+  defp fork_of(state) do
+    windows = Model.windows(state.model)
+
+    cond do
+      not state.branches? ->
+        {:ok, state.session_id}
+
+      Enum.any?(windows, &(&1.path == "root")) ->
+        {:ok, state.session_id}
+
+      windows == [] ->
+        {:error, "nothing to fork: no branch has started, and " <> @own_log}
+
+      true ->
+        {:error,
+         "/new --branch forks a branch: open #{which(windows)} and type it there; #{@own_log}"}
+    end
+  end
+
+  defp which([w]), do: "its window (1 #{w.path})"
+
+  defp which(windows) do
+    named = windows |> Enum.with_index(1) |> Enum.map_join(", ", fn {w, n} -> "#{n} #{w.path}" end)
+    "the window of the one to fork (#{named})"
   end
 
   defp create_here(state, private?),
@@ -3540,7 +3599,9 @@ defmodule Troupe.UI.TUI.Server do
         _ -> model
       end
 
-    state = %{state | model: model} |> shell_ended(event) |> watch_triggered(event)
+    state =
+      %{state | model: model} |> shell_ended(event) |> watch_triggered(event) |> left_window(event)
+
     state = if trees_moved?(event), do: refresh_worktrees(state), else: state
     if event.type == :remote_status, do: recheck_loop(state), else: state
   end
@@ -3568,6 +3629,14 @@ defmodule Troupe.UI.TUI.Server do
     do: notice(state, Model.watch_line(d))
 
   defp watch_triggered(state, _event), do: state
+
+  # A window that went while it was activated — `/merge`, `/discard` or `/dismiss` picked
+  # from the palette over it, a cancel at rest — leaves the screen on the command line,
+  # not on a focus that names it until the next key (D105).
+  defp left_window(%{focus: {:window, path}} = state, %{type: :window_dismissed, agent_path: path}),
+    do: to_command_line(state)
+
+  defp left_window(state, _event), do: state
 
   # The loop on the status line is the journal's, and a daemon that stopped mid-loop left
   # the journal saying it runs: `loop_stopped interrupted` is written only when the

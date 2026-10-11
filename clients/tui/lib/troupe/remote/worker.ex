@@ -46,6 +46,15 @@ defmodule Troupe.Remote.Worker do
   @activating ~w(input.send commands.run approval.respond question.answer todo.edit
                  profile.switch session.goal.set session.goal.clear session.loop.start
                  fs.upload shell.run)
+  # What a person is asked, by call id, and what answers it: a branch's are answered from
+  # its parent's screen (`remember_call/2`).
+  @asks [:approval_requested, :question_asked, :budget_ask_started]
+  @answers [
+    :approval_answered,
+    :question_answered,
+    :budget_ask_answered,
+    :tool_failures_ask_answered
+  ]
 
   @type mode :: :read | :activate
 
@@ -288,6 +297,7 @@ defmodule Troupe.Remote.Worker do
       resent: MapSet.new()
     }
 
+    :ok = remember_asked(state)
     {:ok, state, {:continue, :connect}}
   end
 
@@ -1220,14 +1230,35 @@ defmodule Troupe.Remote.Worker do
     %{event | session_id: sid, agent_path: Branch.rewrite(event.agent_path, window)}
   end
 
-  # An approval or a question a branch asks is answered through the parent's session
-  # id, so the client finds its way back to this session by the call id. The
-  # registration dies with this process, like the window it belongs to.
+  # An approval or a question a branch asks, the budget's included, is answered through the
+  # parent's session id, so the client finds its way back to this session by the call id.
+  # The registration dies with this process, like the window it belongs to.
   defp remember_call(%{as: {sid, _}} = state, %Troupe.Event{type: type, data: %{call_id: call_id}})
-       when type in [:approval_requested, :question_asked] do
+       when type in @asks do
     _ = Registry.register(Troupe.Client.Registry, {:call, sid, call_id}, state.session_id)
     :ok
   end
 
   defp remember_call(_state, _event), do: :ok
+
+  # A worker that starts again, after a crash or with its parent's session opened again,
+  # resumes past what it had seen, so a request asked of the one before it is not seen
+  # again: what the branch's journal says it still asks is registered as it starts (D113).
+  defp remember_asked(%{as: {_sid, _window}} = state) do
+    state.session_id
+    |> Journal.all()
+    |> Enum.reduce(%{}, fn
+      %Troupe.Event{type: type, data: %{call_id: id}} = event, open when type in @asks ->
+        Map.put(open, id, event)
+
+      %Troupe.Event{type: type, data: %{call_id: id}}, open when type in @answers ->
+        Map.delete(open, id)
+
+      _event, open ->
+        open
+    end)
+    |> Enum.each(fn {_id, event} -> remember_call(state, event) end)
+  end
+
+  defp remember_asked(_state), do: :ok
 end

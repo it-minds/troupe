@@ -1103,19 +1103,6 @@ Found by the #519, #522 and client fixers, 2026-10-10.
 
 Found by the #528, #529 and #536 fixers, 2026-10-10.
 
-### D105 - Branch commands since a branch became a session of its own (medium)
-
-What the command audit ([command-audit.md](command-audit.md)) found the TUI's branch
-commands no longer doing, against their rows in `Troupe.Commands` and the TUI decisions
-that made them. The rest were fixed with Decision 843.
-
-- After `/merge`, `/discard` or `/dismiss` from the palette over the activated window, the
-  screen's focus still names the closed window until the next key.
-- `/ask`'s `read_branch`, with no branch finished, lists the others with their states and
-  never says that none has finished.
-
-Found by the #502 audit, 2026-10-10.
-
 ### D107 - Commands from an activated window, and the palette's rows (low)
 
 For the palette (#503), whose slot owns these.
@@ -1124,9 +1111,8 @@ For the palette (#503), whose slot owns these.
   own agent, not the window's (`Client.run_command/3`, by design in Decision 763); the
   palette doesn't say so.
 - `explore`, `general`, `implementer` and `reviewer` ship as subagents, so they have no
-  row and nothing a person types starts one; #502 lists them as rows. `agents.list` lists
-  primaries only, so neither client's agents manager shows or edits them either, though
-  `agents.get` answers them by name.
+  palette row and nothing a person types starts one; #502 lists them as rows. (Both agents
+  managers list and edit them since Decision 852.)
 
 Found by the #502 audit, 2026-10-10.
 
@@ -1172,16 +1158,12 @@ Found by the #248 fixers, 2026-10-10.
 
 ### D112 - Agents after #549, #551 and #563 (low)
 
-- `agents.put` has no conflict guard (last write wins, Decision 841), and neither client
-  warns when `agents.changed` arrives for the agent open in its editor.
 - `agents.put` into the user scope takes `permission: auto` (`shell: auto` included) with
   no confirmation at the daemon, and a user agent's `auto` isn't gated by trust: both
   clients ask before such a save, a client of their own with `admin` need not.
 - `agents.put` and `agents.delete` in the project scope take any `workspace` the daemon's
   user can write, as `mcp.add` does.
 - Each `agents.list` row's `worktree` is `session.create`'s rule, the same for every row.
-- An agent file that doesn't parse is listed with its reason, but nothing returns its
-  text, so neither manager can open it to mend it.
 - A save into a layer that a higher one hides counts as a new file and asks about every
   `auto` (`agents.get`'s `also` gives paths, not permissions).
 - The TUI has two agent choosers, command mode's Ctrl-N and the window's Tab switcher.
@@ -1190,21 +1172,8 @@ Found by the #248 fixers, 2026-10-10.
 
 Found by the #503 fixers, 2026-10-10.
 
-### D113 - Command mode and branches after #556 and #560 (medium)
+### D113 - Command mode and branches after #556 and #560 (low)
 
-- An approval a branch asked for before its worker connection restarted can't be answered
-  from the parent's screen: `Daemon.call_target/2`'s `{:call, sid, call_id}` registration
-  died with the old worker, so the answer goes to the parent session (medium).
-- `/new --branch` forks the session's own log, which in command mode holds no
-  conversation; the work is in the branches.
-- After a real merge conflict the line says "resolve in your checkout", but the merge was
-  aborted (Decision 647): the branch has to be merged by hand.
-- A git failure in `worktree.remove` is answered `invalid_params` with an inspected
-  string, where merge and discard answer `internal_error`.
-- `worktree.list` runs about four git calls per tree; `status --porcelain=v2 --branch`
-  would do with one.
-- A branch's row doesn't say which model it runs (quick's is `cheap`), and a dismissed
-  branch's row in the picker is titled by its worktree path.
 - TUI Decision 39's diff stat when a person's own worktree finishes, and Decision 42's
   `/merge <name>` acting on the name, aren't there since branches became sessions.
 
@@ -1212,10 +1181,7 @@ Found by the #502 fixers, 2026-10-10.
 
 ### D114 - Watch after #558 (low)
 
-- The desktop app's watch checkbox (`LocalControls.tsx`) is its own record
-  (`raw.config.watch`), not `watch.get` and `watch_changed`.
 - An `answer` branch can't remove its `AI?` comment, so each save of that file asks again.
-- A headless run prints nothing for `watch_triggered`.
 - A trigger fired while no TUI was attached is in the journal, but its window opens only
   from a live event (not tested).
 

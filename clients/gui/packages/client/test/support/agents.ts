@@ -8,7 +8,14 @@
 // file uses, line by line, and refuses the rest as the daemon refuses a file that is not
 // YAML.
 
+import { createHash } from "node:crypto";
+
 export type FakeAgentLayer = "builtin" | "bundle" | "user" | "project";
+
+/** A file's hash as `agents.get` gives it and `agents.put`'s `if_hash` names it (troupe Decision 852). */
+export function agentHash(text: string): string {
+  return `sha256:${createHash("sha256").update(text).digest("hex")}`;
+}
 
 /** One agent file in one layer; a `project` one is a workspace's. */
 export interface FakeAgent {
@@ -85,6 +92,23 @@ export const BUILTIN_AGENTS: FakeAgent[] = [
       "---\ndescription: Read-only search subagent. Finds where things live and how they work. Cheap and fast.\nmode: subagent\nbudget_share: 0.4\n" +
       "tools:\n  - read_file\n  - list_files\n  - grep\n  - glob\n  - git_read\n  - finish\npermissions:\n  write_file: deny\n  edit_file: deny\n  shell: deny\n---\nYou search.\n",
   },
+  {
+    name: "general",
+    layer: "builtin",
+    text: "---\ndescription: General-purpose subagent for a bounded task.\nmode: subagent\nbudget_share: 0.5\n---\nYou do the task in the brief, and finish.\n",
+  },
+  {
+    name: "implementer",
+    layer: "builtin",
+    text: "---\ndescription: Implements one change from a brief and reports what it ran.\nmode: subagent\nmodel: default\nbudget_share: 0.5\n---\nYou make the change the brief asks for.\n",
+  },
+  {
+    name: "reviewer",
+    layer: "builtin",
+    text:
+      "---\ndescription: Verification subagent. Runs the checks and reports what is wrong without fixing it.\nmode: subagent\nmodel: default\n" +
+      "permissions:\n  write_file: deny\n  edit_file: deny\n  shell: auto\nbudget_share: 0.4\n---\nYou review against the brief.\n",
+  },
 ];
 
 const ON_A_POD = "On a pod the agents come from the profile's bundle and are read-only here: change them in the console";
@@ -136,6 +160,19 @@ function frontmatter(yaml: string): Record<string, unknown> {
     }
   }
   return meta;
+}
+
+/** Why the daemon's loader would not read a file, in its words, or null when it would. */
+function unreadable(text: string): string | null {
+  let meta: Record<string, unknown>;
+  try {
+    meta = frontmatter(split(text).yaml);
+  } catch (e) {
+    return `not read: the frontmatter is not YAML (${(e as Error).message})`;
+  }
+  const mode = meta["mode"];
+  if (mode !== undefined && mode !== null && mode !== "primary" && mode !== "subagent") return `not read: mode must be primary or subagent, not ${JSON.stringify(mode)}`;
+  return null;
 }
 
 /** The nearest names to one that is not a tool, as the daemon offers them. */
@@ -258,20 +295,32 @@ export class FakeAgents {
       .sort((a, b) => order.indexOf(a.layer) - order.indexOf(b.layer));
   }
 
-  /** Every definition a workspace sees, by name, the highest layer's. */
+  /**
+   * Every definition a workspace sees, by name, the highest layer's that is read: a file
+   * that does not parse is not, and the one below it answers, as the daemon's loader does.
+   */
   resolve(workspace: string | null): Parsed[] {
     const names = [...new Set(this.files.map((f) => f.name))].sort();
     return names.flatMap((name) => {
-      const top = this.stack(name, workspace).at(-1);
-      if (!top) return [];
-      const { yaml, body } = split(top.text);
-      let meta: Record<string, unknown>;
-      try {
-        meta = frontmatter(yaml);
-      } catch {
-        return [];
+      for (const file of [...this.stack(name, workspace)].reverse()) {
+        if (unreadable(file.text) !== null) continue;
+        const { yaml, body } = split(file.text);
+        return [{ name, layer: file.layer, path: this.pathOf(file), text: file.text, meta: frontmatter(yaml), prompt: body.trim() }];
       }
-      return [{ name, layer: top.layer, path: this.pathOf(top), text: top.text, meta, prompt: body.trim() }];
+      return [];
+    });
+  }
+
+  /**
+   * The person's and the workspace's files that do not parse, the highest of each name,
+   * with why, as `agents.list`'s `skipped` and `agents.get`'s `broken` give them.
+   */
+  brokenFiles(workspace: string | null): Array<{ name: string; scope: "user" | "project"; path: string; text: string; reason: string }> {
+    const names = [...new Set(this.files.map((f) => f.name))].sort();
+    return names.flatMap((name) => {
+      const top = [...this.stack(name, workspace)].reverse().find((f) => (f.layer === "user" || f.layer === "project") && unreadable(f.text) !== null);
+      if (!top) return [];
+      return [{ name, scope: top.layer as "user" | "project", path: this.pathOf(top)!, text: top.text, reason: unreadable(top.text)! }];
     });
   }
 
@@ -304,6 +353,7 @@ export class FakeAgents {
       description: typeof d.meta["description"] === "string" ? d.meta["description"] : "",
       source: d.layer === "user" ? "global" : d.layer,
       notes: [],
+      mode: d.meta["mode"] === "primary" ? "primary" : "subagent",
       layer: d.layer,
       model,
       tool_count: this.toolsOf(d).length,
@@ -337,6 +387,7 @@ export class FakeAgents {
       prompt: d.prompt,
       path: d.path,
       text: d.path === null ? null : d.text,
+      hash: d.path === null ? null : agentHash(d.text),
       editable: why === null,
       editable_reason: why,
       also: this.stack(d.name, workspace)

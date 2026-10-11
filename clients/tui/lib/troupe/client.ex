@@ -580,9 +580,11 @@ defmodule Troupe.Client do
 
   @doc """
   The session's branches whose windows were dismissed, still sessions of their own, which
-  the picker lists; a session a plane runs has none.
+  the picker lists, each with the first thing it was asked; a session a plane runs has none.
   """
-  @spec dismissed_branches(session_id()) :: [%{window: String.t(), session_id: String.t()}]
+  @spec dismissed_branches(session_id()) :: [
+          %{window: String.t(), session_id: String.t(), prompt: String.t()}
+        ]
   def dismissed_branches(sid), do: if(remote?(sid), do: [], else: Daemon.dismissed_branches(sid))
 
   @doc "The text a multiple-choice answer is sent as."

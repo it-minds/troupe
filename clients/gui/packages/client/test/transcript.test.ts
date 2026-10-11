@@ -124,6 +124,41 @@ describe("the transcript fold", () => {
     assert.deepEqual(done.answered, { agent: "explore", edited: ["constraints"] });
   });
 
+  // The child's first message is that brief, from the agent that delegated it: never a
+  // person's turn, in whichever order the two are written (troupe Decision 852).
+  it("folds a subagent's first message into the brief it was handed, in either order", () => {
+    seq = 0;
+    const brief = { goal: "find the retry", context: "lib/", constraints: "read only", deliverable: "a path", do_not: "none" };
+    const task = "Goal: find the retry\n\nContext: lib/";
+    const delegated = durable("delegation_started", { call_id: "d1", agent: "explore", child_path: ["root", "explore#1"], task, brief });
+    const first = durable("user_input", { source: "user", text: task }, ["root", "explore#1"]);
+
+    for (const events of [
+      [delegated, first],
+      [first, delegated],
+    ]) {
+      const state = foldAll(events);
+      assert.equal(state.entries.filter((e) => e.kind === "user").length, 0);
+      const handed = state.entries.find((e): e is Extract<Entry, { kind: "brief" }> => e.kind === "brief")!;
+      assert.deepEqual(handed.agent, ["root", "explore#1"]);
+      assert.deepEqual(handed.from, ["root"]);
+      assert.equal(handed.child, "explore");
+      assert.equal(handed.seq, first.seq);
+      assert.deepEqual(
+        handed.parts.map(([name]) => name),
+        ["goal", "context", "constraints", "deliverable", "do_not"],
+      );
+    }
+
+    // What a person sends a subagent is theirs, and the root's input is never a brief.
+    seq = 0;
+    const own = foldAll([durable("user_input", { source: "user", text: "Goal: mine" }), durable("user_input", { source: "user", text: "hi" }, ["root", "explore#1"])]);
+    assert.deepEqual(
+      own.entries.map((e) => e.kind),
+      ["user", "user"],
+    );
+  });
+
   it("is the same list whether or not the ephemerals arrived", () => {
     seq = 0;
     const durables = [

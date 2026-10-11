@@ -50,13 +50,15 @@ defmodule Troupe.Agent.Definitions do
   A file found and not read, with why: an agent, a skill (`Troupe.Skills.skipped/2`), a
   command (`Troupe.Commands.Local.skipped/1`) or a workflow (`Troupe.Workflow.skipped/1`),
   the name it would have had, where it is, and a sentence a person can act on. A
-  directory not looked into has no name.
+  directory not looked into has no name. An agent file that was read and does not parse
+  keeps the layer it was read from as `source`.
   """
   @type skipped :: %{
-          kind: :agent | :skill | :command | :workflow,
-          name: String.t() | nil,
-          path: Path.t(),
-          reason: String.t()
+          required(:kind) => :agent | :skill | :command | :workflow,
+          required(:name) => String.t() | nil,
+          required(:path) => Path.t(),
+          required(:reason) => String.t(),
+          optional(:source) => atom()
         }
 
   @doc "Why a workspace's own file, linked out of it, is not read (Decision 829)."
@@ -399,7 +401,8 @@ defmodule Troupe.Agent.Definitions do
   end
 
   # A file that cannot be read or parsed is listed with why, in words, as well as logged:
-  # the log is where nobody looks (Decision 841).
+  # the log is where nobody looks (Decision 841). It keeps the layer it was found in, so a
+  # manager can open the person's or the repository's to mend it (Decision 852).
   defp merge_file({by_name, failed}, path, source) do
     name = Path.basename(path, ".md")
 
@@ -411,7 +414,8 @@ defmodule Troupe.Agent.Definitions do
         require Logger
         Logger.warning("troupe: skipping agent definition #{path}: #{inspect(reason)}")
         why = "not read: " <> Validate.describe(reason)
-        {by_name, failed ++ [skip(Path.dirname(path), name, why)]}
+        skipped = path |> Path.dirname() |> skip(name, why) |> Map.put(:source, source)
+        {by_name, failed ++ [skipped]}
     end
   end
 end

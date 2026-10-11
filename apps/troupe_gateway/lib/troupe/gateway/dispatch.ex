@@ -1021,6 +1021,9 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # git's refusal is answered as merge and discard answer theirs, `internal_error` with
+  # git's words, and a git that did not run in Troupe's own words: never an inspected
+  # term (D113).
   defp handle("worktree.remove", params, _context) do
     with {:ok, path} <- fetch(params, "path") do
       case Worktrees.remove(path, Map.get(params, "force", false)) do
@@ -1030,8 +1033,14 @@ defmodule Troupe.Gateway.Dispatch do
         {:error, :dirty} ->
           {:error, Error.new(:conflict, %{reason: "worktree has local changes"})}
 
+        {:error, :not_found} ->
+          worktree_error(:not_found)
+
+        {:error, {:git, _output} = refused} ->
+          worktree_error(refused)
+
         {:error, reason} ->
-          {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
+          {:error, Error.new(:internal_error, %{reason: Troupe.Git.explain(reason)})}
       end
     end
   end

@@ -263,21 +263,36 @@ defmodule Troupe.Onboard do
   provenance, since it came from nobody else's file. What `agents.put` writes through
   (Decision 841), so a person's agents and onboarded ones keep one edge. Answers as
   `write/3` does.
+
+  `if_hash:` is the `"sha256:<hex>"` of the file as the writer last read it: a file that
+  holds anything else now, or is gone, is not written over, and the answer is `{:error,
+  {:changed, %{shown, hash}}}` with what it holds now (`nil` when gone), checked in the
+  same transaction as the write (Decision 852).
   """
   @spec put_file(target(), String.t(), binary(), Path.t() | nil, keyword()) ::
           {:ok, %{file: Path.t(), shown: String.t(), action: :created | :replaced}}
-          | {:error, String.t()}
+          | {:error, String.t() | {:changed, %{shown: String.t(), hash: String.t() | nil}}}
   def put_file(target, path, content, workspace, opts \\ []) do
+    expected = Keyword.get(opts, :if_hash)
     opts = defaults(opts)
 
     with {:ok, place} <- own_place(target, path, workspace, opts) do
-      :global.trans({{__MODULE__, key(place.real)}, self()}, fn -> put_at(place, content) end)
+      :global.trans({{__MODULE__, key(place.real)}, self()}, fn ->
+        put_at(place, content, expected)
+      end)
     end
   end
 
-  defp put_at(place, content) do
+  defp put_at(place, content, expected) do
     current = read(place.real)
+    hash = current && "sha256:" <> sha256(current)
 
+    if is_binary(expected) and hash != expected,
+      do: {:error, {:changed, %{shown: place.shown, hash: hash}}},
+      else: replace_at(place, content, current)
+  end
+
+  defp replace_at(place, content, current) do
     with :ok <- replace(place.real, content) do
       action = if current, do: :replaced, else: :created
       {:ok, %{file: place.file, shown: place.shown, action: action}}

@@ -81,8 +81,25 @@ export type Entry =
       agent: string[];
       callId: string;
       child: string;
+      /** The child's agent path, where its brief arrives as its first message. */
+      childPath: string[];
       task: string;
       brief: Array<[string, string]>;
+    }
+  /**
+   * That brief as the subagent was handed it, its first message: from the agent that
+   * delegated, not from a person, and laid out as its parts under their names (troupe
+   * Decision 852). `parts` is empty for a log written before briefs had them.
+   */
+  | {
+      kind: "brief";
+      seq: number;
+      agent: string[];
+      /** The agent that delegated it. */
+      from: string[];
+      child: string;
+      parts: Array<[string, string]>;
+      text: string;
     }
   /**
    * A question for a person: the agent's `ask_user`, or the harness asking whether to
@@ -255,6 +272,20 @@ export const emptyTranscript: TranscriptState = {
 /** The root agent is the one-element path; everything deeper is a subagent. */
 export const isRoot = (agent: string[]): boolean => agent.length <= 1;
 const pathKey = (agent: string[]): string => agent.slice(1).join("/");
+const samePath = (a: string[], b: string[]): boolean => a.length === b.length && a.every((p, i) => p === b[i]);
+
+/** The brief a delegation handed its child, as the child's first message at `seq`. */
+function briefOf(delegation: Extract<Entry, { kind: "delegation" }>, seq: number): Extract<Entry, { kind: "brief" }> {
+  return {
+    kind: "brief",
+    seq,
+    agent: delegation.childPath,
+    from: delegation.agent,
+    child: delegation.child,
+    parts: delegation.brief,
+    text: delegation.task,
+  };
+}
 /** Whether `agent` is the agent at `path` or one under it. */
 const within = (agent: string[], path: string[]): boolean => agent.length >= path.length && path.every((part, i) => agent[i] === part);
 
@@ -639,11 +670,19 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
           entries: [...state.entries, { kind: "system", ...base, type: "harness_note", text: `the harness said: ${str(d.data["text"])}` }],
         };
       }
+      // A subagent's first message is the brief it was handed, which its delegation has
+      // already said, or will say as soon as it is written (the two race).
+      const text = str(d.data["text"]);
+      const handed = isRoot(d.agent)
+        ? undefined
+        : state.entries.find((en): en is Extract<Entry, { kind: "delegation" }> => en.kind === "delegation" && samePath(en.childPath, d.agent) && en.task === text);
       return {
         ...started,
         entries: [
           ...state.entries,
-          { kind: "user", ...base, text: str(d.data["text"]), author: d.actor.subject, source: str(d.data["source"], "user") },
+          handed
+            ? briefOf(handed, base.seq)
+            : { kind: "user", ...base, text, author: d.actor.subject, source: str(d.data["source"], "user") },
         ],
       };
     }
@@ -746,21 +785,23 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
         ],
       };
 
-    case "delegation_started":
-      return {
-        ...next,
-        entries: [
-          ...state.entries,
-          {
-            kind: "delegation",
-            ...base,
-            callId: str(d.data["call_id"]),
-            child: str(d.data["agent"]),
-            task: str(d.data["task"]),
-            brief: partsOf(d.data["brief"], BRIEF_PARTS),
-          },
-        ],
+    case "delegation_started": {
+      const childPath = Array.isArray(d.data["child_path"]) ? d.data["child_path"].map((p) => str(p)) : [];
+      const delegation: Extract<Entry, { kind: "delegation" }> = {
+        kind: "delegation",
+        ...base,
+        callId: str(d.data["call_id"]),
+        child: str(d.data["agent"]),
+        childPath,
+        task: str(d.data["task"]),
+        brief: partsOf(d.data["brief"], BRIEF_PARTS),
       };
+      // The child's first message may have been written first: it is the brief, not a
+      // person's turn.
+      const first = state.entries.findIndex((en) => en.kind === "user" && samePath(en.agent, childPath) && en.text === delegation.task);
+      const entries = first < 0 ? state.entries : state.entries.map((en, i) => (i === first ? briefOf(delegation, en.seq) : en));
+      return { ...next, entries: [...entries, delegation] };
+    }
 
     // A question for a person. The harness's budget question rides on the same path under
     // a `budget-<n>` id with an event of its own beside it, so the entry is made from

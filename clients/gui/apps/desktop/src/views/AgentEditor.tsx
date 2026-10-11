@@ -11,6 +11,11 @@
 // Above Save is what the agent may do, every `auto` named, and what this save adds to it:
 // the screen asks once, before writing, when the save lets a tool run without asking that
 // did not before (`Agents.tsx`).
+//
+// A save back into the file the editor was opened from names that file's hash, so one
+// over a file somebody else saved meanwhile is refused with the daemon's sentence, and
+// another client's save of this agent is said here as it is announced (troupe Decision
+// 852). A file that does not parse is opened here too, to mend, and saved where it is.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
@@ -27,9 +32,9 @@ export function permissionWords(p: string): string {
   return p === "auto" ? "runs without asking" : p === "deny" ? "never" : p === "ask" ? "asks first" : p;
 }
 
-/** What the editor holds: a new agent or a file being changed, its text, and what the daemon last found. */
+/** What the editor holds: a new agent, a file being changed or one being mended, its text, and what the daemon last found. */
 export interface Editing {
-  kind: "new" | "edit";
+  kind: "new" | "edit" | "mend";
   name: string;
   scope: AgentScope;
   text: string;
@@ -38,6 +43,20 @@ export interface Editing {
   findings: AgentCheck | null;
   /** Whether `findings` came from Check rather than from a refused save. */
   checked: boolean;
+  /** The file it was opened from, by scope and hash: a save back into that scope names the hash. */
+  base?: { scope: AgentScope; hash: string | null } | null;
+  /** Why a file being mended was not read. */
+  reason?: string | null;
+  /** Another client saved this agent while it was open here. */
+  elsewhere?: string | null;
+  /** The daemon refused a save over a file that changed since it was opened. */
+  conflict?: string | null;
+}
+
+/** The hash a save names: the file's it was opened from, when it goes back into that file's scope. */
+export function ifHashOf(editing: Editing): string | undefined {
+  const base = editing.base;
+  return base && base.scope === editing.scope && base.hash ? base.hash : undefined;
 }
 
 type Tab = "frontmatter" | "instruction" | "file";
@@ -73,7 +92,7 @@ export function AgentEditor({
   busy: boolean;
   onChange: (next: Editing) => void;
   onCancel: () => void;
-  onSave: (target: { name: string; scope: AgentScope; text: string; before: Record<string, string> }) => void;
+  onSave: (target: { name: string; scope: AgentScope; text: string; before: Record<string, string>; ifHash?: string }) => void;
 }): JSX.Element {
   const [tab, setTab] = useState<Tab>("frontmatter");
   const [checking, setChecking] = useState(false);
@@ -86,7 +105,14 @@ export function AgentEditor({
   const errorsIn = (t: Tab): number => (editing.findings?.errors ?? []).filter((f) => tabOf(f.field) === t).length;
   const set = (patch: Partial<Editing>): void => onChange({ ...editing, ...patch });
   const setText = (text: string): void => set({ text });
-  const title = editing.kind === "edit" ? `Edit ${editing.name}` : editing.original ? `New agent from ${editing.original.name}` : "New agent";
+  const title =
+    editing.kind === "edit"
+      ? `Edit ${editing.name}`
+      : editing.kind === "mend"
+        ? `Mend ${editing.name}`
+        : editing.original
+          ? `New agent from ${editing.original.name}`
+          : "New agent";
 
   const check = async (): Promise<void> => {
     setChecking(true);
@@ -117,6 +143,24 @@ export function AgentEditor({
           </p>
         </div>
       )}
+      {editing.conflict && (
+        <div className="banner error" role="alert" aria-label="Changed since it was opened">
+          <p>
+            Not saved: {editing.conflict}. Your edit is still here; Save again to replace that change, or Cancel and open the agent to read
+            it first.
+          </p>
+        </div>
+      )}
+      {editing.elsewhere && !editing.conflict && (
+        <p className="note error" role="status" aria-label="Saved elsewhere">
+          {editing.elsewhere}
+        </p>
+      )}
+      {editing.kind === "mend" && editing.reason && (
+        <p className="note">
+          The file is not read ({editing.reason}). Mend it here; the daemon checks it, and Save puts it back where it is.
+        </p>
+      )}
       {editing.findings?.ok && editing.checked && <p className="note">The daemon finds nothing wrong with it.</p>}
       {checkError && <p className="note error">{checkError}</p>}
 
@@ -126,12 +170,12 @@ export function AgentEditor({
           <input
             value={editing.name}
             onChange={(e) => set({ name: e.target.value, findings: null })}
-            disabled={editing.kind === "edit"}
+            disabled={editing.kind !== "new"}
             placeholder="review"
             spellCheck={false}
             aria-label="Name"
           />
-          <small>{editing.kind === "edit" ? "a new name is a new agent: New agent from this" : "lowercase letters, digits and dashes"}</small>
+          <small>{editing.kind === "new" ? "lowercase letters, digits and dashes" : "a new name is a new agent: New agent from this"}</small>
         </label>
         <label>
           Save to
@@ -186,7 +230,10 @@ export function AgentEditor({
         <button
           className="primary"
           disabled={busy || editing.name.trim() === ""}
-          onClick={() => onSave({ name: editing.name.trim(), scope: editing.scope, text: editing.text, before: replaced(editing) })}
+          onClick={() => {
+            const ifHash = ifHashOf(editing);
+            onSave({ name: editing.name.trim(), scope: editing.scope, text: editing.text, before: replaced(editing), ...(ifHash ? { ifHash } : {}) });
+          }}
         >
           {busy ? "Saving…" : `Save to ${scopeWords(editing.scope)}`}
         </button>

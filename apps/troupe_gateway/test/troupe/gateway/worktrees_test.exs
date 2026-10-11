@@ -130,6 +130,30 @@ defmodule Troupe.Gateway.WorktreesTest do
     assert cwd == real!(context.workspace)
   end
 
+  # A git that refuses is answered as merge and discard answer it, `internal_error` with
+  # git's own words, not `invalid_params` with an inspected string (D113).
+  test "worktree.remove answers git's refusal as an internal error in git's words", context do
+    client = connect(context)
+    plain = Path.join(context.workspace, "plain")
+    File.mkdir_p!(plain)
+
+    assert {:error, %Error{message: "internal_error", data: %{"reason" => reason}}} =
+             Client.call(client, "worktree.remove", %{
+               "command_id" => Client.command_id(),
+               "path" => plain
+             })
+
+    assert reason =~ "is not a working tree"
+    refute String.starts_with?(reason, "\"")
+    assert File.dir?(plain)
+
+    assert {:error, %Error{message: "not_found"}} =
+             Client.call(client, "worktree.remove", %{
+               "command_id" => Client.command_id(),
+               "path" => Path.join(context.base, "gone")
+             })
+  end
+
   # TUI Decision 42, in the daemon: `/worktree login: …` works in `<checkout>-login` on
   # `troupe/login`, the same tree every time, made again from its branch when only the
   # directory went.
@@ -207,6 +231,7 @@ defmodule Troupe.Gateway.WorktreesTest do
     File.write!(Path.join(workspace, "other.txt"), "x\n")
     {_, 0} = git(workspace, ["add", "other.txt"])
     {_, 0} = git(workspace, ["commit", "-qm", "other"])
+    ran = record_calls(context.base)
 
     assert {:ok, %{"worktrees" => trees}} =
              Client.call(client, "worktree.list", %{"workspace" => workspace})
@@ -220,6 +245,21 @@ defmodule Troupe.Gateway.WorktreesTest do
     # The checkout has nothing uncommitted, and no upstream to be ahead of or behind.
     assert %{"ahead" => nil, "behind" => nil, "added" => 0, "removed" => 0, "dirty" => false} =
              checkout
+
+    # One `status --porcelain=v2 --branch` a tree says how it stands and whether it is
+    # dirty, and the lines are one `diff` from the merge base: no `rev-list`, no
+    # `merge-base`, no second status (D113).
+    calls = ran.()
+    assert Enum.count(calls, &(&1 =~ "--porcelain=v2 --branch")) == 2
+    assert Enum.count(calls, &(&1 =~ ~r/\bstatus\b/)) == 2
+    refute Enum.any?(calls, &(&1 =~ ~r/ (rev-list|merge-base) /))
+
+    # A branch with an upstream of its own is still counted against the checkout's.
+    {_, 0} = git(wt, ["config", "branch.#{branch}.remote", "origin"])
+    {_, 0} = git(wt, ["config", "branch.#{branch}.merge", "refs/heads/elsewhere"])
+
+    assert %{"ahead" => 1, "behind" => 1, "added" => 4, "removed" => 1} =
+             workspace |> Worktrees.list() |> Enum.find(&(&1["branch"] == branch))
   end
 
   # #529 (Decision 833): the gateway's own git runs none of the commands the repository's
@@ -319,6 +359,32 @@ defmodule Troupe.Gateway.WorktreesTest do
     File.write!(Path.join(bin, "git"), """
     #!/bin/sh
     case "$*" in *"worktree remove"*) pwd -P >> '#{log}' ;; esac
+    exec '#{real_git}' "$@"
+    """)
+
+    File.chmod!(Path.join(bin, "git"), 0o755)
+    path = System.get_env("PATH")
+    System.put_env("PATH", bin <> ":" <> path)
+    on_exit(fn -> System.put_env("PATH", path) end)
+
+    fn ->
+      case File.read(log) do
+        {:ok, text} -> String.split(text, "\n", trim: true)
+        {:error, _} -> []
+      end
+    end
+  end
+
+  # Every git started after this, by its arguments, through the same stand-in on PATH.
+  defp record_calls(base) do
+    real_git = System.find_executable("git")
+    bin = Path.join(base, "calls-bin")
+    log = Path.join(base, "calls.log")
+    File.mkdir_p!(bin)
+
+    File.write!(Path.join(bin, "git"), """
+    #!/bin/sh
+    echo "$*" >> '#{log}'
     exec '#{real_git}' "$@"
     """)
 
