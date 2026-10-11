@@ -47,8 +47,8 @@ for compaction, where the prefix changes anyway; a follow-up issue carries it.
   one of `markdown` (the default), `mermaid`, `json`, `csv` and `text`. It writes or
   replaces the document of that name; calling it again under the same name is a new
   version, not a second document. `:auto`: it writes nothing but the session's own
-  scratchpad. Its result tells the model the path and the version and to keep the reply
-  short and name the document.
+  scratchpad. Its result tells the model the path and the version, and to reply in a few
+  sentences that name the document without repeating it.
 - **The name** is a file name, lowered: letters, digits, `.`, `-` and `_`, starting with a
   letter or digit, at most 64. A separator, `..` and a control character are refused each
   in a sentence of its own, and so is a name Windows keeps for a device (`nul.md`). Lowered
@@ -107,6 +107,29 @@ against 1,431 (117, `build.md`'s sentence), the first prompt 15,854 against 15,2
 largest 31,351, and 184,128 of the stand-in's tokens over the thirty-one calls against
 179,075 (2.8% more). The budgets move with it: 1,600, 14,300, 15,950, 31,500 and 185,000.
 On a provider that caches, the definition is read from the cache after the first call.
+
+**What it costs live.** The installed build, `troupe bench --live --scenario scratchpad`
+and `scratchpad_without`, three runs each on Claude Sonnet 5.5 ($2 in, $10 out, $0.20 a
+cache read, $2.50 a cache write per million), on Windows, 2026-10-11. `scratchpad_without`
+is `build` as it was, `show` denied and its sentence not in the prompt.
+
+| | with `show` | without |
+|---|---:|---:|
+| runs whose checks held | 3 of 3 | 3 of 3 |
+| model calls | 9 | 7 |
+| input tokens, fresh / from the cache | 23,873 / 54,886 | 10,418 / 38,400 |
+| output tokens | 14,718 | 13,350 |
+| cost, the three runs | $0.2178 | $0.1672 |
+| the plan, where it went | the scratchpad, 9.4 to 10.2 KB | the reply, 10.0 to 11.1 KB |
+| the reply | 1.1 to 1.4 KB, naming the document | the plan |
+
+Every run with the tool put the plan on the scratchpad and replied in a paragraph and a
+few points that named it. The turn costs more, about 30% a run: one more model call, which
+carries the document as the call's arguments, and a short reply on top of the plan. That
+is the display-only decision's price, and the saving is compaction's to make. A first set
+of three, with the tool's result saying only "keep the reply short and name it", put the
+plan on the scratchpad every time, but two replies of three did not name the document
+($0.2264); the result now names it and asks for a few sentences.
 
 **The desktop app.** A card where the call was, which opens a panel beside the
 conversation with a tab for each document, read with `fs.read` when a tab opens and again

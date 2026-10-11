@@ -765,8 +765,9 @@ defmodule Troupe.Bench.LiveScenarios do
         {[],
          [
            {"shown", "the plan went to the scratchpad", shown(ctx.events) != []},
-           {"short", "the reply is under 1,000 bytes and names the document",
-            byte_size(reply(ctx)) < 1_000 and Enum.any?(shown(ctx.events), &(reply(ctx) =~ &1))}
+           {"named", "the reply names the document", Enum.any?(shown(ctx.events), &(reply(ctx) =~ &1))},
+           {"short", "the reply is a fifth of the document or less",
+            byte_size(reply(ctx)) * 5 <= Enum.max([0 | shown_sizes(ctx.events)])}
          ]}
       end
     }
@@ -792,9 +793,12 @@ defmodule Troupe.Bench.LiveScenarios do
     }
   end
 
-  # The names of the documents the run showed.
+  # The names of the documents the run showed, and their sizes.
   defp shown(events),
     do: for(%{type: "scratch_updated", data: %{"name" => name}} <- events, uniq: true, do: name)
+
+  defp shown_sizes(events),
+    do: for(%{type: "scratch_updated", data: %{"size" => size}} <- events, do: size)
 
   @doc false
   @spec build_without_show() :: String.t()

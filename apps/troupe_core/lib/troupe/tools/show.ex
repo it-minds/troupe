@@ -60,7 +60,7 @@ defmodule Troupe.Tools.Show do
            Scratch.write(ctx, %{name: name, kind: kind, title: title, content: content}) do
       {:ok,
        "Showed #{document.path} (#{document.size} bytes, version #{document.version}) beside " <>
-         "the chat. Keep the reply short and name it."}
+         "the chat. Reply in a few sentences that name #{document.name}, and do not repeat it."}
     end
   end
 end
