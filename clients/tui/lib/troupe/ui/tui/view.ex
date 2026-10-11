@@ -30,6 +30,10 @@ defmodule Troupe.UI.TUI.View do
   @input_content 5
   @input_rows @input_content + 2
 
+  # The side panel is drawn from this many columns (Decision 48), and where it is, it says
+  # what the window's last turn cost and the transcript does not (TUI Decision 160).
+  @side_box 100
+
   @doc """
   The frame's widgets, coloured for the terminal: `state.theme` when the state carries
   one (a test drawing at a given depth), otherwise what the environment says.
@@ -184,7 +188,7 @@ defmodule Troupe.UI.TUI.View do
 
   @doc "Splits the pane into the transcript and the side panel; below 100 columns there is no side panel."
   @spec pane_split(Rect.t()) :: {Rect.t(), Rect.t() | nil}
-  def pane_split(%Rect{width: width} = rect) when width < 100, do: {rect, nil}
+  def pane_split(%Rect{width: width} = rect) when width < @side_box, do: {rect, nil}
 
   def pane_split(%Rect{width: width} = rect) do
     side_w = width |> div(4) |> max(30) |> min(60)
@@ -230,6 +234,7 @@ defmodule Troupe.UI.TUI.View do
           layout(width, height, true, length(Model.windows(state.model)), box_height(height))
 
         {left, side} = pane_split(pane_rect)
+        w = turn_lines_moved(w, side != nil)
         inner_w = max(left.width - 2, 1)
         inner_h = max(left.height - 2, 1)
         agent = viewed_agent(w, state.pane.agent)
@@ -276,6 +281,12 @@ defmodule Troupe.UI.TUI.View do
   end
 
   def pane_geometry(_state, _size), do: nil
+
+  # Where the side box is drawn it says what the window's last turn cost (TUI Decision
+  # 160), so the window's transcript, in its pane and on its tile, leaves out the line that
+  # said it under the turn; a screen too narrow for the box keeps the line.
+  defp turn_lines_moved(w, true), do: Model.without_turn_lines(w)
+  defp turn_lines_moved(w, false), do: w
 
   # Following shows the end of the transcript — except when the last block is what the
   # branch is waiting on and it is taller than the pane: then its header (`APPROVAL: …`
@@ -2092,11 +2103,12 @@ defmodule Troupe.UI.TUI.View do
   defp strip(windows, rect, state) do
     shown = Enum.take(windows, 9)
     rects = tile_rects(rect, length(shown))
+    moved? = rect.width >= @side_box
 
     shown
     |> Enum.with_index(1)
     |> Enum.zip(rects)
-    |> Enum.flat_map(fn {{w, n}, r} -> window_tile(w, n, r, state) end)
+    |> Enum.flat_map(fn {{w, n}, r} -> window_tile(turn_lines_moved(w, moved?), n, r, state) end)
   end
 
   # Nothing started yet: the mask and the word over what to type, when the screen has
@@ -2329,7 +2341,7 @@ defmodule Troupe.UI.TUI.View do
     side =
       if g.side do
         inner_w = max(g.side.width - 2, 1)
-        lines = side_lines(w, g.agent)
+        lines = side_lines(w, g.agent, inner_w)
 
         [
           {%Paragraph{
@@ -2520,7 +2532,7 @@ defmodule Troupe.UI.TUI.View do
 
   ## Side panel
 
-  defp side_lines(w, viewed) do
+  defp side_lines(w, viewed, width) do
     todos = todo_lines(w, w.path, "")
     paths = Model.agent_paths(w)
 
@@ -2555,11 +2567,27 @@ defmodule Troupe.UI.TUI.View do
             Enum.map(items, &{:pending, "  " <> pending_summary(&1, "y / n / a")})
       end
 
-    [{:system, "Tokens:"}] ++
-      Enum.map(Model.token_lines(w), &{:text, "  " <> &1}) ++
+    # What the last turn cost and, beneath it, the session (TUI Decision 160), indented
+    # two columns inside the box.
+    room = max(width - 2, 1)
+
+    [{:system, "This turn:"}] ++
+      this_turn(w, room) ++
+      [{:system, "Session:"}] ++
+      Enum.map(Model.session_box(w, room), &{:text, "  " <> &1}) ++
       [{:blank, ""}, {:system, "Tasks:"}] ++
       if(todos == [], do: [{:text, "  (none)"}], else: todos) ++
       agents ++ pending
+  end
+
+  # The window's last turn once it has ended; while the next one runs, that its figures
+  # come when it ends, and never a running count (Decision 139).
+  defp this_turn(w, room) do
+    case Map.get(w, :last_turn) do
+      %{} = turn -> Enum.map(Model.turn_box(turn, room), &{:text, "  " <> &1})
+      nil when w.state in [:running, :needs_input] -> [{:text, "  said when it ends"}]
+      nil -> [{:text, "  (none)"}]
+    end
   end
 
   # An item as `Troupe.Remote.Translate` spells it: `text`, `status`, `id`.

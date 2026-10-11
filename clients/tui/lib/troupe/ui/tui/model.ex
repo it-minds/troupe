@@ -148,7 +148,8 @@ defmodule Troupe.UI.TUI.Model do
   at all (TUI Decision 155: a window nobody asked anything of is idle, not running);
   `badge` says the window has ended since it was last opened. `session_id` is the
   branch's own session, when its window was opened with one, and `cost` what its own
-  agent's turns cost, as the events that end them say (Decision 139).
+  agent's turns cost, as the events that end them say (Decision 139); `last_turn` is the
+  last of those turns, from its end until the next one starts (TUI Decision 160).
   """
   @type window :: %{
           path: String.t(),
@@ -159,6 +160,7 @@ defmodule Troupe.UI.TUI.Model do
           started: boolean(),
           session_id: String.t() | nil,
           cost: spend(),
+          last_turn: turn() | nil,
           isolation: atom(),
           started_at: integer(),
           ended_at: integer() | nil,
@@ -224,6 +226,7 @@ defmodule Troupe.UI.TUI.Model do
           started: started,
           session_id: e.data[:session_id],
           cost: @no_spend,
+          last_turn: nil,
           isolation: e.data.isolation,
           started_at: e.ts,
           ended_at: nil,
@@ -344,7 +347,10 @@ defmodule Troupe.UI.TUI.Model do
 
   defp turn(w, _e), do: w
 
-  defp working(w), do: %{w | outcome: nil, message: nil, ended_at: nil, started: true}
+  # A turn that starts puts the last one's figures away: the side box says nothing of a
+  # turn while it runs (TUI Decision 160), as the line under it never did.
+  defp working(w),
+    do: %{w | outcome: nil, message: nil, ended_at: nil, started: true, last_turn: nil}
 
   # Why a rest is a failure, in words, or nil when it is none: the line the headless
   # printer draws between a run that finished and one that ended short, save that a cancel
@@ -722,9 +728,11 @@ defmodule Troupe.UI.TUI.Model do
   # What the turn cost, once, in the line under it (Decision 139): the event that ends a
   # turn carries it, and a live `agent_state` never does, so nothing is said while it runs.
   # The window's own agent's turn carries what its subagents spent (root Decision 769), so
-  # only that one is added to what the window cost: a subagent's would count twice.
+  # only that one is added to what the window cost: a subagent's would count twice. It is
+  # also the window's `last_turn`, which the side box says (TUI Decision 160); where that
+  # box is drawn, the view leaves the line out (`without_turn_lines/1`).
   defp turn_cost(w, path, %{turn: %{calls: calls} = turn}, false) when calls > 0 do
-    w = if path == w.path, do: %{w | cost: spent(w.cost, turn)}, else: w
+    w = if path == w.path, do: %{w | cost: spent(w.cost, turn), last_turn: turn}, else: w
     w |> ensure_agent(path) |> push(path, {:system, turn_line(turn)})
   end
 
@@ -1501,18 +1509,70 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   @doc """
-  The same counts as one short line each, for the side panel, which is too narrow
-  for `token_detail/1`. The cache line is only there when the provider cached.
+  What the side box says of the window's last turn (TUI Decision 160), in `turn_line/1`'s
+  words: its calls and the money, `↑` sent and cached, `↓` received. Two figures share a
+  line where `width` columns hold both, and each takes its own where they do not: the
+  side panel is 30 to 60 columns, too narrow for `turn_line/1`.
   """
-  @spec token_lines(%{usage: usage()}) :: [String.t()]
-  def token_lines(%{usage: u} = a) do
-    ["↑ #{short(u.input + u.cache_write)} sent", "↓ #{short(u.output)} received"] ++
-      if(u.cache_read > 0, do: ["⟳ #{short(u.cache_read)} from cache"], else: []) ++
-      case headroom_note(a) do
+  @spec turn_box(turn(), pos_integer()) :: [String.t()]
+  def turn_box(%{calls: calls} = turn, width),
+    do: fit([[calls(calls), money(turn)] | usage_rows(turn.usage)], width)
+
+  @doc """
+  What the side box says of the session under the last turn (TUI Decision 160): the calls
+  and money of the window's ended turns, once one has ended, the window's tokens in the
+  turn's words, and the tightest limit a warning has fired for, where the limit is.
+  """
+  @spec session_box(window(), pos_integer()) :: [String.t()]
+  def session_box(%{usage: u} = w, width) do
+    spend =
+      case Map.get(w, :cost, @no_spend) do
+        %{calls: 0} -> []
+        spend -> [[calls(spend.calls), money(spend)]]
+      end
+
+    fit(spend ++ usage_rows(u), width) ++
+      case headroom_note(w) do
         "" -> []
         note -> ["⚠ " <> note]
       end
   end
+
+  defp usage_rows(u) do
+    [
+      ["↑ #{short(u.input + u.cache_write)} sent", "#{short(u.cache_read)} cached"],
+      ["↓ #{short(u.output)} received"]
+    ]
+  end
+
+  defp fit(rows, width) do
+    Enum.flat_map(rows, fn figures ->
+      line = Enum.join(figures, " · ")
+      if cell_width(line) <= width, do: [line], else: figures
+    end)
+  end
+
+  @doc """
+  The window with the lines that said what its own agent's turns cost left out of that
+  agent's transcript, for a screen wide enough for the side box, which says it there (TUI
+  Decision 160). The fold keeps them, for the narrow screen that has no side box. A
+  subagent's line says what its own task cost, which the side box does not, and stays.
+  """
+  @spec without_turn_lines(window()) :: window()
+  def without_turn_lines(%{path: path, agents: agents} = w) do
+    case agents do
+      %{^path => a} ->
+        kept = Enum.reject(a.transcript, &turn_entry?/1)
+        %{w | agents: %{agents | path => %{a | transcript: kept}}}
+
+      _ ->
+        w
+    end
+  end
+
+  # The line `turn_cost/4` writes: nothing else in a transcript starts with `turn: `.
+  defp turn_entry?({:system, "turn: " <> _}), do: true
+  defp turn_entry?(_entry), do: false
 
   @doc """
   What one turn cost, as the line under it says (Decision 139): its model calls, what was
@@ -1522,9 +1582,12 @@ defmodule Troupe.UI.TUI.Model do
   """
   @spec turn_line(turn()) :: String.t()
   def turn_line(%{calls: calls, usage: u} = turn) do
-    "turn: #{calls} #{if calls == 1, do: "call", else: "calls"} · ↑ #{short(u.input + u.cache_write)} sent · " <>
+    "turn: #{calls(calls)} · ↑ #{short(u.input + u.cache_write)} sent · " <>
       "#{short(u.cache_read)} cached · ↓ #{short(u.output)} received · " <> money(turn)
   end
+
+  defp calls(1), do: "1 call"
+  defp calls(n), do: "#{n} calls"
 
   @doc """
   What a window's turns have cost so far, in the words a turn's line uses (`$0.02`, `no
