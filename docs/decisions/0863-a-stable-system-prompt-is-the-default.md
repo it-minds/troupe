@@ -1,6 +1,6 @@
 ---
 number: 863
-title: "A session's system prompt is the same on every call by default, and what changes during it reaches the model as turn context; `per_turn` is the old prompt by name, `thinking_binding: drop_block` an opt-in fallback, `error` the refusal asked for, and the API's mismatch header is kept on `llm_response` in its own words"
+title: "A session's system prompt is the same on every call by default, and what changes during it reaches the model as turn context, logged and folded so a restart sends the same prefix; `per_turn` is the old prompt by name, `thinking_binding: drop_block` an opt-in fallback, `error` the refusal asked for, and the API's mismatch header is kept on `llm_response` in its own words"
 date: 2026-10-11
 status: accepted
 issue: 465
@@ -10,6 +10,8 @@ paths:
   - apps/troupe_core/lib/troupe/config/schema.ex
   - apps/troupe_core/lib/troupe/config/layers.ex
   - apps/troupe_core/lib/troupe/agent/server.ex
+  - apps/troupe_core/lib/troupe/agent/state.ex
+  - apps/troupe_core/lib/troupe/log/fold.ex
   - apps/troupe_core/lib/troupe/llm/providers/anthropic.ex
   - apps/troupe_core/lib/troupe/llm/request.ex
   - apps/troupe_core/lib/troupe/bench/live.ex
@@ -23,7 +25,7 @@ paths:
   - apps/troupe_core/test/troupe/llm/thinking_test.exs
   - apps/troupe_core/test/troupe/bench_live_test.exs
   - docs/developer/prompt-prefix.md
-gist: "system_prompt defaults to stable (per_turn by name, read as written); drop_block stays opt-in, error asks for the 400; llm_response.prefix_mismatch keeps only the header's own words"
+gist: "system_prompt defaults to stable (per_turn by name, read as written); turn context logged on llm_request and folded; drop_block opt-in, error asks for the 400; prefix_mismatch in the API's words"
 ---
 
 Issue #465, decided by the maintainer on 2026-10-11 from the measurement on the issue
@@ -47,12 +49,29 @@ counter, the stand-in) stands.
   `with_turn_context/2` appends each recorded block to its message on every later request,
   so a request is always the one before with something added. Nothing moves a block or
   takes one out, except a compaction, which empties both maps; the sections then go again
-  with the conversation that is left. The blocks are not in the log: an agent restarted
-  sends its next call without them, once, and puts the sections again as they are then.
-  `llm_request.turn_context` names the sections a call carried. What the turn context
+  with the conversation that is left. `llm_request.turn_context` names the sections a
+  call carried. What the turn context
   cannot carry is anything outside the messages: the tools (Decision 793's task-list tools
   at a turn's eleventh call, #590), a profile's prompt (an `AI?` turn's `plan`, a profile
   switch), the model.
+- **The turn context is in the log, and folded.** 815 kept the blocks in the agent alone,
+  so an agent restarted, or a session `troupe resume` woke, sent its next call without
+  them. That was not one edit: every thinking block made after them was bound to a prefix
+  that held them, so on an account that enforces the check every later call was refused
+  and sent again without its thinking, until a compaction. With option 2 the default that
+  is every resumed session. Each block put is now on its call's `llm_request`, as
+  `turn_context_block`: `at` (the message it goes after), `text` (the block as sent) and
+  `sent` (each section's `sha256:` digest, which is all `State.context_sent` keeps now).
+  The agent's replay puts each back with the same `put_context/2` the live call used, and
+  a `compacted` empties both maps on replay as it does live. A restarted agent's next call
+  is then the call before it with something added, byte for byte, and a section that has
+  not changed is not sent again. `Troupe.Log.Fold` witnesses `llm_request` now: the blocks
+  the conversation carries since its last compaction, a key present only once one was put,
+  so every recorded fixture's hash stands. The text is logged once, when it is put; it is
+  what the conversation already says to the model, like a tool's result. Not chosen:
+  logging only the sections and rendering the block again on replay, which a later
+  build's wording would turn into a different prefix. A log written before 0.13.0 has no
+  blocks, and its agents send their next call without them once, as before.
 - **The old value keeps its name, and a setting is read as written.** `per_turn` is the
   prompt as it was before 0.13.0, chosen by name in any layer or with
   `TROUPE_SYSTEM_PROMPT=per_turn`. A `per_turn` already in a file stays `per_turn`; a file
@@ -65,8 +84,8 @@ counter, the stand-in) stands.
   reach the model today, and the measurement's model made up for the lost reasoning with
   42% more output; with a stable system prompt nothing in front of the blocks changed, so
   it had nothing to drop. It is the fallback for an enforced account on the changes a
-  stable prompt cannot remove: a compaction, an `AI?` turn's `plan` prompt, an agent
-  restarted; and, until #590, the task list's tools.
+  stable prompt cannot remove: a compaction, an `AI?` turn's `plan` prompt; and, until
+  #590, the task list's tools.
 - **`thinking_binding: error`** (#591) sends the beta header and `block_binding:
   {prefix_mismatch_behavior: "error"}` on the same requests `drop_block` binds (those to a
   model whose thinking goes back, Decision 805). The API refuses a stale block with the
@@ -120,4 +139,12 @@ counter, the stand-in) stands.
   sections=system; changed_validated=system.0`; `error` with the default is never refused.
   On the chunk's tip four of these failed: the second turn's system prompt held the list,
   the config read `per_turn` and refused `error`, `error` sent no header, and no response
-  had the field.
+  had the field. The fold, in `StablePromptTest`: a session stopped and resumed, an agent
+  killed between turns, one killed in the middle of a tool call, and one killed after a
+  compaction each send a next call whose system prompt and messages, as the log writes a
+  message, begin with the call before the restart's; against the stand-in as Claude Opus
+  5.5 with `thinking_binding: error`, a resumed session's three calls are never refused;
+  and the fold's witness counts the blocks, a compaction clears the count, and a log
+  without one folds as it did. Before the fold all four restart cases failed, the
+  stand-in's refused once, and without the reset on a replayed compaction the last case
+  failed.

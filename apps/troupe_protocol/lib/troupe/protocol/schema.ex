@@ -126,7 +126,11 @@ defmodule Troupe.Protocol.Schema do
         "prompt_bytes" => optional(:object),
         "system_changed" => optional(:boolean),
         "tools_changed" => optional(:boolean),
-        "turn_context" => optional({:array, :string})
+        "turn_context" => optional({:array, :string}),
+        # The block that call put into the conversation: `at`, the index of the message it
+        # goes after, `text`, and `sent`, each section's digest; folded on replay so a
+        # restarted agent sends the prefix it sent before (Decision 863).
+        "turn_context_block" => optional(:object)
       },
       "llm_response" => %{
         "message" => required(:object),

@@ -368,6 +368,12 @@ defmodule Troupe.Agent.Server do
   defp fold_event(%Event{type: "delegation_started", data: data}, state),
     do: %{state | child_seq: child_seq(state, data["child_path"])}
 
+  # The turn context a call put into the conversation, put back where it was, so the call
+  # after a restart sends the prefix the one before it sent (Decision 863). A call that put
+  # none, and a log written before 0.13.0, fold as they did.
+  defp fold_event(%Event{type: "llm_request", data: %{"turn_context_block" => %{} = put}}, state),
+    do: put_context(state, put)
+
   # The note a root's failed request left in its conversation (Decision 693). A log written
   # before the note was, has none, and replays as it always did. A call the agent gave up
   # on is counted as it was live (Decision 788).
@@ -459,10 +465,17 @@ defmodule Troupe.Agent.Server do
   # conversation that has moved on.
   # What the conversation was compacted to, and the budget's own history (Decision 660):
   # a grant survives a restart, and a question without its answer is still owed.
+  # The turn context the conversation carried goes with it (Decision 863), as it does live.
   defp fold_limits(state, "compacted", data) do
     conversation = Enum.map(data["conversation"], &resolve_results(state, &1))
 
-    %{state | conversation: conversation, compacted_through: compacted_through(conversation)}
+    %{
+      state
+      | conversation: conversation,
+        compacted_through: compacted_through(conversation),
+        turn_context: %{},
+        context_sent: %{}
+    }
     |> show_todos()
     |> fold_summary_call(data)
   end
@@ -1422,8 +1435,10 @@ defmodule Troupe.Agent.Server do
 
   defp digest(term), do: :crypto.hash(:sha256, :erlang.term_to_binary(term, [:deterministic]))
 
-  defp put_attached(data, []), do: data
-  defp put_attached(data, sections), do: Map.put(data, "turn_context", sections)
+  defp put_attached(data, nil), do: data
+
+  defp put_attached(data, {sections, put}),
+    do: data |> Map.put("turn_context", sections) |> Map.put("turn_context_block", put)
 
   # The profile in force for this turn. Normally the agent's own; during an `AI?` watch
   # turn, the agent's own under the plan permission set (Decision 844): its model, prompt
@@ -1588,40 +1603,56 @@ defmodule Troupe.Agent.Server do
   # where it was put, on every later call: a request is then the one before with
   # something added, which is what keeps a kept thinking block valid and the cached
   # conversation readable. A section goes again only when it changed since the copy the
-  # conversation already carries; one that emptied says so. Not folded: an agent
-  # restarted sends its next call without the blocks it had put before, which is one
-  # edit of the conversation, and puts the sections again as they are then. A compaction
-  # rewrites the conversation, and they are put again after it.
+  # conversation already carries; one that emptied says so. A compaction rewrites the
+  # conversation, and they are put again after it.
+  #
+  # Each block put is on its call's `llm_request` (`turn_context_block`: where, the text,
+  # and the digest of each section it carried) and folded back on replay (`put_context/2`),
+  # so an agent restarted, or a session resumed, sends the prefix it sent before (Decision
+  # 863).
+  @nothing_sent "sha256:" <> Base.encode16(:crypto.hash(:sha256, ""), case: :lower)
+
   defp attach_turn_context(%State{} = state) do
     if stable?(state),
       do: attach_changed(state, last_user_index(state.conversation)),
-      else: {state, []}
+      else: {state, nil}
   end
 
-  defp attach_changed(state, nil), do: {state, []}
+  defp attach_changed(state, nil), do: {state, nil}
 
   defp attach_changed(state, index) do
     changed =
       Enum.reject(turn_sections(state), fn {name, text} ->
-        Map.get(state.context_sent, name, "") == text
+        Map.get(state.context_sent, name, @nothing_sent) == section_digest(text)
       end)
 
     case changed do
       [] ->
-        {state, []}
+        {state, nil}
 
       changed ->
-        block = render_turn_context(changed)
-
-        state = %{
-          state
-          | turn_context: Map.update(state.turn_context, index, block, &(&1 <> "\n\n" <> block)),
-            context_sent: Map.merge(state.context_sent, Map.new(changed))
+        put = %{
+          "at" => index,
+          "text" => render_turn_context(changed),
+          "sent" => Map.new(changed, fn {name, text} -> {name, section_digest(text)} end)
         }
 
-        {state, Enum.map(changed, &elem(&1, 0))}
+        {put_context(state, put), {Enum.map(changed, &elem(&1, 0)), put}}
     end
   end
+
+  # A block put after what the message at `at` holds, after any put there before; the
+  # same live and on replay.
+  defp put_context(state, %{"at" => at, "text" => text, "sent" => sent}) do
+    %{
+      state
+      | turn_context: Map.update(state.turn_context, at, text, &(&1 <> "\n\n" <> text)),
+        context_sent: Map.merge(state.context_sent, sent)
+    }
+  end
+
+  defp section_digest(text),
+    do: "sha256:" <> Base.encode16(:crypto.hash(:sha256, text), case: :lower)
 
   defp turn_sections(state) do
     [

@@ -272,7 +272,7 @@ Durable:
 | `user_shell` | `run_id`, `command`, `output`, `ended`, `agent`, `exit_status`, `reason`, `timeout_ms`, `duration_ms`, `command_id` — a command the person ran with `shell.run`, written by the root agent under their actor when it ended. `output` is its combined stdout and stderr, the tail capped at `tool_output_limit` with the `read_output` marker when it was cut; `ended` is `exited` (with `exit_status`), `timeout`, `killed` (`shell.cancel`) or `failed` (it could not start, `reason` says why); `agent: false` is one kept from the agent (Decision 813) |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
-| `llm_request` | `model`, `message_count`, `tools`, `profile`, `prompt_bytes` — what the prompt was made of (see below); `system_changed`, `tools_changed`, `turn_context` — what changed in front of what the agent had sent (see below) |
+| `llm_request` | `model`, `message_count`, `tools`, `profile`, `prompt_bytes` — what the prompt was made of (see below); `system_changed`, `tools_changed`, `turn_context`, `turn_context_block` — what changed in front of what the agent had sent (see below) |
 | `llm_response` | `message` (`role`, `content`: blocks of type `text`, `tool_use`, `tool_result` or `reasoning` — the last is the model's thinking, `provider`-bound, replayed only to the provider that made it and carried by `Message.text` nowhere), `usage` (`input_tokens`, `cache_read`, `cache_write`, `output_tokens` — disjoint, so the first three sum to the prompt's length), `stop_reason`, `model`, `gateway`; `thinking_resent`, `thinking_dropped`, `prefix_mismatch` — what became of the thinking the call handed back, and what the provider said of why (see below) |
 | `llm_error` | `reason` — a sentence a person can act on: a blown context window, rejected credentials, an unknown model, a rate limit the backoff outlasted, with the provider's words in brackets; `note` — a root's, the words its conversation was given about the failure, which a replay puts back; `stopped` — the call the agent gave up on when it did not answer within `llm_timeout_ms`, and stopped (see below) |
 | `truncated` | `reason` (`max_tokens`: the output cap cut the reply; `empty`: it had neither text nor a tool call), then one of `note` (the model was asked again), `calls` (tool calls cut mid-argument, answered with an error and not run) or `final: true` (asked once already; the agent ends `output_truncated` or `empty_reply`) |
@@ -446,7 +446,11 @@ On `llm_request`, `system_changed` and `tools_changed` say whether the system pr
 the tool definitions differ from the agent's call before; both are absent on an agent's
 first call and on its first after a restart. `turn_context` is present on a call that sent
 the session's turn context, with `system_prompt: stable` (the default since 0.13.0,
-Decision 863): the sections it carried, of `instructions`, `goal` and `task_list`. On
+Decision 863): the sections it carried, of `instructions`, `goal` and `task_list`; and
+`turn_context_block` the block itself, `at` (the index of the message it goes after),
+`text` and `sent` (each section's `sha256:` digest), which a restarted or resumed agent
+folds back so its next call sends the prefix the one before it sent. Absent in events
+written before 0.13.0, whose agents send their next call without the blocks once. On
 `llm_response`, `thinking_resent: true` says the provider refused the thinking the call
 handed back as bound to another conversation and the call was sent once more without it
 (Decision 805), and `thinking_dropped` how many thinking blocks Anthropic's

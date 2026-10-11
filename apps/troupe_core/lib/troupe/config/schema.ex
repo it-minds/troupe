@@ -256,7 +256,7 @@ defmodule Troupe.Config.Schema do
           "Anthropic only. `drop_block` sends the `thinking-binding-controls-2026-08-01` beta and asks the API to " <>
             "drop a thinking block whose conversation changed since it was made, instead of refusing the call: the " <>
             "fallback for an account that refuses one, on what a stable system prompt cannot keep the same (a " <>
-            "compaction, an `AI?` turn's plan prompt, an agent restarted). `error` asks for the refusal an enforced " <>
+            "compaction, an `AI?` turn's plan prompt, the task list's tools). `error` asks for the refusal an enforced " <>
             "account gets, on any account, so it can be measured; Troupe sends the call again without its thinking.",
           default: "default",
           field: :thinking_binding

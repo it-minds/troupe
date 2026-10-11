@@ -941,8 +941,10 @@ Found by the #371 fixer, 2026-10-08.
   `llm_request.tools_changed` counts it.
 - Unchecked: whether `split_for_compaction` strips thinking from the tail compaction
   keeps; Anthropic's documentation says a kept tail breaks the binding unless it does.
-- With `system_prompt: stable`, the turn contexts live in the agent's state, not the log,
-  so an agent restarted mid-session edits its history once.
+- A log written before 0.13.0 has no `turn_context_block` to fold (Decision 863): a session
+  that ran `system_prompt: stable` then sends its first call after a resume without the
+  turn contexts it had put, and one that ran 0.12.0's `per_turn` default changes its system
+  prompt at that call; once either way.
 - Unchecked: whether LiteLLM carries `anthropic-beta` into Amazon Bedrock's
   `anthropic_beta` body field.
 

@@ -16,7 +16,7 @@ live, and the maintainer chose on 2026-10-11 (Decision 863):
   the system prompt mid-session. `system_prompt: per_turn` is the old prompt, by name.
 - **Option 1, Anthropic's beta, is an opt-in fallback** (`thinking_binding: drop_block`)
   for an account that refuses a stale block, on the prefix changes option 2 cannot remove:
-  a compaction, an `AI?` turn's `plan` prompt, an agent restarted mid-session. The
+  a compaction, an `AI?` turn's `plan` prompt. The
   largest such change today, the task list's tools offered at a turn's eleventh call
   (Decision 793), is #590.
 - **`thinking_binding: error`** asks the API for the refusal an enforced account gets, on
@@ -35,7 +35,7 @@ question, and gives the numbers from the live runs with the commands that produc
 | the `plan` prompt added to the profile's | an `AI?` watch turn | | changes |
 | the tools | the call after the task list's tools are first offered: once there is a list, or after ten calls of a turn | 793 | changes (#590) |
 | the conversation | a compaction, which keeps a tail of it | 774 | changes |
-| the turn context put before | an agent restarted in the middle of a session | 815 | changes |
+| the turn context put before | an agent restarted, or a session resumed | 815 | the same: the blocks are in the log (863) |
 
 On an account the check is enforced for, every call after one of these that carries a
 block from before it is refused, and sent again with no thinking at all. Troupe's history
@@ -110,9 +110,9 @@ call carried.
 What it costs:
 
 - **The prefix still changes** where the system prompt was not the cause: the tools when
-  the task list's are first offered (793), a compaction, an `AI?` turn's `plan` prompt,
-  and an agent restarted in the middle of a session, whose blocks are kept in the agent and
-  not the log, so its next call goes without them once and puts the sections again.
+  the task list's are first offered (793), a compaction, an `AI?` turn's `plan` prompt.
+  An agent restarted, or a session resumed, sends what it sent before: each block is on
+  its call's `llm_request` as `turn_context_block` and folded back on replay (863).
 - **Tokens.** A changed section is added to the conversation each time it changes, and
   stays there until a compaction: the task list once for each turn that began with a new
   one, the instruction files when a turn brings in a nested file or one was edited. With
@@ -135,7 +135,8 @@ What it costs:
 ## What the log says, and the counter
 
 Per model call (PROTOCOL.md): `llm_request.system_changed` and `tools_changed` against the
-agent's call before; `llm_request.turn_context` with `stable`; and on `llm_response`,
+agent's call before; `llm_request.turn_context` with `stable`, and `turn_context_block`, the
+block it put, which a restart folds back; and on `llm_response`,
 `thinking_resent: true` when the call was refused as bound to another conversation and
 sent again (805's path, written nowhere before), `thinking_dropped`, the blocks the beta
 dropped, and `prefix_mismatch`, what the API's `anthropic-thinking-prefix-mismatch` header
