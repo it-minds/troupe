@@ -48,12 +48,28 @@ defmodule Troupe.UI.TUI.Model do
           where: String.t() | nil
         }
 
+  @typedoc """
+  A document `show` put on the scratchpad (root Decision 870), as the card that stands
+  where its call was (TUI Decision 159): never its words, which `/scratch` opens.
+  `version` counts the writes of its name, the first included.
+  """
+  @type scratch_card :: %{
+          call_id: String.t() | nil,
+          name: String.t(),
+          path: String.t(),
+          kind: String.t(),
+          title: String.t(),
+          size: non_neg_integer(),
+          version: pos_integer()
+        }
+
   @type entry ::
           {:user, String.t()}
           | {:assistant, [line()]}
           | {:reasoning, [line()]}
           | {:tool, tool_entry()}
           | {:shell, shell_entry()}
+          | {:scratch, scratch_card()}
           | {:system, String.t()}
 
   @typedoc """
@@ -169,6 +185,8 @@ defmodule Troupe.UI.TUI.Model do
             watch: %{enabled: false, backend: nil},
             remote: nil,
             files_version: 0,
+            # Bumped by each `scratch_updated`: an open `/scratch` lists again from it.
+            scratch_version: 0,
             mcp: %{}
 
   @type t :: %__MODULE__{mcp: %{optional(String.t()) => map()}}
@@ -257,6 +275,13 @@ defmodule Troupe.UI.TUI.Model do
       # listing is stale, without the panel subscribing to anything itself.
       :fs_changed ->
         %{m | files_version: m.files_version + 1}
+
+      # A document on the scratchpad (TUI Decision 159): its card in the window, and a
+      # bumped version, which is what tells an open `/scratch` its listing is stale.
+      :scratch_updated ->
+        update_window(%{m | scratch_version: m.scratch_version + 1}, root, fn w ->
+          w |> apply_to_window(e) |> settle(e)
+        end)
 
       _ ->
         update_window(m, root, fn w -> w |> apply_to_window(e) |> settle(e) end)
@@ -383,6 +408,22 @@ defmodule Troupe.UI.TUI.Model do
 
       :remote_note ->
         push(ensure_agent(w, path), path, {:system, d.text})
+
+      # The `show` call that wrote it becomes its card, so the transcript never holds the
+      # document's words; one whose call is not on screen gets a card of its own.
+      :scratch_updated ->
+        card = Map.take(d, [:call_id, :name, :path, :kind, :title, :size, :version])
+        w = ensure_agent(w, path)
+        call = d.call_id
+
+        if is_binary(call) and
+             Enum.any?(w.agents[path].transcript, &match?({:tool, %{id: ^call}}, &1)) do
+          update_agent(w, path, fn a ->
+            %{a | transcript: Enum.map(a.transcript, &card_for(&1, call, card))}
+          end)
+        else
+          push(w, path, {:scratch, card})
+        end
 
       # The agent the window's own agent is, as it started and whenever it is switched (root
       # Decision 841): what its header says it runs (TUI Decision 156). The transcript
@@ -775,6 +816,9 @@ defmodule Troupe.UI.TUI.Model do
 
   defp complete_tool(entry, _), do: entry
 
+  defp card_for({:tool, %{id: id}}, id, card), do: {:scratch, card}
+  defp card_for(entry, _id, _card), do: entry
+
   defp attach_preview({:tool, %{id: id} = t}, %{call_id: id} = d) when is_binary(d.preview),
     do: {:tool, %{t | preview: sanitize(d.preview)}}
 
@@ -884,6 +928,8 @@ defmodule Troupe.UI.TUI.Model do
 
   defp summarize_input("shell", %{"command" => c}), do: c
   defp summarize_input("web_fetch", %{"url" => u}), do: u
+  # Never the document: its title and name until the card stands in its place.
+  defp summarize_input("show", %{} = input), do: "#{input["title"]} · #{input["name"]}"
 
   defp summarize_input("todo_write", %{"items" => items}) when is_list(items),
     do: "#{length(items)} items"
@@ -1680,12 +1726,72 @@ defmodule Troupe.UI.TUI.Model do
     if expanded?, do: [head | t.body], else: [head]
   end
 
+  # One line, expanded or not: the document is `/scratch`'s to show (TUI Decision 159).
+  defp entry_lines({:scratch, card}, _expanded?) do
+    [
+      {:tool_ok,
+       [
+         {:tool_glyph, "▤"},
+         {:tool_name, " " <> card.title},
+         {:tool_arg, " · " <> card.name},
+         {:tool_note, " · " <> scratch_note(card)}
+       ]}
+    ]
+  end
+
   # The person's command, marked as theirs with its `!`, then what it printed: the last
   # rows of it, or all with output expanded (`e`), since a person ran it to read it.
   defp entry_lines({:shell, s}, expanded?) do
     head = {:user, [{:user_marker, "! "}, {:user, s.command}] ++ shell_notes(s)}
     [head | shell_body(s.lines, expanded?)]
   end
+
+  @doc """
+  The scratchpad documents this screen's windows were shown, for `/scratch` (TUI
+  Decision 159): a fold over the cards, as the rest of the screen is, so a screen that
+  attaches late or comes back has them from the replay. The latest card of each name in
+  each window, its `window` beside it, in the order each name was first shown.
+  """
+  @spec scratch_documents(t()) :: [map()]
+  def scratch_documents(%__MODULE__{} = m) do
+    for path <- m.order,
+        w = m.windows[path],
+        w != nil,
+        {_agent, a} <- Enum.sort_by(w.agents, &elem(&1, 0)),
+        {:scratch, card} <- a.transcript,
+        reduce: [] do
+      docs ->
+        doc = Map.put(card, :window, path)
+
+        case Enum.find_index(docs, &(&1.window == path and &1.name == card.name)) do
+          nil -> docs ++ [doc]
+          i -> List.update_at(docs, i, &if(card.version >= &1.version, do: doc, else: &1))
+        end
+    end
+  end
+
+  @doc """
+  A scratchpad document's words as lines for `/scratch`'s pane: Markdown drawn as an
+  assistant's reply is, the other kinds as they were written.
+  """
+  @spec document_lines(String.t(), String.t()) :: [line()]
+  def document_lines("markdown", content), do: content |> sanitize() |> markdown()
+
+  def document_lines(_kind, content),
+    do: content |> sanitize() |> String.split("\n") |> Enum.map(&{:text, &1})
+
+  @doc """
+  A scratchpad document's size and how often it was written, as its card and `/scratch`
+  say them (TUI Decision 159): `840 B · new`, then `2.3 kB · updated 2 times`, the count
+  every write of its name, the first included.
+  """
+  @spec scratch_note(%{size: non_neg_integer(), version: pos_integer()}) :: String.t()
+  def scratch_note(%{size: size, version: version}),
+    do: doc_size(size) <> " · " <> if(version > 1, do: "updated #{version} times", else: "new")
+
+  defp doc_size(size) when size >= 1_000_000, do: "#{Float.round(size / 1_000_000, 1)} MB"
+  defp doc_size(size) when size >= 1_000, do: "#{Float.round(size / 1_000, 1)} kB"
+  defp doc_size(size), do: "#{size} B"
 
   @doc "How a person's command stands, in a few words: running, its exit, a kill."
   @spec shell_status(shell_entry()) :: String.t()
