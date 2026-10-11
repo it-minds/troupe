@@ -65,7 +65,16 @@ await daemon.start();
 daemon.onboarding["/home/ada/repo"] = exampleOnboarding({ briefOutdated: true });
 daemon.memory["/home/ada/repo"] = { status: "fresh", built_at: "2026-10-08T09:00:00Z", facts: exampleFacts() };
 daemon.memory["/home/ada/project"] = { status: "absent" };
-daemon.seed("/home/ada/notes");
+const notes = daemon.seed("/home/ada/notes");
+// A scratchpad to look at (issue #472): a plan the agent showed and then wrote again, and
+// a table beside it.
+notes.scratch.show(notes.log, { name: "plan.md", title: "Migration plan", content: "# Migration plan\n\n- copy the ledger table\n- drop the old index\n" }, "call-plan-1");
+notes.scratch.show(notes.log, { name: "rows.csv", title: "Rows moved", content: "table,rows\nledger,1204\naudit,88\n" }, "call-rows-1");
+notes.scratch.show(
+  notes.log,
+  { name: "plan.md", title: "Migration plan", content: "# Migration plan\n\n1. copy the ledger table\n2. check the counts in `rows.csv`\n3. drop the old index\n" },
+  "call-plan-2",
+);
 // The agents manager (troupe #503) with every layer to show: the built-ins, the
 // repository's own reviewer, whose shell runs without asking, and a bundle's.
 daemon.agents.files.push(
@@ -91,8 +100,9 @@ console.log(`
 
 Sign in to the plane URL above. A browser is sent to the provider and straight back as
 Alice; a device code approves itself.
-Prompts understand three prefixes: "approve: <cmd>" asks for an approval,
-"big: <label>" returns a tool result too large to inline, and "quiet: …"
+Prompts understand four prefixes: "approve: <cmd>" asks for an approval,
+"big: <label>" returns a tool result too large to inline, "show: <title>" puts
+notes.md in the session's scratchpad (again for its next version), and "quiet: …"
 answers without streaming.
 
 This computer's daemon is a fake too: open the app at
@@ -101,5 +111,5 @@ and a new session in /home/ada/repo asks to onboard Claude Code's and Cursor's f
 then to rewrite the brief; /memory there lists its facts. A new session in
 /home/ada/project, which has no brief, starts the librarian by itself. Agents, in the
 rail, manages the agents of /home/ada/notes: the built-ins, the repository's review and
-a bundle's deploy.
+a bundle's deploy. The session in /home/ada/notes has two documents in its scratchpad.
 `);

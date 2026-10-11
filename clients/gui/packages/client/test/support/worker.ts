@@ -17,6 +17,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { FakeAgents } from "./agents.js";
 import { COMMANDS, expandDefined } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
+import { FakeScratch } from "./scratch.js";
 
 export const BLOB_THRESHOLD = 16 * 1024;
 
@@ -54,6 +55,8 @@ interface Session {
   approvals: Map<string, { tool: string; args: unknown; resolvedBy: string | null; decision: string | null }>;
   blobs: Map<string, Buffer>;
   files: Map<string, string>;
+  /** What the session's `show` calls wrote (issue #472). */
+  scratch: FakeScratch;
   pendingApprovalCount: number;
   costMicros: number;
 }
@@ -164,6 +167,7 @@ export class FakeWorker {
         ["README.md", "# a workspace\n"],
         ["lib/a.ex", "defmodule A do\nend\n"],
       ]),
+      scratch: new FakeScratch(),
       pendingApprovalCount: 0,
       costMicros: 0,
     };
@@ -510,10 +514,20 @@ export class FakeWorker {
         return reply(ws, id, { path: at || ".", entries });
       }
 
+      // The scratchpad's documents (issue #472): listed in the order each was first
+      // written, and read through `fs.read` on their `scratch:/` path like any file.
+      case "scratch.list":
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        return reply(ws, id, session.scratch.list());
+
       case "fs.read": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         const path = String(params["path"] ?? "");
         if (path.includes("..")) return reply(ws, id, null, { code: -32004, message: "forbidden" });
+        if (path.startsWith("scratch:/")) {
+          const doc = session.scratch.read(path);
+          return doc ? reply(ws, id, doc) : reply(ws, id, null, { code: -32005, message: "not_found" });
+        }
         const content = session.files.get(path);
         if (content === undefined) return reply(ws, id, null, { code: -32005, message: "not_found" });
         return reply(ws, id, {
@@ -569,6 +583,7 @@ export class FakeWorker {
 
     if (text.startsWith("approve:")) return this.askApproval(session, text.slice("approve:".length).trim());
     if (text.startsWith("big:")) return this.bigResult(session, text.slice("big:".length).trim());
+    if (text.startsWith("show:")) return this.showNotes(session, text.slice("show:".length).trim());
     const quiet = text.startsWith("quiet:");
 
     const answer = quiet ? `(silently) ${text.slice("quiet:".length)}` : `You said: ${text}`;
@@ -634,6 +649,22 @@ export class FakeWorker {
       content: { blob: key, size: body.length, preview: body.subarray(0, 4096).toString(), truncated: true },
     });
     this.respond(session, `read ${body.length} bytes`);
+    this.setStatus(session, "idle");
+  }
+
+  /**
+   * A `show` of `notes.md` (issue #472): the scratchpad document the agent keeps, written
+   * again each time, so a second `show:` makes its second version.
+   */
+  private async showNotes(session: Session, label: string): Promise<void> {
+    const version = (session.scratch.docs.get("notes.md")?.version ?? 0) + 1;
+    const content =
+      `# ${label || "Notes"}\n\nWhat this session has found so far, as of version ${version}.\n\n` +
+      `- the placement loop runs once per tick\n- the ledger table has an index nobody reads\n- \`lib/a.ex\` is where it starts\n`;
+    this.setStatus(session, "acting");
+    session.scratch.show(session.log, { name: "notes.md", title: label || "Notes", kind: "markdown", content }, `call-${session.log.headSeq}`);
+    await sleep(1);
+    this.respond(session, "The notes are in the scratchpad.");
     this.setStatus(session, "idle");
   }
 }
