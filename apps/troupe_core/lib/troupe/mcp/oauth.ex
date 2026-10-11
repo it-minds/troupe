@@ -28,12 +28,20 @@ defmodule Troupe.MCP.OAuth do
   fails too, the sign-in is marked as run out and the tool answers `sign_in_required`
   for the model to relay, and every client shows "sign in again".
 
+  A call that comes back `403 insufficient_scope` wants more than the sign-in granted
+  (Decision 872): the scope the server named is kept beside the sign-in, the tool
+  answers `sign_in_required` with that scope, and the person's next sign-in asks for it
+  on top of what was granted, at the authorization server the server's metadata names.
+  The tokens held are used until that sign-in lands. Signing out tells the provider too,
+  at its `revocation_endpoint` (RFC 7009), when it names one.
+
   This module is the part with no process: reading the configuration, discovery, the
-  URLs, the token endpoint, and `authorized/2`, which wraps a call.
+  URLs, the token and revocation endpoints, and `authorized/2`, which wraps a call.
   """
 
   alias Troupe.MCP.{Client, Server}
   alias Troupe.MCP.OAuth.{SignIn, Store, Tokens}
+  alias Troupe.WorkerProfile.Reach
 
   @typedoc "What an entry's `oauth` says, read: the client id and the overrides."
   @type config :: %{
@@ -61,11 +69,24 @@ defmodule Troupe.MCP.OAuth do
           issuer: String.t(),
           authorization_endpoint: String.t(),
           token_endpoint: String.t(),
+          revocation_endpoint: String.t() | nil,
           resource: String.t() | nil,
           scopes: [String.t()]
         }
 
+  @typedoc """
+  What signing out told the provider: `revoked`; `failed`, with why it was not told;
+  `unsupported`, a provider that names no revocation endpoint; or `none`, nothing held.
+  """
+  @type revocation :: %{
+          state: :revoked | :failed | :unsupported | :none,
+          reason: String.t() | nil
+        }
+
   @http_timeout 15_000
+
+  # Signing out waits this long for the provider, then forgets the sign-in anyway.
+  @revoke_timeout 5_000
 
   # -- configuration -------------------------------------------------------------------
 
@@ -164,30 +185,80 @@ defmodule Troupe.MCP.OAuth do
   @doc """
   Start a person's sign-in to one server: discover where it is done, and listen on a
   loopback port for the answer. Answers the URL for a client to open, the redirect it
-  will come back to, and when the wait ends. A second sign-in to the same server
-  replaces the first.
+  will come back to, when the wait ends, and the scopes it asks for. A second sign-in to
+  the same server replaces the first. One after the server wanted more than was granted
+  asks for what was granted and what the server named, besides what a first one would.
   """
   @spec sign_in(String.t(), String.t(), config(), keyword()) ::
           {:ok, map()} | {:error, String.t()}
   def sign_in(name, url, config, opts \\ []) do
     binding = binding(name, url, config, Keyword.get(opts, :state_dir))
 
-    with {:ok, plan} <- discover(url, config) do
+    with {:ok, plan} <- discover(url, config, wider(Store.get(binding.state_dir, binding.key))) do
       SignIn.start(binding, plan)
     end
   end
 
-  @doc "Forget a server's sign-in on this machine. The provider's own session is the provider's."
-  @spec sign_out(binding()) :: :ok | {:error, String.t()}
-  def sign_out(binding), do: Tokens.forget(binding)
+  # What a step-up adds to a sign-in: what was granted — the token endpoint's `scope`,
+  # or what was asked for when it said none — and what the server named since.
+  defp wider(%{"step_up" => [_ | _] = named} = entry),
+    do: (split(entry["scope"]) || List.wrap(entry["scopes"])) ++ named
+
+  defp wider(_entry), do: []
+
+  @doc """
+  Sign out of a server on this machine: the sign-in is forgotten, then the provider is
+  asked to revoke its refresh token (RFC 7009) when its metadata names a revocation
+  endpoint, within `timeout_ms` (five seconds). What the provider was told comes back;
+  the sign-in is forgotten whatever it was. The provider's own session in the browser is
+  the provider's.
+
+  Forgotten first, so no refresh can spend the token and keep a new one while the
+  provider is asked.
+  """
+  @spec sign_out(binding() | %{key: String.t(), state_dir: Path.t() | nil}, keyword()) ::
+          {:ok, revocation()} | {:error, String.t()}
+  def sign_out(binding, opts \\ []) do
+    with {:ok, entry} <- Tokens.take(binding) do
+      {:ok, revoke(entry, opts)}
+    end
+  end
+
+  @doc """
+  Sign out of every server signed in to on this machine, as `sign_out/2` does each, for
+  `troupe logout`: each one's revocation, with the server's name.
+  """
+  @spec sign_out_all(Path.t() | nil, keyword()) ::
+          {:ok, [%{server: String.t() | nil, state: atom(), reason: String.t() | nil}]}
+          | {:error, String.t()}
+  def sign_out_all(state_dir, opts \\ []) do
+    state_dir
+    |> Store.all()
+    |> Enum.reduce_while({:ok, []}, fn {key, entry}, {:ok, done} ->
+      case sign_out(%{key: key, state_dir: state_dir}, opts) do
+        {:ok, told} -> {:cont, {:ok, [Map.put(told, :server, entry["server"]) | done]}}
+        {:error, why} -> {:halt, {:error, why}}
+      end
+    end)
+    |> case do
+      {:ok, done} -> {:ok, Enum.reverse(done)}
+      {:error, why} -> {:error, why}
+    end
+  end
 
   @doc """
   How a server's sign-in stands, for a client: `signed_out`, `signing_in` (a browser is
   out), `signed_in` (with the account, when the provider said whose it is) or `expired`
-  (it ran out or was refused, and the person signs in again). Read from the store, so it
-  never waits behind a refresh.
+  (it ran out or was refused, and the person signs in again). `step_up` is the scope the
+  server wanted on top of what was granted, which the next sign-in asks for, or `nil`.
+  Read from the store, so it never waits behind a refresh.
   """
-  @spec status(binding()) :: %{state: atom(), account: String.t() | nil, error: String.t() | nil}
+  @spec status(binding()) :: %{
+          state: atom(),
+          account: String.t() | nil,
+          error: String.t() | nil,
+          step_up: String.t() | nil
+        }
   def status(binding) do
     entry = Store.get(binding.state_dir, binding.key) || %{}
 
@@ -199,13 +270,18 @@ defmodule Troupe.MCP.OAuth do
         true -> :signed_out
       end
 
-    %{state: state, account: entry["account"], error: entry["error"]}
+    %{state: state, account: entry["account"], error: entry["error"], step_up: step_up_of(entry)}
   end
+
+  defp step_up_of(%{"step_up" => [_ | _] = named}), do: Enum.join(named, " ")
+  defp step_up_of(_entry), do: nil
 
   @doc """
   Run `call` with the server's token, once more after a refresh when the server answers
   `401`, and `{:error, :sign_in_required}` when there is no sign-in to use or it has run
-  out. What `call` answers otherwise comes back as it is.
+  out. A `403 insufficient_scope` naming a scope is `{:error, {:sign_in_required,
+  scope}}`, the scope kept for the next sign-in and the tokens kept as they are. What
+  `call` answers otherwise comes back as it is.
   """
   @spec authorized(Server.t(), (Server.t() -> {:ok, term()} | {:error, term()})) ::
           {:ok, term()} | {:error, term()}
@@ -213,7 +289,7 @@ defmodule Troupe.MCP.OAuth do
     with {:ok, token} <- Tokens.token(binding) do
       case call.(%{server | credential: token}) do
         {:error, {:unauthorized, _challenge}} -> again(server, binding, token, call)
-        other -> other
+        other -> step_up(binding, other)
       end
     end
   end
@@ -231,10 +307,28 @@ defmodule Troupe.MCP.OAuth do
           {:error, :sign_in_required}
 
         other ->
-          other
+          step_up(binding, other)
       end
     end
   end
+
+  # The token is good and the call wants a scope it was not granted. Only the scope is
+  # read from the challenge: a `resource_metadata` there is not followed, so the next
+  # sign-in goes where the server's own metadata says, not where a `403` points. Nothing
+  # signs in from here; the person decides. A challenge that names no scope leaves a
+  # sign-in nothing to ask for, and is the refusal it was.
+  defp step_up(binding, {:error, {:insufficient_scope, header}} = refused) do
+    case split(challenge(header)["scope"]) do
+      nil ->
+        refused
+
+      named ->
+        _ = Tokens.step_up(binding, named)
+        {:error, {:sign_in_required, Enum.join(named, " ")}}
+    end
+  end
+
+  defp step_up(_binding, other), do: other
 
   # -- discovery -------------------------------------------------------------------------
 
@@ -244,24 +338,29 @@ defmodule Troupe.MCP.OAuth do
   authorization server, unless `issuer` names it; then that server's metadata, tried at
   the three places the MCP specification lists for an issuer with a path and the two for
   one without. Scopes are the entry's, or the `401`'s, or the metadata's
-  `scopes_supported`, with `offline_access` added when the authorization server offers
-  it, since without it there is no refresh and the person signs in every hour.
+  `scopes_supported`, with `wider` added (a step-up's, Decision 872) and `offline_access`
+  when the authorization server offers it, since without it there is no refresh and the
+  person signs in every hour. The revocation endpoint, when the metadata names one, is
+  kept for signing out.
   """
-  @spec discover(String.t(), config()) :: {:ok, plan()} | {:error, String.t()}
-  def discover(url, config) do
+  @spec discover(String.t(), config(), [String.t()]) :: {:ok, plan()} | {:error, String.t()}
+  def discover(url, config, wider \\ []) do
     with :ok <- secure(url, "the server's url"),
          {:ok, issuer, hints} <- authorization_server(url, config),
          {:ok, metadata} <- server_metadata(issuer),
          :ok <- secure(metadata["authorization_endpoint"], "the authorization endpoint"),
-         :ok <- secure(metadata["token_endpoint"], "the token endpoint"),
+         :ok <- outbound(metadata["token_endpoint"], "the token endpoint"),
          :ok <- pkce(metadata) do
+      scopes = Enum.uniq((config.scopes || hints.scopes || []) ++ wider)
+
       {:ok,
        %{
          issuer: metadata["issuer"] || issuer,
          authorization_endpoint: metadata["authorization_endpoint"],
          token_endpoint: metadata["token_endpoint"],
+         revocation_endpoint: present(metadata["revocation_endpoint"]),
          resource: if(config.resource, do: resource(url)),
-         scopes: with_offline(config.scopes || hints.scopes || [], metadata)
+         scopes: with_offline(scopes, metadata)
        }}
     end
   end
@@ -328,17 +427,17 @@ defmodule Troupe.MCP.OAuth do
 
   defp metadata_scopes(_metadata), do: nil
 
-  defp server_metadata(issuer) do
+  defp server_metadata(issuer, timeout \\ @http_timeout) do
     with :ok <- secure(issuer, "the authorization server") do
-      case issuer |> metadata_places() |> Enum.find_value(&metadata_at/1) do
+      case issuer |> metadata_places() |> Enum.find_value(&metadata_at(&1, timeout)) do
         nil -> {:error, "#{issuer} publishes no authorization server metadata"}
         metadata -> {:ok, metadata}
       end
     end
   end
 
-  defp metadata_at(place) do
-    case get_json(place) do
+  defp metadata_at(place, timeout) do
+    case get_json(place, timeout) do
       {:ok, %{"authorization_endpoint" => a, "token_endpoint" => t} = metadata}
       when is_binary(a) and is_binary(t) ->
         metadata
@@ -496,6 +595,87 @@ defmodule Troupe.MCP.OAuth do
 
   def refresh(_entry), do: {:error, :invalid_grant}
 
+  # -- revocation (RFC 7009) -------------------------------------------------------------
+
+  # The refresh token, since revoking it ends the grant at a provider that ties its
+  # access tokens to it; the access token when there is no refresh token.
+  defp revoke(entry, opts) do
+    case held(entry) do
+      nil ->
+        told(:none)
+
+      {token, hint} ->
+        timeout = Keyword.get(opts, :timeout_ms, @revoke_timeout)
+
+        case revocation_endpoint(entry, timeout) do
+          {:ok, nil} -> told(:unsupported)
+          {:ok, endpoint} -> revoke_at(endpoint, token, hint, entry["client_id"], timeout)
+          {:error, why} -> told(:failed, why)
+        end
+    end
+  end
+
+  defp held(%{"refresh_token" => token}) when is_binary(token), do: {token, "refresh_token"}
+  defp held(%{"access_token" => token}) when is_binary(token), do: {token, "access_token"}
+  defp held(_entry), do: nil
+
+  # Kept at the sign-in, `nil` when the metadata named none. A sign-in kept before it was
+  # looked for has it looked up now, from the authorization server it was made with.
+  defp revocation_endpoint(%{"revocation_endpoint" => endpoint}, _timeout)
+       when is_binary(endpoint) or is_nil(endpoint),
+       do: {:ok, endpoint}
+
+  defp revocation_endpoint(%{"issuer" => issuer}, timeout) when is_binary(issuer) do
+    with {:ok, metadata} <- server_metadata(issuer, timeout),
+         do: {:ok, present(metadata["revocation_endpoint"])}
+  end
+
+  defp revocation_endpoint(_entry, _timeout),
+    do: {:error, "the sign-in kept no authorization server to tell"}
+
+  # The token goes where a refresh token may: `outbound/2`, as for the token endpoint.
+  # 200 is revoked, and so is any 2xx; anything else, or no answer in time, is the
+  # provider not told.
+  defp revoke_at(endpoint, token, hint, client_id, timeout) do
+    form =
+      Enum.reject([token: token, token_type_hint: hint, client_id: client_id], fn {_k, v} ->
+        is_nil(v)
+      end)
+
+    case outbound(endpoint, "the revocation endpoint") do
+      :ok -> endpoint |> revocation_request(form, timeout) |> revocation_answer()
+      {:error, why} -> told(:failed, why)
+    end
+  end
+
+  defp revocation_request(endpoint, form, timeout) do
+    Req.post(endpoint,
+      form: form,
+      headers: [{"accept", "application/json"}],
+      receive_timeout: timeout,
+      connect_options: [timeout: timeout],
+      retry: false,
+      redirect: false
+    )
+  end
+
+  defp revocation_answer({:ok, %{status: status}}) when status in 200..299, do: told(:revoked)
+
+  defp revocation_answer({:ok, %{status: status, body: body}}) do
+    case json(body) do
+      %{"error" => error} = answer when is_binary(error) ->
+        told(:failed, refused(error, answer["error_description"]))
+
+      _other ->
+        told(:failed, "the revocation endpoint answered #{status}")
+    end
+  end
+
+  defp revocation_answer({:error, reason}),
+    do: told(:failed, "the revocation endpoint could not be reached: #{reason_text(reason)}")
+
+  defp told(state, reason \\ nil), do: %{state: state, reason: reason}
+
   defp resource_param(nil), do: []
   defp resource_param(resource), do: [resource: resource]
 
@@ -591,6 +771,25 @@ defmodule Troupe.MCP.OAuth do
   def secure(_url, what), do: {:error, "#{what} is missing"}
 
   @doc """
+  Whether the daemon may send a token to a URL: `secure/2`, and not at an address no
+  worker reaches either (Decision 856, `Troupe.WorkerProfile.Reach.refusal/1`) —
+  link-local, a cloud's metadata service, the unspecified address — written as an
+  address. Loopback stays, as `secure/2` has it, for a server on this machine. Held to by
+  the token endpoint and the revocation endpoint, the two a refresh token goes to.
+  """
+  @spec outbound(term(), String.t()) :: :ok | {:error, String.t()}
+  def outbound(url, what) do
+    with :ok <- secure(url, what) do
+      case Reach.refusal(URI.parse(url).host) do
+        kind when kind in [nil, "loopback"] -> :ok
+        "cloud metadata" -> {:error, "#{what} (#{url}) is a cloud metadata address"}
+        "unspecified" -> {:error, "#{what} (#{url}) is the unspecified address"}
+        kind -> {:error, "#{what} (#{url}) is #{kind}"}
+      end
+    end
+  end
+
+  @doc """
   A redirect URI as the daemon listens for it: `{ip, port, path}`, the port `0` when the
   URI names none, so any free one is taken.
   """
@@ -612,10 +811,10 @@ defmodule Troupe.MCP.OAuth do
     URI.to_string(%URI{scheme: scheme, host: host, port: port})
   end
 
-  defp get_json(url) do
+  defp get_json(url, timeout \\ @http_timeout) do
     case Req.get(url,
            headers: [{"accept", "application/json"}],
-           receive_timeout: @http_timeout,
+           receive_timeout: timeout,
            retry: false,
            redirect: false
          ) do

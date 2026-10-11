@@ -32,14 +32,21 @@ defmodule Troupe.CLI.Remote do
   @doc """
   Forgets a plane's credentials, or every plane's with `all: true`, and has a daemon
   running here let go of the plane token it was handed for each (issue #381).
+
+  Without a plane named, signing out of Troupe as a whole, it also signs the daemon out
+  of every one of the person's own MCP servers it holds a sign-in to, each revoked at its
+  provider where the provider can be told (troupe-remote Decision 872), or says why it
+  could not. Naming a plane signs out of that plane alone: those sign-ins are no plane's.
   """
   @spec logout(String.t() | nil, keyword()) :: non_neg_integer()
   def logout(plane_url, opts \\ []) do
     say = Keyword.get(opts, :say, &IO.puts/1)
+    all? = Keyword.get(opts, :all, false)
+    servers? = all? or not is_binary(plane_url)
 
     target =
       cond do
-        Keyword.get(opts, :all, false) -> :all
+        all? -> :all
         is_binary(plane_url) -> Discovery.base(plane_url)
         true -> current()
       end
@@ -47,6 +54,7 @@ defmodule Troupe.CLI.Remote do
     case target do
       nil ->
         say.("not signed in to any plane")
+        sign_out_daemon([], servers?, say)
         0
 
       target ->
@@ -56,7 +64,7 @@ defmodule Troupe.CLI.Remote do
         case Tokens.logout(target) do
           {:ok, path} ->
             say.("signed out of #{describe(target)}; #{Troupe.Paths.display(path)} updated")
-            sign_out_daemon(signed_in, say)
+            sign_out_daemon(signed_in, servers?, say)
             0
 
           {:error, reason} ->
@@ -203,27 +211,74 @@ defmodule Troupe.CLI.Remote do
   # memory, and seals private sessions with it (Decision 764). Signing out takes it back
   # where it is the person's at that plane: the daemon decides, from the plane and the
   # subject it is told, and leaves somebody else's. A daemon that is not running holds
-  # nothing, and is not started to be told so.
-  defp sign_out_daemon([], _say), do: :ok
+  # nothing, and is not started to be told so. The person's own MCP servers' sign-ins
+  # are on disk, so a daemon that is not running is said to have kept them.
+  defp sign_out_daemon([], false, _say), do: :ok
 
-  defp sign_out_daemon(planes, say) do
+  defp sign_out_daemon(planes, servers?, say) do
     info = %{"name" => "troupe", "version" => to_string(Application.spec(:troupe, :vsn) || "dev")}
 
     case Protocol.Daemon.connect(spawn: false, client_info: info) do
       {:ok, client} ->
         try do
           Enum.each(planes, &sign_out_at(client, &1, say))
+          if servers?, do: sign_out_servers(client, say)
         after
           Protocol.Client.close(client)
         end
 
       {:error, :not_running} ->
+        if servers?, do: servers_kept(say, "it is not running")
         :ok
 
       {:error, reason} ->
-        say.(
-          "could not reach the daemon on this machine to take its plane token back: #{inspect(reason)}"
-        )
+        if planes != [] do
+          say.(
+            "could not reach the daemon on this machine to take its plane token back: #{inspect(reason)}"
+          )
+        end
+
+        if servers?, do: servers_kept(say, "it could not be reached: #{inspect(reason)}")
+    end
+  end
+
+  # Every one of the person's own MCP servers the daemon holds a sign-in to (Decision
+  # 872): forgotten, and revoked at the provider where it can be told.
+  defp sign_out_servers(client, say) do
+    params = %{command_id: RPC.command_id(), all: true}
+
+    case Protocol.Client.call(client, "mcp.sign_out", params) do
+      {:ok, %{"servers" => servers}} ->
+        for %{"server" => name, "revocation" => told} <- servers, told["state"] != "none" do
+          say.("signed out of the MCP server #{name}; #{Client.revocation_text(told)}")
+        end
+
+      {:ok, _answer} ->
+        :ok
+
+      {:error, error} ->
+        say.("the daemon on this machine kept your sign-ins to MCP servers: #{daemon_error(error)}")
+    end
+  end
+
+  # Read from the daemon's state directory, where it keeps them (`mcp-oauth.json`,
+  # `Troupe.MCP.OAuth.Store`): how many sign-ins it holds, never what is in them.
+  defp servers_kept(say, why) do
+    held =
+      with {:ok, text} <- File.read(Path.join(Troupe.Paths.state_dir(), "mcp-oauth.json")),
+           {:ok, %{} = entries} <- Jason.decode(text) do
+        Enum.count(entries, fn {_key, entry} ->
+          is_map(entry) and is_binary(entry["access_token"])
+        end)
+      else
+        _none -> 0
+      end
+
+    if held > 0 do
+      say.(
+        "your sign-ins to #{held} MCP server(s) are kept: the daemon on this machine signs " <>
+          "out of them, and #{why}; start it and run troupe logout again"
+      )
     end
   end
 

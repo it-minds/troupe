@@ -221,6 +221,84 @@ defmodule Troupe.Gateway.MCPCallTest do
     refute Enum.any?(logged, &(&1 =~ @token))
   end
 
+  # Issue #586, Decision 872: a tool that wants a scope the sign-in did not grant, offered
+  # to a pod's session. Its model reads the step-up as a local session's does, nothing
+  # signs in by itself, and once the person signs in for the scope the call goes through.
+  test "a pod session's call that wants a wider scope tells its model so, and goes through once the person signs in for it",
+       context do
+    sign_in(context)
+
+    session =
+      pod_session(context, steps: [{:tools, [{"client.notes.write", %{"topic" => "the plan"}}]}])
+
+    pod = attach(context, @ada)
+
+    offered = %{
+      "name" => "notes.write",
+      "description" => "Write a note.",
+      "schema" => %{"type" => "object", "properties" => %{"topic" => %{"type" => "string"}}}
+    }
+
+    assert {:ok, %{"registered" => ["client.notes.write"]}} = register(pod, session.id, offered)
+    {:ok, _} = Client.subscribe(pod, "session:#{session.id}", from_seq: 0)
+
+    {:ok, _} =
+      Client.call(pod, "input.send", %{
+        "command_id" => Client.command_id(),
+        "session_id" => session.id,
+        "text" => "write the plan down"
+      })
+
+    assert_receive {:troupe_request, id, "tool.invoke",
+                    %{"name" => "client.notes.write"} = invoke},
+                   15_000
+
+    {:ok, %{"content" => content}} =
+      Client.call(context.daemon, "mcp.call", %{
+        "command_id" => "call-#{session.id}-#{invoke["call_id"]}",
+        "name" => "notes",
+        "tool" => "write",
+        "arguments" => invoke["arguments"]
+      })
+
+    assert %{"error" => "sign_in_required", "server" => "notes", "scope" => "notes.write"} =
+             Jason.decode!(content)
+
+    :ok = Client.respond(pod, id, %{"content" => content})
+
+    events = collect("session:#{session.id}", &(&1.type == "tool_call_completed"))
+    completed = Enum.find(events, &(&1.type == "tool_call_completed"))
+    assert completed.data["content"] =~ "sign_in_required"
+    assert completed.data["content"] =~ "notes.write"
+
+    # Every client shows what the server wants; the sign-in held is still the one used.
+    {:ok, %{"servers" => servers}} = Client.call(context.daemon, "mcp.list", %{})
+
+    assert %{"auth" => %{"state" => "signed_in", "step_up" => "notes.write"}} =
+             Enum.find(servers, &(&1["name"] == "notes"))
+
+    assert {:ok, %{"content" => "notes on x, for " <> _}} =
+             call(context.daemon, "search", %{"topic" => "x"})
+
+    # (The one without is the sign-in's discovery asking what the server wants.)
+    assert server_calls() |> Enum.map(&elem(&1, 1)) |> Enum.reject(&is_nil/1) |> Enum.uniq() ==
+             ["Bearer at-1"]
+
+    # The person signs in for it, at the issuer they signed in at, and the call is made again.
+    {:ok, %{"url" => url, "scopes" => scopes}} =
+      Client.call(context.daemon, "mcp.sign_in", %{
+        "command_id" => Client.command_id(),
+        "name" => "notes"
+      })
+
+    assert "notes.write" in scopes and "notes.read" in scopes
+    assert String.starts_with?(url, context.fake.issuer <> "/authorize?")
+    {200, _page} = FakeOAuth.browse(url)
+
+    assert {:ok, %{"content" => "wrote a note on the plan, for #{@ada}"}} =
+             call(context.daemon, "write", %{"topic" => "the plan"})
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp sign_in(context) do

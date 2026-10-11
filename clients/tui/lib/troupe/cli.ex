@@ -149,7 +149,8 @@ defmodule Troupe.CLI do
     {"troupe login PLANE_URL", "sign in to a plane with the device flow",
      [["login", "https://plane.example"]]},
     {"troupe logout [PLANE_URL]",
-     "forget a plane's credentials and sign this machine's daemon out of it (--all: every plane)",
+     "forget a plane's credentials and sign this machine's daemon out of it (--all: every plane); " <>
+       "without a plane named, out of your own MCP servers too, revoked at their providers",
      [["logout"], ["logout", "--all"]]},
     {"troupe whoami [PLANE_URL]", "print who the plane says you are, and your teams", [["whoami"]]},
     {"troupe setup",

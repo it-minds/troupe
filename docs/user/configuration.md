@@ -312,9 +312,25 @@ page says "signed in as …", and a session waiting for the server gets its tool
 The sign-in is kept in Troupe's state directory (`mcp-oauth.json`, readable by you
 alone), never in `mcp.json`, and refreshed when it runs out. When the provider stops
 taking it, the server's line says to sign in again, and a tool the model calls answers
-`sign_in_required` instead of failing. `/mcp sign-out wiki`, `o`, or **Sign out**
-forgets it. A workspace's server is signed in to only after the workspace's servers are
-allowed, since its `oauth` came with the repository.
+`sign_in_required` instead of failing. A workspace's server is signed in to only after
+the workspace's servers are allowed, since its `oauth` came with the repository.
+
+Some tools want more than you granted when you signed in: writing where you signed in to
+read, say. The server answers such a call `403` naming the scope it wants, and the model
+is told `sign_in_required` with that scope, to tell you. Nothing signs in for you: the
+server's line on the `/mcp` page says what it wants (`wants notes.write — s`), and when
+you choose to grant it, `s` (or `/mcp sign-in wiki`, or **Sign in**) asks for what you
+granted before and the new scope, at the same provider. Until that sign-in lands, the one
+you had is used, and if you say no at the provider you keep it.
+
+`/mcp sign-out wiki`, `o`, or **Sign out** forgets the sign-in on this machine and asks the
+provider to revoke it, so a copy of Troupe's state directory can no longer renew it.
+The terminal UI says whether the provider was told: one that refuses or does not answer
+within a few seconds is not, and one that offers no way to revoke a sign-in is named as
+such; in both cases the sign-in is still forgotten here, and the provider takes it until
+it runs out. `troupe logout`, without a plane named, does the same for every server you are
+signed in to, and says so for each; if the daemon is not running it says your sign-ins
+were kept.
 
 A session on your team's pod gets them from the desktop app. Open the session and it asks
 whether to take your signed-in servers' tools, naming them; **Offer them** registers

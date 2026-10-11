@@ -2279,17 +2279,17 @@ defmodule Troupe.UI.TUI.Server do
   # itself once it lands.
   defp sign_in_server(state, name) do
     case Client.manage_sources(state.session_id, "mcp.sign_in", %{name: name}) do
-      {:ok, %{"url" => url}} ->
+      {:ok, %{"url" => url} = answer} ->
         text =
           case open_url(url) do
             :ok ->
-              "#{name}: finish signing in in your browser, then r"
+              "#{name}: finish signing in in your browser"
 
             {:error, _why} ->
-              "#{name}: open the sign-in URL on the page in a browser on this machine, then r"
+              "#{name}: open the sign-in URL on the page in a browser on this machine"
           end
 
-        {:mcp_sign_in, name, url, text}
+        {:mcp_sign_in, name, url, text <> asking(answer) <> ", then r"}
 
       {:ok, _answer} ->
         {:error, "#{name}: the daemon answered no sign-in URL"}
@@ -2299,10 +2299,20 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # What the person is asked to grant, so a sign-in for a wider scope says what it is for
+  # (troupe-remote Decision 872).
+  defp asking(%{"scopes" => [_ | _] = scopes}), do: " (asking for #{Enum.join(scopes, " ")})"
+  defp asking(_answer), do: ""
+
+  # And the provider is told, where it can be (troupe-remote Decision 872).
   defp sign_out_server(state, name) do
     case Client.manage_sources(state.session_id, "mcp.sign_out", %{name: name}) do
-      {:ok, _answer} -> {:mcp, "#{name}: signed out on this machine"}
-      {:error, reason} -> {:error, to_message(reason)}
+      {:ok, answer} ->
+        told = Client.revocation_text(answer["revocation"])
+        {:mcp, "#{name}: signed out on this machine; #{told}"}
+
+      {:error, reason} ->
+        {:error, to_message(reason)}
     end
   end
 

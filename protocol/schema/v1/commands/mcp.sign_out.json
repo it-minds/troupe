@@ -3,6 +3,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "all": {
+      "type": "boolean"
+    },
     "command_id": {
       "type": "string"
     },
@@ -17,8 +20,7 @@
     }
   },
   "required": [
-    "command_id",
-    "name"
+    "command_id"
   ],
   "title": "mcp.sign_out",
   "type": "object"
