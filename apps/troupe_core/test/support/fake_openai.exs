@@ -254,8 +254,33 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
                %{"path" => "docs/next.txt", "content" => "# kept by the bench\nbeta\n-- end\n"}}
             ]},
            {:text, "docs/next.txt is written."}
+         ]},
+        # `task_list`, three turns on the `plan` agent (issue #465): an answer a turn
+        # writes the list, then two that each read a file and mark items done.
+        {"Write a task list with todo_write",
+         [
+           {:tools, [{"todo_write", %{"items" => items(["pending", "pending", "pending"])}}]},
+           {:text, "The task list is written."},
+           {:tools,
+            [
+              {"read_file", %{"path" => "notes/a.txt"}},
+              {"todo_write", %{"items" => items(["completed", "pending", "pending"])}}
+            ]},
+           {:text, "Its first word is apple."},
+           {:tools,
+            [
+              {"read_file", %{"path" => "notes/b.txt"}},
+              {"todo_write", %{"items" => items(["completed", "completed", "completed"])}}
+            ]},
+           {:text, "notes/b.txt has more lines, and N is 440."}
          ]}
       ]
+    end
+
+    defp items(statuses) do
+      ["read notes/a.txt", "read notes/b.txt", "report 440"]
+      |> Enum.zip(statuses)
+      |> Enum.map(fn {content, status} -> %{"content" => content, "status" => status} end)
     end
 
     defp roman do

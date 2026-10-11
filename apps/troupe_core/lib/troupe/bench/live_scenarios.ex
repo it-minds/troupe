@@ -21,7 +21,9 @@ defmodule Troupe.Bench.LiveScenarios do
   `follow_up` is in neither suite, and runs when it is named (`--scenario follow_up`): two
   turns, the second under an instruction file the first brought into the session, which
   is what changes a prompt between turns and what issue #465's two options are measured
-  on (Decision 815).
+  on (Decision 815). `task_list`, in neither suite either, is that issue's other change:
+  three turns on the `plan` agent, each after the first beginning with the task list the
+  turn before left.
   """
 
   alias Troupe.Bench.Scenario
@@ -46,7 +48,8 @@ defmodule Troupe.Bench.LiveScenarios do
       precise_edit(),
       follow_steps(),
       answer_only(),
-      follow_up()
+      follow_up(),
+      task_list()
     ]
   end
 
@@ -578,6 +581,58 @@ defmodule Troupe.Bench.LiveScenarios do
          ]}
       end
     }
+  end
+
+  # -- three turns, each beginning with the task list the turn before left -------------
+
+  # Issue #465's other prefix change: the task list a turn begins with is in the system
+  # prompt (Decision 792), so each turn after one that changed the list begins with a
+  # system prompt the conversation's thinking was not made under. On the `plan` agent,
+  # which always has the list's tools (Decision 793): the first turn writes the list, and
+  # works out a number in it without a tool, which is what makes a model think and hand
+  # back a block the later turns carry; the second and third each read a file and mark
+  # items done. Two calls a run begin with a changed list where it is in the system prompt.
+  defp task_list do
+    %Scenario{
+      name: "task_list",
+      title: "three turns, each beginning with the task list the turn before left",
+      config: [default_agent: "plan"],
+      prompt: """
+      Write a task list with todo_write, every item pending: 1. read notes/a.txt 2. read notes/b.txt 3. report N, where N is the sum of the prime numbers below 60 (work it out yourself, with no tool, and write the number in the item). Do nothing else, and say so in one short sentence.\
+      """,
+      follow_ups: [
+        "Read notes/a.txt with read_file and, in the same response, mark the first item of your task list completed with todo_write. Then say the file's first word in one short sentence.",
+        "Read notes/b.txt with read_file and, in the same response, mark the second and third items completed with todo_write. Then say in one short sentence which of the two files has more lines, and the N of the third item."
+      ],
+      files: %{
+        "notes/a.txt" => "apple\none\n",
+        "notes/b.txt" => "banana\none\ntwo\nthree\n"
+      },
+      measure: fn ctx ->
+        items = last_list(ctx.events)
+        answer = reply(ctx)
+
+        {[],
+         [
+           {"three_turns", "all three turns were taken", typed(ctx.events) == 3},
+           {"list_done", "the list ends with its three items completed",
+            length(items) == 3 and Enum.all?(items, &(&1["status"] == "completed"))},
+           {"answer", "the last reply names b.txt and 440",
+            answer =~ "b.txt" and answer =~ ~r/\b440\b/}
+         ]}
+      end
+    }
+  end
+
+  # The task list as the run left it.
+  defp last_list(events) do
+    events
+    |> Enum.filter(&(&1.type == "todo_updated"))
+    |> List.last()
+    |> case do
+      nil -> []
+      event -> event.data["items"] || []
+    end
   end
 
   # What the run typed, each a turn of its own; a note from the harness is not one.
