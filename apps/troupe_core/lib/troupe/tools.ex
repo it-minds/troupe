@@ -46,7 +46,9 @@ defmodule Troupe.Tools do
     Troupe.Tools.GitRead,
     Troupe.Tools.Glob,
     # Onboarding another tool's files into Troupe's own (Decision 823).
-    Troupe.Tools.OnboardWrite
+    Troupe.Tools.OnboardWrite,
+    # A document shown beside the chat (Decision 870), on every call: never gated here.
+    Troupe.Tools.Show
   ]
 
   # The task list's tools, and the model calls a turn makes before a profile that did not

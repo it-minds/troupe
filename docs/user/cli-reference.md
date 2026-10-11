@@ -93,6 +93,7 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 | `/hq [plane]`, `/remote` | HQ: a plane's teams, profiles and sessions. This machine's own sessions are listed alongside. Names a plane by URL; without one, the plane this machine is logged in to. For example `/hq https://troupe.example`. |  |
 | `/observer`, `/agents-tree`, `/tree` | The agent tree: every branch and subagent. Each with its state, worktree and tokens; Enter opens the agent's transcript. |  |
 | `/files` | The session's files, live. Enter opens a file, ← goes up, r reloads; a change the session makes reloads the listing by itself. |  |
+| `/scratch [name]` | The documents an agent showed you beside the chat. Plans, reports and tables the agent put on the session's scratchpad with show; Enter opens one, and a newer version reads itself again. For example `/scratch plan.md`. |  |
 
 ### Workspace
 

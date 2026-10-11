@@ -81,6 +81,7 @@ export {
   FINISH_PARTS,
   LEGACY_BUDGET_OPTIONS,
 } from "./transcript.js";
+export { SCRATCH_KINDS, foldScratch, scratchDocumentOf, scratchLine, scratchSize, scratchVersion } from "./scratch.js";
 export type {
   Entry,
   DelegationGate,

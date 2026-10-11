@@ -846,6 +846,15 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # A branch's documents are on its own session's scratchpad, beside its own log.
+  @impl true
+  def scratch_read(sid, window, path) do
+    case branch(sid, window) do
+      %{session_id: child} -> fs_read(child, path)
+      nil -> fs_read(sid, path)
+    end
+  end
+
   @impl true
   def fs_upload(sid, path, content), do: describe(Worker.fs_upload(sid, path, content))
 

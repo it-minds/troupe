@@ -11,6 +11,11 @@ defmodule Troupe.Mounts do
       org:/            the org volume from the cluster policy, always read-only
       skills:/<name>/  the pinned config bundle's skills, always read-only
 
+  A fifth, `scratch:/`, is the session's scratchpad beside its log (`Troupe.Scratch`,
+  Decision 870). It is not in the session's table: only `show` writes it and a client's
+  `fs.read` reads it, each with a table of its own, so neither the file tools nor the
+  sandbox see it.
+
   Two rules make this worth having rather than decorative.
 
   **A path outside the table does not resolve.** Not "is rejected" — does not resolve,
@@ -36,7 +41,7 @@ defmodule Troupe.Mounts do
             name: String.t(),
             root: Path.t(),
             mode: :ro | :rw,
-            kind: :session | :team | :org | :bundle,
+            kind: :session | :team | :org | :bundle | :scratch,
             root_key: String.t()
           }
   end
@@ -85,11 +90,12 @@ defmodule Troupe.Mounts do
     }
   end
 
-  defp kind(value) when value in [:session, :team, :org, :bundle], do: value
+  defp kind(value) when value in [:session, :team, :org, :bundle, :scratch], do: value
   defp kind("session"), do: :session
   defp kind("team"), do: :team
   defp kind("org"), do: :org
   defp kind("bundle"), do: :bundle
+  defp kind("scratch"), do: :scratch
   defp kind(_other), do: :team
 
   defp mode(value) when value in [:ro, :rw], do: value
@@ -136,15 +142,17 @@ defmodule Troupe.Mounts do
     end
   end
 
-  # Four prefixes and nothing else: `session:`, `org:`, `skills:`, and `team:<name>`.
-  # Anything that is not one of them is a session-relative path, which is both what
-  # every existing tool call means and what keeps a Windows drive letter from being read
-  # as a mount name.
+  # Five prefixes and nothing else: `session:`, `org:`, `skills:`, `team:<name>`, and
+  # `scratch:`, the session's scratchpad (Decision 870), which only `show` and a client's
+  # `fs.read` have in their table. Anything that is not one of them is a session-relative
+  # path, which is both what every existing tool call means and what keeps a Windows drive
+  # letter from being read as a mount name.
   defp entry_for(mounts, path) do
     case String.split(path, ":", parts: 2) do
       ["session", rest] -> of_kind(mounts, :session, String.trim_leading(rest, "/"))
       ["org", rest] -> of_kind(mounts, :org, String.trim_leading(rest, "/"))
       ["skills", rest] -> of_kind(mounts, :bundle, String.trim_leading(rest, "/"))
+      ["scratch", rest] -> of_kind(mounts, :scratch, String.trim_leading(rest, "/"))
       ["team", rest] -> team(mounts, rest)
       # No prefix: the session's own root, and the path is passed through untouched so
       # that an absolute one stays absolute and is rejected rather than reinterpreted.

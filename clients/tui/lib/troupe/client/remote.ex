@@ -276,6 +276,10 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  # A pod's session is one session, its windows its agents: one scratchpad.
+  @impl true
+  def scratch_read(sid, _window, path), do: fs_read(sid, path)
+
   @impl true
   def fs_upload(sid, path, content), do: describe(Worker.fs_upload(sid, path, content))
 

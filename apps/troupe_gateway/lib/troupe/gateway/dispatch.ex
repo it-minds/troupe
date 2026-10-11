@@ -79,6 +79,8 @@ defmodule Troupe.Gateway.Dispatch do
     "fs.list" => :observe,
     "fs.read" => :observe,
     "fs.upload" => :control,
+    # The scratchpad's documents (Decision 870); each is read with `fs.read`.
+    "scratch.list" => :observe,
     "workspace.recent" => :observe,
     "agents.list" => :observe,
     # An agent whole, and checked without writing (#503, Decision 841); writing one or
@@ -369,6 +371,16 @@ defmodule Troupe.Gateway.Dispatch do
       )
 
       {:ok, %{"path" => Workspace.relative(workspace, resolved), "bytes" => byte_size(content)}}
+    end
+  end
+
+  # What `show` put on the session's scratchpad, from its log, running or dormant
+  # (Decision 870). The words are read with `fs.read` of each `path`.
+  defp handle("scratch.list", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, _session} <- lookup(session_id) do
+      documents = session_id |> Troupe.Scratch.list() |> Enum.map(&Troupe.Scratch.to_json/1)
+      {:ok, %{"documents" => documents}}
     end
   end
 
@@ -1700,14 +1712,19 @@ defmodule Troupe.Gateway.Dispatch do
 
   # The live session's table where there is one, and the log's `mounts_resolved` where
   # there is not — a dormant session still has a mount table, and a client reading one
-  # must be confined by the same rules the agent was.
+  # must be confined by the same rules the agent was. With the scratchpad's `scratch:/`
+  # first and read-only (Decision 870): a client reads a document there, and only `show`
+  # writes one.
   defp mounted(session_id, workspace) do
-    case Troupe.replay_from(session_id, 0)
-         |> Enum.reverse()
-         |> Enum.find(&(&1.type == "mounts_resolved")) do
-      nil -> workspace
-      event -> Workspace.with_mounts(workspace, Mounts.from_json(event.data))
-    end
+    mounts =
+      case Troupe.replay_from(session_id, 0)
+           |> Enum.reverse()
+           |> Enum.find(&(&1.type == "mounts_resolved")) do
+        nil -> workspace.mounts
+        event -> Mounts.from_json(event.data)
+      end
+
+    Workspace.with_mounts(workspace, Troupe.Scratch.with_mount(mounts, session_id))
   end
 
   defp resolve_path(workspace, path, mode) do

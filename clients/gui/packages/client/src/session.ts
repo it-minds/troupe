@@ -12,6 +12,8 @@ import type {
   LlmDeltaData,
   LoopInfo,
   LoopStarted,
+  ScratchDocument,
+  ScratchList,
   SessionCreateResult,
   SubscribeResult,
   TroupeEvent,
@@ -335,6 +337,21 @@ export class SessionView {
 
   fsRead(path: string): Promise<FsFile> {
     return this.conn.call<FsFile>("fs.read", { session_id: this.sessionId, path });
+  }
+
+  /**
+   * `scratch.list`: the documents the session's agents put in its scratchpad with `show`
+   * (issue #472), each at its latest version, in the order each name was first written.
+   * The events say the same as they arrive (`scratch_updated`, folded into
+   * `TranscriptState.scratch`); this is for a reader that has not folded them.
+   */
+  async scratchList(): Promise<ScratchDocument[]> {
+    return (await this.conn.call<ScratchList>("scratch.list", { session_id: this.sessionId })).documents;
+  }
+
+  /** One scratchpad document's text, read as any file is: `fs.read` on its `scratch:/` path. */
+  scratchRead(doc: Pick<ScratchDocument, "path">): Promise<FsFile> {
+    return this.fsRead(doc.path);
   }
 
   /**
