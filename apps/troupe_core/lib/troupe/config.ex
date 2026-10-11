@@ -117,6 +117,9 @@ defmodule Troupe.Config do
             # Bytes of a tool's result the model is sent; the rest is one `read_output`
             # call away. 32 KiB, from a live bench's numbers (Decision 781).
             tool_output_limit: 32_768,
+            # The scratchpad's caps (Decision 870): bytes a document, documents a session.
+            scratch_max_bytes: 262_144,
+            scratch_max_documents: 50,
             watch: false,
             watch_debounce_ms: 300,
             watch_poll_interval_ms: 1_000,

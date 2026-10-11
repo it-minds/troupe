@@ -1,0 +1,42 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/scratch_updated.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "call_id": {
+      "type": "string"
+    },
+    "hash": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "size": {
+      "type": "integer"
+    },
+    "title": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "hash",
+    "kind",
+    "name",
+    "path",
+    "size",
+    "title",
+    "version"
+  ],
+  "title": "scratch_updated",
+  "type": "object"
+}

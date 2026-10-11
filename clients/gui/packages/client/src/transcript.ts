@@ -6,7 +6,8 @@
 // the message being produced, the agent's state, who else is here — and may be dropped
 // under load without changing what the transcript says.
 
-import type { DurableEvent, LlmDeltaData, LoopInfo, TroupeEvent } from "./types.js";
+import { foldScratch, scratchDocumentOf } from "./scratch.js";
+import type { DurableEvent, LlmDeltaData, LoopInfo, ScratchDocument, TroupeEvent } from "./types.js";
 import { isDurable } from "./types.js";
 
 /** A `data` field the server replaced with a reference because it ran past 16 KiB. */
@@ -48,6 +49,31 @@ export type Entry =
       /** Undefined while the call is still running. */
       ok: boolean | undefined;
       content: string | BlobRef | undefined;
+    }
+  /**
+   * A document an agent put in the session's scratchpad with `show` (issue #472), in place
+   * of the call: what it is called and how big, and which write of its name this was once
+   * the call's `scratch_updated` said. Never its text, which the call's arguments carry
+   * and the scratchpad reads with `fs.read`.
+   */
+  | {
+      kind: "scratch";
+      seq: number;
+      agent: string[];
+      callId: string;
+      /** The document's name, `plan.md`; empty while a call whose arguments ran past 16 KiB waits for its event. */
+      name: string;
+      title: string;
+      /** The document's own `kind`: `markdown`, `mermaid`, `json`, `csv` or `text`, once known. */
+      format: string | undefined;
+      /** Bytes. */
+      size: number | undefined;
+      /** From `scratch_updated`: 1 for the first write of the name, 2 for the second, … */
+      version: number | undefined;
+      /** Undefined while the call is still running. */
+      ok: boolean | undefined;
+      /** What a call that failed answered. */
+      error: string | undefined;
     }
   | {
       kind: "approval";
@@ -234,6 +260,11 @@ export interface TranscriptState {
    * it into questions over `onboard.plan`; its line says it where nothing asks.
    */
   onboarding: OnboardingSuggested | undefined;
+  /**
+   * The session's scratchpad (issue #472): every document an agent wrote with `show`, at its
+   * latest version, in the order each name was first written, from `scratch_updated`.
+   */
+  scratch: ScratchDocument[];
 }
 
 /** What `onboarding_suggested` says is due, and where. */
@@ -272,6 +303,7 @@ export const emptyTranscript: TranscriptState = {
   goal: undefined,
   loop: undefined,
   onboarding: undefined,
+  scratch: [],
 };
 
 /** The root agent is the one-element path; everything deeper is a subagent. */
@@ -480,6 +512,51 @@ function contentOf(v: unknown): string | BlobRef | undefined {
   if (v === undefined || v === null) return undefined;
   if (isBlobRef(v)) return v;
   return typeof v === "string" ? v : JSON.stringify(v);
+}
+
+/**
+ * A `show` call as its card: the name, title and kind its arguments give, and the size of
+ * the document they carry, which is not kept. Its `scratch_updated` may have been written
+ * first, and then the card is whole at once. Arguments past 16 KiB arrive as a reference,
+ * and the card waits for the event to say what they were.
+ */
+function showCard(base: { seq: number; agent: string[] }, d: DurableEvent, docs: ScratchDocument[]): Extract<Entry, { kind: "scratch" }> {
+  const callId = str(d.data["call_id"]);
+  const raw = d.data["args"];
+  const args = typeof raw === "object" && raw !== null && !isBlobRef(raw) ? (raw as Record<string, unknown>) : {};
+  const content = args["content"];
+  const name = str(args["name"]);
+  const card: Extract<Entry, { kind: "scratch" }> = {
+    kind: "scratch",
+    ...base,
+    callId,
+    name,
+    title: str(args["title"]) || name,
+    format: str(args["kind"]) || undefined,
+    size: typeof content === "string" ? new TextEncoder().encode(content).length : undefined,
+    version: undefined,
+    ok: undefined,
+    error: undefined,
+  };
+  const written = docs.find((doc) => callId !== "" && doc.call_id === callId);
+  return written ? fillCard(card, written) : card;
+}
+
+/** A card as the document its call wrote says it is. */
+function fillCard(card: Extract<Entry, { kind: "scratch" }>, doc: ScratchDocument): Extract<Entry, { kind: "scratch" }> {
+  return { ...card, name: doc.name, title: doc.title, format: doc.kind, size: doc.size, version: doc.version };
+}
+
+function lastIndex<T>(items: T[], pred: (item: T) => boolean): number {
+  for (let i = items.length - 1; i >= 0; i--) if (pred(items[i]!)) return i;
+  return -1;
+}
+
+/** What a failed call answered, as a line: a reference's preview when it ran long. */
+function errorOf(v: unknown): string | undefined {
+  const content = contentOf(v);
+  if (content === undefined) return undefined;
+  return isBlobRef(content) ? (content.preview ?? undefined) : content;
 }
 
 /** A count the event gives, or nothing for one it does not. */
@@ -773,7 +850,10 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
       };
     }
 
+    // A `show` is a card for the document it wrote, not a call with the whole document in
+    // its arguments (issue #472).
     case "tool_call_started":
+      if (str(d.data["name"]) === "show") return { ...next, entries: [...state.entries, showCard(base, d, state.scratch)] };
       return {
         ...next,
         entries: [
@@ -795,15 +875,34 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
     // out waiting.
     case "tool_call_completed": {
       const id = str(d.data["call_id"]);
+      const ok = Boolean(d.data["ok"]);
       return {
         ...next,
         entries: state.entries.map((en) =>
           en.kind === "tool" && en.callId === id
-            ? { ...en, ok: Boolean(d.data["ok"]), content: contentOf(d.data["content"]) }
-            : (en.kind === "approval" || en.kind === "question") && en.callId === id
-              ? closeUnanswered(en)
-              : en,
+            ? { ...en, ok, content: contentOf(d.data["content"]) }
+            : en.kind === "scratch" && en.callId === id
+              ? { ...en, ok, error: ok ? undefined : errorOf(d.data["content"]) }
+              : (en.kind === "approval" || en.kind === "question") && en.callId === id
+                ? closeUnanswered(en)
+                : en,
         ),
+      };
+    }
+
+    // A document written to the scratchpad (issue #472): the session's list of them, and
+    // the card of the call that wrote it, which now says which write of its name it was.
+    // A log whose event names no call fills the latest card for that name still waiting.
+    case "scratch_updated": {
+      const doc = scratchDocumentOf(d);
+      if (!doc) return next;
+      const waiting = doc.call_id
+        ? state.entries.findIndex((en) => en.kind === "scratch" && en.callId === doc.call_id)
+        : lastIndex(state.entries, (en) => en.kind === "scratch" && en.name === doc.name && en.version === undefined);
+      return {
+        ...next,
+        scratch: foldScratch(state.scratch, d),
+        entries: waiting < 0 ? state.entries : state.entries.map((en, i) => (i === waiting && en.kind === "scratch" ? fillCard(en, doc) : en)),
       };
     }
 

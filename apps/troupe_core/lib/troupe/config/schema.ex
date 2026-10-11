@@ -403,6 +403,14 @@ defmodule Troupe.Config.Schema do
           field: :tool_output_limit,
           label: "tool output limit"
         ),
+        spec("scratch_max_bytes", {:integer, 1}, "Bytes one document `show` puts on the session's scratchpad may hold.",
+          default: 262_144,
+          field: :scratch_max_bytes
+        ),
+        spec("scratch_max_documents", {:integer, 1}, "Documents one session's scratchpad may hold.",
+          default: 50,
+          field: :scratch_max_documents
+        ),
         spec(
           "tool_failures_note_at",
           {:integer, 0},

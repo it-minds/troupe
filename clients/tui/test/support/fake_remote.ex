@@ -855,6 +855,11 @@ defmodule Troupe.FakeRemote do
     {{:ok, %{"entries" => entries}}, state}
   end
 
+  # A scratchpad document (root Decision 870): Markdown, so a pane that draws it as a
+  # reply can be told from one that prints it.
+  defp dispatch(state, _kind, "fs.read", %{"path" => "scratch:/" <> name}, _pid),
+    do: {{:ok, %{"content" => "# The plan\n\n- **copy** the table\n- switch #{name}\n"}}, state}
+
   defp dispatch(state, _kind, "fs.read", _params, _pid),
     do: {{:ok, %{"content" => "hello from the worker\n"}}, state}
 

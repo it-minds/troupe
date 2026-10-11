@@ -146,6 +146,8 @@ defmodule Troupe.Client do
   @callback instructions(session_id()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  @callback scratch_read(session_id(), String.t() | nil, String.t()) ::
+              {:ok, String.t()} | {:error, term()}
   @callback fs_upload(session_id(), String.t(), binary()) :: :ok | {:error, term()}
   @callback upload_fits(session_id(), non_neg_integer()) :: :ok | {:error, String.t()}
   @callback stop_session(session_id()) :: :ok | {:error, term()}
@@ -465,6 +467,14 @@ defmodule Troupe.Client do
 
   @spec fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def fs_read(sid, path), do: impl(sid).fs_read(sid, path)
+
+  @doc """
+  A scratchpad document's words (root Decision 870): `fs.read` of its `scratch:/` path,
+  in the session of the window its card is in, a branch's own where it has one.
+  """
+  @spec scratch_read(session_id(), String.t() | nil, String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def scratch_read(sid, window, path), do: impl(sid).scratch_read(sid, window, path)
 
   @spec fs_upload(session_id(), String.t(), binary()) :: :ok | {:error, term()}
   def fs_upload(sid, path, content), do: impl(sid).fs_upload(sid, path, content)

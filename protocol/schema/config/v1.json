@@ -498,6 +498,24 @@
       ],
       "minimum": 1
     },
+    "scratch_max_bytes": {
+      "description": "Bytes one document `show` puts on the session's scratchpad may hold.",
+      "default": 262144,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "scratch_max_documents": {
+      "description": "Documents one session's scratchpad may hold.",
+      "default": 50,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
     "tool_failures_note_at": {
       "description": "Failures of one tool in a row after which the model is told to stop and reconsider; 0 never.",
       "default": 5,

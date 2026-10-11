@@ -33,6 +33,7 @@ defmodule Troupe.UI.TUI.Server do
             | :observer
             | :sessions
             | :files
+            | :scratch
             | :mcp
             | :memory
             | :hq
@@ -74,6 +75,7 @@ defmodule Troupe.UI.TUI.Server do
           observer: %{cursor: non_neg_integer()} | nil,
           sessions: sessions() | nil,
           files: files() | nil,
+          scratch: scratch() | nil,
           mcp_cursor: non_neg_integer(),
           memory: memory() | nil,
           hq: HQ.t() | nil,
@@ -211,6 +213,29 @@ defmodule Troupe.UI.TUI.Server do
         }
 
   @typedoc """
+  `/scratch`'s state (TUI Decision 159): where the cursor sits in the documents the
+  model's cards list (`Model.scratch_documents/1`), and the one open in the pane, its
+  window and name, the version read, its lines and how far it is scrolled. `version` is
+  the model's `scratch_version` as last looked at: a newer card for the open document
+  reads it again.
+  """
+  @type scratch :: %{
+          cursor: non_neg_integer(),
+          version: non_neg_integer(),
+          open:
+            %{
+              window: String.t(),
+              name: String.t(),
+              title: String.t(),
+              version: pos_integer(),
+              lines: [Model.line()],
+              scroll: non_neg_integer()
+            }
+            | nil,
+          error: String.t() | nil
+        }
+
+  @typedoc """
   The command this screen ran with `!` and that has not ended (Decision 152): what
   Esc and Ctrl-C kill. Its block is the model's, from the session's events; this is only
   which run is this screen's to kill, so a command another client ran is left alone.
@@ -274,6 +299,7 @@ defmodule Troupe.UI.TUI.Server do
       observer: nil,
       sessions: nil,
       files: nil,
+      scratch: nil,
       mcp_cursor: 0,
       mcp_page: nil,
       # The sign-in URL the daemon last answered, `%{name, url}`, shown on the page in
@@ -383,7 +409,7 @@ defmodule Troupe.UI.TUI.Server do
         tick_scheduled: false
     }
 
-    state = state |> resume_follow() |> refresh_files()
+    state = state |> resume_follow() |> refresh_files() |> refresh_scratch()
     needs_blink = Enum.any?(Model.windows(state.model), &(&1.state in [:running, :needs_input]))
 
     if state.dirty or needs_blink do
@@ -604,6 +630,9 @@ defmodule Troupe.UI.TUI.Server do
   def handle_event(%Key{} = key, %{focus: :files} = state),
     do: {:noreply, files_key(key, %{state | quit_armed: false})}
 
+  def handle_event(%Key{} = key, %{focus: :scratch} = state),
+    do: {:noreply, scratch_key(key, %{state | quit_armed: false})}
+
   def handle_event(%Key{} = key, %{focus: :mcp} = state),
     do: {:noreply, mcp_key(key, %{state | quit_armed: false})}
 
@@ -659,6 +688,9 @@ defmodule Troupe.UI.TUI.Server do
       :files ->
         {:noreply, state, render?: false}
 
+      :scratch ->
+        {:noreply, state, render?: false}
+
       :mcp ->
         {:noreply, state, render?: false}
 
@@ -691,6 +723,7 @@ defmodule Troupe.UI.TUI.Server do
              :observer,
              :sessions,
              :files,
+             :scratch,
              :mcp,
              :memory,
              :hq,
@@ -778,6 +811,9 @@ defmodule Troupe.UI.TUI.Server do
         {entries, cursor} = View.files_view(state)
         cursor = cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(max(length(entries) - 1, 0))
         {:noreply, %{state | files: %{state.files | cursor: cursor}}}
+
+      :scratch ->
+        {:noreply, scratch_move(state, step)}
 
       :mcp ->
         count = length(View.mcp_entries(state))
@@ -979,7 +1015,8 @@ defmodule Troupe.UI.TUI.Server do
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
   @builtins ~w(new cancel dismiss merge discard goal loop sessions back hq observer files
-               upload copy memory context watch settings models mcp skills help agents worktree quit)
+               scratch upload copy memory context watch settings models mcp skills help agents
+               worktree quit)
 
   @doc false
   @spec builtins() :: [String.t()]
@@ -1047,6 +1084,7 @@ defmodule Troupe.UI.TUI.Server do
       :quit -> %{state | quitting: true}
       :palette -> open_palette(state)
       :files -> toggle_files(state)
+      {:scratch, arg} -> open_scratch(state, arg)
       :mcp -> open_mcp(state)
       :agents -> open_agents(state)
       :memory -> open_memory(state)
@@ -1311,6 +1349,7 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("models", _args, _state, _target), do: :models
   defp builtin("observer", _args, _state, _target), do: :observer
   defp builtin("files", _args, _state, _target), do: :files
+  defp builtin("scratch", args, _state, _target), do: {:scratch, String.trim(args)}
   defp builtin("mcp", args, state, _target), do: sources_command(state, "mcp", String.trim(args))
 
   defp builtin("skills", args, state, _target),
@@ -2446,6 +2485,123 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp files_key(_key, state), do: state
+
+  ## Scratchpad
+
+  # `/scratch` lists the documents the cards name (TUI Decision 159), every window's;
+  # `/scratch <name>` opens the latest of that name at once. The words are read when a
+  # document is opened, and again when a newer card for it comes in.
+  defp open_scratch(state, "") do
+    scratch = %{cursor: 0, open: nil, error: nil, version: state.model.scratch_version}
+    %{put_cmd(state, "") | focus: :scratch, scratch: scratch}
+  end
+
+  defp open_scratch(state, name) do
+    state = open_scratch(state, "")
+    wanted = String.downcase(name)
+
+    found =
+      state.model
+      |> Model.scratch_documents()
+      |> Enum.with_index()
+      |> Enum.filter(fn {doc, _i} -> doc.name == wanted end)
+      |> List.last()
+
+    case found do
+      nil -> notice(state, "no document named #{name} on the scratchpad")
+      {doc, i} -> read_document(%{state | scratch: %{state.scratch | cursor: i}}, doc)
+    end
+  end
+
+  defp read_document(state, doc) do
+    case Client.scratch_read(state.session_id, doc.window, doc.path) do
+      {:ok, content} ->
+        scroll =
+          case state.scratch.open do
+            %{window: window, name: name, scroll: scroll}
+            when window == doc.window and name == doc.name ->
+              scroll
+
+            _ ->
+              0
+          end
+
+        open = %{
+          window: doc.window,
+          name: doc.name,
+          title: doc.title,
+          version: doc.version,
+          lines: Model.document_lines(doc.kind, content),
+          scroll: scroll
+        }
+
+        %{state | scratch: %{state.scratch | open: open, error: nil}}
+
+      {:error, reason} ->
+        %{state | scratch: %{state.scratch | error: to_message(reason)}}
+    end
+  end
+
+  # A card newer than the open document's version reads it again; nothing is asked while
+  # no card has come in since.
+  defp refresh_scratch(%{scratch: %{version: version}} = state)
+       when version == state.model.scratch_version,
+       do: state
+
+  defp refresh_scratch(%{scratch: %{open: open} = scratch} = state) when is_map(open) do
+    state = %{state | scratch: %{scratch | version: state.model.scratch_version}}
+    docs = Model.scratch_documents(state.model)
+
+    case Enum.find(docs, &(&1.window == open.window and &1.name == open.name)) do
+      %{version: version} = doc when version > open.version -> read_document(state, doc)
+      _ -> state
+    end
+  end
+
+  defp refresh_scratch(%{scratch: %{} = scratch} = state),
+    do: %{state | scratch: %{scratch | version: state.model.scratch_version}}
+
+  defp refresh_scratch(state), do: state
+
+  defp scratch_key(%Key{code: "esc"}, %{scratch: %{open: open}} = state) when is_map(open),
+    do: %{state | scratch: %{state.scratch | open: nil}}
+
+  defp scratch_key(%Key{code: "esc"}, state), do: %{state | focus: :command, scratch: nil}
+
+  defp scratch_key(%Key{code: code}, state) when code in ["up", "k"], do: scratch_move(state, -1)
+  defp scratch_key(%Key{code: code}, state) when code in ["down", "j"], do: scratch_move(state, 1)
+  defp scratch_key(%Key{code: "page_up"}, state), do: scratch_move(state, -10)
+  defp scratch_key(%Key{code: "page_down"}, state), do: scratch_move(state, 10)
+
+  defp scratch_key(%Key{code: "enter"}, state) do
+    {docs, cursor} = View.scratch_view(state)
+
+    case Enum.at(docs, cursor) do
+      nil -> state
+      doc -> read_document(state, doc)
+    end
+  end
+
+  defp scratch_key(_key, state), do: state
+
+  # With a document open the rows scroll; otherwise the cursor moves, a row a notch.
+  defp scratch_move(%{scratch: %{open: open} = scratch} = state, step) when is_map(open),
+    do: %{state | scratch: %{scratch | open: %{open | scroll: max(open.scroll + step, 0)}}}
+
+  defp scratch_move(%{scratch: %{} = scratch} = state, step) do
+    {docs, cursor} = View.scratch_view(state)
+    step = if abs(step) >= 3, do: div(step, 3), else: step
+
+    %{
+      state
+      | scratch: %{
+          scratch
+          | cursor: cursor |> Kernel.+(step) |> max(0) |> min(max(length(docs) - 1, 0))
+        }
+    }
+  end
+
+  defp scratch_move(state, _step), do: state
 
   ## MCP page
 

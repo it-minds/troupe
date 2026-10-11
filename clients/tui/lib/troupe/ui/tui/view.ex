@@ -76,6 +76,12 @@ defmodule Troupe.UI.TUI.View do
     files_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
+  defp draw(%{focus: :scratch} = state, frame) do
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+    [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
+    scratch_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
+  end
+
   defp draw(%{focus: :mcp} = state, frame) do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
@@ -892,6 +898,90 @@ defmodule Troupe.UI.TUI.View do
 "
     )
   end
+
+  ## Scratchpad
+
+  @doc "`/scratch`'s documents, from the model's cards, and the clamped cursor (TUI Decision 159)."
+  @spec scratch_view(map()) :: {[map()], non_neg_integer()}
+  def scratch_view(%{scratch: %{cursor: cursor}} = state) do
+    docs = Model.scratch_documents(state.model)
+    {docs, min(cursor, max(length(docs) - 1, 0))}
+  end
+
+  def scratch_view(_state), do: {[], 0}
+
+  # The documents on the left, each its title, name and how often it was written; the
+  # open one on the right, Markdown drawn as a reply is, or the selected one's details.
+  defp scratch_page(state, rect) do
+    {docs, cursor} = scratch_view(state)
+    [list_rect, detail_rect] = Layout.split(rect, :horizontal, [{:fill, 2}, {:fill, 3}])
+    width = max(list_rect.width - 4, 12)
+
+    list = %ExRatatui.Widgets.List{
+      items: Enum.map(docs, &clip("#{&1.title} · #{&1.name} · #{Model.scratch_note(&1)}", width)),
+      selected: if(docs == [], do: nil, else: cursor),
+      highlight_symbol: "▸ ",
+      highlight_style: selected(),
+      block: %Block{
+        title: fit([" scratchpad ", " scratch "], list_rect.width - 2),
+        borders: [:all],
+        border_type: :double
+      }
+    }
+
+    [{list, list_rect}, {scratch_detail(state, Enum.at(docs, cursor), detail_rect), detail_rect}]
+  end
+
+  defp scratch_detail(%{scratch: %{error: error}}, _doc, _rect) when is_binary(error),
+    do: %Paragraph{text: error, wrap: true, block: %Block{title: " scratchpad ", borders: [:all]}}
+
+  defp scratch_detail(%{scratch: %{open: %{} = open}}, _doc, rect) do
+    width = max(rect.width - 2, 1)
+    height = max(rect.height - 2, 1)
+    offset = min(open.scroll, max(Model.row_count(open.lines, width) - height, 0))
+
+    %Paragraph{
+      text: styled(Model.rows(open.lines, width, offset, height)),
+      wrap: false,
+      block: %Block{
+        title: clip(" #{open.title} · #{open.name} — Esc closes ", width),
+        borders: [:all]
+      }
+    }
+  end
+
+  defp scratch_detail(_state, nil, _rect) do
+    %Paragraph{
+      text:
+        "Nothing on the scratchpad yet. An agent puts a plan, a report or a table here with show.",
+      wrap: true,
+      block: %Block{title: " scratchpad ", borders: [:all]}
+    }
+  end
+
+  defp scratch_detail(_state, doc, _rect) do
+    %Paragraph{
+      text:
+        Enum.join(
+          [
+            field("title", doc.title),
+            field("name", doc.name),
+            field("kind", doc.kind),
+            field("size", Model.scratch_note(doc)),
+            field("window", doc.window),
+            field("path", doc.path)
+          ],
+          "\n"
+        ),
+      wrap: false,
+      block: %Block{title: " Enter opens · Esc closes ", borders: [:all]}
+    }
+  end
+
+  defp scratch_footer(%{scratch: %{open: %{}}}),
+    do: " scratchpad — ↑↓ PgUp PgDn scroll · Esc back to the list "
+
+  defp scratch_footer(_state), do: " scratchpad — ↑↓ move · Enter opens · Esc back "
 
   defp human_size(size) when is_integer(size) and size >= 1_000_000,
     do: "#{Float.round(size / 1_000_000, 1)} MB"
@@ -2760,6 +2850,9 @@ defmodule Troupe.UI.TUI.View do
 
         :files ->
           {"", " files — ↑↓ move · Enter opens · ← up · r reloads · Esc back "}
+
+        :scratch ->
+          {"", scratch_footer(state)}
 
         :mcp ->
           {"", " mcp — ↑↓ move · r reload · c check · d enable/disable · x remove · Esc back "}

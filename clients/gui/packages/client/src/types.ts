@@ -239,6 +239,36 @@ export interface FsFile {
   [k: string]: unknown;
 }
 
+/**
+ * One document in a session's scratchpad (issue #472): what an agent's `show` wrote under
+ * `name`, at its latest version. `scratch.list` lists them in the order each name was
+ * first written, and `scratch_updated` carries one each time it is written; the text is
+ * read with `fs.read` on `path` (`scratch:/<name>`), which answers the same `hash`.
+ */
+export interface ScratchDocument {
+  /** Lowercase ASCII letters, digits, `.`, `-` and `_`: `plan.md`. */
+  name: string;
+  path: string;
+  kind: "markdown" | "mermaid" | "json" | "csv" | "text" | string;
+  title: string;
+  /** Bytes. */
+  size: number;
+  /** `sha256:…`. */
+  hash: string;
+  /** 1 for the first write of the name in the session, 2 for the second, … */
+  version: number;
+  /** When the latest version was written: `scratch.list`'s, or the event's `ts` in a fold. */
+  updated_at: string;
+  /** The `show` call that wrote the latest version, where its event named one. */
+  call_id?: string;
+  [k: string]: unknown;
+}
+
+export interface ScratchList {
+  documents: ScratchDocument[];
+  [k: string]: unknown;
+}
+
 /** One argument of a slash command, for completion and the usage line. */
 export interface CommandArg {
   name: string;
