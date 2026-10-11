@@ -444,6 +444,47 @@ defmodule Troupe.BenchLiveTest do
       assert stable["cached_tokens"] > per_turn["cached_tokens"]
       assert stable["input_tokens"] < per_turn["input_tokens"]
     end
+
+    test "task_list: by default the turns after the list changed are refused, stable none" do
+      runs =
+        for system_prompt <- ["per_turn", "stable"], into: %{} do
+          fake = start_fake()
+
+          {:ok, plan} =
+            Bench.plan(
+              config: anthropic(fake, system_prompt: system_prompt),
+              only: ["task_list"],
+              history: nil
+            )
+
+          report = Bench.live(plan)
+          assert Bench.passed?(report), Bench.markdown(report)
+          [run] = scenario(report, "task_list")["runs"]
+          {system_prompt, {run, FakeOpenAI.requests(fake)}}
+        end
+
+      # Six answers. By default the second and third turns each begin with a system prompt
+      # holding the list the turn before left, and each of their four calls carries the
+      # first turn's block: refused, and sent again without thinking.
+      {per_turn, requests} = runs["per_turn"]
+      assert per_turn["model_calls"] == 6
+
+      assert %{"system_changes" => 2, "thinking_resent" => 4, "turn_contexts" => 0} =
+               per_turn["prefix"]
+
+      assert [200, 200, 400, 200, 400, 200, 400, 200, 400, 200] =
+               Enum.map(requests, & &1.status)
+
+      # Stable, the list goes with the turn, and nothing in front of what was sent changes.
+      {stable, requests} = runs["stable"]
+
+      assert %{"system_changes" => 0, "tools_changes" => 0, "thinking_resent" => 0} =
+               stable["prefix"]
+
+      assert stable["prefix"]["turn_contexts"] == 2
+      assert Enum.all?(requests, &(&1.status == 200 and &1.thinking == :kept))
+      assert [_one] = requests |> Enum.map(& &1.system) |> Enum.uniq()
+    end
   end
 
   # The stand-in as Anthropic's API, serving Claude Opus 5.5 at its price.
