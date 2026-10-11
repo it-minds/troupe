@@ -164,7 +164,8 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :daemon} = args} ->
         Troupe.CLI.Daemon.run(args.daemon_args)
 
-      # This troupe and the troupe-daemon beside it, from a signed release (Decision 865).
+      # This troupe and the troupe-daemon beside it, from a signed release (Decision 865),
+      # and the version the plane signed in to says, where there is one (Decision 868).
       {:ok, %{mode: :update} = args} ->
         action =
           cond do
@@ -175,7 +176,8 @@ defmodule Troupe.CLI.Runner do
 
         Troupe.Update.run(action,
           version: args.update_version,
-          installed: to_string(Application.spec(:troupe, :vsn))
+          installed: to_string(Application.spec(:troupe, :vsn)),
+          plane: if(action != :rollback, do: Troupe.CLI.Remote.client_versions())
         )
 
       {:ok, %{mode: :tui} = args} ->

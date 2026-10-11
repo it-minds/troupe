@@ -27,14 +27,28 @@ defmodule Troupe.Gateway.Plane do
   when nobody has linked and an ordinary error when the network is what it is; no caller
   treats either as exceptional, and nothing retries in here, because the thing that knows
   when to try again is the thing that has work pending.
+
+  ## The plane may refuse this daemon's version
+
+  A link with a token is followed by `handshake/1`: the plane's `initialize`, as
+  `troupe-daemon` with this build's version (Decision 868). A plane whose administrators
+  hold the daemon to a newer version, or have blocked this one, answers `update_required`,
+  and from then on every call answers `{:error, {:update_required, sentence}}` without
+  reaching the plane, the sentence saying what to run. It is logged once, `identity.get`
+  carries it, and the next link's handshake asks again. A plane from before the policy has
+  no `initialize`, and holds this daemon to nothing.
   """
 
   use GenServer
 
+  alias Troupe.Protocol.ClientUpdate
+
+  require Logger
+
   @name __MODULE__
   @timeout 15_000
 
-  defstruct [:url, :token, :subject, :expires_at]
+  defstruct [:url, :token, :subject, :expires_at, :refused]
 
   @type link :: %{url: String.t(), token: String.t(), subject: String.t()}
 
@@ -87,10 +101,66 @@ defmodule Troupe.Gateway.Plane do
   """
   @spec call(String.t(), map(), GenServer.server()) :: {:ok, map()} | {:error, term()}
   def call(method, params, server \\ @name) do
-    with {:ok, %__MODULE__{} = state} <- GenServer.call(server, :state) do
-      request(state, method, params)
+    case GenServer.call(server, :state) do
+      {:ok, %__MODULE__{refused: refused}} when is_binary(refused) ->
+        {:error, {:update_required, refused}}
+
+      {:ok, %__MODULE__{} = state} ->
+        request(state, method, params)
+
+      error ->
+        error
     end
   end
+
+  @doc """
+  Ask the plane what it says to this daemon's version: its `initialize`, as
+  `troupe-daemon` (Decision 868).
+
+  `:ok` where it serves this version, or has no `initialize` (a plane from before the
+  policy); `{:error, {:update_required, sentence}}` where it refuses it, after which every
+  `call/3` answers that until a handshake is answered otherwise; any other error leaves
+  things as they were. Called after a link that carries a token, before anything is sealed.
+  """
+  @spec handshake(GenServer.server(), String.t()) :: :ok | {:error, term()}
+  def handshake(server \\ @name, version \\ version()) do
+    with {:ok, %__MODULE__{} = state} <- GenServer.call(server, :state) do
+      hello = %{
+        "protocol_version" => Troupe.Protocol.version(),
+        "client_info" => %{"name" => "troupe-daemon", "version" => version},
+        "capabilities" => %{}
+      }
+
+      case request(state, "initialize", hello) do
+        {:ok, _answer} ->
+          GenServer.call(server, {:refused, nil})
+
+        {:error, {:rpc, %{"code" => -32_601}}} ->
+          GenServer.call(server, {:refused, nil})
+
+        {:error, {:rpc, %{"code" => -32_016} = error}} ->
+          sentence = ClientUpdate.sentence(error["data"])
+          :ok = GenServer.call(server, {:refused, sentence})
+          {:error, {:update_required, sentence}}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  @doc """
+  The sentence the plane's refusal of this daemon's version came to, or `nil`: also where
+  no plane link runs at all, as on a worker.
+  """
+  @spec refusal(GenServer.server()) :: String.t() | nil
+  def refusal(server \\ @name) do
+    GenServer.call(server, :refusal)
+  catch
+    :exit, _not_running -> nil
+  end
+
+  defp version, do: to_string(Application.spec(:troupe_gateway, :vsn) || "dev")
 
   # -- server -----------------------------------------------------------------
 
@@ -109,16 +179,28 @@ defmodule Troupe.Gateway.Plane do
     subject = trim(attrs["subject"] || attrs[:subject]) || state.subject
     kept = held_for(state, subject)
 
+    url = trim(attrs["plane_url"] || attrs[:plane_url]) || state.url
+
     {:reply, :ok,
      %__MODULE__{
-       url: trim(attrs["plane_url"] || attrs[:plane_url]) || state.url,
+       url: url,
        token: trim(attrs["plane_token"] || attrs[:plane_token]) || kept.token,
        subject: subject,
-       expires_at: attrs["expires_at"] || attrs[:expires_at] || kept.expires_at
+       expires_at: attrs["expires_at"] || attrs[:expires_at] || kept.expires_at,
+       refused: refusal_kept(state, url)
      }}
   end
 
   def handle_call(:unlink, _from, _state), do: {:reply, :ok, %__MODULE__{}}
+
+  def handle_call({:refused, sentence}, _from, state) do
+    if is_binary(sentence) and sentence != state.refused,
+      do: Logger.warning("troupe-daemon: #{state.url} refuses this version. #{sentence}")
+
+    {:reply, :ok, %{state | refused: sentence}}
+  end
+
+  def handle_call(:refusal, _from, state), do: {:reply, state.refused, state}
 
   def handle_call({:sign_out, url, subject}, _from, %__MODULE__{token: token} = state)
       when is_binary(token) do
@@ -185,6 +267,10 @@ defmodule Troupe.Gateway.Plane do
     do: state
 
   defp held_for(_state, _subject), do: %__MODULE__{}
+
+  # A refusal is this plane's word on this build, and stands until a handshake with it says
+  # otherwise; another plane has said nothing yet (Decision 868).
+  defp refusal_kept(state, url), do: if(same_plane?(state.url, url), do: state.refused)
 
   # The same plane however its URL was spelled: the clients agree on all but a trailing
   # slash.

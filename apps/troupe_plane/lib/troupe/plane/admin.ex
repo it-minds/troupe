@@ -37,6 +37,7 @@ defmodule Troupe.Plane.Admin do
     Breakglass,
     Budget,
     Bundles,
+    ClientVersions,
     ClusterPolicy,
     Connections,
     Drain,
@@ -1631,6 +1632,49 @@ defmodule Troupe.Plane.Admin do
       base -> String.trim_trailing(base, "/") <> "/admin/callback"
     end
   end
+
+  # -- which client versions this plane serves -------------------------------
+
+  @doc """
+  Every component's version policy: the recommended version, the minimum, the blocked list,
+  and who set them last (Decision 868).
+
+  Readable by a team admin, because "why is my team's terminal refused" is their question;
+  changing it is a platform admin's, since it holds every team's clients alike.
+  """
+  @spec clients_get(actor()) :: result()
+  def clients_get(actor) do
+    with :ok <- require_admin(actor), do: {:ok, %{clients: ClientVersions.all()}}
+  end
+
+  @doc """
+  Change one component's version policy.
+
+  Partial: the keys sent change, a key sent as `null` is cleared, and `blocked` is the whole
+  list. Refused, with nothing written, for a version SemVer cannot read, a minimum newer
+  than the recommended version, or a recommended version that is blocked. Audited with the
+  diff. A client is held to it at its next `initialize`.
+  """
+  @spec clients_put(actor(), String.t(), map()) :: result()
+  def clients_put(actor, component, policy) do
+    with :ok <- require_platform_admin(actor) do
+      case ClientVersions.put(component, policy || %{}, actor.subject) do
+        {:ok, %{before: before, now: now}} ->
+          changes = Audit.diff(policy_fields(before), policy_fields(now))
+          {:ok, _} = Audit.record(actor.subject, "clients.put", component, changes)
+          {:ok, Map.put(now, :changes, changes)}
+
+        {:error, why} ->
+          {:error, Error.new(:invalid_params, why)}
+      end
+    end
+  end
+
+  @doc "The keys a component's policy takes, as `admin.clients.put` declares them."
+  @spec client_policy_keys() :: [String.t()]
+  def client_policy_keys, do: ClientVersions.keys()
+
+  defp policy_fields(policy), do: Map.take(policy, [:recommended, :minimum, :blocked])
 
   # -- the identity provider --------------------------------------------------
 

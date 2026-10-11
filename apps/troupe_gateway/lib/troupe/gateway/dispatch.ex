@@ -1124,8 +1124,15 @@ defmodule Troupe.Gateway.Dispatch do
 
   # -- identity ---------------------------------------------------------------
 
+  # With the plane's refusal of this daemon's version, when there is one: the sentence a
+  # client shows, saying what to run (Decision 868).
   defp handle("identity.get", _params, _context) do
-    {:ok, Identity.to_json(Identity.get())}
+    identity = Identity.to_json(Identity.get())
+
+    case Plane.refusal() do
+      nil -> {:ok, identity}
+      sentence -> {:ok, Map.put(identity, "update_required", sentence)}
+    end
   end
 
   defp handle("identity.link", params, context) do
@@ -1453,10 +1460,19 @@ defmodule Troupe.Gateway.Dispatch do
   # none, and a session made while nobody had linked was never registered (Decision 764).
   # Not waited for: the link answers now, and a plane that cannot be reached is asked again
   # at the next one, which a client makes whenever its token is renewed.
+  # First the plane's word on this daemon's version (Decision 868): one it refuses seals
+  # nothing and asks nothing more of it until the next link, and says why in its log and in
+  # `identity.get`. A plane that could not be asked is not a refusal.
   defp erasures(%{"plane_token" => token}) when is_binary(token) and token != "" do
     Task.start(fn ->
-      Private.apply_erasures()
-      Private.resume()
+      case Plane.handshake() do
+        {:error, {:update_required, _sentence}} ->
+          :ok
+
+        _served_or_unknown ->
+          Private.apply_erasures()
+          Private.resume()
+      end
     end)
   end
 

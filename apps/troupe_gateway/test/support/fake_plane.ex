@@ -25,6 +25,10 @@ defmodule Troupe.Gateway.FakePlane do
   `refuse_keys/2` can make the key manager refuse, leaving the row `erasure_pending` until
   an erase or a `session.erasures` finds it willing again.
 
+  And `initialize`, the handshake a daemon makes when a token arrives (Decision 868): a
+  method this plane does not have, as a plane from before the version policy, unless
+  `initialize_with/2` says what it answers.
+
   It takes one plane token at a time, `"plane-token"` unless told otherwise, and
   `renew/2` replaces it, as a plane token running out and a client renewing it does: the
   old one is refused from then on (issue #365).
@@ -70,6 +74,14 @@ defmodule Troupe.Gateway.FakePlane do
     {:ok, {_ip, port}} = ThousandIsland.listener_info(server)
     %{url: "http://127.0.0.1:#{port}", state: state, server: server}
   end
+
+  @doc """
+  What `initialize` answers from now on (Decision 868): `{:ok, result}`, or `{:refuse,
+  data}` for `update_required` with that `data`. Never set, it is a method this plane does
+  not have, as a plane from before the version policy.
+  """
+  @spec initialize_with(pid(), {:ok, map()} | {:refuse, map()}) :: :ok
+  def initialize_with(state, answer), do: Agent.update(state, &Map.put(&1, :initialize, answer))
 
   @doc "Take `token` from now on, and refuse the one taken before."
   @spec renew(pid(), String.t()) :: :ok
@@ -307,6 +319,21 @@ defmodule Troupe.Gateway.FakePlane do
     end
   end
 
+  # The handshake (Decision 868): what `initialize_with/2` said, and otherwise the method a
+  # plane from before the version policy does not have.
+  defp dispatch(state, "initialize", _params) do
+    case Agent.get(state, &Map.get(&1, :initialize)) do
+      {:ok, result} ->
+        {:ok, result}
+
+      {:refuse, data} ->
+        {:rpc_error, -32_016, "update_required", data}
+
+      nil ->
+        {:rpc_error, -32_601, "method_not_found", %{"method" => "initialize"}}
+    end
+  end
+
   defp dispatch(_state, method, _params), do: {:error, "method_not_found:#{method}"}
 
   # The device is recorded once every version is gone, and told again otherwise, as the
@@ -410,6 +437,14 @@ defmodule Troupe.Gateway.FakePlane do
         "jsonrpc" => "2.0",
         "id" => request["id"],
         "error" => %{"code" => -32_007, "message" => message}
+      })
+    end
+
+    defp answer(conn, request, {:rpc_error, code, message, data}) do
+      json(conn, %{
+        "jsonrpc" => "2.0",
+        "id" => request["id"],
+        "error" => %{"code" => code, "message" => message, "data" => data}
       })
     end
 

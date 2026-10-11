@@ -221,13 +221,18 @@ defmodule Troupe.UI.HQ do
       {[], rect}
     else
       [line, rest] = Layout.split(rect, :vertical, [{:length, 1}, {:fill, 1}])
-
-      text =
-        "⚠ the plane is unreachable — attached sessions keep streaming; " <>
-          "creating and activating sessions are unavailable" <> reason(hq)
-
-      {[{%Paragraph{text: text, style: Theme.style(:offline, [:bold])}, line}], rest}
+      {[{%Paragraph{text: banner_text(hq), style: Theme.style(:offline, [:bold])}, line}], rest}
     end
+  end
+
+  # A plane that does not serve this version is not unreachable, and saying so would send
+  # somebody to check their network: it says what to run instead (Decision 868).
+  defp banner_text(%{status: %{update_required: sentence}}) when is_binary(sentence),
+    do: "⚠ " <> sentence
+
+  defp banner_text(hq) do
+    "⚠ the plane is unreachable — attached sessions keep streaming; " <>
+      "creating and activating sessions are unavailable" <> reason(hq)
   end
 
   defp reason(%{error: error}) when is_binary(error), do: " (#{error})"

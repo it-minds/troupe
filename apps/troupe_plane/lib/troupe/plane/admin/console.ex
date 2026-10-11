@@ -87,6 +87,10 @@ defmodule Troupe.Plane.Admin.Console do
     setting_put: {:screen, :policy},
     setting_reset: {:screen, :policy},
     setting_effective: {:screen, :policy},
+    # A small panel on Policy until the console's redo (#56) gives client versions a screen
+    # of their own, with who runs what beside them (Decision 868).
+    clients_get: {:screen, :policy},
+    clients_put: {:screen, :policy},
     bundles_list: {:screen, :bundles},
     bundle_get: {:screen, :bundles},
     bundle_validate: {:screen, :bundles},

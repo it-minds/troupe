@@ -1003,6 +1003,8 @@ A client that is signed in tells it who that is, once.
 {"linked": true, "subject": "ada@example.test", "display_name": "Ada",
  "plane_url": "https://troupe.example", "linked_at": "2026-09-14T08:00:00Z"}
 ```
+with `update_required`, a sentence saying what to run, where the plane it is linked to
+refused this daemon's version at the last link ([Client versions](#client-versions)).
 
 #### `identity.link`
 ```json
@@ -2335,6 +2337,8 @@ that team.
 | `admin.settings.list` | either | every platform setting with its value, where that value came from (`stored`, `deployed`, `unset`), what changing it does and when it takes effect; a secret is reported as set and never returned |
 | `admin.setting.put` | platform | `{key, value}` — parsed against the setting's declared type and refused if it does not fit, or if the deployment owns it |
 | `admin.setting.reset` | platform | `{key}` — drops the stored value, so the setting goes back to what the plane was deployed with |
+| `admin.clients.get` | either | `{clients: {tui, daemon, desktop}}`, each `{component, recommended, minimum, blocked, updated_by, updated_at}`: which versions of its clients this plane serves ([Client versions](#client-versions)) |
+| `admin.clients.put` | platform | `{component, policy: {recommended?, minimum?, blocked?}}` → the component's policy as it now stands, with `changes`. Only the keys sent change, `null` clears one, `blocked` is the whole list; `invalid_params` with `data.field` and `data.reason` for a version SemVer cannot read, a `minimum` newer than `recommended`, or a `recommended` that is blocked. Audited as `clients.put` |
 | `admin.identity.check` | either | four named checks with what each proved and how long it took: provider discovery, its signing keys, the endpoints this plane was given, and who actually carries the platform admin group. `{group}` checks a candidate group *before* it is saved |
 | `admin.principals.list` | either | a team's service principals: subject, profiles, last use, whether enabled — never a secret or its hash |
 | `admin.principal.create` | either | `{team, name, description, profiles}` → the principal, with `secret` exactly once; `profiles` must be within the team's grants |
@@ -2433,6 +2437,8 @@ than an admin uses them:
 | `trigger.fire` | control | the trigger's principal, or an admin of its team | `{trigger (name, `team/name` or id), idempotency_key, event}` → the run and, when a session was made, the same `{session_id, endpoint, token}` `session.create` returns. The run names the `revision` and `revision_hash` it ran. The same key returns the same run, the same revision and a fresh token; over the trigger's `concurrency` the run is `skipped` and has no session |
 | `session.grant` | control | the session's owner, or an admin of its team | `{session_id, subject, role}` (`owner`, `collaborator`, `viewer`; default collaborator) → mirrored in the plane's ACL and pushed to the pod holding the session as `acl.changed` |
 | `session.review` | control | anybody who can see the session | `{session_id}` → sets `reviewed_by`/`reviewed_at` on the session and its run, audited as `session.review` |
+| `initialize` | observe | anybody | `{protocol_version, client_info: {name, version}, capabilities}` → `{protocol_version, server_info: {name: "troupe-plane", version}, principal, client_update}`: the handshake over `/rpc`, where `principal` is what `me` answers and `client_update` is this plane's word on the client's version, or `update_required` ([Client versions](#client-versions)) |
+| `me.client_versions` | observe | anybody | `{}` → `{tui, daemon, desktop}`, each `{recommended, minimum, blocked}`: what `troupe update` installs by, asked on its own because the client that most needs it is the one `initialize` refuses |
 | `me.client_defaults` | observe | anybody | `{}` → `{configured, provider, base_url, auth, models: {default, cheap, expensive}}` — what an administrator says people's own machines should talk to (the *Client defaults* settings), for a client to pre-fill its model settings with. **Never a key**: anybody signed in may ask, so each person supplies their own. `configured` is false, and the rest null, until a provider is set |
 | `me.connections.list` | observe | anybody | the MCP servers on the caller's profiles that act as *them*, each with its `slot` and whether they have `connected` it. Whether, never what: the plane can see that a slot has a version and cannot read one |
 | `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, name, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own name at the key manager (`name`, the segment of `path` under `troupe/people/`, not always their subject: Decision 755). The client exchanges it with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
@@ -2480,6 +2486,48 @@ has connected, the tool answers a result the model can read —
 well as `{"id_token"}`, and answers the same plane token with `kind: "service"`, `team`
 and `profiles` claims.
 
+### Client versions
+
+A plane holds, per component — `tui` (the terminal, `troupe`), `daemon`
+(`troupe-daemon`) and `desktop` (the desktop app) — which versions of its clients it
+serves (Decision 868): a `recommended` version, a `minimum`, and a `blocked` list.
+Administrators change it with `admin.clients.put`; a plane with nothing set serves every
+version. Versions are ordered as SemVer orders them, so `0.13.0-beta` comes before
+`0.13.1-beta` and before `0.13.0`; a policy names versions as releases are numbered.
+
+`/rpc` keeps no connection, so its `initialize` is a call like any other, and a client
+makes it when it connects. The component is read from `client_info.name` — `troupe` and
+`troupe-headless` are `tui`, `troupe-daemon` is `daemon`, `troupe-gui` is `desktop` — and
+judged by `client_info.version`:
+
+- **on a blocked version, or below `minimum`**: refused with `update_required`. The
+  client says so in a sentence and does not go on; `data.reason` is that sentence:
+
+  ```json
+  {"code": -32016, "message": "update_required", "data": {
+    "component": "tui", "version": "0.12.0-beta", "minimum": "0.13.0-beta",
+    "recommended": "0.13.1-beta", "blocked": false, "run": "troupe update",
+    "reason": "This plane needs troupe 0.13.0-beta or later, and this is 0.12.0-beta: run troupe update, which installs 0.13.1-beta."}}
+  ```
+
+- **otherwise**: served, and the answer carries the policy with what it means for that
+  version: `"client_update": {"component": "tui", "recommended": "0.13.1-beta",
+  "minimum": "0.13.0-beta", "blocked": [], "action": "suggest"}`, where `action` is
+  `suggest` below `recommended` and `none` at it or past it.
+
+A client the plane cannot place — no `client_info`, or a name it does not know, as a
+script's — is held to nothing and gets `client_update: null`. So is a client from before
+this, which sends no `initialize` to `/rpc` at all: the policy reaches the clients that
+ask. The version is the client's word; the refusal is a service to the person, telling
+them what they need, and not a way to keep anybody out.
+
+`troupe update`, signed in, asks `me.client_versions` and installs the `recommended`
+version, never a blocked one and never one below `minimum`, moves backwards only when the
+person names the version, and is still held to the release key: the plane can hold a
+version back or name one, and cannot make a client install anything the key did not sign. The daemon makes the same `initialize` when a client
+links it with a token (`identity.link`); refused, it asks the plane nothing more until the
+next link, and `identity.get` carries the sentence as `update_required`.
+
 ### Errors
 
 `forbidden` with `data.required_role` when the caller's role is not enough, and
@@ -2525,6 +2573,7 @@ audit trail with `outcome: refused`.
 | -32013 | `consent_required` | `data.challenge`, `data.prompt`, `data.tools` |
 | -32014 | `budget_exhausted` | the team has nothing left to reserve; `data.team`, `data.reason` |
 | -32015 | `managed_by_gitops` | an admin write to what a repository holds (§9); `data.source` |
+| -32016 | `update_required` | the plane does not serve this client's version: below its minimum, or blocked (§9, Client versions); `data.component`, `data.version`, `data.minimum`, `data.recommended`, `data.blocked`, `data.run`, and the sentence in `data.reason` |
 
 Transport-level framing faults close the connection after a best-effort error.
 

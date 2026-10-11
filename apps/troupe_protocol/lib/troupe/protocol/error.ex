@@ -38,7 +38,10 @@ defmodule Troupe.Protocol.Error do
     # An admin write to something a repository holds: in GitOps mode a profile is changed
     # by a commit to the repository its resources are applied from, never by the plane.
     # `data.source` says where that repository is, when the deployment says.
-    managed_by_gitops: -32_015
+    managed_by_gitops: -32_015,
+    # A plane refusing a client its administrators hold to a newer version, or whose
+    # version they have blocked (Decision 868). `data` says which, and what to run.
+    update_required: -32_016
   }
 
   @doc "Every error token and its code, for documentation and schema generation."

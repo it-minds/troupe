@@ -11,7 +11,7 @@ defmodule Troupe.CLI.Remote do
 
   alias Troupe.Client
   alias Troupe.Protocol
-  alias Troupe.Remote.{Auth, Credentials, Discovery, RPC, Tokens}
+  alias Troupe.Remote.{Auth, Credentials, Discovery, HTTP, RPC, Tokens}
 
   @doc "Runs the device flow against a plane and stores the refresh token."
   @spec login(String.t(), keyword()) :: non_neg_integer()
@@ -62,6 +62,58 @@ defmodule Troupe.CLI.Remote do
           {:error, reason} ->
             fail(say, reason)
         end
+    end
+  end
+
+  @doc """
+  What the plane this machine is signed in to says of each component's version, for
+  `troupe update` (Decision 868): `%{url: plane, versions: %{"tui" => ..., "daemon" =>
+  ...}}`, or `nil` where it is signed in to none or the plane has no version policy.
+
+  Asked with `me.client_versions`, one call on its own, not through the connection whose
+  handshake a plane refuses for the very version this is meant to replace. A plane that
+  cannot be asked is said in a line, and `troupe update` goes on as without one: the
+  release key still decides what may be installed.
+  """
+  @spec client_versions(keyword()) :: map() | nil
+  def client_versions(opts \\ []) do
+    say = Keyword.get(opts, :say, &IO.puts/1)
+
+    with url when is_binary(url) <- Keyword.get_lazy(opts, :plane_url, &current/0),
+         {:ok, versions} <- versions(url) do
+      %{url: url, versions: versions}
+    else
+      nil ->
+        nil
+
+      :none ->
+        nil
+
+      {:error, url, reason} ->
+        say.(
+          "could not ask #{url} which versions it serves (#{reason}); " <>
+            "going on as without a plane"
+        )
+
+        nil
+    end
+  end
+
+  defp versions(url) do
+    request = RPC.request(1, "me.client_versions", %{})
+
+    with {:ok, _plane} <- Tokens.load(url),
+         {:ok, %{rpc_url: rpc_url}} <- Tokens.discovery(url),
+         {:ok, token} <- Tokens.access_token(url),
+         {:ok, %{} = versions} <- HTTP.rpc(rpc_url, token, request) do
+      {:ok, versions}
+    else
+      # A plane from before the version policy, or one that speaks only a socket.
+      {:error, %{code: -32_601}} -> :none
+      {:ok, %{ws_url: _socket}} -> :none
+      {:error, %{code: _code} = error} -> {:error, url, RPC.describe(error)}
+      {:error, reason} -> {:error, url, inspect(reason)}
+      other -> {:error, url, inspect(other)}
     end
   end
 

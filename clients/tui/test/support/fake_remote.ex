@@ -25,6 +25,8 @@ defmodule Troupe.FakeRemote do
 
   use GenServer
 
+  alias Troupe.Protocol.ClientUpdate
+
   @guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
   @type session :: %{
@@ -131,6 +133,9 @@ defmodule Troupe.FakeRemote do
   @doc "The scopes the handshake reports. `[\"observe\"]` is a viewer token."
   @spec scopes(pid(), [String.t()]) :: :ok
   def scopes(remote, scopes), do: GenServer.call(remote, {:scopes, scopes})
+
+  @doc "Gives the plane a version policy from now on (Decision 868), or takes it away with `nil`."
+  def client_versions(remote, versions), do: GenServer.call(remote, {:client_versions, versions})
 
   @doc "Sets a session's state (`active`, `dormant`, `read_only`, `erased`)."
   @spec state(pid(), String.t(), String.t()) :: :ok
@@ -240,6 +245,10 @@ defmodule Troupe.FakeRemote do
       calls: [],
       failures: %{},
       transport: Keyword.get(opts, :transport, :websocket),
+      # The version policy, per component, of a plane that has one (Decision 868): its
+      # `/rpc` then answers `initialize` and `me.client_versions` as such a plane does.
+      # Unset, `/rpc` has neither, as a plane from before it.
+      client_versions: Keyword.get(opts, :client_versions),
       exchange?: Keyword.get(opts, :exchange, true),
       plane_tokens: MapSet.new(),
       # Seconds a plane token from `/auth/exchange` is good for.
@@ -363,6 +372,9 @@ defmodule Troupe.FakeRemote do
   end
 
   def handle_call({:scopes, scopes}, _from, state), do: {:reply, :ok, %{state | scopes: scopes}}
+
+  def handle_call({:client_versions, versions}, _from, state),
+    do: {:reply, :ok, %{state | client_versions: versions}}
 
   def handle_call({:state, session_id, session_state}, _from, state),
     do: {:reply, :ok, put_in(state.sessions[session_id][:state], session_state)}
@@ -555,6 +567,49 @@ defmodule Troupe.FakeRemote do
   defp dispatch(state, :worker, method, params, _pid)
        when method in @addressed and not is_map_key(params, "session_id") do
     {{:error, -32_602, "invalid_params"}, state}
+  end
+
+  # A plane with a version policy (Decision 868): its `initialize` over `/rpc` is `me` and
+  # what the policy makes of the client's version, or `update_required`, judged the way
+  # the plane judges it.
+  defp dispatch(
+         %{transport: :http, client_versions: %{} = versions} = state,
+         _kind,
+         "initialize",
+         params,
+         pid
+       ) do
+    info = params["client_info"] || %{}
+    component = ClientUpdate.component(info["name"])
+    policy = versions[component] || %{}
+    {{:ok, me}, state} = dispatch(state, :plane, "me", %{}, pid)
+
+    case component && ClientUpdate.judge(policy, info["version"]) do
+      {:refuse, why} ->
+        data = ClientUpdate.refusal(component, info["version"], policy, why)
+        {{:error, -32_016, "update_required", data}, state}
+
+      verdict ->
+        update =
+          case verdict do
+            {:ok, action} -> ClientUpdate.client_update(component, policy, action)
+            nil -> nil
+          end
+
+        {{:ok,
+          %{
+            "protocol_version" => "1",
+            "server_info" => %{"name" => "troupe-plane", "version" => "1.0.0"},
+            "principal" => me,
+            "client_update" => update
+          }}, state}
+    end
+  end
+
+  defp dispatch(%{client_versions: %{} = versions} = state, _kind, "me.client_versions", _, _) do
+    empty = %{"recommended" => nil, "minimum" => nil, "blocked" => []}
+    answer = Map.new(~w(tui daemon desktop), &{&1, Map.merge(empty, versions[&1] || %{})})
+    {{:ok, answer}, state}
   end
 
   # The worker compares `protocol_version` as a string, and so does this: an integer
@@ -1150,7 +1205,7 @@ defmodule Troupe.FakeRemote do
 
             {:reply, {401, %{"jsonrpc" => "2.0", "id" => id, "error" => error}}, state}
 
-          method == "initialize" ->
+          method == "initialize" and is_nil(state.client_versions) ->
             error = %{
               "code" => -32_601,
               "message" => "method not found",
@@ -1166,6 +1221,10 @@ defmodule Troupe.FakeRemote do
 
               {{:error, code, message}, state} ->
                 error = %{"code" => code, "message" => message}
+                {:reply, {200, %{"jsonrpc" => "2.0", "id" => id, "error" => error}}, state}
+
+              {{:error, code, message, data}, state} ->
+                error = %{"code" => code, "message" => message, "data" => data}
                 {:reply, {200, %{"jsonrpc" => "2.0", "id" => id, "error" => error}}, state}
             end
         end

@@ -165,6 +165,105 @@ defmodule Troupe.UpdateTest do
     assert Update.daemon_version(ctx.lib, false) == "0.9.0"
   end
 
+  describe "signed in to a plane (Decision 868)" do
+    test "the version installed is the plane's recommended one, checked as any other", ctx do
+      url = release!(ctx, "1.1.0")
+      plane = plane(%{"recommended" => "1.1.0"})
+
+      assert Update.run(:check, opts(ctx, url, plane: plane)) == 0
+      out = lines()
+      assert "  plane          https://plane.example.test recommends 1.1.0" in out
+      assert "troupe update would install 1.1.0 over troupe-daemon 1.0.0 and troupe 1.0.0." in out
+
+      assert Update.run(:update, opts(ctx, url, plane: plane)) == 0
+      assert "the plane at https://plane.example.test recommends 1.1.0" in lines()
+      assert File.read!(ctx.tui) == "troupe 1.1.0\n"
+      assert Update.daemon_version(ctx.lib, false) == "1.1.0"
+    end
+
+    # B29's finding: somebody who controls a mirror can keep serving an older signed
+    # release. Signed in, the plane names the version, and the mirror's older one is not it.
+    test "a mirror cannot hold back the release the plane recommends", ctx do
+      url = release!(ctx, "1.1.0")
+
+      assert Update.run(:update, opts(ctx, url, plane: plane(%{"recommended" => "1.2.0"}))) == 1
+      assert Enum.any?(lines(), &(&1 =~ "is 1.1.0, not 1.2.0; nothing is installed"))
+      assert_unchanged(ctx)
+      refute_received :daemon_asked
+    end
+
+    test "a version the plane blocks is never installed, the latest or one named", ctx do
+      url = release!(ctx, "1.1.0")
+      plane = plane(%{"blocked" => ["1.1.0"]})
+
+      assert Update.run(:update, opts(ctx, url, plane: plane)) == 1
+
+      assert Enum.any?(
+               lines(),
+               &(&1 =~
+                   "the plane at https://plane.example.test blocks troupe 1.1.0; nothing is installed")
+             )
+
+      assert Update.run(:update, opts(ctx, url, plane: plane, version: "1.1.0")) == 1
+      assert Enum.any?(lines(), &(&1 =~ "blocks troupe 1.1.0"))
+      assert_unchanged(ctx)
+      refute_received :daemon_asked
+    end
+
+    test "nor one older than the plane's minimum for a component it replaces", ctx do
+      url = release!(ctx, "1.0.5")
+      plane = plane(%{"minimum" => "1.0.0"}, %{"minimum" => "1.1.0"})
+
+      assert Update.run(:update, opts(ctx, url, plane: plane, version: "1.0.5")) == 1
+
+      assert Enum.any?(
+               lines(),
+               &(&1 =~
+                   "1.0.5 is older than the oldest troupe-daemon the plane at https://plane.example.test serves (1.1.0)")
+             )
+
+      assert_unchanged(ctx)
+    end
+
+    # Moving back is the person's to ask for: a plane, or whoever holds one, cannot walk a
+    # machine back to an old release of its choosing by blocking the one it has.
+    test "a blocked version with an older one recommended is moved back only when named", ctx do
+      url = release!(ctx, "0.9.0")
+      blocked = %{"recommended" => "0.9.0", "blocked" => ["1.0.0"]}
+      plane = plane(blocked, blocked)
+
+      assert Update.run(:update, opts(ctx, url, plane: plane)) == 1
+
+      assert Enum.any?(
+               lines(),
+               &(&1 =~
+                   "blocks troupe-daemon 1.0.0, and the version it recommends, 0.9.0, is older: " <>
+                     "troupe update --version 0.9.0 moves back to it")
+             )
+
+      assert_unchanged(ctx)
+
+      assert Update.run(:update, opts(ctx, url, plane: plane, version: "0.9.0")) == 0
+      assert File.read!(ctx.tui) == "troupe 0.9.0\n"
+      assert Update.daemon_version(ctx.lib, false) == "0.9.0"
+    end
+
+    test "a newer version than the plane recommends, and not blocked, is left alone", ctx do
+      url = release!(ctx, "0.9.0")
+
+      assert Update.run(:update, opts(ctx, url, plane: plane(%{"recommended" => "0.9.0"}))) == 0
+      assert Enum.any?(lines(), &(&1 =~ "Nothing to update"))
+      assert_unchanged(ctx)
+    end
+
+    test "a plane that recommends nothing leaves the latest release, unless it blocks it", ctx do
+      url = release!(ctx, "1.1.0")
+
+      assert Update.run(:update, opts(ctx, url, plane: plane(%{"blocked" => ["1.0.9"]}))) == 0
+      assert File.read!(ctx.tui) == "troupe 1.1.0\n"
+    end
+  end
+
   test "a daemon that cannot be stopped between turns is nothing changed", ctx do
     url = release!(ctx, "1.1.0")
     refuse = fn _s -> {:error, "troupe-daemon did not stop; nothing changed"} end
@@ -212,6 +311,11 @@ defmodule Troupe.UpdateTest do
   end
 
   # -- helpers --------------------------------------------------------------------
+
+  # What a plane's `me.client_versions` said, as the CLI hands it over.
+  defp plane(tui, daemon \\ %{}) do
+    %{url: "https://plane.example.test", versions: %{"tui" => tui, "daemon" => daemon}}
+  end
 
   defp opts(ctx, url, extra \\ []) do
     test = self()
