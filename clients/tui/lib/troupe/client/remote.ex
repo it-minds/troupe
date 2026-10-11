@@ -472,7 +472,14 @@ defmodule Troupe.Client.Remote do
       origin: origin,
       principal: status.principal,
       scopes: status.scopes,
-      error: status.error
+      error: status.error,
+      # The plane's refusal of this version, as the sentence that says what to run
+      # (Decision 868): what HQ shows instead of "unreachable".
+      update_required:
+        case status.error do
+          {:update_required, sentence} -> sentence
+          _other -> nil
+        end
     }
   end
 
@@ -626,6 +633,7 @@ defmodule Troupe.Client.Remote do
   defp message(:lost), do: "lost the session; trying again now"
   defp message({:lost, why}), do: "lost the session: #{why}"
   defp message(:plane_down), do: "the plane is unreachable"
+  defp message({:update_required, sentence}), do: sentence
   defp message(:timeout), do: "the server did not answer in time"
   defp message(:logged_out), do: "not signed in; run troupe login <plane-url>"
   defp message(reason) when is_binary(reason), do: reason

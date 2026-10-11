@@ -15,6 +15,7 @@ defmodule Troupe.Plane.PanelTest do
     Admin,
     Audit,
     Bundles,
+    ClientVersions,
     FakeWorkerProfiles,
     Fleet,
     Identity,
@@ -1836,6 +1837,49 @@ You build."}
 
       assert html =~ "including you."
       refute html =~ "Run the check below before saving this one"
+    end
+
+    # The client versions panel (Decision 868): what a component's form says is what is
+    # saved, a policy that cannot be one is refused with its reason, and it is audited.
+    test "client versions are set per component, and a bad one is refused", context do
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/policy")
+
+      assert html =~ "Client versions"
+      assert html =~ "nothing set: every version is served"
+
+      html =
+        view
+        |> element("#clients-tui")
+        |> render_submit(%{
+          "component" => "tui",
+          "recommended" => "0.13.1-beta",
+          "minimum" => "0.13.0-beta",
+          "blocked" => "0.12.3-beta, 0.12.4-beta"
+        })
+
+      assert html =~
+               "troupe: recommended 0.13.1-beta, minimum 0.13.0-beta, blocked 0.12.3-beta, 0.12.4-beta."
+
+      assert html =~ "set by root@example.test"
+
+      assert %{"tui" => %{minimum: "0.13.0-beta", blocked: ["0.12.3-beta", "0.12.4-beta"]}} =
+               ClientVersions.all()
+
+      assert [%{action: "clients.put", subject_id: "tui"}] = Audit.list(kind: "clients")
+
+      html =
+        view
+        |> element("#clients-daemon")
+        |> render_submit(%{
+          "component" => "daemon",
+          "recommended" => "0.13.0-beta",
+          "minimum" => "0.14.0-beta",
+          "blocked" => ""
+        })
+
+      assert html =~ "newer than the recommended version"
+      assert ClientVersions.policy("daemon").minimum == nil
     end
   end
 

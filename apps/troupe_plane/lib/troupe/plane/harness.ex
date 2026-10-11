@@ -27,7 +27,9 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.{
     Audit,
     Budget,
+    Build,
     Bundles,
+    ClientVersions,
     Connections,
     Drain,
     Erasure,
@@ -46,7 +48,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.{Tokens, Triggers}
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.Bundle, as: Document
-  alias Troupe.Protocol.{Canonical, Error, Origin, Principal, SessionId, Token}
+  alias Troupe.Protocol.{Canonical, ClientUpdate, Error, Origin, Principal, SessionId, Token}
   alias Troupe.Sessions.Fork
 
   require Logger
@@ -96,8 +98,12 @@ defmodule Troupe.Plane.Harness do
         }
 
   @methods %{
+    # The handshake, over a door that keeps no connection: who the token is, and what this
+    # plane says to the client's version (Decision 868).
+    "initialize" => :observe,
     "me" => :observe,
     "me.client_defaults" => :observe,
+    "me.client_versions" => :observe,
     "me.connections.list" => :observe,
     "me.connections.grant" => :control,
     "teams.list" => :observe,
@@ -222,6 +228,27 @@ defmodule Troupe.Plane.Harness do
 
   # -- who you are, and what you may use --------------------------------------
 
+  # `/rpc` keeps no connection, so the handshake is a call like any other, and every later
+  # call stands on its own token. What it adds to `me` is the version policy for the kind
+  # of client this is (Decision 868): the policy as `client_update`, or `update_required`
+  # for a client below the minimum or on a blocked version, with what to run. A client the
+  # plane cannot place — no name it knows, as a script's — is held to no policy.
+  defp handle("initialize", params, context) do
+    info = if is_map(params["client_info"]), do: params["client_info"], else: %{}
+    component = ClientUpdate.component(info["name"])
+
+    with {:ok, me} <- handle("me", %{}, context),
+         {:ok, client_update} <- client_update(component, info["version"]) do
+      {:ok,
+       %{
+         "protocol_version" => Troupe.Protocol.version(),
+         "server_info" => %{"name" => "troupe-plane", "version" => Build.version()},
+         "principal" => me,
+         "client_update" => client_update
+       }}
+    end
+  end
+
   defp handle("me", _params, %{user: user} = context) do
     {:ok,
      %{
@@ -252,6 +279,24 @@ defmodule Troupe.Plane.Harness do
          "expensive" => blank_to_nil(Settings.get("client_model_expensive"))
        }
      }}
+  end
+
+  # Each component's version policy, for `troupe update` to choose what to install by:
+  # the recommended version, never a blocked one, never below the minimum (Decision 868).
+  # Asked on its own rather than through `initialize`, because the client that most needs
+  # it is the one `initialize` refuses.
+  defp handle("me.client_versions", _params, _context) do
+    {:ok,
+     Map.new(ClientVersions.components(), fn component ->
+       policy = ClientVersions.policy(component)
+
+       {component,
+        %{
+          "recommended" => policy.recommended,
+          "minimum" => policy.minimum,
+          "blocked" => policy.blocked
+        }}
+     end)}
   end
 
   defp handle("teams.list", _params, %{user: user}) do
@@ -2450,6 +2495,23 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp blank_to_nil(_value), do: nil
+
+  # What `initialize` says to one client about its version: the component's policy, with
+  # what it means for that version, or the refusal.
+  defp client_update(nil, _version), do: {:ok, nil}
+
+  defp client_update(component, version) do
+    policy = ClientVersions.policy(component)
+
+    case ClientUpdate.judge(policy, version) do
+      {:ok, action} ->
+        {:ok, ClientUpdate.client_update(component, policy, action)}
+
+      {:refuse, why} ->
+        {:error,
+         Error.new(:update_required, ClientUpdate.refusal(component, version, policy, why))}
+    end
+  end
 
   defp worker_json(worker) do
     %{

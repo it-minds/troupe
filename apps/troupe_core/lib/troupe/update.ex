@@ -33,9 +33,19 @@ defmodule Troupe.Update do
   daemon's release directory is unpacked beside the old one and renamed into its place,
   the old kept as `troupe-daemon.previous`. `--rollback` swaps each back, and run again
   swaps forward.
+
+  **A plane's word, when signed in to one** (Decision 868). The caller hands over what
+  the plane says of each component (`:plane`, from its `me.client_versions`). Then the
+  version installed is the plane's `recommended` one rather than the latest; a version
+  the plane blocks, or one older than its minimum, is never installed, whether it is the
+  latest or named with `--version`. Nothing moves backwards unless the person names the
+  version: a component on a blocked version whose recommended one is older is told the
+  `--version` that moves it back. The release is still checked against the release key
+  exactly as without a plane: a plane can hold a version back or name one, and cannot make
+  this install anything the key did not sign, nor walk a machine back to an old release.
   """
 
-  alias Troupe.Protocol.{Client, Daemon}
+  alias Troupe.Protocol.{Client, ClientUpdate, Daemon}
   alias Troupe.Release.{Keys, Manifest, Minisign}
 
   @repo "it-minds/troupe"
@@ -47,10 +57,11 @@ defmodule Troupe.Update do
   @doc """
   Run one action and return the exit status.
 
-  `opts`: `:version` (the release asked for), `:installed` (this troupe's version), and,
-  standing in for the machine in tests, `:release_url`, `:repo`, `:keys`, `:target`,
-  `:tui`, `:lib`, `:windows?`, `:out` (a line printed), `:fetch`, `:daemon` (what quiets
-  the daemon) and `:sleep`.
+  `opts`: `:version` (the release asked for), `:installed` (this troupe's version),
+  `:plane` (`%{url: plane, versions: %{"tui" => policy, "daemon" => policy}}`, what a
+  plane signed in to says, or `nil`), and, standing in for the machine in tests,
+  `:release_url`, `:repo`, `:keys`, `:target`, `:tui`, `:lib`, `:windows?`, `:out` (a line
+  printed), `:fetch`, `:daemon` (what quiets the daemon) and `:sleep`.
   """
   @spec run(action(), keyword()) :: non_neg_integer()
   def run(action, opts \\ []) do
@@ -58,8 +69,8 @@ defmodule Troupe.Update do
 
     result =
       case action do
-        :check -> check(s)
-        :update -> update(s)
+        :check -> s |> planned() |> check()
+        :update -> s |> planned() |> update()
         :rollback -> rollback(s)
       end
 
@@ -80,6 +91,10 @@ defmodule Troupe.Update do
 
     %{
       version: opts[:version],
+      # Whether the version was named by the person, who may move either way, rather than
+      # chosen for them by a plane, which moves only forward but for a blocked version.
+      named?: opts[:version] != nil,
+      plane: opts[:plane],
       installed: opts[:installed],
       release_url: Keyword.get_lazy(opts, :release_url, fn -> env("TROUPE_RELEASE_URL") end),
       repo: Keyword.get_lazy(opts, :repo, fn -> env("TROUPE_REPO") || @repo end),
@@ -161,6 +176,7 @@ defmodule Troupe.Update do
     inst = installed(s)
     s.out.("  troupe         #{inst.tui || "not installed"}  #{s.tui}")
     s.out.("  troupe-daemon  #{inst.daemon || "not installed"}  #{s.lib}")
+    if s.plane, do: s.out.("  plane          #{s.plane.url} #{plane_says(s)}")
 
     with {:ok, rel} <- release(s) do
       s.out.("  release        #{rel.version}  #{rel.base}")
@@ -192,7 +208,8 @@ defmodule Troupe.Update do
          {:ok, signature} <- get_small(s, base, "manifest.json.minisig"),
          {:ok, signed} <- signed(bytes, signature, s.keys, base),
          {:ok, manifest} <- decoded(bytes, base),
-         :ok <- asked_for(manifest, s.version, tag, base) do
+         :ok <- asked_for(manifest, s.version, tag, base),
+         :ok <- served(manifest.version, s) do
       {:ok, %{version: manifest.version, base: base, manifest: manifest, key_ids: signed.key_ids}}
     end
   end
@@ -288,6 +305,82 @@ defmodule Troupe.Update do
     end
   end
 
+  # -- a plane's word ---------------------------------------------------------------
+
+  # With a plane and no version named, the one asked for is the plane's recommended
+  # version: the terminal's, where troupe is installed and the plane names one, and
+  # otherwise the daemon's. With none, the latest, as without a plane.
+  defp planned(%{plane: %{} = plane, version: nil} = s) do
+    components = if installed(s).tui, do: ["tui", "daemon"], else: ["daemon", "tui"]
+
+    case Enum.find_value(components, &policy(plane, &1)["recommended"]) do
+      nil -> s
+      version -> %{s | version: version}
+    end
+  end
+
+  defp planned(s), do: s
+
+  defp plane_says(%{named?: false, version: version}) when is_binary(version),
+    do: "recommends #{version}"
+
+  defp plane_says(_s), do: "recommends no version"
+
+  defp policy(%{versions: versions}, component) when is_map(versions) do
+    case versions[component] do
+      %{} = policy -> policy
+      _none -> %{}
+    end
+  end
+
+  defp policy(_plane, _component), do: %{}
+
+  # A version the plane serves to each component this would replace: none blocked, none
+  # older than its minimum. Without a plane, every signed version is.
+  defp served(_version, %{plane: nil}), do: :ok
+
+  defp served(version, %{plane: plane} = s) do
+    inst = installed(s)
+
+    [{"tui", inst.tui}, {"daemon", inst.daemon}]
+    |> Enum.reject(fn {_component, from} -> is_nil(from) end)
+    |> Enum.reduce_while(:ok, fn {component, _from}, :ok ->
+      policy = policy(plane, component)
+      name = ClientUpdate.program(component)
+
+      case ClientUpdate.judge(policy, version) do
+        {:refuse, :blocked} ->
+          {:halt,
+           {:error, "the plane at #{plane.url} blocks #{name} #{version}; nothing is installed"}}
+
+        {:refuse, :below_minimum} ->
+          {:halt,
+           {:error,
+            "#{version} is older than the oldest #{name} the plane at #{plane.url} serves " <>
+              "(#{policy["minimum"]}); nothing is installed"}}
+
+        {:ok, _action} ->
+          {:cont, :ok}
+      end
+    end)
+  end
+
+  # A component on a version the plane blocks, which the release would not replace because
+  # it is no newer: moving back is the person's to ask for by name, never the plane's to
+  # decide, so a plane cannot walk a fleet back to an old release of its choosing.
+  defp held_back(steps_from, rel, %{plane: %{} = plane, named?: false}) do
+    Enum.find_value(steps_from, :ok, fn {name, component, from} ->
+      if from in List.wrap(policy(plane, component)["blocked"]) and
+           not wanted?(from, rel.version, false) do
+        {:error,
+         "the plane at #{plane.url} blocks #{name} #{from}, and the version it recommends, " <>
+           "#{rel.version}, is older: troupe update --version #{rel.version} moves back to it"}
+      end
+    end)
+  end
+
+  defp held_back(_steps_from, _rel, _s), do: :ok
+
   # -- the plan -----------------------------------------------------------------
 
   defp plan(rel, s) do
@@ -308,15 +401,17 @@ defmodule Troupe.Update do
         {:error, "this machine is not one a release is built for"}
 
       true ->
-        candidates
-        |> Enum.filter(fn {_name, _component, from} ->
-          wanted?(from, rel.version, s.version != nil)
-        end)
-        |> Enum.reduce_while({:ok, []}, &add_step(&1, &2, rel, s))
-        |> case do
-          {:ok, steps} -> {:ok, %{steps: steps, version: rel.version}}
-          error -> error
-        end
+        with :ok <- held_back(candidates, rel, s), do: steps(candidates, rel, s)
+    end
+  end
+
+  defp steps(candidates, rel, s) do
+    candidates
+    |> Enum.filter(fn {_name, _component, from} -> wanted?(from, rel.version, s.named?) end)
+    |> Enum.reduce_while({:ok, []}, &add_step(&1, &2, rel, s))
+    |> case do
+      {:ok, steps} -> {:ok, %{steps: steps, version: rel.version}}
+      error -> error
     end
   end
 
@@ -351,6 +446,8 @@ defmodule Troupe.Update do
       s.out.(
         "release #{rel.version} (#{rel.base}), manifest signed by release key #{Enum.join(rel.key_ids, " and ")}"
       )
+
+      if s.plane, do: s.out.("the plane at #{s.plane.url} #{plane_says(s)}")
 
       if plan.steps == [] do
         s.out.("Nothing to update: what is installed is #{rel.version} or newer.")

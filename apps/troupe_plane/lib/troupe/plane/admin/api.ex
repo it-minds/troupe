@@ -36,7 +36,7 @@ defmodule Troupe.Plane.Admin.API do
     dialog to read.
   """
 
-  alias Troupe.Plane.Admin
+  alias Troupe.Plane.{Admin, ClientVersions}
   alias Troupe.Plane.Admin.API.{Argument, Method}
   alias Troupe.Plane.Fleet.Provisioner
   alias Troupe.Plane.Identity.Team
@@ -90,6 +90,28 @@ defmodule Troupe.Plane.Admin.API do
       type: :object,
       description:
         "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount, repositoryOverridesBundle, storage.storageClassName. configBundleChannel is the bundle channel the profile follows, stable where absent. repositoryOverridesBundle true lets a session's working copy replace the bundle's agents and skills, and the built-in agents, of the same name with its own; absent or false, those win and the working copy's are skipped and listed. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. storage.storageClassName is the storage class a worker's disk comes from, one the cluster policy allows; absent is the cluster's default. mcpIdentities says who the profile is at each server its bundle calls with client credentials: {server, clientId, scope, tokenUrl, transitKey, keyVersion, certificateThumbprint, algorithm}, none of it secret; the answer's identity_problems lists a server the bundle marks client_credentials that has none, or an identity that is incomplete. Replicas, sessionsPerPod, resources and storage.size are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
+    }
+  ]
+
+  # A component's version policy, as `admin.clients.put` takes it (Decision 868).
+  @client_policy_properties [
+    %Argument{
+      name: "recommended",
+      type: :string,
+      description:
+        "The version clients are nudged to, and the one troupe update installs for a person signed in here. Null for none."
+    },
+    %Argument{
+      name: "minimum",
+      type: :string,
+      description:
+        "The oldest version this plane serves; an older client is refused and told to run troupe update. Not newer than recommended. Null for none."
+    },
+    %Argument{
+      name: "blocked",
+      type: :array,
+      description:
+        "Versions this plane serves to nobody, whatever their number: a release with a defect. The whole list; the recommended version may not be on it."
     }
   ]
 
@@ -1111,6 +1133,38 @@ defmodule Troupe.Plane.Admin.API do
       risk: :write,
       arguments: [
         %Argument{name: "key", type: :string, required: true, description: "The setting's key."}
+      ]
+    },
+    %Method{
+      name: "admin.clients.get",
+      function: :clients_get,
+      summary:
+        "Which versions of its clients this plane serves, per component (tui, daemon, desktop): the recommended version, the minimum, the blocked list, and who set them last. A client below the minimum or on a blocked version is refused at initialize with update_required.",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.clients.put",
+      function: :clients_put,
+      summary:
+        "Change one component's version policy. Only the keys sent change, null clears one, and blocked is the whole list. Versions are written as releases are numbered (0.13.0-beta). A client is held to it at its next initialize: raising the minimum turns away every older client of that component.",
+      risk: :write,
+      arguments: [
+        %Argument{
+          name: "component",
+          type: :string,
+          required: true,
+          values: ClientVersions.components(),
+          description:
+            "Which client: tui (the terminal, troupe), daemon (troupe-daemon) or desktop (the desktop app)."
+        },
+        %Argument{
+          name: "policy",
+          type: :object,
+          required: true,
+          description: "The keys to change.",
+          properties: @client_policy_properties
+        }
       ]
     },
     %Method{

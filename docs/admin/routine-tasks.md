@@ -91,6 +91,31 @@ visible on the writing replica at once and everywhere within 5 s. Before changin
 `platform_admin_group`, `admin.identity.check {group}` with the candidate; the console will
 not save it otherwise.
 
+## Client versions
+
+Which versions of troupe, troupe-daemon and the desktop app this plane serves, per
+component (`tui`, `daemon`, `desktop`): a **recommended** version, a **minimum** and a
+**blocked** list (Decision 868). The **Client versions** panel on the console's Policy page
+is `admin.clients.get` and `admin.clients.put {component, policy: {recommended, minimum,
+blocked}}`; a platform admin's to change, a team admin's to read, audited as `clients.put`.
+Nothing set serves every version.
+
+- **Hold the fleet to a release**: set `minimum`. A client below it is refused when it
+  connects (`update_required`) with one sentence that says to run `troupe update`; nothing
+  it is running is stopped, and the refusal is at its next connection.
+- **Move the fleet**: set `recommended`. `troupe update` on a machine signed in here installs
+  that version, rather than the latest, and only if the release key signed it.
+- **Retire a bad release**: put its version in `blocked`, and recommend a good one. A client
+  on it is refused whatever its number. `troupe update` installs a newer recommended version
+  by itself; to go back to an older one it names the `--version` and leaves the choice to
+  the person, so a plane cannot walk machines back to an old release. The recommended
+  version may not be blocked, and the minimum may not be newer than it.
+
+Write versions as releases are numbered (`0.13.0-beta`): they are ordered as SemVer orders
+them, which puts `0.13.0-beta` before `0.13.0`. A client from before 0.13 does not say its
+version and is not held to any of this; nor is anything that calls `/rpc` without saying
+which client it is.
+
 ## Locked out of the console
 
 Nobody is a platform admin because `platform_admin_group` or `groups_claim` is wrong:

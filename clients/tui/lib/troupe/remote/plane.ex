@@ -163,7 +163,7 @@ defmodule Troupe.Remote.Plane do
 
   @impl true
   def handle_call({:rpc, _method, _params, _timeout}, _from, %{status: :down} = state),
-    do: {:reply, {:error, :plane_down}, state}
+    do: {:reply, {:error, down_reason(state)}, state}
 
   def handle_call({:rpc, method, params, timeout}, from, %{status: :handshaking} = state) do
     if length(state.waiting) >= @max_waiting do
@@ -209,13 +209,25 @@ defmodule Troupe.Remote.Plane do
     {:noreply, %{state | subscribers: subscribers}}
   end
 
-  def handle_info({:http_result, {:internal, :initialize}, {:ok, result}}, state),
-    do: {:noreply, initialized(state, result)}
+  def handle_info({:http_result, {:internal, step}, {:ok, result}}, state)
+      when step in [:initialize, :me],
+      do: {:noreply, initialized(state, result)}
 
   # A plane whose `rpc` path turns out not to be a POST endpoint is tried as a
   # socket before giving up: the discovery document names a path, not a verb.
-  def handle_info({:http_result, {:internal, :initialize}, {:error, reason}}, state) do
+  def handle_info({:http_result, {:internal, step}, {:error, reason}}, state)
+      when step in [:initialize, :me] do
     cond do
+      # A plane from before the version policy has no `initialize`, and `me` is the
+      # handshake there, as it always was (TUI Decision 93).
+      step == :initialize and rpc_reason(reason) == :method_not_found ->
+        {:noreply, post_request(state, {:internal, :me}, "me", %{})}
+
+      # This version is one the plane does not serve (Decision 868). Nothing is asked of it
+      # until a reconnect is answered otherwise, and whoever waits is told why.
+      rpc_reason(reason) == :update_required ->
+        {:noreply, state |> refuse(reason) |> schedule_reconnect()}
+
       websocket_worth_trying?(reason) ->
         {:noreply,
          do_connect(%{state | transport: :websocket, url: Discovery.ws_scheme(state.url)})}
@@ -280,15 +292,16 @@ defmodule Troupe.Remote.Plane do
     end
   end
 
-  # Over `POST` there is no session to initialise: the live plane has no
-  # `initialize` method at all, and every call carries its own token. The
-  # handshake is `me` — it proves the token and names the principal, which is
-  # what `initialize` would have answered with (Decision 93).
+  # Over `POST` there is no session to initialise, and every call carries its own
+  # token. The handshake is the plane's `initialize`, a call like any other: it proves
+  # the token, names the principal and says what the plane makes of this version
+  # (Decision 868). A plane from before that has none, and `me` is the handshake there
+  # (Decision 93).
   defp do_connect(%{transport: :http} = state) do
     case Tokens.access_token(state.plane_url, name: state.tokens) do
       {:ok, _token} ->
         state = %{state | status: :handshaking, error: nil}
-        post_request(state, {:internal, :initialize}, "me", %{})
+        post_request(state, {:internal, :initialize}, "initialize", handshake_params())
 
       {:error, reason} ->
         state |> put_error(reason) |> schedule_reconnect()
@@ -419,10 +432,15 @@ defmodule Troupe.Remote.Plane do
         state
 
       {{{:internal, :initialize}, _method}, pending} ->
-        %{state | pending: pending}
-        |> put_error({:initialize, RPC.describe(error)})
-        |> drop_socket()
-        |> schedule_reconnect()
+        state = %{state | pending: pending}
+
+        if rpc_reason(error) == :update_required,
+          do: state |> refuse(error) |> drop_socket() |> schedule_reconnect(),
+          else:
+            state
+            |> put_error({:initialize, RPC.describe(error)})
+            |> drop_socket()
+            |> schedule_reconnect()
 
       {{from, _method}, pending} ->
         state = reply_and(state, pending, from, {:error, error})
@@ -483,7 +501,9 @@ defmodule Troupe.Remote.Plane do
     do: state |> put_error(:bad_handshake) |> drop_socket() |> schedule_reconnect()
 
   # `initialize` answers with a `principal`; `me` *is* the principal — in the
-  # live plane's spelling (`subject`, `display_name`) or the contract's.
+  # live plane's spelling (`subject`, `display_name`) or the contract's. The plane's
+  # `initialize` answers with its `me`, read as `me` is.
+  defp principal(%{"principal" => %{"subject" => _} = me}), do: principal(me)
   defp principal(%{"principal" => %{} = principal}), do: principal
 
   defp principal(%{"subject" => subject} = me) when is_binary(subject),
@@ -494,6 +514,27 @@ defmodule Troupe.Remote.Plane do
 
   defp refused?(%{code: _code} = error), do: RPC.reason(error) == :unauthenticated
   defp refused?(_reason), do: false
+
+  defp rpc_reason(%{code: _code} = error), do: RPC.reason(error)
+  defp rpc_reason(_reason), do: nil
+
+  # The plane does not serve this version: the sentence that says what to run is the error
+  # from here on, and every call waiting on the handshake gets it rather than "down".
+  defp refuse(state, error) do
+    # Debug, as every other handshake failure here: it is asked again at every reconnect,
+    # and the person reads it on screen.
+    refusal = {:update_required, RPC.describe(error)}
+    Logger.debug("plane #{state.plane_url}: #{elem(refusal, 1)}")
+
+    for {from, _method, _params, _timeout} <- state.waiting, do: reply(from, {:error, refusal})
+
+    %{state | error: refusal, waiting: [], status: :down}
+  end
+
+  # Why a call made while the plane is down fails: a refusal of this version says so, and
+  # anything else is the plane being down.
+  defp down_reason(%{error: {:update_required, _sentence} = refusal}), do: refusal
+  defp down_reason(_state), do: :plane_down
 
   # There is nothing to subscribe to over `POST`: a plane with no socket cannot
   # push, so HQ refreshes on demand instead.

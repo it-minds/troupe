@@ -46,6 +46,37 @@ updates what the installers installed, where they installed it (`TROUPE_BIN_DIR`
 `TROUPE_LIB_DIR` move it, as they move the installers'). A machine with the daemon and no
 `troupe` is updated by running its installer again.
 
+## Signed in to a plane
+
+Your organisation's plane can say which versions of `troupe` and `troupe-daemon` it serves:
+a recommended version, a minimum, and versions it has blocked. Signed in (`troupe login`),
+`troupe update` asks it first:
+
+- it installs the plane's **recommended** version rather than the latest, and leaves a
+  newer one you already have alone;
+- it never installs a version the plane **blocks**, or one older than its **minimum**, even
+  with `--version`;
+- it never moves you backwards on the plane's word alone. On a blocked version whose
+  recommended one is older, it says so and names the `troupe update --version` that moves
+  you back, for you to run.
+
+The release is checked against the release key exactly as without a plane: the plane can
+hold a version back or name one, and cannot make `troupe update` install anything the key
+did not sign, nor walk your machine back to an old release. A plane that cannot be reached
+is said in a line, and `troupe update` goes on as without one.
+
+A `troupe` older than the plane's minimum, or on a version it has blocked, is refused when
+it connects, with one sentence saying what to run:
+
+```text
+This plane needs troupe 0.13.0-beta or later, and this is 0.12.0-beta: run troupe update, which installs 0.13.1-beta.
+```
+
+HQ, `troupe whoami` and the plane's commands say that rather than that the plane is
+unreachable. Sessions on this machine are not affected. A `troupe-daemon` the plane refuses
+says the same in its log and in `identity.get`, and stops syncing private sessions until it
+is updated and linked again.
+
 ## What the signature proves, and what it does not
 
 Each release's `manifest.json` is signed with Troupe's release key, an Ed25519 key in
@@ -62,7 +93,11 @@ signed one, a manifest someone edited, or one signed by any other key, is refuse
 - that the code is free of bugs or safe to run: only that it is what the release built;
 - that the release is the newest. Somebody who controls a mirror can keep serving an older
   signed release. `troupe update` never moves you backwards unless `--version` asks it to,
-  but it cannot tell that a newer one exists if it is never shown one;
+  but it cannot tell that a newer one exists if it is never shown one. Signed in to a plane
+  it is told: the plane's recommended version is the one asked for, and a mirror serving an
+  older one is refused (`the release at … is 0.13.0-beta, not 0.13.1-beta`). The plane's
+  word comes over your signed-in connection to it, so this holds for as long as the plane
+  itself is not the one holding you back;
 - anything about a release's build machine, or about what is already on your machine;
 - anything about a pre-release or a release before 0.13, which are not signed.
 
