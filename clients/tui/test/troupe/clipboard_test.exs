@@ -63,6 +63,37 @@ defmodule Troupe.ClipboardTest do
     assert clip == String.replace(Path.join(bin, "clip.exe"), "/", "\\")
   end
 
+  # D115: clip.exe reads a file with no byte-order mark in the console's code page, so text
+  # with anything but ASCII in it could arrive garbled. `clip` is given UTF-16LE with the
+  # mark; every other command gets the text as it is. What the real clip.exe reads was
+  # checked with a stand-in for it on Windows, never with the clipboard.
+  test "clip on Windows is given the text as UTF-16LE with a byte-order mark, nothing else is" do
+    text = "héllo – ✓ 日本"
+    utf16 = <<0xFF, 0xFE>> <> :unicode.characters_to_binary(text, :utf8, {:utf16, :little})
+
+    assert Clipboard.staged("clip", text, {:win32, :nt}) == utf16
+    assert Clipboard.staged("clip", "", {:win32, :nt}) == <<0xFF, 0xFE>>
+    assert Clipboard.staged("cat > x", text, {:win32, :nt}) == text
+    assert Clipboard.staged("xclip", text, {:unix, :linux}) == text
+    assert Clipboard.staged("pbcopy", text, {:unix, :darwin}) == text
+  end
+
+  # D115: a clipboard_command takes the text by `<`, which PowerShell, the platform shell on
+  # Windows without Git Bash, does not have: it failed with PowerShell's parser error.
+  test "a clipboard_command in a shell without `<` is refused with a sentence" do
+    staged = Path.join(System.tmp_dir!(), "troupe-clip-7")
+
+    for shell <- ["pwsh", "pwsh.exe", "powershell.exe"] do
+      assert {:error, sentence} = Clipboard.shell_line("more", staged, shell)
+      assert sentence =~ "clipboard_command"
+      assert sentence =~ "PowerShell"
+    end
+
+    for shell <- ["bash.exe", "bash", "sh"] do
+      assert Clipboard.shell_line("cat > x", staged, shell) == {:ok, "cat > x < '#{staged}'"}
+    end
+  end
+
   defp staged_files,
     do: System.tmp_dir!() |> Path.join("troupe-clip-*") |> Path.wildcard() |> length()
 

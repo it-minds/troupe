@@ -137,6 +137,33 @@ defmodule Troupe.CLIDaemonTest do
         assert eventually(fn -> not alive?(pid) end)
       end
     end
+
+    # D115: `open` starts a daemon that is to outlive it, detached, and returns. On Windows
+    # the reaper's job took everything `open` had left running when `open` returned, the
+    # daemon with it, so `troupe daemon open` left none where `troupe-daemon open` did.
+    # `open` runs under no reaper; the sweep here is the Unix reaper's, which takes what a
+    # command leaves behind in its process group the way the job does on Windows.
+    test "`open` runs under no reaper, so what it starts outlives it", %{reaper: reaper} do
+      if reaper do
+        fake =
+          fake_daemon("troupe-daemon-open", "fake-daemon", """
+          #!/bin/sh
+          nohup sleep 60 >/dev/null 2>&1 &
+          echo $! > "$0.pid"
+          echo "fake-daemon got: $*"
+          """)
+
+        System.put_env("TROUPE_DAEMON_COMMAND", fake)
+
+        output = capture_io(fn -> assert Troupe.CLI.Daemon.run(["open"], reaper: reaper) == 0 end)
+        assert output =~ "fake-daemon got: open"
+
+        assert pid = written(fake <> ".pid")
+        on_exit(fn -> System.cmd("kill", ["-9", pid], stderr_to_stdout: true) end)
+        Process.sleep(300)
+        assert alive?(pid)
+      end
+    end
   end
 
   test "with no binary anywhere the answer is how to install one, and exit 1" do

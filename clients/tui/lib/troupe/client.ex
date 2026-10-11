@@ -147,6 +147,7 @@ defmodule Troupe.Client do
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_upload(session_id(), String.t(), binary()) :: :ok | {:error, term()}
+  @callback upload_fits(session_id(), non_neg_integer()) :: :ok | {:error, String.t()}
   @callback stop_session(session_id()) :: :ok | {:error, term()}
   @callback has_session?(session_id()) :: boolean()
   @callback idle?(session_id()) :: boolean()
@@ -461,6 +462,14 @@ defmodule Troupe.Client do
 
   @spec fs_upload(session_id(), String.t(), binary()) :: :ok | {:error, term()}
   def fs_upload(sid, path, content), do: impl(sid).fs_upload(sid, path, content)
+
+  @doc """
+  Whether a file of `size` bytes can go in one `fs_upload/3`: `:ok`, or the sentence saying
+  it is larger than the daemon or worker takes in one message. Asked before the file is
+  read, so one that could never be sent is not read whole (D115).
+  """
+  @spec upload_fits(session_id(), non_neg_integer()) :: :ok | {:error, String.t()}
+  def upload_fits(sid, size), do: impl(sid).upload_fits(sid, size)
 
   @spec stop_session(session_id()) :: :ok | {:error, term()}
   def stop_session(sid), do: impl(sid).stop_session(sid)

@@ -149,6 +149,20 @@ defmodule Troupe.Remote.Worker do
   @spec fs_upload(String.t(), String.t(), binary()) :: :ok | {:error, term()}
   def fs_upload(session_id, path, content), do: call(session_id, {:upload, path, content})
 
+  @doc """
+  Whether a file of `size` bytes can go in one `fs.upload` (D115): the sentence `fs_upload/3`
+  would answer once it had been read, when it is larger than the server's message. A frame
+  is larger than the file, so one that fits here may still be refused as sent. `:ok` as well
+  where nothing can say yet: before `initialize`, or with no connection to ask.
+  """
+  @spec upload_fits(String.t(), non_neg_integer()) :: :ok | {:error, String.t()}
+  def upload_fits(session_id, size) do
+    case call(session_id, {:upload_fits, size}) do
+      {:error, sentence} when is_binary(sentence) -> {:error, sentence}
+      _fits_or_unknown -> :ok
+    end
+  end
+
   @doc "Any command on the session's socket, for what has no method of its own here."
   @spec rpc(String.t(), String.t(), map()) :: {:ok, term()} | :ok | {:error, term()}
   def rpc(session_id, method, params), do: call(session_id, {:rpc, method, params})
@@ -420,6 +434,16 @@ defmodule Troupe.Remote.Worker do
     end
   end
 
+  def handle_call({:upload_fits, size}, _from, %{max_message: limit} = state)
+      when is_integer(limit) and size > limit do
+    {:reply,
+     {:error,
+      "too large to send: #{mib(size)} on disk, and the #{server(state)} takes at most " <>
+        "#{mib(limit)} in one message; nothing was sent"}, state}
+  end
+
+  def handle_call({:upload_fits, _size}, _from, state), do: {:reply, :ok, state}
+
   def handle_call({:rpc, method, params}, from, state), do: command(state, from, method, params)
 
   def handle_call({:note, event}, _from, state),
@@ -537,15 +561,16 @@ defmodule Troupe.Remote.Worker do
   # is told why. The size is the frame's, which is the file's and then some for an upload.
   defp too_large(%{max_message: limit} = state, frame) when is_integer(limit) do
     size = IO.iodata_length(frame)
-    server = if state.plane_url, do: "worker", else: "daemon"
 
     if size > limit do
-      "too large to send: #{mib(size)} as sent, and the #{server} takes at most #{mib(limit)} " <>
-        "in one message; nothing was sent"
+      "too large to send: #{mib(size)} as sent, and the #{server(state)} takes at most " <>
+        "#{mib(limit)} in one message; nothing was sent"
     end
   end
 
   defp too_large(_state, _frame), do: nil
+
+  defp server(state), do: if(state.plane_url, do: "worker", else: "daemon")
 
   defp mib(bytes), do: "#{Float.round(bytes / (1024 * 1024), 1)} MiB"
 

@@ -843,6 +843,9 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def fs_upload(sid, path, content), do: describe(Worker.fs_upload(sid, path, content))
 
+  @impl true
+  def upload_fits(sid, size), do: Worker.upload_fits(sid, size)
+
   # Stopping means letting go: the daemon keeps the session and idles it on its own.
   # Its branches' windows go with the screen they were on.
   @impl true

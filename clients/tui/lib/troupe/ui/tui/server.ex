@@ -1540,21 +1540,22 @@ defmodule Troupe.UI.TUI.Server do
 
   # `/upload <path>` sends a local file to the session's own mount. The path is
   # read here rather than on the worker: the worker has no access to this
-  # machine, which is the point of the mount.
+  # machine, which is the point of the mount. Its size is asked first, so a file
+  # larger than the daemon takes in a message is refused without being read (D115).
   defp upload(_sid, ""), do: {:error, "usage: /upload <path>"}
 
   defp upload(sid, path) do
-    case File.read(Path.expand(path)) do
-      {:ok, content} ->
-        target = "session:/" <> Path.basename(path)
+    local = Path.expand(path)
+    target = "session:/" <> Path.basename(path)
 
-        case Client.fs_upload(sid, target, content) do
-          :ok -> {:ok, "uploaded #{path} to #{target}"}
-          {:error, reason} -> {:error, "#{path} not uploaded: #{to_message(reason)}"}
-        end
-
-      {:error, reason} ->
-        {:error, "#{path}: #{:file.format_error(reason)}"}
+    with {:ok, %File.Stat{size: size}} <- File.stat(local),
+         :ok <- Client.upload_fits(sid, size),
+         {:ok, content} <- File.read(local),
+         :ok <- Client.fs_upload(sid, target, content) do
+      {:ok, "uploaded #{path} to #{target}"}
+    else
+      {:error, reason} when is_atom(reason) -> {:error, "#{path}: #{:file.format_error(reason)}"}
+      {:error, reason} -> {:error, "#{path} not uploaded: #{to_message(reason)}"}
     end
   end
 

@@ -16,7 +16,9 @@ defmodule Troupe.Clipboard do
   `config :troupe, clipboard_command: "…"` replaces the guess with a command of
   your own — a tmux buffer or an OSC-52 helper over ssh — and is how the tests
   avoid clobbering the clipboard of whoever is running them. It is used as a
-  shell command with the staged file redirected into it.
+  shell command with the staged file redirected into it, so it needs a shell
+  with `<`: on Windows without Git Bash the shell is PowerShell, and the command
+  is refused with a sentence saying so (D115).
   """
 
   alias Troupe.OS
@@ -63,7 +65,7 @@ defmodule Troupe.Clipboard do
   defp stage_and_run(name, text) do
     path = Path.join(System.tmp_dir!(), "troupe-clip-#{:erlang.unique_integer([:positive])}")
 
-    case File.write(path, text) do
+    case File.write(path, staged(name, text)) do
       :ok ->
         result = run(name, path)
         File.rm(path)
@@ -73,6 +75,20 @@ defmodule Troupe.Clipboard do
         {:error, "could not stage the text: #{:file.format_error(reason)}"}
     end
   end
+
+  @doc """
+  The bytes `name` is given for `text` on `os_type`. Windows' `clip` reads a file with no
+  byte-order mark in the console's code page, so anything but ASCII could arrive garbled
+  (D115); it is given UTF-16LE with the mark, which is how it is told the text is Unicode,
+  whatever the code page. Every other command gets the text as it is, in UTF-8.
+  """
+  @spec staged(String.t(), String.t(), {atom(), atom()}) :: binary()
+  def staged(name, text, os_type \\ :os.type())
+
+  def staged("clip", text, {:win32, _}),
+    do: <<0xFF, 0xFE>> <> :unicode.characters_to_binary(text, :utf8, {:utf16, :little})
+
+  def staged(_name, text, _os_type), do: text
 
   # Redirection, not a pipe, so nothing depends on the shell's job control. On
   # Windows the platform shell may be PowerShell, which has no `<` at all, so
@@ -84,8 +100,29 @@ defmodule Troupe.Clipboard do
     )
   end
 
-  defp run(name, path),
-    do: OS.Process.shell("#{argv(name)} < '#{path}'", timeout_ms: @timeout_ms)
+  defp run(name, path) do
+    {shell, _description} = OS.Process.shell_info()
+
+    with {:ok, line} <- shell_line(argv(name), path, shell),
+         do: OS.Process.shell(line, timeout_ms: @timeout_ms)
+  end
+
+  @doc """
+  The line the platform shell `shell` (its program's name) is given to feed `command` the
+  file at `path`, or why it cannot be: PowerShell, Windows' shell without Git Bash, has no
+  `<`, and a `clipboard_command` failed there with its parser's error (D115).
+  """
+  @spec shell_line(String.t(), Path.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def shell_line(command, path, shell) do
+    if String.starts_with?(String.downcase(shell), ["pwsh", "powershell"]) do
+      {:error,
+       "clipboard_command is given the text with `<`, which PowerShell, the shell here " <>
+         "without Git Bash, does not have; install Git for Windows, or unset clipboard_command " <>
+         "to copy with clip"}
+    else
+      {:ok, "#{command} < '#{path}'"}
+    end
+  end
 
   @doc """
   What cmd.exe is given to feed `name` the file at `path`, which it runs in the file's
@@ -105,6 +142,7 @@ defmodule Troupe.Clipboard do
     do: {:error, "#{name} exited #{status}: #{first_line(output)}"}
 
   defp report(name, {:error, :timeout, _output}), do: {:error, "#{name} did not finish in time"}
+  defp report(_name, {:error, sentence}) when is_binary(sentence), do: {:error, sentence}
 
   defp first_line(""), do: "no output"
   defp first_line(output), do: output |> String.split("\n") |> hd() |> String.trim()

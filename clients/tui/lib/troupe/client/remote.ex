@@ -277,6 +277,9 @@ defmodule Troupe.Client.Remote do
   def fs_upload(sid, path, content), do: describe(Worker.fs_upload(sid, path, content))
 
   @impl true
+  def upload_fits(sid, size), do: Worker.upload_fits(sid, size)
+
+  @impl true
   def stop_session(sid) do
     Worker.detach(sid)
     :ok
