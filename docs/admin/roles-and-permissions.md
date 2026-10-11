@@ -99,7 +99,9 @@ caller's role on the session:
 | viewer | `observe` | subscribe and read |
 
 The owner is `admin`; an ACL row gives its role; otherwise a `team`-visible session gives a
-team member `control` when the team's `members_may_control` is set, else `observe`.
+team member `control` when the team's `members_may_control` is set, else `observe`. The
+owner's `admin` comes from owning the session (`owner_subject`), not from a row, so an
+access-list row naming the owner with a narrower role does not narrow them.
 `session.grant` is for the owner or a team admin. Revoking a team's grant on a profile
 freezes its sessions read-only: a running one is put to sleep on its pod, and one still
 waiting for a worker is never started. Workers re-check the ACL on every command, so a
