@@ -245,6 +245,29 @@ A `url` server is spoken to as the MCP specification's streamable HTTP transport
 one, carried on every call after, opened again once if the server has forgotten it, and
 ended when the Troupe session ends.
 
+### Where the daemon connects
+
+A `url` server, and everything a sign-in to it calls (the server's metadata, the
+authorization server's metadata, and the token and revocation endpoints), is called from
+your machine, and only at an address that passes one check. The server's name is
+resolved, every address it answers is checked, and the request goes to the address that
+passed, so a name that answers one address to the check and another a moment later is not
+followed there. A redirect is checked the same way before it is followed; the token
+endpoint follows none. TLS still checks the server's certificate against its name.
+
+| | Addresses |
+|---|---|
+| Refused | link-local (`169.254.0.0/16`, `fe80::/10`); a cloud's metadata service (`169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`), however the address is written, an IPv4 address written as IPv6 included; the unspecified address (`0.0.0.0`, `::`) |
+| Allowed | loopback, for a server you run on this machine; the private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`), where an intranet's servers are; everything else |
+
+One refused address among a name's answers refuses the name. The server's line on the
+`/mcp` page says what it resolved to (`wiki.example.com resolves to 169.254.169.254, a
+link-local address, and is not called`), and a sign-in whose metadata names such an
+address is refused before your browser opens. The authorization endpoint is opened by
+your browser, not the daemon: its name is refused at the same addresses when it resolves
+on this machine, and left to the browser when it does not. A sign-in's URLs are also
+`https`, or `http` on `127.0.0.1`, `[::1]` or `localhost`.
+
 ### A server that wants a key
 
 A server over HTTP that takes a key, a token or a team's name in a header gets it from
