@@ -152,6 +152,43 @@ defmodule Troupe.DelegationGateTest do
     assert child_brief(sid) =~ "Goal: Then write"
   end
 
+  # Headless mode has nobody to ask: it denies the gate as any request, and its lines say
+  # why it asked and that --auto-approve would not have answered it.
+  test "headless denies a delegation that asks first, and says what made it ask" do
+    ws = tmp_workspace()
+
+    {sid, _, _} =
+      start_session!(
+        workspace: ws,
+        config: @asks,
+        scripts: %{
+          "root" => [
+            {:tools, [{"delegate", brief("Write notes.md")}]},
+            {:text_and_tools, "It was not mine to send.", []}
+          ]
+        }
+      )
+
+    {:ok, io} = StringIO.open("")
+    me = self()
+
+    {:ok, _pid} =
+      Troupe.UI.Headless.Printer.start_link(
+        session_id: sid,
+        target: "root",
+        io: io,
+        on_rest: fn code -> send(me, {:rest, code}) end
+      )
+
+    say!(sid, "delegate it")
+    assert_receive {:rest, 3}, 15_000
+    {_, out} = StringIO.contents(io)
+    assert out =~ "delegation to general asks first (delegation.ask"
+    assert out =~ "--auto-approve does not answer it"
+    assert out =~ "The person denied this delegation to general."
+    assert out =~ "exit 3: an approval was refused, with nobody to ask: delegations that ask first"
+  end
+
   describe "the box itself" do
     @item %{
       kind: :approval,
