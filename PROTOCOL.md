@@ -268,7 +268,7 @@ Durable:
 | `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
-| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness`/`shell` — `loop` is an iteration of `session.loop.start`, `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails, and `shell` what the agent was given of the person's own commands, each of which a client draws from its `user_shell` instead), `text`, `command_id` — the send it was taken from, as its `input_accepted` names it; absent from a `harness` or `shell` note, which nobody sent, and from a log written before 0.5.2 |
+| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness`/`shell`/`subagent` — `loop` is an iteration of `session.loop.start`, `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails, `shell` what the agent was given of the person's own commands, each of which a client draws from its `user_shell` instead, and `subagent` the end of a child the agent started in the background, handed to it once, Decision 853), `text`, `command_id` — the send it was taken from, as its `input_accepted` names it; absent from a `harness`, `shell` or `subagent` note, which nobody sent, and from a log written before 0.5.2; `child_path` and `ended` (`finished`, `cut_short`, `stopped`, `cancelled`, `interrupted`, `failed`) on one from `subagent` |
 | `user_shell` | `run_id`, `command`, `output`, `ended`, `agent`, `exit_status`, `reason`, `timeout_ms`, `duration_ms`, `command_id` — a command the person ran with `shell.run`, written by the root agent under their actor when it ended. `output` is its combined stdout and stderr, the tail capped at `tool_output_limit` with the `read_output` marker when it was cut; `ended` is `exited` (with `exit_status`), `timeout`, `killed` (`shell.cancel`) or `failed` (it could not start, `reason` says why); `agent: false` is one kept from the agent (Decision 813) |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
@@ -288,7 +288,7 @@ Durable:
 | `loop_iteration_started` | `loop_id`, `iteration`, `command_id` — the command id the iteration's input carries, which the root's `input_accepted` echoes |
 | `loop_iteration_finished` | `loop_id`, `iteration`, `outcome` (`continue`: the turn ended and the goal is not met; `complete`: the agent called `goal_complete`; `failed`: the turn ended in an error; `stopped`: the loop stopped around it), `detail` |
 | `loop_stopped` | `loop_id`, `reason` (`goal_complete`, `max_iterations`, `failures`, `budget`, `requested`, `cancelled`, `goal_cleared`, `interrupted`, `agent_done`), `iterations`, `detail`, `summary` (the evidence `goal_complete` gave), `command_id` (the `session.loop.stop` that asked) |
-| `delegation_started` | `call_id`, `agent`, `child_path` (the parent's path and `<agent>#<n>`; `n` goes on counting across restarts, so a path names one child), `task`. The child writes its `agent_done` before the parent's `tool_call_completed` for the call, and is stopped once the parent has its result: from then on it is only its log. A delegation a restart closes as interrupted or takes up again leaves a child nothing starts again, so the restart closes that child's part of the log, and the part of each agent under it: a `tool_call_completed` for each call still open, then `agent_done` with `reason: interrupted` |
+| `delegation_started` | `call_id`, `agent`, `child_path` (the parent's path and `<agent>#<n>`; `n` goes on counting across restarts, so a path names one child), `task` (the child's first message: the brief's parts under their names), `brief` (the parts, `goal`, `context`, `constraints`, `deliverable` and `do_not`; absent from a log written before briefs had them, Decision 847), `wait` (`false` for a child started in the background: the `delegate` call answered at once, and the child's end reaches the parent later as a `user_input` from `subagent`; absent otherwise, Decision 853). The child writes its `agent_done` before the parent's `tool_call_completed` for the call, and is stopped once the parent has its result: from then on it is only its log. A delegation a restart closes as interrupted or takes up again leaves a child nothing starts again, so the restart closes that child's part of the log, and the part of each agent under it: a `tool_call_completed` for each call still open, then `agent_done` with `reason: interrupted` |
 | `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting), and the summariser's own model call as `llm_request` and `llm_response` say one: `model`, `prompt_bytes`, `usage`, `gateway` (absent from a log written before 0.8.2) |
 | `budget_exhausted` | `limit` |
 | `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, answered with `question.answer`. Its `question` says what the limit protects against, what the session has used and spent, and what the raise on offer would cost; its `options` are sizes and scopes — `+25 turns this run`, `+50 turns this session`, `no limit this session`, `+50 turns this workspace`, `stop` — and a typed amount (`50`, `+50 turns`, `+50k tokens`, `+15 min`, with `run`, `session` or `workspace` after it) is an answer too (Decision 699) |
@@ -296,7 +296,7 @@ Durable:
 | `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
 | `tool_failures_ask_started` | `call_id` (`failures-<n>`), `tool`, `failures`, `detail` — one tool has failed `failures` times in a row and the agent asks before its next model call whether the turn goes on; the question itself is a `question_asked` under the same `call_id`, with options `stop` / `continue`, answered with `question.answer` |
 | `tool_failures_ask_answered` | `call_id`, `decision` (`continue`: the tool's count starts again; `stop`: a `user_input` from `harness` saying why, then `turn_ended` with `reason: tool_failures`) |
-| `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`, `tool_failures`, `llm_error` — a subagent whose model request failed, after the `llm_error` that says why; a root rests instead; `interrupted` — a subagent a restart took down, written by the restart, see `delegation_started`), `summary`, `limit`, `turn` — what the agent's last turn cost, a subagent's whole task (see below); absent from one a restart wrote |
+| `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`, `tool_failures`, `llm_error` — a subagent whose model request failed, after the `llm_error` that says why; a root rests instead; `interrupted` — a subagent a restart took down, written by the restart, see `delegation_started`; `stopped`, `cancelled` and `failed` — a child in the background its parent stopped, a cancel stopped, or that failed past its restarts, written by its parent, Decision 853), `by` (with `stopped`, the parent's path), `summary` (after a `finish`, its report as the parent is handed it: the summary, then `changed`, `ran`, `passed`, `unverified` and `needs` under their names), `report` (those parts, `changed` as Troupe counted it from the agent's file tools: `files` with `path`, `added`, `removed` and `whole`, the totals, `commands` not counted, `session_id` and `agent` to read the diff by with `read_branch`, and `said`; Decision 847), `limit`, `turn` — what the agent's last turn cost, a subagent's whole task (see below); absent from one a restart wrote |
 
 A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
 `waiting` until the answer, input queues meanwhile, and the answer says how much more and
@@ -321,9 +321,9 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
 | `cancelled` | `turn` — what the cancelled turn had cost (see below); `stopped` — the model call the cancel stopped, when one was in flight (see below) |
-| `turn_ended` | `reason` — the agent's turn is over and it waits for input: the model answered without asking for a tool, or a root's request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done`. `reason` is there only when the harness ended the turn: `tool_failures`, a tool kept failing and the answer to `tool_failures_ask_started` was `stop`; `agent_failed`, the root agent crashed as often as it may be restarted, `detail` says what it raised, and the session stops after it, to come back dormant (Decision 727). Neither turn is taken up again by a restart. `turn` — what the turn cost (see below); absent from an `agent_failed` one |
-| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it |
-| `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
+| `turn_ended` | `reason` — the agent's turn is over and it waits for input: the model answered without asking for a tool, or a root's request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done`. `reason` is there only when the harness ended the turn: `tool_failures`, a tool kept failing and the answer to `tool_failures_ask_started` was `stop`; `agent_failed`, the root agent crashed as often as it may be restarted, `detail` says what it raised, and the session stops after it, to come back dormant (Decision 727). Neither turn is taken up again by a restart. `waiting`, a subagent that ended its turn while a child it started in the background still runs: it rests until that child's end, and its task goes on (Decision 853). `turn` — what the turn cost (see below); absent from an `agent_failed` or a `waiting` one |
+| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it. A delegation a person asked to see first (`delegation.ask` in a config file, or `delegation: ask` in the agent's definition; Decision 850) asks with `tool: "delegate"`, the call's arguments as `args`, and `delegation`: what the gate shows — `agent`; `definition` (`name`, `layer`, `path`, `description`; `agents.get` by that name opens it, and the gate never edits one); `brief` (`goal`, `context`, `constraints`, `deliverable`, `do_not`); `tools` (`[{name, permission}]`, what the child will hold); `budget_share`; `depth` (the child's) and `max_depth`; `agents` (`[{name, description}]`, the subagents it could go to instead). `auto_approve` does not answer one |
+| `approval_decided` | `call_id`, `tool`, `decision`, `actor`; for a delegation, `agent` (the subagent it went to, when allowed), `brief` and `edited` (the brief as the person edited it, and which parts), `reason` (the person's word back with a denial) |
 | `approval_resolved` | `call_id`, `resolved_by` |
 | `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple`, `preview` — the agent's `ask_user`; answered with `question.answer`. `preview`, where there is one, is text the question is about, for a client to show as it is beneath it: the prompt a workspace's command would send, when it asks before it is first sent (`commands.run`). Open until its `question_answered`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no answer), or a `cancelled` on the agent that asked or on one above it. The budget's and the failure guard's question have no call; each also ends with its `budget_ask_answered` or `tool_failures_ask_answered`, the only word there is when nobody is there to ask, and one a cancel ended is asked again at the next turn with another `question_asked` under the same `call_id` |
 | `question_answered` | `call_id`, `text`, `actor` |
@@ -949,6 +949,19 @@ dormant. A daemon configured to resume (`resume_on_restart`) resumes the loop to
 one receives an `approval_resolved` event naming who resolved it, and has no second
 effect.
 
+A delegation's request (`approval_requested` with `delegation`, Decision 850) takes three
+more, each optional: `agent`, one of the subagents its `delegation.agents` offers, to send
+the same brief there instead; `brief`, the parts the person edited (`{"constraints": "…"}`),
+laid over the brief and held to its shape, so a part sent blank is refused; `reason`, a
+word back with `deny`, which the agent that delegated receives as the call's answer.
+`allow_session` lets the agent it goes to run unasked for the rest of the session. A wrong
+one is `invalid_params` with a `reason` saying why, and the request waits on.
+
+```json
+{"command_id": "c-6", "session_id": "s-9f", "call_id": "call_7",
+ "decision": "allow", "agent": "explore", "brief": {"constraints": "Read only."}}
+```
+
 #### `question.answer`
 ```json
 {"command_id": "c-5", "session_id": "s-9f", "call_id": "call_4", "text": "the blue one"}
@@ -1090,9 +1103,9 @@ the client that uploaded it, not the session.
 ```json
 {"workspace": "/home/me/project"}
 ```
-→ `{"agents": [{"name", "description", "source", "notes", "layer", "model", "tool_count",
-"read_only", "max_turns", "worktree", "available", "reason"}], "skipped": [{"name", "path",
-"reason"}]}` — the primary agents a session in that
+→ `{"agents": [{"name", "description", "source", "notes", "mode", "layer", "model",
+"tool_count", "read_only", "max_turns", "worktree", "available", "reason"}], "skipped":
+[{"name", "path", "reason"}]}` — the primary agents a session in that
 workspace may be created with, resolved as `session.create` resolves them (built-ins, the
 machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `global`
 or `project`. A worker answers from its bundle instead, so a client offers exactly what
@@ -1102,6 +1115,13 @@ workspace`; a `.troupe/agents` linked out whole is one entry with a null `name`,
 Decision 829), in a git worktree one the main checkout has not committed, or one that does
 not parse, with what is wrong in words (`not read: mode must be primary or subagent, not
 "main"`, Decision 841), which the session's `files_skipped` carries too. Additive.
+
+With `"subagents": true` the subagents an agent delegates to are listed as well, after the
+primaries, each in the same shape (Decision 852): what an agents manager asks, so a person
+can read and change `explore` or `reviewer`; a picker of what a session runs never asks,
+since `session.create` and `profile.switch` refuse a subagent. Every row says its `mode`,
+`primary` or `subagent`. Both are additive: a daemon before them lists the primaries alone
+and its rows have no `mode`.
 
 `notes` is what a person should know about how an agent is read, each `{"key",
 "reason"}` with the reason in words, and empty for most. A `project` agent whose
@@ -1139,10 +1159,12 @@ from the profile's bundle and are read-only here: change them in the console".
 `agents.get` (`observe`; `workspace` or `session_id`, or neither for the person's own and
 the built-ins) → one definition, as the session would run it: every key of an
 `agents.list` row, plus `mode` (`primary` or `subagent`), `tools` (`"all"` or the list),
-`permissions` (`{"<tool>": "auto"|"ask"|"deny"}`), `budget_share`, `skills` (`"all"` or
+`permissions` (`{"<tool>": "auto"|"ask"|"deny"}`), `budget_share`, `delegation` (`ask` when
+a delegation to it asks first by its own file, else `auto`; Decision 850), `skills` (`"all"` or
 the list), `prompt` (the instruction, the file's body), `path` (the file, `null` for a
 bundle's ACP agent), `text` (the file as it is on disk, frontmatter and all, for an
-editor), `editable` and `editable_reason` (`null` when editable; otherwise a sentence: a
+editor), `hash` (`"sha256:<hex>"` of `text`, `null` with no file: what `agents.put`'s
+`if_hash` names, Decision 852), `editable` and `editable_reason` (`null` when editable; otherwise a sentence: a
 built-in is changed by a copy in a scope, a bundle's agent in the console, and on a pod
 none here), `also` (`[{"layer", "path"}]`, the files of the same name in lower layers this
 one hides, nearest first: what answers once this one is taken away) and `running`
@@ -1152,6 +1174,16 @@ branches, that run this agent now; empty without one). With a `session_id` the
 definitions are that session's (on a pod its bundle's), read again from their files as a
 switch would read them. A name nothing defines is `not_found` with `kind: "agent"`.
 
+`broken` (Decision 852) is the person's or the workspace's file of that name that was found
+and does not parse, the one that would answer once mended, for an editor to open: `{"scope",
+"layer", "path", "text", "hash", "reason"}`, `scope` being where `agents.put` writes it back
+(`user` or `project`) and `reason` the words `agents.list`'s `skipped` gives; `null` when
+there is none. It is beside what answers to the name (a `.troupe/agents/plan.md` that does
+not parse leaves the built-in `plan` answering), and when nothing answers the answer is
+`{"name", "broken"}` alone rather than `not_found`. A file not read for another reason (a
+link out of the workspace, a main checkout's draft, one a bundle's name beats) is never
+`broken`: it is not at the place `agents.put` writes.
+
 ```json
 {"source": "---\nmode: primary\n---\nYou review.\n", "name": "review", "workspace": "/home/me/project"}
 ```
@@ -1160,7 +1192,8 @@ switch would read them. A name nothing defines is `not_found` with `kind: "agent
 (`mode`, `tools`, `model`, …), `permissions.<tool>` for one permission, `frontmatter`
 when it is not YAML, `name`, or `prompt` and `description` for the warnings. Errors: a key
 no agent has (the keys are `description`, `mode`, `model`, `tools`, `permissions`,
-`max_turns`, `budget_share`, `skills` and `override`, and onboarding's `imported_*`);
+`max_turns`, `budget_share`, `skills`, `override` and `delegation`, and onboarding's
+`imported_*`); `delegation` not `ask` or `auto`;
 `mode` missing or not `primary`/`subagent`; `tools` or `skills` not `"all"` or a list; a
 tool that does not exist (with the nearest that do); a permission not `auto`, `ask` or
 `deny`; a permission that grants (`auto` or `ask`) a tool `tools` does not list, which
@@ -1193,6 +1226,17 @@ writer too); a temporary file is renamed over it. A name an agent may not have i
 changed by a copy: a `put` of its text, under its name (which then hides it) or another,
 into either scope. A user agent that the workspace's `.troupe/agents` has a file of the
 same name for is written, with a warning that the repository's is the one that runs there.
+
+`if_hash` (optional, Decision 852) is the `hash` `agents.get` gave for the file this save
+replaces, which a client sends when it saves an edit back into the file it was opened from.
+When the file there holds anything else now, saved by another client or by hand, or is gone,
+nothing is written and the answer is `conflict` with a `reason` in words ("…/review.md
+changed since it was opened, saved from somewhere else: nothing is written. Read it again
+to see the change; saving over it replaces that change", or that it "was taken away since
+it was opened") and `hash`, what the file holds now (`null` when gone), which a save that
+means to replace it sends as its `if_hash`. It is checked in the same transaction as the
+write. Without it the last write wins, as before; a copy into another scope, or a new
+agent, sends none.
 
 ```json
 {"command_id": "c-31", "name": "review", "scope": "project", "workspace": "/home/me/project"}
@@ -1272,7 +1316,7 @@ it can and shows the rest greyed with the reason. Reading the table wakes nothin
 `mix check`", "scope": null, "anchors": [{"path": "mix.exs", "hash": "9f2c...e1"}],
 "evidence": {"session": "s_01J...", "seq": 412, "head": "7f8a221", "exit_status": 0, "by":
 "librarian"}, "created_at": "2026-10-10T09:00:00Z", "verified_at": "2026-10-10T09:00:00Z",
-"status": "current"}]}`
+"status": "current"}], "model": {"usable": true, "reason": null}}`
 
 The **project brief**: what earlier agents learned about the repository, read into
 every agent's system prompt and written by the `remember` tool and the `librarian`
@@ -1306,7 +1350,15 @@ was last checked. `status` is computed as the answer is made, never stored: `cur
 both of which a client shows as "may no longer be true", and `unanchored` (no anchors: it
 ages out by `verified_at`). `generated: true` says `text` and `sections` are a view of the
 facts, rewritten whenever they change. A daemon from before facts sends neither key, and a
-client shows the brief as it did.
+client shows the brief as it did. In a repository an anchor git does not track (ignored, or
+never added) is `missing` and never hashed, as `remember` refuses to write one.
+
+`model` says whether a model can be asked under the workspace's own config (Decision 854):
+`usable`, and when it is `false` the `reason` in words (`anthropic has no key, so no model
+can be asked`, or why a `{env:VAR}` the key reads was refused). `setup.get`'s `usable` is
+the machine's; a client starting a `librarian` on the workspace reads this one. A daemon
+from before it sends no `model`. `control`: the path is any the client names, and reading a
+brief there may migrate it, or read a person's edit back, into facts.
 
 #### `memory.forget` → `{"command_id", "workspace", "id"}` (`id` optional)
 
@@ -1367,7 +1419,9 @@ never over a file that changed since it was shown. `action` is `created` or `rep
 id that names no file the plan holds now is refused with a sentence. Once a call has
 answered every file the plan held, the workspace is recorded as onboarded under this
 build's rules. `admin`: it writes into the repository and into the person's config
-directory.
+directory. Outside a git repository, where the plan is due nothing, it and
+`onboard.decline` are refused (`invalid_params`, with the sentence) and nothing is written
+or remembered (Decision 854); `troupe onboard` still runs wherever it is asked to.
 
 #### `onboard.decline` → `{"workspace", "ids": [...]}` or `{"workspace", "all": true}` (`command_id` optional)
 → `{"declined": n}`. Says no to the files named, or to all of them: each is not proposed
@@ -2000,8 +2054,8 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
-| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
+| `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all

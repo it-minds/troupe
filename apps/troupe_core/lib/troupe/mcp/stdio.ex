@@ -126,6 +126,10 @@ defmodule Troupe.MCP.Stdio do
     name = Keyword.fetch!(opts, :name)
     config = Keyword.fetch!(opts, :config)
     Process.set_label("troupe mcp #{name} #{session_id}")
+    # A port that fails ends with an exit signal of its own: on Windows a write to a server
+    # that has exited, or closed its input, ends it with `epipe` (D115). That is the
+    # server's status, read in `handle_info/2`, not a reason for this process to go too.
+    Process.flag(:trap_exit, true)
 
     state = %__MODULE__{session_id: session_id, name: name, config: config}
 
@@ -184,18 +188,29 @@ defmodule Troupe.MCP.Stdio do
     {:noreply, %{state | buffer: state.buffer <> chunk}}
   end
 
-  def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
-    # Only callers are answered; the lifecycle requests (`:initialize`, `:tools_list`)
-    # have nobody waiting.
+  def handle_info({port, {:exit_status, code}}, %{port: port} = state),
+    do: {:noreply, stopped(state, "exited with status #{code}")}
+
+  # A port that ended without an exit status. On Windows, where the server is a plain port,
+  # a write to one that has exited or closed its input ends the port with `epipe` and
+  # nothing follows it, so that is all there is to say.
+  def handle_info({:EXIT, port, reason}, %{port: port} = state),
+    do: {:noreply, stopped(state, ended(reason))}
+
+  def handle_info(_message, state), do: {:noreply, state}
+
+  # Only callers are answered; the lifecycle requests (`:initialize`, `:tools_list`) have
+  # nobody waiting.
+  defp stopped(state, error) do
     for {_id, from} <- state.pending,
         is_tuple(from),
         do: GenServer.reply(from, {:error, "the MCP server #{state.name} exited"})
 
-    {:noreply,
-     %{state | state: :stopped, error: "exited with status #{code}", pending: %{}, port: nil}}
+    %{state | state: :stopped, error: error, pending: %{}, port: nil}
   end
 
-  def handle_info(_message, state), do: {:noreply, state}
+  defp ended(:epipe), do: "closed its input"
+  defp ended(reason), do: "ended (#{inspect(reason)})"
 
   ## Protocol
 
@@ -298,32 +313,39 @@ defmodule Troupe.MCP.Stdio do
 
   defp request(state, method, params) do
     id = state.next_id
+    message = %{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params}
 
-    send_json(state.port, %{
-      "jsonrpc" => "2.0",
-      "id" => id,
-      "method" => method,
-      "params" => params
-    })
+    if sent?(state.port, message) do
+      pending =
+        case method do
+          "initialize" -> Map.put(state.pending, id, :initialize)
+          "tools/list" -> Map.put(state.pending, id, :tools_list)
+          _ -> state.pending
+        end
 
-    pending =
-      case method do
-        "initialize" -> Map.put(state.pending, id, :initialize)
-        "tools/list" -> Map.put(state.pending, id, :tools_list)
-        _ -> state.pending
-      end
-
-    %{state | next_id: id + 1, pending: pending}
+      %{state | next_id: id + 1, pending: pending}
+    else
+      closed(state)
+    end
   end
 
   defp notify(%{port: nil} = state, _method, _params), do: state
 
   defp notify(state, method, params) do
-    send_json(state.port, %{"jsonrpc" => "2.0", "method" => method, "params" => params})
-    state
+    if sent?(state.port, %{"jsonrpc" => "2.0", "method" => method, "params" => params}),
+      do: state,
+      else: closed(state)
   end
 
-  defp send_json(port, message), do: Port.command(port, [Jason.encode!(message), "\n"])
+  # A port already closed is `badarg` (D115): the server has exited, and its exit status,
+  # which comes before the port closes, is already on its way here and says more.
+  defp sent?(port, message) do
+    Port.command(port, [Jason.encode!(message), "\n"])
+  rescue
+    ArgumentError -> false
+  end
+
+  defp closed(state), do: %{state | state: :stopped, error: "closed its input"}
 
   ## Process
 

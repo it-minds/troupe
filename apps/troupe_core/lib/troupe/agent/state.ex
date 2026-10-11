@@ -2,7 +2,20 @@ defmodule Troupe.Agent.Call do
   @moduledoc "One outstanding tool call, from dispatch to result."
 
   @enforce_keys [:id, :name, :args]
-  defstruct [:id, :name, :args, :task_pid, :monitor, :timer, :child_ref, :child_pid, result: nil]
+  # `note`: what a person's answer at the delegation gate changed, said to the parent
+  # before its child's report (Decision 850).
+  defstruct [
+    :id,
+    :name,
+    :args,
+    :task_pid,
+    :monitor,
+    :timer,
+    :child_ref,
+    :child_pid,
+    :note,
+    result: nil
+  ]
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -13,6 +26,7 @@ defmodule Troupe.Agent.Call do
           timer: reference() | nil,
           child_ref: reference() | nil,
           child_pid: pid() | nil,
+          note: String.t() | nil,
           result: Troupe.Tool.Result.t() | nil
         }
 end
@@ -100,6 +114,14 @@ defmodule Troupe.Agent.State do
     pending: %{},
     call_order: [],
     monitors: %{},
+    # The subagents this agent started in the background that still run (Decision 853), by
+    # the ref they report under: `%{path, pid, monitor}`. Not folded: a restart takes them
+    # down with this agent's Node, and closes them.
+    background: %{},
+    # Their ends not yet given to the model, oldest first, each `Background.ended()`: given
+    # before the next model call, as a `user_input` from `subagent`. A restart holds again
+    # the ends the log has no such `user_input` for.
+    child_reports: [],
     child_seq: 0,
     last_input_tokens: 0,
     # What the turn this agent is on has cost so far (Decision 769): its own calls, folded,
@@ -144,6 +166,8 @@ defmodule Troupe.Agent.State do
     failure_asks: 0,
     failure_ask: nil,
     compact_resume: :idle,
+    # The parts a `finish` of this turn gave (Decision 847), reported once the turn's other
+    # calls are back; a summary alone when it came off a log from before the parts.
     finish_summary: nil,
     fake: nil,
     # Inputs that arrived mid-turn and have been announced as `input_queued`. Needed
@@ -197,6 +221,8 @@ defmodule Troupe.Agent.State do
           pending: %{optional(String.t()) => Call.t()},
           call_order: [String.t()],
           monitors: %{optional(reference()) => term()},
+          background: %{optional(reference()) => map()},
+          child_reports: [Troupe.Agent.Background.ended()],
           child_seq: non_neg_integer(),
           last_input_tokens: non_neg_integer(),
           turn: Spend.t(),
@@ -214,7 +240,7 @@ defmodule Troupe.Agent.State do
           failure_asks: non_neg_integer(),
           failure_ask: {String.t(), pos_integer()} | nil,
           compact_resume: :idle | :thinking,
-          finish_summary: String.t() | nil,
+          finish_summary: %{String.t() => String.t()} | nil,
           fake: pid() | atom() | nil,
           queued: MapSet.t(String.t()),
           shell_notes: [String.t()],
@@ -233,6 +259,11 @@ defmodule Troupe.Agent.State do
   @doc "Whether this agent reports to a parent rather than to the user."
   @spec subagent?(t()) :: boolean()
   def subagent?(%__MODULE__{parent: parent}), do: is_pid(parent)
+
+  @doc "The subagents this agent runs in the background, as `root/general#1`, in order."
+  @spec background_paths(t()) :: [String.t()]
+  def background_paths(%__MODULE__{background: background}),
+    do: background |> Map.values() |> Enum.map(&Enum.join(&1.path, "/")) |> Enum.sort()
 
   @doc "Every call whose result has not arrived."
   @spec outstanding(t()) :: [Call.t()]

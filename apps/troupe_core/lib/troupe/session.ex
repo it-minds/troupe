@@ -394,9 +394,16 @@ defmodule Troupe.Sessions do
   Sessions are `:transient`: one that finished normally must not be restarted, and one
   whose root Node exceeded its restart intensity is left down for `troupe resume`
   rather than looped.
+
+  A session is stopped from its stopper's process, never from this one (Decision 855):
+  a tree that takes its whole thirty seconds to come down holds up nobody else's start or
+  stop.
   """
 
   use DynamicSupervisor
+
+  # How long a session's tree is given to come down before it is killed.
+  @shutdown_ms 30_000
 
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts), do: DynamicSupervisor.start_link(__MODULE__, opts, name: __MODULE__)
@@ -411,17 +418,72 @@ defmodule Troupe.Sessions do
       start: {Troupe.Session, :start_link, [opts]},
       type: :supervisor,
       restart: :transient,
-      shutdown: 30_000
+      shutdown: @shutdown_ms
     }
 
     DynamicSupervisor.start_child(__MODULE__, spec)
   end
 
+  @doc """
+  Bring a session's tree down, and answer once it is gone.
+
+  In the calling process: the tree is shut down as `terminate_child/2` would, and killed
+  after the same thirty seconds, but this supervisor is not the one waiting, so it goes on
+  starting and stopping other sessions meanwhile (Decision 855). The tree is `:transient`
+  and its exit is a shutdown, so it is not started again. `Troupe.stop_session/1` is the
+  stop to call: it says so first, and writes the session's last word.
+  """
   @spec stop_session(String.t()) :: :ok | {:error, :not_found}
   def stop_session(session_id) do
     case Troupe.Registry.whereis({:session, session_id}) do
       nil -> {:error, :not_found}
-      pid -> DynamicSupervisor.terminate_child(__MODULE__, pid)
+      pid -> stop(pid)
+    end
+  end
+
+  @doc """
+  Whether a session's tree is being stopped: `Troupe.stop_session/1` holds it from before
+  the session's last word until its tree is gone.
+  """
+  @spec stopping?(String.t()) :: boolean()
+  def stopping?(session_id), do: Troupe.Registry.whereis({:stopping, session_id}) != nil
+
+  @doc """
+  Wait for a tree another caller is stopping to be gone, for as long as a stop may take.
+  """
+  @spec await_down(pid()) :: :ok
+  def await_down(pid) do
+    ref = Process.monitor(pid)
+
+    receive do
+      {:DOWN, ^ref, :process, _pid, _reason} -> :ok
+    after
+      @shutdown_ms + 5_000 ->
+        Process.demonitor(ref, [:flush])
+        :ok
+    end
+  end
+
+  # Whatever `Supervisor.stop/3` exits with — the tree was gone already, another stop
+  # ended it, or it ran past the bound — the monitor says whether it is down.
+  defp stop(pid) do
+    ref = Process.monitor(pid)
+
+    try do
+      Supervisor.stop(pid, :shutdown, @shutdown_ms)
+    catch
+      :exit, _reason -> :ok
+    end
+
+    receive do
+      {:DOWN, ^ref, :process, _pid, _reason} -> :ok
+    after
+      0 ->
+        if Process.alive?(pid), do: Process.exit(pid, :kill)
+
+        receive do
+          {:DOWN, ^ref, :process, _pid, _reason} -> :ok
+        end
     end
   end
 

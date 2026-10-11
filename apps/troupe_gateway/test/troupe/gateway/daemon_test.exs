@@ -455,6 +455,114 @@ defmodule Troupe.Gateway.DaemonTest do
                })
     end
 
+    # Decision 850: a delegation's answer carries the edited brief, another agent, or a word
+    # back, and one the gate cannot take is refused with why while the request waits.
+    test "a delegation's answer carries the brief as edited, and a wrong one says why", context do
+      fake =
+        start_supervised!(
+          {Troupe.LLM.Fake,
+           routes: %{
+             "root" => [
+               {:tools,
+                [
+                  {"delegate",
+                   %{
+                     "agent" => "general",
+                     "goal" => "Write notes.md",
+                     "context" => "none",
+                     "constraints" => "none",
+                     "deliverable" => "a summary",
+                     "do_not" => "none"
+                   }}
+                ]},
+               {:text, "root done"}
+             ],
+             "general" => [
+               {:tools,
+                [
+                  {"finish",
+                   %{
+                     "summary" => "wrote it",
+                     "ran" => "none",
+                     "passed" => "none",
+                     "unverified" => "none",
+                     "needs" => "none"
+                   }}
+                ]}
+             ]
+           }},
+          id: {Troupe.LLM.Fake, System.unique_integer([:positive])}
+        )
+
+      {:ok, session} =
+        Troupe.start_session(
+          workspace: context.workspace,
+          fake: fake,
+          config_overrides: [
+            provider: "fake",
+            auto_approve: true,
+            model: "fake",
+            state_dir: context.state_dir,
+            delegation_ask: ["general"]
+          ]
+        )
+
+      on_exit(fn -> Troupe.stop_session(session.id) end)
+      client = connect(context)
+      {:ok, _} = Client.subscribe(client, "session:#{session.id}")
+
+      {:ok, _} =
+        Client.call(client, "input.send", %{
+          "command_id" => Client.command_id(),
+          "session_id" => session.id,
+          "text" => "delegate it"
+        })
+
+      [asked | _] =
+        fn e -> e.type == "approval_requested" end
+        |> collect_until()
+        |> Enum.filter(&(&1.type == "approval_requested"))
+
+      assert asked.data["delegation"]["agent"] == "general"
+
+      respond =
+        &Map.merge(
+          %{
+            "command_id" => Client.command_id(),
+            "session_id" => session.id,
+            "call_id" => asked.data["call_id"]
+          },
+          &1
+        )
+
+      assert {:error, %Error{message: "invalid_params", data: %{"reason" => reason}}} =
+               Client.call(
+                 client,
+                 "approval.respond",
+                 respond.(%{"decision" => "allow", "brief" => %{"goal" => ""}})
+               )
+
+      assert reason =~ "the brief has no goal"
+
+      assert {:ok, %{"accepted" => true}} =
+               Client.call(
+                 client,
+                 "approval.respond",
+                 respond.(%{
+                   "decision" => "allow",
+                   "brief" => %{"constraints" => "notes.md only"},
+                   "reason" => nil
+                 })
+               )
+
+      started =
+        fn e -> e.type == "delegation_started" end
+        |> collect_until()
+        |> Enum.find(&(&1.type == "delegation_started"))
+
+      assert started.data["brief"]["constraints"] == "notes.md only"
+    end
+
     test "an unknown approval decision names the field", context do
       %{session: session} = start_session(context, [{:text, "hi"}])
       client = connect(context)

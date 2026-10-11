@@ -19,11 +19,23 @@ defmodule Troupe.Sessions.Index do
   at it is a state change nobody asked for, and the clocks start when they leave. The
   whole ladder, from a running turn to the daemon's exit, with every clock's setting:
   [troupe-daemon](../../../../troupe_daemon/README.md#how-long-it-stays-up).
+
+  None of it waits on a session (Decision 848). The sweep asks the sessions how they are
+  from a task and decides here, from the answers, which to stop; a stop runs in a task of
+  its own, and a session being stopped reads as dormant until its tree is gone. A read is
+  answered from a task too, since a listing asks every live session's summary.
+
+  The state directory is more than one (Decision 855): the platform's, the one the
+  person's `config.yaml` names, and every one a session it was told of was started with,
+  since a session's log is wherever its config put it. A dormant session's row is read
+  from its log when the log is new here or has changed, by its size and time, and kept
+  between listings otherwise. And an agent slow to answer the sweep is not taken for gone:
+  only its tree's monitor says that.
   """
 
   use GenServer
 
-  alias Troupe.{Events, Paths, Registry, Session}
+  alias Troupe.{Config, Events, Paths, Registry, Session}
   alias Troupe.Protocol.Event
   alias Troupe.Session.{Approvals, Log, Questions, Summary, Watcher}
   alias Troupe.Sessions.Unseen
@@ -46,7 +58,8 @@ defmodule Troupe.Sessions.Index do
           cost: float(),
           created_at: String.t() | nil,
           last_active_at: String.t() | nil,
-          pinned: boolean()
+          pinned: boolean(),
+          state_dir: Path.t() | nil
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -126,6 +139,14 @@ defmodule Troupe.Sessions.Index do
   @spec live_ids() :: [String.t()]
   def live_ids, do: GenServer.call(__MODULE__, :live_ids)
 
+  @doc """
+  Every state directory sessions are kept under, as far as this daemon knows (Decision
+  855): the platform's, the one `config.yaml` named when it started, and each one a session
+  it was told of was started with. Where a session that is not running is looked for.
+  """
+  @spec roots() :: [Path.t()]
+  def roots, do: GenServer.call(__MODULE__, :roots)
+
   @doc "Workspaces this daemon has seen, most recently used first."
   @spec recent_workspaces(pos_integer()) :: [map()]
   def recent_workspaces(limit \\ 20), do: GenServer.call(__MODULE__, {:recent, limit}, 15_000)
@@ -167,15 +188,38 @@ defmodule Troupe.Sessions.Index do
       end)
     if detached_ms != :infinity, do: Process.send_after(self(), :sweep, sweep_ms)
 
+    # Where the sweep, the stops and the reads run, so that this process never waits on one.
+    {:ok, tasks} = Task.Supervisor.start_link()
+
     {:ok,
      %{
        live: %{},
        monitors: %{},
+       tasks: tasks,
+       sweeper: nil,
+       stops: %{},
        state_dir: Keyword.get(opts, :state_dir),
+       configured: configured(opts),
+       roots: MapSet.new(),
+       # A dormant session's row by its log's path, with the stamp it was read at. Written
+       # by the reads' tasks, so public; this process owns it and never reads it.
+       rows: :ets.new(:troupe_session_rows, [:set, :public, read_concurrency: true]),
        idle_ms: idle_ms,
        detached_ms: detached_ms,
        sweep_ms: sweep_ms
      }}
+  end
+
+  # The state directory the person's `config.yaml` names, read once as this starts: a
+  # session started under another one later says so when it is registered. `:user_path` is
+  # the file, for a test. A config that cannot be read names none.
+  defp configured(opts) do
+    case Config.resolve(nil, [], Keyword.take(opts, [:user_path])) do
+      {:ok, config, _layers} -> config.state_dir
+      {:error, _error} -> nil
+    end
+  rescue
+    _ -> nil
   end
 
   @impl GenServer
@@ -199,7 +243,8 @@ defmodule Troupe.Sessions.Index do
     {:noreply,
      state
      |> put_in([:live, session_id], entry)
-     |> put_in([:monitors, ref], session_id)}
+     |> put_in([:monitors, ref], session_id)
+     |> remember(Map.get(meta, :state_dir))}
   end
 
   def handle_cast({:update, session_id, changes}, state) do
@@ -239,17 +284,75 @@ defmodule Troupe.Sessions.Index do
   @impl GenServer
   def handle_info(:sweep, state) do
     Process.send_after(self(), :sweep, state.sweep_ms)
-    {:noreply, Enum.reduce(Map.keys(state.live), state, &sweep_session/2)}
+    {:noreply, start_sweep(state)}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+  def handle_info({:probed, session_id, facts}, state) do
+    {:noreply, sweep_session(state, session_id, facts)}
+  end
+
+  # A task's answer: the sweep's, or a stop's.
+  def handle_info({ref, result}, state) when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, task_done(state, ref, result)}
+  end
+
+  # A tree that is gone drops its entry, unless the session was started again since and the
+  # entry is the new tree's (Decision 855): a command that waited on a stop wakes the
+  # session at once, and its registration may be here before the old tree's monitor is.
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
     case Map.pop(state.monitors, ref) do
-      {nil, _} -> {:noreply, state}
-      {session_id, monitors} -> {:noreply, drop(%{state | monitors: monitors}, session_id)}
+      {nil, _} ->
+        {:noreply, task_done(state, ref, {:exit, reason})}
+
+      {session_id, monitors} ->
+        state = %{state | monitors: monitors}
+
+        if session_id in Map.values(monitors),
+          do: {:noreply, state},
+          else: {:noreply, drop(state, session_id)}
     end
   end
 
+  # State directories a read found gone, forgotten unless a running session is under one.
+  def handle_info({:roots_gone, gone}, state) do
+    used =
+      for {_id, entry} <- state.live, into: MapSet.new(), do: root(Map.get(entry, :state_dir))
+
+    forgotten = MapSet.difference(MapSet.new(gone), used)
+    {:noreply, %{state | roots: MapSet.difference(state.roots, forgotten)}}
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
+
+  # One task asks each session in turn what this process used to ask it, and sends each
+  # answer back as soon as it has it, so the answer is as fresh when it is acted on as it
+  # was. A sweep still asking when the next is due is left to finish: a session slow to
+  # answer delays the sweep after it, and nobody's call. One being stopped is not asked.
+  defp start_sweep(%{sweeper: nil} = state) do
+    index = self()
+
+    case for {id, entry} <- state.live, not stopping?(entry), do: id do
+      [] ->
+        state
+
+      ids ->
+        task =
+          Task.Supervisor.async_nolink(state.tasks, fn ->
+            Enum.each(ids, &send(index, {:probed, &1, probe(&1)}))
+          end)
+
+        %{state | sweeper: task.ref}
+    end
+  end
+
+  defp start_sweep(state), do: state
+
+  defp probe(session_id) do
+    if Events.attached?(session_id),
+      do: :attached,
+      else: {watched?(session_id), agent_state(session_id)}
+  end
 
   # A session with nothing to do for long enough gives its actor tree back. Idleness
   # is asked of the agent rather than inferred from events, because "nothing has been
@@ -258,15 +361,19 @@ defmodule Troupe.Sessions.Index do
   # Not while a client is reading it, whatever the clocks say. Both start again from the
   # sweep after it leaves, so a session read for an hour and left is on the same footing
   # as one that went quiet the moment its reader went.
-  defp sweep_session(session_id, state) do
-    case Map.fetch(state.live, session_id) do
-      :error ->
+  defp sweep_session(state, session_id, facts) do
+    case {Map.fetch(state.live, session_id), facts} do
+      {{:ok, %{stopping: true}}, _facts} ->
         state
 
-      {:ok, entry} ->
-        if Events.attached?(session_id),
-          do: put_in(state.live[session_id], Map.merge(entry, %{idle_since: nil, unwatched_since: nil})),
-          else: sweep_live(state, session_id, watch(entry, session_id), agent_state(session_id))
+      {{:ok, entry}, :attached} ->
+        put_in(state.live[session_id], Map.merge(entry, %{idle_since: nil, unwatched_since: nil}))
+
+      {{:ok, entry}, {watched?, agent}} ->
+        sweep_live(state, session_id, watch(entry, watched?), agent)
+
+      {:error, _facts} ->
+        state
     end
   end
 
@@ -274,7 +381,9 @@ defmodule Troupe.Sessions.Index do
     put_in(state.live[session_id], Map.put(entry, :idle_since, nil))
   end
 
-  defp sweep_live(state, session_id, _entry, :gone), do: drop(state, session_id)
+  # An agent that did not say how it is decides nothing: asked again at the next sweep, on
+  # the clocks it had. A tree that has really gone is dropped by its monitor.
+  defp sweep_live(state, session_id, entry, :unknown), do: put_in(state.live[session_id], entry)
 
   # Idle, or parked on a person: the same here, since neither has anything running to lose.
   defp sweep_live(state, session_id, entry, _idle_or_parked) do
@@ -282,12 +391,58 @@ defmodule Troupe.Sessions.Index do
     entry = Map.put(entry, :idle_since, Map.get(entry, :idle_since) || now)
 
     if due?(state, entry, now) do
-      Troupe.stop_session(session_id)
-      drop(state, session_id)
+      stop(state, session_id, entry)
     else
       put_in(state.live[session_id], entry)
     end
   end
+
+  # In a task, since a tree can take thirty seconds to come down, and marked meanwhile: a
+  # session being stopped is read from its log as dormant, and no sweep asks about it or
+  # stops it again. Its monitor drops it once the tree has gone.
+  defp stop(state, session_id, entry) do
+    task = Task.Supervisor.async_nolink(state.tasks, fn -> stop_session(session_id) end)
+
+    %{
+      state
+      | live: Map.put(state.live, session_id, Map.put(entry, :stopping, true)),
+        stops: Map.put(state.stops, task.ref, session_id)
+    }
+  end
+
+  defp stop_session(session_id) do
+    Troupe.stop_session(session_id)
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  defp task_done(%{sweeper: ref} = state, ref, _result), do: %{state | sweeper: nil}
+
+  defp task_done(state, ref, result) do
+    case Map.pop(state.stops, ref) do
+      {nil, _stops} -> state
+      {session_id, stops} -> stopped(%{state | stops: stops}, session_id, result)
+    end
+  end
+
+  # A stop that did not happen leaves a tree running, which is live again and the next
+  # sweep's to ask about, on a clock started afresh.
+  defp stopped(state, _session_id, :ok), do: state
+
+  defp stopped(state, session_id, _failed) do
+    case Map.fetch(state.live, session_id) do
+      {:ok, %{stopping: true} = entry} ->
+        put_in(
+          state.live[session_id],
+          entry |> Map.delete(:stopping) |> Map.put(:idle_since, nil)
+        )
+
+      _gone_or_new ->
+        state
+    end
+  end
+
+  defp stopping?(entry), do: Map.get(entry, :stopping, false)
 
   # On the long clock whoever is watching, or on the short one once nobody has been
   # watching for that long either.
@@ -301,8 +456,8 @@ defmodule Troupe.Sessions.Index do
   # When the sweep first found nobody watching, so the short clock runs from whichever
   # came later — going quiet, or the last viewer leaving — and a client that reconnects
   # within a sweep or two finds its session where it left it.
-  defp watch(entry, session_id) do
-    if watched?(session_id),
+  defp watch(entry, watched?) do
+    if watched?,
       do: Map.put(entry, :unwatched_since, nil),
       else: Map.put(entry, :unwatched_since, Map.get(entry, :unwatched_since) || now_ms())
   end
@@ -315,15 +470,19 @@ defmodule Troupe.Sessions.Index do
     :exit, _ -> false
   end
 
+  # Unknown, not gone, when the agent does not answer within a snapshot's five seconds or is
+  # not there to ask (Decision 855): one busy past the timeout, or between two restarts of
+  # its Node, is still a running tree, and taken for gone it was dropped from this index,
+  # listed as dormant while it ran, and never swept again.
   defp agent_state(session_id) do
     case Troupe.snapshot(session_id) do
-      %{state: state} when state in [:idle, :done] -> :idle
+      %{state: state} when state in [:idle, :done] -> at_rest(session_id)
       %{state: state} when state in [:acting, :waiting] -> parked_or_busy(session_id)
       %{state: _} -> :busy
-      _ -> :gone
+      _ -> :unknown
     end
   catch
-    :exit, _ -> :gone
+    :exit, _ -> :unknown
   end
 
   # Waiting on a person and on nothing else: the root agent has asked something — an
@@ -354,6 +513,13 @@ defmodule Troupe.Sessions.Index do
 
   defp done_agent?(session_id, path), do: match?(%{state: :done}, Troupe.snapshot(session_id, path))
 
+  # A root at rest while a subagent it started in the background still works (Decision 853)
+  # is not idle: the subagent's end is its next turn, and a sleep would stop it.
+  defp at_rest(session_id) do
+    subagents = Troupe.agent_tree(session_id) -- [Session.root_path()]
+    if Enum.all?(subagents, &done_agent?(session_id, &1)), do: :idle, else: :busy
+  end
+
   defp now_ms, do: System.monotonic_time(:millisecond)
 
   # A session that is no longer running is no longer live, full stop. Its metadata
@@ -363,24 +529,46 @@ defmodule Troupe.Sessions.Index do
     %{state | live: Map.delete(state.live, session_id)}
   end
 
-  @impl GenServer
-  def handle_call({:get, session_id}, _from, state) do
-    {:reply, live(state, session_id) || from_disk(state, session_id), state}
+  # A state directory a session was started with, read from once it is dormant. The
+  # platform's is read anyway.
+  defp remember(state, state_dir) when is_binary(state_dir) and state_dir != "",
+    do: %{state | roots: MapSet.put(state.roots, root(state_dir))}
+
+  defp remember(state, _state_dir), do: state
+
+  # Every state directory a session may be under: this index's own first, the platform's
+  # unless it was given another, then the one `config.yaml` names, if it names one.
+  defp roots(state) do
+    [state.state_dir | Enum.reject([state.configured | MapSet.to_list(state.roots)], &is_nil/1)]
+    |> Enum.map(&root/1)
+    |> Enum.uniq()
   end
 
-  def handle_call({:list, filter}, _from, state) do
-    listed = state |> all() |> apply_filter(filter) |> Enum.map(&(live(state, &1.id, &1) || &1))
-    {:reply, listed, state}
+  # With `/` for `\`, as a glob reads it on every host (`Paths.glob_escape/1`): one
+  # directory spelt two ways is one root, and `File.dir?/1` finds it on Linux too.
+  defp root(state_dir),
+    do: state_dir |> Paths.state_dir() |> String.replace("\\", "/") |> Path.expand()
+
+  @impl GenServer
+  def handle_call({:get, session_id}, from, state) do
+    read(state, from, &(live(&1, session_id) || from_disk(&1, session_id)))
+  end
+
+  def handle_call({:list, filter}, from, state) do
+    read(state, from, fn view ->
+      view |> all() |> apply_filter(filter) |> Enum.map(&(live(view, &1.id, &1) || &1))
+    end)
   end
 
   def handle_call(:live_ids, _from, state) do
-    {:reply, state.live |> Enum.filter(&(elem(&1, 1).state == :active)) |> Enum.map(&elem(&1, 0)),
-     state}
+    {:reply, for({id, %{state: :active}} <- readable(state), do: id), state}
   end
 
-  def handle_call({:recent, limit}, _from, state) do
-    workspaces =
-      state
+  def handle_call(:roots, _from, state), do: {:reply, roots(state), state}
+
+  def handle_call({:recent, limit}, from, state) do
+    read(state, from, fn view ->
+      view
       |> all()
       |> Enum.group_by(& &1.workspace)
       |> Enum.map(fn {workspace, sessions} ->
@@ -392,9 +580,22 @@ defmodule Troupe.Sessions.Index do
       end)
       |> Enum.sort_by(& &1["last_used_at"], :desc)
       |> Enum.take(limit)
-
-    {:reply, workspaces, state}
+    end)
   end
+
+  # Answered from a task, over what this process holds as it is asked: a read goes through
+  # logs on disk and each live session's summary, and neither the next caller nor the sweep
+  # waits on that (Decision 848). A session being stopped is read from its log.
+  defp read(state, from, answer) do
+    view = %{live: readable(state), roots: roots(state), rows: state.rows, index: self()}
+
+    {:ok, _pid} =
+      Task.Supervisor.start_child(state.tasks, fn -> GenServer.reply(from, answer.(view)) end)
+
+    {:noreply, state}
+  end
+
+  defp readable(state), do: Map.reject(state.live, fn {_id, entry} -> stopping?(entry) end)
 
   # A running session's entry, with the approvals and questions it has open read when it
   # is asked for: from the session's own summary projection, which already follows every
@@ -404,8 +605,8 @@ defmodule Troupe.Sessions.Index do
   # way: `listed` is the listing's own scan of that log, already done, and `get` reads it
   # now, only when nobody is attached (`Unseen`). A turn that failed is the listing's scan
   # alone to say: a session stops on one, so `get` finds it on disk.
-  defp live(state, session_id, listed \\ nil) do
-    case Map.fetch(state.live, session_id) do
+  defp live(view, session_id, listed \\ nil) do
+    case Map.fetch(view.live, session_id) do
       {:ok, entry} ->
         entry
         |> put_asked(Summary.snapshot(session_id))
@@ -444,11 +645,11 @@ defmodule Troupe.Sessions.Index do
   # Live entries win: a session with a running tree knows more about itself than its
   # log's first event does. What nobody has seen of it, and a turn that failed, are the
   # log's to say either way.
-  defp all(state) do
-    disk = Map.new(scan_disk(state), &{&1.id, &1})
+  defp all(view) do
+    disk = Map.new(scan_disk(view), &{&1.id, &1})
 
     disk
-    |> Map.merge(state.live, fn _id, from_disk, live ->
+    |> Map.merge(view.live, fn _id, from_disk, live ->
       Map.merge(live, Map.take(from_disk, [:unseen, :failed]))
     end)
     |> Map.values()
@@ -476,29 +677,78 @@ defmodule Troupe.Sessions.Index do
   end
 
   # A dormant session is only its log, so its metadata comes from the log's own first
-  # and last events rather than from anything this process remembered.
-  defp scan_disk(state) do
-    root = state.state_dir |> Paths.state_dir() |> Paths.glob_escape()
+  # and last events rather than from anything this process remembered: in every state
+  # directory a session may be under (Decision 855).
+  defp scan_disk(view) do
+    found = for root <- present(view), path <- logs(root, "*"), do: {root, path}
 
-    [root, "sessions", "*", "*", "events.jsonl"]
-    |> Path.join()
-    |> Path.wildcard()
-    |> Enum.flat_map(&meta_from_log/1)
+    forget_rows(view.rows, MapSet.new(found, &elem(&1, 1)))
+    Enum.flat_map(found, fn {root, path} -> dormant(view, root, path) end)
   end
 
   # The id is a name, not a pattern: escaped, so `*` finds no session rather than the
   # first one on disk (#97).
-  defp from_disk(state, session_id) do
-    root = state.state_dir |> Paths.state_dir() |> Paths.glob_escape()
-
-    [root, "sessions", "*", Paths.glob_escape(session_id), "events.jsonl"]
-    |> Path.join()
-    |> Path.wildcard()
-    |> Enum.flat_map(&meta_from_log/1)
-    |> List.first()
+  defp from_disk(view, session_id) do
+    Enum.find_value(present(view), fn root ->
+      root
+      |> logs(Paths.glob_escape(session_id))
+      |> Enum.find_value(&(view |> dormant(root, &1) |> List.first()))
+    end)
   end
 
-  defp meta_from_log(path) do
+  defp logs(root, id_pattern) do
+    [Paths.glob_escape(root), "sessions", "*", id_pattern, "events.jsonl"]
+    |> Path.join()
+    |> Path.wildcard()
+  end
+
+  # The state directories that are there; this process is told of the ones that are not.
+  defp present(view) do
+    {present, gone} = Enum.split_with(view.roots, &File.dir?/1)
+    if gone != [], do: send(view.index, {:roots_gone, gone})
+    present
+  end
+
+  # A dormant session's row, read from its log only when the log is new here or has changed
+  # since it was read: by its size and time, and by the `seen` mark beside it, whose value
+  # is read each time, a few bytes. A listing of thousands of dormant sessions reads none
+  # of their logs again (Decision 855). Whether a client is attached is asked every time,
+  # since that is not on disk.
+  defp dormant(view, root, path) do
+    mark = path |> Path.dirname() |> Unseen.mark()
+    stamp = {file_stamp(path), mark}
+
+    rows =
+      case :ets.lookup(view.rows, path) do
+        [{^path, ^stamp, rows}] ->
+          rows
+
+        _changed_or_new ->
+          rows = meta_from_log(root, path, mark)
+          :ets.insert(view.rows, {path, stamp, rows})
+          rows
+      end
+
+    Enum.map(rows, &%{&1 | unseen: Unseen.unseen_now(&1.id, &1.unseen)})
+  end
+
+  defp file_stamp(path) do
+    case File.stat(path, time: :posix) do
+      {:ok, %File.Stat{size: size, mtime: mtime}} -> {size, mtime}
+      {:error, _} -> nil
+    end
+  end
+
+  # The rows of logs a listing no longer finds: an erased session's, or one whose directory
+  # went.
+  defp forget_rows(rows, found) do
+    rows
+    |> :ets.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+    |> Enum.reject(&MapSet.member?(found, &1))
+    |> Enum.each(&:ets.delete(rows, &1))
+  end
+
+  defp meta_from_log(root, path, mark) do
     case Log.read_file(path) do
       [] ->
         []
@@ -521,12 +771,13 @@ defmodule Troupe.Sessions.Index do
           state: :dormant,
           status: status_from_log(events),
           failed: failed_from_log(events),
-          unseen: Unseen.of(id, Path.dirname(path), fn -> events end),
+          unseen: Unseen.since_mark(mark, fn -> events end),
           tokens: total_tokens(events),
           cost: total_cost(events),
           created_at: first.ts,
           last_active_at: last.ts,
-          pinned: false
+          pinned: false,
+          state_dir: root
         }
 
         [meta |> put_asked(root_asked(events)) |> waiting()]

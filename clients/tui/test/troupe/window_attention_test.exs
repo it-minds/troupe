@@ -296,7 +296,15 @@ defmodule Troupe.WindowAttentionTest do
         auto_approve: false,
         scripts: %{
           "root" => [
-            {:tool, "delegate", %{"agent" => "general", "task" => "write the note"}},
+            {:tool, "delegate",
+             %{
+               "agent" => "general",
+               "goal" => "write the note",
+               "context" => "none",
+               "constraints" => "none",
+               "deliverable" => "say it is written",
+               "do_not" => "none"
+             }},
             {:text_and_tools, "The note is written.", []}
           ],
           "general" => [

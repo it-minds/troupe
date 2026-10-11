@@ -16,7 +16,7 @@ defmodule Troupe.Agent.BudgetQuestionTest do
   alias Troupe.Session.Log
 
   defp tools(n), do: List.duplicate({:tools, [{"todo_read", %{}}]}, n)
-  defp finish(summary), do: {:text_and_tools, "done", [{"finish", %{"summary" => summary}}]}
+  defp finish(summary), do: {:text_and_tools, "done", [{"finish", finished(summary)}]}
 
   defp run(context, steps, overrides, opts \\ []) do
     %{session: session, fake: fake} =

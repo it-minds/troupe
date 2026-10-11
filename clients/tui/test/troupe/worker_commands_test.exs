@@ -82,6 +82,19 @@ defmodule Troupe.WorkerCommandsTest do
     assert File.read!(Path.join(ws, "after.txt")) == "still connected"
   end
 
+  # D115: `/upload` asks a file's size before it reads it, so one the daemon would refuse
+  # is never read whole. The answer is the size against the limit `initialize` gave.
+  test "a file's size is weighed against what the daemon takes before it is read" do
+    {sid, _, _} = start_session!(script: [])
+    eventually(fn -> Client.capability(sid).up? end)
+
+    assert Client.upload_fits(sid, 1_024) == :ok
+    assert {:error, reason} = Client.upload_fits(sid, 20 * 1024 * 1024)
+    assert reason =~ "20.0 MiB"
+    assert reason =~ "the daemon takes at most 16.0 MiB in one message"
+    assert reason =~ "nothing was sent"
+  end
+
   test "fs.list says which entries are directories, the way the files panel needs" do
     ws = tmp_workspace(%{"lib/a.ex" => "defmodule A, do: nil\n", "README.md" => "# hi\n"})
     {sid, _, _} = start_session!(workspace: ws, script: [])
@@ -203,14 +216,37 @@ defmodule Troupe.WorkerCommandsTest do
       refute File.exists?(Path.join(ws, "big.txt"))
       assert Client.capability(sid).up?
     end
+
+    # D115: the same file, which this user may not read. The size is asked first, so the
+    # answer is that it is too large, not that it could not be read: nothing read it.
+    test "/upload refuses a file larger than the daemon takes before reading it" do
+      {sid, _, ws} = start_session!(script: [])
+      eventually(fn -> Client.capability(sid).up? end)
+
+      path = Path.join(tmp_workspace(), "big.txt")
+      File.write!(path, String.duplicate("a", 20 * 1024 * 1024))
+      File.chmod!(path, 0o200)
+      on_exit(fn -> File.chmod(path, 0o600) end)
+
+      # A user every file is readable to (root, or Windows) cannot show it this way.
+      if match?({:error, _}, File.read(path)) do
+        {pid, session} = start_tui(sid)
+        type(pid, "/upload " <> path)
+        press(pid, "enter")
+
+        eventually(fn -> screen_text(pid, session) =~ "nothing was sent" end)
+        refute screen_text(pid, session) =~ "permission denied"
+        refute File.exists?(Path.join(ws, "big.txt"))
+      end
+    end
   end
 
   # What a payload too large for an event becomes. The blob is put where the daemon keeps
   # them, as a large tool output would have been, and read back by range.
   test "blob.get asks for a byte range and reads the bytes the daemon sends" do
     {sid, _, _} = start_session!(script: [])
-    workspace = Troupe.get_session(sid).workspace
-    digest = Troupe.Session.Blobs.store(sid, workspace, "0123456789")
+    session = Troupe.get_session(sid)
+    digest = Troupe.Session.Blobs.store(sid, session.workspace, session.state_dir, "0123456789")
 
     assert {:ok, %{"data" => data, "size" => 10}} = Worker.blob(sid, digest, 2, 3)
     assert Base.decode64!(data) == "234"

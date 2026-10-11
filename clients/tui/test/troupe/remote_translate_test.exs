@@ -239,6 +239,44 @@ defmodule Troupe.RemoteTranslateTest do
     assert [%{text: "write tests", status: :in_progress, id: "t1"}] = todos.data.items
   end
 
+  # A child in the background (root Decision 853): its delegation says so, its stop says who
+  # stopped it, and its end handed to its parent is a line rather than the person's words.
+  test "a child in the background, its stop and its end handed to its parent are lines" do
+    started = %{
+      "call_id" => "c1",
+      "agent" => "general",
+      "child_path" => ["root", "general#1"],
+      "task" => "Goal: count",
+      "wait" => false
+    }
+
+    assert [%{type: :remote_note, data: %{text: "delegated to root/general#1, in the background"}}] =
+             translate(durable("delegation_started", started))
+
+    stopped = %{
+      "reason" => "stopped",
+      "by" => ["root"],
+      "summary" => "It was stopped by its parent"
+    }
+
+    assert [
+             %{type: :remote_note, data: %{text: "stopped by its parent"}},
+             %{type: :agent_state, data: %{to: :done, reason: "stopped"}}
+           ] = translate(durable("agent_done", stopped, %{"agent" => ["root", "general#1"]}))
+
+    handed = %{
+      "source" => "subagent",
+      "text" => "[You stopped root/general#1 before it finished. What it had done:]",
+      "child_path" => ["root", "general#1"],
+      "ended" => "stopped"
+    }
+
+    assert [%{type: :remote_note, data: %{text: text}}] = translate(durable("user_input", handed))
+
+    assert text ==
+             "root/general#1, in the background: stopped by its parent; its end reached its parent"
+  end
+
   test "lifecycle events become state and notes" do
     assert [%{type: :agent_state, data: %{to: :thinking}}] =
              translate(durable("llm_request", %{"model" => "m"}))

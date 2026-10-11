@@ -19,13 +19,14 @@ defmodule Troupe.CLI.Daemon do
   Run the daemon binary with `args` and return its exit status.
 
   `opts[:reaper]` is the reaper to run it under (`{:ok, path}`), or `:none`: by default the
-  reaper on Windows and none elsewhere.
+  reaper on Windows and none elsewhere. `open` runs under none, whatever it is given: the
+  daemon it starts is to outlive it (D115).
   """
   @spec run([String.t()], keyword()) :: non_neg_integer()
   def run(args, opts \\ []) do
     case command() do
       {:ok, path} ->
-        exec(path, args, Keyword.get_lazy(opts, :reaper, &reaper/0))
+        exec(path, args, reaper(args, opts))
 
       :error ->
         IO.puts(:stderr, missing())
@@ -72,7 +73,7 @@ defmodule Troupe.CLI.Daemon do
     end
   end
 
-  # On Windows the daemon, and whatever else is asked of it, runs under the reaper
+  # On Windows the daemon, and whatever else is asked of it but `open`, runs under the reaper
   # (`Troupe.Reaper`), in a job that ends when this VM does, however it does (#231, TUI
   # Decision 130). There Ctrl-C is a key while troupe runs, which `Troupe.CLI.Interrupt`
   # reads and ends troupe with, and a daemon started through a batch file gets no signal
@@ -112,6 +113,15 @@ defmodule Troupe.CLI.Daemon do
   rescue
     error in ErlangError -> cannot_run(path, error)
   end
+
+  # `open` starts the daemon if none is answering, detached, and returns. Under the reaper
+  # that daemon was in the reaper's job, which ends everything in it once the command it
+  # ran has exited: `troupe daemon open` said the daemon was running and left none, where
+  # `troupe-daemon open` kept it (D115). So `open` runs as a person runs it, and its daemon
+  # starts as a client starts one (Decision 802). A Ctrl-C while it waits ends troupe and
+  # leaves `open` to finish on its own, which it does within its own timeouts.
+  defp reaper(["open" | _], _opts), do: :none
+  defp reaper(_args, opts), do: Keyword.get_lazy(opts, :reaper, &reaper/0)
 
   defp reaper do
     with {:win32, _} <- :os.type(),

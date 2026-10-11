@@ -6,6 +6,9 @@
     "agent": {
       "type": "string"
     },
+    "brief": {
+      "type": "object"
+    },
     "call_id": {
       "type": "string"
     },
@@ -17,6 +20,9 @@
     },
     "task": {
       "type": "string"
+    },
+    "wait": {
+      "type": "boolean"
     }
   },
   "required": [

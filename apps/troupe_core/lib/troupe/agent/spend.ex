@@ -51,6 +51,32 @@ defmodule Troupe.Agent.Spend do
     }
   end
 
+  @doc """
+  What the agent at `path` and every agent under it have spent, read off the log as each
+  agent folds its own calls: each reply, a compaction's summariser and a call given up on.
+  How a subagent still at work, or one its parent stopped, is costed (Decision 853): its
+  own sum dies with its process.
+  """
+  @spec of([Troupe.Protocol.Event.t()], [String.t()]) :: t()
+  def of(events, path) do
+    for %{agent: agent, type: type, data: data} <- events,
+        is_list(agent) and List.starts_with?(agent, path),
+        reduce: %__MODULE__{} do
+      spend -> logged(spend, type, data)
+    end
+  end
+
+  defp logged(spend, "llm_response", data), do: logged_call(spend, data)
+  defp logged(spend, "compacted", %{"usage" => %{}} = data), do: logged_call(spend, data)
+
+  defp logged(spend, type, %{"stopped" => %{} = stopped}) when type in ["llm_error", "cancelled"],
+    do: logged_call(spend, stopped)
+
+  defp logged(spend, _type, _data), do: spend
+
+  defp logged_call(spend, data),
+    do: call(spend, Usage.from_json(data["usage"]), get_in(data, ["gateway", "cost_micros"]))
+
   @doc "As the event that ends a turn carries it, under `turn`."
   @spec to_json(t()) :: map()
   def to_json(%__MODULE__{} = spend) do

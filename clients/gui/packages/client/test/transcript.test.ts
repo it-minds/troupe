@@ -5,7 +5,22 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { addPending, dropPending, emptyTranscript, fold, isBusy, loopEnding, needsYou, openApprovals, openQuestions, rootState, settleLoop } from "../src/index.js";
+import {
+  addPending,
+  BRIEF_PARTS,
+  dropPending,
+  emptyTranscript,
+  FINISH_PARTS,
+  fold,
+  isBusy,
+  loopEnding,
+  needsYou,
+  openApprovals,
+  openQuestions,
+  partsOf,
+  rootState,
+  settleLoop,
+} from "../src/index.js";
 import type { DurableEvent, Entry, TranscriptState, TroupeEvent } from "../src/index.js";
 
 let seq = 0;
@@ -44,6 +59,126 @@ describe("the transcript fold", () => {
     assert.equal(tool.content, "defmodule A");
     assert.equal(state.profile, "dev");
     assert.equal(state.costMicros, 250);
+  });
+
+  // A brief and a finish have parts (troupe Decision 847), which a client shows under their
+  // names; a delegation from before briefs had them has its task alone.
+  it("keeps a delegation's brief as its parts, in order, and reads a finish's the same way", () => {
+    seq = 0;
+    const brief = { do_not: "none", goal: "find the retry", context: "lib/", constraints: "read only", deliverable: "a path" };
+    const state = foldAll([
+      durable("delegation_started", { call_id: "d1", agent: "explore", child_path: ["root", "explore#1"], task: "Goal: find the retry", brief }),
+      durable("delegation_started", { call_id: "d2", agent: "explore", child_path: ["root", "explore#2"], task: "find it" }),
+    ]);
+
+    const [shaped, old] = state.entries as Array<Extract<Entry, { kind: "delegation" }>>;
+    assert.deepEqual(
+      shaped!.brief.map(([name]) => name),
+      ["goal", "context", "constraints", "deliverable", "do_not"],
+    );
+    assert.deepEqual(old!.brief, []);
+    assert.equal(old!.task, "find it");
+
+    assert.deepEqual(partsOf({ summary: "done", ran: "none", unverified: "the tests", extra: 1 }, FINISH_PARTS), [
+      ["summary", "done"],
+      ["ran", "none"],
+      ["unverified", "the tests"],
+    ]);
+    assert.deepEqual(partsOf({ agent: "explore", task: "old" }, BRIEF_PARTS), []);
+  });
+
+  // A delegation a person asked to see first (troupe Decision 850) asks with what the gate
+  // shows, and its decision says what the answer changed.
+  it("keeps what a delegation's gate shows, and what its answer changed", () => {
+    seq = 0;
+    const delegation = {
+      agent: "general",
+      definition: { name: "general", layer: "builtin", path: "/a/general.md", description: "Edits." },
+      brief: { goal: "g", context: "c", constraints: "k", deliverable: "d", do_not: "n" },
+      tools: [{ name: "shell", permission: "ask" }],
+      budget_share: 0.5,
+      depth: 1,
+      max_depth: 3,
+      agents: [{ name: "explore", description: "Reads." }],
+    };
+    const asked = foldAll([
+      durable("approval_requested", { call_id: "c7", tool: "delegate", args: { agent: "general" }, agent_path: ["root"], delegation }),
+      durable("approval_requested", { call_id: "c8", tool: "write_file", args: { path: "a" }, agent_path: ["root"] }),
+    ]);
+
+    const [gate, plain] = openApprovals(asked);
+    assert.equal(gate!.delegation!.agent, "general");
+    assert.equal(gate!.delegation!.budgetShare, 0.5);
+    assert.equal(gate!.delegation!.maxDepth, 3);
+    assert.deepEqual(gate!.delegation!.brief, delegation.brief);
+    assert.deepEqual(gate!.delegation!.tools, [{ name: "shell", permission: "ask" }]);
+    assert.equal(gate!.delegation!.definition.layer, "builtin");
+    assert.equal(plain!.delegation, undefined);
+
+    const decided = fold(
+      asked,
+      durable("approval_decided", { call_id: "c7", tool: "delegate", args: {}, agent_path: ["root"], decision: "allow", agent: "explore", edited: ["constraints"] }),
+    );
+    const done = decided.entries.find((e) => e.kind === "approval" && e.callId === "c7") as Extract<Entry, { kind: "approval" }>;
+    assert.equal(done.decision, "allow");
+    assert.deepEqual(done.answered, { agent: "explore", edited: ["constraints"] });
+  });
+
+  // A child in the background (troupe Decision 853): its delegation says so, its stop says who
+  // stopped it, and its end handed to its parent is a line, never the person's words.
+  it("shows a child in the background, its stop, and its end handed to its parent", () => {
+    seq = 0;
+    const child = ["root", "general#1"];
+    const state = foldAll([
+      durable("delegation_started", { call_id: "d1", agent: "general", child_path: child, task: "Goal: count", wait: false }),
+      durable("delegation_started", { call_id: "d2", agent: "explore", child_path: ["root", "explore#2"], task: "Goal: look" }),
+      durable("agent_done", { reason: "stopped", by: ["root"], summary: "It was stopped by its parent" }, child),
+      durable("user_input", { source: "subagent", text: "[You stopped root/general#1 before it finished. What it had done:]", child_path: child, ended: "stopped" }),
+    ]);
+
+    const [background, waited] = state.entries.filter((e): e is Extract<Entry, { kind: "delegation" }> => e.kind === "delegation");
+    assert.equal(background!.background, true);
+    assert.equal(waited!.background, false);
+
+    const lines = state.entries.filter((e): e is Extract<Entry, { kind: "system" }> => e.kind === "system").map((e) => e.text);
+    assert.deepEqual(lines, ["stopped by its parent", "root/general#1, in the background: stopped by its parent; its end reached its parent"]);
+    assert.equal(state.entries.filter((e) => e.kind === "user").length, 0);
+    assert.equal(state.agentState["general#1"], "done");
+  });
+
+  // The child's first message is that brief, from the agent that delegated it: never a
+  // person's turn, in whichever order the two are written (troupe Decision 852).
+  it("folds a subagent's first message into the brief it was handed, in either order", () => {
+    seq = 0;
+    const brief = { goal: "find the retry", context: "lib/", constraints: "read only", deliverable: "a path", do_not: "none" };
+    const task = "Goal: find the retry\n\nContext: lib/";
+    const delegated = durable("delegation_started", { call_id: "d1", agent: "explore", child_path: ["root", "explore#1"], task, brief });
+    const first = durable("user_input", { source: "user", text: task }, ["root", "explore#1"]);
+
+    for (const events of [
+      [delegated, first],
+      [first, delegated],
+    ]) {
+      const state = foldAll(events);
+      assert.equal(state.entries.filter((e) => e.kind === "user").length, 0);
+      const handed = state.entries.find((e): e is Extract<Entry, { kind: "brief" }> => e.kind === "brief")!;
+      assert.deepEqual(handed.agent, ["root", "explore#1"]);
+      assert.deepEqual(handed.from, ["root"]);
+      assert.equal(handed.child, "explore");
+      assert.equal(handed.seq, first.seq);
+      assert.deepEqual(
+        handed.parts.map(([name]) => name),
+        ["goal", "context", "constraints", "deliverable", "do_not"],
+      );
+    }
+
+    // What a person sends a subagent is theirs, and the root's input is never a brief.
+    seq = 0;
+    const own = foldAll([durable("user_input", { source: "user", text: "Goal: mine" }), durable("user_input", { source: "user", text: "hi" }, ["root", "explore#1"])]);
+    assert.deepEqual(
+      own.entries.map((e) => e.kind),
+      ["user", "user"],
+    );
   });
 
   it("is the same list whether or not the ephemerals arrived", () => {

@@ -18,8 +18,9 @@ defmodule Troupe.Tools.RememberTest do
     %{session: first, fake: fake} =
       start_session(context,
         steps: [
-          {:tools, [{"remember", %{"section" => "note", "text" => "the ledger is a fold over the log"}}]},
-          {:text_and_tools, "Noted.", [{"finish", %{"summary" => "noted"}}]}
+          {:tools,
+           [{"remember", %{"kind" => "note", "claim" => "the ledger is a fold over the log"}}]},
+          {:text_and_tools, "Noted.", [{"finish", finished("noted")}]}
         ]
       )
 
@@ -36,7 +37,7 @@ defmodule Troupe.Tools.RememberTest do
            "a note alone is not a built brief"
 
     %{session: second, fake: fake2} =
-      start_session(context, steps: [{:text_and_tools, "hi", [{"finish", %{"summary" => "ok"}}]}])
+      start_session(context, steps: [{:text_and_tools, "hi", [{"finish", finished("ok")}]}])
 
     :ok = Troupe.subscribe(second.id)
     Troupe.send_input(second.id, "hello")
@@ -54,9 +55,11 @@ defmodule Troupe.Tools.RememberTest do
            ] = Facts.recall(context.workspace, query: "ledger")
   end
 
-  test "a curated section stamps the brief, and memory: false keeps it out of the prompt",
+  test "a librarian's facts, stamped as checked, are a built brief, and memory: false keeps it out of the prompt",
        context do
-    assert :ok = Memory.put_section(context.workspace, "commands", "mix test")
+    command = %{kind: "command", claim: "mix test"}
+    {:ok, _} = Facts.put(context.workspace, command, %{by: "librarian"})
+    assert :ok = Memory.checked(context.workspace)
     brief = Memory.brief(context.workspace)
     assert brief.built_at != nil
     assert Troupe.Memory.section(brief, "Commands") == "- mix test"
@@ -81,7 +84,7 @@ defmodule Troupe.Tools.RememberTest do
     config = Troupe.Config.load(context.workspace)
 
     # Nothing but a note, and the librarian ends its turn without a word written.
-    :ok = Memory.note(context.workspace, "root", "the ledger is a fold over the log")
+    {:ok, _} = note(context.workspace, "the ledger is a fold over the log")
     assert Memory.status(context.workspace, config) == :stale
     before = Memory.brief(context.workspace).sections
 
@@ -94,7 +97,7 @@ defmodule Troupe.Tools.RememberTest do
     write_file(context, ".troupe/memory.md", "## Overview\nWritten by hand.\n")
     assert Memory.status(context.workspace, config) == :stale
 
-    librarian!(context, [{:tools, [{"finish", %{"summary" => "nothing to change"}}]}])
+    librarian!(context, [{:tools, [{"finish", finished("nothing to change")}]}])
     assert Memory.status(context.workspace, config) == :fresh
     brief = Memory.brief(context.workspace)
     assert Troupe.Memory.section(brief, "Overview") == "- Written by hand."
@@ -210,7 +213,7 @@ defmodule Troupe.Tools.RememberTest do
     assert :ok = Memory.checked(context.workspace)
     refute File.exists?(Memory.path(context.workspace))
 
-    :ok = Memory.note(context.workspace, "root", "a note")
+    {:ok, _} = note(context.workspace, "a note")
     text = Troupe.Memory.render(Memory.brief(context.workspace))
     assert :ok = Memory.checked(context.workspace)
 
@@ -239,7 +242,7 @@ defmodule Troupe.Tools.RememberTest do
       assert Memory.path(dir) == Path.join(repo, ".troupe/memory.md")
     end
 
-    assert :ok = Memory.note(worktree, "root", "written from the worktree")
+    assert {:ok, _} = note(worktree, "written from the worktree")
     assert File.read!(Path.join(repo, ".troupe/memory.md")) =~ "written from the worktree"
     refute File.exists?(Path.join(worktree, ".troupe/memory.md"))
   end
@@ -303,7 +306,7 @@ defmodule Troupe.Tools.RememberTest do
       assert Memory.path(ws) == Path.join(ws, ".troupe/memory.md")
       assert Memory.brief(ws) == nil
       assert Memory.prompt_section(ws, nil) == ""
-      assert :ok = Memory.note(ws, "root", "written from forged-#{n}")
+      assert {:ok, _} = note(ws, "written from forged-#{n}")
       assert File.read!(Path.join(ws, ".troupe/memory.md")) =~ "written from forged-#{n}"
       assert :ok = Memory.forget(ws)
       refute File.exists?(Path.join(ws, ".troupe/memory.md"))
@@ -325,8 +328,7 @@ defmodule Troupe.Tools.RememberTest do
     File.ln_s!(outside, linked)
 
     assert Memory.brief(context.workspace) == nil
-    assert {:error, "not written: " <> _} = Memory.note(context.workspace, "root", "a note")
-    assert {:error, _} = Memory.put_section(context.workspace, "commands", "mix test")
+    assert {:error, "not written: " <> _} = note(context.workspace, "a note")
     assert :ok = Memory.forget(context.workspace)
     assert {:ok, _target} = File.read_link(linked)
     assert File.read!(outside) == "## Overview\na stand-in for a private key\n"
@@ -337,25 +339,30 @@ defmodule Troupe.Tools.RememberTest do
     File.ln_s!(elsewhere, Path.join(other, ".troupe"))
 
     assert Memory.brief(other) == nil
-    assert {:error, _} = Memory.note(other, "root", "a note")
+    assert {:error, _} = note(other, "a note")
     assert :ok = Memory.forget(other)
     assert File.ls!(elsewhere) == ["memory.md"]
     assert File.read!(outside) == "## Overview\na stand-in for a private key\n"
   end
 
-  test "remember refuses an unknown section and empty text", context do
+  # The form from before facts kept working for one release (Decision 839) and is refused now,
+  # naming the form that replaced it (Decision 854).
+  test "remember refuses section and text, naming kind, claim and anchors", context do
     %{session: session} = start_session(context, steps: [])
     ctx = ctx(session, context)
 
-    assert {:error, "unknown section" <> _} =
-             Remember.run(%{"section" => "todo", "text" => "x"}, ctx)
+    for args <- [
+          %{"section" => "overview", "text" => "A thing."},
+          %{"section" => "note"},
+          %{"text" => "a note"}
+        ] do
+      assert {:error, "remember no longer takes section and text" <> _ = why} =
+               Remember.run(args, ctx)
 
-    assert {:error, "nothing to remember" <> _} =
-             Remember.run(%{"section" => "note", "text" => "  "}, ctx)
+      assert why =~ "kind" and why =~ "claim" and why =~ "anchors"
+    end
 
-    # The older form writes facts (Decision 839).
-    assert {:ok, "remembered 1 overview fact(s)" <> _} =
-             Remember.run(%{"section" => "overview", "text" => "A thing."}, ctx)
+    assert Facts.list(context.workspace) == []
   end
 
   # A librarian session on the test's workspace, told what a client tells it of a stale
@@ -371,6 +378,10 @@ defmodule Troupe.Tools.RememberTest do
       10_000 -> flunk("the librarian did not come to rest")
     end
   end
+
+  # A note an agent of the session's left, as `remember` writes one.
+  defp note(workspace, claim),
+    do: Facts.put(workspace, %{kind: "note", claim: claim}, %{by: "agent:root"})
 
   defp git_init!(dir) do
     {_, 0} = System.cmd("git", ["init", "-q", "--initial-branch", "main"], cd: dir)

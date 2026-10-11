@@ -15,6 +15,9 @@
     "call_id": {
       "type": "string"
     },
+    "delegation": {
+      "type": "object"
+    },
     "tool": {
       "type": "string"
     }

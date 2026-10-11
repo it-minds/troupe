@@ -62,8 +62,50 @@ export type Entry =
       resolvedBy: string | undefined;
       /** Set when it ended unanswered: its call was cancelled, or timed out while it waited. */
       closed: boolean;
+      /**
+       * A delegation a person asked to see first (troupe Decision 850): what the gate
+       * shows. Absent from every other approval.
+       */
+      delegation?: DelegationGate;
+      /** For a delegation, what its answer carried: the agent it went to, the parts edited, the word back. */
+      answered?: { agent?: string; edited?: string[]; reason?: string };
     }
-  | { kind: "delegation"; seq: number; agent: string[]; callId: string; child: string; task: string }
+  /**
+   * A subagent handed a brief: `task` is its first message, the parts under their names,
+   * and `brief` the parts themselves, absent from a log written before briefs had them
+   * (troupe Decision 847).
+   */
+  | {
+      kind: "delegation";
+      seq: number;
+      agent: string[];
+      callId: string;
+      child: string;
+      /** The child's agent path, where its brief arrives as its first message. */
+      childPath: string[];
+      task: string;
+      brief: Array<[string, string]>;
+      /**
+       * Started in the background (`wait: false`, troupe Decision 853): its call answered at
+       * once, and its end reaches its parent later, once, as a `user_input` from `subagent`.
+       */
+      background: boolean;
+    }
+  /**
+   * That brief as the subagent was handed it, its first message: from the agent that
+   * delegated, not from a person, and laid out as its parts under their names (troupe
+   * Decision 852). `parts` is empty for a log written before briefs had them.
+   */
+  | {
+      kind: "brief";
+      seq: number;
+      agent: string[];
+      /** The agent that delegated it. */
+      from: string[];
+      child: string;
+      parts: Array<[string, string]>;
+      text: string;
+    }
   /**
    * A question for a person: the agent's `ask_user`, or the harness asking whether to
    * spend more once a budget is gone (`asked: "budget"`, troupe-remote Decision 660).
@@ -235,6 +277,20 @@ export const emptyTranscript: TranscriptState = {
 /** The root agent is the one-element path; everything deeper is a subagent. */
 export const isRoot = (agent: string[]): boolean => agent.length <= 1;
 const pathKey = (agent: string[]): string => agent.slice(1).join("/");
+const samePath = (a: string[], b: string[]): boolean => a.length === b.length && a.every((p, i) => p === b[i]);
+
+/** The brief a delegation handed its child, as the child's first message at `seq`. */
+function briefOf(delegation: Extract<Entry, { kind: "delegation" }>, seq: number): Extract<Entry, { kind: "brief" }> {
+  return {
+    kind: "brief",
+    seq,
+    agent: delegation.childPath,
+    from: delegation.agent,
+    child: delegation.child,
+    parts: delegation.brief,
+    text: delegation.task,
+  };
+}
 /** Whether `agent` is the agent at `path` or one under it. */
 const within = (agent: string[], path: string[]): boolean => agent.length >= path.length && path.every((part, i) => agent[i] === part);
 
@@ -244,6 +300,75 @@ function textOf(message: unknown): string {
   // The model's thinking is not its answer, in either spelling (troupe-remote Decision 658).
   for (const block of content) if (typeof block.text === "string" && block.type !== "thinking" && block.type !== "reasoning") out += block.text;
   return out;
+}
+
+/**
+ * A brief's five parts and a finish's, in the order they are read (troupe Decision 847): a
+ * `delegate` call's args and `delegation_started.brief` carry the first, a `finish` call's
+ * args the second.
+ */
+export const BRIEF_PARTS = ["goal", "context", "constraints", "deliverable", "do_not"] as const;
+export const FINISH_PARTS = ["summary", "changed", "ran", "passed", "unverified", "needs"] as const;
+
+/**
+ * What the gate shows of a delegation a person asked to see first (troupe Decision 850):
+ * the agent, where its definition is (`agents.get` by that name opens it; the gate never
+ * edits one), the brief's parts, the tools the child will hold with each one's permission,
+ * its share of the budget, its depth and the deepest it may go, and the subagents it could
+ * go to instead.
+ */
+export interface DelegationGate {
+  agent: string;
+  definition: { name: string; layer: string | null; path: string | null; description: string | null };
+  brief: Record<string, string>;
+  tools: { name: string; permission: string }[];
+  budgetShare: number | null;
+  depth: number | null;
+  maxDepth: number | null;
+  agents: { name: string; description: string }[];
+}
+
+/** What a delegation's answer may carry besides its word, as `approval.respond` sends it. */
+export interface GateAnswer {
+  agent?: string;
+  brief?: Partial<Record<(typeof BRIEF_PARTS)[number], string>>;
+  reason?: string;
+}
+
+function gateOf(raw: unknown): DelegationGate | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const g = raw as Record<string, unknown>;
+  const def = (typeof g["definition"] === "object" && g["definition"] !== null ? g["definition"] : {}) as Record<string, unknown>;
+  const text = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+  const list = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null) : []);
+  return {
+    agent: str(g["agent"]),
+    definition: { name: str(def["name"], str(g["agent"])), layer: text(def["layer"]), path: text(def["path"]), description: text(def["description"]) },
+    brief: Object.fromEntries(partsOf(g["brief"], BRIEF_PARTS)),
+    tools: list(g["tools"]).map((t) => ({ name: str(t["name"]), permission: str(t["permission"]) })),
+    budgetShare: num(g["budget_share"]),
+    depth: num(g["depth"]),
+    maxDepth: num(g["max_depth"]),
+    agents: list(g["agents"]).map((a) => ({ name: str(a["name"]), description: str(a["description"]) })),
+  };
+}
+
+function answeredOf(data: Record<string, unknown>): { agent?: string; edited?: string[]; reason?: string } | undefined {
+  const out: { agent?: string; edited?: string[]; reason?: string } = {};
+  if (typeof data["agent"] === "string") out.agent = data["agent"];
+  if (Array.isArray(data["edited"])) out.edited = data["edited"].filter((p): p is string => typeof p === "string");
+  if (typeof data["reason"] === "string") out.reason = data["reason"];
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** The parts named in `names` that `value` carries as text, as `[name, text]` in that order. */
+export function partsOf(value: unknown, names: readonly string[]): Array<[string, string]> {
+  if (typeof value !== "object" || value === null) return [];
+  const record = value as Record<string, unknown>;
+  return names.flatMap((name): Array<[string, string]> => {
+    const text = record[name];
+    return typeof text === "string" && text !== "" ? [[name, text]] : [];
+  });
 }
 
 function str(v: unknown, fallback = ""): string {
@@ -422,7 +547,7 @@ function systemText(d: DurableEvent): string {
     case "budget_warning":
       return `nearly out: ${str(d.data["detail"], str(d.data["dimension"], "a limit"))}`;
     case "agent_done":
-      return `done: ${str(d.data["reason"], "finished")}`;
+      return ENDED_BY_PARENT[str(d.data["reason"])] ?? `done: ${str(d.data["reason"], "finished")}`;
     case "input_after_done":
       return "input after the agent had finished; it picked the conversation back up";
     case "cancelled":
@@ -448,6 +573,32 @@ function systemText(d: DurableEvent): string {
     default:
       return d.type;
   }
+}
+
+/**
+ * A child in the background its parent ended (troupe Decision 853), by its `agent_done`
+ * reason, in the terminal client's words.
+ */
+const ENDED_BY_PARENT: Record<string, string> = {
+  stopped: "stopped by its parent",
+  cancelled: "stopped by the cancel",
+  failed: "failed past its restarts",
+};
+
+/** How a child in the background ended, by the `ended` its end was handed over with. */
+const ENDED: Record<string, string> = {
+  finished: "finished",
+  cut_short: "ended before it finished",
+  stopped: "stopped by its parent",
+  cancelled: "stopped by the cancel",
+  interrupted: "stopped by a restart",
+  failed: "failed past its restarts",
+};
+
+/** A child's end, handed to the agent that started it in the background, as the terminal client says it. */
+function subagentEndText(d: DurableEvent): string {
+  const path = Array.isArray(d.data["child_path"]) ? d.data["child_path"].map((p) => str(p)).join("/") : "a subagent";
+  return `${path}, in the background: ${ENDED[str(d.data["ended"])] ?? "ended before it finished"}; its end reached its parent`;
 }
 
 /** Where an agent was read from, as `profile_switched`'s `layer` names it (troupe Decision 841). */
@@ -550,11 +701,25 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
           entries: [...state.entries, { kind: "system", ...base, type: "harness_note", text: `the harness said: ${str(d.data["text"])}` }],
         };
       }
+      // The end of a child the agent started in the background, handed to it once (troupe
+      // Decision 853): whose and how it ended, in a line. What it had done is the child's own
+      // `agent_done`, and its agent's next answer.
+      if (str(d.data["source"]) === "subagent") {
+        return { ...started, entries: [...state.entries, { kind: "system", ...base, type: "subagent_end", text: subagentEndText(d) }] };
+      }
+      // A subagent's first message is the brief it was handed, which its delegation has
+      // already said, or will say as soon as it is written (the two race).
+      const text = str(d.data["text"]);
+      const handed = isRoot(d.agent)
+        ? undefined
+        : state.entries.find((en): en is Extract<Entry, { kind: "delegation" }> => en.kind === "delegation" && samePath(en.childPath, d.agent) && en.task === text);
       return {
         ...started,
         entries: [
           ...state.entries,
-          { kind: "user", ...base, text: str(d.data["text"]), author: d.actor.subject, source: str(d.data["source"], "user") },
+          handed
+            ? briefOf(handed, base.seq)
+            : { kind: "user", ...base, text, author: d.actor.subject, source: str(d.data["source"], "user") },
         ],
       };
     }
@@ -657,20 +822,24 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
         ],
       };
 
-    case "delegation_started":
-      return {
-        ...next,
-        entries: [
-          ...state.entries,
-          {
-            kind: "delegation",
-            ...base,
-            callId: str(d.data["call_id"]),
-            child: str(d.data["agent"]),
-            task: str(d.data["task"]),
-          },
-        ],
+    case "delegation_started": {
+      const childPath = Array.isArray(d.data["child_path"]) ? d.data["child_path"].map((p) => str(p)) : [];
+      const delegation: Extract<Entry, { kind: "delegation" }> = {
+        kind: "delegation",
+        ...base,
+        callId: str(d.data["call_id"]),
+        child: str(d.data["agent"]),
+        childPath,
+        task: str(d.data["task"]),
+        brief: partsOf(d.data["brief"], BRIEF_PARTS),
+        background: d.data["wait"] === false,
       };
+      // The child's first message may have been written first: it is the brief, not a
+      // person's turn.
+      const first = state.entries.findIndex((en) => en.kind === "user" && samePath(en.agent, childPath) && en.text === delegation.task);
+      const entries = first < 0 ? state.entries : state.entries.map((en, i) => (i === first ? briefOf(delegation, en.seq) : en));
+      return { ...next, entries: [...entries, delegation] };
+    }
 
     // A question for a person. The harness's budget question rides on the same path under
     // a `budget-<n>` id with an event of its own beside it, so the entry is made from
@@ -760,7 +929,8 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
     case "truncated":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: truncatedText(d) }] };
 
-    case "approval_requested":
+    case "approval_requested": {
+      const gate = gateOf(d.data["delegation"]);
       return {
         ...next,
         entries: [
@@ -774,16 +944,21 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
             decision: undefined,
             resolvedBy: undefined,
             closed: false,
+            ...(gate ? { delegation: gate } : {}),
           },
         ],
       };
+    }
 
     case "approval_decided": {
       const id = str(d.data["call_id"]);
+      const answered = answeredOf(d.data);
       return {
         ...next,
         entries: state.entries.map((en) =>
-          en.kind === "approval" && en.callId === id ? { ...en, decision: str(d.data["decision"]) } : en,
+          en.kind === "approval" && en.callId === id
+            ? { ...en, decision: str(d.data["decision"]), ...(answered && en.delegation ? { answered } : {}) }
+            : en,
         ),
       };
     }

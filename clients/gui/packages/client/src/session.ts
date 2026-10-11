@@ -1,5 +1,6 @@
 import type { AgentDefinition, ProfileSwitch } from "./agents.js";
 import type { TroupeConnection } from "./connection.js";
+import type { GateAnswer } from "./transcript.js";
 import type {
   BlobResponse,
   CommandsList,
@@ -207,13 +208,19 @@ export class SessionView {
     return { commandId };
   }
 
-  /** `approval.respond`. First response wins; a later one is answered with a resolution. */
-  async respondApproval(callId: string, decision: "allow" | "deny" | "allow_session"): Promise<void> {
+  /**
+   * `approval.respond`. First response wins; a later one is answered with a resolution.
+   * A delegation's answer may carry the agent it goes to instead, the parts of the brief
+   * the person edited, and a word back with a denial (troupe Decision 850); a wrong one is
+   * refused with why, and the request waits on.
+   */
+  async respondApproval(callId: string, decision: "allow" | "deny" | "allow_session", answer: GateAnswer = {}): Promise<void> {
     await this.conn.call("approval.respond", {
       command_id: this.conn.nextCommandId(),
       session_id: this.sessionId,
       call_id: callId,
       decision,
+      ...answer,
     });
   }
 

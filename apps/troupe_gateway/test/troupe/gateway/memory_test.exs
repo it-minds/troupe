@@ -4,6 +4,7 @@ defmodule Troupe.Gateway.MemoryTest do
   use ExUnit.Case, async: false
 
   alias Troupe.Gateway.Daemon
+  alias Troupe.Memory.Facts
   alias Troupe.Protocol.{Client, Endpoint}
   alias Troupe.Session.Memory
 
@@ -41,14 +42,14 @@ defmodule Troupe.Gateway.MemoryTest do
 
     assert absent["path"] == Path.join(ws, ".troupe/memory.md")
 
-    :ok = Memory.note(ws, "root", "a note")
+    {:ok, _} = Facts.put(ws, %{kind: "note", claim: "a note"}, %{by: "agent:root"})
 
     assert {:ok, %{"status" => "stale", "sections" => ["Notes"], "text" => text}} =
              Client.call(client, "memory.get", %{"workspace" => ws})
 
     assert text =~ "root: a note"
 
-    :ok = Memory.put_section(ws, "overview", "A project.")
+    :ok = built(ws)
 
     # The view's sections come in its own order (Decision 838).
     assert {:ok, %{"status" => "fresh", "sections" => ["Overview", "Notes"], "built_at" => built}} =
@@ -96,7 +97,7 @@ defmodule Troupe.Gateway.MemoryTest do
     assert {:ok, %{"refresh_due" => true, "refresh_held_until" => nil}} =
              Client.call(client, "memory.get", %{"workspace" => ws})
 
-    :ok = Memory.put_section(ws, "overview", "A project.")
+    :ok = built(ws)
 
     assert {:ok, %{"status" => "fresh", "refresh_due" => false}} =
              Client.call(client, "memory.get", %{"workspace" => ws})
@@ -108,5 +109,11 @@ defmodule Troupe.Gateway.MemoryTest do
 
     assert {:ok, %{"status" => "disabled"}} =
              Client.call(client, "memory.get", %{"workspace" => ws})
+  end
+
+  # What a librarian's run leaves: an overview, and the brief stamped as built.
+  defp built(ws) do
+    {:ok, _} = Facts.put(ws, %{kind: "overview", claim: "A project."}, %{by: "librarian"})
+    Memory.checked(ws)
   end
 end

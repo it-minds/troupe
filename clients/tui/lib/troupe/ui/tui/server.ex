@@ -69,6 +69,7 @@ defmodule Troupe.UI.TUI.Server do
           selection: selection() | nil,
           size: {non_neg_integer(), non_neg_integer()},
           answer: answer() | nil,
+          gate: map() | nil,
           settings: settings() | nil,
           observer: %{cursor: non_neg_integer()} | nil,
           sessions: sessions() | nil,
@@ -268,6 +269,8 @@ defmodule Troupe.UI.TUI.Server do
       selection: nil,
       settings: nil,
       answer: nil,
+      # The draft of an answer to a delegation at the gate (TUI Decision 157).
+      gate: nil,
       observer: nil,
       sessions: nil,
       files: nil,
@@ -419,8 +422,15 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # An agent was saved or deleted, here or in the desktop app (root Decision 841): the
-  # palette's rows, and the `/agents` page when it is open, are read again.
-  def handle_info({:troupe_agents_changed, _changed}, state) do
+  # palette's rows, and the `/agents` page when it is open, are read again, and an edit
+  # open on that agent is told (root Decision 852).
+  def handle_info({:troupe_agents_changed, changed}, state) do
+    state =
+      case state.agents_page do
+        %{} = page -> %{state | agents_page: Agents.heard(page, changed)}
+        nil -> state
+      end
+
     {:noreply, schedule_tick(%{agents_changed(state) | dirty: true}), render?: false}
   end
 
@@ -1540,21 +1550,22 @@ defmodule Troupe.UI.TUI.Server do
 
   # `/upload <path>` sends a local file to the session's own mount. The path is
   # read here rather than on the worker: the worker has no access to this
-  # machine, which is the point of the mount.
+  # machine, which is the point of the mount. Its size is asked first, so a file
+  # larger than the daemon takes in a message is refused without being read (D115).
   defp upload(_sid, ""), do: {:error, "usage: /upload <path>"}
 
   defp upload(sid, path) do
-    case File.read(Path.expand(path)) do
-      {:ok, content} ->
-        target = "session:/" <> Path.basename(path)
+    local = Path.expand(path)
+    target = "session:/" <> Path.basename(path)
 
-        case Client.fs_upload(sid, target, content) do
-          :ok -> {:ok, "uploaded #{path} to #{target}"}
-          {:error, reason} -> {:error, "#{path} not uploaded: #{to_message(reason)}"}
-        end
-
-      {:error, reason} ->
-        {:error, "#{path}: #{:file.format_error(reason)}"}
+    with {:ok, %File.Stat{size: size}} <- File.stat(local),
+         :ok <- Client.upload_fits(sid, size),
+         {:ok, content} <- File.read(local),
+         :ok <- Client.fs_upload(sid, target, content) do
+      {:ok, "uploaded #{path} to #{target}"}
+    else
+      {:error, reason} when is_atom(reason) -> {:error, "#{path}: #{:file.format_error(reason)}"}
+      {:error, reason} -> {:error, "#{path} not uploaded: #{to_message(reason)}"}
     end
   end
 
@@ -1719,11 +1730,20 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # Titled by what the branch was first asked, as the window was: the daemon's own title for
+  # it is the worktree it worked in (D113).
   defp dismissed_branches(state, listed) do
-    for %{window: window, session_id: id} <- Client.dismissed_branches(state.session_id),
+    for %{window: window, session_id: id} = branch <- Client.dismissed_branches(state.session_id),
         not MapSet.member?(listed, id),
         {:ok, row} <- [Client.get_session({:local, here(state)}, id)],
-        do: %{row | title: "#{window}, dismissed: #{row.title}"}
+        do: %{row | title: "#{window}, dismissed: #{asked(branch.prompt) || row.title}"}
+  end
+
+  defp asked(prompt) do
+    case prompt |> to_string() |> String.trim() |> String.split("\n", parts: 2) do
+      [""] -> nil
+      [line | _] -> String.trim(line)
+    end
   end
 
   defp worked?(entry), do: entry.branches != [] or (entry.tokens || 0) > 0
@@ -1912,16 +1932,59 @@ defmodule Troupe.UI.TUI.Server do
 
   # Here: the session on screen's directory, or with a plane's on screen the one this
   # window was opened in, which is also the directory the picker lists. A branch is a fork
-  # of the session on screen, wherever it is.
+  # of the work on screen, wherever it is.
   defp open_new(state, :local), do: create_here(state, false)
   defp open_new(state, :private), do: create_here(state, true)
-  defp open_new(state, :branch), do: Client.fork_session(state.session_id)
+
+  defp open_new(state, :branch) do
+    with {:ok, sid} <- fork_of(state), do: Client.fork_session(sid)
+  end
 
   defp open_new(_state, {:remote, profile}) do
     case ensure_plane(Client.default_plane()) do
       nil -> {:error, "no plane; run troupe login <plane-url> first"}
       origin -> Client.create_session(origin, %{profile: profile})
     end
+  end
+
+  # What `--branch` forks (root Decision 812): the branch whose window is activated, its own
+  # session; the session itself from its own window, or when its agent has work of its own
+  # (a pod's, a `troupe run`'s). In command mode the session's own log holds no
+  # conversation, the work being in its branches, so with no window activated it says which
+  # one it needs rather than fork an empty log (D113, TUI Decision 158).
+  @own_log "this session's own log holds no conversation"
+
+  defp fork_of(%{focus: {:window, path}} = state) do
+    case state.model.windows[path] do
+      %{session_id: child} when is_binary(child) -> {:ok, child}
+      _own -> {:ok, state.session_id}
+    end
+  end
+
+  defp fork_of(state) do
+    windows = Model.windows(state.model)
+
+    cond do
+      not state.branches? ->
+        {:ok, state.session_id}
+
+      Enum.any?(windows, &(&1.path == "root")) ->
+        {:ok, state.session_id}
+
+      windows == [] ->
+        {:error, "nothing to fork: no branch has started, and " <> @own_log}
+
+      true ->
+        {:error,
+         "/new --branch forks a branch: open #{which(windows)} and type it there; #{@own_log}"}
+    end
+  end
+
+  defp which([w]), do: "its window (1 #{w.path})"
+
+  defp which(windows) do
+    named = windows |> Enum.with_index(1) |> Enum.map_join(", ", fn {w, n} -> "#{n} #{w.path}" end)
+    "the window of the one to fork (#{named})"
   end
 
   defp create_here(state, private?),
@@ -2908,6 +2971,12 @@ defmodule Troupe.UI.TUI.Server do
 
   ## Window keys
 
+  # A step of the delegation gate (TUI Decision 157) is left with Esc, the draft kept: the
+  # parts edited and the agent switched to stay until the gate is answered.
+  defp window_key(%Key{code: "esc"}, _path, %{gate: %{step: step} = draft} = state)
+       when step != nil,
+       do: clear_input(Map.put(state, :gate, %{draft | step: nil}))
+
   # Esc clears a selection before it leaves the window, so a mis-drag can be
   # cancelled without losing the pane.
   defp window_key(%Key{code: "esc"}, _path, %{selection: %{}} = state),
@@ -2942,6 +3011,34 @@ defmodule Troupe.UI.TUI.Server do
   defp window_key(%Key{code: "tab"}, _path, state),
     do: put_win(state, complete_file(state.win_text, state.model.workspace))
 
+  # While the gate waits for words, a part of the brief or a word back, every key types:
+  # the letters that answer the gate are text then (TUI Decision 157).
+  defp window_key(%Key{code: code, modifiers: mods}, _path, %{gate: %{step: step}} = state)
+       when (step == :deny or is_tuple(step)) and mods in [[], ["shift"]] and byte_size(code) == 1,
+       do: put_win(state, Input.insert(win_input(state), code))
+
+  # A delegation at the gate: `e` edits the brief and `s` sends it to another subagent;
+  # anywhere else `e` expands output and `s` is a letter.
+  defp window_key(%Key{code: code, modifiers: []}, path, %{win_text: ""} = state)
+       when code in ["e", "s"] do
+    w = Map.fetch!(state.model.windows, path)
+
+    case answerable(w, state.pane.agent || path) do
+      %{delegation: %{}} = item -> gate_key(state, item, code)
+      _ when code == "e" -> toggle_expanded(state)
+      _ -> put_win(state, code)
+    end
+  end
+
+  # A digit picks the part to edit, or the subagent to switch to, while the gate asks which.
+  defp window_key(
+         %Key{code: <<d>>, modifiers: []},
+         path,
+         %{win_text: "", gate: %{step: step}} = state
+       )
+       when d in ?1..?9 and step in [:edit, :switch],
+       do: gate_pick(state, path, d - ?0)
+
   defp window_key(%Key{code: code, modifiers: []}, path, %{win_text: ""} = state)
        when code in ["y", "n", "a"] do
     w = Map.fetch!(state.model.windows, path)
@@ -2949,6 +3046,9 @@ defmodule Troupe.UI.TUI.Server do
     case answerable(w, state.pane.agent || path) do
       nil ->
         put_win(state, code)
+
+      %{delegation: %{}} = item ->
+        gate_key(state, item, code)
 
       %{call_id: call_id} ->
         decision = %{"y" => :allow, "n" => :deny, "a" => :allow_session}[code]
@@ -3014,6 +3114,11 @@ defmodule Troupe.UI.TUI.Server do
 
   defp window_key(%Key{code: "j", modifiers: ["ctrl"]}, _path, state),
     do: put_win(state, Input.insert(win_input(state), "\n"))
+
+  # Enter keeps a part as edited, or sends the denial with its word back.
+  defp window_key(%Key{code: "enter"}, path, %{gate: %{step: step}} = state)
+       when step == :deny or is_tuple(step),
+       do: gate_enter(state, path)
 
   # Enter with nothing typed sends the ticked options of a multiple-choice
   # question. With none ticked there is nothing to send, so it falls through.
@@ -3091,6 +3196,104 @@ defmodule Troupe.UI.TUI.Server do
   # by digit or by typing, never by one of these letters (Decision 120): an amount typed
   # in a person's own words — `no limit` — must not stop the session on its first key.
   defp answerable(w, viewed), do: pending_of(w, viewed, [:approval])
+
+  # The delegation gate's keys (root Decision 850, TUI Decision 157): `y` runs it and `a`
+  # runs it and lets that agent run unasked for the session, either with the draft's edits
+  # and switch; `n` asks for a word back; `e` asks which part to edit; `s` which agent.
+  defp gate_key(state, item, code) do
+    draft = Model.gate_draft(Map.get(state, :gate), item)
+
+    case code do
+      "y" -> answer_gate(state, item, draft, :allow, Model.gate_answer(draft, item))
+      "a" -> answer_gate(state, item, draft, :allow_session, Model.gate_answer(draft, item))
+      "n" -> state |> Map.put(:gate, %{draft | step: :deny}) |> clear_input()
+      "e" -> Map.put(state, :gate, %{draft | step: :edit})
+      "s" -> Map.put(state, :gate, %{draft | step: :switch})
+    end
+  end
+
+  defp answer_gate(state, item, draft, decision, answer) do
+    case Client.approve(state.session_id, item.call_id, decision, answer) do
+      :ok ->
+        state |> Map.put(:gate, nil) |> clear_input() |> follow()
+
+      {:error, reason} ->
+        state |> Map.put(:gate, %{draft | step: nil}) |> follow() |> notice(approval_error(reason))
+    end
+  end
+
+  # A part to edit goes into the box as it stands, to be changed in place; an agent to
+  # switch to is taken at once, and the gate shows it.
+  defp gate_pick(state, path, n) do
+    w = Map.fetch!(state.model.windows, path)
+
+    with %{delegation: delegation} = item <- answerable(w, state.pane.agent || path),
+         draft = Model.gate_draft(Map.get(state, :gate), item),
+         {:ok, state} <- gate_choice(state, item, delegation, draft, n) do
+      state
+    else
+      _ -> state
+    end
+  end
+
+  defp gate_choice(state, item, _delegation, %{step: :edit} = draft, n) do
+    case Enum.at(Model.gate_parts(), n - 1) do
+      {part, _label} ->
+        state = Map.put(state, :gate, %{draft | step: {:edit, part}})
+        {:ok, put_win(state, Model.gate_part(draft, item, part))}
+
+      nil ->
+        :none
+    end
+  end
+
+  defp gate_choice(state, _item, delegation, %{step: :switch} = draft, n) do
+    case Enum.at(delegation["agents"] || [], n - 1) do
+      %{"name" => name} -> {:ok, Map.put(state, :gate, %{draft | agent: name, step: nil})}
+      _ -> :none
+    end
+  end
+
+  defp gate_choice(_state, _item, _delegation, _draft, _n), do: :none
+
+  defp gate_enter(%{gate: draft} = state, path) do
+    w = Map.fetch!(state.model.windows, path)
+
+    case answerable(w, state.pane.agent || path) do
+      %{delegation: %{}, call_id: id} = item when id == draft.call_id ->
+        case draft.step do
+          :deny -> answer_gate(state, item, draft, :deny, word_back(state.win_text))
+          {:edit, part} -> keep_part(state, item, draft, part)
+        end
+
+      _ ->
+        state |> Map.put(:gate, nil) |> clear_input()
+    end
+  end
+
+  defp word_back(text) do
+    case String.trim(text) do
+      "" -> %{}
+      word -> %{"reason" => word}
+    end
+  end
+
+  # A part kept as typed: the shape still holds, so an empty one is refused here, as the
+  # daemon would refuse it, and the edit stays open. One typed back as it was is no edit.
+  defp keep_part(state, item, draft, part) do
+    text = String.trim(state.win_text)
+
+    edits =
+      if text == get_in(item.delegation, ["brief", part]),
+        do: Map.delete(draft.edits, part),
+        else: Map.put(draft.edits, part, text)
+
+    if text == "" do
+      notice(state, "a part of the brief cannot be empty: write none where it has nothing")
+    else
+      state |> Map.put(:gate, %{draft | edits: edits, step: nil}) |> clear_input()
+    end
+  end
 
   # A single-choice question is answered by the digit itself; a multiple-choice
   # one accumulates ticks until Enter, and re-pressing a digit unticks it.
@@ -3181,6 +3384,7 @@ defmodule Troupe.UI.TUI.Server do
         pane: fresh_pane(agent),
         selection: nil
     }
+    |> Map.put(:gate, nil)
   end
 
   defp fresh_pane(agent \\ nil), do: %{agent: agent, scroll: :follow, seen_entries: 0}
@@ -3395,7 +3599,9 @@ defmodule Troupe.UI.TUI.Server do
         _ -> model
       end
 
-    state = %{state | model: model} |> shell_ended(event) |> watch_triggered(event)
+    state =
+      %{state | model: model} |> shell_ended(event) |> watch_triggered(event) |> left_window(event)
+
     state = if trees_moved?(event), do: refresh_worktrees(state), else: state
     if event.type == :remote_status, do: recheck_loop(state), else: state
   end
@@ -3423,6 +3629,14 @@ defmodule Troupe.UI.TUI.Server do
     do: notice(state, Model.watch_line(d))
 
   defp watch_triggered(state, _event), do: state
+
+  # A window that went while it was activated — `/merge`, `/discard` or `/dismiss` picked
+  # from the palette over it, a cancel at rest — leaves the screen on the command line,
+  # not on a focus that names it until the next key (D105).
+  defp left_window(%{focus: {:window, path}} = state, %{type: :window_dismissed, agent_path: path}),
+    do: to_command_line(state)
+
+  defp left_window(state, _event), do: state
 
   # The loop on the status line is the journal's, and a daemon that stopped mid-loop left
   # the journal saying it runs: `loop_stopped interrupted` is written only when the

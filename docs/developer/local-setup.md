@@ -117,7 +117,7 @@ it and commit the result after changing a key. `TROUPE_PROVIDER=fake` and
 | `ZIG_LOCAL_CACHE_DIR`, `ZIG_GLOBAL_CACHE_DIR` | Zig | point at a plain local filesystem: Zig aborts on ecryptfs and some network mounts |
 | `TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL`, `TROUPE_FAKE_SCRIPT` | `Troupe.Config` | override `config.yaml` |
 | `TROUPE_STATE_HOME`, `TROUPE_CONFIG_HOME`, `XDG_*`, `APPDATA`, `LOCALAPPDATA` | `Troupe.Paths` | state and config directories |
-| `TROUPE_DAEMON_SOCKET`, `TROUPE_DAEMON_COMMAND` | `Troupe.Protocol.Endpoint`, `.Daemon` | `tcp` or a socket path; what a client spawns as a daemon (else `troupe-daemon` on the `PATH`) |
+| `TROUPE_DAEMON_SOCKET`, `TROUPE_DAEMON_COMMAND` | `Troupe.Protocol.Endpoint`, `.Daemon` | `tcp` or a socket path (empty is unset); what a client spawns as a daemon (else `troupe-daemon` on the `PATH`) |
 | `KUBECONFIG`, `TROUPE_KUBE_CONTEXT` | operator outside a pod, cluster suites | which cluster |
 
 ## 7. The clients

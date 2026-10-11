@@ -51,7 +51,7 @@ defmodule Troupe.Agent.HeadroomTest do
   test "an agent warns once when a limit is near, carries the gauge, and is quiet with full_send",
        context do
     steps = for _ <- 1..4, do: {:text_and_tools, "again", [{"todo_read", %{}}]}
-    steps = steps ++ [{:text_and_tools, "done", [{"finish", %{"summary" => "ok"}}]}]
+    steps = steps ++ [{:text_and_tools, "done", [{"finish", finished("ok")}]}]
 
     %{session: session} = start_session(context, steps: steps, config_overrides: [max_turns: 5])
     sid = session.id

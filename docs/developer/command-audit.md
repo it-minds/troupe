@@ -7,7 +7,8 @@ draws) run in a session, with what happened and what now holds it: a test, or a 
 
 Since then, in the same release: D105's items but two were fixed by #556, D106 (watch) by
 #558, D107's palette items by #560 and #563, and D108 and D109 (uploads, a dropped
-connection, copying on Windows) by #552. What is still open is in D105 and D107.
+connection, copying on Windows) by #552; D105's other two in 0.11.0, with D113. What is
+still open is in D107 and D113.
 
 ## How it was run
 
@@ -135,7 +136,8 @@ connection; the client's link exited with it and took the screen down (D108). Ru
 the checkout, the removal works there, and a git failure in `worktree.merge`,
 `worktree.discard` is now an `internal_error` the caller is told
 (`branches_test.exs`, "a worktree git cannot remove is an internal error the caller is
-told"). `worktree.remove`, which the desktop app calls, still runs inside the tree (D105).
+told"). `worktree.remove`, which the desktop app calls, ran inside the tree too until #556
+(D105) and answers git's refusal in git's words since #570.
 
 ## Fixed with the audit
 

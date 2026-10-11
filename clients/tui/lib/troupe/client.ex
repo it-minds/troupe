@@ -116,7 +116,7 @@ defmodule Troupe.Client do
   @callback run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback shell_run(session_id(), String.t(), boolean()) :: {:ok, String.t()} | {:error, term()}
   @callback shell_cancel(session_id(), String.t()) :: :ok | {:error, term()}
-  @callback approve(session_id(), String.t(), decision()) :: :ok | {:error, term()}
+  @callback approve(session_id(), String.t(), decision(), map()) :: :ok | {:error, term()}
   @callback answer(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback answer_local(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback edit_todo(session_id(), String.t(), term()) :: :ok | {:error, term()}
@@ -147,6 +147,7 @@ defmodule Troupe.Client do
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_upload(session_id(), String.t(), binary()) :: :ok | {:error, term()}
+  @callback upload_fits(session_id(), non_neg_integer()) :: :ok | {:error, String.t()}
   @callback stop_session(session_id()) :: :ok | {:error, term()}
   @callback has_session?(session_id()) :: boolean()
   @callback idle?(session_id()) :: boolean()
@@ -295,8 +296,14 @@ defmodule Troupe.Client do
   @spec shell_cancel(session_id(), String.t()) :: :ok | {:error, term()}
   def shell_cancel(sid, run_id), do: impl(sid).shell_cancel(sid, run_id)
 
-  @spec approve(session_id(), String.t(), decision()) :: :ok | {:error, term()}
-  def approve(sid, call_id, decision), do: impl(sid).approve(sid, call_id, decision)
+  @doc """
+  Answers an approval. `answer` is what a delegation's answer carries besides its word
+  (root Decision 850): `"agent"` to send it to another subagent, `"brief"` with the parts
+  the person edited, `"reason"` with a denial.
+  """
+  @spec approve(session_id(), String.t(), decision(), map()) :: :ok | {:error, term()}
+  def approve(sid, call_id, decision, answer \\ %{}),
+    do: impl(sid).approve(sid, call_id, decision, answer)
 
   @spec answer(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   def answer(sid, call_id, text), do: impl(sid).answer(sid, call_id, text)
@@ -462,6 +469,14 @@ defmodule Troupe.Client do
   @spec fs_upload(session_id(), String.t(), binary()) :: :ok | {:error, term()}
   def fs_upload(sid, path, content), do: impl(sid).fs_upload(sid, path, content)
 
+  @doc """
+  Whether a file of `size` bytes can go in one `fs_upload/3`: `:ok`, or the sentence saying
+  it is larger than the daemon or worker takes in one message. Asked before the file is
+  read, so one that could never be sent is not read whole (D115).
+  """
+  @spec upload_fits(session_id(), non_neg_integer()) :: :ok | {:error, String.t()}
+  def upload_fits(sid, size), do: impl(sid).upload_fits(sid, size)
+
   @spec stop_session(session_id()) :: :ok | {:error, term()}
   def stop_session(sid), do: impl(sid).stop_session(sid)
 
@@ -565,9 +580,11 @@ defmodule Troupe.Client do
 
   @doc """
   The session's branches whose windows were dismissed, still sessions of their own, which
-  the picker lists; a session a plane runs has none.
+  the picker lists, each with the first thing it was asked; a session a plane runs has none.
   """
-  @spec dismissed_branches(session_id()) :: [%{window: String.t(), session_id: String.t()}]
+  @spec dismissed_branches(session_id()) :: [
+          %{window: String.t(), session_id: String.t(), prompt: String.t()}
+        ]
   def dismissed_branches(sid), do: if(remote?(sid), do: [], else: Daemon.dismissed_branches(sid))
 
   @doc "The text a multiple-choice answer is sent as."

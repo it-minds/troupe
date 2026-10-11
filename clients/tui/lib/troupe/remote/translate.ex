@@ -243,6 +243,7 @@ defmodule Troupe.Remote.Translate do
     budget_question? = match?("budget-" <> _, call_id(data))
     harness_note? = data["source"] == "harness"
     shell_note? = data["source"] == "shell"
+    subagent_end? = data["source"] == "subagent"
 
     # Two spellings of one vocabulary: the worker's (`llm_response`,
     # `tool_call_started` — PROTOCOL.md §4) and the older dotted one the contract's
@@ -257,6 +258,12 @@ defmodule Troupe.Remote.Translate do
       # on screen already as its `user_shell`, the person's command and what it printed.
       "user_input" when shell_note? ->
         {[], memory}
+
+      # The end of a child the agent started in the background, handed to it once (root
+      # Decision 853): a line saying whose and how it ended, not the person's words. The
+      # report itself is the child's own `agent_done`.
+      "user_input" when subagent_end? ->
+        {[emit.(:remote_note, %{text: subagent_end(data)})], memory}
 
       "user_shell" ->
         {[emit.(:user_shell, user_shell(data, memory))], memory}
@@ -313,12 +320,16 @@ defmodule Troupe.Remote.Translate do
            ] ->
         {[], memory}
 
+      # A delegation a person asked to see first (root Decision 850) carries what the gate
+      # shows, as the daemon wrote it: the agent, its definition, the brief, the tools, the
+      # budget and the depth, and the subagents it could go to instead.
       type when type in ["approval.requested", "approval_requested"] ->
         {[
            emit.(:approval_requested, %{
              call_id: call_id(data),
              name: data["name"] || data["tool"] || "tool",
-             preview: preview(data)
+             preview: preview(data),
+             delegation: if(is_map(data["delegation"]), do: data["delegation"])
            })
          ], memory}
 
@@ -546,8 +557,11 @@ defmodule Troupe.Remote.Translate do
            })
          ], memory}
 
+      # One in the background (root Decision 853) says so: its call answers at once, and the
+      # child goes on working after it.
       "delegation_started" ->
-        {[emit.(:remote_note, %{text: "delegated" <> to_child(data)})], memory}
+        background = if data["wait"] == false, do: ", in the background", else: ""
+        {[emit.(:remote_note, %{text: "delegated" <> to_child(data) <> background})], memory}
 
       "session_created" ->
         {[
@@ -687,6 +701,11 @@ defmodule Troupe.Remote.Translate do
   defp source_atom("loop"), do: :loop
   defp source_atom(_source), do: :user
 
+  # A child in the background its parent ended (root Decision 853) says how in a line; what it
+  # had done is its parent's to read, as the end it was handed.
+  defp done_note(emit, %{"reason" => reason}) when reason in ~w(stopped cancelled failed),
+    do: [emit.(:remote_note, %{text: ended_by_parent(reason)})]
+
   defp done_note(emit, %{"summary" => summary}) when is_binary(summary) and summary != "",
     do: [emit.(:remote_note, %{text: "done: " <> summary})]
 
@@ -695,6 +714,30 @@ defmodule Troupe.Remote.Translate do
        do: [emit.(:remote_note, %{text: "done (#{reason})"})]
 
   defp done_note(_emit, _data), do: []
+
+  defp ended_by_parent("stopped"), do: "stopped by its parent"
+  defp ended_by_parent("cancelled"), do: "stopped by the cancel"
+  defp ended_by_parent(_failed), do: "failed past its restarts"
+
+  defp subagent_end(data) do
+    child =
+      case data["child_path"] do
+        [_ | _] = path -> Enum.join(path, "/")
+        _ -> "a subagent"
+      end
+
+    how =
+      case data["ended"] do
+        "finished" -> "finished"
+        "stopped" -> "stopped by its parent"
+        "cancelled" -> "stopped by the cancel"
+        "interrupted" -> "stopped by a restart"
+        "failed" -> "failed past its restarts"
+        _ -> "ended before it finished"
+      end
+
+    "#{child}, in the background: #{how}; its end reached its parent"
+  end
 
   # With what it raised when the agent kept crashing (`agent_failed`, Decision 727).
   defp ended_by(idle, %{"reason" => reason} = data) when is_binary(reason) do

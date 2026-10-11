@@ -155,7 +155,7 @@ defmodule Troupe.Bench.LiveScenarios do
       title: "a question delegated and its answer used",
       prompt: """
       The notes/ directory holds a few short text files. Find out what the lighthouse keeper's cat is called.
-      Do not read, list or search any file yourself: call the delegate tool exactly once, with agent "explore" and a task asking it to find the cat's name in notes/.
+      Do not read, list or search any file yourself: call the delegate tool exactly once, with agent "explore" and a brief asking it to find the cat's name in notes/.
       When it reports back, write the cat's name and nothing else to answer.txt with write_file, then say the name in one sentence.\
       """,
       files: %{

@@ -48,4 +48,4 @@ Rules:
 - Do not write a fact `recall` already lists as current, and nothing an `AGENTS.md` or a rule already says.
 - `command` and `convention` facts go into every agent's prompt; `overview` and `layout` are answered by `recall` when an agent asks. Keep each claim to one or two sentences: every word of a command or a convention is paid for on every turn of every later session.
 
-When memory says what it should, call `finish` with a one-line summary of what you recorded, re-anchored, corrected and dropped.
+When memory says what it should, call `finish` with a one-line `summary` of what you recorded, re-anchored, corrected and dropped, the facts you could not verify in `unverified`, and none in `ran`, `passed` and `needs`.

@@ -9,6 +9,11 @@ defmodule Troupe.Session.Blobs do
   Blobs are deduplicated **within a session and never across sessions**. Sharing them
   would mean one session's content sitting under another session's key, which is
   exactly the property that makes per-session erasure meaningful.
+
+  They are in the session's own directory, beside its log: under the state directory
+  the session was started with, which every call here is given, and never under the
+  platform's for a session whose config named another (Decision 855). That is what lets
+  an erasure delete them with the log.
   """
 
   alias Troupe.Paths
@@ -23,17 +28,19 @@ defmodule Troupe.Session.Blobs do
   @doc """
   Store `content` if it is too large to inline, returning what belongs in the event.
 
-  Returns the content unchanged when it fits.
+  Returns the content unchanged when it fits. `state_dir` is the session's, its config's
+  `state_dir`; `nil` is the platform's.
   """
-  @spec maybe_store(String.t(), Path.t(), binary()) :: binary() | map()
-  def maybe_store(session_id, workspace_root, content) when byte_size(content) <= @inline_limit do
-    _ = {session_id, workspace_root}
+  @spec maybe_store(String.t(), Path.t(), Path.t() | nil, binary()) :: binary() | map()
+  def maybe_store(session_id, workspace_root, state_dir, content)
+      when byte_size(content) <= @inline_limit do
+    _ = {session_id, workspace_root, state_dir}
     content
   end
 
-  def maybe_store(session_id, workspace_root, content) do
+  def maybe_store(session_id, workspace_root, state_dir, content) do
     digest = digest(content)
-    path = blob_path(session_id, workspace_root, digest)
+    path = blob_path(session_id, workspace_root, state_dir, digest)
 
     unless File.exists?(path) do
       File.mkdir_p!(Path.dirname(path))
@@ -49,10 +56,10 @@ defmodule Troupe.Session.Blobs do
   end
 
   @doc "Store `content` whatever its size and return its digest: a kept tool output."
-  @spec store(String.t(), Path.t(), binary()) :: String.t()
-  def store(session_id, workspace_root, content) when is_binary(content) do
+  @spec store(String.t(), Path.t(), Path.t() | nil, binary()) :: String.t()
+  def store(session_id, workspace_root, state_dir, content) when is_binary(content) do
     digest = digest(content)
-    path = blob_path(session_id, workspace_root, digest)
+    path = blob_path(session_id, workspace_root, state_dir, digest)
 
     unless File.exists?(path) do
       File.mkdir_p!(Path.dirname(path))
@@ -65,28 +72,29 @@ defmodule Troupe.Session.Blobs do
   @doc """
   Turn a stored payload back into its bytes, or pass a plain one through.
 
-  The inverse of `maybe_store/3`, for a replay that has to rebuild the conversation
+  The inverse of `maybe_store/4`, for a replay that has to rebuild the conversation
   the model saw. A blob whose file has gone comes back as a note saying so rather than
   an error: a conversation with a missing tool result is recoverable, a crash during
   replay is not.
   """
-  @spec resolve(String.t(), Path.t(), binary() | map()) :: binary()
-  def resolve(_session_id, _workspace_root, content) when is_binary(content), do: content
+  @spec resolve(String.t(), Path.t(), Path.t() | nil, binary() | map()) :: binary()
+  def resolve(_session_id, _workspace_root, _state_dir, content) when is_binary(content),
+    do: content
 
-  def resolve(session_id, workspace_root, %{"blob" => digest} = reference) do
-    case read(session_id, workspace_root, digest) do
+  def resolve(session_id, workspace_root, state_dir, %{"blob" => digest} = reference) do
+    case read(session_id, workspace_root, state_dir, digest) do
       {:ok, content, _size} -> content
       {:error, :not_found} -> Map.get(reference, "preview", "(the stored output is gone)")
     end
   end
 
-  def resolve(_session_id, _workspace_root, other), do: to_string(other)
+  def resolve(_session_id, _workspace_root, _state_dir, other), do: to_string(other)
 
   @doc "Read a blob, optionally a byte range as `[first, last]` inclusive."
-  @spec read(String.t(), Path.t(), String.t(), [integer()] | nil) ::
+  @spec read(String.t(), Path.t(), Path.t() | nil, String.t(), [integer()] | nil) ::
           {:ok, binary(), non_neg_integer()} | {:error, :not_found}
-  def read(session_id, workspace_root, digest, range \\ nil) do
-    path = blob_path(session_id, workspace_root, digest)
+  def read(session_id, workspace_root, state_dir, digest, range \\ nil) do
+    path = blob_path(session_id, workspace_root, state_dir, digest)
 
     case File.stat(path) do
       {:ok, %File.Stat{size: size}} -> {:ok, slice(path, size, range), size}
@@ -129,11 +137,11 @@ defmodule Troupe.Session.Blobs do
     if String.valid?(binary), do: binary, else: scrub(binary_part(binary, 0, byte_size(binary) - 1))
   end
 
-  defp blob_path(session_id, workspace_root, "sha256:" <> hex) do
-    Path.join([Paths.session_dir(workspace_root, session_id), "blobs", hex])
+  defp blob_path(session_id, workspace_root, state_dir, "sha256:" <> hex) do
+    Path.join([Paths.session_dir(workspace_root, session_id, state_dir), "blobs", hex])
   end
 
-  defp blob_path(session_id, workspace_root, digest) do
-    Path.join([Paths.session_dir(workspace_root, session_id), "blobs", digest])
+  defp blob_path(session_id, workspace_root, state_dir, digest) do
+    Path.join([Paths.session_dir(workspace_root, session_id, state_dir), "blobs", digest])
   end
 end

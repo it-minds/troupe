@@ -185,10 +185,14 @@ defmodule Troupe.Client.Daemon.Link do
   # A daemon that has not answered in time has answered too: the caller gets an error it
   # can print, and this process, the one link to the daemon, lives on for the next call
   # rather than dying of the caller's (#231). So does one that closed the connection with
-  # the call in it, which the protocol client ends with (D108): the next call connects
-  # again, as it does after the daemon restarts.
+  # the call in it, which the protocol client answers `unavailable` as it ends (D115), or
+  # ended with before (D108): the next call connects again, as it does after the daemon
+  # restarts.
   defp request(client, method, params) do
-    Client.call(client, method, params, @call_timeout)
+    case Client.call(client, method, params, @call_timeout) do
+      {:error, error} = answer -> if Client.closed?(error), do: {:error, :closed}, else: answer
+      answer -> answer
+    end
   catch
     :exit, {:timeout, _} ->
       {:error, "the daemon did not answer #{method} within #{div(@call_timeout, 1_000)} s"}

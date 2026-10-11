@@ -11,15 +11,26 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import type { Entry } from "@troupe/client";
+import { BRIEF_PARTS } from "@troupe/client";
+import type { DelegationGate, Entry, GateAnswer } from "@troupe/client";
 import { Pill } from "./bits";
 import { Mask } from "./brand";
 
 export type Decision = "allow" | "deny" | "allow_session";
 type Approval = Extract<Entry, { kind: "approval" }>;
 
+/** A brief's parts by the names a person reads them by (troupe Decision 847). */
+const PART_NAMES: Record<string, string> = {
+  goal: "Goal",
+  context: "Context",
+  constraints: "Constraints",
+  deliverable: "Deliverable",
+  do_not: "Do not",
+};
+
 /** Four words, phrased as a question, in the reader's language and not the protocol's. */
 function headline(tool: string): string {
+  if (tool === "delegate") return "Hand work to a subagent?";
   if (/shell|bash|command|exec/i.test(tool)) return "Run a command?";
   if (/write|edit|patch|apply/i.test(tool)) return "Change a file?";
   if (/delete|remove|rm/i.test(tool)) return "Delete a file?";
@@ -77,11 +88,32 @@ export function ApprovalPanel({
   canAnswer,
   others,
   onAnswer,
+  onDefinition,
 }: {
   entry: Approval;
   /** False on a read-only session: the buttons are absent, not disabled. */
   canAnswer: boolean;
   /** Other people who could answer this too, by display name. */
+  others: string[];
+  onAnswer: (decision: Decision, answer?: GateAnswer) => Promise<void>;
+  /** Opens a delegation's agent in the agents manager, where there is one to open. */
+  onDefinition?: ((agent: string) => void) | undefined;
+}): JSX.Element {
+  // A delegation a person asked to see first has five answers, not three (troupe Decision 850).
+  if (entry.delegation && entry.decision === undefined) {
+    return <DelegationPanel entry={entry} gate={entry.delegation} canAnswer={canAnswer} others={others} onAnswer={onAnswer} onDefinition={onDefinition} />;
+  }
+  return <ToolApproval entry={entry} canAnswer={canAnswer} others={others} onAnswer={onAnswer} />;
+}
+
+function ToolApproval({
+  entry,
+  canAnswer,
+  others,
+  onAnswer,
+}: {
+  entry: Approval;
+  canAnswer: boolean;
   others: string[];
   onAnswer: (decision: Decision) => Promise<void>;
 }): JSX.Element {
@@ -174,16 +206,249 @@ export function ApprovalPanel({
   );
 }
 
+/**
+ * A delegation a person asked to see before it starts (troupe Decision 850): the agent and
+ * a way to its definition, the tools and permissions the subagent will hold, its depth and
+ * budget share, and the brief's five parts. The five answers: run it; edit a part in place
+ * (held to the brief's shape: a part left empty is refused); send the same brief to
+ * another subagent; deny it, with a word back the agent that delegated reads as the
+ * answer; or let that agent run unasked for the rest of the session. The definition is
+ * linked, never edited here: an edit for one run would be a fork nobody finds again.
+ */
+function DelegationPanel({
+  entry,
+  gate,
+  canAnswer,
+  others,
+  onAnswer,
+  onDefinition,
+}: {
+  entry: Approval;
+  gate: DelegationGate;
+  canAnswer: boolean;
+  others: string[];
+  onAnswer: (decision: Decision, answer?: GateAnswer) => Promise<void>;
+  onDefinition?: ((agent: string) => void) | undefined;
+}): JSX.Element {
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [agent, setAgent] = useState(gate.agent);
+  const [denying, setDenying] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState<Decision | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const answer = (): GateAnswer => ({
+    ...(agent !== gate.agent ? { agent } : {}),
+    ...(Object.keys(edits).length > 0 ? { brief: edits } : {}),
+  });
+
+  const send = async (decision: Decision, given: GateAnswer): Promise<void> => {
+    if (busy) return;
+    setBusy(decision);
+    setError(null);
+    try {
+      await onAnswer(decision, given);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const keep = (part: string): void => {
+    const text = draft.trim();
+    if (text === "") {
+      setError("A part of the brief cannot be empty: write none where it has nothing.");
+      return;
+    }
+    setError(null);
+    setEdits((now) => {
+      const next = { ...now };
+      if (text === gate.brief[part]) delete next[part];
+      else next[part] = text;
+      return next;
+    });
+    setEditing(null);
+  };
+
+  const share = gate.budgetShare === null ? null : `${Math.round(gate.budgetShare * 100)}% of the budget`;
+  const switched = agent !== gate.agent ? gate.agents.find((a) => a.name === agent) : undefined;
+
+  return (
+    <section className="approval delegation" aria-label={`Delegation to ${agent}`}>
+      <header>
+        <Mask size={26} />
+        <Pill status="waiting" />
+        <h2>Hand this to {agent}?</h2>
+      </header>
+      <p className="consequence">
+        The session wants a subagent to do this. Nothing starts until you answer, and what you change here is what it is given.
+      </p>
+
+      <dl className="facts gate">
+        <dt>Agent</dt>
+        <dd>
+          {gate.agent}
+          {gate.definition.description ? ` — ${gate.definition.description}` : ""}{" "}
+          {onDefinition ? (
+            <button type="button" className="link" onClick={() => onDefinition(gate.agent)}>
+              Open its definition
+            </button>
+          ) : (
+            <span className="muted">{[gate.definition.layer, gate.definition.path].filter(Boolean).join(" ")}</span>
+          )}
+        </dd>
+        {switched && (
+          <>
+            <dt>Sent to</dt>
+            <dd>
+              {switched.name}
+              {switched.description ? ` — ${switched.description}` : ""}, with its own tools and budget
+            </dd>
+          </>
+        )}
+        <dt>Depth</dt>
+        <dd>
+          {gate.depth ?? "?"} of {gate.maxDepth ?? "?"}
+        </dd>
+        {share && (
+          <>
+            <dt>Budget</dt>
+            <dd>{share}</dd>
+          </>
+        )}
+        <dt>Tools</dt>
+        <dd>{gate.tools.length > 0 ? gate.tools.map((t) => `${t.name} ${t.permission}`).join(", ") : "its own"}</dd>
+      </dl>
+
+      <dl className="facts wide parts brief" aria-label="The brief">
+        {BRIEF_PARTS.map((part) => {
+          const text = edits[part] ?? gate.brief[part] ?? "";
+          const edited = edits[part] !== undefined;
+          return (
+            <div key={part} className="gate-part">
+              <dt>
+                {PART_NAMES[part]}
+                {edited ? " · edited" : ""}
+              </dt>
+              <dd>
+                {editing === part ? (
+                  <form
+                    className="answers"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      keep(part);
+                    }}
+                  >
+                    <textarea value={draft} onChange={(e) => setDraft(e.target.value)} aria-label={`Edit ${PART_NAMES[part]}`} rows={3} />
+                    <button type="submit" className="deny">
+                      Keep
+                    </button>
+                    <button type="button" className="deny" onClick={() => setEditing(null)}>
+                      Back
+                    </button>
+                  </form>
+                ) : (
+                  <>
+                    <span className="gate-text">{text}</span>{" "}
+                    {canAnswer && editing === null && (
+                      <button
+                        type="button"
+                        className="link"
+                        aria-label={`Edit ${PART_NAMES[part]}`}
+                        onClick={() => {
+                          setDraft(text);
+                          setEditing(part);
+                        }}
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </>
+                )}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+
+      {others.length > 0 && <p className="also">{others.join(", ")} can answer this too. The first answer counts.</p>}
+      {error && <p className="also error">{error}</p>}
+
+      {!canAnswer ? (
+        <p className="also">You can read this session but not answer for it.</p>
+      ) : denying ? (
+        <form
+          className="answers"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const word = reason.trim();
+            void send("deny", word ? { reason: word } : {});
+          }}
+        >
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="A word back for the agent that delegated (optional)"
+            aria-label="A word back"
+            disabled={busy !== null}
+          />
+          <button type="submit" className="deny" disabled={busy !== null}>
+            {busy === "deny" ? "Denying…" : "Deny"}
+          </button>
+          <button type="button" className="deny" onClick={() => setDenying(false)} disabled={busy !== null}>
+            Back
+          </button>
+        </form>
+      ) : (
+        <div className="answers">
+          <button className="allow" onClick={() => void send("allow", answer())} disabled={busy !== null || editing !== null}>
+            {busy === "allow" ? "Starting…" : "Run"}
+          </button>
+          <button className="deny" onClick={() => setDenying(true)} disabled={busy !== null}>
+            Deny…
+          </button>
+          <label className="also plain">
+            Send to{" "}
+            <select value={agent} onChange={(e) => setAgent(e.target.value)} aria-label="Send to" disabled={busy !== null}>
+              {gate.agents.map((a) => (
+                <option key={a.name} value={a.name}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="scoped" onClick={() => void send("allow_session", answer())} disabled={busy !== null || editing !== null}>
+            {busy === "allow_session" ? "Starting…" : `Run, and let ${agent} run unasked for this session`}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** What an approval becomes in the stream once it has been answered. Never deleted. */
 export function DecisionRecord({ entry, self }: { entry: Approval; self: string | undefined }): JSX.Element {
   const by = entry.resolvedBy ?? self;
   const mine = by === undefined || by === self;
   const verb = entry.decision === "deny" ? "Denied" : entry.decision === "allow_session" ? "Allowed for this session" : "Allowed";
+  const said = entry.answered;
+  // A delegation's answer says what it changed: where it went, which parts, the word back.
+  const detail = said
+    ? [
+        said.agent && entry.delegation && said.agent !== entry.delegation.agent ? `sent to ${said.agent}` : null,
+        said.edited && said.edited.length > 0 ? `edited ${said.edited.map((p) => PART_NAMES[p] ?? p).join(", ").toLowerCase()}` : null,
+        said.reason ? `said: ${said.reason}` : null,
+      ].filter(Boolean)
+    : [];
   return (
     <div className={`decision ${entry.decision ?? "allow"}`}>
       <Pill status={entry.decision === "deny" ? "denied" : "allowed"}>{verb}</Pill>
       <span className="secondary">
         {headline(entry.tool).replace(/\?$/, "").toLowerCase()} · {mine ? "by you" : `by ${by}`}
+        {detail.length > 0 ? ` · ${detail.join(" · ")}` : ""}
         {entry.decision === "deny" ? " — nothing was changed" : ""}
       </span>
     </div>

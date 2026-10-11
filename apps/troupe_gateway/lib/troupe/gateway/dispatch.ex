@@ -90,7 +90,10 @@ defmodule Troupe.Gateway.Dispatch do
     # A command a file defines sends the session its prompt, so it takes what input does.
     "commands.run" => :control,
     "workflows.list" => :observe,
-    "memory.get" => :observe,
+    # The brief at any path it is given, which a read may migrate or read back into facts
+    # there (Decision 838): what `memory.decline` takes, not what watching a session does
+    # (Decision 854).
+    "memory.get" => :control,
     # A no to rewriting a brief an older survey wrote (Decision 835): it writes only the
     # person's own answer, in the state directory.
     "memory.decline" => :control,
@@ -387,7 +390,9 @@ defmodule Troupe.Gateway.Dispatch do
   # whether a client that refreshes it by itself should start a librarian now, and
   # `refresh_held_until` until when a try that built nothing holds that off. `facts` are
   # what the brief is now made of, each with its status as read now, and `generated` says
-  # `text` is their view (Decision 839).
+  # `text` is their view (Decision 839). `model` says whether a model can be asked under the
+  # workspace's own config (`Troupe.Config.key_problem/1`), which a client starting a
+  # librarian there needs and the machine's `setup.get` cannot say (Decision 854).
   defp handle("memory.get", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          workspace = Path.expand(workspace),
@@ -405,7 +410,8 @@ defmodule Troupe.Gateway.Dispatch do
          "refresh_due" => Troupe.Session.Memory.refresh_due?(workspace, config),
          "refresh_held_until" => held && DateTime.to_iso8601(held),
          "facts" => Facts.list(workspace),
-         "generated" => true
+         "generated" => true,
+         "model" => model_json(Troupe.Config.key_problem(config))
        }}
     end
   end
@@ -793,14 +799,22 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # A delegation's answer may carry more than its word (Decision 850): `agent` to send it
+  # to another subagent, `brief` with the parts the person edited, `reason` with a no. A
+  # wrong one is refused with the sentence that says why, and the request waits on.
   defp handle("approval.respond", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, call_id} <- fetch(params, "call_id"),
          {:ok, decision} <- fetch(params, "decision"),
          {:ok, decision} <- parse_decision(decision),
          :ok <- activate(session_id, context) do
-      Troupe.approve(session_id, call_id, decision, actor(context))
-      {:ok, %{"accepted" => true}}
+      answer =
+        params |> Map.take(~w(agent brief reason)) |> Map.reject(fn {_k, v} -> is_nil(v) end)
+
+      case Troupe.approve(session_id, call_id, decision, actor(context), answer) do
+        :ok -> {:ok, %{"accepted" => true}}
+        {:error, sentence} -> {:error, Error.new(:invalid_params, %{reason: sentence})}
+      end
     end
   end
 
@@ -1013,6 +1027,9 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # git's refusal is answered as merge and discard answer theirs, `internal_error` with
+  # git's words, and a git that did not run in Troupe's own words: never an inspected
+  # term (D113).
   defp handle("worktree.remove", params, _context) do
     with {:ok, path} <- fetch(params, "path") do
       case Worktrees.remove(path, Map.get(params, "force", false)) do
@@ -1022,8 +1039,14 @@ defmodule Troupe.Gateway.Dispatch do
         {:error, :dirty} ->
           {:error, Error.new(:conflict, %{reason: "worktree has local changes"})}
 
+        {:error, :not_found} ->
+          worktree_error(:not_found)
+
+        {:error, {:git, _output} = refused} ->
+          worktree_error(refused)
+
         {:error, reason} ->
-          {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
+          {:error, Error.new(:internal_error, %{reason: Troupe.Git.explain(reason)})}
       end
     end
   end
@@ -1539,6 +1562,14 @@ defmodule Troupe.Gateway.Dispatch do
       else: Error.new(:not_found, %{kind: "fact", id: id})
   end
 
+  # Whether the workspace's default model can be asked, and why not in words a client shows.
+  defp model_json(nil), do: %{"usable" => true, "reason" => nil}
+
+  defp model_json({:no_key, provider}),
+    do: %{"usable" => false, "reason" => "#{provider} has no key, so no model can be asked"}
+
+  defp model_json({:refused, why}), do: %{"usable" => false, "reason" => why}
+
   defp fetch(params, key) do
     case Map.get(params, key) do
       value when is_binary(value) and value != "" -> {:ok, value}
@@ -1700,11 +1731,22 @@ defmodule Troupe.Gateway.Dispatch do
   # Through the endpoint's own activation where it has one. On a pod only the plane brings
   # a session back, so there `not_found` is the answer for one with no tree running, and
   # the client asks the plane where the session is (PROTOCOL.md §6, "A session that moves").
+  #
+  # A session whose stop has run past the wait for it is said in words (Decision 855).
   defp activate(session_id, %Context{activate: activate} = context) do
     case (activate || (&Troupe.activate(&1, client: context.client))).(session_id) do
-      {:ok, _pid} -> :ok
-      {:error, :not_found} -> {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
-      {:error, reason} -> {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
+      {:ok, _pid} ->
+        :ok
+
+      {:error, :not_found} ->
+        {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
+
+      {:error, :stopping} ->
+        reason = "session #{session_id} is stopping; try again"
+        {:error, Error.new(:unavailable, %{reason: reason})}
+
+      {:error, reason} ->
+        {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
     end
   end
 

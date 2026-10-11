@@ -20,4 +20,4 @@ The question came from an `AI?` comment; the code around it is quoted in your pr
 
 Do not survey the tree, do not read a file "for context", and do not verify anything you were not asked about. If you cannot answer from what you have read, say what you would need to look at instead of guessing.
 
-Call `finish` with the answer in the summary: a direct reply first, then the file paths and line numbers it rests on. If the question cannot be answered without a change to the code, say so and stop — the person will write `AI!` for that.
+Call `finish` with the answer in `summary`: a direct reply first, then the file paths and line numbers it rests on. Put what you read that bears it out in `passed`, what it leans on that you did not read in `unverified`, and none in `ran` and `needs`. If the question cannot be answered without a change to the code, say so and stop — the person will write `AI!` for that.

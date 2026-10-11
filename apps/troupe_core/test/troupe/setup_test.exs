@@ -440,6 +440,29 @@ defmodule Troupe.SetupTest do
       assert reason =~ "set a provider up instead"
     end
 
+    # D102: on the chunk's tip `detect/0` read opencode's `auth.json`, which holds keys, and
+    # every `{file:}` a provider's options name, only to list the providers by name.
+    test "opencode's providers are named without reading auth.json or a key's file", ctx do
+      key_file = Path.join(ctx.base, "portal.key")
+      File.write!(key_file, "sk-from-a-file\n")
+
+      File.write!(
+        System.get_env("TROUPE_OPENCODE_AUTH"),
+        ~s({"portal": {"type": "api", "key": "sk-auth"}})
+      )
+
+      File.write!(System.get_env("TROUPE_OPENCODE_CONFIG"), """
+      {"provider": {"portal": {"options": {"apiKey": "{file:#{key_file}}"}},
+                    "other": {"options": {"baseURL": "https://other.example/v1"}}}}
+      """)
+
+      {detected, touched} = files_touched(fn -> Setup.detect() end)
+      assert detected["opencode"]["providers"] == ["other", "portal"]
+      assert System.get_env("TROUPE_OPENCODE_CONFIG") in touched
+      refute System.get_env("TROUPE_OPENCODE_AUTH") in touched
+      refute key_file in touched
+    end
+
     test "a missing config.yaml cannot be reused" do
       {:ok, flow} = Setup.answer(Setup.new(), "where", %{"choice" => "local"})
       assert {:error, reason} = Setup.answer(flow, "provider", %{"reuse" => "config"})
@@ -574,4 +597,45 @@ defmodule Troupe.SetupTest do
     :gen_tcp.close(socket)
     serve(listen, status, body, times - 1)
   end
+
+  # Every path this process hands `:file` while `fun` runs, as it handed it: a call traced
+  # by a process beside the test (a process is not its own tracer).
+  defp files_touched(fun) do
+    Code.ensure_loaded!(:file)
+    :erlang.trace_pattern({:file, :_, :_}, true, [:global])
+    on_exit(fn -> :erlang.trace_pattern({:file, :_, :_}, false, [:global]) end)
+    tracer = spawn_link(fn -> collect([]) end)
+
+    :erlang.trace(self(), true, [:call, {:tracer, tracer}])
+    result = fun.()
+    :erlang.trace(self(), false, [:call])
+
+    ref = :erlang.trace_delivered(self())
+    assert_receive {:trace_delivered, _pid, ^ref}
+    send(tracer, {:paths, self()})
+    assert_receive {:paths, paths}
+    {result, paths}
+  end
+
+  defp collect(paths) do
+    receive do
+      {:trace, _pid, :call, {:file, _function, args}} ->
+        collect(Enum.flat_map(args, &path/1) ++ paths)
+
+      {:paths, from} ->
+        send(from, {:paths, Enum.uniq(paths)})
+    end
+  end
+
+  defp path(arg) when is_binary(arg), do: [arg]
+
+  defp path(arg) when is_list(arg) do
+    if List.ascii_printable?(arg) or Enum.all?(arg, &is_integer/1),
+      do: [List.to_string(arg)],
+      else: []
+  rescue
+    _not_a_path -> []
+  end
+
+  defp path(_arg), do: []
 end

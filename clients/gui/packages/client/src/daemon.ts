@@ -14,7 +14,7 @@
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { ConnectOptions, ConnectionHooks } from "./connection.js";
-import type { AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
+import type { AgentBroken, AgentCheck, AgentDefinition, AgentDeleted, AgentRow, AgentScope, AgentSkippedFile, AgentsChanged, AgentWritten } from "./agents.js";
 import type { ConfigScope, ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import { syncState } from "./fleet.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
@@ -22,6 +22,15 @@ import type { MemoryBrief } from "./memory.js";
 import type { OnboardApplied, OnboardPlan } from "./onboard.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
 import type { ConfigChanged, EventEnvelope, Principal, SessionCreateResult, ToolInvoke, TroupeEvent } from "./types.js";
+import { ErrorCodes } from "./types.js";
+
+/** `watch.get`: whether a workspace is watched, how, and by which session (troupe Decision 844). */
+export interface WatchState {
+  enabled: boolean;
+  /** `native`, `poll`, or `off` when nothing watches. */
+  backend: string;
+  session_id: string | null;
+}
 
 /** What `daemon.json` says about the WebSocket the daemon serves for graphical clients. */
 export interface DaemonEndpoint {
@@ -618,6 +627,15 @@ export class DaemonClient {
   }
 
   /**
+   * Whether a workspace is watched, by `native` or `poll`, and by which session (troupe
+   * Decision 844): `backend` `off` and a null `session_id` when none. What a control shows,
+   * rather than what it last set; the watching session's `watch_changed` says each change.
+   */
+  getWatch(workspace: string): Promise<WatchState> {
+    return this.call<WatchState>("watch.get", { workspace });
+  }
+
+  /**
    * The model settings in effect, and the file they come from.
    *
    * `workspace` asks as a session in that directory would see them, which is what
@@ -777,19 +795,37 @@ export class DaemonClient {
   /**
    * The primary agents a session in `workspace` could run, as `session.create` resolves
    * them, each with what decides whether a person wants it (troupe Decision 841), and the
-   * agent files found and not read, with why.
+   * agent files found and not read, with why. `subagents: true` lists the subagents an
+   * agent delegates to as well, each row with its `mode`, the primaries first (troupe
+   * Decision 852): what a manager asks, never a picker of what a session runs.
    */
-  listAgents(workspace: string): Promise<{ agents: AgentRow[]; skipped?: AgentSkippedFile[] }> {
-    return this.call("agents.list", { workspace });
+  listAgents(workspace: string, opts: { subagents?: boolean } = {}): Promise<{ agents: AgentRow[]; skipped?: AgentSkippedFile[] }> {
+    return this.call("agents.list", { workspace, ...(opts.subagents ? { subagents: true } : {}) });
   }
 
   /**
-   * One definition whole: its frontmatter, its instruction, its file and that file's text,
-   * whether it is a person's to change here and, with a session, the windows of its family
-   * running it. `not_found` (`kind: "agent"`) for a name nothing defines.
+   * One definition whole: its frontmatter, its instruction, its file and that file's text
+   * with its `hash`, whether it is a person's to change here and, with a session, the
+   * windows of its family running it. `not_found` (`kind: "agent"`) for a name nothing
+   * defines; a name only a file that does not parse has is `brokenAgent`'s.
    */
   getAgent(params: { name: string; workspace?: string; session_id?: string }): Promise<AgentDefinition> {
     return this.call<AgentDefinition>("agents.get", { ...params });
+  }
+
+  /**
+   * The person's or the repository's file of `name` that does not parse, to open and mend
+   * (troupe Decision 852): `agents.get`'s `broken`, beside what answers to the name or alone
+   * when nothing does. Null when there is none, or the daemon is older than it.
+   */
+  async brokenAgent(params: { name: string; workspace?: string }): Promise<AgentBroken | null> {
+    try {
+      const got = await this.call<{ broken?: AgentBroken | null }>("agents.get", { ...params });
+      return got.broken ?? null;
+    } catch (e) {
+      if (e instanceof TroupeRpcError && e.code === ErrorCodes.not_found) return null;
+      throw e;
+    }
   }
 
   /** Check a definition's text as `putAgent` would, writing nothing. */
@@ -801,9 +837,11 @@ export class DaemonClient {
    * Check a definition and write it as `<name>.md` in the scope's directory: the person's
    * agents (`user`, read by every session on this computer) or a workspace's
    * `.troupe/agents` (`project`, committed and shared). One with an error is refused with
-   * every error at its field (`agentRefusal`) and nothing is written. `admin`.
+   * every error at its field (`agentRefusal`) and nothing is written. `if_hash`, the
+   * `hash` `getAgent` gave for the file the save replaces, refuses one over a file that
+   * changed since (`agentConflict`, troupe Decision 852). `admin`.
    */
-  putAgent(params: { name: string; scope: AgentScope; source: string; workspace?: string }): Promise<AgentWritten> {
+  putAgent(params: { name: string; scope: AgentScope; source: string; workspace?: string; if_hash?: string }): Promise<AgentWritten> {
     return this.command<AgentWritten>("agents.put", { ...params });
   }
 

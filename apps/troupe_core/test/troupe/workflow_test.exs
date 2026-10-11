@@ -113,7 +113,19 @@ defmodule Troupe.WorkflowTest do
   test "plan without parallel steps leaves out the concurrency rule, and an empty list is the default" do
     plan = Workflow.plan([Workflow.step("only", "implementer", "do it")], "t")
     refute plan =~ "run concurrently"
-    assert plan =~ "Every delegate prompt must stand alone"
+    assert plan =~ "A step's prompt is a brief"
     assert Workflow.plan([], "t") == Workflow.plan(Workflow.default_steps(), "t")
+  end
+
+  # #554: the rules follow the delegation's contract (Decision 847), not a free prompt and
+  # a free summary.
+  test "the rules say a step's prompt is a brief in its parts and its result a finish in parts" do
+    plan = Workflow.plan([Workflow.step("only", "implementer", "do it")], "t")
+
+    for part <- ~w(goal context constraints deliverable do_not), do: assert(plan =~ part)
+    assert plan =~ "A step's result is its finish"
+    assert plan =~ "what is unverified"
+    refute plan =~ "must stand alone"
+    refute plan =~ "summary is all you get back"
   end
 end

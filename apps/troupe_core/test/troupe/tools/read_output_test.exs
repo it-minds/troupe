@@ -18,14 +18,17 @@ defmodule Troupe.Tools.ReadOutputTest do
     on_exit(fn -> File.rm_rf!(root) end)
 
     {:ok, workspace} = Workspace.new(root)
+    on_exit(fn -> File.rm_rf!(root <> "-state") end)
 
+    # Kept outputs go under the session's own state directory (Decision 855): this one's,
+    # beside the workspace, and never the developer's.
     ctx = %Ctx{
       session_id: "s-#{System.unique_integer([:positive])}",
       agent_path: ["root"],
       workspace: workspace,
       call_id: "call_1",
       agent_pid: self(),
-      config: %Troupe.Config{tool_output_limit: 400}
+      config: %Troupe.Config{tool_output_limit: 400, state_dir: root <> "-state"}
     }
 
     %{root: root, ctx: ctx}

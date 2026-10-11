@@ -29,7 +29,11 @@
           {
             "name": "finish",
             "input": {
-              "summary": "smoke test complete: wrote hello.txt and read it back through reaper"
+              "summary": "smoke test complete: wrote hello.txt and read it back through reaper",
+              "ran": "cat hello.txt",
+              "passed": "hello.txt reads back what was written",
+              "unverified": "none",
+              "needs": "none"
             }
           }
         ]

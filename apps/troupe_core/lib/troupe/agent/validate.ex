@@ -32,7 +32,7 @@ defmodule Troupe.Agent.Validate do
   alias Troupe.LLM.Catalog.Store
   alias Troupe.Protocol.AgentDefinition
 
-  @keys ~w(description mode model tools permissions max_turns budget_share skills override)
+  @keys ~w(description mode model tools permissions max_turns budget_share skills override delegation)
   @provenance ~w(imported_from imported_hash imported_at imported_also imported_version)
 
   # Tools the harness offers outside the pod-wide list: the skill tool, when the session's
@@ -87,6 +87,9 @@ defmodule Troupe.Agent.Validate do
   def describe({:bad_permissions, value}),
     do: "permissions must be a map of tool names to auto, ask or deny, not #{inspect(value)}"
 
+  def describe({:bad_delegation, value}),
+    do: "delegation must be ask or auto, not #{inspect(value)}"
+
   def describe(reason) when is_atom(reason),
     do: "it cannot be read (#{:file.format_error(reason)})"
 
@@ -134,6 +137,7 @@ defmodule Troupe.Agent.Validate do
       max_turns(Map.fetch(meta, "max_turns")) ++
       budget_share(Map.fetch(meta, "budget_share")) ++
       override(Map.fetch(meta, "override")) ++
+      delegation(Map.fetch(meta, "delegation")) ++
       description(Map.get(meta, "description")) ++
       instruction(String.trim(body))
   end
@@ -144,7 +148,7 @@ defmodule Troupe.Agent.Validate do
       error(
         key,
         "#{key} is not a key an agent has: the keys are description, mode, model, tools, " <>
-          "permissions, max_turns, budget_share, skills and override"
+          "permissions, max_turns, budget_share, skills, override and delegation"
       )
     end
   end
@@ -324,6 +328,10 @@ defmodule Troupe.Agent.Validate do
 
   defp override({:ok, other}),
     do: [error("override", "override must be true or false, not #{inspect(other)}")]
+
+  defp delegation(:error), do: []
+  defp delegation({:ok, value}) when value in ["ask", "auto"], do: []
+  defp delegation({:ok, other}), do: [error("delegation", describe({:bad_delegation, other}))]
 
   defp description(text) when is_binary(text) and text != "", do: []
 

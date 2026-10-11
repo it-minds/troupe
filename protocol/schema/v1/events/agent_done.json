@@ -3,11 +3,20 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "by": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "limit": {
       "type": "string"
     },
     "reason": {
       "type": "string"
+    },
+    "report": {
+      "type": "object"
     },
     "summary": {
       "type": "string"

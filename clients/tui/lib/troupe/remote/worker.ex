@@ -46,6 +46,15 @@ defmodule Troupe.Remote.Worker do
   @activating ~w(input.send commands.run approval.respond question.answer todo.edit
                  profile.switch session.goal.set session.goal.clear session.loop.start
                  fs.upload shell.run)
+  # What a person is asked, by call id, and what answers it: a branch's are answered from
+  # its parent's screen (`remember_call/2`).
+  @asks [:approval_requested, :question_asked, :budget_ask_started]
+  @answers [
+    :approval_answered,
+    :question_answered,
+    :budget_ask_answered,
+    :tool_failures_ask_answered
+  ]
 
   @type mode :: :read | :activate
 
@@ -105,7 +114,8 @@ defmodule Troupe.Remote.Worker do
   def cancel(session_id), do: call(session_id, :cancel)
 
   @spec approve(String.t(), String.t(), :allow | :deny | :allow_session) :: :ok | {:error, term()}
-  def approve(session_id, call_id, decision), do: call(session_id, {:approve, call_id, decision})
+  def approve(session_id, call_id, decision, answer \\ %{}),
+    do: call(session_id, {:approve, call_id, decision, answer})
 
   @doc "Answers a question the agent asked with `ask_user`."
   @spec answer(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
@@ -148,6 +158,20 @@ defmodule Troupe.Remote.Worker do
 
   @spec fs_upload(String.t(), String.t(), binary()) :: :ok | {:error, term()}
   def fs_upload(session_id, path, content), do: call(session_id, {:upload, path, content})
+
+  @doc """
+  Whether a file of `size` bytes can go in one `fs.upload` (D115): the sentence `fs_upload/3`
+  would answer once it had been read, when it is larger than the server's message. A frame
+  is larger than the file, so one that fits here may still be refused as sent. `:ok` as well
+  where nothing can say yet: before `initialize`, or with no connection to ask.
+  """
+  @spec upload_fits(String.t(), non_neg_integer()) :: :ok | {:error, String.t()}
+  def upload_fits(session_id, size) do
+    case call(session_id, {:upload_fits, size}) do
+      {:error, sentence} when is_binary(sentence) -> {:error, sentence}
+      _fits_or_unknown -> :ok
+    end
+  end
 
   @doc "Any command on the session's socket, for what has no method of its own here."
   @spec rpc(String.t(), String.t(), map()) :: {:ok, term()} | :ok | {:error, term()}
@@ -273,6 +297,7 @@ defmodule Troupe.Remote.Worker do
       resent: MapSet.new()
     }
 
+    :ok = remember_asked(state)
     {:ok, state, {:continue, :connect}}
   end
 
@@ -360,12 +385,22 @@ defmodule Troupe.Remote.Worker do
   def handle_call(:cancel, from, state),
     do: command(state, from, "turn.cancel", %{command_id: RPC.command_id()})
 
-  def handle_call({:approve, call_id, decision}, from, state) do
-    activating(state, from, "approval.respond", %{
-      call_id: call_id,
-      decision: to_string(decision),
-      command_id: RPC.command_id()
-    })
+  # A delegation's answer carries more than its word (root Decision 850): `agent`, `brief`
+  # and `reason`, sent as they are given.
+  def handle_call({:approve, call_id, decision, answer}, from, state) do
+    keys = %{"agent" => :agent, "brief" => :brief, "reason" => :reason}
+    given = for {key, value} <- answer, Map.has_key?(keys, key), into: %{}, do: {keys[key], value}
+
+    activating(
+      state,
+      from,
+      "approval.respond",
+      Map.merge(given, %{
+        call_id: call_id,
+        decision: to_string(decision),
+        command_id: RPC.command_id()
+      })
+    )
   end
 
   def handle_call({:answer, call_id, text}, from, state) do
@@ -419,6 +454,16 @@ defmodule Troupe.Remote.Worker do
        state}
     end
   end
+
+  def handle_call({:upload_fits, size}, _from, %{max_message: limit} = state)
+      when is_integer(limit) and size > limit do
+    {:reply,
+     {:error,
+      "too large to send: #{mib(size)} on disk, and the #{server(state)} takes at most " <>
+        "#{mib(limit)} in one message; nothing was sent"}, state}
+  end
+
+  def handle_call({:upload_fits, _size}, _from, state), do: {:reply, :ok, state}
 
   def handle_call({:rpc, method, params}, from, state), do: command(state, from, method, params)
 
@@ -537,15 +582,16 @@ defmodule Troupe.Remote.Worker do
   # is told why. The size is the frame's, which is the file's and then some for an upload.
   defp too_large(%{max_message: limit} = state, frame) when is_integer(limit) do
     size = IO.iodata_length(frame)
-    server = if state.plane_url, do: "worker", else: "daemon"
 
     if size > limit do
-      "too large to send: #{mib(size)} as sent, and the #{server} takes at most #{mib(limit)} " <>
-        "in one message; nothing was sent"
+      "too large to send: #{mib(size)} as sent, and the #{server(state)} takes at most " <>
+        "#{mib(limit)} in one message; nothing was sent"
     end
   end
 
   defp too_large(_state, _frame), do: nil
+
+  defp server(state), do: if(state.plane_url, do: "worker", else: "daemon")
 
   defp mib(bytes), do: "#{Float.round(bytes / (1024 * 1024), 1)} MiB"
 
@@ -1184,14 +1230,35 @@ defmodule Troupe.Remote.Worker do
     %{event | session_id: sid, agent_path: Branch.rewrite(event.agent_path, window)}
   end
 
-  # An approval or a question a branch asks is answered through the parent's session
-  # id, so the client finds its way back to this session by the call id. The
-  # registration dies with this process, like the window it belongs to.
+  # An approval or a question a branch asks, the budget's included, is answered through the
+  # parent's session id, so the client finds its way back to this session by the call id.
+  # The registration dies with this process, like the window it belongs to.
   defp remember_call(%{as: {sid, _}} = state, %Troupe.Event{type: type, data: %{call_id: call_id}})
-       when type in [:approval_requested, :question_asked] do
+       when type in @asks do
     _ = Registry.register(Troupe.Client.Registry, {:call, sid, call_id}, state.session_id)
     :ok
   end
 
   defp remember_call(_state, _event), do: :ok
+
+  # A worker that starts again, after a crash or with its parent's session opened again,
+  # resumes past what it had seen, so a request asked of the one before it is not seen
+  # again: what the branch's journal says it still asks is registered as it starts (D113).
+  defp remember_asked(%{as: {_sid, _window}} = state) do
+    state.session_id
+    |> Journal.all()
+    |> Enum.reduce(%{}, fn
+      %Troupe.Event{type: type, data: %{call_id: id}} = event, open when type in @asks ->
+        Map.put(open, id, event)
+
+      %Troupe.Event{type: type, data: %{call_id: id}}, open when type in @answers ->
+        Map.delete(open, id)
+
+      _event, open ->
+        open
+    end)
+    |> Enum.each(fn {_id, event} -> remember_call(state, event) end)
+  end
+
+  defp remember_asked(_state), do: :ok
 end

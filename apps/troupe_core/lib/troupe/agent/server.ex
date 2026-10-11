@@ -33,6 +33,7 @@ defmodule Troupe.Agent.Server do
   @behaviour :gen_statem
 
   alias Troupe.Agent.{
+    Background,
     BudgetQuestion,
     Call,
     Definition,
@@ -40,7 +41,8 @@ defmodule Troupe.Agent.Server do
     Headroom,
     Local,
     Spend,
-    State
+    State,
+    Writes
   }
   alias Troupe.{Budget, Config, Events, Instructions, Registry, Skills, Todo, Tool, Tools}
 
@@ -63,7 +65,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions, Shell}
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
-  alias Troupe.Tools.{Output, ReadOutput}
+  alias Troupe.Tools.{Delegate, Finish, Output, ReadOutput}
   alias Troupe.Watch.Trigger
 
   require Logger
@@ -315,7 +317,7 @@ defmodule Troupe.Agent.Server do
         end
 
       _ ->
-        state = Enum.reduce(events, state, &fold_event/2)
+        state = events |> Enum.reduce(state, &fold_event/2) |> hold_background(events)
         incomplete = incomplete_calls(events)
         awaiting = awaiting_person(events)
         action = resume_action(state, incomplete, awaiting, cold_start?, cancelled?(events))
@@ -328,6 +330,15 @@ defmodule Troupe.Agent.Server do
 
         {if(takes_up_turn?(action), do: open_batch(state, events), else: state), action}
     end
+  end
+
+  # The ends of the children it started in the background that it was never handed, held
+  # again, after closing those its restart took down (Decision 853). Read off the whole log
+  # only when it has started one.
+  defp hold_background(state, events) do
+    if Background.any?(events),
+      do: %{state | child_reports: Background.held(state.session_id, state.agent_path)},
+      else: state
   end
 
   # The bundle version rides along when there is one, so a transcript says which
@@ -429,6 +440,10 @@ defmodule Troupe.Agent.Server do
   # which left the list the prompt shows alone when it was written, and does so here.
   defp fold_input(state, %{"source" => "harness"}), do: state
 
+  # A background child's end (Decision 853) is given before a model call wherever it falls,
+  # as a harness note is, and leaves the list alone the same way.
+  defp fold_input(state, %{"source" => "subagent"}), do: state
+
   # The person's commands, given to the model before a call (Decision 813): written before
   # the input that starts a turn, or between a tool exchange and the call after it, and the
   # list the prompt shows is the turn's either way.
@@ -473,6 +488,9 @@ defmodule Troupe.Agent.Server do
 
   # A raise for one run is given back where the run ended (Decision 699), and the next run
   # counts what it costs from nothing (Decision 769).
+  #
+  # A subagent's wait for a child of its own (Decision 853) ends no run: its sum goes on.
+  defp fold_limits(state, "turn_ended", %{"reason" => "waiting"}), do: state
   defp fold_limits(state, "turn_ended", _data), do: %{reclaim_run_grant(state) | turn: %Spend{}}
 
   defp fold_limits(state, "tool_failures_ask_started", data) do
@@ -578,7 +596,10 @@ defmodule Troupe.Agent.Server do
     end
   end
 
-  defp carry_on(state, []), do: if(needs_turn?(state), do: :turn, else: :none)
+  # A background child's end still to hand over is a turn owed, as it is to a resting agent
+  # (Decision 853).
+  defp carry_on(state, []),
+    do: if(needs_turn?(state) or state.child_reports != [], do: :turn, else: :none)
   defp carry_on(_state, incomplete), do: {:rerun, incomplete}
 
   # A question at the gate still waiting on a person — a spent budget's (Decision 660), or
@@ -686,7 +707,7 @@ defmodule Troupe.Agent.Server do
       call_id: completed["call_id"],
       name: completed["name"],
       ok?: completed["ok"] == true,
-      content: Blobs.resolve(state.session_id, state.workspace.root_real, completed["content"])
+      content: resolve_payload(state, completed["content"])
     }
 
     %Call{
@@ -697,9 +718,11 @@ defmodule Troupe.Agent.Server do
     }
   end
 
+  # The parts the `finish` gave, read off its call as `Finish` read them live (Decision
+  # 847); one from before the parts gave a summary alone.
   defp finished_with(back) do
     Enum.find_value(Map.values(back), fn
-      %Call{name: "finish", args: %{"summary" => summary}, result: %Result{ok?: true}} -> summary
+      %Call{name: "finish", args: %{} = args, result: %Result{ok?: true}} -> Finish.replayed(args)
       _call -> nil
     end)
   end
@@ -737,6 +760,11 @@ defmodule Troupe.Agent.Server do
   end
 
   def idle(:internal, :turn, state), do: start_turn(state)
+
+  # A run ended with a background child's end held: it is the next turn (Decision 853), after
+  # any input that waited for the run to end, whose turn is given it too.
+  def idle(:info, :child_reports, %State{child_reports: []}), do: {:keep_state_and_data, []}
+  def idle(:info, :child_reports, state), do: start_turn(state)
 
   # Came back from a restart with work half-done. The calls that never finished are
   # closed off as errors rather than left dangling: the model needs a `tool_result` for
@@ -778,6 +806,11 @@ defmodule Troupe.Agent.Server do
   def idle(:info, {:switch_profile, name, definitions, meta}, state) do
     {:keep_state, do_switch_profile(state, name, definitions, meta)}
   end
+
+  # Resting, nothing is in flight but what it left running in the background (Decision 853),
+  # which a cancel stops.
+  def idle(:info, :cancel, %State{background: background} = state) when map_size(background) > 0,
+    do: cancel_everything(state)
 
   def idle(:info, :cancel, state), do: {:keep_state, state}
 
@@ -847,7 +880,7 @@ defmodule Troupe.Agent.Server do
   def acting(:info, {:child_result, ref, child_result}, state) do
     case find_call_by_child(state, ref) do
       nil ->
-        {:keep_state_and_data, []}
+        background_ended(state, ref, child_result, :acting)
 
       call ->
         state
@@ -873,6 +906,17 @@ defmodule Troupe.Agent.Server do
   def acting(:info, {:approval, call_id, decision}, state) do
     Approvals.decide(state.session_id, call_id, decision)
     {:keep_state_and_data, []}
+  end
+
+  # A delegation the person was asked about (Decision 850), answered.
+  def acting(:info, {:delegation_answer, call_id, answer}, state) do
+    case Map.fetch(state.pending, call_id) do
+      {:ok, %Call{result: nil, child_ref: nil} = call} ->
+        {:keep_state, delegation_answered(state, call, answer)}
+
+      _ ->
+        {:keep_state_and_data, []}
+    end
   end
 
   def acting(:info, :cancel, state), do: cancel_everything(state)
@@ -1013,6 +1057,11 @@ defmodule Troupe.Agent.Server do
     end
   end
 
+  # A child started in the background reports in whatever state its parent is in (Decision
+  # 853); a waited-for one only ever finds its parent `:acting`, which takes it there.
+  defp common(:info, {:child_result, ref, result}, state_name, state),
+    do: background_ended(state, ref, result, state_name)
+
   # The goal is taken in every state, `:done` included: a finished agent woken by the next
   # input should find the goal it was given while it rested.
   defp common(:info, {:goal, text, actor, command_id}, _state_name, state) do
@@ -1094,11 +1143,17 @@ defmodule Troupe.Agent.Server do
 
   # A child Node that exceeded its restart intensity becomes an error result for that
   # one delegation. Siblings are untouched — the whole point of per-delegation Nodes.
-  defp handle_child_down(_state_name, state, child_ref, reason) do
-    case find_call_by_child(state, child_ref) do
-      %Call{result: nil} when reason != :normal ->
+  #
+  # A child in the background that does the same ends `failed`, and its parent is handed what
+  # its log says it had done (Decision 853).
+  defp handle_child_down(state_name, state, child_ref, reason) do
+    case {find_call_by_child(state, child_ref), Map.fetch(state.background, child_ref)} do
+      {%Call{result: nil}, _} when reason != :normal ->
         {:keep_state, state,
          [{:next_event, :info, {:child_result, child_ref, {:error, {:child_failed, reason}}}}]}
+
+      {nil, {:ok, child}} when reason != :normal ->
+        state |> end_background(child, "failed") |> deliver(state_name)
 
       _ ->
         {:keep_state, state}
@@ -1268,6 +1323,21 @@ defmodule Troupe.Agent.Server do
     %{state | conversation: state.conversation ++ [Message.user(text)], shell_notes: []}
   end
 
+  # The ends of children started in the background (Decision 853), in the same place and for
+  # the same reason: each a user message of its own, written as a `user_input` from
+  # `subagent`, which is also the record that it was handed over, once.
+  defp fold_child_reports(%State{child_reports: []} = state), do: state
+
+  defp fold_child_reports(state) do
+    messages =
+      for ended <- state.child_reports do
+        log(state, :user_input, Background.input(ended))
+        Message.user(ended.text)
+      end
+
+    %{state | conversation: state.conversation ++ messages, child_reports: []}
+  end
+
   # -- turns ------------------------------------------------------------------
 
   defp start_turn(state) do
@@ -1277,7 +1347,12 @@ defmodule Troupe.Agent.Server do
 
       :ok ->
         {state, attached} =
-          state |> fold_shell() |> load_instructions() |> attach_turn_context()
+          state
+          |> fold_shell()
+          |> fold_child_reports()
+          |> load_instructions()
+          |> attach_turn_context()
+
         definition = effective_definition(state)
         request = build_request(state, definition)
         {prefix, changed} = prefix_changes(state.prefix, request)
@@ -2023,8 +2098,16 @@ defmodule Troupe.Agent.Server do
     brief_checked(state)
 
     cond do
+      # A subagent with a child of its own still in the background, or its end not yet read,
+      # waits for it rather than finishing (Decision 853): it rests as a root does, and the
+      # end is its next turn.
+      State.subagent?(state) and (state.background != %{} or state.child_reports != []) ->
+        wait_for_children(state)
+
+      # A subagent that answered without `finish` is reported in the same parts, what changed
+      # counted all the same and the rest said to be unsaid (Decision 847).
       State.subagent?(state) ->
-        report_and_finish(state, text)
+        report_and_finish(state, Finish.unreported(text))
 
       needs_compaction?(state) ->
         enter_compaction(state, :idle)
@@ -2071,12 +2154,27 @@ defmodule Troupe.Agent.Server do
   # to be able to tell that the agent is waiting for input (issue #127). A `reason` says the
   # harness ended the turn rather than the model (Decision 687), and `turn` what the turn
   # cost (Decision 769).
+  #
+  # A run that ends with a background child's end held takes it as its next turn (Decision
+  # 853), unless the harness ended it: then it waits for the next input, as after a cancel.
   defp rest(state, reason \\ nil) do
     state = reclaim_run_grant(%{state | turn_mode: nil})
     data = if(reason, do: %{"reason" => reason}, else: %{})
     log(state, :turn_ended, Map.put(data, "turn", Spend.to_json(state.turn)))
     state = %{state | turn: %Spend{}}
     publish_state(state, :idle)
+    if state.child_reports != [] and reason == nil, do: send(self(), :child_reports)
+    {:next_state, :idle, state}
+  end
+
+  # A subagent waiting on a child of its own in the background (Decision 853) rests without
+  # ending its task: what it has spent so far is charged to its parent with its finish, so its
+  # `turn_ended` says `waiting` and carries no `turn`, and the sum goes on, folded as it was.
+  defp wait_for_children(state) do
+    log(state, :turn_ended, %{"reason" => "waiting"})
+    state = %{state | turn_mode: nil}
+    publish_state(state, :idle)
+    if state.child_reports != [], do: send(self(), :child_reports)
     {:next_state, :idle, state}
   end
 
@@ -2178,17 +2276,23 @@ defmodule Troupe.Agent.Server do
     state
   end
 
-  defp defer(state, call, {:delegate, agent_name, task}) do
-    spawn_child(state, call, agent_name, task)
+  defp defer(state, call, {:delegate, agent_name, brief}) do
+    definition = Definitions.fetch!(state.definitions, agent_name)
+
+    if Delegate.asks?(definition, state.config),
+      do: ask_to_delegate(state, call, definition, brief),
+      else: spawn_child(state, call, agent_name, brief)
   end
 
-  defp defer(state, call, {:finish, summary}) do
-    # `finish` is terminal. The summary is stashed rather than acted on here, because
-    # sibling tool calls from the same turn are still running and their results must
-    # be recorded before the agent stops.
+  defp defer(state, call, {:finish, parts}) do
+    # `finish` is terminal. Its parts are stashed rather than acted on here, because
+    # sibling tool calls from the same turn are still running and their results must be
+    # recorded before the agent stops — and what they wrote is part of what it changed.
     send(self(), {:tool_result, call.id, Result.ok(call.id, call.name, "Finished.")})
-    %{state | finish_summary: summary}
+    %{state | finish_summary: parts}
   end
+
+  defp defer(state, call, {:stop_child, name}), do: stop_in_background(state, call, name)
 
   defp run_in_task(state, call, module, definition, ctx) do
     task_sup = tasks(state)
@@ -2224,6 +2328,7 @@ defmodule Troupe.Agent.Server do
       watcher: state.watcher || Registry.watcher_pid(state.session_id),
       bundle: state.bundle,
       todos: state.todos,
+      children: State.background_paths(state),
       turn_calls: state.turn.calls,
       depth: State.depth(state),
       max_depth: state.config.max_depth,
@@ -2293,10 +2398,10 @@ defmodule Troupe.Agent.Server do
         if from_state == :acting, do: {:keep_state, state}, else: {:next_state, :acting, state}
 
       state.finish_summary != nil ->
-        summary = state.finish_summary
+        parts = state.finish_summary
         state = fold_results(state, State.ordered_results(state))
         brief_checked(state)
-        report_and_finish(state, summary)
+        report_and_finish(state, parts)
 
       true ->
         results = State.ordered_results(state)
@@ -2799,12 +2904,16 @@ defmodule Troupe.Agent.Server do
 
   # Anything over the inline limit goes to content-addressed storage and travels as a
   # reference. A 40 MB test log belongs in the session directory, not in every
-  # subscriber's socket and not in the log line that every replay reads.
+  # subscriber's socket and not in the log line that every replay reads: the session's own
+  # directory, under the state directory its config names (Decision 855).
   defp store_payload(state, content) when is_binary(content) do
-    Blobs.maybe_store(state.session_id, state.workspace.root_real, content)
+    Blobs.maybe_store(state.session_id, state.workspace.root_real, state.config.state_dir, content)
   end
 
   defp store_payload(_state, content), do: content
+
+  defp resolve_payload(state, content),
+    do: Blobs.resolve(state.session_id, state.workspace.root_real, state.config.state_dir, content)
 
   # Any message: its tool results are stored, every other block passes through, so a
   # `compacted` conversation goes the same way (Decision 774).
@@ -2826,18 +2935,108 @@ defmodule Troupe.Agent.Server do
   end
 
   defp resolve_block(state, %{"type" => "tool_result", "content" => content} = block) do
-    %{block | "content" => Blobs.resolve(state.session_id, state.workspace.root_real, content)}
+    %{block | "content" => resolve_payload(state, content)}
   end
 
   defp resolve_block(_state, block), do: block
 
   # -- delegation -------------------------------------------------------------
 
-  defp spawn_child(state, call, agent_name, task) do
+  # A delegation the person asked to see first waits at the session's approval gate
+  # (Decision 850), in a task as an asking tool's call does, so this agent goes on
+  # collecting its other calls meanwhile and a cancel ends the wait with the task. No
+  # timer: a child has none, and a person reading a brief may take longer than a tool.
+  defp ask_to_delegate(state, call, definition, brief) do
+    where = %{
+      depth: State.depth(state),
+      max_depth: state.config.max_depth,
+      session_id: state.session_id
+    }
+
+    req = %{
+      call_id: call.id,
+      tool: call.name,
+      args: call.args,
+      agent_path: state.agent_path,
+      delegation: Delegate.gate(definition, brief, state.definitions, where)
+    }
+
+    agent = self()
+    session_id = state.session_id
+
+    {:ok, pid} =
+      Task.Supervisor.start_child(tasks(state), fn ->
+        send(agent, {:delegation_answer, call.id, Approvals.request(session_id, req)})
+      end)
+
+    monitor = Process.monitor(pid)
+    call = %{call | task_pid: pid, monitor: monitor}
+
+    %{state | pending: Map.put(state.pending, call.id, call)}
+    |> State.watch(monitor, {:tool, call.id})
+  end
+
+  # The person's answer: the child starts, as the delegate asked or as they changed it, or
+  # the delegate call is answered no, with their word back when they gave one.
+  defp delegation_answered(state, call, answer) do
+    if call.monitor, do: Process.demonitor(call.monitor, [:flush])
+    state = if call.monitor, do: State.unwatch(state, call.monitor), else: state
+    call = %{call | task_pid: nil, monitor: nil}
+    state = %{state | pending: Map.put(state.pending, call.id, call)}
+
+    case answer do
+      {:allow, given} -> run_as_answered(state, call, given)
+      {:deny, :unattended} -> answer_call(state, call, {:denied_unattended, call.name})
+      {:deny, given} -> answer_call(state, call, denied(call, given))
+    end
+  end
+
+  defp run_as_answered(state, call, given) do
+    {:ok, asked} = Delegate.brief(call.args)
+    agent = given["agent"] || call.args["agent"]
+    brief = given["brief"] || asked
+
+    case Definitions.fetch(state.definitions, agent) do
+      {:ok, %Definition{mode: :subagent}} ->
+        note = answered_note(call.args["agent"], agent, given["edited"] || [])
+        spawn_child(state, %{call | note: note}, agent, brief)
+
+      _other ->
+        answer_call(state, call, "#{agent} is not a subagent here, so the delegation did not run")
+    end
+  end
+
+  defp answer_call(state, call, reason) do
+    send(self(), {:tool_result, call.id, Result.error(call.id, call.name, reason)})
+    state
+  end
+
+  defp denied(call, given) do
+    case given["reason"] do
+      nil -> "The person denied this delegation to #{call.args["agent"]}."
+      reason -> "The person denied this delegation to #{call.args["agent"]} and said: #{reason}"
+    end
+  end
+
+  # Said to the parent before the child's report, so it knows the work it judges is not
+  # quite what it asked for.
+  defp answered_note(asked, asked, []), do: nil
+
+  defp answered_note(asked, agent, edited) do
+    switched = if agent != asked, do: ["sent it to #{agent} rather than #{asked}"], else: []
+    parts = if edited != [], do: ["edited its #{Finish.and_list(edited)}"], else: []
+    "[The person #{Enum.join(switched ++ parts, " and ")} before it ran.]"
+  end
+
+  # The child is handed its brief as its first message, the parts under their names, and
+  # `delegation_started` carries the parts as well, for a client to show them as parts
+  # (Decision 847).
+  defp spawn_child(state, call, agent_name, brief) do
     definition = Definitions.fetch!(state.definitions, agent_name)
     seq = state.child_seq + 1
     child_path = state.agent_path ++ ["#{agent_name}##{seq}"]
     child_ref = make_ref()
+    task = Delegate.render(brief)
 
     opts = [
       session_id: state.session_id,
@@ -2874,31 +3073,137 @@ defmodule Troupe.Agent.Server do
         {Troupe.Agent.Node, opts}
       end
 
+    background? = Delegate.background?(call.args)
+
     case DynamicSupervisor.start_child(children_sup(state), child_spec) do
       {:ok, node_pid} ->
         monitor = Process.monitor(node_pid)
 
-        log(state, :delegation_started, %{
-          "call_id" => call.id,
-          "agent" => agent_name,
-          "child_path" => child_path,
-          "task" => task
-        })
+        log(
+          state,
+          :delegation_started,
+          %{
+            "call_id" => call.id,
+            "agent" => agent_name,
+            "child_path" => child_path,
+            "task" => task,
+            "brief" => brief
+          }
+          |> then(&if(background?, do: Map.put(&1, "wait", false), else: &1))
+        )
 
-        updated = %{call | child_ref: child_ref, child_pid: node_pid, monitor: monitor}
+        state = %{state | child_seq: seq} |> State.watch(monitor, {:child, child_ref})
 
-        %{
-          state
-          | pending: Map.put(state.pending, call.id, updated),
-            child_seq: seq
-        }
-        |> State.watch(monitor, {:child, child_ref})
+        if background? do
+          child = %{ref: child_ref, path: child_path, pid: node_pid, monitor: monitor}
+          in_background(state, call, child)
+        else
+          waited_for(state, %{call | child_ref: child_ref, child_pid: node_pid, monitor: monitor})
+        end
 
       {:error, reason} ->
         result = Result.error(call.id, call.name, {:child_failed, reason})
         send(self(), {:tool_result, call.id, result})
         %{state | child_seq: seq}
     end
+  end
+
+  # The call waits for the child's finish, which completes it.
+  defp waited_for(state, call), do: %{state | pending: Map.put(state.pending, call.id, call)}
+
+  # The call answers at once with the child's path (Decision 853), what the gate changed
+  # first when it asked, and the child is this agent's to hear from, read and stop.
+  defp in_background(state, call, child) do
+    answer = noted(call, Background.started(child.path))
+    send(self(), {:tool_result, call.id, Result.ok(call.id, call.name, answer)})
+
+    %{
+      state
+      | pending: Map.put(state.pending, call.id, call),
+        background: Map.put(state.background, child.ref, child)
+    }
+  end
+
+  # -- children in the background (Decision 853) ---------------------------------
+
+  # One reported, in whatever state this agent is in: stopped as a waited-for child is once
+  # its parent has its result (#171), charged as one is, and its end held for the model.
+  defp background_ended(state, ref, result, state_name) do
+    case Map.fetch(state.background, ref) do
+      {:ok, child} ->
+        state
+        |> forget_child(child)
+        |> charge_child_usage(result)
+        |> hold(Background.reported(child.path, result))
+        |> deliver(state_name)
+
+      :error ->
+        {:keep_state_and_data, []}
+    end
+  end
+
+  # One this agent ends itself: stopped, cancelled with the turn, ended with this agent, or
+  # failed past its restarts. Its Node goes, and every agent under it with it, and its log
+  # and theirs are closed with what it had done; that is charged, and its end held.
+  defp end_background(state, child, reason) do
+    state = forget_child(state, child)
+    by = if reason == "stopped", do: state.agent_path
+    {ended, spent} = Background.stop(state.session_id, child.path, reason, by)
+    state |> charge_child(spent) |> hold(ended)
+  end
+
+  defp end_all_background(state, reason) do
+    state.background
+    |> Map.values()
+    |> Enum.sort_by(& &1.path)
+    |> Enum.reduce(state, &end_background(&2, &1, reason))
+  end
+
+  defp forget_child(state, child) do
+    Process.demonitor(child.monitor, [:flush])
+    DynamicSupervisor.terminate_child(children_sup(state), child.pid)
+    %{State.unwatch(state, child.monitor) | background: Map.delete(state.background, child.ref)}
+  end
+
+  defp hold(state, ended), do: %{state | child_reports: state.child_reports ++ [ended]}
+
+  # A resting agent takes an end as its next turn; a busy one is given it before its next
+  # model call. An agent that is done has none running: it stopped them as it ended.
+  defp deliver(state, :idle), do: start_turn(state)
+  defp deliver(state, _busy), do: {:keep_state, state}
+
+  # `stop_child`: one of this agent's own children in the background, by path or by its last
+  # part. The call answers that it stopped it, and its end is the model's next message.
+  defp stop_in_background(state, call, name) do
+    path = Background.path(name, state.agent_path)
+
+    case Enum.find(Map.values(state.background), &(&1.path == path)) do
+      nil ->
+        answer_call(state, call, not_in_background(name, state))
+
+      child ->
+        state = end_background(state, child, "stopped")
+        %{ended: ended} = List.last(state.child_reports)
+        send(self(), {:tool_result, call.id, Result.ok(call.id, call.name, stopped(path, ended))})
+        state
+    end
+  end
+
+  defp stopped(path, "stopped"),
+    do: "Stopped #{Background.label(path)}. What it had done comes to you next, as its end."
+
+  defp stopped(path, ended),
+    do: "#{Background.label(path)} had already ended (#{ended}); its end comes to you next."
+
+  defp not_in_background(name, state) do
+    running =
+      case State.background_paths(state) do
+        [] -> "None of yours runs in the background."
+        paths -> "Yours that do: " <> Enum.join(paths, ", ") <> "."
+      end
+
+    "no subagent of yours runs in the background as #{inspect(name)}. #{running} A subagent " <>
+      "you wait for is not stopped here: its finish is its delegate call's result."
   end
 
   # A child that has reported is stopped (issue #171). What it found is its delegation's
@@ -2919,18 +3224,21 @@ defmodule Troupe.Agent.Server do
   end
 
   defp child_result_to_result(call, {:ok, summary, _usage}) do
-    Result.ok(call.id, call.name, summary)
+    Result.ok(call.id, call.name, noted(call, summary))
   end
 
   # Partial work still comes back as a successful tool result: the content says it was
   # cut short, and an error result would throw the findings away.
   defp child_result_to_result(call, {:partial, summary, _usage}) do
-    Result.ok(call.id, call.name, summary)
+    Result.ok(call.id, call.name, noted(call, summary))
   end
 
   defp child_result_to_result(call, {:error, reason}) do
     Result.error(call.id, call.name, {:child_failed, reason})
   end
+
+  defp noted(%Call{note: nil}, summary), do: summary
+  defp noted(%Call{note: note}, summary), do: note <> "\n\n" <> summary
 
   defp charge_child_usage(state, {kind, _summary, spent}) when kind in [:ok, :partial],
     do: charge_child(state, spent)
@@ -2989,13 +3297,37 @@ defmodule Troupe.Agent.Server do
     end
   end
 
-  defp report_and_finish(state, summary) do
+  # What the parent is handed, `agent_done`'s `summary` and the delegate call's result, is
+  # the report rendered: the summary, then each part under its name. `report` keeps the
+  # parts for a client, `changed` among them as Troupe counted it once every call of the
+  # turn was back (Decision 847). A summary alone, off a log from before the parts, is
+  # handed over as it was.
+  defp report_and_finish(state, parts) do
+    report = if Finish.legacy?(parts), do: parts, else: with_changed(state, parts)
+    summary = Finish.render(report)
+    data = if Finish.legacy?(parts), do: %{}, else: %{"report" => report}
+
     enter_done(
       state,
       :finished,
-      %{"summary" => summary},
+      Map.put(data, "summary", summary),
       {:ok, summary, state.turn}
     )
+  end
+
+  # Read off the log file in this process rather than through the log's: it is fsynced at
+  # every append, and a long session's whole log is not copied between processes.
+  defp with_changed(state, parts) do
+    changed =
+      state.session_id
+      |> Log.path()
+      |> Log.read_file()
+      |> Writes.changed(state.agent_path, state.session_id)
+
+    case parts["changed"] do
+      nil -> Map.put(parts, "changed", changed)
+      said -> Map.put(parts, "changed", Map.put(changed, "said", said))
+    end
   end
 
   defp report(%State{parent: parent, parent_ref: ref}, result)
@@ -3215,9 +3547,12 @@ defmodule Troupe.Agent.Server do
 
   # -- cancellation and termination -------------------------------------------
 
+  # A child in the background is stopped with the rest, its log closed `cancelled` and its end
+  # held for the next input (Decision 853).
   defp cancel_everything(state) do
     {state, stopped} = stop_llm(state)
     Enum.each(Map.values(state.pending), &kill_task(state, &1))
+    state = end_all_background(state, "cancelled")
     terminate_children(state)
     state = kill_budget_ask(state)
 
@@ -3322,8 +3657,12 @@ defmodule Troupe.Agent.Server do
 
   # A subagent reports last, once everything it has to say is written and its state
   # announced: its parent stops it as soon as it has the result (#171).
+  #
+  # A child it still runs in the background is stopped first, recorded as stopped by it
+  # (Decision 853): its parent stops this agent on its report, which would take the child
+  # with it unrecorded.
   defp enter_done(state, reason, data, result \\ nil) do
-    state = state |> clear_llm() |> reclaim_run_grant()
+    state = state |> clear_llm() |> reclaim_run_grant() |> end_all_background("stopped")
 
     log(
       state,

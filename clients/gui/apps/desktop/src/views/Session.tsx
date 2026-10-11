@@ -10,9 +10,21 @@
 // the stream, because the stream's order is the server's and a reconnect must not
 // reshuffle what somebody has already read.
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import { isBlobRef, isBusy, needsYou, openApprovals, openQuestions, rootState, settleLoop, unseenSummary } from "@troupe/client";
+import {
+  BRIEF_PARTS,
+  FINISH_PARTS,
+  isBlobRef,
+  isBusy,
+  needsYou,
+  openApprovals,
+  openQuestions,
+  partsOf,
+  rootState,
+  settleLoop,
+  unseenSummary,
+} from "@troupe/client";
 import type {
   AttachStatus,
   AuthSession,
@@ -111,6 +123,9 @@ export function Session({
   // says, or what the start's event named; the memory pane asks about its repository.
   const workspace =
     kind === "team" ? undefined : (startedIn ?? (row?.raw as { workspace?: string } | undefined)?.workspace ?? view.state.onboarding?.workspace);
+  // The palette's agent rows carry their facts from the daemon's `agents.list` for this
+  // workspace (troupe #565); a session on the platform has its commands.list alone.
+  const agentRows = useMemo(() => (daemon && workspace ? () => daemon.listAgents(workspace).then((r) => r.agents) : undefined), [daemon, workspace]);
 
   // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen.
   useEffect(() => {
@@ -144,6 +159,7 @@ export function Session({
             },
             transcript: () => transcriptText(view.state),
             ...(kind !== "team" && onAgents ? { agents: () => onAgents() } : {}),
+            ...(agentRows ? { agentRows } : {}),
           }}
         />
       )}
@@ -183,7 +199,14 @@ export function Session({
 
           {/* Sticky, so scrolling up to read the context never loses the decision. */}
           {open.map((entry) => (
-            <ApprovalPanel key={entry.callId} entry={entry} canAnswer={!readOnly} others={others} onAnswer={(d) => view.respond(entry.callId, d)} />
+            <ApprovalPanel
+              key={entry.callId}
+              entry={entry}
+              canAnswer={!readOnly}
+              others={others}
+              onAnswer={(d, a) => view.respond(entry.callId, d, a)}
+              onDefinition={kind !== "team" ? onAgents : undefined}
+            />
           ))}
 
           {/* The agent's questions and the harness's budget question, in the same place. */}
@@ -635,10 +658,40 @@ function StreamEntry({
     case "tool":
       return <ToolActivity entry={entry} readBlob={readBlob} />;
 
+    // A subagent's first message is the brief it was handed: from the agent that delegated,
+    // never a person's turn, its parts under their names (troupe Decision 852). A brief
+    // from before the parts is the text it was.
+    case "brief":
+      return (
+        <article className="turn brief" aria-label={`The brief ${entry.child} was handed`}>
+          <div className="byline">
+            <span className="name">Brief</span>
+            <span className="micro muted">
+              from {entry.from.length > 1 ? entry.from.slice(1).join(" › ") : "the session's agent"} to {entry.agent.slice(1).join(" › ")}
+            </span>
+          </div>
+          {entry.parts.length > 0 ? (
+            <dl className="facts wide parts">
+              {entry.parts.map(([name, text]) => (
+                <Fragment key={name}>
+                  <dt>{name.replace("_", " ")}</dt>
+                  <dd>{text}</dd>
+                </Fragment>
+              ))}
+            </dl>
+          ) : (
+            <div className="body">{entry.text}</div>
+          )}
+        </article>
+      );
+
+    // The brief's goal says what it is for in a line; the parts are in the delegate call's.
+    // One in the background says so: its call answered at once (troupe Decision 853).
     case "delegation":
       return (
         <p className="note">
-          Handed to {entry.child}: {entry.task}
+          Handed to {entry.child}
+          {entry.background ? ", in the background" : ""}: {entry.brief.find(([name]) => name === "goal")?.[1] ?? entry.task}
         </p>
       );
 
@@ -712,8 +765,12 @@ function modelErrorStep(text: string): string | null {
  */
 function ToolActivity({ entry, readBlob }: { entry: Extract<Entry, { kind: "tool" }>; readBlob: (b: string) => Promise<string> }): JSX.Element {
   const args = (entry.args ?? {}) as Record<string, unknown>;
-  const target = ["path", "file", "command", "query", "url"].map((k) => args[k]).find((v) => typeof v === "string") as string | undefined;
+  const target = ["path", "file", "command", "query", "url", "agent", "child"].map((k) => args[k]).find((v) => typeof v === "string") as string | undefined;
   const running = entry.ok === undefined;
+  // A brief and a finish are read as their parts, each under its name, not as JSON
+  // (troupe Decision 847); a call from before they had parts has none, and stays JSON.
+  const shape = entry.name === "delegate" ? BRIEF_PARTS : entry.name === "finish" ? FINISH_PARTS : null;
+  const parts = shape ? partsOf(entry.args, shape) : [];
 
   return (
     <details className={`tool ${running ? "running" : entry.ok ? "ok" : "failed"}`}>
@@ -722,7 +779,18 @@ function ToolActivity({ entry, readBlob }: { entry: Extract<Entry, { kind: "tool
         <span className="target">{target ?? ""}</span>
         <span className="muted">{running ? "running" : entry.ok ? "done" : "failed"}</span>
       </summary>
-      <pre className="payload">{JSON.stringify(entry.args, null, 2)}</pre>
+      {parts.length > 0 ? (
+        <dl className="payload facts wide parts">
+          {parts.map(([name, text]) => (
+            <Fragment key={name}>
+              <dt>{name.replace("_", " ")}</dt>
+              <dd>{text}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      ) : (
+        <pre className="payload">{JSON.stringify(entry.args, null, 2)}</pre>
+      )}
       {entry.content !== undefined &&
         (isBlobRef(entry.content) ? (
           <LargeResult reference={entry.content} readBlob={readBlob} />
@@ -936,7 +1004,7 @@ function Backstage({
         </section>
       )}
 
-      {daemon && row && row.kind !== "team" && <LocalControls daemon={daemon} row={row} />}
+      {daemon && row && row.kind !== "team" && <LocalControls daemon={daemon} row={row} session={view.view} />}
 
       <section>
         <h3>This session</h3>

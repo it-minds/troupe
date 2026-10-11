@@ -423,6 +423,32 @@
         null
       ]
     },
+    "delegation": {
+      "description": "Delegating to subagents. Read from a project's file only in a trusted workspace.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "ask": {
+          "description": "The subagents a `delegate` to asks you first, by name: you see the brief, the tools and the budget the child would get, and run it, edit the brief, send it to another agent, deny it with a word back, or let that agent run unasked for the session. `auto_approve` does not answer it. An agent's own definition asks too with `delegation: ask`. Unset: every delegation runs at once.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
     "managed_permission_rules_only": {
       "description": "A session may not allow a tool for itself. Read from a project's file only in a trusted workspace.",
       "default": false,

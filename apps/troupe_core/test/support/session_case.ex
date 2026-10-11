@@ -89,6 +89,52 @@ defmodule Troupe.SessionCase do
     %{session: session, fake: fake, workspace: context.workspace}
   end
 
+  @doc """
+  A `delegate` call's arguments: `goal` to `agent`, the rest of the brief's five parts
+  filled in (Decision 847). `extra` adds to them or replaces them.
+  """
+  @spec brief(String.t(), String.t(), map()) :: map()
+  def brief(agent, goal, extra \\ %{}) do
+    Map.merge(
+      %{
+        "agent" => agent,
+        "goal" => goal,
+        "context" => "none",
+        "constraints" => "none",
+        "deliverable" => "a summary",
+        "do_not" => "none"
+      },
+      extra
+    )
+  end
+
+  @doc """
+  A `finish` call's arguments: `summary`, and none for the other parts a finish must have
+  (Decision 847). `extra` adds to them or replaces them.
+  """
+  @spec finished(String.t(), map()) :: map()
+  def finished(summary, extra \\ %{}) do
+    Map.merge(
+      %{
+        "summary" => summary,
+        "ran" => "none",
+        "passed" => "none",
+        "unverified" => "none",
+        "needs" => "none"
+      },
+      extra
+    )
+  end
+
+  @doc """
+  What a parent is handed when a subagent finishes with `finished(summary)` and wrote
+  nothing: the report, its parts under their names.
+  """
+  @spec reported(String.t()) :: String.t()
+  def reported(summary) do
+    summary <> "\n\nchanged: nothing\nran: none\npassed: none\nunverified: none\nneeds: none"
+  end
+
   @doc "A file in the test workspace."
   @spec write_file(map(), Path.t(), iodata()) :: Path.t()
   def write_file(context, relative, contents) do

@@ -3,6 +3,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "agent": {
+      "type": "string"
+    },
     "agent_path": {
       "items": {
         "type": "string"
@@ -12,10 +15,22 @@
     "args": {
       "type": "object"
     },
+    "brief": {
+      "type": "object"
+    },
     "call_id": {
       "type": "string"
     },
     "decision": {
+      "type": "string"
+    },
+    "edited": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "reason": {
       "type": "string"
     },
     "tool": {

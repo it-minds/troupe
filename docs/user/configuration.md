@@ -612,6 +612,27 @@ its own instruction files; `--json` prints the same as one object, with `files`,
 `onboarded` and `findings`. Your own `<config>/AGENTS.md` is checked with the rest, except for paths,
 which it names for every repository.
 
+## Seeing a delegation before it runs
+
+An agent hands work to a subagent with a brief, and by default the subagent starts at
+once. To see the brief first for some agents, name them:
+
+```yaml
+delegation:
+  ask: [general, implementer]
+```
+
+An agent's own definition can ask too, with `delegation: ask` in its frontmatter, which
+is how a profile's bundle makes a pod's sessions ask. Either is enough. A delegation to
+one of them then waits in the approval box (the terminal UI) or the approval panel (the
+desktop app), showing the agent and where its definition is, the brief's five parts, the
+tools and permissions the subagent will hold, its share of the budget and how deep it
+is. You run it; edit the brief's parts; send the same brief to another subagent; deny
+it, with a word back the agent that delegated reads as the answer; or let that agent run
+unasked for the rest of the session. `auto_approve` does not answer it: you asked to see
+these. With nobody attached, `approvals: deny` denies it at once and `wait` keeps it
+waiting, as any approval.
+
 ## Every file Troupe reads
 
 In one table, in the order each kind is read, and what happens when two say different
@@ -971,6 +992,8 @@ shows a key by, in the desktop app and the terminal UI alike.
 |---|---|---|---|---|---|
 | `auto_approve` | boolean | `false` | user; project if trusted | auto approve | Run every tool call without asking. Off, a write, an edit or a shell command waits until a person allows it, once or for the rest of the session, or denies it. |
 | `approvals` | `wait` \| `deny` | `wait` | user; project if trusted |  | What a call that asks does with nobody attached: wait, or be denied. |
+| `delegation` | settings |  | user; project if trusted |  | Delegating to subagents. |
+| `delegation.ask` | list of strings |  | user; project if trusted |  | The subagents a `delegate` to asks you first, by name: you see the brief, the tools and the budget the child would get, and run it, edit the brief, send it to another agent, deny it with a word back, or let that agent run unasked for the session. `auto_approve` does not answer it. An agent's own definition asks too with `delegation: ask`. Unset: every delegation runs at once. |
 | `managed_permission_rules_only` | boolean | `false` | user; project if trusted |  | A session may not allow a tool for itself. |
 | `managed_mcp_servers_only` | boolean | `false` | user; project if trusted |  | A client may not offer a session its own tools. |
 

@@ -81,6 +81,9 @@ defmodule Troupe.UI.Headless.Printer do
       # What the exit code needs to know by the time the target rests.
       failed: false,
       refused: MapSet.new(),
+      # The refused that were delegations a person asked to see first (root Decision 850),
+      # which `--auto-approve` does not answer, so the last line does not suggest it.
+      gated: MapSet.new(),
       # Budget questions answered no: the item is drawn again once the question that
       # rides beside it arrives with its options (Decision 120), and is answered once.
       budgets: MapSet.new(),
@@ -197,10 +200,17 @@ defmodule Troupe.UI.Headless.Printer do
       # Counted when asked, not when answered: the request is in the log before the tool
       # waits on it, while the answer is written after the tool has it and can land behind
       # the rest it led to. Its subagents' requests count as its own, being for its task.
-      %{type: :approval_requested, agent_path: path, data: %{call_id: id}} ->
-        if path == state.target or String.starts_with?(path, state.target <> "/"),
-          do: %{state | refused: MapSet.put(state.refused, id)},
-          else: state
+      %{type: :approval_requested, agent_path: path, data: %{call_id: id} = data} ->
+        cond do
+          not (path == state.target or String.starts_with?(path, state.target <> "/")) ->
+            state
+
+          is_map(data[:delegation]) ->
+            %{state | refused: MapSet.put(state.refused, id), gated: MapSet.put(state.gated, id)}
+
+          true ->
+            %{state | refused: MapSet.put(state.refused, id)}
+        end
 
       # Somebody else, attached to the same session, said yes before headless mode said no.
       %{type: :approval_answered, data: %{call_id: id, decision: decision}}
@@ -236,6 +246,11 @@ defmodule Troupe.UI.Headless.Printer do
 
       state.failed ->
         {1, "the model request failed"}
+
+      MapSet.size(state.refused) > 0 and MapSet.subset?(state.refused, state.gated) ->
+        {3,
+         refusals(MapSet.size(state.refused)) <>
+           ", with nobody to ask: delegations that ask first (delegation.ask)"}
 
       MapSet.size(state.refused) > 0 ->
         {3, refusals(MapSet.size(state.refused)) <> ", with nobody to ask (use --auto-approve)"}
@@ -338,6 +353,23 @@ defmodule Troupe.UI.Headless.Printer do
     end
   end
 
+  # A delegation a person asked to see first (root Decision 850) is denied like any other
+  # request with nobody to ask, and `--auto-approve` does not answer it: the line says so.
+  defp print(
+         %{type: :approval_requested, agent_path: p, data: %{delegation: %{} = gate} = d},
+         state
+       ) do
+    line(
+      state,
+      p,
+      "delegation to #{gate["agent"]} asks first (delegation.ask, or its definition's " <>
+        "delegation: ask); headless mode denies it, and --auto-approve does not answer it"
+    )
+
+    Client.approve(state.session_id, d.call_id, :deny)
+    state
+  end
+
   defp print(%{type: :approval_requested, agent_path: p, data: d}, state) do
     line(state, p, "approval needed for #{d.name}; headless mode denies it (use --auto-approve)")
     Client.approve(state.session_id, d.call_id, :deny)
@@ -394,6 +426,12 @@ defmodule Troupe.UI.Headless.Printer do
 
   defp print(%{type: :branch_spawned, agent_path: p, data: d}, state),
     do: say(state, p, "spawned /#{d.name} (#{d.isolation})")
+
+  # A saved `AI!` or `AI?` comment and the branch it started, in the line the screen puts
+  # under itself (root Decisions 844 and 852): the branch is a session of its own, which a
+  # headless run of this one does not follow.
+  defp print(%{type: :watch_triggered, agent_path: p, data: d}, state),
+    do: say(state, p, Model.watch_line(d))
 
   # What the turn cost, in the line the window puts under it (Decisions 139 and 144): the
   # event that ends a turn carries it and a live `agent_state` never does, so it is printed

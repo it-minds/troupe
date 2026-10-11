@@ -14,7 +14,7 @@ defmodule Troupe.Agent.ToolFailuresTest do
 
   defp failing(n), do: List.duplicate({:tools, [{"read_file", %{"path" => "missing.txt"}}]}, n)
   defp reading(n), do: List.duplicate({:tools, [{"read_file", %{"path" => "here.txt"}}]}, n)
-  defp finish(summary), do: {:text_and_tools, "done", [{"finish", %{"summary" => summary}}]}
+  defp finish(summary), do: {:text_and_tools, "done", [{"finish", finished(summary)}]}
 
   defp run(context, steps, overrides \\ []) do
     write_file(context, "here.txt", "here\n")
@@ -163,7 +163,7 @@ defmodule Troupe.Agent.ToolFailuresTest do
       start_session(context,
         routes: %{
           "root" => [
-            {:tools, [{"delegate", %{"agent" => "general", "task" => "find the file"}}]},
+            {:tools, [{"delegate", brief("general", "find the file")}]},
             {:text, "root done"}
           ],
           "general" =>

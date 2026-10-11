@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { DaemonClient, SessionView, agentRefusal, agentTemplate, parseAgent, permissionsOf, widenedAutos, withBody, withFields } from "../src/index.js";
+import { DaemonClient, SessionView, agentConflict, agentRefusal, agentTemplate, parseAgent, permissionsOf, widenedAutos, withBody, withFields } from "../src/index.js";
 import type { AgentsChanged } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 
@@ -184,6 +184,49 @@ describe("agents, over the daemon", () => {
     await assert.rejects(view.switchProfile("nobody"), /not_found/);
     await assert.rejects(view.switchProfile("explore"), /a subagent/);
     assert.equal((await view.agent("plan")).name, "plan");
+  });
+
+  // troupe Decision 852: the subagents when asked, a save over a changed file refused with
+  // what it holds now, a file that does not parse read to mend, and watch state.
+  it("lists the subagents when asked, refuses a save over a changed file, reads a broken one, and says who watches", async () => {
+    const { agents } = await client.listAgents(REPO, { subagents: true });
+    assert.deepEqual(
+      agents.map((a) => [a.name, a.mode]),
+      [
+        ["build", "primary"],
+        ["plan", "primary"],
+        ["explore", "subagent"],
+        ["general", "subagent"],
+        ["implementer", "subagent"],
+        ["reviewer", "subagent"],
+      ],
+    );
+
+    const source = "---\ndescription: Notes.\nmode: primary\n---\nYou take notes.\n";
+    await client.putAgent({ name: "notes", scope: "project", workspace: REPO, source });
+    const read = await client.getAgent({ name: "notes", workspace: REPO });
+    assert.match(read.hash ?? "", /^sha256:[0-9a-f]{64}$/);
+    await client.putAgent({ name: "notes", scope: "project", workspace: REPO, source: source.replace("Notes.", "Theirs."), if_hash: read.hash! });
+    await assert.rejects(client.putAgent({ name: "notes", scope: "project", workspace: REPO, source, if_hash: read.hash! }), (e: unknown) => {
+      const conflict = agentConflict(e);
+      assert.ok(conflict);
+      assert.match(conflict.reason, /notes\.md changed since it was opened/);
+      assert.match(conflict.hash ?? "", /^sha256:/);
+      assert.notEqual(conflict.hash, read.hash);
+      return true;
+    });
+    await client.deleteAgent({ name: "notes", scope: "project", workspace: REPO });
+
+    daemon.agents.files.push({ name: "broken", layer: "project", workspace: REPO, text: "---\nmode: main\n---\nx\n" });
+    const broken = await client.brokenAgent({ name: "broken", workspace: REPO });
+    assert.deepEqual(broken && [broken.scope, broken.text, broken.reason], ["project", "---\nmode: main\n---\nx\n", 'not read: mode must be primary or subagent, not "main"']);
+    assert.equal(await client.brokenAgent({ name: "nobody", workspace: REPO }), null);
+    daemon.agents.files = daemon.agents.files.filter((f) => f.name !== "broken");
+
+    const watched = daemon.seed("/home/ada/watched");
+    assert.deepEqual(await client.getWatch("/home/ada/watched"), { enabled: false, backend: "off", session_id: null });
+    await client.setWatch("/home/ada/watched", true);
+    assert.deepEqual(await client.getWatch("/home/ada/watched"), { enabled: true, backend: "poll", session_id: watched.id });
   });
 });
 

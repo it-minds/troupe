@@ -83,15 +83,23 @@ defmodule Troupe.Tools.Output do
     end
   end
 
-  @doc "Store the full text of a cut result as a blob of the session; its digest is the id."
+  @doc """
+  Store the full text of a cut result as a blob of the session, under the state directory
+  its config names (Decision 855); its digest is the id.
+  """
   @spec keep(Troupe.Tool.Ctx.t(), String.t()) :: {:ok, String.t()} | :error
-  def keep(%{session_id: sid, workspace: %{root_real: root}}, text) when is_binary(sid) do
-    {:ok, Blobs.store(sid, root, text)}
+  def keep(%{session_id: sid, workspace: %{root_real: root}} = ctx, text) when is_binary(sid) do
+    {:ok, Blobs.store(sid, root, state_dir(ctx), text)}
   rescue
     _ -> :error
   end
 
   def keep(_ctx, _text), do: :error
+
+  @doc "The state directory a tool's session keeps its files under; `nil` is the platform's."
+  @spec state_dir(Troupe.Tool.Ctx.t() | map()) :: Path.t() | nil
+  def state_dir(%{config: %{state_dir: state_dir}}), do: state_dir
+  def state_dir(_ctx), do: nil
 
   @doc """
   The conversation as the model is sent it: each tool result over the blob inline limit

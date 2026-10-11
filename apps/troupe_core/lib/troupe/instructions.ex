@@ -19,8 +19,9 @@ defmodule Troupe.Instructions do
   directories, Copilot's `.github/copilot-instructions.md` and
   `.github/instructions/*.instructions.md` at the root, and Cursor's `.cursorrules` and
   `.cursor/rules/*.mdc` are each listed as skipped, saying so, so nobody debugs a file
-  that was never loaded. A Copilot file below the root never counted
-  (Decision 806), and says that instead. A file that is there and cannot be read is
+  that was never loaded: to run `troupe onboard`, or, once onboarding has brought it in,
+  which of Troupe's files it went into (Decision 854). A Copilot file below the root never
+  counted (Decision 806), and says that instead. A file that is there and cannot be read is
   listed too, with why.
 
   An `.agents/AGENTS.md` in the repository root, or in a directory on the way to where
@@ -210,7 +211,11 @@ defmodule Troupe.Instructions do
     worked_on = Enum.map(focus, &Path.expand(&1, workspace))
 
     bounds = %{user: key(Paths.config_dir()), repository: key(root)}
-    found = Enum.flat_map(directories, &(find(&1, bounds) ++ rules(&1, bounds, worked_on)))
+
+    found =
+      directories
+      |> Enum.flat_map(&(find(&1, bounds) ++ rules(&1, bounds, worked_on)))
+      |> onboarded(root)
 
     # A file skipped, or a rule not joined, is not in the prompt, so an import may still
     # bring it in.
@@ -285,6 +290,10 @@ defmodule Troupe.Instructions do
       {:error, _} -> false
     end
   end
+
+  @doc "Whether `glob_match?/2` can read a glob at all: one whose braces do not close cannot."
+  @spec glob?(String.t()) :: boolean()
+  def glob?(glob), do: match?({:ok, _}, glob_regex(glob))
 
   @doc """
   What `context.get` answers and the `instructions_loaded` event carries: every file, in
@@ -405,6 +414,28 @@ defmodule Troupe.Instructions do
         File.regular?(path),
         do: unread(path, dir, fields, :skipped, reason)
   end
+
+  # Another tool's file that onboarding has brought in says where it went, not to run
+  # `troupe onboard` (Decision 854): the repository's `.troupe/onboarded.json` records what
+  # each `AGENTS.md` was made from, and each rule its source in its front matter. Read only
+  # when such a file is found; nothing of the file itself is read, as before.
+  defp onboarded(found, root) do
+    if Enum.any?(found, &(Map.get(&1, :reason) == @onboard_reason)) do
+      into = Troupe.Onboard.onboarded_into(root)
+      Enum.map(found, &onboarded_reason(&1, into, root))
+    else
+      found
+    end
+  end
+
+  defp onboarded_reason(%{reason: @onboard_reason, path: path} = file, into, root) do
+    case Map.get(into, Path.relative_to(path, root)) do
+      nil -> file
+      target -> %{file | reason: "not read: onboarded into #{target}"}
+    end
+  end
+
+  defp onboarded_reason(file, _into, _root), do: file
 
   # A file found in a directory is confined as an import is: one that is really somewhere
   # outside the repository (or, for the person's own, the config directory), a link out

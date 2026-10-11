@@ -27,11 +27,13 @@ defmodule Troupe.Onboard.Source do
 
   `skipped/2`, optional, names the other tool's files the source found and proposed
   nothing for, each with its reason in a sentence (linked outside the workspace, disabled,
-  a name Troupe cannot take); `troupe onboard` lists them.
+  a name Troupe cannot take); `troupe onboard` lists them. One whose every word is in a
+  file onboarding writes says which (`said_in`, its target and path), so a file that was
+  onboarded into it counts as unchanged rather than listed (Decision 854).
 
-  `found?/1`, optional, is a cheap look at the workspace's root for the files the source
-  reads: a session's start asks it before it asks for proposals, to say what `troupe
-  onboard` would bring in (Decision 827), and a source without it is always asked.
+  `found?/1`, optional, is a cheap look at the workspace for the files the source reads: a
+  session's start asks it before it asks for proposals, to say what `troupe onboard` would
+  bring in (Decision 827), and a source without it is always asked.
 
   `target` may also be `:workspace` for an `AGENTS.md`, `path` then relative to the
   workspace itself (Decision 827).
@@ -55,7 +57,11 @@ defmodule Troupe.Onboard.Source do
           optional(:also_from) => [also()]
         }
 
-  @type skipped :: %{source: String.t(), reason: String.t()}
+  @type skipped :: %{
+          required(:source) => String.t(),
+          required(:reason) => String.t(),
+          optional(:said_in) => %{target: :repo | :user | :workspace, path: String.t()}
+        }
 
   @callback proposals(workspace :: Path.t(), opts :: keyword()) :: [proposal()]
   @callback skipped(workspace :: Path.t(), opts :: keyword()) :: [skipped()]

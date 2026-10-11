@@ -72,7 +72,7 @@ defmodule Troupe.Tools.LibrarianFactsTest do
              {"remember", %{"replaces" => missing["id"]}},
              {"remember", %{"kind" => "note", "claim" => "a librarian's note"}}
            ]},
-          {:tools, [{"finish", %{"summary" => "re-anchored one fact, dropped one"}}]}
+          {:tools, [{"finish", finished("re-anchored one fact, dropped one")}]}
         ]
       )
 

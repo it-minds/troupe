@@ -62,13 +62,20 @@ defmodule Troupe.Gateway.WorkflowsTest do
           "tools" => [
             %{
               "name" => "delegate",
-              "input" => %{"agent" => "implementer", "task" => "write hello.txt"}
+              "input" => %{
+                "agent" => "implementer",
+                "goal" => "write hello.txt",
+                "context" => "none",
+                "constraints" => "none",
+                "deliverable" => "say it is written",
+                "do_not" => "none"
+              }
             }
           ]
         },
         %{
           "text" => "Orchestrated.",
-          "tools" => [%{"name" => "finish", "input" => %{"summary" => "implementer wrote hello.txt"}}]
+          "tools" => [%{"name" => "finish", "input" => finished("implementer wrote hello.txt")}]
         }
       ],
       "implementer" => [
@@ -77,7 +84,7 @@ defmodule Troupe.Gateway.WorkflowsTest do
             %{"name" => "write_file", "input" => %{"path" => "hello.txt", "content" => "hi\n"}}
           ]
         },
-        %{"tools" => [%{"name" => "finish", "input" => %{"summary" => "wrote it"}}]}
+        %{"tools" => [%{"name" => "finish", "input" => finished("wrote it")}]}
       ]
     })
 
@@ -121,7 +128,7 @@ defmodule Troupe.Gateway.WorkflowsTest do
 
   test "an unknown workflow name is the default pipeline", context do
     write_fake!(context.workspace, %{
-      "root" => [%{"tools" => [%{"name" => "finish", "input" => %{"summary" => "ok"}}]}]
+      "root" => [%{"tools" => [%{"name" => "finish", "input" => finished("ok")}]}]
     })
 
     client = connect(context)
@@ -182,6 +189,16 @@ defmodule Troupe.Gateway.WorkflowsTest do
     on_exit(fn -> if Process.alive?(client), do: Client.close(client) end)
     client
   end
+
+  # A `finish` in the parts every finish has (Decision 847).
+  defp finished(summary),
+    do: %{
+      "summary" => summary,
+      "ran" => "none",
+      "passed" => "none",
+      "unverified" => "none",
+      "needs" => "none"
+    }
 
   defp write_fake!(workspace, routes) do
     File.mkdir_p!(Path.join(workspace, ".troupe"))

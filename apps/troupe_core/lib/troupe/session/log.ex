@@ -141,9 +141,17 @@ defmodule Troupe.Session.Log do
 
   The id is escaped along with the state directory: it names one session, and an id of
   `*` must not find whichever log comes first (#97).
+
+  `state_dir` may be a list, searched in order: every state directory a daemon keeps
+  sessions in (`Troupe.Sessions.Index.roots/0`, Decision 855).
   """
-  @spec locate(String.t(), Path.t() | nil) :: Path.t() | nil
-  def locate(session_id, state_dir \\ nil) do
+  @spec locate(String.t(), Path.t() | [Path.t() | nil] | nil) :: Path.t() | nil
+  def locate(session_id, state_dir \\ nil)
+
+  def locate(session_id, state_dirs) when is_list(state_dirs),
+    do: Enum.find_value(state_dirs, &locate(session_id, &1))
+
+  def locate(session_id, state_dir) do
     root = state_dir |> Paths.state_dir() |> Paths.glob_escape()
 
     [root, "sessions", "*", Paths.glob_escape(session_id), "events.jsonl"]
@@ -152,8 +160,8 @@ defmodule Troupe.Session.Log do
     |> List.first()
   end
 
-  @doc "Every event for a session, running or not."
-  @spec read_session(String.t(), Path.t() | nil) :: [Event.t()]
+  @doc "Every event for a session, running or not, found as `locate/2` finds it."
+  @spec read_session(String.t(), Path.t() | [Path.t() | nil] | nil) :: [Event.t()]
   def read_session(session_id, state_dir \\ nil) do
     case locate(session_id, state_dir) do
       nil -> []
