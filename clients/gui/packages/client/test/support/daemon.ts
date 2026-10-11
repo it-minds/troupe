@@ -477,6 +477,8 @@ export class FakeDaemon {
   readonly privateSessions = new Set<string>();
   /** The sessions `session.claim` took over, oldest first. */
   readonly claims: string[] = [];
+  /** How many times `daemon.stop` was asked, for an update to replace the daemon. */
+  stopsAsked = 0;
   /** Refuse every claim as the daemon does one whose plane copy went further than this one. */
   claimsDiverge = false;
   /** The settings file, as `config.set` last wrote it. Nothing is saved until then. */
@@ -1376,6 +1378,18 @@ export class FakeDaemon {
 
       case "profile.switch":
         return this.switchAgent(ws, id, params);
+
+      // Stopping between turns, for an update to replace the daemon's release (Decision
+      // 865): a session at work keeps it running and is named. The fake says it stops and
+      // goes on answering; `stopsAsked` counts the asking.
+      case "daemon.stop": {
+        this.stopsAsked += 1;
+        const atWork = [...this.sessions.values()].filter((s) => ["thinking", "acting", "compacting"].includes(s.status));
+        if (atWork.length > 0) {
+          return reply(ws, id, { stopping: false, reason: "at_work", at_work: atWork.map((s) => ({ id: s.id, workspace: s.workspace })) });
+        }
+        return reply(ws, id, { stopping: true });
+      }
 
       default:
         return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });

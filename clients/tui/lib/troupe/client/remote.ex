@@ -16,6 +16,7 @@ defmodule Troupe.Client.Remote do
 
   alias Troupe.Client.Events
   alias Troupe.Config
+  alias Troupe.Protocol.ClientUpdate
   alias Troupe.Remote.{Capability, Credentials, Discovery, Journal, Plane, RPC, Tokens, Worker}
 
   ## Session-scoped
@@ -483,7 +484,14 @@ defmodule Troupe.Client.Remote do
         case status.error do
           {:update_required, sentence} -> sentence
           _other -> nil
-        end
+        end,
+      # A newer version the plane recommends, as one quiet line with what to run
+      # (Decision 874); nothing at or past it.
+      suggest:
+        ClientUpdate.suggestion(
+          Map.get(status, :client_update),
+          to_string(Application.spec(:troupe, :vsn))
+        )
     }
   end
 

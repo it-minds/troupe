@@ -42,13 +42,13 @@ fn discovery_path() -> Option<PathBuf> {
     Some(base.join("troupe").join("daemon.json"))
 }
 
-fn home() -> Option<PathBuf> {
+pub(crate) fn home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
 }
 
-fn read_endpoint() -> Option<DaemonEndpoint> {
+pub(crate) fn read_endpoint() -> Option<DaemonEndpoint> {
     let path = discovery_path()?;
     let contents = std::fs::read_to_string(path).ok()?;
     let json: serde_json::Value = serde_json::from_str(&contents).ok()?;
@@ -64,7 +64,7 @@ fn read_endpoint() -> Option<DaemonEndpoint> {
 /// Whether something is listening where the file says. A `daemon.json` left behind by a
 /// daemon that died names a port nothing answers on, and starting a daemon over a stale
 /// file is the whole point of `daemon_start`.
-fn alive(endpoint: &DaemonEndpoint) -> bool {
+pub(crate) fn alive(endpoint: &DaemonEndpoint) -> bool {
     let addr = SocketAddr::from(([127, 0, 0, 1], endpoint.port));
     TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
 }
