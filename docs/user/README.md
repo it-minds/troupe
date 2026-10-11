@@ -199,6 +199,34 @@ versions. A session is pinned to the version current when it started.
 **Trigger.** A scheduled or externally fired job that starts a session as a service
 principal. Such sessions are flagged for review until somebody looks at them.
 
+## The scratchpad
+
+A long answer, such as a plan, a report, a comparison, a diagram or a table, does not
+belong in the chat, where it scrolls away and has to be printed again to be revised. An
+agent puts it on the session's scratchpad instead, with its `show` tool, and keeps its
+reply to the short answer and the document's name. Showing a document again under the
+same name replaces it, so a plan is revised in place.
+
+- **In the terminal UI** each document is a card in the transcript where the agent showed
+  it: its title, its name, its size, and `new` or `updated 3 times`. `/scratch` lists the
+  session's documents and opens one beside the list, Markdown drawn as a reply is and the
+  other kinds as written; `/scratch plan.md` opens that one at once.
+- **In the desktop app** the card opens the scratchpad beside the conversation, a tab for
+  each document, and **Show scratchpad** in the session's header opens it on the latest.
+- **Kinds.** A document is `markdown`, `mermaid`, `json`, `csv` or `text`. The clients show
+  the last four as text for now.
+- **Where it is.** A document is the session's own, beside its log in the state directory,
+  never in your working directory: there is nothing to commit or clean up. Erasing the
+  session erases its documents, a private session's stay on your machine with its log, and
+  a fork has the ones its history shows. Your own program reads one as `scratch:/<name>`
+  (`scratch.list` and `fs.read` in [PROTOCOL.md](../../PROTOCOL.md)).
+- **Limits.** 256 KiB a document (`scratch_max_bytes`) and 50 documents a session
+  (`scratch_max_documents`). Past either, `show` refuses and says so, and the agent
+  replaces a document or answers in the chat.
+- **What it costs.** The document's words are still in the conversation, as the call's
+  arguments, so it costs about what the same answer in the chat would. What changes is
+  where you read it, not what is sent to the model.
+
 ## What Troupe never does
 
 - **It never reads your session on the plane.** The plane holds who, which profile, which

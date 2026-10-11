@@ -532,6 +532,20 @@ defmodule Troupe.Protocol.Schema do
         "hash" => required(:string),
         "size" => required(:integer)
       },
+      # A document `show` wrote to the session's scratchpad, or replaced (Decision 870):
+      # everything a client shows of it but its words, which `fs.read` of `path` returns.
+      # `version` counts the writes of that name in the session, from 1; `call_id` is the
+      # `show` call that wrote it, so a transcript can put the card where the call was.
+      "scratch_updated" => %{
+        "name" => required(:string),
+        "path" => required(:string),
+        "kind" => required(:string),
+        "title" => required(:string),
+        "size" => required(:integer),
+        "hash" => required(:string),
+        "version" => required(:integer),
+        "call_id" => optional(:string)
+      },
       # A capability somebody minted over this session: a link that carries a role rather
       # than a name. Durable, because a share is a decision about who may read what was
       # said, and a decision of that kind that left no trace would be one nobody could
@@ -765,6 +779,9 @@ defmodule Troupe.Protocol.Schema do
         "content" => required(:string),
         "command_id" => optional(:string)
       },
+      # The session's scratchpad documents (Decision 870): the latest of each name, in the
+      # order each was first shown, from its log. Read one with `fs.read` of its `path`.
+      "scratch.list" => %{"session_id" => required(:string)},
       "blob.get" => %{
         "session_id" => required(:string),
         "blob" => required(:string),

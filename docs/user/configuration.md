@@ -1008,6 +1008,8 @@ shows a key by, in the desktop app and the terminal UI alike.
 |---|---|---|---|---|---|
 | `shell_timeout_ms` | integer ≥ 1 | `120000` | any | shell timeout (ms) | How long a shell command may run before it, and everything it started, is stopped. |
 | `tool_output_limit` | integer ≥ 1 | `32768` | any | tool output limit | Bytes of a tool's output the model sees; the rest is kept, and read_output pages it back. |
+| `scratch_max_bytes` | integer ≥ 1 | `262144` | any |  | Bytes one document `show` puts on the session's scratchpad may hold. |
+| `scratch_max_documents` | integer ≥ 1 | `50` | any |  | Documents one session's scratchpad may hold. |
 | `tool_failures_note_at` | integer ≥ 0 | `5` | any |  | Failures of one tool in a row after which the model is told to stop and reconsider; 0 never. |
 | `tool_failures_stop_at` | integer ≥ 0 | `10` | any |  | Failures of one tool in a row that stop the turn and ask whether it goes on, budget or not; 0 never. |
 | `read_roots` | list of strings |  | user; project if trusted |  | Directories outside the workspace the read tools may reach. |

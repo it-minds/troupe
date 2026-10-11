@@ -337,6 +337,7 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
 | `files_skipped` | `files` — the agent, skill, command and workflow files a session found at a start and did not read, each `{kind, name, path, reason}`: on a pod, a working copy's file of a name its bundle has or a built-in agent's, which those beat unless the profile sets `repositoryOverridesBundle`; in a git worktree, one the main checkout has not committed (Decision 826); a workspace's `.troupe/` file, or directory, that is a link out of it, a skill whose `SKILL.md` can't be read, and what a workspace's `skills.json` links from outside the repository while the workspace is not trusted (Decision 829). A directory not looked into has a null `name`. Written when the list differs from the one the log last recorded, so an empty list says the files went away |
 | `fs_changed` | `path`, `hash`, `size` |
+| `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870): a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
 Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`, and `shell_started` and
@@ -1099,7 +1100,9 @@ what the agent may see and a path that climbs out of a mount is refused with
 
 `hash` is the `sha256:…` of the bytes, the same one `fs_changed` carries, so a client
 can check that the file it read is the file the event announced. Reading a directory,
-or a file larger than the server's cap, is `invalid_params`.
+or a file larger than the server's cap, is `invalid_params`. A `path` of
+`scratch:/<name>` reads a scratchpad document (`scratch.list`), whose `hash` is the one
+its `scratch_updated` carries.
 
 #### `fs.upload`
 ```json
@@ -1110,7 +1113,24 @@ written.
 
 Needs `control`: putting a file into a workspace is steering the session. The write is
 recorded as an `fs_changed` event, carrying the file's `hash` and `size`, whose actor is
-the client that uploaded it, not the session.
+the client that uploaded it, not the session. `scratch:/` is read-only to it: only the
+agent's `show` puts a document on the scratchpad.
+
+#### `scratch.list`
+```json
+{"session_id": "s-9f"}
+```
+→ `{"documents": [{"name", "path", "kind", "title", "size", "hash", "version",
+"updated_at"}]}`
+
+The session's scratchpad (Decision 870): the documents its agents showed the person with
+the `show` tool, the latest version of each name, in the order each was first shown.
+Each row is what that name's last `scratch_updated` said, and `updated_at` when it was
+written. It is a fold over the log, so a dormant session answers it as a running one
+does, and a client that attaches late has the same rows from its replay. Read a
+document's words with `fs.read` of its `path`, the one read path there is. The documents
+are the session's own, beside its log rather than in its workspace: an erasure takes
+them, and a fork carries the ones its history shows.
 
 #### `agents.list`
 ```json
@@ -2077,7 +2097,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop` |
 
@@ -2138,7 +2158,7 @@ ACL of each session a request names.
 `unsubscribe` on its own topics, the two listings above, and every command whose params
 require `session_id` (§6) but the five below: `session.get`, `input.send`, `turn.cancel`,
 `profile.switch`, `session.goal.*`, `session.loop.*`, `approval.respond`,
-`question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
+`question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `scratch.list`, `blob.get`,
 `mcp.status`, `context.get`, `commands.list`, `commands.run`, `presence.set`, `tools.register`, `tools.unregister`, `shell.run` and `shell.cancel`. Everything else a
 worker serves is about the pod or a path on it — `session.create`, `agents.list`,
 `workflows.list`, `memory.get`, `memory.forget`, `memory.decline`, `workspace.recent`, `workspace.search`,
