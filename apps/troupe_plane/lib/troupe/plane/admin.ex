@@ -2741,9 +2741,11 @@ defmodule Troupe.Plane.Admin do
     `ClusterPolicy.egress_allowed?/1` a pod's NetworkPolicy is generated from. A host in a
     bundle that the policy refuses is a tool that will fail at the moment somebody uses it,
     and this is where that is visible before then rather than after.
-  * **Notification targets**, with the rule they are held to: absolute, and not loopback.
-    A relative target resolved against the plane's own base URL is the advisory LangGraph
-    shipped in 2026, and it is cheaper to have this check than to explain it.
+  * **Notification targets**, with the rule they are held to: absolute, and not at an
+    address a worker is refused (loopback, link-local, a cloud's metadata service) nor in
+    the shared address space, `100.64.0.0/10` (`Troupe.Plane.Triggers.Notify`, Decision
+    866). A relative target resolved against the plane's own base URL is the advisory
+    LangGraph shipped in 2026, and it is cheaper to have this check than to explain it.
 
   Read-only. The allowlist is generated from what each component declares it dials, and an
   allowlist edited in two places is an allowlist nobody trusts — so this page says where

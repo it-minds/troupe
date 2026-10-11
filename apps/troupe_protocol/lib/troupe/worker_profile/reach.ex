@@ -33,7 +33,12 @@ defmodule Troupe.WorkerProfile.Reach do
   either (`refused?/1`), so a profile naming one is refused and reported in both modes
   alike (Decision 758). And since a name is admitted there at whatever address its DNS
   answer carries, that policy also denies link-local and the metadata addresses outright
-  (`denied/1`), whatever name leads to them (Decision 856).
+  (`denied/1`), whatever name leads to them (Decision 856), and the v4 ones as NAT64 spells
+  them (Decision 866).
+
+  An IPv4 address written in IPv6 (`::ffff:169.254.169.254`, `64:ff9b::a9fe:a9fe`) is
+  judged as the IPv4 address it names (`ipv4/1`), so every spelling of a refused address is
+  refused.
   """
 
   alias Troupe.WorkerProfile, as: Profile
@@ -62,7 +67,22 @@ defmodule Troupe.WorkerProfile.Reach do
   ]
 
   # What no worker reaches by any name: the link-local ranges and the metadata addresses.
-  @denied for {block, kind} <- @refused, kind in ["link-local", "cloud metadata"], do: block
+  @link_local_and_metadata for {block, kind} <- @refused,
+                               kind in ["link-local", "cloud metadata"],
+                               do: block
+
+  # And the v4 ones in NAT64's well-known prefix, `64:ff9b::/96`: in a cluster with NAT64,
+  # a DNS64 resolver answers a name with an address there, and a translator carries it on
+  # to the v4 address (Decision 866).
+  @denied @link_local_and_metadata ++
+            for(
+              block <- @link_local_and_metadata,
+              [network, size] = String.split(block, "/"),
+              {:ok, {a, b, c, d}} <- [:inet.parse_strict_address(String.to_charlist(network))],
+              do:
+                "#{:inet.ntoa({0x64, 0xFF9B, 0, 0, 0, 0, a * 256 + b, c * 256 + d})}/" <>
+                  "#{96 + String.to_integer(size)}"
+            )
 
   @typedoc "One endpoint a profile names, as `admitted/1` and `unreachable/1` take it."
   @type endpoint ::
@@ -157,18 +177,36 @@ defmodule Troupe.WorkerProfile.Reach do
   end
 
   def refusal(address) when tuple_size(address) in [4, 8] do
-    address = v4(address)
+    address = ipv4(address)
 
     Enum.find_value(@refused, fn {block, kind} -> if within?(address, block), do: kind end)
   end
 
   @doc """
+  The IPv4 address an IPv6 spelling of one names, which `refusal/1` judges in its place,
+  or `address` as it is: v4-mapped (`::ffff:a.b.c.d`), IPv4-compatible (`::a.b.c.d`, but
+  not `::` or `::1`, which are their own), NAT64's well-known prefix (`64:ff9b::a.b.c.d`)
+  and 6to4 (`2002:aabb:ccdd::/48`).
+
+  None of those prefixes overlaps a refused IPv6 block, so judging the IPv4 address alone
+  loses nothing. A rule that admits an endpoint is still written for the address as given
+  (`admission/2`): only a v4-mapped one is the IPv4 address on the wire.
+  """
+  @spec ipv4(:inet.ip_address()) :: :inet.ip_address()
+  def ipv4({0, 0, 0, 0, 0, 0xFFFF, high, low}), do: v4(high, low)
+  def ipv4({0x64, 0xFF9B, 0, 0, 0, 0, high, low}), do: v4(high, low)
+  def ipv4({0x2002, high, low, _d, _e, _f, _g, _h}), do: v4(high, low)
+  def ipv4({0, 0, 0, 0, 0, 0, high, low}) when high != 0 or low > 1, do: v4(high, low)
+  def ipv4(address), do: address
+
+  @doc """
   The blocks a worker's `CiliumNetworkPolicy` denies whatever admits them, the link-local
-  ranges and the metadata addresses outside them, each with the addresses among `kept`
-  inside it, as blocks of one, left out of it. A `toFQDNs` rule admits a name at whatever
-  address its DNS answer carries, so these are denied by address as well as refused as
-  one. `kept` are hosts the installation chose; a name among them is passed over, and an
-  address that is a whole block takes that block out.
+  ranges and the metadata addresses outside them, then the v4 ones in NAT64's well-known
+  prefix (`64:ff9b::a9fe:0/112`, `64:ff9b::6464:64c8/128`), each with the addresses among
+  `kept` inside it, as blocks of one, left out of it. A `toFQDNs` rule admits a name at
+  whatever address its DNS answer carries, so these are denied by address as well as
+  refused as one. `kept` are hosts the installation chose; a name among them is passed
+  over, and an address that is a whole block takes that block out.
   """
   @spec denied([String.t()]) :: [{String.t(), [String.t()]}]
   def denied(kept) do
@@ -245,19 +283,21 @@ defmodule Troupe.WorkerProfile.Reach do
   # writing an endpoint means by it.
   defp address(host) do
     case :inet.parse_strict_address(String.to_charlist(host)) do
-      {:ok, address} -> {:ok, v4(address)}
+      {:ok, address} -> {:ok, mapped(address)}
       {:error, _name} -> :error
     end
   end
 
-  # A v4 address in v6 spelling (`::ffff:169.254.169.254`) is the v4 address it names,
-  # which is where a pod's connection to it goes.
-  defp v4({0, 0, 0, 0, 0, 0xFFFF, high, low}) do
+  # A v4 address in v4-mapped spelling (`::ffff:169.254.169.254`) is the v4 address it
+  # names, which is where a pod's connection to it goes. The other spellings `ipv4/1` reads
+  # are reached as IPv6, through a translator or a relay, so are admitted as written.
+  defp mapped({0, 0, 0, 0, 0, 0xFFFF, high, low}), do: v4(high, low)
+  defp mapped(address), do: address
+
+  defp v4(high, low) do
     <<a, b, c, d>> = <<high::16, low::16>>
     {a, b, c, d}
   end
-
-  defp v4(address), do: address
 
   # The one address, as a block of one in its shortest form.
   defp block({_a, _b, _c, _d} = address), do: "#{:inet.ntoa(address)}/32"
