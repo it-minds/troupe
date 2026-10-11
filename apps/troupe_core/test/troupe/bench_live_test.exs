@@ -625,6 +625,52 @@ defmodule Troupe.BenchLiveTest do
     end
   end
 
+  # Issue #606 (Decision 871): `loop_turn` is a `/loop` turn and then a person's turn. On a
+  # model that binds its thinking, `goal_complete` is offered on both, so the person's turn
+  # changes nothing in front of the loop's thinking; where it was offered on the loop's turn
+  # alone (Decision 679, kept for a model that does not bind), the person's turn changed the
+  # tools and each of its calls was refused once. The stand-in binds every model's thinking,
+  # Claude Opus 5's too, which is how that case is shown.
+  describe "issue #606's loop turn" do
+    test "a loop's turn and a person's with thinking_binding: error: no tools change, nothing refused" do
+      fake = start_fake()
+
+      {:ok, plan} =
+        Bench.plan(
+          config: anthropic(fake, thinking_binding: "error"),
+          only: ["loop_turn"],
+          history: nil
+        )
+
+      report = Bench.live(plan)
+      assert Bench.passed?(report), Bench.markdown(report)
+
+      [run] = scenario(report, "loop_turn")["runs"]
+      assert run["model_calls"] == 6
+      assert Enum.all?(run["checks"], & &1["passed"]), inspect(run["checks"])
+
+      assert %{"system_changes" => 0, "tools_changes" => 0, "thinking_resent" => 0} =
+               run["prefix"]
+
+      requests = FakeOpenAI.requests(fake)
+      assert length(requests) == 6
+      assert Enum.all?(requests, &(&1.status == 200 and &1.thinking == :kept))
+    end
+
+    test "where goal_complete comes and goes, the person's turn changes the tools and is refused" do
+      fake = start_fake()
+      config = anthropic(fake, thinking_binding: "error", model: "claude-opus-5")
+      {:ok, plan} = Bench.plan(config: config, only: ["loop_turn"], history: nil)
+
+      [run] = plan |> Bench.live() |> scenario("loop_turn") |> Map.fetch!("runs")
+      assert run["succeeded"] and run["model_calls"] == 6
+
+      # Each of the person's turn's three calls.
+      assert %{"tools_changes" => 1, "thinking_resent" => 3} = run["prefix"]
+      assert length(FakeOpenAI.requests(fake)) == 9
+    end
+  end
+
   # The stand-in as Anthropic's API, serving Claude Opus 5.5 at its price.
   defp anthropic(fake, extra \\ []) do
     Troupe.Config.load(

@@ -7,9 +7,11 @@ defmodule Troupe.Tools.GoalComplete do
   did not meet the goal; `Troupe.Session.Loop` reads it off the durable
   `tool_call_completed`, with the evidence from its arguments.
 
-  Offered only on a turn a running loop started (`Ctx.loop`), and whatever the profile's
-  tool list says: it changes no file and runs nothing, and a loop whose agent had no way
-  to say "done" could only ever run to its cap. Inline, because all it does is answer.
+  Offered on a turn a running loop started (`Ctx.loop`), and whatever the profile's tool
+  list says: it changes no file and runs nothing, and a loop whose agent had no way to say
+  "done" could only ever run to its cap. To a model that binds its thinking to its tools,
+  on every call of the root agent, and a call outside a loop's turn is refused with a
+  sentence (Decision 871). Inline, because all it does is answer.
   """
 
   @behaviour Troupe.Tool
@@ -26,7 +28,7 @@ defmodule Troupe.Tools.GoalComplete do
   def description do
     """
     Say that the session's goal, in the <goal> section, is met, which ends the loop that is
-    working towards it.
+    working towards it. Only a turn of a loop may call it.
 
     Call it only when the goal is fully achieved and you have checked that it is — a test
     run that passes, the file that now exists — and put that evidence in `summary`. If

@@ -8,6 +8,9 @@ defmodule Troupe.Bench.Scenario do
     * `prompt` — what is typed, once, as a person's input
     * `follow_ups` — what is typed after it, each once the turn before has ended by
       itself; a live scenario's only (Decision 815)
+    * `loop` — `nil`, or a goal: the run sets it and runs a `/loop` of one iteration
+      towards it before the prompt is typed, which goes once that turn has ended by
+      itself; a live scenario's only (Decision 871)
     * `files` — the workspace before the run, `%{relative_path => content}`
     * `config` — settings the scenario needs beside the bench's own, as config overrides
     * `script` — the offline model's steps (`Troupe.Bench.Model`); a run against a real
@@ -35,6 +38,7 @@ defmodule Troupe.Bench.Scenario do
     :prompt,
     :measure,
     follow_ups: [],
+    loop: nil,
     files: %{},
     config: [],
     script: [],
@@ -54,6 +58,7 @@ defmodule Troupe.Bench.Scenario do
           prompt: String.t(),
           measure: (map() -> {[metric()], [check()]}),
           follow_ups: [String.t()],
+          loop: String.t() | nil,
           files: %{String.t() => iodata()},
           config: keyword(),
           script: [Troupe.Bench.Model.step()],
