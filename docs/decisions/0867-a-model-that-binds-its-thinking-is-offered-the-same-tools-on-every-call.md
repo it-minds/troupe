@@ -113,9 +113,25 @@ more input over the thirty-one calls (181,505 tokens against 179,075). On Anthro
 the tools are the front of the first cache mark, so after the first call of a session they
 are read from the cache. The offline bench itself runs on a model that does not bind and
 is within every budget unchanged: tool definitions 13,640 bytes, the first prompt 15,203,
-the system prompt 1,431 (the words in `build.md` added 40 bytes). On a model that binds,
+the system prompt 1,431 (the words in `build.md` added 48 bytes). On a model that binds,
 a turn that runs long no longer writes its whole prompt to the cache again at the eleventh
 call, and the turn after no longer does it a second time when the list's tools go.
+
+Live, on Claude Sonnet 5.5 with `thinking_binding: error`, three runs each, the installed
+build before and after (the numbers are in `prompt-prefix.md`):
+
+- `long_turn`: before, every call from the eleventh was refused once, 9 in 39 calls (48
+  HTTP requests), each with the API's `kind=tools_changed; pattern=tool_set_changed`;
+  after, none, and no tools change. The median run cost $0.0316 against $0.0353, and a
+  warm run wrote about 1,870 tokens to the cache against 3,330. Sonnet 5.5, offered the
+  list from the first call, never wrote one.
+- On short work, the four standard tasks on which `qwen3-235b` wrote a list whenever it
+  had the tool, Sonnet 5.5 wrote none in twelve runs with the list offered from the first
+  call, made 39 calls against 40, and cost $0.1383 against $0.1361: the two definitions
+  read from the cache, about 234 tokens a call, $0.0003 a run.
+- Not live: a compaction whose kept tail holds a block. Sonnet 5.5 thought on the first and
+  the last call of `long_turn` only, so two runs with a small window (three compactions
+  before, seven after) kept no block in a tail; no call after a compaction was refused.
 
 **Left as they are**, prefix changes this does not touch: a `/loop`'s `goal_complete`,
 offered on the turns a running loop started and no others (Decision 679); the tools of an
@@ -136,4 +152,8 @@ model that does not bind are unchanged. `BenchLiveTest`: `long_turn` against the
 as Claude Opus 5.5 with `error` makes thirteen calls, no tools change, nothing refused;
 with 793's gate it counted one tools change and three calls sent again. `ThinkingTest`:
 which names bind. On the chunk's tip the first four of these failed; `TaskListCallsTest`
-and the offline bench pass unchanged.
+and the offline bench pass unchanged. And the installed daemon on scratch homes, against
+the stand-in served as Claude Sonnet 5.5 with `error`: a thirteen-call turn on `build` and
+a turn that compacted in its middle followed by `troupe resume`, no request refused; the
+build before it refused calls eleven to thirteen of the first, and the summariser's call
+and the resumed call of the second, whose compaction had kept three blocks.

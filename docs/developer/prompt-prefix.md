@@ -300,6 +300,69 @@ tokens more than a warm run.
 - Every run's outcome and checks held. The full tables, `follow_up` and Opus 5.5 among
   them, are on #465.
 
+## Live numbers for the task list's tools (#590)
+
+`long_turn` is one turn of thirteen calls on `build` with no task list: the first call
+works a number out without a tool, so its thinking goes back on every later call, then
+twelve files are read one after another. Before, the list's tools came at the eleventh
+call; after, on a model that binds its thinking, they are there from the first (Decision
+867). Claude Sonnet 5.5 on one account that is not enforced, with `thinking_binding: error`
+(an enforced account, asked for), three runs each, the installed build before and after
+the change, on Windows, 2026-10-11, at Sonnet 5.5's prices as above:
+
+| | before | after |
+|---|---:|---:|
+| runs that succeeded | 3 of 3 | 3 of 3 |
+| model calls | 39 | 39 |
+| refused, and sent again without thinking | 9 | 0 |
+| HTTP requests | 48 | 39 |
+| calls whose tools changed | 3 | 0 |
+| tokens written to the cache | 20,657 ¹ | 5,615 |
+| tokens read from the cache | 235,102 | 263,938 |
+| output tokens | 3,075 | 2,695 |
+| cost, median run | $0.0353 | $0.0316 |
+| median wall clock | 22.4 s | 21.1 s |
+
+¹ The first run wrote the prompt from cold, 5,905 tokens on its first call; a warm run
+wrote 3,330, 1,580 of them at the eleventh call, against about 1,870 after.
+
+- **Every call from the eleventh was refused once**, three a run, and the API's header
+  said why on each: `kind=tools_changed; pattern=tool_set_changed; sections=tools;
+  changed_validated=tools; position=at`. After, none was, and the tools never changed.
+- **The median run cost 10% less** and wrote 44% less to the cache on a warm run: the
+  eleventh call no longer writes the whole prompt again.
+- **No run wrote a list**: offered from the first call, Sonnet 5.5 never called
+  `todo_write` in this turn.
+
+What the list's tools cost on short work, where they used not to be offered: the four
+tasks of the standard suite on which `qwen3-235b` wrote a list whenever it had the tool
+(Decision 793), `fix_test`, `rename_symbol`, `implement_spec` and `follow_steps`, three runs
+each:
+
+| | before | after |
+|---|---:|---:|
+| runs that succeeded | 12 of 12 | 12 of 12 |
+| model calls | 40 | 39 |
+| `todo_write` calls | 0 | 0 |
+| tokens written to the cache | 17,534 | 17,812 |
+| tokens read from the cache | 231,836 | 240,950 |
+| output tokens | 4,573 | 4,542 |
+| cost, the twelve runs | $0.1361 | $0.1383 |
+
+The two tools' definitions are read from the cache on every call, about 234 tokens a call;
+each task's median run cost $0.0003 more (2 to 3%), and Sonnet 5.5 wrote no list for any.
+The 32 runs, two compaction probes among them, cost $0.65. To run it again, with the
+commands of the section above: `troupe bench --live --scenario long_turn --repeat 3`, and
+`--scenario fix_test,rename_symbol,implement_spec,follow_steps`, each with
+`$env:TROUPE_THINKING_BINDING = "error"`.
+
+Not measured live: a compaction whose kept tail holds a thinking block. Sonnet 5.5 thought
+on the first and the last call of `long_turn` only, so in two runs with a window small
+enough to compact (three compactions before, seven after, none refused) the first call's
+block was always in what the summary replaced; in those runs (three compactions before, seven
+after) no call after a compaction was refused. The stand-in, which binds as the
+documentation says, is the proof for the tail (`BoundThinkingTest`).
+
 ## Live numbers
 
 Claude Opus 5.5 on Anthropic's API, with this branch's installed build, on Windows,
