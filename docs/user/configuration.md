@@ -41,7 +41,12 @@ Only these keys can be enforced, and each one is a ceiling:
 A file, a variable or a flag that tries to go past an enforced value is held to it, with
 one warning that names the file, the key and the organisation's value. The settings pages
 show such a key as set by your organisation and do not change it, and `config.set` refuses
-it. `troupe config --explain KEY` shows both ends with where they came from:
+it. When a session reaches an enforced `max_turns` or `wall_clock_ms`, the question that
+asks whether to go on offers only what stays under it, says the limit is your
+organisation's and where it came from, and turns away a larger amount, `no limit` and an
+`allow` past it. A model entry's own `max_output` can lower an enforced `max_tokens` for
+its model, and cannot raise it. `troupe config --explain KEY` shows both ends with where
+they came from:
 
 ```text
 max_turns = 25
