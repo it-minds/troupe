@@ -2,8 +2,8 @@
   "tool_calls": {
     "model_calls": 31,
     "system_prompt_bytes": 1500,
-    "tool_definition_bytes": 13500,
-    "first_prompt_bytes": 15000,
+    "tool_definition_bytes": 13800,
+    "first_prompt_bytes": 15300,
     "largest_prompt_bytes": 31000,
     "growth_per_call_bytes": 550,
     "turn_input_tokens": 180000,

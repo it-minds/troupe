@@ -23,6 +23,9 @@ defmodule Troupe.Tool.Ctx do
     # The `/loop` this turn is an iteration of, or `nil`: what offers `goal_complete`.
     :loop,
     todos: [],
+    # The subagents this agent started in the background that still run, by path
+    # (Decision 853): what `finish` is refused over.
+    children: [],
     # The model calls this agent's turn has made so far, its subagents' included: what
     # offers the task list to a profile that did not ask for it by name (Decision 793).
     turn_calls: 0,
@@ -45,6 +48,7 @@ defmodule Troupe.Tool.Ctx do
           bundle: map() | nil,
           loop: String.t() | nil,
           todos: [Troupe.Todo.t()],
+          children: [String.t()],
           turn_calls: non_neg_integer(),
           depth: non_neg_integer(),
           max_depth: pos_integer(),
@@ -192,6 +196,7 @@ defmodule Troupe.Tool do
   @type instruction ::
           {:delegate, agent :: String.t(), brief :: %{String.t() => String.t()}}
           | {:finish, parts :: %{String.t() => String.t()}}
+          | {:stop_child, child :: String.t()}
   @type result ::
           {:ok, content()}
           | {:ok, content(), updates()}

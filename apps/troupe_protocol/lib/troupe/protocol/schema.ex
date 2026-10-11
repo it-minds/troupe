@@ -75,11 +75,16 @@ defmodule Troupe.Protocol.Schema do
       },
       # `command_id` is the send the input was taken from, as its `input_accepted` names it:
       # what a client that drew the line when it was typed knows it by. A harness note,
-      # which nobody sent, has none, and neither has a log written before it did.
+      # which nobody sent, has none, and neither has a log written before it did. One from
+      # `subagent` is the end of a child its parent started in the background, handed to the
+      # parent once (Decision 853): `child_path` is the child, `ended` how it ended
+      # (`finished`, `cut_short`, `stopped`, `cancelled`, `interrupted` or `failed`).
       "user_input" => %{
         "source" => required(:string),
         "text" => required(:string),
-        "command_id" => optional(:string)
+        "command_id" => optional(:string),
+        "child_path" => optional({:array, :string}),
+        "ended" => optional(:string)
       },
       # A command the person ran in the session's workspace (`shell.run`, Decision 813),
       # written by the root agent under its actor when it ends. `output` is the tail capped
@@ -249,13 +254,16 @@ defmodule Troupe.Protocol.Schema do
       },
       # `task` is the child's first message: the brief's parts under their names. `brief`
       # is the parts themselves, `goal`, `context`, `constraints`, `deliverable` and
-      # `do_not` (Decision 847); absent from a log written before briefs had them.
+      # `do_not` (Decision 847); absent from a log written before briefs had them. `wait` is
+      # `false` for a child started in the background, whose `delegate` call answered at once
+      # (Decision 853), and absent otherwise.
       "delegation_started" => %{
         "call_id" => required(:string),
         "agent" => required(:string),
         "child_path" => required({:array, :string}),
         "task" => required(:string),
-        "brief" => optional(:object)
+        "brief" => optional(:object),
+        "wait" => optional(:boolean)
       },
       "compacted" => %{
         "summary" => required(:string),
@@ -326,19 +334,24 @@ defmodule Troupe.Protocol.Schema do
       # `report` as the parts: `summary`, `ran`, `passed`, `unverified`, `needs`, and
       # `changed` as Troupe counted it — `files` (`path`, `added`, `removed`, `whole`), the
       # totals, `commands` not counted, `session_id` and `agent` to read the diff by, and
-      # `said` when the agent named changes of its own (Decision 847).
+      # `said` when the agent named changes of its own (Decision 847). A child its parent
+      # ended in the background (Decision 853) is `stopped` with `by`, its parent's path,
+      # `cancelled`, `interrupted` or `failed`, its `summary` and `report` saying what it had
+      # done, written by its parent.
       "agent_done" => %{
         "reason" => required(:string),
         "summary" => optional(:string),
         "report" => optional(:object),
         "limit" => optional(:string),
-        "turn" => optional(:object)
+        "turn" => optional(:object),
+        "by" => optional({:array, :string})
       },
       # The agent's turn is over and it waits for input: the durable twin of `agent_state`
       # reaching `idle`, for a client that was not listening when it happened (issue #127).
       # `reason` only when the harness ended it: `tool_failures` (Decision 687), or
       # `agent_failed`, the root crashing as often as its Node allows, with `detail` saying
-      # what it raised; its session stops after it (Decision 727).
+      # what it raised; its session stops after it (Decision 727); or `waiting`, a subagent
+      # resting until a child it started in the background ends, with no `turn` (Decision 853).
       "turn_ended" => %{
         "reason" => optional(:string),
         "detail" => optional(:string),

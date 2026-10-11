@@ -890,7 +890,10 @@ defmodule Troupe.UI.TUI.Model do
 
   defp summarize_input(_, %{"path" => p}), do: p
   defp summarize_input("read_branch", %{} = input), do: read_branch_input(input)
+  # One in the background, and the call that stops it (root Decision 853).
+  defp summarize_input("delegate", %{"agent" => a, "wait" => false}), do: a <> ", in the background"
   defp summarize_input("delegate", %{"agent" => a}), do: a
+  defp summarize_input("stop_child", %{"child" => c}), do: c
   defp summarize_input("finish", %{"summary" => s}), do: String.slice(s, 0, 60)
   defp summarize_input("ask_user", %{"question" => q}), do: q
   defp summarize_input(_, input), do: input |> Jason.encode!() |> String.slice(0, 60)

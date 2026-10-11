@@ -59,9 +59,23 @@ defmodule Troupe.Tools.Finish do
   def default_permission, do: :auto
 
   @impl Troupe.Tool
-  def run(args, _ctx) do
-    with {:ok, parts} <- parts(args), do: {:defer, {:finish, parts}}
+  def run(args, ctx) do
+    with :ok <- none_running(ctx),
+         {:ok, parts} <- parts(args),
+         do: {:defer, {:finish, parts}}
   end
+
+  # A finish is the whole report, and whoever delegated stops the agent once it has it:
+  # a subagent of its own still at work in the background would be cut off with nothing
+  # said of it (Decision 853).
+  defp none_running(%{children: [_ | _] = running}) do
+    {:error,
+     "finish refused: #{and_list(running)} still #{if match?([_], running), do: "runs", else: "run"} " <>
+       "in the background. End your turn to wait for its end, or stop it with stop_child, " <>
+       "then finish."}
+  end
+
+  defp none_running(_ctx), do: :ok
 
   @doc "The parts of a `finish` call, or the sentence that refuses it."
   @spec parts(map()) :: {:ok, map()} | {:error, String.t()}

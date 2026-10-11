@@ -124,6 +124,28 @@ describe("the transcript fold", () => {
     assert.deepEqual(done.answered, { agent: "explore", edited: ["constraints"] });
   });
 
+  // A child in the background (troupe Decision 853): its delegation says so, its stop says who
+  // stopped it, and its end handed to its parent is a line, never the person's words.
+  it("shows a child in the background, its stop, and its end handed to its parent", () => {
+    seq = 0;
+    const child = ["root", "general#1"];
+    const state = foldAll([
+      durable("delegation_started", { call_id: "d1", agent: "general", child_path: child, task: "Goal: count", wait: false }),
+      durable("delegation_started", { call_id: "d2", agent: "explore", child_path: ["root", "explore#2"], task: "Goal: look" }),
+      durable("agent_done", { reason: "stopped", by: ["root"], summary: "It was stopped by its parent" }, child),
+      durable("user_input", { source: "subagent", text: "[You stopped root/general#1 before it finished. What it had done:]", child_path: child, ended: "stopped" }),
+    ]);
+
+    const [background, waited] = state.entries.filter((e): e is Extract<Entry, { kind: "delegation" }> => e.kind === "delegation");
+    assert.equal(background!.background, true);
+    assert.equal(waited!.background, false);
+
+    const lines = state.entries.filter((e): e is Extract<Entry, { kind: "system" }> => e.kind === "system").map((e) => e.text);
+    assert.deepEqual(lines, ["stopped by its parent", "root/general#1, in the background: stopped by its parent; its end reached its parent"]);
+    assert.equal(state.entries.filter((e) => e.kind === "user").length, 0);
+    assert.equal(state.agentState["general#1"], "done");
+  });
+
   // The child's first message is that brief, from the agent that delegated it: never a
   // person's turn, in whichever order the two are written (troupe Decision 852).
   it("folds a subagent's first message into the brief it was handed, in either order", () => {

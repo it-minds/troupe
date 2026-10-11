@@ -20,6 +20,9 @@
     },
     "task": {
       "type": "string"
+    },
+    "wait": {
+      "type": "boolean"
     }
   },
   "required": [

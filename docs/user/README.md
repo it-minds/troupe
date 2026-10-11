@@ -150,8 +150,10 @@ even while it waits on your answer to an approval or a question, so it does not 
 daemon up; answering it later wakes it, and the turn carries on.
 
 **Agent.** The thing that talks to the model. A session starts with one — `build`, or
-`plan` for a proposal first — which may delegate to others. An agent is a markdown file;
-your team's bundle or your own config can add more.
+`plan` for a proposal first — which may delegate to others, waiting for each or letting it
+work in the background while it goes on; it can look in on one at work and stop it, and
+cancelling the turn stops them too. An agent is a markdown file; your team's bundle or your
+own config can add more.
 
 **Goal.** What a session is working towards: `/goal <text>` in the terminal UI. The agent
 sees it on every later turn until `/goal clear`, and it survives a restart.

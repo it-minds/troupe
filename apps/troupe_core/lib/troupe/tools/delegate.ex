@@ -27,6 +27,11 @@ defmodule Troupe.Tools.Delegate do
   budget share and its depth, and the subagents it could go to instead. The person runs it,
   edits the brief (`edit/2`, which holds the edit to the same shape), switches the agent,
   denies it with a word back, or lets that agent run unasked for the session.
+
+  With `wait: false` the child runs in the background (#554, Decision 853): the call answers
+  at once with its path, its parent works on, and the child's end reaches the parent once,
+  before its next model call or as its next turn (`Troupe.Agent.Background`). Meanwhile
+  `read_branch` reads it and `stop_child` stops it.
   """
 
   @behaviour Troupe.Tool
@@ -91,7 +96,8 @@ defmodule Troupe.Tools.Delegate do
         "context" => %{"type" => "string", "description" => "What you know that it needs."},
         "constraints" => %{"type" => "string", "description" => "What it may not touch or break."},
         "deliverable" => %{"type" => "string", "description" => "What to return, in what form."},
-        "do_not" => %{"type" => "string", "description" => "What is out of scope."}
+        "do_not" => %{"type" => "string", "description" => "What is out of scope."},
+        "wait" => %{"type" => "boolean", "description" => "false: run it in the background."}
       },
       "required" => ["agent" | @parts]
     }
@@ -104,6 +110,7 @@ defmodule Troupe.Tools.Delegate do
   def run(args, ctx) do
     with {:ok, agent} <- Tool.fetch_string(args, "agent"),
          {:ok, brief} <- brief(args),
+         :ok <- check_wait(args),
          :ok <- check_depth(ctx),
          {:ok, definition} <- fetch_definition(ctx, agent),
          :ok <- check_mode(definition) do
@@ -234,6 +241,20 @@ defmodule Troupe.Tools.Delegate do
     "delegate refused: the brief has no #{Finish.and_list(missing)}. A brief has five " <>
       "parts, each its own field: goal, context, constraints, deliverable and do_not; " <>
       "write none where one has nothing, and delegate again with all five." <> old
+  end
+
+  @doc """
+  Whether a `delegate` call runs its child in the background (Decision 853): `wait: false`.
+  Left out, or `true`, its parent waits for the finish as the call's result, as it always did.
+  """
+  @spec background?(map()) :: boolean()
+  def background?(args), do: Map.get(args, "wait") == false
+
+  defp check_wait(args) do
+    case Map.get(args, "wait") do
+      wait when is_boolean(wait) or is_nil(wait) -> :ok
+      other -> {:error, {:invalid_args, "wait is true or false, got #{inspect(other)}"}}
+    end
   end
 
   # Depth is `length(agent_path) - 1`, so the root is 0 and the default cap of 3

@@ -28,6 +28,8 @@ defmodule Troupe.Tools do
     Troupe.Tools.TodoWrite,
     Troupe.Tools.TodoRead,
     Troupe.Tools.Delegate,
+    # A subagent started in the background, stopped by the agent that started it (Decision 853).
+    Troupe.Tools.StopChild,
     Troupe.Tools.Finish,
     # What a branch of this session (Decision 646) said when it finished.
     Troupe.Tools.ReadBranch,
