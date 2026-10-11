@@ -8,6 +8,5 @@
 # with RELEASE_MINISIGN_KEY_PREVIOUS as well, so that a client built before the rotation
 # can still check that release.
 #
-# None yet: until the maintainer creates the key and adds its public half here, a build
-# trusts no key, `troupe update` installs nothing, and the release workflow refuses to
-# publish (docs/developer/ci.md, "The release key").
+# The release key, created by the maintainer on 2026-10-11 (key id 513B504E4D472FED).
+RWTtL0dNTlA7UdUhY1AQD8uF2Px0iQAlw3UwznjEgirTPjJ2BR9g2fDg

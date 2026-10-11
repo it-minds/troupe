@@ -45,8 +45,11 @@ and nothing unverified is ever installed. This records how.
   variable or file read at run time adds a key, and a test hands its own throwaway key to the
   function it calls. That is the line not to undo: a knob to trust another key is a knob for
   whoever can turn it.
-- **Until the maintainer creates it**, the list is empty. A build then trusts no key and
-  `troupe update` installs nothing, saying why, and the release workflow refuses to publish.
+- **Before the maintainer created it**, the list was empty: a build trusted no key,
+  `troupe update` installed nothing, saying why, and the release workflow refused to
+  publish. The maintainer created the key on 2026-10-11, and it is the first line of
+  `release-keys.txt`. A build from before then still trusts none, so it is updated by its
+  installer, not by `troupe update`.
 
 ## The manifest
 
