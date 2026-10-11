@@ -196,6 +196,92 @@ defmodule Troupe.GitTest do
       end
     end
 
+    test "objects reached through alternates or a link out of the checkout are not read", c do
+      # #538: git reads objects wherever `objects/info/alternates` or a link in `objects`
+      # leads, so the other checkout's commit would show as the workspace's own.
+      secret = c.other |> git!(["rev-parse", "HEAD"]) |> String.trim()
+      other_objects = Path.join(c.other, ".git/objects")
+      fan_out = String.slice(secret, 0, 2)
+
+      # The same objects, packed, for a link to a pack.
+      packed = Path.join(c.base, "packed.git")
+      git!(c.base, ["clone", "-q", "--bare", "--no-local", c.other, packed])
+      [pack] = Path.wildcard(Path.join(packed, "objects/pack/*.pack"))
+
+      escapes = [
+        alternates: fn objects ->
+          File.write!(Path.join(objects, "info/alternates"), "# a comment\n#{other_objects}\n")
+        end,
+        relative_alternates: fn objects ->
+          relative = Path.relative_to(other_objects, c.base) |> then(&"../../../../#{&1}")
+          File.write!(Path.join(objects, "info/alternates"), relative <> "\n")
+        end,
+        # quoted as git quotes a path, with an octal escape for the `o` of `other`
+        quoted_alternates: fn objects ->
+          quoted = String.replace(other_objects, "/other/", "/\\157ther/")
+          File.write!(Path.join(objects, "info/alternates"), ~s("#{quoted}"\n))
+        end,
+        # an alternate inside the checkout, whose own alternates lead out
+        alternates_through_one_inside: fn objects ->
+          inner = Path.expand("../../vendor", objects)
+          File.mkdir_p!(inner)
+          commit!(inner, %{"v.txt" => "v\n"}, "vendored")
+          inner_objects = Path.join(inner, ".git/objects")
+          File.write!(Path.join(inner_objects, "info/alternates"), other_objects <> "\n")
+          File.write!(Path.join(objects, "info/alternates"), inner_objects <> "\n")
+        end,
+        objects_link: fn objects ->
+          File.rm_rf!(objects)
+          File.ln_s!(other_objects, objects)
+        end,
+        fan_out_link: fn objects ->
+          File.rm_rf!(Path.join(objects, fan_out))
+          File.ln_s!(Path.join(other_objects, fan_out), Path.join(objects, fan_out))
+        end,
+        pack_link: fn objects ->
+          for file <- [pack, String.replace_suffix(pack, ".pack", ".idx")],
+              do: File.ln_s!(file, Path.join([objects, "pack", Path.basename(file)]))
+        end
+      ]
+
+      for {key, escape} <- escapes, name = Atom.to_string(key) do
+        ws = Path.join([c.base, "escapes", name])
+        File.mkdir_p!(ws)
+        commit!(ws, %{"mine.txt" => "mine\n"}, "the workspace's own commit")
+        escape.(Path.join(ws, ".git/objects"))
+
+        # git itself is taken in.
+        {shown, 0} = System.cmd("git", ["cat-file", "commit", secret], cd: ws)
+        assert shown =~ "the other workspace's commit", "#{name}: the escape did not work"
+
+        {:ok, workspace} = Workspace.new(ws)
+        ctx = %{c.ctx | workspace: workspace}
+
+        for args <- [%{"op" => "show", "ref" => secret}, %{"op" => "log", "ref" => secret}] do
+          assert {:error, message} = GitRead.run(args, ctx), "#{name}: #{args["op"]} was read"
+          assert message =~ "git was not run: this repository's objects lead to ", name
+          assert message =~ "which is outside the checkout", name
+          refute message =~ "the other workspace's commit", name
+        end
+      end
+
+      # An alternate inside the checkout is the checkout's own, and is read.
+      ws = Path.join(c.base, "inside")
+      File.mkdir_p!(ws)
+      commit!(ws, %{"mine.txt" => "mine\n"}, "the workspace's own commit")
+      inner = Path.join(ws, "vendor")
+      File.mkdir_p!(inner)
+      commit!(inner, %{"v.txt" => "v\n"}, "vendored")
+      vendored = inner |> git!(["rev-parse", "HEAD"]) |> String.trim()
+      File.write!(Path.join(ws, ".git/objects/info/alternates"), "../../vendor/.git/objects\n")
+      {:ok, workspace} = Workspace.new(ws)
+
+      assert {:ok, shown} =
+               GitRead.run(%{"op" => "show", "ref" => vendored}, %{c.ctx | workspace: workspace})
+
+      assert shown =~ "vendored"
+    end
+
     test "a real worktree is read, and its checkout's objects with it", c do
       wt = Path.join(c.base, "wt")
       git!(c.other, ["worktree", "add", "-q", "-b", "wt", wt])
