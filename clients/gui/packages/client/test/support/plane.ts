@@ -40,7 +40,41 @@ export interface PlaneOptions {
    * its own gateway; `{ configured: false }` is one whose administrator has set nothing.
    */
   clientDefaults?: Record<string, unknown>;
+  /**
+   * The version policy per component (`tui`, `daemon`, `desktop`), which `initialize` and
+   * `me.client_versions` answer from (Decision 868). None is a plane with no policy set.
+   */
+  clientVersions?: Record<string, { recommended?: string | null; minimum?: string | null; blocked?: string[] }>;
+  /** A plane from before the policy: no `initialize` over `/rpc`, no `me.client_versions`. */
+  beforePolicy?: boolean;
 }
+
+/** SemVer's order, enough for a policy's versions: the numbers, then a pre-release below none. */
+function older(a: string, b: string): boolean {
+  const parse = (v: string) => /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(v);
+  const x = parse(a);
+  const y = parse(b);
+  if (!x || !y) return false;
+  for (let i = 1; i <= 3; i += 1) {
+    if (Number(x[i]) !== Number(y[i])) return Number(x[i]) < Number(y[i]);
+  }
+  if (x[4] === y[4]) return false;
+  if (!x[4]) return false;
+  if (!y[4]) return true;
+  const xs = x[4].split(".");
+  const ys = y[4].split(".");
+  for (let i = 0; i < Math.min(xs.length, ys.length); i += 1) {
+    const [p, q] = [xs[i]!, ys[i]!];
+    if (p === q) continue;
+    const [pn, qn] = [/^\d+$/.test(p), /^\d+$/.test(q)];
+    if (pn && qn) return Number(p) < Number(q);
+    if (pn !== qn) return pn;
+    return p < q;
+  }
+  return xs.length < ys.length;
+}
+
+const COMPONENTS: Record<string, string> = { troupe: "tui", "troupe-headless": "tui", "troupe-daemon": "daemon", "troupe-gui": "desktop" };
 
 /** An organisation that points its clients at an OpenAI-compatible gateway of its own. */
 export const GATEWAY_DEFAULTS = {
@@ -54,6 +88,8 @@ export const GATEWAY_DEFAULTS = {
 export class FakePlane {
   readonly server: Server;
   readonly rows = new Map<string, Row>();
+  /** Every `client_info` an `initialize` over `/rpc` gave, in order. */
+  readonly initialized: Array<{ name?: unknown; version?: unknown }> = [];
   corsOrigins: string[];
   podTokenLifetime: number;
 
@@ -196,7 +232,49 @@ export class FakePlane {
     const worker = this.opts.worker;
     const profiles = this.opts.profiles ?? ["dev", "ux"];
 
+    const policy = (component: string) => {
+      const p = this.opts.clientVersions?.[component] ?? {};
+      return { recommended: p.recommended ?? null, minimum: p.minimum ?? null, blocked: p.blocked ?? [] };
+    };
+
     switch (method) {
+      // The handshake over `/rpc` (Decision 868): `me`, and the policy for the kind of
+      // client this is, or `update_required` for one on a blocked version or below the
+      // minimum.
+      case "initialize": {
+        if (this.opts.beforePolicy) return { error: { code: -32601, message: "method_not_found", data: { method } } };
+        const info = (params["client_info"] ?? {}) as { name?: unknown; version?: unknown };
+        this.initialized.push(info);
+        const component = COMPONENTS[String(info.name)];
+        const version = typeof info.version === "string" ? info.version : null;
+        const principal = this.rpc(subject, name, "me", {});
+        const hello = (clientUpdate: unknown) => ({
+          result: { protocol_version: "1", server_info: { name: "troupe-plane", version: "test" }, principal: "result" in principal ? principal.result : null, client_update: clientUpdate },
+        });
+        if (!component) return hello(null);
+        const p = policy(component);
+        const blocked = version !== null && p.blocked.includes(version);
+        if (blocked || (version !== null && p.minimum && older(version, p.minimum))) {
+          const program = { tui: "troupe", daemon: "troupe-daemon", desktop: "the desktop app" }[component];
+          const reason = blocked
+            ? `This plane does not serve ${program} ${version}, which its administrators have blocked.`
+            : `This plane needs ${program} ${p.minimum} or later, and this is ${version}.`;
+          return {
+            error: {
+              code: -32016,
+              message: "update_required",
+              data: { component, version, minimum: p.minimum, recommended: p.recommended, blocked, run: null, reason },
+            },
+          };
+        }
+        const action = version !== null && p.recommended && older(version, p.recommended) ? "suggest" : "none";
+        return hello({ component, ...p, action });
+      }
+
+      case "me.client_versions":
+        if (this.opts.beforePolicy) return { error: { code: -32601, message: "method_not_found", data: { method } } };
+        return { result: { tui: policy("tui"), daemon: policy("daemon"), desktop: policy("desktop") } };
+
       case "me":
         return {
           result: {

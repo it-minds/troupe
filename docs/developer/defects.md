@@ -1275,14 +1275,12 @@ Found by the chunk 28 fixers and the coordinator, 2026-10-11.
 - **Pre-releases aren't signed.** `prerelease.yml` can be dispatched on any branch, so it has no access to the release key, and `troupe update` refuses its builds. Whether pre-releases get a key of their own is undecided.
 - **Releases reach `troupe update` only once marked Latest.** `release.yml` publishes a `-beta` version as a GitHub pre-release, and `/releases/latest` skips pre-releases. A machine with no plane, and the installers' default, see a release only after it's marked Latest by hand. A signed-in client follows its plane's `recommended` (Decision 868).
 - **The daemon's own update.**
-  - A machine with only the daemon (the desktop app's) has no updater: `troupe-daemon` can't replace the directory it runs from on Windows.
+  - A machine with the daemon alone, no `troupe` and no desktop app, has no updater: `troupe-daemon` can't replace the directory it runs from on Windows. The desktop app updates the daemon beside it (Decision 874).
   - A turn can start in the 250 ms between `daemon.stop` answering and the stop, and a client can restart the old daemon before the swap. Decision 865 records both.
 - **What the plane's version check is.**
   - Client versions are what the client says, so `update_required` is a service to the person, not access control: a client that lies, a script, or a client from before 0.13.0 is never refused.
   - Only `initialize` judges; a connected client isn't re-checked when the policy changes.
-  - The TUI doesn't show `client_update.action: "suggest"` yet.
   - The plane doesn't record which version each client runs.
-  - The desktop app neither calls `initialize` nor shows `update_required`.
 - **Wording.**
   - The no-key refusal says the same thing twice ("installs no release; nothing is installed").
   - `troupe login` against a plane that refuses the version keeps the credentials and exits 1 with the sentence, where "signed in, but..." would read better.

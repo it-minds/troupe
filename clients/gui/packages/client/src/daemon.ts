@@ -48,6 +48,13 @@ export interface DaemonIdentity {
   linked_at?: string | null;
 }
 
+/** What `daemon.stop` answers: stopping now, or why not (`embedded`, `at_work`, with which). */
+export interface DaemonStop {
+  stopping: boolean;
+  reason?: "embedded" | "at_work" | string;
+  at_work?: Array<{ id: string; workspace: string | null }>;
+}
+
 /** One session as the daemon's own `session.list` reports it. */
 export interface DaemonSessionRow {
   id: string;
@@ -578,6 +585,16 @@ export class DaemonClient {
    */
   signOutIdentity(params: { plane_url: string; subject?: string }): Promise<{ signed_out: boolean }> {
     return this.command("identity.sign_out", { ...params });
+  }
+
+  /**
+   * Ask the daemon to stop between turns, so an update can replace its release (`daemon.stop`,
+   * Decision 865): it stops when no session has a turn at work and otherwise names the ones
+   * that do, to be asked again; one a terminal runs inside itself says so and stays. Every
+   * client's connection ends when it stops.
+   */
+  stopBetweenTurns(): Promise<DaemonStop> {
+    return this.call<DaemonStop>("daemon.stop");
   }
 
   listSessions(filter: Record<string, unknown> = {}): Promise<{ sessions: DaemonSessionRow[] }> {

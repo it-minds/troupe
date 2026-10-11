@@ -179,6 +179,8 @@ defmodule Troupe.CLI.Remote do
          {:ok, me} <- Client.whoami(origin) do
       say.("#{me.name || me.sub} (#{me.sub}) on #{plane_url}")
       say.("teams: " <> teams(me.teams))
+      # A newer version the plane recommends, quietly, with what to run (Decision 874).
+      if line = Client.fleet_status(origin)[:suggest], do: say.(line)
       0
     else
       {:error, reason} -> fail(say, reason)

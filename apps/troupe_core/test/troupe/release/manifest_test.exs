@@ -26,6 +26,14 @@ defmodule Troupe.Release.ManifestTest do
     assert Manifest.classify(v, "Troupe_0.13.0_amd64.AppImage") == {"desktop", "linux_x86_64"}
     assert Manifest.classify(v, "Troupe-0.13.0-1.x86_64.rpm") == {"desktop", "linux_x86_64"}
     assert Manifest.classify(v, "Troupe_0.13.0_universal.dmg") == {"desktop", "macos_universal"}
+    # What the desktop app updates itself from, and its updater's document (Decision 874).
+    assert Manifest.classify(v, "Troupe_0.13.0_universal.app.tar.gz") ==
+             {"desktop", "macos_universal"}
+
+    assert Manifest.classify(v, "Troupe_0.13.0_x64-setup.exe.sig") ==
+             {"desktop", "windows_x86_64"}
+
+    assert Manifest.classify(v, "latest.json") == {"desktop", nil}
     assert Manifest.classify(v, "troupe-#{v}-plan9_mips") == {"other", nil}
     assert Manifest.classify(v, "troupe-0.12.0-linux_x86_64") == {"other", nil}
   end

@@ -43,6 +43,47 @@ defmodule Troupe.PlaneVersionTest do
     assert status.update_required == nil
   end
 
+  # #66 slice 2 (Decision 874): `suggest` is said, quietly, where the plane is met.
+  test "a newer recommended version is one quiet line, with what to run, and never an error" do
+    {remote, url} =
+      start_remote!(transport: :http, client_versions: %{"tui" => %{"recommended" => "99.0.1"}})
+
+    login!(remote, url)
+    {:ok, origin} = Client.connect_plane(url)
+    eventually(fn -> Client.fleet_status(origin).up? end)
+
+    line = "This plane recommends troupe 99.0.1, and this is #{@version}: run troupe update."
+    assert Client.fleet_status(origin)[:suggest] == line
+    assert Client.fleet_status(origin).update_required == nil
+
+    # troupe whoami says who, then the line, and succeeds.
+    me = self()
+    assert Troupe.CLI.Remote.whoami(url, say: &send(me, {:said, &1})) == 0
+    assert_received {:said, ^line}
+
+    # HQ says it under the lockup, and the plane is up: no warning, nothing unreachable.
+    {sid, _ws} = local_session!()
+    {pid, screen} = start_tui(sid, page: :hq, plane: url)
+    eventually(fn -> screen_text(pid, screen) =~ "This plane recommends troupe 99.0.1" end)
+    refute screen_text(pid, screen) =~ "unreachable"
+    refute screen_text(pid, screen) =~ "⚠"
+    GenServer.stop(pid, :normal)
+  end
+
+  test "a version at or past the recommended one says nothing" do
+    {remote, url} =
+      start_remote!(transport: :http, client_versions: %{"tui" => %{"recommended" => @version}})
+
+    login!(remote, url)
+    {:ok, origin} = Client.connect_plane(url)
+    eventually(fn -> Client.fleet_status(origin).up? end)
+    assert Client.fleet_status(origin)[:suggest] == nil
+
+    me = self()
+    assert Troupe.CLI.Remote.whoami(url, say: &send(me, {:said, &1})) == 0
+    refute_received {:said, "This plane recommends" <> _}
+  end
+
   test "a plane that does not serve this version refuses it in one sentence, wherever it is asked" do
     {remote, url} = start_remote!(transport: :http)
     login!(remote, url)

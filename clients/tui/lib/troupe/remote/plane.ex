@@ -34,12 +34,15 @@ defmodule Troupe.Remote.Plane do
   @max_waiting 64
 
   @type status :: %{
-          up?: boolean(),
-          plane_url: String.t(),
-          principal: map() | nil,
-          scopes: [String.t()],
-          server_info: map() | nil,
-          error: term() | nil
+          required(:up?) => boolean(),
+          required(:plane_url) => String.t(),
+          required(:principal) => map() | nil,
+          required(:scopes) => [String.t()],
+          required(:server_info) => map() | nil,
+          required(:error) => term() | nil,
+          # What the plane's `initialize` said about this version (Decision 868), where
+          # it said anything: the policy, and `action`.
+          optional(:client_update) => map() | nil
         }
 
   ## API
@@ -150,6 +153,7 @@ defmodule Troupe.Remote.Plane do
       principal: nil,
       scopes: [],
       protocol_version: nil,
+      client_update: nil,
       backoff: Backoff.new(),
       subscribers: MapSet.new(),
       fleet_subscribed?: false
@@ -186,7 +190,8 @@ defmodule Troupe.Remote.Plane do
       principal: state.principal,
       scopes: state.scopes,
       server_info: state.server_info,
-      error: state.error
+      error: state.error,
+      client_update: state.client_update
     }
 
     {:reply, status, state}
@@ -486,7 +491,10 @@ defmodule Troupe.Remote.Plane do
         capabilities: result["capabilities"] || %{},
         principal: principal(result),
         scopes: result["scopes"] || [],
-        protocol_version: result["protocol_version"]
+        protocol_version: result["protocol_version"],
+        # `suggest` here is a newer version recommended: said quietly where the plane is
+        # met, never an error (Decision 874).
+        client_update: if(is_map(result["client_update"]), do: result["client_update"])
     }
 
     state =

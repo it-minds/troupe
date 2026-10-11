@@ -111,10 +111,19 @@ Nothing set serves every version.
   the person, so a plane cannot walk machines back to an old release. The recommended
   version may not be blocked, and the minimum may not be newer than it.
 
+The desktop app follows the same policy (Decision 874). Signed in here, it calls the
+plane's `initialize` as `troupe-gui` with its version when it starts and once a day: on a
+blocked version or below `minimum` it says the refusal's sentence, keeps to the sessions
+on its own computer, and offers **Update now**; below `recommended` it offers the update
+quietly. It updates itself, and the troupe-daemon beside it, to the `desktop` component's
+recommended version (the latest release when there is none), never to a blocked one or one
+below the minimum, never backwards, and only from a release the release key signed. It
+asks the person before it restarts.
+
 Write versions as releases are numbered (`0.13.0-beta`): they are ordered as SemVer orders
 them, which puts `0.13.0-beta` before `0.13.0`. A client from before 0.13 does not say its
-version and is not held to any of this; nor is anything that calls `/rpc` without saying
-which client it is.
+version and is not held to any of this, and neither is a desktop app from before 0.15;
+nor is anything that calls `/rpc` without saying which client it is.
 
 ## Locked out of the console
 

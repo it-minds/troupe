@@ -434,6 +434,21 @@ label code {
   color: var(--running-fg);
   background: var(--running-bg);
 }
+/* The app's own update (Decision 874): an offer is the machine's quiet cyan; the plane
+   not serving this version reads as the platform being away, which is what it means for
+   the team's sessions; a release that could not be checked is a refusal. */
+.banner.update.quiet {
+  color: var(--running-fg);
+  background: var(--running-bg);
+}
+.banner.update.required {
+  color: var(--offline-fg);
+  background: var(--offline-bg);
+}
+.banner.update.refused {
+  color: var(--error-fg);
+  background: var(--error-bg);
+}
 
 .empty {
   padding: var(--space-9) var(--space-6);
