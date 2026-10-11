@@ -2607,6 +2607,13 @@ version back or name one, and cannot make a client install anything the key did 
 links it with a token (`identity.link`); refused, it asks the plane nothing more until the
 next link, and `identity.get` carries the sentence as `update_required`.
 
+The desktop app makes it too, as `troupe-gui`, when it is signed in: at start and once a
+day (Decision 874). Refused, it keeps to the sessions on its own computer and offers to
+update itself, which is why `data.run` is `null` for it; served with `action: "suggest"`,
+it offers the update quietly, as the terminal says it in a line. Its update is the
+`desktop` component's `recommended` version from `me.client_versions`, held to the same
+`minimum` and `blocked` list, and to the release key.
+
 ### Errors
 
 `forbidden` with `data.required_role` when the caller's role is not enough, and

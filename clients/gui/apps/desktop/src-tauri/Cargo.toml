@@ -41,6 +41,21 @@ tauri-plugin-notification = "~2.5"
 # notification, hands its arguments to the one running and exits. `~2.4` because 2.5
 # wants tauri 2.12 (Decision 717); it has no JavaScript half.
 tauri-plugin-single-instance = "~2.5"
+# The app's own update (#66, Decision 874): Tauri's updater installs a release's setup
+# (Windows), app archive (macOS) or AppImage (Linux) once src/update.rs has checked the
+# release's signed manifest. `~2.13` because 2.13 is the minor that wants tauri 2.12; it
+# is driven from Rust alone, so it has no JavaScript half to keep in step (Decision 717).
+tauri-plugin-updater = "~2.13"
+# The manifest's check: minisign's format, the one the updater itself verifies with, and
+# sha256 for each file it names; versions as SemVer orders them. The daemon's release is a
+# `.tar.gz`, unpacked beside the one it replaces. All of them already in the lock through
+# tauri and the updater.
+minisign-verify = "0.3"
+sha2 = "0.10"
+base64 = "0.22"
+semver = "1"
+tar = "0.4"
+flate2 = "1"
 # Windows Credential Manager / macOS Keychain / Secret Service. The refresh token lives
 # here and nowhere else; see src/secrets.rs.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }

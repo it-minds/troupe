@@ -473,12 +473,26 @@ jobs:
             grep -Eq "(^|[/ ])$f\$" <<<"$listing" || { echo "$f is not in the installer:"; echo "$listing"; exit 1; }
           done
 
+      # What the desktop app updates itself from on macOS (Decision 874): the app as an
+      # archive, the shape Tauri's updater unpacks, beside the disk image a person installs
+      # from. Windows updates from the setup and Linux from the AppImage, both kept already.
+      # Packed here and signed in `release.yml`'s publish job, which alone holds the key.
+      - name: The app archive the updater reads (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle
+        run: |
+          version=$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/VERSION")
+          tar -czf "macos/Troupe_${version%%-*}_universal.app.tar.gz" -C macos Troupe.app
+          ls -la macos
+
       - name: Keep the installers
         uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.target }}
           if-no-files-found: error
           path: |
+            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.app.tar.gz
             clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
             clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
             clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi

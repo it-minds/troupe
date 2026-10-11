@@ -44,7 +44,58 @@ last update, the daemon again only between turns. Run again, it swaps forward.
 The latest release replaces only what is older than it; `--version` replaces either way. It
 updates what the installers installed, where they installed it (`TROUPE_BIN_DIR` and
 `TROUPE_LIB_DIR` move it, as they move the installers'). A machine with the daemon and no
-`troupe` is updated by running its installer again.
+`troupe` is updated by the desktop app, when it has one (below), and otherwise by running
+its installer again.
+
+## The desktop app
+
+The desktop app updates itself, and the `troupe-daemon` the installers put beside it, from
+the same signed releases. It looks when it starts and once a day after:
+
+- **What it looks for.** Signed in to a plane, the version the plane recommends for the
+  desktop app; otherwise the latest release. `TROUPE_RELEASE_URL` points it at a mirror, as
+  it points `troupe update`, over `https`.
+- **What it checks.** The release's `manifest.json` and its signature, against the release
+  keys the app was built with, before anything else; then the update itself, which Tauri's
+  updater holds to its own signature by the same key, and the app holds to the size and
+  sha256 the manifest names. A release it cannot check is refused with a sentence saying
+  why, and nothing changes.
+- **When it installs.** Only when you say so: **Update** downloads and checks it, and
+  **Restart now** installs it. A turn at work in a session on this computer is waited for
+  first, and so is the daemon, which is asked to stop between turns, as `troupe update`
+  asks it, when its release is replaced too. Sessions on the plane run on their pods
+  whatever the window does. On Windows the setup restarts the app; on macOS and Linux the
+  app restarts into the new one.
+- **The daemon beside it.** Where the installers put a `troupe-daemon` older than the
+  release (`%LOCALAPPDATA%\Programs\troupe-daemon`, `~/.local/lib/troupe-daemon`), it is
+  replaced with the release's daemon in the same step, the old one kept as
+  `troupe-daemon.previous`, as `troupe update` keeps it, so `troupe update --rollback` and
+  the installers find it. A daemon a running `troupe` started inside itself is that
+  `troupe`'s, and is left running.
+- **Never backwards.** A release older than the app is not offered. On a version the plane
+  has blocked whose recommended one is older, the app says so and leaves the choice to you:
+  that release's own installer moves you back.
+
+Signed in to a plane that does not serve this version of the desktop app, below its
+minimum or on a version it has blocked, the app says so in one sentence, keeps to the
+sessions on this computer as it does when the plane is not answering, and offers
+**Update now**:
+
+```text
+This plane needs the desktop app 0.15.0-beta or later, and this is 0.14.0-beta: update it now, which installs 0.15.1-beta.
+```
+
+A newer version the plane recommends is a quiet line with an **Update** beside it. The
+terminal says the same in a line where it meets the plane, in HQ and after `troupe login`
+and `troupe whoami`, with the command to run:
+
+```text
+This plane recommends troupe 0.15.1-beta, and this is 0.15.0-beta: run troupe update.
+```
+
+Desktop apps from before 0.15 have no updater: their installer, or `install.ps1 -Gui` and
+`install.sh --gui`, installs the release once, and the app keeps itself current from then
+on.
 
 ## Signed in to a plane
 

@@ -233,13 +233,16 @@ jobs:
 
       - uses: azure/setup-helm@v5
 
-      # manifest.json names every file attached, with its size and sha256, and
-      # manifest.json.minisig signs it with the release key: what `troupe update` and the
-      # installers check before they install anything (Decision 865). Without the key, or
-      # with one that is not the first in apps/troupe_core/priv/release-keys.txt, the script
-      # fails and the release stays a draft: it is never published unsigned. During a key
-      # rotation RELEASE_MINISIGN_KEY_PREVIOUS signs as well. Then SHA256SUMS, over the
-      # manifest and its signature too.
+      # The desktop app's update first (Decision 874): a `.sig` beside each file it updates
+      # itself from, and `latest.json`, the document its updater reads, signed with the same
+      # release key, so that the manifest names them with everything else and one signature
+      # chain covers everything a client installs. Then manifest.json, which names every file
+      # attached with its size and sha256, and manifest.json.minisig, which signs it with the
+      # release key: what `troupe update`, the desktop app and the installers check before
+      # they install anything (Decision 865). Without the key, or with one that is not the
+      # first in apps/troupe_core/priv/release-keys.txt, either script fails and the release
+      # stays a draft: it is never published unsigned. During a key rotation
+      # RELEASE_MINISIGN_KEY_PREVIOUS signs as well. Then SHA256SUMS, over all of it.
       - name: The signed manifest, and checksums
         env:
           GH_TOKEN: ${{ github.token }}
@@ -250,10 +253,12 @@ jobs:
         run: |
           mkdir dist
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dist
-          rm -f dist/SHA256SUMS dist/manifest.json dist/manifest.json.minisig
+          rm -f dist/SHA256SUMS dist/manifest.json dist/manifest.json.minisig dist/latest.json dist/*.sig
+          elixir scripts/release-desktop-update.exs "$VERSION" dist \
+            --base "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
           elixir scripts/release-manifest.exs "$VERSION" dist
           (cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
-          gh release upload "$TAG" dist/manifest.json dist/manifest.json.minisig dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$TAG" dist/latest.json dist/*.sig dist/manifest.json dist/manifest.json.minisig dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
 
       # The same file the release page has, as `oci://ghcr.io/<owner>/charts/troupe` at
       # the version, pushed with this workflow's own token (Decision 735).

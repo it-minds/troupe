@@ -24,9 +24,11 @@
 //   notifications the page's own `Notification` is refused in WebView2, so the OS's are
 //                 reached through the notification plugin, and on Windows through the
 //                 shell's own toast, whose click is heard
+//   updater       the app's own update: a release the shell checks against the release
+//                 keys it was built with, then installs, restarting the app
 
 import type { DaemonEndpoint, TokenStore } from "@troupe/client";
-import type { NotifyPermission, ShellNotifications, TroupeShell } from "./shell";
+import type { NotifyPermission, ShellNotifications, ShellUpdater, TroupeShell, UpdateCheck } from "./shell";
 
 /** True inside a Tauri webview. v2 injects this before any of our code runs. */
 export function inTauri(): boolean {
@@ -134,6 +136,35 @@ function notifications(): ShellNotifications {
 }
 
 /**
+ * The app's own update, three commands of the shell's (`src-tauri/src/update.rs`): the
+ * release and its keys are the shell's to find and check, so none of them takes a URL, a
+ * path or a key from the page.
+ */
+function updater(): ShellUpdater {
+  return {
+    async check(params) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      return invoke<UpdateCheck>("update_check", { params });
+    },
+    async download(onProgress) {
+      const [{ invoke }, { listen }] = await Promise.all([import("@tauri-apps/api/core"), import("@tauri-apps/api/event")]);
+      const stop = onProgress
+        ? await listen<{ received: number; total: number | null }>("troupe://update-progress", (e) => onProgress(e.payload.received, e.payload.total))
+        : null;
+      try {
+        await invoke("update_download");
+      } finally {
+        stop?.();
+      }
+    },
+    async install(daemonStopped) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("update_install", { daemonStopped });
+    },
+  };
+}
+
+/**
  * Install the shell on `window.troupe`, which is where `shell.ts` looks for it.
  * Called from `main.tsx` before the app renders, and only inside the shell.
  */
@@ -159,6 +190,7 @@ export async function installShell(): Promise<void> {
     readDaemon,
     pickDirectory,
     notifications: notifications(),
+    updater: updater(),
   };
   (globalThis as { window?: Window }).window!.troupe = shell;
 }

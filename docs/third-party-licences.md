@@ -346,7 +346,7 @@ depends on the machine.
 
 ## The desktop app (Cargo)
 
-485 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
+503 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
 platform, build dependencies included.
 
 | package | licence |
@@ -357,6 +357,7 @@ platform, build dependencies included.
 | `alloc-stdlib` | BSD-3-Clause |
 | `android_system_properties` | MIT OR Apache-2.0 |
 | `anyhow` | MIT OR Apache-2.0 |
+| `arbitrary` | MIT OR Apache-2.0 |
 | `async-broadcast` | MIT OR Apache-2.0 |
 | `async-channel` | Apache-2.0 OR MIT |
 | `async-executor` | Apache-2.0 OR MIT |
@@ -427,6 +428,7 @@ platform, build dependencies included.
 | `defmt-macros` | MIT OR Apache-2.0 |
 | `defmt-parser` | MIT OR Apache-2.0 |
 | `deranged` | MIT OR Apache-2.0 |
+| `derive_arbitrary` | MIT OR Apache-2.0 |
 | `derive_more` | MIT |
 | `derive_more-impl` | MIT |
 | `digest` | MIT OR Apache-2.0 |
@@ -457,6 +459,7 @@ platform, build dependencies included.
 | `fastrand` | Apache-2.0 OR MIT |
 | `fdeflate` | MIT OR Apache-2.0 |
 | `field-offset` | MIT OR Apache-2.0 |
+| `filetime` | MIT/Apache-2.0 |
 | `find-msvc-tools` | MIT OR Apache-2.0 |
 | `flate2` | MIT OR Apache-2.0 |
 | `fnv` | Apache-2.0 / MIT |
@@ -532,7 +535,9 @@ platform, build dependencies included.
 | `jiff-static` | Unlicense OR MIT |
 | `jiff-tzdb` | Unlicense OR MIT |
 | `jiff-tzdb-platform` | Unlicense OR MIT |
+| `jni` | MIT OR Apache-2.0 |
 | `jni` | MIT/Apache-2.0 |
+| `jni-macros` | MIT OR Apache-2.0 |
 | `jni-sys` | MIT OR Apache-2.0 |
 | `jni-sys-macros` | MIT OR Apache-2.0 |
 | `js-sys` | MIT OR Apache-2.0 |
@@ -557,6 +562,7 @@ platform, build dependencies included.
 | `memchr` | Unlicense OR MIT |
 | `memoffset` | MIT |
 | `mime` | MIT OR Apache-2.0 |
+| `minisign-verify` | MIT |
 | `miniz_oxide` | MIT OR Zlib OR Apache-2.0 |
 | `mio` | MIT |
 | `muda` | Apache-2.0 OR MIT |
@@ -585,14 +591,17 @@ platform, build dependencies included.
 | `objc2-exception-helper` | Zlib OR Apache-2.0 OR MIT |
 | `objc2-foundation` | MIT |
 | `objc2-io-surface` | Zlib OR Apache-2.0 OR MIT |
+| `objc2-osa-kit` | Zlib OR Apache-2.0 OR MIT |
 | `objc2-quartz-core` | Zlib OR Apache-2.0 OR MIT |
 | `objc2-ui-kit` | Zlib OR Apache-2.0 OR MIT |
 | `objc2-user-notifications` | Zlib OR Apache-2.0 OR MIT |
 | `objc2-web-kit` | Zlib OR Apache-2.0 OR MIT |
 | `once_cell` | MIT OR Apache-2.0 |
 | `open` | MIT |
+| `openssl-probe` | MIT OR Apache-2.0 |
 | `option-ext` | MPL-2.0 |
 | `ordered-stream` | MIT OR Apache-2.0 |
+| `osakit` | MIT OR Apache-2.0 |
 | `pango` | MIT |
 | `pango-sys` | MIT |
 | `parking` | Apache-2.0 OR MIT |
@@ -647,11 +656,15 @@ platform, build dependencies included.
 | `rustc_version` | MIT OR Apache-2.0 |
 | `rustix` | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 | `rustls` | Apache-2.0 OR ISC OR MIT |
+| `rustls-native-certs` | Apache-2.0 OR ISC OR MIT |
 | `rustls-pki-types` | MIT OR Apache-2.0 |
+| `rustls-platform-verifier` | MIT OR Apache-2.0 |
+| `rustls-platform-verifier-android` | MIT OR Apache-2.0 |
 | `rustls-webpki` | ISC |
 | `rustversion` | MIT OR Apache-2.0 |
 | `ryu` | Apache-2.0 OR BSL-1.0 |
 | `same-file` | Unlicense/MIT |
+| `schannel` | MIT |
 | `schemars` | MIT |
 | `schemars_derive` | MIT |
 | `scopeguard` | MIT OR Apache-2.0 |
@@ -677,6 +690,7 @@ platform, build dependencies included.
 | `shlex` | MIT OR Apache-2.0 |
 | `signal-hook-registry` | MIT OR Apache-2.0 |
 | `simd-adler32` | MIT |
+| `simd_cesu8` | Apache-2.0 OR MIT |
 | `simdutf8` | MIT OR Apache-2.0 |
 | `siphasher` | MIT/Apache-2.0 |
 | `slab` | MIT |
@@ -699,6 +713,7 @@ platform, build dependencies included.
 | `system-deps` | MIT OR Apache-2.0 |
 | `tao` | Apache-2.0 |
 | `tao-macros` | MIT OR Apache-2.0 |
+| `tar` | MIT OR Apache-2.0 |
 | `target-lexicon` | Apache-2.0 WITH LLVM-exception |
 | `tauri` | Apache-2.0 OR MIT |
 | `tauri-build` | Apache-2.0 OR MIT |
@@ -711,6 +726,7 @@ platform, build dependencies included.
 | `tauri-plugin-notification` | Apache-2.0 OR MIT |
 | `tauri-plugin-opener` | Apache-2.0 OR MIT |
 | `tauri-plugin-single-instance` | Apache-2.0 OR MIT |
+| `tauri-plugin-updater` | Apache-2.0 OR MIT |
 | `tauri-runtime` | Apache-2.0 OR MIT |
 | `tauri-runtime-wry` | Apache-2.0 OR MIT |
 | `tauri-utils` | Apache-2.0 OR MIT |
@@ -778,6 +794,7 @@ platform, build dependencies included.
 | `web_atoms` | MIT OR Apache-2.0 |
 | `webkit2gtk` | MIT |
 | `webkit2gtk-sys` | MIT |
+| `webpki-root-certs` | CDLA-Permissive-2.0 |
 | `webpki-roots` | CDLA-Permissive-2.0 |
 | `webview2-com` | MIT |
 | `webview2-com-macros` | MIT |
@@ -817,6 +834,7 @@ platform, build dependencies included.
 | `wry` | Apache-2.0 OR MIT |
 | `x11` | MIT |
 | `x11-dl` | MIT |
+| `xattr` | MIT OR Apache-2.0 |
 | `yoke` | Unicode-3.0 |
 | `yoke-derive` | Unicode-3.0 |
 | `zbus` | MIT |
@@ -832,6 +850,7 @@ platform, build dependencies included.
 | `zerotrie` | Unicode-3.0 |
 | `zerovec` | Unicode-3.0 |
 | `zerovec-derive` | Unicode-3.0 |
+| `zip` | MIT |
 | `zlib-rs` | Zlib |
 | `zmij` | MIT |
 | `zvariant` | MIT |

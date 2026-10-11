@@ -52,7 +52,7 @@ defmodule Troupe.Protocol.ClientUpdate do
 
   @doc """
   What a person runs to update a component, or `nil` where it is not a command: the
-  desktop app has no updater of its own yet (a later slice of #66).
+  desktop app updates itself, from its own banner (Decision 874).
   """
   @spec run(component() | nil) :: String.t() | nil
   def run(component) when component in ["tui", "daemon"], do: "troupe update"
@@ -157,17 +157,37 @@ defmodule Troupe.Protocol.ClientUpdate do
 
   def sentence(_data), do: "This plane needs a newer version of this client."
 
+  @doc """
+  The quiet line a client shows for `action: "suggest"` (Decision 874): what the plane
+  recommends, what this is, and what to run. `nil` for any other answer: a client at or
+  past the recommended version, or one the plane holds to no policy, is told nothing.
+  """
+  @spec suggestion(map() | nil, String.t() | nil) :: String.t() | nil
+  def suggestion(update, version) when is_map(update) do
+    component = field(update, :component)
+    recommended = field(update, :recommended)
+
+    if field(update, :action) == "suggest" and is_binary(recommended) do
+      this = if is_binary(version), do: ", and this is #{version}", else: ""
+
+      "This plane recommends #{program(component)} #{recommended}#{this}: #{action(component, update)}."
+    end
+  end
+
+  def suggestion(_update, _version), do: nil
+
   defp remedy(component, data) do
     recommended = field(data, :recommended)
-
-    action =
-      case field(data, :run) || run(component) do
-        nil when component == "desktop" -> "install a newer desktop app"
-        nil -> "install a newer version"
-        command -> "run #{command}"
-      end
-
+    action = action(component, data)
     if is_binary(recommended), do: "#{action}, which installs #{recommended}", else: action
+  end
+
+  defp action(component, data) do
+    case field(data, :run) || run(component) do
+      nil when component == "desktop" -> "update the desktop app"
+      nil -> "install a newer version"
+      command -> "run #{command}"
+    end
   end
 
   defp blocked(policy) do

@@ -13,13 +13,18 @@
 //   notifications          WebView2 refuses a page's own, so a session that finishes or
 //                          asks while nobody is looking is said through the OS's, and on
 //                          Windows a click on one opens its session (src/notify.rs)
+//   its own update         a release whose manifest the release key signed, checked
+//                          here, installed by Tauri's updater, with the daemon beside the
+//                          app swapped in first (src/update.rs, src/release.rs)
 //
 // Each one is reached through `TroupeShell` in `src/shell.ts`, which the shell installs
 // on `window.troupe` at startup. Nothing else in the bundle knows this process exists.
 //
 mod daemon;
 mod notify;
+mod release;
 mod secrets;
+mod update;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -34,13 +39,20 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        // Driven from `update.rs` alone, with the key and the release it checked; the
+        // page is granted none of the plugin's own commands.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(update::Updates::default())
         .invoke_handler(tauri::generate_handler![
             secrets::secret_get,
             secrets::secret_set,
             secrets::secret_delete,
             daemon::daemon_endpoint,
             daemon::daemon_start,
-            notify::notify_show
+            notify::notify_show,
+            update::update_check,
+            update::update_download,
+            update::update_install
         ])
         .run(tauri::generate_context!())
         .expect("the Troupe desktop shell failed to start");
