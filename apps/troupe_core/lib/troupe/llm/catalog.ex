@@ -35,10 +35,24 @@ defmodule Troupe.LLM.Catalog do
           output: float() | nil,
           cache_read: float() | nil,
           cache_write: float() | nil,
-          thinking: thinking() | nil
+          thinking: thinking() | nil,
+          binds_thinking: boolean() | nil
         }
 
-  defstruct [:id, :context, :max_output, :input, :output, :cache_read, :cache_write, :thinking]
+  # `binds_thinking` is what a listing says of whether the model binds its thinking to the
+  # conversation it was made in (Decision 871), `nil` where it says nothing: a gateway that
+  # serves a model under a name of its own may say so on the model's entry.
+  defstruct [
+    :id,
+    :context,
+    :max_output,
+    :input,
+    :output,
+    :cache_read,
+    :cache_write,
+    :thinking,
+    :binds_thinking
+  ]
 
   @doc """
   Parses one provider's model listing. Unknown or malformed entries are dropped rather
@@ -61,7 +75,8 @@ defmodule Troupe.LLM.Catalog do
         id: id,
         context: pos_int(m["max_input_tokens"]),
         max_output: pos_int(m["max_tokens"]),
-        thinking: listed_thinking(m["capabilities"])
+        thinking: listed_thinking(m["capabilities"]),
+        binds_thinking: flag(m["binds_thinking"])
       }
     ]
   end
@@ -85,7 +100,8 @@ defmodule Troupe.LLM.Catalog do
             input: price(m["input_cost_per_token"]),
             output: price(m["output_cost_per_token"]),
             cache_read: price(m["cache_read_input_token_cost"]),
-            cache_write: price(m["cache_creation_input_token_cost"])
+            cache_write: price(m["cache_creation_input_token_cost"]),
+            binds_thinking: flag(m["binds_thinking"])
           }
         ]
     end
@@ -96,7 +112,8 @@ defmodule Troupe.LLM.Catalog do
       %__MODULE__{
         id: id,
         context: pos_int(m["max_input_tokens"] || m["context_length"]),
-        max_output: pos_int(m["max_output_tokens"])
+        max_output: pos_int(m["max_output_tokens"]),
+        binds_thinking: flag(m["binds_thinking"])
       }
     ]
   end
@@ -167,7 +184,9 @@ defmodule Troupe.LLM.Catalog do
   the system prompt and every message before it), so that an account the check is enforced
   for refuses a block sent back after any of those changed, by its name (Decisions 805 and
   867): Claude Fable from 5.1, Opus and Sonnet from 5.5, and later versions of the three,
-  found inside a gateway's renaming as `thinking/1` finds them.
+  found inside a gateway's renaming as `thinking/1` finds them. A name that hides the model
+  says nothing here; `Troupe.Config.binds_thinking?/2` asks the config's `binds_thinking`
+  and the listing's first (Decision 871).
   """
   @spec binds_thinking?(String.t() | nil) :: boolean()
   def binds_thinking?(model) when is_binary(model) do
@@ -200,6 +219,9 @@ defmodule Troupe.LLM.Catalog do
 
   defp price(n) when is_number(n) and n > 0, do: n * 1.0
   defp price(_), do: nil
+
+  defp flag(value) when is_boolean(value), do: value
+  defp flag(_), do: nil
 
   @doc "Prefixes every id with the provider that serves it: `portal/glm-5.2`."
   @spec qualify([t()], String.t() | nil) :: [t()]
@@ -290,7 +312,8 @@ defmodule Troupe.LLM.Catalog do
       "output" => e.output,
       "cache_read" => e.cache_read,
       "cache_write" => e.cache_write,
-      "thinking" => e.thinking && Atom.to_string(e.thinking)
+      "thinking" => e.thinking && Atom.to_string(e.thinking),
+      "binds_thinking" => e.binds_thinking
     }
     |> Map.reject(fn {_k, v} -> is_nil(v) end)
   end
@@ -305,7 +328,8 @@ defmodule Troupe.LLM.Catalog do
       output: price(m["output"]),
       cache_read: price(m["cache_read"]),
       cache_write: price(m["cache_write"]),
-      thinking: thinking_form(m["thinking"])
+      thinking: thinking_form(m["thinking"]),
+      binds_thinking: flag(m["binds_thinking"])
     }
   end
 

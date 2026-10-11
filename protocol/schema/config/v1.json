@@ -141,6 +141,13 @@
                     "integer",
                     "null"
                   ]
+                },
+                "binds_thinking": {
+                  "description": "Whether the model binds its thinking to the conversation it was made in, as Claude Fable 5.1, Opus 5.5 and Sonnet 5.5 do, so its tools stay the same all session: for a name that hides the model. Unset: the provider's, else what its model list says, else its name.",
+                  "type": [
+                    "boolean",
+                    "null"
+                  ]
                 }
               },
               "patternProperties": {
@@ -148,6 +155,13 @@
               },
               "additionalProperties": false
             }
+          },
+          "binds_thinking": {
+            "description": "Whether the models it serves bind their thinking to the conversation, unless a model's entry says. Unset: what its model list says, else each model's name.",
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "auth_token": {
             "description": "Old spelling of api_key with auth: bearer.",

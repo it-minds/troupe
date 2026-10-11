@@ -42,6 +42,43 @@ defmodule Troupe.Agent.BoundThinkingTest do
              Prefix.count(Troupe.events(session.id))
   end
 
+  # Issue #606 (Decision 871): a gateway's alias hides the model's name, so nothing reads it
+  # as one that binds, and with an effort set its blocks go back (Decision 805). Its entry's
+  # `binds_thinking: true` says it binds.
+  test "a gateway's alias said to bind is offered the same tools on every call, and never refused",
+       context do
+    reads = Enum.map(1..11, &{:tools, [{"read_file", %{"path" => "notes/#{&1}.txt"}}]})
+    stand_in = stand_in([{"read the notes", reads ++ [{:text, "Read all eleven."}]}])
+
+    smart = %{
+      id: "smart",
+      context: nil,
+      max_output: nil,
+      reasoning_effort: "medium",
+      binds_thinking: true
+    }
+
+    provider = %{
+      type: :anthropic,
+      base_url: stand_in.url,
+      api_key: "test-key",
+      auth: :api_key,
+      source: :yaml,
+      models: %{"smart" => smart}
+    }
+
+    overrides = [providers: %{"gw" => provider}, model: "gw/smart", thinking_binding: "error"]
+    %{session: session} = start_session(context, config_overrides: overrides)
+    turn(session.id, "read the notes, one at a time")
+
+    requests = FakeOpenAI.requests(stand_in)
+    assert length(requests) == 12, inspect(Enum.map(requests, & &1.status))
+    assert Enum.all?(requests, &(&1.status == 200 and &1.thinking == :kept))
+
+    assert %{"model_calls" => 12, "tools_changes" => 0, "thinking_resent" => 0} =
+             Prefix.count(Troupe.events(session.id))
+  end
+
   test "Troupe.Bench.Prefix counts no tools change over a turn of twenty calls", context do
     reads = Enum.map(1..19, &{:tools, [{"read_file", %{"path" => "notes/#{&1}.txt"}}]})
     stand_in = stand_in([{"read the notes", reads ++ [{:text, "Read them all."}]}])

@@ -950,6 +950,31 @@ think at their own default effort, and what they thought is handed back to them 
 next call, as it is when an effort is set, so a turn of tool calls goes on from the
 reasoning it started with.
 
+Claude Fable 5.1, Opus 5.5 and Sonnet 5.5, and later versions, bind what they thought to
+the conversation it was made in, the tools among it: an account that enforces the check
+refuses a call whose earlier thinking was made under other tools, and Troupe sends it
+again without that thinking. For those, an agent's tools stay the same for the whole
+session: the task list's tools are offered from the first call, and `/loop`'s
+`goal_complete` on every call of the session's main agent, refused outside a loop. Troupe
+tells these models by name. A gateway's alias that hides the name, such as `smart`
+for Sonnet 5.5, is said to bind with `binds_thinking`, on the model's entry or for every
+model of the provider; `false` says a model does not:
+
+```yaml
+providers:
+  gateway:
+    type: anthropic
+    base_url: https://llm.example.com
+    models:
+      smart: {reasoning_effort: medium, binds_thinking: true}
+```
+
+The tools of an MCP server, and those a person's client offers a session, may still come
+or go while a session runs: a server that comes back with another list, a sign-in that
+completes, a person who closes the window. Whatever the model, those changes reach the
+model at its next turn, never in the middle of one. A tool that went in the meantime stays
+in the list until the turn ends, and a call to it is told it is gone.
+
 ## What Troupe tells the provider
 
 Every model call names the software that made it, so whoever runs the gateway can see
@@ -1006,6 +1031,8 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `providers.<name>.models.<model>.context` | integer ≥ 1 |  | user; project if trusted |  | The model's context window, in tokens. |
 | `providers.<name>.models.<model>.max_output` | integer ≥ 1 |  | user; project if trusted |  | The most output tokens to ask for. |
 | `providers.<name>.models.<model>.reasoning_effort` | string or integer |  | user; project if trusted |  | How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a thinking budget in tokens. An Anthropic model gets it in the form it takes. |
+| `providers.<name>.models.<model>.binds_thinking` | boolean |  | user; project if trusted |  | Whether the model binds its thinking to the conversation it was made in, as Claude Fable 5.1, Opus 5.5 and Sonnet 5.5 do, so its tools stay the same all session: for a name that hides the model. Unset: the provider's, else what its model list says, else its name. |
+| `providers.<name>.binds_thinking` | boolean |  | user; project if trusted |  | Whether the models it serves bind their thinking to the conversation, unless a model's entry says. Unset: what its model list says, else each model's name. |
 | `models` | settings |  | any |  | Which model each role uses. |
 | `models.default` | string | `claude-sonnet-5` | any | model | The model every agent uses unless its definition names one. A bare id goes to the session-wide provider; `<provider>/<model>` goes to a named one, from `providers`. `troupe models` lists what this machine can address. |
 | `models.cheap` | string |  | any | cheap model | The model for small jobs, compaction summaries among them. Unset: the default model. |

@@ -285,7 +285,18 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
          Enum.map(
            ~w(start k7 b2 x9 m4 q1 d8 r3 h6 t5 w0 z2),
            &{:tools, [{"read_file", %{"path" => "chain/#{&1}.txt"}}]}
-         ) ++ [{:text, "N is 440, and the numbers add up to 52."}]}
+         ) ++ [{:text, "N is 440, and the numbers add up to 52."}]},
+        # `loop_turn` (issue #606): the loop's one iteration writes N and says the goal is
+        # met; the person's turn after it, in the same conversation, reads it and writes N + 1.
+        {"Loop iteration 1 of 1",
+         [
+           {:tools, [{"write_file", %{"path" => "out/n.txt", "content" => "440\n"}}]},
+           {:tools, [{"goal_complete", %{"summary" => "out/n.txt holds 440."}}]},
+           {:text, "The goal is met: out/n.txt holds 440."},
+           {:tools, [{"read_file", %{"path" => "out/n.txt"}}]},
+           {:tools, [{"write_file", %{"path" => "out/next.txt", "content" => "441\n"}}]},
+           {:text, "out/next.txt holds 441."}
+         ]}
       ]
     end
 
