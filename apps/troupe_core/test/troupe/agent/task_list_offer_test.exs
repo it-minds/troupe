@@ -74,6 +74,32 @@ defmodule Troupe.Agent.TaskListOfferTest do
     assert offers(fake) == [true]
   end
 
+  # Issue #590 (Decision 867). Anthropic's newest models bind a thinking block to the tools
+  # it was made under, and the tools are the start of every prompt: on one of those the
+  # list's tools are there from the first call, so a long turn's eleventh call sends the
+  # tools and the system prompt its tenth did, and the next turn the same again.
+  test "a model that binds its thinking has the list from its first call, and its tools never change",
+       context do
+    reads = Enum.map(1..11, &{:tools, [{"read_file", %{"path" => "notes/#{min(&1, 10)}.txt"}}]})
+
+    %{session: session, fake: fake} =
+      start(context,
+        steps: reads ++ [{:text, "read them"}, {:text, "hello"}],
+        config_overrides: [model: "claude-sonnet-5-5"]
+      )
+
+    turn(session, "read the notes")
+    turn(session, "and now?")
+
+    requests = Fake.requests(fake)
+    assert offers(fake) == List.duplicate(true, 13)
+
+    [tenth, eleventh] = Enum.slice(requests, 9, 2)
+    assert eleventh.tools == tenth.tools
+    assert eleventh.system == tenth.system
+    assert [_one] = requests |> Enum.map(&{&1.tools, &1.system}) |> Enum.uniq()
+  end
+
   test "plan, which names the list's tools, has them on every call", context do
     %{session: session, fake: fake} =
       start(context, agent: "plan", steps: [{:text, "a plan"}])

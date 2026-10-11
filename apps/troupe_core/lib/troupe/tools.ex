@@ -9,6 +9,7 @@ defmodule Troupe.Tools do
   """
 
   alias Troupe.Agent.Definition
+  alias Troupe.LLM.Catalog
   alias Troupe.Session.{Approvals, ClientTools}
   alias Troupe.{Skills, Tool}
   alias Troupe.Tool.{Ctx, Result}
@@ -147,9 +148,16 @@ defmodule Troupe.Tools do
   # calls, and not before: a model that answers with one call a response paid a call for
   # a list and one for each update, on tasks of a few calls, whatever its prompt said. A
   # call to it unoffered still runs, as the profile allows it.
-  defp task_list(tools, %Definition{tools: :all}, %Ctx{todos: [], turn_calls: calls})
-       when calls < @task_list_after,
-       do: Enum.reject(tools, &(Tool.name(&1) in @task_list))
+  #
+  # Except to a model that binds its thinking to the tools it was made under (Decision
+  # 867): there they are offered from the first call, since a tool added in the middle of
+  # a session makes every thinking block before it one an enforced account refuses.
+  defp task_list(tools, %Definition{tools: :all}, %Ctx{todos: [], turn_calls: calls} = ctx)
+       when calls < @task_list_after do
+    if Catalog.binds_thinking?(ctx.model),
+      do: tools,
+      else: Enum.reject(tools, &(Tool.name(&1) in @task_list))
+  end
 
   defp task_list(tools, _definition, _ctx), do: tools
 

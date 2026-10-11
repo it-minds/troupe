@@ -16,9 +16,9 @@ live, and the maintainer chose on 2026-10-11 (Decision 863):
   the system prompt mid-session. `system_prompt: per_turn` is the old prompt, by name.
 - **Option 1, Anthropic's beta, is an opt-in fallback** (`thinking_binding: drop_block`)
   for an account that refuses a stale block, on the prefix changes option 2 cannot remove:
-  a compaction, an `AI?` turn's `plan` prompt. The
-  largest such change today, the task list's tools offered at a turn's eleventh call
-  (Decision 793), is #590.
+  an `AI?` turn's `plan` prompt, a profile or model switch. The largest such change, the
+  task list's tools offered at a turn's eleventh call (Decision 793), and the tail a
+  compaction keeps are gone on a model that binds its thinking (#590, Decision 867).
 - **`thinking_binding: error`** asks the API for the refusal an enforced account gets, on
   any account, so that refusal can be measured without a patched build (#591).
 
@@ -33,8 +33,8 @@ question, and gives the numbers from the live runs with the commands that produc
 | the instruction files and the brief in the system prompt | the first call of a turn after a file was edited, or after the turn before worked in a directory with its own `AGENTS.md` | 798 | turn context |
 | the goal in the system prompt | the call after it was set or cleared | 678 | turn context |
 | the `plan` prompt added to the profile's | an `AI?` watch turn | | changes |
-| the tools | the call after the task list's tools are first offered: once there is a list, or after ten calls of a turn | 793 | changes (#590) |
-| the conversation | a compaction, which keeps a tail of it | 774 | changes |
+| the tools | the call after the task list's tools are first offered: once there is a list, or after ten calls of a turn | 793 | the same on a model that binds its thinking: the list's tools from the first call (867); changes on others |
+| the conversation | a compaction, which keeps a tail of it | 774 | changes; on a model that binds its thinking the tail goes without the blocks made in front of what the summary replaced, so no later call is refused (867) |
 | the turn context put before | an agent restarted, or a session resumed | 815 | the same: the blocks are in the log (863) |
 
 On an account the check is enforced for, every call after one of these that carries a
@@ -109,8 +109,10 @@ call carried.
 
 What it costs:
 
-- **The prefix still changes** where the system prompt was not the cause: the tools when
-  the task list's are first offered (793), a compaction, an `AI?` turn's `plan` prompt.
+- **The prefix still changes** where the system prompt was not the cause: a compaction,
+  an `AI?` turn's `plan` prompt, and on a model that does not bind its thinking the tools
+  when the task list's are first offered (793). On one that does, the list's tools are
+  there from the first call and a compaction's tail keeps no thinking (867).
   An agent restarted, or a session resumed, sends what it sent before: each block is on
   its call's `llm_request` as `turn_context_block` and folded back on replay (863).
 - **Tokens.** A changed section is added to the conversation each time it changes, and
@@ -294,8 +296,72 @@ tokens more than a warm run.
   in `task_list`, the task list's block behind the cache mark.
 - **The task list's tools (#590) did not show:** no call of these scenarios is a turn's
   eleventh, and `task_list` runs on `plan`, which has the list's tools from its first call.
+  `long_turn` (below) is the scenario that shows it.
 - Every run's outcome and checks held. The full tables, `follow_up` and Opus 5.5 among
   them, are on #465.
+
+## Live numbers for the task list's tools (#590)
+
+`long_turn` is one turn of thirteen calls on `build` with no task list: the first call
+works a number out without a tool, so its thinking goes back on every later call, then
+twelve files are read one after another. Before, the list's tools came at the eleventh
+call; after, on a model that binds its thinking, they are there from the first (Decision
+867). Claude Sonnet 5.5 on one account that is not enforced, with `thinking_binding: error`
+(an enforced account, asked for), three runs each, the installed build before and after
+the change, on Windows, 2026-10-11, at Sonnet 5.5's prices as above:
+
+| | before | after |
+|---|---:|---:|
+| runs that succeeded | 3 of 3 | 3 of 3 |
+| model calls | 39 | 39 |
+| refused, and sent again without thinking | 9 | 0 |
+| HTTP requests | 48 | 39 |
+| calls whose tools changed | 3 | 0 |
+| tokens written to the cache | 20,657 ¹ | 5,615 |
+| tokens read from the cache | 235,102 | 263,938 |
+| output tokens | 3,075 | 2,695 |
+| cost, median run | $0.0353 | $0.0316 |
+| median wall clock | 22.4 s | 21.1 s |
+
+¹ The first run wrote the prompt from cold, 5,905 tokens on its first call; a warm run
+wrote 3,330, 1,580 of them at the eleventh call, against about 1,870 after.
+
+- **Every call from the eleventh was refused once**, three a run, and the API's header
+  said why on each: `kind=tools_changed; pattern=tool_set_changed; sections=tools;
+  changed_validated=tools; position=at`. After, none was, and the tools never changed.
+- **The median run cost 10% less** and wrote 44% less to the cache on a warm run: the
+  eleventh call no longer writes the whole prompt again.
+- **No run wrote a list**: offered from the first call, Sonnet 5.5 never called
+  `todo_write` in this turn.
+
+What the list's tools cost on short work, where they used not to be offered: the four
+tasks of the standard suite on which `qwen3-235b` wrote a list whenever it had the tool
+(Decision 793), `fix_test`, `rename_symbol`, `implement_spec` and `follow_steps`, three runs
+each:
+
+| | before | after |
+|---|---:|---:|
+| runs that succeeded | 12 of 12 | 12 of 12 |
+| model calls | 40 | 39 |
+| `todo_write` calls | 0 | 0 |
+| tokens written to the cache | 17,534 | 17,812 |
+| tokens read from the cache | 231,836 | 240,950 |
+| output tokens | 4,573 | 4,542 |
+| cost, the twelve runs | $0.1361 | $0.1383 |
+
+The two tools' definitions are read from the cache on every call, about 234 tokens a call;
+each task's median run cost $0.0003 more (2 to 3%), and Sonnet 5.5 wrote no list for any.
+The 32 runs, two compaction probes among them, cost $0.65. To run it again, with the
+commands of the section above: `troupe bench --live --scenario long_turn --repeat 3`, and
+`--scenario fix_test,rename_symbol,implement_spec,follow_steps`, each with
+`$env:TROUPE_THINKING_BINDING = "error"`.
+
+Not measured live: a compaction whose kept tail holds a thinking block. Sonnet 5.5 thought
+on the first and the last call of `long_turn` only, so in two runs with a window small
+enough to compact (three compactions before, seven after, none refused) the first call's
+block was always in what the summary replaced; in those runs (three compactions before, seven
+after) no call after a compaction was refused. The stand-in, which binds as the
+documentation says, is the proof for the tail (`BoundThinkingTest`).
 
 ## Live numbers
 
