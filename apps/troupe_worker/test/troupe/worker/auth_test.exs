@@ -97,6 +97,8 @@ defmodule Troupe.Worker.AuthTest do
     "fs.list",
     "fs.read",
     "fs.upload",
+    # The scratchpad's documents, the GUI's (root Decision 870).
+    "scratch.list",
     "blob.get",
     "context.get",
     "presence.set",
