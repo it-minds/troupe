@@ -44,3 +44,7 @@ scripts/release-installers text eol=lf
 scripts/remote-up text eol=lf
 scripts/toolbox text eol=lf
 dev/toolbox/entrypoint text eol=lf
+
+# Signed bytes: the release's test vectors reach every checkout exactly as they were
+# signed, or every signature in them fails (Decision 865).
+test/fixtures/release/** -text

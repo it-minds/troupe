@@ -66,13 +66,17 @@ defmodule Troupe.Daemon.CLI do
 
   A daemon serves a person, and a person may be looking at a graphical client, which has
   no way to reach a Unix socket or a raw TCP one — so the loopback WebSocket is on. The
-  idle timeout is `config/runtime.exs`'s reading of `TROUPE_DAEMON_IDLE_MINUTES`.
+  idle timeout is `config/runtime.exs`'s reading of `TROUPE_DAEMON_IDLE_MINUTES`. And it
+  stops between turns when `troupe update` asks it to (`daemon.stop`, Decision 865), so
+  its release can be replaced; a TUI that runs the daemon inside itself does not.
   """
   @spec run_opts() :: keyword()
   def run_opts do
     [
       loopback: [enabled: true],
-      idle_shutdown_ms: Application.get_env(:troupe_daemon, :idle_shutdown_ms, :timer.minutes(10))
+      idle_shutdown_ms:
+        Application.get_env(:troupe_daemon, :idle_shutdown_ms, :timer.minutes(10)),
+      stop_on_request: true
     ]
   end
 

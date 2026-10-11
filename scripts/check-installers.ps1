@@ -23,6 +23,10 @@ $Installer = Join-Path $Root "install.ps1"
 $Version = "0.0.0-check"
 $Work = Join-Path ([System.IO.Path]::GetTempPath()) ("troupe-check-installers-" + [guid]::NewGuid())
 $CheckRelease = Join-Path $Work "release"
+$ChangedRelease = Join-Path $Work "release-changed"
+$KeyedInstaller = Join-Path $Work "install-keyed.ps1"
+$CheckKey = "RWQcheckinstallerscheckinstallerscheckinstallerscheckin"
+$UseInstaller = $null
 $CodeCli = Join-Path $Work "code.cmd"
 $Failures = 0
 $CheckTripped = New-Object System.Collections.ArrayList
@@ -121,6 +125,43 @@ function New-Release {
   if ($LASTEXITCODE -ne 0) { throw "could not pack the stand-in release" }
   $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $CheckRelease $name)).Hash.ToLower()
   Set-Content -Encoding ASCII -Path (Join-Path $CheckRelease "SHA256SUMS") -Value "$hash  $name"
+
+  # The release's signature (Decision 865): a manifest naming the daemon's archive as
+  # scripts/release-manifest.exs does, and a stand-in signature, which the minisign
+  # stand-ins below answer for. A second release's manifest has a sha256 for the archive
+  # that is not the file's, which SHA256SUMS still names.
+  $size = (Get-Item (Join-Path $CheckRelease $name)).Length
+  $line = "    {`"component`": `"daemon`", `"target`": `"windows_x86_64`", `"file`": `"$name`", `"size`": $size, `"sha256`": `"@SHA@`"}"
+  $manifest = "{`n  `"format`": 1,`n  `"version`": `"$Version`",`n  `"artifacts`": [`n$line`n  ]`n}`n"
+  New-Item -ItemType Directory -Force -Path $ChangedRelease | Out-Null
+  Copy-Item -Path (Join-Path $CheckRelease "*") -Destination $ChangedRelease
+  [System.IO.File]::WriteAllText((Join-Path $CheckRelease "manifest.json"), $manifest.Replace("@SHA@", $hash))
+  [System.IO.File]::WriteAllText((Join-Path $ChangedRelease "manifest.json"), $manifest.Replace("@SHA@", "0" * 64))
+  foreach ($r in @($CheckRelease, $ChangedRelease)) { Set-Content -Encoding ASCII -Path (Join-Path $r "manifest.json.minisig") -Value "a stand-in signature" }
+
+  # install.ps1 with a release key written in, as scripts/release-installers writes one.
+  $text = (Get-Content -Raw $Installer) -replace '(?m)^\$ReleaseKey = ""', "`$ReleaseKey = `"$CheckKey`""
+  if (-not $text.Contains("`$ReleaseKey = `"$CheckKey`"")) { throw "install.ps1 has no `$ReleaseKey line to write a key into" }
+  [System.IO.File]::WriteAllText($KeyedInstaller, $text, [System.Text.Encoding]::ASCII)
+}
+
+# minisign as install.ps1 finds it on the PATH: absent, one that says the signature holds,
+# or one that says it does not. Each writes down how it was asked.
+function Set-Minisign([string]$Mode) {
+  Microsoft.PowerShell.Management\Remove-Item Function:\minisign -ErrorAction SilentlyContinue
+  if ($Mode -eq "ok") {
+    function script:minisign {
+      Add-Content -LiteralPath $env:TROUPE_CHECK_LOG -Value "minisign $args"
+      "Signature and comment signature verified"
+      $global:LASTEXITCODE = 0
+    }
+  } elseif ($Mode -eq "bad") {
+    function script:minisign {
+      Add-Content -LiteralPath $env:TROUPE_CHECK_LOG -Value "minisign $args"
+      "Signature verification failed"
+      $global:LASTEXITCODE = 1
+    }
+  }
 }
 
 # -- running it -------------------------------------------------------------------------
@@ -175,8 +216,9 @@ function Invoke-Installer([string]$Name, [hashtable]$Switches, [string]$Daemon =
   $saved = Use-Home $Name $Daemon
   $lines = New-Object System.Collections.ArrayList
   $script:Threw = $false
+  $script_ = if ($UseInstaller) { $UseInstaller } else { $Installer }
   try {
-    & $Installer @Switches *>&1 | ForEach-Object { [void]$lines.Add("$_") }
+    & $script_ @Switches *>&1 | ForEach-Object { [void]$lines.Add("$_") }
   } catch {
     $script:Threw = $true
     [void]$lines.Add("threw: $($_.Exception.Message)")
@@ -251,10 +293,41 @@ try {
   Set-Content -Encoding ASCII -Path $probe -Value '@(Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue).Count'
   if ((& $probe) -ne 0) { throw "the registry is not hidden from install.ps1 here; stopping before it could uninstall anything real" }
 
+  if (Get-Command minisign -ErrorAction SilentlyContinue) { throw "a minisign is on this machine's PATH; the checks of the signature need it absent" }
+
   Invoke-Installer "yes" @{}
   Expect "-Yes installs the daemon" { -not $Threw }
   Expect "-Yes does not turn starting at login on" { -not (Test-Asked "login on") }
   Expect "-Yes says how to turn it on" { Test-Said "troupe-daemon login on" }
+  Expect "a copy with no release key says it checks SHA256SUMS only" { Test-Said "carries no release key" }
+
+  # The release's signature (Decision 865).
+  $UseInstaller = $KeyedInstaller
+  Invoke-Installer "no-minisign" @{}
+  Expect "with the release key and no minisign, it installs" { -not $Threw }
+  Expect "... saying the signature is not checked, only SHA256SUMS" { Test-Said "minisign is not on the PATH" }
+
+  Set-Minisign "ok"
+  Invoke-Installer "signed" @{}
+  Expect "with minisign, the plan says the signature is checked" { Test-Said "check the release's signature with minisign" }
+  Expect "... minisign checks the manifest against the release key" { [bool]((Get-Asked) -match "^minisign -Vm .*manifest\.json -x .*manifest\.json\.minisig -P $CheckKey$") }
+  Expect "... it says so" { Test-Said "manifest.json signed by the release key" }
+  Expect "... and installs what the signed manifest names" { -not $Threw -and (Test-There "lib\troupe-daemon") }
+
+  Set-Minisign "bad"
+  Invoke-Installer "unsigned" @{}
+  Expect "a signature that does not verify installs nothing" { $Threw -and (Test-Said "does not verify against the release key") }
+  Expect "... and nothing is there" { -not (Test-There "lib\troupe-daemon") }
+
+  Set-Minisign "ok"
+  $saved = $CheckRelease
+  $CheckRelease = $ChangedRelease
+  Invoke-Installer "changed" @{}
+  $CheckRelease = $saved
+  Expect "a file that is not as the signed manifest names it installs nothing" { $Threw -and (Test-Said "is not the file the signed manifest names") }
+  Expect "... and nothing is there" { -not (Test-There "lib\troupe-daemon") }
+  Set-Minisign ""
+  $UseInstaller = $null
 
   Invoke-Installer "on" @{ StartAtLogin = $true }
   Expect "-StartAtLogin installs" { -not $Threw }

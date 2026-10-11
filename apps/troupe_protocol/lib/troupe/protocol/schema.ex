@@ -1017,7 +1017,10 @@ defmodule Troupe.Protocol.Schema do
         "workspace" => optional(:string),
         "name" => optional(:string),
         "include" => optional(:string)
-      }
+      },
+      # Stop between turns, for `troupe update` (Decision 865) — the daemon's only; a
+      # worker answers `method_not_found`. The answer is `stopping`, or why not.
+      "daemon.stop" => %{}
     }
   end
 

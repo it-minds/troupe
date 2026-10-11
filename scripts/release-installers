@@ -5,6 +5,11 @@
 # names -- without TROUPE_VERSION. They are attached with the rest and so land in the
 # release's SHA256SUMS.
 #
+# The release key is written in too: the first key in apps/troupe_core/priv/release-keys.txt,
+# the one the release's manifest is signed with, which the installers check that signature
+# against when minisign is installed (Decision 865). With no key in the list yet, they carry
+# none, and say they can check SHA256SUMS only.
+#
 #   scripts/release-installers VERSION OUTDIR
 set -euo pipefail
 
@@ -16,11 +21,27 @@ case "$version" in
   *[!0-9A-Za-z.-]* | "") echo "error: $version is not a version" >&2; exit 1 ;;
 esac
 
-mkdir -p "$out"
-sed "s/^PINNED_VERSION=\"\"/PINNED_VERSION=\"${version}\"/" "$root/install.sh" > "$out/install.sh"
-sed "s/^\\\$PinnedVersion = \"\"/\$PinnedVersion = \"${version}\"/" "$root/install.ps1" > "$out/install.ps1"
+key=$(grep -v '^[[:space:]]*#' "$root/apps/troupe_core/priv/release-keys.txt" | tr -d '[:space:]' | head -c 56 || true)
+case "$key" in
+  "") ;;
+  RW*) [ "${#key}" = 56 ] || { echo "error: the first key in release-keys.txt is not a minisign public key" >&2; exit 1; } ;;
+  *) echo "error: the first key in release-keys.txt is not a minisign public key" >&2; exit 1 ;;
+esac
 
-# A line that no longer matches would publish installers that install the latest release.
+mkdir -p "$out"
+sed -e "s/^PINNED_VERSION=\"\"/PINNED_VERSION=\"${version}\"/" \
+  -e "s|^RELEASE_KEY=\"\"|RELEASE_KEY=\"${key}\"|" "$root/install.sh" > "$out/install.sh"
+sed -e "s/^\\\$PinnedVersion = \"\"/\$PinnedVersion = \"${version}\"/" \
+  -e "s|^\\\$ReleaseKey = \"\"|\$ReleaseKey = \"${key}\"|" "$root/install.ps1" > "$out/install.ps1"
+
+# A line that no longer matches would publish installers that install the latest release,
+# or that check no signature.
 grep -qx "PINNED_VERSION=\"${version}\"" "$out/install.sh" || { echo "error: could not pin install.sh to $version" >&2; exit 1; }
 grep -qxF "\$PinnedVersion = \"${version}\"" "$out/install.ps1" || { echo "error: could not pin install.ps1 to $version" >&2; exit 1; }
-echo "installers pinned to $version in $out"
+grep -qxF "RELEASE_KEY=\"${key}\"" "$out/install.sh" || { echo "error: could not write the release key into install.sh" >&2; exit 1; }
+grep -qxF "\$ReleaseKey = \"${key}\"" "$out/install.ps1" || { echo "error: could not write the release key into install.ps1" >&2; exit 1; }
+if [ -n "$key" ]; then
+  echo "installers pinned to $version, with release key $key, in $out"
+else
+  echo "installers pinned to $version in $out (no release key yet: they check SHA256SUMS only)"
+fi

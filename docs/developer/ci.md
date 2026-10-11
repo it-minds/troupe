@@ -102,14 +102,44 @@ flowchart LR
 flowchart LR
   v{"VERSION changed<br/>and untagged?"} -->|yes| suite["full suite<br/>ci.yml full · soak 9 · cluster"]
   suite --> images["images at 0.3.2"] --> cut["tag v0.3.2<br/>chart · draft release"]
-  cut --> native["native builds<br/>attached"] --> publish["SHA256SUMS · chart to ghcr.io<br/>publish"]
+  cut --> native["native builds<br/>attached"] --> publish["signed manifest · SHA256SUMS<br/>chart to ghcr.io · publish"]
 ```
 
 - The full suite is `ci.yml` called with `full: true`: every job whatever changed, each app's suite nine more times, and the cluster suite on kind. Nothing is trusted from an earlier run.
 - The images are built from the commit being released and tagged with the version; the chart is packaged at that version, so it pulls exactly those.
+- The `publish` job runs in the `release` environment and signs the release before anything else: `scripts/release-manifest.exs` writes `manifest.json`, every file attached with its component, target, size and sha256, and `manifest.json.minisig` with the release key ([below](#the-release-key)), then `SHA256SUMS` covers both. Without the key the job fails there and the release stays a draft: it is never published unsigned (Decision 865).
 - The chart goes to `oci://ghcr.io/it-minds/charts/troupe` just before the release is published, so a chart version in the registry is a release that finished. The release's notes show both ways to install it.
 - A release candidate (`0.4.0-rc.1`) runs all of it and is published as a GitHub pre-release.
 - A release whose run failed after VERSION merged can be retried with `Actions → release → Run workflow`: by hand it cuts VERSION's version if that has no tag yet.
+
+### The release key
+
+One minisign key (Ed25519) signs every release's manifest; `troupe update` and the
+installers check it before they install anything ([updating](../user/updating.md),
+Decision 865). The maintainer creates it once, on a machine of their own, and nobody else
+holds the secret half:
+
+1. `minisign -G -W -p troupe-release.pub -s troupe-release.key` makes the pair, the secret
+   key unencrypted (`-W`): the environment below is its protection.
+2. In the repository's settings, **Environments → `release`** (create it if a run has not),
+   add the secret `RELEASE_MINISIGN_KEY` with the whole of `troupe-release.key`, both lines.
+   Restrict the environment to `main` as well, so no other branch can sign.
+3. Put the public key's second line (`RW...`) first in
+   `apps/troupe_core/priv/release-keys.txt`, by pull request. Every `troupe` and
+   `troupe-daemon` built from then on trusts it, and `scripts/release-installers` writes it
+   into the installers a release attaches.
+4. Keep `troupe-release.key` offline, or destroy it: the environment's copy is the one that
+   signs.
+
+Until both are there the release workflow fails at the manifest, saying which is missing.
+The key in the environment must be the first key in the list, or the script refuses it.
+
+**Rotating it.** Make a new pair; put its public key first in `release-keys.txt` and keep
+the old one on the line below; set `RELEASE_MINISIGN_KEY` to the new key and add
+`RELEASE_MINISIGN_KEY_PREVIOUS` with the old one. The next release is signed with both, so a
+client built before it can still check it. In the release after that, take the old key out
+of the list and delete `RELEASE_MINISIGN_KEY_PREVIOUS`. If the key is lost or leaked, rotate
+the same way, and say in the release's notes which key to stop trusting.
 
 ## Nightly
 
@@ -163,6 +193,8 @@ The images and the chart need none: the workflow's own token pushes them.
 
 | Name | Kind | Used by |
 |---|---|---|
+| `RELEASE_MINISIGN_KEY` | `release` environment secret | `release.yml`'s `publish` job: the release key that signs `manifest.json` ([the release key](#the-release-key)). Without it a release is not published |
+| `RELEASE_MINISIGN_KEY_PREVIOUS` | `release` environment secret | the same job, during a key rotation only: the key being retired, which signs too |
 | `GUI_BASE` | repository variable | `images.yml`: the GUI's mount path baked into its assets, default `app` |
 | `APPLE_*`, `AZURE_*` | repository secrets | `native.yml`: sign the desktop installers; absent, they are unsigned ([install.md](../../clients/gui/docs/install.md)) |
 | `TROUPE_NIGHTLY_BASE_URL`, `TROUPE_NIGHTLY_API_KEY` | repository secrets | `nightly.yml` → `live.yml`: the LiteLLM gateway (OpenAI-compatible, with `/v1` or without) and a key for it, capped there at about $2 a day. Without both the live check fails and says so |

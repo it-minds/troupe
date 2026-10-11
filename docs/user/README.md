@@ -108,7 +108,8 @@ flowchart LR
 | Another agent | a profile called through the A2A facade | [a2a.md](../a2a.md) |
 
 `install.sh` / `install.ps1` at the repository root install `troupe` and `troupe-daemon`
-from the latest release. `troupe login <plane URL>` signs you in with a code you type in
+from the latest release, and `troupe update` keeps them current, checking each release's
+signature first ([updating](updating.md)). `troupe login <plane URL>` signs you in with a code you type in
 your browser; you sign in where you always do, and Troupe never has a password of its own.
 
 ## Words you will meet

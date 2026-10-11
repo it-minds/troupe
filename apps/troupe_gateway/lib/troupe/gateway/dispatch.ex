@@ -22,6 +22,7 @@ defmodule Troupe.Gateway.Dispatch do
     ClientTool,
     Commands,
     Connections,
+    Idle,
     LocalSources,
     Plane,
     Presence,
@@ -41,7 +42,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
   alias Troupe.Session.MCP, as: LocalMCP
-  alias Troupe.Sessions.Unseen
+  alias Troupe.Sessions.{Index, Unseen}
   alias Troupe.Todo.Edit
   alias Troupe.Tool.Result
   alias Troupe.Workflow
@@ -192,7 +193,10 @@ defmodule Troupe.Gateway.Dispatch do
     "mcp.call" => :admin,
     "skills.list" => :observe,
     "skills.add" => :admin,
-    "skills.remove" => :admin
+    "skills.remove" => :admin,
+    # Stopping the daemon between turns, so `troupe update` can replace its release
+    # (Decision 865): the machine's own, and it ends every client's connection.
+    "daemon.stop" => :admin
   }
 
   # Every way a registration can fail for want of consent. All three answer with a fresh
@@ -1221,8 +1225,40 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # `troupe update` replaces the daemon's release only once it has stopped, and it stops
+  # only between turns (Decision 865): while a session has a turn at work the answer says
+  # which, and the client asks again. A daemon a TUI runs inside itself is that TUI's and
+  # says so; a worker has none to stop.
+  defp handle("daemon.stop" = method, _params, _context) do
+    cond do
+      Process.whereis(Troupe.Gateway.Daemon) == nil ->
+        {:error, Error.new(:method_not_found, %{method: method})}
+
+      not Idle.stoppable?() ->
+        {:ok, %{"stopping" => false, "reason" => "embedded"}}
+
+      (at_work = Index.at_work()) != [] ->
+        {:ok,
+         %{
+           "stopping" => false,
+           "reason" => "at_work",
+           "at_work" => Enum.map(at_work, &at_work_row/1)
+         }}
+
+      true ->
+        {:ok, %{"stopping" => Idle.stop_on_request() == :ok}}
+    end
+  end
+
   defp handle(method, _params, _context) do
     {:error, Error.new(:method_not_found, %{method: method})}
+  end
+
+  defp at_work_row(session_id) do
+    case Index.get(session_id) do
+      %{workspace: workspace} -> %{"id" => session_id, "workspace" => workspace}
+      _gone -> %{"id" => session_id, "workspace" => nil}
+    end
   end
 
   defp onboard("onboard.plan", _params, workspace, config),

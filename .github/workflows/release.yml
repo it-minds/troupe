@@ -1,5 +1,6 @@
 # A release: the full suite, then the version's images, the chart, the native builds and
-# a published GitHub release (Decisions 669, 674, 676). It publishes and it ends there:
+# a published GitHub release whose manifest the release key signs (Decisions 669, 674, 676,
+# 865). It publishes and it ends there:
 # nothing here deploys, or knows where the release will run (Decision 735).
 # `docs/developer/ci.md` has the picture.
 #
@@ -207,30 +208,52 @@ jobs:
       tag: ${{ needs.version.outputs.tag }}
     secrets: inherit
 
-  # Published once everything is attached, with one SHA256SUMS over all of it, and the
-  # chart in the registry first: a version there is a release that finished.
+  # Published once everything is attached and signed, with one SHA256SUMS over all of it,
+  # and the chart in the registry first: a version there is a release that finished.
   publish:
     name: publish ${{ needs.version.outputs.tag }}
     needs: [version, native]
     runs-on: ubuntu-26.04
     timeout-minutes: 10
+    # The release key is this environment's secret and nobody else's (Decision 865).
+    environment: release
     permissions:
       contents: write
       packages: write
     steps:
+      # The release's own commit: the manifest's script and the list of release keys the
+      # clients of this release are built with.
+      - uses: actions/checkout@v7
+
+      # Elixir alone, for the script, at the versions `native.yml` builds with.
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.5.0.5"
+          elixir-version: "1.20.4"
+
       - uses: azure/setup-helm@v5
 
-      - name: Checksums
+      # manifest.json names every file attached, with its size and sha256, and
+      # manifest.json.minisig signs it with the release key: what `troupe update` and the
+      # installers check before they install anything (Decision 865). Without the key, or
+      # with one that is not the first in apps/troupe_core/priv/release-keys.txt, the script
+      # fails and the release stays a draft: it is never published unsigned. During a key
+      # rotation RELEASE_MINISIGN_KEY_PREVIOUS signs as well. Then SHA256SUMS, over the
+      # manifest and its signature too.
+      - name: The signed manifest, and checksums
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_MINISIGN_KEY: ${{ secrets.RELEASE_MINISIGN_KEY }}
+          RELEASE_MINISIGN_KEY_PREVIOUS: ${{ secrets.RELEASE_MINISIGN_KEY_PREVIOUS }}
         run: |
-          mkdir dist && cd dist
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY"
-          rm -f SHA256SUMS
-          sha256sum -- * > SHA256SUMS
-          cat SHA256SUMS
-          gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          mkdir dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dist
+          rm -f dist/SHA256SUMS dist/manifest.json dist/manifest.json.minisig
+          elixir scripts/release-manifest.exs "$VERSION" dist
+          (cd dist && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+          gh release upload "$TAG" dist/manifest.json dist/manifest.json.minisig dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
 
       # The same file the release page has, as `oci://ghcr.io/<owner>/charts/troupe` at
       # the version, pushed with this workflow's own token (Decision 735).

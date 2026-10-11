@@ -15,7 +15,11 @@
     * the VS Code extension (-VSCode): the release's troupe.vsix, handed to VS Code's own
       `code --install-extension`. It opens troupe in VS Code, so it goes with the TUI.
   Everything is downloaded and checked against the release's SHA256SUMS before anything is
-  replaced, and Troupe processes running from what is replaced are stopped first.
+  replaced, and Troupe processes running from what is replaced are stopped first. Where
+  minisign is on the PATH, the copy attached to a release also checks the release's
+  signature: the manifest the release key signed names every file's sha256 (Decision 865).
+  Without minisign it says it checks SHA256SUMS only, which catches a broken download and
+  not a changed release; troupe update always checks the signature.
 
   In a terminal it shows what it is about to do and asks first, and with none of -Tui,
   -Gui and -VSCode it asks which clients to install. -Yes asks nothing: it installs what the
@@ -72,6 +76,9 @@ if ($StartAtLogin -and $Uninstall) { throw "-StartAtLogin goes with an install; 
 
 # Set in the copy attached to a release (scripts/release-installers); empty in the repository.
 $PinnedVersion = ""
+# The release key, the minisign public key the release's manifest is signed with: set in
+# the copy attached to a release too, from apps/troupe_core/priv/release-keys.txt.
+$ReleaseKey = ""
 
 $Repo = if ($env:TROUPE_REPO) { $env:TROUPE_REPO } else { "it-minds/troupe" }
 $BinDir = if ($env:TROUPE_BIN_DIR) { $env:TROUPE_BIN_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\troupe" }
@@ -525,7 +532,14 @@ $names = @("troupe-daemon")
 if ($Tui) { $names += "troupe" }
 if ($Gui) { $names += "the desktop app" }
 if ($VSCode) { $names += "the VS Code extension" }
-Write-Item "download $($names -join ', ') $Version and check each against SHA256SUMS"
+# The release's signature is checked with the release key in this copy and minisign on the
+# PATH (Decision 865); otherwise SHA256SUMS alone, which the download step says.
+$Minisign = if ($ReleaseKey) { Get-Command minisign -ErrorAction SilentlyContinue | Select-Object -First 1 } else { $null }
+if ($Minisign) {
+  Write-Item "download $($names -join ', ') $Version, check the release's signature with minisign, and each file against the signed manifest and SHA256SUMS"
+} else {
+  Write-Item "download $($names -join ', ') $Version and check each against SHA256SUMS (not the release's signature: see below)"
+}
 Write-StopPlan (Select-ToStop @(Get-Running))
 if ($CleanInstall -and $Was) { Write-RemovalPlan $Purge }
 $daemonVersion = Get-DaemonVersion
@@ -554,7 +568,41 @@ if ($Interactive) {
 $Tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("troupe-install-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $Tmp | Out-Null
 
-# Download one artifact of the release into $Tmp and check it against SHA256SUMS.
+# The release's signature (Decision 865): minisign checks that the release key signed
+# manifest.json, which names every file's sha256, and Get-Verified then holds each file to
+# it. Where it cannot be checked, this says so, and only SHA256SUMS is: it comes from the
+# same place as the files, so it catches a broken download, not a changed release. The
+# manifest, once its signature held; $null otherwise.
+function Test-Signature {
+  if (-not $ReleaseKey) {
+    Write-Host "  note: this install.ps1 carries no release key (the one attached to a release does), so only SHA256SUMS is checked"
+    return $null
+  }
+  if (-not $Minisign) {
+    Write-Host "  note: minisign is not on the PATH, so the release's signature is not checked, only SHA256SUMS:"
+    Write-Host "        that catches a broken download, not a changed release. With minisign installed it is checked."
+    return $null
+  }
+  foreach ($name in @("manifest.json", "manifest.json.minisig")) {
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/$name" -OutFile (Join-Path $Tmp $name)
+    } catch {
+      throw "the release has no $name to check its signature with; nothing installed (releases before 0.13 are not signed: use the install.ps1 attached to that release)"
+    }
+  }
+  # Windows PowerShell turns a native command's stderr into a terminating error under "Stop".
+  $ErrorActionPreference = "Continue"
+  $said = @(& $Minisign -Vm (Join-Path $Tmp "manifest.json") -x (Join-Path $Tmp "manifest.json.minisig") -P $ReleaseKey 2>&1 | ForEach-Object { "$_" })
+  if ($LASTEXITCODE -ne 0) { throw "the release's manifest does not verify against the release key ($($said | Select-Object -First 1)); nothing installed" }
+  $manifest = Get-Content -Raw (Join-Path $Tmp "manifest.json") | ConvertFrom-Json
+  if ($manifest.version -ne $Version) { throw "the signed manifest is release $($manifest.version)'s, not $Version's; nothing installed" }
+  Write-Host "  manifest.json signed by the release key " -NoNewline
+  Write-Host "ok" -ForegroundColor Green
+  return $manifest
+}
+
+# Download one artifact of the release into $Tmp and check it against SHA256SUMS, and
+# against the signed manifest when its signature held.
 function Get-Verified([string]$Name) {
   Write-Host "  $Name " -NoNewline
   try {
@@ -568,6 +616,11 @@ function Get-Verified([string]$Name) {
   $expected = ($line -split "\s+")[0].ToLower()
   $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $Tmp $Name)).Hash.ToLower()
   if ($expected -ne $actual) { Write-Host ""; throw "checksum mismatch for $Name (expected $expected, got $actual); nothing installed" }
+  if ($Signed) {
+    $entry = @($Signed.artifacts | Where-Object { $_.file -eq $Name }) | Select-Object -First 1
+    if (-not $entry) { Write-Host ""; throw "the signed manifest does not name $Name; nothing installed" }
+    if ("$($entry.sha256)".ToLower() -ne $actual) { Write-Host ""; throw "$Name is not the file the signed manifest names; nothing installed" }
+  }
   Write-Host "ok" -ForegroundColor Green
 }
 
@@ -578,6 +631,7 @@ try {
   } catch {
     throw "download of $BaseUrl/SHA256SUMS failed: $($_.Exception.Message)"
   }
+  $Signed = Test-Signature
   # Everything is downloaded and checked before anything is replaced.
   Get-Verified $Artifact
   if ($Tui) { Get-Verified $TuiArtifact }
