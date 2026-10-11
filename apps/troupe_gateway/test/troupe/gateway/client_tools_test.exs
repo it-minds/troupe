@@ -301,6 +301,9 @@ defmodule Troupe.Gateway.ClientToolsTest do
       # transport word the model can do nothing with.
       assert completed.data["content"] =~ "notes.search"
       assert completed.data["content"] =~ "left"
+      # And that it may have run before the client went, so the model checks rather than
+      # doing it twice (Decision 861).
+      assert completed.data["content"] =~ "may have run on their machine"
 
       assert elapsed >= 400, "failed the call before the grace was up"
 
