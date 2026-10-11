@@ -418,6 +418,37 @@ as a model that does not bind still has it (the stand-in binds every model's thi
 the person's turn changed the tools and each of its three calls was refused once, nine
 requests for six calls; offered on every call, six requests and nothing refused.
 
+Live, on Claude Sonnet 5.5 with `thinking_binding: error`, the installed build of
+Decision 871, three runs of `loop_turn` each, on Windows, 2026-10-11, at Sonnet 5.5's prices
+as above. `goal_complete` on every call is Sonnet 5.5 as its name says it binds; on the
+loop's turn alone is the same model through a provider whose entry says
+`binds_thinking: false`, which is how Decision 679 offers it on a model that does not bind:
+
+| | on the loop's turn alone (679) | on every call (871) |
+|---|---:|---:|
+| runs that succeeded | 3 of 3 | 3 of 3 |
+| model calls | 22 | 21 |
+| refused, and sent again without thinking | 9 | 0 |
+| HTTP requests | 31 | 21 |
+| calls whose tools changed | 3 | 0 |
+| tokens sent uncached (fresh, or written to the cache) | 21,343 | 12,164 |
+| tokens read from the cache | 129,371 | 144,072 |
+| output tokens | 2,396 | 2,568 |
+| cost, the three runs | $0.1032 | $0.0849 |
+| median run | $0.0258 | $0.0237 |
+
+- **Every call of the person's turn was refused once** where `goal_complete` went with the
+  loop, three a run, each with the API's `kind=tools_changed; pattern=tool_set_changed;
+  sections=tools; changed_validated=tools; position=at`. Offered on every call, none was,
+  and the tools never changed.
+- **The three runs cost 18% less**, and sent 43% fewer tokens uncached: the person's turn no
+  longer writes the whole prompt to the cache again.
+- The outcome and both checks held in all six runs. The six runs cost $0.19. To run them
+  again: `$env:TROUPE_THINKING_BINDING = "error"`, then
+  `troupe bench --live --scenario loop_turn --repeat 3 --model claude-sonnet-5-5`, and the
+  same with `--model <provider>/claude-sonnet-5-5` for a provider whose `models:` entry for
+  it says `binds_thinking: false`.
+
 ## Live numbers
 
 Claude Opus 5.5 on Anthropic's API, with this branch's installed build, on Windows,

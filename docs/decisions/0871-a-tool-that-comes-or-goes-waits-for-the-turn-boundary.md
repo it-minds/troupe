@@ -54,11 +54,11 @@ thinking (Decision 805). Three changes were left:
 - **MCP tools are held for the turn.** `Tools.mcp/1` is the tools that come and go: the
   pod's MCP servers', the session's own and those a person's client offers. The agent takes
   them as a turn's first model call begins (`State.turn_tools`, emptied when the turn ends
-  or an input is taken) and offers those for the rest of the turn (`Ctx.turn_tools`), as Decision 798
-  holds the instruction files. A tool that came in the meantime is offered from the next
-  turn's first call. One that went stays in the tools until the turn ends, and a call to it
-  is an error result saying it went during the turn and did not run (`{:tool_gone, name}`);
-  the turn goes on. This is so on every model: what is offered never changes under a turn's
+  or an input is taken) and offers those for the rest of the turn (`Ctx.turn_tools`), as
+  Decision 798 holds the instruction files. A tool that came in the meantime is offered
+  from the next turn's first call. One that went stays in the tools until the turn ends,
+  and a call to it is an error result saying it went during the turn and did not run
+  (`{:tool_gone, name}`); the turn goes on. This is so on every model: what is offered never changes under a turn's
   reasoning, and on a model that caches by prefix the change costs its cache write at a
   boundary rather than in the middle of a turn.
 - **`goal_complete` on a binding model.** Its root agent, the one a loop runs on, is offered
@@ -107,6 +107,13 @@ and 5 of the 6 calls refused (11 requests); held, one change at the second turn'
 call and 3 refused (9 requests). The hold saves the refusals of the rest of the turn the
 tool came in, and none after.
 
+**Live**, on Claude Sonnet 5.5 with `thinking_binding: error`, `loop_turn` three times each
+on the installed build (the numbers are in `prompt-prefix.md`): with `goal_complete` on
+the loop's turn alone (the same model through an entry saying `binds_thinking: false`),
+every call of each person's turn was refused once, 9 in 22 calls, each with the API's
+`kind=tools_changed; pattern=tool_set_changed`; offered on every call, none in 21, no tools
+change, and the three runs cost $0.0849 against $0.1032.
+
 **Not chosen.**
 
 - **Hold the MCP tools for the session**, offering a new one only after a restart or a
@@ -139,9 +146,10 @@ makes twelve requests over a twelve-call turn, none refused, no tools change.
 a listing's flag through the cache file. `BenchLiveTest`: `loop_turn` against the stand-in
 as Claude Opus 5.5 with `error` makes six calls, nothing refused, no tools change; as
 Claude Opus 5, which keeps 679's offering (the stand-in binds every model), the person's
-turn changed the tools and each of its three calls was refused once. On the chunk's tip all
-seven new cases of `StableToolsTest` and the alias case failed. And the installed daemon on
-scratch homes, against the stand-in served as Claude Sonnet 5.5 with `error`: a loop turn
-and a person's turn with no refusal, and an MCP stub whose tools changed while a turn's
-first call was in flight changed the tools at the next turn only, a call to its gone tool
-answered as gone.
+turn changed the tools and each of its three calls was refused once. On the chunk's tip the
+six cases of `StableToolsTest` before the cost case, and the alias case, failed; the cost
+case's "before" is the same test with the tools taken on every call. And the installed
+daemon on scratch homes, against the stand-in served as Claude Sonnet 5.5 with `error`: a
+loop turn and a person's turn with no refusal, and an MCP stub whose tools changed while a
+turn's first call was in flight changed the tools at the next turn only, a call to its
+gone tool answered as gone.
