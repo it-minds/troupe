@@ -180,18 +180,20 @@ and the others still ask. Apart from the budget, a tool that fails ten times in 
 stops the turn and asks whether to go on, even with every limit lifted.
 
 **Cost.** One thing you type is often many model calls, each sending the whole
-conversation again. When a turn ends, the terminal UI and the desktop app say what it
-cost in one line under it, and `troupe run --headless` prints the same line:
+conversation again. When a turn ends, the desktop app says what it cost in one line under
+it, and `troupe run --headless` prints the same line:
 `turn: 12 calls · ↑ 48.2k sent · 610.4k cached · ↓ 6.3k received · $0.41`, its
 subagents' calls included, and the one that summarises the conversation when it is
-compacted. `sent` is input billed in full, `cached` what the provider's
-prompt cache served at a fraction of the price, and the money is what the gateway said or
-what the model's price comes to (`no price` when nothing prices it). The window's own
-`↑ ↓` count is the whole session's. The session's log keeps the same figures for every
-turn, and for every call what its prompt was made of: the system prompt, the instruction
-files and brief when the system prompt carries them (`system_prompt: per_turn`; by default
-they go with the turn and count in the conversation), the tool definitions, the
-conversation and the tool results.
+compacted. The terminal UI says the same figures in the side panel beside the
+transcript, under `This turn`, with the session's under `Session`; below 100 columns,
+where there is no side panel, it writes the line under the turn. `sent` is input billed
+in full, `cached` what the provider's prompt cache served at a fraction of the price, and
+the money is what the gateway said or what the model's price comes to (`no price` when
+nothing prices it). The window's own `↑ ↓` count is the whole session's. The session's
+log keeps the same figures for every turn, and for every call what its prompt was made
+of: the system prompt, the instruction files and brief when the system prompt carries
+them (`system_prompt: per_turn`; by default they go with the turn and count in the
+conversation), the tool definitions, the conversation and the tool results.
 
 **Bundle.** The agents, skills and MCP servers a profile's sessions carry, published in
 versions. A session is pinned to the version current when it started.
