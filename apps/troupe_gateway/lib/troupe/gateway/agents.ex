@@ -40,17 +40,26 @@ defmodule Troupe.Gateway.Agents do
   # each agent file found and not read, with why: one linked out of the workspace
   # (Decision 829), in a worktree one its main checkout has not committed, or one that
   # does not parse (Decision 841). Each row says what decides whether a person wants it.
+  #
+  # The primaries alone unless `subagents` is true (Decision 852): every picker of what a
+  # session runs reads this list, and `profile.switch` and `session.create` refuse a
+  # subagent, so a manager asks for those too and the rest are answered as before. Each row
+  # says its `mode`, the primaries first.
   defp list(params) do
     with {:ok, workspace} <- required(params, "workspace") do
       workspace = Path.expand(workspace)
       definitions = load(workspace)
       context = row_context(workspace)
 
+      chosen =
+        if params["subagents"] == true,
+          do: Definitions.all(definitions),
+          else: Definitions.primaries(definitions)
+
       agents =
-        definitions
-        |> Definitions.primaries()
+        chosen
         |> Enum.map(&row(&1, context))
-        |> Enum.sort_by(& &1["name"])
+        |> Enum.sort_by(&{&1["mode"] != "primary", &1["name"]})
 
       skipped =
         definitions
@@ -63,20 +72,39 @@ defmodule Troupe.Gateway.Agents do
 
   # One definition whole, from the session's own definitions when one is named (on a pod
   # its bundle's), read again from their files as a switch would read them, else from the
-  # workspace's. With a session, the windows of its family that run it now.
+  # workspace's. With a session, the windows of its family that run it now. A file of the
+  # person's or the repository's of that name that does not parse is `broken`, its text to
+  # mend (Decision 852): beside what answers, or alone when nothing does.
   defp get(params) do
     with {:ok, name} <- required(params, "name"),
          {:ok, workspace, session} <- where(params) do
       definitions = definitions(workspace, session)
+      broken = definitions |> Local.broken(name, workspace) |> broken_json()
 
-      case Definitions.fetch(definitions, name) do
-        {:ok, definition} ->
-          {:ok, whole(definition, workspace, session)}
+      case {Definitions.fetch(definitions, name), broken} do
+        {{:ok, definition}, _broken} ->
+          {:ok, Map.put(whole(definition, workspace, session), "broken", broken)}
 
-        {:error, _unknown} ->
+        {{:error, _unknown}, %{} = broken} ->
+          {:ok, %{"name" => name, "broken" => broken}}
+
+        {{:error, _unknown}, nil} ->
           {:error, Error.new(:not_found, %{kind: "agent", name: name})}
       end
     end
+  end
+
+  defp broken_json(nil), do: nil
+
+  defp broken_json(broken) do
+    %{
+      "scope" => Atom.to_string(broken.scope),
+      "layer" => broken.layer,
+      "path" => Paths.display(broken.path),
+      "text" => broken.text,
+      "hash" => broken.hash,
+      "reason" => broken.reason
+    }
   end
 
   defp validate(params) do
@@ -89,13 +117,17 @@ defmodule Troupe.Gateway.Agents do
 
   # -- writes --------------------------------------------------------------------
 
+  # `if_hash` is the `hash` `agents.get` gave for the file this save replaces: another
+  # client's save, or a hand's, since then is not written over (Decision 852).
   defp put(params) do
     with {:ok, name} <- required(params, "name"),
          {:ok, scope} <- scope(params),
          {:ok, source} <- source(params),
          {:ok, workspace, _session} <- where(params),
          :ok <- has_workspace(scope, workspace) do
-      case Local.put(scope, workspace, name, source, config: config(workspace)) do
+      opts = [config: config(workspace), if_hash: if_hash(params)]
+
+      case Local.put(scope, workspace, name, source, opts) do
         {:ok, written} ->
           announce(name, scope, workspace, written.file, written.action)
 
@@ -166,6 +198,28 @@ defmodule Troupe.Gateway.Agents do
       else: {:error, Error.new(:forbidden, %{reason: Local.on_a_pod()})}
   end
 
+  # What the file holds now goes with the sentence, so a client that means to replace it
+  # can say so by saving again with that hash.
+  defp refusal({:changed, %{shown: shown, hash: nil}}),
+    do:
+      {:error,
+       Error.new(:conflict, %{
+         reason:
+           "#{shown} was taken away since it was opened: nothing is written. Read the " <>
+             "agents again; saving it now makes it anew",
+         hash: nil
+       })}
+
+  defp refusal({:changed, %{shown: shown, hash: hash}}),
+    do:
+      {:error,
+       Error.new(:conflict, %{
+         reason:
+           "#{shown} changed since it was opened, saved from somewhere else: nothing is " <>
+             "written. Read it again to see the change; saving over it replaces that change",
+         hash: hash
+       })}
+
   defp refusal({:read_only, sentence}), do: {:error, Error.new(:forbidden, %{reason: sentence})}
 
   defp refusal({:bad_name, sentence}),
@@ -207,6 +261,7 @@ defmodule Troupe.Gateway.Agents do
       "name" => definition.name,
       "description" => definition.description,
       "source" => Atom.to_string(definition.source),
+      "mode" => Atom.to_string(definition.mode),
       "layer" => Local.layer(definition),
       "model" => definition.model,
       "tool_count" => definition |> Troupe.Tools.for_definition() |> length(),
@@ -222,11 +277,11 @@ defmodule Troupe.Gateway.Agents do
   defp whole(definition, workspace, session) do
     context = row_context(workspace)
     why = Local.not_editable(definition, pod: context.pod)
+    text = text(definition.path)
 
     definition
     |> row(context)
     |> Map.merge(%{
-      "mode" => Atom.to_string(definition.mode),
       "tools" => names(definition.tools),
       "permissions" =>
         Map.new(definition.permissions, fn {tool, p} -> {tool, Atom.to_string(p)} end),
@@ -234,7 +289,8 @@ defmodule Troupe.Gateway.Agents do
       "skills" => names(definition.skills),
       "prompt" => definition.prompt,
       "path" => definition.path && Paths.display(definition.path),
-      "text" => text(definition.path),
+      "text" => text,
+      "hash" => Local.hash(text),
       "editable" => why == nil,
       "editable_reason" => why,
       "also" =>
@@ -387,6 +443,9 @@ defmodule Troupe.Gateway.Agents do
        })}
 
   defp has_workspace(_scope, _workspace), do: :ok
+
+  defp if_hash(%{"if_hash" => hash}) when is_binary(hash) and hash != "", do: hash
+  defp if_hash(_params), do: nil
 
   defp source(params) do
     case Map.get(params, "source") do

@@ -98,12 +98,64 @@ defmodule Troupe.Agent.Local do
   end
 
   @doc """
+  What a client compares to know a file is the one it read: `"sha256:<hex>"` of its text,
+  as `fs.read` and `fs_changed` write a file's hash; `nil` for no text.
+  """
+  @spec hash(String.t() | nil) :: String.t() | nil
+  def hash(nil), do: nil
+  def hash(text), do: "sha256:" <> (:sha256 |> :crypto.hash(text) |> Base.encode16(case: :lower))
+
+  @doc """
+  The person's or the repository's file of `name` that was found and does not parse, the
+  nearest to winning first, for a manager to open and mend (Decision 852): its `scope`
+  (where `put/5` writes it back), `layer`, `path`, `text`, `hash` and the `reason` it is
+  not read; `nil` when there is none. A file that was never read (one linked out of the
+  workspace, a main checkout's draft, one a bundle's name beats) is not one: its `scope` is
+  the place `put/5` writes, so only a file at that very place counts.
+  """
+  @spec broken(Definitions.t(), String.t(), Path.t() | nil) :: map() | nil
+  def broken(%Definitions{} = definitions, name, workspace) do
+    places = [
+      {:project, workspace && Path.join([Paths.project_dir(workspace), "agents", name <> ".md"])},
+      {:user, Path.join([Paths.config_dir(), "agents", name <> ".md"])}
+    ]
+
+    definitions
+    |> Definitions.skipped()
+    |> Enum.filter(&(&1.name == name and Map.has_key?(&1, :source)))
+    |> Enum.reverse()
+    |> Enum.find_value(&mendable(&1, places))
+  end
+
+  defp mendable(skipped, places) do
+    with {scope, _place} <- Enum.find(places, &at?(&1, skipped.path)),
+         {:ok, text} <- File.read(skipped.path) do
+      %{
+        scope: scope,
+        layer: Atom.to_string(scope),
+        path: skipped.path,
+        text: text,
+        hash: hash(text),
+        reason: skipped.reason
+      }
+    else
+      _not_a_place -> nil
+    end
+  end
+
+  defp at?({_scope, nil}, _path), do: false
+
+  defp at?({_scope, place}, path),
+    do: Troupe.Workspace.compare_key(place) == Troupe.Workspace.compare_key(path)
+
+  @doc """
   Check a definition and write it as `<name>.md` in the scope's directory: `{:ok,
   written}` with the file, how a person sees its path, whether it was `:created` or
   `:replaced`, and the check's warnings (and one when a project file of the name hides a
-  user one); `{:error, {:invalid, result}}` with every error, nothing written; or `{:error,
-  sentence}` when the writer refuses the place. `config:` is what the model is checked
-  against; `config_dir:` for a test.
+  user one); `{:error, {:invalid, result}}` with every error, nothing written; `{:error,
+  {:changed, %{shown, hash}}}` when `if_hash:` is given and the file there is not that one
+  any more (Decision 852); or `{:error, sentence}` when the writer refuses the place.
+  `config:` is what the model is checked against; `config_dir:` for a test.
   """
   @spec put(scope(), Path.t() | nil, String.t(), String.t(), keyword()) ::
           {:ok,
@@ -113,7 +165,11 @@ defmodule Troupe.Agent.Local do
              action: :created | :replaced,
              warnings: [Validate.finding()]
            }}
-          | {:error, {:invalid, Validate.result()} | {:bad_name, String.t()} | String.t()}
+          | {:error,
+             {:invalid, Validate.result()}
+             | {:bad_name, String.t()}
+             | {:changed, %{shown: String.t(), hash: String.t() | nil}}
+             | String.t()}
   def put(scope, workspace, name, source, opts \\ []) do
     with :ok <- name_ok(name),
          :ok <- placed(scope, workspace) do
@@ -133,12 +189,12 @@ defmodule Troupe.Agent.Local do
            file(name),
            source,
            workspace,
-           Keyword.take(opts, [:config_dir])
+           Keyword.take(opts, [:config_dir, :if_hash])
          ) do
       {:ok, written} ->
         {:ok, Map.put(written, :warnings, warnings ++ shadowed(scope, workspace, name))}
 
-      {:error, _sentence} = refused ->
+      {:error, _sentence_or_changed} = refused ->
         refused
     end
   end

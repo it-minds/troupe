@@ -33,7 +33,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
-import { FakeAgents, checkAgent } from "./agents.js";
+import { FakeAgents, agentHash, checkAgent } from "./agents.js";
 import { COMMANDS, DEFINED, expandDefined } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 
@@ -457,6 +457,8 @@ function commandQuestion(callId: string, name: string, text: string): Record<str
 export class FakeDaemon {
   /** The token it serves with now; a `restart` draws a new one, as a daemon does. */
   token: string;
+  /** The command table `commands.list` answers; a test may add a row of its own. */
+  commands: typeof COMMANDS = [...COMMANDS];
   readonly sessions = new Map<string, Session>();
   readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   /** Who the daemon says its user is. `null` until somebody links an identity. */
@@ -1241,7 +1243,7 @@ export class FakeDaemon {
 
       case "commands.list":
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
-        return reply(ws, id, { commands: COMMANDS });
+        return reply(ws, id, { commands: this.commands });
 
       // A command a file defines, as the daemon runs it (Decision 763): its prompt, with
       // `arguments` for `$ARGUMENTS`, goes in as input under the call's `command_id`.
@@ -1297,8 +1299,19 @@ export class FakeDaemon {
         if (enabled && already && already !== mine) {
           return reply(ws, id, null, { code: -32006, message: "conflict", data: { reason: "watch is exclusive per workspace" } });
         }
+        const changed = mine && mine.watch !== enabled;
         if (mine) mine.watch = enabled;
-        return reply(ws, id, { enabled, backend: "poll" });
+        reply(ws, id, { enabled, backend: "poll" });
+        // The session whose watch went on or off says so, to every client attached (troupe
+        // Decision 844): the terminal's `/watch` is heard by the desktop app's box.
+        if (mine && changed) this.ephemeral(mine, "watch_changed", { enabled, backend: enabled ? "poll" : "off" });
+        return;
+      }
+
+      case "watch.get": {
+        const workspace = String(params["workspace"] ?? "");
+        const watching = [...this.sessions.values()].find((s) => s.watch && s.workspace === workspace);
+        return reply(ws, id, { enabled: Boolean(watching), backend: watching ? "poll" : "off", session_id: watching?.id ?? null });
       }
 
       case "config.get":
@@ -1847,6 +1860,16 @@ export class FakeDaemon {
     for (const c of this.clients) notify(c.ws, "agents.changed", changed);
   }
 
+  /** An ephemeral event on a session, to every subscription to it: written in no log. */
+  ephemeral(session: Session, type: string, data: Record<string, unknown>, agent: string[] = ["root"]): void {
+    const topic = `session:${session.id}`;
+    for (const c of this.clients) {
+      for (const sub of c.subs.values()) {
+        if (sub.topic === topic) notify(c.ws, "event", { topic, subscription_id: sub.id, session_id: session.id, event: { ephemeral: true, type, agent, data } });
+      }
+    }
+  }
+
   /**
    * The five `agents.*` methods (troupe Decision 841), with the daemon's semantics: a
    * listing of the primaries a workspace sees, one definition whole, a check that writes
@@ -1865,19 +1888,27 @@ export class FakeDaemon {
     const ctx = { worktree: workspace !== null && [...this.sessions.values()].some((s) => s.workspace === workspace && s.state === "active"), ...models };
     const name = params["name"];
 
+    // The primaries, and with `subagents` the subagents after them (troupe Decision 852).
     if (method === "agents.list") {
       if (!workspace) return invalid({ field: "workspace", missing: "workspace", reason: "required" });
       const agents = this.agents
         .resolve(workspace)
-        .filter((d) => d.meta["mode"] === "primary")
+        .filter((d) => d.meta["mode"] === "primary" || (params["subagents"] === true && d.meta["mode"] === "subagent"))
+        .sort((a, b) => Number(a.meta["mode"] !== "primary") - Number(b.meta["mode"] !== "primary") || a.name.localeCompare(b.name))
         .map((d) => this.agents.row(d, ctx));
-      const skipped = this.agents.skipped.filter((s) => !s.workspace || s.workspace === workspace).map(({ workspace: _w, ...s }) => s);
-      return reply(ws, id, { agents, skipped });
+      const listed = this.agents.skipped.filter((s) => !s.workspace || s.workspace === workspace).map(({ workspace: _w, ...s }) => s);
+      const broken = this.agents.brokenFiles(workspace).map((b) => ({ name: b.name, path: b.path, reason: b.reason }));
+      return reply(ws, id, { agents, skipped: [...listed, ...broken] });
     }
 
+    // What answers, with the file of the name that does not parse beside it, or that file
+    // alone when nothing answers (troupe Decision 852).
     if (method === "agents.get") {
       if (typeof name !== "string" || !name) return invalid({ field: "name", missing: "name", reason: "required" });
       const found = this.agents.find(name, workspace);
+      const broken = this.agents.brokenFiles(workspace).find((b) => b.name === name);
+      const brokenJson = broken ? { scope: broken.scope, layer: broken.scope, path: broken.path, text: broken.text, hash: agentHash(broken.text), reason: broken.reason } : null;
+      if (!found && brokenJson) return reply(ws, id, { name, broken: brokenJson });
       if (!found) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "agent", name } });
       const family = named ? [named.parent ?? named.id] : [];
       const running = named
@@ -1885,7 +1916,7 @@ export class FakeDaemon {
             .filter((s) => (family.includes(s.id) || (s.parent && family.includes(s.parent))) && s.state === "active" && s.profile === name)
             .map((s) => ({ session_id: s.id, parent: s.parent ?? null }))
         : [];
-      return reply(ws, id, this.agents.whole(found, workspace, ctx, running));
+      return reply(ws, id, { ...this.agents.whole(found, workspace, ctx, running), broken: brokenJson });
     }
 
     const source = params["source"];
@@ -1918,6 +1949,19 @@ export class FakeDaemon {
         scope === "user" && workspace && this.agents.files.some((f) => f.name === name && f.layer === "project" && f.workspace === workspace)
           ? [{ field: "name", message: `the repository's .troupe/agents/${name}.md has this name too, and is the one that runs in this workspace` }]
           : [];
+      // A save over a file that changed since the client read it is refused (troupe Decision 852).
+      const expected = params["if_hash"];
+      if (typeof expected === "string" && expected !== "") {
+        const there = this.agents.files.find((f) => f.name === name && f.layer === scope && (scope !== "project" || f.workspace === workspace));
+        const now = there ? agentHash(there.text) : null;
+        if (now !== expected) {
+          const shown = this.agents.pathOf({ name, layer: scope, ...(scope === "project" ? { workspace: workspace! } : {}) });
+          const reason = now
+            ? `${shown} changed since it was opened, saved from somewhere else: nothing is written. Read it again to see the change; saving over it replaces that change`
+            : `${shown} was taken away since it was opened: nothing is written. Read the agents again; saving it now makes it anew`;
+          return reply(ws, id, null, { code: -32006, message: "conflict", data: { reason, hash: now } });
+        }
+      }
       const written = this.agents.put(name, scope, workspace, source);
       reply(ws, id, { name, scope, layer: scope, path: written.path, action: written.action, warnings: [...checked.warnings, ...shadowed] });
       return announce(written.path, written.action);

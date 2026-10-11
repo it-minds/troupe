@@ -395,6 +395,12 @@ defmodule Troupe.UI.Headless.Printer do
   defp print(%{type: :branch_spawned, agent_path: p, data: d}, state),
     do: say(state, p, "spawned /#{d.name} (#{d.isolation})")
 
+  # A saved `AI!` or `AI?` comment and the branch it started, in the line the screen puts
+  # under itself (root Decisions 844 and 852): the branch is a session of its own, which a
+  # headless run of this one does not follow.
+  defp print(%{type: :watch_triggered, agent_path: p, data: d}, state),
+    do: say(state, p, Model.watch_line(d))
+
   # What the turn cost, in the line the window puts under it (Decisions 139 and 144): the
   # event that ends a turn carries it and a live `agent_state` never does, so it is printed
   # once, after the turn's reply and before the line saying why the run ended. A turn that

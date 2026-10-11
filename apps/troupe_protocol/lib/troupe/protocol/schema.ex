@@ -733,10 +733,13 @@ defmodule Troupe.Protocol.Schema do
       "workspace.recent" => %{"limit" => optional(:integer)},
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "workflows.list" => %{"workspace" => required(:string)},
-      "agents.list" => %{"workspace" => required(:string)},
+      # The primaries, and with `subagents` the subagents too, each row with its `mode`
+      # (Decision 852).
+      "agents.list" => %{"workspace" => required(:string), "subagents" => optional(:boolean)},
       # One agent whole, checked, written and taken away (#503, Decision 841). Reading and
       # checking answer on a pod too; writing is the daemon's, and a pod refuses it.
-      # `scope` is `user` or `project` (`workspace` is taken as `project`).
+      # `scope` is `user` or `project` (`workspace` is taken as `project`). `if_hash` is
+      # the `hash` `agents.get` gave: a file changed since is not written over (Decision 852).
       "agents.get" => %{
         "name" => required(:string),
         "workspace" => optional(:string),
@@ -753,6 +756,7 @@ defmodule Troupe.Protocol.Schema do
         "name" => required(:string),
         "scope" => required(:string),
         "source" => required(:string),
+        "if_hash" => optional(:string),
         "workspace" => optional(:string),
         "session_id" => optional(:string)
       },
