@@ -228,6 +228,16 @@ Objects carry `app.kubernetes.io/managed-by=troupe-operator` and `troupe.dev/pro
 labels and no owner references (they cannot cross namespaces); the operator prunes labelled
 objects that are no longer desired. Deleting a `WorkerProfile` deletes its namespace.
 
+### What a worker can reach
+
+This is a summary; the detail is where each part is set.
+
+- **The network:** only what the profile's `TroupePolicy` admits (section 4). That is its `allowedEgress` names and its endpoints (the model, the MCP servers, the installation's OpenBao and object store). It never reaches a loopback, unspecified, link-local or cloud metadata address (`169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`), by literal address or by any name that resolves there. With Cilium those addresses are denied whatever the DNS answer says. Without Cilium the public rule leaves out link-local, the private ranges and `100.64.0.0/10` (Decisions 758 and 0856). The plane itself is not a worker: a trigger's `notify_url` is checked when it is set, and #588 tracks the metadata addresses that check still misses.
+- **Kubernetes and secrets:** no ServiceAccount token is mounted. The pod holds two projected tokens, `troupe-plane` for enrolment and `troupe-kms` for OpenBao, and reads only what its OpenBao role allows ([roles-and-permissions.md section 8](roles-and-permissions.md#8-openbao-policies)).
+- **Commands:** every command a session runs on a pod runs in bubblewrap, and a pod that can't start it refuses the command (Decision 832).
+- **What a person may do there:** a session token's scopes follow the person's role on the session ([roles-and-permissions.md section 5](roles-and-permissions.md#5-session-roles-and-scopes)). The pod checks the plane's access list at every command, so a role the plane narrows holds at the person's next command. A widened role takes effect with their next token, at most 15 minutes later (Decision 0859). The session's owner always has `admin`.
+- **A person's own tools:** tools a person offers a pod session from their machine (#308) are called on that machine, with their token. The pod sees the tools' names and schemas, the arguments and the results, never the token. A profile that should not take them is #595 (Decision 0862).
+
 ### Status conditions
 
 | Condition | `True` means |
