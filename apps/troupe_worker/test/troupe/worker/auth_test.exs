@@ -107,7 +107,7 @@ defmodule Troupe.Worker.AuthTest do
 
   setup do
     auth = start_supervised!({Auth, name: nil, worker_id: "worker-dev-0"})
-    %{guard: Auth.guard(auth)}
+    %{auth: auth, guard: Auth.guard(auth)}
   end
 
   describe "a token for one session" do
@@ -170,6 +170,34 @@ defmodule Troupe.Worker.AuthTest do
             do: {method, answer}
 
       assert refused == []
+    end
+  end
+
+  # The role the plane pushed since the token was minted (issue #494).
+  describe "a role the plane narrows" do
+    test "holds the next command to that role's scopes", %{auth: auth, guard: guard} do
+      params = %{"session_id" => @mine}
+
+      :ok = Auth.put_acl(auth, @mine, "owner@example.test", "collaborator")
+      assert guard.(session_token(), "shell.run", params) == {:ok, [:observe, :control]}
+
+      :ok = Auth.put_acl(auth, @mine, "owner@example.test", "viewer")
+      assert guard.(session_token(), "input.send", params) == {:ok, [:observe]}
+
+      :ok = Auth.put_acl(auth, @mine, "owner@example.test", nil)
+      assert {:error, %{message: "forbidden"}} = guard.(session_token(), "input.send", params)
+    end
+
+    test "to the fewest scopes of the sessions a token with none in it names",
+         %{auth: auth, guard: guard} do
+      other = "20260923T101112-zz9_Bq"
+      :ok = Auth.put_acl(auth, @mine, "owner@example.test", "collaborator")
+      :ok = Auth.put_acl(auth, other, "owner@example.test", "viewer")
+
+      params = %{"session_id" => @mine, "topic" => "session:" <> other}
+      assert guard.(unscoped_token(), "subscribe", params) == {:ok, [:observe]}
+      assert guard.(unscoped_token(), "input.send", %{"session_id" => @mine}) ==
+               {:ok, [:observe, :control]}
     end
   end
 

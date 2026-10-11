@@ -26,8 +26,10 @@ defmodule Troupe.Client.Remote do
   @impl true
   def unsubscribe(sid), do: Events.unsubscribe(sid)
 
+  # The journal, and the question this client has out to the person in the window, which
+  # is never written down (`Worker.asking/1`).
   @impl true
-  def events(sid), do: Journal.all(sid)
+  def events(sid), do: Journal.all(sid) ++ Worker.asking(sid)
 
   @impl true
   def commands(sid) do

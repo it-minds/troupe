@@ -47,8 +47,8 @@ operator:
   # profile names, `bao.address` and `objectStore.endpoint`, and nothing else outside the
   # cluster; without it, egress to named hosts is a CIDR rule and a documented gap, and a
   # profile's own endpoint on another port or at an address gets a rule of its own. Either
-  # way one at a loopback or link-local address gets none, and the plane refuses it. True
-  # on a cluster without Cilium fails closed.
+  # way one at a loopback, link-local or cloud metadata address gets none, and the plane
+  # refuses it. True on a cluster without Cilium fails closed.
   ciliumAvailable: false
   # The namespace running this controller must carry `troupe.dev/ingress=true`: a
   # worker's NetworkPolicy admits traffic from namespaces with that label and from

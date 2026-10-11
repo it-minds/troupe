@@ -188,12 +188,16 @@ the scripted model's requests, and their budgets are the script's.
 | `follow_steps` | the three steps of `TASK.md` | `out/done.txt` lists the two files | each step's file holds what it should |
 | `answer_only` | a sum, with no tool | | the reply has 391; no tool was called |
 | `follow_up` | two turns: write step 1 of `docs/plan.txt`, then step 2 under `docs/` | `docs/next.txt` holds step 2 under `AGENTS.md`'s and `docs/AGENTS.md`'s rules | `out/first.txt` keeps the root's rule; both turns were taken |
+| `task_list` | three turns on `plan`: write a three-item list, one with a number worked out without a tool, then read a file and mark items done, twice | | all three turns were taken; the list ends with its three items completed; the last reply names `b.txt` and 440 |
 
 The first four are the `smoke` suite, the default; the next six with them are `standard`
 (Decision 775). `follow_up` is in neither, and runs when named: it is issue #465's
 (Decision 815), whose second turn begins with an instruction file the first brought in,
 and [prompt-prefix.md](prompt-prefix.md) says how it is run with each of that issue's
-settings. A scenario's `follow_ups` are typed one after another, each once the turn
+settings. `task_list` is in neither suite either: that issue's other change, each turn after
+the first beginning with the task list the turn before left in the system prompt
+(Decision 792), on the `plan` agent, which always has the list's tools. A scenario's
+`follow_ups` are typed one after another, each once the turn
 before has ended by itself, under the run's one deadline and cap.
 `LiveScenarios.select/2` takes a suite or a list of names, which may come from either, and
 answers them in report order; `--suite` and `--scenario` reach it through `plan/1`'s
