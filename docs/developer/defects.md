@@ -1225,22 +1225,11 @@ Found by the #502 fixers, 2026-10-10.
 
 Found by the #502 watch fixer, 2026-10-10.
 
-### D115 - Windows processes and connections after #552 and #562 (medium)
+### D115 - Windows processes and connections after #552 and #562 (low)
 
-- `troupe daemon open` run through the TUI on Windows leaves no daemon once it returns,
-  probably because the reaper's job object kills the detached daemon when `open` exits;
-  `troupe-daemon open` run directly keeps it (medium).
-- `Troupe.MCP.Stdio` on Windows crashes in `Port.command` (`badarg` or `epipe`) when a stdio
-  server exits or closes its input before `initialize` is written, so `mcp.check` and a
-  session's MCP start get an exit, not "exited with status N" (medium).
-- `clip.exe` probably reads the UTF-8 staged file in the console's code page, so text with
-  non-ASCII characters may arrive garbled (unconfirmed; staging UTF-16LE with a BOM is the
-  usual answer).
-- A custom `clipboard_command` on Windows runs through `OS.Process.shell`, which without Git
-  Bash is PowerShell, which has no `<`.
-- `Troupe.Protocol.Client` stops `:normal` with calls pending, so `troupe ctl` and other
-  callers exit instead of getting an error.
-- `/upload` reads the whole file before the size check refuses it.
+What D115 named about `troupe daemon open`, `Troupe.MCP.Stdio`, the clipboard,
+`Troupe.Protocol.Client` and `/upload` is Decision 849. Left:
+
 - `System.cmd/3` with a bare name still resolves through `:os.find_executable` (the
   worker's `df`, the daemon CLI's `open`/`xdg-open`, the mix tasks' `zig`, `kubectl` and
   `kubeconform`); none runs from a workspace, and the credo check of Decision 846 has no
