@@ -256,6 +256,46 @@ From Anthropic's documentation as read on 2026-10-08, none of it tried against t
   is; none, while `drop_block` drops blocks, means it is not. (The live run below answers
   it: not enforced.)
 
+## Live numbers with the new defaults
+
+The installed build of Decision 863, on Windows, 2026-10-11:
+`troupe bench --live --scenario task_list,follow_up --repeat 5` on Claude Sonnet 5.5 and
+Opus 5.5, on one account that is not enforced, priced as the earlier runs were (Sonnet
+5.5 $2 in, $10 out, $0.20 cache read, $2.50 cache write per million; Opus 5.5 $4, $20,
+$0.20, $5). Three configurations: `stable` (the default), `stable` with
+`thinking_binding: error` (an enforced account, asked for), and `per_turn` with `error`
+(0.12.0's prompt on an enforced account). The 60 runs cost $1.53 in all.
+
+`task_list` on Sonnet 5.5, five runs, beside the 0.11.0 baseline from #465's measurement:
+
+| | 0.11.0 baseline | `stable` | `stable` + `error` | `per_turn` + `error` |
+|---|---:|---:|---:|---:|
+| model calls | 30 | 30 | 30 | 30 |
+| refused, and sent again without thinking | 0 | 0 | 0 | 20 |
+| calls whose system prompt changed | 10 | 0 | 0 | 10 |
+| tokens written to the cache | 17,200 | 15,397 ¹ | 11,269 | 20,666 ¹ |
+| tokens read from the cache | 145,509 | 151,743 | 156,015 | 141,257 |
+| output tokens | 3,622 | 3,655 | 3,708 | 5,858 |
+| cost, median run | $0.0215 | $0.0192 | $0.0195 | $0.0259 |
+| median wall clock | 9.5 s | 8.3 s | 8.8 s | 13.1 s |
+
+¹ The configuration's first run wrote the tools to the cache from cold, about 4,000
+tokens more than a warm run.
+
+- **Nothing in front of what was sent changed** with `stable`, on either model and in
+  either scenario: no system prompt change and, with `error`, no refusal in 40 runs.
+- **`per_turn` + `error` is the enforced column**, from configuration: 20 refusals in
+  `task_list` on both models, as the patched build's measurement had, with 60% more output
+  on Sonnet as the model worked the number out again.
+- **The diagnosis header came on every refusal** (26 on Sonnet, 24 on Opus), streamed,
+  and the log kept it: `kind=system_changed; pattern=system_rerendered; sections=system;
+  changed_validated=system.0; position=at` in `follow_up`, and `changed_validated=system.1`
+  in `task_list`, the task list's block behind the cache mark.
+- **The task list's tools (#590) did not show:** no call of these scenarios is a turn's
+  eleventh, and `task_list` runs on `plan`, which has the list's tools from its first call.
+- Every run's outcome and checks held. The full tables, `follow_up` and Opus 5.5 among
+  them, are on #465.
+
 ## Live numbers
 
 Claude Opus 5.5 on Anthropic's API, with this branch's installed build, on Windows,
