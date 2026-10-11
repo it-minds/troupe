@@ -81,7 +81,9 @@ defmodule Troupe.Tools do
   and those a person's client offers. An agent takes them as a turn's first model call
   finds them and offers those for the rest of the turn (`Ctx.turn_tools`, Decision 871),
   so a server that comes back with another list, a sign-in that completes or a person's
-  tools leaving change the tools at the next turn, not in the middle of one.
+  tools leaving change the tools at the next turn, not in the middle of one. An agent
+  restarted in the middle of a turn offers them as the turn began (`Troupe.Agent.Hold`,
+  Decision 876).
   """
   @spec mcp(String.t() | nil) :: [Tool.handle()]
   def mcp(session_id), do: remote() ++ local(session_id) ++ hosted(session_id)
@@ -181,6 +183,12 @@ defmodule Troupe.Tools do
     do: profile_tools(@builtins ++ extra() ++ held, definition)
 
   defp offered(definition, %Ctx{} = ctx), do: for_definition(definition, ctx.session_id)
+
+  # The skills as the turn's first call found them (Decision 876), for the profile in force:
+  # a skill file added, removed or renamed in the middle of a turn changes the tool at the
+  # next turn, and a call to one that went is told so.
+  defp skill_tools(definition, %Ctx{turn_skills: %{} = held}),
+    do: held |> Skills.offered(definition) |> Skills.tools_for()
 
   # The person's own skills are read beside the workspace (Decision 700), and only when
   # there is one to read beside: a context built without a workspace has no layer. What

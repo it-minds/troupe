@@ -130,7 +130,11 @@ defmodule Troupe.Protocol.Schema do
         # The block that call put into the conversation: `at`, the index of the message it
         # goes after, `text`, and `sent`, each section's digest; folded on replay so a
         # restarted agent sends the prefix it sent before (Decision 863).
-        "turn_context_block" => optional(:object)
+        "turn_context_block" => optional(:object),
+        # What a turn's first call took and offers to the turn's end: `digest`, and `tools`
+        # and `skills` when they differ from the last written whole; folded on replay so an
+        # agent restarted in the middle of the turn offers what it began with (Decision 876).
+        "turn_hold" => optional(:object)
       },
       "llm_response" => %{
         "message" => required(:object),
