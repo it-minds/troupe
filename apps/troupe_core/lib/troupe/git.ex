@@ -21,7 +21,9 @@ defmodule Troupe.Git do
     named with a `=` or a quote in it is still the one turned off;
   - only in a repository whose git directory and common directory are the checkout's
     own `.git` (or, for a worktree its checkout names back, the checkout's), pinned with
-    `GIT_DIR`, `GIT_COMMON_DIR` and `GIT_WORK_TREE` so that what runs is what was checked.
+    `GIT_DIR`, `GIT_COMMON_DIR` and `GIT_WORK_TREE` so that what runs is what was checked,
+    and whose objects stay in the checkout: no alternates entry and no link in
+    `.git/objects` that leads out of it (Decision 858).
   """
 
   alias Troupe.Config.Trust
@@ -29,11 +31,12 @@ defmodule Troupe.Git do
 
   @typedoc """
   Why git did not run: the reaper's reasons, a repository that is somewhere else than the
-  checkout the workspace is in, or a git too old to say where it is.
+  checkout the workspace is in or whose objects lead out of it, or a git too old to say
+  where it is.
   """
   @type error ::
           Reaper.error()
-          | {:elsewhere, :work_tree | :common_dir | :git_dir, Path.t()}
+          | {:elsewhere, :work_tree | :common_dir | :git_dir | :objects, Path.t()}
           | :unlocated
 
   # Settings of the command line's scope, so above every file's: what runs a command, or
@@ -106,6 +109,12 @@ defmodule Troupe.Git do
       "the checkout the workspace is in nor a worktree's that the checkout names back"
   end
 
+  def explain({:elsewhere, :objects, path}) do
+    "this repository's objects lead to #{Paths.display(path)}, which is outside the checkout " <>
+      "the workspace is in (an objects/info/alternates entry or a link in .git/objects), and " <>
+      "Troupe reads no other repository"
+  end
+
   def explain(:unlocated),
     do: "git did not say where this workspace's repository is (git 2.31 or later is needed)"
 
@@ -145,6 +154,9 @@ defmodule Troupe.Git do
       not own_git_dir?(git_dir, top, checkout, worktree?) ->
         {:error, {:elsewhere, :git_dir, git_dir}}
 
+      out = objects_out(Path.join(common, "objects"), real(checkout)) ->
+        {:error, {:elsewhere, :objects, out}}
+
       true ->
         {:ok, %{top: top, git_dir: git_dir, common: common}}
     end
@@ -155,6 +167,103 @@ defmodule Troupe.Git do
 
   defp own_git_dir?(git_dir, _top, checkout, true),
     do: key(Path.dirname(git_dir)) == key(Path.join([checkout, ".git", "worktrees"]))
+
+  # -- where its objects are ----------------------------------------------------------
+
+  # git reads an object wherever the object directory leads, and no setting turns that
+  # off: an `info/alternates` entry (and, in turn, that directory's own), or a link in
+  # it - the directory itself, a fan-out directory, a pack, anything in `info`. Each must
+  # really be in the checkout, or another repository on the machine reads as this one's
+  # (#538). The first place that is not, or nil. A loose object's own file is not looked
+  # at: there may be thousands, and a link to one shows only an object whose name the
+  # link's maker already knew.
+  defp objects_out(objects, checkout), do: objects_out([objects], checkout, MapSet.new())
+
+  defp objects_out([], _checkout, _seen), do: nil
+
+  defp objects_out([dir | rest], checkout, seen) do
+    real = real(dir)
+
+    cond do
+      not inside?(real, checkout) -> real
+      MapSet.member?(seen, key(real)) -> objects_out(rest, checkout, seen)
+      out = linked_out(real, checkout) -> out
+      true -> objects_out(alternates(real) ++ rest, checkout, MapSet.put(seen, key(real)))
+    end
+  end
+
+  defp linked_out(objects, checkout) do
+    ["", "pack", "info", "info/commit-graphs"]
+    |> Enum.flat_map(fn sub ->
+      dir = Path.join(objects, sub)
+      dir |> ls() |> Enum.map(&Path.join(dir, &1))
+    end)
+    |> Enum.find_value(&link_out(&1, checkout))
+  end
+
+  defp link_out(path, checkout) do
+    case :file.read_link_all(String.to_charlist(path)) do
+      {:ok, _target} ->
+        real = real(path)
+        if inside?(real, checkout), do: nil, else: real
+
+      {:error, _} ->
+        nil
+    end
+  end
+
+  # As git reads the file: one directory a line, relative to the object directory, a
+  # line starting with `#` a comment, and one starting with `"` quoted as git quotes.
+  defp alternates(objects) do
+    case File.read(Path.join(objects, "info/alternates")) do
+      {:ok, text} ->
+        for line <- String.split(text, ~r/\r?\n/),
+            line != "" and not String.starts_with?(line, "#"),
+            do: Path.expand(unquote_c(line), objects)
+
+      {:error, _} ->
+        []
+    end
+  end
+
+  # git's `unquote_c_style`: what follows the closing quote is ignored, and a line it
+  # cannot unquote is taken as it stands.
+  defp unquote_c(line) do
+    case Regex.run(~r/\A"((?:[^"\\]|\\(?:[0-7]{3}|[abfnrtv\\"]))*)"/, line) do
+      [_, quoted] ->
+        Regex.replace(~r/\\([0-7]{3}|.)/, quoted, fn _, escaped -> unescape(escaped) end)
+
+      nil ->
+        line
+    end
+  end
+
+  defp unescape(<<octal::binary-size(3)>>), do: <<String.to_integer(octal, 8)>>
+
+  defp unescape(char) do
+    case char do
+      "a" -> "\a"
+      "b" -> "\b"
+      "f" -> "\f"
+      "n" -> "\n"
+      "r" -> "\r"
+      "t" -> "\t"
+      "v" -> "\v"
+      other -> other
+    end
+  end
+
+  defp ls(dir) do
+    case File.ls(dir) do
+      {:ok, names} -> names
+      {:error, _} -> []
+    end
+  end
+
+  defp inside?(path, root),
+    do:
+      key(path) == key(root) or
+        String.starts_with?(key(path), String.trim_trailing(key(root), "/") <> "/")
 
   defp real(path) do
     case Workspace.real_path(path) do

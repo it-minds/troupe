@@ -134,7 +134,7 @@ onboard`. The shell can still write there, which is why the runner does not rely
 - Objects reached through `objects/info/alternates`, or through a link inside `.git`
   (`objects`, a pack): git reads them where they point. On a pod, the way to close that
   and the rest of this class is to run Troupe's own git inside the session's sandbox,
-  the issue's other option, not taken here.
+  the issue's other option, not taken here. Decision 858 now refuses such a repository.
 - `git worktree remove` without `--force` checks the worktree itself, with
   `status --ignore-submodules=none`, so a submodule in a worktree being removed is looked
   inside under its own config.
