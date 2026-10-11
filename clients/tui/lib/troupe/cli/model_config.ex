@@ -1,14 +1,16 @@
 defmodule Troupe.CLI.ModelConfig do
   @moduledoc """
-  `troupe config pull [PLANE_URL]`: take the organisation's defaults for this machine's
-  model settings from a plane and save them.
+  `troupe config pull [PLANE_URL]`: fetch the organisation's document from a plane now,
+  for this machine's organisation layer (root Decision 869).
 
-  The plane answers provider, URL, auth style and models (`me.client_defaults`) and never
-  a key, so a saved key is kept and one that is missing is asked for in words. The write
-  goes through the daemon's `config.set` rather than to a path computed here: the daemon
-  is the process whose environment decides which `config.yaml` a session reads, and
-  asking it is how this command and the desktop app's settings screen end up editing the
-  same file.
+  The plane answers `me.client_defaults`: its defaults (provider, URL, auth style,
+  models; never a key) and what it enforces. This command hands that answer to the
+  daemon's `config.organisation`, which keeps it as the copy every later session reads,
+  below the person's own file and, for what is enforced, above everything. Nothing is
+  written into the person's own `config.yaml`: a copy there would outrank the
+  organisation's defaults and never be updated again. The daemon fetches the same
+  document itself whenever a client signed in to the plane connects; this is the way to
+  have it now.
   """
 
   alias Troupe.Client
@@ -16,49 +18,92 @@ defmodule Troupe.CLI.ModelConfig do
   alias Troupe.Protocol.Client, as: Protocol
   alias Troupe.Remote.Credentials
 
-  @doc "Pull a plane's defaults into this machine's config; returns the exit status."
+  @doc "Fetch a plane's document into this machine's organisation layer; returns the exit status."
   @spec pull(String.t() | nil, (String.t() -> any())) :: non_neg_integer()
   def pull(plane_url, say \\ &IO.puts/1) do
     with {:ok, url} <- plane(plane_url),
          {:ok, origin} <- Client.connect_plane(url),
-         {:ok, defaults} <- Client.client_defaults(origin),
-         :ok <- configured(defaults, url),
-         {:ok, saved} <- Link.call("config.set", params(defaults)) do
-      report(saved, url, say)
-      0
+         {:ok, answer} <- Client.client_defaults(origin) do
+      keep(url, answer, say)
     else
       {:error, reason} ->
-        say.("could not pull the defaults: " <> describe(reason))
-        1
-
-      {:nothing, message} ->
-        say.(message)
+        say.("could not pull the organisation's settings: " <> describe(reason))
         1
     end
   end
 
   @doc """
-  The `config.set` params for a plane's defaults. Only what the plane says is sent: a
-  role it leaves empty keeps this machine's choice, and no `api_key` keeps the saved key.
+  Hand a plane's answer to the daemon to keep, through `call` (the daemon's, by default),
+  and say what this machine now takes from the organisation. Returns the exit status.
   """
-  @spec params(map()) :: map()
-  def params(defaults) do
-    models =
-      (defaults["models"] || %{})
-      |> Enum.reject(fn {_role, model} -> model in [nil, ""] end)
-      |> Map.new()
+  @spec keep(String.t(), map(), (String.t() -> any()), (String.t(), map() ->
+                                                          {:ok, map()} | {:error, term()})) ::
+          non_neg_integer()
+  def keep(url, answer, say, call \\ &Link.call/2) do
+    case call.("config.organisation", %{
+           "command_id" => Protocol.command_id(),
+           "plane_url" => url,
+           "document" => answer
+         }) do
+      {:ok, kept} ->
+        report(kept, say)
+        0
 
-    %{
-      "command_id" => Protocol.command_id(),
-      "provider" => defaults["provider"],
-      "base_url" => defaults["base_url"]
-    }
-    |> put_present("auth", defaults["auth"])
-    |> put_present("models", if(models == %{}, do: nil, else: models))
+      {:error, reason} ->
+        say.("could not keep the organisation's settings: " <> describe(reason))
+        1
+    end
   end
 
-  defp put_present(params, _key, nil), do: params
-  defp put_present(params, key, value), do: Map.put(params, key, value)
+  defp report(kept, say) do
+    defaults = kept["defaults"] || %{}
+    enforced = kept["enforced"] || %{}
+
+    if defaults == %{} and enforced == %{} do
+      say.(
+        "#{kept["plane_url"]} sets no defaults or limits for people's own machines; an administrator sets them " <>
+          "under Policy → What people's own machines talk to"
+      )
+    else
+      say.("#{kept["plane_url"]}'s settings for this machine, kept in #{kept["path"]}:")
+
+      Enum.each(flatten(defaults), fn {key, value} ->
+        say.("  default   #{key} = #{shown(value)}")
+      end)
+
+      Enum.each(flatten(enforced), fn {key, value} ->
+        say.("  enforced  #{key} = #{shown(value)}")
+      end)
+    end
+
+    for warning <- kept["warnings"] || [], do: say.("note: #{warning}")
+
+    case kept["shadowed"] || [] do
+      [] ->
+        :ok
+
+      keys ->
+        say.("")
+
+        say.(
+          "your own settings set #{Enum.join(keys, ", ")} too, and win over the organisation's defaults; " <>
+            "`troupe config --explain KEY` shows where"
+        )
+    end
+  end
+
+  defp flatten(map, prefix \\ []) do
+    map
+    |> Enum.sort()
+    |> Enum.flat_map(fn
+      {key, value} when is_map(value) -> flatten(value, prefix ++ [key])
+      {key, value} -> [{Enum.join(prefix ++ [key], "."), value}]
+    end)
+  end
+
+  defp shown(true), do: "on"
+  defp shown(false), do: "off"
+  defp shown(value), do: to_string(value)
 
   defp plane(url) when is_binary(url) and url != "", do: {:ok, url}
 
@@ -69,40 +114,9 @@ defmodule Troupe.CLI.ModelConfig do
     end
   end
 
-  defp configured(%{"configured" => true}, _url), do: :ok
-
-  defp configured(_defaults, url),
-    do:
-      {:nothing,
-       "#{url} offers no defaults for local sessions; an administrator sets them under Settings → What people's own machines talk to"}
-
-  defp report(saved, url, say) do
-    say.("saved #{url}'s defaults to #{saved["path"]}")
-    say.("  provider  #{saved["provider"]}#{base(saved["base_url"])}")
-
-    for role <- ~w(default cheap expensive), is_binary(saved["models"][role]) do
-      say.("  #{String.pad_trailing(role, 9)} #{saved["models"][role]}")
-    end
-
-    unless saved["api_key_set"] do
-      say.("")
-
-      say.(
-        "no API key yet — the plane never hands one out. Add yours as api_key in #{saved["path"]},"
-      )
-
-      say.("set TROUPE_API_KEY, or paste it into the desktop app's Models settings.")
-    end
-
-    for %{"detail" => detail} <- saved["overrides"] || [] do
-      say.("note: #{detail}")
-    end
-  end
-
-  defp base(nil), do: ""
-  defp base(url), do: " at #{url}"
-
   defp describe(:logged_out), do: "not signed in; run troupe login <plane-url>"
   defp describe(reason) when is_binary(reason), do: reason
+  defp describe(%{data: %{"reason" => reason}}) when is_binary(reason), do: reason
+  defp describe(%{data: %{reason: reason}}) when is_binary(reason), do: reason
   defp describe(reason), do: inspect(reason)
 end

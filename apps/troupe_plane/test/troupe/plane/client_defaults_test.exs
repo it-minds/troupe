@@ -2,13 +2,17 @@ defmodule Troupe.Plane.ClientDefaultsTest do
   @moduledoc """
   `me.client_defaults`: what an administrator says people's own machines should talk to,
   handed to anybody signed in — and never a key, because anybody signed in can ask.
+
+  And the organisation's document (Decision 869): its `defaults` in a config file's
+  shape, and `enforced`, which an administrator sets through the plane's settings,
+  audited, and which names only the keys an organisation may enforce.
   """
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Harness, Settings}
+  alias Troupe.Plane.{Admin, Audit, Harness, Identity, Settings}
 
-  @keys ~w(client_provider client_base_url client_auth client_model_default client_model_cheap client_model_expensive)
+  @keys ~w(client_provider client_base_url client_auth client_model_default client_model_cheap client_model_expensive client_enforced)
 
   setup do
     on_exit(fn ->
@@ -24,6 +28,8 @@ defmodule Troupe.Plane.ClientDefaultsTest do
              Harness.call("me.client_defaults", %{}, as(context.ada))
 
     assert defaults["models"] == %{"default" => nil, "cheap" => nil, "expensive" => nil}
+    assert defaults["defaults"] == %{}
+    assert defaults["enforced"] == %{}
   end
 
   test "set, any signed-in person gets provider, URL, auth and models", context do
@@ -35,12 +41,21 @@ defmodule Troupe.Plane.ClientDefaultsTest do
 
     assert {:ok, defaults} = Harness.call("me.client_defaults", %{}, as(context.ada))
 
-    assert defaults == %{
+    # What a client from before the organisation's document reads, as it was.
+    assert Map.take(defaults, ~w(configured provider base_url auth models)) == %{
              "configured" => true,
              "provider" => "openai",
              "base_url" => "https://llm-gw.example/v1",
              "auth" => "bearer",
              "models" => %{"default" => "glm-5.2", "cheap" => "qwen3.6-35b", "expensive" => nil}
+           }
+
+    # And the same as a config file's defaults, only what is set.
+    assert defaults["defaults"] == %{
+             "provider" => "openai",
+             "base_url" => "https://llm-gw.example/v1",
+             "auth" => "bearer",
+             "models" => %{"default" => "glm-5.2", "cheap" => "qwen3.6-35b"}
            }
   end
 
@@ -55,6 +70,63 @@ defmodule Troupe.Plane.ClientDefaultsTest do
   test "there is no setting a key could be stored in" do
     refute Enum.any?(Settings.all(), &(&1.group == :client_defaults and &1.secret))
     refute Enum.any?(Settings.all(), &(&1.group == :client_defaults and &1.key =~ "key"))
+  end
+
+  describe "the enforced set" do
+    setup do
+      Application.put_env(:troupe_plane, :platform_admin_group, "platform")
+      on_exit(fn -> Application.delete_env(:troupe_plane, :platform_admin_group) end)
+
+      {:ok, platform} = Identity.upsert_group(%{external_id: "platform", display_name: "platform"})
+      {:ok, _} = Identity.enable_team(platform, %{name: "platform"})
+      root = person("root@example.test", ["platform"])
+
+      %{actor: Admin.actor_for_subject(root.subject)}
+    end
+
+    test "an administrator sets it through the settings, audited, and every machine is told", context do
+      assert {:ok, applied} =
+               Admin.setting_put(context.actor, "client_enforced", ~s|{"approvals": "deny", "max_turns": 100}|)
+
+      assert applied.value == %{"approvals" => "deny", "max_turns" => 100}
+
+      assert {:ok, %{"enforced" => %{"approvals" => "deny", "max_turns" => 100}}} =
+               Harness.call("me.client_defaults", %{}, as(context.ada))
+
+      assert [%{action: "setting.put", subject_id: "client_enforced", detail: detail}] =
+               Audit.list(kind: "setting")
+
+      assert detail["client_enforced"] == %{"from" => nil, "to" => %{"approvals" => "deny", "max_turns" => 100}}
+
+      # A change to one key of it is that key, in the audit.
+      {:ok, _} = Admin.setting_put(context.actor, "client_enforced", ~s|{"approvals": "deny", "max_turns": 50}|)
+      assert Enum.any?(
+               Audit.list(kind: "setting"),
+               &match?(%{detail: %{"client_enforced.max_turns" => %{"from" => 100, "to" => 50}}}, &1)
+             )
+
+      # As the settings page reads it: the JSON it is typed as.
+      assert %{value: shown} = Enum.find(Settings.all(), &(&1.key == "client_enforced"))
+      assert Jason.decode!(shown) == %{"approvals" => "deny", "max_turns" => 50}
+    end
+
+    test "a key an organisation may not enforce is refused with the reason, and nothing is written", context do
+      assert {:error, error} =
+               Admin.setting_put(context.actor, "client_enforced", ~s|{"auto_approve": false, "max_turns": 100}|)
+
+      assert error.data.reason =~
+               "auto_approve is not a key an organisation may enforce; the ones it may are approvals, provider"
+
+      assert {:error, %{data: %{reason: why}}} =
+               Admin.setting_put(context.actor, "client_enforced", ~s|{"max_turns": "lots"}|)
+
+      assert why =~ "max_turns must be a whole number"
+
+      assert {:error, _not_json} = Admin.setting_put(context.actor, "client_enforced", "approvals=deny")
+
+      assert Settings.get("client_enforced") == nil
+      assert Audit.list(kind: "setting") == []
+    end
   end
 
   defp as(user), do: %{user: user, platform_admin?: false}

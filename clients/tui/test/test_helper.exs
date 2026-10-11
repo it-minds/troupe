@@ -18,6 +18,13 @@ for var <-
   System.delete_env(var)
 end
 
+# The organisation's managed file and the plane's cached document (root Decision 869): the
+# suite's own, not this machine's, and not there until a test writes one.
+Application.put_env(:troupe_core, :organisation,
+  managed_path: Path.join([tmp, "org", "managed.yaml"]),
+  cache_path: Path.join([tmp, "org", "organisation.json"])
+)
+
 System.put_env("TROUPE_OPENCODE_CONFIG", Path.join(tmp, "no-opencode.jsonc"))
 System.put_env("TROUPE_OPENCODE_AUTH", Path.join(tmp, "no-auth.json"))
 

@@ -18,6 +18,14 @@ File.write!(
 System.delete_env("TROUPE_STATE_HOME")
 System.at_exit(fn _ -> File.rm_rf!(config_home) end)
 
+# The organisation's layer (Decision 869) is read from a managed file at a fixed path and
+# from the state directory: a test run reads neither of this machine's, but two of its
+# own that are not there until a test writes them.
+Application.put_env(:troupe_core, :organisation,
+  managed_path: Path.join(config_home, "org/managed.yaml"),
+  cache_path: Path.join(config_home, "org/organisation.json")
+)
+
 # The person's own `~/.agents/skills` (Decision 822) is read from the home directory,
 # which a test cannot move: an empty one of the suite's own instead of the developer's.
 Application.put_env(:troupe_core, :agents_home, Path.join(config_home, "home/.agents"))

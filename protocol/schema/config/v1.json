@@ -23,7 +23,7 @@
       ]
     },
     "provider": {
-      "description": "The session-wide provider's API. Read from a project's file only in a trusted workspace.",
+      "description": "The session-wide provider's API. Read from a project's file only in a trusted workspace. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": "anthropic",
       "enum": [
         "anthropic",
@@ -33,7 +33,7 @@
       ]
     },
     "base_url": {
-      "description": "The session-wide provider's URL. Unset: the vendor's own endpoint. Read from a project's file only in a trusted workspace.",
+      "description": "The session-wide provider's URL. Unset: the vendor's own endpoint. Read from a project's file only in a trusted workspace. An organisation may enforce it, and nothing on this machine then goes past it.",
       "type": [
         "string",
         "null"
@@ -287,7 +287,7 @@
       "additionalProperties": false
     },
     "max_tokens": {
-      "description": "The most output tokens one model call asks for.",
+      "description": "The most output tokens one model call asks for. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": 8192,
       "type": [
         "integer",
@@ -351,7 +351,7 @@
       ]
     },
     "max_turns": {
-      "description": "Model calls an agent may make before its budget stops it.",
+      "description": "Model calls an agent may make before its budget stops it. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": 40,
       "type": [
         "integer",
@@ -378,7 +378,7 @@
       "minimum": 1
     },
     "wall_clock_ms": {
-      "description": "How long an agent may run.",
+      "description": "How long an agent may run. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": 1800000,
       "type": [
         "integer",
@@ -387,7 +387,7 @@
       "minimum": 1
     },
     "max_depth": {
-      "description": "How deep agents may delegate; 1 means the root alone may.",
+      "description": "How deep agents may delegate; 1 means the root alone may. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": 3,
       "type": [
         "integer",
@@ -430,7 +430,7 @@
       ]
     },
     "approvals": {
-      "description": "What a call that asks does with nobody attached: wait, or be denied. Read from a project's file only in a trusted workspace.",
+      "description": "What a call that asks does with nobody attached: wait, or be denied. Read from a project's file only in a trusted workspace. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": "wait",
       "enum": [
         "wait",
@@ -465,7 +465,7 @@
       "additionalProperties": false
     },
     "managed_permission_rules_only": {
-      "description": "A session may not allow a tool for itself. Read from a project's file only in a trusted workspace.",
+      "description": "A session may not allow a tool for itself. Read from a project's file only in a trusted workspace. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": false,
       "type": [
         "boolean",
@@ -473,7 +473,7 @@
       ]
     },
     "managed_mcp_servers_only": {
-      "description": "A client may not offer a session its own tools. Read from a project's file only in a trusted workspace.",
+      "description": "A client may not offer a session its own tools. Read from a project's file only in a trusted workspace. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": false,
       "type": [
         "boolean",

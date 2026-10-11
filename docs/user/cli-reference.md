@@ -34,7 +34,7 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe config migrate [--write] [PATH]` | show, or make, the rewrite to the current spellings |
 | `troupe config trust [PATH]` | let a workspace's own files set the trusted keys; --list shows them |
 | `troupe config untrust [PATH]` | take a workspace's trust back |
-| `troupe config pull [PLANE_URL]` | save the plane's default provider and models here (never a key) |
+| `troupe config pull [PLANE_URL]` | fetch the organisation's defaults and limits from the plane now (never a key) |
 | `troupe models [--refresh]` | what each provider serves, its window and its price; asked again when stale, or now with --refresh |
 | `troupe models --json [--workspace DIR] [--refresh]` | the same as one JSON object for a program: models, roles, catalog, providers; never a key |
 | `troupe doctor [--json]` | check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure |

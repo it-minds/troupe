@@ -22,40 +22,35 @@ defmodule Troupe.ModelConfigTest do
     assert CLI.usage() =~ "troupe config pull"
   end
 
-  describe "the config.set a plane's defaults become" do
-    test "carries what the plane says, and no key" do
-      params =
-        ModelConfig.params(%{
-          "configured" => true,
-          "provider" => "openai",
-          "base_url" => "https://llm-gw.example/v1",
-          "auth" => "bearer",
-          "models" => %{"default" => "glm-5.2", "cheap" => "qwen3.6-35b", "expensive" => nil}
-        })
+  # The plane's answer goes to the daemon's `config.organisation` as it came, and nothing
+  # into the person's own file (root Decision 869; `org_settings_test.exs` has the rest).
+  test "config pull hands the plane's answer to the daemon, as it came" do
+    answer = %{
+      "configured" => true,
+      "provider" => "openai",
+      "defaults" => %{"provider" => "openai"},
+      "enforced" => %{}
+    }
 
-      assert %{
-               "provider" => "openai",
-               "base_url" => "https://llm-gw.example/v1",
-               "auth" => "bearer",
-               "models" => %{"default" => "glm-5.2", "cheap" => "qwen3.6-35b"}
-             } = params
+    test = self()
 
-      assert "c-" <> _ = params["command_id"]
-      # Absent, not empty: an empty key would remove the one already saved.
-      refute Map.has_key?(params, "api_key")
+    call = fn method, params ->
+      send(test, {:called, method, params})
+
+      {:ok,
+       %{
+         "plane_url" => params["plane_url"],
+         "defaults" => %{"provider" => "openai"},
+         "enforced" => %{},
+         "path" => "x"
+       }}
     end
 
-    test "a role the plane leaves empty keeps this machine's choice" do
-      params =
-        ModelConfig.params(%{
-          "provider" => "anthropic",
-          "base_url" => nil,
-          "models" => %{"default" => ""}
-        })
-
-      refute Map.has_key?(params, "models")
-      refute Map.has_key?(params, "auth")
-    end
+    assert ModelConfig.keep("https://plane.example", answer, fn _line -> :ok end, call) == 0
+    assert_received {:called, "config.organisation", params}
+    assert %{"plane_url" => "https://plane.example", "document" => ^answer} = params
+    assert "c-" <> _ = params["command_id"]
+    refute Map.has_key?(params, "api_key")
   end
 
   describe "a model error" do

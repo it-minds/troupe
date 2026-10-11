@@ -958,6 +958,14 @@ defmodule Troupe.Protocol.Schema do
         "from" => required(:string),
         "workspace" => optional(:string)
       },
+      # A plane's `me.client_defaults` answer, fetched by a client signed in to it, kept as
+      # this machine's copy of the organisation's defaults and limits (Decision 869).
+      "config.organisation" => %{
+        "command_id" => required(:string),
+        "plane_url" => required(:string),
+        "document" => required(:object),
+        "workspace" => optional(:string)
+      },
       # A first run's questions (Decision 705) — the daemon's only, like the settings
       # they write; a worker answers `method_not_found`. `answer` is the named step's
       # answer, whose shape the step decides; the key goes in through it and never

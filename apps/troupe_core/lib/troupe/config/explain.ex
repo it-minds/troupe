@@ -10,11 +10,15 @@ defmodule Troupe.Config.Explain do
 
   `--explain` shows every key with its value, secrets masked, and the layer that set
   it; with a key, the whole ladder for that key: its default, then each layer that gave
-  it a value, the one in effect last, and the ones ignored with why.
+  it a value, the one in effect last, and the ones ignored with why. The organisation's
+  defaults are `org`, named by the managed file's path or the plane's URL, and what it
+  enforces is `enforced`, last on the ladder: in effect where it held a value, and shown
+  as the limit where the value in effect is within it (Decision 869).
   """
 
   alias Troupe.Config
   alias Troupe.Config.{Issue, Layers, Migrate, Schema}
+  alias Troupe.Protocol.Organisation
 
   @typedoc "One key as `--explain` shows it."
   @type row :: %{
@@ -113,14 +117,26 @@ defmodule Troupe.Config.Explain do
   defp map_spec?(_spec), do: false
 
   # The last value no layer ignored, unless a file's `null` removed it — which the
-  # merged values say, for everything a file or the environment set.
+  # merged values say, for everything a file or the environment set. An enforced value
+  # a lower one stayed within is on the ladder as the limit, not in effect.
   defp in_effect(path, ladder, layers) do
-    winner = ladder |> Enum.reject(& &1.ignored) |> List.last()
+    winner = ladder |> Enum.reject(&(&1.ignored || limit?(&1))) |> List.last()
 
     cond do
-      winner.layer in [:default, :cli] -> winner
+      winner.layer in [:default, :cli, :enforced] -> winner
       winner.value != nil and present?(layers.values, path) -> winner
       true -> %{hd(ladder) | layer: :default}
+    end
+  end
+
+  defp limit?(entry), do: Map.get(entry, :limit, false)
+
+  @doc "The value the organisation enforces on a row's key, as its ladder says, or `nil`."
+  @spec enforced(row()) :: %{value: term(), source: String.t()} | nil
+  def enforced(row) do
+    case Enum.find(row.ladder, &(&1.layer == :enforced)) do
+      nil -> nil
+      entry -> %{value: entry.value, source: entry.source}
     end
   end
 
@@ -172,8 +188,7 @@ defmodule Troupe.Config.Explain do
     header = [
       "configuration for #{if layers.workspace, do: shown(layers.workspace), else: "no workspace"}" <> trust(layers),
       Enum.map_join(layers.files, "\n", fn file ->
-        "  #{String.pad_trailing(Atom.to_string(file.layer), 8)} #{shown(file.path)}" <>
-          if(file.exists?, do: "", else: " (none)")
+        "  #{String.pad_trailing(Atom.to_string(file.layer), 8)} #{shown(file.path)}" <> file_note(file)
       end)
     ]
 
@@ -187,6 +202,12 @@ defmodule Troupe.Config.Explain do
       "\n\n"
     ) <> "\n"
   end
+
+  # A plane's document is named by the plane, with when it was fetched and where it is
+  # kept; a file by its path, and `(none)` where it is not there.
+  defp file_note(%{fetched_at: at, cache: cache}), do: " (fetched #{at}, kept in #{shown(cache)})"
+  defp file_note(%{exists?: true}), do: ""
+  defp file_note(_file), do: " (none)"
 
   defp trust(%{workspace: nil}), do: ""
   defp trust(%{trusted?: true}), do: " (trusted)"
@@ -225,12 +246,15 @@ defmodule Troupe.Config.Explain do
         cond do
           entry.ignored -> String.trim_trailing(line) <> "\n           ignored: #{entry.ignored}"
           i == winner -> String.trim_trailing(line) <> "  <- in effect"
+          limit?(entry) -> String.trim_trailing(line) <> "  (enforced: #{meaning(row.key)})"
           true -> String.trim_trailing(line)
         end
       end)
 
     Enum.join(["#{row.key} = #{row.shown}" | lines], "\n")
   end
+
+  defp meaning(key), do: key |> Organisation.kind() |> Organisation.meaning()
 
   defp issues_text(layers) do
     case layers.errors ++ layers.refusals ++ layers.warnings do
@@ -243,8 +267,7 @@ defmodule Troupe.Config.Explain do
     %{
       "workspace" => layers.workspace,
       "trusted" => layers.trusted?,
-      "files" =>
-        Enum.map(layers.files, &%{"layer" => Atom.to_string(&1.layer), "path" => &1.path, "exists" => &1.exists?}),
+      "files" => Enum.map(layers.files, &file_json/1),
       "keys" =>
         Enum.map(rows, fn row ->
           spec = Schema.at(String.split(row.key, "."))
@@ -254,6 +277,7 @@ defmodule Troupe.Config.Explain do
             "value" => json_value(%{value: row.value, raw: nil}, spec),
             "layer" => Atom.to_string(row.layer),
             "source" => row.source,
+            "enforced" => enforced(row) != nil,
             "ladder" =>
               Enum.map(row.ladder, fn entry ->
                 %{
@@ -263,12 +287,19 @@ defmodule Troupe.Config.Explain do
                   "from" => entry.raw,
                   "ignored" => entry.ignored
                 }
+                |> Map.merge(if entry.layer == :enforced, do: %{"limit" => limit?(entry)}, else: %{})
               end)
           }
         end),
       "warnings" => Enum.map(layers.warnings, &Issue.to_json/1),
       "refusals" => Enum.map(layers.refusals, &Issue.to_json/1)
     }
+  end
+
+  # A plane's document adds when it was fetched and where it is kept.
+  defp file_json(file) do
+    %{"layer" => Atom.to_string(file.layer), "path" => file.path, "exists" => file.exists?}
+    |> Map.merge(if file[:fetched_at], do: %{"fetched_at" => file.fetched_at, "cache" => file.cache}, else: %{})
   end
 
   defp json_value(%{value: {:unset_env, _var, raw}}, _spec), do: raw
@@ -318,9 +349,11 @@ defmodule Troupe.Config.Explain do
        if(migrate?, do: " `troupe config migrate` rewrites the old spellings.", else: "") <> "\n", 1}
   end
 
-  # Which file a path is, for which keys it may set.
+  # Which file a path is, for which keys it may set. A `managed.yaml` is an
+  # organisation's, wherever it is, so a draft is checked before it is put in place.
   defp layer_of(path) do
     cond do
+      Path.basename(path) == "managed.yaml" -> :org
       Path.basename(path) == "config.local.yaml" -> :local
       path |> Path.dirname() |> Path.basename() == ".troupe" -> :project
       true -> :user
