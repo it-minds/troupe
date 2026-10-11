@@ -92,9 +92,24 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
   while another run has a `/tmp/troupe-bench-*` directory.
 - A pull request into a chunk branch builds the TUI but doesn't run its tests, so a TUI
   regression is first seen on the chunk's pull request into `main`.
+- Since D117 (Decision 848), still failing now and then under full load and passing
+  alone:
+  - core `FactsTest` "one process per repository" (25 puts against `async_stream`'s 5 s);
+  - `PropertyTest`, at its 60 s inside `:file.call`;
+  - `WatchSessionTest`;
+  - `RememberFactsTest` ("README.md is not there");
+  - `StoppedCallTest` (Finch's "excess queuing");
+  - `DelegateContractTest`'s branch diff (a `list` timeout);
+  - the gateway's `LoopbackTest` "a refused upgrade is logged at warning level".
+
+  With the default 64 cases on a busy machine many more core tests time out, and all pass at
+  `--max-cases 8`.
+- `Troupe.BenchTest` measures the tool definitions of the test build, which registers four
+  test-only tools (about 582 bytes), so the budget gates a list nobody ships and `mix
+  troupe.bench` in dev reads that much lower.
 
 Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23), in chunks 3 to 7, and by
-the chunk 24 and 26 fixers (2026-10-08/10).
+the chunk 24, 26 and 27 fixers (2026-10-08/11).
 
 ### D23 - Small leftovers (low)
 
@@ -1114,18 +1129,30 @@ Found by the #502 audit, 2026-10-10.
 - The desktop app logged React's "two children with the same key" for workspace paths on
   every poll (`views/Local.tsx` keys rows by `path`), so `worktree.list` or
   `workspace.recent` may answer one path twice on Windows (unconfirmed).
+- In a repository not onboarded and with no other tools' files at its root, every start
+  runs three git processes to look for nested ones (`found?/1`: rev-parse, `config
+  --list`, `ls-files`); adding `ls-files` to `Troupe.Git`'s objects-only set would drop
+  one, under Decision 833.
+- A glob in opencode's `instructions` still walks `node_modules` before its matches are
+  dropped, which is slow in a JavaScript repository.
 
-Found by the #516 third-wave and #248 desktop fixers, 2026-10-10.
+Found by the #516 third-wave and #248 desktop fixers, 2026-10-10, and the chunk 27 fixers,
+2026-10-11.
 
 ### D111 - Repository memory after #553 and #557 (low)
 
 - Two daemons on one repository each re-read before writing, but a write replaces the
   whole `facts.jsonl`: the last writer wins a narrow race.
-- The tool definitions are 12,827 of the bench's 13,500 bytes since `recall`.
+- The tool definitions are 13,640 of the bench's 13,800 bytes (raised from 13,500 by
+  Decision 853), so the next tool needs room made for it.
 - TUI Decision 54 still describes the file-count drift Decision 838 removed (a supersede
   can't cross the two numberings).
+- For an anchor git doesn't track that is still on disk, the prompt says "`.env` is gone
+  since it was checked".
+- `memory.get` (scope `control`, Decision 854) still migrates or reads back a brief in
+  whatever directory its caller names: a read that writes.
 
-Found by the #248 fixers, 2026-10-10.
+Found by the #248 fixers, 2026-10-10, and the chunk 27 fixers, 2026-10-11.
 
 ### D112 - Agents after #549, #551 and #563 (low)
 
@@ -1169,8 +1196,16 @@ What D115 named about `troupe daemon open`, `Troupe.MCP.Stdio`, the clipboard,
   test of its own.
 - On Windows (OTP 28) a raw `Port.open({:spawn_executable, ...})` of a console program
   without `:hide` returns 0 and does nothing; `System.cmd` and `Troupe.OS.Process` pass it.
+- On Windows a stdio MCP server that closes its input but keeps running is never stopped:
+  it runs outside the reaper (Decision 654), and closing the port doesn't end it.
+- `Troupe.CLI.Daemon.exec`'s reaper branch falls back to a bare `cmd` when `COMSPEC` is
+  unset, where Decision 846's `Troupe.Executable.comspec/0` would do.
+- `Troupe.Protocol.Client` still answers a send that failed as `unavailable` with an
+  inspected reason, which `closed?/1` doesn't recognise, so the TUI says plain
+  "unavailable" until the disconnect arrives.
+- `clipboard_command` is app configuration only, so an installed build can't set it.
 
-Found by the #502 and #555 fixers, 2026-10-10.
+Found by the #502 and #555 fixers, 2026-10-10, and the D115 fixer, 2026-10-11.
 
 ### D116 - A shell call's outcome after #545 (low)
 
@@ -1182,6 +1217,49 @@ Found by the #502 and #555 fixers, 2026-10-10.
   as that command's `exit_status`.
 
 Found by the #248 fixer, 2026-10-10.
+
+### D118 - Delegation after #567, #572 and #575 (low)
+
+- **Approvals and the gate.**
+  - A parent definition's `permissions: {delegate: ask}`, or any other inline tool set to `ask`, is accepted and then ignored: inline tools check only `deny` (`Tools.authorize`). `delegation.ask` (Decision 850) is what asks.
+  - An ordinary `ask` approval waits inside the tool's own timer (at least 180 s), while the delegation gate has none, so a slow person times out on one and not on the other.
+  - After `approvals: deny` and a restart, a replayed unattended denial reaches the root as "The person denied...", and so does one the approvals process dropped by dying: the harness did it, not the person.
+- **Background children.**
+  - ACP (`troupe acp`) and A2A map every `user_input` to the user's message, so a background child's end, like the harness's notes, reads there as the user's words.
+  - A background child's spend is lost across its parent's restart.
+  - A stopped or cancelled child's model call in flight is not counted.
+  - A person can stop background children only all at once, by cancelling.
+  - The desktop app shows a stopped child's closed call as failed, where the TUI gives the reason.
+  - No agent's instruction (`build`, `orchestrate`) mentions background delegation; #554's bench (slice 4) is to say whether to teach it.
+- **What changed.** A child's `changed` is counted from its file tools' calls, so what its commands changed is said, never counted. A branch's full diff is rebuilt the same way, where its worktree's own `git diff` would count both.
+
+Found by the #554 fixers, 2026-10-11.
+
+### D119 - Sessions and state directories after #568 and #576 (low)
+
+- **Erasure (security-relevant, low).** `session.erase` answers `erased: true` for a session it found nowhere, and its log stays. This happens to a session in a trusted project's own `state_dir`, after a daemon restart and before any session in that directory has started again: the index doesn't know the directory yet. Persisting the known state directories, or having erase say what it deleted, would close it.
+- **Listing after a restart.** For the same reason, such dormant sessions aren't listed after a restart until a session in that directory starts.
+- **Dead pids.** `Troupe.Registry.whereis/1` can answer a dead pid for a moment after the process exits (Elixir 1.20's `Registry.lookup` doesn't check liveness), and an input sent to it is lost. `Troupe.activate` checks; `whereis` itself doesn't.
+- **Stop race.** A command that arrives between the sweep's decision to stop a session and the stop's claim on it (microseconds) still reaches the tree.
+- **Slow MCP servers.** A slow MCP server makes every session using it take up to 4 s to stop (`MCP.Sessions.end_all`), and the killed request seems to leave its pooled connection busy for the next one.
+- **Config schema wording.** The config schema still says `state_dir` is "where session logs go"; it holds the blobs and kept outputs too.
+
+Found by the D117 and session lifecycle fixers, 2026-10-11.
+
+### D120 - Command mode, agents and watch after #570 and #571 (low)
+
+- **Merge and discard errors.** `worktree.merge` and `worktree.discard` still answer a git that didn't run (`{:elsewhere, ...}`, `:unlocated`, the reaper's errors) as `invalid_params` with an inspected term, through `dispatch.ex`'s shared `worktree_error/1`.
+- **Forks of a branch.** A fork made with `/new --branch` runs in that branch's worktree. It isn't in the parent directory's picker, and its directory goes when the branch is merged or discarded.
+- **Forking from the palette.** `/new` from the palette runs at once as a new session; forking needs Tab and a typed `--branch`.
+- **Conflicted merges.** After a conflicted merge the branch's uncommitted work has been committed (`commit_pending`), so Decision 647's "the worktree is as it was" isn't literal.
+- **TUI errors.** The TUI's link (`Link.error_message`) flattens a protocol error to "code: reason" and drops its `data`.
+- **Desktop watch box.** It follows `watch_changed` only for the session it shows.
+- **Team session palette.** A team session's palette rows have no agent facts: the desktop client has no `agents.list` over a worker.
+- **TUI kept edits.** The TUI keeps an unsaved agent edit by name, so a broken `.troupe/agents/plan.md` and the built-in `plan` share a slot.
+- **Broken agent files (no new exposure).** `agents.get` (scope `observe`) returns the text of a user or project agent file that doesn't parse, from the same places it returned when the file parsed. A link swapped in between load and read is a theoretical race.
+- **Headless duplicate.** The headless printer once printed `spawned /build (shared)` twice (a race between reading the journal and the live stream).
+
+Found by the chunk 27 fixers, 2026-10-11.
 
 ## Taken
 
@@ -1287,6 +1365,12 @@ Found by the #248 fixer, 2026-10-10.
 | D107's first and palette items - a slash command typed in a window went to the agent, the palette dropped the window, Tab matched summaries, an argument hint ran empty, `/agents` listed `worktree` | #502 and #503, PRs #560 and #563 |
 | D108 - an upload over 16 MB, or a connection closed mid-call, took the connection or the screen down | #502, PR #552 |
 | D109 - `/copy` and Ctrl-Y on Windows | #502, PR #552 |
+| D115's first five items - `troupe daemon open` from the TUI lost its daemon on Windows, an MCP stdio server that exited early crashed its start, `clip` got UTF-8, `/upload` read an oversized file first, a dropped protocol client's pending calls exited | PR #566 |
+| D117 - the sessions index blocked on a slow stop, the shared cause of most load flakes | PR #568 |
+| D113's first six items and D105's last two - an approval asked before a worker restart went to the parent, `/new --branch` forked the empty log, a conflicted merge said to resolve, `worktree.remove` answered an inspected string, `worktree.list` ran four git calls a tree, rows had no model, a dismissed one was titled by its path, the focus named a closed window, `/ask` never said none had finished | #502, PR #570 |
+| D107's subagents item, D112's conflict and unparseable-file items, D114's desktop watch box and headless line | #565, PR #571 |
+| D102's, D110's and D111's items, and D68's empty `TROUPE_DAEMON_SOCKET` - untracked anchors hashed on read, the old `remember` form, `scope`, anchor case on Windows, `memory.get`'s scope and model, onboarding outside a repository, onboarded files said not read, nested files, second runs, opencode globs and keys | #248, #516, PR #574 |
+| B27's session items - erasure ignoring a configured `state_dir`, dormant sessions there unlisted, a slow stop blocking every start, a command reaching a stopping session, the sweep dropping a running session, listings reading every log | PR #576 |
 
 ## Checked and not a defect
 

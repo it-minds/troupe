@@ -136,7 +136,8 @@ connection; the client's link exited with it and took the screen down (D108). Ru
 the checkout, the removal works there, and a git failure in `worktree.merge`,
 `worktree.discard` is now an `internal_error` the caller is told
 (`branches_test.exs`, "a worktree git cannot remove is an internal error the caller is
-told"). `worktree.remove`, which the desktop app calls, still runs inside the tree (D105).
+told"). `worktree.remove`, which the desktop app calls, ran inside the tree too until #556
+(D105) and answers git's refusal in git's words since #570.
 
 ## Fixed with the audit
 
