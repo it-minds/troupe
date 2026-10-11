@@ -939,9 +939,7 @@ Found by the #371 fixer, 2026-10-08.
 - On a model that does not bind its thinking, Decision 793 still offers the todo tools once
   a list exists or after 10 calls, which changes `tools` mid-turn and costs a cache write
   (`llm_request.tools_changed` counts it). A model that binds has them from the first call,
-  and a compaction's kept tail goes without its thinking there (Decision 867). A loop
-  turn's `goal_complete` and MCP tools that come and go still change `tools` on a binding
-  model: #606.
+  and a compaction's kept tail goes without its thinking there (Decision 867).
 - A log written before 0.13.0 has no `turn_context_block` to fold (Decision 863): a session
   that ran `system_prompt: stable` then sends its first call after a resume without the
   turn contexts it had put, and one that ran 0.12.0's `per_turn` default changes its system

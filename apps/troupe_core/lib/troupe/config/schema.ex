@@ -73,6 +73,11 @@ defmodule Troupe.Config.Schema do
         "reasoning_effort",
         :effort,
         "How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a thinking budget in tokens. An Anthropic model gets it in the form it takes."
+      ),
+      spec(
+        "binds_thinking",
+        :boolean,
+        "Whether the model binds its thinking to the conversation it was made in, as Claude Fable 5.1, Opus 5.5 and Sonnet 5.5 do, so its tools stay the same all session: for a name that hides the model. Unset: the provider's, else what its model list says, else its name."
       )
     ]
   end
@@ -100,6 +105,11 @@ defmodule Troupe.Config.Schema do
       ),
       spec("models", {:map, {:object, model_entry()}}, "The models it serves, by the name Troupe addresses them with.",
         default: %{}
+      ),
+      spec(
+        "binds_thinking",
+        :boolean,
+        "Whether the models it serves bind their thinking to the conversation, unless a model's entry says. Unset: what its model list says, else each model's name."
       )
     ]
   end
