@@ -99,13 +99,10 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
   - `WatchSessionTest`;
   - `RememberFactsTest` ("README.md is not there");
   - `StoppedCallTest` (Finch's "excess queuing");
-  - `DelegateContractTest`'s branch diff (a `list` timeout);
   - the gateway's `LoopbackTest` "a refused upgrade is logged at warning level".
 
   With the default 64 cases on a busy machine many more core tests time out, and all pass at
-  `--max-cases 8`. The `Sessions.Index` list timeouts among them (5 to 7 tests a full run
-  in chunk 28: `ReadBranchTest`, `WatchSessionTest`, `LocalPricingTest`,
-  `DelegateContractTest`, `ForkSessionTest`) are #589.
+  `--max-cases 8`.
 - `Troupe.BenchTest` measures the tool definitions of the test build, which registers four
   test-only tools (about 582 bytes), so the budget gates a list nobody ships and `mix
   troupe.bench` in dev reads that much lower.

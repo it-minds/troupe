@@ -144,15 +144,26 @@ exit 1
 EOF
 chmod +x "$work/minisign-ok/minisign" "$work/minisign-bad/minisign"
 
+# uname as install.sh asks it on a Mac, for the uninstall checks there: the install itself
+# is the Linux one, laid out the same way.
+mkdir -p "$work/macos"
+cat >"$work/macos/uname" <<'EOF'
+#!/bin/sh
+case "${1:-}" in -m) echo x86_64 ;; *) echo Darwin ;; esac
+EOF
+chmod +x "$work/macos/uname"
+
 # run NAME SHELL [ARG...]: install.sh under SHELL in NAME's home, which a later run of the
 # same NAME finds as this one left it. What it printed lands in $home/out, what the daemon
 # was asked in $home/log, its exit status in $status. $answers, when set, is typed at its
 # questions; $daemon is the stand-in's TROUPE_CHECK_DAEMON. $use_installer runs another
 # copy of install.sh, $check_release downloads from another release, and $extra_path goes
-# first on the PATH.
+# first on the PATH. $elsewhere installs into the home's elsewhere/bin and elsewhere/lib,
+# through TROUPE_BIN_DIR and TROUPE_LIB_DIR, instead of ~/.local.
 use_installer=
 check_release=
 extra_path=
+elsewhere=
 run() {
   name=$1
   shell=$2
@@ -160,12 +171,15 @@ run() {
   home=$work/$shell/$name
   mkdir -p "$home"
   : >"$home/log"
+  bin=$home/.local/bin
+  if [ -n "$elsewhere" ]; then bin=$home/elsewhere/bin; fi
   set -- env -i "HOME=$home" "PATH=${extra_path:+$extra_path:}$stubs:/usr/local/bin:/usr/bin:/bin" TERM=dumb \
     "XDG_CONFIG_HOME=$home/.config" "XDG_DATA_HOME=$home/.local/share" "XDG_STATE_HOME=$home/.local/state" \
     "TROUPE_VERSION=$version" TROUPE_RELEASE_URL=https://release.invalid \
     "TROUPE_OPENCODE_CONFIG=$home/no-opencode.jsonc" \
+    "TROUPE_BIN_DIR=${elsewhere:+$bin}" "TROUPE_LIB_DIR=${elsewhere:+$home/elsewhere/lib/troupe-daemon}" \
     "TROUPE_CHECK_RELEASE=${check_release:-$release}" "TROUPE_CHECK_LOG=$home/log" \
-    "TROUPE_CHECK_ENTRY=$home/login-entry" "TROUPE_CHECK_TUI=$home/.local/bin/troupe" \
+    "TROUPE_CHECK_ENTRY=$home/login-entry" "TROUPE_CHECK_TUI=$bin/troupe" \
     "TROUPE_CHECK_DAEMON=$daemon" \
     "$shell" "${use_installer:-$installer}" "$@"
   if [ -n "$answers" ]; then
@@ -206,6 +220,26 @@ in_order() {
 }
 exists() { [ -e "$home/$1" ]; }
 gone() { [ ! -e "$home/$1" ]; }
+
+# What an install elsewhere shares with the one in ~/.local/bin (Decision 873), as stand-ins
+# in $home: the TUI's unpacked payload under $1 (where Burrito unpacks, relative to $home)
+# and a troupe running from it, a script that waits, started from a subshell so that once
+# stopped it is nobody's child left unreaped; that install's menu entry, its PATH line, and
+# an entry starting its daemon at login.
+shared() {
+  unpacked=$home/$1/troupe_erts-0_0.0.0-check
+  mkdir -p "$unpacked/bin" "$home/.local/share/applications"
+  printf '#!/bin/sh\nwhile :; do sleep 1; done\n' >"$unpacked/bin/troupe-tui"
+  chmod +x "$unpacked/bin/troupe-tui"
+  ("$unpacked/bin/troupe-tui" </dev/null >/dev/null 2>&1 & echo $! >"$home/tui.pid")
+  tui_pid=$(cat "$home/tui.pid")
+  printf '[Desktop Entry]\nExec=%s\n' "$home/.local/bin/troupe-desktop" >"$home/.local/share/applications/troupe.desktop"
+  printf '\nexport PATH="%s:$PATH" # added by troupe installer\n' "$home/.local/bin" >>"$home/.profile"
+  printf '"%s" run\n' "$home/.local/bin/troupe-daemon" >"$home/login-entry"
+}
+alive() { kill -0 "$tui_pid" 2>/dev/null; }
+let_go() { kill "$tui_pid" 2>/dev/null || true; }
+path_line() { grep -qF "\"$home/.local/bin:\$PATH\" # added by troupe installer" "$home/.profile"; }
 
 question="Start troupe-daemon when you log in"
 pty=0
@@ -312,6 +346,71 @@ for shell in "$@"; do
   expect "--uninstall goes on when login off fails" succeeded
   expect "... saying why" said "permission denied"
   expect "... and the daemon is gone" gone .local/lib/troupe-daemon
+
+  # Decision 873: an install elsewhere removes and stops only what is in its own
+  # directories or names them.
+  payload=.local/share/.burrito/troupe_erts-0_0.0.0-check
+  elsewhere=1
+  run elsewhere "$shell" -y --tui
+  shared .local/share/.burrito
+  run elsewhere "$shell" -y --uninstall
+  expect "--uninstall elsewhere uninstalls" succeeded
+  expect "... its own daemon and troupe" eval 'gone elsewhere/lib/troupe-daemon && gone elsewhere/bin/troupe'
+  expect "... leaving the unpacked payload" exists "$payload"
+  expect "... and the troupe running from it" alive
+  expect "... the other install's menu entry" exists .local/share/applications/troupe.desktop
+  expect "... its PATH line" path_line
+  expect "... and its login entry" eval 'exists login-entry && not asked "login off"'
+  expect "... which the plan says" said "it starts another install's"
+  let_go
+
+  run elsewhere-clean "$shell" -y --tui
+  shared .local/share/.burrito
+  run elsewhere-clean "$shell" -y --clean-install
+  expect "--clean-install elsewhere installs again" eval 'succeeded && exists elsewhere/lib/troupe-daemon'
+  expect "... leaving the unpacked payload" exists "$payload"
+  expect "... and the troupe running from it" alive
+  let_go
+
+  run elsewhere-gui "$shell" -y
+  echo "a stand-in" >"$home/elsewhere/bin/troupe-desktop"
+  mkdir -p "$home/.local/share/applications"
+  printf '[Desktop Entry]\nExec=%s\n' "$home/elsewhere/bin/troupe-desktop" >"$home/.local/share/applications/troupe.desktop"
+  run elsewhere-gui "$shell" -y --uninstall
+  expect "an install elsewhere takes its own desktop app" gone elsewhere/bin/troupe-desktop
+  expect "... with the menu entry that starts it" gone .local/share/applications/troupe.desktop
+
+  run mac-elsewhere "$shell" -y
+  mkdir -p "$home/Applications/Troupe.app"
+  shared "Library/Application Support/.burrito"
+  extra_path=$work/macos
+  run mac-elsewhere "$shell" -y --uninstall
+  extra_path=
+  expect "on macOS, --uninstall elsewhere leaves the desktop app in ~/Applications" exists Applications/Troupe.app
+  expect "... which the plan says" said "leave the desktop app alone"
+  expect "... and the unpacked payload" exists "Library/Application Support/.burrito/troupe_erts-0_0.0.0-check"
+  expect "... and the troupe running from it" alive
+  let_go
+  elsewhere=
+
+  run default "$shell" -y --tui
+  shared .local/share/.burrito
+  run default "$shell" -y --uninstall
+  expect "--uninstall of the install in ~/.local/bin clears the unpacked payload" gone "$payload"
+  expect "... stopping the troupe running from it" not alive
+  expect "... and takes the menu entry, the PATH line and the login entry" \
+    eval 'gone .local/share/applications/troupe.desktop && not path_line && gone login-entry'
+  let_go
+
+  run mac-default "$shell" -y
+  mkdir -p "$home/Applications/Troupe.app"
+  shared "Library/Application Support/.burrito"
+  extra_path=$work/macos
+  run mac-default "$shell" -y --uninstall
+  extra_path=
+  expect "on macOS, --uninstall of the install in ~/.local/bin removes the desktop app" gone Applications/Troupe.app
+  expect "... and the unpacked payload" gone "Library/Application Support/.burrito/troupe_erts-0_0.0.0-check"
+  let_go
 
   if [ "$pty" = 0 ]; then
     echo "skipped: the questions (no util-linux script here)"

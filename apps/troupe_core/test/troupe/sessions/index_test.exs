@@ -226,6 +226,47 @@ defmodule Troupe.Sessions.IndexTest do
     end
   end
 
+  # #589: every file operation in the VM that takes a name is a call to one process, the
+  # file server, and a listing's glob was one call for every directory under every state
+  # directory. Under the full suite's load each waited behind everyone else's, and `list`
+  # took longer than its fifteen seconds. Here the file server is held while a listing that
+  # has read nothing yet, a `get` and a log's search are asked: each answers without it.
+  describe "with the file server held" do
+    test "a listing, a get and the search for a log answer without it", context do
+      ids = for i <- 1..20, do: "held-#{i}"
+
+      for {id, i} <- Enum.with_index(ids),
+          do: recorded(context.state_dir, Path.join(context.base, "ws-#{rem(i, 4)}"), id, "open")
+
+      # Everything a listing runs, loaded before the file server is held, on an index of its
+      # own: the one asked below has read no log yet.
+      _ = context |> listing([]) |> GenServer.call({:list, %{}})
+      index = listing(context, [])
+      server = Process.whereis(:file_server_2)
+      :ok = :sys.suspend(server)
+
+      try do
+        assert {rows, ms} = timed(fn -> GenServer.call(index, {:list, %{}}, 5_000) end)
+        assert ms < @answers_within_ms, "list took #{ms} ms"
+        assert Enum.sort(Enum.map(rows, & &1.id)) == Enum.sort(ids)
+
+        assert {%{state: :dormant, status: :waiting}, ms} =
+                 timed(fn -> GenServer.call(index, {:get, "held-7"}, 5_000) end)
+
+        assert ms < @answers_within_ms, "get took #{ms} ms"
+
+        # In a task: a search that waited on the file server would wait for as long as it is
+        # held, and this test must get to let it go.
+        search = Task.async(fn -> timed(fn -> Log.locate("held-7", context.state_dir) end) end)
+        assert {:ok, {path, ms}} = Task.yield(search, 5_000) || Task.shutdown(search)
+        assert ms < @answers_within_ms, "locate took #{ms} ms"
+        assert Path.basename(Path.dirname(path)) == "held-7"
+      after
+        :sys.resume(server)
+      end
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   @fixtures Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "approvals"]))

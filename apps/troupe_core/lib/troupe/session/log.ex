@@ -143,7 +143,8 @@ defmodule Troupe.Session.Log do
   `*` must not find whichever log comes first (#97).
 
   `state_dir` may be a list, searched in order: every state directory a daemon keeps
-  sessions in (`Troupe.Sessions.Index.roots/0`, Decision 855).
+  sessions in (`Troupe.Sessions.Index.roots/0`, Decision 855). The search goes through every
+  workspace's directory there, so not through the file server (`Troupe.Paths.wildcard/1`).
   """
   @spec locate(String.t(), Path.t() | [Path.t() | nil] | nil) :: Path.t() | nil
   def locate(session_id, state_dir \\ nil)
@@ -156,7 +157,7 @@ defmodule Troupe.Session.Log do
 
     [root, "sessions", "*", Paths.glob_escape(session_id), "events.jsonl"]
     |> Path.join()
-    |> Path.wildcard()
+    |> Paths.wildcard()
     |> List.first()
   end
 
@@ -173,11 +174,13 @@ defmodule Troupe.Session.Log do
   Read a session's events straight off disk, without a running session.
 
   Used by `troupe resume` and `troupe ctl verify`, which must work when nothing is
-  running — including against a log written by a different machine.
+  running — including against a log written by a different machine. Read in the calling
+  process, not by the file server, which every other file operation in the VM waits on
+  while it reads (#589).
   """
   @spec read_file(Path.t()) :: [Event.t()]
   def read_file(path) do
-    case File.read(path) do
+    case :file.read_file(path, [:raw]) do
       {:ok, contents} -> decode_lines(contents)
       {:error, _} -> []
     end

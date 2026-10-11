@@ -38,7 +38,10 @@
   neither it installs the latest release, which GitHub names at /releases/latest. A private
   repository answers that only to somebody signed in: set TROUPE_VERSION, and
   TROUPE_RELEASE_URL to wherever your organisation mirrors releases. TROUPE_BIN_DIR and
-  TROUPE_LIB_DIR move the two directories.
+  TROUPE_LIB_DIR move the two directories. An install whose programs are moved so is one
+  of its own: its -Uninstall and -CleanInstall remove and stop what is in its directories,
+  and leave the desktop app, the TUI's unpacked payload and what starts another install's
+  daemon at login to the install in %LOCALAPPDATA%\Programs\troupe.
 .EXAMPLE
   irm https://github.com/it-minds/troupe/releases/latest/download/install.ps1 -OutFile install.ps1
   powershell -ExecutionPolicy Bypass -File .\install.ps1
@@ -81,7 +84,8 @@ $PinnedVersion = ""
 $ReleaseKey = ""
 
 $Repo = if ($env:TROUPE_REPO) { $env:TROUPE_REPO } else { "it-minds/troupe" }
-$BinDir = if ($env:TROUPE_BIN_DIR) { $env:TROUPE_BIN_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\troupe" }
+$DefaultBinDir = Join-Path $env:LOCALAPPDATA "Programs\troupe"
+$BinDir = if ($env:TROUPE_BIN_DIR) { $env:TROUPE_BIN_DIR } else { $DefaultBinDir }
 $LibDir = if ($env:TROUPE_LIB_DIR) { $env:TROUPE_LIB_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\troupe-daemon" }
 $Shim = Join-Path $BinDir "troupe-daemon.cmd"
 $TuiExe = Join-Path $BinDir "troupe.exe"
@@ -89,8 +93,21 @@ $TuiExe = Join-Path $BinDir "troupe.exe"
 $LicenceFiles = @("LICENSE", "NOTICE", "THIRD-PARTY-NOTICES.txt")
 $StateDir = if ($env:TROUPE_STATE_HOME) { $env:TROUPE_STATE_HOME } else { Join-Path $env:LOCALAPPDATA "troupe" }
 $ConfigDir = if ($env:TROUPE_CONFIG_HOME) { $env:TROUPE_CONFIG_HOME } else { Join-Path $env:APPDATA "troupe" }
-# Where the TUI's Burrito wrapper unpacks itself on first run, once per version.
-$BurritoDirs = @((Join-Path $env:APPDATA ".burrito"), (Join-Path $env:LOCALAPPDATA ".burrito"))
+
+function Get-FullPath([string]$Path) {
+  try { return [System.IO.Path]::GetFullPath($Path).TrimEnd([char[]]"\/") } catch { return $Path.TrimEnd([char[]]"\/") }
+}
+
+# Whether this is the default install, whose programs are in %LOCALAPPDATA%\Programs\troupe.
+# It alone owns what every install on this machine shares (Decision 873): the desktop app,
+# which its setup puts in its own place whatever TROUPE_BIN_DIR says, the TUI's unpacked
+# payload, which every troupe.exe of a version unpacks to the same place, the processes
+# running from those, and the entry that starts a daemon at login. An install elsewhere, a
+# second one or a test of this script, removes and stops what is in its own directories.
+$AtDefault = (Get-FullPath $BinDir) -eq (Get-FullPath $DefaultBinDir)
+# Where the TUI's Burrito wrapper unpacks itself on first run, once per version: the
+# default install's to clear.
+$BurritoDirs = if ($AtDefault) { @((Join-Path $env:APPDATA ".burrito"), (Join-Path $env:LOCALAPPDATA ".burrito")) } else { @() }
 # The VS Code extension: its id, and the file a release attaches.
 $VSCodeExtension = "objective-mj.troupe"
 $Vsix = "troupe.vsix"
@@ -151,6 +168,17 @@ function Get-DesktopEntry {
     Select-Object -First 1
 }
 
+# The same, when the desktop app is this install's to stop and remove: the default
+# install's, or one whose program is in this install's directories. An install elsewhere
+# leaves the person's desktop app alone (Decision 873).
+function Get-OwnDesktopEntry {
+  $entry = Get-DesktopEntry
+  if (-not $entry -or $AtDefault) { return $entry }
+  $exe = "$($entry.DisplayIcon)".Trim('"')
+  if ($exe -and (Test-Under $exe @("$(Get-FullPath $BinDir)\", "$(Get-FullPath $LibDir)\"))) { return $entry }
+  return $null
+}
+
 # VS Code's command line, which installs an extension: TROUPE_VSCODE_CLI, else code.cmd on
 # the PATH, else where VS Code's user and system setups put it. Run only where the
 # extension is in question, not for a summary: it starts VS Code's own Node.
@@ -196,11 +224,12 @@ function Test-Under([string]$Path, [string[]]$Prefixes) {
 }
 
 # Troupe processes running from what this installs, by what they are. Another BEAM on this
-# machine is somebody else's work, so it is the executable's path that decides.
+# machine is somebody else's work, so it is the executable's path that decides. A TUI
+# running from the shared payload, and the desktop app, are the default install's.
 function Get-Running {
   $burrito = @($BurritoDirs | ForEach-Object { Join-Path $_ "troupe_" })
   $desktopExe = $null
-  $entry = Get-DesktopEntry
+  $entry = Get-OwnDesktopEntry
   if ($entry -and $entry.DisplayIcon) { $desktopExe = "$($entry.DisplayIcon)".Trim('"') }
   foreach ($p in Get-Process) {
     $path = $null
@@ -227,7 +256,7 @@ function Format-Pids($Procs, [string]$What) {
 }
 
 # Burrito unpacks once per version, so a payload left by a build of the same version as the
-# new binary would run instead of it.
+# new binary would run instead of it. Only the default install has any to clear.
 function Clear-TuiPayload {
   foreach ($base in $BurritoDirs) {
     if (-not (Test-Path $base)) { continue }
@@ -239,7 +268,7 @@ function Clear-TuiPayload {
 }
 
 function Uninstall-Desktop {
-  $entry = Get-DesktopEntry
+  $entry = Get-OwnDesktopEntry
   if (-not $entry) { return }
   $uninstaller = if ($entry.UninstallString -match '^"([^"]+)"') { $Matches[1] } else { $entry.UninstallString.Trim() }
   Write-Host "running the desktop app's uninstaller silently"
@@ -393,12 +422,29 @@ function Disable-StartAtLogin {
   Write-Warn "troupe-daemon login off failed ($($said | Select-Object -First 1)); what starts it at login may be left behind"
 }
 
+# Whether `login off` is this install's to run. There is one entry per person, and `login
+# off` removes it whichever daemon it starts, so an install elsewhere runs it only when the
+# entry Get-StartAtLogin names starts this install's daemon (Decision 873).
+function Test-OwnStartAtLogin([string]$Entry) {
+  if ($AtDefault) { return $true }
+  if (-not $Entry) { return $false }
+  $text = try { Get-Content -Raw -LiteralPath $Entry -ErrorAction Stop } catch { "" }
+  foreach ($daemon in @($Shim, (Join-Path $LibDir "bin\troupe-daemon"))) {
+    if ("$text".IndexOf($daemon, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+  }
+  return $false
+}
+
 function Write-RemovalPlan([bool]$PurgeToo) {
   $daemonVersion = Get-DaemonVersion
-  $entry = Get-DesktopEntry
+  $entry = Get-OwnDesktopEntry
   if ($daemonVersion) { Write-Item "remove troupe-daemon $daemonVersion ($LibDir, $Shim)" }
-  if (Test-Path $TuiExe) { Write-Item "remove troupe ($TuiExe) and its unpacked payload" }
+  if (Test-Path $TuiExe) {
+    if ($AtDefault) { Write-Item "remove troupe ($TuiExe) and its unpacked payload" }
+    else { Write-Item "remove troupe ($TuiExe); its unpacked payload, which every troupe of its version shares, stays" }
+  }
   if ($entry) { Write-Item "remove the desktop app $($entry.DisplayVersion), with its own uninstaller" }
+  elseif (Get-DesktopEntry) { Write-Item "leave the desktop app alone: it is not installed in $BinDir or $LibDir" }
   if ($PurgeToo) {
     Write-Item "DELETE config ($ConfigDir) and state, sessions included ($StateDir)"
   } else {
@@ -418,7 +464,7 @@ function Write-StopPlan($Procs) {
 function Get-InstalledSummary {
   $parts = @()
   $daemonVersion = Get-DaemonVersion
-  $entry = Get-DesktopEntry
+  $entry = Get-OwnDesktopEntry
   if ($daemonVersion) { $parts += "troupe-daemon $daemonVersion" }
   if (Test-Path $TuiExe) { $parts += "troupe" }
   if ($entry) { $parts += "the desktop app $($entry.DisplayVersion)" }
@@ -436,7 +482,9 @@ if ($Uninstall) {
   }
   $running = @(Get-Running)
   $atLogin = Get-StartAtLogin
-  if ($atLogin) { Write-Item "remove what starts troupe-daemon at login ($atLogin)" }
+  $ownAtLogin = Test-OwnStartAtLogin $atLogin
+  if ($atLogin -and $ownAtLogin) { Write-Item "remove what starts troupe-daemon at login ($atLogin)" }
+  elseif ($atLogin) { Write-Item "leave what starts troupe-daemon at login alone ($atLogin): it starts another install's" }
   Write-StopPlan $running
   Write-RemovalPlan $Purge
   if ($extensionWas) { Write-Item "remove the VS Code extension ($VSCodeExtension)" }
@@ -445,7 +493,7 @@ if ($Uninstall) {
     Write-Host ""
     if (-not (Read-YesNo "Go ahead?" (-not $Purge))) { Write-Host "nothing changed"; return }
   }
-  Disable-StartAtLogin
+  if ($ownAtLogin) { Disable-StartAtLogin }
   Stop-Running @(Get-Running)
   Remove-Installed
   if ($extensionWas -and -not (Invoke-Code $codeCli --uninstall-extension $VSCodeExtension).Ok) {
