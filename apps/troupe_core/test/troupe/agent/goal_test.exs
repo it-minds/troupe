@@ -118,10 +118,10 @@ defmodule Troupe.Agent.GoalTest do
         start_session(context,
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "explore", "task" => "look around"}}]},
+              {:tools, [{"delegate", brief("explore", "look around")}]},
               {:text, "explored"}
             ],
-            "explore" => [{:tools, [{"finish", %{"summary" => "looked"}}]}]
+            "explore" => [{:tools, [{"finish", finished("looked")}]}]
           }
         )
 

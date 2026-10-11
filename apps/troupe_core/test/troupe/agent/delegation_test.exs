@@ -17,14 +17,14 @@ defmodule Troupe.Agent.DelegationTest do
             "root" => [
               {:tools,
                Enum.map(1..4, fn n ->
-                 {"delegate", %{"agent" => "general", "task" => "task #{n}"}}
+                 {"delegate", brief("general", "task #{n}")}
                end)},
               {:text, "all four came back"}
             ],
             # Four children run concurrently, so their answers come from one route
             # rather than from the root's list, where the interleaving would decide
             # who got which step.
-            "general" => List.duplicate({:tools, [{"finish", %{"summary" => "child result"}}]}, 4)
+            "general" => List.duplicate({:tools, [{"finish", finished("child result")}]}, 4)
           }
         )
 
@@ -42,7 +42,7 @@ defmodule Troupe.Agent.DelegationTest do
 
       assert length(completed) == 4
       assert Enum.all?(completed, & &1.data["ok"])
-      assert Enum.all?(completed, &(&1.data["content"] == "child result"))
+      assert Enum.all?(completed, &(&1.data["content"] == reported("child result")))
     end
 
     test "one child failing past its restart intensity fails only its own delegation",
@@ -53,14 +53,14 @@ defmodule Troupe.Agent.DelegationTest do
             "root" => [
               {:tools,
                [
-                 {"delegate", %{"agent" => "general", "task" => "one"}},
-                 {"delegate", %{"agent" => "general", "task" => "two"}},
-                 {"delegate", %{"agent" => "general", "task" => "three"}},
-                 {"delegate", %{"agent" => "doomed", "task" => "four"}}
+                 {"delegate", brief("general", "one")},
+                 {"delegate", brief("general", "two")},
+                 {"delegate", brief("general", "three")},
+                 {"delegate", brief("doomed", "four")}
                ]},
               {:text, "three of four"}
             ],
-            "general" => List.duplicate({:tools, [{"finish", %{"summary" => "ok"}}]}, 3),
+            "general" => List.duplicate({:tools, [{"finish", finished("ok")}]}, 3),
             # The doomed child never answers: the test kills it until its Node gives up.
             # A restarted agent asks again, so there is a step here for every kill: a
             # request whose answer the kill threw away has still consumed its step, and
@@ -100,7 +100,7 @@ defmodule Troupe.Agent.DelegationTest do
           config_overrides: [max_turns: 20],
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:tools, [{"delegate", brief("general", "look into it")}]},
               {:text, "root done"}
             ],
             # The child says something useful, then keeps calling tools until its
@@ -137,7 +137,7 @@ defmodule Troupe.Agent.DelegationTest do
           config_overrides: [max_turns: 20],
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:tools, [{"delegate", brief("general", "look into it")}]},
               {:text, "root done"}
             ],
             "general" => List.duplicate({:tools, [{"todo_read", %{}}]}, 20)
@@ -162,7 +162,7 @@ defmodule Troupe.Agent.DelegationTest do
           config_overrides: [max_turns: 20],
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:tools, [{"delegate", brief("general", "look into it")}]},
               {:text, "root done"}
             ],
             # Some models open a turn with a bare "\n\n" before its tool calls and leave
@@ -195,7 +195,7 @@ defmodule Troupe.Agent.DelegationTest do
         start_session(context,
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:tools, [{"delegate", brief("general", "look into it")}]},
               {:text, "root done"}
             ],
             "general" => [
@@ -226,7 +226,7 @@ defmodule Troupe.Agent.DelegationTest do
         start_session(context,
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:tools, [{"delegate", brief("general", "look into it")}]},
               {:text, "root done"}
             ],
             "general" => [{:error, {:api_error, "the gateway is down"}}]
@@ -259,12 +259,12 @@ defmodule Troupe.Agent.DelegationTest do
             "root" =>
               List.duplicate({:tools, [{"todo_read", %{}}]}, 6) ++
                 [
-                  {:tools, [{"delegate", %{"agent" => "explore", "task" => "summarise the app"}}]},
+                  {:tools, [{"delegate", brief("explore", "summarise the app")}]},
                   {:text, "root done"}
                 ],
             "explore" =>
               List.duplicate({:tools, [{"read_file", %{"path" => "mix.exs"}}]}, 20) ++
-                [{:tools, [{"finish", %{"summary" => "an app with a mix.exs"}}]}]
+                [{:tools, [{"finish", finished("an app with a mix.exs")}]}]
           }
         )
 
@@ -278,7 +278,7 @@ defmodule Troupe.Agent.DelegationTest do
         |> Enum.find(&(&1.data["name"] == "delegate"))
 
       assert result.data["ok"]
-      assert result.data["content"] == "an app with a mix.exs"
+      assert result.data["content"] == reported("an app with a mix.exs")
 
       [explore] = Enum.filter(events_of_type(session.id, "agent_done"), &(&1.agent != ["root"]))
       assert explore.data["reason"] == "finished"
@@ -291,7 +291,7 @@ defmodule Troupe.Agent.DelegationTest do
         start_session(context,
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:tools, [{"delegate", brief("general", "look into it")}]},
               {:text, "root done"}
             ],
             "general" => [{:text, "\n\nThe retry logic is in lib/retry.ex.\n"}]
@@ -303,7 +303,9 @@ defmodule Troupe.Agent.DelegationTest do
       await_root_idle(session.id)
 
       result = session.id |> events_of_type("tool_call_completed") |> Enum.find(&(&1.data["name"] == "delegate"))
-      assert result.data["content"] == "The retry logic is in lib/retry.ex."
+      # Without `finish` it said nothing of what it checked, and the parent is told so.
+      assert result.data["content"] =~ ~r/^The retry logic is in lib\/retry.ex.\n\nchanged: nothing\n/
+      assert result.data["content"] =~ "unverified: all of it: it answered without calling finish"
     end
 
     test "of whitespace alone is not a summary: it is nudged once, then ends empty", context do
@@ -311,7 +313,7 @@ defmodule Troupe.Agent.DelegationTest do
         start_session(context,
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:tools, [{"delegate", brief("general", "look into it")}]},
               {:text, "root done"}
             ],
             "general" => [{:text, "\n\n"}, {:text, "  \n"}]
@@ -337,7 +339,7 @@ defmodule Troupe.Agent.DelegationTest do
         start_session(context,
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "spawn grandchildren"}}]},
+              {:tools, [{"delegate", brief("general", "spawn grandchildren")}]},
               {:text, "done"}
             ],
             # The first child delegates twice more, so there is a real subtree to kill;
@@ -345,8 +347,8 @@ defmodule Troupe.Agent.DelegationTest do
             "general" => [
               {:tools,
                [
-                 {"delegate", %{"agent" => "general", "task" => "deep one"}},
-                 {"delegate", %{"agent" => "general", "task" => "deep two"}}
+                 {"delegate", brief("general", "deep one")},
+                 {"delegate", brief("general", "deep two")}
                ]},
               {:tools, [{"shell", %{"command" => "sleep 30"}}]},
               {:tools, [{"shell", %{"command" => "sleep 30"}}]}
@@ -386,15 +388,15 @@ defmodule Troupe.Agent.DelegationTest do
           routes: %{
             "root" => [
               {:tools,
-               Enum.map(1..4, &{"delegate", %{"agent" => "general", "task" => "quick #{&1}"}}) ++
-                 [{"delegate", %{"agent" => "lingering", "task" => "slow"}}]},
+               Enum.map(1..4, &{"delegate", brief("general", "quick #{&1}")}) ++
+                 [{"delegate", brief("lingering", "slow")}]},
               {:text, "all five came back"}
             ],
-            "general" => List.duplicate({:tools, [{"finish", %{"summary" => "quick"}}]}, 4),
+            "general" => List.duplicate({:tools, [{"finish", finished("quick")}]}, 4),
             "lingering" => [
               {:tools,
                [{"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 1_500}}]},
-              {:tools, [{"finish", %{"summary" => "slow"}}]}
+              {:tools, [{"finish", finished("slow")}]}
             ]
           },
           definitions: definitions_with(["lingering"])
@@ -404,7 +406,7 @@ defmodule Troupe.Agent.DelegationTest do
       Troupe.subscribe(sid)
       Troupe.send_input(sid, "five things, one slow")
 
-      await_results(sid, "quick", 4)
+      await_results(sid, reported("quick"), 4)
       [lingering] = children_of(sid, "lingering")
 
       # Four have reported and the fifth is still counting: the fifth is all that is left.
@@ -431,11 +433,11 @@ defmodule Troupe.Agent.DelegationTest do
           routes: %{
             "root" =>
               List.duplicate(
-                {:tools, [{"delegate", %{"agent" => "general", "task" => "one more"}}]},
+                {:tools, [{"delegate", brief("general", "one more")}]},
                 5
               ) ++
                 [{:text, "five in a row"}],
-            "general" => List.duplicate({:tools, [{"finish", %{"summary" => "done one"}}]}, 5)
+            "general" => List.duplicate({:tools, [{"finish", finished("done one")}]}, 5)
           }
         )
 
@@ -458,11 +460,11 @@ defmodule Troupe.Agent.DelegationTest do
         start_session(context,
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "look"}}]},
+              {:tools, [{"delegate", brief("general", "look")}]},
               {:text, "it found it"}
             ],
             "general" => [
-              {:text_and_tools, "found it in lib/a.ex", [{"finish", %{"summary" => "lib/a.ex"}}]}
+              {:text_and_tools, "found it in lib/a.ex", [{"finish", finished("lib/a.ex")}]}
             ]
           }
         )
@@ -478,15 +480,17 @@ defmodule Troupe.Agent.DelegationTest do
       child_log = sid |> Troupe.events() |> Enum.filter(&(&1.agent == child))
       assert %{type: "agent_started"} = List.first(child_log)
 
-      assert %{type: "agent_done", data: %{"reason" => "finished", "summary" => "lib/a.ex"}} =
+      assert %{type: "agent_done", data: %{"reason" => "finished", "summary" => summary}} =
                List.last(child_log)
+
+      assert summary == reported("lib/a.ex")
 
       before = Troupe.snapshot(sid).conversation
 
       assert Enum.any?(before, fn message ->
                Enum.any?(
                  List.wrap(message.content),
-                 &match?(%ToolResult{content: "lib/a.ex"}, &1)
+                 &match?(%ToolResult{content: ^summary}, &1)
                )
              end)
 
@@ -515,13 +519,13 @@ defmodule Troupe.Agent.DelegationTest do
           config_overrides: [max_depth: 1],
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "go deeper"}}]},
+              {:tools, [{"delegate", brief("general", "go deeper")}]},
               {:text, "root done"}
             ],
             # The child is at depth 1 and may not delegate further.
             "general" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "too deep"}}]},
-              {:tools, [{"finish", %{"summary" => "could not delegate further"}}]}
+              {:tools, [{"delegate", brief("general", "too deep")}]},
+              {:tools, [{"finish", finished("could not delegate further")}]}
             ]
           }
         )

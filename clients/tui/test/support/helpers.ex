@@ -107,10 +107,10 @@ defmodule Troupe.TestHelpers do
   # summary of a `{:finish, _}` that follows it, when one does — and a test that wants a
   # reply *without* the agent finishing spells `{:text_and_tools, text, []}`.
   defp finishing([{:text, text}, {:finish, summary} | rest]),
-    do: [{:text_and_tools, text, [{"finish", %{"summary" => summary}}]} | finishing(rest)]
+    do: [{:text_and_tools, text, [{"finish", finish_input(summary)}]} | finishing(rest)]
 
   defp finishing([{:text, text} | rest]),
-    do: [{:text_and_tools, text, [{"finish", %{"summary" => text}}]} | finishing(rest)]
+    do: [{:text_and_tools, text, [{"finish", finish_input(text)}]} | finishing(rest)]
 
   defp finishing([step | rest]), do: [step | finishing(rest)]
   defp finishing([]), do: []
@@ -166,11 +166,21 @@ defmodule Troupe.TestHelpers do
     do: Map.put(json_step({:tools, calls}), "text", text)
 
   defp json_step({:finish, summary}),
-    do: %{"tools" => [%{"name" => "finish", "input" => %{"summary" => summary}}]}
+    do: %{"tools" => [%{"name" => "finish", "input" => finish_input(summary)}]}
 
   defp json_step({:error, reason}), do: %{"error" => to_string(reason)}
   # The JSON the daemon reads, as it is: for what the tuples do not spell, such as `stop`.
   defp json_step(%{} = step), do: step
+
+  # A `finish` takes its parts, each one, or the daemon refuses it (troupe Decision 847).
+  defp finish_input(summary),
+    do: %{
+      "summary" => summary,
+      "ran" => "none",
+      "passed" => "none",
+      "unverified" => "none",
+      "needs" => "none"
+    }
 
   @doc "Waits for the window `path` to reach `state`: `:done`, `:thinking`, `:idle`, `:acting`."
   def await_state(path, state, timeout \\ 5_000) do

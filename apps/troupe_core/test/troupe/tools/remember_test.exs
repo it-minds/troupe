@@ -19,7 +19,7 @@ defmodule Troupe.Tools.RememberTest do
       start_session(context,
         steps: [
           {:tools, [{"remember", %{"section" => "note", "text" => "the ledger is a fold over the log"}}]},
-          {:text_and_tools, "Noted.", [{"finish", %{"summary" => "noted"}}]}
+          {:text_and_tools, "Noted.", [{"finish", finished("noted")}]}
         ]
       )
 
@@ -36,7 +36,7 @@ defmodule Troupe.Tools.RememberTest do
            "a note alone is not a built brief"
 
     %{session: second, fake: fake2} =
-      start_session(context, steps: [{:text_and_tools, "hi", [{"finish", %{"summary" => "ok"}}]}])
+      start_session(context, steps: [{:text_and_tools, "hi", [{"finish", finished("ok")}]}])
 
     :ok = Troupe.subscribe(second.id)
     Troupe.send_input(second.id, "hello")
@@ -94,7 +94,7 @@ defmodule Troupe.Tools.RememberTest do
     write_file(context, ".troupe/memory.md", "## Overview\nWritten by hand.\n")
     assert Memory.status(context.workspace, config) == :stale
 
-    librarian!(context, [{:tools, [{"finish", %{"summary" => "nothing to change"}}]}])
+    librarian!(context, [{:tools, [{"finish", finished("nothing to change")}]}])
     assert Memory.status(context.workspace, config) == :fresh
     brief = Memory.brief(context.workspace)
     assert Troupe.Memory.section(brief, "Overview") == "- Written by hand."

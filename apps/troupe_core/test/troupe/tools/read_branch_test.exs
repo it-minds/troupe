@@ -23,7 +23,7 @@ defmodule Troupe.Tools.ReadBranchTest do
              {"todo_write",
               %{"items" => [%{"id" => "1", "content" => "rename the module", "status" => "completed"}]}}
            ]},
-          {:text_and_tools, "Renamed.", [{"finish", %{"summary" => "renamed Foo to Bar"}}]}
+          {:text_and_tools, "Renamed.", [{"finish", finished("renamed Foo to Bar")}]}
         ]
       )
 

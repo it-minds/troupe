@@ -17,10 +17,17 @@ defmodule Troupe.Tools.ReadBranch do
   subagents, so the description says otherwise, and a wrong id is answered with the ids
   that exist: a bare "no branch 7" once had a model guess ids one call at a time, for
   hundreds of calls (#116).
+
+  The one thing a finished subagent's result leaves out is the diff of what it wrote: its
+  `finish` says what changed as a stat and names the `child` to read here, with `diff`,
+  for the rest (#554, Decision 847). The diff is given only when it is asked for, of a
+  branch as of a subagent, since a diff handed back unasked is the context a delegation
+  exists to save (`Troupe.Agent.Writes`).
   """
 
   @behaviour Troupe.Tool
 
+  alias Troupe.Agent.Writes
   alias Troupe.Log.Fold
   alias Troupe.Protocol.Event
   alias Troupe.Session.Log
@@ -31,10 +38,9 @@ defmodule Troupe.Tools.ReadBranch do
 
   @impl Troupe.Tool
   def description do
-    "List this session's branches, or read what a finished one was asked and what it " <>
-      "answered. A branch is a separate session started from this one, by the person or " <>
-      "by the librarian. A subagent you started with `delegate` is not a branch: what it " <>
-      "found is the result of the delegate call that started it."
+    "List this session's branches, or read what a finished one was asked and answered. A " <>
+      "subagent is no branch: its finish is its delegate call's result; only its diff is " <>
+      "read here, by `child`."
   end
 
   @impl Troupe.Tool
@@ -44,10 +50,10 @@ defmodule Troupe.Tools.ReadBranch do
       "properties" => %{
         "session_id" => %{
           "type" => "string",
-          "description" =>
-            "The session id of the branch to read, as the listing gives it. Leave out to " <>
-              "list every branch of this session with its state."
-        }
+          "description" => "The branch to read. Leave out to list them."
+        },
+        "child" => %{"type" => "string", "description" => "A subagent, as its finish names it."},
+        "diff" => %{"type" => "boolean", "description" => "Add the full diff of what it wrote."}
       },
       "required" => []
     }
@@ -58,10 +64,26 @@ defmodule Troupe.Tools.ReadBranch do
 
   @impl Troupe.Tool
   def run(args, ctx) do
-    case Map.get(args, "session_id") do
-      nil -> {:ok, list(ctx)}
-      id when is_binary(id) -> read(ctx, id)
-      other -> {:error, {:invalid_args, "session_id must be a string, got #{inspect(other)}"}}
+    diff? = Map.get(args, "diff") == true
+
+    case {Map.get(args, "session_id"), Map.get(args, "child")} do
+      {nil, nil} ->
+        {:ok, list(ctx)}
+
+      {id, nil} when is_binary(id) ->
+        read(ctx, id, diff?)
+
+      {nil, child} when is_binary(child) ->
+        read_child(ctx, ctx.session_id, child, diff?)
+
+      {id, child} when is_binary(id) and is_binary(child) ->
+        read_branch_child(ctx, id, child, diff?)
+
+      {id, nil} ->
+        {:error, {:invalid_args, "session_id must be a string, got #{inspect(id)}"}}
+
+      {_id, child} ->
+        {:error, {:invalid_args, "child must be a string, got #{inspect(child)}"}}
     end
   end
 
@@ -108,26 +130,104 @@ defmodule Troupe.Tools.ReadBranch do
 
   # -- one branch --------------------------------------------------------------
 
-  defp read(ctx, id) do
+  defp read(ctx, id, diff?) do
     with {:ok, meta} <- fetch_branch(ctx, id),
          events = events(id, ctx),
          {:ok, summary} <- finished(events, id) do
       todos = todos_of(events)
 
       {:ok,
-       """
-       branch #{id} (#{meta.profile})
-       prompt: #{prompt_of(events) || "(none)"}
+       ("""
+        branch #{id} (#{meta.profile})
+        prompt: #{prompt_of(events) || "(none)"}
 
-       summary:
-       #{summary}
+        summary:
+        #{summary}
 
-       task list:
-       #{render_todos(todos)}
-       """
-       |> String.trim_trailing()}
+        task list:
+        #{render_todos(todos)}
+        """
+        |> String.trim_trailing()) <> diff(events, ["root"], diff?)}
     end
   end
+
+  # -- a subagent ----------------------------------------------------------------
+
+  defp read_branch_child(ctx, id, child, diff?) do
+    with {:ok, _meta} <- fetch_branch(ctx, id), do: read_child(ctx, id, child, diff?)
+  end
+
+  # A subagent of the session `id`, named by its path as its finish gives it, or by its
+  # last part when it is one of the reader's own: its brief, what it finished with, and
+  # the diff of its writes when that is asked for.
+  defp read_child(ctx, id, child, diff?) do
+    events = events(id, ctx)
+    path = child_path(child, ctx)
+    mine = Enum.filter(events, &(&1.agent == path))
+
+    case Enum.find(mine, &(&1.type == "agent_started")) do
+      nil ->
+        {:error, no_child(child, events)}
+
+      %Event{data: data} ->
+        with {:ok, summary} <- child_finished(mine, child) do
+          {:ok,
+           """
+           subagent #{Enum.join(path, "/")} (#{data["profile"]})
+           brief:
+           #{child_brief(mine) || "(none)"}
+
+           finish:
+           #{summary}\
+           """ <> diff(events, path, diff?)}
+        end
+    end
+  end
+
+  defp child_path(child, ctx) do
+    case String.split(child, "/", trim: true) do
+      [_one] = name -> ctx.agent_path ++ name
+      path -> path
+    end
+  end
+
+  defp child_brief(events) do
+    Enum.find_value(events, fn
+      %Event{type: "user_input", data: %{"text" => text}} -> text
+      _ -> nil
+    end)
+  end
+
+  defp child_finished(events, child) do
+    events
+    |> Enum.filter(&(&1.type == "agent_done"))
+    |> List.last()
+    |> case do
+      %Event{data: %{"reason" => "finished"} = data} -> {:ok, data["summary"] || "(no summary)"}
+      %Event{data: %{"reason" => reason}} -> {:ok, "(ended: #{reason})"}
+      nil -> {:error, "subagent #{child} has not finished"}
+    end
+  end
+
+  # A wrong path is answered with the subagents there are, as a wrong branch id is.
+  defp no_child(child, events) do
+    known =
+      for %Event{type: "delegation_started", data: %{"child_path" => path}} <- events,
+          do: Enum.join(path, "/")
+
+    listed =
+      case known do
+        [] -> "This session has no subagents."
+        _ -> "The subagents there are: " <> Enum.join(known, ", ") <> "."
+      end
+
+    "no subagent #{inspect(child)}. #{listed}"
+  end
+
+  defp diff(_events, _path, false), do: ""
+
+  defp diff(events, path, true),
+    do: "\n\ndiff:\n" <> (events |> Writes.of(path) |> Writes.diff())
 
   # Only a session in the family is readable: a branch is not a way to open any log on
   # the machine by guessing an id. So a wrong id is answered with the right ones.

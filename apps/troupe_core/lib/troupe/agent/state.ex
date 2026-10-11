@@ -144,6 +144,8 @@ defmodule Troupe.Agent.State do
     failure_asks: 0,
     failure_ask: nil,
     compact_resume: :idle,
+    # The parts a `finish` of this turn gave (Decision 847), reported once the turn's other
+    # calls are back; a summary alone when it came off a log from before the parts.
     finish_summary: nil,
     fake: nil,
     # Inputs that arrived mid-turn and have been announced as `input_queued`. Needed
@@ -214,7 +216,7 @@ defmodule Troupe.Agent.State do
           failure_asks: non_neg_integer(),
           failure_ask: {String.t(), pos_integer()} | nil,
           compact_resume: :idle | :thinking,
-          finish_summary: String.t() | nil,
+          finish_summary: %{String.t() => String.t()} | nil,
           fake: pid() | atom() | nil,
           queued: MapSet.t(String.t()),
           shell_notes: [String.t()],

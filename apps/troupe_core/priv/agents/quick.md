@@ -22,4 +22,4 @@ Do not open with a survey of the tree. Do not write a task list — the work is 
 
 Remove every processed `AI!` and `AI?` marker comment as part of your edit; leaving one behind triggers the watcher again on the next save.
 
-When done, call `finish` with one or two sentences: what you changed and how you checked it.
+When done, call `finish`: one or two sentences in `summary` on what you changed, the command you checked it with in `ran` and what you saw pass in `passed`, what you did not check in `unverified`, and in `needs` what a request too large for you would need, or none.

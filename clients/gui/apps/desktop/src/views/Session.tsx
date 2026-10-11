@@ -12,7 +12,19 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { isBlobRef, isBusy, needsYou, openApprovals, openQuestions, rootState, settleLoop, unseenSummary } from "@troupe/client";
+import {
+  BRIEF_PARTS,
+  FINISH_PARTS,
+  isBlobRef,
+  isBusy,
+  needsYou,
+  openApprovals,
+  openQuestions,
+  partsOf,
+  rootState,
+  settleLoop,
+  unseenSummary,
+} from "@troupe/client";
 import type {
   AttachStatus,
   AuthSession,
@@ -635,10 +647,11 @@ function StreamEntry({
     case "tool":
       return <ToolActivity entry={entry} readBlob={readBlob} />;
 
+    // The brief's goal says what it is for in a line; the parts are in the delegate call's.
     case "delegation":
       return (
         <p className="note">
-          Handed to {entry.child}: {entry.task}
+          Handed to {entry.child}: {entry.brief.find(([name]) => name === "goal")?.[1] ?? entry.task}
         </p>
       );
 
@@ -712,8 +725,12 @@ function modelErrorStep(text: string): string | null {
  */
 function ToolActivity({ entry, readBlob }: { entry: Extract<Entry, { kind: "tool" }>; readBlob: (b: string) => Promise<string> }): JSX.Element {
   const args = (entry.args ?? {}) as Record<string, unknown>;
-  const target = ["path", "file", "command", "query", "url"].map((k) => args[k]).find((v) => typeof v === "string") as string | undefined;
+  const target = ["path", "file", "command", "query", "url", "agent"].map((k) => args[k]).find((v) => typeof v === "string") as string | undefined;
   const running = entry.ok === undefined;
+  // A brief and a finish are read as their parts, each under its name, not as JSON
+  // (troupe Decision 847); a call from before they had parts has none, and stays JSON.
+  const shape = entry.name === "delegate" ? BRIEF_PARTS : entry.name === "finish" ? FINISH_PARTS : null;
+  const parts = shape ? partsOf(entry.args, shape) : [];
 
   return (
     <details className={`tool ${running ? "running" : entry.ok ? "ok" : "failed"}`}>
@@ -722,7 +739,18 @@ function ToolActivity({ entry, readBlob }: { entry: Extract<Entry, { kind: "tool
         <span className="target">{target ?? ""}</span>
         <span className="muted">{running ? "running" : entry.ok ? "done" : "failed"}</span>
       </summary>
-      <pre className="payload">{JSON.stringify(entry.args, null, 2)}</pre>
+      {parts.length > 0 ? (
+        <dl className="payload facts wide parts">
+          {parts.map(([name, text]) => (
+            <Fragment key={name}>
+              <dt>{name.replace("_", " ")}</dt>
+              <dd>{text}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      ) : (
+        <pre className="payload">{JSON.stringify(entry.args, null, 2)}</pre>
+      )}
       {entry.content !== undefined &&
         (isBlobRef(entry.content) ? (
           <LargeResult reference={entry.content} readBlob={readBlob} />

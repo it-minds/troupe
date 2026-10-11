@@ -107,18 +107,18 @@ defmodule Troupe.LLM.FakeScriptTest do
           "root" => [
             %{
               "tools" => [
-                %{"name" => "delegate", "input" => %{"agent" => "explore", "task" => "look"}}
+                %{"name" => "delegate", "input" => brief("explore", "look")}
               ]
             },
             %{
               "text" => "the explorer said its piece",
-              "tools" => [%{"name" => "finish", "input" => %{"summary" => "done"}}]
+              "tools" => [%{"name" => "finish", "input" => finished("done")}]
             }
           ],
           "explore" => [
             %{
               "text" => "found it",
-              "tools" => [%{"name" => "finish", "input" => %{"summary" => "found it"}}]
+              "tools" => [%{"name" => "finish", "input" => finished("found it")}]
             }
           ]
         }

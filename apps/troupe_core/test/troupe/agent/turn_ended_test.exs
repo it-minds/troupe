@@ -35,7 +35,7 @@ defmodule Troupe.Agent.TurnEndedTest do
   end
 
   test "an agent that finishes is done, not at the end of a turn", context do
-    sid = run(context, [{:tools, [{"finish", %{"summary" => "all done"}}]}])
+    sid = run(context, [{:tools, [{"finish", finished("all done")}]}])
     await_state(sid, [:done], 10_000)
 
     assert [_done] = events_of_type(sid, :agent_done)

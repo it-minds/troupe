@@ -56,7 +56,7 @@ defmodule Troupe.Tools.OnboardWriteTest do
         config_overrides: [auto_approve: false],
         steps: [
           {:tools, [call()]},
-          {:text_and_tools, "Onboarded.", [{"finish", %{"summary" => "onboarded"}}]}
+          {:text_and_tools, "Onboarded.", [{"finish", finished("onboarded")}]}
         ]
       )
 
@@ -125,7 +125,7 @@ defmodule Troupe.Tools.OnboardWriteTest do
         steps: [
           {:tools, [call()]},
           {:tools, [{"onboard_write", user}]},
-          {:text_and_tools, "Done.", [{"finish", %{"summary" => "done"}}]}
+          {:text_and_tools, "Done.", [{"finish", finished("done")}]}
         ]
       )
 
@@ -174,7 +174,7 @@ defmodule Troupe.Tools.OnboardWriteTest do
         definitions: onboarder(),
         steps: [
           {:tools, [{"onboard_write", agents}]},
-          {:text_and_tools, "Done.", [{"finish", %{"summary" => "onboarded"}}]}
+          {:text_and_tools, "Done.", [{"finish", finished("onboarded")}]}
         ]
       )
 
@@ -212,7 +212,7 @@ defmodule Troupe.Tools.OnboardWriteTest do
         config_overrides: [auto_approve: false],
         steps: [
           {:tools, [call()]},
-          {:text_and_tools, "Left out.", [{"finish", %{"summary" => "nothing"}}]}
+          {:text_and_tools, "Left out.", [{"finish", finished("nothing")}]}
         ]
       )
 

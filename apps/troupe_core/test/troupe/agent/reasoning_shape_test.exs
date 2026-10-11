@@ -8,7 +8,7 @@ defmodule Troupe.Agent.ReasoningShapeTest do
 
   test "thinking is streamed as a reasoning delta, logged as a block, and kept out of the summary",
        context do
-    steps = [{:reasoning, "let me think", {:text_and_tools, "done", [{"finish", %{"summary" => "ok"}}]}}]
+    steps = [{:reasoning, "let me think", {:text_and_tools, "done", [{"finish", finished("ok")}]}}]
 
     %{session: session} = start_session(context, steps: steps)
     sid = session.id
@@ -25,7 +25,7 @@ defmodule Troupe.Agent.ReasoningShapeTest do
                    10_000
 
     assert done["reason"] == "finished"
-    assert done["summary"] == "ok"
+    assert done["summary"] == reported("ok")
 
     [response] = events_of_type(sid, :llm_response)
 

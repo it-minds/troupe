@@ -130,7 +130,11 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
               {"delegate",
                %{
                  "agent" => "explore",
-                 "task" => "Find the lighthouse keeper's cat's name in notes/ and report it."
+                 "goal" => "Find the lighthouse keeper's cat's name in notes/.",
+                 "context" => "The notes are plain text files in notes/.",
+                 "constraints" => "Read only.",
+                 "deliverable" => "The cat's name, and the file that says it.",
+                 "do_not" => "Do not write any file."
                }}
             ]},
            {:tools, [{"write_file", %{"path" => "answer.txt", "content" => "Pemberton\n"}}]},

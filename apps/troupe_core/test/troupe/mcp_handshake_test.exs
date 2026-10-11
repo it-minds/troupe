@@ -50,7 +50,7 @@ defmodule Troupe.MCPHandshakeTest do
         with_server(context,
           steps: [
             {:tools, [{"mcp.notes.search", %{"topic" => "trains"}}]},
-            {:text_and_tools, "Found.", [{"finish", %{"summary" => "found"}}]}
+            {:text_and_tools, "Found.", [{"finish", finished("found")}]}
           ]
         )
 

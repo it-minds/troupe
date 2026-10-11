@@ -247,11 +247,15 @@ defmodule Troupe.Protocol.Schema do
         "summary" => optional(:string),
         "command_id" => optional(:string)
       },
+      # `task` is the child's first message: the brief's parts under their names. `brief`
+      # is the parts themselves, `goal`, `context`, `constraints`, `deliverable` and
+      # `do_not` (Decision 847); absent from a log written before briefs had them.
       "delegation_started" => %{
         "call_id" => required(:string),
         "agent" => required(:string),
         "child_path" => required({:array, :string}),
-        "task" => required(:string)
+        "task" => required(:string),
+        "brief" => optional(:object)
       },
       "compacted" => %{
         "summary" => required(:string),
@@ -318,9 +322,15 @@ defmodule Troupe.Protocol.Schema do
       },
       # `turn` here, on `turn_ended` and on `cancelled` is what the turn the event ends cost:
       # `calls`, the four token figures summed, `cost_micros` and `unpriced` (Decision 769).
+      # A `finish` writes `summary` as its report reads, the parts under their names, and
+      # `report` as the parts: `summary`, `ran`, `passed`, `unverified`, `needs`, and
+      # `changed` as Troupe counted it — `files` (`path`, `added`, `removed`, `whole`), the
+      # totals, `commands` not counted, `session_id` and `agent` to read the diff by, and
+      # `said` when the agent named changes of its own (Decision 847).
       "agent_done" => %{
         "reason" => required(:string),
         "summary" => optional(:string),
+        "report" => optional(:object),
         "limit" => optional(:string),
         "turn" => optional(:object)
       },

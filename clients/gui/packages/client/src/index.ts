@@ -76,6 +76,9 @@ export {
   loopEnding,
   settleLoop,
   turnLine,
+  partsOf,
+  BRIEF_PARTS,
+  FINISH_PARTS,
   LEGACY_BUDGET_OPTIONS,
 } from "./transcript.js";
 export type {

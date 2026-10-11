@@ -167,12 +167,12 @@ defmodule Troupe.Agent.TurnCostTest do
       run(context,
         routes: %{
           "root" => [
-            {:tools, [{"delegate", %{"agent" => "general", "task" => "look"}}]},
+            {:tools, [{"delegate", brief("general", "look")}]},
             {:text, "it came back"}
           ],
           "general" => [
             {:text_and_tools, "looking", [{"todo_read", %{}}]},
-            {:tools, [{"finish", %{"summary" => "found it"}}]}
+            {:tools, [{"finish", finished("found it")}]}
           ]
         }
       )
@@ -209,7 +209,7 @@ defmodule Troupe.Agent.TurnCostTest do
       run(context,
         steps: [
           {:text_and_tools, "on it", [{"todo_read", %{}}]},
-          {:tools, [{"finish", %{"summary" => "all done"}}]}
+          {:tools, [{"finish", finished("all done")}]}
         ]
       )
 
