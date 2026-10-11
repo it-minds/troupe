@@ -34,6 +34,10 @@ defmodule Troupe.Operator.Resources do
   @dns_namespace "kube-system"
   @dns_app "kube-dns"
 
+  # Where a NodeLocal DNSCache listens on each node, as its manifests and most clusters
+  # that run one have it: a link-local address, which a worker is otherwise denied.
+  @node_local_dns "169.254.20.10"
+
   @doc "Every object a profile implies, in dependency order."
   @spec for_profile(Profile.t(), Policy.t(), Settings.t()) :: [map()]
   def for_profile(%Profile{} = profile, %Policy{} = policy, %Settings{} = settings) do
@@ -517,7 +521,7 @@ defmodule Troupe.Operator.Resources do
   # The allowlist, by name, or by address where a host is one: every host the profile
   # declares, the platform's own OpenBao and object storage where they are outside the
   # cluster, and nothing else outside it, since the NetworkPolicy beside it no longer
-  # reaches past the cluster at all.
+  # reaches past the cluster at all. And what no name reaches, denied.
   defp cilium_network_policy(namespace, profile, settings) do
     [
       %{
@@ -526,10 +530,31 @@ defmodule Troupe.Operator.Resources do
         "metadata" => metadata("troupe-egress", namespace, profile),
         "spec" => %{
           "endpointSelector" => %{"matchLabels" => Names.labels(profile.name)},
-          "egress" => [cilium_dns_rule() | allowlist_rules(profile, settings)]
+          "egress" => [cilium_dns_rule() | allowlist_rules(profile, settings)],
+          "egressDeny" => [deny_rule(settings)]
         }
       }
     ]
+  end
+
+  # A `toFQDNs` rule admits a name at whatever address Cilium watched it resolve to, so a
+  # name in `allowedEgress` pointed at 169.254.169.254 reached the node's metadata service,
+  # whatever `Reach.refused?/1` said of the profile's addresses (issue #361). The deny is
+  # by address: link-local in both families and the two metadata addresses outside it.
+  # Cilium takes a deny before any allow, this policy's or another's, so it holds whatever
+  # name leads there.
+  #
+  # Except the installation's own OpenBao and object store, which it chose and which the
+  # allowlist admits by address (Decision 758), and the address a NodeLocal DNSCache
+  # listens on by convention: nothing here admits that, but a policy of the installation's
+  # own that admits its DNS cache would be undone by a deny that covered it (Decision 856).
+  defp deny_rule(settings) do
+    blocks =
+      for {block, kept} <- Reach.denied([@node_local_dns | platform_hosts(settings)]) do
+        if kept == [], do: %{"cidr" => block}, else: %{"cidr" => block, "except" => kept}
+      end
+
+    %{"toCIDRSet" => blocks}
   end
 
   # A `toFQDNs` rule admits the addresses Cilium has watched a name resolve to, and it
@@ -569,11 +594,12 @@ defmodule Troupe.Operator.Resources do
   # `toCIDR` that is empty and means whatever the Cilium version at hand takes an empty
   # list to mean.
   #
-  # Except a host of the profile's at a loopback or link-local address, which is left out
-  # as the NetworkPolicy leaves it out without Cilium (Decision 758): from a pod, loopback
-  # is the pod itself, and link-local is the node's, where a cloud's metadata service
-  # answers. The policy's `allowedEgress` naming it is not enough. `EndpointUnreachable`
-  # says so on the profile, from the same judgement.
+  # Except a host of the profile's at a loopback or link-local address, or a cloud's
+  # metadata address outside that range, which is left out as the NetworkPolicy leaves it
+  # out without Cilium (Decision 758): from a pod, loopback is the pod itself, and
+  # link-local is the node's, where a cloud's metadata service answers. The policy's
+  # `allowedEgress` naming it is not enough. `EndpointUnreachable` says so on the profile,
+  # from the same judgement.
   defp allowlist_rules(profile, settings) do
     own = Enum.reject(Profile.egress_destinations(profile), &Reach.refused?/1)
     hosts = Enum.uniq(own ++ platform_hosts(settings))

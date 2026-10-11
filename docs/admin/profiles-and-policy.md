@@ -238,7 +238,7 @@ objects that are no longer desired. Deleting a `WorkerProfile` deletes its names
 | `MCPIdentityMissing` | a server the bundle calls with client credentials has no identity in `mcpIdentities`, or its identity is incomplete; the message says which ([above](#calling-an-mcp-server-as-the-profile)) |
 | `UpgradePending` | the StatefulSet has a newer revision than the named pods run; each keeps its revision until the plane has drained it and the operator replaced it, and the message says how far each has got ([§3](#3-upgrades-and-drains)) |
 | `EgressByHostname` | the `CiliumNetworkPolicy` was written and applied, so a worker reaches its allowlist and the installation's own OpenBao and object store by name, and nothing else outside the cluster; `False` with `NoCilium` or `CiliumPolicyNotApplied` ([egress](#4-troupepolicy)) |
-| `EndpointUnreachable` | an endpoint the profile names is at a loopback or link-local address, which its workers do not reach with Cilium or without (`LoopbackOrLinkLocal`): the message names each and says what to do; `False` with `Reachable`, or `Cilium` where there is Cilium ([egress](#4-troupepolicy)) |
+| `EndpointUnreachable` | an endpoint the profile names is at a loopback, unspecified, link-local or cloud metadata address, which its workers do not reach with Cilium or without (`LoopbackOrLinkLocal`): the message names each and says what to do; `False` with `Reachable`, or `Cilium` where there is Cilium ([egress](#4-troupepolicy)) |
 
 `SecretMissing`, `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname` and
 `EndpointUnreachable` do not affect `Ready`. `kubectl -n troupe-system get wp` shows
@@ -369,21 +369,33 @@ whether Cilium is there:
   address inside the cluster, a Service's cluster IP say, is not dependably admitted by an
   `ipBlock`, so name the Service instead.
 
-**Loopback and link-local**, with Cilium or without. A profile's endpoint at a loopback or
-link-local address (`127.0.0.1`, `::1`, `169.254.169.254`, `fe80::1`, or the same written
-as `::ffff:127.0.0.1`) gets no rule, neither in the NetworkPolicy nor as a `toCIDR` in the
-`CiliumNetworkPolicy`, even where `allowedEgress` names it (Decision 758): from a pod,
-loopback is the pod itself, and link-local is the node's, where a cloud's metadata service
-answers. Such an endpoint is refused where it is set up (Decision 749): `admin.profile.put`
-and the profile editor refuse a profile whose workers are pods with `invalid_params`,
-naming each endpoint, counting the servers its channel's bundle gives it; publishing a
-bundle that names such a server to a channel such a profile follows is refused the same
-way. In `gitops` mode nothing can refuse what a repository holds, so the operator reports
-it on the profile as `EndpointUnreachable`, which the console's **Workers** page shows; it
-does in `direct` mode too, for a profile saved before. Give the endpoint as a pod reaches
-it: by name, at another address, or, for one in the cluster, as its Service
-(`<service>.<namespace>.svc`). A git host or an MCP identity's token endpoint at such an
-address gets no rule either, but is neither refused nor named.
+**Loopback, link-local and metadata addresses**, with Cilium or without. A profile's
+endpoint at a loopback or link-local address (`127.0.0.1`, `::1`, `169.254.169.254`,
+`fe80::1`, or the same written as `::ffff:127.0.0.1`), at the unspecified address
+(`0.0.0.0`, `::`), or at one of the two cloud metadata addresses outside link-local
+(`fd00:ec2::254`, `100.100.100.200`) gets no rule, neither in the NetworkPolicy nor as a
+`toCIDR` in the `CiliumNetworkPolicy`, even where `allowedEgress` names it (Decision 758):
+from a pod, loopback and the unspecified address are the pod itself, and link-local is the
+node's, where a cloud's metadata service answers. Such an endpoint is refused where it is
+set up (Decision 749): `admin.profile.put` and the profile editor refuse a profile whose
+workers are pods with `invalid_params`, naming each endpoint, counting the servers its
+channel's bundle gives it; publishing a bundle that names such a server to a channel such
+a profile follows is refused the same way. In `gitops` mode nothing can refuse what a
+repository holds, so the operator reports it on the profile as `EndpointUnreachable`,
+which the console's **Workers** page shows; it does in `direct` mode too, for a profile
+saved before. Give the endpoint as a pod reaches it: by name, at another address, or, for
+one in the cluster, as its Service (`<service>.<namespace>.svc`). A git host or an MCP
+identity's token endpoint at such an address gets no rule either, but is neither refused
+nor named.
+
+A name does not get there either (Decision 856). With Cilium a `toFQDNs` rule admits a
+name at whatever address its DNS answer carries, so the `CiliumNetworkPolicy` also denies
+link-local (`169.254.0.0/16`, `fe80::/10`) and both metadata addresses, whatever name
+leads there and whatever else admits them, except `169.254.20.10`, where a NodeLocal
+DNSCache listens, and OpenBao or the object store given as an address in those ranges.
+Without Cilium the public rule leaves out link-local and the shared address space
+`100.64.0.0/10`, so an endpoint in that space, the installation's or a profile's, is
+reached only when given as its address.
 
 `ciliumAvailable: true` on a cluster without Cilium fails closed: a worker reaches nothing
 outside the cluster, and the profile is `Ready: False` with `ApplyFailed` naming the

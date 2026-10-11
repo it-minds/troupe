@@ -311,8 +311,8 @@ from those and from operator pods.
 | `troupe-plane` | HTTP from ingress namespaces (and A2A pods when enabled); control port from worker namespaces and the operator; epmd and dist from plane pods | unrestricted |
 | `troupe-operator` | nothing | unrestricted |
 | `troupe-a2a` | `a2a.port` from ingress namespaces | unrestricted |
-| `troupe-w-<profile>` | TCP 4000 from ingress namespaces | DNS to `k8s-app=kube-dns` in `kube-system`; the plane's control port; OpenBao, object storage, the LLM endpoint and MCP servers when their hosts are `*.svc`; **without Cilium only**, `0.0.0.0/0` minus private and link-local ranges on 443 and 80, and OpenBao, object storage outside the cluster and the profile's own LLM endpoint, MCP servers and `egress.fqdns` entries on the port they name: an IP address as that one address (`/32`, `/128`), a name on another port as the same ranges on that port; a profile's endpoint at a loopback or link-local address gets nothing |
-| `troupe-egress` (Cilium only) | — | `toFQDNs` for the LLM endpoint, MCP servers, `egress.fqdns` and `gitHosts`, and for OpenBao and object storage when their hosts are not `*.svc`; `toCIDR` (`/32`, `/128`) instead for any of these given as an IP address, except a profile's at a loopback or link-local address, which gets nothing; DNS to kube-dns through Cilium's DNS proxy (a `dns` rule), which is how `toFQDNs` learns addresses |
+| `troupe-w-<profile>` | TCP 4000 from ingress namespaces | DNS to `k8s-app=kube-dns` in `kube-system`; the plane's control port; OpenBao, object storage, the LLM endpoint and MCP servers when their hosts are `*.svc`; **without Cilium only**, `0.0.0.0/0` minus private, link-local and shared (`100.64.0.0/10`) ranges on 443 and 80, and OpenBao, object storage outside the cluster and the profile's own LLM endpoint, MCP servers and `egress.fqdns` entries on the port they name: an IP address as that one address (`/32`, `/128`), a name on another port as the same ranges on that port; a profile's endpoint at a loopback, link-local or cloud metadata address gets nothing |
+| `troupe-egress` (Cilium only) | — | `toFQDNs` for the LLM endpoint, MCP servers, `egress.fqdns` and `gitHosts`, and for OpenBao and object storage when their hosts are not `*.svc`; `toCIDR` (`/32`, `/128`) instead for any of these given as an IP address, except a profile's at a loopback, link-local or cloud metadata address, which gets nothing; DNS to kube-dns through Cilium's DNS proxy (a `dns` rule), which is how `toFQDNs` learns addresses; `egressDeny` of `169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254` and `100.100.100.200` whatever name resolves there, except `169.254.20.10` (NodeLocal DNSCache) and OpenBao or object storage given as an address in them |
 
 With Cilium a worker reaches the hosts its profile names, the installation's own OpenBao
 and object store, and nothing else outside the cluster: Cilium admits the union of both
@@ -324,10 +324,13 @@ and an object store outside the cluster are admitted on their own ports too, and
 profile's own endpoints, so one named on 9000 opens 9000 to every public host; a name that
 resolves to a private address cannot be admitted by name without Cilium, so give it as an
 address instead ([profiles-and-policy.md](profiles-and-policy.md#4-troupepolicy) says what
-else works). A profile's endpoint at a loopback or link-local address gets no rule, with
-Cilium or without, even where `allowedEgress` names it: it is refused by the plane where it
-is set up, and reported by the operator as `EndpointUnreachable` on a profile a repository
-holds.
+else works). A profile's endpoint at a loopback, link-local or cloud metadata address gets
+no rule, with Cilium or without, even where `allowedEgress` names it: it is refused by the
+plane where it is set up, and reported by the operator as `EndpointUnreachable` on a
+profile a repository holds. With Cilium no name reaches link-local or a metadata address
+either, whatever it resolves to. Without Cilium the public rule leaves out the shared
+address space `100.64.0.0/10` as it leaves out link-local, so an endpoint there, a hosted
+object store's internal address say, is reached only when given as its address.
 
 **Ingress annotations.** Plane: 3600 s read and send timeouts, `proxy-body-size`, the rate
 limits above. A2A: buffering off, 3600 s timeouts, 2m bodies. Worker (nginx only): 3600 s
