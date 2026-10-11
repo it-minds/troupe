@@ -3,9 +3,10 @@ defmodule Troupe.Remote.RPC do
   JSON-RPC 2.0 over one text frame per message: encoding, and classifying what
   comes back.
 
-  The client answers server-to-client requests with `-32601` rather than
-  ignoring them, as the contract says: a server waiting for an answer should
-  find out now that this client has no methods, not time out.
+  The client answers server-to-client requests it does not serve with `-32601`
+  rather than ignoring them, as the contract says: a server waiting for an answer
+  should find out now, not time out. The one it serves is `tool.invoke`, for the
+  tools it offered a session (`Troupe.Remote.Offer`).
   """
 
   @type incoming ::
@@ -35,6 +36,18 @@ defmodule Troupe.Remote.RPC do
       id: id,
       error: %{code: -32_601, message: "method not found"}
     })
+  end
+
+  @doc "The answer to a server-to-client request this client serves (`tool.invoke`)."
+  @spec response(term(), map()) :: iodata()
+  def response(id, result) when is_map(result) do
+    Jason.encode_to_iodata!(%{jsonrpc: "2.0", id: id, result: result})
+  end
+
+  @doc "A server-to-client request this client could not serve, and why, in words."
+  @spec error_response(term(), integer(), String.t()) :: iodata()
+  def error_response(id, code, message) when is_integer(code) and is_binary(message) do
+    Jason.encode_to_iodata!(%{jsonrpc: "2.0", id: id, error: %{code: code, message: message}})
   end
 
   @doc "Decodes and classifies one text frame."
