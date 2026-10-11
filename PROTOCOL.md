@@ -1951,6 +1951,16 @@ never watches (`forbidden`). → `{"enabled", "backend"}`.
 `backend: "off"` and a null `session_id`. `observe`; the daemon's only. What a status line
 shows and what the next toggle turns; `watch_changed` says when it changes.
 
+#### `daemon.stop` → `{}`. Stop the daemon between turns, so `troupe update` can replace its
+release (Decision 865). `admin`; the daemon's only, and a worker answers
+`method_not_found`. With no session's turn at work the answer is `{"stopping": true}` and the
+daemon stops a moment after it, as its idle stop does: sessions seal and close, and every
+connection ends. A session that is idle, done, or waiting on a person is not at work. While
+one is, nothing stops and the answer says which, for the client to ask again:
+`{"stopping": false, "reason": "at_work", "at_work": [{"id": "s-3a", "workspace":
+"/home/me/project"}]}`. A daemon a TUI runs inside itself stops when that TUI exits, and
+answers `{"stopping": false, "reason": "embedded"}`.
+
 ### Session states, dormancy, and activation
 
 | `state` | actor tree | what a client can do |
@@ -2067,7 +2077,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or

@@ -16,6 +16,7 @@
     "commands/config.models.json",
     "commands/config.set.json",
     "commands/context.get.json",
+    "commands/daemon.stop.json",
     "commands/fleet.get.json",
     "commands/fs.list.json",
     "commands/fs.read.json",

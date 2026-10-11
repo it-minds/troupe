@@ -27,7 +27,11 @@
 #   * LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt, from the daemon's release, in
 #     ~/.local/share/doc/troupe.
 # Everything is downloaded and checked against the release's SHA256SUMS before anything is
-# replaced, and a daemon or TUI running from what is replaced is stopped first.
+# replaced, and a daemon or TUI running from what is replaced is stopped first. Where
+# minisign is installed, the copy attached to a release also checks the release's
+# signature: the manifest the release key signed names every file's sha256 (Decision 865).
+# Without minisign it says it checks SHA256SUMS only, which catches a broken download and
+# not a changed release; `troupe update` always checks the signature.
 #
 # In a terminal it shows what it is about to do and asks first, and with none of --tui,
 # --gui and --vscode it asks which clients to install. -y asks nothing: it installs what the
@@ -51,6 +55,9 @@ set -eu
 
 # Set in the copy attached to a release (scripts/release-installers); empty in the repository.
 PINNED_VERSION=""
+# The release key, the minisign public key the release's manifest is signed with: set in
+# the copy attached to a release too, from apps/troupe_core/priv/release-keys.txt.
+RELEASE_KEY=""
 
 REPO="${TROUPE_REPO:-it-minds/troupe}"
 BIN_DIR="${TROUPE_BIN_DIR:-${TROUPE_INSTALL_DIR:-$HOME/.local/bin}}"
@@ -320,7 +327,41 @@ latest_version() {
   case "$url" in */tag/v*) printf '%s' "${url##*/tag/v}" ;; *) return 1 ;; esac
 }
 
-# Download one artifact of the release into $tmp and check it against SHA256SUMS.
+# Whether the release's signature can be checked here: the release key in this copy, and
+# minisign on the PATH.
+signature_checkable() {
+  [ -n "$RELEASE_KEY" ] && command -v minisign >/dev/null 2>&1
+}
+
+# The release's signature (Decision 865): minisign checks that the release key signed
+# manifest.json, which names every file's sha256, and `fetch` then holds each file to it.
+# Where it cannot be checked, this says so, and only SHA256SUMS is: it comes from the same
+# place as the files, so it catches a broken download, not a changed release.
+signed=0
+check_signature() {
+  if [ -z "$RELEASE_KEY" ]; then
+    say "  note: this install.sh carries no release key (the one attached to a release does), so only SHA256SUMS is checked"
+    return 0
+  fi
+  if ! command -v minisign >/dev/null 2>&1; then
+    say "  note: minisign is not installed, so the release's signature is not checked, only SHA256SUMS:"
+    say "        that catches a broken download, not a changed release. With minisign on the PATH it is checked."
+    return 0
+  fi
+  get -o "$tmp/manifest.json" "$BASE_URL/manifest.json" ||
+    die "the release has no manifest.json to check its signature with; nothing installed (releases before 0.13 are not signed: use the install.sh attached to that release)"
+  get -o "$tmp/manifest.json.minisig" "$BASE_URL/manifest.json.minisig" ||
+    die "the release has no manifest.json.minisig; nothing installed"
+  if ! said=$(minisign -Vm "$tmp/manifest.json" -x "$tmp/manifest.json.minisig" -P "$RELEASE_KEY" 2>&1); then
+    die "the release's manifest does not verify against the release key ($(printf '%s\n' "$said" | head -n 1)); nothing installed"
+  fi
+  grep -qxF "  \"version\": \"$VERSION\"," "$tmp/manifest.json" || die "the signed manifest is not release $VERSION's; nothing installed"
+  signed=1
+  say "  manifest.json signed by the release key ok"
+}
+
+# Download one artifact of the release into $tmp and check it against SHA256SUMS, and
+# against the signed manifest when its signature held.
 fetch() {
   artifact=$1
   printf '  %s ' "$artifact"
@@ -333,6 +374,11 @@ fetch() {
     actual=$(shasum -a 256 "$tmp/$artifact" | awk '{print $1}')
   fi
   [ "$expected" = "$actual" ] || die "checksum mismatch for $artifact (expected $expected, got $actual); nothing installed"
+  if [ "$signed" = 1 ]; then
+    line=$(grep -F "\"file\": \"$artifact\"," "$tmp/manifest.json") || die "the signed manifest does not name $artifact; nothing installed"
+    signed_sha=$(printf '%s\n' "$line" | sed 's/.*"sha256": "\([0-9a-f]*\)".*/\1/')
+    [ "$signed_sha" = "$actual" ] || die "$artifact is not the file the signed manifest names; nothing installed"
+  fi
   say "ok"
 }
 
@@ -572,7 +618,11 @@ install() {
   if [ "$with_tui" = 1 ]; then what="$what, troupe"; fi
   if [ "$with_gui" = 1 ]; then what="$what, the desktop app"; fi
   if [ "$with_vscode" = 1 ]; then what="$what, the VS Code extension"; fi
-  item "download $what $VERSION and check each against SHA256SUMS"
+  if signature_checkable; then
+    item "download $what $VERSION, check the release's signature with minisign, and each file against the signed manifest and SHA256SUMS"
+  else
+    item "download $what $VERSION and check each against SHA256SUMS (not the release's signature: see below)"
+  fi
   if [ -n "$daemon_pids" ]; then item "stop troupe-daemon (pid $daemon_pids); the sessions it runs end"; fi
   if [ -n "$tui_pids" ]; then item "stop troupe (pid $tui_pids)"; fi
   if [ "$clean" = 1 ] && [ -n "$was" ]; then plan_removal "$purge"; fi
@@ -610,6 +660,7 @@ install() {
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
   get -o "$tmp/SHA256SUMS" "$BASE_URL/SHA256SUMS" || die "download of $BASE_URL/SHA256SUMS failed"
+  check_signature
   daemon_artifact="troupe-daemon-${VERSION}-${target}.tar.gz"
   tui_artifact="troupe-${VERSION}-${target}"
   # Everything is downloaded and checked before anything is replaced.

@@ -164,6 +164,20 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :daemon} = args} ->
         Troupe.CLI.Daemon.run(args.daemon_args)
 
+      # This troupe and the troupe-daemon beside it, from a signed release (Decision 865).
+      {:ok, %{mode: :update} = args} ->
+        action =
+          cond do
+            args.check -> :check
+            args.rollback -> :rollback
+            true -> :update
+          end
+
+        Troupe.Update.run(action,
+          version: args.update_version,
+          installed: to_string(Application.spec(:troupe, :vsn))
+        )
+
       {:ok, %{mode: :tui} = args} ->
         # A first run meets the setup before a session it could not use: the setup's
         # screen on a machine with no settings and no key, whose first session is the one
@@ -220,7 +234,7 @@ defmodule Troupe.CLI.Runner do
   def interruptible?({:ok, %{mode: mode} = args}) when mode in [:run, :resume], do: args.headless
 
   def interruptible?({:ok, %{mode: mode}}),
-    do: mode in [:daemon, :login, :logout, :whoami, :models, :doctor, :bench, :config_pull]
+    do: mode in [:daemon, :login, :logout, :whoami, :models, :doctor, :bench, :config_pull, :update]
 
   def interruptible?(_parsed), do: false
 

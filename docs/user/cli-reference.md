@@ -45,6 +45,8 @@ they are not what the tables say, so edit the tables rather than this page.
 | `troupe bench --live [--suite smoke\|standard] [--scenario NAME,...] [--repeat N] [--model M] [--yes] [--keep DIR] [--json [FILE]] [--md FILE]` | tasks against your own provider, under a cap it prints and asks about first; scored, and kept in a history |
 | `troupe bench --compare [VERSION\|MODEL]` | the last live bench against the one before it, or against a version's or a model's |
 | `troupe daemon [ARGS]` | the local daemon: `run` (default), `status`, `open` (the web app, connected to it), `config`, `models`, `login on\|off`, `version` |
+| `troupe update [--check] [--version X]` | install the latest release, or X, over this troupe and troupe-daemon: its signature checked against the release key this build carries, each file against the signed manifest, the daemon replaced between turns; --check says what is installed, the latest release and what an update would do |
+| `troupe update --rollback` | put the troupe and troupe-daemon from before the last update back |
 | `troupe --version` | print the version |
 | `troupe --help` | print the command lines and the commands inside a session |
 <!-- cli-commands:end -->

@@ -1,0 +1,7 @@
+{
+  "format": 1,
+  "version": "9.9.9-test",
+  "artifacts": [
+    {"component": "tui", "target": "linux_x86_64", "file": "troupe-9.9.9-test-linux_x86_64", "size": 48, "sha256": "ec66b85ab91a6781bb0858d94705fc8e71ce4de9019158fa4258432a31a9eb88"}
+  ]
+}

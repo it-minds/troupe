@@ -39,6 +39,7 @@ defmodule Mix.Tasks.Troupe.Xref do
       Troupe.Instructions.Check                     what `troupe instructions check` finds in the instruction files
       Troupe.Onboard                                what `troupe onboard` proposes, and the one writer of it
       Troupe.Bench                                 the offline suite `troupe bench` runs on this binary's harness
+      Troupe.Update                                 `troupe update`: a signed release, checked and swapped in
 
   A new call into, say, the agent tree or the session log fails here, and the way to add
   one is to put it in the protocol. What the import table cannot see is a module named as
@@ -79,7 +80,8 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Doctor,
     Troupe.Instructions.Check,
     Troupe.Onboard,
-    Troupe.Bench
+    Troupe.Bench,
+    Troupe.Update
   ]
 
   @impl true

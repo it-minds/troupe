@@ -33,6 +33,7 @@ defmodule Troupe.CLI do
           | :logout
           | :whoami
           | :daemon
+          | :update
 
   @type args :: %{
           mode: mode(),
@@ -71,7 +72,10 @@ defmodule Troupe.CLI do
           scenario: String.t() | nil,
           keep: String.t() | nil,
           key: String.t() | nil,
-          path: String.t() | nil
+          path: String.t() | nil,
+          check: boolean(),
+          rollback: boolean(),
+          update_version: String.t() | nil
         }
 
   @switches [
@@ -210,6 +214,14 @@ defmodule Troupe.CLI do
      "the local daemon: `run` (default), `status`, `open` (the web app, connected to it), " <>
        "`config`, `models`, `login on|off`, `version`",
      [["daemon"], ["daemon", "status"], ["daemon", "open"]]},
+    {"troupe update [--check] [--version X]",
+     "install the latest release, or X, over this troupe and troupe-daemon: its signature checked " <>
+       "against the release key this build carries, each file against the signed manifest, the daemon " <>
+       "replaced between turns; --check says what is installed, the latest release and what an update would do",
+     [["update"], ["update", "--check"], ["update", "--version", "0.13.0"]]},
+    {"troupe update --rollback",
+     "put the troupe and troupe-daemon from before the last update back",
+     [["update", "--rollback"]]},
     {"troupe --version", "print the version", [["--version"]]},
     {"troupe --help", "print the command lines and the commands inside a session", [["--help"]]}
   ]
@@ -229,6 +241,39 @@ defmodule Troupe.CLI do
 
     with {:ok, args} <- parse_argv(argv) do
       {:ok, %{args | json_path: values["--json"], ref: values["--compare"]}}
+    end
+  end
+
+  # `--version` names the release to install here; anywhere else it is the program's own
+  # (Decision 865). A tag's `v` is taken off: the release's number is without it.
+  def parse(["update" | rest]) do
+    case OptionParser.parse(rest, strict: [check: :boolean, rollback: :boolean, version: :string]) do
+      {opts, [], []} ->
+        rollback = Keyword.get(opts, :rollback, false)
+        version = if v = opts[:version], do: String.replace_prefix(v, "v", "")
+
+        if rollback and (version != nil or opts[:check]) do
+          {:error,
+           "troupe update --rollback takes nothing else: it puts back what the last update replaced"}
+        else
+          with {:ok, base} <- parse_argv([]) do
+            {:ok,
+             %{
+               base
+               | mode: :update,
+                 check: Keyword.get(opts, :check, false),
+                 rollback: rollback,
+                 update_version: version
+             }}
+          end
+        end
+
+      {_opts, words, []} ->
+        {:error, "unknown arguments: update #{Enum.join(words, " ")}"}
+
+      {_opts, _words, invalid} ->
+        {:error,
+         "unknown option: #{Enum.map_join(invalid, ", ", &elem(&1, 0))} (troupe update takes --check, --version X and --rollback)"}
     end
   end
 
@@ -289,7 +334,10 @@ defmodule Troupe.CLI do
       scenario: Keyword.get(opts, :scenario),
       keep: Keyword.get(opts, :keep),
       key: nil,
-      path: nil
+      path: nil,
+      check: false,
+      rollback: false,
+      update_version: nil
     }
 
     cond do

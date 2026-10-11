@@ -159,6 +159,8 @@ defmodule Troupe.Daemon.CLITest do
     opts = CLI.run_opts()
     assert opts[:loopback] == [enabled: true]
     assert is_integer(opts[:idle_shutdown_ms])
+    # `troupe update` may ask it to stop between turns (Decision 865).
+    assert opts[:stop_on_request] == true
   end
 
   test "version names the daemon, the harness it was built from and the protocol" do

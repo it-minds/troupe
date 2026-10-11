@@ -1,0 +1,302 @@
+defmodule Troupe.Release.Manifest do
+  @moduledoc """
+  A release's `manifest.json` (#66, Decision 865): the version, then every file the
+  release publishes with its component, its target, its size and its sha256. CI writes
+  it and signs it (`scripts/release-manifest.exs`); a client checks the signature
+  (`Troupe.Release.Minisign`), then each file it downloads against it.
+
+      {
+        "format": 1,
+        "version": "0.13.0-beta",
+        "artifacts": [
+          {"component": "tui", "target": "linux_x86_64", "file": "troupe-0.13.0-beta-linux_x86_64", "size": 41234567, "sha256": "..."},
+          ...
+        ]
+      }
+
+  One artifact to a line, written the same way every time, so that a shell installer
+  finds a file's line with `grep` and the bytes signed are the bytes a reader gets.
+  `component` is `daemon`, `tui`, `desktop`, `installer`, `chart`, `vscode`, `licence` or
+  `other`; `target` is one of `targets/0`, `macos_universal` for the desktop app's one
+  macOS build, or `null` for a file that runs anywhere.
+
+  Like `Troupe.Release.Minisign` it needs only `:crypto` and `JSON`, so the script that
+  writes it loads it from source.
+  """
+
+  @format 1
+  @targets ~w(linux_x86_64 linux_aarch64 macos_x86_64 macos_aarch64 windows_x86_64)
+  # What a manifest is about, never in it: itself, its signature, and SHA256SUMS, which
+  # is written after it.
+  @not_artifacts ~w(manifest.json manifest.json.minisig SHA256SUMS)
+
+  @enforce_keys [:version, :artifacts]
+  defstruct [:version, :artifacts]
+
+  @type artifact :: %{
+          component: String.t(),
+          target: String.t() | nil,
+          file: String.t(),
+          size: non_neg_integer(),
+          sha256: String.t()
+        }
+  @type t :: %__MODULE__{version: String.t(), artifacts: [artifact()]}
+
+  @doc "The five targets a release builds the daemon and the TUI for."
+  @spec targets() :: [String.t()]
+  def targets, do: @targets
+
+  @doc """
+  The manifest of the release in `dir`: every regular file in it, by name, bar the
+  manifest's own files.
+  """
+  @spec build(String.t(), Path.t()) :: t()
+  def build(version, dir) do
+    artifacts =
+      dir
+      |> File.ls!()
+      |> Enum.sort()
+      |> Enum.reject(&(&1 in @not_artifacts))
+      |> Enum.filter(&File.regular?(Path.join(dir, &1)))
+      |> Enum.map(fn file ->
+        path = Path.join(dir, file)
+        {component, target} = classify(version, file)
+
+        %{
+          component: component,
+          target: target,
+          file: file,
+          size: File.stat!(path).size,
+          sha256: sha256(path)
+        }
+      end)
+
+    %__MODULE__{version: version, artifacts: artifacts}
+  end
+
+  @doc """
+  What a release's file is, from its name: `{component, target}`. The names are the ones
+  `native.yml` and `release.yml` give; the desktop app's carry its version without the
+  pre-release part (`scripts/version.exs`).
+  """
+  @spec classify(String.t(), String.t()) :: {String.t(), String.t() | nil}
+  def classify(version, file) do
+    cond do
+      target = suffix(file, "troupe-daemon-#{version}-", ".tar.gz") ->
+        {"daemon", target}
+
+      target =
+          suffix(file, "troupe-#{version}-", ".exe") || suffix(file, "troupe-#{version}-", "") ->
+        {"tui", target}
+
+      file == "troupe-#{version}.tgz" ->
+        {"chart", nil}
+
+      true ->
+        named(version, file)
+    end
+  end
+
+  @named %{
+    "install.sh" => "installer",
+    "install.ps1" => "installer",
+    "troupe.vsix" => "vscode",
+    "LICENSE" => "licence",
+    "NOTICE" => "licence",
+    "THIRD-PARTY-NOTICES.txt" => "licence"
+  }
+
+  defp named(version, file) do
+    desktop = version |> String.split("-") |> hd()
+
+    cond do
+      component = @named[file] ->
+        {component, nil}
+
+      String.starts_with?(file, ["Troupe_#{desktop}_", "Troupe-#{desktop}-"]) ->
+        {"desktop", desktop_target(file)}
+
+      true ->
+        {"other", nil}
+    end
+  end
+
+  defp suffix(file, prefix, ext) do
+    with true <- String.starts_with?(file, prefix) and String.ends_with?(file, ext),
+         target = file |> String.replace_prefix(prefix, "") |> String.replace_suffix(ext, ""),
+         true <- target in @targets do
+      target
+    else
+      _ -> nil
+    end
+  end
+
+  defp desktop_target(file) do
+    cond do
+      String.contains?(file, "universal") -> "macos_universal"
+      String.contains?(file, "x64") -> "windows_x86_64"
+      String.contains?(file, "amd64") or String.contains?(file, "x86_64") -> "linux_x86_64"
+      true -> nil
+    end
+  end
+
+  @doc "The manifest as it is signed: the same bytes for the same release, one artifact to a line."
+  @spec encode(t()) :: String.t()
+  def encode(%__MODULE__{version: version, artifacts: artifacts}) do
+    lines =
+      Enum.map_join(artifacts, ",\n", fn a ->
+        "    {" <>
+          Enum.map_join(
+            [
+              component: a.component,
+              target: a.target,
+              file: a.file,
+              size: a.size,
+              sha256: a.sha256
+            ],
+            ", ",
+            fn {key, value} -> ~s("#{key}": ) <> JSON.encode!(value) end
+          ) <> "}"
+      end)
+
+    """
+    {
+      "format": #{@format},
+      "version": #{JSON.encode!(version)},
+      "artifacts": [
+    #{lines}
+      ]
+    }
+    """
+  end
+
+  @doc "A manifest from its bytes, checked for the shape a client relies on."
+  @spec decode(binary()) :: {:ok, t()} | {:error, String.t()}
+  def decode(bytes) when is_binary(bytes) do
+    with {:ok, %{"format" => @format, "version" => version, "artifacts" => artifacts}}
+         when is_binary(version) and is_list(artifacts) <- JSON.decode(bytes),
+         {:ok, artifacts} <- artifacts(artifacts, []) do
+      {:ok, %__MODULE__{version: version, artifacts: artifacts}}
+    else
+      {:ok, %{"format" => format}} when format != @format ->
+        {:error,
+         "is in format #{inspect(format)}, which this build does not read (it reads #{@format}); a newer troupe does"}
+
+      {:error, why} when is_binary(why) ->
+        {:error, why}
+
+      _other ->
+        {:error, "is not a release manifest"}
+    end
+  end
+
+  defp artifacts([], acc), do: {:ok, Enum.reverse(acc)}
+
+  defp artifacts([entry | rest], acc) do
+    case artifact(entry) do
+      {:ok, artifact} -> artifacts(rest, [artifact | acc])
+      error -> error
+    end
+  end
+
+  defp artifact(%{"component" => c, "target" => t, "file" => f, "size" => s, "sha256" => h}) do
+    typed? =
+      Enum.all?([
+        is_binary(c),
+        is_binary(t) or is_nil(t),
+        is_binary(f),
+        is_integer(s),
+        is_binary(h)
+      ])
+
+    cond do
+      not typed? or s < 0 ->
+        {:error, "has an artifact whose fields are not what they should be"}
+
+      plain_name?(f) and sha256?(h) ->
+        {:ok, %{component: c, target: t, file: f, size: s, sha256: h}}
+
+      true ->
+        {:error, "names a file #{inspect(f)} it cannot be about"}
+    end
+  end
+
+  defp artifact(_other),
+    do: {:error, "has an artifact without its component, target, file, size and sha256"}
+
+  # A file name is where a client puts what it downloads: never a path.
+  defp plain_name?(file),
+    do:
+      Path.basename(file) == file and file not in ["", ".", ".."] and
+        not String.contains?(file, "\\")
+
+  defp sha256?(hex), do: Regex.match?(~r/\A[0-9a-f]{64}\z/, hex)
+
+  @doc "The artifact of `component` built for `target`, or `nil`."
+  @spec find(t(), String.t(), String.t()) :: artifact() | nil
+  def find(%__MODULE__{artifacts: artifacts}, component, target),
+    do: Enum.find(artifacts, &(&1.component == component and &1.target == target))
+
+  @doc """
+  Whether the file at `path` is the artifact: its size first, then its sha256. A refusal
+  is a sentence naming the file.
+  """
+  @spec check_file(artifact(), Path.t()) :: :ok | {:error, String.t()}
+  def check_file(%{file: file, size: size, sha256: expected}, path) do
+    case File.stat(path) do
+      {:ok, %{size: ^size}} ->
+        actual = sha256(path)
+
+        if actual == expected,
+          do: :ok,
+          else:
+            {:error,
+             "#{file} is not the file the signed manifest names (sha256 #{actual}, not #{expected})"}
+
+      {:ok, %{size: other}} ->
+        {:error, "#{file} is #{other} bytes, and the signed manifest says #{size}"}
+
+      {:error, reason} ->
+        {:error, "#{file} could not be read: #{:file.format_error(reason)}"}
+    end
+  end
+
+  @doc "A file's sha256, lower-case hexadecimal, read a megabyte at a time."
+  @spec sha256(Path.t()) :: String.t()
+  def sha256(path) do
+    path
+    |> File.stream!(1_048_576)
+    |> Enum.reduce(:crypto.hash_init(:sha256), &:crypto.hash_update(&2, &1))
+    |> :crypto.hash_final()
+    |> Base.encode16(case: :lower)
+  end
+
+  @doc """
+  This machine's target, as the release names its builds, or `nil` on one it does not
+  build for.
+  """
+  @spec target() :: String.t() | nil
+  def target, do: target(:os.type(), to_string(:erlang.system_info(:system_architecture)))
+
+  @doc false
+  @spec target({atom(), atom()}, String.t()) :: String.t() | nil
+  def target(os_type, architecture) do
+    target = "#{os(os_type)}_#{arch(architecture)}"
+    if target in @targets, do: target
+  end
+
+  defp os({:win32, _}), do: "windows"
+  defp os({:unix, :darwin}), do: "macos"
+  defp os({:unix, :linux}), do: "linux"
+  defp os(_other), do: nil
+
+  defp arch(architecture) do
+    cond do
+      String.starts_with?(architecture, ["x86_64", "amd64"]) -> "x86_64"
+      String.starts_with?(architecture, ["aarch64", "arm64"]) -> "aarch64"
+      # An older Windows BEAM said `win32` whatever the processor; a release builds x86_64.
+      architecture == "win32" -> "x86_64"
+      true -> nil
+    end
+  end
+end
