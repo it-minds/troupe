@@ -936,11 +936,10 @@ Found by the #371 fixer, 2026-10-08.
   dropped on every call with `drop_block`. Once a call is refused or reports drops,
   sending the leading run of pre-change blocks no more would end it (Anthropic accepts a
   leading run removed oldest first).
-- Decision 793 offers the todo tools once a list exists or after 10 calls, which changes
-  `tools` mid-turn: that invalidates every kept block on the newest models and the cache.
-  `llm_request.tools_changed` counts it.
-- Unchecked: whether `split_for_compaction` strips thinking from the tail compaction
-  keeps; Anthropic's documentation says a kept tail breaks the binding unless it does.
+- On a model that does not bind its thinking, Decision 793 still offers the todo tools once
+  a list exists or after 10 calls, which changes `tools` mid-turn and costs a cache write
+  (`llm_request.tools_changed` counts it). A model that binds has them from the first call,
+  and a compaction's kept tail goes without its thinking there (Decision 867).
 - A log written before 0.13.0 has no `turn_context_block` to fold (Decision 863): a session
   that ran `system_prompt: stable` then sends its first call after a resume without the
   turn contexts it had put, and one that ran 0.12.0's `per_turn` default changes its system

@@ -10,9 +10,10 @@ run the project's own tests or build when they exist rather than assuming.
 
 Task discipline:
 
-- `todo_write` is offered once the work has run long: then write the whole plan,
-  keep exactly one item `in_progress`, and mark each `completed` the moment it is
-  done, in the same response as the call doing the work.
+- `todo_write` is for work that has run long, past ten calls or so, and is not
+  worth a call before: then write the whole plan, keep exactly one item
+  `in_progress`, and mark each `completed` the moment it is done, in the same
+  response as the call doing the work.
 - Independent items go to subagents, all in one turn; dependent work stays with you.
   `explore` reads, `general` edits. A brief is all they know: a goal they can check,
   the paths and findings you have, what not to touch, what to return. Judge a finish

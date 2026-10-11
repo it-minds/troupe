@@ -29,6 +29,9 @@ defmodule Troupe.Tool.Ctx do
     # The model calls this agent's turn has made so far, its subagents' included: what
     # offers the task list to a profile that did not ask for it by name (Decision 793).
     turn_calls: 0,
+    # The model the call goes to, as its provider names it, when the tools are being
+    # offered: on one that binds its thinking to them they never change (Decision 867).
+    model: nil,
     depth: 0,
     max_depth: 3,
     budget: nil,
@@ -50,6 +53,7 @@ defmodule Troupe.Tool.Ctx do
           todos: [Troupe.Todo.t()],
           children: [String.t()],
           turn_calls: non_neg_integer(),
+          model: String.t() | nil,
           depth: non_neg_integer(),
           max_depth: pos_integer(),
           budget: Troupe.Budget.t() | nil,

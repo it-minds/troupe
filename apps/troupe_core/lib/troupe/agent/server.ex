@@ -52,6 +52,7 @@ defmodule Troupe.Agent.Server do
     Gateway,
     Message,
     Provider,
+    Reasoning,
     Request,
     Response,
     Text,
@@ -1465,8 +1466,10 @@ defmodule Troupe.Agent.Server do
     %{own | tools: tools, permissions: Map.merge(own.permissions, denied)}
   end
 
+  # The tools are offered knowing the model they go to: one that binds its thinking to
+  # them is offered the same on every call (Decision 867).
   defp build_request(state, definition) do
-    ctx = base_ctx(state, "")
+    ctx = %{base_ctx(state, "") | model: Config.target(state.config, definition.model).model}
     tools = Tools.specs(definition, ctx)
 
     %Request{
@@ -3465,10 +3468,14 @@ defmodule Troupe.Agent.Server do
   # What the summariser reads: the stretch it replaces, with each tool call and result
   # written out as text (Decision 779). Its request defines no tools, and Anthropic's API
   # refuses a tool block in a request that defines none (#404). A result's tool is named
-  # by the calls in the message before it, as `Output.stub_behind/3` names it.
+  # by the calls in the message before it, as `Output.stub_behind/3` names it. Anthropic's
+  # thinking is not sent: it says nothing a summary can read, and on a model that binds it
+  # to the conversation it was made in, the summariser's is not that one (Decision 867).
   defp written_out(messages) do
     {written, _calls} =
-      Enum.map_reduce(messages, %{}, fn %Message{content: blocks} = message, calls ->
+      messages
+      |> Enum.map(&without_thinking/1)
+      |> Enum.map_reduce(%{}, fn %Message{content: blocks} = message, calls ->
         {%{message | content: Enum.map(blocks, &as_text(&1, calls))},
          Map.new(Message.tool_uses(message), &{&1.id, &1.name})}
       end)
@@ -3525,6 +3532,7 @@ defmodule Troupe.Agent.Server do
     summary = Message.text(Response.to_message(response))
     gateway = gateway_json(response.gateway, state, response, "cheap")
     {keep, _drop} = split_for_compaction(state.conversation)
+    keep = if binds_thinking?(state), do: Enum.map(keep, &without_thinking/1), else: keep
 
     conversation = [
       Message.user("Summary of earlier work in this session:\n\n" <> summary)
@@ -3558,6 +3566,25 @@ defmodule Troupe.Agent.Server do
     |> show_todos()
     |> instructions_due()
   end
+
+  # What a compaction keeps was said after the messages the summary replaces, so each
+  # thinking block in it is bound to a conversation no later request has: on a model that
+  # binds its thinking, an account the check is enforced for would refuse every call after
+  # the compaction once, until a later one summarised the blocks away. Kept without them,
+  # as the API asks of a compaction's tail (D92, Decision 867). On any other model a block
+  # still holds, and an Anthropic model thinking with an effort set may need its last one.
+  defp binds_thinking?(state),
+    do: Catalog.binds_thinking?(Config.target(state.config, state.definition.model).model)
+
+  # A message that was nothing but thinking is left as it was rather than sent empty.
+  defp without_thinking(%Message{role: :assistant, content: blocks} = message) do
+    case Enum.reject(blocks, &match?(%Reasoning{provider: :anthropic}, &1)) do
+      [] -> message
+      kept -> %{message | content: kept}
+    end
+  end
+
+  defp without_thinking(message), do: message
 
   # What a compaction leaves behind it ends at the model's last reply in what it kept
   # (Decision 771). A result after that reply, the one a compaction in the middle of a turn

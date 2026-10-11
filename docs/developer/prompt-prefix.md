@@ -16,9 +16,9 @@ live, and the maintainer chose on 2026-10-11 (Decision 863):
   the system prompt mid-session. `system_prompt: per_turn` is the old prompt, by name.
 - **Option 1, Anthropic's beta, is an opt-in fallback** (`thinking_binding: drop_block`)
   for an account that refuses a stale block, on the prefix changes option 2 cannot remove:
-  a compaction, an `AI?` turn's `plan` prompt. The
-  largest such change today, the task list's tools offered at a turn's eleventh call
-  (Decision 793), is #590.
+  an `AI?` turn's `plan` prompt, a profile or model switch. The largest such change, the
+  task list's tools offered at a turn's eleventh call (Decision 793), and the tail a
+  compaction keeps are gone on a model that binds its thinking (#590, Decision 867).
 - **`thinking_binding: error`** asks the API for the refusal an enforced account gets, on
   any account, so that refusal can be measured without a patched build (#591).
 
@@ -33,8 +33,8 @@ question, and gives the numbers from the live runs with the commands that produc
 | the instruction files and the brief in the system prompt | the first call of a turn after a file was edited, or after the turn before worked in a directory with its own `AGENTS.md` | 798 | turn context |
 | the goal in the system prompt | the call after it was set or cleared | 678 | turn context |
 | the `plan` prompt added to the profile's | an `AI?` watch turn | | changes |
-| the tools | the call after the task list's tools are first offered: once there is a list, or after ten calls of a turn | 793 | changes (#590) |
-| the conversation | a compaction, which keeps a tail of it | 774 | changes |
+| the tools | the call after the task list's tools are first offered: once there is a list, or after ten calls of a turn | 793 | the same on a model that binds its thinking: the list's tools from the first call (867); changes on others |
+| the conversation | a compaction, which keeps a tail of it | 774 | changes; on a model that binds its thinking the tail goes without the blocks made in front of what the summary replaced, so no later call is refused (867) |
 | the turn context put before | an agent restarted, or a session resumed | 815 | the same: the blocks are in the log (863) |
 
 On an account the check is enforced for, every call after one of these that carries a
@@ -109,8 +109,10 @@ call carried.
 
 What it costs:
 
-- **The prefix still changes** where the system prompt was not the cause: the tools when
-  the task list's are first offered (793), a compaction, an `AI?` turn's `plan` prompt.
+- **The prefix still changes** where the system prompt was not the cause: a compaction,
+  an `AI?` turn's `plan` prompt, and on a model that does not bind its thinking the tools
+  when the task list's are first offered (793). On one that does, the list's tools are
+  there from the first call and a compaction's tail keeps no thinking (867).
   An agent restarted, or a session resumed, sends what it sent before: each block is on
   its call's `llm_request` as `turn_context_block` and folded back on replay (863).
 - **Tokens.** A changed section is added to the conversation each time it changes, and
@@ -294,6 +296,7 @@ tokens more than a warm run.
   in `task_list`, the task list's block behind the cache mark.
 - **The task list's tools (#590) did not show:** no call of these scenarios is a turn's
   eleventh, and `task_list` runs on `plan`, which has the list's tools from its first call.
+  `long_turn` (below) is the scenario that shows it.
 - Every run's outcome and checks held. The full tables, `follow_up` and Opus 5.5 among
   them, are on #465.
 

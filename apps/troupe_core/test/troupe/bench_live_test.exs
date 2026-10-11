@@ -594,6 +594,37 @@ defmodule Troupe.BenchLiveTest do
     end
   end
 
+  # Issue #590 (Decision 867): `long_turn` is thirteen calls of one turn on `build`, with no
+  # task list. The list's tools are there from the first call on a model that binds its
+  # thinking, so nothing in front of the first call's thinking changes at the eleventh,
+  # and an enforced account refuses nothing; where they came at the eleventh, the three
+  # calls from there were each refused once.
+  describe "issue #590's long turn" do
+    test "thirteen calls on build with thinking_binding: error: no tools change, nothing refused" do
+      fake = start_fake()
+
+      {:ok, plan} =
+        Bench.plan(
+          config: anthropic(fake, thinking_binding: "error"),
+          only: ["long_turn"],
+          history: nil
+        )
+
+      report = Bench.live(plan)
+      assert Bench.passed?(report), Bench.markdown(report)
+
+      [run] = scenario(report, "long_turn")["runs"]
+      assert run["model_calls"] == 13
+
+      assert %{"system_changes" => 0, "tools_changes" => 0, "thinking_resent" => 0} =
+               run["prefix"]
+
+      requests = FakeOpenAI.requests(fake)
+      assert length(requests) == 13
+      assert Enum.all?(requests, &(&1.status == 200 and &1.thinking == :kept))
+    end
+  end
+
   # The stand-in as Anthropic's API, serving Claude Opus 5.5 at its price.
   defp anthropic(fake, extra \\ []) do
     Troupe.Config.load(

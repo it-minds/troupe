@@ -278,7 +278,14 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
               {"todo_write", %{"items" => items(["completed", "completed", "completed"])}}
             ]},
            {:text, "notes/b.txt has more lines, and N is 440."}
-         ]}
+         ]},
+        # `long_turn`, one turn of thirteen calls on `build` (issue #590): twelve files read
+        # one after another, each naming the next, then the answer.
+        {"First work out N, the sum of the prime numbers below 60",
+         Enum.map(
+           ~w(start k7 b2 x9 m4 q1 d8 r3 h6 t5 w0 z2),
+           &{:tools, [{"read_file", %{"path" => "chain/#{&1}.txt"}}]}
+         ) ++ [{:text, "N is 440, and the numbers add up to 52."}]}
       ]
     end
 

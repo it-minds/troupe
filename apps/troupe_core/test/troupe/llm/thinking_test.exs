@@ -115,6 +115,36 @@ defmodule Troupe.LLM.ThinkingTest do
       end
     end
 
+    # Decision 867: the ones whose blocks are bound to the conversation, the tools among it,
+    # by name as `thinks_unasked?/1` reads it.
+    test "Fable from 5.1, Opus and Sonnet from 5.5 bind their thinking, and later versions" do
+      for model <- [
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-fable-5-1",
+            "claude-opus-6",
+            "claude-sonnet-5-6-20261101",
+            "eu.anthropic.claude-sonnet-5-5-v1:0",
+            "anthropic/claude-fable-5-1"
+          ] do
+        assert Catalog.binds_thinking?(model), model
+      end
+
+      for model <- [
+            "claude-opus-5",
+            "claude-opus-5-20260301",
+            "claude-sonnet-5",
+            "claude-fable-5",
+            "claude-mythos-5-1",
+            "claude-opus-4-8",
+            "claude-haiku-5-5",
+            "qwen3-235b",
+            nil
+          ] do
+        refute Catalog.binds_thinking?(model), inspect(model)
+      end
+    end
+
     test "an effort of none sends no thinking field, and the thinking the model did goes back" do
       for effort <- ["none", "off"] do
         body = sent(%{request("claude-opus-5-5", effort) | messages: tool_turn(thought())})
