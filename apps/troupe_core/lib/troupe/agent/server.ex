@@ -2732,19 +2732,50 @@ defmodule Troupe.Agent.Server do
   end
 
   # What the question is about (Decision 699): the session's spend so far, from the index
-  # where every priced response lands; the scopes and the ceiling the terms leave a session
-  # on a pod; the file a workspace answer writes; and `iteration` for a loop's turn.
+  # where every priced response lands; the scopes the terms leave a session on a pod; the
+  # ceiling on the limit and whose it is; the file a workspace answer writes; and
+  # `iteration` for a loop's turn.
   defp budget_context(state, limit) do
     entry = headroom(state)[Headroom.dimension(limit)]
     terms = state.config.terms
+    {cap, cap_by} = ceiling(state.config, limit)
 
     BudgetQuestion.context(limit, entry,
       spent_micros: spent_micros(state),
       scopes: if(is_map(terms), do: [:run, :session], else: [:run, :session, :workspace]),
-      cap: if(is_map(terms), do: Map.get(terms, limit)),
+      cap: cap,
+      cap_by: cap_by,
       path: Config.project_path(state.workspace.root_real),
       run_word: if(state.turn_mode == :loop, do: "iteration", else: "run")
     )
+  end
+
+  # What a limit may not be raised past (issue #622): the lower of the ceiling a pod's
+  # terms set (Decision 699) and the one the organisation enforces on this machine
+  # (Decision 869), and whose it is, for the question's words. `{nil, nil}` where
+  # neither says.
+  defp ceiling(config, limit) do
+    terms = if is_map(config.terms), do: Map.get(config.terms, limit)
+
+    case config |> Map.get(:ceilings, %{}) |> Map.get(limit) do
+      %{limit: cap, source: source} when is_nil(terms) or cap < terms ->
+        {cap, {:organisation, source}}
+
+      _none when is_integer(terms) ->
+        {terms, :terms}
+
+      _none ->
+        {nil, nil}
+    end
+  end
+
+  # Every limit's ceiling, which whatever an answer did is held to.
+  defp ceilings(config) do
+    for limit <- @limits,
+        {cap, _by} <- [ceiling(config, limit)],
+        cap != nil,
+        into: %{},
+        do: {limit, cap}
   end
 
   defp spent_micros(state) do
@@ -2796,28 +2827,38 @@ defmodule Troupe.Agent.Server do
   defp scope_named(_session_or_odd), do: :session
 
   # `allow` also forgets which limits were warned about: a fresh slice is a fresh warning.
+  # Whatever an answer did is held to the ceilings (issue #622): `allow` raises every limit
+  # at once, and an answer logged before a ceiling was set is replayed under it.
   defp apply_budget_decision(state, :allow) do
-    %{state | budget: Budget.grant(state.budget), headroom_warned: MapSet.new()}
+    budget = state.budget |> Budget.grant() |> Budget.hold(ceilings(state.config))
+    %{state | budget: budget, headroom_warned: MapSet.new()}
   end
 
   defp apply_budget_decision(%State{budget_ask_limit: nil} = state, :always), do: state
 
-  defp apply_budget_decision(state, :always),
-    do: %{state | budget: Budget.lift(state.budget, state.budget_ask_limit)}
+  defp apply_budget_decision(state, :always) do
+    lifted = Budget.lift(state.budget, state.budget_ask_limit)
+    %{state | budget: Budget.hold(lifted, ceilings(state.config))}
+  end
 
   defp apply_budget_decision(%State{budget_ask_limit: nil} = state, {:extend, _scope, _amount}), do: state
 
   # A raise re-arms the warning for its own dimension: a fresh stretch of that limit. One
-  # for this run alone is remembered, to be given back where the run ends.
+  # for this run alone is remembered, as far as the ceilings let it go, to be given back
+  # where the run ends.
   defp apply_budget_decision(%State{budget_ask_limit: limit} = state, {:extend, scope, amount}) do
+    budget = state.budget |> Budget.extend(limit, amount) |> Budget.hold(ceilings(state.config))
+    field = Budget.field(limit)
+    raised = Map.fetch!(budget, field) - Map.fetch!(state.budget, field)
+
     grants =
-      if scope == :run,
-        do: Map.update(state.budget_run_grant, limit, amount, &(&1 + amount)),
+      if scope == :run and raised > 0,
+        do: Map.update(state.budget_run_grant, limit, raised, &(&1 + raised)),
         else: state.budget_run_grant
 
     %{
       state
-      | budget: Budget.extend(state.budget, limit, amount),
+      | budget: budget,
         budget_run_grant: grants,
         headroom_warned: MapSet.delete(state.headroom_warned, Headroom.dimension(limit))
     }

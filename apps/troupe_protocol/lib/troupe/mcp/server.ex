@@ -46,7 +46,12 @@ defmodule Troupe.MCP.Server do
     # The headers a person's own server's entry names (Decision 820), `{name, value}` with
     # each `{env:VAR}` already read, sent with every request beside the credential. A
     # bundle's server has none: it carries its one credential.
-    headers: []
+    headers: [],
+    # A person's own server, called from their machine (Decision 875): every request goes
+    # to an address its name was resolved to and checked at, never a link-local, cloud
+    # metadata or unspecified one (`Troupe.MCP.Address`). Set by the daemon, never from a
+    # file; a pod's egress is its network policy's.
+    pinned: false
   ]
 
   @type t :: %__MODULE__{
@@ -60,7 +65,8 @@ defmodule Troupe.MCP.Server do
           tools: :all | [String.t()],
           oauth: map() | nil,
           sessions: :ets.tid() | nil,
-          headers: [{String.t(), String.t()}]
+          headers: [{String.t(), String.t()}],
+          pinned: boolean()
         }
 
   # What the client sends on its own, per request: a header of the entry's with one of
