@@ -1103,19 +1103,6 @@ Found by the #519, #522 and client fixers, 2026-10-10.
 
 Found by the #528, #529 and #536 fixers, 2026-10-10.
 
-### D105 - Branch commands since a branch became a session of its own (medium)
-
-What the command audit ([command-audit.md](command-audit.md)) found the TUI's branch
-commands no longer doing, against their rows in `Troupe.Commands` and the TUI decisions
-that made them. The rest were fixed with Decision 843.
-
-- After `/merge`, `/discard` or `/dismiss` from the palette over the activated window, the
-  screen's focus still names the closed window until the next key.
-- `/ask`'s `read_branch`, with no branch finished, lists the others with their states and
-  never says that none has finished.
-
-Found by the #502 audit, 2026-10-10.
-
 ### D107 - Commands from an activated window, and the palette's rows (low)
 
 For the palette (#503), whose slot owns these.
@@ -1190,21 +1177,8 @@ Found by the #248 fixers, 2026-10-10.
 
 Found by the #503 fixers, 2026-10-10.
 
-### D113 - Command mode and branches after #556 and #560 (medium)
+### D113 - Command mode and branches after #556 and #560 (low)
 
-- An approval a branch asked for before its worker connection restarted can't be answered
-  from the parent's screen: `Daemon.call_target/2`'s `{:call, sid, call_id}` registration
-  died with the old worker, so the answer goes to the parent session (medium).
-- `/new --branch` forks the session's own log, which in command mode holds no
-  conversation; the work is in the branches.
-- After a real merge conflict the line says "resolve in your checkout", but the merge was
-  aborted (Decision 647): the branch has to be merged by hand.
-- A git failure in `worktree.remove` is answered `invalid_params` with an inspected
-  string, where merge and discard answer `internal_error`.
-- `worktree.list` runs about four git calls per tree; `status --porcelain=v2 --branch`
-  would do with one.
-- A branch's row doesn't say which model it runs (quick's is `cheap`), and a dismissed
-  branch's row in the picker is titled by its worktree path.
 - TUI Decision 39's diff stat when a person's own worktree finishes, and Decision 42's
   `/merge <name>` acting on the name, aren't there since branches became sessions.
 

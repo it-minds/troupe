@@ -89,10 +89,19 @@ defmodule Troupe.Tools.ReadBranch do
 
   # -- listing -----------------------------------------------------------------
 
+  # A listing where nothing has finished says so: `/ask`, asked before any branch had, read
+  # the states and answered as if one had (D105).
   defp list(ctx) do
-    case family(ctx) do
-      [] -> "no branches"
-      branches -> Enum.map_join(branches, "\n", &line(&1, ctx))
+    case Enum.map(family(ctx), &line(&1, ctx)) do
+      [] ->
+        "no branches"
+
+      lines ->
+        listing = Enum.map_join(lines, "\n", &elem(&1, 0))
+
+        if Enum.any?(lines, &elem(&1, 1)),
+          do: listing,
+          else: listing <> "\nNone of them has finished yet, so there is no summary to read."
     end
   end
 
@@ -115,13 +124,17 @@ defmodule Troupe.Tools.ReadBranch do
     |> Enum.sort_by(& &1.created_at)
   end
 
+  # A branch's line, and whether it has finished.
   defp line(meta, ctx) do
     events = events(meta.id, ctx)
     prompt = first_line(prompt_of(events)) || "(no prompt)"
 
     case done_summary(events) do
-      nil -> "#{meta.id}  #{meta.profile}  #{state_of(meta)}  #{prompt}"
-      summary -> "#{meta.id}  #{meta.profile}  finished  #{prompt}\n    #{first_line(summary)}"
+      nil ->
+        {"#{meta.id}  #{meta.profile}  #{state_of(meta)}  #{prompt}", false}
+
+      summary ->
+        {"#{meta.id}  #{meta.profile}  finished  #{prompt}\n    #{first_line(summary)}", true}
     end
   end
 

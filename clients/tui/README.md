@@ -688,8 +688,10 @@ to it (and `/back` again comes back, one step either way). `/new --private` make
 a private session, `/new --remote PROFILE` one on that profile of the plane you
 are signed in to, and `/new --branch` a fork of the session on screen: a session
 of its own whose log starts as a copy of this one's, so its agent goes on from the
-conversation as it stands while the first carries on as it was. The new session's
-command line is where its first line goes.
+conversation as it stands while the first carries on as it was. In command mode the
+conversations are the branches', so it is typed in the branch's window and forks that
+branch; on the command line it says which window to open. The new session's command
+line is where its first line goes.
 
 `troupe`'s own log is `troupe.log` in the same state directory, beside the
 daemon's `daemon.log`: `~/.local/state/troupe/troupe.log` (`$XDG_STATE_HOME/troupe`

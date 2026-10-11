@@ -189,9 +189,10 @@ defmodule Troupe.Gateway.Worktrees do
   @doc """
   Remove a worktree. Refuses a dirty one unless `force`. git runs from the checkout the
   tree belongs to, as `merge/3` and `discard/2` remove it: on Windows git cannot delete
-  the directory it was started in.
+  the directory it was started in. git's refusal is `{:git, output}`, as theirs is.
   """
-  @spec remove(Path.t(), boolean()) :: :ok | {:error, :dirty | term()}
+  @spec remove(Path.t(), boolean()) ::
+          :ok | {:error, :dirty | :not_found | {:git, String.t()} | term()}
   def remove(path, force?) do
     path = Path.expand(path)
 
@@ -209,7 +210,7 @@ defmodule Troupe.Gateway.Worktrees do
         # is no linked worktree is its own, and git says what it makes of it.
         case git(Trust.root(path), args) do
           {:ok, _output, 0} -> :ok
-          {:ok, output, _} -> {:error, String.trim(output)}
+          {:ok, output, _} -> {:error, {:git, String.trim(output)}}
           {:error, reason} -> {:error, reason}
         end
     end
@@ -398,45 +399,98 @@ defmodule Troupe.Gateway.Worktrees do
 
   defp annotate(%{"worktree" => path} = entry, main) do
     session = path |> live_in() |> List.first()
-
-    status = status(path)
+    branch = entry |> Map.get("branch", "") |> String.replace_prefix("refs/heads/", "")
+    main? = entry == main
+    status = status(path, against(main?, branch, main["branch"]))
 
     %{
       "path" => path,
-      "branch" => entry |> Map.get("branch", "") |> String.replace_prefix("refs/heads/", ""),
+      "branch" => branch,
       "session_id" => session && session.id,
-      "dirty" => status != []
+      "dirty" => status.entries != []
     }
-    |> Map.merge(standing(path, entry == main, main["branch"], status))
+    |> Map.merge(standing(path, main?, main["branch"], status))
   end
 
-  # `git status` a line a path, every untracked file named (not its directory), or `[]`
-  # where git could not say.
-  defp status(path) do
-    case git(path, ["status", "--porcelain", "--untracked-files=all"]) do
-      {:ok, output, 0} -> String.split(output, ~r/\r?\n/, trim: true)
-      _ -> []
+  # One `git status` a tree (D113): its entries, each untracked file named (not its
+  # directory), say whether it is dirty and which files a merge would add, and `--branch`
+  # says how far its branch is from its upstream. For a linked tree's branch the upstream is,
+  # for this one call, the checkout's branch (`branch.<name>.remote` `.`), so the same line
+  # says how far it is from that. Nothing where git could not say.
+  defp status(path, settings) do
+    args =
+      settings ++
+        ["status", "--porcelain=v2", "--branch", "--ahead-behind", "--untracked-files=all"]
+
+    case git(path, args) do
+      {:ok, output, 0} ->
+        {headers, entries} =
+          output
+          |> String.split(~r/\r?\n/, trim: true)
+          |> Enum.split_with(&String.starts_with?(&1, "# "))
+
+        %{entries: entries, upstream: header(headers, "upstream"), ab: ab(header(headers, "ab"))}
+
+      _ ->
+        %{entries: [], upstream: nil, ab: nil}
     end
   end
 
+  # The checkout's branch as the linked tree's upstream. A name git's `-c` would split
+  # wrongly (one with a `=`) is not offered; its tree is counted the other way.
+  defp against(false, branch, "refs/heads/" <> _ = base) when branch != "" do
+    if String.contains?(branch, "="),
+      do: [],
+      else: ["-c", "branch.#{branch}.remote=.", "-c", "branch.#{branch}.merge=#{base}"]
+  end
+
+  defp against(_main?, _branch, _base), do: []
+
+  defp header(headers, name) do
+    Enum.find_value(headers, fn line ->
+      case String.split(line, " ", parts: 3) do
+        ["#", "branch." <> ^name, value] -> value
+        _ -> nil
+      end
+    end)
+  end
+
+  # `+ahead -behind`, or nil.
+  defp ab("+" <> counts) do
+    with [ahead, "-" <> behind] <- String.split(counts, " "),
+         {ahead, ""} <- Integer.parse(ahead),
+         {behind, ""} <- Integer.parse(behind) do
+      {ahead, behind}
+    else
+      _ -> nil
+    end
+  end
+
+  defp ab(_value), do: nil
+
   # The checkout against its upstream, and what it has not committed.
   defp standing(path, true, _base, status) do
-    {behind, ahead} = counts(path, "@{upstream}...HEAD")
-    {added, removed} = changed(path, "HEAD", status)
+    {ahead, behind} = if status.upstream, do: status.ab || {nil, nil}, else: {nil, nil}
+    {added, removed} = changed(path, ["HEAD"], status)
     %{"ahead" => ahead, "behind" => behind, "added" => added, "removed" => removed}
   end
 
   # A linked worktree against the checkout's branch: what its branch has that that one has
-  # not and the other way round, and the lines since it left it.
-  defp standing(path, false, "refs/heads/" <> _ = base, status) do
-    {behind, ahead} = counts(path, base <> "...HEAD")
+  # not and the other way round, and the lines since it left it. A tree whose status did not
+  # take the checkout's branch for its upstream (a detached one, one whose branch has an
+  # upstream of its own) is counted with `rev-list`.
+  defp standing(path, false, "refs/heads/" <> short = base, status) do
+    {ahead, behind} =
+      case status do
+        %{upstream: upstream, ab: {_, _} = ab} when upstream in [short, "heads/" <> short] ->
+          ab
 
-    {added, removed} =
-      case git(path, ["merge-base", base, "HEAD"]) do
-        {:ok, sha, 0} -> changed(path, String.trim(sha), status)
-        _ -> {nil, nil}
+        _ ->
+          {behind, ahead} = counts(path, base <> "...HEAD")
+          {ahead, behind}
       end
 
+    {added, removed} = changed(path, ["--merge-base", base], status)
     %{"ahead" => ahead, "behind" => behind, "added" => added, "removed" => removed}
   end
 
@@ -455,10 +509,11 @@ defmodule Troupe.Gateway.Worktrees do
     end
   end
 
-  # Lines added and removed since `from`, the working tree's included, and the lines of
-  # every untracked file, which a merge commits too (`git add -A`, `commit_pending/2`).
+  # Lines added and removed since `from` (a commit, or `--merge-base` and the branch it
+  # left), the working tree's included, and the lines of every untracked file, which a
+  # merge commits too (`git add -A`, `commit_pending/2`).
   defp changed(path, from, status) do
-    case git(path, ["diff", "--numstat", from]) do
+    case git(path, ["diff", "--numstat" | from]) do
       {:ok, output, 0} ->
         {added, removed} =
           output |> String.split(~r/\r?\n/, trim: true) |> Enum.reduce({0, 0}, &numstat/2)
@@ -496,10 +551,10 @@ defmodule Troupe.Gateway.Worktrees do
 
     # git quotes a name with unusual characters in it; such a file is left out of the
     # count rather than read by a name worked out here.
-    status
+    status.entries
     |> Enum.flat_map(fn
-      "?? \"" <> _quoted -> []
-      "?? " <> file -> [file]
+      "? \"" <> _quoted -> []
+      "? " <> file -> [file]
       _ -> []
     end)
     |> Enum.take(@untracked_files)

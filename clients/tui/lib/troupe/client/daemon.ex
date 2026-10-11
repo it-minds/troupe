@@ -409,9 +409,15 @@ defmodule Troupe.Client.Daemon do
           close_branch(sid, branch)
           {:ok, merged(branch, result)}
 
+        # git stopped and the daemon aborted it (Decision 647): the checkout is as it was,
+        # nothing in it to resolve, and the window and its worktree stay.
         {:error, "conflict: merge conflicts" <> _ = reason} ->
           record(sid, branch.window, :worktree_merged, %{output: reason, conflicts: true})
-          {:error, "merge conflicts; resolve in your checkout: #{reason}"}
+
+          {:error,
+           "#{branch.window} is not merged: #{branch.git_branch} conflicts with the checkout, " <>
+             "so the merge was aborted and the checkout is as it was; merge " <>
+             "#{branch.git_branch} by hand, then /discard #{branch.window}"}
 
         # git would not start it: nothing conflicted, and the checkout is as it was.
         {:error, "conflict: local changes" <> _} ->
@@ -1211,22 +1217,35 @@ defmodule Troupe.Client.Daemon do
   end
 
   @doc """
-  This session's branches whose windows were dismissed, by window and session id: each is
-  still a session in the daemon, which the picker lists (the row of `/dismiss`). One
+  This session's branches whose windows were dismissed, by window and session id, with the
+  first thing each was asked: each is still a session in the daemon, which the picker lists
+  (the row of `/dismiss`), titled by that rather than the worktree it worked in (D113). One
   merged, discarded or cancelled is not: it was ended, not let go.
   """
-  @spec dismissed_branches(String.t()) :: [%{window: String.t(), session_id: String.t()}]
+  @spec dismissed_branches(String.t()) :: [
+          %{window: String.t(), session_id: String.t(), prompt: String.t()}
+        ]
   def dismissed_branches(sid) do
     events = Journal.all(sid)
     open = MapSet.new(branches(events), & &1.window)
     ended = for event <- events, ended?(event), into: MapSet.new(), do: event.agent_path
 
-    for %{type: :branch_spawned, agent_path: window, data: %{session_id: child}} <- events,
+    for %{type: :branch_spawned, agent_path: window, data: %{session_id: child} = data} <- events,
         is_binary(child),
         not MapSet.member?(open, window),
         not MapSet.member?(ended, window),
-        do: %{window: window, session_id: child}
+        do: %{window: window, session_id: child, prompt: first_prompt(child, data[:prompt])}
   end
+
+  # A branch opened with no prompt was told its task in its window: its first input.
+  defp first_prompt(child, prompt) when prompt in [nil, ""] do
+    Enum.find_value(Journal.all(child), "", fn
+      %{type: :input, data: %{content: text}} when is_binary(text) and text != "" -> text
+      _event -> nil
+    end)
+  end
+
+  defp first_prompt(_child, prompt), do: prompt
 
   defp ended?(%{type: :worktree_discarded}), do: true
   defp ended?(%{type: :worktree_merged, data: %{conflicts: false}}), do: true
@@ -1328,7 +1347,8 @@ defmodule Troupe.Client.Daemon do
   end
 
   # An approval asked by a branch was registered under this session and its call id by
-  # the branch's worker; anything else is this session's own.
+  # the branch's worker, as it went by or, for a worker started again since, as that one
+  # started (D113); anything else is this session's own.
   defp call_target(sid, call_id) do
     case Registry.lookup(Troupe.Client.Registry, {:call, sid, call_id}) do
       [{_pid, child}] -> child

@@ -7,7 +7,8 @@ draws) run in a session, with what happened and what now holds it: a test, or a 
 
 Since then, in the same release: D105's items but two were fixed by #556, D106 (watch) by
 #558, D107's palette items by #560 and #563, and D108 and D109 (uploads, a dropped
-connection, copying on Windows) by #552. What is still open is in D105 and D107.
+connection, copying on Windows) by #552; D105's other two in 0.11.0, with D113. What is
+still open is in D107 and D113.
 
 ## How it was run
 

@@ -43,16 +43,20 @@ defmodule Troupe.Tools.ReadBranchTest do
     :ok = Troupe.subscribe(branch.id)
     ctx = ctx(parent, context)
 
+    # With none finished the listing says so, rather than leave the states to be read as
+    # though one had (D105).
     assert {:ok, listing} = ReadBranch.run(%{}, ctx)
     assert listing =~ branch.id
-    refute listing =~ "finished"
+    refute listing =~ "  finished  "
+    assert listing =~ "None of them has finished yet"
     assert {:error, "branch " <> _} = ReadBranch.run(%{"session_id" => branch.id}, ctx)
 
     Troupe.send_input(branch.id, "rename Foo to Bar")
     assert_receive {:troupe_event, _, %Event{type: "agent_done", agent: ["root"]}}, 5_000
 
     assert {:ok, listing} = ReadBranch.run(%{}, ctx)
-    assert listing =~ "finished"
+    assert listing =~ "  finished  "
+    refute listing =~ "None of them"
     assert listing =~ "renamed Foo to Bar"
 
     assert {:ok, text} = ReadBranch.run(%{"session_id" => branch.id}, ctx)
@@ -77,6 +81,7 @@ defmodule Troupe.Tools.ReadBranchTest do
     assert {:ok, listing} = ReadBranch.run(%{}, ctx(ask, context))
     assert listing =~ sibling.id
     refute listing =~ parent.id
+    assert listing =~ "None of them has finished yet"
 
     assert {:error, "no branch " <> _} =
              ReadBranch.run(%{"session_id" => parent.id}, ctx(ask, context))
