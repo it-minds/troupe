@@ -909,6 +909,29 @@
       },
       "additionalProperties": false
     },
+    "transcript": {
+      "description": "How the clients draw a transcript. The daemon keeps it and acts on none of it.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "detail": {
+          "description": "How much of a turn the clients draw open: `quiet`, its answer with its working one strip above it; `tools`, its tool calls open and its reasoning collapsed; `everything`, nothing collapsed. A failed call, an approval, a question and what follows a budget stop are open at every level. `/detail` changes it for one session.",
+          "default": "quiet",
+          "enum": [
+            "quiet",
+            "tools",
+            "everything",
+            null
+          ]
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
     "model": {
       "description": "Old spelling of models.default.",
       "deprecated": true,

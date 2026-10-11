@@ -65,7 +65,8 @@ defmodule Troupe.UI.TUI.Server do
           tick_scheduled: boolean(),
           quit_armed: boolean(),
           win_armed: win_armed() | nil,
-          expanded: boolean(),
+          detail: :quiet | :tools | :everything,
+          detail_own: :quiet | :tools | :everything | nil,
           pane: pane(),
           selection: selection() | nil,
           size: {non_neg_integer(), non_neg_integer()},
@@ -99,13 +100,15 @@ defmodule Troupe.UI.TUI.Server do
   @typedoc """
   Activated-pane state: which of the branch's agents is shown (nil = the root),
   where the transcript is scrolled (`:follow` sticks to the bottom; a row offset
-  stays put while new content arrives), and how many transcript entries there
-  were when the user last scrolled, so the title can say how much arrived since.
+  stays put while new content arrives), how many transcript entries there
+  were when the user last scrolled, so the title can say how much arrived since, and the
+  turns `e` turned the other way from the screen's level (TUI Decision 161), by number.
   """
   @type pane :: %{
           agent: String.t() | nil,
           scroll: :follow | non_neg_integer(),
-          seen_entries: non_neg_integer()
+          seen_entries: non_neg_integer(),
+          open: MapSet.t(non_neg_integer())
         }
 
   @typedoc """
@@ -289,7 +292,10 @@ defmodule Troupe.UI.TUI.Server do
       tick_scheduled: false,
       quit_armed: false,
       win_armed: nil,
-      expanded: false,
+      # How much of a transcript is open (TUI Decision 161): `transcript.detail`, read with
+      # the theme, and the level `/detail` set for this session, which outranks it.
+      detail: :quiet,
+      detail_own: nil,
       pane: fresh_pane(),
       selection: nil,
       settings: nil,
@@ -434,9 +440,14 @@ defmodule Troupe.UI.TUI.Server do
 
   # A settings file changed, here or in another client (#57): an open settings page reads
   # them again, so a model picked in the desktop app is on it without a key pressed, and a
-  # changed `ui` key is read again, so a theme picked there is the one drawn here (#228).
+  # changed `ui` key is read again, so a theme picked there is the one drawn here (#228),
+  # as is `transcript.detail` (TUI Decision 161).
   def handle_info({:troupe_settings_changed, changed}, state) do
-    ui? = changed |> Map.get("keys") |> List.wrap() |> Enum.any?(&String.starts_with?(&1, "ui."))
+    ui? =
+      changed
+      |> Map.get("keys")
+      |> List.wrap()
+      |> Enum.any?(&(String.starts_with?(&1, "ui.") or String.starts_with?(&1, "transcript.")))
 
     if ui? or state.settings != nil do
       state = if ui?, do: read_appearance(state), else: state
@@ -1016,7 +1027,7 @@ defmodule Troupe.UI.TUI.Server do
   # than being dispatched as an agent.
   @builtins ~w(new cancel dismiss merge discard goal loop sessions back hq observer files
                scratch upload copy memory context watch settings models mcp skills help agents
-               worktree quit)
+               worktree detail quit)
 
   @doc false
   @spec builtins() :: [String.t()]
@@ -1085,6 +1096,7 @@ defmodule Troupe.UI.TUI.Server do
       :palette -> open_palette(state)
       :files -> toggle_files(state)
       {:scratch, arg} -> open_scratch(state, arg)
+      {:detail, arg} -> set_detail(state, arg)
       :mcp -> open_mcp(state)
       :agents -> open_agents(state)
       :memory -> open_memory(state)
@@ -1104,6 +1116,28 @@ defmodule Troupe.UI.TUI.Server do
       {:notice, text} -> notice(state, text)
       {:error, msg} when is_binary(msg) -> notice(state, msg)
       {:error, other} -> notice(state, inspect(other))
+    end
+  end
+
+  # How much of a transcript this session's screen draws open (TUI Decision 161): the
+  # client's own view of it, so nothing is written to the log or a config file, and history
+  # is drawn again at the new level. With no word it says where it stands.
+  defp set_detail(state, "") do
+    notice(
+      state,
+      "transcripts are drawn #{View.detail(state)}: /detail quiet, tools or everything " <>
+        "changes it for this session; transcript.detail in /settings is the default"
+    )
+  end
+
+  defp set_detail(state, word) do
+    case Model.detail(word) do
+      nil ->
+        notice(state, "/detail takes quiet, tools or everything, not #{inspect(word)}")
+
+      level ->
+        %{state | detail_own: level, pane: %{state.pane | open: MapSet.new()}}
+        |> notice("transcripts drawn #{level} in this session")
     end
   end
 
@@ -1350,6 +1384,7 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("observer", _args, _state, _target), do: :observer
   defp builtin("files", _args, _state, _target), do: :files
   defp builtin("scratch", args, _state, _target), do: {:scratch, String.trim(args)}
+  defp builtin("detail", args, _state, _target), do: {:detail, String.trim(args)}
   defp builtin("mcp", args, state, _target), do: sources_command(state, "mcp", String.trim(args))
 
   defp builtin("skills", args, state, _target),
@@ -1925,7 +1960,7 @@ defmodule Troupe.UI.TUI.Server do
         win_text: "",
         win_pos: 0,
         win_armed: nil,
-        expanded: false,
+        detail_own: nil,
         pane: fresh_pane(),
         settings: nil,
         observer: nil,
@@ -2903,6 +2938,13 @@ defmodule Troupe.UI.TUI.Server do
     value = Settings.value(view, nil, "ui.theme")
     theme = Theme.blinking(state.theme, Settings.value(view, nil, "ui.blink"))
 
+    # The level transcripts are drawn at, from the config ladder (TUI Decision 161); a
+    # value this client does not know is the default. `/detail` outranks it per session.
+    state = %{
+      state
+      | detail: Model.detail(Settings.value(view, nil, "transcript.detail")) || :quiet
+    }
+
     case Theme.choose(theme, value) do
       {:ok, theme} -> %{state | theme: theme}
       {:unknown, theme} -> unknown_theme(%{state | theme: theme}, value)
@@ -3198,7 +3240,7 @@ defmodule Troupe.UI.TUI.Server do
 
     case answerable(w, state.pane.agent || path) do
       %{delegation: %{}} = item -> gate_key(state, item, code)
-      _ when code == "e" -> toggle_expanded(state)
+      _ when code == "e" -> toggle_turn(state)
       _ -> put_win(state, code)
     end
   end
@@ -3259,7 +3301,7 @@ defmodule Troupe.UI.TUI.Server do
        when code in ["x", "d"],
        do: %{put_win(state, code) | win_armed: {path, code}}
 
-  defp window_key(%Key{code: "e"}, _path, %{win_text: ""} = state), do: toggle_expanded(state)
+  defp window_key(%Key{code: "e"}, _path, %{win_text: ""} = state), do: toggle_turn(state)
 
   # A digit picks an offered option: with a single-choice question it is the
   # answer, with `multiple` it toggles a tick that Enter later sends. Only while
@@ -3560,7 +3602,8 @@ defmodule Troupe.UI.TUI.Server do
     |> Map.put(:gate, nil)
   end
 
-  defp fresh_pane(agent \\ nil), do: %{agent: agent, scroll: :follow, seen_entries: 0}
+  defp fresh_pane(agent \\ nil),
+    do: %{agent: agent, scroll: :follow, seen_entries: 0, open: MapSet.new()}
 
   ## Pane scrolling
 
@@ -3612,25 +3655,32 @@ defmodule Troupe.UI.TUI.Server do
   # Empties the input box without leaving the window, and takes any arming with it.
   defp clear_input(state), do: %{put_win(state, "") | win_armed: nil}
 
-  # Expanding or collapsing tool output keeps the entry at the top of the view where it is,
+  # `e` opens the turn in view, every frame of it, or closes it again (TUI Decision 161):
+  # the last turn while the pane follows the tail, the one at the top of the view
+  # otherwise. Opening or closing keeps the entry at the top of the view where it is,
   # instead of throwing the reader to the bottom of a transcript that just changed height.
-  defp toggle_expanded(state) do
-    before = View.pane_geometry(state)
-    state = %{state | expanded: not state.expanded}
-
-    case {before, state.pane.scroll} do
-      {nil, _} ->
+  defp toggle_turn(state) do
+    case View.pane_geometry(state) do
+      nil ->
         state
 
-      {_, :follow} ->
-        state
+      before ->
+        n = View.turn_in_view(before)
+        open = state.pane.open
+        open = if MapSet.member?(open, n), do: MapSet.delete(open, n), else: MapSet.put(open, n)
+        state = %{state | pane: %{state.pane | open: open}}
 
-      {g, offset} ->
-        {idx, row} = View.block_at(g.heights, offset)
-        after_g = View.pane_geometry(state)
-        start = after_g.heights |> Enum.take(idx) |> Enum.sum()
-        height = Enum.at(after_g.heights, idx, 1)
-        set_scroll(state, after_g, start + min(row, max(height - 1, 0)))
+        case state.pane.scroll do
+          :follow ->
+            state
+
+          offset ->
+            {idx, row} = View.block_at(before.heights, offset)
+            after_g = View.pane_geometry(state)
+            start = after_g.heights |> Enum.take(idx) |> Enum.sum()
+            height = Enum.at(after_g.heights, idx, 1)
+            set_scroll(state, after_g, start + min(row, max(height - 1, 0)))
+        end
     end
   end
 

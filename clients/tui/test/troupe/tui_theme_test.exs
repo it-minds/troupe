@@ -591,7 +591,8 @@ defmodule Troupe.TUIThemeTest do
       now: Keyword.get(opts, :now, 0),
       quit_armed: false,
       win_armed: nil,
-      expanded: true,
+      # Every frame open (TUI Decision 161): these are about colour, not what is shut.
+      detail: :everything,
       pane: %{agent: nil, scroll: :follow, seen_entries: 0},
       selection: nil,
       answer: nil,

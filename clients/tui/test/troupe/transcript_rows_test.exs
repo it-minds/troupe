@@ -57,12 +57,13 @@ defmodule Troupe.TranscriptRowsTest do
     }
   end
 
+  # Every frame open (TUI Decision 161), as `e` used to open all output.
   defp geometry(model, width) do
     state = %{
       focus: {:window, "root"},
       model: model,
       pane: %{agent: nil, scroll: :follow, seen_entries: 0},
-      expanded: true,
+      detail: :everything,
       tick: 0,
       now: System.system_time(:millisecond),
       answer: nil
@@ -95,9 +96,9 @@ defmodule Troupe.TranscriptRowsTest do
     for width <- [200, 60] do
       g = geometry(model, width)
 
-      # The line typed; the prose and the block between its two rules; the call's head
-      # and its two lines of output. Nothing blank.
-      assert Enum.take(g.heights, g.entries) == [1, 5, 3]
+      # The line typed; the turn's strip, then the prose and the block between its two
+      # rules; the call's head and its two lines of output. Nothing blank.
+      assert Enum.take(g.heights, g.entries) == [1, 6, 3]
 
       texts =
         g.blocks
@@ -107,15 +108,16 @@ defmodule Troupe.TranscriptRowsTest do
 
       assert [
                "> fix it",
+               "▾ 1 step · shell",
                "Here is the fix:",
                "┌─ elixir " <> _,
                "│ def hello, do: :world",
                "└" <> _,
                "Apply it and rerun.",
                "✓ shell " <> _,
-               "  one",
-               "  two"
-             ] = Enum.take(texts, 9)
+               "one",
+               "two"
+             ] = Enum.take(texts, 10)
     end
   end
 
@@ -161,9 +163,12 @@ defmodule Troupe.TranscriptRowsTest do
     file = %{"big.txt" => Enum.map_join(1..1_001, "\n", &"\tline #{&1}") <> "\n"}
     args = %{"path" => "big.txt", "offset" => 998, "limit" => 4}
 
+    # The turn's strip, then the call; its body is on the rendered surface, whose rail
+    # copying and these texts leave out (TUI Decision 161).
     assert [
+             "▾ 1 step · read_file",
              "✓ read_file big.txt" <> _,
-             "  (lines 998-1001 of 1002)",
+             "(lines 998-1001 of 1002)",
              "  998 │     line 998",
              "  999 │     line 999",
              " 1000 │     line 1000",
@@ -176,6 +181,7 @@ defmodule Troupe.TranscriptRowsTest do
     args = %{"path" => "Makefile"}
 
     assert [
+             "▾ 1 step · read_file",
              "✓ read_file Makefile" <> _,
              "    1 │ all:",
              "    2 │     go build ./...",
@@ -185,9 +191,10 @@ defmodule Troupe.TranscriptRowsTest do
     cut = read_file!(file, args, %Troupe.Config{tool_output_limit: 20})
 
     assert [
+             "▾ 1 step · read_file",
              "✓ read_file Makefile" <> _,
              "    1 │ all:",
-             "  [truncated: " <> _
+             "[truncated: " <> _
            ] = read_rows(cut, args)
   end
 
@@ -271,24 +278,27 @@ defmodule Troupe.TranscriptRowsTest do
       {pid, session} = start_tui(sid, width: width, height: 40)
       press(pid, "1")
       eventually(fn -> match?({:window, "root"}, user_state(pid).focus) end)
+      # `e` opens the turn (TUI Decision 161): every frame of it, as before every output.
       press(pid, "e")
-      eventually(fn -> user_state(pid).expanded end)
+      eventually(fn -> MapSet.size(user_state(pid).pane.open) == 1 end)
 
       rows = pane_rows(pid, session, {width, 40})
 
       start =
-        Enum.find_index(rows, &(&1 == "Here is the fix:")) ||
+        Enum.find_index(rows, &(&1 == "▎ Here is the fix:")) ||
           flunk("the reply is not on the #{width}-column screen:\n#{Enum.join(rows, "\n")}")
 
+      assert "▾ 2 steps · shell, read_file" <> _ = Enum.at(rows, start - 1)
+
       assert [
-               "Here is the fix:",
-               "┌─ elixir " <> _,
-               "│ def hello, do: :world",
-               "└" <> _,
-               "Apply it and rerun.",
+               "▎ Here is the fix:",
+               "▎ ┌─ elixir " <> _,
+               "▎ │ def hello, do: :world",
+               "▎ └" <> _,
+               "▎ Apply it and rerun.",
                "✓ shell " <> _,
-               "  one",
-               "  two",
+               "▎ one",
+               "▎ two",
                "✓ read_file Makefile" <> _
              ] = Enum.slice(rows, start, 9)
 
@@ -300,10 +310,10 @@ defmodule Troupe.TranscriptRowsTest do
         |> Enum.split_while(&(not String.starts_with?(&1, "✓ finish")))
 
       assert read == [
-               "    1 │ all:",
-               "    2 │     go build ./...",
-               "    3 │     echo done",
-               "    4 │"
+               "▎     1 │ all:",
+               "▎     2 │     go build ./...",
+               "▎     3 │     echo done",
+               "▎     4 │"
              ]
 
       assert finish =~ "finish"

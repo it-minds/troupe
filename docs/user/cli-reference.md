@@ -94,6 +94,7 @@ shell forbids this too ([Decision 813](../decisions/0813-a-person-s-own-command-
 | `/observer`, `/agents-tree`, `/tree` | The agent tree: every branch and subagent. Each with its state, worktree and tokens; Enter opens the agent's transcript. |  |
 | `/files` | The session's files, live. Enter opens a file, ← goes up, r reloads; a change the session makes reloads the listing by itself. |  |
 | `/scratch [name]` | The documents an agent showed you beside the chat. Plans, reports and tables the agent put on the session's scratchpad with show; Enter opens one, and a newer version reads itself again. For example `/scratch plan.md`. |  |
+| `/detail [quiet \| tools \| everything]` | How much of a transcript is open: quiet, tools or everything. Quiet shows a turn's answer with its working one strip above it; tools opens the tool calls; everything collapses nothing. For this session's screen; the transcript.detail setting is the default. For example `/detail everything`. |  |
 
 ### Workspace
 
