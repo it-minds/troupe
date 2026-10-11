@@ -62,6 +62,13 @@ export type Entry =
       resolvedBy: string | undefined;
       /** Set when it ended unanswered: its call was cancelled, or timed out while it waited. */
       closed: boolean;
+      /**
+       * A delegation a person asked to see first (troupe Decision 850): what the gate
+       * shows. Absent from every other approval.
+       */
+      delegation?: DelegationGate;
+      /** For a delegation, what its answer carried: the agent it went to, the parts edited, the word back. */
+      answered?: { agent?: string; edited?: string[]; reason?: string };
     }
   /**
    * A subagent handed a brief: `task` is its first message, the parts under their names,
@@ -266,6 +273,57 @@ function textOf(message: unknown): string {
  */
 export const BRIEF_PARTS = ["goal", "context", "constraints", "deliverable", "do_not"] as const;
 export const FINISH_PARTS = ["summary", "changed", "ran", "passed", "unverified", "needs"] as const;
+
+/**
+ * What the gate shows of a delegation a person asked to see first (troupe Decision 850):
+ * the agent, where its definition is (`agents.get` by that name opens it; the gate never
+ * edits one), the brief's parts, the tools the child will hold with each one's permission,
+ * its share of the budget, its depth and the deepest it may go, and the subagents it could
+ * go to instead.
+ */
+export interface DelegationGate {
+  agent: string;
+  definition: { name: string; layer: string | null; path: string | null; description: string | null };
+  brief: Record<string, string>;
+  tools: { name: string; permission: string }[];
+  budgetShare: number | null;
+  depth: number | null;
+  maxDepth: number | null;
+  agents: { name: string; description: string }[];
+}
+
+/** What a delegation's answer may carry besides its word, as `approval.respond` sends it. */
+export interface GateAnswer {
+  agent?: string;
+  brief?: Partial<Record<(typeof BRIEF_PARTS)[number], string>>;
+  reason?: string;
+}
+
+function gateOf(raw: unknown): DelegationGate | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const g = raw as Record<string, unknown>;
+  const def = (typeof g["definition"] === "object" && g["definition"] !== null ? g["definition"] : {}) as Record<string, unknown>;
+  const text = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+  const list = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null) : []);
+  return {
+    agent: str(g["agent"]),
+    definition: { name: str(def["name"], str(g["agent"])), layer: text(def["layer"]), path: text(def["path"]), description: text(def["description"]) },
+    brief: Object.fromEntries(partsOf(g["brief"], BRIEF_PARTS)),
+    tools: list(g["tools"]).map((t) => ({ name: str(t["name"]), permission: str(t["permission"]) })),
+    budgetShare: num(g["budget_share"]),
+    depth: num(g["depth"]),
+    maxDepth: num(g["max_depth"]),
+    agents: list(g["agents"]).map((a) => ({ name: str(a["name"]), description: str(a["description"]) })),
+  };
+}
+
+function answeredOf(data: Record<string, unknown>): { agent?: string; edited?: string[]; reason?: string } | undefined {
+  const out: { agent?: string; edited?: string[]; reason?: string } = {};
+  if (typeof data["agent"] === "string") out.agent = data["agent"];
+  if (Array.isArray(data["edited"])) out.edited = data["edited"].filter((p): p is string => typeof p === "string");
+  if (typeof data["reason"] === "string") out.reason = data["reason"];
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 
 /** The parts named in `names` that `value` carries as text, as `[name, text]` in that order. */
 export function partsOf(value: unknown, names: readonly string[]): Array<[string, string]> {
@@ -792,7 +850,8 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
     case "truncated":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: truncatedText(d) }] };
 
-    case "approval_requested":
+    case "approval_requested": {
+      const gate = gateOf(d.data["delegation"]);
       return {
         ...next,
         entries: [
@@ -806,16 +865,21 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
             decision: undefined,
             resolvedBy: undefined,
             closed: false,
+            ...(gate ? { delegation: gate } : {}),
           },
         ],
       };
+    }
 
     case "approval_decided": {
       const id = str(d.data["call_id"]);
+      const answered = answeredOf(d.data);
       return {
         ...next,
         entries: state.entries.map((en) =>
-          en.kind === "approval" && en.callId === id ? { ...en, decision: str(d.data["decision"]) } : en,
+          en.kind === "approval" && en.callId === id
+            ? { ...en, decision: str(d.data["decision"]), ...(answered && en.delegation ? { answered } : {}) }
+            : en,
         ),
       };
     }

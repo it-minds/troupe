@@ -10,10 +10,14 @@ defmodule Troupe.Protocol.AgentDefinition do
   where both can see it, and core builds its struct from what this returns.
 
   A file without frontmatter is still a definition: the whole file is then the prompt.
+
+  `delegation: ask` says a `delegate` to this agent asks the person first (#554, Decision
+  850); `auto`, the default, runs it at once.
   """
 
   @type mode :: :primary | :subagent
   @type permission :: :auto | :ask | :deny
+  @type delegation :: :auto | :ask
 
   @type t :: %{
           name: String.t(),
@@ -26,7 +30,8 @@ defmodule Troupe.Protocol.AgentDefinition do
           max_turns: pos_integer() | nil,
           budget_share: float(),
           skills: :all | [String.t()],
-          override: boolean()
+          override: boolean(),
+          delegation: delegation()
         }
 
   @name ~r/\A[a-z0-9][a-z0-9-]{0,63}\z/
@@ -78,7 +83,8 @@ defmodule Troupe.Protocol.AgentDefinition do
     with {:ok, mode} <- parse_mode(Map.get(meta, "mode", "subagent")),
          {:ok, tools} <- parse_list(:tools, Map.get(meta, "tools", nil)),
          {:ok, skills} <- parse_list(:skills, Map.get(meta, "skills", [])),
-         {:ok, permissions} <- parse_permissions(Map.get(meta, "permissions", %{})) do
+         {:ok, permissions} <- parse_permissions(Map.get(meta, "permissions", %{})),
+         {:ok, delegation} <- parse_delegation(Map.get(meta, "delegation")) do
       {:ok,
        %{
          name: name,
@@ -91,10 +97,16 @@ defmodule Troupe.Protocol.AgentDefinition do
          max_turns: parse_pos_int(Map.get(meta, "max_turns")),
          budget_share: parse_share(Map.get(meta, "budget_share")),
          skills: skills,
-         override: Map.get(meta, "override", false) == true
+         override: Map.get(meta, "override", false) == true,
+         delegation: delegation
        }}
     end
   end
+
+  defp parse_delegation(nil), do: {:ok, :auto}
+  defp parse_delegation("auto"), do: {:ok, :auto}
+  defp parse_delegation("ask"), do: {:ok, :ask}
+  defp parse_delegation(other), do: {:error, {:bad_delegation, other}}
 
   defp parse_mode("primary"), do: {:ok, :primary}
   defp parse_mode("subagent"), do: {:ok, :subagent}

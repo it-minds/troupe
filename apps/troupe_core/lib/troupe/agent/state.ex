@@ -2,7 +2,20 @@ defmodule Troupe.Agent.Call do
   @moduledoc "One outstanding tool call, from dispatch to result."
 
   @enforce_keys [:id, :name, :args]
-  defstruct [:id, :name, :args, :task_pid, :monitor, :timer, :child_ref, :child_pid, result: nil]
+  # `note`: what a person's answer at the delegation gate changed, said to the parent
+  # before its child's report (Decision 850).
+  defstruct [
+    :id,
+    :name,
+    :args,
+    :task_pid,
+    :monitor,
+    :timer,
+    :child_ref,
+    :child_pid,
+    :note,
+    result: nil
+  ]
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -13,6 +26,7 @@ defmodule Troupe.Agent.Call do
           timer: reference() | nil,
           child_ref: reference() | nil,
           child_pid: pid() | nil,
+          note: String.t() | nil,
           result: Troupe.Tool.Result.t() | nil
         }
 end

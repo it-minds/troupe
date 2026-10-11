@@ -350,18 +350,32 @@ defmodule Troupe.Protocol.Schema do
       "input_after_done" => %{"source" => required(:string)},
       # `stopped`: the model call the cancel stopped, as on `llm_error` (Decision 788).
       "cancelled" => %{"turn" => optional(:object), "stopped" => optional(:object)},
+      # A delegation a person asked to see first (Decision 850) asks with `tool: delegate`
+      # and what the gate shows under `delegation`: `agent`; `definition` (`name`, `layer`,
+      # `path`, `description`), which `agents.get` opens; `brief`, the five parts; `tools`,
+      # each `{name, permission}` the child will hold; `budget_share`; `depth` and
+      # `max_depth`; and `agents`, each `{name, description}` it could go to instead.
       "approval_requested" => %{
         "call_id" => required(:string),
         "tool" => required(:string),
         "args" => required(:object),
-        "agent_path" => required({:array, :string})
+        "agent_path" => required({:array, :string}),
+        "delegation" => optional(:object)
       },
+      # A delegation's decision names the `agent` it went to when it was allowed, the
+      # `brief` as the person edited it and which parts (`edited`), and the person's word
+      # back with a denial (`reason`). `allow_session` lets that agent run unasked for the
+      # session.
       "approval_decided" => %{
         "call_id" => required(:string),
         "tool" => required(:string),
         "args" => required(:object),
         "agent_path" => required({:array, :string}),
-        "decision" => required(:string)
+        "decision" => required(:string),
+        "agent" => optional(:string),
+        "brief" => optional(:object),
+        "edited" => optional({:array, :string}),
+        "reason" => optional(:string)
       },
       # `ask_user` (Decision 651): the agent hands a decision to a person and waits.
       # `preview` is text the question is about, shown as it is beneath it: the prompt a
@@ -694,11 +708,18 @@ defmodule Troupe.Protocol.Schema do
         "session_id" => required(:string)
       },
       "session.loop.get" => %{"session_id" => required(:string)},
+      # A delegation's answer (Decision 850) may carry `agent`, a subagent the request offered
+      # to send it to instead; `brief`, the parts the person edited, held to the brief's
+      # shape; and `reason`, a word back with `deny`. A wrong one is `invalid_params`, and
+      # the request waits on.
       "approval.respond" => %{
         "command_id" => required(:string),
         "session_id" => required(:string),
         "call_id" => required(:string),
-        "decision" => required(:string)
+        "decision" => required(:string),
+        "agent" => optional(:string),
+        "brief" => optional(:object),
+        "reason" => optional(:string)
       },
       "todo.edit" => %{
         "command_id" => required(:string),

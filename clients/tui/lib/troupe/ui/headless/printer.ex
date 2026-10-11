@@ -338,6 +338,23 @@ defmodule Troupe.UI.Headless.Printer do
     end
   end
 
+  # A delegation a person asked to see first (root Decision 850) is denied like any other
+  # request with nobody to ask, and `--auto-approve` does not answer it: the line says so.
+  defp print(
+         %{type: :approval_requested, agent_path: p, data: %{delegation: %{} = gate} = d},
+         state
+       ) do
+    line(
+      state,
+      p,
+      "delegation to #{gate["agent"]} asks first (delegation.ask, or its definition's " <>
+        "delegation: ask); headless mode denies it, and --auto-approve does not answer it"
+    )
+
+    Client.approve(state.session_id, d.call_id, :deny)
+    state
+  end
+
   defp print(%{type: :approval_requested, agent_path: p, data: d}, state) do
     line(state, p, "approval needed for #{d.name}; headless mode denies it (use --auto-approve)")
     Client.approve(state.session_id, d.call_id, :deny)

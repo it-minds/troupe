@@ -87,6 +87,43 @@ describe("the transcript fold", () => {
     assert.deepEqual(partsOf({ agent: "explore", task: "old" }, BRIEF_PARTS), []);
   });
 
+  // A delegation a person asked to see first (troupe Decision 850) asks with what the gate
+  // shows, and its decision says what the answer changed.
+  it("keeps what a delegation's gate shows, and what its answer changed", () => {
+    seq = 0;
+    const delegation = {
+      agent: "general",
+      definition: { name: "general", layer: "builtin", path: "/a/general.md", description: "Edits." },
+      brief: { goal: "g", context: "c", constraints: "k", deliverable: "d", do_not: "n" },
+      tools: [{ name: "shell", permission: "ask" }],
+      budget_share: 0.5,
+      depth: 1,
+      max_depth: 3,
+      agents: [{ name: "explore", description: "Reads." }],
+    };
+    const asked = foldAll([
+      durable("approval_requested", { call_id: "c7", tool: "delegate", args: { agent: "general" }, agent_path: ["root"], delegation }),
+      durable("approval_requested", { call_id: "c8", tool: "write_file", args: { path: "a" }, agent_path: ["root"] }),
+    ]);
+
+    const [gate, plain] = openApprovals(asked);
+    assert.equal(gate!.delegation!.agent, "general");
+    assert.equal(gate!.delegation!.budgetShare, 0.5);
+    assert.equal(gate!.delegation!.maxDepth, 3);
+    assert.deepEqual(gate!.delegation!.brief, delegation.brief);
+    assert.deepEqual(gate!.delegation!.tools, [{ name: "shell", permission: "ask" }]);
+    assert.equal(gate!.delegation!.definition.layer, "builtin");
+    assert.equal(plain!.delegation, undefined);
+
+    const decided = fold(
+      asked,
+      durable("approval_decided", { call_id: "c7", tool: "delegate", args: {}, agent_path: ["root"], decision: "allow", agent: "explore", edited: ["constraints"] }),
+    );
+    const done = decided.entries.find((e) => e.kind === "approval" && e.callId === "c7") as Extract<Entry, { kind: "approval" }>;
+    assert.equal(done.decision, "allow");
+    assert.deepEqual(done.answered, { agent: "explore", edited: ["constraints"] });
+  });
+
   it("is the same list whether or not the ephemerals arrived", () => {
     seq = 0;
     const durables = [

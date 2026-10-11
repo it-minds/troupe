@@ -321,6 +321,25 @@ defmodule Troupe.Config.Schema do
           scope: :trusted,
           field: :approvals
         ),
+        # Decision 850: asking before a delegation is opt-in, per agent.
+        spec(
+          "delegation",
+          {:object,
+           [
+             spec(
+               "ask",
+               {:list, :string},
+               "The subagents a `delegate` to asks you first, by name: you see the brief, the tools and the budget " <>
+                 "the child would get, and run it, edit the brief, send it to another agent, deny it with a word " <>
+                 "back, or let that agent run unasked for the session. `auto_approve` does not answer it. An " <>
+                 "agent's own definition asks too with `delegation: ask`. Unset: every delegation runs at once.",
+               default: [],
+               field: :delegation_ask
+             )
+           ]},
+          "Delegating to subagents.",
+          scope: :trusted
+        ),
         spec("managed_permission_rules_only", :boolean, "A session may not allow a tool for itself.",
           default: false,
           scope: :trusted,

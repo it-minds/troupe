@@ -18,12 +18,21 @@ defmodule Troupe.Tools.Delegate do
 
   The description is generated from the definitions actually loaded, so a project
   that ships its own subagents advertises them without a code change.
+
+  A delegation runs at once unless the person asked to see it first (#554, Decision 850):
+  `delegation.ask` in a config file names the agent, or the agent's own definition says
+  `delegation: ask` (`asks?/2`). Then the agent puts it through the session's approval gate
+  before the child starts, with what the gate shows (`gate/4`): the agent and where its
+  definition is, the brief's parts, the tools and permissions the child will hold, its
+  budget share and its depth, and the subagents it could go to instead. The person runs it,
+  edits the brief (`edit/2`, which holds the edit to the same shape), switches the agent,
+  denies it with a word back, or lets that agent run unasked for the session.
   """
 
   @behaviour Troupe.Tool
 
-  alias Troupe.Agent.{Definition, Definitions}
-  alias Troupe.Tool
+  alias Troupe.Agent.{Definition, Definitions, Local}
+  alias Troupe.{Paths, Tool, Tools}
   alias Troupe.Tools.Finish
 
   @parts ~w(goal context constraints deliverable do_not)
@@ -105,17 +114,108 @@ defmodule Troupe.Tools.Delegate do
   @doc "The five parts of a brief, or the sentence that refuses it, naming what is missing."
   @spec brief(map()) :: {:ok, map()} | {:error, String.t()}
   def brief(args) do
-    {found, missing} =
-      Enum.reduce(@parts, {%{}, []}, fn part, {found, missing} ->
-        case Finish.text(Map.get(args, part)) do
-          nil -> {found, missing ++ [part]}
-          value -> {Map.put(found, part, value), missing}
-        end
-      end)
+    case parts(args) do
+      {found, []} -> {:ok, found}
+      {_found, missing} -> {:error, refusal(missing, Map.has_key?(args, "task"))}
+    end
+  end
 
-    case missing do
-      [] -> {:ok, found}
-      _ -> {:error, refusal(missing, Map.has_key?(args, "task"))}
+  defp parts(args) do
+    Enum.reduce(@parts, {%{}, []}, fn part, {found, missing} ->
+      case Finish.text(Map.get(args, part)) do
+        nil -> {found, missing ++ [part]}
+        value -> {Map.put(found, part, value), missing}
+      end
+    end)
+  end
+
+  @doc """
+  A brief as a person edited it at the gate: the parts they sent over the ones it had, held
+  to the same shape. A part sent blank is a part taken away, and refused, naming it; a key
+  that is no part is refused too.
+  """
+  @spec edit(map(), map()) :: {:ok, map()} | {:error, String.t()}
+  def edit(brief, edits) when is_map(edits) do
+    case Map.keys(edits) -- @parts do
+      [] ->
+        case parts(Map.merge(brief, edits)) do
+          {found, []} ->
+            {:ok, found}
+
+          {_found, missing} ->
+            {:error,
+             "the brief has no #{Finish.and_list(missing)}: each of goal, context, constraints, " <>
+               "deliverable and do_not needs something, none where it has nothing"}
+        end
+
+      others ->
+        {:error,
+         "#{Finish.and_list(others)} #{if match?([_], others), do: "is", else: "are"} no part of a " <>
+           "brief: its parts are goal, context, constraints, deliverable and do_not"}
+    end
+  end
+
+  def edit(_brief, _edits),
+    do:
+      {:error, "a brief is its parts by name: goal, context, constraints, deliverable and do_not"}
+
+  @doc "The parts of a brief a person's edit changed, in their order."
+  @spec edited(map(), map()) :: [String.t()]
+  def edited(before, now), do: Enum.filter(@parts, &(before[&1] != now[&1]))
+
+  @doc """
+  Whether a `delegate` to this agent asks the person first (Decision 850): its definition
+  says `delegation: ask`, or the session's `delegation.ask` names it. Either is enough, and
+  neither can be undone by the other: asking is what a person opted into.
+  """
+  @spec asks?(Definition.t(), Troupe.Config.t() | map()) :: boolean()
+  def asks?(%Definition{} = definition, config) do
+    definition.delegation == :ask or
+      definition.name in List.wrap(Map.get(config, :delegation_ask))
+  end
+
+  @doc """
+  What the gate shows of a delegation, as `approval_requested` carries it under
+  `delegation`: the agent, where its definition is (for `agents.get`; the gate never edits
+  one), the brief, the tools the child will hold with each one's permission, its budget
+  share, its depth and the deepest it may go, and the subagents it could go to instead.
+  """
+  @spec gate(Definition.t(), map(), Definitions.t(), map()) :: map()
+  def gate(%Definition{} = definition, brief, definitions, %{depth: depth} = where) do
+    %{
+      "agent" => definition.name,
+      "definition" => definition_link(definition),
+      "brief" => brief,
+      "tools" => tools(definition, Map.get(where, :session_id)),
+      "budget_share" => definition.budget_share,
+      "depth" => depth + 1,
+      "max_depth" => Map.get(where, :max_depth),
+      "agents" =>
+        definitions
+        |> Definitions.subagents()
+        |> Enum.map(&%{"name" => &1.name, "description" => &1.description})
+    }
+  end
+
+  defp definition_link(definition) do
+    %{
+      "name" => definition.name,
+      "layer" => Local.layer(definition),
+      "path" => if(definition.path, do: Paths.display(definition.path)),
+      "description" => definition.description
+    }
+  end
+
+  # A program speaking ACP has no tool list of Troupe's to show.
+  defp tools(definition, session_id) do
+    if Definition.acp?(definition) do
+      []
+    else
+      for tool <- Tools.for_definition(definition, session_id) do
+        name = Tool.name(tool)
+        permission = Definition.permission(definition, name, Tool.default_permission(tool))
+        %{"name" => name, "permission" => Atom.to_string(permission)}
+      end
     end
   end
 

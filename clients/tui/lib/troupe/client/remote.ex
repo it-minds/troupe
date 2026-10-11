@@ -115,7 +115,8 @@ defmodule Troupe.Client.Remote do
   def shell_cancel(sid, run_id), do: describe(Worker.shell_cancel(sid, run_id))
 
   @impl true
-  def approve(sid, call_id, decision), do: describe(Worker.approve(sid, call_id, decision))
+  def approve(sid, call_id, decision, answer),
+    do: describe(Worker.approve(sid, call_id, decision, answer))
 
   # The contract has no question method: an answer is input, which is how a
   # remote agent's `ask_user` reaches it.

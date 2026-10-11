@@ -105,7 +105,8 @@ defmodule Troupe.Remote.Worker do
   def cancel(session_id), do: call(session_id, :cancel)
 
   @spec approve(String.t(), String.t(), :allow | :deny | :allow_session) :: :ok | {:error, term()}
-  def approve(session_id, call_id, decision), do: call(session_id, {:approve, call_id, decision})
+  def approve(session_id, call_id, decision, answer \\ %{}),
+    do: call(session_id, {:approve, call_id, decision, answer})
 
   @doc "Answers a question the agent asked with `ask_user`."
   @spec answer(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
@@ -374,12 +375,22 @@ defmodule Troupe.Remote.Worker do
   def handle_call(:cancel, from, state),
     do: command(state, from, "turn.cancel", %{command_id: RPC.command_id()})
 
-  def handle_call({:approve, call_id, decision}, from, state) do
-    activating(state, from, "approval.respond", %{
-      call_id: call_id,
-      decision: to_string(decision),
-      command_id: RPC.command_id()
-    })
+  # A delegation's answer carries more than its word (root Decision 850): `agent`, `brief`
+  # and `reason`, sent as they are given.
+  def handle_call({:approve, call_id, decision, answer}, from, state) do
+    keys = %{"agent" => :agent, "brief" => :brief, "reason" => :reason}
+    given = for {key, value} <- answer, Map.has_key?(keys, key), into: %{}, do: {keys[key], value}
+
+    activating(
+      state,
+      from,
+      "approval.respond",
+      Map.merge(given, %{
+        call_id: call_id,
+        decision: to_string(decision),
+        command_id: RPC.command_id()
+      })
+    )
   end
 
   def handle_call({:answer, call_id, text}, from, state) do

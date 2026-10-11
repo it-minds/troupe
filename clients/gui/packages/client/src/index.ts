@@ -83,6 +83,8 @@ export {
 } from "./transcript.js";
 export type {
   Entry,
+  DelegationGate,
+  GateAnswer,
   TranscriptState,
   PendingInput,
   BlobRef,

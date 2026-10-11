@@ -231,6 +231,8 @@ defmodule Troupe.Gateway.Agents do
       "permissions" =>
         Map.new(definition.permissions, fn {tool, p} -> {tool, Atom.to_string(p)} end),
       "budget_share" => definition.budget_share,
+      # Whether a delegation to it asks first, by its own file (Decision 850).
+      "delegation" => Atom.to_string(definition.delegation),
       "skills" => names(definition.skills),
       "prompt" => definition.prompt,
       "path" => definition.path && Paths.display(definition.path),

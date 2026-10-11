@@ -116,7 +116,7 @@ defmodule Troupe.Client do
   @callback run_command(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback shell_run(session_id(), String.t(), boolean()) :: {:ok, String.t()} | {:error, term()}
   @callback shell_cancel(session_id(), String.t()) :: :ok | {:error, term()}
-  @callback approve(session_id(), String.t(), decision()) :: :ok | {:error, term()}
+  @callback approve(session_id(), String.t(), decision(), map()) :: :ok | {:error, term()}
   @callback answer(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback answer_local(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   @callback edit_todo(session_id(), String.t(), term()) :: :ok | {:error, term()}
@@ -296,8 +296,14 @@ defmodule Troupe.Client do
   @spec shell_cancel(session_id(), String.t()) :: :ok | {:error, term()}
   def shell_cancel(sid, run_id), do: impl(sid).shell_cancel(sid, run_id)
 
-  @spec approve(session_id(), String.t(), decision()) :: :ok | {:error, term()}
-  def approve(sid, call_id, decision), do: impl(sid).approve(sid, call_id, decision)
+  @doc """
+  Answers an approval. `answer` is what a delegation's answer carries besides its word
+  (root Decision 850): `"agent"` to send it to another subagent, `"brief"` with the parts
+  the person edited, `"reason"` with a denial.
+  """
+  @spec approve(session_id(), String.t(), decision(), map()) :: :ok | {:error, term()}
+  def approve(sid, call_id, decision, answer \\ %{}),
+    do: impl(sid).approve(sid, call_id, decision, answer)
 
   @spec answer(session_id(), String.t(), String.t()) :: :ok | {:error, term()}
   def answer(sid, call_id, text), do: impl(sid).answer(sid, call_id, text)
