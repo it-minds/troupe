@@ -1810,7 +1810,8 @@ defmodule Troupe.UI.TUI.View do
   end
 
   # One row per branch: its digit and mark, the window, its agent, its state, how long it
-  # has gone, the last thing it said or did, and what it has used and cost.
+  # has gone, the last thing it said or did, and the model it runs (as its agent's replies
+  # name it: `quick`'s is the cheap one, D113) with what it has used and cost.
   defp branch_lines(_state, [], _width), do: []
 
   defp branch_lines(state, windows, width) do
@@ -1823,7 +1824,7 @@ defmodule Troupe.UI.TUI.View do
       |> Enum.map(fn {w, n} ->
         %Span{content: glyph, style: style} = mark(w, state)
         word = state_text(w.state, state, w.badge)
-        used = String.trim("#{Model.tokens(w)}  #{Model.cost(w)}")
+        used = String.trim("#{runs(w)}  #{Model.tokens(w)}  #{Model.cost(w)}")
 
         left =
           "#{n} " <>
@@ -1846,6 +1847,14 @@ defmodule Troupe.UI.TUI.View do
       end)
 
     [{:blank, ""}, {:heading, "branches"} | rows]
+  end
+
+  # The model the window's own agent last answered with; nothing before its first reply.
+  defp runs(w) do
+    case Map.get(w.agents, w.path) do
+      %{model: model} when is_binary(model) and model != "" -> clip(model, 28)
+      _ -> ""
+    end
   end
 
   # One row per worktree of the repository, as `worktree.list` has them (root Decision
