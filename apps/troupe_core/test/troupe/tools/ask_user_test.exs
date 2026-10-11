@@ -23,7 +23,7 @@ defmodule Troupe.Tools.AskUserTest do
                 "multiple" => false
               }}
            ]},
-          {:text_and_tools, "Blue it is.", [{"finish", %{"summary" => "picked"}}]}
+          {:text_and_tools, "Blue it is.", [{"finish", finished("picked")}]}
         ]
       )
 
@@ -64,7 +64,7 @@ defmodule Troupe.Tools.AskUserTest do
         config_overrides: [approvals: :deny],
         steps: [
           {:tools, [{"ask_user", %{"question" => "Ship it?"}}]},
-          {:text_and_tools, "Deciding alone.", [{"finish", %{"summary" => "decided"}}]}
+          {:text_and_tools, "Deciding alone.", [{"finish", finished("decided")}]}
         ]
       )
 

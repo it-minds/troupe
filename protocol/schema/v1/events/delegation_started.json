@@ -6,6 +6,9 @@
     "agent": {
       "type": "string"
     },
+    "brief": {
+      "type": "object"
+    },
     "call_id": {
       "type": "string"
     },

@@ -9,6 +9,9 @@
     "reason": {
       "type": "string"
     },
+    "report": {
+      "type": "object"
+    },
     "summary": {
       "type": "string"
     },

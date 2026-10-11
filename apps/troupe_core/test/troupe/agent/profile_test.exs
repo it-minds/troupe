@@ -123,12 +123,12 @@ defmodule Troupe.Agent.ProfileTest do
         start_session(context,
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "explore", "task" => "look around"}}]},
+              {:tools, [{"delegate", brief("explore", "look around")}]},
               {:text, "explored"}
             ],
             "explore" => [
               {:tools, [{"write_file", %{"path" => "lib/keep.ex", "content" => "clobbered"}}]},
-              {:tools, [{"finish", %{"summary" => "I cannot write."}}]}
+              {:tools, [{"finish", finished("I cannot write.")}]}
             ]
           }
         )

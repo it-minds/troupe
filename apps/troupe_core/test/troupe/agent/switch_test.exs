@@ -120,7 +120,7 @@ defmodule Troupe.Agent.SwitchTest do
   test "a branch that finished switches, and the next input runs on the new agent", context do
     %{session: branch, fake: fake} =
       branch(context,
-        steps: [{:tools, [{"finish", %{"summary" => "built it"}}]}, {:text, "reviewed"}]
+        steps: [{:tools, [{"finish", finished("built it")}]}, {:text, "reviewed"}]
       )
 
     sid = branch.id

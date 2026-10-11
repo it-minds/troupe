@@ -1346,6 +1346,11 @@ main {
 .tool .payload .note {
   margin: var(--space-2) 0 0;
 }
+/* A brief's or a finish's parts under their names (troupe Decision 847): a part of
+   several lines keeps them. */
+.tool .parts dd {
+  white-space: pre-wrap;
+}
 
 .thinking {
   max-width: var(--measure-reading);

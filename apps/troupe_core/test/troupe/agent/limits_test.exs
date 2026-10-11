@@ -12,7 +12,7 @@ defmodule Troupe.Agent.LimitsTest do
 
   @overflow {:error, {:http_status, 400, "prompt is too long: 250000 tokens > 200000 maximum"}}
 
-  defp finish(summary), do: {:text_and_tools, "done", [{"finish", %{"summary" => summary}}]}
+  defp finish(summary), do: {:text_and_tools, "done", [{"finish", finished(summary)}]}
 
   defp run(context, steps, overrides \\ []) do
     %{session: session, fake: fake} = start_session(context, steps: steps, config_overrides: overrides)
@@ -57,7 +57,7 @@ defmodule Troupe.Agent.LimitsTest do
 
       done = await_done(sid)
       assert done["reason"] == "finished"
-      assert done["summary"] == "smaller steps"
+      assert done["summary"] == reported("smaller steps")
       assert [%{data: %{"note" => _}}] = events_of_type(sid, :truncated)
     end
 
@@ -118,7 +118,7 @@ defmodule Troupe.Agent.LimitsTest do
 
       done = await_done(sid)
       assert done["reason"] == "finished"
-      assert done["summary"] == "recovered"
+      assert done["summary"] == reported("recovered")
       assert [%{data: %{"reason" => "context_overflow"}}] = events_of_type(sid, :compacted)
       assert events_of_type(sid, :llm_error) == []
     end

@@ -142,7 +142,8 @@ cat > ~/demo/.troupe/script.json <<'JSON'
    "tools": [{"name": "ask_user", "input": {"question": "Formal or casual?",
              "options": [{"label": "formal"}, {"label": "casual"}]}}]},
   {"text": "Noted."},
-  {"tools": [{"name": "finish", "input": {"summary": "done"}}]}
+  {"tools": [{"name": "finish", "input": {"summary": "done", "ran": "none", "passed": "none",
+                                          "unverified": "none", "needs": "none"}}]}
 ]}}
 JSON
 troupe-daemon config trust ~/demo

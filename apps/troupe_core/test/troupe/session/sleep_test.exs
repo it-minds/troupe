@@ -244,7 +244,7 @@ defmodule Troupe.Session.SleepTest do
         start_session(context,
           config_overrides: [auto_approve: false],
           routes: %{
-            "root" => [{:tools, [{"delegate", %{"agent" => "general", "task" => "ask"}}]}],
+            "root" => [{:tools, [{"delegate", brief("general", "ask")}]}],
             "general" => [{:tools, [{"needs_approval", %{"note" => "child"}}]}]
           }
         )
@@ -384,10 +384,10 @@ defmodule Troupe.Session.SleepTest do
         start_session(context,
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "look"}}]},
+              {:tools, [{"delegate", brief("general", "look")}]},
               {:text, "carried on after it"}
             ],
-            "general" => [{:text_and_tools, "found it", [{"finish", %{"summary" => "found it"}}]}]
+            "general" => [{:text_and_tools, "found it", [{"finish", finished("found it")}]}]
           }
         )
 
@@ -408,7 +408,7 @@ defmodule Troupe.Session.SleepTest do
         start_session(context,
           config_overrides: [auto_approve: false],
           routes: %{
-            "root" => [{:tools, [{"delegate", %{"agent" => "general", "task" => "ask"}}]}],
+            "root" => [{:tools, [{"delegate", brief("general", "ask")}]}],
             "general" => [{:tools, [{"needs_approval", %{"note" => "child"}}]}]
           }
         )

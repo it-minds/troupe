@@ -40,7 +40,8 @@ defmodule Troupe.Agent.Server do
     Headroom,
     Local,
     Spend,
-    State
+    State,
+    Writes
   }
   alias Troupe.{Budget, Config, Events, Instructions, Registry, Skills, Todo, Tool, Tools}
 
@@ -63,7 +64,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions, Shell}
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
-  alias Troupe.Tools.{Output, ReadOutput}
+  alias Troupe.Tools.{Delegate, Finish, Output, ReadOutput}
   alias Troupe.Watch.Trigger
 
   require Logger
@@ -697,9 +698,11 @@ defmodule Troupe.Agent.Server do
     }
   end
 
+  # The parts the `finish` gave, read off its call as `Finish` read them live (Decision
+  # 847); one from before the parts gave a summary alone.
   defp finished_with(back) do
     Enum.find_value(Map.values(back), fn
-      %Call{name: "finish", args: %{"summary" => summary}, result: %Result{ok?: true}} -> summary
+      %Call{name: "finish", args: %{} = args, result: %Result{ok?: true}} -> Finish.replayed(args)
       _call -> nil
     end)
   end
@@ -2023,8 +2026,10 @@ defmodule Troupe.Agent.Server do
     brief_checked(state)
 
     cond do
+      # A subagent that answered without `finish` is reported in the same parts, what changed
+      # counted all the same and the rest said to be unsaid (Decision 847).
       State.subagent?(state) ->
-        report_and_finish(state, text)
+        report_and_finish(state, Finish.unreported(text))
 
       needs_compaction?(state) ->
         enter_compaction(state, :idle)
@@ -2178,16 +2183,16 @@ defmodule Troupe.Agent.Server do
     state
   end
 
-  defp defer(state, call, {:delegate, agent_name, task}) do
-    spawn_child(state, call, agent_name, task)
+  defp defer(state, call, {:delegate, agent_name, brief}) do
+    spawn_child(state, call, agent_name, brief)
   end
 
-  defp defer(state, call, {:finish, summary}) do
-    # `finish` is terminal. The summary is stashed rather than acted on here, because
-    # sibling tool calls from the same turn are still running and their results must
-    # be recorded before the agent stops.
+  defp defer(state, call, {:finish, parts}) do
+    # `finish` is terminal. Its parts are stashed rather than acted on here, because
+    # sibling tool calls from the same turn are still running and their results must be
+    # recorded before the agent stops — and what they wrote is part of what it changed.
     send(self(), {:tool_result, call.id, Result.ok(call.id, call.name, "Finished.")})
-    %{state | finish_summary: summary}
+    %{state | finish_summary: parts}
   end
 
   defp run_in_task(state, call, module, definition, ctx) do
@@ -2293,10 +2298,10 @@ defmodule Troupe.Agent.Server do
         if from_state == :acting, do: {:keep_state, state}, else: {:next_state, :acting, state}
 
       state.finish_summary != nil ->
-        summary = state.finish_summary
+        parts = state.finish_summary
         state = fold_results(state, State.ordered_results(state))
         brief_checked(state)
-        report_and_finish(state, summary)
+        report_and_finish(state, parts)
 
       true ->
         results = State.ordered_results(state)
@@ -2833,11 +2838,15 @@ defmodule Troupe.Agent.Server do
 
   # -- delegation -------------------------------------------------------------
 
-  defp spawn_child(state, call, agent_name, task) do
+  # The child is handed its brief as its first message, the parts under their names, and
+  # `delegation_started` carries the parts as well, for a client to show them as parts
+  # (Decision 847).
+  defp spawn_child(state, call, agent_name, brief) do
     definition = Definitions.fetch!(state.definitions, agent_name)
     seq = state.child_seq + 1
     child_path = state.agent_path ++ ["#{agent_name}##{seq}"]
     child_ref = make_ref()
+    task = Delegate.render(brief)
 
     opts = [
       session_id: state.session_id,
@@ -2882,7 +2891,8 @@ defmodule Troupe.Agent.Server do
           "call_id" => call.id,
           "agent" => agent_name,
           "child_path" => child_path,
-          "task" => task
+          "task" => task,
+          "brief" => brief
         })
 
         updated = %{call | child_ref: child_ref, child_pid: node_pid, monitor: monitor}
@@ -2989,13 +2999,37 @@ defmodule Troupe.Agent.Server do
     end
   end
 
-  defp report_and_finish(state, summary) do
+  # What the parent is handed, `agent_done`'s `summary` and the delegate call's result, is
+  # the report rendered: the summary, then each part under its name. `report` keeps the
+  # parts for a client, `changed` among them as Troupe counted it once every call of the
+  # turn was back (Decision 847). A summary alone, off a log from before the parts, is
+  # handed over as it was.
+  defp report_and_finish(state, parts) do
+    report = if Finish.legacy?(parts), do: parts, else: with_changed(state, parts)
+    summary = Finish.render(report)
+    data = if Finish.legacy?(parts), do: %{}, else: %{"report" => report}
+
     enter_done(
       state,
       :finished,
-      %{"summary" => summary},
+      Map.put(data, "summary", summary),
       {:ok, summary, state.turn}
     )
+  end
+
+  # Read off the log file in this process rather than through the log's: it is fsynced at
+  # every append, and a long session's whole log is not copied between processes.
+  defp with_changed(state, parts) do
+    changed =
+      state.session_id
+      |> Log.path()
+      |> Log.read_file()
+      |> Writes.changed(state.agent_path, state.session_id)
+
+    case parts["changed"] do
+      nil -> Map.put(parts, "changed", changed)
+      said -> Map.put(parts, "changed", Map.put(changed, "said", said))
+    end
   end
 
   defp report(%State{parent: parent, parent_ref: ref}, result)

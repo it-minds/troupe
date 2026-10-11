@@ -89,7 +89,7 @@ Use write_file once and do nothing else. When the file is written, say so in one
     say "Oil, wicks and biscuits arrive every second Tuesday." > "$dir/work/notes/supplies.txt"
     fact="Pemberton"
     prompt="The notes/ directory holds a few short text files. Find out what the lighthouse keeper's cat is called.
-Do not read, list or search any file yourself: call the delegate tool exactly once, with agent \"explore\" and a task asking it to find the cat's name in notes/.
+Do not read, list or search any file yourself: call the delegate tool exactly once, with agent \"explore\" and a brief asking it to find the cat's name in notes/.
 When it reports back, answer in one sentence that names the cat."
     ;;
 

@@ -63,7 +63,20 @@ export type Entry =
       /** Set when it ended unanswered: its call was cancelled, or timed out while it waited. */
       closed: boolean;
     }
-  | { kind: "delegation"; seq: number; agent: string[]; callId: string; child: string; task: string }
+  /**
+   * A subagent handed a brief: `task` is its first message, the parts under their names,
+   * and `brief` the parts themselves, absent from a log written before briefs had them
+   * (troupe Decision 847).
+   */
+  | {
+      kind: "delegation";
+      seq: number;
+      agent: string[];
+      callId: string;
+      child: string;
+      task: string;
+      brief: Array<[string, string]>;
+    }
   /**
    * A question for a person: the agent's `ask_user`, or the harness asking whether to
    * spend more once a budget is gone (`asked: "budget"`, troupe-remote Decision 660).
@@ -244,6 +257,24 @@ function textOf(message: unknown): string {
   // The model's thinking is not its answer, in either spelling (troupe-remote Decision 658).
   for (const block of content) if (typeof block.text === "string" && block.type !== "thinking" && block.type !== "reasoning") out += block.text;
   return out;
+}
+
+/**
+ * A brief's five parts and a finish's, in the order they are read (troupe Decision 847): a
+ * `delegate` call's args and `delegation_started.brief` carry the first, a `finish` call's
+ * args the second.
+ */
+export const BRIEF_PARTS = ["goal", "context", "constraints", "deliverable", "do_not"] as const;
+export const FINISH_PARTS = ["summary", "changed", "ran", "passed", "unverified", "needs"] as const;
+
+/** The parts named in `names` that `value` carries as text, as `[name, text]` in that order. */
+export function partsOf(value: unknown, names: readonly string[]): Array<[string, string]> {
+  if (typeof value !== "object" || value === null) return [];
+  const record = value as Record<string, unknown>;
+  return names.flatMap((name): Array<[string, string]> => {
+    const text = record[name];
+    return typeof text === "string" && text !== "" ? [[name, text]] : [];
+  });
 }
 
 function str(v: unknown, fallback = ""): string {
@@ -668,6 +699,7 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
             callId: str(d.data["call_id"]),
             child: str(d.data["agent"]),
             task: str(d.data["task"]),
+            brief: partsOf(d.data["brief"], BRIEF_PARTS),
           },
         ],
       };

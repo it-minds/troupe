@@ -5,7 +5,22 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { addPending, dropPending, emptyTranscript, fold, isBusy, loopEnding, needsYou, openApprovals, openQuestions, rootState, settleLoop } from "../src/index.js";
+import {
+  addPending,
+  BRIEF_PARTS,
+  dropPending,
+  emptyTranscript,
+  FINISH_PARTS,
+  fold,
+  isBusy,
+  loopEnding,
+  needsYou,
+  openApprovals,
+  openQuestions,
+  partsOf,
+  rootState,
+  settleLoop,
+} from "../src/index.js";
 import type { DurableEvent, Entry, TranscriptState, TroupeEvent } from "../src/index.js";
 
 let seq = 0;
@@ -44,6 +59,32 @@ describe("the transcript fold", () => {
     assert.equal(tool.content, "defmodule A");
     assert.equal(state.profile, "dev");
     assert.equal(state.costMicros, 250);
+  });
+
+  // A brief and a finish have parts (troupe Decision 847), which a client shows under their
+  // names; a delegation from before briefs had them has its task alone.
+  it("keeps a delegation's brief as its parts, in order, and reads a finish's the same way", () => {
+    seq = 0;
+    const brief = { do_not: "none", goal: "find the retry", context: "lib/", constraints: "read only", deliverable: "a path" };
+    const state = foldAll([
+      durable("delegation_started", { call_id: "d1", agent: "explore", child_path: ["root", "explore#1"], task: "Goal: find the retry", brief }),
+      durable("delegation_started", { call_id: "d2", agent: "explore", child_path: ["root", "explore#2"], task: "find it" }),
+    ]);
+
+    const [shaped, old] = state.entries as Array<Extract<Entry, { kind: "delegation" }>>;
+    assert.deepEqual(
+      shaped!.brief.map(([name]) => name),
+      ["goal", "context", "constraints", "deliverable", "do_not"],
+    );
+    assert.deepEqual(old!.brief, []);
+    assert.equal(old!.task, "find it");
+
+    assert.deepEqual(partsOf({ summary: "done", ran: "none", unverified: "the tests", extra: 1 }, FINISH_PARTS), [
+      ["summary", "done"],
+      ["ran", "none"],
+      ["unverified", "the tests"],
+    ]);
+    assert.deepEqual(partsOf({ agent: "explore", task: "old" }, BRIEF_PARTS), []);
   });
 
   it("is the same list whether or not the ephemerals arrived", () => {

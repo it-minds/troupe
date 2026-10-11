@@ -164,7 +164,7 @@ defmodule Troupe.Agent.ResilienceTest do
       %{session: session, fake: fake} =
         start_session(context,
           steps: [
-            {:tools, [{"finish", %{"summary" => "all done"}}]},
+            {:tools, [{"finish", finished("all done")}]},
             {:text, "and again"}
           ]
         )
@@ -193,7 +193,7 @@ defmodule Troupe.Agent.ResilienceTest do
     test "a restarted agent that was woken comes back idle, not done", context do
       %{session: session} =
         start_session(context,
-          steps: [{:tools, [{"finish", %{"summary" => "all done"}}]}, {:text, "and again"}]
+          steps: [{:tools, [{"finish", finished("all done")}]}, {:text, "and again"}]
         )
 
       Troupe.subscribe(session.id)
@@ -218,7 +218,7 @@ defmodule Troupe.Agent.ResilienceTest do
       %{session: session, fake: fake} =
         start_session(context,
           steps: [
-            {:tools, [{"finish", %{"summary" => "all done"}}]},
+            {:tools, [{"finish", finished("all done")}]},
             {:tools, [{"todo_read", %{}}]},
             {:text, "and again"}
           ]
@@ -233,7 +233,8 @@ defmodule Troupe.Agent.ResilienceTest do
 
       assert Troupe.snapshot(session.id).state == :idle
       assert Fake.call_count(fake) == 3
-      assert [%{data: %{"summary" => "all done"}}] = events_of_type(session.id, "agent_done")
+      assert [%{data: %{"summary" => summary}}] = events_of_type(session.id, "agent_done")
+      assert summary == reported("all done")
     end
   end
 
@@ -278,15 +279,15 @@ defmodule Troupe.Agent.ResilienceTest do
         start_session(context,
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "first task"}}]},
+              {:tools, [{"delegate", brief("general", "first task")}]},
               {:text, "first done"},
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "second task"}}]},
+              {:tools, [{"delegate", brief("general", "second task")}]},
               {:text, "second done"}
             ],
             "general" => [
-              {:tools, [{"finish", %{"summary" => "first result"}}]},
+              {:tools, [{"finish", finished("first result")}]},
               {:tools, [{"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 2_000}}]},
-              {:tools, [{"finish", %{"summary" => "second result"}}]}
+              {:tools, [{"finish", finished("second result")}]}
             ]
           }
         )
@@ -309,11 +310,11 @@ defmodule Troupe.Agent.ResilienceTest do
         |> Enum.filter(&(&1.agent == ["root"] and &1.data["name"] == "delegate"))
         |> Enum.map(& &1.data["content"])
 
-      assert results == ["first result", "second result"]
+      assert results == [reported("first result"), reported("second result")]
 
       [_first, _second, third] = Fake.requests_for(fake, "general")
       assert [task] = third.messages
-      assert Message.text(task) == "second task"
+      assert Message.text(task) =~ ~r/^Goal: second task\n/
 
       # The child the restart took down is done in its own log too, with nothing left open
       # (D19): it never reports and its path is never used again.
@@ -334,7 +335,7 @@ defmodule Troupe.Agent.ResilienceTest do
           config_overrides: [auto_approve: false],
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "ask for it"}}]},
+              {:tools, [{"delegate", brief("general", "ask for it")}]},
               {:text, "never asked"}
             ],
             "general" => [
@@ -470,7 +471,7 @@ defmodule Troupe.Agent.ResilienceTest do
           steps: [
             {:tools,
              [
-               {"finish", %{"summary" => "all done"}},
+               {"finish", finished("all done")},
                {"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 1_000}}
              ]},
             {:text, "never asked"}
@@ -485,9 +486,10 @@ defmodule Troupe.Agent.ResilienceTest do
       restart_agent(session.id)
       await_state(session.id, [:done], 10_000)
 
-      assert [%{data: %{"reason" => "finished", "summary" => "all done"}}] =
+      assert [%{data: %{"reason" => "finished", "summary" => summary}}] =
                events_of_type(session.id, "agent_done")
 
+      assert summary == reported("all done")
       assert Fake.call_count(fake) == 1
       [results] = events_of_type(session.id, "tool_results")
       assert [%{"content" => [_finished, _counted]}] = results.data["results"]
@@ -499,13 +501,13 @@ defmodule Troupe.Agent.ResilienceTest do
           routes: %{
             "root" => [
               {:tools,
-               [{"delegate", %{"agent" => "general", "task" => "finish while counting"}}]},
+               [{"delegate", brief("general", "finish while counting")}]},
               {:text, "root done"}
             ],
             "general" => [
               {:tools,
                [
-                 {"finish", %{"summary" => "child result"}},
+                 {"finish", finished("child result")},
                  {"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 1_000}}
                ]},
               {:text, "never asked"}
@@ -527,7 +529,7 @@ defmodule Troupe.Agent.ResilienceTest do
         |> events_of_type("tool_call_completed")
         |> Enum.filter(&(&1.agent == ["root"] and &1.data["name"] == "delegate"))
 
-      assert result.data["content"] == "child result"
+      assert result.data["content"] == reported("child result")
       assert [_asked_once] = Fake.requests_for(fake, "general")
     end
   end
@@ -584,7 +586,7 @@ defmodule Troupe.Agent.ResilienceTest do
           steps: [
             {:tools,
              [
-               {"finish", %{"summary" => "stale"}},
+               {"finish", finished("stale")},
                {"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 2_000}}
              ]},
             {:tools, [{"todo_read", %{}}]},
@@ -702,7 +704,7 @@ defmodule Troupe.Agent.ResilienceTest do
           config_overrides: [auto_approve: false],
           routes: %{
             "root" => [
-              {:tools, [{"delegate", %{"agent" => "general", "task" => "ask for it"}}]},
+              {:tools, [{"delegate", brief("general", "ask for it")}]},
               {:text, "never asked"}
             ],
             "general" => [
@@ -831,14 +833,14 @@ defmodule Troupe.Agent.ResilienceTest do
   defp two_delegations do
     %{
       "root" => [
-        {:tools, [{"delegate", %{"agent" => "general", "task" => "first task"}}]},
+        {:tools, [{"delegate", brief("general", "first task")}]},
         {:text, "first done"},
-        {:tools, [{"delegate", %{"agent" => "general", "task" => "second task"}}]},
+        {:tools, [{"delegate", brief("general", "second task")}]},
         {:text, "second done"}
       ],
       "general" => [
-        {:tools, [{"finish", %{"summary" => "first result"}}]},
-        {:tools, [{"finish", %{"summary" => "second result"}}]}
+        {:tools, [{"finish", finished("first result")}]},
+        {:tools, [{"finish", finished("second result")}]}
       ]
     }
   end
@@ -853,12 +855,12 @@ defmodule Troupe.Agent.ResilienceTest do
       |> Enum.filter(&(&1.agent == ["root"] and &1.data["name"] == "delegate"))
       |> Enum.map(& &1.data["content"])
 
-    assert results == ["first result", "second result"]
+    assert results == [reported("first result"), reported("second result")]
 
     # Seeded with its own task, not replaying the first child's conversation.
     [_first, second] = Fake.requests_for(fake, "general")
     assert [task] = second.messages
-    assert Message.text(task) == "second task"
+    assert Message.text(task) =~ ~r/^Goal: second task\n/
   end
 
   # The root's turn is over: `turn_ended`, from the log, so a restart's `idle` published

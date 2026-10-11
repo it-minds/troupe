@@ -190,8 +190,8 @@ defmodule Troupe.Tool do
   @type fields :: %{String.t() => String.t() | integer() | boolean()}
   @type updates :: %{optional(:todos) => [Troupe.Todo.t()], optional(:fields) => fields()}
   @type instruction ::
-          {:delegate, agent :: String.t(), task :: String.t()}
-          | {:finish, summary :: String.t()}
+          {:delegate, agent :: String.t(), brief :: %{String.t() => String.t()}}
+          | {:finish, parts :: %{String.t() => String.t()}}
   @type result ::
           {:ok, content()}
           | {:ok, content(), updates()}

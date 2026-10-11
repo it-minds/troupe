@@ -13,7 +13,7 @@ defmodule Troupe.Agent.UsageShapeTest do
     steps = [
       {:text_and_tools, "one", [{"todo_read", %{}}]},
       {:text_and_tools, "two", [{"todo_read", %{}}]},
-      {:text_and_tools, "done", [{"finish", %{"summary" => "ok"}}]}
+      {:text_and_tools, "done", [{"finish", finished("ok")}]}
     ]
 
     # Every answer bills 100 fresh input tokens and reports 1000 served from the cache.

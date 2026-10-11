@@ -47,7 +47,7 @@ defmodule Troupe.Agent.CutShortTest do
             delay_ms: context.delay_ms,
             routes: %{
               "root" => [
-                {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+                {:tools, [{"delegate", brief("general", "look into it")}]},
                 {:text, "root done"}
               ],
               "general" =>
@@ -144,7 +144,7 @@ defmodule Troupe.Agent.CutShortTest do
           config_overrides: [max_turns: 3],
           routes: %{
             "root" =>
-              [{:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]}] ++
+              [{:tools, [{"delegate", brief("general", "look into it")}]}] ++
                 List.duplicate({:tools, [{"todo_read", %{}}]}, @steps),
             "general" => List.duplicate({:tools, [{"todo_read", %{}}]}, @steps)
           }

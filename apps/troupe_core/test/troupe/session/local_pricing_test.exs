@@ -193,13 +193,13 @@ defmodule Troupe.Session.LocalPricingTest do
       start_session(context,
         routes: %{
           "root" => [
-            {:tools, [{"delegate", %{"agent" => "pricey", "task" => "one"}}]},
-            {:tools, [{"delegate", %{"agent" => "pricey", "task" => "two"}}]},
+            {:tools, [{"delegate", brief("pricey", "one")}]},
+            {:tools, [{"delegate", brief("pricey", "two")}]},
             {:text, "done"}
           ],
           "pricey" => [
-            {:tools, [{"finish", %{"summary" => "one"}}]},
-            {:tools, [{"finish", %{"summary" => "two"}}]}
+            {:tools, [{"finish", finished("one")}]},
+            {:tools, [{"finish", finished("two")}]}
           ]
         },
         cost_micros: nil,

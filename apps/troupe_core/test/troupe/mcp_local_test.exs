@@ -62,7 +62,7 @@ defmodule Troupe.MCPLocalTest do
       with_stub(context,
         steps: [
           {:tools, [{"mcp.stub.greet", %{"name" => "world"}}]},
-          {:text_and_tools, "Greeted.", [{"finish", %{"summary" => "greeted"}}]}
+          {:text_and_tools, "Greeted.", [{"finish", finished("greeted")}]}
         ]
       )
 
