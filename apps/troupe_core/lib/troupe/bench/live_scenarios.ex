@@ -27,9 +27,11 @@ defmodule Troupe.Bench.LiveScenarios do
   with no list, where the task list's tools were offered from the eleventh (issue #590,
   Decision 867). `loop_turn`, by name, is a `/loop` turn and then a person's turn in the
   same session, where `goal_complete` was offered on the loop's turn alone (issue #606,
-  Decision 871).
+  Decision 871). `scratchpad` and `scratchpad_without`, by name too, are one migration plan
+  with the scratchpad and without it (issue #472, Decision 870).
   """
 
+  alias Troupe.Agent.Definitions
   alias Troupe.Bench.Scenario
 
   @suites %{
@@ -55,7 +57,9 @@ defmodule Troupe.Bench.LiveScenarios do
       follow_up(),
       task_list(),
       long_turn(),
-      loop_turn()
+      loop_turn(),
+      scratchpad(),
+      scratchpad_without()
     ]
   end
 
@@ -704,6 +708,113 @@ defmodule Troupe.Bench.LiveScenarios do
 
   defp loop_met?(events),
     do: Enum.any?(events, &(&1.type == "loop_stopped" and &1.data["reason"] == "goal_complete"))
+
+  # -- a long answer, and where it goes ---------------------------------------------
+
+  @schema_sql """
+  CREATE TABLE notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    tags TEXT,            -- comma-separated
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    archived INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX notes_created ON notes (created_at);
+  CREATE VIRTUAL TABLE notes_fts USING fts5(title, body, content='notes', content_rowid='id');
+  """
+
+  @store_py """
+  import sqlite3
+
+  DB = "notes.db"
+
+  def connect():
+      conn = sqlite3.connect(DB)
+      conn.row_factory = sqlite3.Row
+      return conn
+
+  def add(title, body, tags=()):
+      with connect() as conn:
+          conn.execute("INSERT INTO notes (title, body, tags) VALUES (?, ?, ?)", (title, body, ",".join(tags)))
+
+  def search(term):
+      with connect() as conn:
+          return conn.execute("SELECT n.* FROM notes_fts f JOIN notes n ON n.id = f.rowid WHERE notes_fts MATCH ?", (term,)).fetchall()
+
+  def archive(note_id):
+      with connect() as conn:
+          conn.execute("UPDATE notes SET archived = 1 WHERE id = ?", (note_id,))
+  """
+
+  @migration_prompt """
+  Write a migration plan for moving this project's storage from SQLite to PostgreSQL: db/schema.sql is the schema and app/store.py the code that uses it. Read both, then give the plan: the steps in order, the schema changes, how the data is copied, the risks, and how to roll back.\
+  """
+
+  # Issue #472 (Decision 870): a long answer a person will read, which an agent with the
+  # scratchpad puts there and names in a short reply. `scratchpad_without` is the same task
+  # on the build agent as it was before it, `show` denied and its words not in the prompt,
+  # so the two say what the scratchpad does to a turn's tokens and to where the plan ends up.
+  defp scratchpad do
+    %Scenario{
+      name: "scratchpad",
+      title: "a migration plan, a long answer a person will read",
+      prompt: @migration_prompt,
+      files: %{"db/schema.sql" => @schema_sql, "app/store.py" => @store_py},
+      measure: fn ctx ->
+        {[],
+         [
+           {"shown", "the plan went to the scratchpad", shown(ctx.events) != []},
+           {"named", "the reply names the document", Enum.any?(shown(ctx.events), &(reply(ctx) =~ &1))},
+           {"short", "the reply is a fifth of the document or less",
+            byte_size(reply(ctx)) * 5 <= Enum.max([0 | shown_sizes(ctx.events)])}
+         ]}
+      end
+    }
+  end
+
+  defp scratchpad_without do
+    %Scenario{
+      name: "scratchpad_without",
+      title: "the same plan, with no scratchpad",
+      prompt: @migration_prompt,
+      files: %{
+        "db/schema.sql" => @schema_sql,
+        "app/store.py" => @store_py,
+        ".troupe/agents/build.md" => build_without_show()
+      },
+      measure: fn ctx ->
+        {[],
+         [
+           {"answered", "the reply is the plan", byte_size(reply(ctx)) >= 1_000},
+           {"not_shown", "nothing went to a scratchpad", shown(ctx.events) == []}
+         ]}
+      end
+    }
+  end
+
+  # The names of the documents the run showed, and their sizes.
+  defp shown(events),
+    do: for(%{type: "scratch_updated", data: %{"name" => name}} <- events, uniq: true, do: name)
+
+  defp shown_sizes(events),
+    do: for(%{type: "scratch_updated", data: %{"size" => size}} <- events, do: size)
+
+  @doc false
+  @spec build_without_show() :: String.t()
+  def build_without_show do
+    words = File.read!(Path.join(Definitions.builtin_dir(), "build.md"))
+    [_, front, body] = Regex.run(~r/\A---\r?\n(.*?)\r?\n---\r?\n(.*)\z/s, words)
+
+    body =
+      Regex.replace(
+        ~r/\s+A\s+plan,\s+report,\s+comparison,\s+diagram\s+or\s+table\s+they\s+will\s+read\s+goes\s+to\s+`show`,\s+and\s+the\s+answer\s+stays\s+short\s+and\s+names\s+it\./,
+        body,
+        ""
+      )
+
+    "---\n" <> front <> "\npermissions:\n  show: deny\n---\n" <> body
+  end
 
   # The task list as the run left it.
   defp last_list(events) do

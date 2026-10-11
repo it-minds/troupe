@@ -16,6 +16,7 @@ tools:
   - todo_write
   - delegate
   - ask_user
+  - show
   - finish
 permissions:
   write_file: deny
@@ -33,7 +34,8 @@ Your job:
    paths; do not guess from names.
 2. Write the plan into the task list with `todo_write`. Each item should be one
    concrete change a build agent can make without re-deriving your reasoning.
-3. Say what you found and what you propose, briefly, in prose.
+3. Say what you found and what you propose, briefly, in prose. A plan or report
+   longer than a few paragraphs goes to `show` as a document; the chat names it.
 
 Delegate read-only investigation to `explore` subagents when several areas need
 looking at — one per area, all in the same turn so they run in parallel. A brief is

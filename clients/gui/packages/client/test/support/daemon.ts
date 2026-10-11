@@ -36,10 +36,13 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { FakeAgents, agentHash, checkAgent } from "./agents.js";
 import { COMMANDS, DEFINED, expandDefined } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
+import { FakeScratch } from "./scratch.js";
 
 interface Session {
   id: string;
   log: SessionLog;
+  /** What the session's `show` calls wrote (issue #472): `scratch.show(log, …)` makes one. */
+  scratch: FakeScratch;
   workspace: string;
   branch: string | null;
   profile: string;
@@ -644,6 +647,7 @@ export class FakeDaemon {
     const session: Session = {
       id,
       log: new SessionLog(),
+      scratch: new FakeScratch(),
       workspace,
       branch: null,
       profile: "build",
@@ -1245,6 +1249,18 @@ export class FakeDaemon {
 
       case "presence.set":
         return reply(ws, id, { ok: true });
+
+      // The scratchpad (issue #472), and `fs.read` on its documents' `scratch:/` paths. A
+      // session's other files are not this fake's: nothing here reads them.
+      case "scratch.list":
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        return reply(ws, id, session.scratch.list());
+
+      case "fs.read": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const doc = session.scratch.read(String(params["path"] ?? ""));
+        return doc ? reply(ws, id, doc) : reply(ws, id, null, { code: -32005, message: "not_found" });
+      }
 
       case "commands.list":
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
