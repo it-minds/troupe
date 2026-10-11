@@ -20,8 +20,9 @@ defmodule Troupe.Config.Org do
   lower layer tried to go past it with.
 
   In a release neither path can be moved, by a variable or by a flag: that would be a
-  way out of the limits. Only a test run moves them, through the application
-  environment (`:troupe_core, :organisation`, `managed_path:` and `cache_path:`).
+  way out of the limits. Only a test run (Mix started, in `test`) moves them, through
+  the application environment (`:troupe_core, :organisation`, `managed_path:` and
+  `cache_path:`).
   """
 
   alias Troupe.Config
@@ -41,10 +42,11 @@ defmodule Troupe.Config.Org do
   def cache_path,
     do: override(:cache_path) || Path.join(Troupe.Paths.state_dir(), "organisation.json")
 
-  # A test run is one with Mix loaded and in its `test` environment. A release has no
-  # Mix, so the application environment, which `ERL_FLAGS` could set, moves nothing there.
+  # A test run is one with Mix running and in its `test` environment. A release has no
+  # Mix, so the application environment, which `ERL_FLAGS` could set, moves nothing there;
+  # a bare `elixir` VM has Mix's modules and not its state, which `Mix.env/0` needs.
   defp override(key) do
-    if Code.ensure_loaded?(Mix) and Mix.env() == :test do
+    if List.keymember?(Application.started_applications(), :mix, 0) and Mix.env() == :test do
       :troupe_core |> Application.get_env(:organisation, []) |> Keyword.get(key)
     end
   end

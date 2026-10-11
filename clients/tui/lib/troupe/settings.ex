@@ -150,6 +150,7 @@ defmodule Troupe.Settings do
   @spec enforced_line(view(), String.t()) :: String.t()
   def enforced_line(view, key) do
     %{"value" => value, "source" => source} = enforced(view, key)
+
     "#{key} is set by your organisation (#{shown(value)}, from #{source}); it cannot be changed here"
   end
 

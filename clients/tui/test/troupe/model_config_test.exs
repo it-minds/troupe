@@ -25,12 +25,25 @@ defmodule Troupe.ModelConfigTest do
   # The plane's answer goes to the daemon's `config.organisation` as it came, and nothing
   # into the person's own file (root Decision 869; `org_settings_test.exs` has the rest).
   test "config pull hands the plane's answer to the daemon, as it came" do
-    answer = %{"configured" => true, "provider" => "openai", "defaults" => %{"provider" => "openai"}, "enforced" => %{}}
+    answer = %{
+      "configured" => true,
+      "provider" => "openai",
+      "defaults" => %{"provider" => "openai"},
+      "enforced" => %{}
+    }
+
     test = self()
 
     call = fn method, params ->
       send(test, {:called, method, params})
-      {:ok, %{"plane_url" => params["plane_url"], "defaults" => %{"provider" => "openai"}, "enforced" => %{}, "path" => "x"}}
+
+      {:ok,
+       %{
+         "plane_url" => params["plane_url"],
+         "defaults" => %{"provider" => "openai"},
+         "enforced" => %{},
+         "path" => "x"
+       }}
     end
 
     assert ModelConfig.keep("https://plane.example", answer, fn _line -> :ok end, call) == 0

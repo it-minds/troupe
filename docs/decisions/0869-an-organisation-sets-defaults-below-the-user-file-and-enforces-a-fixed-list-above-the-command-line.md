@@ -74,9 +74,12 @@ key outside the two sections warns.
 
 **No override in a release.** Neither path is moved by a variable or a flag. The
 application environment (`:troupe_core, :organisation`) moves them only in a test run,
-which is recognised as Mix loaded with its environment `test`: a release carries no Mix,
-so `ERL_FLAGS`, which can set any application's environment, moves nothing there either.
-Every suite's helper points both at scratch paths, so no test reads this machine's.
+which is recognised as the `:mix` application started with its environment `test`: a
+release carries no Mix, so `ERL_FLAGS`, which can set any application's environment, moves
+nothing there either. Started, not loaded: a bare `elixir` VM (the gateway's restart test's
+daemon, or the installed TUI's modules loaded into a person's Elixir) can load Mix's modules
+without its state, and `Mix.env/0` raises there. Every suite's helper points both at scratch
+paths, so no test reads this machine's.
 
 ## Which source wins when both exist
 
@@ -214,6 +217,9 @@ under a fixed provider (held on load, with the warning).
   fetching, keeping and announcing the document, `config.get` showing it and `config.set`
   refusing; a plane that does not answer leaving the copy; `config.organisation` keeping,
   naming `shadowed`, not announcing an unchanged copy, refusing a bad one.
+- `apps/troupe_gateway/test/troupe/gateway/restart_test.exs`, unchanged, whose daemon is a
+  bare `elixir` VM: it failed every session's start while the guard asked a loaded but
+  unstarted Mix for its environment.
 - `apps/troupe_plane/test/troupe/plane/client_defaults_test.exs` and the Policy page's test
   in `panel_test.exs`: the old fields unchanged, `defaults` and `enforced` added, the set
   put, audited, refused with the reason for an unmarked key or a bad value.
