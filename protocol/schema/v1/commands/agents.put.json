@@ -6,6 +6,9 @@
     "command_id": {
       "type": "string"
     },
+    "if_hash": {
+      "type": "string"
+    },
     "name": {
       "type": "string"
     },

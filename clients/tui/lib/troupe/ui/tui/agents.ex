@@ -19,6 +19,13 @@ defmodule Troupe.UI.TUI.Agents do
   A bundle's agent is the profile's and is changed in the console; on a pod every agent
   is the bundle's, and the page is read-only and says so.
 
+  The subagents an agent delegates to are listed too, each saying it is one, and are
+  edited and copied as any other (root Decision 852). A save goes with the `hash` of the
+  file the edit was opened from, so one over a file somebody else saved meanwhile is
+  refused with the daemon's sentence and the edit kept; the next save replaces theirs.
+  Another client's save of the agent being edited is said as it is announced. A file that
+  does not parse is opened by `e` like any other, and saved back where it is.
+
   The page is a map in the server's state (`agents_page`); `key/3` is its keys, and
   `render/3` its widgets. An edit is the one thing the server does for it, because the
   editor has the terminal: `key/3` answers `{:edit, page, request}`, and the server
@@ -37,24 +44,41 @@ defmodule Troupe.UI.TUI.Agents do
   The page: the listing (`rows`, the files not read in `skipped`, and `read_only`, why
   nothing here may be written, on a pod), the cursor, each agent read whole as the cursor
   reaches it (`details`), the instruction being read (`view`), the edits not saved yet
-  with what was wrong with them (`kept`, `errors`), the question open (`ask`) and the
-  page's own line of news (`status`).
+  with what was wrong with them and the file each was opened from (`kept`, `errors`,
+  `bases`), the question open (`ask`) and the page's own line of news (`status`).
   """
   @type page :: %{
-          rows: [map()],
-          skipped: [map()],
-          read_only: String.t() | nil,
-          cursor: non_neg_integer(),
-          details: %{optional(String.t()) => map()},
-          view: %{name: String.t(), scroll: non_neg_integer()} | nil,
-          kept: %{optional(String.t()) => String.t()},
-          errors: %{optional(String.t()) => [map()]},
-          ask: map() | nil,
-          status: String.t() | nil
+          required(:rows) => [map()],
+          required(:skipped) => [map()],
+          required(:read_only) => String.t() | nil,
+          required(:cursor) => non_neg_integer(),
+          required(:details) => %{optional(String.t()) => map()},
+          required(:view) => %{name: String.t(), scroll: non_neg_integer()} | nil,
+          required(:kept) => %{optional(String.t()) => String.t()},
+          required(:errors) => %{optional(String.t()) => [map()]},
+          optional(:bases) => %{optional(String.t()) => base()},
+          required(:ask) => map() | nil,
+          required(:status) => String.t() | nil
         }
 
-  @typedoc "An edit for the server to run: the agent's name and the text the editor opens on."
-  @type request :: %{name: String.t(), text: String.t(), kept?: boolean(), new?: boolean()}
+  @typedoc """
+  The file an edit was opened from: its layer and the `hash` `agents.get` gave, sent as
+  `if_hash` when the edit is saved back into that layer (root Decision 852).
+  """
+  @type base :: %{layer: String.t() | nil, hash: String.t() | nil} | nil
+
+  @typedoc """
+  An edit for the server to run: the agent's name, the text the editor opens on and the
+  file it came from; `mend?` for a file that does not parse, saved back where it is.
+  """
+  @type request :: %{
+          required(:name) => String.t(),
+          required(:text) => String.t(),
+          required(:kept?) => boolean(),
+          required(:new?) => boolean(),
+          optional(:base) => base(),
+          optional(:mend?) => boolean()
+        }
 
   ## Opening and reading
 
@@ -70,6 +94,7 @@ defmodule Troupe.UI.TUI.Agents do
       view: nil,
       kept: %{},
       errors: %{},
+      bases: %{},
       ask: nil,
       status: nil
     }
@@ -77,15 +102,16 @@ defmodule Troupe.UI.TUI.Agents do
   end
 
   @doc """
-  Reads the listing again, keeping the cursor on the agent it was on (or on `select`)
-  and the edits not saved yet; what was read whole is read again as it is reached.
+  Reads the listing again, the subagents with the primaries, keeping the cursor on the
+  agent it was on (or on `select`) and the edits not saved yet; what was read whole is
+  read again as it is reached.
   """
   @spec reload(page(), String.t(), String.t() | nil) :: page()
   def reload(page, sid, select \\ nil) do
     select = select || selected_name(page)
 
     page =
-      case Client.agents(sid, "agents.list") do
+      case Client.agents(sid, "agents.list", %{subagents: true}) do
         {:ok, listed} ->
           %{
             page
@@ -127,7 +153,8 @@ defmodule Troupe.UI.TUI.Agents do
   defp entry_name({_kind, _entry}), do: nil
 
   # The selected agent read whole, once: its instruction, its file and the windows of the
-  # session's family that run it.
+  # session's family that run it. A file not read is asked about by its name too, for the
+  # text of one that does not parse (`broken`), which `e` opens to mend.
   defp fetch_selected(page, sid) do
     case selected(page) do
       {:agent, %{"name" => name}} when not is_map_key(page.details, name) ->
@@ -136,10 +163,32 @@ defmodule Troupe.UI.TUI.Agents do
           {:error, reason} -> %{page | status: "agents.get #{name}: #{message(reason)}"}
         end
 
+      {:skipped, %{"name" => name}} when is_binary(name) and not is_map_key(page.details, name) ->
+        case Client.agents(sid, "agents.get", %{name: name}) do
+          {:ok, whole} -> %{page | details: Map.put(page.details, name, whole)}
+          {:error, _none} -> page
+        end
+
       _other ->
         page
     end
   end
+
+  defp bases(page), do: Map.get(page, :bases, %{})
+
+  # What `e` on a file not read can open: the person's or the repository's that does not
+  # parse, as `agents.get` answered it.
+  defp broken(page, %{"name" => name}) when is_binary(name) do
+    case get_in(page.details, [name, "broken"]) do
+      %{"text" => text, "scope" => scope} = broken when is_binary(text) and is_binary(scope) ->
+        broken
+
+      _none ->
+        nil
+    end
+  end
+
+  defp broken(_page, _skipped), do: nil
 
   ## Keys
 
@@ -193,12 +242,13 @@ defmodule Troupe.UI.TUI.Agents do
     case selected_name(page) do
       name when is_map_key(page.kept, name) ->
         {:ok,
-         %{
-           page
-           | kept: Map.delete(page.kept, name),
-             errors: Map.delete(page.errors, name),
-             status: "dropped your edit of #{name}; e opens its file as it is"
-         }}
+         page
+         |> Map.merge(%{
+           kept: Map.delete(page.kept, name),
+           errors: Map.delete(page.errors, name),
+           bases: Map.delete(bases(page), name),
+           status: "dropped your edit of #{name}; e opens its file as it is"
+         })}
 
       _other ->
         {:ok, page}
@@ -234,28 +284,54 @@ defmodule Troupe.UI.TUI.Agents do
 
   # The file as it is, or the edit kept from the last try. A built-in is edited too: what
   # is saved is a copy in a layer the person picks, which then answers to the name. A
-  # bundle's agent is the profile's, and a pod's are all the bundle's.
+  # bundle's agent is the profile's, and a pod's are all the bundle's. The file the edit
+  # comes from goes with it, so its save can say which file it means to replace.
   defp edit(page) do
     with :ok <- writable(page),
          {:agent, %{"name" => name} = row} <- selected(page) || :none,
          :ok <- not_bundle(page, row) do
       case Map.fetch(page.kept, name) do
         {:ok, text} ->
-          {:edit, page, %{name: name, text: text, kept?: true, new?: false}}
+          {:edit, page,
+           %{name: name, text: text, kept?: true, new?: false, base: bases(page)[name]}}
 
         :error ->
-          case get_in(page.details, [name, "text"]) do
+          whole = Map.get(page.details, name, %{})
+
+          case whole["text"] do
             text when is_binary(text) ->
-              {:edit, page, %{name: name, text: text, kept?: false, new?: false}}
+              base = %{layer: whole["layer"], hash: whole["hash"]}
+              {:edit, page, %{name: name, text: text, kept?: false, new?: false, base: base}}
 
             _none ->
               {:ok, %{page | status: "#{name} has no file to edit here"}}
           end
       end
     else
-      {:skipped, skipped} -> {:ok, %{page | status: skipped_words(skipped)}}
+      {:skipped, skipped} -> mend(page, skipped)
       {:refused, reason} -> {:ok, %{page | status: reason}}
       _none -> {:ok, page}
+    end
+  end
+
+  # A file that does not parse, opened as it is (or as the last try left it) and saved
+  # back where it is (root Decision 852); one not read for another reason is the hand's.
+  defp mend(page, skipped) do
+    case broken(page, skipped) do
+      nil ->
+        {:ok, %{page | status: skipped_words(page, skipped)}}
+
+      broken ->
+        name = skipped["name"]
+        base = Map.get(bases(page), name) || %{layer: broken["scope"], hash: broken["hash"]}
+
+        {text, kept?} =
+          case Map.fetch(page.kept, name) do
+            {:ok, kept} -> {kept, true}
+            :error -> {broken["text"], false}
+          end
+
+        {:edit, page, %{name: name, text: text, kept?: kept?, new?: false, base: base, mend?: true}}
     end
   end
 
@@ -290,21 +366,24 @@ defmodule Troupe.UI.TUI.Agents do
         ask_save(%{page | errors: Map.delete(page.errors, name)}, sid, request, text, checked)
 
       {:ok, %{"errors" => errors}} ->
-        %{
-          page
-          | kept: Map.put(page.kept, name, text),
-            errors: Map.put(page.errors, name, errors),
-            ask: nil,
-            status: "#{name} is not saved: #{first_error(errors)}; e opens your edit again"
-        }
+        page
+        |> keep(name, text, request[:base])
+        |> Map.merge(%{
+          errors: Map.put(page.errors, name, errors),
+          ask: nil,
+          status: "#{name} is not saved: #{first_error(errors)}; e opens your edit again"
+        })
 
       {:error, reason} ->
-        %{
-          page
-          | kept: Map.put(page.kept, name, text),
-            status: "#{name} could not be checked: #{message(reason)}; your edit is kept"
-        }
+        page
+        |> keep(name, text, request[:base])
+        |> Map.put(:status, "#{name} could not be checked: #{message(reason)}; your edit is kept")
     end
+  end
+
+  # An edit not saved, kept with the file it was opened from.
+  defp keep(page, name, text, base) do
+    Map.merge(page, %{kept: Map.put(page.kept, name, text), bases: Map.put(bases(page), name, base)})
   end
 
   defp first_error([%{"field" => field, "message" => message} | rest]) do
@@ -317,7 +396,9 @@ defmodule Troupe.UI.TUI.Agents do
   ## Saving
 
   # The save question: which layer, and what the agent may do. The permissions are the
-  # text's own; what the name has now (any layer) is what an `auto` is compared with.
+  # text's own; what the name has now (any layer) is what an `auto` is compared with. A
+  # file that did not parse is saved back where it is, and since nothing of it was read,
+  # every `auto` in it counts.
   defp ask_save(page, sid, request, text, checked) do
     current =
       case Client.agents(sid, "agents.get", %{name: request.name}) do
@@ -325,12 +406,16 @@ defmodule Troupe.UI.TUI.Agents do
         {:error, _not_found} -> nil
       end
 
+    mend? = request[:mend?] == true
+    base = request[:base]
+
     ask = %{
       kind: :save,
       name: request.name,
       source: text,
-      layer: current && current["layer"],
-      before: (current && current["permissions"]) || %{},
+      layer: if(mend?, do: base && base.layer, else: current && current["layer"]),
+      before: if(mend?, do: %{}, else: (current && current["permissions"]) || %{}),
+      base: base,
       permissions: permissions(text),
       warnings: List.wrap(checked["warnings"]),
       confirm: nil
@@ -353,7 +438,7 @@ defmodule Troupe.UI.TUI.Agents do
       |> ask_save(sid, %{name: name, text: text, kept?: false, new?: false}, text, %{})
       |> picked(sid, scope)
     else
-      {:skipped, skipped} -> {:ok, %{page | status: skipped_words(skipped)}}
+      {:skipped, skipped} -> {:ok, %{page | status: skipped_words(page, skipped)}}
       {:refused, reason} -> {:ok, %{page | status: reason}}
       :no_file -> {:ok, %{page | status: "#{selected_name(page)} has no file to copy here"}}
       _none -> {:ok, page}
@@ -412,17 +497,30 @@ defmodule Troupe.UI.TUI.Agents do
     for {tool, "auto"} <- Enum.sort(permissions), Map.get(replaced, tool) != "auto", do: tool
   end
 
+  # Saved back into the layer the edit was opened from, the save names that file's hash,
+  # and one somebody else saved meanwhile is refused (root Decision 852).
   defp put(%{ask: ask} = page, sid, scope) do
-    case Client.agents(sid, "agents.put", %{name: ask.name, scope: scope, source: ask.source}) do
+    params =
+      case Map.get(ask, :base) do
+        %{layer: ^scope, hash: hash} when is_binary(hash) -> %{if_hash: hash}
+        _other -> %{}
+      end
+
+    case Client.agents(
+           sid,
+           "agents.put",
+           Map.merge(params, %{name: ask.name, scope: scope, source: ask.source})
+         ) do
       {:ok, written} ->
         warnings = written |> Map.get("warnings") |> List.wrap() |> Enum.map(& &1["message"])
 
-        page = %{
-          page
-          | ask: nil,
+        page =
+          Map.merge(page, %{
+            ask: nil,
             kept: Map.delete(page.kept, ask.name),
-            errors: Map.delete(page.errors, ask.name)
-        }
+            errors: Map.delete(page.errors, ask.name),
+            bases: Map.delete(bases(page), ask.name)
+          })
 
         page = reload(page, sid, ask.name)
 
@@ -437,14 +535,36 @@ defmodule Troupe.UI.TUI.Agents do
 
         {:changed, %{page | status: status}}
 
+      {:error, "conflict: " <> sentence} ->
+        # The person has been told; the edit is kept, and its next save is over the file
+        # as it is now.
+        {:ok,
+         page
+         |> keep(ask.name, ask.source, %{layer: scope, hash: hash_now(sid, ask.name, scope)})
+         |> Map.merge(%{
+           ask: nil,
+           status:
+             "#{ask.name} is not saved: #{sentence}. Your edit is kept: e opens it, z drops it"
+         })}
+
       {:error, reason} ->
         {:ok,
-         %{
-           page
-           | ask: nil,
-             kept: Map.put(page.kept, ask.name, ask.source),
-             status: "#{ask.name} is not saved: #{message(reason)}; e opens your edit again"
-         }}
+         page
+         |> keep(ask.name, ask.source, Map.get(ask, :base))
+         |> Map.merge(%{
+           ask: nil,
+           status: "#{ask.name} is not saved: #{message(reason)}; e opens your edit again"
+         })}
+    end
+  end
+
+  # The hash of the name's file in a layer now, as `agents.get` reads it: the one that
+  # answers, or one there that does not parse; `nil` when the layer has none.
+  defp hash_now(sid, name, scope) do
+    case Client.agents(sid, "agents.get", %{name: name}) do
+      {:ok, %{"layer" => ^scope, "hash" => hash}} -> hash
+      {:ok, %{"broken" => %{"scope" => ^scope, "hash" => hash}}} -> hash
+      _none -> nil
     end
   end
 
@@ -456,14 +576,41 @@ defmodule Troupe.UI.TUI.Agents do
     if ask.source == text do
       %{page | ask: nil, status: "nothing saved"}
     else
-      %{
-        page
-        | ask: nil,
-          kept: Map.put(page.kept, ask.name, ask.source),
-          status: "kept your edit of #{ask.name}, not saved; e opens it again"
-      }
+      page
+      |> keep(ask.name, ask.source, Map.get(ask, :base))
+      |> Map.merge(%{
+        ask: nil,
+        status: "kept your edit of #{ask.name}, not saved; e opens it again"
+      })
     end
   end
+
+  @doc """
+  An `agents.changed` heard while the page is open: another client saved or took away an
+  agent. One with an edit open here (kept, or at the save question) is said, since this
+  edit's save is now over a file it was not opened from, and is refused once (root
+  Decision 852). This client's own saves have closed their edit by the time theirs is
+  heard.
+  """
+  @spec heard(page(), map()) :: page()
+  def heard(page, %{"name" => name} = changed) when is_binary(name) do
+    open? = Map.has_key?(page.kept, name) or match?(%{kind: :save, name: ^name}, page.ask)
+
+    if open?,
+      do: %{
+        page
+        | status:
+            "#{name} was #{changed_verb(changed["action"])} elsewhere while you had it open " <>
+              "(#{changed["path"]}): saving yours is refused once, so you can read it first; " <>
+              "the next save replaces it"
+      },
+      else: page
+  end
+
+  def heard(page, _changed), do: page
+
+  defp changed_verb("deleted"), do: "deleted"
+  defp changed_verb(_saved), do: "saved"
 
   @doc """
   The `permissions:` a definition's frontmatter sets, `%{tool => "auto" | "ask" | "deny"}`,
@@ -564,7 +711,7 @@ defmodule Troupe.UI.TUI.Agents do
            }}
       end
     else
-      {:skipped, skipped} -> {:ok, %{page | status: skipped_words(skipped)}}
+      {:skipped, skipped} -> {:ok, %{page | status: skipped_words(page, skipped)}}
       {:refused, reason} -> {:ok, %{page | status: reason}}
       _none -> {:ok, page}
     end
@@ -596,10 +743,17 @@ defmodule Troupe.UI.TUI.Agents do
 
   defp delete_key(page, _key, _sid), do: {:ok, %{page | ask: nil, status: "nothing deleted"}}
 
-  defp skipped_words(skipped),
-    do:
-      "#{skipped["path"]} is not read (#{skipped["reason"]}): fix the file by hand, " <>
-        "and r reads it again"
+  defp skipped_words(page, skipped) do
+    case broken(page, skipped) do
+      nil ->
+        "#{skipped["path"]} is not read (#{skipped["reason"]}): fix the file by hand, " <>
+          "and r reads it again"
+
+      broken ->
+        "#{skipped["path"]} is not read (#{skipped["reason"]}): e opens it to mend it, " <>
+          "and the save puts it back in #{layer_place(broken["scope"])}"
+    end
+  end
 
   ## Words
 
@@ -733,8 +887,10 @@ defmodule Troupe.UI.TUI.Agents do
     windows = Map.get(running, name, [])
     style = if row["available"] == false, do: Theme.style(:muted), else: Theme.style(nil)
 
+    # A subagent says so first: nothing a person types starts one, an agent delegates to it.
     facts =
-      facts(row) ++
+      if(row["mode"] == "subagent", do: ["subagent"], else: []) ++
+        facts(row) ++
         if(windows == [], do: [], else: ["runs in " <> Enum.join(windows, ", ")]) ++
         if(Map.has_key?(page.kept, name), do: ["edit kept, not saved"], else: [])
 
@@ -767,7 +923,7 @@ defmodule Troupe.UI.TUI.Agents do
   defp detail(page, nil, _running, _rect), do: page.status || "Nothing to show."
 
   defp detail(page, {:skipped, skipped}, _running, _rect),
-    do: Enum.join([skipped_words(skipped)] ++ status_lines(page), "\n")
+    do: Enum.join([skipped_words(page, skipped)] ++ status_lines(page), "\n")
 
   defp detail(page, {:agent, %{"name" => name} = row}, running, rect) do
     whole = Map.get(page.details, name, row)
@@ -777,6 +933,7 @@ defmodule Troupe.UI.TUI.Agents do
         String.trim(to_string(whole["description"] || "")),
         "",
         field("from", layer_word(whole["layer"]) <> path_words(whole)),
+        field("mode", mode_words(whole["mode"])),
         field("model", whole["model"] || "the session's"),
         field("tools", tools_words(whole)),
         field("may", permission_words(whole["permissions"])),
@@ -818,6 +975,9 @@ defmodule Troupe.UI.TUI.Agents do
 
   defp path_words(%{"path" => path}) when is_binary(path), do: " · " <> path
   defp path_words(_whole), do: ""
+
+  defp mode_words("subagent"), do: "subagent: an agent delegates to it"
+  defp mode_words(_primary), do: "primary: a session or a branch runs it"
 
   defp tools_words(%{"tools" => "all", "tool_count" => n}), do: "all (#{n})"
 

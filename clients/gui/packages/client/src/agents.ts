@@ -14,6 +14,7 @@
 // 825 gates only a repository's), so a save that adds or widens one is asked about once.
 
 import { TroupeRpcError } from "./connection.js";
+import { ErrorCodes } from "./types.js";
 
 /** Where a definition is read from: Troupe's, the plane profile's bundle, the person's, or a repository's. */
 export type AgentLayer = "builtin" | "bundle" | "user" | "project";
@@ -31,6 +32,12 @@ export interface AgentRow {
   /** `builtin`, `global` (the person's) or `project`: the older word for `layer`. */
   source: string;
   notes?: Array<{ key: string; reason: string }>;
+  /**
+   * `primary`, run by a session or a branch, or `subagent`, delegated to: `agents.list`
+   * lists the subagents only when asked (troupe Decision 852). Absent from a daemon before
+   * it, whose rows are all primaries.
+   */
+  mode?: "primary" | "subagent";
   layer?: AgentLayer;
   /** As the definition names it; null runs on the session's own model. */
   model?: string | null;
@@ -65,6 +72,14 @@ export interface AgentDefinition extends AgentRow {
   path: string | null;
   /** The file as it is on disk, frontmatter and all, for an editor. */
   text: string | null;
+  /**
+   * `sha256:<hex>` of `text`: sent back as `if_hash` when the edit is saved into the same
+   * layer, so a save over a file somebody else saved meanwhile is refused (troupe Decision
+   * 852). Absent from a daemon before it.
+   */
+  hash?: string | null;
+  /** The person's or the repository's file of this name that does not parse, to mend. */
+  broken?: AgentBroken | null;
   editable: boolean;
   /** Why it is not editable here: a built-in is changed by a copy, a bundle's in the console. */
   editable_reason: string | null;
@@ -72,6 +87,33 @@ export interface AgentDefinition extends AgentRow {
   also: Array<{ layer: AgentLayer; path: string }>;
   /** With a session named: the windows of its family running it now. */
   running: Array<{ session_id: string; parent: string | null }>;
+}
+
+/**
+ * An agent file of the person's or the repository's that was found and does not parse, as
+ * `agents.get` gives it to mend (troupe Decision 852): saved back with `agents.put` into
+ * `scope` with `if_hash` set to `hash`.
+ */
+export interface AgentBroken {
+  scope: AgentScope;
+  layer: AgentLayer;
+  path: string;
+  text: string;
+  hash: string;
+  /** Why it is not read, as `agents.list`'s `skipped` says it. */
+  reason: string;
+}
+
+/**
+ * A save `agents.put` refused because the file changed since it was read (`conflict`,
+ * troupe Decision 852): the daemon's sentence, and the hash of the file as it is now, or
+ * null when it is gone, which a save that means to replace it sends as `if_hash`.
+ */
+export function agentConflict(e: unknown): { reason: string; hash: string | null } | null {
+  if (!(e instanceof TroupeRpcError) || e.code !== ErrorCodes.conflict || !e.data) return null;
+  const reason = typeof e.data["reason"] === "string" ? e.data["reason"] : e.message;
+  const hash = typeof e.data["hash"] === "string" ? e.data["hash"] : null;
+  return { reason, hash };
 }
 
 /** One thing a check found: `field` is a frontmatter key, `permissions.<tool>`, `frontmatter`, `name`, `prompt` or `description`. */

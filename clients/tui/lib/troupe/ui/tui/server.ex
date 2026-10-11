@@ -419,8 +419,15 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # An agent was saved or deleted, here or in the desktop app (root Decision 841): the
-  # palette's rows, and the `/agents` page when it is open, are read again.
-  def handle_info({:troupe_agents_changed, _changed}, state) do
+  # palette's rows, and the `/agents` page when it is open, are read again, and an edit
+  # open on that agent is told (root Decision 852).
+  def handle_info({:troupe_agents_changed, changed}, state) do
+    state =
+      case state.agents_page do
+        %{} = page -> %{state | agents_page: Agents.heard(page, changed)}
+        nil -> state
+      end
+
     {:noreply, schedule_tick(%{agents_changed(state) | dirty: true}), render?: false}
   end
 

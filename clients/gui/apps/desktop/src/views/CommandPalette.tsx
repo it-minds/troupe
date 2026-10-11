@@ -12,10 +12,17 @@
 // workspace's may ask first, in the session, with the prompt in view. It uses the
 // theme's tokens and restyles nothing around it, so the app's coming re-skin (#52) can
 // take it as a component.
+//
+// Three kinds of row, each drawn as what it is, as the terminal's palette draws them
+// (troupe #565, TUI Decision 156): a `command` Troupe has; an `agent`, which is not a
+// command but something a branch or a session runs, with where it comes from, its model,
+// whether it is read-only and whether a session on it gets a worktree or works in the
+// checkout, from `agents.list` for a session on this computer; and a file's command,
+// `repository` or `yours`. A row that cannot run here says why.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
-import type { CommandEntry } from "@troupe/client";
+import type { AgentLayer, AgentRow, CommandEntry } from "@troupe/client";
 import type { SessionHandle } from "../hooks";
 import { loopError } from "./Goal";
 
@@ -32,6 +39,8 @@ export interface PaletteActions {
   transcript: () => string;
   /** Open the agents manager on the session's workspace: a session on this computer's (troupe #503). */
   agents?: (() => void) | undefined;
+  /** `agents.list`'s rows for the session's workspace, which an agent's row takes its facts from: a session on this computer's. */
+  agentRows?: (() => Promise<AgentRow[]>) | undefined;
 }
 
 interface RunContext extends PaletteActions {
@@ -143,13 +152,62 @@ async function runDefined({ view }: RunContext, name: string, args: string): Pro
   return undefined;
 }
 
-function reasonFor(entry: CommandEntry, local: boolean): string | null {
+function reasonFor(entry: CommandEntry, local: boolean, agent: AgentRow | undefined): string | null {
   if (entry.availability === "local" && !local) return "only for a session on this computer";
   if (entry.availability === "plane") return "needs a plane";
+  // The daemon's own reason first: an agent no session could run here (a model the
+  // provider does not serve) cannot run from the terminal client either.
+  if (entry.source === "agent" && agent?.available === false) return `${entry.name} cannot run here: ${agent.reason ?? "the daemon says it cannot"}`;
   if (entry.source === "agent") return "start a branch on it from the terminal client, or a new session from the list";
   if (defined(entry)) return null;
   if (!(entry.name in RUNNERS)) return NOT_HERE[entry.name] ?? "not in the desktop app yet";
   return null;
+}
+
+/** What kind of row a command is, in the word the terminal's palette uses. */
+type Kind = "command" | "agent" | "repository" | "yours";
+
+function kindOf(entry: CommandEntry): Kind {
+  switch (entry.source) {
+    case "agent":
+      return "agent";
+    case "project":
+      return "repository";
+    case "user":
+      return "yours";
+    default:
+      return "command";
+  }
+}
+
+/** Where an agent comes from, in as few letters as say it. */
+function layerBadge(layer: AgentLayer | undefined): string | null {
+  switch (layer) {
+    case "builtin":
+      return "built in";
+    case "bundle":
+      return "bundle";
+    case "user":
+      return "yours";
+    case "project":
+      return "repository";
+    default:
+      return null;
+  }
+}
+
+/**
+ * An agent's facts on its row: where it comes from, its model (`default` runs on the
+ * session's), whether it is read-only, and whether a session on it gets a worktree of its
+ * own or works in the checkout, as `agents.list` says it for this workspace.
+ */
+function agentBadges(agent: AgentRow): string[] {
+  return [
+    layerBadge(agent.layer),
+    agent.model ?? "default",
+    agent.read_only ? "read-only" : null,
+    agent.worktree === undefined ? null : agent.worktree ? "worktree" : "checkout",
+  ].filter((b): b is string => b !== null);
 }
 
 /** How many of a command's lines its detail shows before it counts the rest. */
@@ -175,6 +233,34 @@ function Sends({ body }: { body: string }): JSX.Element {
     </div>
   );
 }
+
+/** An agent's row is not a command: the detail says what it is, and where it is changed. */
+function AgentAbout({ name, agent, manager }: { name: string; agent: AgentRow | undefined; manager: boolean }): JSX.Element {
+  const facts = agent
+    ? [
+        agent.model ? `model ${agent.model}` : "the session's model",
+        agent.tool_count === undefined ? null : `${agent.tool_count} tools`,
+        agent.read_only ? "read-only" : null,
+        agent.max_turns ? `at most ${agent.max_turns} turns` : null,
+        agent.worktree === undefined ? null : agent.worktree ? "a session on it gets a worktree of its own" : "a session on it works in this checkout",
+      ].filter((f): f is string => f !== null)
+    : [];
+  const from = agent?.layer ? `, from ${LAYER_PLACES[agent.layer]}` : "";
+  return (
+    <p className="micro">
+      An agent, not a command{from}
+      {facts.length > 0 ? `: ${facts.join(" · ")}` : ""}. A branch or a session runs {name}
+      {manager ? "; /agents reads, edits and copies it." : "."}
+    </p>
+  );
+}
+
+const LAYER_PLACES: Record<AgentLayer, string> = {
+  builtin: "the built-ins",
+  bundle: "the profile's bundle",
+  user: "your agents",
+  project: "this repository",
+};
 
 /** The first word filters; the rest is the command's argument. */
 function split(query: string): { word: string; args: string } {
@@ -202,12 +288,14 @@ export function CommandPalette({
   onClose: () => void;
 }): JSX.Element {
   const [commands, setCommands] = useState<CommandEntry[] | null>(null);
+  const [agents, setAgents] = useState<Map<string, AgentRow>>(new Map());
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const { agentRows } = actions;
 
   // The list is the harness's, read when the palette opens: agents come and go with the
   // workspace, and nothing here is worth caching over that.
@@ -227,11 +315,26 @@ export function CommandPalette({
     };
   }, [view.view]);
 
+  // The agents' facts come a moment after the commands, and the list never waits on them:
+  // a row without them is still the agent it is.
+  useEffect(() => {
+    let live = true;
+    void agentRows?.()
+      .then((rows) => live && setAgents(new Map(rows.map((a) => [a.name, a]))))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [agentRows]);
+
   const { word, args } = split(query);
 
   const rows = useMemo<Row[]>(
-    () => (commands ?? []).filter((c) => matches(c, word)).map((entry) => ({ entry, reason: reasonFor(entry, local) })),
-    [commands, word, local],
+    () =>
+      (commands ?? [])
+        .filter((c) => matches(c, word))
+        .map((entry) => ({ entry, reason: reasonFor(entry, local, entry.source === "agent" ? agents.get(entry.name) : undefined) })),
+    [commands, word, local, agents],
   );
 
   // A new filter starts on the row that matches it exactly, so "q" + Enter is /quit.
@@ -349,23 +452,29 @@ export function CommandPalette({
           {grouped.map((group) => (
             <div key={group.section}>
               <div className="section">{SECTION_NAMES[group.section] ?? group.section}</div>
-              {group.rows.map(({ row, index }) => (
-                <div
-                  key={row.entry.name}
-                  role="option"
-                  aria-selected={index === cursor}
-                  aria-disabled={row.reason !== null || undefined}
-                  className={`row ${row.reason ? "unavailable" : ""}`}
-                  onMouseMove={() => setCursor(index)}
-                  onClick={() => void run(row)}
-                >
-                  <span className="name">/{row.entry.name}</span>
-                  <span className="summary">
-                    {row.entry.summary}
-                    {row.reason && <span className="micro"> — {row.reason}</span>}
-                  </span>
-                </div>
-              ))}
+              {group.rows.map(({ row, index }) => {
+                const kind = kindOf(row.entry);
+                const agent = kind === "agent" ? agents.get(row.entry.name) : undefined;
+                return (
+                  <div
+                    key={row.entry.name}
+                    role="option"
+                    aria-selected={index === cursor}
+                    aria-disabled={row.reason !== null || undefined}
+                    className={`row kind-${kind} ${row.reason ? "unavailable" : ""}`}
+                    onMouseMove={() => setCursor(index)}
+                    onClick={() => void run(row)}
+                  >
+                    <span className="name">/{row.entry.name}</span>
+                    <span className="kind">{kind}</span>
+                    <span className="summary">
+                      {agent && <span className="badges">{agentBadges(agent).join(" · ")}</span>}
+                      {row.entry.summary}
+                      {row.reason && <span className="micro"> — {row.reason}</span>}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>
@@ -375,6 +484,7 @@ export function CommandPalette({
             <span className="usage">{selected.entry.usage}</span>
             {selected.entry.aliases.length > 0 && <span className="micro muted"> also {selected.entry.aliases.map((a) => `/${a}`).join(", ")}</span>}
             <p>{selected.entry.detail}</p>
+            {selected.entry.source === "agent" && <AgentAbout name={selected.entry.name} agent={agents.get(selected.entry.name)} manager={Boolean(actions.agents)} />}
             {typeof selected.entry.body === "string" && <Sends body={selected.entry.body} />}
             {selected.entry.example && (
               <p className="micro muted">

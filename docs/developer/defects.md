@@ -1124,9 +1124,8 @@ For the palette (#503), whose slot owns these.
   own agent, not the window's (`Client.run_command/3`, by design in Decision 763); the
   palette doesn't say so.
 - `explore`, `general`, `implementer` and `reviewer` ship as subagents, so they have no
-  row and nothing a person types starts one; #502 lists them as rows. `agents.list` lists
-  primaries only, so neither client's agents manager shows or edits them either, though
-  `agents.get` answers them by name.
+  palette row and nothing a person types starts one; #502 lists them as rows. (Both agents
+  managers list and edit them since Decision 852.)
 
 Found by the #502 audit, 2026-10-10.
 
@@ -1172,16 +1171,12 @@ Found by the #248 fixers, 2026-10-10.
 
 ### D112 - Agents after #549, #551 and #563 (low)
 
-- `agents.put` has no conflict guard (last write wins, Decision 841), and neither client
-  warns when `agents.changed` arrives for the agent open in its editor.
 - `agents.put` into the user scope takes `permission: auto` (`shell: auto` included) with
   no confirmation at the daemon, and a user agent's `auto` isn't gated by trust: both
   clients ask before such a save, a client of their own with `admin` need not.
 - `agents.put` and `agents.delete` in the project scope take any `workspace` the daemon's
   user can write, as `mcp.add` does.
 - Each `agents.list` row's `worktree` is `session.create`'s rule, the same for every row.
-- An agent file that doesn't parse is listed with its reason, but nothing returns its
-  text, so neither manager can open it to mend it.
 - A save into a layer that a higher one hides counts as a new file and asks about every
   `auto` (`agents.get`'s `also` gives paths, not permissions).
 - The TUI has two agent choosers, command mode's Ctrl-N and the window's Tab switcher.
@@ -1212,10 +1207,7 @@ Found by the #502 fixers, 2026-10-10.
 
 ### D114 - Watch after #558 (low)
 
-- The desktop app's watch checkbox (`LocalControls.tsx`) is its own record
-  (`raw.config.watch`), not `watch.get` and `watch_changed`.
 - An `answer` branch can't remove its `AI?` comment, so each save of that file asks again.
-- A headless run prints nothing for `watch_triggered`.
 - A trigger fired while no TUI was attached is in the journal, but its window opens only
   from a live event (not tested).
 
