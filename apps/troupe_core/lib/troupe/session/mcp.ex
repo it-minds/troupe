@@ -44,6 +44,7 @@ defmodule Troupe.Session.MCP do
 
   use GenServer
 
+  alias Troupe.Config
   alias Troupe.MCP.{Client, Local, OAuth, Server, Sessions, Stdio, Tool, Trust}
   alias Troupe.Session.Questions
 
@@ -206,7 +207,15 @@ defmodule Troupe.Session.MCP do
       hold_auto?: Keyword.get(opts, :hold_auto, false) == true
     }
 
-    {:ok, state, {:continue, {:start, Keyword.get(opts, :servers, %{})}}}
+    # The servers come inside the session's config, which prints them by name (Decision
+    # 857): the session's child spec holds what this was started with.
+    servers =
+      case Keyword.get(opts, :config) do
+        %Config{mcp: servers} -> servers
+        nil -> %{}
+      end
+
+    {:ok, state, {:continue, {:start, servers}}}
   end
 
   @impl GenServer
@@ -461,29 +470,22 @@ defmodule Troupe.Session.MCP do
   def handle_info(_message, state), do: {:noreply, state}
 
   # A crash report prints the state, and a server's environment and headers can hold a
-  # credential (Decision 820): it prints their names.
+  # credential (Decision 820): it prints their names. The report's stacktrace prints the
+  # state as an argument of the call that failed, which no `format_status/1` reaches: the
+  # `Inspect` below the module does (Decision 857).
   @impl GenServer
   def format_status(status), do: Map.replace_lazy(status, :state, &redacted/1)
 
-  defp redacted(%__MODULE__{servers: servers} = state) do
+  @doc false
+  @spec redacted(%__MODULE__{}) :: %__MODULE__{}
+  def redacted(%__MODULE__{servers: servers} = state) do
     %{state | servers: Map.new(servers, fn {name, entry} -> {name, redacted_entry(entry)} end)}
   end
 
-  defp redacted(state), do: state
-
-  defp redacted_entry(%{record: %{config: config} = record} = entry) do
-    config = config |> names_only(:env) |> names_only(:headers)
-    %{entry | record: %{record | config: config}}
-  end
+  defp redacted_entry(%{record: %{config: config} = record} = entry),
+    do: %{entry | record: %{record | config: Config.redacted_server(config)}}
 
   defp redacted_entry(entry), do: entry
-
-  defp names_only(config, key) do
-    case config do
-      %{^key => %{} = values} -> Map.put(config, key, values |> Map.keys() |> Enum.sort())
-      _other -> config
-    end
-  end
 
   defp decision({:ok, text}) when is_binary(text) do
     case text |> String.trim() |> String.downcase() do
@@ -664,4 +666,8 @@ defmodule Troupe.Session.MCP do
     do: %{server | oauth: OAuth.binding(server.name, server.url, oauth, state_dir)}
 
   defp with_oauth(server, _none, _state_dir), do: server
+end
+
+defimpl Inspect, for: Troupe.Session.MCP do
+  def inspect(state, opts), do: Inspect.Any.inspect(Troupe.Session.MCP.redacted(state), opts)
 end

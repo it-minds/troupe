@@ -1269,6 +1269,45 @@ defmodule Troupe.Config do
   def mask(key) when is_binary(key), do: binary_part(key, 0, 4) <> "..." <> binary_part(key, byte_size(key) - 2, 2)
   def mask(_other), do: "****"
 
+  @doc """
+  The config as a crash report or `inspect` prints it (Decision 857): the session-wide key
+  and each named provider's as `:redacted`, and each MCP server's `env` and `headers` as
+  their names (`redacted_server/1`). An unset key stays `nil`, so a report still says
+  which were set. For printing only; a session goes on with the config it holds.
+  """
+  @spec redacted(t()) :: t()
+  def redacted(%__MODULE__{} = config) do
+    %{
+      config
+      | api_key: redacted_key(config.api_key),
+        providers: Map.new(config.providers, fn {name, provider} -> {name, redacted_provider(provider)} end),
+        mcp: Map.new(config.mcp, fn {name, server} -> {name, redacted_server(server)} end)
+    }
+  end
+
+  @doc """
+  One MCP server's entry with its `env` and `headers` as their names, sorted: either can
+  hold a credential, and the names are what someone reading a report needs. Atom or string
+  keys, as a session and `mcp.check` hold one.
+  """
+  @spec redacted_server(term()) :: term()
+  def redacted_server(%{} = server) do
+    Enum.reduce([:env, :headers, "env", "headers"], server, fn key, server ->
+      case server do
+        %{^key => %{} = values} -> Map.put(server, key, values |> Map.keys() |> Enum.sort())
+        _other -> server
+      end
+    end)
+  end
+
+  def redacted_server(other), do: other
+
+  defp redacted_provider(%{api_key: key} = provider), do: %{provider | api_key: redacted_key(key)}
+  defp redacted_provider(provider), do: provider
+
+  defp redacted_key(nil), do: nil
+  defp redacted_key(_key), do: :redacted
+
   @env_reference ~r/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/
 
   @doc """
@@ -1325,4 +1364,11 @@ defmodule Troupe.Config do
   def effort(_), do: nil
 
   defp present?(value), do: is_binary(value) and value != ""
+end
+
+# A crash report, `:sys.get_status/1` and a stray `inspect` print a config through this, and
+# a supervisor's child specs carry one (Decision 857): the keys and each MCP server's `env`
+# and `headers` by name, never their values.
+defimpl Inspect, for: Troupe.Config do
+  def inspect(config, opts), do: Inspect.Any.inspect(Troupe.Config.redacted(config), opts)
 end
