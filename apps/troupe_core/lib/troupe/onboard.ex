@@ -373,6 +373,25 @@ defmodule Troupe.Onboard do
   end
 
   @doc """
+  Where onboarding brought a workspace's other tools' files: each source's path from the
+  workspace to the file it went into, as shown (`AGENTS.md`, `.troupe/rules/web-style.md`),
+  read from the provenance onboarding recorded, the `AGENTS.md` files' in the workspace's
+  `onboarded.json` and each rule's in its front matter. What the instruction files' loader
+  says of a file it does not read (Decision 854). Nothing is hashed: a source that changed
+  since is `drift/2`'s to report.
+  """
+  @spec onboarded_into(Path.t()) :: %{optional(String.t()) => String.t()}
+  def onboarded_into(workspace) do
+    workspace = Path.expand(workspace)
+    opts = defaults([])
+
+    for record <- records(:workspace, workspace, opts) ++ rule_records(workspace, opts),
+        source <- [record.from | Enum.map(record.also, & &1["from"])],
+        reduce: %{},
+        do: (into -> Map.put_new(into, source, record.shown))
+  end
+
+  @doc """
   The version of the onboarding rules `workspace` was last onboarded under as a whole: its
   `.troupe/onboarded.json`'s `onboarding`, `0` for a workspace onboarded before there was
   one, and `nil` for one never onboarded (no manifest and no file recording where it came
@@ -474,19 +493,40 @@ defmodule Troupe.Onboard do
       do:
         Enum.map(
           source.skipped(workspace, source_opts(opts)),
-          &skipped_entry(source, &1)
+          &skipped_entry(source, &1, workspace, opts)
         ),
       else: []
   rescue
     error -> [{:refused, refusal(%{}, "#{inspect(source)} failed: #{Exception.message(error)}")}]
   end
 
-  defp skipped_entry(_source, %{source: from, reason: reason})
-       when is_binary(from) and is_binary(reason),
-       do: {:skipped, %{source: from, reason: reason}}
+  # A file whose every word is in the file it was onboarded into, which records it as a
+  # source (`said_in`), is that file unchanged since, counted and not listed (Decision
+  # 854): a second run said "everything it says is there already" of each, every run.
+  defp skipped_entry(_source, %{source: from, reason: reason} = skip, workspace, opts)
+       when is_binary(from) and is_binary(reason) do
+    if onboarded_from?(Map.get(skip, :said_in), from, workspace, opts),
+      do: {:unchanged, from},
+      else: {:skipped, %{source: from, reason: reason}}
+  end
 
-  defp skipped_entry(source, other),
+  defp skipped_entry(source, other, _workspace, _opts),
     do: {:refused, refusal(%{}, "#{inspect(source)} skipped #{inspect(other)}")}
+
+  defp onboarded_from?(%{target: target, path: path}, from, workspace, opts)
+       when target in [:repo, :user, :workspace] and is_binary(path) do
+    with :ok <- check_path(target, path),
+         {:ok, place} <- place(target, path, workspace, opts),
+         current when is_binary(current) <- read(place.real),
+         %{"imported_from" => source} = was <- recorded(current, place) do
+      also = for %{"from" => f} <- List.wrap(was["imported_also"]), do: f
+      from in [source | also]
+    else
+      _ -> false
+    end
+  end
+
+  defp onboarded_from?(_said_in, _from, _workspace, _opts), do: false
 
   defp classify(proposal, workspace, declined, opts) do
     case check(proposal, workspace, opts) do
@@ -1081,6 +1121,19 @@ defmodule Troupe.Onboard do
          manifest_records(base, target, base))
       |> Enum.map(&Map.merge(&1, %{target: target, shown: shown(target, &1.path, opts)}))
       |> Enum.sort_by(& &1.path)
+    else
+      _ -> []
+    end
+  end
+
+  # The rules onboarding wrote, as `records/3` reads a repository's, and nothing else of it.
+  defp rule_records(workspace, opts) do
+    with {:ok, base} <- base(:repo, workspace, opts),
+         {:ok, real} <- real(root(:repo, workspace, opts)),
+         true <- key(real) == key(base) and File.dir?(base) do
+      base
+      |> markdown_entry("", "rules", 0)
+      |> Enum.map(&Map.put(&1, :shown, shown(:repo, &1.path, opts)))
     else
       _ -> []
     end

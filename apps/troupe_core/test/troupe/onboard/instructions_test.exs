@@ -294,9 +294,12 @@ defmodule Troupe.Onboard.InstructionsTest do
 
       assert %{proposals: [], skipped: [skipped]} = Instructions.survey(ctx.workspace, ctx.opts)
 
+      # `said_in` names the file that says it all, so a later run can tell one onboarded into
+      # it from one that never was (Decision 854).
       assert skipped == %{
                source: "CLAUDE.md",
-               reason: "everything it says is in AGENTS.md or .agents/AGENTS.md already"
+               reason: "everything it says is in AGENTS.md or .agents/AGENTS.md already",
+               said_in: %{target: :workspace, path: "AGENTS.md"}
              }
     end
 
@@ -504,15 +507,9 @@ defmodule Troupe.Onboard.InstructionsTest do
       assert %{"files" => %{"AGENTS.md" => %{"imported_from" => "~/.config/troupe/CLAUDE.md"}}} =
                Jason.decode!(File.read!(Path.join(config, "onboarded.json")))
 
-      assert %{proposals: [], skipped: skipped} = Onboard.plan(ctx.workspace, opts)
-
-      assert Enum.map(skipped, & &1.source) == [
-               "~/.claude/CLAUDE.md",
-               "~/.config/troupe/CLAUDE.md",
-               "~/.config/troupe/GEMINI.md"
-             ]
-
-      assert Enum.all?(skipped, &(&1.reason =~ "everything it says is in"))
+      # The three files it was made from are unchanged since, counted and not each listed as
+      # said already (Decision 854).
+      assert %{proposals: [], skipped: [], unchanged: 3} = Onboard.plan(ctx.workspace, opts)
     end
 
     test "a config directory outside the home directory is skipped; ~/.claude/CLAUDE.md still goes in",
@@ -595,11 +592,12 @@ defmodule Troupe.Onboard.InstructionsTest do
              Prefer pattern matching in function heads.
              """
 
-      # Nothing changed: nothing proposed, and the files already said are named.
-      assert %{proposals: [], unchanged: 8, skipped: skipped} =
+      # Nothing changed: nothing proposed, and the files the AGENTS.md files were made from
+      # are unchanged with the rules, not each listed as said already (Decision 854).
+      assert %{proposals: [], unchanged: 12, skipped: skipped} =
                Onboard.plan(ctx.workspace, ctx.opts)
 
-      assert %{source: "CLAUDE.md", reason: "everything it says is in AGENTS.md already"} in skipped
+      refute Enum.any?(skipped, &(&1.reason =~ "everything it says is in"))
 
       # `troupe instructions check` sees them, and nothing has drifted.
       check = [executable?: fn _ -> true end, config_dir: ctx.config, home: ctx.home]
@@ -795,8 +793,7 @@ defmodule Troupe.Onboard.InstructionsTest do
       assert %{"imported_from" => "docs/house-rules.md", "imported_version" => 2} =
                manifest["workspace"]["AGENTS.md"]
 
-      assert %{proposals: [], skipped: [again]} = Onboard.plan(ctx.workspace, ctx.opts)
-      assert again.reason == "everything it says is in AGENTS.md already"
+      assert %{proposals: [], skipped: [], unchanged: 1} = Onboard.plan(ctx.workspace, ctx.opts)
 
       File.write!(Path.join(ctx.workspace, "docs/house-rules.md"), "Use tabs.\n")
       check = [executable?: fn _ -> true end, config_dir: ctx.config, home: ctx.home]

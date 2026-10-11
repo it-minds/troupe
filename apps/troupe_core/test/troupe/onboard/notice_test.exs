@@ -12,6 +12,7 @@ defmodule Troupe.Onboard.NoticeTest do
 
   use Troupe.SessionCase, async: true
 
+  alias Troupe.Memory.Facts
   alias Troupe.Onboard
   alias Troupe.Onboard.Notice
 
@@ -247,7 +248,7 @@ defmodule Troupe.Onboard.NoticeTest do
              events_of_type(declined, :onboarding_suggested)
 
     # A brief this build's survey wrote says nothing.
-    :ok = Troupe.Session.Memory.put_section(context.workspace, "overview", "A project.")
+    :ok = built!(context.workspace)
 
     assert read_file(context, ".troupe/memory.md") =~
              "survey: #{Troupe.Memory.survey_version()}\n"
@@ -342,11 +343,18 @@ defmodule Troupe.Onboard.NoticeTest do
 
     # A brief this build's survey wrote is not outdated, and one turned off is never due.
     File.rm!(Path.join(context.state_dir, "onboard.json"))
-    :ok = Troupe.Session.Memory.put_section(context.workspace, "overview", "A project.")
+    :ok = built!(context.workspace)
     assert %{due: "none", recorded: ^survey} = Notice.brief(context.workspace, opts)
 
     assert %{due: "none", recorded: nil} =
              Notice.brief(context.workspace, [memory: false] ++ opts)
+  end
+
+  # What a librarian's run of this build leaves: a fact, and the brief stamped as built.
+  defp built!(workspace) do
+    {:ok, _} = Facts.put(workspace, %{kind: "overview", claim: "A project."}, %{by: "librarian"})
+
+    Troupe.Session.Memory.checked(workspace)
   end
 
   # Every path this process hands `:file` while `fun` runs, as it handed it: a call traced

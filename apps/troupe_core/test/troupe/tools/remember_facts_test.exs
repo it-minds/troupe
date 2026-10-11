@@ -4,7 +4,7 @@ defmodule Troupe.Tools.RememberFactsTest do
   was read from, with the evidence Troupe takes from the session (the session, the seq of
   the call, HEAD, who wrote it, and for a command the session ran, how it exited), through
   `Troupe.Memory.Facts`. A model names the paths; Troupe hashes them. The older `section`
-  and `text` still write something sensible, as facts, for one release.
+  and `text` are refused, naming the form that replaced them (Decision 854).
   """
 
   use Troupe.SessionCase, async: true
@@ -308,41 +308,22 @@ defmodule Troupe.Tools.RememberFactsTest do
     assert [%{"evidence" => %{"by" => "librarian"}}] = Facts.list(context.workspace)
   end
 
-  # An older prompt, or a bundle's agent written before facts, still calls it the old way.
-  test "section and text still write facts: a note, and a section's bullets replacing the last",
+  # An older prompt, or a bundle's agent written before facts, still calls it the old way:
+  # Decision 839 kept the form for one release, and Decision 854 takes it away, with the
+  # form that replaced it in the answer the agent reads.
+  test "section and text are refused, naming kind, claim and anchors, and write nothing",
        context do
-    ctx = ctx(context)
+    {_sid, completed} =
+      run(context, [
+        {:tools, [{"remember", %{"section" => "commands", "text" => "- `mix test` runs tests"}}]},
+        {:text, "done"}
+      ])
 
-    assert {:ok, _} = Remember.run(%{"section" => "note", "text" => "the ledger is a fold"}, ctx)
-
-    assert {:ok, _} =
-             Remember.run(
-               %{
-                 "section" => "commands",
-                 "text" => "- `mix test` runs the tests\n- `mix format`"
-               },
-               ctx
-             )
-
-    by_kind = fn -> Enum.group_by(Facts.list(context.workspace), & &1["kind"], & &1["claim"]) end
-    assert by_kind.()["note"] == ["the ledger is a fold"]
-    assert Enum.sort(by_kind.()["command"]) == ["`mix format`", "`mix test` runs the tests"]
-
-    # The section again replaces what it wrote before, and nothing anchored.
-    {:ok, _anchored} =
-      Remember.run(
-        %{"kind" => "command", "claim" => "`mix check`", "anchors" => ["mix.exs"]},
-        ctx
-      )
-
-    assert {:ok, _} = Remember.run(%{"section" => "commands", "text" => "`mix compile`"}, ctx)
-    assert Enum.sort(by_kind.()["command"]) == ["`mix check`", "`mix compile`"]
-
-    assert {:ok, _} = Remember.run(%{"section" => "overview", "text" => "A fixture."}, ctx)
-    assert by_kind.()["overview"] == ["A fixture."]
-
-    assert {:error, "unknown section" <> _} =
-             Remember.run(%{"section" => "todo", "text" => "x"}, ctx)
+    assert %{"ok" => false, "content" => content} = completed["remember"]
+    assert content =~ "remember no longer takes section and text"
+    assert content =~ ~s("kind": "command")
+    assert content =~ ~s("anchors": ["mix.exs"])
+    assert Facts.list(context.workspace) == []
   end
 
   test "this build's survey is version 2, so a brief an older survey wrote is due again",

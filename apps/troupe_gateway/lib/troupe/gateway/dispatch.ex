@@ -90,7 +90,10 @@ defmodule Troupe.Gateway.Dispatch do
     # A command a file defines sends the session its prompt, so it takes what input does.
     "commands.run" => :control,
     "workflows.list" => :observe,
-    "memory.get" => :observe,
+    # The brief at any path it is given, which a read may migrate or read back into facts
+    # there (Decision 838): what `memory.decline` takes, not what watching a session does
+    # (Decision 854).
+    "memory.get" => :control,
     # A no to rewriting a brief an older survey wrote (Decision 835): it writes only the
     # person's own answer, in the state directory.
     "memory.decline" => :control,
@@ -387,7 +390,9 @@ defmodule Troupe.Gateway.Dispatch do
   # whether a client that refreshes it by itself should start a librarian now, and
   # `refresh_held_until` until when a try that built nothing holds that off. `facts` are
   # what the brief is now made of, each with its status as read now, and `generated` says
-  # `text` is their view (Decision 839).
+  # `text` is their view (Decision 839). `model` says whether a model can be asked under the
+  # workspace's own config (`Troupe.Config.key_problem/1`), which a client starting a
+  # librarian there needs and the machine's `setup.get` cannot say (Decision 854).
   defp handle("memory.get", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          workspace = Path.expand(workspace),
@@ -405,7 +410,8 @@ defmodule Troupe.Gateway.Dispatch do
          "refresh_due" => Troupe.Session.Memory.refresh_due?(workspace, config),
          "refresh_held_until" => held && DateTime.to_iso8601(held),
          "facts" => Facts.list(workspace),
-         "generated" => true
+         "generated" => true,
+         "model" => model_json(Troupe.Config.key_problem(config))
        }}
     end
   end
@@ -1555,6 +1561,14 @@ defmodule Troupe.Gateway.Dispatch do
       do: Error.new(:internal, %{reason: inspect(reason)}),
       else: Error.new(:not_found, %{kind: "fact", id: id})
   end
+
+  # Whether the workspace's default model can be asked, and why not in words a client shows.
+  defp model_json(nil), do: %{"usable" => true, "reason" => nil}
+
+  defp model_json({:no_key, provider}),
+    do: %{"usable" => false, "reason" => "#{provider} has no key, so no model can be asked"}
+
+  defp model_json({:refused, why}), do: %{"usable" => false, "reason" => why}
 
   defp fetch(params, key) do
     case Map.get(params, key) do

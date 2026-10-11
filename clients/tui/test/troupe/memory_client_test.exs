@@ -13,9 +13,9 @@ defmodule Troupe.MemoryClientTest do
   alias Troupe.Client
 
   # The librarian writes no notes (root Decision 839): what it learns is a section's facts.
-  @layout {:tools, [{"remember", %{"section" => "layout", "text" => "tests live under test/"}}]}
+  @layout {:tools, [{"remember", %{"kind" => "layout", "claim" => "tests live under test/"}}]}
   # A curated section stamps the brief as built; a note alone leaves it stale.
-  @overview {:tools, [{"remember", %{"section" => "overview", "text" => "a fixture repository"}}]}
+  @overview {:tools, [{"remember", %{"kind" => "overview", "claim" => "a fixture repository"}}]}
 
   test "/memory shows the brief's state, /memory refresh has the librarian write it, /memory forget removes it" do
     # The same fake answers the session and the librarian branch: one layout, then done.

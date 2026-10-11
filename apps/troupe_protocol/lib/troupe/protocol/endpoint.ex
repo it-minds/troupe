@@ -26,13 +26,19 @@ defmodule Troupe.Protocol.Endpoint do
           activate: (String.t() -> {:ok, pid()} | {:error, term()}) | nil
         }
 
-  @doc "The endpoint this machine should use, honouring `TROUPE_DAEMON_SOCKET`."
+  @doc """
+  The endpoint this machine should use, honouring `TROUPE_DAEMON_SOCKET`: `tcp`, or a
+  socket's path. Set but empty (or only spaces) is unset, as a shell that clears a variable
+  by setting it to nothing means it: a socket at `""` was a daemon that died at once.
+  """
   @spec default() :: t()
   def default do
-    case System.get_env("TROUPE_DAEMON_SOCKET") do
-      nil -> detect()
-      "tcp" -> tcp()
-      path -> %__MODULE__{kind: :unix, path: path}
+    value = System.get_env("TROUPE_DAEMON_SOCKET") || ""
+
+    cond do
+      String.trim(value) == "" -> detect()
+      value == "tcp" -> tcp()
+      true -> %__MODULE__{kind: :unix, path: value}
     end
   end
 

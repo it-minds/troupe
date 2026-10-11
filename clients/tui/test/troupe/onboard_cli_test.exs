@@ -323,13 +323,13 @@ defmodule Troupe.OnboardCLITest do
       assert manifest["onboarding"] == Troupe.Onboard.version()
       assert %{"imported_from" => "CLAUDE.md"} = manifest["workspace"]["AGENTS.md"]
 
-      # A second run proposes nothing, and says why of each file it found.
+      # A second run proposes nothing, and counts what it brought in as unchanged rather than
+      # listing each file as said already (root Decision 854).
       {out, 0} = onboard(ws, opts, [])
-      assert out =~ "skipped: CLAUDE.md: everything it says is in AGENTS.md already\n"
-      assert out =~ "skipped: pkg/CLAUDE.md: everything it says is in pkg/AGENTS.md already\n"
+      refute out =~ "skipped:"
 
       assert out =~
-               "Nothing to onboard in #{Troupe.Paths.display(ws)}; 1 unchanged since onboarded.\n"
+               "Nothing to onboard in #{Troupe.Paths.display(ws)}; 3 unchanged since onboarded.\n"
 
       refute_received {:asked, _question}
     end
