@@ -68,6 +68,8 @@ alternate inside the checkout whose own alternates lead out, the object director
 link, a fan-out directory as a link and a pack and its index as links, plain `git
 cat-file` in the workspace shows the other checkout's commit, and `git_read`'s `show` and
 `log` of that commit are refused with the sentence and do not show it. On the chunk's tip
-`git_read` read the other checkout's commit through every one of them (through the fan-out
-link, `log` did; `show` failed for want of the commit's tree). An alternate inside
+`git_read` read the other checkout's commit through each of them probed, all but the quoted
+entry, which was added after (through the fan-out link, `log` did; `show` failed for want of
+the commit's tree). On Windows the installed build refuses an alternates entry, the object
+directory as a junction and a fan-out directory as a junction, which the build before it read. An alternate inside
 the checkout is still read.
