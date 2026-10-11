@@ -22,8 +22,10 @@ defmodule Troupe.Plane.Settings.Setting do
           # than by the page so that adding one is a change to this list and nothing else.
           group: atom(),
           # `:enum` is a string with a closed set of values; `:list` is words separated by
-          # commas or spaces, stored as typed and read as a list; the rest are what they say.
-          type: :string | :integer | :boolean | :enum | :list,
+          # commas or spaces, stored as typed and read as a list; `:enforced` is a JSON
+          # object of the keys an organisation holds people's machines to, checked by
+          # `Troupe.Protocol.Organisation` (Decision 869); the rest are what they say.
+          type: :string | :integer | :boolean | :enum | :list | :enforced,
           summary: String.t(),
           # What changes when this changes. Shown next to the field, because a setting
           # whose effect a reader has to guess is one they will not touch.

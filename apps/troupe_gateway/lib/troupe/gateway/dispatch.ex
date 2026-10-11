@@ -15,7 +15,7 @@ defmodule Troupe.Gateway.Dispatch do
   """
 
   alias Troupe.Agent.{Definitions, Local}
-  alias Troupe.Config.{ModelSettings, Settings}
+  alias Troupe.Config.{ModelSettings, Org, Settings}
 
   alias Troupe.Gateway.{
     Agents,
@@ -172,6 +172,9 @@ defmodule Troupe.Gateway.Dispatch do
     "config.models" => :admin,
     "config.set" => :admin,
     "config.import" => :admin,
+    # A plane's organisation document, kept as this machine's copy (Decision 869): what
+    # every later session's defaults and limits are.
+    "config.organisation" => :admin,
     # A first run's questions (Decision 705): reading where it stands says nothing
     # secret; answering sends a key to a provider, writes the settings and starts a
     # session, so it takes what `config.set` takes.
@@ -1354,6 +1357,48 @@ defmodule Troupe.Gateway.Dispatch do
     settings_result({:error, "config.import copies from opencode, not #{inspect(from)}"})
   end
 
+  # A plane's `me.client_defaults` answer, which a client signed in to the plane fetched
+  # (`troupe config pull`), kept as this machine's copy of the organisation's document
+  # by the writer the daemon's own refresh uses (Decision 869). The answer is what was
+  # kept, and which of the keys it sets this machine's own files set over it.
+  defp model_settings("config.organisation", params) do
+    with {:ok, plane_url} <- fetch(params, "plane_url"),
+         {:ok, kept} <- settings_result(keep_document(plane_url, params["document"])) do
+      {:ok, Map.put(kept, "shadowed", Org.shadowed(workspace_param(params)))}
+    end
+  end
+
+  defp keep_document(plane_url, document) when is_map(document), do: keep_organisation(plane_url, document)
+  defp keep_document(_plane_url, _other), do: {:error, "document must be the plane's me.client_defaults answer, an object"}
+
+  # One writer for both ways a plane's document arrives, and every client hears which of
+  # its keys changed, as a file's are announced.
+  defp keep_organisation(plane_url, document) do
+    before = organisation()
+
+    with {:ok, kept} <- Org.save(plane_url, document) do
+      now = organisation()
+
+      keys =
+        Enum.uniq(
+          Settings.changed(before["defaults"], now["defaults"]) ++
+            Settings.changed(before["enforced"], now["enforced"])
+        )
+
+      if keys != [],
+        do: Connections.broadcast("config.changed", %{"scope" => "org", "path" => kept["plane_url"], "keys" => keys})
+
+      {:ok, Map.update!(kept, "path", &Troupe.Paths.display/1)}
+    end
+  end
+
+  defp organisation do
+    case Org.read_cache() do
+      {:ok, cached} -> %{"defaults" => cached["defaults"] || %{}, "enforced" => cached["enforced"] || %{}}
+      _none -> %{"defaults" => %{}, "enforced" => %{}}
+    end
+  end
+
   defp settings_result({:ok, result}), do: {:ok, result}
 
   defp settings_result({:error, reason}),
@@ -1463,6 +1508,9 @@ defmodule Troupe.Gateway.Dispatch do
   # First the plane's word on this daemon's version (Decision 868): one it refuses seals
   # nothing and asks nothing more of it until the next link, and says why in its log and in
   # `identity.get`. A plane that could not be asked is not a refusal.
+  # Then the organisation's document (Decision 869), kept for every later session: a client
+  # links whenever it connects, so this is at sign-in and at the first connection after a
+  # restart. A plane that does not answer leaves the copy as it was.
   defp erasures(%{"plane_token" => token}) when is_binary(token) and token != "" do
     Task.start(fn ->
       case Plane.handshake() do
@@ -1470,6 +1518,7 @@ defmodule Troupe.Gateway.Dispatch do
           :ok
 
         _served_or_unknown ->
+          refresh_organisation()
           Private.apply_erasures()
           Private.resume()
       end
@@ -1477,6 +1526,20 @@ defmodule Troupe.Gateway.Dispatch do
   end
 
   defp erasures(_params), do: :ok
+
+  defp refresh_organisation do
+    with url when is_binary(url) <- Plane.url(),
+         {:ok, answer} <- Plane.call("me.client_defaults", %{}),
+         {:ok, _kept} <- keep_organisation(url, answer) do
+      :ok
+    else
+      {:error, reason} ->
+        Logger.info("troupe-daemon: the organisation's document was not refreshed: #{inspect(reason)}")
+
+      _no_plane ->
+        :ok
+    end
+  end
 
   # Somebody else linking over the person before stops that person's sealing first, as an
   # unlink would: a sealer seals with whatever token the daemon holds, and the one this link

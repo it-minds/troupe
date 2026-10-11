@@ -19,6 +19,13 @@ System.at_exit(fn _ -> File.rm_rf!(config_home) end)
 # the developer's.
 Application.put_env(:troupe_core, :agents_home, Path.join(config_home, "home/.agents"))
 
+# The organisation's managed file and the plane's cached document (Decision 869): the
+# suite's own, not this machine's, and not there until a test writes one.
+Application.put_env(:troupe_core, :organisation,
+  managed_path: Path.join(config_home, "org/managed.yaml"),
+  cache_path: Path.join(config_home, "org/organisation.json")
+)
+
 # The first run's `daemon` step writes a login entry (Decision 762): into a scratch home
 # here, never the developer's own login items.
 login_home =

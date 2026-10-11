@@ -1232,15 +1232,18 @@ defmodule Troupe.UI.TUI.View do
     [list_rect, help_rect] = Layout.split(rect, :horizontal, [{:fill, 2}, {:fill, 3}])
 
     # Each value with the layer that set it, when that is not the default: what the
-    # daemon says a session here would read (#57).
+    # daemon says a session here would read (#57). A key the organisation enforces says
+    # so, whichever layer's value is in effect under it (root Decision 869).
     items =
       Enum.map(Settings.fields(), fn field ->
         value = Settings.format(s.view, s.config, field.key)
 
         from =
-          case Settings.layer(s.view, field.key) do
-            layer when layer in [nil, "default"] -> ""
-            layer -> "  · " <> layer
+          cond do
+            Settings.enforced(s.view, field.key) -> "  · set by your organisation"
+            Settings.layer(s.view, field.key) in [nil, "default"] -> ""
+            Settings.layer(s.view, field.key) == "org" -> "  · organisation"
+            true -> "  · " <> Settings.layer(s.view, field.key)
           end
 
         "#{String.pad_trailing(field.label, 26)} #{value}#{from}"
@@ -1641,15 +1644,33 @@ defmodule Troupe.UI.TUI.View do
   # Where the selected setting's change goes: the scope and its file.
   defp settings_title(s) do
     field = Enum.at(Settings.fields(), s.cursor)
-    scope = Settings.target(s.view, field.key, s.scope)
-    "a change goes to #{scope}: #{Map.get(s.view.files, scope, "config.yaml")}"
+
+    if Settings.enforced(s.view, field.key) do
+      "#{field.label} is set by your organisation"
+    else
+      scope = Settings.target(s.view, field.key, s.scope)
+      "a change goes to #{scope}: #{Map.get(s.view.files, scope, "config.yaml")}"
+    end
   end
 
   defp where_line(s, key) do
+    enforced = Settings.enforced(s.view, key)
+
     case Settings.layer(s.view, key) do
-      nil -> "set by: unknown to this daemon"
-      "default" -> "set by: nobody; this is the default"
-      layer -> "set by: #{layer} (#{get_in(s.view.keys, [key, "source"])})"
+      _layer when is_map(enforced) ->
+        "set by: your organisation (#{enforced["source"]}), which enforces it; it cannot be changed here"
+
+      nil ->
+        "set by: unknown to this daemon"
+
+      "default" ->
+        "set by: nobody; this is the default"
+
+      "org" ->
+        "set by: your organisation's defaults (#{get_in(s.view.keys, [key, "source"])}); a change here wins over them"
+
+      layer ->
+        "set by: #{layer} (#{get_in(s.view.keys, [key, "source"])})"
     end
   end
 

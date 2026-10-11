@@ -55,6 +55,7 @@ defmodule Troupe.Plane.Settings do
   alias Troupe.Plane.Repo
   alias Troupe.Plane.Settings.Setting
   alias Troupe.Plane.Settings.Stored
+  alias Troupe.Protocol.Organisation
 
   @settings [
     %Setting{
@@ -439,6 +440,22 @@ defmodule Troupe.Plane.Settings do
       summary: "The premium model an orchestrating agent may ask for, if there is one.",
       consequence: "Pre-filled as the expensive model; empty means the default model is used for that too.",
       effect: :immediate
+    },
+    # What people's own machines may not go past (Decision 869): a JSON object of the keys
+    # `Troupe.Protocol.Organisation` lists, and nothing else.
+    %Setting{
+      key: "client_enforced",
+      group: :client_defaults,
+      type: :enforced,
+      summary:
+        "What people's own machines may not go past, as a JSON object: " <>
+          ~s|{"approvals": "deny", "max_turns": 100}. | <>
+          "The keys it may hold: " <> Enum.join(Troupe.Protocol.Organisation.keys(), ", ") <> ".",
+      consequence:
+        "A number is a ceiling a machine may lower and not raise; approvals and the two managed switches may be " <>
+          "tightened and not loosened; a provider or URL is fixed. A machine takes it at its next sign-in or " <>
+          "troupe config pull, and holds to its last copy offline. Any other key is refused.",
+      effect: :immediate
     }
   ]
 
@@ -458,7 +475,7 @@ defmodule Troupe.Plane.Settings do
     {:team_defaults, "What a new team starts with",
      "Applied when a group is enabled as a team. Changing them leaves existing teams alone; each team's own values are on the Teams page."},
     {:client_defaults, "What people's own machines talk to",
-     "Offered to the desktop app and the TUI as organisation defaults for a person's local sessions: provider, URL and models. Never a key; each person pastes their own."},
+     "The organisation's defaults for a person's local sessions, below their own settings: provider, URL and models. Never a key; each person pastes their own. And what those sessions may not go past, above everything a person sets."},
     {:sessions, "What a new session runs with",
      "Defaults for work started after the change. Running sessions keep what they were given."},
     {:sign_in, "Where people sign in",
@@ -586,7 +603,7 @@ defmodule Troupe.Plane.Settings do
     with {:ok, setting} <- editable(key),
          {:ok, parsed} <- parse(setting, value) do
       %Stored{}
-      |> Stored.changeset(%{key: key, value: to_string(value), updated_by: actor})
+      |> Stored.changeset(%{key: key, value: text(value), updated_by: actor})
       |> Repo.insert!(
         on_conflict: {:replace, [:value, :updated_by, :updated_at]},
         conflict_target: :key
@@ -698,15 +715,39 @@ defmodule Troupe.Plane.Settings do
   defp display(_setting, value) when is_atom(value) and not is_boolean(value),
     do: to_string(value)
 
+  # An enforced set reads as the JSON it is typed as, which is what a form holds.
+  defp display(%Setting{type: :enforced}, value) when is_map(value), do: Jason.encode!(value)
+
   defp display(_setting, value), do: value
 
+  # Stored as text: an object as its JSON.
+  defp text(value) when is_map(value), do: Jason.encode!(value)
+  defp text(value), do: to_string(value)
+
   # Everything is parsed from text: that is how it is stored, and how a form and a JSON-RPC
-  # caller both send it.
+  # caller both send it. An enforced set may arrive as the object itself.
+  defp parse(%Setting{type: :enforced}, value) when is_map(value), do: enforced(value)
+
   defp parse(%Setting{} = setting, value) when not is_binary(value) do
     parse(setting, to_string(value))
   end
 
   defp parse(%Setting{type: :string}, value), do: {:ok, value}
+
+  # Blank is nothing enforced. Every key must be one `Troupe.Protocol.Organisation` lists,
+  # with a value of its type, or nothing is stored and every reason is said.
+  defp parse(%Setting{type: :enforced}, value) do
+    case String.trim(value) do
+      "" ->
+        {:ok, %{}}
+
+      text ->
+        case Jason.decode(text) do
+          {:ok, set} -> enforced(set)
+          {:error, _invalid} -> {:error, {:invalid, ~s|must be a JSON object, such as {"approvals": "deny"}|}}
+        end
+    end
+  end
 
   # Matched against the declared atoms rather than converted. `String.to_existing_atom/1`
   # would raise for a value that happens to appear nowhere else in the codebase — which
@@ -741,6 +782,13 @@ defmodule Troupe.Plane.Settings do
       yes when yes in ~w(true yes on 1) -> {:ok, true}
       no when no in ~w(false no off 0) -> {:ok, false}
       _other -> {:error, {:invalid, "must be true or false"}}
+    end
+  end
+
+  defp enforced(set) do
+    case Organisation.check(set) do
+      {:ok, set} -> {:ok, set}
+      {:error, reasons} -> {:error, {:invalid, Enum.join(reasons, "; ")}}
     end
   end
 

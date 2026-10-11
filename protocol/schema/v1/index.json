@@ -14,6 +14,7 @@
     "commands/config.get.json",
     "commands/config.import.json",
     "commands/config.models.json",
+    "commands/config.organisation.json",
     "commands/config.set.json",
     "commands/context.get.json",
     "commands/daemon.stop.json",

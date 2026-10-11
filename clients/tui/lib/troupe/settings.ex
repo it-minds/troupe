@@ -138,12 +138,36 @@ defmodule Troupe.Settings do
   @spec scopes(view(), String.t()) :: [String.t()]
   def scopes(%{keys: keys}, key), do: get_in(keys, [key, "scopes"]) || ["user"]
 
+  @doc """
+  What the organisation enforces on `key`, as the daemon says (`%{"value", "source"}`), or
+  `nil`. Such a key is the organisation's: the page shows it so, and does not edit it
+  (root Decision 869).
+  """
+  @spec enforced(view(), String.t()) :: map() | nil
+  def enforced(%{keys: keys}, key), do: get_in(keys, [key, "enforced"])
+
+  @doc "What the page says of a key the organisation enforces, when it is asked to change it."
+  @spec enforced_line(view(), String.t()) :: String.t()
+  def enforced_line(view, key) do
+    %{"value" => value, "source" => source} = enforced(view, key)
+    "#{key} is set by your organisation (#{shown(value)}, from #{source}); it cannot be changed here"
+  end
+
+  defp shown(true), do: "on"
+  defp shown(false), do: "off"
+  defp shown(value), do: to_string(value)
+
   @doc "The next scope `s` moves a change of `key` to, after the one it goes to now."
   @spec next_scope(view(), String.t(), String.t() | nil) :: String.t()
   def next_scope(view, key, picked) do
-    scopes = scopes(view, key)
-    now = target(view, key, picked)
-    Enum.at(scopes, rem((Enum.find_index(scopes, &(&1 == now)) || 0) + 1, length(scopes)))
+    case scopes(view, key) do
+      [] ->
+        target(view, key, picked)
+
+      scopes ->
+        now = target(view, key, picked)
+        Enum.at(scopes, rem((Enum.find_index(scopes, &(&1 == now)) || 0) + 1, length(scopes)))
+    end
   end
 
   @doc "Whether the TUI should capture the mouse, as the config says."

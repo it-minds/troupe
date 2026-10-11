@@ -206,8 +206,9 @@ is enabled (budgets, idle timeout, cache eviction, erase-after, pins, whether me
 control sessions), **sessions** (managed permission rules and MCP servers only, the default
 bundle channel), **sign in** (issuer, client, endpoints, scopes — the console's **Identity
 provider** card — and `subject_claim`, shown there and not editable), **client defaults**
-(the provider and models people's own machines are offered), and **deployment** keys that
-are shown but only change with a rollout.
+(the provider and models people's own machines take as their organisation's defaults, and
+`client_enforced`, what those machines may not go past: [Part F](#defaults-and-limits-for-peoples-machines)),
+and **deployment** keys that are shown but only change with a rollout.
 
 `admin.settings.list`, `admin.setting.effective`, `admin.setting.put` and
 `admin.setting.reset` are the methods; the console's settings pages are the same calls. A
@@ -360,8 +361,87 @@ every key are in [docs/user/configuration.md](../user/configuration.md); the sch
   knows, both spellings of one setting, or a file written for a newer Troupe.
 - **On a laptop**, a workspace's files set those keys only once the user's own file lists
   the workspace under `trusted_workspaces`, which `troupe config trust` in the workspace
-  adds. `troupe config pull` writes the plane's
-  client defaults (Part C) into the user's file through the daemon, in the current
-  spellings.
+  adds. The organisation's defaults sit below the user's file and what it enforces above
+  everything (next section).
 - **A repository can check its own file** in CI: `troupe config validate
   .troupe/config.yaml` exits non-zero on any problem, an unknown key included.
+
+### Defaults and limits for people's machines
+
+An organisation can give the laptops of the people in it defaults, which a person's own
+settings win over, and limits, which nothing on the machine goes past (Decision 869). Both
+are in one document, a `defaults:` section and an `enforced:` section, and it reaches a
+machine in one of two ways.
+
+**From a plane.** The *client defaults* settings (Part C) are the defaults: provider, URL,
+how the key is sent, and the three models; never a key. `client_enforced` is the enforced
+set, a JSON object such as `{"approvals": "deny", "max_turns": 100}`, set on the console's
+Policy page or with `admin.setting.put`, audited like every setting. The plane answers both
+in `me.client_defaults` (as `defaults` and `enforced`, beside the fields older clients
+read). A signed-in machine's daemon fetches it whenever a client connects with a plane
+token, keeps a copy in its state directory (`organisation.json`, with which plane and
+when), and uses that copy as it is while the plane cannot be reached; `troupe config pull`
+fetches it at once. The copy is the person's own file, so it is a default the person is
+held to, not a lock against them: see below.
+
+**From a managed file**, for an organisation without a plane: one file at a fixed path,
+which no variable or flag moves.
+
+| System | Path |
+|---|---|
+| Windows | `%ProgramData%\troupe\managed.yaml`, on the system drive (read from the registry, not from the variable) |
+| macOS | `/Library/Application Support/troupe/managed.yaml` |
+| Linux and others | `/etc/troupe/managed.yaml` |
+
+Write it so only an administrator can change it. Its format:
+
+```yaml
+version: 1
+defaults:
+  provider: openai
+  base_url: https://llm-gw.example.com/v1
+  auth: bearer
+  api_key: "{env:ORG_GATEWAY_KEY}"
+  models:
+    default: glm-5.2
+    cheap: qwen3.6-35b
+enforced:
+  approvals: deny
+  base_url: https://llm-gw.example.com/v1
+  max_turns: 100
+  wall_clock_ms: 3600000
+```
+
+`defaults:` takes any key a user's `config.yaml` takes except `trusted_workspaces`, and is
+checked the same way: a value of the wrong type refuses every session's start, naming the
+file and the line, and an unknown key warns. `enforced:` takes only these, each a ceiling:
+
+| Key | Enforced, a machine may |
+|---|---|
+| `max_tokens`, `max_turns`, `wall_clock_ms`, `max_depth` | set a lower number, not a higher one |
+| `approvals` | tighten `wait` to `deny`, not loosen `deny` |
+| `managed_mcp_servers_only`, `managed_permission_rules_only` | turn one on, not turn it off |
+| `provider`, `base_url` | nothing else: the session's provider is this one, and a named provider of another type or at another URL is refused |
+
+Any other key under `enforced:` is not enforced and warns, with the list; the plane refuses
+it outright when it is set. An enforced value is written out in full: `{env:VAR}` is
+refused there, since a person sets their own environment. `troupe config validate
+managed.yaml` checks a draft before it is put in place.
+
+**Both.** Where a machine has both, the plane's defaults win over the file's, the stricter
+of two limits on one key holds, and a provider or URL both fix is the managed file's, with
+a warning: the managed file is the one a person cannot change.
+
+**What a person sees.** A value a person's own file, a variable or a flag sets past an
+enforced one is held to it, with one warning naming the file, the key and the
+organisation's value. `troupe config --explain KEY` shows the organisation's layer with its
+source (the plane's URL or the file's path) at both ends of the ladder, the terminal UI's
+settings page shows an enforced key as set by the organisation and does not change it, and
+the daemon's `config.set` refuses it.
+
+**What it is not.** It is the organisation's word honoured by Troupe on the machine, not a
+control a person cannot get round on a machine they administer: the plane's copy is in
+their own state directory, and they choose which build they run. A managed file an
+administrator owns, on a machine its person does not administer, is the strong form. A
+spent budget's question can still raise `max_turns` or the wall clock for one run or
+session past an enforced ceiling; that is a later slice.

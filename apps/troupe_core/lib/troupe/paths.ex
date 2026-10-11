@@ -75,6 +75,10 @@ defmodule Troupe.Paths do
   """
   @spec display(Path.t(), {atom(), atom()}) :: String.t()
   def display(path, os_type \\ :os.type())
+  # A plane's address, which names where a cached organisation document came from
+  # (Decision 869), is a URL wherever it is shown.
+  def display("http://" <> _ = url, _os_type), do: url
+  def display("https://" <> _ = url, _os_type), do: url
   def display(path, {:win32, _}), do: path |> to_string() |> String.replace("/", "\\") |> drive()
   def display(path, _os_type), do: to_string(path)
 

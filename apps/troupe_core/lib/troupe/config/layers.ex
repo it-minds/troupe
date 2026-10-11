@@ -3,10 +3,13 @@ defmodule Troupe.Config.Layers do
   The files and the environment a configuration is made of, each read, checked against
   `Troupe.Config.Schema` and merged, with a record of which layer set what.
 
-  Lowest first: the user's `config.yaml`, the workspace's `.troupe/config.yaml`, its
-  `.troupe/config.local.yaml` (git-ignored, for one person's settings in one
-  repository), then `TROUPE_*`. The command line comes last, in `Troupe.Config`, because
-  it arrives as struct fields rather than as a file.
+  Lowest first: the organisation's defaults (`Troupe.Config.Org`: a managed file, then
+  the cached copy of a plane's document), the user's `config.yaml`, the workspace's
+  `.troupe/config.yaml`, its `.troupe/config.local.yaml` (git-ignored, for one person's
+  settings in one repository), then `TROUPE_*`. The command line comes after, in
+  `Troupe.Config`, because it arrives as struct fields rather than as a file, and what
+  the organisation enforces after that (Decision 869): `enforced` here, which
+  `Troupe.Config.Org.hold/2` holds the configuration to.
 
   Each file is read the same way:
 
@@ -28,9 +31,10 @@ defmodule Troupe.Config.Layers do
   the provider or MCP server it belongs to, or, anywhere else, the load.
   """
 
-  alias Troupe.Config.{Issue, Migrate, Schema, Trust}
+  alias Troupe.Config.{Issue, Migrate, Org, Schema, Trust}
+  alias Troupe.Protocol.Organisation
 
-  @type layer :: :default | :user | :project | :local | :env | :cli
+  @type layer :: :default | :org | :user | :project | :local | :env | :cli | :enforced
 
   @typedoc "One value one layer gave one key: the ladder `--explain` shows."
   @type entry :: %{
@@ -50,6 +54,8 @@ defmodule Troupe.Config.Layers do
               trusted?: false,
               workspace: nil,
               refused: %{session: nil, providers: %{}, mcp: %{}},
+              # What the organisation enforces, by key path: `%{value, source}`.
+              enforced: %{},
               warnings: [],
               refusals: [],
               errors: []
@@ -82,13 +88,15 @@ defmodule Troupe.Config.Layers do
   Read every layer for a workspace (`nil`: the user file and the environment only).
 
   Options: `:trust` — `:never` for a session on a pod, which reads no gated key from a
-  project's file whatever the user file says; `:user_path` — the user file, when it is
-  not `Troupe.Config.user_path/0`.
+  project's file whatever the user file says, and no organisation layer, since a pod's
+  configuration is its profile's; `:user_path` — the user file, when it is not
+  `Troupe.Config.user_path/0`.
   """
   @spec read(Path.t() | nil, keyword()) :: Result.t()
   def read(workspace, opts \\ []) do
     user_path = Keyword.get_lazy(opts, :user_path, &Troupe.Config.user_path/0)
     user = user_path |> file_layer_user() |> relative_trust(user_path)
+    org = organisation(Keyword.put(opts, :user_path, user_path))
 
     trusted? =
       cond do
@@ -111,10 +119,11 @@ defmodule Troupe.Config.Layers do
         []
       end
 
-    layers = [user | workspace_layers] ++ [env_layer()]
+    layers = org.layers ++ [user | workspace_layers] ++ [env_layer()]
+    start = %Result{trusted?: trusted?, workspace: workspace, enforced: org.enforced, warnings: org.warnings}
 
     result =
-      Enum.reduce(layers, %Result{trusted?: trusted?, workspace: workspace}, fn layer, acc ->
+      Enum.reduce(layers, start, fn layer, acc ->
         %{
           acc
           | values: merge(acc.values, layer.values),
@@ -157,6 +166,233 @@ defmodule Troupe.Config.Layers do
     %{user | warnings: user.warnings ++ warnings}
   end
 
+  # -- the organisation -------------------------------------------------------------
+
+  @doc """
+  The organisation's layer (Decision 869): a layer for the managed file, and one for the
+  cached copy of a plane's document when there is one, each with its defaults as a file's
+  values and what it enforces; and the two enforced sets as one, by key path. Where both
+  enforce a key the stricter holds, and where both fix one (`provider`, `base_url`) the
+  managed file's does, with a warning: it is the one a person cannot change.
+
+  Nothing on a pod (`trust: :never`), whose configuration is its profile's.
+  """
+  @spec organisation(keyword()) :: %{layers: [map()], enforced: map(), warnings: [Issue.t()]}
+  def organisation(opts \\ []) do
+    if Keyword.get(opts, :trust) == :never do
+      %{layers: [], enforced: %{}, warnings: []}
+    else
+      user_path = Keyword.get_lazy(opts, :user_path, &Troupe.Config.user_path/0)
+      ctx = %{trusted?: true, pod?: false, user_path: user_path, workspace: nil}
+      layers = [managed_layer(Org.managed_path(), ctx) | List.wrap(plane_layer(Org.cache_path(), ctx))]
+      {enforced, warnings} = combine(layers)
+      %{layers: layers, enforced: enforced, warnings: warnings}
+    end
+  end
+
+  defp empty_layer, do: %{values: %{}, entries: [], extra: %{}, warnings: [], errors: [], enforced: %{}}
+
+  defp managed_layer(path, ctx) do
+    file = %{layer: :org, path: path, exists?: false}
+
+    case parse(path) do
+      :absent -> Map.put(empty_layer(), :file, file)
+      {:error, issue} -> empty_layer() |> Map.put(:errors, [issue]) |> Map.put(:file, %{file | exists?: true})
+      {:ok, map, text} -> map |> org_document(path, text, ctx) |> Map.put(:file, %{file | exists?: true})
+    end
+  end
+
+  # The plane's document names the plane as its source, which is what a person is shown:
+  # the cache is where it is kept, not where it came from.
+  defp plane_layer(cache, ctx) do
+    case Org.read_cache(cache) do
+      :absent ->
+        nil
+
+      {:error, why} ->
+        empty_layer()
+        |> Map.put(:warnings, [issue(:warning, cache, nil, nil, "the organisation's document " <> why)])
+        |> Map.put(:file, %{layer: :org, path: cache, exists?: true})
+
+      {:ok, cached} ->
+        cached
+        |> Map.take(["defaults", "enforced"])
+        |> org_document(cached["plane_url"], nil, ctx)
+        |> Map.put(:file, %{
+          layer: :org,
+          path: cached["plane_url"],
+          exists?: true,
+          cache: cache,
+          fetched_at: cached["fetched_at"]
+        })
+    end
+  end
+
+  @org_keys ~w(version $schema defaults enforced)
+
+  # One format for the managed file and a plane's document: `defaults:`, checked as any
+  # file is, and `enforced:`, which only the keys the schema marks may be in.
+  defp org_document(map, source, text, ctx) do
+    case check_version(map, source, text) do
+      {:error, issue} ->
+        %{empty_layer() | errors: [issue]}
+
+      :ok ->
+        unknown =
+          for key <- map |> Map.keys() |> Enum.sort(),
+              key not in @org_keys and not String.starts_with?(key, "x-"),
+              do:
+                issue(
+                  :warning,
+                  source,
+                  line_of(text, [key]),
+                  key,
+                  "#{key} is not part of an organisation's file, and is ignored; " <>
+                    "a setting goes under defaults: or enforced:"
+                )
+
+        defaults = defaults_section(map["defaults"], source, text, ctx)
+        enforced = enforced_section(map["enforced"], source, text)
+
+        %{
+          defaults
+          | warnings: unknown ++ defaults.warnings ++ enforced.warnings,
+            errors: defaults.errors ++ enforced.errors
+        }
+        |> Map.put(:enforced, enforced.set)
+    end
+  end
+
+  defp defaults_section(nil, _source, _text, _ctx), do: empty_layer()
+
+  defp defaults_section(map, source, text, ctx) when is_map(map) do
+    {block, offset} = block(text, "defaults")
+    checked = check_keys(:org, source, map, block, ctx)
+
+    %{
+      checked
+      | warnings: Enum.map(checked.warnings, &within(&1, "defaults", offset)),
+        errors: Enum.map(checked.errors, &within(&1, "defaults", offset))
+    }
+  end
+
+  defp defaults_section(other, source, text, _ctx) do
+    message = "defaults must be a map of settings, one `key: value` per line, not #{kind(other)}"
+    %{empty_layer() | errors: [issue(:error, source, line_of(text, ["defaults"]), "defaults", message)]}
+  end
+
+  defp enforced_section(nil, _source, _text), do: %{set: %{}, warnings: [], errors: []}
+
+  defp enforced_section(map, source, text) when is_map(map) do
+    {block, offset} = block(text, "enforced")
+
+    found =
+      map
+      |> Enum.sort()
+      |> Enum.reduce(%{set: %{}, warnings: [], errors: []}, &enforce_entry(&1, &2, source, block))
+
+    %{
+      found
+      | warnings: Enum.map(found.warnings, &within(&1, "enforced", offset)),
+        errors: Enum.map(found.errors, &within(&1, "enforced", offset))
+    }
+  end
+
+  defp enforced_section(other, source, text) do
+    message = "enforced must be a map of settings, one `key: value` per line, not #{kind(other)}"
+    %{set: %{}, warnings: [], errors: [issue(:error, source, line_of(text, ["enforced"]), "enforced", message)]}
+  end
+
+  # A key the schema does not mark is not enforced, with the reason the plane refuses it
+  # with; an enforced value is written out, never read from the environment, which is
+  # the person's to set; and its type is checked as a file's is.
+  defp enforce_entry({key, value}, acc, source, text) do
+    spec = Enum.find(Schema.keys(), &(&1.key == key))
+    line = line_of(text, [key])
+
+    cond do
+      String.starts_with?(key, "x-") or is_nil(value) ->
+        acc
+
+      is_nil(spec) or is_nil(spec.enforce) ->
+        %{acc | warnings: acc.warnings ++ [issue(:warning, source, line, key, Organisation.refusal(key) <> "; it is not enforced")]}
+
+      is_binary(value) and value =~ @env_reference ->
+        message =
+          "#{key} reads #{value}; an enforced value is written out in full, since the environment is the person's to set"
+
+        %{acc | errors: acc.errors ++ [issue(:error, source, line, key, message)]}
+
+      true ->
+        {checked, found} = check_value(value, spec, [key], source, text)
+
+        if found.errors == [],
+          do: %{acc | set: Map.put(acc.set, [key], %{value: checked, source: source}), warnings: acc.warnings ++ found.warnings},
+          else: %{acc | errors: acc.errors ++ found.errors}
+    end
+  end
+
+  # The lines under a top-level key, and the line it is on, so that what is found in a
+  # section is found at its line in the file.
+  defp block(nil, _key), do: {nil, 0}
+
+  defp block(text, key) do
+    case line_of(text, [key]) do
+      nil ->
+        {nil, 0}
+
+      n ->
+        lines =
+          text
+          |> String.split("\n")
+          |> Enum.drop(n)
+          |> Enum.take_while(&(not content?(&1) or indent(&1) > 0))
+
+        {Enum.join(lines, "\n"), n}
+    end
+  end
+
+  defp within(%Issue{} = issue, section, offset) do
+    %{
+      issue
+      | line: issue.line && issue.line + offset,
+        key: issue.key && "#{section}.#{issue.key}",
+        message: "#{section}: " <> issue.message
+    }
+  end
+
+  defp combine(layers) do
+    Enum.reduce(layers, {%{}, []}, fn layer, acc ->
+      layer.enforced |> Enum.sort() |> Enum.reduce(acc, &combine_entry/2)
+    end)
+  end
+
+  defp combine_entry({[key] = path, entry}, {enforced, warnings}) do
+    case Map.fetch(enforced, path) do
+      :error ->
+        {Map.put(enforced, path, entry), warnings}
+
+      {:ok, %{value: value}} when value == entry.value ->
+        {enforced, warnings}
+
+      {:ok, held} ->
+        both(Organisation.kind(key), key, held, entry, {enforced, warnings})
+    end
+  end
+
+  defp both(:fixed, key, held, entry, {enforced, warnings}) do
+    message =
+      "#{key} is enforced as #{show(entry.value)} here, and as #{show(held.value)} by " <>
+        "#{Troupe.Paths.display(held.source)}, which holds: the managed file is the one a person cannot change"
+
+    {enforced, warnings ++ [issue(:warning, entry.source, nil, "enforced.#{key}", message)]}
+  end
+
+  defp both(kind, key, held, entry, {enforced, warnings}) do
+    stricter = if Organisation.exceeds?(kind, held.value, entry.value), do: entry, else: held
+    {Map.put(enforced, [key], stricter), warnings}
+  end
+
   # -- one file -------------------------------------------------------------------
 
   defp file_layer_user(path), do: file_layer(:user, path, %{trusted?: true, pod?: false, user_path: path, workspace: nil})
@@ -181,10 +417,13 @@ defmodule Troupe.Config.Layers do
   Check one file's map as the loader would, without the environment or the other
   layers: what `troupe config validate PATH` reports. `layer` decides which keys the file
   may set; a workspace file is checked as if its workspace were trusted, because whether
-  it is depends on the machine, not the file.
+  it is depends on the machine, not the file. `:org` is an organisation's managed file,
+  with its `defaults:` and `enforced:` sections.
   """
   @spec check(Troupe.Config.Layers.layer(), Path.t()) :: %{warnings: [Issue.t()], errors: [Issue.t()]}
   def check(layer, path) do
+    ctx = %{trusted?: true, pod?: false, user_path: nil, workspace: nil}
+
     case parse(path) do
       :absent ->
         %{warnings: [], errors: [issue(:error, path, nil, nil, "does not exist")]}
@@ -192,10 +431,25 @@ defmodule Troupe.Config.Layers do
       {:error, issue} ->
         %{warnings: [], errors: [issue]}
 
+      {:ok, map, text} when layer == :org ->
+        checked = org_document(map, path, text, ctx)
+        %{warnings: checked.warnings, errors: checked.errors}
+
       {:ok, map, text} ->
-        checked = check_file(layer, path, map, text, %{trusted?: true, pod?: false, user_path: nil, workspace: nil})
+        checked = check_file(layer, path, map, text, ctx)
         %{warnings: checked.warnings, errors: checked.errors}
     end
+  end
+
+  @doc """
+  Check an organisation's document as the loader would read it, `source` naming where it
+  came from: what a plane's answer is put through before the daemon saves it.
+  """
+  @spec check_organisation(map(), String.t()) :: %{warnings: [Issue.t()], errors: [Issue.t()]}
+  def check_organisation(document, source) when is_map(document) do
+    ctx = %{trusted?: true, pod?: false, user_path: nil, workspace: nil}
+    checked = org_document(stringify_keys(document), source, nil, ctx)
+    %{warnings: checked.warnings, errors: checked.errors}
   end
 
   @doc """

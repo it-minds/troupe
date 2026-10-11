@@ -2845,25 +2845,32 @@ defmodule Troupe.UI.TUI.Server do
   defp settings_key(%Key{code: "page_down"}, %{settings: s} = state),
     do: put_settings(state, scroll: s.scroll + 5)
 
+  # A key the organisation enforces is not edited, nor moved to another file: the page says
+  # whose it is instead (root Decision 869).
+  defp settings_key(%Key{code: code}, %{settings: s} = state) when code in ["s", "enter", " "] do
+    field = Enum.at(Settings.fields(), s.cursor)
+
+    if Settings.enforced(s.view, field.key),
+      do: put_settings(state, status: Settings.enforced_line(s.view, field.key)),
+      else: settings_change(code, field, state)
+  end
+
+  defp settings_key(_key, state), do: state
+
   # `s` moves where a change goes: through the scopes the daemon says the setting may be
   # written to here, from the one it goes to now.
-  defp settings_key(%Key{code: "s"}, %{settings: s} = state) do
-    field = Enum.at(Settings.fields(), s.cursor)
+  defp settings_change("s", field, %{settings: s} = state) do
     scope = Settings.next_scope(s.view, field.key, s.scope)
     put_settings(state, scope: scope, status: "a change goes to #{scope_file(s.view, scope)}")
   end
 
-  defp settings_key(%Key{code: code}, %{settings: s} = state) when code in ["enter", " "] do
-    field = Enum.at(Settings.fields(), s.cursor)
-
+  defp settings_change(_enter_or_space, field, %{settings: s} = state) do
     case field.type do
       :bool -> apply_setting(state, field.key, Settings.value(s.view, s.config, field.key) != true)
       type when type in [:model, :theme] -> open_picker(state)
       _ -> put_settings(state, editing: shown(s, field.key), status: nil)
     end
   end
-
-  defp settings_key(_key, state), do: state
 
   defp commit_setting(%{settings: s} = state, text) do
     field = Enum.at(Settings.fields(), s.cursor)

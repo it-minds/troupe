@@ -170,7 +170,7 @@ defmodule Troupe.CLI do
      [["config", "trust"], ["config", "trust", "--list"]]},
     {"troupe config untrust [PATH]", "take a workspace's trust back", [["config", "untrust"]]},
     {"troupe config pull [PLANE_URL]",
-     "save the plane's default provider and models here (never a key)", [["config", "pull"]]},
+     "fetch the organisation's defaults and limits from the plane now (never a key)", [["config", "pull"]]},
     {"troupe models [--refresh]",
      "what each provider serves, its window and its price; asked again when stale, or now with --refresh",
      [["models", "--refresh"]]},

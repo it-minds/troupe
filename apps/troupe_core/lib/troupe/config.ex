@@ -2,9 +2,11 @@ defmodule Troupe.Config do
   @moduledoc """
   Resolved settings for one session.
 
-  Layered lowest to highest: built-in defaults, the user's `config.yaml`, the project's
-  `.troupe/config.yaml`, the project's git-ignored `.troupe/config.local.yaml`,
-  environment variables, then explicit options from the CLI or the client API. Maps
+  Layered lowest to highest: built-in defaults, the organisation's defaults
+  (`Troupe.Config.Org`), the user's `config.yaml`, the project's `.troupe/config.yaml`,
+  the project's git-ignored `.troupe/config.local.yaml`, environment variables, explicit
+  options from the CLI or the client API, then what the organisation enforces, which
+  nothing below goes past (Decision 869). Maps
   merge by key (RFC 7396): a project file that adds one provider keeps the user's
   others, `null` removes what a lower layer set, and a list replaces. Every key, its
   type and which files may set it are in `Troupe.Config.Schema`; how the files are read
@@ -50,7 +52,7 @@ defmodule Troupe.Config do
         windows: {some-bare-model: 128000}
   """
 
-  alias Troupe.Config.{Error, Explain, Issue, Layers, Migrate, Schema, Trust}
+  alias Troupe.Config.{Error, Explain, Issue, Layers, Migrate, Org, Schema, Trust}
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
   alias Troupe.LLM.Endpoint
@@ -299,6 +301,8 @@ defmodule Troupe.Config do
 
     with [] <- layers.errors,
          {:ok, config, layers} <- layers |> build() |> apply_overrides(overrides, layers) do
+      # What the organisation enforces is above the command line (Decision 869).
+      {config, layers} = Org.hold(config, layers)
       config = apply_catalog(config)
       {:ok, %{config | warnings: Enum.map(layers.warnings ++ layers.refusals, &Issue.format/1)}, layers}
     else
