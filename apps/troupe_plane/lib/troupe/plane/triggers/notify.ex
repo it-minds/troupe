@@ -15,15 +15,21 @@ defmodule Troupe.Plane.Triggers.Notify do
   because the request never left the process that was trusted. Here a URL with no scheme
   and no host is not a URL, and is refused before it is stored.
 
-  **Not loopback, not link-local.** `http://127.0.0.1:4000/rpc` is the same attack
-  written out in full, and `http://169.254.169.254/` is the cloud metadata endpoint,
-  which is where credentials live. Both are refused by address, so a hostname that
-  resolves to one is refused as surely as a literal.
+  **Not loopback, not link-local, not a cloud's metadata service.**
+  `http://127.0.0.1:4000/rpc` is the same attack written out in full, and
+  `http://169.254.169.254/` is the cloud metadata endpoint, which is where credentials
+  live. Two clouds answer outside link-local too, at `fd00:ec2::254` and
+  `100.100.100.200`. All of them are refused by address, so a hostname that resolves to
+  one is refused as surely as a literal. The list is the one a worker is held to
+  (`Troupe.WorkerProfile.Reach.refusal/1`, Decision 856), so an address added there is
+  refused here as well (Decision 866).
 
   Other private ranges are *not* refused here. A plane in a cluster has legitimate
   internal targets on private addresses — somebody's own webhook receiver in the next
   namespace — and refusing 10/8 outright would break them. What governs those is the
-  egress allowlist, which an administrator sets deliberately.
+  egress allowlist, which an administrator sets deliberately. The shared address space,
+  `100.64.0.0/10`, is the exception: one metadata service answers in it and other
+  internal services of a provider may, and the plane's own egress is not restricted.
 
   **On the egress allowlist.** The same list a pod's egress is held to. A plane that
   could reach hosts its own workers cannot would be the widest hole in the deployment,
@@ -36,11 +42,18 @@ defmodule Troupe.Plane.Triggers.Notify do
   checked. A host that passed at save and answers `127.0.0.1` today is a DNS rebind, and
   the check that catches it is the second one. A check only at save is a check against
   the value, not against what the value does.
+
+  And the request goes to the address that second check passed, not to whatever the name
+  answers when the connection asks again: a name answering one address to the check and
+  another a moment later (a rebind with a short lifetime, a round robin) would otherwise be
+  sent to where no check looked. The name still goes as the `Host` header, the TLS server
+  name and the name the certificate is checked against (Decision 866).
   """
 
   alias Troupe.Plane.ClusterPolicy
   alias Troupe.Plane.Triggers.{Run, Trigger}
   alias Troupe.Protocol.Error
+  alias Troupe.WorkerProfile.Reach
 
   require Logger
 
@@ -84,10 +97,7 @@ defmodule Troupe.Plane.Triggers.Notify do
   """
   @spec allowed?(String.t()) :: :ok | {:error, String.t()}
   def allowed?(url) do
-    with :ok <- validate(url),
-         %URI{host: host} <- URI.parse(url) do
-      resolved(host)
-    end
+    with {:ok, _address} <- target(url), do: :ok
   end
 
   @doc """
@@ -105,9 +115,9 @@ defmodule Troupe.Plane.Triggers.Notify do
   def deliver(%Trigger{notify_url: url}, _run, _outcome) when url in [nil, ""], do: :ok
 
   def deliver(%Trigger{notify_url: url} = trigger, %Run{} = run, outcome) do
-    case allowed?(url) do
-      :ok ->
-        post(url, body(trigger, run, outcome))
+    case target(url) do
+      {:ok, address} ->
+        post(url, address, body(trigger, run, outcome))
 
       {:error, reason} ->
         # Refused at send even though it was allowed at save. Worth a warning rather than
@@ -161,11 +171,15 @@ defmodule Troupe.Plane.Triggers.Notify do
       else: {:error, "is a host this deployment's egress policy allows"}
   end
 
-  defp resolved(host) do
-    with :ok <- host_allowed(host) do
+  # The address to send to: the first the host answers, once every answer has passed.
+  # The first is a v4 one when there is one, as the connection would have chosen.
+  defp target(url) do
+    with :ok <- validate(url),
+         %URI{host: host} <- URI.parse(url),
+         :ok <- host_allowed(host) do
       case addresses(host) do
         [] -> {:error, "is a host that resolves"}
-        addresses -> Enum.find_value(addresses, :ok, &refusal/1)
+        [first | _rest] = addresses -> Enum.find_value(addresses, {:ok, first}, &refusal/1)
       end
     end
   end
@@ -181,14 +195,22 @@ defmodule Troupe.Plane.Triggers.Notify do
   # is refused by the caller rather than treated as reachable.
   defp addresses(host) do
     case parse_address(host) do
-      {:ok, address} ->
-        [address]
+      {:ok, address} -> [address]
+      :error -> host |> strip_brackets() |> resolve()
+    end
+  end
 
-      :error ->
-        charlist = host |> strip_brackets() |> String.to_charlist()
+  # What DNS answers for a name, in both families. `:notify_resolver` in the application
+  # environment, a function of a hostname to its addresses, stands in for DNS where a test
+  # must say what a name answers without asking the network.
+  defp resolve(host) do
+    case Application.get_env(:troupe_plane, :notify_resolver) do
+      fun when is_function(fun, 1) ->
+        fun.(host)
 
+      nil ->
         for family <- [:inet, :inet6],
-            {:ok, list} <- [:inet.getaddrs(charlist, family)],
+            {:ok, list} <- [:inet.getaddrs(String.to_charlist(host), family)],
             address <- list,
             do: address
     end
@@ -201,29 +223,37 @@ defmodule Troupe.Plane.Triggers.Notify do
     end
   end
 
-  defp address_allowed({127, _b, _c, _d}), do: {:error, "is not loopback"}
-  defp address_allowed({0, 0, 0, 0}), do: {:error, "is not the unspecified address"}
-  defp address_allowed({169, 254, _c, _d}), do: {:error, "is not link-local"}
-  defp address_allowed({a, _b, _c, _d}) when a >= 224, do: {:error, "is not multicast"}
-  defp address_allowed({0, 0, 0, 0, 0, 0, 0, 1}), do: {:error, "is not loopback"}
-  defp address_allowed({0, 0, 0, 0, 0, 0, 0, 0}), do: {:error, "is not the unspecified address"}
+  # What no worker reaches, the plane does not post to: loopback, the unspecified
+  # address, link-local and the metadata addresses, from the one list
+  # `Troupe.WorkerProfile.Reach` keeps (not `Troupe.Plane.Reach`, which asks it of profiles).
+  # A v4 address wearing a v6 hat (`::ffff:127.0.0.1`, `64:ff9b::a9fe:a9fe`), which is the
+  # one that gets past a check written only for the eight-tuple, is judged as the v4
+  # address it names, here as there.
+  defp address_allowed(address) do
+    address = Reach.ipv4(address)
 
-  # `fe80::/10` and `ff00::/8`: link-local and multicast, the v6 spellings of the two
-  # above. Written as a range rather than a pattern because the prefix is ten bits.
-  defp address_allowed({a, _b, _c, _d, _e, _f, _g, _h})
-       when a >= 0xFE80 and a <= 0xFEBF,
-       do: {:error, "is not link-local"}
-
-  defp address_allowed({a, _b, _c, _d, _e, _f, _g, _h}) when a >= 0xFF00,
-    do: {:error, "is not multicast"}
-
-  # `::ffff:127.0.0.1` and friends: a v4 address wearing a v6 hat, which is the one that
-  # gets past a check written only for the eight-tuple.
-  defp address_allowed({0, 0, 0, 0, 0, 0xFFFF, g, h}) do
-    address_allowed({div(g, 256), rem(g, 256), div(h, 256), rem(h, 256)})
+    case Reach.refusal(address) do
+      nil -> beyond_reach(address)
+      kind -> {:error, said(kind)}
+    end
   end
 
-  defp address_allowed(_address), do: :ok
+  defp said("unspecified"), do: "is not the unspecified address"
+  defp said("cloud metadata"), do: "is not a cloud metadata address"
+  defp said(kind), do: "is not #{kind}"
+
+  # And what is the plane's own to refuse. Multicast in both families, `ff00::/8` written
+  # as a range; and the shared address space, `100.64.0.0/10`: a worker reaches it only at
+  # an address it was given (Decision 856), and the chart leaves the plane's egress open.
+  defp beyond_reach({a, _b, _c, _d}) when a >= 224, do: {:error, "is not multicast"}
+
+  defp beyond_reach({100, b, _c, _d}) when b in 64..127,
+    do: {:error, "is not in the shared address space"}
+
+  defp beyond_reach({a, _b, _c, _d, _e, _f, _g, _h}) when a >= 0xFF00,
+    do: {:error, "is not multicast"}
+
+  defp beyond_reach(_address), do: :ok
 
   defp strip_brackets("[" <> rest), do: String.trim_trailing(rest, "]")
   defp strip_brackets(host), do: host
@@ -243,18 +273,24 @@ defmodule Troupe.Plane.Triggers.Notify do
     }
   end
 
-  defp post(url, body) do
-    case Req.request(
-           method: :post,
-           url: url,
-           json: body,
-           retry: false,
-           receive_timeout: @timeout,
-           # No redirects. A target that answers `302 http://127.0.0.1/` would carry the
-           # request somewhere neither check ever saw, which would make both of them
-           # decoration.
-           redirect: false
-         ) do
+  defp post(url, address, body) do
+    options =
+      Keyword.merge(
+        [
+          method: :post,
+          url: url,
+          json: body,
+          retry: false,
+          receive_timeout: @timeout,
+          # No redirects. A target that answers `302 http://127.0.0.1/` would carry the
+          # request somewhere neither check ever saw, which would make both of them
+          # decoration.
+          redirect: false
+        ],
+        pinned(URI.parse(url), address)
+      )
+
+    case Req.request(options) do
       {:ok, %{status: status}} when status in 200..299 ->
         :ok
 
@@ -263,6 +299,23 @@ defmodule Troupe.Plane.Triggers.Notify do
 
       {:error, reason} ->
         {:error, inspect(reason)}
+    end
+  end
+
+  # The URL names the address that was checked, so the connection asks DNS nothing and
+  # cannot be answered differently; a literal in an older spelling is written as the
+  # address it was read as. A name still goes as the `Host` header, the TLS server name
+  # and the name the certificate is checked against (Mint's `:hostname`).
+  defp pinned(%URI{host: host, scheme: scheme, port: port} = uri, address) do
+    url = %{uri | host: to_string(:inet.ntoa(address))}
+
+    case parse_address(host) do
+      {:ok, _literal} ->
+        [url: url]
+
+      :error ->
+        named = if port == URI.default_port(scheme), do: host, else: "#{host}:#{port}"
+        [url: url, headers: [{"host", named}], connect_options: [hostname: host]]
     end
   end
 end
