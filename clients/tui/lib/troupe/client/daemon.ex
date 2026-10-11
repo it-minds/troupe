@@ -626,24 +626,6 @@ defmodule Troupe.Client.Daemon do
 
   def manage_sources(_sid, method, _params), do: {:error, "unknown method #{method}"}
 
-  @doc """
-  What signing out of a person's own server told its provider, as `mcp.sign_out`'s
-  `revocation` says it (troupe-remote Decision 872), in the words the `/mcp` page and
-  `troupe logout` both use.
-  """
-  @spec revocation_text(map() | nil) :: String.t()
-  def revocation_text(%{"state" => "revoked"}), do: "the provider revoked the sign-in"
-
-  def revocation_text(%{"state" => "failed"} = revocation) do
-    why = if is_binary(revocation["reason"]), do: " (#{revocation["reason"]})", else: ""
-    "the provider was not told#{why}, so the sign-in stays good there until it runs out"
-  end
-
-  def revocation_text(%{"state" => "unsupported"}),
-    do: "the provider offers no way to revoke it, so the sign-in stays good there until it runs out"
-
-  def revocation_text(_none), do: "nothing was held to revoke"
-
   # The agents of this session's workspace, read, checked and written by the daemon (root
   # Decision 841). Reading and checking name the session too, so `agents.get` answers
   # with the session's own definitions and the windows of its family that run one, and go

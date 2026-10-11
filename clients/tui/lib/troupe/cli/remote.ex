@@ -10,7 +10,6 @@ defmodule Troupe.CLI.Remote do
   """
 
   alias Troupe.Client
-  alias Troupe.MCP.OAuth.Store
   alias Troupe.Protocol
   alias Troupe.Remote.{Auth, Credentials, Discovery, HTTP, RPC, Tokens}
 
@@ -251,7 +250,7 @@ defmodule Troupe.CLI.Remote do
     case Protocol.Client.call(client, "mcp.sign_out", params) do
       {:ok, %{"servers" => servers}} ->
         for %{"server" => name, "revocation" => told} <- servers, told["state"] != "none" do
-          say.("signed out of the MCP server #{name}; #{Client.Daemon.revocation_text(told)}")
+          say.("signed out of the MCP server #{name}; #{Client.revocation_text(told)}")
         end
 
       {:ok, _answer} ->
@@ -262,13 +261,18 @@ defmodule Troupe.CLI.Remote do
     end
   end
 
-  # Read from the daemon's state directory, as this machine's daemon would: how many
-  # sign-ins it holds, never what is in them.
+  # Read from the daemon's state directory, where it keeps them (`mcp-oauth.json`,
+  # `Troupe.MCP.OAuth.Store`): how many sign-ins it holds, never what is in them.
   defp servers_kept(say, why) do
     held =
-      nil
-      |> Store.all()
-      |> Enum.count(fn {_key, entry} -> is_binary(entry["access_token"]) end)
+      with {:ok, text} <- File.read(Path.join(Troupe.Paths.state_dir(), "mcp-oauth.json")),
+           {:ok, %{} = entries} <- Jason.decode(text) do
+        Enum.count(entries, fn {_key, entry} ->
+          is_map(entry) and is_binary(entry["access_token"])
+        end)
+      else
+        _none -> 0
+      end
 
     if held > 0 do
       say.(

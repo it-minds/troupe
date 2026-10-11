@@ -19,6 +19,7 @@ paths:
   - apps/troupe_protocol/lib/troupe/mcp/client.ex
   - apps/troupe_protocol/lib/troupe/protocol/schema.ex
   - clients/tui/lib/troupe/cli/remote.ex
+  - clients/tui/lib/troupe/client.ex
   - clients/tui/lib/troupe/client/daemon.ex
   - clients/tui/lib/troupe/ui/tui/server.ex
   - clients/tui/lib/troupe/ui/tui/view.ex
@@ -104,9 +105,10 @@ it expired, and a copy of the state directory could still renew it.
   print a line per server that held a sign-in. Naming a plane signs out of that plane
   alone: these sign-ins are no plane's, and signing out of a second plane should not end
   them. A daemon that is not running is not started (Decision 766 does not start one for
-  the plane token either); the CLI reads the store for how many sign-ins it holds, never
-  what is in them, and says they were kept and why. A daemon that refuses the call (one
-  from before this, which wants a `name`) is said to have kept them.
+  the plane token either); the CLI reads the daemon's `mcp-oauth.json` for how many
+  sign-ins it holds, never using what is in them, and says they were kept and why. A
+  daemon that refuses the call (one from before this, which wants a `name`) is said to
+  have kept them.
 
 **Proof.** `Troupe.MCPOAuthTest`, against `fake_oauth.exs`, whose tokens now carry their
 scopes, whose `write` tool wants `notes.write` and answers `403 insufficient_scope`
@@ -122,5 +124,6 @@ of 23). `Troupe.Gateway.MCPCallTest`: a pod session's agent calls a person's off
 shows `step_up`, and after the person's sign-in `mcp.call` goes through.
 `Troupe.Gateway.MCPSignInTest`: `revocation` in `mcp.sign_out`'s answer, and `all`. The
 TUI's `MCPPageTest`: the page's `wants notes.write — s`, `s` asking for it, the sign-out
-notice saying the provider revoked it, and `troupe logout` signing out of the server
-with its provider told.
+notice saying the provider revoked it, and `troupe logout` saying the sign-in was kept
+while the daemon is not running (and starting none), then, with it running, signing out
+of the server with its provider told.

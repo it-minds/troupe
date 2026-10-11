@@ -206,8 +206,23 @@ defmodule Troupe.MCPPageTest do
 
     assert {200, _page} = Troupe.Test.FakeOAuth.browse(url)
     assert Troupe.Test.FakeOAuth.refresh_token?(fake, "rt-1")
-
     me = self()
+
+    # A daemon that is not running is not started to be told, and the sign-in is said to
+    # be kept, and why.
+    for {_id, daemon, _type, _modules} <- DynamicSupervisor.which_children(Troupe.Client.Daemons),
+        is_pid(daemon),
+        do: DynamicSupervisor.terminate_child(Troupe.Client.Daemons, daemon)
+
+    eventually(fn -> not Troupe.Protocol.Daemon.running?() end)
+
+    assert 0 == Troupe.CLI.Remote.logout(nil, say: &send(me, {:said, &1}))
+    assert Enum.any?(said(), &(&1 =~ "your sign-ins to 1 MCP server(s) are kept"))
+    refute Troupe.Protocol.Daemon.running?()
+    assert Troupe.Test.FakeOAuth.refresh_token?(fake, "rt-1")
+
+    # With it running, it signs out of the server and tells the provider.
+    {:ok, _identity} = Link.call("identity.get", %{})
     assert 0 == Troupe.CLI.Remote.logout(nil, say: &send(me, {:said, &1}))
 
     assert Enum.any?(

@@ -2308,7 +2308,7 @@ defmodule Troupe.UI.TUI.Server do
   defp sign_out_server(state, name) do
     case Client.manage_sources(state.session_id, "mcp.sign_out", %{name: name}) do
       {:ok, answer} ->
-        told = Client.Daemon.revocation_text(answer["revocation"])
+        told = Client.revocation_text(answer["revocation"])
         {:mcp, "#{name}: signed out on this machine; #{told}"}
 
       {:error, reason} ->
