@@ -1,7 +1,7 @@
 defmodule Troupe.Gateway.WorkflowsTest do
   @moduledoc """
   A workflow through the protocol (Decision 648): `workflows.list` names them,
-  `session.create` with `workflow` starts the orchestrator on the rendered plan, and the
+  `session.create` with `workflow` starts `orchestrate` on the rendered plan, and the
   orchestrator's delegate reaches a subagent that does the work.
   """
 
@@ -109,7 +109,8 @@ defmodule Troupe.Gateway.WorkflowsTest do
     on_exit(fn -> Troupe.stop_session(sid) end)
     :ok = Troupe.subscribe(sid)
 
-    assert {:ok, %{"profile" => "workflow"}} =
+    # The one orchestrator runs it (#554): there is no `workflow` agent beside it.
+    assert {:ok, %{"profile" => "orchestrate"}} =
              Client.call(client, "session.get", %{"session_id" => sid})
 
     assert_root_done(sid, context.state_dir)
@@ -124,6 +125,46 @@ defmodule Troupe.Gateway.WorkflowsTest do
 
     assert Enum.any?(events, &(&1.type == "agent_started" and &1.agent == ["root", "implementer#1"]))
     assert File.read!(Path.join(context.workspace, "hello.txt")) == "hi\n"
+  end
+
+  test "a client that still names the workflow profile gets orchestrate, and one it names otherwise runs it",
+       context do
+    write_fake!(context.workspace, %{
+      "root" => [%{"tools" => [%{"name" => "finish", "input" => finished("ok")}]}]
+    })
+
+    File.mkdir_p!(Path.join(context.workspace, ".troupe/agents"))
+
+    File.write!(Path.join(context.workspace, ".troupe/agents/captain.md"), """
+    ---
+    description: Runs a release
+    mode: primary
+    ---
+    You run releases.
+    """)
+
+    client = connect(context)
+
+    for {profile, runs} <- [{"workflow", "orchestrate"}, {"captain", "captain"}] do
+      assert {:ok, %{"session_id" => sid}} =
+               Client.call(client, "session.create", %{
+                 "command_id" => Client.command_id(),
+                 "workspace" => context.workspace,
+                 "worktree" => "never",
+                 "workflow" => "default",
+                 "profile" => profile,
+                 "prompt" => "do it"
+               })
+
+      on_exit(fn -> Troupe.stop_session(sid) end)
+      :ok = Troupe.subscribe(sid)
+
+      assert {:ok, %{"profile" => ^runs}} =
+               Client.call(client, "session.get", %{"session_id" => sid})
+
+      assert_root_done(sid, context.state_dir)
+      Troupe.stop_session(sid)
+    end
   end
 
   test "an unknown workflow name is the default pipeline", context do

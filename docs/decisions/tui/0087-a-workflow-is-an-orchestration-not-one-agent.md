@@ -5,7 +5,7 @@ date: 2026-09-17
 status: accepted
 paths:
   - apps/troupe_core/lib/troupe/workflow.ex
-  - apps/troupe_core/priv/agents/workflow.md
+  - apps/troupe_core/priv/agents/orchestrate.md
 gist: "A workflow is an orchestration, not one agent working through a list: the `workflow` agent is expensive, cannot write, and owns only the decisions"
 ---
 

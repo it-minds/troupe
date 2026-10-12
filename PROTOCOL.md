@@ -672,9 +672,11 @@ in that tree, in its directory or a folder of it; refused with `invalid_params`,
 
 `workflow`: run the prompt as a named **workflow**: the step list at
 `<workspace>/.troupe/workflows/<name>.json` (or the built-in `default` pipeline) is
-rendered around the prompt as the plan the `workflow` agent starts from, and `profile`
-defaults to `workflow`. `workflows.list {workspace}` says which names exist. A workflow
-is meant for a worktree of its own (`worktree: "always"`), since its subagents write.
+rendered around the prompt as the plan the `orchestrate` agent starts from, and `profile`
+defaults to `orchestrate`; `workflow`, the name of the agent that ran workflows before
+`orchestrate` took its place, is taken as `orchestrate` (Decision 888).
+`workflows.list {workspace}` says which names exist. A workflow is meant for a worktree
+of its own (`worktree: "always"`), since its subagents write.
 
 `parent`: the session this one is a **branch** of — a second agent a person started
 from the first one's screen. The daemon records it in `session_created`, returns it in

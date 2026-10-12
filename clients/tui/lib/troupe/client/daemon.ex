@@ -95,12 +95,13 @@ defmodule Troupe.Client.Daemon do
   end
 
   # The agents a slash command may start a branch on, plus `/worktree`: the default
-  # agent, always in a worktree of its own.
+  # agent, always in a worktree of its own; and `/workflow`: `orchestrate` on a step list,
+  # in one too.
   @impl true
   def commands(sid) do
     case profiles({:local, workspace(sid)}, nil) do
-      {:ok, profiles} -> Enum.map(profiles, & &1.name) ++ ["worktree"]
-      _ -> ["worktree"]
+      {:ok, profiles} -> Enum.uniq(Enum.map(profiles, & &1.name) ++ ["worktree", "workflow"])
+      _ -> ["worktree", "workflow"]
     end
   end
 
@@ -1381,8 +1382,8 @@ defmodule Troupe.Client.Daemon do
   defp branch_profile(_sid, "librarian"), do: {:ok, "librarian", "never", :agent}
 
   # A workflow's subagents write, so it always gets a worktree of its own; the daemon
-  # renders the plan (troupe-remote Decision 648).
-  defp branch_profile(_sid, "workflow"), do: {:ok, "workflow", "always", :workflow}
+  # renders the plan (troupe-remote Decision 648), and `orchestrate` runs it.
+  defp branch_profile(_sid, "workflow"), do: {:ok, "orchestrate", "always", :workflow}
 
   defp branch_profile(sid, name) do
     primaries =
@@ -1396,7 +1397,7 @@ defmodule Troupe.Client.Daemon do
     else
       {:error,
        "unknown command /#{name}; available: " <>
-         Enum.map_join(Enum.uniq(primaries ++ ["worktree"]), ", ", &("/" <> &1))}
+         Enum.map_join(Enum.uniq(primaries ++ ["worktree", "workflow"]), ", ", &("/" <> &1))}
     end
   end
 

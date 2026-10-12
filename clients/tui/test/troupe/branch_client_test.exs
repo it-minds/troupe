@@ -294,8 +294,9 @@ defmodule Troupe.BranchClientTest do
     assert "workflow" in Client.commands(sid)
     assert {:ok, "workflow-1"} = Client.dispatch(sid, "workflow", "greet: greet the world")
 
+    # The window is the workflow's; the agent running it is the one orchestrator (#554).
     spawned = await_event("workflow-1", :branch_spawned)
-    assert spawned.data.name == "workflow"
+    assert spawned.data.name == "orchestrate"
     assert spawned.data.isolation == :worktree
 
     input = await_event("workflow-1", :input)

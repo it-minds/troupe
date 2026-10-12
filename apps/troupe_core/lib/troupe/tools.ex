@@ -159,7 +159,7 @@ defmodule Troupe.Tools do
   end
 
   # The task list (Decision 793). A profile that names `todo_write`, as `plan` and
-  # `workflow` do, has it on every call: the list is what it is for. One with every tool,
+  # `orchestrate` do, has it on every call: the list is what it is for. One with every tool,
   # as `build`, is offered it while there is a list and once its turn has made ten model
   # calls, and not before: a model that answers with one call a response paid a call for
   # a list and one for each update, on tasks of a few calls, whatever its prompt said. A

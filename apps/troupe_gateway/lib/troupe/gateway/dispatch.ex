@@ -1585,7 +1585,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   # A client cannot see this machine's filesystem, so "it did not work" is useless to
   # it — say which of the things it asked for was impossible.
-  # A workflow is a plan the `workflow` agent starts from: the named step list rendered
+  # A workflow is a plan the one orchestrator starts from: the named step list rendered
   # around the prompt. Loaded from the workspace a client named, not the worktree the
   # session may get, since that is where `.troupe/workflows/` lives.
   defp workflow_of(params, workspace) do
@@ -1593,7 +1593,7 @@ defmodule Troupe.Gateway.Dispatch do
       name when is_binary(name) and name != "" ->
         steps = workspace |> Path.expand() |> Workflow.load(name)
 
-        {Map.get(params, "profile") || "workflow",
+        {Workflow.agent(Map.get(params, "profile")),
          Workflow.plan(steps, Map.get(params, "prompt") || "")}
 
       _ ->
