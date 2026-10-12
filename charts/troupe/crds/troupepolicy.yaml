@@ -58,6 +58,9 @@ spec:
                           !self.contains('*') ||
                           (self.startsWith('*.') && self.size() > 2 && !self.substring(2).contains('*') &&
                            !self.substring(2).startsWith('.') && !self.endsWith('.') && !self.contains('..'))
+                        # The API server wants a plain message beside the expression once a rule
+                        # spans lines; the expression's own wording is what a refusal shows.
+                        message: an allowedEgress entry is not a hostname or a one-label wildcard such as *.example.com
                         messageExpression: >-
                           'allowedEgress entry ' + self + ' is not a hostname or a one-label wildcard such as *.example.com'
                 allowedStorageClasses:
