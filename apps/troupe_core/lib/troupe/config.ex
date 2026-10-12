@@ -1181,7 +1181,7 @@ defmodule Troupe.Config do
   # What the list was fetched from and when, one line for each provider a refresh asks.
   defp describe_catalog(config, sources, asked, command) do
     case {Store.providers(config), unlisted(config)} do
-      {[], []} ->
+      {[], ""} ->
         "catalog: no provider to ask; one is asked what it serves once the config gives it a key\n"
 
       {providers, unlisted} ->
