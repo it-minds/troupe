@@ -35,6 +35,9 @@
     },
     "turn_context_block": {
       "type": "object"
+    },
+    "turn_hold": {
+      "type": "object"
     }
   },
   "required": [
