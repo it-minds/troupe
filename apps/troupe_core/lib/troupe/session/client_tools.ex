@@ -36,6 +36,11 @@ defmodule Troupe.Session.ClientTools do
   registered, logged or tainted. The refusal names the switch, so the model can tell the
   person why rather than reporting a transport failure.
 
+  **So may a worker profile, for its pods.** A profile whose `spec.personalTools` is
+  `forbid` (Decision 862) has its sessions refuse a registration the same way, naming the
+  profile and the setting, and say so in the pod's log, which is the only record of a
+  refusal: the session's log has nothing to say about a tool it never had.
+
   Placed directly under `Session.Log` in the session tree, so a registration can be
   logged and an agent restart does not lose one. A crash here is worth restarting the
   agent for: registrations that are gone must not go on looking present.
@@ -62,6 +67,8 @@ defmodule Troupe.Session.ClientTools do
 
   defstruct [
     :session_id,
+    # The worker profile that forbids a person's own tools on its pods, or `nil`.
+    :forbidden_by,
     managed_servers_only: false,
     tools: %{},
     challenges: %{},
@@ -186,7 +193,8 @@ defmodule Troupe.Session.ClientTools do
     {:ok,
      %__MODULE__{
        session_id: session_id,
-       managed_servers_only: Keyword.get(opts, :managed_servers_only, false)
+       managed_servers_only: Keyword.get(opts, :managed_servers_only, false),
+       forbidden_by: Keyword.get(opts, :forbidden_by)
      }}
   end
 
@@ -214,6 +222,22 @@ defmodule Troupe.Session.ClientTools do
     # somebody for consent to a thing the platform has already refused. Asking a person
     # to approve something that will be refused anyway is worse than refusing it.
     {:reply, {:error, :managed_mcp_servers_only}, state}
+  end
+
+  def handle_call({:register, _conn, _consent, opts}, _from, %{forbidden_by: profile} = state)
+      when is_binary(profile) do
+    # The profile's word, before the challenge as the platform's is (Decision 862). Said in
+    # the pod's log, since nothing goes in the session's: an operator asked why somebody's
+    # tools never reached a session finds it there.
+    names = opts |> Keyword.get(:specs, []) |> Enum.map(& &1.name)
+
+    Logger.warning(
+      "troupe: refused tools.register in #{state.session_id} from " <>
+        "#{Keyword.get(opts, :subject) || "an unnamed client"} (#{Enum.join(names, ", ")}): " <>
+        "the worker profile #{profile} sets personalTools: forbid"
+    )
+
+    {:reply, {:error, {:personal_tools_forbidden, profile}}, state}
   end
 
   def handle_call({:register, connection, consent, opts}, _from, state) do

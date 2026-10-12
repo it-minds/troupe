@@ -42,14 +42,16 @@ defmodule Troupe.MCP.Sessions do
   @typedoc """
   A session, as a server issued it: its id (`nil` when the server keeps none), the
   protocol version it chose, where it is, the headers that end it (`nil` when they are
-  not held), and what it is kept for.
+  not held), what it is kept for, and whether its server is reached only at an address
+  checked first (Decision 875).
   """
   @type session :: %{
-          id: String.t() | nil,
-          version: String.t(),
-          url: String.t(),
-          ends_with: [{String.t(), String.t()}] | nil,
-          kept_for: kept_for()
+          required(:id) => String.t() | nil,
+          required(:version) => String.t(),
+          required(:url) => String.t(),
+          required(:ends_with) => [{String.t(), String.t()}] | nil,
+          required(:kept_for) => kept_for(),
+          optional(:pinned) => boolean()
         }
 
   @typedoc "A configured server, by URL and name, and whose credential it carries."

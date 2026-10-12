@@ -96,6 +96,9 @@ export type {
   OnboardingSuggested,
   TokenUsage,
   TurnCost,
+  CurtainPhase,
+  CurtainState,
+  FoldOptions,
 } from "./transcript.js";
 export {
   FleetStore,
@@ -170,6 +173,8 @@ export type {
   AgentWritten,
   ProfileSwitch,
 } from "./agents.js";
+export { DESKTOP_CLIENT, askPlane, suggestion, updateRequiredSentence } from "./update.js";
+export type { ClientUpdate, PlaneVersionWord, UpdateRequired, VersionPolicy } from "./update.js";
 export { DaemonClient, DaemonSource, claimRefusal, daemonUrl, rowFromDaemon } from "./daemon.js";
 export type {
   ClaimResult,
@@ -178,6 +183,7 @@ export type {
   DaemonHooks,
   DaemonIdentity,
   DaemonSessionRow,
+  DaemonStop,
   ImportResult,
   LocalServer,
   LocalSkill,

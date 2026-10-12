@@ -154,6 +154,12 @@ defmodule Troupe.Config do
             # raise itself past when its budget asks (Decision 699). `nil` on a laptop;
             # a map, possibly empty, wherever the worker set the terms. Never from a file.
             terms: nil,
+            # The budget's limits the organisation enforces on this machine (Decision 869),
+            # by the budget's names for them (`max_turns`, `wall_clock`), each with its
+            # `limit` and the `source` that set it: a ceiling the budget question raises a
+            # limit no further than, as it does the terms (issue #622). Set where the
+            # organisation's word is held; never from a file or an override.
+            ceilings: %{},
             auto_approve: false,
             # Two switches a platform sets and a session may not move. Both arrive with
             # the activation and are re-read at every one, so turning one on reaches
@@ -166,6 +172,11 @@ defmodule Troupe.Config do
             # profile's.
             managed_permission_rules_only: false,
             managed_mcp_servers_only: false,
+            # The worker profile whose pods take no tool a person's own client hosts, by
+            # name, or `nil` where a person may offer theirs (Decision 862): a profile's
+            # `spec.personalTools: forbid`, which the worker sets from the activation, so a
+            # change reaches a session at its next wake. Never from a file.
+            personal_tools_forbidden_by: nil,
             # What happens to an `ask` tool when nobody is attached to answer. `:wait`
             # leaves the request in the log for a person to find; `:deny` answers no at
             # once, which is what an unattended session asks for. There is deliberately
@@ -556,7 +567,7 @@ defmodule Troupe.Config do
 
   defp override(config, key, value) when is_atom(key) do
     cond do
-      key in [:__struct__, :warnings, :refused] or not Map.has_key?(config, key) ->
+      key in [:__struct__, :warnings, :refused, :ceilings] or not Map.has_key?(config, key) ->
         :ignore
 
       spec = field_spec(key) ->

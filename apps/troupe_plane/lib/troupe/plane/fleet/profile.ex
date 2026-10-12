@@ -114,14 +114,31 @@ defmodule Troupe.Plane.Fleet.Profile do
   # rather than saved: a profile whose admin believes they turned something on must not
   # quietly have it off. The resource's schema refuses one too, and this is the check for a
   # profile that is never one, on hosts.
+  #
+  # `personalTools` says whether a person may offer a session on the profile's pods their
+  # own signed-in tools (Decision 862): `allow`, the default, or `forbid`. Anything else is
+  # refused for the same reason: a pod reads only `forbid` as forbidding, and a `"Forbid"`
+  # saved would leave the pods taking what the admin believes they refuse.
   defp spec_switches(:spec, spec) when is_map(spec) do
-    case Map.fetch(spec, "repositoryOverridesBundle") do
-      {:ok, value} when not is_boolean(value) ->
-        [spec: "repositoryOverridesBundle must be true or false, not #{inspect(value)}"]
+    overrides =
+      case Map.fetch(spec, "repositoryOverridesBundle") do
+        {:ok, value} when not is_boolean(value) ->
+          [spec: "repositoryOverridesBundle must be true or false, not #{inspect(value)}"]
 
-      _absent_or_boolean ->
-        []
-    end
+        _absent_or_boolean ->
+          []
+      end
+
+    personal =
+      case Map.fetch(spec, "personalTools") do
+        {:ok, value} when value not in ["allow", "forbid"] ->
+          [spec: "personalTools must be allow or forbid, not #{inspect(value)}"]
+
+        _absent_or_known ->
+          []
+      end
+
+    overrides ++ personal
   end
 
   defp spec_switches(:spec, _spec), do: []

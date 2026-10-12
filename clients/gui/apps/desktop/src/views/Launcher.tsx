@@ -52,6 +52,7 @@ export function Launcher({
   onApprovals,
   onSettings,
   onOpen,
+  notice = null,
 }: {
   rows: FleetRow[];
   auth: AuthSession | null;
@@ -64,6 +65,8 @@ export function Launcher({
   onApprovals: () => void;
   onSettings: () => void;
   onOpen: (id: string) => void;
+  /** A line over the page: the app's own update, when there is one to say (Decision 874). */
+  notice?: JSX.Element | null;
 }): JSX.Element {
   const caps = capabilities();
   const start = useOpensOnLauncher();
@@ -102,6 +105,7 @@ export function Launcher({
         </span>
         <span className="micro">Troupe · {caps.shellName ?? "browser"}</span>
       </div>
+      {notice}
 
       <main>
         <div className="masthead">

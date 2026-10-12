@@ -171,6 +171,25 @@ defmodule Troupe.Budget do
   end
 
   @doc """
+  Hold the limits to ceilings, by the budget's names for them: a limit above its ceiling
+  comes down to it, and one with a ceiling is not lifted. What a pod's terms (Decision
+  699) and an organisation's enforced limits (Decision 869) put on whatever an answer to
+  the budget question did, `allow` included, which raises every limit at once (issue
+  #622).
+  """
+  @spec hold(t(), %{optional(exhaustion()) => pos_integer()}) :: t()
+  def hold(%__MODULE__{} = b, ceilings) when ceilings == %{}, do: b
+
+  def hold(%__MODULE__{} = b, ceilings) do
+    b =
+      Enum.reduce(ceilings, b, fn {limit, ceiling}, b ->
+        Map.update!(b, field(limit), &min(&1, ceiling))
+      end)
+
+    %{b | lifted: Enum.reject(b.lifted, &Map.has_key?(ceilings, &1))}
+  end
+
+  @doc """
   Take back what is left of a raise that was for one run only (Decision 699): the limit
   comes down by `amount`, but never below what has been used, so the next run meets the
   checkpoint again rather than stopping the moment it starts.

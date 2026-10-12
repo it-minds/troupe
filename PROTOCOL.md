@@ -272,7 +272,7 @@ Durable:
 | `user_shell` | `run_id`, `command`, `output`, `ended`, `agent`, `exit_status`, `reason`, `timeout_ms`, `duration_ms`, `command_id` — a command the person ran with `shell.run`, written by the root agent under their actor when it ended. `output` is its combined stdout and stderr, the tail capped at `tool_output_limit` with the `read_output` marker when it was cut; `ended` is `exited` (with `exit_status`), `timeout`, `killed` (`shell.cancel`) or `failed` (it could not start, `reason` says why); `agent: false` is one kept from the agent (Decision 813) |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
-| `llm_request` | `model`, `message_count`, `tools`, `profile`, `prompt_bytes` — what the prompt was made of (see below); `system_changed`, `tools_changed`, `turn_context`, `turn_context_block` — what changed in front of what the agent had sent (see below) |
+| `llm_request` | `model`, `message_count`, `tools`, `profile`, `prompt_bytes` — what the prompt was made of (see below); `system_changed`, `tools_changed`, `turn_context`, `turn_context_block`, `turn_hold` — what changed in front of what the agent had sent, and what a turn holds to its end (see below) |
 | `llm_response` | `message` (`role`, `content`: blocks of type `text`, `tool_use`, `tool_result` or `reasoning` — the last is the model's thinking, `provider`-bound, replayed only to the provider that made it and carried by `Message.text` nowhere), `usage` (`input_tokens`, `cache_read`, `cache_write`, `output_tokens` — disjoint, so the first three sum to the prompt's length), `stop_reason`, `model`, `gateway`; `thinking_resent`, `thinking_dropped`, `prefix_mismatch` — what became of the thinking the call handed back, and what the provider said of why (see below) |
 | `llm_error` | `reason` — a sentence a person can act on: a blown context window, rejected credentials, an unknown model, a rate limit the backoff outlasted, with the provider's words in brackets; `note` — a root's, the words its conversation was given about the failure, which a replay puts back; `stopped` — the call the agent gave up on when it did not answer within `llm_timeout_ms`, and stopped (see below) |
 | `truncated` | `reason` (`max_tokens`: the output cap cut the reply; `empty`: it had neither text nor a tool call), then one of `note` (the model was asked again), `calls` (tool calls cut mid-argument, answered with an error and not run) or `final: true` (asked once already; the agent ends `output_truncated` or `empty_reply`) |
@@ -451,7 +451,14 @@ Decision 863): the sections it carried, of `instructions`, `goal` and `task_list
 `turn_context_block` the block itself, `at` (the index of the message it goes after),
 `text` and `sent` (each section's `sha256:` digest), which a restarted or resumed agent
 folds back so its next call sends the prefix the one before it sent. Absent in events
-written before 0.13.0, whose agents send their next call without the blocks once. On
+written before 0.13.0, whose agents send their next call without the blocks once.
+`turn_hold` is on a turn's first call: the tools of MCP servers and of people's clients,
+and the skills, that the call took and the turn offers to its end (Decisions 871 and 876),
+as `digest` (`sha256:`), with `tools` (each `name`, `description`, `schema`,
+`default_permission`) and `skills` (`bundle` and `local`, each `name`, `description`,
+`layer`, `dir`) when they differ from the last hold the agent wrote whole; an agent
+restarted in the middle of the turn folds it back and offers what the turn began with.
+Absent in events written before 0.15.0, whose agents restarted mid-turn take them afresh. On
 `llm_response`, `thinking_resent: true` says the provider refused the thinking the call
 handed back as bound to another conversation and the call was sent once more without it
 (Decision 805), and `thinking_dropped` how many thinking blocks Anthropic's
@@ -2343,6 +2350,13 @@ Without `consent`, the answer is an error carrying the challenge to show:
 
 With it: `{"registered": ["client.notes.search"], "taint": "personal_connector"}`.
 
+A session that takes no client-hosted tools refuses before it issues a challenge, so nobody
+is asked to consent to what it will not take: `forbidden`, with `setting` naming why and a
+`reason` to show. On a platform with `managed_mcp_servers_only` the setting is that; on a pod
+whose worker profile sets `personalTools: forbid` it is `personalTools`, with `profile`
+(Decision 862). Troupe's clients take either as the answer for the attachment and do not
+offer again on a later socket of it; a session opened again is offered again.
+
 Registered tools appear as `client.<name>` under the same allowlists, permissions and
 approvals as everything else. A client offering one of the person's own servers this way
 (`mcp.tools`, `mcp.call`) names each tool `<server>.<tool>`, so the model sees
@@ -2606,6 +2620,13 @@ person names the version, and is still held to the release key: the plane can ho
 version back or name one, and cannot make a client install anything the key did not sign. The daemon makes the same `initialize` when a client
 links it with a token (`identity.link`); refused, it asks the plane nothing more until the
 next link, and `identity.get` carries the sentence as `update_required`.
+
+The desktop app makes it too, as `troupe-gui`, when it is signed in: at start and once a
+day (Decision 874). Refused, it keeps to the sessions on its own computer and offers to
+update itself, which is why `data.run` is `null` for it; served with `action: "suggest"`,
+it offers the update quietly, as the terminal says it in a line. Its update is the
+`desktop` component's `recommended` version from `me.client_versions`, held to the same
+`minimum` and `blocked` list, and to the release key.
 
 ### Errors
 

@@ -166,6 +166,54 @@ defmodule Troupe.Agent.BudgetAnswerTest do
     end
   end
 
+  describe "under an organisation's enforced ceiling (issue #622)" do
+    @managed "/etc/troupe/managed.yaml"
+
+    test "the time limit is raised only inside it, and the organisation is named, not the terms" do
+      ctx = ctx(:wall_clock, 600_000, cap: 1_800_000, cap_by: {:organisation, @managed})
+
+      assert labels(ctx) == [
+               "+5 min this run",
+               "+10 min this run",
+               "+15 min this run",
+               "+10 min this session",
+               "+15 min this session",
+               "+15 min this workspace",
+               "stop"
+             ]
+
+      assert BudgetQuestion.question(ctx) =~
+               "Your organisation caps the time limit at 30 min (#{@managed})"
+
+      refute BudgetQuestion.question(ctx) =~ "terms"
+      assert parse("+20 min", ctx) == {:ok, {:extend, :session, 1_200_000}}
+      assert {:error, note} = parse("+21 min", ctx)
+
+      assert note ==
+               "your organisation caps the time limit at 30 min (#{@managed}), and this session " <>
+                 "cannot raise it past that."
+
+      assert {:error, _note} = parse("no limit", ctx)
+      assert parse("allow", ctx) == {:ok, :allow}
+    end
+
+    test "at it, nothing is offered but stop, and allow is asked back" do
+      ctx = ctx(:max_turns, 50, cap: 50, cap_by: {:organisation, "https://plane.example.test"})
+
+      assert labels(ctx) == ["stop"]
+
+      assert BudgetQuestion.question(ctx) =~
+               "Your organisation holds the turn limit to 50 turns (https://plane.example.test), " <>
+                 "and this session cannot raise it past that."
+
+      for text <- ["allow", "always", "+1"] do
+        assert {:error, "your organisation caps the turn limit at 50 turns" <> _} =
+                 parse(text, ctx),
+               text
+      end
+    end
+  end
+
   describe "on a pod" do
     test "a limit the terms set cannot be raised past them, and the question says so" do
       ctx = ctx(:max_turns, 40, scopes: [:run, :session], cap: 40)

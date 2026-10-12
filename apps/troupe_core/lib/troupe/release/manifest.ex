@@ -97,9 +97,12 @@ defmodule Troupe.Release.Manifest do
     end
   end
 
+  # `latest.json` is what the desktop app's updater reads (Decision 874); the `.sig` beside
+  # each of its update files is named like the file, and so is the desktop app's too.
   @named %{
     "install.sh" => "installer",
     "install.ps1" => "installer",
+    "latest.json" => "desktop",
     "troupe.vsix" => "vscode",
     "LICENSE" => "licence",
     "NOTICE" => "licence",

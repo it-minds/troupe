@@ -215,6 +215,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
     |> Map.merge(Map.take(params, @scalars))
     |> Map.put("orgMount", Map.has_key?(params, "orgMount"))
     |> Map.put("repositoryOverridesBundle", Map.has_key?(params, "repositoryOverridesBundle"))
+    |> Map.put("forbidPersonalTools", Map.has_key?(params, "forbidPersonalTools"))
   end
 
   # Rows arrive as `mcp.0.url`. Gathered by index and kept whole, empty ones included: a
@@ -289,7 +290,10 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
         # would mean a mounted volume could never be unmounted from this page.
         "orgMount" => fields["orgMount"] == true,
         # The same, and the bundle winning is what false says (Decision 826).
-        "repositoryOverridesBundle" => fields["repositoryOverridesBundle"] == true
+        "repositoryOverridesBundle" => fields["repositoryOverridesBundle"] == true,
+        # Written whichever way it is, as the two above, so a save from here can lift it
+        # (Decision 862).
+        "personalTools" => if(fields["forbidPersonalTools"] == true, do: "forbid", else: "allow")
       })
 
     compact(%{
@@ -347,7 +351,14 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
     socket
     |> assign(current: nil, verdict: nil, preview: nil, gitops: nil)
     |> with_mode()
-    |> assign(fields: %{"orgMount" => false, "repositoryOverridesBundle" => false}, servers: [])
+    |> assign(
+      fields: %{
+        "orgMount" => false,
+        "repositoryOverridesBundle" => false,
+        "forbidPersonalTools" => false
+      },
+      servers: []
+    )
   end
 
   defp load(socket, name) do
@@ -366,7 +377,12 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
         |> assign(current: nil, verdict: nil, preview: nil, gitops: nil)
         |> with_mode()
         |> assign(
-          fields: %{"name" => name, "orgMount" => false, "repositoryOverridesBundle" => false},
+          fields: %{
+            "name" => name,
+            "orgMount" => false,
+            "repositoryOverridesBundle" => false,
+            "forbidPersonalTools" => false
+          },
           servers: []
         )
         |> assign(error: error.message)
@@ -411,7 +427,8 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       "storage.storageClassName" => get_in(spec, ["storage", "storageClassName"]),
       "configBundleChannel" => Map.get(spec, "configBundleChannel"),
       "orgMount" => Map.get(spec, "orgMount") == true,
-      "repositoryOverridesBundle" => Map.get(spec, "repositoryOverridesBundle") == true
+      "repositoryOverridesBundle" => Map.get(spec, "repositoryOverridesBundle") == true,
+      "forbidPersonalTools" => Map.get(spec, "personalTools") == "forbid"
     }
   end
 
@@ -646,6 +663,16 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
               Off, the bundle's agents and skills and the built-in agents win over a working
               copy's of the same name, which a session lists as skipped. On, a repository's
               .troupe/agents and .troupe/skills replace them. Read at every activation.
+            </.toggle>
+
+            <.toggle
+              form={@fields}
+              name="forbidPersonalTools"
+              label="keep people's own signed-in tools off these pods"
+            >
+              Off, a person may offer a session here the MCP servers they signed in to on
+              their own machine, which run there with their sign-in. On (personalTools:
+              forbid), the pods refuse the offer and say why. Read at every activation.
             </.toggle>
           </section>
 

@@ -78,7 +78,9 @@ defmodule Troupe.Session do
         # restart, because the connection that made it has not gone anywhere and would
         # have no way of knowing it needed to offer its tools again.
         {Troupe.Session.ClientTools,
-         session_id: session_id, managed_servers_only: config.managed_mcp_servers_only},
+         session_id: session_id,
+         managed_servers_only: config.managed_mcp_servers_only,
+         forbidden_by: config.personal_tools_forbidden_by},
         # The sessions its URL servers issue (Decision 746): before the servers, and
         # stopped after them, which is when each is ended at its server.
         {Troupe.MCP.Sessions, name: Troupe.Registry.mcp_sessions(session_id)},

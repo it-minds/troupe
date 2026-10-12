@@ -61,6 +61,49 @@ export interface TroupeShell {
    * answers for it. So a shell brings its own, and `notify.ts` prefers it.
    */
   notifications?: ShellNotifications;
+  /**
+   * The app's own update (#66, Decision 874): a release whose signed manifest the shell
+   * checks against the release keys it was built with, installed by the shell. A browser
+   * build is updated where it is served, and has none.
+   */
+  updater?: ShellUpdater;
+}
+
+/** What a plane says may be installed, for the shell to hold an update to (Decision 868). */
+export interface UpdatePlane {
+  url: string;
+  versions: Record<string, { recommended?: string | null; minimum?: string | null; blocked?: string[] }>;
+}
+
+/** An update the shell found, checked, and can install. */
+export interface UpdateOffer {
+  version: string;
+  current: string;
+  /** The release the files come from. */
+  source: string;
+  /** The daemon the installers put beside the app, replaced with it. */
+  daemon: { from: string; to: string; lib: string } | null;
+  /** Why the daemon here is left as it is, when it is. */
+  daemon_note: string | null;
+}
+
+export type UpdateCheck = { state: "current"; version: string; current: string } | ({ state: "offer" } & UpdateOffer);
+
+export interface ShellUpdater {
+  /**
+   * Find the release to move to — `version`, which a plane recommends, or the latest — and
+   * say what an update would replace. Rejects with a sentence where the release cannot be
+   * checked, or a plane does not serve it; nothing changes either way.
+   */
+  check(params: { version: string | null; plane: UpdatePlane | null }): Promise<UpdateCheck>;
+  /** Download what the check offered and check it against the release key and the manifest. */
+  download(onProgress?: (received: number, total: number | null) => void): Promise<void>;
+  /**
+   * Install it: the daemon's release swapped in, then the app, which restarts. Called once
+   * the person said so and no turn here is at work; `daemonStopped` says the daemon was
+   * asked to stop between turns and said it would.
+   */
+  install(daemonStopped: boolean): Promise<void>;
 }
 
 export type NotifyPermission = "granted" | "denied" | "default";

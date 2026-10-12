@@ -36,6 +36,10 @@ defmodule Troupe.Tool.Ctx do
     # them (Decision 871), offered for the rest of the turn; `nil` before it, which is the
     # tools as they are now.
     turn_tools: nil,
+    # The skills as the turn's first model call found them (`Troupe.Skills.found/3`,
+    # Decision 876), which the `skill` tool lists for the rest of the turn; `nil` before it,
+    # which is the skills on disk now.
+    turn_skills: nil,
     depth: 0,
     max_depth: 3,
     budget: nil,
@@ -59,6 +63,7 @@ defmodule Troupe.Tool.Ctx do
           turn_calls: non_neg_integer(),
           binds_thinking: boolean(),
           turn_tools: [Troupe.Tool.handle()] | nil,
+          turn_skills: Troupe.Skills.found() | nil,
           depth: non_neg_integer(),
           max_depth: pos_integer(),
           budget: Troupe.Budget.t() | nil,
@@ -106,6 +111,13 @@ defmodule Troupe.Tool.Result do
   """
   @spec describe(term()) :: String.t()
   def describe(reason) when is_binary(reason), do: reason
+
+  # A document on the scratchpad, which a compaction's pointer names, and only `read_file`
+  # reads (Decision 878): another file tool given one says which reads it.
+  def describe({:outside_workspace, "scratch:" <> _ = path}),
+    do:
+      "#{path} is on the session's scratchpad, which only read_file reads and only show " <>
+        "writes. Read it with read_file(path: \"#{path}\")."
 
   def describe({:outside_workspace, path}),
     do: "Path #{path} is outside the workspace and was rejected. Use a path inside the project."
@@ -162,6 +174,12 @@ defmodule Troupe.Tool.Result do
     do:
       "The tool #{name} went during this turn: the server or the client that offered it " <>
         "no longer does. It did not run. Do the work another way, or say what is left undone."
+
+  # Decision 876: a skill listed for the rest of the turn whose file has gone.
+  def describe({:skill_gone, name}),
+    do:
+      "The skill #{name} went during this turn: its SKILL.md is no longer there to read. " <>
+        "Do the work without it, or say what is left undone."
 
   def describe({:no_loop, name}),
     do:

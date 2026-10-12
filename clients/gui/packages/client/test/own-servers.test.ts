@@ -161,6 +161,26 @@ describe("the person's own servers, offered to a pod session", () => {
     assert.equal(worker.calls.filter((c) => c.method === "tools.register").length, 1, "only the first socket asked for the challenge");
   });
 
+  // troupe Decision 862: a session on a worker profile with `personalTools: forbid` refuses
+  // before any challenge. The person is asked nothing, the offer says why, and no later
+  // socket of the attachment lists the servers or registers them again.
+  it("are not offered to a session whose profile forbids them, and the offer says why", async () => {
+    worker.personalToolsForbiddenBy = "dev";
+    const a = await attach();
+    await until("the refusal", settled("refused"));
+    assert.equal(asks.length, 0);
+    assert.equal(worker.tools.size, 0);
+    const refusal = states.find((s) => s.state === "refused");
+    assert.match(refusal?.state === "refused" ? refusal.reason : "", /worker profile dev .*\(personalTools: forbid\)/);
+
+    const listed = daemon.calls.filter((c) => c.method === "mcp.list").length;
+    await drop(a);
+    await until("the next socket's answer", settled("refused", 2));
+    assert.equal(asks.length, 0);
+    assert.equal(worker.calls.filter((c) => c.method === "tools.register").length, 1, "the next socket offered them again");
+    assert.equal(daemon.calls.filter((c) => c.method === "mcp.list").length, listed, "the next socket listed the servers again");
+  });
+
   it("are not offered by somebody who may only read the session", async () => {
     await attach({ scopes: ["observe"] });
     await until("the answer", settled("none"));

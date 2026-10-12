@@ -107,6 +107,8 @@ export class FakeWorker {
   readonly frames: string[] = [];
   /** Client-hosted tools by session and prefixed name, as `tools.register` left them. */
   readonly tools = new Map<string, RegisteredTool>();
+  /** The worker profile, when it forbids a person's own tools on its pods (troupe Decision 862). */
+  personalToolsForbiddenBy: string | null = null;
   /** The agents a session here could run: the built-ins, and a bundle's a test adds (troupe Decision 841). */
   readonly agents = new FakeAgents("/home/troupe/.config/troupe", true);
 
@@ -437,6 +439,12 @@ export class FakeWorker {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
         if (!client.token.scopes.includes("control")) {
           return reply(ws, id, null, { code: -32004, message: "forbidden", data: { required_scope: "control" } });
+        }
+        // A profile with `personalTools: forbid` refuses before any challenge, as the gateway does.
+        if (this.personalToolsForbiddenBy) {
+          const profile = this.personalToolsForbiddenBy;
+          const reason = `the worker profile ${profile} does not take a person's own tools on its pods (personalTools: forbid); only the profile's MCP servers are available`;
+          return reply(ws, id, null, { code: -32004, message: "forbidden", data: { setting: "personalTools", profile, reason } });
         }
         const specs = (params["tools"] as Array<{ name: string; description?: string; schema?: unknown }> | undefined) ?? [];
         const names = specs.map((t) => t.name).sort();

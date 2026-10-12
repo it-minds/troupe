@@ -103,4 +103,24 @@ describe("your own servers in a team session", () => {
     expect(harness.worker.tools.size).toBe(0);
     expect(says("Your servers are offered")).toBe(false);
   });
+
+  // troupe Decision 862: the team's worker profile forbids a person's own tools on its pods.
+  // Nobody is asked; the line says they are unavailable here, and why.
+  it("are shown as unavailable, with the profile's reason, where the profile forbids them", async () => {
+    harness.worker.personalToolsForbiddenBy = "dev";
+    harness.plane.seed("alice@example.com", { id: "team-3", title: "Locked down", profile: "dev" });
+    await harness.signIn({ store: webTokenStore() });
+    localStorage.setItem("troupe.pref.planeUrl", harness.plane.baseUrl);
+    localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");
+    startOnTheList();
+
+    unmount = render(<App />).unmount;
+    const row = await waitFor(() => [...document.querySelectorAll<HTMLButtonElement>("button.row")].find((b) => b.textContent?.includes("Locked down")), "the team session's row");
+    row.click();
+
+    await waitFor(() => says("Your servers could not be offered here: the worker profile dev does not take a person's own tools"), "the line saying why");
+    expect(says("(personalTools: forbid)")).toBe(true);
+    expect(document.querySelector('section[aria-label="Offer your servers"]')).toBeNull();
+    expect(harness.worker.tools.size).toBe(0);
+  });
 });

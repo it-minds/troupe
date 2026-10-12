@@ -10,11 +10,13 @@
 // be signed in: in local mode there is no `auth`, the screens that only a plane can fill
 // are not offered, and nothing here calls a plane.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import { awaitingYou } from "@troupe/client";
-import type { AuthSession, SessionKind } from "@troupe/client";
+import type { AuthSession, FleetRow, SessionKind } from "@troupe/client";
 import { useAdmin, useDaemon, useFleet } from "./hooks";
+import { useUpdates } from "./updates";
+import { UpdateBanner } from "./views/Update";
 import { Agents } from "./views/Agents";
 import { chooseLocalOnly, storedLocalOnly } from "./mode";
 import type { AppMode } from "./mode";
@@ -78,7 +80,6 @@ export function App(): JSX.Element {
     setSignInNow(false);
     setAuth(a);
   }, []);
-  const mode: AppMode = localOnly || offline ? "local" : "plane";
   // The launcher, unless the person has said the list (Decision 709). A first run ends
   // where it ends — on the session it started, or on the list — and the next start is
   // the first that opens here.
@@ -87,10 +88,19 @@ export function App(): JSX.Element {
   const daemon = useDaemon(auth);
   // The theme, light or dark and notifications follow the person through the daemon (troupe #57).
   useSharedPrefs(daemon.client);
-  const { snapshot, store, refresh } = useFleet(auth, daemon.client);
+  // What the plane makes of this version, and the app's own update (Decision 874). A
+  // plane that does not serve this version is not used: the app keeps to this computer,
+  // as it does offline, and says what to install instead.
+  const rowsNow = useRef<FleetRow[]>([]);
+  const updates = useUpdates(auth, daemon.client, () => rowsNow.current);
+  const refused = updates.required !== null;
+  const planeAuth = refused ? null : auth;
+  const mode: AppMode = localOnly || offline || refused ? "local" : "plane";
+  const { snapshot, store, refresh } = useFleet(planeAuth, daemon.client);
+  rowsNow.current = snapshot.rows;
   // Only the Review screen still needs it: `admin.runs.list` is how a reviewer finds
   // the runs nobody has looked at. Administration itself is the console's, at /admin.
-  const adminApi = useAdmin(auth);
+  const adminApi = useAdmin(planeAuth);
   const appearance = useAppearance();
   // Opening a session reads it, which clears its row's `unseen` at the daemon: the row
   // says so now rather than at the next poll. What rows count while nobody reads their
@@ -241,11 +251,12 @@ export function App(): JSX.Element {
     return (
       <Launcher
         rows={snapshot.rows}
-        auth={auth}
+        auth={planeAuth}
         daemon={daemon}
         planeUrl={planeUrl}
         offline={offline}
         localOnly={localOnly}
+        notice={<UpdateBanner updates={updates} />}
         onNew={() => setWhere({ screen: "new" })}
         onSessions={() => setWhere({ screen: "sessions" })}
         onApprovals={() => setWhere({ screen: "approvals" })}
@@ -274,7 +285,7 @@ export function App(): JSX.Element {
           </button>
           {/* Review reads the plane's record of unattended runs. There is none without
               a plane, so it is not offered, rather than offered and empty. */}
-          {auth && (
+          {planeAuth && (
             <button aria-current={where.screen === "review" ? "page" : undefined} onClick={() => setWhere({ screen: "review" })}>
               Review
             </button>
@@ -294,10 +305,10 @@ export function App(): JSX.Element {
           </button>
         </nav>
         <span className="spacer" />
-        {auth ? (
+        {planeAuth ? (
           <div className="me">
-            <div className="name">{auth.me?.display_name ?? auth.me?.subject ?? "Signed in"}</div>
-            <div className="teams muted">{auth.me?.teams.join(", ") || "no team"}</div>
+            <div className="name">{planeAuth.me?.display_name ?? planeAuth.me?.subject ?? "Signed in"}</div>
+            <div className="teams muted">{planeAuth.me?.teams.join(", ") || "no team"}</div>
             <div className="host muted micro" title={`Your sign-in is kept in: ${caps.secrets.replace("-", " ")}`}>
               {caps.shellName ?? "browser"}
             </div>
@@ -312,7 +323,14 @@ export function App(): JSX.Element {
             <div className="name">This computer</div>
             <div className="teams muted">{daemon.user?.name ?? "the daemon is not connected"}</div>
             <div className="host muted micro">
-              {!offline ? "local only" : expired ? "not signed in to the platform" : "the platform is not answering"} ·{" "}
+              {refused
+                ? "the platform needs a newer version"
+                : !offline
+                  ? "local only"
+                  : expired
+                    ? "not signed in to the platform"
+                    : "the platform is not answering"}{" "}
+              ·{" "}
               {caps.shellName ?? "browser"}
             </div>
           </div>
@@ -320,6 +338,7 @@ export function App(): JSX.Element {
       </div>
 
       <main>
+        <UpdateBanner updates={updates} />
         {offline && (
           <div className="banner offline">
             <p>
@@ -359,7 +378,7 @@ export function App(): JSX.Element {
 
         {where.screen === "new" && (
           <StartSession
-            auth={auth}
+            auth={planeAuth}
             daemon={daemon.client}
             linked={Boolean(daemon.identity?.linked)}
             onClose={() => setWhere({ screen: "sessions" })}
@@ -373,9 +392,9 @@ export function App(): JSX.Element {
         {where.screen === "local" && (
           <Local
             daemon={daemon}
-            auth={auth}
-            me={auth?.me ? { subject: auth.me.subject, display_name: auth.me.display_name } : null}
-            planeUrl={auth?.planeUrl ?? ""}
+            auth={planeAuth}
+            me={planeAuth?.me ? { subject: planeAuth.me.subject, display_name: planeAuth.me.display_name } : null}
+            planeUrl={planeAuth?.planeUrl ?? ""}
             localOnly={localOnly}
             onLocalOnly={setLocalOnly}
           />
@@ -388,13 +407,13 @@ export function App(): JSX.Element {
             rows={snapshot.rows}
             workspace={where.workspace}
             agent={where.agent}
-            planeUrl={auth?.planeUrl ?? null}
+            planeUrl={planeAuth?.planeUrl ?? null}
             onOpenSession={(id) => setWhere({ screen: "session", id })}
           />
         )}
 
-        {where.screen === "review" && auth && (
-          <Review auth={auth} admin={adminApi} daemon={daemon.client} teams={auth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
+        {where.screen === "review" && planeAuth && (
+          <Review auth={planeAuth} admin={adminApi} daemon={daemon.client} teams={planeAuth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
         )}
 
         {where.screen === "appearance" && <AppearanceSettings {...appearance} />}
@@ -403,7 +422,7 @@ export function App(): JSX.Element {
 
         {where.screen === "approvals" && (
           <Approvals
-            auth={auth}
+            auth={planeAuth}
             daemon={daemon.client}
             rows={snapshot.rows}
             onOpen={(id) => setWhere({ screen: "session", id })}
@@ -413,7 +432,7 @@ export function App(): JSX.Element {
 
         {where.screen === "session" && (
           <Session
-            auth={auth}
+            auth={planeAuth}
             daemon={daemon.client}
             machineUser={daemon.user?.subject ?? null}
             row={row}

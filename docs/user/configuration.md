@@ -41,7 +41,12 @@ Only these keys can be enforced, and each one is a ceiling:
 A file, a variable or a flag that tries to go past an enforced value is held to it, with
 one warning that names the file, the key and the organisation's value. The settings pages
 show such a key as set by your organisation and do not change it, and `config.set` refuses
-it. `troupe config --explain KEY` shows both ends with where they came from:
+it. When a session reaches an enforced `max_turns` or `wall_clock_ms`, the question that
+asks whether to go on offers only what stays under it, says the limit is your
+organisation's and where it came from, and turns away a larger amount, `no limit` and an
+`allow` past it. A model entry's own `max_output` can lower an enforced `max_tokens` for
+its model, and cannot raise it. `troupe config --explain KEY` shows both ends with where
+they came from:
 
 ```text
 max_turns = 25
@@ -245,6 +250,29 @@ A `url` server is spoken to as the MCP specification's streamable HTTP transport
 one, carried on every call after, opened again once if the server has forgotten it, and
 ended when the Troupe session ends.
 
+### Where the daemon connects
+
+A `url` server, and everything a sign-in to it calls (the server's metadata, the
+authorization server's metadata, and the token and revocation endpoints), is called from
+your machine, and only at an address that passes one check. The server's name is
+resolved, every address it answers is checked, and the request goes to the address that
+passed, so a name that answers one address to the check and another a moment later is not
+followed there. A redirect is checked the same way before it is followed; the token
+endpoint follows none. TLS still checks the server's certificate against its name.
+
+| | Addresses |
+|---|---|
+| Refused | link-local (`169.254.0.0/16`, `fe80::/10`); a cloud's metadata service (`169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`), however the address is written, an IPv4 address written as IPv6 included; the unspecified address (`0.0.0.0`, `::`) |
+| Allowed | loopback, for a server you run on this machine; the private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`), where an intranet's servers are; everything else |
+
+One refused address among a name's answers refuses the name. The server's line on the
+`/mcp` page says what it resolved to (`wiki.example.com resolves to 169.254.169.254, a
+link-local address, and is not called`), and a sign-in whose metadata names such an
+address is refused before your browser opens. The authorization endpoint is opened by
+your browser, not the daemon: its name is refused at the same addresses when it resolves
+on this machine, and left to the browser when it does not. A sign-in's URLs are also
+`https`, or `http` on `127.0.0.1`, `[::1]` or `localhost`.
+
 ### A server that wants a key
 
 A server over HTTP that takes a key, a token or a team's name in a header gets it from
@@ -381,7 +409,10 @@ the session's approvals like any other tool's. Closing the session, or the app, 
 a connection that drops and comes back offers them again without asking twice. The TUI
 does the same for a pod session you open from HQ: the session's question waits in its
 window as an approval naming the tools, `y` offers them and `n` does not, and a line in
-the transcript says what was offered.
+the transcript says what was offered. A team may keep people's own tools off its pods
+(`personalTools: forbid` on the profile): such a session asks you nothing, the desktop app
+and the TUI say that your servers are not offered there and why, and neither offers them
+again while the session is open.
 
 ## Your own commands
 
@@ -1161,4 +1192,6 @@ shows a key by, in the desktop app and the terminal UI alike.
 | `ui.blink` | boolean | `true` | any | blink | What waits on you blinks: the terminal UI's mark and border of a window that needs you. Off holds them lit. |
 | `ui.mode` | `system` \| `light` \| `dark` | `system` | any | light or dark | Light or dark in the desktop app, or `system` to follow the computer. |
 | `ui.notifications` | boolean | `true` | any | notifications | The desktop app says when a session nobody is reading finishes a turn or waits for you. |
+| `transcript` | settings |  | any |  | How the clients draw a transcript. The daemon keeps it and acts on none of it. |
+| `transcript.detail` | `quiet` \| `tools` \| `everything` | `quiet` | any | transcript detail | How much of a turn the clients draw open: `quiet`, its answer with its working one strip above it; `tools`, its tool calls open and its reasoning collapsed; `everything`, nothing collapsed. A failed call, an approval, a question and what follows a budget stop are open at every level. `/detail` changes it for one session. |
 <!-- config-keys:end -->

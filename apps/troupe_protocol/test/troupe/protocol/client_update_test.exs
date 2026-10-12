@@ -50,7 +50,7 @@ defmodule Troupe.Protocol.ClientUpdateTest do
              "This plane does not serve troupe-daemon 0.13.2-beta, which its administrators " <>
                "have blocked: run troupe update, which installs 0.13.1-beta."
 
-    # The desktop app has no updater of its own yet, so nothing is named to run.
+    # The desktop app updates itself (Decision 874): there is no command to name.
     desktop =
       ClientUpdate.refusal("desktop", "0.12.0-beta", %{minimum: "0.13.0-beta"}, :below_minimum)
 
@@ -58,7 +58,27 @@ defmodule Troupe.Protocol.ClientUpdateTest do
 
     assert desktop["reason"] ==
              "This plane needs the desktop app 0.13.0-beta or later, and this is 0.12.0-beta: " <>
-               "install a newer desktop app."
+               "update the desktop app."
+  end
+
+  test "suggest is one quiet line with what to run, and anything else is nothing" do
+    suggest = ClientUpdate.client_update("tui", @policy, "suggest")
+
+    assert ClientUpdate.suggestion(suggest, "0.13.0-beta") ==
+             "This plane recommends troupe 0.13.1-beta, and this is 0.13.0-beta: run troupe update."
+
+    # As JSON delivered it, from the desktop app's policy.
+    desktop =
+      "desktop"
+      |> ClientUpdate.client_update(@policy, "suggest")
+      |> Jason.encode!()
+      |> Jason.decode!()
+
+    assert ClientUpdate.suggestion(desktop, nil) ==
+             "This plane recommends the desktop app 0.13.1-beta: update the desktop app."
+
+    assert ClientUpdate.suggestion(ClientUpdate.client_update("tui", @policy, "none"), "x") == nil
+    assert ClientUpdate.suggestion(nil, "0.13.0-beta") == nil
   end
 
   test "the sentence is the same from the fields as JSON delivered them" do

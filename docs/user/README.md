@@ -201,6 +201,41 @@ versions. A session is pinned to the version current when it started.
 **Trigger.** A scheduled or externally fired job that starts a session as a service
 principal. Such sessions are flagged for review until somebody looks at them.
 
+## Reading a transcript
+
+A turn shows its answer, not its working. Everything rendered from something is a frame
+on a surface of its own, a step from the chat: the model's prose, a code block, a diff, a
+tool call and what came back, reasoning, data. What you typed keeps its own panel. By
+default a turn's reasoning, its calls and the prose between them are one line where they
+began, above the answer: `▸ 7 steps · 1 failed · grep, read_file, edit_file · 14s`.
+
+- **In the desktop app** a click on that line opens the whole turn, every frame in it, and
+  another click shuts it. `/detail quiet`, `/detail tools` or `/detail everything` in the
+  command palette changes how much of every turn is open in this session's window, and
+  draws the history again: `tools` opens each call's frame, its result cut past 24 lines
+  to its first 20 (a press on `… 42 more lines` shows the rest in place) and its reasoning
+  to `▸ thinking · 12s`; `everything` collapses nothing, arguments included, which is what
+  a bug report wants. Whatever the level, a call that failed is open with its error, an
+  approval or a question waits in its panel, and everything after a budget ran out is open.
+- **The answer** is rendered from its Markdown: headings, lists nested to any depth, tables,
+  quotes, and each fenced block a frame of its own, code with its language and path, a
+  `diff` with `+n −m`, and `csv`, `tsv` or `json` as a table with its row count. **source**
+  at the top of an answer shows the Markdown as the model wrote it. Raw HTML in a reply is
+  shown as text, never as markup, and an image is never loaded; Mermaid shows its source
+  for now.
+- **Reasoning** is what the model streamed before it answered, so it is there for a turn
+  the app watched happen, and not in a session opened afterwards.
+- **While a turn works**, the line under it says what is running, how many and for how
+  long, after a few words from the theatre: `◐ reading the script — running read_file
+  a.ex (00:06)`. The facts are always there; waiting on you, the line is `waiting for you`
+  in the colour that means you.
+- **The default** for every session is the `transcript.detail` setting (`quiet`, `tools`
+  or `everything`), from your `config.yaml`, a repository's `.troupe/config.yaml` or your
+  organisation's, as any setting. `/detail` changes it for one session and writes nothing.
+- **In the terminal UI** the same frames are drawn with a rail down their left, and `e`
+  opens the turn in view ([clients/tui](../../clients/tui/README.md)). The design both
+  follow is [docs/design/frames.md](../design/frames.md).
+
 ## The scratchpad
 
 A long answer, such as a plan, a report, a comparison, a diagram or a table, does not
@@ -225,9 +260,14 @@ same name replaces it, so a plan is revised in place.
 - **Limits.** 256 KiB a document (`scratch_max_bytes`) and 50 documents a session
   (`scratch_max_documents`). Past either, `show` refuses and says so, and the agent
   replaces a document or answers in the chat.
-- **What it costs.** The document's words are still in the conversation, as the call's
-  arguments, so it costs about what the same answer in the chat would. What changes is
-  where you read it, not what is sent to the model.
+- **What it costs.** Until the conversation is compacted, the document's words are in it
+  as the call's arguments, so it costs about what the same answer in the chat would. A
+  compaction leaves each document out for a one-line pointer (its name, title, version
+  and size), and the summary it writes lists every document on the scratchpad, so from
+  then on the model is not sent them again but knows they are there. When the agent needs
+  a document after that, it reads it back with `read_file` on `scratch:/<name>`; that read
+  is the only way the agent's tools reach the scratchpad, and it writes there only with
+  `show`.
 
 ## What Troupe never does
 

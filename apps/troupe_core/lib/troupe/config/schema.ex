@@ -577,6 +577,23 @@ defmodule Troupe.Config.Schema do
              )
            ]},
           "What follows a person from one client to the other. The daemon keeps it and acts on none of it."
+        ),
+        spec(
+          "transcript",
+          {:object,
+           [
+             spec(
+               "detail",
+               {:enum, ~w(quiet tools everything)},
+               "How much of a turn the clients draw open: `quiet`, its answer with its working one strip above it; " <>
+                 "`tools`, its tool calls open and its reasoning collapsed; `everything`, nothing collapsed. " <>
+                 "A failed call, an approval, a question and what follows a budget stop are open at every level. " <>
+                 "`/detail` changes it for one session.",
+               default: "quiet",
+               label: "transcript detail"
+             )
+           ]},
+          "How the clients draw a transcript. The daemon keeps it and acts on none of it."
         )
       ])
     ]

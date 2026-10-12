@@ -159,14 +159,14 @@ SOFTWARE.
 ========================================================================================
 Hex packages: castore, db_connection, ecto, ecto_sql, elixir_make, file_system,
   mint_web_socket, nimble_pool, postgrex, rustler_precompiled, stream_data
-Rust crates: dispatch2, icy_sixel, libappindicator-sys, mac-notification-sys, ndk,
+Rust crates: dispatch2, icy_sixel, jni, libappindicator-sys, mac-notification-sys, ndk,
   ndk-context, ndk-sys, objc2-app-kit, objc2-cloud-kit, objc2-core-data,
   objc2-core-foundation, objc2-core-graphics, objc2-core-image, objc2-core-location,
-  objc2-core-text, objc2-exception-helper, objc2-io-surface, objc2-quartz-core,
-  objc2-ui-kit, objc2-user-notifications, objc2-web-kit, quantette, r-efi, rustler,
-  tui-big-text, tui-markdown, unic-char-property, unic-char-range, unic-common,
-  unic-ucd-ident, unic-ucd-version, wasip3, winapi-i686-pc-windows-gnu,
-  winapi-x86_64-pc-windows-gnu
+  objc2-core-text, objc2-exception-helper, objc2-io-surface, objc2-osa-kit,
+  objc2-quartz-core, objc2-ui-kit, objc2-user-notifications, objc2-web-kit, quantette,
+  r-efi, rustler, rustls-platform-verifier-android, tui-big-text, tui-markdown,
+  unic-char-property, unic-char-range, unic-common, unic-ucd-ident, unic-ucd-version,
+  wasip3, winapi-i686-pc-windows-gnu, winapi-x86_64-pc-windows-gnu
 None of these ships a licence file. Each declares Apache-2.0, and this is its standard
 text.
 ----------------------------------------------------------------------------------------
@@ -200,29 +200,31 @@ text.
 
 ========================================================================================
 Hex packages: cc_precompiler, owl, pluggable
-Rust crates: approx, arrayvec, async-channel, async-executor, async-io, async-lock,
-  async-process, async-signal, async-task, atomic, atomic-waker, base64, bit-set,
-  bit-vec, bitflags, block-buffer, blocking, bs58, bytemuck, camino, cfg-if, chacha20,
-  concurrent-queue, core-foundation, core-foundation-sys, core-graphics,
+Rust crates: approx, arbitrary, arrayvec, async-channel, async-executor, async-io,
+  async-lock, async-process, async-signal, async-task, atomic, atomic-waker, base64,
+  bit-set, bit-vec, bitflags, block-buffer, blocking, bs58, bytemuck, camino, cfg-if,
+  chacha20, concurrent-queue, core-foundation, core-foundation-sys, core-graphics,
   core-graphics-types, core_detect, cpufeatures, critical-section, crossbeam-channel,
   crossbeam-deque, crossbeam-epoch, crossbeam-utils, crypto-common, data-url,
   dbus-secret-service, defmt, digest, either, embed_plist, encoding_rs, equivalent,
-  errno, euclid, event-listener, event-listener-strategy, fastrand, fixedbitset, flate2,
-  fnv, form_urlencoded, futures-lite, futures-timer, getopts, gif, glob, hashbrown,
-  heck, hermit-abi, html5ever, httparse, hyper-rustls, idna, idna_adapter, indexmap,
-  itertools, jni, js-sys, keyboard-types, lazy_static, libappindicator, linked-hash-map,
-  linux-raw-sys, lock_api, log, lru-slab, markup5ever, memmem, mime, minimal-lexical,
-  muda, multiversion, num-traits, once_cell, ordered-stream, palette, parking,
-  parking_lot, parking_lot_core, percent-encoding, pest, piper, png, polling, psl-types,
-  publicsuffix, quinn, quinn-proto, quinn-udp, rayon, rayon-core, regex, regex-automata,
-  regex-syntax, rustix, rustls, safe_arch, scopeguard, security-framework,
-  security-framework-sys, self_cell, serde_with, serialize-to-javascript, servo_arc,
-  sha2, signal-hook, signal-hook-mio, signal-hook-registry, smallvec, socket2,
-  stable_deref_trait, static_assertions, string_cache, system-configuration,
-  system-configuration-sys, tempfile, tendril, tinyvec, tray-icon, ucd-trie, unicase,
-  unicode-segmentation, unicode-truncate, unicode-width, url, utf8_iter, uuid, wasi,
-  wasip2, wasm-bindgen, wasm-bindgen-futures, wasm-bindgen-shared, web-sys, web_atoms,
-  weezl, window-vibrancy, wit-bindgen, wry, yaml-rust, zeroize, zune-core, zune-jpeg
+  errno, euclid, event-listener, event-listener-strategy, fastrand, filetime,
+  fixedbitset, flate2, fnv, form_urlencoded, futures-lite, futures-timer, getopts, gif,
+  glob, hashbrown, heck, hermit-abi, html5ever, httparse, hyper-rustls, idna,
+  idna_adapter, indexmap, itertools, jni, js-sys, keyboard-types, lazy_static,
+  libappindicator, linked-hash-map, linux-raw-sys, lock_api, log, lru-slab, markup5ever,
+  memmem, mime, minimal-lexical, muda, multiversion, num-traits, once_cell,
+  openssl-probe, ordered-stream, palette, parking, parking_lot, parking_lot_core,
+  percent-encoding, pest, piper, png, polling, psl-types, publicsuffix, quinn,
+  quinn-proto, quinn-udp, rayon, rayon-core, regex, regex-automata, regex-syntax,
+  rustix, rustls, rustls-native-certs, rustls-platform-verifier, safe_arch, scopeguard,
+  security-framework, security-framework-sys, self_cell, serde_with,
+  serialize-to-javascript, servo_arc, sha2, signal-hook, signal-hook-mio,
+  signal-hook-registry, simd_cesu8, smallvec, socket2, stable_deref_trait,
+  static_assertions, string_cache, system-configuration, system-configuration-sys, tar,
+  tempfile, tendril, tinyvec, tray-icon, ucd-trie, unicase, unicode-segmentation,
+  unicode-truncate, unicode-width, url, utf8_iter, uuid, wasi, wasip2, wasm-bindgen,
+  wasm-bindgen-futures, wasm-bindgen-shared, web-sys, web_atoms, weezl, window-vibrancy,
+  wit-bindgen, wry, xattr, yaml-rust, zeroize, zune-core, zune-jpeg
 ----------------------------------------------------------------------------------------
 
 [The terms and conditions of the Apache License, Version 2.0, word for word as in LICENSE.]
@@ -282,13 +284,14 @@ Hex packages: decimal, fine, hpax, lazy_html, mint, nimble_options, telemetry
 npm packages: @tauri-apps/api
 Rust crates: allocator-api2, anyhow, dtoa, dyn-clone, erased-serde, fdeflate,
   field-offset, finl_unicode, image, image-webp, inventory, itoa, libc, miniz_oxide,
-  num-conv, num_enum, pin-project-lite, portable-atomic, portable-atomic-util,
+  num-conv, num_enum, osakit, pin-project-lite, portable-atomic, portable-atomic-util,
   proc-macro2, quote, rand_xoshiro, raw-window-handle, ref-cast, rustc-hash, ryu,
   semver, serde, serde-untagged, serde_core, serde_json, serde_urlencoded, simdutf8,
   syn, sync_wrapper, tauri, tauri-plugin-dialog, tauri-plugin-fs, tauri-plugin-http,
   tauri-plugin-notification, tauri-plugin-opener, tauri-plugin-single-instance,
-  tauri-runtime, tauri-runtime-wry, tauri-utils, tauri-winrt-notification, thiserror,
-  time, time-core, typeid, unicode-ident, utf8parse, vte, wasm-streams
+  tauri-plugin-updater, tauri-runtime, tauri-runtime-wry, tauri-utils,
+  tauri-winrt-notification, thiserror, time, time-core, typeid, unicode-ident,
+  utf8parse, vte, wasm-streams
 ----------------------------------------------------------------------------------------
 
 [The terms and conditions of the Apache License, Version 2.0, word for word as in LICENSE.]
@@ -826,13 +829,14 @@ SUCH DAMAGE.
 
 ========================================================================================
 Hex packages: yaml_elixir
-Rust crates: base64-simd, block2, dispatch2, dlopen2, icy_sixel, libappindicator-sys,
-  mac-notification-sys, ndk, ndk-context, ndk-sys, objc2, objc2-app-kit,
-  objc2-cloud-kit, objc2-core-data, objc2-core-foundation, objc2-core-graphics,
-  objc2-core-image, objc2-core-location, objc2-core-text, objc2-encode,
-  objc2-exception-helper, objc2-foundation, objc2-io-surface, objc2-quartz-core,
-  objc2-ui-kit, objc2-user-notifications, objc2-web-kit, quantette, r-efi, ratatui-3d,
-  ratatui-termina, render3d, rustler, tui-big-text, tui-markdown, unic-char-property,
+Rust crates: base64-simd, block2, dispatch2, dlopen2, icy_sixel, jni,
+  libappindicator-sys, mac-notification-sys, ndk, ndk-context, ndk-sys, objc2,
+  objc2-app-kit, objc2-cloud-kit, objc2-core-data, objc2-core-foundation,
+  objc2-core-graphics, objc2-core-image, objc2-core-location, objc2-core-text,
+  objc2-encode, objc2-exception-helper, objc2-foundation, objc2-io-surface,
+  objc2-osa-kit, objc2-quartz-core, objc2-ui-kit, objc2-user-notifications,
+  objc2-web-kit, quantette, r-efi, ratatui-3d, ratatui-termina, render3d, rustler,
+  rustls-platform-verifier-android, tui-big-text, tui-markdown, unic-char-property,
   unic-char-range, unic-common, unic-ucd-ident, unic-ucd-version, vsimd, vtparse,
   wasip3, webview2-com, webview2-com-sys, wezterm-input-types,
   winapi-i686-pc-windows-gnu, winapi-x86_64-pc-windows-gnu
@@ -1181,8 +1185,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 ========================================================================================
 npm packages: @tauri-apps/api
 Rust crates: tauri, tauri-plugin-dialog, tauri-plugin-fs, tauri-plugin-http,
-  tauri-plugin-notification, tauri-plugin-opener, tauri-runtime, tauri-runtime-wry,
-  tauri-utils, tauri-winrt-notification
+  tauri-plugin-notification, tauri-plugin-opener, tauri-plugin-updater, tauri-runtime,
+  tauri-runtime-wry, tauri-utils, tauri-winrt-notification
 ----------------------------------------------------------------------------------------
 
 MIT License
@@ -1236,7 +1240,8 @@ Creator: Person: Daniel Thompson-Yvetot
 npm packages: @tauri-apps/plugin-dialog, @tauri-apps/plugin-http,
   @tauri-apps/plugin-notification, @tauri-apps/plugin-opener
 Rust crates: tauri-plugin-dialog, tauri-plugin-fs, tauri-plugin-http,
-  tauri-plugin-notification, tauri-plugin-opener, tauri-plugin-single-instance
+  tauri-plugin-notification, tauri-plugin-opener, tauri-plugin-single-instance,
+  tauri-plugin-updater
 ----------------------------------------------------------------------------------------
 
 SPDXVersion: SPDX-2.1
@@ -1259,6 +1264,55 @@ PackageDownloadLocation: git://github.com/tauri-apps/tauri
 PackageDownloadLocation: git+https://github.com/tauri-apps/tauri.git
 PackageDownloadLocation: git+ssh://github.com/tauri-apps/tauri.git
 Creator: Person: Daniel Thompson-Yvetot
+
+========================================================================================
+npm packages: marked
+----------------------------------------------------------------------------------------
+
+# License information
+
+## Contribution License Agreement
+
+If you contribute code to this project, you are implicitly allowing your code
+to be distributed under the MIT license. You are also implicitly verifying that
+all code is your original work. `</legalese>`
+
+## Marked
+
+Copyright (c) 2018+, MarkedJS (https://github.com/markedjs/)
+Copyright (c) 2011-2018, Christopher Jeffrey (https://github.com/chjj/)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+## Markdown
+
+Copyright © 2004, John Gruber
+http://daringfireball.net/
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+* Neither the name “Markdown” nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+This software is provided by the copyright holders and contributors “as is” and any express or implied warranties, including, but not limited to, the implied warranties of merchantability and fitness for a particular purpose are disclaimed. In no event shall the copyright owner or contributors be liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, procurement of substitute goods or services; loss of use, data, or profits; or business interruption) however caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or otherwise) arising in any way out of the use of this software, even if advised of the possibility of such damage.
 
 ========================================================================================
 npm packages: react, react-dom, scheduler
@@ -1520,8 +1574,8 @@ Rust crates: adler2, allocator-api2, anyhow, async-channel, async-executor, asyn
   minimal-lexical, num_enum, once_cell, ordered-stream, pango, pango-sys, parking, pest,
   pin-project-lite, piper, polling, portable-atomic, portable-atomic-util, proc-macro2,
   quote, ref-cast, rustc-hash, rustix, semver, serde, serde-untagged, serde_core,
-  serde_json, servo_arc, syn, thiserror, tinyvec, typeid, unicode-ident, wasi, wasip2,
-  wasm-streams, winnow, wit-bindgen, x11, x11-dl, zmij, zvariant_utils
+  serde_json, servo_arc, simd_cesu8, syn, thiserror, tinyvec, typeid, unicode-ident,
+  wasi, wasip2, wasm-streams, winnow, wit-bindgen, x11, x11-dl, zmij, zvariant_utils
 ----------------------------------------------------------------------------------------
 
 Permission is hereby granted, free of charge, to any
@@ -1718,6 +1772,38 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+========================================================================================
+Rust crates: arbitrary
+----------------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2019 Manish Goregaokar
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 
 ========================================================================================
 Rust crates: arrayvec
@@ -2708,8 +2794,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ========================================================================================
-Rust crates: cfg-if, futures-timer, js-sys, socket2, wasm-bindgen, wasm-bindgen-futures,
-  wasm-bindgen-shared, web-sys
+Rust crates: cfg-if, filetime, futures-timer, js-sys, openssl-probe, socket2,
+  wasm-bindgen, wasm-bindgen-futures, wasm-bindgen-shared, web-sys
 ----------------------------------------------------------------------------------------
 
 Copyright (c) 2014 Alex Crichton
@@ -5027,8 +5113,8 @@ SOFTWARE.
 ========================================================================================
 Rust crates: dispatch2, objc2-app-kit, objc2-cloud-kit, objc2-core-data,
   objc2-core-foundation, objc2-core-graphics, objc2-core-image, objc2-core-location,
-  objc2-core-text, objc2-exception-helper, objc2-io-surface, objc2-quartz-core,
-  objc2-ui-kit, objc2-user-notifications, objc2-web-kit
+  objc2-core-text, objc2-exception-helper, objc2-io-surface, objc2-osa-kit,
+  objc2-quartz-core, objc2-ui-kit, objc2-user-notifications, objc2-web-kit
 None of these ships a licence file. Each declares Zlib, and this is its standard text.
 ----------------------------------------------------------------------------------------
 
@@ -6695,7 +6781,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ========================================================================================
-Rust crates: hyper-rustls, rustls
+Rust crates: hyper-rustls, rustls, rustls-native-certs
 ----------------------------------------------------------------------------------------
 
 Copyright (c) 2016 Joseph Birr-Pixton <jpixton@gmail.com>
@@ -6725,7 +6811,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 ========================================================================================
-Rust crates: hyper-rustls, rustls
+Rust crates: hyper-rustls, rustls, rustls-native-certs
 ----------------------------------------------------------------------------------------
 
 ISC License (ISC)
@@ -8120,6 +8206,70 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ========================================================================================
+Rust crates: minisign-verify
+----------------------------------------------------------------------------------------
+
+Copyright (c) 2019-2025 Frank Denis
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+--
+
+Code in the src/crypto folder is derived from the rust-crypto project:
+https://github.com/DaGenix/rust-crypto
+
+Original ISC license follows:
+
+Copyright (c) 2006-2009 Graydon Hoare
+Copyright (c) 2009-2013 Mozilla Foundation
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+========================================================================================
 Rust crates: miniz_oxide
 ----------------------------------------------------------------------------------------
 
@@ -9010,6 +9160,36 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 
   This Source Code Form is "Incompatible With Secondary Licenses", as
   defined by the Mozilla Public License, v. 2.0.
+
+========================================================================================
+Rust crates: osakit
+----------------------------------------------------------------------------------------
+
+Copyright (c) 2024 Marat Dulin
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 
 ========================================================================================
 Rust crates: outref
@@ -10520,6 +10700,20 @@ is licensed under:
 at your option.
 
 ========================================================================================
+Rust crates: rustls-native-certs
+----------------------------------------------------------------------------------------
+
+Rustls is distributed under the following three licenses:
+
+- Apache License version 2.0.
+- MIT license.
+- ISC license.
+
+These are included as LICENSE-APACHE, LICENSE-MIT and LICENSE-ISC
+respectively.  You may use this software under the terms of any
+of these licenses, at your option.
+
+========================================================================================
 Rust crates: rustls-pki-types
 ----------------------------------------------------------------------------------------
 
@@ -10579,6 +10773,32 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+========================================================================================
+Rust crates: rustls-platform-verifier
+----------------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2022 1Password
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ========================================================================================
 Rust crates: rustls-webpki
@@ -10687,6 +10907,18 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+========================================================================================
+Rust crates: schannel
+----------------------------------------------------------------------------------------
+
+Copyright (c) 2015 steffengy
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ========================================================================================
 Rust crates: schemars
@@ -12093,6 +12325,36 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ========================================================================================
+Rust crates: tar
+----------------------------------------------------------------------------------------
+
+Copyright (c) The tar-rs Project Contributors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+========================================================================================
 Rust crates: tauri-plugin-single-instance
 ----------------------------------------------------------------------------------------
 
@@ -12143,7 +12405,7 @@ PackageDownloadLocation: git+ssh://github.com/tauri-apps/winrt-notification.git
 Creator: Person: Daniel Thompson-Yvetot
 
 ========================================================================================
-Rust crates: tempfile
+Rust crates: tempfile, xattr
 ----------------------------------------------------------------------------------------
 
 Copyright (c) 2015 Steven Allen
@@ -13025,7 +13287,7 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ========================================================================================
-Rust crates: webpki-roots
+Rust crates: webpki-root-certs, webpki-roots
 ----------------------------------------------------------------------------------------
 
 # Community Data License Agreement - Permissive - Version 2.0
@@ -13705,6 +13967,35 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+========================================================================================
+Rust crates: zip
+----------------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2014 Mathijs van de Nes
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Some files in the "tests/data" subdirectory of this repository are under other
+licences; see files named LICENSE.*.txt for details.
 
 ========================================================================================
 Rust crates: zlib-rs

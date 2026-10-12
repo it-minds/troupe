@@ -25,18 +25,20 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
 
     @doc """
     Start one. Options: `expires_in` (seconds, 3600), `deny` (the person refuses),
-    `challenge_metadata` (whether the 401 names the metadata, true), `require_resource`
+    `challenge_metadata` (whether the 401 names the metadata, true, or a URL it names
+    instead), `require_resource`
     (true), `write_tool` (whether `tools/list` names `write`, false; it can be called
     either way), `revocation` (`:ok`, `:refuse`, `:slow` or `:none`, which names no
-    endpoint; `:ok`) and `revocation_endpoint` (a URL the metadata names instead of its
-    own).
+    endpoint; `:ok`), `revocation_endpoint`, `token_endpoint` and `authorization_endpoint`
+    (a URL the metadata names instead of its own), and `host` (the name its own URLs use
+    for the loopback address it listens on, `127.0.0.1`; issue #618).
     """
     def start(test, opts \\ []) do
       {:ok, listener} =
         :gen_tcp.listen(0, [:binary, active: false, packet: :raw, ip: {127, 0, 0, 1}])
 
       {:ok, port} = :inet.port(listener)
-      base = "http://127.0.0.1:#{port}"
+      base = "http://#{Keyword.get(opts, :host, "127.0.0.1")}:#{port}"
 
       {:ok, agent} =
         Agent.start(fn ->
@@ -50,6 +52,8 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
             write_tool: Keyword.get(opts, :write_tool, false),
             revocation: Keyword.get(opts, :revocation, :ok),
             revocation_endpoint: Keyword.get(opts, :revocation_endpoint),
+            token_endpoint: Keyword.get(opts, :token_endpoint),
+            authorization_endpoint: Keyword.get(opts, :authorization_endpoint),
             codes: %{},
             # Each token with the scopes it was granted.
             access: %{},
@@ -166,8 +170,9 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
         Map.merge(
           %{
             "issuer" => base <> "/tenant",
-            "authorization_endpoint" => base <> "/tenant/authorize",
-            "token_endpoint" => base <> "/tenant/token",
+            "authorization_endpoint" =>
+              state.authorization_endpoint || base <> "/tenant/authorize",
+            "token_endpoint" => state.token_endpoint || base <> "/tenant/token",
             "scopes_supported" => [
               "openid",
               "profile",
@@ -393,9 +398,11 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOAuth) do
 
     defp unauthorized(state, extra) do
       metadata =
-        if state.challenge_metadata,
-          do: ~s(resource_metadata="#{state.base}/.well-known/oauth-protected-resource/mcp", ),
-          else: ""
+        case state.challenge_metadata do
+          true -> ~s(resource_metadata="#{state.base}/.well-known/oauth-protected-resource/mcp", )
+          url when is_binary(url) -> ~s(resource_metadata="#{url}", )
+          _none -> ""
+        end
 
       respond(401, "application/json", ~s({"error":"unauthorized"}), [
         {"www-authenticate", ~s(Bearer #{metadata}scope="notes.read") <> extra}

@@ -10,10 +10,11 @@ defmodule Troupe.Client.Daemon.Link do
   that socket like anything else would; embedding saves a process, not a protocol. The
   embedded daemon lives as long as this VM does and never idles out from under the UI.
 
-  Fleet-level calls (`session.list`, `session.create`, `agents.list`, `worktree.list`,
-  `identity.get`) go over one `Troupe.Protocol.Client` on the native transport; each
-  attached session has its own `Troupe.Remote.Worker` on the WebSocket, so a session's
-  stream never queues behind a listing.
+  Fleet-level calls (`session.list`, `session.create`, `agents.list`, `identity.get`) go
+  over one `Troupe.Protocol.Client` on the native transport; each attached session has its
+  own `Troupe.Remote.Worker` on the WebSocket, so a session's stream never queues behind a
+  listing. A listing that can take minutes, `worktree.list`, goes on a connection of its
+  own (`call_apart/2`), so the fleet-level calls do not queue behind it either.
 
   ## The plane token
 
@@ -48,6 +49,36 @@ defmodule Troupe.Client.Daemon.Link do
   """
   @spec call(String.t(), map()) :: {:ok, term()} | {:error, term()}
   def call(method, params), do: ask({:call, method, params}, @call_timeout + 5_000)
+
+  @doc """
+  Call a daemon method on a connection of its own, made for the call and closed after it,
+  from the calling process: for a read that can take a long while. The daemon answers one
+  connection's calls in turn, so on the link such a call holds up every call behind it.
+  `worktree.list` is one: in a repository of many worktrees it runs git several times for
+  each, minutes of it on Windows, and a plain line's `agents.list` waited behind it until
+  it gave up (#621). With no daemon answering yet this is `call/2`, which starts one.
+  """
+  @spec call_apart(String.t(), map()) :: {:ok, term()} | {:error, term()}
+  def call_apart(method, params) do
+    case Troupe.Protocol.Daemon.connect(spawn: false, client_info: client_info()) do
+      {:ok, client} ->
+        try do
+          case request(client, method, params) do
+            {:error, %{} = error} -> {:error, error_message(error)}
+            {:error, :closed} -> {:error, unreachable(method)}
+            answer -> answer
+          end
+        after
+          Client.close(client)
+        end
+
+      {:error, :not_running} ->
+        call(method, params)
+
+      {:error, reason} ->
+        {:error, "no connection to the daemon: #{inspect(reason)}"}
+    end
+  end
 
   @doc "The loopback WebSocket the daemon serves, for a per-session worker connection."
   @spec websocket() :: {:ok, %{port: :inet.port_number(), token: String.t()}} | {:error, term()}

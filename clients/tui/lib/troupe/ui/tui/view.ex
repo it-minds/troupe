@@ -213,6 +213,8 @@ defmodule Troupe.UI.TUI.View do
           blocks: [[Model.line()]],
           heights: [non_neg_integer()],
           entries: non_neg_integer(),
+          turns: [non_neg_integer()],
+          view: Model.view(),
           total: non_neg_integer(),
           max_off: non_neg_integer(),
           offset: non_neg_integer(),
@@ -234,25 +236,36 @@ defmodule Troupe.UI.TUI.View do
           layout(width, height, true, length(Model.windows(state.model)), box_height(height))
 
         {left, side} = pane_split(pane_rect)
-        w = turn_lines_moved(w, side != nil)
         inner_w = max(left.width - 2, 1)
         inner_h = max(left.height - 2, 1)
         agent = viewed_agent(w, state.pane.agent)
         transcript = Map.get(w.agents, agent, %{transcript: []}).transcript
         entries = length(transcript)
 
-        blocks =
-          Model.pane_blocks(
+        # How much is open (TUI Decision 161): the session's level, the turns `e` turned the
+        # other way, and the cost lines the side box says where it is drawn (TUI Decision 160).
+        view = %{
+          detail: detail(state),
+          open: Map.get(state.pane, :open, MapSet.new()),
+          turn_lines: side == nil,
+          now: state.now
+        }
+
+        pairs = Model.transcript_blocks(w, agent, view)
+
+        live =
+          Model.live_blocks(
             w,
             agent,
-            state.expanded,
+            view,
             state.tick,
             state.now,
             state.answer,
             Map.get(state, :gate)
           )
 
-        heights = block_heights(transcript, blocks, inner_w, state.expanded)
+        blocks = Enum.map(pairs, &elem(&1, 1)) ++ live
+        heights = block_heights(Enum.map(pairs, &elem(&1, 0)), blocks, inner_w)
         total = Enum.sum(heights)
         max_off = max(total - inner_h, 0)
 
@@ -272,6 +285,8 @@ defmodule Troupe.UI.TUI.View do
           blocks: blocks,
           heights: heights,
           entries: entries,
+          turns: Model.turn_starts(transcript),
+          view: view,
           total: total,
           max_off: max_off,
           offset: offset,
@@ -282,11 +297,29 @@ defmodule Troupe.UI.TUI.View do
 
   def pane_geometry(_state, _size), do: nil
 
-  # Where the side box is drawn it says what the window's last turn cost (TUI Decision
-  # 160), so the window's transcript, in its pane and on its tile, leaves out the line that
-  # said it under the turn; a screen too narrow for the box keeps the line.
-  defp turn_lines_moved(w, true), do: Model.without_turn_lines(w)
-  defp turn_lines_moved(w, false), do: w
+  @doc """
+  The level a screen draws its transcripts at (TUI Decision 161): what `/detail` set for
+  this session, else the `transcript.detail` setting, quiet by default.
+  """
+  @spec detail(map()) :: :quiet | :tools | :everything
+  def detail(state), do: Map.get(state, :detail_own) || Map.get(state, :detail) || :quiet
+
+  @doc """
+  The turn `e` opens or closes in a pane: the last one while the pane follows the tail,
+  otherwise the one at the top of the view, which stays where it is as the turn changes
+  height.
+  """
+  @spec turn_in_view(geometry()) :: non_neg_integer()
+  def turn_in_view(%{follow?: true, turns: turns}), do: max(length(turns) - 1, 0)
+
+  def turn_in_view(g) do
+    {idx, _row} = block_at(g.heights, g.offset)
+    Model.turn_of(g.turns, min(idx, max(g.entries - 1, 0)))
+  end
+
+  @doc "Whether the turn `e` acts on is drawn with everything open."
+  @spec turn_open?(geometry()) :: boolean()
+  def turn_open?(g), do: Model.turn_level(g.view, turn_in_view(g)) == :everything
 
   # Following shows the end of the transcript — except when the last block is what the
   # branch is waiting on and it is taller than the pane: then its header (`APPROVAL: …`
@@ -299,22 +332,23 @@ defmodule Troupe.UI.TUI.View do
   end
 
   # Measuring every block is the part of a frame that grows with the session, and a
-  # finished entry does not change: its height is remembered per process, beside the
-  # entry it was measured from, and only an entry that is new or changed, and the live
-  # blocks after the transcript, are measured again. An unchanged entry is the very term
-  # remembered, so matching it is a pointer check, not a walk of its text.
-  defp block_heights(transcript, blocks, width, expanded?) do
+  # finished entry does not change: its height is remembered per process, beside the key
+  # it was drawn from — the entry and how it is drawn (`Model.transcript_blocks/3`) — and
+  # only an entry that is new or drawn differently, and the live blocks after the
+  # transcript, are measured again. An unchanged entry is the very term remembered, so
+  # matching its key is a pointer check, not a walk of its text.
+  defp block_heights(keys, blocks, width) do
     key = {__MODULE__, :heights}
 
     known =
       case Process.get(key) do
-        {^width, ^expanded?, pairs} -> pairs
+        {^width, pairs} -> pairs
         _ -> []
       end
 
-    {entry_blocks, live} = Enum.split(blocks, length(transcript))
-    pairs = measure(transcript, entry_blocks, known, width)
-    Process.put(key, {width, expanded?, pairs})
+    {entry_blocks, live} = Enum.split(blocks, length(keys))
+    pairs = measure(keys, entry_blocks, known, width)
+    Process.put(key, {width, pairs})
     Enum.map(pairs, &elem(&1, 1)) ++ Enum.map(live, &Model.row_count(&1, width))
   end
 
@@ -1375,7 +1409,7 @@ defmodule Troupe.UI.TUI.View do
 
   # The menu for a setting that has one: every model Troupe found, plus a way out
   # to typing one it did not; or every theme there is.
-  defp picker_list(%{settings: %{picker: p}}, rect) do
+  defp picker_list(%{settings: %{picker: p} = s}, rect) do
     # "▸ " takes two columns of the block's interior, and a note that would not fit
     # drops back a form rather than being clipped mid-word.
     width = max(rect.width - 4, 20)
@@ -1393,14 +1427,19 @@ defmodule Troupe.UI.TUI.View do
       highlight_symbol: "▸ ",
       highlight_style: selected(),
       block: %Block{
-        title: " #{picker_count(p)} — Enter picks · Esc back ",
+        title: " #{picker_count(p, picked_type(s))} — Enter picks · Esc back ",
         borders: [:all]
       }
     }
   end
 
-  defp picker_count(%{typed?: true, choices: choices}), do: "#{length(choices)} models detected"
-  defp picker_count(%{choices: choices}), do: "#{length(choices)} themes"
+  defp picker_count(%{typed?: true, choices: choices}, _type),
+    do: "#{length(choices)} models detected"
+
+  defp picker_count(%{choices: choices}, :detail), do: "#{length(choices)} levels"
+  defp picker_count(%{choices: choices}, _type), do: "#{length(choices)} themes"
+
+  defp picked_type(s), do: Map.get(Enum.at(Settings.fields(), s.cursor) || %{}, :type)
 
   defp note(choice, room),
     do: Enum.find(choice.notes, "", &(Model.cell_width(&1) <= room))
@@ -1729,7 +1768,8 @@ defmodule Troupe.UI.TUI.View do
   end
 
   defp settings_command_line(%{settings: %{picker: p} = s}) when p != nil do
-    {s.status || "", " choose a theme — ↑↓ move · Enter picks · Esc back "}
+    what = if picked_type(s) == :detail, do: "level", else: "theme"
+    {s.status || "", " choose a #{what} — ↑↓ move · Enter picks · Esc back "}
   end
 
   defp settings_command_line(%{settings: %{editing: nil} = s}) do
@@ -1738,6 +1778,7 @@ defmodule Troupe.UI.TUI.View do
         %{type: :bool} -> "Enter/Space toggles"
         %{type: :model} -> "Enter opens the model menu"
         %{type: :theme} -> "Enter opens the theme menu"
+        %{type: :detail} -> "Enter opens the levels"
         _ -> "Enter edits"
       end
 
@@ -2131,12 +2172,15 @@ defmodule Troupe.UI.TUI.View do
   defp strip(windows, rect, state) do
     shown = Enum.take(windows, 9)
     rects = tile_rects(rect, length(shown))
+    # Where the side box is drawn it says what the window's last turn cost (TUI Decision
+    # 160), so a tile, like the pane, draws the line that said it under the turn as
+    # nothing; a screen too narrow for the box keeps it.
     moved? = rect.width >= @side_box
 
     shown
     |> Enum.with_index(1)
     |> Enum.zip(rects)
-    |> Enum.flat_map(fn {{w, n}, r} -> window_tile(turn_lines_moved(w, moved?), n, r, state) end)
+    |> Enum.flat_map(fn {{w, n}, r} -> window_tile(w, n, r, state, not moved?) end)
   end
 
   # Nothing started yet: the mask and the word over what to type, when the screen has
@@ -2212,7 +2256,7 @@ defmodule Troupe.UI.TUI.View do
       |> Enum.all?(&match?({:system, _}, &1))
   end
 
-  defp window_tile(w, n, rect, state) do
+  defp window_tile(w, n, rect, state, turn_lines?) do
     inner_w = max(rect.width - 2, 1)
     inner_h = max(rect.height - 2, 1)
     focused? = state.focus == {:window, w.path}
@@ -2221,7 +2265,7 @@ defmodule Troupe.UI.TUI.View do
     # through the pane, its tile is where the newest output still shows up.
     rows =
       w
-      |> Model.tile_lines(state.tick, state.now, inner_h > 3)
+      |> Model.tile_lines(state.tick, state.now, inner_h > 3, true, turn_lines?)
       |> Model.tail_rows(inner_w, inner_h)
 
     tile = %Paragraph{
@@ -2338,8 +2382,9 @@ defmodule Troupe.UI.TUI.View do
       |> Model.rows(g.inner_w, row, g.inner_h)
       |> highlight(g, Map.get(state, :selection))
 
+    # The surface runs to the column before the scrollbar's.
     transcript = %Paragraph{
-      text: styled(rows),
+      text: styled(rows, g.inner_w - 1),
       wrap: false,
       block: %Block{
         title: pane_title(w, g.agent),
@@ -2410,14 +2455,14 @@ defmodule Troupe.UI.TUI.View do
     agents = length(Model.agent_paths(w))
     delegation? = Enum.any?(w.pending, &match?(%{kind: :approval, delegation: %{}}, &1))
     approval? = not delegation? and Enum.any?(w.pending, &(&1.kind in [:approval, :budget]))
-    verb = if state.expanded, do: "collapses", else: "expands"
+    verb = if turn_open?(g), do: "closes", else: "opens"
     selection? = Map.get(state, :selection) != nil
 
     pieces = [
       {true, ["PgUp/PgDn ↑↓ scroll", "PgUp/PgDn scroll", "PgUp/PgDn"]},
       {not g.follow?, ["End follows the tail", "End follows", "End"]},
       {agents > 1, ["←→ other agents", "←→ agents", "←→"]},
-      {not delegation?, ["e #{verb} output", "e #{verb}", "e"]},
+      {not delegation?, ["e #{verb} the turn", "e #{verb}", "e"]},
       {selection?, ["Ctrl-Y copies the selection", "Ctrl-Y copies selection", "Ctrl-Y sel"]},
       {not selection?, ["drag selects · Ctrl-Y copies all", "drag · Ctrl-Y copy", nil]},
       {approval?, ["y/n/a approve", "y/n/a", "y/n/a"]},
@@ -2473,9 +2518,11 @@ defmodule Troupe.UI.TUI.View do
   defp reverse_span({kind, _} = row, from, to) do
     {pre, inside, post} = Model.split_row(row, from, to)
 
+    # A frame's rail is not text, and keeps its tag so the row stays on the surface.
     reversed =
-      Enum.map(inside, fn {tag, text} ->
-        {add_reversed(segment_style(tag, kind, text)), text}
+      Enum.map(inside, fn
+        {:frame, _rail} = rail -> rail
+        {tag, text} -> {add_reversed(segment_style(tag, kind, text)), text}
       end)
 
     {kind, pre ++ reversed ++ post}
@@ -2491,6 +2538,23 @@ defmodule Troupe.UI.TUI.View do
 
   defp styled([]), do: ""
   defp styled(rows), do: Enum.map(rows, &styled_row/1)
+
+  # The pane's rows, those on the rendered surface laid on it out to `width`.
+  defp styled([], _width), do: ""
+  defp styled(rows, width), do: Enum.map(rows, &surface_row(&1, width))
+
+  # A row of a frame (TUI Decision 161): its rail first, and every cell of it, out to the
+  # edge, on the surface's background — one step from the terminal's own, where the
+  # terminal can draw one. With sixteen colours or none the role has no background, and
+  # the rail and the rules carry the frame alone; the rows are the same at every depth.
+  defp surface_row({_kind, [{:frame, rail} | segments]} = row, width) do
+    %Line{spans: spans} = line = styled_row(row)
+    used = Enum.reduce([{:frame, rail} | segments], 0, &(Model.cell_width(elem(&1, 1)) + &2))
+    pad = if width > used, do: [Span.new(String.duplicate(" ", width - used))], else: []
+    %{line | spans: Enum.map(spans ++ pad, &%{&1 | style: Theme.on_surface(&1.style)})}
+  end
+
+  defp surface_row(row, _width), do: styled_row(row)
 
   # A row is its kind's segments: each one carries either a tag the view maps to
   # a style, or a style of its own (syntax highlighting).
@@ -2514,8 +2578,19 @@ defmodule Troupe.UI.TUI.View do
   def segment_style(%Style{} = style, _kind, _text), do: style
   def segment_style(:muted, _kind, _text), do: Theme.style(:muted)
 
-  def segment_style(tag, _kind, _text) when tag in [:code_rail, :quote_rail, :linenum, :fill],
-    do: Theme.style(:rail)
+  def segment_style(tag, _kind, _text)
+      when tag in [:code_rail, :quote_rail, :linenum, :fill, :frame, :table_rail],
+      do: Theme.style(:rail)
+
+  # A turn's strip and a frame cut short are read second, as reasoning is; a failure the
+  # strip counts is in the colour every failure is in (TUI Decision 161).
+  def segment_style(tag, _kind, _text) when tag in [:strip, :strip_glyph, :more],
+    do: Theme.style(:muted)
+
+  def segment_style(:strip_failed, _kind, _text), do: Theme.style(:error)
+
+  # The curtain line's flourish is the quiet half of it; its facts are the activity's.
+  def segment_style(:curtain, _kind, _text), do: Theme.style(:muted, [:italic])
 
   def segment_style(:code_lang, _kind, _text), do: Theme.style(:accent)
   def segment_style(:code_inline, _kind, _text), do: Theme.style(:accent)

@@ -31,9 +31,15 @@ defmodule Troupe.MCP.Client do
   A *personal* connector — one a harness offers, running on somebody's own machine —
   goes through exactly this code with exactly these rules. The difference is whose
   credential it is and where the process runs, not what is sent.
+
+  **Where a person's own server is called from their machine** (`pinned`, Decision 875),
+  every request goes through `Troupe.MCP.Address`: to an address the server's name
+  resolved to and passed at, never a link-local, cloud metadata or unspecified one, and a
+  redirect is checked the same way before it is followed. A refusal comes back as its
+  sentence.
   """
 
-  alias Troupe.MCP.{Server, Sessions}
+  alias Troupe.MCP.{Address, Server, Sessions}
 
   @protocol_version "2025-06-18"
 
@@ -82,16 +88,18 @@ defmodule Troupe.MCP.Client do
   (`405`), and whatever it answers, the session is not used again.
   """
   @spec end_session(Sessions.session()) :: :ok
-  def end_session(%{id: id, url: url, version: version, ends_with: headers})
+  def end_session(%{id: id, url: url, version: version, ends_with: headers} = session)
       when is_binary(id) and is_list(headers) do
     _ =
       Req.request(
-        method: :delete,
-        url: url,
-        headers: [{"mcp-session-id", id}, {"mcp-protocol-version", version}] ++ headers,
-        receive_timeout: 3_000,
-        connect_options: [timeout: 3_000],
-        retry: false
+        [
+          method: :delete,
+          url: url,
+          headers: [{"mcp-session-id", id}, {"mcp-protocol-version", version}] ++ headers,
+          receive_timeout: 3_000,
+          connect_options: [timeout: 3_000],
+          retry: false
+        ] ++ reach(session)
       )
 
     :ok
@@ -192,7 +200,9 @@ defmodule Troupe.MCP.Client do
       # A person's credential on a pod is held for as long as a call takes, and not kept
       # here for a `DELETE` later (`Troupe.MCP.Sessions`).
       ends_with: if(server.credential_mode == :person and headers != [], do: nil, else: headers),
-      kept_for: Sessions.kept_for(server)
+      kept_for: Sessions.kept_for(server),
+      # The `DELETE` that ends it goes where the server's requests may (Decision 875).
+      pinned: server.pinned
     }
   end
 
@@ -231,18 +241,25 @@ defmodule Troupe.MCP.Client do
 
   defp post(server, headers, session, body) do
     Req.request(
-      method: :post,
-      url: server.url,
-      json: body,
-      headers:
-        [
-          {"accept", "application/json, text/event-stream"},
-          {"mcp-protocol-version", if(session, do: session.version, else: @protocol_version)}
-        ] ++ session_header(session) ++ headers,
-      receive_timeout: server.timeout_ms,
-      retry: false
+      [
+        method: :post,
+        url: server.url,
+        json: body,
+        headers:
+          [
+            {"accept", "application/json, text/event-stream"},
+            {"mcp-protocol-version", if(session, do: session.version, else: @protocol_version)}
+          ] ++ session_header(session) ++ headers,
+        receive_timeout: server.timeout_ms,
+        retry: false
+      ] ++ reach(server)
     )
   end
+
+  # A person's own server, called from their machine, is reached only where Decision 875
+  # lets it be; a pod's egress is its network policy's.
+  defp reach(%{pinned: true}), do: Address.options()
+  defp reach(_server_or_session), do: []
 
   defp session_header(%{id: id}) when is_binary(id), do: [{"mcp-session-id", id}]
   defp session_header(_none), do: []
@@ -269,6 +286,7 @@ defmodule Troupe.MCP.Client do
   defp answer({:ok, %{status: status, body: body}}),
     do: {:error, {:unexpected_status, status, body}}
 
+  defp answer({:error, %Address.Refused{} = refused}), do: {:error, Exception.message(refused)}
   defp answer({:error, reason}), do: {:error, reason}
 
   defp challenge(response) do

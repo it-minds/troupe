@@ -10,17 +10,14 @@
 // the stream, because the stream's order is the server's and a reconnect must not
 // reshuffle what somebody has already read.
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import {
-  BRIEF_PARTS,
-  FINISH_PARTS,
-  isBlobRef,
+  configKey,
   isBusy,
   needsYou,
   openApprovals,
   openQuestions,
-  partsOf,
   rootState,
   scratchSize,
   scratchVersion,
@@ -30,7 +27,6 @@ import {
 import type {
   AttachStatus,
   AuthSession,
-  BlobRef,
   DaemonClient,
   Entry,
   FleetRow,
@@ -43,12 +39,15 @@ import type {
 } from "@troupe/client";
 import { useSessionView, useStartQuestions } from "../hooks";
 import type { SessionHandle } from "../hooks";
+import { curtainLine, DEFAULT_DETAIL, isDetail, layout } from "../frames";
+import type { Detail, Drawn } from "../frames";
 import { AgentSwitch } from "./AgentSwitch";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
 import { CommandPalette } from "./CommandPalette";
 import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
+import { Curtain, ProseFrame, ReasoningFrame, StripLine, ToolFrame, useNow } from "./Frames";
 import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
 import { MemoryPane } from "./Memory";
@@ -133,6 +132,9 @@ export function Session({
   // The palette's agent rows carry their facts from the daemon's `agents.list` for this
   // workspace (troupe #565); a session on the platform has its commands.list alone.
   const agentRows = useMemo(() => (daemon && workspace ? () => daemon.listAgents(workspace).then((r) => r.agents) : undefined), [daemon, workspace]);
+  // How much of each turn is open: the config ladder's `transcript.detail`, unless `/detail`
+  // chose for this session (troupe #474).
+  const detail = useDetail(daemon, workspace, sessionId);
 
   // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen.
   useEffect(() => {
@@ -165,6 +167,7 @@ export function Session({
               if (what) setMemoryAsk((a) => ({ what, n: (a?.n ?? 0) + 1 }));
             },
             transcript: () => transcriptText(view.state),
+            detail: detail.command,
             ...(kind !== "team" && onAgents ? { agents: () => onAgents() } : {}),
             ...(agentRows ? { agentRows } : {}),
           }}
@@ -208,10 +211,12 @@ export function Session({
       <div className="stagearea">
         <div className="conversation">
           <Stream
+            key={sessionId}
             state={view.state}
             notes={notes}
             self={self}
             local={kind === "local"}
+            detail={detail.level}
             readBlob={view.readBlob}
             onSetup={onGo ? () => onGo("setup") : undefined}
             onScratch={setScratch}
@@ -312,6 +317,75 @@ function useStartNotes(daemon: DaemonClient | null, sessionId: string, said: str
     redraw((n) => n + 1);
   }, [daemon, sessionId, said]);
   return (daemon && anchored.get(daemon)?.get(sessionId)) || [];
+}
+
+// The level `/detail` chose, by daemon connection and session, for as long as the app
+// runs: the view is this app's own business, so nothing is written to the session's log or
+// to a file. A team session with no daemon here keeps its choice under `nowhere`.
+const chosen = new WeakMap<object, Map<string, Detail>>();
+const nowhere = {};
+
+function choices(daemon: DaemonClient | null): Map<string, Detail> {
+  const owner = daemon ?? nowhere;
+  const had = chosen.get(owner);
+  if (had) return had;
+  const made = new Map<string, Detail>();
+  chosen.set(owner, made);
+  return made;
+}
+
+/**
+ * How much of a transcript is open (troupe #474): `transcript.detail` as the config ladder
+ * has it for the session's workspace, which the daemon answers from every layer, read when
+ * the daemon is reached and again when a `transcript` key changes, and quiet with no daemon
+ * to ask; and `/detail`'s choice for this session over it.
+ * `command` is the palette's `/detail`.
+ */
+function useDetail(
+  daemon: DaemonClient | null,
+  workspace: string | undefined,
+  sessionId: string,
+): { level: Detail; command: (args: string) => string | undefined } {
+  const [setting, setSetting] = useState<Detail>(DEFAULT_DETAIL);
+  const [choice, setChoice] = useState<Detail | undefined>(() => choices(daemon).get(sessionId));
+  useEffect(() => setChoice(choices(daemon).get(sessionId)), [daemon, sessionId]);
+
+  useEffect(() => {
+    if (!daemon) return;
+    let live = true;
+    const read = (): void => {
+      daemon
+        .modelConfig(workspace)
+        .then((config) => {
+          const value = configKey(config, "transcript.detail")?.value;
+          if (live) setSetting(isDetail(value) ? value : DEFAULT_DETAIL);
+        })
+        .catch(() => undefined);
+    };
+    read();
+    const stop = daemon.onConfigChanged((changed) => {
+      if (changed.keys.some((k) => k === "transcript" || k.startsWith("transcript."))) read();
+    });
+    return () => {
+      live = false;
+      stop();
+    };
+  }, [daemon, workspace]);
+
+  const command = useCallback(
+    (args: string): string | undefined => {
+      if (args === "") {
+        return choice ? `transcript detail: ${choice}, for this session (the setting says ${setting})` : `transcript detail: ${setting} (the transcript.detail setting)`;
+      }
+      if (!isDetail(args)) return "usage: /detail [quiet | tools | everything]";
+      choices(daemon).set(sessionId, args);
+      setChoice(args);
+      return undefined;
+    },
+    [choice, setting, daemon, sessionId],
+  );
+
+  return { level: choice ?? setting, command };
 }
 
 /** What was said, for `/copy`: the people's and the agent's words, not the tool traffic. */
@@ -565,6 +639,7 @@ function Stream({
   notes,
   self,
   local,
+  detail,
   readBlob,
   onSetup,
   onScratch,
@@ -575,35 +650,53 @@ function Stream({
   self: string | undefined;
   /** A session on this computer, whose model settings are this person's to change. */
   local: boolean;
+  /** How much of each turn is open. */
+  detail: Detail;
   readBlob: (blob: string) => Promise<string>;
   /** Leave for the Setup screen, offered under a model error a first run can fix. */
   onSetup?: (() => void) | undefined;
   /** Open the scratchpad on a document, by name. */
   onScratch: (name: string) => void;
 }): JSX.Element {
+  // The turns a click on their strip opened (or shut, at `everything`), by key. Another
+  // level draws every turn again, all of them as it says.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => setOpened(new Set()), [detail]);
+  const toggle = (turn: string): void =>
+    setOpened((was) => {
+      const next = new Set(was);
+      if (!next.delete(turn)) next.add(turn);
+      return next;
+    });
+
+  // The clock, while something runs: a running call's strip and the curtain line count from it.
+  const now = useNow(isBusy(state) || needsYou(state));
+  const drawn = useMemo(() => layout(state.entries, { detail, opened, now }), [state.entries, detail, opened, now]);
+  // What streams belongs to the last turn, and is drawn at its level.
+  const live = drawn.at(-1)?.level ?? detail;
+  const line = curtainLine(state, now);
+
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // Scrolling is not focus: an arriving event must never move the caret.
     bottom.current?.scrollIntoView({ block: "end" });
-  }, [state.entries.length, state.streaming, state.pending.length, notes.length]);
+  }, [state.entries.length, state.streaming, state.pending.length, notes.length, state.thinking === "", line === null]);
 
   return (
     <div className="stream" aria-live="polite">
       {state.entries.length === 0 && <Loading what="Reading the session. The newest part arrives first." />}
 
       <NotesAt notes={notes} from={-Infinity} to={state.entries[0]?.seq ?? Infinity} />
-      {state.entries.map((e, i) => (
-        <Fragment key={`${e.kind}-${e.seq}`}>
-          <StreamEntry entry={e} self={self} local={local} readBlob={readBlob} onSetup={onSetup} onScratch={onScratch} />
-          <NotesAt notes={notes} from={e.seq} to={state.entries[i + 1]?.seq ?? Infinity} />
+      {drawn.map((d, i) => (
+        <Fragment key={`${d.entry.kind}-${d.entry.seq}`}>
+          {d.strip && <StripLine strip={d.strip} onToggle={() => toggle(d.turn)} />}
+          {!d.hidden && <StreamEntry drawn={d} self={self} local={local} readBlob={readBlob} onSetup={onSetup} onScratch={onScratch} />}
+          <NotesAt notes={notes} from={d.entry.seq} to={drawn[i + 1]?.entry.seq ?? Infinity} />
         </Fragment>
       ))}
 
-      {state.thinking && (
-        <details className="thinking">
-          <summary>Thinking</summary>
-          <pre>{state.thinking}</pre>
-        </details>
+      {state.thinking && live !== "quiet" && (
+        <ReasoningFrame text={state.thinking} ms={state.thinkingAt === undefined ? undefined : now - state.thinkingAt} open={live === "everything"} />
       )}
 
       {state.streaming && (
@@ -612,9 +705,13 @@ function Stream({
             <span className="name">Troupe</span>
             <Pill status="running">Writing now</Pill>
           </div>
-          <div className="body caret">{state.streaming}</div>
+          <div className="frame prose">
+            <div className="md caret">{state.streaming}</div>
+          </div>
         </article>
       )}
+
+      {line && <Curtain line={line} />}
 
       {/* Queued, not optimistic: it is not in the stream until the server says it is. */}
       {state.pending.map((p) => (
@@ -647,21 +744,42 @@ function NotesAt({ notes, from, to }: { notes: Note[]; from: number; to: number 
   );
 }
 
-function StreamEntry({
-  entry,
-  self,
-  local,
-  readBlob,
-  onSetup,
-  onScratch,
-}: {
-  entry: Entry;
+type EntryProps = {
+  /** The entry, with the level it is drawn at. */
+  drawn: Drawn;
   self: string | undefined;
   local: boolean;
   readBlob: (blob: string) => Promise<string>;
   onSetup?: (() => void) | undefined;
   onScratch: (name: string) => void;
-}): JSX.Element | null {
+};
+
+/**
+ * Whether an entry would draw the same: the fold hands back the same object for an entry
+ * nothing changed, so the clock that ticks while a turn runs redraws the strip and the
+ * curtain line, not the whole transcript.
+ */
+function sameEntry(a: EntryProps, b: EntryProps): boolean {
+  return (
+    a.drawn.entry === b.drawn.entry &&
+    a.drawn.level === b.drawn.level &&
+    a.self === b.self &&
+    a.local === b.local &&
+    a.readBlob === b.readBlob &&
+    a.onSetup === b.onSetup &&
+    a.onScratch === b.onScratch
+  );
+}
+
+const StreamEntry = memo(function StreamEntry({
+  drawn,
+  self,
+  local,
+  readBlob,
+  onSetup,
+  onScratch,
+}: EntryProps): JSX.Element | null {
+  const { entry, level } = drawn;
   switch (entry.kind) {
     case "user": {
       const mine = entry.author === self || entry.author === undefined;
@@ -680,6 +798,8 @@ function StreamEntry({
       );
     }
 
+    // The model's prose, on the rendered surface: a block inside it is cut past the cap
+    // unless the turn is drawn at everything; the prose around it never is.
     case "assistant":
       return (
         <article className="turn agent">
@@ -687,12 +807,15 @@ function StreamEntry({
             <span className="name">Troupe</span>
             {entry.agent.length > 1 && <span className="micro muted">{entry.agent.slice(1).join(" › ")}</span>}
           </div>
-          <Markdown text={entry.text} />
+          <ProseFrame text={entry.text} full={level === "everything"} />
         </article>
       );
 
+    case "reasoning":
+      return <ReasoningFrame text={entry.text} ms={entry.ms} open={level === "everything"} />;
+
     case "tool":
-      return <ToolActivity entry={entry} readBlob={readBlob} />;
+      return <ToolFrame entry={entry} level={level} readBlob={readBlob} />;
 
     case "scratch":
       return <ScratchCard entry={entry} onOpen={onScratch} />;
@@ -781,7 +904,7 @@ function StreamEntry({
       );
     }
   }
-}
+}, sameEntry);
 
 /**
  * What a person does about a failed model request in a session on this computer, where
@@ -796,85 +919,6 @@ function modelErrorStep(text: string): string | null {
   if (reason.startsWith("no API key is configured")) return "Set up a provider on This computer, under Models.";
   if (reason.startsWith("the provider rejected the credentials")) return "Check the key on This computer, under Models.";
   return null;
-}
-
-/**
- * Tool activity: one mono line — verb, target, duration — collapsed by default,
- * because a session produces hundreds and none of them is the point.
- */
-function ToolActivity({ entry, readBlob }: { entry: Extract<Entry, { kind: "tool" }>; readBlob: (b: string) => Promise<string> }): JSX.Element {
-  const args = (entry.args ?? {}) as Record<string, unknown>;
-  const target = ["path", "file", "command", "query", "url", "agent", "child"].map((k) => args[k]).find((v) => typeof v === "string") as string | undefined;
-  const running = entry.ok === undefined;
-  // A brief and a finish are read as their parts, each under its name, not as JSON
-  // (troupe Decision 847); a call from before they had parts has none, and stays JSON.
-  const shape = entry.name === "delegate" ? BRIEF_PARTS : entry.name === "finish" ? FINISH_PARTS : null;
-  const parts = shape ? partsOf(entry.args, shape) : [];
-
-  return (
-    <details className={`tool ${running ? "running" : entry.ok ? "ok" : "failed"}`}>
-      <summary>
-        <span className="verb">{entry.name}</span>
-        <span className="target">{target ?? ""}</span>
-        <span className="muted">{running ? "running" : entry.ok ? "done" : "failed"}</span>
-      </summary>
-      {parts.length > 0 ? (
-        <dl className="payload facts wide parts">
-          {parts.map(([name, text]) => (
-            <Fragment key={name}>
-              <dt>{name.replace("_", " ")}</dt>
-              <dd>{text}</dd>
-            </Fragment>
-          ))}
-        </dl>
-      ) : (
-        <pre className="payload">{JSON.stringify(entry.args, null, 2)}</pre>
-      )}
-      {entry.content !== undefined &&
-        (isBlobRef(entry.content) ? (
-          <LargeResult reference={entry.content} readBlob={readBlob} />
-        ) : (
-          <pre className="payload">{entry.content}</pre>
-        ))}
-    </details>
-  );
-}
-
-/**
- * A result the server replaced with a reference because it ran past 16 KiB. The
- * preview came with the event; the bytes are fetched by range only when somebody asks
- * for them, which is what keeps opening a long session cheap.
- */
-function LargeResult({ reference, readBlob }: { reference: BlobRef; readBlob: (b: string) => Promise<string> }): JSX.Element {
-  const [full, setFull] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    <div className="payload">
-      <pre>{full ?? reference.preview ?? ""}</pre>
-      {full === null && (
-        <p className="note">
-          {bytes(reference.size)} in total.{" "}
-          <button
-            className="link"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              setError(null);
-              readBlob(reference.blob)
-                .then(setFull)
-                .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-                .finally(() => setBusy(false));
-            }}
-          >
-            {busy ? "Fetching…" : "Show all of it"}
-          </button>
-        </p>
-      )}
-      {error && <p className="note error">{error}</p>}
-    </div>
-  );
 }
 
 /**
@@ -908,8 +952,9 @@ function latest(docs: ScratchDocument[]): string | null {
 /**
  * The session's scratchpad (issue #472): a tab for each document, in the order each was
  * first written, and the open one's text, read when its tab opens and again when a newer
- * version of it is written. A markdown document is rendered as an answer is; the other
- * kinds are shown as they were written. Read-only, like the session's files.
+ * version of it is written. A markdown document is rendered as an answer is, with its
+ * source a toggle away; the other kinds are shown as they were written (a `mermaid`
+ * document as its source, for now). Read-only, like the session's files.
  */
 function Scratchpad({
   view,
@@ -951,10 +996,9 @@ function Scratchpad({
           ) : read.content === null ? (
             <Loading what="Reading the document…" />
           ) : doc.kind === "markdown" ? (
-            // Laid out as an answer is, which is what a turn's body is styled for.
-            <article className="turn">
-              <Markdown text={read.content} />
-            </article>
+            // A prose frame, as an answer is, and whole: the scratchpad is where a long
+            // document is read.
+            <ProseFrame text={read.content} full />
           ) : (
             <pre className="payload">{read.content}</pre>
           )}
@@ -987,75 +1031,6 @@ function useScratchText(view: SessionView | null, doc: ScratchDocument | undefin
     };
   }, [view, name, path, version]);
   return read && read.name === name ? read : { content: null, error: null };
-}
-
-/**
- * The small part of markdown an answer actually uses. Rendered, never dumped into a
- * `<pre>` — a wall of preformatted text is not what the agent wrote.
- */
-function Markdown({ text }: { text: string }): JSX.Element {
-  // A text that ends with a newline, as a file does, would leave its last block a line
-  // short of a list.
-  const blocks = text.replace(/\s+$/, "").split(/\n{2,}/);
-  return (
-    <div className="body">
-      {blocks.map((block, i) => {
-        const fence = block.match(/^```[\w-]*\n([\s\S]*?)\n?```$/);
-        if (fence) return <pre key={i} className="payload">{fence[1]}</pre>;
-
-        const heading = block.match(/^(#{1,4})\s+(.*)$/);
-        if (heading) return <h3 key={i}>{heading[2]}</h3>;
-
-        const lines = block.split("\n");
-        if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
-          return (
-            <ul key={i}>
-              {lines.map((l, j) => (
-                <li key={j}>{inline(l.replace(/^\s*[-*]\s+/, ""))}</li>
-              ))}
-            </ul>
-          );
-        }
-        if (lines.every((l) => /^\s*\d+[.)]\s+/.test(l))) {
-          return (
-            <ol key={i}>
-              {lines.map((l, j) => (
-                <li key={j}>{inline(l.replace(/^\s*\d+[.)]\s+/, ""))}</li>
-              ))}
-            </ol>
-          );
-        }
-        return <p key={i}>{inline(block)}</p>;
-      })}
-    </div>
-  );
-}
-
-/** Inline code and links, and nothing else pretending to be a markdown parser. */
-function inline(text: string): (string | JSX.Element)[] {
-  const out: (string | JSX.Element)[] = [];
-  const pattern = /`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/\S+)/g;
-  let at = 0;
-  let m: RegExpExecArray | null;
-  while ((m = pattern.exec(text))) {
-    if (m.index > at) out.push(text.slice(at, m.index));
-    if (m[1] !== undefined) out.push(<code key={m.index}>{m[1]}</code>);
-    else if (m[2] !== undefined)
-      out.push(
-        <a key={m.index} href={m[3]} target="_blank" rel="noreferrer noopener">
-          {m[2]}
-        </a>,
-      );
-    else
-      out.push(
-        <a key={m.index} href={m[4]} target="_blank" rel="noreferrer noopener">
-          {m[4]}
-        </a>,
-      );
-    at = m.index + m[0].length;
-  }
-  if (at < text.length) out.push(text.slice(at));
-  return out;
 }
 
 function Backstage({
@@ -1289,10 +1264,4 @@ function ReadOnly(): JSX.Element {
       <p className="muted">Ask its owner to give you access if you need to take part.</p>
     </div>
   );
-}
-
-function bytes(n: number): string {
-  if (n < 1024) return `${n} bytes`;
-  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }

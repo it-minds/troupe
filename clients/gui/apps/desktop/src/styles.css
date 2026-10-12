@@ -434,6 +434,21 @@ label code {
   color: var(--running-fg);
   background: var(--running-bg);
 }
+/* The app's own update (Decision 874): an offer is the machine's quiet cyan; the plane
+   not serving this version reads as the platform being away, which is what it means for
+   the team's sessions; a release that could not be checked is a refusal. */
+.banner.update.quiet {
+  color: var(--running-fg);
+  background: var(--running-bg);
+}
+.banner.update.required {
+  color: var(--offline-fg);
+  background: var(--offline-bg);
+}
+.banner.update.refused {
+  color: var(--error-fg);
+  background: var(--error-bg);
+}
 
 .empty {
   padding: var(--space-9) var(--space-6);
@@ -1216,25 +1231,6 @@ main {
 .turn .body p:last-child {
   margin-bottom: 0;
 }
-.turn .body ul,
-.turn .body ol {
-  margin: 0 0 var(--space-3);
-  padding-left: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.turn .body h3 {
-  margin: var(--space-3) 0 var(--space-2);
-}
-.turn .body pre.payload {
-  margin: 0 0 var(--space-3);
-  padding: var(--space-3);
-  background: var(--bg-sunken);
-  border: var(--bw-hairline) solid var(--border-hairline);
-  font: var(--t-code-small);
-  overflow: auto;
-}
 .turn.person .byline .name,
 .turn.person .byline .ring {
   color: var(--author, var(--p-self));
@@ -1297,7 +1293,8 @@ main {
   }
 }
 
-/* Tool activity: one mono line — verb, target, duration — collapsed by default. */
+/* A ruled disclosure: one mono line over what it holds, collapsed by default (a review's
+   event). A call in a transcript is a frame, below. */
 .tool {
   max-width: var(--measure-reading);
   border: var(--bw-hairline) solid var(--border-hairline);
@@ -1366,14 +1363,360 @@ main {
   white-space: pre-wrap;
 }
 
-.thinking {
-  max-width: var(--measure-reading);
-  color: var(--text-muted);
-  font: var(--t-code-small);
-}
-.thinking summary,
 details.advanced > summary {
   cursor: pointer;
+}
+
+/* -- frames ------------------------------------------------------------------ */
+
+/* Rendered output (issue #474, docs/design/frames.md). Every frame's body, and prose
+   whole, sits on the rendered surface: one step from the chat, `--bg-sunken` behind a
+   hairline, which reads as rendered and not as important. A person's turn keeps its
+   panel and its edge, and the chat itself (notes, a turn's strip, the curtain line, a
+   call's header) has neither: three surfaces, and not more. A block inside prose is a
+   frame of its own between its rules on the prose's surface, never a second step. Every
+   colour is a role's token: the rules, a table's lines and line numbers the strong
+   border; a label, a heading and a list marker `--frame-accent`; outcomes their status;
+   reasoning, the strip and the flourish muted; what waits on a person, and nothing else,
+   the reserved colour. */
+.frame {
+  max-width: var(--measure-reading);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-sunken);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  font: var(--t-body);
+  color: var(--text-body);
+}
+.frame pre {
+  margin: 0;
+  font: var(--t-code-small);
+  white-space: pre;
+  overflow-x: auto;
+}
+.frame-head {
+  display: flex;
+  align-items: baseline;
+  font: var(--t-code-small);
+  color: var(--text-muted);
+}
+.frame-head .label {
+  color: var(--frame-accent);
+}
+.frame-head .fact {
+  white-space: pre;
+}
+/* A block inside prose: its header over a rule, and a rule under it. */
+.frame.nested {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  background: none;
+  border: none;
+  border-top: var(--bw-hairline) solid var(--border-strong);
+  border-bottom: var(--bw-hairline) solid var(--border-strong);
+}
+.frame.nested > .frame-head {
+  padding: var(--space-1) 0;
+}
+.frame.nested pre {
+  padding: var(--space-2) 0;
+}
+.frame.diff .add {
+  color: var(--diff-add-fg);
+}
+.frame.diff .del {
+  color: var(--diff-del-fg);
+}
+.frame.diff .hunk {
+  color: var(--diff-hunk);
+}
+/* A file read: its line numbers in a column of their own, out of the way of a copy. */
+.frame pre.numbered .n {
+  display: inline-block;
+  width: var(--gutter, 3ch);
+  margin-right: var(--space-3);
+  text-align: right;
+  color: var(--border-strong);
+  user-select: none;
+}
+/* What a cut body left out, and the press that shows it in place. */
+.frame button.more {
+  display: block;
+  min-height: 0;
+  padding: var(--space-1) 0 0;
+  border: none;
+  background: none;
+  font: var(--t-code-small);
+  color: var(--text-muted);
+  text-align: left;
+}
+.frame button.more:hover:not(:disabled) {
+  filter: none;
+  color: var(--text-secondary);
+}
+.table-wrap {
+  max-width: 100%;
+  margin: 0 0 var(--space-3);
+  overflow-x: auto;
+}
+.frame table {
+  border-collapse: collapse;
+  font: var(--t-ui-small);
+}
+.frame th,
+.frame td {
+  padding: var(--space-1) var(--space-3);
+  text-align: left;
+  vertical-align: top;
+}
+.frame th {
+  font-weight: 700;
+  color: var(--text-primary);
+  border-bottom: var(--bw-hairline) solid var(--border-strong);
+}
+.frame th + th,
+.frame td + td {
+  border-left: var(--bw-hairline) solid var(--border-strong);
+}
+
+/* The model's prose: no header but the toggle to its source, where a header would be. */
+.frame.prose > .frame-head {
+  justify-content: flex-end;
+  margin: calc(-1 * var(--space-2)) calc(-1 * var(--space-2)) 0 0;
+}
+.frame.prose button.source-toggle {
+  min-height: 0;
+  padding: 0 var(--space-1);
+  border: none;
+  background: none;
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  color: var(--text-muted);
+}
+.frame.prose button.source-toggle[aria-pressed="true"] {
+  color: var(--text-primary);
+}
+.frame.prose pre.source {
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0 0 var(--space-3);
+}
+.md h3,
+.md h4 {
+  margin: var(--space-3) 0 var(--space-2);
+  color: var(--frame-accent);
+}
+.md ul,
+.md ol {
+  margin: 0 0 var(--space-3);
+  padding-left: 22px;
+}
+.md li {
+  margin: 4px 0;
+}
+.md li > ul,
+.md li > ol {
+  margin: 4px 0 0;
+}
+/* The marker changes with the depth: • ◦ ▪. */
+.md ul {
+  list-style-type: disc;
+}
+.md ul ul {
+  list-style-type: circle;
+}
+.md ul ul ul {
+  list-style-type: square;
+}
+.md li::marker {
+  color: var(--frame-accent);
+}
+.md li.task {
+  list-style-type: none;
+}
+.md input[type="checkbox"] {
+  min-height: 0;
+  margin: 0 var(--space-2) 0 0;
+  padding: 0;
+}
+.md code {
+  font: var(--t-code-small);
+  color: var(--text-primary);
+}
+.md blockquote {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-3);
+  border-left: var(--bw-edge) solid var(--border-strong);
+  color: var(--text-secondary);
+}
+.md hr {
+  margin: var(--space-3) 0;
+  border: none;
+  border-top: var(--bw-hairline) solid var(--border-strong);
+}
+/* Raw HTML, an image, a footnote: as the model wrote them. */
+.md .raw {
+  font: var(--t-code-small);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+.md.caret {
+  white-space: pre-wrap;
+}
+
+/* A call: its header on the chat, what came back on the surface under it. */
+.tool-frame {
+  max-width: var(--measure-reading);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.tool-frame > summary,
+.reasoning-frame > summary {
+  cursor: pointer;
+  list-style: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool-frame > summary::-webkit-details-marker,
+.reasoning-frame > summary::-webkit-details-marker {
+  display: none;
+}
+.tool-frame > summary {
+  display: block;
+  font: var(--t-code);
+  color: var(--text-label);
+}
+.tool-frame .name {
+  color: var(--text-primary);
+}
+.tool-frame .target {
+  color: var(--text-secondary);
+}
+.tool-frame > summary .fact {
+  color: var(--text-muted);
+}
+.tool-frame.ok .glyph {
+  color: var(--allowed-fg);
+}
+.tool-frame.running .glyph {
+  color: var(--running-fg);
+}
+.tool-frame.failed .glyph,
+.tool-frame.failed > summary .fact {
+  color: var(--error-fg);
+}
+.tool-frame > .frame {
+  color: var(--text-secondary);
+}
+.tool-frame > .frame .note {
+  margin: var(--space-1) 0;
+}
+/* A brief's or a finish's parts under their names (troupe Decision 847): a part of
+   several lines keeps them. */
+.tool-frame .parts dd {
+  white-space: pre-wrap;
+}
+.tool-frame details.args > summary {
+  cursor: pointer;
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  color: var(--text-muted);
+}
+.tool-frame details.args pre {
+  margin: var(--space-1) 0 0;
+  font: var(--t-code-small);
+  color: var(--text-secondary);
+  overflow-x: auto;
+}
+
+/* What the model thought: its header on the chat, the text dim on the surface. */
+.reasoning-frame {
+  max-width: var(--measure-reading);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.reasoning-frame > summary {
+  font: var(--t-code-small);
+  color: var(--text-muted);
+}
+.reasoning-frame > summary::before {
+  content: "▸\00a0";
+}
+.reasoning-frame[open] > summary::before {
+  content: "▾\00a0";
+}
+.reasoning-frame > .frame {
+  font: var(--t-note);
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+/* A turn's working, one line where it began; a press opens the turn. */
+.stream > button.strip {
+  flex: none;
+  align-self: flex-start;
+  max-width: var(--measure-reading);
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: var(--t-code-small);
+  color: var(--text-muted);
+  text-align: left;
+}
+.stream > button.strip:hover:not(:disabled) {
+  filter: none;
+  color: var(--text-secondary);
+}
+.strip .failed {
+  color: var(--error-fg);
+}
+/* The working sits close together, under the line that stands for it. */
+.stream > .strip + .tool-frame,
+.stream > .strip + .reasoning-frame,
+.stream > .tool-frame + .tool-frame,
+.stream > .reasoning-frame + .tool-frame,
+.stream > .tool-frame + .reasoning-frame {
+  margin-top: calc(-1 * var(--space-4));
+}
+
+/* While a turn works: the turning mark and the facts in the machine's colour, the
+   flourish muted before them; waiting on a person, the facts in the reserved colour. */
+.curtain {
+  margin: 0;
+  font: var(--t-code-small);
+  color: var(--running-fg);
+}
+.curtain .flourish {
+  color: var(--text-muted);
+}
+.curtain .spin {
+  display: inline-block;
+  animation: curtain-turn var(--dur-caret) steps(4) infinite;
+}
+.curtain.waiting {
+  color: var(--waiting-fg);
+}
+@keyframes curtain-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .curtain .spin {
+    animation: none;
+  }
 }
 
 /* -- the scratchpad ---------------------------------------------------------- */

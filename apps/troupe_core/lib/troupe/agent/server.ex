@@ -39,12 +39,24 @@ defmodule Troupe.Agent.Server do
     Definition,
     Definitions,
     Headroom,
+    Hold,
     Local,
     Spend,
     State,
     Writes
   }
-  alias Troupe.{Budget, Config, Events, Instructions, Registry, Skills, Todo, Tool, Tools}
+  alias Troupe.{
+    Budget,
+    Config,
+    Events,
+    Instructions,
+    Registry,
+    Scratch,
+    Skills,
+    Todo,
+    Tool,
+    Tools
+  }
 
   alias Troupe.LLM.{
     Catalog,
@@ -66,7 +78,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions, Shell}
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
-  alias Troupe.Tools.{Delegate, Finish, Output, ReadOutput}
+  alias Troupe.Tools.{Delegate, Finish, Output, ReadFile, ReadOutput, Show}
   alias Troupe.Watch.Trigger
 
   require Logger
@@ -370,10 +382,12 @@ defmodule Troupe.Agent.Server do
     do: %{state | child_seq: child_seq(state, data["child_path"])}
 
   # The turn context a call put into the conversation, put back where it was, so the call
-  # after a restart sends the prefix the one before it sent (Decision 863). A call that put
-  # none, and a log written before 0.13.0, fold as they did.
-  defp fold_event(%Event{type: "llm_request", data: %{"turn_context_block" => %{} = put}}, state),
-    do: put_context(state, put)
+  # after a restart sends the prefix the one before it sent (Decision 863). And what a turn's
+  # first call held, so a restart in the middle of the turn offers what it began with
+  # (Decision 876). A call that put or took neither, and a log written before them, fold as
+  # they did.
+  defp fold_event(%Event{type: "llm_request", data: data}, state),
+    do: state |> fold_context(data) |> fold_hold(data)
 
   # The note a root's failed request left in its conversation (Decision 693). A log written
   # before the note was, has none, and replays as it always did. A call the agent gave up
@@ -389,9 +403,9 @@ defmodule Troupe.Agent.Server do
   defp fold_event(%Event{type: "user_shell", data: data}, state), do: hold_shell(state, data)
 
   # A turn ends cancelled as well as at rest, and the next one counts what it costs from
-  # nothing (Decision 769).
+  # nothing (Decision 769) and takes its tools afresh (Decision 876).
   defp fold_event(%Event{type: "cancelled", data: data}, state),
-    do: %{fold_stopped(state, data) | turn: %Spend{}}
+    do: let_go(%{fold_stopped(state, data) | turn: %Spend{}})
 
   defp fold_event(%Event{type: type, data: data}, state) do
     case type do
@@ -455,7 +469,24 @@ defmodule Troupe.Agent.Server do
   # the input that starts a turn, or between a tool exchange and the call after it, and the
   # list the prompt shows is the turn's either way.
   defp fold_input(state, %{"source" => "shell"}), do: %{state | shell_notes: []}
-  defp fold_input(state, _data), do: show_todos(state)
+  defp fold_input(state, _data), do: state |> show_todos() |> let_go()
+
+  defp fold_context(state, %{"turn_context_block" => %{} = put}), do: put_context(state, put)
+  defp fold_context(state, _data), do: state
+
+  # What the turn's first call held, or the hold written before that it names by its
+  # digest (Decision 876). One naming none leaves the next call to take them afresh.
+  defp fold_hold(state, %{"turn_hold" => %{} = hold}) do
+    case Hold.fold(hold, state.hold_written) do
+      {:ok, tools, skills, written} ->
+        %{state | turn_tools: tools, turn_skills: skills, hold_written: written}
+
+      :error ->
+        state
+    end
+  end
+
+  defp fold_hold(state, _data), do: state
 
   # Being finished is not visible in the conversation — a subagent's last message is
   # the tool_results of its own `finish` call, which looks exactly like owing the model
@@ -501,11 +532,13 @@ defmodule Troupe.Agent.Server do
   end
 
   # A raise for one run is given back where the run ended (Decision 699), and the next run
-  # counts what it costs from nothing (Decision 769).
+  # counts what it costs from nothing (Decision 769) and takes its tools afresh (876).
   #
   # A subagent's wait for a child of its own (Decision 853) ends no run: its sum goes on.
   defp fold_limits(state, "turn_ended", %{"reason" => "waiting"}), do: state
-  defp fold_limits(state, "turn_ended", _data), do: %{reclaim_run_grant(state) | turn: %Spend{}}
+
+  defp fold_limits(state, "turn_ended", _data),
+    do: let_go(%{reclaim_run_grant(state) | turn: %Spend{}})
 
   defp fold_limits(state, "tool_failures_ask_started", data) do
     %{
@@ -1238,7 +1271,7 @@ defmodule Troupe.Agent.Server do
       |> apply_input(source, content, actor, meta.command_id)
       |> show_todos()
       |> instructions_due()
-      |> Map.put(:turn_tools, nil)
+      |> let_go()
     else
       Logger.debug("troupe: ignoring #{inspect(source)} input of #{inspect(content)}")
       state
@@ -1361,14 +1394,14 @@ defmodule Troupe.Agent.Server do
         gate_halt(halt)
 
       :ok ->
-        {state, attached} =
+        {state, held} =
           state
           |> fold_shell()
           |> fold_child_reports()
           |> load_instructions()
           |> hold_turn_tools()
-          |> attach_turn_context()
 
+        {state, attached} = attach_turn_context(state)
         definition = effective_definition(state)
         request = build_request(state, definition)
         {prefix, changed} = prefix_changes(state.prefix, request)
@@ -1390,6 +1423,7 @@ defmodule Troupe.Agent.Server do
           }
           |> Map.merge(changed)
           |> put_attached(attached)
+          |> put_held(held)
         )
 
         :telemetry.execute(
@@ -1443,6 +1477,9 @@ defmodule Troupe.Agent.Server do
   defp put_attached(data, {sections, put}),
     do: data |> Map.put("turn_context", sections) |> Map.put("turn_context_block", put)
 
+  defp put_held(data, nil), do: data
+  defp put_held(data, held), do: Map.put(data, "turn_hold", held)
+
   # The profile in force for this turn. Normally the agent's own; during an `AI?` watch
   # turn, the agent's own under the plan permission set (Decision 844): its model, prompt
   # and turns, with only the tools `plan` has too and `plan`'s denials over its own, so a
@@ -1470,11 +1507,21 @@ defmodule Troupe.Agent.Server do
 
   # The MCP servers' and the person's clients' tools, taken as a turn's first call begins
   # and held for the rest of the turn (Decision 871, as 798 holds the instruction files):
-  # what comes or goes in the middle of a turn is offered, or not, from the next one.
-  defp hold_turn_tools(%State{turn_tools: nil} = state),
-    do: %{state | turn_tools: Tools.mcp(state.session_id)}
+  # what comes or goes in the middle of a turn is offered, or not, from the next one. The
+  # skills too (Decision 876), and what was taken goes on that call's `llm_request`, whole
+  # or by the digest of the hold written whole before it, for a restart to fold back.
+  defp hold_turn_tools(%State{turn_tools: nil} = state) do
+    tools = Tools.mcp(state.session_id)
+    ws = state.workspace
+    skills = Skills.found(state.bundle, ws.root_real, trusted: ws.trusted?)
+    {held, written} = tools |> Hold.to_json(skills) |> Hold.written(state.hold_written)
+    {%{state | turn_tools: tools, turn_skills: skills, hold_written: written}, held}
+  end
 
-  defp hold_turn_tools(state), do: state
+  defp hold_turn_tools(state), do: {state, nil}
+
+  # A turn's hold let go of, as the turn ends or an input is taken: the next call takes it.
+  defp let_go(state), do: %{state | turn_tools: nil, turn_skills: nil}
 
   # The tools are offered knowing whether the model they go to binds its thinking to them:
   # one that does is offered the same on every call (Decisions 867 and 871).
@@ -1593,9 +1640,7 @@ defmodule Troupe.Agent.Server do
         do: Instructions.to_prompt(state.instructions, recall: recall?(definition))
       ),
       environment_section(state),
-      Skills.prompt_section(state.bundle, definition, state.workspace.root_real,
-        trusted: state.workspace.trusted?
-      ),
+      skills_section(state, definition),
       unless(stable?, do: goal_section(state))
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
@@ -1603,6 +1648,14 @@ defmodule Troupe.Agent.Server do
   end
 
   defp stable?(%State{config: config}), do: config.system_prompt == "stable"
+
+  # The skills as the turn's first call found them (Decision 876), for the profile in force,
+  # so a skill file added in the middle of a turn changes the prompt at the next one.
+  defp skills_section(%State{turn_skills: %{} = held}, definition),
+    do: held |> Skills.offered(definition) |> Skills.prompt_section_for()
+
+  defp skills_section(%State{workspace: ws} = state, definition),
+    do: Skills.prompt_section(state.bundle, definition, ws.root_real, trusted: ws.trusted?)
 
   # The brief names `recall` only to an agent that has it (Decision 838).
   defp recall?(%Definition{} = definition),
@@ -2214,7 +2267,7 @@ defmodule Troupe.Agent.Server do
     state = reclaim_run_grant(%{state | turn_mode: nil})
     data = if(reason, do: %{"reason" => reason}, else: %{})
     log(state, :turn_ended, Map.put(data, "turn", Spend.to_json(state.turn)))
-    state = %{state | turn: %Spend{}, turn_tools: nil}
+    state = let_go(%{state | turn: %Spend{}})
     publish_state(state, :idle)
     if state.child_reports != [] and reason == nil, do: send(self(), :child_reports)
     {:next_state, :idle, state}
@@ -2392,7 +2445,8 @@ defmodule Troupe.Agent.Server do
       # offers `goal_complete` (Decision 679), and what lets a call to it run (871).
       loop: if(state.turn_mode == :loop, do: state.loop),
       binds_thinking: binds_thinking?(state),
-      turn_tools: state.turn_tools
+      turn_tools: state.turn_tools,
+      turn_skills: state.turn_skills
     }
   end
 
@@ -2732,19 +2786,50 @@ defmodule Troupe.Agent.Server do
   end
 
   # What the question is about (Decision 699): the session's spend so far, from the index
-  # where every priced response lands; the scopes and the ceiling the terms leave a session
-  # on a pod; the file a workspace answer writes; and `iteration` for a loop's turn.
+  # where every priced response lands; the scopes the terms leave a session on a pod; the
+  # ceiling on the limit and whose it is; the file a workspace answer writes; and
+  # `iteration` for a loop's turn.
   defp budget_context(state, limit) do
     entry = headroom(state)[Headroom.dimension(limit)]
     terms = state.config.terms
+    {cap, cap_by} = ceiling(state.config, limit)
 
     BudgetQuestion.context(limit, entry,
       spent_micros: spent_micros(state),
       scopes: if(is_map(terms), do: [:run, :session], else: [:run, :session, :workspace]),
-      cap: if(is_map(terms), do: Map.get(terms, limit)),
+      cap: cap,
+      cap_by: cap_by,
       path: Config.project_path(state.workspace.root_real),
       run_word: if(state.turn_mode == :loop, do: "iteration", else: "run")
     )
+  end
+
+  # What a limit may not be raised past (issue #622): the lower of the ceiling a pod's
+  # terms set (Decision 699) and the one the organisation enforces on this machine
+  # (Decision 869), and whose it is, for the question's words. `{nil, nil}` where
+  # neither says.
+  defp ceiling(config, limit) do
+    terms = if is_map(config.terms), do: Map.get(config.terms, limit)
+
+    case config |> Map.get(:ceilings, %{}) |> Map.get(limit) do
+      %{limit: cap, source: source} when is_nil(terms) or cap < terms ->
+        {cap, {:organisation, source}}
+
+      _none when is_integer(terms) ->
+        {terms, :terms}
+
+      _none ->
+        {nil, nil}
+    end
+  end
+
+  # Every limit's ceiling, which whatever an answer did is held to.
+  defp ceilings(config) do
+    for limit <- @limits,
+        {cap, _by} <- [ceiling(config, limit)],
+        cap != nil,
+        into: %{},
+        do: {limit, cap}
   end
 
   defp spent_micros(state) do
@@ -2796,28 +2881,38 @@ defmodule Troupe.Agent.Server do
   defp scope_named(_session_or_odd), do: :session
 
   # `allow` also forgets which limits were warned about: a fresh slice is a fresh warning.
+  # Whatever an answer did is held to the ceilings (issue #622): `allow` raises every limit
+  # at once, and an answer logged before a ceiling was set is replayed under it.
   defp apply_budget_decision(state, :allow) do
-    %{state | budget: Budget.grant(state.budget), headroom_warned: MapSet.new()}
+    budget = state.budget |> Budget.grant() |> Budget.hold(ceilings(state.config))
+    %{state | budget: budget, headroom_warned: MapSet.new()}
   end
 
   defp apply_budget_decision(%State{budget_ask_limit: nil} = state, :always), do: state
 
-  defp apply_budget_decision(state, :always),
-    do: %{state | budget: Budget.lift(state.budget, state.budget_ask_limit)}
+  defp apply_budget_decision(state, :always) do
+    lifted = Budget.lift(state.budget, state.budget_ask_limit)
+    %{state | budget: Budget.hold(lifted, ceilings(state.config))}
+  end
 
   defp apply_budget_decision(%State{budget_ask_limit: nil} = state, {:extend, _scope, _amount}), do: state
 
   # A raise re-arms the warning for its own dimension: a fresh stretch of that limit. One
-  # for this run alone is remembered, to be given back where the run ends.
+  # for this run alone is remembered, as far as the ceilings let it go, to be given back
+  # where the run ends.
   defp apply_budget_decision(%State{budget_ask_limit: limit} = state, {:extend, scope, amount}) do
+    budget = state.budget |> Budget.extend(limit, amount) |> Budget.hold(ceilings(state.config))
+    field = Budget.field(limit)
+    raised = Map.fetch!(budget, field) - Map.fetch!(state.budget, field)
+
     grants =
-      if scope == :run,
-        do: Map.update(state.budget_run_grant, limit, amount, &(&1 + amount)),
+      if scope == :run and raised > 0,
+        do: Map.update(state.budget_run_grant, limit, raised, &(&1 + raised)),
         else: state.budget_run_grant
 
     %{
       state
-      | budget: Budget.extend(state.budget, limit, amount),
+      | budget: budget,
         budget_run_grant: grants,
         headroom_warned: MapSet.delete(state.headroom_warned, Headroom.dimension(limit))
     }
@@ -3401,7 +3496,7 @@ defmodule Troupe.Agent.Server do
   end
 
   defp enter_compaction(state, resume) do
-    {_keep, drop} = split_for_compaction(state.conversation)
+    {_keep, drop} = state |> shown_left_out(state.conversation) |> split_for_compaction()
 
     if drop == [] do
       # Nothing old enough to summarise: compacting would loop.
@@ -3483,6 +3578,8 @@ defmodule Troupe.Agent.Server do
   # by the calls in the message before it, as `Output.stub_behind/3` names it. Anthropic's
   # thinking is not sent: it says nothing a summary can read, and on a model that binds it
   # to the conversation it was made in, the summariser's is not that one (Decision 867).
+  # Nor, where the agent can read them back, a shown document's words: the stretch is cut
+  # from the conversation with their pointers in their place (Decision 878).
   defp written_out(messages) do
     {written, _calls} =
       messages
@@ -3522,7 +3619,9 @@ defmodule Troupe.Agent.Server do
     identifiers exact. Tool calls are written as [called <tool> <arguments>], each
     followed by what it returned or why it failed: say what the calls that matter
     did (the tool, the arguments that matter, the gist of the result), not their
-    output. Drop pleasantries and anything already reflected in the current state
+    output. A document shown with show stays on the session's scratchpad and is
+    written here as a pointer: keep its name and the read_file call that reads it
+    back. Drop pleasantries and anything already reflected in the current state
     of the files.
     """
     |> String.trim()
@@ -3543,13 +3642,11 @@ defmodule Troupe.Agent.Server do
   defp apply_compaction(state, %Response{} = response) do
     summary = Message.text(Response.to_message(response))
     gateway = gateway_json(response.gateway, state, response, "cheap")
-    {keep, _drop} = split_for_compaction(state.conversation)
+    {keep, _drop} = state |> shown_left_out(state.conversation) |> split_for_compaction()
     keep = if binds_thinking?(state), do: Enum.map(keep, &without_thinking/1), else: keep
 
-    conversation = [
-      Message.user("Summary of earlier work in this session:\n\n" <> summary)
-      | keep
-    ]
+    said = "Summary of earlier work in this session:\n\n" <> summary <> on_the_pad(state)
+    conversation = [Message.user(said) | keep]
 
     log(state, :compacted, %{
       "summary" => summary,
@@ -3587,6 +3684,26 @@ defmodule Troupe.Agent.Server do
   # still holds, and an Anthropic model thinking with an effort set may need its last one.
   # Its config's `binds_thinking` before its name (Decision 871).
   defp binds_thinking?(state), do: Config.binds_thinking?(state.config, state.definition.model)
+
+  # A document `show` put on the scratchpad is there whole, so what a compaction keeps,
+  # and what its summariser reads, has a pointer in place of its words (Decision 878): the
+  # prefix changes here anyway, and only here. Not where the agent has no `read_file`,
+  # which is what reads one back: a pointer it cannot follow is a document lost.
+  defp shown_left_out(state, messages),
+    do: if(reads_back?(state), do: Show.left_out(messages), else: messages)
+
+  # And the summary names every document on the scratchpad after it, so one whose call
+  # went into this summary or an earlier one is still known by name, whatever the
+  # summariser kept of it.
+  defp on_the_pad(state),
+    do: if(reads_back?(state), do: Show.listing(Scratch.list(state.session_id)), else: "")
+
+  defp reads_back?(state) do
+    state
+    |> effective_definition()
+    |> Tools.for_definition(state.session_id)
+    |> Enum.any?(&(Tool.name(&1) == ReadFile.name()))
+  end
 
   # A message that was nothing but thinking is left as it was rather than sent empty.
   defp without_thinking(%Message{role: :assistant, content: blocks} = message) do
@@ -3638,7 +3755,7 @@ defmodule Troupe.Agent.Server do
     state = close_cancelled_calls(state)
     log(state, :cancelled, put_stopped(%{"turn" => Spend.to_json(state.turn)}, stopped))
 
-    state = Map.merge(state, %{turn_mode: nil, turn: %Spend{}})
+    state = let_go(Map.merge(state, %{turn_mode: nil, turn: %Spend{}}))
 
     publish_state(state, :idle)
     {:next_state, :idle, state}

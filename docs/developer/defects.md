@@ -1275,14 +1275,12 @@ Found by the chunk 28 fixers and the coordinator, 2026-10-11.
 - **Pre-releases aren't signed.** `prerelease.yml` can be dispatched on any branch, so it has no access to the release key, and `troupe update` refuses its builds. Whether pre-releases get a key of their own is undecided.
 - **Releases reach `troupe update` only once marked Latest.** `release.yml` publishes a `-beta` version as a GitHub pre-release, and `/releases/latest` skips pre-releases. A machine with no plane, and the installers' default, see a release only after it's marked Latest by hand. A signed-in client follows its plane's `recommended` (Decision 868).
 - **The daemon's own update.**
-  - A machine with only the daemon (the desktop app's) has no updater: `troupe-daemon` can't replace the directory it runs from on Windows.
+  - A machine with the daemon alone, no `troupe` and no desktop app, has no updater: `troupe-daemon` can't replace the directory it runs from on Windows. The desktop app updates the daemon beside it (Decision 874).
   - A turn can start in the 250 ms between `daemon.stop` answering and the stop, and a client can restart the old daemon before the swap. Decision 865 records both.
 - **What the plane's version check is.**
   - Client versions are what the client says, so `update_required` is a service to the person, not access control: a client that lies, a script, or a client from before 0.13.0 is never refused.
   - Only `initialize` judges; a connected client isn't re-checked when the policy changes.
-  - The TUI doesn't show `client_update.action: "suggest"` yet.
   - The plane doesn't record which version each client runs.
-  - The desktop app neither calls `initialize` nor shows `update_required`.
 - **Wording.**
   - The no-key refusal says the same thing twice ("installs no release; nothing is installed").
   - `troupe login` against a plane that refuses the version keeps the credentials and exits 1 with the sentence, where "signed in, but..." would read better.
@@ -1333,6 +1331,41 @@ Found by the chunk 29 fixers, 2026-10-11.
   - In tests, `TUIHelpers.resize/4` doesn't change the size the headless runtime renders at; start a new server, or call `View.render` directly.
 
 Found by the chunk 30 fixers, 2026-10-11.
+
+### D124 - Updates, frames, addresses and the turn's tools after chunk 31 (low)
+
+- **The desktop app's update** (Decision 874).
+  - When the plane refuses the desktop app's version, the rail shows "This computer" and offers no Sign out until the app is updated.
+  - The desktop app's own `client_info` versions to workers and the daemon are hard-coded (`connection.ts`, `attach.ts`, `daemon.ts`). Only the plane's `initialize` gets the real version.
+  - `daemon_start` is a synchronous Tauri command that can loop for up to 30 s. The update banner appeared only after the daemon search gave up, which suggests it holds up other IPC. Not proven.
+  - A desktop app installed from its own setup, without the installers, has no daemon to update. The terminal client has no daily check of its own; it says the plane's `suggest` only when it meets the plane.
+  - The macOS and Linux update paths (`.app.tar.gz`, AppImage) and `app.restart()` there haven't run. The first release run that signs desktop updater artifacts is 0.15.0's.
+- **Frames** (Decisions tui/0161 and 877).
+  - Reasoning is drawn live only, but Decision 658 logs reasoning blocks in `llm_response.message`, so a replayed session could draw a reasoning frame in both clients.
+  - In Afterglow dark, `--bg-sunken` equals `--bg-canvas`, so the frame surface shows by its hairline alone.
+  - The desktop app has no settings control for `transcript.detail`; `/detail` is per session only.
+  - The desktop app's main bundle is 576 KB (171.5 KB gzip), above Vite's 500 KB warning.
+  - The TUI's curtain flourish isn't padded, so the facts beside it shift a few columns. A strip can't be opened with the mouse in the TUI.
+  - `Model.without_turn_lines/1` is unused in `lib` but named by Decision tui/0160.
+- **Addresses and ceilings** (Decision 875, #622).
+  - When an enforced ceiling leaves less room than the budget question's smallest step, the question offers only "stop", although a typed "+1" is accepted.
+  - The plane's trigger notifications keep their own resolve-and-pin code (Decision 866) beside the daemon's `Troupe.MCP.Address`.
+- **The turn's tools** (Decision 876).
+  - The session log now holds the held tools' definitions (including a person's offered tools) and the skill directories' absolute paths, each written once and again on a change.
+  - On a binding model, compaction, an `AI?` turn's `plan` prompt and a profile or model switch still change the prefix. After a change, an enforcing account refuses every later call of the session once (D92).
+- **The scratchpad at compaction** (Decision 878, #616).
+  - The compaction summariser once wrote a whole plan from only the prompt and two files, and once a one-sentence summary that dropped all earlier context.
+  - A live scenario's limits can exceed the plan's cost cap, which the runner still enforces.
+- **Personal tools on a pod** (Decision 879). `personalTools: forbid` takes effect at a session's next activation. A session that is awake when an administrator changes it keeps accepting registrations until it is activated again.
+- **The terminal client's connection.** Every fleet call goes on one connection, and the gateway answers a connection's calls one at a time, so one slow call blocks the rest (`worktree.list` now has its own, #621). `branch_profile/2` turns any `profiles` error into "unknown command /X; available: /worktree", where it should say the daemon didn't answer.
+- **A fresh daemon's first `session.create`.** Twice, a `session.create` sent about 2 seconds after an installed daemon started got no answer for over 120 seconds; one sent later answered in under a second. Not confirmed: it may be the test harness or a startup race. The release runs with distribution off, so it couldn't be attached to.
+- **Tests.**
+  - `MCPPageTest`'s logout case calls `identity.get` right after terminating the embedded daemon, and once got `unavailable` in CI.
+  - `PropertyTest` times out under full-suite load and passes alone.
+  - `ReadToolsTest`'s web_fetch hit a Finch pool timeout once.
+  - Under heavy parallel load, one core run had ten timeouts at once, all passing alone.
+
+Found by the chunk 31 fixers, 2026-10-12.
 
 ## Taken
 
