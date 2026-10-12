@@ -50,6 +50,20 @@ spec:
       expression: variables.endpoints + variables.declared
     - name: allowedEgress
       expression: "has(params.spec.allowedEgress) ? params.spec.allowedEgress : []"
+    # What is not a pattern, on either side: a star anywhere but as the whole first label
+    # of `*.` and a domain with no empty label. A bare `*` is every name to Cilium and `**.`
+    # any number of labels, so neither may reach the operator's rules. The same test as
+    # `Troupe.Policy.pattern?/1`, written out twice because CEL has no functions.
+    - name: notPatternsAllowed
+      expression: >-
+        variables.allowedEgress.filter(p, p.contains('*') &&
+          !(p.startsWith('*.') && p.size() > 2 && !p.substring(2).contains('*') &&
+            !p.substring(2).startsWith('.') && !p.endsWith('.') && !p.contains('..')))
+    - name: notPatternsAsked
+      expression: >-
+        variables.hosts.filter(h, h.contains('*') &&
+          !(h.startsWith('*.') && h.size() > 2 && !h.substring(2).contains('*') &&
+            !h.substring(2).startsWith('.') && !h.endsWith('.') && !h.contains('..')))
     # Every storage class the profile names: one per team volume that asks for one, and
     # the pod's own data volume when it does. A profile that could name any class could
     # put a working copy on whatever the cluster has, which is what the policy's list
@@ -101,21 +115,36 @@ spec:
       messageExpression: "'memory limit is above the maximum of ' + string(params.spec.maxResources.memory)"
       reason: Forbidden
 
+    # A policy that holds something that is not a pattern admits no profile until it is
+    # taken out: what its author meant by it is not something anybody can know.
+    - expression: variables.notPatternsAllowed.size() == 0
+      messageExpression: >-
+        'the TroupePolicy allowedEgress entry ' + variables.notPatternsAllowed.join(', ') +
+        ' is not a hostname or a one-label wildcard such as *.example.com, and the policy admits no profile until it is removed'
+      reason: Forbidden
+
+    - expression: variables.notPatternsAsked.size() == 0
+      messageExpression: >-
+        'egress entry ' + variables.notPatternsAsked.join(', ') +
+        ' is not a hostname or a one-label wildcard such as *.example.com'
+      reason: Forbidden
+
     # `*.example.com` matches exactly one label, as it does everywhere else that syntax
     # appears: the host must end with the suffix and what is left in front of it must
-    # contain no dot of its own.
+    # contain no dot of its own. What is not a pattern is refused above, and covers
+    # nothing here.
     - expression: >-
-        variables.hosts.all(h,
-          variables.allowedEgress.exists(p,
-            h == p ||
-            (p.startsWith('*.') && h.endsWith(p.substring(1)) && h.size() > p.size() - 1 &&
-             !h.substring(0, h.size() - (p.size() - 1)).contains('.'))))
+        variables.hosts.all(h, h in variables.notPatternsAsked ||
+          variables.allowedEgress.exists(p, !(p in variables.notPatternsAllowed) &&
+            (h == p ||
+             (p.startsWith('*.') && h.endsWith(p.substring(1)) && h.size() > p.size() - 1 &&
+              !h.substring(0, h.size() - (p.size() - 1)).contains('.')))))
       messageExpression: >-
-        'egress to ' + variables.hosts.filter(h,
-          !variables.allowedEgress.exists(p,
-            h == p ||
-            (p.startsWith('*.') && h.endsWith(p.substring(1)) && h.size() > p.size() - 1 &&
-             !h.substring(0, h.size() - (p.size() - 1)).contains('.')))).join(', ') +
+        'egress to ' + variables.hosts.filter(h, !(h in variables.notPatternsAsked) &&
+          !variables.allowedEgress.exists(p, !(p in variables.notPatternsAllowed) &&
+            (h == p ||
+             (p.startsWith('*.') && h.endsWith(p.substring(1)) && h.size() > p.size() - 1 &&
+              !h.substring(0, h.size() - (p.size() - 1)).contains('.'))))).join(', ') +
         ' is outside the patterns allowed by TroupePolicy'
       reason: Forbidden
 

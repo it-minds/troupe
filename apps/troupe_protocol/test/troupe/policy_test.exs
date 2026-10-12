@@ -112,7 +112,53 @@ defmodule Troupe.PolicyTest do
       refute Policy.matches?("anthropic.com", "*.anthropic.com")
       refute Policy.matches?("evil-anthropic.com", "*.anthropic.com")
     end
+
+    test "a pattern is an exact name or a wildcard of one leading label, and nothing else" do
+      for entry <- accepted_patterns(), do: assert(Policy.pattern?(entry), entry)
+      for entry <- refused_patterns(), do: refute(Policy.pattern?(entry), entry)
+    end
+
+    # A bare `*` in both used to pass, compared as the string it is, and the operator then
+    # wrote it as a Cilium `matchPattern`, which is every name there is. And
+    # `**.anthropic.com` passed `*.anthropic.com`, its first label being one label, while
+    # Cilium reads `**.` as any number of them.
+    test "a profile entry that is not a pattern is refused, naming it, whatever the policy holds" do
+      for entry <- refused_patterns() do
+        egress = [egress: %{"fqdns" => [entry], "gitHosts" => []}]
+
+        assert check(egress) == [{:egress_not_a_pattern, entry}], entry
+        assert Policy.describe({:egress_not_a_pattern, entry}) =~ entry
+
+        allowing_it = allowed_egress([entry])
+        assert {:egress_not_a_pattern, entry} in check(egress, allowedEgress: allowing_it), entry
+      end
+
+      assert [{:egress_not_a_pattern, "**.anthropic.com"}] =
+               check(egress: %{"fqdns" => ["**.anthropic.com"], "gitHosts" => []})
+    end
+
+    test "a policy entry that is not a pattern admits nothing, and refuses every profile" do
+      for entry <- refused_patterns() do
+        violations = check([], allowedEgress: allowed_egress([entry]))
+
+        assert violations == [{:allowed_egress_not_a_pattern, entry}], entry
+        assert Policy.describe(hd(violations)) =~ entry
+        refute Policy.matches?("api.example.com", entry), entry
+      end
+    end
+
+    test "a profile's wildcard passes only a policy that holds the same wildcard" do
+      wildcard = [egress: %{"fqdns" => ["*.example.com"], "gitHosts" => []}]
+
+      assert check(wildcard, allowedEgress: allowed_egress(["*.example.com"])) == []
+
+      assert [{:egress_not_allowed, "*.example.com"}] =
+               check(wildcard, allowedEgress: allowed_egress(["*.com"]))
+    end
   end
+
+  # The fixture policy's own entries, which the fixture profile needs, and `more`.
+  defp allowed_egress(more), do: policy()["spec"]["allowedEgress"] ++ more
 
   describe "storage" do
     test "a storage class outside the policy is refused" do

@@ -36,6 +36,8 @@ defmodule Troupe.Policy do
           | {:cpu_above_maximum, pos_integer(), pos_integer()}
           | {:memory_above_maximum, pos_integer(), pos_integer()}
           | {:egress_not_allowed, String.t()}
+          | {:egress_not_a_pattern, String.t()}
+          | {:allowed_egress_not_a_pattern, String.t()}
           | {:storage_class_not_allowed, String.t()}
           | {:org_volume_not_offered, nil}
 
@@ -136,19 +138,48 @@ defmodule Troupe.Policy do
   # Every destination the profile asks for has to be covered by a policy pattern. The
   # LLM endpoint and the MCP servers count: a profile that could name any endpoint
   # could send a team's code anywhere.
+  #
+  # An entry that is not a pattern is refused for what it is, on either side. In the
+  # profile, it is refused whatever the policy holds. In the policy, it admits nothing, and
+  # every profile is refused naming it until it is taken out: a policy whose author wrote
+  # something they took for a pattern says nothing anybody can know, which is what a
+  # missing policy says too, and that also admits nothing.
   defp egress_violations(profile, policy) do
-    profile
-    |> Profile.egress_destinations()
-    |> Enum.reject(&matches_any?(&1, policy.allowed_egress))
-    |> Enum.map(&{:egress_not_allowed, &1})
+    unreadable = Enum.reject(policy.allowed_egress, &pattern?/1)
+    {destinations, refused} = Enum.split_with(Profile.egress_destinations(profile), &pattern?/1)
+    outside = Enum.reject(destinations, &matches_any?(&1, policy.allowed_egress))
+
+    Enum.map(unreadable, &{:allowed_egress_not_a_pattern, &1}) ++
+      Enum.map(refused, &{:egress_not_a_pattern, &1}) ++
+      Enum.map(outside, &{:egress_not_allowed, &1})
   end
+
+  @doc """
+  Whether an egress entry is a pattern: an exact hostname, or `*.` and a domain, whose star
+  is the whole of the first label and the only star there is.
+
+  Nothing else. A bare `*` and `**.example.com` are the two that matter most: the operator
+  writes a wildcard as a Cilium `matchPattern`, where a bare `*` is every name and `**.`
+  any number of labels. `*.*`, `a.*.example.com`, `*example.com` and `a*.example.com` would
+  each mean something the policy check here does not, and a domain with an empty label
+  names nothing. A policy's `allowedEgress` and a profile's egress are held to this alike.
+  """
+  @spec pattern?(String.t()) :: boolean()
+  def pattern?("*." <> domain) do
+    domain != "" and not String.contains?(domain, "*") and
+      domain |> String.split(".") |> Enum.all?(&(&1 != ""))
+  end
+
+  def pattern?(entry) when is_binary(entry), do: not String.contains?(entry, "*")
+  def pattern?(_entry), do: false
 
   @doc """
   Whether a hostname is covered by a policy pattern.
 
   `*.example.com` matches one label, as it does everywhere else that syntax appears —
   `a.example.com` but not `a.b.example.com`, and never the bare domain. A pattern with
-  no star is an exact hostname.
+  no star is an exact hostname. An entry that is not a pattern (`pattern?/1`) covers
+  nothing, and is covered by nothing.
 
   A profile's own entry may be a wildcard too. It is compared as the string it is, so
   `*.example.com` passes only a policy that carries that same pattern, never one that
@@ -157,14 +188,18 @@ defmodule Troupe.Policy do
   and what the network allows are the same set of names.
   """
   @spec matches?(String.t(), String.t()) :: boolean()
-  def matches?(host, "*." <> suffix) do
+  def matches?(host, pattern) do
+    pattern?(host) and pattern?(pattern) and covers?(host, pattern)
+  end
+
+  defp covers?(host, "*." <> domain) do
     case String.split(host, ".", parts: 2) do
-      [_label, ^suffix] -> true
+      [label, ^domain] -> label != ""
       _ -> false
     end
   end
 
-  def matches?(host, pattern), do: host == pattern
+  defp covers?(host, pattern), do: host == pattern
 
   defp matches_any?(host, patterns), do: Enum.any?(patterns, &matches?(host, &1))
 
@@ -202,6 +237,14 @@ defmodule Troupe.Policy do
 
   def describe({:egress_not_allowed, host}),
     do: "egress to #{host} is outside the allowed patterns"
+
+  def describe({:egress_not_a_pattern, entry}),
+    do: "egress entry #{entry} is not a hostname or a one-label wildcard such as *.example.com"
+
+  def describe({:allowed_egress_not_a_pattern, entry}),
+    do:
+      "the TroupePolicy's allowedEgress entry #{entry} is not a hostname or a one-label " <>
+        "wildcard such as *.example.com, and the policy admits no profile until it is removed"
 
   def describe({:storage_class_not_allowed, class}),
     do: "storage class #{class} is not allowed"

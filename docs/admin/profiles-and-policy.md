@@ -45,7 +45,7 @@ Other `spec` fields:
 | `llm.endpoint`, `.provider`, `.model` | becomes the worker's `TROUPE_BASE_URL`, `TROUPE_PROVIDER` (`openai` = Chat Completions, which a gateway serves; `anthropic`; `fake`), `TROUPE_MODEL`. The endpoint's host is an egress destination |
 | `llm.secretRef.{name,key}` | the Secret in the worker namespace injected as `TROUPE_API_KEY` (key `api-key`), not optional |
 | `llm.prices` | dollars per million tokens by model, `{"qwen3-235b": {"input": …, "output": …}}` with optional `cacheRead` and `cacheWrite`, injected as `TROUPE_MODEL_PRICES`. For a model the gateway does not price, which with LiteLLM is every streamed call: without a price its calls cost nothing on the ledger and no money budget applies to them. What the gateway says still wins. Set through the API; the console's editor keeps it but does not show it |
-| `egress.fqdns`, `egress.gitHosts` | extra hosts the pods may reach; each must match a policy pattern |
+| `egress.fqdns`, `egress.gitHosts` | extra hosts the pods may reach; each must match a policy pattern. A wildcard is one leading label (`*.example.com`) and passes only a policy holding that same wildcard; a star anywhere else, a bare `*` among them, is refused naming the entry ([§4](#4-troupepolicy)) |
 | `configBundleChannel` | which bundle channel the profile follows (`stable`) |
 | `orgMount` | mount the policy's org volume at `/mnt/org`, always read-only |
 | `repositoryOverridesBundle` | `true` lets a session's working copy replace the bundle's agents and skills, and Troupe's built-in agents, of the same name; absent or `false`, those win ([below](#a-repositorys-agents-and-skills-on-a-pod)) |
@@ -349,7 +349,7 @@ this resource and nothing else.
 | `allowedImageRepositories` | image repositories, compared without tag or digest, exactly or as a prefix `<repo>/` | none (every image refused) |
 | `maxReplicas`, `maxSessionsPerPod` | ceilings | 10, 16 |
 | `maxResources.cpu`, `.memory` | ceiling on **limits** | 4 CPU, 8Gi |
-| `allowedEgress` | hostnames pods may reach, including the LLM endpoint and MCP servers; `*.example.com` matches one label. A bare `*` is not a pattern: it admits only a profile entry that is itself `*`, which with Cilium becomes a rule for every name, so leave it out | none |
+| `allowedEgress` | hostnames pods may reach, including the LLM endpoint and MCP servers; `*.example.com` matches one label. A star anywhere else is refused, in the policy and in a profile's egress alike: a bare `*`, `**.example.com`, `*.*`, `a.*.example.com`, `*example.com`. The CRD refuses such an entry when the policy is written; a policy that holds one anyway (an older CRD) admits no profile, at admission or in the operator, until it is removed, and the refusal names it | none |
 | `allowedStorageClasses` | classes a team volume or pod disk may name | none |
 | `orgVolume` | the org-wide read-only volume profiles may opt into | none |
 | `namespacePrefix`, `workersDomain` | worker namespaces and hostnames | `troupe-w-`, `workers.example.test` |

@@ -110,6 +110,9 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   and storage, enforced by a `ValidatingAdmissionPolicy` and again by the operator. The
   plane cannot write it and has no verb on Secrets, so a compromised plane can only submit
   profiles that must still pass both ([roles-and-permissions.md §7](roles-and-permissions.md#7-kubernetes-rbac-the-chart-grants)).
+  An egress entry is an exact name or a one-label wildcard (`*.example.com`), in the
+  policy and in a profile alike; a bare `*` or any other star is refused, and a policy
+  holding one admits no profile, so no rule for every name is ever written (Decision 883).
 - **Reaching a pod.** Each pod has an Ingress of its own and is internet-facing by design.
   A client needs a session token the plane signed for that pod, and the pod checks the
   plane's access list at every command, so a role the plane narrows or revokes holds at the
