@@ -371,6 +371,9 @@ defmodule Troupe.Protocol.Schema do
         "turn" => optional(:object),
         "by" => optional({:array, :string})
       },
+      # A root agent that had finished took new input as a turn: `from` (`finished`), and
+      # `source`, the input's, as `user_input` names it. Written before the turn it starts.
+      "agent_woken" => %{"from" => required(:string), "source" => required(:string)},
       # The agent's turn is over and it waits for input: the durable twin of `agent_state`
       # reaching `idle`, for a client that was not listening when it happened (issue #127).
       # `reason` only when the harness ended it: `tool_failures` (Decision 687), or

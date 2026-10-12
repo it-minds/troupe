@@ -477,7 +477,7 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, config} <- workspace_config(workspace) do
       case Onboarding.decline_brief(workspace, config: config) do
         :ok -> {:ok, %{"declined" => true}}
-        {:error, reason} -> {:error, Error.new(:internal, %{reason: reason})}
+        {:error, reason} -> {:error, Error.new(:internal_error, %{reason: reason})}
       end
     end
   end
@@ -1724,7 +1724,7 @@ defmodule Troupe.Gateway.Dispatch do
   # there and could not be forgotten (its file could not be written) is the store's reason.
   defp not_forgotten(workspace, id, reason) do
     if Enum.any?(Facts.list(workspace), &(&1["id"] == id)),
-      do: Error.new(:internal, %{reason: inspect(reason)}),
+      do: Error.new(:internal_error, %{reason: inspect(reason)}),
       else: Error.new(:not_found, %{kind: "fact", id: id})
   end
 

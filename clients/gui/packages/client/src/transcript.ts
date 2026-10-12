@@ -685,7 +685,7 @@ function systemText(d: DurableEvent): string {
     case "acl_revoked":
       return `${str(d.data["subject"], "somebody")}'s access was revoked`;
     case "session_tainted":
-      return `client-hosted tools registered by ${str(d.data["subject"], "a client")}`;
+      return taintedText(d);
     default:
       return d.type;
   }
@@ -715,6 +715,17 @@ const ENDED: Record<string, string> = {
 function subagentEndText(d: DurableEvent): string {
   const path = Array.isArray(d.data["child_path"]) ? d.data["child_path"].map((p) => str(p)).join("/") : "a subagent";
   return `${path}, in the background: ${ENDED[str(d.data["ended"])] ?? "ended before it finished"}; its end reached its parent`;
+}
+
+/**
+ * A person's own tools offered to the session (troupe PROTOCOL.md §8), as the terminal client
+ * says it: who offered them (`actor`) and which, since everyone in the session is entitled to
+ * know that a tool runs on somebody's machine.
+ */
+function taintedText(d: DurableEvent): string {
+  const tools = Array.isArray(d.data["tools"]) ? d.data["tools"].filter((t): t is string => typeof t === "string") : [];
+  const said = `${str(d.data["actor"], "somebody")} offered tools that run on their own machine`;
+  return tools.length ? `${said}: ${tools.join(", ")}` : said;
 }
 
 /** Where an agent was read from, as `profile_switched`'s `layer` names it (troupe Decision 841). */

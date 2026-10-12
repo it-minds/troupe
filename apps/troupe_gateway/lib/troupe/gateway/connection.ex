@@ -156,13 +156,15 @@ defmodule Troupe.Gateway.Connection do
 
   def handle_info({:transport_closed, _reason}, state), do: {:stop, :normal, state}
 
-  # A session event. Under load this is where the connection stops keeping up
-  # gracefully and starts keeping up deliberately.
-  def handle_info({:troupe_event, session_id, %Event{} = event}, state) do
+  # A session event, from a session this connection follows by name or, for `fleet`, from
+  # any session. Under load this is where the connection stops keeping up gracefully and
+  # starts keeping up deliberately.
+  def handle_info({tag, session_id, %Event{} = event}, state)
+      when tag in [:troupe_event, :troupe_fleet_event] do
     if queue_len() > @drain_threshold do
-      {:noreply, drain(state, [{session_id, event}])}
+      {:noreply, drain(state, [{delivery(tag), session_id, event}])}
     else
-      {:noreply, deliver(state, session_id, event)}
+      {:noreply, deliver(state, delivery(tag), session_id, event)}
     end
   end
 
@@ -797,7 +799,7 @@ defmodule Troupe.Gateway.Connection do
     # head was read, so an event arriving during the replay is delivered after it — one
     # event per seq, no gap and no duplicate at the boundary.
     Enum.reduce(subscription.replay, state, fn event, acc ->
-      deliver(acc, subscription.session_id, event)
+      deliver(acc, :session, subscription.session_id, event)
     end)
   end
 
@@ -826,8 +828,11 @@ defmodule Troupe.Gateway.Connection do
     end
   end
 
+  # The same for `fleet`, which a connection follows once however many it holds.
   defp stop_following(state, %Subscription{} = subscription) do
-    Session.unsubscribe(subscription.topic)
+    unless Enum.any?(state.subscriptions, fn {_id, sub} -> sub.topic == subscription.topic end),
+      do: Session.unsubscribe(subscription.topic)
+
     state
   end
 
@@ -855,8 +860,8 @@ defmodule Troupe.Gateway.Connection do
     |> Enum.uniq()
   end
 
-  defp deliver(state, session_id, %Event{} = event) do
-    case matching_subscriptions(state, session_id, event) do
+  defp deliver(state, delivery, session_id, %Event{} = event) do
+    case matching_subscriptions(state, delivery, session_id, event) do
       [] ->
         state
 
@@ -867,11 +872,19 @@ defmodule Troupe.Gateway.Connection do
     end
   end
 
-  defp matching_subscriptions(state, session_id, event) do
+  # An event reaches this process once from each delivery it follows (`Troupe.Events`), so a
+  # subscription takes it only from its own: `fleet` and the session's own subscription on
+  # one connection each get it once.
+  defp matching_subscriptions(state, delivery, session_id, event) do
     state.subscriptions
     |> Map.values()
-    |> Enum.filter(&Session.interested?(&1, session_id, event))
+    |> Enum.filter(
+      &(Session.delivery(&1) == delivery and Session.interested?(&1, session_id, event))
+    )
   end
+
+  defp delivery(:troupe_event), do: :session
+  defp delivery(:troupe_fleet_event), do: :fleet
 
   # The envelope names the session as well as the topic: a `fleet` subscriber sees
   # events from every session on one subscription, and an event does not carry its own
@@ -969,7 +982,7 @@ defmodule Troupe.Gateway.Connection do
   # subscription they belong to is resynced rather than delivered late.
   defp drain(state, collected) do
     {events, dropped} = drain_mailbox(collected, 0)
-    durable = Enum.reject(events, fn {_id, event} -> event.ephemeral? end)
+    durable = Enum.reject(events, fn {_delivery, _id, event} -> event.ephemeral? end)
     state = %{state | dropped_ephemerals: state.dropped_ephemerals + dropped}
 
     if length(durable) > state.durable_bound do
@@ -979,16 +992,18 @@ defmodule Troupe.Gateway.Connection do
     end
   end
 
-  defp deliver_pair({session_id, event}, state), do: deliver(state, session_id, event)
+  defp deliver_pair({delivery, session_id, event}, state),
+    do: deliver(state, delivery, session_id, event)
 
   defp drain_mailbox(collected, dropped) do
     receive do
-      {:troupe_event, session_id, %Event{ephemeral?: true}} ->
+      {tag, session_id, %Event{ephemeral?: true}}
+      when tag in [:troupe_event, :troupe_fleet_event] ->
         _ = session_id
         drain_mailbox(collected, dropped + 1)
 
-      {:troupe_event, session_id, %Event{} = event} ->
-        drain_mailbox(collected ++ [{session_id, event}], dropped)
+      {tag, session_id, %Event{} = event} when tag in [:troupe_event, :troupe_fleet_event] ->
+        drain_mailbox(collected ++ [{delivery(tag), session_id, event}], dropped)
     after
       0 -> {collected, dropped}
     end

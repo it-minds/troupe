@@ -575,6 +575,28 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.equal(texts[5], "nearly out: turns 32/40 (80%)");
   });
 
+  it("names the person and the tools when somebody's own tools are offered to the session (troupe #668)", () => {
+    seq = 0;
+    // As `Troupe.Session.ClientTools` writes it: the person is `actor`, there is no `subject`.
+    const state = foldAll([
+      durable(
+        "session_tainted",
+        { kind: "personal_connector", tools: ["client.notes.read", "client.notes.search"], actor: "ada@example.test" },
+        ["root"],
+        "ada@example.test",
+      ),
+      durable("session_tainted", { kind: "personal_connector" }),
+    ]);
+
+    assert.deepEqual(
+      state.entries.map((e) => (e.kind === "system" ? e.text : e.kind)),
+      [
+        "ada@example.test offered tools that run on their own machine: client.notes.read, client.notes.search",
+        "somebody offered tools that run on their own machine",
+      ],
+    );
+  });
+
   it("shows a config note as the harness's sentence (troupe #644)", () => {
     seq = 0;
     const message =

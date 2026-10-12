@@ -216,9 +216,10 @@ desktop app and a browser. Keep the browser's address bar out of frame while sig
    (`client.<server>.<tool>`) asks first; approve it; the answer comes back.
 6. (3:30) The marker every participant sees: open the same session from the terminal
    client (`troupe --remote`) as a second participant and show the transcript's line that
-   the session uses tools from someone's machine. In 0.15.0 the desktop app words it
-   "client-hosted tools registered by a client" and the terminal client prints the raw
-   `session_tainted` event; if `<version>` still does, that is a row 7 item.
+   the session uses tools from someone's machine. Both clients say it in one sentence that
+   names the person and the tools: "<person> offered tools that run on their own machine:
+   client.<server>.<tool>". A client that prints the raw `session_tainted` event, or
+   "client-hosted tools registered by a client" as 0.16.0 and earlier did, is a row 7 item.
 7. (4:30) Close the session in the desktop app. From the terminal client, ask for the tool
    again: the session has no such tool any more, since the tools leave with the person
    (Decision 861).
