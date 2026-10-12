@@ -1,6 +1,6 @@
 ---
 number: 890
-title: "A worker container runs under the seccomp profile the chart chooses: by default the chart's own Localhost profile, the runtime's default plus the namespaces bubblewrap makes, put on every node by a DaemonSet that mounts that one directory; RuntimeDefault and Unconfined are the other two, and kind uses Unconfined"
+title: "A worker container runs under the seccomp profile the chart chooses, by default the chart's own Localhost profile (the runtime's default plus the namespaces bubblewrap makes) put on every node by a DaemonSet that mounts that one directory, and a worker pod runs in a user namespace of its own with its /proc unmasked, so bubblewrap can mount the sandbox's own; kind uses Unconfined"
 date: 2026-10-12
 status: accepted
 issue: 690
@@ -16,9 +16,10 @@ paths:
   - charts/troupe/templates/_helpers.tpl
   - charts/troupe/values.yaml
   - dev/kind/values.yaml
+  - scripts/kind-up
 symbols:
   - Troupe.Operator.Settings.worker_seccomp/1
-gist: "worker.seccomp: Localhost (default + user/mount/PID/IPC/UTS ns, never net/cgroup/time; DaemonSet installs it), RuntimeDefault or Unconfined (kind only)"
+gist: "worker.seccomp Localhost (default + bwrap's namespaces, never net/cgroup/time); worker.userNamespaces: hostUsers false + procMount Unmasked, never apart"
 ---
 
 Issue #690, found by the cluster suite's new bubblewrap test (#670, PR #686). The operator
@@ -81,19 +82,55 @@ node allowed them, and the pod's own profile was what refused. This replaces tha
 - **`RuntimeDefault`** stays a choice: workers start, keep the runtime's filter, and
   refuse every command with 832's sentence. It is also what the operator uses when nothing
   sets the variable, so an operator without the chart fails closed, as 832 wants.
+- **The profile is needed and not enough: a user namespace for each worker pod, with its
+  `/proc` unmasked.** With the profile out of the way, bubblewrap made its namespaces and
+  stopped at mounting the sandbox's own `/proc`: on CI's kind (v1.35, the runner's Ubuntu
+  kernel) the bubblewrap test was answered "bubblewrap could not start one here (bwrap:
+  Can't mount proc on /newroot/proc: Operation not permitted)" (runs 38307929071 and
+  38311632983). The runtime masks paths under a container's `/proc` (`/proc/kcore` and
+  others, mounted over, `/proc/sys` read-only), and the kernel refuses a new proc mount in
+  a user namespace while the one it would reveal is not fully visible. Kubernetes unmasks
+  a container's `/proc` (`procMount: Unmasked`) only for a pod in a user namespace of its
+  own (`hostUsers: false`), where the container's root, and every other uid in it, is an
+  unprivileged user on the node. `worker.userNamespaces` (default `true`) makes the
+  operator write both, `hostUsers: false` on the worker pod and `procMount: Unmasked` on
+  the worker container, from the one setting (`TROUPE_WORKER_USER_NAMESPACES`), so an
+  unmasked `/proc` outside a user namespace is never rendered; the chart refuses a value
+  that is not a boolean, since the string `"false"` reads as on. `false`, and an operator
+  that is not told, keep today's pod: it starts, and refuses every command with 832's
+  sentence. Chosen over a sandbox with no fresh `/proc` (an empty one breaks the tools a
+  shell uses, and the pod's own would show the worker's processes and their environment
+  to a command running as the same user) and over a privileged container.
+- **What user namespaces need.** Kubernetes 1.33 or later (user namespaces on by default;
+  `procMount` is kept, which it is on 1.34 with no feature gate set), containerd 2.0 or later
+  with runc 1.2 or later, Linux 6.3 or later on the nodes (idmapped tmpfs, which the
+  projected tokens and ConfigMaps are), and storage whose filesystems take idmapped mounts:
+  a block volume with ext4 or xfs, and kind's local-path directories, do. NFS does not, and
+  most RWX file storage is NFS: a team volume there is expected to keep its pod from
+  starting, with the idmapped mount refused in the pod's events (not tried here). A cluster
+  that cannot sets `worker.userNamespaces: false` and its workers run no command until it
+  can.
 - **Pod Security.** The operator labels no worker namespace, so they have the cluster's
-  default level. `Localhost` and `RuntimeDefault` pass `restricted`, as the rest of the
-  worker pod does (non-root, no escalation, every capability dropped); `Unconfined` passes
-  only `privileged`, `baseline` refuses it too. The chart does not refuse `Unconfined`
-  where the namespaces enforce more, because it cannot know: they are made after it
-  renders and take a level from the API server's admission configuration, which nothing
-  can read through the API. Such a cluster refuses every worker pod at creation, in a
-  `FailedCreate` event on the StatefulSet that names the setting. The installer's
+  default level. `baseline` and `restricted` refuse `procMount: Unmasked` even in a user
+  namespace (checked on 1.34), as they refuse `Unconfined`, so worker namespaces need
+  `privileged`; `Localhost` and `RuntimeDefault` alone pass `restricted`, as the rest of
+  the worker pod does. The chart cannot refuse the combination: the namespaces are made
+  after it renders and take a level from the API server's admission configuration, which
+  nothing can read through the API. Such a cluster refuses every worker pod at creation,
+  in a `FailedCreate` event on the StatefulSet that names the field. The installer's
   DaemonSet mounts a host directory and runs as root, so its own namespace needs
-  `privileged`.
+  `privileged` too.
+- **kind.** User namespaces work there with nothing enabled, once kind's createContainer
+  hook can be reached: the runtime runs `/kind/bin/mount-product-files.sh` inside the pod's
+  user namespace, as its root, which is nobody on the node, and the node image leaves
+  `/kind` at 0644, so every user-namespaced pod failed "fork/exec
+  /kind/bin/mount-product-files.sh: permission denied". `scripts/kind-up` opens `/kind`
+  (0755; nothing in it is secret).
 - **Upgrading** a plane that runs workers changes every profile's pod template: each
   reports `UpgradePending` and its pods are replaced as they empty (Decision 726). With
-  `Localhost` the installer has to be ready first, which it is unless a node is missing.
+  `Localhost` the installer has to be ready first, which it is unless a node is missing,
+  and the worker namespaces need `privileged` before the replacements are made, or the
+  StatefulSet cannot create them.
 - **Not chosen.** `Unconfined` in production: the sandbox would start, with no filter
   around it. `CAP_SYS_ADMIN` on the worker: it lets the default profile allow everything
   this does and far more, mounting in the pod's own namespace among it. A profile per
@@ -101,31 +138,26 @@ node allowed them, and the pod's own profile was what refused. This replaces tha
   hold only for some capabilities (`includes.caps`): a file cannot know a container's
   capabilities, the worker's are always none, and the form containerd renders itself, the
   OCI runtime spec's, is the one it was proven in.
-- **Needed, and not enough on a standard kernel.** With the profile out of the way,
-  bubblewrap makes its namespaces and then stops at mounting the sandbox's own `/proc`: on
-  CI's kind (v1.35, the runner's Ubuntu kernel, `Unconfined`) the bubblewrap test is
-  answered "bubblewrap could not start one here (bwrap: Can't mount proc on /newroot/proc:
-  Operation not permitted)" (run 38307929071). The runtime masks paths under a container's
-  `/proc` (`/proc/kcore` and the rest, bind-mounted over), and the kernel refuses a new
-  proc mount inside a user namespace while the one it would reveal is not fully visible.
-  Docker Desktop's kind, where everything below was tried, allowed the mount; why is not
-  established. What unmasks a worker's `/proc` (Kubernetes' `procMount: Unmasked`, which it
-  allows only with `hostUsers: false`), or a sandbox that needs no fresh `/proc`, is a
-  decision of its own (#690).
 - **Not done here.** AppArmor: where a node's runtime applies its default AppArmor profile,
-  that profile has `deny mount`, which would refuse bubblewrap's mounts with this profile
-  in place; neither kind cluster (CI's or Docker Desktop's) has AppArmor in its node, so it
-  is unverified. arm64 nodes: the images are built for amd64 alone.
+  that profile has `deny mount`, which would refuse bubblewrap's mounts; neither kind
+  cluster (CI's or Docker Desktop's) has AppArmor in its node, so it is unverified. arm64
+  nodes: the images are built for amd64 alone. Docker Desktop's kind mounted a fresh
+  `/proc` under the masked one, which CI's kernel refuses; why is not established, so a
+  laptop's kind is no proof of the sandbox.
 - **Proof.** Run 38294040077 (above) is the reproduction. On Docker Desktop's kind (v1.34,
-  containerd 2.1.3), the worker image with the worker's security context: under `RuntimeDefault`
-  `unshare -U` and bubblewrap with `Troupe.Sandbox`'s flags are refused; under the
-  shipped profile, installed by the rendered DaemonSet, a user, mount and PID namespace
-  are made, bubblewrap runs with those flags (`/proc/1/comm` is `bwrap`, no BEAM in sight)
-  and git runs inside it, while a network, cgroup or time namespace is refused; under
-  `Unconfined` all of it runs. A pod created before the installer failed
-  `CreateContainerError` and started when the file arrived. In the operator suite each
-  type reaches the worker container and a type the kubelet does not take is refused
-  (`ResourcesTest`, `SettingsTest`); the chart job checks the chart's refusals; and on CI's
-  kind the worker container wears the profile the installation chose (a test of its own),
-  and the bubblewrap test, under `Unconfined`, gets past the user namespace to the `/proc`
-  mount above.
+  containerd 2.1.3), the worker image with the worker's security context: under
+  `RuntimeDefault` `unshare -U` and bubblewrap with `Troupe.Sandbox`'s flags are refused;
+  under the shipped profile, installed by the rendered DaemonSet, a user, mount and PID
+  namespace are made, bubblewrap runs with those flags (`/proc/1/comm` is `bwrap`, no BEAM
+  in sight) and git runs inside it, while a network, cgroup or time namespace is refused;
+  under `Unconfined` all of it runs. A pod created before the installer failed
+  `CreateContainerError` and started when the file arrived. The same pods with
+  `hostUsers: false` and `procMount: Unmasked` run in a uid map of their own, with no mount
+  over `/proc`, write their local-path volume as uid 1000 and read their projected token,
+  and behave the same under each profile. In the operator suite each type and both
+  user-namespace settings reach the worker pod, an unmasked `/proc` never renders without
+  `hostUsers: false`, and a type the kubelet does not take is refused (`ResourcesTest`,
+  `SettingsTest`); the chart job checks the chart's refusals. On CI's kind the cluster
+  suite checks that the worker container wears the profile the installation chose and runs
+  in a user namespace of its own with no mount over `/proc`, and the bubblewrap test runs a
+  session's command in the sandbox.

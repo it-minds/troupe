@@ -100,6 +100,7 @@ if config_env() == :prod do
   # here, with the reason, rather than in an event on every StatefulSet it writes.
   worker_seccomp_type =
     presence.(System.get_env("TROUPE_WORKER_SECCOMP_TYPE")) || "RuntimeDefault"
+
   worker_seccomp_profile = presence.(System.get_env("TROUPE_WORKER_SECCOMP_PROFILE"))
 
   cond do
@@ -146,6 +147,9 @@ if config_env() == :prod do
         String.to_integer(System.get_env("TROUPE_DRAIN_TIMEOUT_SECONDS", "300")),
       worker_seccomp_type: worker_seccomp_type,
       worker_seccomp_profile: worker_seccomp_profile,
+      # A user namespace for every worker pod and its `/proc` unmasked
+      # (`worker.userNamespaces` in the chart). Unset is off, as it always was.
+      worker_user_namespaces: System.get_env("TROUPE_WORKER_USER_NAMESPACES") == "true",
       # Comma-separated names, as the chart joins them; an unset variable and an empty
       # one both mean no pull secrets.
       image_pull_secrets:

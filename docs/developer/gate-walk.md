@@ -131,11 +131,13 @@ changes the chart or the operator, every night and for every release
 | a worker cannot reach 169.254.169.254, even where another policy admits it | `egress_test.exs`, "a cloud's metadata address", against a stand-in CI puts there |
 | the IPv6 and NAT64 forms of the metadata addresses are denied | the same, read from the policy the Cilium agent enforces |
 | a command a session runs on a pod runs in bubblewrap and sees neither the pod's processes nor its OpenBao token | `isolation_test.exs`, "a command a session runs on a pod" |
+| a worker pod runs in a user namespace of its own with nothing mounted over its `/proc`, and under the seccomp profile the installation chose | the same describe, its two other tests |
 | a profile's own OpenBao role reaches its own teams' session keys and nothing else, and a pod of another profile cannot log in under it | `isolation_test.exs`, "a profile's OpenBao role", in the dev OpenBao |
 
-What no test reaches is the live plane's own: its nodes, whose kernel and security profile
-decide whether bubblewrap starts there, and the chart's seccomp profile on them (kind runs
-workers `Unconfined`, so CI never starts bubblewrap under the shipped profile); its cloud's
+What no test reaches is the live plane's own: its nodes, whose kernel, runtime, storage and
+security profile decide whether bubblewrap starts there, the chart's seccomp profile on
+them (kind runs workers `Unconfined`, so CI never starts bubblewrap under the shipped
+profile), and the worker namespaces' Pod Security level; its cloud's
 real metadata service, over IPv6 and NAT64 where its network has them; the hosts its
 profiles name; and whether its OpenBao has a role per profile at all. Those are this row's.
 
@@ -153,7 +155,11 @@ profiles name; and whether its OpenBao has a role per profile at all. Those are 
 2. The worker container's seccomp profile is the chart's (`kubectl -n troupe-w-<p> get pod
    troupe-w-<p>-0 -o jsonpath='{.spec.containers[0].securityContext.seccompProfile}'` reads
    `Localhost` and `troupe/worker.json`), and `kubectl -n troupe-system rollout status
-   daemonset/troupe-worker-seccomp` says every node has it.
+   daemonset/troupe-worker-seccomp` says every node has it. The pod is in a user namespace
+   of its own: `kubectl -n troupe-w-<p> get pod troupe-w-<p>-0 -o
+   jsonpath='{.spec.hostUsers} {.spec.containers[0].securityContext.procMount}'` reads
+   `false Unmasked`, and `kubectl -n troupe-w-<p> exec troupe-w-<p>-0 -- head -1
+   /proc/self/uid_map` does not start `0 0`.
 3. The role, where `bao.workerRolePerProfile` is on: the pod's `TROUPE_BAO_ROLE` is
    `troupe-worker-<p>` (`kubectl -n troupe-w-<p> get pod troupe-w-<p>-0 -o yaml`), and
    OpenBao has that role bound to `troupe-w-<p>` alone (`bao read
@@ -166,10 +172,12 @@ is blocked with Cilium (`EgressByHostname` reads `CiliumFQDN`); without Cilium i
 by design, and the record says so. With a role per profile, the role names the profile's
 namespace and no other. **Fail:** anything else, and in particular a command refused with
 "this worker runs every command in a sandbox and ...": bubblewrap does not start on these
-nodes, and nothing runs. The worker's seccomp profile is the first thing to read then
+nodes, and nothing runs. What bubblewrap said names the cause: "No permissions to create
+new namespace" is the seccomp profile, "Can't mount proc" the pod's user namespace
 ([installing.md](../admin/installing.md#the-workers-seccomp-profile)).
 
-**Behind it:** Decisions 832 (bubblewrap), 890 (the worker's seccomp profile), 856 (the
+**Behind it:** Decisions 832 (bubblewrap), 890 (the worker's seccomp profile and user
+namespace), 856 (the
 denied addresses), 752 and 758 (with and without Cilium), 753 (a role per profile), 889
 (the cluster suite on pull requests);
 #625 and #627 are what is left;

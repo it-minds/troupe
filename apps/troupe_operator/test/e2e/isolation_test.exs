@@ -145,6 +145,57 @@ defmodule Troupe.E2E.IsolationTest do
       assert worn == chosen,
              "#{pod}'s worker container runs under #{inspect(worn)}, and the installation chose #{chosen}"
     end
+
+    # Bubblewrap mounts a fresh /proc for the sandbox, which the kernel refuses inside a user
+    # namespace while the container's own /proc has paths masked over; Kubernetes unmasks it
+    # only for a pod in a user namespace of its own. What the pod says it is, and what the
+    # kernel says it is: a uid map that is not the node's, and no mount over any of /proc.
+    test "runs in a user namespace of its own, with /proc unmasked, where the installation chose it",
+         context do
+      namespace = World.worker_namespace(context.profile)
+      pod = World.pod(namespace, "app.kubernetes.io/name=troupe-worker")
+      assert pod, "#{namespace} has no worker pod to look at"
+
+      chosen =
+        World.kubectl!([
+          "get",
+          "deployment",
+          "troupe-operator",
+          "-n",
+          World.namespace(),
+          "-o",
+          ~s|jsonpath={.spec.template.spec.containers[0].env[?(@.name=="TROUPE_WORKER_USER_NAMESPACES")].value}|
+        ])
+
+      assert chosen == "true", """
+      The kind cluster's workers are meant to run in user namespaces, and the operator was
+      told #{inspect(chosen)}: without one, bubblewrap cannot mount the sandbox's /proc.
+      """
+
+      spec =
+        World.kubectl!([
+          "get",
+          "pod",
+          pod,
+          "-n",
+          namespace,
+          "-o",
+          ~s|jsonpath={.spec.hostUsers} {.spec.containers[?(@.name=="worker")].securityContext.procMount}|
+        ])
+
+      assert spec == "false Unmasked", "#{pod} says hostUsers and procMount are #{inspect(spec)}"
+
+      {uid_map, 0} =
+        World.exec(namespace, pod, ["sh", "-c", "head -1 /proc/self/uid_map | tr -s ' '"])
+
+      refute String.trim(uid_map) =~ ~r/^0 0 /,
+             "#{pod} runs in the node's own user namespace: #{inspect(uid_map)}"
+
+      {masks, _status} =
+        World.exec(namespace, pod, ["sh", "-c", "grep -c ' /proc/' /proc/self/mountinfo"])
+
+      assert String.trim(masks) == "0", "#{pod} has #{String.trim(masks)} mount(s) over /proc"
+    end
   end
 
   describe "a profile's OpenBao role" do

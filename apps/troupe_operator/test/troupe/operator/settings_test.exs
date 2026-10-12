@@ -63,6 +63,14 @@ defmodule Troupe.Operator.SettingsTest do
     end
   end
 
+  describe "a user namespace for each worker pod" do
+    test "is what the chart says, and off when it says nothing" do
+      assert read(%{"TROUPE_WORKER_USER_NAMESPACES" => "true"}).worker_user_namespaces == true
+      assert read(%{"TROUPE_WORKER_USER_NAMESPACES" => "false"}).worker_user_namespaces == false
+      assert read(%{"TROUPE_WORKER_USER_NAMESPACES" => nil}).worker_user_namespaces == false
+    end
+  end
+
   # `config/runtime.exs` read as a release reads it, with `vars` set (a `nil` unset) and put
   # back afterwards, and the operator's settings out of it.
   defp read(vars) do

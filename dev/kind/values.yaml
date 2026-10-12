@@ -56,7 +56,9 @@ plane:
 # every command's sandbox is built from. The chart's own profile, which keeps a filter, is
 # installed on a node's disk by a DaemonSet; a cluster that is thrown away has no need of
 # one, and the worker namespaces here are at the `privileged` Pod Security level, which
-# `Unconfined` needs. Never this anywhere else.
+# `Unconfined` needs. Never this anywhere else. User namespaces stay on, as the chart has
+# them (`worker.userNamespaces`): `scripts/kind-up` lets a user-namespaced pod reach kind's
+# createContainer hook.
 worker:
   image: {tag: dev}
   seccomp:

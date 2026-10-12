@@ -72,6 +72,14 @@ defmodule Troupe.Operator.Settings do
             # and refuses rather than runs.
             worker_seccomp_type: "RuntimeDefault",
             worker_seccomp_profile: nil,
+            # Whether a worker pod runs in a user namespace of its own (`hostUsers: false`)
+            # with its `/proc` unmasked (`procMount: Unmasked`). Bubblewrap mounts a fresh
+            # `/proc` for the sandbox, and the kernel refuses that inside a user namespace
+            # while the container's own `/proc` has paths masked over; Kubernetes unmasks it
+            # only for a pod in a user namespace, where the container's root is nobody on
+            # the node. The chart turns it on; off, a pod refuses every command, as it
+            # always did.
+            worker_user_namespaces: false,
             cilium_available: false,
             drain_timeout_seconds: 300
 

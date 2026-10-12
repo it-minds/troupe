@@ -59,6 +59,9 @@ profile's own directory from the host, and a path with `..` in it would mount an
 */}}
 {{- define "troupe.worker.seccomp.validate" -}}
 {{- $seccomp := .Values.worker.seccomp -}}
+{{- if not (kindIs "bool" .Values.worker.userNamespaces) }}
+{{- fail (printf "worker.userNamespaces is %v (%s), and it is true or false: a string such as \"false\" would read as on." .Values.worker.userNamespaces (kindOf .Values.worker.userNamespaces)) }}
+{{- end }}
 {{- if not (has $seccomp.type (list "Localhost" "RuntimeDefault" "Unconfined")) }}
 {{- fail (printf "worker.seccomp.type is %q: it is Localhost (the chart's profile, which lets bubblewrap make its namespaces), RuntimeDefault (no command runs on a pod) or Unconfined (no filter, for a development cluster)." (toString $seccomp.type)) }}
 {{- end }}

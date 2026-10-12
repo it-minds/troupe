@@ -17,6 +17,7 @@ is a worked example.
 | Cilium, optionally | egress by hostname: a worker reaches its allowlist and nothing else | a worker reaches any public host on 443 and 80; the allowlist is checked at admission, not on the wire; a profile's own endpoint on another port, or given as an address, opens that port or that address; one at a loopback, unspecified, link-local or cloud metadata address is refused, as it is with Cilium |
 | An ingress controller | how a client reaches a worker | sessions are created and cannot be attached to from outside |
 | Nodes that allow unprivileged user namespaces, and the chart's seccomp profile on them | every command on a pod runs in bubblewrap, which builds its sandbox from a user namespace ([below](#the-workers-seccomp-profile)) | a pod refuses every command, saying bubblewrap could not start |
+| Kubernetes ≥ 1.33, containerd ≥ 2.0 (runc ≥ 1.2), Linux ≥ 6.3, storage that takes idmapped mounts, `privileged` Pod Security in worker namespaces | each worker pod runs in a user namespace of its own with its `/proc` unmasked, which bubblewrap's own `/proc` needs ([below](#the-workers-user-namespaces)) | a worker pod is refused or does not start; with `worker.userNamespaces: false` it starts and refuses every command |
 
 Label the ingress controller's namespace, or every worker drops its traffic:
 
@@ -135,18 +136,80 @@ worker:
 - **`Unconfined`** is no filter at all, for a development cluster (`dev/kind/values.yaml`).
   The `baseline` and `restricted` Pod Security levels refuse it.
 
-**Not enough on its own yet.** With the profile in place bubblewrap makes its namespaces,
-and on a standard kernel it then stops at mounting the sandbox's own `/proc` ("bwrap: Can't
-mount proc on /newroot/proc: Operation not permitted"): the container runtime masks paths
-under a container's `/proc`, and the kernel refuses a new proc mount in a user namespace
-while those masks hide part of the one it would reveal. Until that is settled (#690), a
-worker refuses commands with that sentence instead of the one about the namespace.
+### The workers' user namespaces
 
-The operator labels no worker namespace, so they have the cluster's default Pod Security
-level. `Localhost` and `RuntimeDefault` pass `restricted`, as the rest of a worker pod does;
-`Unconfined` needs `privileged`, and where the level is higher every worker pod is refused
-at creation, in a `FailedCreate` event on its StatefulSet. The chart cannot see that level,
-so it cannot refuse the combination for you.
+The profile is not all bubblewrap needs. It also mounts a fresh `/proc` for the sandbox,
+and a container runtime masks paths under a container's own `/proc` (`/proc/kcore` and
+others mounted over, `/proc/sys` read-only); the kernel refuses a new proc mount in a user
+namespace while those hide part of the old one ("bwrap: Can't mount proc on /newroot/proc:
+Operation not permitted"). Kubernetes unmasks a container's `/proc` only for a pod in a user
+namespace of its own, so with `worker.userNamespaces: true`, the default, every worker pod
+gets `hostUsers: false` and its worker container `procMount: Unmasked`, always together. The
+container's root, and every other user in it, is then an unprivileged user on the node.
+
+What the cluster needs for it:
+
+| | |
+| --- | --- |
+| Kubernetes | 1.33 or later, where user namespaces are on by default |
+| Container runtime | containerd 2.0 or later with runc 1.2 or later (CRI-O 1.25 or later with crun or runc should do; not tried) |
+| Nodes | Linux 6.3 or later: the projected tokens and ConfigMaps are tmpfs, and idmapped tmpfs came in 6.3 |
+| Storage | filesystems that take idmapped mounts. A block volume with ext4 or xfs does, and so do kind's and `local-path`'s directories. **NFS does not, and most RWX file storage is NFS**: a team volume there is expected to keep its pod in `ContainerCreating` or `CreateContainerError`, with the idmapped mount refused in the pod's events (not tried here) |
+| Pod Security | `privileged` in the worker namespaces: `baseline` and `restricted` refuse `procMount: Unmasked` even in a user namespace, and every worker pod is then refused at creation, in a `FailedCreate` event on its StatefulSet. The operator labels no worker namespace, so they have the cluster's default level; label each `troupe-w-<profile>` where that default is higher |
+
+A cluster that cannot have them sets `worker.userNamespaces: false`. Its workers start and
+refuse every command, with bubblewrap's `/proc` sentence, until it can: a pod never runs a
+command outside the sandbox.
+
+**Check your cluster** before installing, with no secret and nothing of Troupe's but the
+worker image. This makes a namespace, a volume on the storage class your profiles use, and
+one pod as a worker pod would be, then runs a sandbox the way a worker does:
+
+```bash
+kubectl version | grep Server                    # 1.33 or later
+kubectl get nodes -o custom-columns=NODE:.metadata.name,KERNEL:.status.nodeInfo.kernelVersion,RUNTIME:.status.nodeInfo.containerRuntimeVersion
+kubectl create namespace troupe-check
+kubectl label namespace troupe-check pod-security.kubernetes.io/enforce=privileged
+kubectl apply -n troupe-check -f - <<'YAML'
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: data}
+spec:
+  accessModes: [ReadWriteOnce]       # ReadWriteMany and the class your team volumes use, to check those
+  storageClassName: standard         # the class your profiles name
+  resources: {requests: {storage: 1Gi}}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: worker-check}
+spec:
+  hostUsers: false
+  securityContext: {runAsNonRoot: true, runAsUser: 1000, fsGroup: 1000}
+  containers:
+    - name: worker
+      image: ghcr.io/it-minds/troupe-worker:0.17.0-beta   # the release you install
+      command: ["sleep", "600"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities: {drop: ["ALL"]}
+        seccompProfile: {type: Localhost, localhostProfile: troupe/worker.json}  # once the chart's DaemonSet has run; else Unconfined, for the check only
+        procMount: Unmasked
+      volumeMounts: [{name: data, mountPath: /var/lib/troupe}]
+  volumes: [{name: data, persistentVolumeClaim: {claimName: data}}]
+YAML
+kubectl -n troupe-check wait --for=condition=Ready pod/worker-check --timeout=120s
+kubectl -n troupe-check exec worker-check -- sh -c '
+  head -1 /proc/self/uid_map                     # not "0 0 4294967295"
+  grep -c " /proc/" /proc/self/mountinfo         # 0: nothing masked
+  touch /var/lib/troupe/ok && echo volume ok
+  bwrap --unshare-pid --proc /proc --dev /dev --ro-bind /usr /usr --symlink usr/bin /bin \
+    --symlink usr/lib /lib --symlink usr/lib64 /lib64 -- /bin/sh -c "cat /proc/1/comm"'   # bwrap
+kubectl delete namespace troupe-check
+```
+
+A pod that never becomes ready says why in `kubectl -n troupe-check describe pod
+worker-check`: `hostUsers` dropped or refused (Kubernetes or the runtime too old), an
+idmapped mount refused (the storage), or the seccomp profile missing from the node.
 
 ## 3. Prove it is up
 

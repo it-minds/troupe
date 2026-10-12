@@ -53,5 +53,14 @@ else
   esac
 fi
 
+# Worker pods run in a user namespace of their own (`worker.userNamespaces`), and the
+# runtime runs kind's createContainer hook, /kind/bin/mount-product-files.sh, inside it: as
+# the pod's root, which is nobody on the node. The node image leaves /kind at 0644, so that
+# root cannot reach the hook and every such pod fails to start ("fork/exec
+# /kind/bin/mount-product-files.sh: permission denied"). Nothing under /kind is secret.
+for node in $(kind get nodes --name "$cluster"); do
+  docker exec "$node" chmod 0755 /kind
+done
+
 kubectl --context "kind-${cluster}" version --output=yaml | head -20
 kubectl --context "kind-${cluster}" get nodes

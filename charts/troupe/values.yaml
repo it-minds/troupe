@@ -240,15 +240,24 @@ worker:
   #   default plus the calls bubblewrap makes its user, mount and PID namespaces with, and
   #   never a network, cgroup or time namespace. It has to be on every node that runs
   #   workers, at `localhostProfile` under the kubelet's seccomp directory: `install` below
-  #   puts it there, or the Security Profiles Operator does. Allowed under the `restricted`
-  #   Pod Security level.
+  #   puts it there, or the Security Profiles Operator does.
   # - `RuntimeDefault`: the runtime's own. Workers start and refuse every command.
   # - `Unconfined`: no filter at all, for a development cluster (`dev/kind/values.yaml`).
-  #   Refused by the `baseline` and `restricted` Pod Security levels, so the worker
-  #   namespaces need `privileged`.
   #
-  # Changing it changes every profile's pod template, so each profile reports
-  # `UpgradePending` until its pods are replaced.
+  # Changing it, or `userNamespaces`, changes every profile's pod template, so each profile
+  # reports `UpgradePending` until its pods are replaced.
+  #
+  # Every worker pod in a user namespace of its own (`hostUsers: false`), with the worker
+  # container's `/proc` unmasked (`procMount: Unmasked`). Bubblewrap mounts a fresh `/proc`
+  # for the sandbox, and the kernel refuses that inside a user namespace while the
+  # container's own `/proc` has paths masked over; Kubernetes unmasks it only for a pod in
+  # a user namespace, where the container's root is an unprivileged user on the node. Needs
+  # Kubernetes 1.33 or later, containerd 2.0 and runc 1.2 or later, Linux 6.3 or later on
+  # the nodes, storage whose filesystems take idmapped mounts, and the `privileged` Pod
+  # Security level in the worker namespaces, since `baseline` and `restricted` refuse an
+  # unmasked `/proc` (docs/admin/installing.md). `false` keeps the node's users and the
+  # masked `/proc`: workers start and refuse every command.
+  userNamespaces: true
   seccomp:
     type: Localhost
     localhostProfile: troupe/worker.json

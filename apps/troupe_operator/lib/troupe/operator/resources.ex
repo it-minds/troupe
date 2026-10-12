@@ -751,7 +751,22 @@ defmodule Troupe.Operator.Resources do
       "volumes" => volumes(profile)
     }
     |> put_unless_nil("imagePullSecrets", pull_secrets(settings))
+    |> Map.merge(user_namespace(settings))
   end
+
+  # A user namespace of the pod's own, where the installation asks for one: the
+  # container's root is then an unprivileged user on the node, and Kubernetes lets the
+  # worker container's `/proc` go unmasked (`container_user_namespace/1`), which it allows
+  # in nothing else. Bubblewrap mounts a fresh `/proc` for the sandbox, and the kernel
+  # refuses that while the container's own has paths masked over. The two always come
+  # together: an unmasked `/proc` outside a user namespace is never rendered.
+  defp user_namespace(%Settings{worker_user_namespaces: true}), do: %{"hostUsers" => false}
+  defp user_namespace(_settings), do: %{}
+
+  defp container_user_namespace(%Settings{worker_user_namespaces: true}),
+    do: %{"procMount" => "Unmasked"}
+
+  defp container_user_namespace(_settings), do: %{}
 
   defp pull_secrets(%Settings{image_pull_secrets: []}), do: nil
   defp pull_secrets(%Settings{image_pull_secrets: names}), do: Enum.map(names, &%{"name" => &1})
@@ -767,19 +782,23 @@ defmodule Troupe.Operator.Resources do
       "volumeMounts" => volume_mounts(profile),
       "readinessProbe" => probe("/health/ready"),
       "livenessProbe" => probe("/health/live"),
-      "securityContext" => %{
-        "allowPrivilegeEscalation" => false,
-        "readOnlyRootFilesystem" => false,
-        # `bubblewrap` needs user namespaces, not privileges: every capability is
-        # dropped and the sandbox is built from unprivileged namespaces.
-        "capabilities" => %{"drop" => ["ALL"]},
-        # And a seccomp profile that lets it make them. The runtime's default, which the
-        # pod as a whole keeps, refuses a user namespace to a process without
-        # CAP_SYS_ADMIN, and a pod under it refuses every command. This container's is
-        # the installation's: the chart's profile, the default plus what bubblewrap
-        # needs, or `Unconfined` on a development cluster.
-        "seccompProfile" => Settings.worker_seccomp(settings)
-      }
+      "securityContext" =>
+        Map.merge(
+          %{
+            "allowPrivilegeEscalation" => false,
+            "readOnlyRootFilesystem" => false,
+            # `bubblewrap` needs user namespaces, not privileges: every capability is
+            # dropped and the sandbox is built from unprivileged namespaces.
+            "capabilities" => %{"drop" => ["ALL"]},
+            # And a seccomp profile that lets it make them. The runtime's default, which
+            # the pod as a whole keeps, refuses a user namespace to a process without
+            # CAP_SYS_ADMIN, and a pod under it refuses every command. This container's is
+            # the installation's: the chart's profile, the default plus what bubblewrap
+            # needs, or `Unconfined` on a development cluster.
+            "seccompProfile" => Settings.worker_seccomp(settings)
+          },
+          container_user_namespace(settings)
+        )
     }
   end
 

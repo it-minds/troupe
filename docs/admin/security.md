@@ -94,6 +94,17 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   dropped and no privilege escalation. Its root filesystem is writable. No ServiceAccount
   token is mounted; two projected tokens are, one for enrolling with the plane and one for
   OpenBao.
+- **The pod runs in a user namespace of its own** (`hostUsers: false`, `worker.userNamespaces`,
+  Decision 890), so its root and every other user in it, uid 1000 included, are
+  unprivileged users on the node, mapped to a range no other pod has: a process that
+  escaped the container would be nobody there. Its worker container's `/proc` is unmasked
+  (`procMount: Unmasked`), because bubblewrap mounts a fresh `/proc` for the sandbox and
+  the kernel refuses that while paths in the container's own are masked over. Kubernetes
+  allows that only inside a pod's own user namespace, and the operator writes the two
+  together or neither; what the masks hid (`/proc/kcore`, `/proc/sys`, ...) is the pod's
+  user namespace's to see, where its root has no privilege over the node. The Pod Security
+  levels `baseline` and `restricted` refuse an unmasked `/proc` all the same, so worker
+  namespaces are `privileged`.
 - **Every command runs in bubblewrap**, the shell's and every process Troupe starts there
   (git, ripgrep, a stdio MCP server), over the session's own directory. A pod that cannot
   start bubblewrap refuses the command with a sentence; it never runs one unconfined
@@ -121,9 +132,7 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   allow all of this and mounting in the pod's own namespace besides, and `Unconfined`, which
   the development cluster uses, removes the filter entirely. The pod as a whole keeps the
   runtime's default; only the worker container has this one. `RuntimeDefault` remains a
-  choice, under which no command runs on a pod. The profile is not yet all bubblewrap needs
-  on a standard kernel: the runtime's masked `/proc` refuses the sandbox a fresh one, and a
-  pod refuses commands at that point instead (#690).
+  choice, under which no command runs on a pod.
 - **Network.** Each profile's namespace has a NetworkPolicy: ingress only from the
   namespace labelled `troupe.dev/ingress=true`, egress to DNS, the plane, OpenBao, object
   storage, the model, the MCP servers and the git hosts. **With Cilium** the profile's
