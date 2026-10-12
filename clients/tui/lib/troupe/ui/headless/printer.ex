@@ -87,7 +87,7 @@ defmodule Troupe.UI.Headless.Printer do
       # Budget questions by id, `:said` once the line is printed and `:stopped` once
       # answered no: the item is drawn again once the question that rides beside it
       # arrives with its options (Decision 120), and it is that question which is
-      # answered, once (Decision 162).
+      # answered, once.
       budgets: %{},
       rested: false,
       # Lines sent to the target while it worked and not yet taken, by command id.
@@ -398,8 +398,8 @@ defmodule Troupe.UI.Headless.Printer do
   # budget question is a question (Decision 120), so it is answered as one, with the
   # word the harness reads as a stop, once it has been asked: the item that comes with
   # the question's options. The harness says the budget ran out a moment before it asks,
-  # and a stop sent in between answered no question, so the run waited for good
-  # (Decision 162). The line is said when either comes first.
+  # and a stop sent in between answered no question, so the run waited for good. The
+  # line is said when either comes first.
   defp print(%{type: :budget_ask_started, agent_path: p, data: d}, state) do
     state = budget_said(state, p, d)
 
