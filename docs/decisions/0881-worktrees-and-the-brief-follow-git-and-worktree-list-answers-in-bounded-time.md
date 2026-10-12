@@ -120,7 +120,11 @@ maintainer's rule (2026-10-12): worktrees and the brief follow git.
 **Measured**, 201 trees (a checkout and 200 linked worktrees of a one-file repository),
 through the daemon's socket. In WSL (Linux) on the chunk's tip: `worktree.list` 33.8 s,
 every tree read; with this change 2.7 s with 24 trees read, and 0.16 s with `status: false`
-(which the tip ignored, 38.9 s). On Windows, the installed builds: in the pull request.
+(which the tip ignored, 38.9 s). On Windows, the installed builds on scratch homes: before,
+54.7 s at the checkout and 48.5 s in an ignored folder (201 rows each, every tree read);
+after, 2.7 to 2.8 s at the checkout or in a tracked folder (about 40 trees read), 0.6 to
+0.7 s with `status: false`, and 0.7 s with no rows in the ignored folder. A plain line in
+the ignored folder opened `build-1` in 0.75 s.
 
 **Proof.** Each failed on the chunk's tip (8b1b760) first.
 - `Troupe.Gateway.EnclosingRepositoryTest`. An ignored folder: `worktree.list` empty with
