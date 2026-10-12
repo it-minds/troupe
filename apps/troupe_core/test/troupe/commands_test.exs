@@ -76,7 +76,7 @@ defmodule Troupe.CommandsTest do
     agents_section =
       entries |> Enum.filter(&(&1["section"] == "agents")) |> Enum.map(& &1["name"])
 
-    assert agents_section == ["agents", "worktree", "code", "plan"]
+    assert agents_section == ["agents", "worktree", "workflow", "code", "plan"]
   end
 
   test "without agents the list is the built-ins" do

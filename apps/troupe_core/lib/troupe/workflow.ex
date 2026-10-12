@@ -1,27 +1,28 @@
 defmodule Troupe.Workflow do
   @moduledoc """
-  Named, multi-step engineering workflows, run as an *orchestration*: the `workflow`
-  agent is an expensive orchestrator that never edits the repository itself. It reads
-  the step list, decides when each step is ready, and hands every step to the subagent
-  that owns it — which may delegate further in turn, up to `max_depth`. A client runs
-  one as a session of its own in a worktree (`session.create` with `workflow` and
-  `worktree: "always"`), so the person reviews the result with `worktree.merge` or
-  `worktree.discard`.
+  Named, multi-step engineering workflows, run as an *orchestration*: `orchestrate`, the
+  one agent that orchestrates, never edits the repository itself. Given a workflow, it
+  reads the step list, decides when each step is ready, and hands every step to the
+  subagent that owns it — which may delegate further in turn, up to `max_depth`. A
+  client runs one as a session of its own in a worktree (`session.create` with
+  `workflow` and `worktree: "always"`), so the person reviews the result with
+  `worktree.merge` or `worktree.discard`.
 
   A step is a name, a directive, the `agent` responsible for it, and whether it may run
   concurrently with the steps beside it. A step with no agent is the orchestrator's own
   (planning, deciding, reporting).
 
   This module is thin and free of state: it loads step definitions and renders a plan.
-  Running a workflow is starting the `workflow` primary agent with the plan as its
-  prompt, so every existing mechanism — worktrees, approvals, budgets, resume — applies
-  unchanged.
+  Running a workflow is starting `agent/0` with the plan as its prompt, so every
+  existing mechanism — worktrees, approvals, budgets, resume — applies unchanged. The
+  same agent, started on a person's own words, orchestrates a change nobody wrote a
+  step list for: a workflow is that agent with its plan written down in advance, not a
+  second orchestrator.
 
   A step follows the delegation's contract (#554, Decisions 847 and 850): its prompt is
   what the orchestrator turns into a brief in five parts, its result is the subagent's
   finish in parts, and a step to an agent the person asked to see first stops at the
-  same gate any delegation does. `workflow` runs a repository's declared steps;
-  `orchestrate` is the same contract with no step list, for work nobody wrote one for.
+  same gate any delegation does.
 
   ## Defining a workflow
 
@@ -60,6 +61,19 @@ defmodule Troupe.Workflow do
           agent: String.t() | nil,
           parallel: boolean()
         }
+
+  @doc """
+  The agent a workflow runs on: `orchestrate`, which orchestrates a change whether its
+  plan was written in advance or not. `workflow`, the name the runner had before, is
+  taken as this one when a client still sends it.
+  """
+  @spec agent() :: String.t()
+  def agent, do: "orchestrate"
+
+  @doc "The agent a workflow runs on when a client names `profile`, or none."
+  @spec agent(String.t() | nil) :: String.t()
+  def agent(profile) when profile in [nil, "", "workflow"], do: agent()
+  def agent(profile) when is_binary(profile), do: profile
 
   @doc "The bundled default workflow: a generic engineering pipeline, one owner per step."
   @spec default_steps() :: [step()]
@@ -234,7 +248,7 @@ defmodule Troupe.Workflow do
   defp parse_agent(_), do: nil
 
   @doc """
-  Renders the full prompt the `workflow` agent starts from for `task` using `steps`: the
+  Renders the full prompt `agent/0` starts from for `task` using `steps`: the
   task, the orchestration contract, then the ordered step list with the agent that owns
   each step.
   """

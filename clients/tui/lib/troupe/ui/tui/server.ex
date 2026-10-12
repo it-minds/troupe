@@ -1027,7 +1027,7 @@ defmodule Troupe.UI.TUI.Server do
   # than being dispatched as an agent.
   @builtins ~w(new cancel dismiss merge discard goal loop sessions back hq observer files
                scratch upload copy memory context watch settings models mcp skills help agents
-               worktree detail quit)
+               worktree workflow detail quit)
 
   @doc false
   @spec builtins() :: [String.t()]
@@ -1441,6 +1441,11 @@ defmodule Troupe.UI.TUI.Server do
   # client starts (`/worktree <name>: …` and `/worktree <existing> …` are its business).
   defp builtin("worktree", args, state, _target),
     do: Client.dispatch(state.session_id, "worktree", args)
+
+  # A workflow is `orchestrate` on a step list the daemon renders, in a worktree of its
+  # own: a branch the client starts, as `/worktree`'s is.
+  defp builtin("workflow", args, state, _target),
+    do: Client.dispatch(state.session_id, "workflow", args)
 
   ## Command palette
 
