@@ -17,11 +17,16 @@ defmodule Troupe.Agent.PropertyTest do
 
   @actions [:input, :cancel, :switch_plan, :switch_build, :unknown, :todo_edit, :bad_approval]
 
+  # Each run is a session started, driven and stopped, a fraction of a second alone and
+  # several on a machine running the whole suite: 25 of them in a row outran the test's
+  # 60 seconds there. So the runs stop at 20 seconds, the 25th or not, and the one under
+  # way finishes inside its own deadline.
   property "any interleaving of input, cancel, profile switches and junk leaves the agent live and at rest",
            context do
     check all(
             actions <- list_of(member_of(@actions), min_length: 1, max_length: 14),
-            max_runs: 25
+            max_runs: 25,
+            max_run_time: 20_000
           ) do
       %{session: session} =
         start_session(context,

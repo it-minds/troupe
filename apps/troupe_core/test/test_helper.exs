@@ -52,4 +52,9 @@ System.at_exit(fn _ -> File.rm_rf!(login_home) end)
 # look like failures.
 Logger.configure(level: :critical)
 
+# Loaded now rather than by the first test to call each one, which then waits on the read
+# behind every other test's: on a slow disk that wait is past the suite's timeouts.
+Code.require_file("support/preload.exs", __DIR__)
+Troupe.Test.Preload.run()
+
 ExUnit.start(capture_log: true)

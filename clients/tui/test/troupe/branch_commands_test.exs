@@ -101,7 +101,8 @@ defmodule Troupe.BranchCommandsTest do
         await_event(window, :worktree_discarded, 15_000)
         await_event(window, :window_dismissed)
         refute File.dir?(worktree), "#{how}: the worktree Troupe made is gone"
-        refute Map.has_key?(user_state(pid).model.windows, window)
+        # The screen hears the same event as this test, in its own time.
+        eventually(fn -> not Map.has_key?(user_state(pid).model.windows, window) end)
       end
     end
   end
