@@ -75,7 +75,8 @@ seconds, the checkout first; a worktree it did not reach shows no state rather t
 tracks, the worktrees are the repository's, and `/worktree` makes one beside the
 repository's checkout, with the agent in the same folder of it. A folder the repository
 ignores (say one in its `.gitignore`) is a workspace of its own: it lists no worktrees,
-and `/worktree name: …` is refused there.
+`/worktree <prompt>` works in the folder itself, and `/worktree name: …` is refused
+there.
 
 A line that starts with `!` is a shell command of your own. In the terminal client
 `!git status` runs `git status` where the session runs, in its workspace (the pod's
