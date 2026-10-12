@@ -456,8 +456,17 @@ question a session asks when it reaches that limit: it offers only raises that s
 the ceiling, refuses a typed amount past it, names the organisation and where its limit
 came from (the file's path or the plane's URL), and does not offer "no limit"; `allow`,
 which buys the first allowance again, stops at the ceiling too. An enforced `max_tokens`
-is the most output one model call asks for: a provider's model entry with its own
-`max_output` can lower that for its model, and cannot raise it.
+is the most output one model call asks for, whatever the call: a provider's model entry
+with its own `max_output` can lower that for its model, and cannot raise it, and the
+summary a compaction asks for is held to it too. It also holds the room a model's
+`reasoning_effort` gives its thinking, which otherwise raises the output cap to fit. On
+an Anthropic model the thinking is shortened so that the answer keeps 4,096 tokens, or
+half the ceiling where that is less, and where that leaves less than Anthropic's minimum
+of 1,024 tokens the call asks for no thinking. An OpenAI-compatible model's reasoning
+spends from the same cap. A session whose thinking is shortened or turned off says so
+once, naming the ceiling and its source, so a person who set a high effort learns why
+the model thinks less than they asked. Under a ceiling of less than 2,047 tokens an
+Anthropic model is never asked to think.
 
 **What it is not.** It is the organisation's word honoured by Troupe on the machine, not a
 control a person cannot get round on a machine they administer: the plane's copy is in

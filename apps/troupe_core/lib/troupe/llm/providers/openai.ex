@@ -278,7 +278,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
       stream: true,
       messages: encode_messages(request)
     }
-    |> put_output_cap(request.max_tokens, request.reasoning_effort)
+    |> put_output_cap(Request.output_cap(request), request.reasoning_effort)
     |> maybe_put(:temperature, request.temperature)
     |> maybe_put(:tools, encode_tools(request.tools))
     # Usage is not reported in a stream unless it is asked for; providers that do not
@@ -301,7 +301,9 @@ defmodule Troupe.LLM.Providers.OpenAI do
   # A reasoning model rejects `max_tokens` and counts its reasoning against
   # `max_completion_tokens`; a plain OpenAI-compatible server knows only `max_tokens`. A
   # configured effort is what says which kind this is, and it goes out verbatim — "none"
-  # is as meaningful as "xhigh", and only the model knows which levels it has.
+  # is as meaningful as "xhigh", and only the model knows which levels it has. Nothing is
+  # raised to hold the reasoning, so an organisation's enforced `max_tokens` holds it as
+  # it holds the answer: the cap is never more than the ceiling.
   defp put_output_cap(body, max, nil), do: Map.put(body, :max_tokens, max)
 
   defp put_output_cap(body, max, effort) do

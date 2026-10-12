@@ -421,6 +421,11 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:remote_note, %{text: to_string(data["message"] || "run troupe onboard here")})],
          memory}
 
+      # Something the configuration did to the session, said once (troupe issue #644: an
+      # organisation's output ceiling shortened the thinking): the harness's sentence.
+      "config_note" ->
+        {[emit.(:remote_note, %{text: to_string(data["message"] || "a setting was held")})], memory}
+
       # A saved `AI!` or `AI?` comment started a branch of this session (root Decision 844):
       # the branch's session, its agent, and the comments, as the daemon wrote them.
       "watch_triggered" ->
