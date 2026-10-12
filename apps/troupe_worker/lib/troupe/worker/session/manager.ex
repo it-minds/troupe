@@ -45,7 +45,8 @@ defmodule Troupe.Worker.Session.Manager do
   alias Troupe.Sessions.{Context, Sealer}
   alias Troupe.Worker.Cache
   alias Troupe.Worker.Connections
-  alias Troupe.Worker.Session.{Restore, Workspace}
+  alias Troupe.Worker.GitCredentials
+  alias Troupe.Worker.Session.{Clone, Restore, Workspace}
   alias Troupe.Worker.Sessions
   alias Troupe.Worker.Usage
 
@@ -291,6 +292,8 @@ defmodule Troupe.Worker.Session.Manager do
     # The key-manager token this session's person-mode servers were reaching through.
     # Held for the life of the session and no longer, exactly as the data key is.
     Connections.forget(state.session_id)
+    # And its GitHub token, for the same reason.
+    GitCredentials.forget(state.session_id)
 
     :ok
   end
@@ -345,9 +348,15 @@ defmodule Troupe.Worker.Session.Manager do
     # log is found; one that looks after it finds the name taken and writes nothing.
     found = Restore.with_log(context.session_id, fn -> found(context, root) end)
 
+    # A token a previous activation here held is not this one's: the next use asks the
+    # plane for a new one, which is how an activation refreshes it.
+    GitCredentials.forget(context.session_id)
+
     try do
       with {:ok, log} <- Restore.events(context, root),
-           {:ok, _tree} <- Restore.workspace(context, root),
+           {:ok, tree} <- Restore.workspace(context, root),
+           # A session created with a repository, waking to an empty tree, starts from it.
+           :ok <- Clone.ensure(context.session_id, root, tree, state.opts),
            {:ok, sealer} <- start_sealer(state, context, log),
            {:ok, session} <- Restore.start(context, root, state.opts) do
         {:ok, log, sealer, session}

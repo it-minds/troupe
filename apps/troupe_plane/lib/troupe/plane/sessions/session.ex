@@ -58,6 +58,10 @@ defmodule Troupe.Plane.Sessions.Session do
 
     field(:title, :string)
     field(:workspace_source, :map)
+    # The GitHub repository the session clones on its first activation, `{owner, name,
+    # ref}`, checked against the plane's App when the session was created. What a pod may
+    # ask a token for is read from here, never from the pod.
+    field(:repository, :map)
     field(:bundle_version, :integer)
     field(:retention_class, :string)
     field(:pinned, :boolean, default: false)
@@ -142,6 +146,7 @@ defmodule Troupe.Plane.Sessions.Session do
     :device,
     :title,
     :workspace_source,
+    :repository,
     :bundle_version,
     :retention_class,
     :pinned,

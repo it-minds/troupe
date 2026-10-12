@@ -43,6 +43,7 @@ defmodule Troupe.Plane.Admin do
     Drain,
     Erasure,
     Fleet,
+    GitHub,
     Gitops,
     Identity,
     Ledger
@@ -1675,6 +1676,55 @@ defmodule Troupe.Plane.Admin do
   def client_policy_keys, do: ClientVersions.keys()
 
   defp policy_fields(policy), do: Map.take(policy, [:recommended, :minimum, :blocked])
+
+  # -- the plane's GitHub App -------------------------------------------------
+
+  @doc """
+  The plane's GitHub App: its id, API URL and where clones come from, the installations
+  it may use, whether its private key is set (type, fingerprint and transit version, never
+  the key), and what a session's token is given.
+
+  Readable by a team admin, whose sessions name repositories through it; changed only by a
+  platform admin, since one App serves every team on the plane.
+  """
+  @spec github_get(actor()) :: result()
+  def github_get(actor) do
+    with :ok <- require_admin(actor), do: {:ok, GitHub.describe()}
+  end
+
+  @doc """
+  Change the plane's GitHub App. Only the keys sent change; `installations` is the whole
+  list; `private_key`, the PEM GitHub downloads, is imported into OpenBao's transit engine
+  and is in no answer, row, log or audit entry afterwards. Refused with the field and the
+  reason, and nothing written, for anything that does not read. Audited with the diff,
+  in which the key is its fingerprint.
+  """
+  @spec github_put(actor(), map()) :: result()
+  def github_put(actor, app) do
+    with :ok <- require_platform_admin(actor) do
+      case GitHub.put(app || %{}, actor.subject) do
+        {:ok, %{before: before, now: now}} ->
+          changes = Audit.diff(github_fields(before), github_fields(now))
+          {:ok, _} = Audit.record(actor.subject, "github.put", "app", changes)
+          {:ok, Map.put(now, :changes, changes)}
+
+        {:error, why} ->
+          {:error, Error.new(:invalid_params, why)}
+      end
+    end
+  end
+
+  # What a diff of the App shows: the key by its fingerprint and version, which is what
+  # tells one key from another, and never more.
+  defp github_fields(app) do
+    %{
+      app_id: app.app_id,
+      api_url: app.api_url,
+      installations: app.installations,
+      fingerprint: app.private_key.fingerprint,
+      transit_version: app.private_key.version
+    }
+  end
 
   # -- the identity provider --------------------------------------------------
 
