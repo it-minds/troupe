@@ -39,6 +39,7 @@ defmodule Troupe.Agent.Server do
     Definition,
     Definitions,
     Headroom,
+    Hold,
     Local,
     Spend,
     State,
@@ -381,10 +382,12 @@ defmodule Troupe.Agent.Server do
     do: %{state | child_seq: child_seq(state, data["child_path"])}
 
   # The turn context a call put into the conversation, put back where it was, so the call
-  # after a restart sends the prefix the one before it sent (Decision 863). A call that put
-  # none, and a log written before 0.13.0, fold as they did.
-  defp fold_event(%Event{type: "llm_request", data: %{"turn_context_block" => %{} = put}}, state),
-    do: put_context(state, put)
+  # after a restart sends the prefix the one before it sent (Decision 863). And what a turn's
+  # first call held, so a restart in the middle of the turn offers what it began with
+  # (Decision 876). A call that put or took neither, and a log written before them, fold as
+  # they did.
+  defp fold_event(%Event{type: "llm_request", data: data}, state),
+    do: state |> fold_context(data) |> fold_hold(data)
 
   # The note a root's failed request left in its conversation (Decision 693). A log written
   # before the note was, has none, and replays as it always did. A call the agent gave up
@@ -400,9 +403,9 @@ defmodule Troupe.Agent.Server do
   defp fold_event(%Event{type: "user_shell", data: data}, state), do: hold_shell(state, data)
 
   # A turn ends cancelled as well as at rest, and the next one counts what it costs from
-  # nothing (Decision 769).
+  # nothing (Decision 769) and takes its tools afresh (Decision 876).
   defp fold_event(%Event{type: "cancelled", data: data}, state),
-    do: %{fold_stopped(state, data) | turn: %Spend{}}
+    do: let_go(%{fold_stopped(state, data) | turn: %Spend{}})
 
   defp fold_event(%Event{type: type, data: data}, state) do
     case type do
@@ -466,7 +469,24 @@ defmodule Troupe.Agent.Server do
   # the input that starts a turn, or between a tool exchange and the call after it, and the
   # list the prompt shows is the turn's either way.
   defp fold_input(state, %{"source" => "shell"}), do: %{state | shell_notes: []}
-  defp fold_input(state, _data), do: show_todos(state)
+  defp fold_input(state, _data), do: state |> show_todos() |> let_go()
+
+  defp fold_context(state, %{"turn_context_block" => %{} = put}), do: put_context(state, put)
+  defp fold_context(state, _data), do: state
+
+  # What the turn's first call held, or the hold written before that it names by its
+  # digest (Decision 876). One naming none leaves the next call to take them afresh.
+  defp fold_hold(state, %{"turn_hold" => %{} = hold}) do
+    case Hold.fold(hold, state.hold_written) do
+      {:ok, tools, skills, written} ->
+        %{state | turn_tools: tools, turn_skills: skills, hold_written: written}
+
+      :error ->
+        state
+    end
+  end
+
+  defp fold_hold(state, _data), do: state
 
   # Being finished is not visible in the conversation — a subagent's last message is
   # the tool_results of its own `finish` call, which looks exactly like owing the model
@@ -512,11 +532,13 @@ defmodule Troupe.Agent.Server do
   end
 
   # A raise for one run is given back where the run ended (Decision 699), and the next run
-  # counts what it costs from nothing (Decision 769).
+  # counts what it costs from nothing (Decision 769) and takes its tools afresh (876).
   #
   # A subagent's wait for a child of its own (Decision 853) ends no run: its sum goes on.
   defp fold_limits(state, "turn_ended", %{"reason" => "waiting"}), do: state
-  defp fold_limits(state, "turn_ended", _data), do: %{reclaim_run_grant(state) | turn: %Spend{}}
+
+  defp fold_limits(state, "turn_ended", _data),
+    do: let_go(%{reclaim_run_grant(state) | turn: %Spend{}})
 
   defp fold_limits(state, "tool_failures_ask_started", data) do
     %{
@@ -1249,7 +1271,7 @@ defmodule Troupe.Agent.Server do
       |> apply_input(source, content, actor, meta.command_id)
       |> show_todos()
       |> instructions_due()
-      |> Map.put(:turn_tools, nil)
+      |> let_go()
     else
       Logger.debug("troupe: ignoring #{inspect(source)} input of #{inspect(content)}")
       state
@@ -1372,14 +1394,14 @@ defmodule Troupe.Agent.Server do
         gate_halt(halt)
 
       :ok ->
-        {state, attached} =
+        {state, held} =
           state
           |> fold_shell()
           |> fold_child_reports()
           |> load_instructions()
           |> hold_turn_tools()
-          |> attach_turn_context()
 
+        {state, attached} = attach_turn_context(state)
         definition = effective_definition(state)
         request = build_request(state, definition)
         {prefix, changed} = prefix_changes(state.prefix, request)
@@ -1401,6 +1423,7 @@ defmodule Troupe.Agent.Server do
           }
           |> Map.merge(changed)
           |> put_attached(attached)
+          |> put_held(held)
         )
 
         :telemetry.execute(
@@ -1454,6 +1477,9 @@ defmodule Troupe.Agent.Server do
   defp put_attached(data, {sections, put}),
     do: data |> Map.put("turn_context", sections) |> Map.put("turn_context_block", put)
 
+  defp put_held(data, nil), do: data
+  defp put_held(data, held), do: Map.put(data, "turn_hold", held)
+
   # The profile in force for this turn. Normally the agent's own; during an `AI?` watch
   # turn, the agent's own under the plan permission set (Decision 844): its model, prompt
   # and turns, with only the tools `plan` has too and `plan`'s denials over its own, so a
@@ -1481,11 +1507,21 @@ defmodule Troupe.Agent.Server do
 
   # The MCP servers' and the person's clients' tools, taken as a turn's first call begins
   # and held for the rest of the turn (Decision 871, as 798 holds the instruction files):
-  # what comes or goes in the middle of a turn is offered, or not, from the next one.
-  defp hold_turn_tools(%State{turn_tools: nil} = state),
-    do: %{state | turn_tools: Tools.mcp(state.session_id)}
+  # what comes or goes in the middle of a turn is offered, or not, from the next one. The
+  # skills too (Decision 876), and what was taken goes on that call's `llm_request`, whole
+  # or by the digest of the hold written whole before it, for a restart to fold back.
+  defp hold_turn_tools(%State{turn_tools: nil} = state) do
+    tools = Tools.mcp(state.session_id)
+    ws = state.workspace
+    skills = Skills.found(state.bundle, ws.root_real, trusted: ws.trusted?)
+    {held, written} = tools |> Hold.to_json(skills) |> Hold.written(state.hold_written)
+    {%{state | turn_tools: tools, turn_skills: skills, hold_written: written}, held}
+  end
 
-  defp hold_turn_tools(state), do: state
+  defp hold_turn_tools(state), do: {state, nil}
+
+  # A turn's hold let go of, as the turn ends or an input is taken: the next call takes it.
+  defp let_go(state), do: %{state | turn_tools: nil, turn_skills: nil}
 
   # The tools are offered knowing whether the model they go to binds its thinking to them:
   # one that does is offered the same on every call (Decisions 867 and 871).
@@ -1604,9 +1640,7 @@ defmodule Troupe.Agent.Server do
         do: Instructions.to_prompt(state.instructions, recall: recall?(definition))
       ),
       environment_section(state),
-      Skills.prompt_section(state.bundle, definition, state.workspace.root_real,
-        trusted: state.workspace.trusted?
-      ),
+      skills_section(state, definition),
       unless(stable?, do: goal_section(state))
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
@@ -1614,6 +1648,14 @@ defmodule Troupe.Agent.Server do
   end
 
   defp stable?(%State{config: config}), do: config.system_prompt == "stable"
+
+  # The skills as the turn's first call found them (Decision 876), for the profile in force,
+  # so a skill file added in the middle of a turn changes the prompt at the next one.
+  defp skills_section(%State{turn_skills: %{} = held}, definition),
+    do: held |> Skills.offered(definition) |> Skills.prompt_section_for()
+
+  defp skills_section(%State{workspace: ws} = state, definition),
+    do: Skills.prompt_section(state.bundle, definition, ws.root_real, trusted: ws.trusted?)
 
   # The brief names `recall` only to an agent that has it (Decision 838).
   defp recall?(%Definition{} = definition),
@@ -2225,7 +2267,7 @@ defmodule Troupe.Agent.Server do
     state = reclaim_run_grant(%{state | turn_mode: nil})
     data = if(reason, do: %{"reason" => reason}, else: %{})
     log(state, :turn_ended, Map.put(data, "turn", Spend.to_json(state.turn)))
-    state = %{state | turn: %Spend{}, turn_tools: nil}
+    state = let_go(%{state | turn: %Spend{}})
     publish_state(state, :idle)
     if state.child_reports != [] and reason == nil, do: send(self(), :child_reports)
     {:next_state, :idle, state}
@@ -2403,7 +2445,8 @@ defmodule Troupe.Agent.Server do
       # offers `goal_complete` (Decision 679), and what lets a call to it run (871).
       loop: if(state.turn_mode == :loop, do: state.loop),
       binds_thinking: binds_thinking?(state),
-      turn_tools: state.turn_tools
+      turn_tools: state.turn_tools,
+      turn_skills: state.turn_skills
     }
   end
 
@@ -3712,7 +3755,7 @@ defmodule Troupe.Agent.Server do
     state = close_cancelled_calls(state)
     log(state, :cancelled, put_stopped(%{"turn" => Spend.to_json(state.turn)}, stopped))
 
-    state = Map.merge(state, %{turn_mode: nil, turn: %Spend{}})
+    state = let_go(Map.merge(state, %{turn_mode: nil, turn: %Spend{}}))
 
     publish_state(state, :idle)
     {:next_state, :idle, state}

@@ -152,10 +152,11 @@ defmodule Troupe.Log.Fold do
 
   # The turn context a call put into the conversation (Decision 863), which a restarted
   # agent puts back: how many blocks the conversation carries since its last compaction.
-  # Present only once one was put, as the goal is, so a log without one folds to the map it
-  # always did.
-  defp agent_fold(agent, %Event{type: "llm_request", data: %{"turn_context_block" => %{}}}),
-    do: Map.update(agent, "turn_contexts", 1, &(&1 + 1))
+  # And the digest of what the last turn's first call held (Decision 876), which a restart
+  # in the middle of that turn offers again. Each present only once there is one, as the
+  # goal is, so a log without either folds to the map it always did.
+  defp agent_fold(agent, %Event{type: "llm_request", data: data}),
+    do: agent |> count_context(data) |> held(data)
 
   defp agent_fold(agent, %Event{type: "llm_response", data: data}) do
     usage = data["usage"] || %{}
@@ -273,4 +274,14 @@ defmodule Troupe.Log.Fold do
   end
 
   defp add_stopped(agent, _data), do: agent
+
+  defp count_context(agent, %{"turn_context_block" => %{}}),
+    do: Map.update(agent, "turn_contexts", 1, &(&1 + 1))
+
+  defp count_context(agent, _data), do: agent
+
+  defp held(agent, %{"turn_hold" => %{"digest" => digest}}),
+    do: Map.put(agent, "turn_hold", digest)
+
+  defp held(agent, _data), do: agent
 end

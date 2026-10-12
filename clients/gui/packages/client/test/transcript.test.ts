@@ -31,7 +31,7 @@ function durable(type: string, data: Record<string, unknown> = {}, agent = ["roo
 function ephemeral(type: string, data: Record<string, unknown>, agent = ["root"]): TroupeEvent {
   return { ephemeral: true, type, agent, data };
 }
-const foldAll = (events: TroupeEvent[], from: TranscriptState = emptyTranscript) => events.reduce(fold, from);
+const foldAll = (events: TroupeEvent[], from: TranscriptState = emptyTranscript) => events.reduce((s, e) => fold(s, e), from);
 
 describe("the transcript fold", () => {
   it("turns a turn into user, tool and assistant entries in order", () => {
@@ -581,6 +581,58 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.equal(state.thinking, "let me think");
     assert.equal(needsYou(fold(state, ephemeral("agent_state", { state: "waiting" }))), true);
     assert.equal(isBusy(fold(state, ephemeral("agent_state", { state: "waiting" }))), false);
+  });
+
+  it("keeps the reasoning it saw stream where the reply lands, with how long it took, and a replay has none (troupe #474)", () => {
+    seq = 0;
+    const reply = durable("llm_response", {
+      message: { role: "assistant", content: [{ type: "reasoning", provider: "openai", text: "the parser drops a line" }, { type: "text", text: "Fixed." }] },
+    });
+    let live = fold(emptyTranscript, durable("user_input", { text: "fix it", source: "user" }));
+    live = fold(live, ephemeral("llm_delta", { kind: "reasoning", text: "the parser " }), { now: 1_000 });
+    live = fold(live, ephemeral("llm_delta", { kind: "reasoning", text: "drops a line" }), { now: 5_000 });
+    live = fold(live, reply, { now: 13_000 });
+    assert.deepEqual(
+      live.entries.map((e) => e.kind),
+      ["user", "reasoning", "assistant"],
+    );
+    const thought = live.entries[1] as Extract<Entry, { kind: "reasoning" }>;
+    assert.equal(thought.text, "the parser drops a line");
+    assert.equal(thought.ms, 12_000);
+    assert.equal(live.thinking, "");
+    assert.equal(live.thinkingAt, undefined);
+
+    // The log's reply carries its reasoning block, but nothing streamed: no entry.
+    const replay = foldAll([durable("user_input", { text: "fix it", source: "user" }), reply]);
+    assert.deepEqual(
+      replay.entries.map((e) => e.kind),
+      ["user", "assistant"],
+    );
+  });
+
+  it("times a call from the events that start and end it", () => {
+    seq = 0;
+    const started = durable("tool_call_started", { call_id: "t", name: "shell", args: { command: "mix test" } });
+    const completed = durable("tool_call_completed", { call_id: "t", ok: true, content: "1 test" });
+    started.ts = "2026-10-12T10:00:00.000Z";
+    completed.ts = "2026-10-12T10:00:07.500Z";
+    const tool = foldAll([started, completed]).entries[0] as Extract<Entry, { kind: "tool" }>;
+    assert.equal(tool.endedAt! - tool.startedAt!, 7_500);
+  });
+
+  it("counts the root agent's phases of a turn for the curtain line, and starts again with the next turn", () => {
+    seq = 0;
+    let state = fold(emptyTranscript, durable("user_input", { text: "go", source: "user" }));
+    state = fold(state, ephemeral("agent_state", { state: "thinking" }), { now: 1_000 });
+    state = fold(state, ephemeral("agent_state", { state: "thinking" }), { now: 2_000 });
+    assert.deepEqual(state.curtain, { phases: { thinking: 1 }, since: 1_000 });
+    state = fold(state, ephemeral("agent_state", { state: "acting" }), { now: 3_000 });
+    state = fold(state, ephemeral("agent_state", { state: "thinking" }), { now: 4_000 });
+    // A subagent's state is its own and no phase of the root's.
+    state = fold(state, ephemeral("agent_state", { state: "acting" }, ["root", "helper#1"]), { now: 5_000 });
+    assert.deepEqual(state.curtain, { phases: { thinking: 2, acting: 1 }, since: 4_000 });
+    state = fold(state, durable("user_input", { text: "again", source: "user" }));
+    assert.deepEqual(state.curtain.phases, {});
   });
 
   it("ends a turn the root failed as a failure, with what it raised, until the next turn starts (Decision 727)", () => {

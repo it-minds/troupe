@@ -37,6 +37,11 @@ export interface PaletteActions {
   showMemory: (what?: "refresh" | "forget") => void;
   /** The transcript as text, for /copy. */
   transcript: () => string;
+  /**
+   * `/detail`: with a level, draw this session's transcript at it (troupe #474); without
+   * one, say which it is drawn at. A sentence back is a notice; undefined closes the palette.
+   */
+  detail: (level: string) => string | undefined;
   /** Open the agents manager on the session's workspace: a session on this computer's (troupe #503). */
   agents?: (() => void) | undefined;
   /** `agents.list`'s rows for the session's workspace, which an agent's row takes its facts from: a session on this computer's. */
@@ -97,6 +102,7 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
     if (args === "refresh" || args === "forget") return void showMemory(args);
     return `unknown /memory ${args}; use /memory, /memory refresh or /memory forget`;
   },
+  detail: ({ detail }, args) => detail(args),
   settings: ({ go }) => void go("local"),
   models: ({ go }) => void go("local"),
   agents: ({ agents }) =>

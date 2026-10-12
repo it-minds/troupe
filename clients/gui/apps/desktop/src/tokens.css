@@ -132,6 +132,7 @@
   --border-strong: rgba(232,223,208,0.42);
   --focus: #00C6C9;
   --divider: rgba(232,223,208,0.18);
+  --frame-accent: #00C6C9;
 
   --running-fg: #00DBD3;
   --running-bg: rgba(0,220,220,0.10);
@@ -223,6 +224,7 @@
   --border-strong: rgba(232,223,208,0.42);
   --focus: #00C6C9;
   --divider: rgba(232,223,208,0.18);
+  --frame-accent: #00C6C9;
 
   --running-fg: #00DBD3;
   --running-bg: rgba(0,220,220,0.10);
@@ -313,6 +315,7 @@
   --border-strong: rgba(11,11,18,0.42);
   --focus: #007A7C;
   --divider: rgba(11,11,18,0.18);
+  --frame-accent: #007A7C;
 
   --running-fg: #006466;
   --running-bg: rgba(0,134,135,0.10);
@@ -404,6 +407,7 @@
     --border-strong: rgba(11,11,18,0.42);
     --focus: #007A7C;
     --divider: rgba(11,11,18,0.18);
+    --frame-accent: #007A7C;
 
     --running-fg: #006466;
     --running-bg: rgba(0,134,135,0.10);
@@ -496,6 +500,7 @@
   --border-strong: #36485D;
   --focus: #8CC0F0;
   --divider: #18222E;
+  --frame-accent: #8CC0F0;
 
   --running-fg: #4FCFB0;
   --running-bg: #0D2A25;
@@ -586,6 +591,7 @@
   --border-strong: #98A7B6;
   --focus: #0F4C81;
   --divider: #D7DEE6;
+  --frame-accent: #0F4C81;
 
   --running-fg: #046B57;
   --running-bg: #DCF1EB;
@@ -677,6 +683,7 @@
     --border-strong: #98A7B6;
     --focus: #0F4C81;
     --divider: #D7DEE6;
+    --frame-accent: #0F4C81;
 
     --running-fg: #046B57;
     --running-bg: #DCF1EB;
@@ -769,6 +776,7 @@
   --border-strong: #4A4534;
   --focus: #DCF470;
   --divider: #211F18;
+  --frame-accent: #93B7E0;
 
   --running-fg: #74BCCA;
   --running-bg: #0D2127;
@@ -859,6 +867,7 @@
   --border-strong: #9A927C;
   --focus: #454F05;
   --divider: #DBD5C4;
+  --frame-accent: #1F4F86;
 
   --running-fg: #14565F;
   --running-bg: #D9EDF0;
@@ -950,6 +959,7 @@
     --border-strong: #9A927C;
     --focus: #454F05;
     --divider: #DBD5C4;
+    --frame-accent: #1F4F86;
 
     --running-fg: #14565F;
     --running-bg: #D9EDF0;
@@ -1042,6 +1052,7 @@
   --border-strong: #3A424C;
   --focus: #3FD2E8;
   --divider: #1A1E24;
+  --frame-accent: #3FD2E8;
 
   --running-fg: #3FD2E8;
   --running-bg: #062A31;
@@ -1132,6 +1143,7 @@
   --border-strong: #979EA7;
   --focus: #0A5866;
   --divider: #D9DDE2;
+  --frame-accent: #0A5866;
 
   --running-fg: #0A5866;
   --running-bg: #D8EFF3;
@@ -1223,6 +1235,7 @@
     --border-strong: #979EA7;
     --focus: #0A5866;
     --divider: #D9DDE2;
+    --frame-accent: #0A5866;
 
     --running-fg: #0A5866;
     --running-bg: #D8EFF3;
