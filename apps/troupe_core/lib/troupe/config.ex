@@ -55,7 +55,7 @@ defmodule Troupe.Config do
   alias Troupe.Config.{Error, Explain, Issue, Layers, Migrate, Org, Schema, Trust}
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
-  alias Troupe.LLM.Endpoint
+  alias Troupe.LLM.{Endpoint, ProviderType}
   alias Troupe.MCP.{OAuth, Server}
 
   require Logger
@@ -246,14 +246,15 @@ defmodule Troupe.Config do
   used — a `{env:VAR}` it reads is not set — and a request to it fails with that.
   """
   @type provider :: %{
-          required(:type) => :anthropic | :openai,
+          required(:type) => :anthropic | :openai | :ollama | :openrouter | :azure_openai | :gemini,
           required(:base_url) => String.t() | nil,
           required(:api_key) => String.t() | nil,
           required(:auth) => auth(),
           required(:models) => %{optional(String.t()) => model()},
           required(:source) => :yaml | :opencode,
           optional(:refused) => String.t() | nil,
-          optional(:binds_thinking) => boolean() | nil
+          optional(:binds_thinking) => boolean() | nil,
+          optional(:api_version) => String.t()
         }
 
   @typedoc """
@@ -282,6 +283,7 @@ defmodule Troupe.Config do
           base_url: String.t() | nil,
           api_key: String.t() | {:refused, String.t()} | nil,
           auth: auth(),
+          api_version: String.t() | nil,
           max_output: pos_integer() | nil,
           reasoning_effort: String.t() | nil
         }
@@ -473,6 +475,8 @@ defmodule Troupe.Config do
   defp field_value(_field, {:unset_env, _var, _raw}), do: nil
   defp field_value(_field, value), do: value
 
+  # A `type` that is not written is `openai`, the schema's default. One that is written
+  # and names no type never gets here: the loader refuses the file, naming the types.
   defp parse_providers(map, refused) do
     Map.new(map, fn {name, p} ->
       provider = %{
@@ -484,9 +488,16 @@ defmodule Troupe.Config do
         source: :yaml
       }
 
-      {name, provider |> put_flag(:binds_thinking, p["binds_thinking"]) |> with_refusal(refused[name])}
+      {name,
+       provider
+       |> put_flag(:binds_thinking, p["binds_thinking"])
+       |> put_present(:api_version, string(p["api_version"]))
+       |> with_refusal(refused[name])}
     end)
   end
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
 
   # A server is started from exactly one of `command` and `url`; one with neither or
   # both is refused by the loader, and never started.
@@ -539,7 +550,7 @@ defmodule Troupe.Config do
   defp string(_value), do: nil
 
   # The schema has already said the value is one of these.
-  @enum_atoms [:anthropic, :openai, :api_key, :bearer, :wait, :deny]
+  @enum_atoms Enum.map(ProviderType.all(), & &1.name) ++ [:api_key, :bearer, :wait, :deny]
   defp enum_atom(value) when is_atom(value), do: value
   defp enum_atom(value), do: Enum.find(@enum_atoms, &(Atom.to_string(&1) == value))
 
@@ -831,6 +842,7 @@ defmodule Troupe.Config do
           base_url: config.base_url,
           api_key: key_or_refusal(config.api_key, config.refused),
           auth: config.auth,
+          api_version: nil,
           max_output: nil,
           reasoning_effort: nil
         }
@@ -844,6 +856,7 @@ defmodule Troupe.Config do
           base_url: provider.base_url,
           api_key: key_or_refusal(provider.api_key, Map.get(provider, :refused)),
           auth: provider.auth,
+          api_version: Map.get(provider, :api_version),
           max_output: spec && spec.max_output,
           reasoning_effort: spec && spec.reasoning_effort
         }
@@ -896,24 +909,25 @@ defmodule Troupe.Config do
   defdelegate vendor_key_var(type, base_url), to: Endpoint
 
   # Whether a request to a provider carries a key, or needs none: its own, the vendor's
-  # variable at the vendor's own endpoint, or the fake's nothing at all.
+  # variable at the vendor's own endpoint, or the nothing at all a local server and the
+  # fake take.
   defp keyed?(type, base_url, key) do
     type = to_string(type)
 
     cond do
       present?(key) -> true
-      type == "fake" -> true
+      ProviderType.keyless?(type) -> true
       var = Endpoint.vendor_key_var(type, base_url) -> present?(System.get_env(var))
       true -> false
     end
   end
 
   # An OpenAI-compatible server that is not OpenAI's is sent no key it was not given,
-  # and may well want none.
+  # and may well want none; a local server of a type that takes none (`ollama`) wants none.
   defp keyless?(%{provider: "openai", base_url: base_url}),
     do: Endpoint.vendor_key_var("openai", base_url) == nil
 
-  defp keyless?(_target), do: false
+  defp keyless?(%{provider: type}), do: ProviderType.keyless?(type)
 
   defp session_keyed?(%__MODULE__{refused: nil} = config),
     do: keyed?(config.provider, config.base_url, config.api_key)

@@ -3,8 +3,11 @@ defmodule Troupe.LLM.Providers.OpenAI do
   OpenAI-compatible Chat Completions: function calling, streamed over SSE.
 
   Written against the shape rather than the vendor, so it works unchanged against
-  LiteLLM, vLLM, Mistral, Ollama's compatibility endpoint and anything else that
-  speaks `/v1/chat/completions` — point `base_url` at it.
+  LiteLLM, vLLM, Mistral and anything else that speaks `/v1/chat/completions` — point
+  `base_url` at it. The provider types that speak the same shape with differences of
+  their own — `ollama`, `openrouter`, `azure_openai`, `gemini` — come through here too,
+  and what each does differently is `Troupe.LLM.Providers.Compatible`, by the request's
+  `type`.
 
   Two shape differences from the Anthropic adapter drive the translation here.
   Function arguments arrive as a JSON *string* rather than an object, so tool calls
@@ -30,9 +33,8 @@ defmodule Troupe.LLM.Providers.OpenAI do
   }
 
   alias Troupe.LLM.{Endpoint, Identify}
+  alias Troupe.LLM.Providers.Compatible
   alias Troupe.LLM.Providers.OpenAI.Collector
-
-  @default_base_url "https://api.openai.com"
 
   @impl Troupe.LLM.Provider
   def stream(%Request{} = request, reply_to, ref) do
@@ -50,8 +52,10 @@ defmodule Troupe.LLM.Providers.OpenAI do
   defp attempt(request, reply_to, ref), do: post(request, body(request), reply_to, ref, :first)
 
   defp post(request, body, reply_to, ref, pass) do
+    type = Compatible.type(request)
+
     options = [
-      url: Endpoint.build(base_url(request), "/v1/chat/completions"),
+      url: Compatible.url(request),
       method: :post,
       json: body,
       headers: headers(request),
@@ -60,7 +64,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
       # An error's body is read here, JSON or not (Decision 791).
       decode_body: false,
       into: fn {:data, chunk}, {req, resp} ->
-        {:cont, {req, handle_chunk(resp, chunk, reply_to, ref)}}
+        {:cont, {req, handle_chunk(resp, chunk, %{reply_to: reply_to, ref: ref, type: type})}}
       end
     ]
 
@@ -138,28 +142,23 @@ defmodule Troupe.LLM.Providers.OpenAI do
     end
   end
 
+  # A local vLLM or Ollama often needs no key at all, so a missing one is not an error
+  # here the way it is for a hosted API.
   defp headers(request) do
-    base = [{"accept", "text/event-stream"} | Identify.headers(request, :openai)]
-
-    # A local vLLM or Ollama often needs no key at all, so a missing one is not an
-    # error here the way it is for a hosted API.
-    case api_key(request) do
-      nil -> base
-      key -> [{"authorization", "Bearer " <> key} | base]
-    end
+    Compatible.auth_headers(request, api_key(request)) ++
+      [{"accept", "text/event-stream"} | Identify.headers(request, Compatible.type(request))]
   end
 
   # Req hands `into` the body of every response, whatever its status. Only a 200's is the
   # event stream; any other's is the provider's error, kept for `post/5` to read rather
   # than fed to the parser, where it was lost (Decision 791).
-  defp handle_chunk(%Req.Response{status: status} = resp, chunk, _reply_to, _ref)
+  defp handle_chunk(%Req.Response{status: status} = resp, chunk, _sink)
        when status != 200,
        do: Provider.collect_error(resp, chunk)
 
-  defp handle_chunk(resp, chunk, reply_to, ref) do
-    state = resp.private[:troupe] || %{acc: Collector.new(), sse: SSE.new()}
+  defp handle_chunk(resp, chunk, sink) do
+    state = resp.private[:troupe] || %{acc: Collector.new(sink.type), sse: SSE.new()}
     {events, sse} = SSE.feed(state.sse, chunk)
-    sink = %{reply_to: reply_to, ref: ref}
 
     acc =
       Enum.reduce(events, state.acc, fn event, acc ->
@@ -242,6 +241,8 @@ defmodule Troupe.LLM.Providers.OpenAI do
     Enum.reduce(calls, acc, &apply_tool_call(&1, &2, sink))
   end
 
+  # What the provider attached to the call to have it back (Gemini's thought signature, in
+  # `extra_content`) is kept with it, whichever chunk it came in.
   defp apply_tool_call(call, acc, sink) do
     index = call["index"] || 0
     function = call["function"] || %{}
@@ -249,6 +250,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
     acc
     |> open_tool(index, call["id"], function["name"], sink)
     |> append_arguments(index, function["arguments"], sink)
+    |> Collector.put_tool_extra(index, call["extra_content"])
   end
 
   defp open_tool(acc, _index, nil, nil, _sink), do: acc
@@ -278,7 +280,10 @@ defmodule Troupe.LLM.Providers.OpenAI do
       stream: true,
       messages: encode_messages(request)
     }
-    |> put_output_cap(Request.output_cap(request), request.reasoning_effort)
+    # A configured effort goes out verbatim — "none" is as meaningful as "xhigh", and
+    # only the model knows which levels it has — in the field and beside the output cap
+    # the type takes.
+    |> Compatible.put_output(request)
     |> maybe_put(:temperature, request.temperature)
     |> maybe_put(:tools, encode_tools(request.tools))
     # Usage is not reported in a stream unless it is asked for; providers that do not
@@ -292,23 +297,10 @@ defmodule Troupe.LLM.Providers.OpenAI do
     # to bill and names nobody: its `metadata` is the session and the software
     # (Decision 787), and a `user` naming the software would make every person one end
     # user at the gateway, under one end user's budget.
-    |> maybe_put(:user, request.attribution[:owner])
-    |> maybe_put(:metadata, Identify.metadata(request))
+    |> Compatible.put_identity(request)
   end
 
   defp stream_options(%Request{}), do: %{include_usage: true}
-
-  # A reasoning model rejects `max_tokens` and counts its reasoning against
-  # `max_completion_tokens`; a plain OpenAI-compatible server knows only `max_tokens`. A
-  # configured effort is what says which kind this is, and it goes out verbatim — "none"
-  # is as meaningful as "xhigh", and only the model knows which levels it has. Nothing is
-  # raised to hold the reasoning, so an organisation's enforced `max_tokens` holds it as
-  # it holds the answer: the cap is never more than the ceiling.
-  defp put_output_cap(body, max, nil), do: Map.put(body, :max_tokens, max)
-
-  defp put_output_cap(body, max, effort) do
-    body |> Map.put(:max_completion_tokens, max) |> Map.put(:reasoning_effort, effort)
-  end
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, _key, []), do: map
@@ -335,12 +327,13 @@ defmodule Troupe.LLM.Providers.OpenAI do
   defp encode_messages(%Request{messages: messages} = request) do
     system = Request.system_text(request)
     system_messages = if system, do: [%{role: "system", content: system}], else: []
-    system_messages ++ Enum.flat_map(messages, &encode_message/1)
+    type = Compatible.type(request)
+    system_messages ++ Enum.flat_map(messages, &encode_message(&1, type))
   end
 
   # A user message holding tool results becomes one `role: "tool"` message per result,
   # which is the shape this API expects; anything else keeps its role.
-  defp encode_message(%Message{role: :user, content: content}) do
+  defp encode_message(%Message{role: :user, content: content}, _type) do
     {results, rest} = Enum.split_with(content, &match?(%ToolResult{}, &1))
 
     tool_messages =
@@ -352,7 +345,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
     tool_messages ++ if(text == "", do: [], else: [%{role: "user", content: text}])
   end
 
-  defp encode_message(%Message{role: :assistant, content: content}) do
+  defp encode_message(%Message{role: :assistant, content: content}, type) do
     tool_calls =
       content
       |> Enum.filter(&match?(%ToolUse{}, &1))
@@ -362,22 +355,34 @@ defmodule Troupe.LLM.Providers.OpenAI do
           type: "function",
           function: %{name: call.name, arguments: Jason.encode!(call.input)}
         }
+        |> put_extra(call.extra, type)
       end)
 
-    message = %{role: "assistant", content: join_text(content)} |> put_reasoning(content)
+    message = %{role: "assistant", content: join_text(content)} |> put_reasoning(content, type)
     [if(tool_calls == [], do: message, else: Map.put(message, :tool_calls, tool_calls))]
   end
 
-  defp encode_message(%Message{role: role, content: content}) do
+  defp encode_message(%Message{role: role, content: content}, _type) do
     [%{role: Atom.to_string(role), content: join_text(content)}]
   end
 
-  # Reasoning goes back where it came from: a sibling of `content`, and only what this
-  # adapter's provider produced. DeepSeek's thinking mode is all-or-nothing — once one
+  # What a provider attached to a call goes back to a provider of the type that attached
+  # it, and to no other, which may refuse a field it does not know.
+  defp put_extra(call, %{} = extra, type) do
+    case Map.fetch(extra, Atom.to_string(type)) do
+      {:ok, attached} -> Map.put(call, :extra_content, attached)
+      :error -> call
+    end
+  end
+
+  defp put_extra(call, _none, _type), do: call
+
+  # Reasoning goes back where it came from: a sibling of `content`, and only what a
+  # provider of this type produced. DeepSeek's thinking mode is all-or-nothing — once one
   # assistant message in the history carried `reasoning_content`, one that omits it fails
   # the request with a 400 — and another provider's reasoning is not ours to replay.
-  defp put_reasoning(message, content) do
-    case Message.reasoning_of(content, :openai) do
+  defp put_reasoning(message, content, type) do
+    case Message.reasoning_of(content, type) do
       [] -> message
       reasoning -> Map.put(message, :reasoning_content, Enum.map_join(reasoning, & &1.text))
     end
@@ -428,28 +433,29 @@ defmodule Troupe.LLM.Providers.OpenAI do
   defp stop_reason("content_filter"), do: :refusal
   defp stop_reason(_), do: :other
 
-  defp base_url(%Request{base_url: nil}), do: @default_base_url
-  defp base_url(%Request{base_url: url}), do: url
-
-  # `OPENAI_API_KEY` is OpenAI's key, so it goes to OpenAI's endpoint and nowhere else:
-  # a gateway or a local server configured without a key is sent none.
+  # `OPENAI_API_KEY` is OpenAI's key, so it goes to OpenAI's endpoint and nowhere else, as
+  # each vendor's variable goes to its own: a gateway or a local server configured without
+  # a key is sent none.
   defp api_key(%Request{api_key: key}) when is_binary(key) and key != "", do: key
 
-  defp api_key(%Request{base_url: url}) do
-    if var = Endpoint.vendor_key_var(:openai, url), do: System.get_env(var)
+  defp api_key(%Request{base_url: url} = request) do
+    if var = Endpoint.vendor_key_var(Compatible.type(request), url), do: System.get_env(var)
   end
 
   # What an error response said, as a person reads it: no key in it (Decision 791).
   defp detail(body, request), do: body |> describe() |> Provider.error_text(api_key(request))
 
   # OpenAI's error is `{"error": {"message": …}}`, and so is most compatible servers';
-  # vLLM puts `message` at the top. It arrives as the text `into` collected.
+  # vLLM puts `message` at the top, and Gemini's endpoint sends a list of one such error.
+  # It arrives as the text `into` collected.
   defp describe(%{"error" => %{"message" => message}}) when is_binary(message), do: message
   defp describe(%{"message" => message}) when is_binary(message), do: message
+  defp describe([%{} = first | _rest]), do: describe(first)
 
   defp describe(body) when is_binary(body) do
     case Jason.decode(body) do
       {:ok, %{} = decoded} -> describe(decoded)
+      {:ok, [%{} | _] = decoded} -> describe(decoded)
       _not_json -> String.slice(body, 0, 400)
     end
   end
@@ -463,16 +469,23 @@ defmodule Troupe.LLM.Providers.OpenAI.Collector do
 
   Tool calls arrive by index across many chunks — an id and name in one, argument
   fragments in others — so they are reassembled by index and parsed once at the end.
+  `type` is the provider type the response came from, which its reasoning and what a
+  provider attached to a call are bound to.
   """
 
   alias Troupe.LLM.{Reasoning, Response, Text, ToolUse, Usage}
 
-  defstruct text: "", reasoning: "", tools: %{}, usage: %Usage{}, stop_reason: :end_turn
+  defstruct type: :openai,
+            text: "",
+            reasoning: "",
+            tools: %{},
+            usage: %Usage{},
+            stop_reason: :end_turn
 
   @type t :: %__MODULE__{}
 
-  @spec new() :: t()
-  def new, do: %__MODULE__{}
+  @spec new(atom()) :: t()
+  def new(type \\ :openai), do: %__MODULE__{type: type}
 
   @spec append_text(t(), String.t()) :: t()
   def append_text(acc, text), do: %{acc | text: acc.text <> text}
@@ -500,6 +513,15 @@ defmodule Troupe.LLM.Providers.OpenAI.Collector do
     %{acc | tools: tools}
   end
 
+  @doc "Keep what the provider attached to the call at `index`, when it attached anything."
+  @spec put_tool_extra(t(), non_neg_integer(), term()) :: t()
+  def put_tool_extra(acc, index, %{} = extra) when map_size(extra) > 0 do
+    opened = %{id: nil, name: nil, arguments: "", extra: extra}
+    %{acc | tools: Map.update(acc.tools, index, opened, &Map.put(&1, :extra, extra))}
+  end
+
+  def put_tool_extra(acc, _index, _none), do: acc
+
   @spec add_usage(t(), Usage.t()) :: t()
   def add_usage(acc, %Usage{input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0}),
     do: acc
@@ -516,12 +538,12 @@ defmodule Troupe.LLM.Providers.OpenAI.Collector do
     reasoning_blocks =
       if acc.reasoning == "",
         do: [],
-        else: [%Reasoning{provider: :openai, text: acc.reasoning}]
+        else: [%Reasoning{provider: acc.type, text: acc.reasoning}]
 
     tool_blocks =
       acc.tools
       |> Enum.sort_by(fn {index, _} -> index end)
-      |> Enum.flat_map(fn {index, tool} -> materialise(index, tool) end)
+      |> Enum.flat_map(fn {index, tool} -> materialise(index, tool, acc.type) end)
 
     stop_reason = if tool_blocks == [], do: acc.stop_reason, else: :tool_use
 
@@ -532,19 +554,20 @@ defmodule Troupe.LLM.Providers.OpenAI.Collector do
     }
   end
 
-  defp materialise(index, %{name: name} = tool) when is_binary(name) do
+  defp materialise(index, %{name: name} = tool, type) when is_binary(name) do
     [
       %ToolUse{
         # Some compatible servers omit the id; the model still needs a stable one to
         # match a result against, so the index supplies it.
         id: tool.id || "call_#{index}",
         name: name,
-        input: decode_arguments(tool.arguments)
+        input: decode_arguments(tool.arguments),
+        extra: if(extra = tool[:extra], do: %{Atom.to_string(type) => extra})
       }
     ]
   end
 
-  defp materialise(_index, _tool), do: []
+  defp materialise(_index, _tool, _type), do: []
 
   # Malformed arguments still reach the agent, which turns them into an error tool
   # result the model can see and correct — better than dropping the call.

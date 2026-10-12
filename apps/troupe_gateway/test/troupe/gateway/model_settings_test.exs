@@ -74,7 +74,7 @@ defmodule Troupe.Gateway.ModelSettingsTest do
       assert {:error, %Error{message: "invalid_params", data: data}} =
                Client.call(context.client, "config.set", %{
                  "command_id" => "c-2",
-                 "provider" => "gemini"
+                 "provider" => "bedrock"
                })
 
       assert data["reason"] =~ "provider"

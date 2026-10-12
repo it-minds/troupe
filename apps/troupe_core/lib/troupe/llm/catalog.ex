@@ -15,6 +15,9 @@ defmodule Troupe.LLM.Catalog do
       the one source that has prices.
     * `:openai` — a plain `GET /v1/models` gives ids, and windows if the server
       volunteers them. Vanilla OpenAI-compatible servers volunteer nothing else.
+    * `:openrouter` — OpenRouter's `GET /api/v1/models` gives each model's window, its
+      output cap and its prices, cache reads and writes included, as dollars per token
+      written as strings.
 
   Entries never override an explicit window in a config file — the catalog fills gaps
   and prices, it does not overrule what the user wrote.
@@ -59,7 +62,7 @@ defmodule Troupe.LLM.Catalog do
   than crashing a refresh: a gateway that serves one broken row should still contribute
   the other nineteen.
   """
-  @spec parse(:anthropic | :litellm | :openai, map()) :: [t()]
+  @spec parse(:anthropic | :litellm | :openai | :openrouter, map()) :: [t()]
   def parse(shape, %{"data" => data}) when is_list(data) do
     data
     |> Enum.filter(&is_map/1)
@@ -113,6 +116,25 @@ defmodule Troupe.LLM.Catalog do
         id: id,
         context: pos_int(m["max_input_tokens"] || m["context_length"]),
         max_output: pos_int(m["max_output_tokens"]),
+        binds_thinking: flag(m["binds_thinking"])
+      }
+    ]
+  end
+
+  # A router's own entry (`openrouter/auto`) is priced at -1, which is no price.
+  defp entry(:openrouter, %{"id" => id} = m) when is_binary(id) do
+    pricing = if is_map(m["pricing"]), do: m["pricing"], else: %{}
+    top = if is_map(m["top_provider"]), do: m["top_provider"], else: %{}
+
+    [
+      %__MODULE__{
+        id: id,
+        context: pos_int(m["context_length"] || top["context_length"]),
+        max_output: pos_int(top["max_completion_tokens"]),
+        input: price(pricing["prompt"]),
+        output: price(pricing["completion"]),
+        cache_read: price(pricing["input_cache_read"]),
+        cache_write: price(pricing["input_cache_write"]),
         binds_thinking: flag(m["binds_thinking"])
       }
     ]
@@ -218,6 +240,14 @@ defmodule Troupe.LLM.Catalog do
   defp pos_int(_), do: nil
 
   defp price(n) when is_number(n) and n > 0, do: n * 1.0
+
+  defp price(text) when is_binary(text) do
+    case Float.parse(text) do
+      {n, ""} -> price(n)
+      _not_a_number -> nil
+    end
+  end
+
   defp price(_), do: nil
 
   defp flag(value) when is_boolean(value), do: value

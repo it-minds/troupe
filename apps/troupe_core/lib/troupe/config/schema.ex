@@ -40,6 +40,9 @@ defmodule Troupe.Config.Schema do
   two ways. `settings/0` lists them.
   """
 
+  alias Troupe.LLM.Providers.Compatible
+  alias Troupe.LLM.ProviderType
+
   @version 1
   @id "https://troupe.dev/schema/config/v1.json"
 
@@ -104,13 +107,21 @@ defmodule Troupe.Config.Schema do
 
   defp provider_entry do
     [
-      spec("type", {:enum, ~w(openai anthropic)}, "The API it speaks. A gateway such as LiteLLM or vLLM is `openai`.",
+      spec(
+        "type",
+        {:enum, ProviderType.named()},
+        "The API it speaks; the table under Provider types says what each one does. A gateway such as LiteLLM or vLLM is `openai`.",
         default: "openai"
       ),
-      spec("base_url", :string, "Where it is. Unset: the vendor's own endpoint."),
+      spec("base_url", :string, "Where it is. Unset: the type's own, as the table under Provider types says; `azure_openai` needs one."),
       spec("api_key", :string, "Its key. `{env:VAR}` reads it from the environment.", secret: true),
       spec("auth", {:enum, ~w(api_key bearer)}, "How the key is sent: the vendor's own header, or `Authorization: Bearer`.",
         default: "api_key"
+      ),
+      spec(
+        "api_version",
+        :string,
+        "`azure_openai` only: the `api-version` each call names. Unset: `#{Compatible.azure_api_version()}`."
       ),
       spec("models", {:map, {:object, model_entry()}}, "The models it serves, by the name Troupe addresses them with.",
         default: %{}
@@ -169,7 +180,10 @@ defmodule Troupe.Config.Schema do
         spec("$schema", :string, "Where an editor finds this schema. Troupe does not read it.")
       ]),
       group("Model and provider", [
-        spec("provider", {:enum, ~w(anthropic openai fake)}, "The session-wide provider's API.",
+        spec(
+          "provider",
+          {:enum, ProviderType.names()},
+          "The session-wide provider's API; the table under Provider types says what each one does.",
           default: "anthropic",
           scope: :trusted,
           field: :provider,
@@ -750,15 +764,25 @@ defmodule Troupe.Config.Schema do
   @doc """
   What to add to a refusal of a key's value, when there is something a person usually
   meant: the name people reach for as a provider is the gateway they talk to — `litellm`,
-  `vllm`, `openrouter` — and every one of those is `openai` with a `base_url`.
+  `vllm` — and every one of those is `openai` with a `base_url`. Given a file's `value`,
+  a name people mean another type by (`litellm`, `google`, `azure`) says which, and that
+  `troupe config migrate` rewrites it.
   """
-  @spec hint([String.t()]) :: String.t()
-  def hint(["provider"]), do: gateway_hint()
-  def hint(["providers", _name, "type"]), do: gateway_hint()
-  def hint(_path), do: ""
+  @spec hint([String.t()], term()) :: String.t()
+  def hint(path, value \\ nil)
+  def hint(["provider"], value), do: type_hint(value)
+  def hint(["providers", _name, "type"], value), do: type_hint(value)
+  def hint(_path, _value), do: ""
 
-  defp gateway_hint,
-    do: "; a gateway that speaks the OpenAI API (LiteLLM, vLLM, OpenRouter) is `openai` with its base_url"
+  defp type_hint(value) do
+    case ProviderType.rewrite(value) do
+      nil ->
+        "; a gateway that speaks the OpenAI API (LiteLLM, vLLM) is `openai` with its base_url"
+
+      type ->
+        "; #{value} is `#{type}` here, and `troupe config migrate` rewrites it"
+    end
+  end
 
   @doc "How a type reads in a sentence: what a value must be."
   @spec describe_type(type()) :: String.t()

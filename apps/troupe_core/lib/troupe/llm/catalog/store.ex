@@ -18,7 +18,7 @@ defmodule Troupe.LLM.Catalog.Store do
 
   alias Troupe.Config
   alias Troupe.Config.ModelSettings
-  alias Troupe.LLM.{Catalog, Endpoint}
+  alias Troupe.LLM.{Catalog, Endpoint, ProviderType}
   alias Troupe.Paths
 
   @filename "models.json"
@@ -301,26 +301,36 @@ defmodule Troupe.LLM.Catalog.Store do
     end)
   end
 
-  # Every provider worth asking: the named ones, plus the session-wide provider when it
-  # has a key of its own. A provider with no key cannot be asked.
+  # Every provider worth asking: the named ones, plus the session-wide provider, each that
+  # has a key of its own or takes none (`ollama`) and whose type lists its models at all
+  # (`Troupe.LLM.ProviderType`). A provider with no key cannot be asked, Azure lists
+  # deployments only to its management API, and a refused provider is asked nothing: what
+  # refused it may be the URL its key was for.
   defp targets(%Config{} = config) do
     named =
       config.providers
       |> Enum.sort()
-      |> Enum.filter(fn {_name, p} -> present?(p.api_key) end)
-      |> Enum.map(fn {name, p} -> {name, p.type, p.base_url, p.api_key, p.auth} end)
+      |> Enum.map(fn {name, p} -> {name, p, Map.get(p, :refused)} end)
 
-    named ++ session_target(to_string(config.provider), config)
+    session = %{
+      type: config.provider,
+      base_url: config.base_url,
+      api_key: config.api_key,
+      auth: config.auth
+    }
+
+    for {name, p, nil} <- named ++ [{nil, session, config.refused}], askable?(p) do
+      {name, ProviderType.atom(p.type), p.base_url, p.api_key, p.auth}
+    end
   end
 
-  defp session_target("anthropic", config), do: keyed_session(:anthropic, config)
-  defp session_target("openai", config), do: keyed_session(:openai, config)
-  defp session_target(_other, _config), do: []
-
-  defp keyed_session(type, config) do
-    if present?(config.api_key),
-      do: [{nil, type, config.base_url, config.api_key, config.auth}],
-      else: []
+  defp askable?(provider) do
+    case ProviderType.fetch(provider.type) do
+      %ProviderType{listing: nil} -> false
+      %ProviderType{keyless: true} -> true
+      %ProviderType{} -> present?(provider.api_key)
+      nil -> false
+    end
   end
 
   # A provider is one record whatever its key: who it is, what it speaks and where.
@@ -354,7 +364,30 @@ defmodule Troupe.LLM.Catalog.Store do
     end
   end
 
+  # The other types list at their own endpoint, the type's where no `base_url` says:
+  # Ollama the models pulled on the server, asked with no key; OpenRouter windows and
+  # prices; Gemini the ids, as `models/<id>`, which is not how a request names one.
+  defp fetch({name, type, base_url, key, _auth}) when type in [:ollama, :openrouter, :gemini] do
+    headers = if present?(key), do: [{"authorization", "Bearer " <> key}], else: []
+    url = Endpoint.url(type, trim(base_url), "/v1/models")
+
+    case get_json(url, headers) do
+      {:ok, body} -> {:ok, name, listed(type, body), url}
+      {:error, reason} -> {:error, name, reason}
+    end
+  end
+
   defp fetch({name, type, _base_url, _key, _auth}), do: {:error, name, {:unsupported_provider, type}}
+
+  defp listed(:openrouter, body), do: Catalog.parse(:openrouter, body)
+
+  defp listed(:gemini, body),
+    do:
+      :openai
+      |> Catalog.parse(body)
+      |> Enum.map(&%{&1 | id: String.replace_prefix(&1.id, "models/", "")})
+
+  defp listed(_type, body), do: Catalog.parse(:openai, body)
 
   defp anthropic_auth(:bearer, key), do: {"authorization", "Bearer " <> key}
   defp anthropic_auth(_auth, key), do: {"x-api-key", key}
