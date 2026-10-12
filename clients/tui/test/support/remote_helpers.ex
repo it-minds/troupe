@@ -27,7 +27,7 @@ defmodule Troupe.RemoteHelpers do
     on_exit(fn ->
       detach_all()
       _ = Tokens.logout(:all)
-      if Process.alive?(remote), do: GenServer.stop(remote, :normal)
+      stop(remote)
       # A TUI signed in links the daemon it attaches to as the person the plane names and
       # hands it the plane token (issue #365), and the daemon this VM embeds outlives the
       # test: the next one meets it as it would on a machine nobody has signed in on.
@@ -35,6 +35,15 @@ defmodule Troupe.RemoteHelpers do
     end)
 
     {remote, url}
+  end
+
+  # The remote is linked to the test process, whose end takes it down as well, so by now
+  # it may be on its way out: a stop that finds it going exits with the reason it went
+  # with, which is not a failure of the test.
+  defp stop(remote) do
+    GenServer.stop(remote, :normal)
+  catch
+    :exit, _gone -> :ok
   end
 
   @doc "Runs the device flow against a FakeRemote, as `troupe login` does."
