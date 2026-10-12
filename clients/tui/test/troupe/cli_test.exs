@@ -787,7 +787,7 @@ defmodule Troupe.CLITest do
 
   # The harness says the budget ran out a moment before it asks the question beside it,
   # and a stop sent in between answered no question: the session drops an answer to one it
-  # has not asked, and the run waited for good (TUI Decision 162). Here that moment is held
+  # has not asked, and the run waited for good. Here that moment is held
   # open. The agent asks from a task, so its tasks are held while it says the budget ran
   # out, and let go once the printer has had its say.
   test "headless printer stops the budget question once it is asked, not when the budget runs out" do
