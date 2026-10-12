@@ -64,7 +64,7 @@ defmodule Troupe.Client.Daemon do
   # them. So nothing of a branch sorts ahead of its window's opening, and nothing of this
   # session's own either: this client stamps the session's window as it opens it, the
   # daemon its first events, and on a busy machine the line typed into the new window
-  # came out a millisecond ahead of it, and off a rebuilt screen (TUI Decision 163).
+  # came out a millisecond ahead of it, and off a rebuilt screen.
   @impl true
   def events(sid) do
     own = Journal.all(sid)

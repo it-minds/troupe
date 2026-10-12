@@ -193,8 +193,8 @@ defmodule Troupe.BranchClientTest do
   # The same for the session's own window. This client stamps it as it opens it for the
   # first line typed, the daemon stamps that line as it takes it, and on a busy machine
   # the line came out a millisecond earlier: read back in time order alone it came ahead
-  # of the window, and a rebuilt screen showed the reply without the line (TUI Decision
-  # 163, the Ctrl-Y copy tests' flake).
+  # of the window, and a rebuilt screen showed the reply without the line (the Ctrl-Y
+  # copy tests' flake).
   test "the session's own first events are read back inside its window" do
     sid = "s-own-#{System.unique_integer([:positive])}"
     start_supervised!({Journal, session_id: sid, plane_url: "daemon"})
