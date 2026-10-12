@@ -7,9 +7,11 @@ is needed to run Troupe: operators have [their own track](../admin/README.md).
 
 ## 1. Where things live
 
-One Elixir umbrella under `apps/`, two clients under `clients/`, a Helm chart under
+One Elixir umbrella under `apps/`, the terminal and desktop clients under `clients/` (and
+`clients/vscode`, which opens the terminal client in VS Code), a Helm chart under
 `charts/troupe`, and the documentation. The clients and the plane reach a session only
-through the protocol, and `mix troupe.boundaries` fails the build on any other call
+through the protocol, and `mix troupe.boundaries` (the umbrella) and `mix troupe.xref` (the
+terminal client) fail the build on any other call
 ([architecture.md §2](architecture.md#2-boundaries)), so the place a change goes is
 usually the only place it can go.
 
@@ -138,8 +140,8 @@ sequenceDiagram
   and the fold brings it back. A client subscribes from a `seq` and gets the replay, then
   the live events, with no gap and no duplicate.
 - **Old logs.** Every event carries a version, and `Troupe.Log.Upcast` brings an old one
-  up a step at a time. Each release records logs in `test/fixtures/logs/<version>/` with
-  the hash of their fold; `fold_test.exs` replays every version and compares, so a fold
+  up a step at a time. Logs recorded at a release sit in `test/fixtures/logs/<version>/`
+  (0.2.0 and 0.3.0 so far) with the hash of their fold; `fold_test.exs` replays every version and compares, so a fold
   that quietly changed meaning fails CI. A moving hash is a bug to find, never a fixture
   to re-record.
 

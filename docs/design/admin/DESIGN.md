@@ -8,7 +8,11 @@ Files:
 - `admin/example.dc.html` — all nine surfaces, self-contained, opens directly in a browser. Includes a broken state (Overview, Integrations, Audit integrity failure), a pending state (bundle rollout, committed profile change), a waiting state (`dev-standard`), a draining machine, and a console-offline banner you can toggle from the top bar.
 - `DESIGN.md` — this file.
 
-It is a sibling of the user client (`/tokens.json`, `/DESIGN.md`, `/example.dc.html`), not a reskin of it. §1 says exactly where they diverge and why.
+`mix troupe.admin.tokens` turns `tokens.json` into the console's `apps/troupe_plane/priv/static/tokens.css` and `priv/design/statuses.json`, which `Troupe.Plane.Web.Live.Status` reads, and CI checks both are current.
+
+What the sections below describe is the design and its mockup, `example.dc.html`; the console in `apps/troupe_plane/lib/troupe/plane/web/live/` is built to it, and where the two differ — an erase panel rather than a dialog, an audit page with its integrity check below the log rather than tabs, no changed-cell flash yet — the console is what ships and the admin track ([profiles and policy](../../admin/profiles-and-policy.md)) says how it works.
+
+It is a sibling of the user client ([`clients/gui/docs/design/`](../../../clients/gui/docs/design/DESIGN.md): its `DESIGN.md`, `example.dc.html` and the four `themes/*.tokens.json`), not a reskin of it. §1 says where they diverged when both were drawn; the client has since moved to Afterglow (Figtree and DM Mono, square corners, pink as its reserved colour), and the console has not.
 
 ---
 
@@ -26,7 +30,7 @@ So this design keeps the platform's family and changes the grammar.
 
 1. **Amber is reassigned.** In the client, amber means "a human must decide now", and nothing else may use it. That meaning does not exist here — an administrator is never asked to approve an agent's file edit. Amber here means **degraded**: still serving, needs attention soon. Reusing the colour for a different meaning across two products is a real risk, and it is worth taking: in both cases amber means *stopped short of done, a person is the unblocker*. The alternative — inventing a ninth hue so amber could stay unused — would have made the status system harder to read for the sake of a consistency nobody experiences, since no one has both products open at once.
 
-2. **No single accent.** The client has one accent doing one job. Here, **status is the accent system**: nine states, each with a colour, a glyph and a word. Nothing else in the interface is coloured. Buttons are neutral. Links are blue because links are blue. If something on this screen has colour, it is telling you the state of a thing.
+2. **No single accent.** The client has one accent doing one job. Here, **status is the accent system**: twelve states, each with a colour, a glyph and a word. Nothing else in the interface is coloured. Buttons are neutral. Links are blue because links are blue. If something on this screen has colour, it is telling you the state of a thing.
 
 3. **Denser by a whole step.** Body type drops from 15px to 13px, table rows are 32px, the spacing scale gains a 6px step that exists purely for cell padding. Forty rows beat six cards. The client optimises for reading a conversation; this optimises for scanning a fleet.
 
@@ -74,6 +78,9 @@ This is the core of the product. Each state ships as a triple — **glyph, word,
 | unknown | ? | Unknown | `#96A5B6` | `#495868` | No report received |
 | rejected | ⊘ | Rejected by policy | `#E6849E` | `#8E1F44` | Cluster policy refused it |
 | credential missing | ∅ | Credential missing | `#FF9F6E` | `#8E3A05` | A reference points at nothing |
+| running | ▸ | Running | `#4CCCAD` | `#046855` | A session doing work |
+| dormant | ○ | Asleep | `#A79EDB` | `#4F4489` | A session put to sleep, its log kept |
+| disconnected | ⚡ | Console offline | `#C6B08A` | `#5D4820` | The console has lost the plane; what is shown is as it was |
 
 Every foreground clears 4.5:1 on its own background in both themes.
 
@@ -89,13 +96,13 @@ Five deliberate separations:
 
 Readable in greyscale, and by anyone whose red and green are the same colour:
 
-1. **Glyph.** Nine visually distinct marks, not nine dots in nine hues. Filled circle, half circle, cross, hollow diamond, pause, arrow, question mark, slashed circle, empty set.
+1. **Glyph.** Twelve visually distinct marks, not twelve dots in twelve hues. Filled circle, half circle, cross, hollow diamond, pause, arrow, question mark, slashed circle, empty set, play triangle, hollow circle, lightning.
 2. **Word.** Always present. Never a bare dot in a table cell.
 3. **Position.** Anything not healthy is sorted to the top of its list, and carries a 3px left marker on its row.
 
 ### Budget
 
-`budget.under` / `near` / `over` are separate from status because a team over budget is not a degraded team — nothing is malfunctioning, a number crossed a line. Over budget does not block sessions; the copy says so.
+`budget.under` / `near` / `over` are separate from status because a team over budget is not a degraded team — nothing is malfunctioning, a number crossed a line. Over budget does block new sessions — a team at its ceiling cannot start one, and Overview reports it broken, near the ceiling degraded — and the copy says which ceiling bound.
 
 ---
 
@@ -130,7 +137,7 @@ Shell: a nav rail and a content column, both fluid.
 - **<900px:** the rail wraps above the content and its items reflow into a wrapping row of 170px buttons. This is the checking-in mode: Overview, status lists and the session list stay fully usable; configuration forms are reachable but are not the point.
 - **≥1600px:** detail screens split their title block into more columns automatically (`repeat(auto-fit, minmax(220px, 1fr))`).
 
-No media-query-switched layouts. Every region declares a flex basis or an auto-fit grid and the browser decides, because the console is server-rendered and patched over a live connection — layout that depends on measured width or client state is a liability on reconnect.
+As few media-query-switched layouts as will do: the shell switches at 900px, and a few regions below that; everything else declares a flex basis or an auto-fit grid and the browser decides, because the console is server-rendered and patched over a live connection — layout that depends on measured width or client state is a liability on reconnect.
 
 **Tables never shrink below legibility.** Each table sets a `min-width` and lives in an `overflow-x: auto` container. A column disappears only when it is genuinely secondary, and the page never scrolls sideways as a whole.
 
@@ -153,16 +160,16 @@ No media-query-switched layouts. Every region declares a flex basis or an auto-f
 
 - One column, 12px between fields, labels above inputs. No inline label columns — they break at 380px and they break in Danish.
 - Every field that names an external thing shows what it is for underneath, in `body`, not in a tooltip.
-- **Verify before save.** The identity form cannot be saved until a test has passed; the integration form cannot be added until a test has passed. The test result is a check list with timings, not a green tick: four named checks, each with what it proved.
+- **Verify before save.** The identity form cannot be saved until a test has passed; the platform admin group cannot be saved until it has been checked. (The Integrations page is read-only.) The test result is a check list with timings, not a green tick: four named checks, each with what it proved.
 - Secrets are inputs that take a *reference*, with a sentence saying the value is read at call time and never stored. There is no reveal control anywhere in this product, because there is nothing to reveal.
 
 ---
 
 ## 6. Component inventory
 
-**Status pill / status cell** — the nine states above. Pill form in headers, bare glyph+word in table cells.
+**Status pill / status cell** — the twelve states above. Pill form in headers, bare glyph+word in table cells.
 
-**Attention item** (Overview) — status marker, status word in a fixed 170px column so glyphs and words align down the list, one sentence of what and where, one action. Sorted worst-first: broken → credential missing → degraded → over budget → pending.
+**Attention item** (Overview) — status marker, status word in a fixed 170px column so glyphs and words align down the list, one sentence of what and where, one action. Sorted worst-first, in the order `Status` ranks: broken → credential missing → rejected → degraded → console offline → unknown → pending → waiting → draining → running → healthy → asleep, a team over budget reported as broken and one near it as degraded.
 
 **Metric** — label, `metric` number, one line of context. Four maximum. A metric with no context line is not allowed; "14" alone is not information.
 
@@ -180,7 +187,7 @@ No media-query-switched layouts. Every region declares a flex basis or an auto-f
 
 **Banner** — console offline, bootstrap mode, drift. Full-width, left marker, one sentence of consequence and one action.
 
-**Tabs** — Audit's change log versus integrity check. `aria-pressed`, selected background, no underline animation.
+**Tabs** — in the mockup, Audit's change log versus integrity check. The console puts the integrity check on the same page, below the log, and has no tabs.
 
 ---
 
@@ -191,7 +198,7 @@ Everything on these screens can change under the reader.
 - **Never reorder a table while it is being read.** New rows are appended in place and marked; sort order is recomputed only on an explicit action, on filter change, or on navigation.
 - **A changed cell flashes once** with `table.changedCell` and fades over `motion.duration.settle` (1.8s). The fade is the only decorative timing in the product, and it is decorative on purpose: it tells you *where* to look after you glanced away.
 - **Changed numbers live in an `aria-live="polite"` region**, so the change is announced rather than only glowing.
-- **Under reduced motion**, the flash is replaced by a static marker held for one refresh.
+- **Under reduced motion**, the flash is replaced by a static marker held for one refresh. (Neither the flash nor the marker is built: the console styles `td.changed`, and no view sets it yet.)
 - **Values are never optimistic.** An action shows what the console did (`Committed 12:01:07Z`), not what it hopes happened. Pending means pending.
 - **When the console loses the cluster**, values freeze and say so with the timestamp they are from. They are not blanked, not greyed to illegibility, and never replaced by a spinner: stale data with an honest timestamp is more useful to an operator than no data. The banner states plainly that **sessions and workers are unaffected** — this console going dark is not an outage of the platform, and an interface that implies otherwise causes the wrong 3 a.m. decision.
 
@@ -216,9 +223,9 @@ The erase dialog is the model for everything irreversible. It states what is del
 
 ## 9. The four architectural facts, and how the interface carries them
 
-**Administrators cannot read session content.** The Sessions screen opens with a permanent line, not a dismissible tip: *"Administrators cannot read session content. This list shows metadata only… There is no setting that changes this."* Phrasing it as a property of the platform rather than a permission the reader lacks is the entire point — this is the guarantee the product is sold on. The integrity check reinforces it: it proves records are unaltered **by reading hashes, not content**, and says so on the result.
+**Administrators cannot read session content.** The Sessions screen opens with a permanent line, not a dismissible tip: *"Metadata only. No administrative role grants access to what a session said."* Phrasing it as a property of the platform rather than a permission the reader lacks is the entire point — this is the guarantee the product is sold on. The integrity check reinforces it: it proves records are unaltered **by reading hashes, not content**, and says so on the result.
 
-**Membership lives in the identity provider.** The team roster is a plain read-only list with one sentence — add and remove people in Entra ID, this follows within six hours — and a link straight to that group. No greyed-out "Add member" button; a disabled control implies the ability exists and you lack it. Enabling a team is a choice among groups that exist, not a creation form, and a group that sync rejected appears in that list with its rejection reason rather than silently missing.
+**Membership lives in the identity provider.** The team roster is a plain read-only list with one sentence — the members come from the identity provider and are read-only here. No greyed-out "Add member" button; a disabled control implies the ability exists and you lack it. Enabling a team is a choice among groups that exist, not a creation form, and a group that sync rejected appears in that list with its rejection reason rather than silently missing.
 
 **Secrets are references.** Credentials render as a vault path with `reference only · never shown` beneath. There is no reveal, no masked value, no copy button. `credential missing` is a first-class status with its own colour and glyph.
 
@@ -235,7 +242,7 @@ The erase dialog is the model for everything irreversible. It states what is del
 - **Focus:** 2px `border.focus` ring with 2px offset on `:focus-visible`, never removed. DOM order is reading order. The erase dialog traps focus and returns it to the triggering row's button on close; Escape closes it.
 - **Keyboard:** every control reachable; tables are ordinary tables with real `th scope` and `caption`; no custom grid behaviour to learn.
 - **Live regions:** `aria-live="polite"` on changing metrics; `role="status"` on the offline banner. Nothing else announces — a busy fleet would otherwise be unusable with a screen reader.
-- **Motion:** `prefers-reduced-motion: reduce` removes the pulse on draining and pending and removes the settle fade.
+- **Motion:** `prefers-reduced-motion: reduce` removes the pulse on draining (the one state that pulses) and the settle fade.
 - **Targets:** 30px is the default control height for a mouse-first tool, but **44px minimum** for every destructive action at any size, and for all controls on the surfaces that matter on a phone (Overview, sessions, banners).
 - **Tables at 380px:** horizontal scroll inside the table container, never on the page. Column headers stay visible because the header row scrolls with the body, not away from it.
 - **Language:** identifiers and group names are Danish. Interface strings must not be sized to their English length.
@@ -252,13 +259,13 @@ Technical and exact, because the audience is. Sentence case. No marketing, no ex
 
 | Don't | Do |
 |---|---|
-| "Something went wrong" | "GET https://ghe.itm.dk/api/v3/meta — 503 Service Unavailable · 5 attempts · last 14:09:44Z" |
+| "Something went wrong" | "GET https://ghe.example.com/api/v3/meta — 503 Service Unavailable · 5 attempts · last 14:09:44Z" |
 | "Permission denied" | "policy/credential-scope: a credential reference must live under kv/troupe/. The change was not applied and no state was modified." |
 | "Sync error" | "User sync last completed 2026-09-11 03:00Z, 53 hours ago. Three records rejected. Sign-in still works." |
-| "Cannot connect" | "Console offline — no answer from itm-prod since 11:48:02Z. Sessions and workers are unaffected; you are reading values from 11:48. Retrying every 10 s." |
+| "Cannot connect" | "Console offline — no answer from the plane since 11:48:02Z. Sessions and workers are unaffected; you are reading values from 11:48. Retrying every 10 s." |
 | "Are you sure?" | The erase dialog: what is deleted, where, what survives, then type the identifier. |
 | "Update available" | "Rev 19 was accepted at 11:52:14Z. Three machines still carry sessions and will take it as they empty." |
-| "You do not have permission to add members" | "From ITM-Salg. Add and remove people in Entra ID — this roster follows within six hours." |
+| "You do not have permission to add members" | "From the identity provider, and read-only here." |
 
 Three rules for error copy: **what failed, what the platform did about it, what to do next.** The github-enterprise panel is the reference implementation — the request and response, then "sessions keep running, agents are told the tool is unavailable", then Test now / Disable in 2 profiles.
 
@@ -267,7 +274,7 @@ Three rules for error copy: **what failed, what the platform did about it, what 
 ## 12. What a developer must not do
 
 - Don't ship a status without all three of glyph, word and colour.
-- Don't invent a tenth status. If a new situation appears, it maps onto one of the nine or it earns a token, a glyph and an entry in this table — not a one-off colour.
+- Don't invent a thirteenth status. If a new situation appears, it maps onto one of the twelve or it earns a token, a glyph and an entry in this table — not a one-off colour.
 - Don't use a status colour for anything that is not a status. No coloured buttons, no coloured headings, no brand accent.
 - Don't collapse degraded into broken, pending into waiting, or unknown into broken. Each pair has a different owner and a different fix.
 - Don't reorder or re-sort a table because data arrived. Mark, don't move.
@@ -291,7 +298,7 @@ Three rules for error copy: **what failed, what the platform did about it, what 
 
 3. **Status is the accent system, and nothing else is coloured.** The brief's strongest warning was one accent asked to mean six things. The inverse solution: no general accent at all. Every coloured pixel is a state. Buttons are neutral grey; the erase confirm button only becomes red once the typed name matches, which is also the moment it becomes destructive.
 
-4. **Nine states, each with a glyph.** Colour is the third signal. The test is a greyscale screenshot, and it passes.
+4. **Twelve states, each with a glyph.** Colour is the third signal. The test is a greyscale screenshot, and it passes.
 
 5. **Pending and waiting are different colours, not shades.** Blue for "the cluster has not answered me", violet for "the cluster said yes and is holding". They are adjacent in a lifecycle and constantly confused in operations tools; giving them different hue families is worth the extra token.
 

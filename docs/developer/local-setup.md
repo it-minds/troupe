@@ -34,19 +34,20 @@ and four gateway tests that spawn or `kill -9` a daemon. They pass on a Linux ru
 | `minio` | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`, pinned by digest (Pigsty's community build; MinIO's own images are no longer public) | 29000 (S3), 29001 (console) | `troupe` / `troupe-secret` | `minio-setup` creates bucket `troupe-sessions` and enables versioning (`:87-98`) |
 | `openbao` | `openbao/openbao:2.4.1`, dev mode | 28200 | root token `troupe-dev-root` | dev mode keeps everything in memory, so the container enables `transit` and creates key `troupe-session-tokens` (`ecdsa-p256`) each time it starts, and is healthy once the key exists (`:105-136`); KV v2 is at `secret/` in dev mode |
 
-`config/config.exs:61-70` points the dev and test repos at `localhost:25432`
-(`troupe_plane_dev` / `troupe_plane_test`), `:86-96` points the object store at
-`localhost:29000`, and `:98-113` points both the worker's KMS and the plane's transit at
-`localhost:28200` with the dev root token — "for these two environments only".
+`config/config.exs` points the dev and test repos at `localhost:25432`
+(`troupe_plane_dev` / `troupe_plane_test`), the object store at `localhost:29000`, and both
+the worker's KMS and the plane's transit at `localhost:28200` with the dev root token — "for
+these two environments only".
 
 Stop them with `scripts/dev-down`; `scripts/dev-down --purge` also removes the volumes
 (`scripts/dev-down:7-11`).
 
-Then create and migrate the test database, which is what `apps/troupe_plane/test/test_helper.exs:26-31`
-tells you to do when it finds none:
+Then create and migrate the test database (compose creates only `troupe_plane_dev`; the
+plane's `test_helper.exs` says so when it finds none), and run the gate:
 
 ```bash
 mix deps.get
+MIX_ENV=test mix ecto.create && MIX_ENV=test mix ecto.migrate
 mix check          # compile with warnings as errors, format, credo --strict, boundaries, test
 ```
 
@@ -78,11 +79,13 @@ supported path is:
 scripts/remote-up          # idempotent: run it again to pick up a change
 ```
 
-It creates kind cluster `troupe-dev` (host ports 30080/30443), installs ingress-nginx and
-labels its namespace, builds the images and loads them (`TROUPE_SKIP_BUILD=1` skips),
+It creates kind cluster `troupe-dev` (host ports 30080/30443) with Cilium as its CNI
+(`TROUPE_KIND_CNI`, `TROUPE_CILIUM_VERSION`; the cluster suite's egress checks need a CNI
+that enforces policy), installs ingress-nginx and labels its namespace, points CoreDNS's
+`dex.localtest.me` at the ingress, builds the images and loads them (`TROUPE_SKIP_BUILD=1` skips),
 applies `dev/kind/dependencies.yaml` (PostgreSQL, MinIO, OpenBao with Kubernetes auth,
 Dex), applies the CRDs, installs the chart with `dev/kind/values.yaml` and restarts the
-plane and operator, then creates a `WorkerProfile` and its namespace's Secrets. It prints:
+plane, the operator and the GUI, then creates a `WorkerProfile` and its namespace's Secrets. It prints:
 
 | Thing | Address |
 |---|---|
@@ -95,9 +98,11 @@ Then `troupe login http://plane.localtest.me:30080` and `troupe --remote`.
 
 ## 5. Configuration
 
-`Troupe.Config` layers built-in defaults, `<config dir>/config.yaml`,
+`Troupe.Config` layers built-in defaults, the organisation's defaults (a managed file, then
+the cached copy of a plane's document), `<config dir>/config.yaml`,
 `<workspace>/.troupe/config.yaml`, `<workspace>/.troupe/config.local.yaml`, environment
-variables, then explicit options; maps merge by key and any string may say `{env:VAR}`.
+variables, then explicit options, and the organisation's enforced values over all of them
+(Decision 869); maps merge by key and any string may say `{env:VAR}`.
 Every key is in one table, `Troupe.Config.Schema`, from which `mix troupe.config.schema`
 writes `protocol/schema/config/v1.json` and the reference in
 [docs/user/configuration.md](../user/configuration.md); CI runs it with `--check`, so run
@@ -110,7 +115,7 @@ it and commit the result after changing a key. `TROUPE_PROVIDER=fake` and
 
 | Variable | Read by | Effect |
 |---|---|---|
-| `TROUPE_SKIP_BUILD`, `TROUPE_PROFILE_NAME`, `TROUPE_GATEWAY_URL`, `TROUPE_GATEWAY_MODEL`, `TROUPE_GATEWAY_SMALL_MODEL`, `TROUPE_GATEWAY_KEY` | `scripts/remote-up` | skip the image build; the dev profile's name (`dev`), model endpoint (unset, a placeholder that resolves nowhere; its host is added to the policy either way), models, and the key written into its `llm-credentials` Secret (never into a file here) |
+| `TROUPE_SKIP_BUILD`, `TROUPE_KIND_CNI`, `TROUPE_CILIUM_VERSION`, `TROUPE_PROFILE_NAME`, `TROUPE_GATEWAY_URL`, `TROUPE_GATEWAY_MODEL`, `TROUPE_GATEWAY_SMALL_MODEL`, `TROUPE_GATEWAY_KEY` | `scripts/remote-up` | skip the image build; the kind cluster's CNI and the Cilium it installs; the dev profile's name (`dev`), model endpoint (unset, a placeholder that resolves nowhere; its host is added to the policy either way), models, and the key written into its `llm-credentials` Secret (never into a file here) |
 | `TROUPE_KIND_CLUSTER`, `TROUPE_REGISTRY`, `TROUPE_IMAGE_TAG`, `TROUPE_PUSH` | kind scripts, `scripts/build-images` | cluster name (`troupe-dev`), image prefix, tag (`dev`), push instead of `kind load` |
 | `TROUPE_PG_CONTAINER`, `TROUPE_PITR_DB` | `scripts/pitr-drill` | the compose container and database |
 | `TROUPE_REAPER_TARGETS` | `mix compile.reaper` | triples to build, or `all` |

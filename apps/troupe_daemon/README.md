@@ -19,6 +19,7 @@ troupe-daemon config trust [PATH]   let a workspace's own files set the trusted 
 troupe-daemon config untrust [PATH]   take that back
 troupe-daemon config import-opencode   copy opencode's providers into config.yaml
 troupe-daemon models [--refresh]  what each provider serves; asked again when stale, or now with --refresh
+troupe-daemon doctor              check the setup: provider, key, models, daemon, PATH, plane; exits 1 on a failure
 troupe-daemon login on|off|status   start at login, or not; status exits 1 when it does not
 troupe-daemon version
 ```
@@ -45,10 +46,10 @@ irm https://github.com/it-minds/troupe/releases/latest/download/install.ps1 -Out
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The daemon is always installed. In a terminal the installer asks whether to add the TUI
-and the desktop app, shows what it is about to do, and asks before doing it; `--tui` and
-`--gui` (`-Tui`, `-Gui`) name them, and `-y` (`-Yes`) asks nothing, installing the daemon
-alone when neither is named. Once the daemon is in place it asks whether to
+The daemon is always installed. In a terminal the installer asks whether to add the TUI,
+the desktop app and the VS Code extension, shows what it is about to do, and asks before
+doing it; `--tui`, `--gui` and `--vscode` (`-Tui`, `-Gui`, `-VSCode`) name them, and `-y`
+(`-Yes`) asks nothing, installing the daemon alone when none is named. Once the daemon is in place it asks whether to
 [start it at login](#start-at-login), Enter meaning no; `--start-at-login` and
 `--no-start-at-login` (`-StartAtLogin`, `-NoStartAtLogin`) answer without the question, and
 `-y` alone turns nothing on. The copy attached to a release installs that release.
@@ -106,9 +107,11 @@ only you can read, which sends it on, so the token is never on a command line.
 
 ## Configuration
 
-`~/.config/troupe/config.yaml` (`%APPDATA%\troupe\config.yaml` on Windows), then the
-project's `.troupe/config.yaml` and `.troupe/config.local.yaml`, then `TROUPE_*`, merged
-by key. A project's files set the provider, keys, approvals, MCP servers and paths only
+The organisation's defaults, if it has any (a managed file, then the cached copy of a
+plane's document), then `~/.config/troupe/config.yaml` (`%APPDATA%\troupe\config.yaml` on
+Windows), then the project's `.troupe/config.yaml` and `.troupe/config.local.yaml`, then
+`TROUPE_*`, merged by key, and what the organisation enforces over all of them (Decision
+869). A project's files set the provider, keys, approvals, MCP servers and paths only
 in a workspace the user file's `trusted_workspaces` names (`config trust` adds one), and a
 pod's never do. The rules and every key:
 [docs/user/configuration.md](../../docs/user/configuration.md).
@@ -199,7 +202,7 @@ harness's: they are one commit.
 
 `.github/workflows/native.yml` builds the Linux, macOS and Windows targets on native
 runners — nightly, for every pre-release and release, and on a pull request that touches
-the daemon — and smokes each (unpack, `version`, `status`, `run`, `status`, `eval`; on
+the daemon, Linux and Windows only — and smokes each (unpack, `version`, `status`, `run`, `status`, `eval`; on
 Windows `version`, `status` and a zstd round trip in `eval`). A release attaches the
 tarballs to the GitHub release with everything else it ships.
 

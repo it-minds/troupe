@@ -7,8 +7,9 @@ them for the first time links here.
 
 What talks to the model: a markdown file of instructions, the tools it may use and,
 optionally, which model. A session starts with one, `build` (reads, edits and runs
-commands) or `plan` (reads and proposes, never writes), and it may hand parts of its task
-to subagents. Your own configuration, a workspace or a bundle can add more.
+commands) unless you pick another — `plan` reads and proposes and never writes, and
+`orchestrate`, `workflow` and others ship too — and it may hand parts of its task to
+subagents. Your own configuration, a workspace or a bundle can add more.
 
 ### Approval
 
@@ -20,7 +21,7 @@ where the configuration says so.
 
 ### Branch
 
-A session opened from another one in the terminal UI (`/code`, `/worktree`), with a window
+A session opened from another one in the terminal UI (`/build`, `/worktree`), with a window
 of its own, often in its own worktree. Branches run side by side, and a window that needs
 you says so.
 
@@ -118,12 +119,13 @@ What earlier agents found out about a repository, kept as facts in
 `.troupe/memory/facts.jsonl`, each with the files it rests on and who checked it: a fact
 whose file has changed since is marked "may no longer be true". Every agent's prompt carries
 the commands and conventions; the rest it asks for with `recall`. `.troupe/memory.md` is a
-view of the facts for a person to read, and an edit to it is read back. A `librarian`
-session writes it and keeps it current.
+view of the facts for a person to read, and an edit to it is read back. Agents add facts
+with `remember`; a `librarian` session surveys the repository and keeps them current.
 
 ### Provider
 
-Where the model is: Anthropic, OpenAI, or any endpoint that speaks the OpenAI API. You bring
+Where the model is: Anthropic, OpenAI, or any endpoint that speaks the Anthropic or the
+OpenAI API. You bring
 the key; Troupe calls it and counts what each call used.
 
 ### Service principal
@@ -135,7 +137,8 @@ in as a person does and can hold no admin role.
 
 One agent, and the agents it delegates to, working in one workspace, with its log. It lives
 in the daemon or on a worker pod, not in the window you look at it through, and it is
-`active`, `dormant` (stopped with its log kept, woken when opened), `read_only` or `erased`;
+`active`, `dormant` (stopped with its log kept, woken when opened), `read_only` or `erased`,
+and on a plane `pending` too (waiting for a worker while its profile grows);
 a session being erased is `erasure_pending` until its key is destroyed.
 
 ### Skill
@@ -158,8 +161,8 @@ review until somebody has looked.
 
 ### Worker
 
-A pod that runs the harness for the plane. A profile has one or more; each holds many
-sessions, and a client reaches it directly over a WebSocket with a short-lived token.
+A pod, or a machine the plane provisions, that runs the harness for the plane. A profile
+has as many as its sessions need, and none while it is idle; each holds many sessions, and a client reaches it directly over a WebSocket with a short-lived token.
 
 ### Workspace
 

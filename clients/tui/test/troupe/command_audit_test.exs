@@ -1,6 +1,6 @@
 defmodule Troupe.CommandAuditTest do
   @moduledoc """
-  The audit of every command (issue #502, part B; `docs/developer/command-audit.md`): what
+  The audit of every command (issue #502, part B; `docs/history/command-audit.md`): what
   the rows of the harness's table do when they are typed, from the command line and from
   the palette over an activated window, on this machine and on a pod, where the audit
   found them wrong or nothing else held them.

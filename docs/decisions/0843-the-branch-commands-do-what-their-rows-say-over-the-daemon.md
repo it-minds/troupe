@@ -14,7 +14,7 @@ paths:
 gist: "/cancel discards Troupe's tree at rest; worktree_name; local changes no conflict; landed merge stays one; own window stays; read_branch lists no parent"
 ---
 
-The command audit of #502 (`docs/developer/command-audit.md`) found the branch commands
+The command audit of #502 (`docs/history/command-audit.md`) found the branch commands
 short of their rows since a branch became a session of its own (Decision 646, TUI
 Decision 103): D105. What each now does, and where a rule had to be chosen:
 

@@ -2,7 +2,10 @@
 
 Defects found in passing, while working on something else, and not fixed yet. Each has a
 place in the code, what goes wrong and who saw it. An entry leaves this page when an issue
-or a pull request takes it; the line that remains says which one.
+or a pull request takes it; the line that remains says which one. Every entry but D8 (the
+flaky tests, which have their own pass) was checked against the code of 0.15.0 on
+2026-10-12 (#422): what was fixed went to the table at the end, and what was said twice is
+said once.
 
 Fixers following [fixing-issues.md](fixing-issues.md) add their `noticed` defects here.
 Stale docs and style nits are not defects and do not belong here.
@@ -114,7 +117,6 @@ the chunk 24, 26 and 27 fixers (2026-10-08/11).
 
 - The config schema's `$id` (`https://troupe.dev/schema/config/v1.json`) isn't served, so
   an editor can't fetch it.
-- Killing `troupe.exe` on Windows can leave Burrito's `erl.exe` running.
 - `queue_input` logs a task edit's `input_queued` text as `inspect(%Todo.Edit{})`.
 - A worker command that is `waiting` can still be sent after its caller got
   `{:error, :timeout}` at 35 s.
@@ -133,19 +135,17 @@ Found by the chunk 4, 5 and 7 fixers, 2026-09-26/27.
 - The desktop app starts the daemon with the app's install directory as its working
   directory (`spawn_any` in `src-tauri/src/daemon.rs`), so the uninstaller probably can't
   remove that directory while the daemon runs (unconfirmed).
-- Fixed in PR #262: `troupe run --headless` exited at the first rest, so the reply to a
-  line another client queued mid-turn was never printed.
 
-The A2A task that stayed `working` after the failure guard stopped its turn was fixed in
-PR #266. Found by the chunk 5 fixers, 2026-09-26.
+Found by the chunk 5 fixers, 2026-09-26.
 
 ### D30 - Two sources for the brand's assets (low)
 
 - `scripts/brand-icons.py` (Pillow) draws the plane's `favicon.ico` and
   `apple-touch-icon.png` with a second rasteriser; `pnpm icons` (PR #210) could draw them
   from the same mask so the plane and the desktop app match.
-- `clients/gui/docs/design/*.dc.html` reference `./support.js`, which is not in that
-  directory.
+- `clients/gui/docs/design/afterglow.dc.html` and `example.dc.html` reference
+  `./support.js`, which is not in that directory (the themes' comps have theirs beside
+  them).
 
 The two copies of the design tokens are one since PR #239. Found by the #159 and #52
 fixers (PRs #210, #211), 2026-09-26.
@@ -163,17 +163,11 @@ The rest of this entry was fixed in PRs #234 and #237. Found by the chunk 6 fixe
 
 - An idle screen stops ticking, so the sessions page's and HQ's ages are only as fresh
   as the last tick.
-- A question for the design rather than a defect: chatting from the command line, the
-  session's own window shows `done ●`, dimmed, and "1 done" after every reply until you
-  open it (PR #241).
 - `model.ex` highlights code with syntect's dark-only `base16_ocean_dark`, so code keeps
   dark-theme colours on a light terminal.
 - Dead since the daemon move: a window's `summary` and `diff_stat` fields, which nothing
-  feeds.
+  feeds (TUI Decisions 39 and 42's diff stat, D113).
 
-The rest of this entry (the printer's and the model's dead clauses, the view's recount,
-the picker's empty branches column, `Troupe.Codec`'s `to`/`reason`) was fixed in PR #262,
-and the dead `truncated`, `compaction` and other clauses left in both for issue #301.
 Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
 
 ### D37 - Small leftovers from the 0.6.1 work (low)
@@ -222,8 +216,8 @@ for issue #305.
   doesn't loop).
 - The TUI's `troupe doctor` under a scratch `APPDATA` fails in the Burrito launcher with
   "error: FileNotFound" (with the real `APPDATA` it works).
-- Subagents get no `started_at` or name in the TUI (`delegation_started` isn't read), so
-  the observer measures their time from the window's start.
+- Subagents get no `started_at` in the TUI (a subagent's window is made with none), so the
+  observer measures their time from the window's start.
 - `budget_ask_answered` and `tool_failures_ask_answered` carry `decision` as a string
   live and an atom when `Troupe.Codec` reads them back (nothing reads it yet).
 - The TUI picker: every local row's title is the workspace path (the daemon's
@@ -271,8 +265,8 @@ Found by the chunk 9 fixers, 2026-09-29.
   name slips into a chunk and is caught only at the chunk's pull request.
 - Unit-test fixtures and the desktop app's identifier still use an old personal namespace
   (`ghcr.io/objective-mj/...`, `com.objective-mj.troupe`).
-- `Session.Log`'s moduledoc cites `troupe ctl verify`, which no client has; the TUI's
-  tile headline reads `needs_input ▶ needs input`.
+- `Session.Log`'s moduledoc cites `troupe ctl verify`, which no client has (#628 makes it);
+  the TUI's tile headline reads `needs_input ▶ needs input`.
 - `docs/mask.png` (2 MB, the source of the brand mask) is referenced by nothing and is
   published with the site; MkDocs is held at 1.x because Material warns that 2.0 breaks
   its plugins (the generator's future belongs to #189).
@@ -351,14 +345,6 @@ in the pod's `Troupe.MCP.Sessions` until the pod stops or a bundle drops the ser
 at the server until the server expires it. Found by the chunk 12 fixer of slot A (PR
 #323), 2026-10-01; the rest is #358.
 
-### D52 - A worker's own OpenBao identity (medium)
-
-- Nothing writes a profile's OpenBao role and policy: an installation that turns on
-  `bao.workerRolePerProfile` (Decision 753) makes `troupe-worker-<profile>` by hand, and
-  writes the profile's policy again whenever its granted teams change.
-
-Found by the chunk 12 fixer of slot B (PR #324), 2026-10-01; the rest is #336.
-
 ### D53 - Small leftovers from the 0.7.2 work (low)
 
 - A2A's `state_of_row` could read the plane row's `failed_reason` (Decision 750) instead
@@ -372,7 +358,7 @@ Found by the chunk 12 fixer of slot B (PR #324), 2026-10-01; the rest is #336.
   the console's server check and preview don't show it; `gitHosts` aren't checked.
 - `TROUPE_STATE_HOME` doesn't move `daemon.json`, which is always under
   `%LOCALAPPDATA%\troupe`, so a daemon run with scratch homes still takes the machine's one
-  discovery slot, and a forced stop leaves a stale file (`verify-local.ps1` too).
+  discovery slot, and a forced stop leaves a stale file (D23 has `verify-local.ps1`'s).
 - The daemon's clocks are set in whole minutes, so a waiting session's clock can't be
   under a minute.
 - Core `SleepTest` failed once under the full core suite's load and passed alone.
@@ -395,10 +381,6 @@ Found by the chunk 13 fixer of slot B13 (PR #338), 2026-10-02.
 
 ### D55 - A worker's OpenBao login: what #336 left (medium)
 
-- By default every worker pod logs in as the one role `troupe-worker`, and the dev
-  manifests give that role a policy over every team's keys. Keeping profiles apart takes
-  per-profile roles and `bao.workerRolePerProfile` (Decision 753), and then narrowing or
-  removing the shared role, since a pod chooses the role it asks for.
 - The worker doesn't read `TROUPE_BAO_AUTH_PATH`: its auth mount is always `kubernetes`,
   where the plane's follows `bao.authPath`.
 - `Troupe.KMS.OpenBao.static_token/1` takes `TROUPE_BAO_TOKEN` unfiltered, so an empty
@@ -489,15 +471,11 @@ Found by the chunk 15 fixer of slot B15 (PR #372), 2026-10-04.
 - `troupe config --explain --json` likely fails when a list holds an unset `{env:VAR}` (an
   MCP server's `args`): `Explain.json_value` keeps the `{:unset_env, ...}` tuple, which
   JSON can't encode. `config.get` has the fix (PR #374); `Explain` doesn't.
-- A daemon older than 0.8.0 treats a `config.set` without `provider` as a model-panel save
-  and writes `provider: anthropic` when the file has none. This release's clients refuse to
-  set a single key unless `config.get` lists `keys`; another client could still do it.
 - The TUI's settings help says a `next_run` setting applies "the next time the TUI
   starts"; most apply to the next session.
 - Two clients saving one file at the same moment: the last write wins (Decision 761).
 - A command file that shadows a built-in is skipped with a warning logged on every
-  `commands.list`, so each time a palette opens; and the TUI reads the command table only
-  when a session opens (the desktop app reads it each time its palette opens).
+  `commands.list`, so each time a palette opens.
 - The TUI suite prints "spawn: Could not cd to /tmp/troupe-ws-NNN" in several tests, and
   `InterruptTest` ("a console that cannot be read ends the watch") failed once under the
   full gate's load and passed alone.
@@ -512,8 +490,6 @@ Found by the chunk 15 fixers of slots A15, B15 and C15 (PRs #374, #372, #370), 2
 - `/todo complete|cancel|add`, typed in a branch window, is a slash command missing from
   `Troupe.Commands`, so it is in neither `commands.list`, the palettes, `troupe --help` nor
   the command reference.
-- `docs/developer/build.md` section 3 has no row for `mix troupe.config.schema` (the
-  config schema and the configuration reference it writes).
 - `troupe --workspace DIR` with a directory that doesn't exist is unchecked; the VS Code
   extension always passes a real folder.
 - The TUI suite shares one embedded daemon, which answers a replayed `command_id` with the
@@ -525,9 +501,10 @@ Found by the chunk 16 fixers, 2026-10-04.
 ### D65 - What a turn costs: what #389 left (medium)
 
 - Unchecked: whether a gateway speaking Anthropic's API passes `cache_control` on.
-- Subagent spend is added to the parent's turn live only. A cancel or a parent restart in
-  the middle of the turn loses what the subagents reported; the delegation's own
-  `tool_call_completed` could carry it.
+- A waited-for subagent's spend is added to the parent's turn live only. A cancel or a
+  parent restart in the middle of the turn loses what it reported; the delegation's own
+  `tool_call_completed` could carry it. A background child is charged when it is stopped
+  or cancelled (Decision 853), though not across its parent's restart (D118).
 - `Troupe.Bench.Model.measure/2` counts `request.system` only, so the offline bench's
   `system_bytes` leaves out the task list the log counts; `Request.system_text/1` has both.
 
@@ -568,10 +545,8 @@ Found by the #410 fixer, 2026-10-04.
   running and holding the pipe.
 - `troupe bench --live` prints the history path with mixed separators on Windows;
   `Troupe.Paths.display/1` would print it the platform's way.
-- A daemon started with only the `TROUPE_*_HOME` variables pointing at scratch still
-  writes `%LOCALAPPDATA%\troupe\daemon.json`, which then names a daemon that is gone.
-- `scripts/dev-check` doesn't run `mix troupe.bench` (about 10 s), so a change past a
-  budget shows only on the chunk's pull request into `main`.
+- `dev-check.yml` doesn't run `mix troupe.bench` (about 10 s), so a change past a budget
+  shows only on the chunk's pull request into `main`.
 - Two `scripts/ci` runs from different worktrees share the toolbox's Docker volumes and
   can break each other.
 
@@ -579,8 +554,6 @@ Found by the chunk 17 fixers and the coordinator, 2026-10-04.
 
 ### D69 - Anthropic thinking: what #396 left (low)
 
-- Unchecked: reasoning blocks go to the compaction summariser unchanged, so when the small
-  model is a different Anthropic model it receives another model's signed thinking blocks.
 - Opus 4 and 4.1 cap output at 32K tokens, but `xhigh` (and now `max`) asks for
   `max_tokens` 36,864 (`put_thinking`), which they refuse.
 - The catalog records each model's thinking form, not which effort levels it takes: a
@@ -654,7 +627,6 @@ Found by the chunk 19 fixers, 2026-10-05.
 
 - A gateway loopback test logs a `FunctionClauseError` from `Troupe.LLM.Fake.render(%{text:
   "done"}, ...)`; it fails nothing.
-- The TUI tests' `FakeRemote` HTTP `/rpc` can only answer errors without `data`.
 - `Private.resume/1` now always asks `Plane.subject`, so a link's resume task that outlives
   a daemon test's teardown logs a task exit.
 
@@ -663,16 +635,14 @@ Found by the chunk 19 fixers, 2026-10-05.
 ### D74 - Model calls: what the 0.8.5 work left (low)
 
 - `qwen3-235b` never puts two tool calls in one response (179 of 179 in the live bench), so
-  `build.md`'s "one `delegate` call per item, all in the same turn, so they run
-  concurrently" can't happen on it. The OpenAI-compatible adapter sets no
+  the `build` agent's "Independent items go to subagents, all in one turn"
+  (`priv/agents/build.md`) can't happen on it. The OpenAI-compatible adapter sets no
   `parallel_tool_calls`.
 
 Found by the chunk 20 fixers, 2026-10-06.
 
 ### D75 - Decision files: small leftovers (low)
 
-- `symbols:` in a decision's front matter is type-checked but not checked against the code,
-  as #437 had it optionally.
 - Gists were drafted from titles: a long title gives a gist cut off with "…", which reads
   badly in `mix troupe.decisions --for`.
 - Several migrated bodies run a `- ` list straight on from a paragraph with no blank line
@@ -744,9 +714,6 @@ Found by the chunk 21 fixers, 2026-10-06.
 - A gateway's own name for one of these models isn't known to think unasked (the model
   listing has no field for it), so its thinking blocks are still dropped unless an effort
   is set.
-- Unchecked: whether Troupe ever sends a forced `tool_choice` (`any` or a named tool),
-  which Opus 5.5, Sonnet 5.5 and Fable 5.1 refuse.
-- The conversation-prefix binding of thinking blocks is #465.
 
 Found by the #427 fixer, 2026-10-06.
 
@@ -858,9 +825,6 @@ Found by the #378 fixers, 2026-10-07 and 2026-10-08.
   before it refuses an erased session, so a refused redemption still leaves both.
 - A tombstone whose session row was deleted outright is skipped by the erasure pass, which
   joins on sessions.
-- The plane names a team session's key by the team's current name; if a team could be
-  renamed, the session's manifest would be the safer source. Unchecked whether renames
-  exist.
 - Tests of the key manager other than the erasure tests still run under OpenBao's root
   token, which hides every policy refusal; Decision 811's tests use the credentials
   `Troupe.KMS.Policy` writes for each component.
@@ -871,10 +835,10 @@ Found by the chunk 23 fixers, 2026-10-07.
 
 ### D89 - Shell mode and tool output after #486 and #493 (low)
 
-- The desktop app doesn't call `shell.run` and doesn't know `user_shell`, so it probably
-  draws the `user_input` from `shell` as a line the person typed (unconfirmed). The A2A
-  facade folds that note into a task's history as a user message, as it does harness
-  notes.
+- The desktop app has no shell mode: it doesn't call `shell.run` and doesn't know
+  `user_shell`, and shows the `user_input` from `shell` as the person's entry, tagged "via
+  shell". (The A2A facade folds that note into a task's history as a user message: D118's
+  ACP and A2A item.)
 - `!` typed in a window's input box still goes to that window's agent (TUI Decision 152:
   an answer may start with `!`). Neither the palette nor the status line mentions `!`;
   only the CLI reference does.
@@ -899,9 +863,6 @@ Found by the #486 and #493 fixers, 2026-10-08.
   workspace may still use the label.
 - The client journal gains a root "spawned /build" line every time a session is opened.
   Headless resume no longer prints them, but they accumulate.
-- The TUI's `FakeRemote` answers `commands.list` without aliases, so `/resume` on a
-  stand-in remote session is dispatched to the plane as a profile name; a real pod's table
-  has them.
 - `scripts/verify-local.ps1`'s `Stop-OurDaemon` stops every process running from the
   install directory, which includes a person's own installed daemon if one is running.
 
@@ -932,7 +893,9 @@ Found by the #371 fixer, 2026-10-08.
   meets the mismatch again until a compaction: two requests a call today, or every block
   dropped on every call with `drop_block`. Once a call is refused or reports drops,
   sending the leading run of pre-change blocks no more would end it (Anthropic accepts a
-  leading run removed oldest first).
+  leading run removed oldest first). Since Decision 871 a tool that comes or goes changes
+  the prefix only at a turn boundary, but each change there (D124's turn's tools) still
+  costs every later call one refusal.
 - On a model that does not bind its thinking, Decision 793 still offers the todo tools once
   a list exists or after 10 calls, which changes `tools` mid-turn and costs a cache write
   (`llm_request.tools_changed` counts it). A model that binds has them from the first call,
@@ -1026,8 +989,6 @@ Found by the #516 fixers, 2026-10-09.
 
 ### D100 - MCP import after #520 (low)
 
-- `agents.list` lists primary agents only, so the note on a `.troupe/agents` subagent whose
-  `auto` waits for trust reaches no client.
 - The desktop app's import hint and the `/mcp import` row of the CLI reference don't
   mention Codex's `config.toml`.
 - A linked file's import warnings (Codex's `enabled_tools is not carried`) repeat on every
@@ -1066,7 +1027,8 @@ Found by the #516 fixers, 2026-10-10.
   without saying so.
 - `mcp.list`'s `trust` says "trusted" both when the workspace is trusted and when only the
   start was allowed; since #522 those differ for `auto`. The `notes` carry the difference,
-  and neither client shows `notes` (nor `agents.list`'s).
+  and neither client shows `mcp.list`'s; the desktop app doesn't show `agents.list`'s
+  either (the TUI's agents manager does, since #563).
 - Trust is read when a session starts, so after `troupe config trust` a running session
   keeps asking until a new one starts.
 - `Troupe.Protocol.Bundle.list_skills_in/1` and `Skills.Local.skills_at` (`skills.add`,
@@ -1127,8 +1089,10 @@ Found by the #502 audit, 2026-10-10.
   machine's; `memory.get`'s `model` now says whether a model can be asked under the
   workspace's own config (Decision 854), as the TUI's `Config.key_problem` check does.
 - The desktop app logged React's "two children with the same key" for workspace paths on
-  every poll (`views/Local.tsx` keys rows by `path`), so `worktree.list` or
-  `workspace.recent` may answer one path twice on Windows (unconfirmed).
+  every poll (`views/Local.tsx` keys rows by `path`): `worktree.list` drops repeated
+  session workspaces by their exact string before listing each one's repository, so a
+  checkout and its own worktree, or `C:\x` and `c:/x`, list the same trees twice. Not
+  Windows only.
 - In a repository not onboarded and with no other tools' files at its root, every start
   runs three git processes to look for nested ones (`found?/1`: rev-parse, `config
   --list`, `ls-files`); adding `ls-files` to `Troupe.Git`'s objects-only set would drop
@@ -1143,8 +1107,9 @@ Found by the #516 third-wave and #248 desktop fixers, 2026-10-10, and the chunk 
 
 - Two daemons on one repository each re-read before writing, but a write replaces the
   whole `facts.jsonl`: the last writer wins a narrow race.
-- The tool definitions are 13,640 of the bench's 13,800 bytes (raised from 13,500 by
-  Decision 853), so the next tool needs room made for it.
+- The bench's budget for the tool definitions has been raised for each new tool (13,500,
+  13,800 by Decision 853, 14,300 for `show`), and they were within 160 bytes of it when
+  this was written, so the next tool needs room made for it rather than another raise.
 - TUI Decision 54 still describes the file-count drift Decision 838 removed (a supersede
   can't cross the two numberings).
 - For an anchor git doesn't track that is still on disk, the prompt says "`.env` is gone
@@ -1164,7 +1129,6 @@ Found by the #248 fixers, 2026-10-10, and the chunk 27 fixers, 2026-10-11.
 - Each `agents.list` row's `worktree` is `session.create`'s rule, the same for every row.
 - A save into a layer that a higher one hides counts as a new file and asks about every
   `auto` (`agents.get`'s `also` gives paths, not permissions).
-- The TUI has two agent choosers, command mode's Ctrl-N and the window's Tab switcher.
 - The nearest-name suggestion for an unknown tool reads oddly ("teleport": import,
   delegate, todo_write).
 
@@ -1191,11 +1155,8 @@ What D115 named about `troupe daemon open`, `Troupe.MCP.Stdio`, the clipboard,
 `Troupe.Protocol.Client` and `/upload` is Decision 849. Left:
 
 - `System.cmd/3` with a bare name still resolves through `:os.find_executable` (the
-  worker's `df`, the daemon CLI's `open`/`xdg-open`, the mix tasks' `zig`, `kubectl` and
-  `kubeconform`); none runs from a workspace, and the credo check of Decision 846 has no
-  test of its own.
-- On Windows (OTP 28) a raw `Port.open({:spawn_executable, ...})` of a console program
-  without `:hide` returns 0 and does nothing; `System.cmd` and `Troupe.OS.Process` pass it.
+  worker's `df`, the mix tasks' `zig`, `kubectl` and `kubeconform`); none runs from a
+  workspace, and the credo check of Decision 846 has no test of its own.
 - On Windows a stdio MCP server that closes its input but keeps running is never stopped:
   it runs outside the reaper (Decision 654), and closing the port doesn't end it.
 - `Troupe.CLI.Daemon.exec`'s reaper branch falls back to a bare `cmd` when `COMSPEC` is
@@ -1229,7 +1190,6 @@ Found by the #248 fixer, 2026-10-10.
   - A background child's spend is lost across its parent's restart.
   - A stopped or cancelled child's model call in flight is not counted.
   - A person can stop background children only all at once, by cancelling.
-  - The desktop app shows a stopped child's closed call as failed, where the TUI gives the reason.
   - No agent's instruction (`build`, `orchestrate`) mentions background delegation; #554's bench (slice 4) is to say whether to teach it.
 - **What changed.** A child's `changed` is counted from its file tools' calls, so what its commands changed is said, never counted. A branch's full diff is rebuilt the same way, where its worktree's own `git diff` would count both.
 
@@ -1277,10 +1237,7 @@ Found by the chunk 28 fixers and the coordinator, 2026-10-11.
 - **The daemon's own update.**
   - A machine with the daemon alone, no `troupe` and no desktop app, has no updater: `troupe-daemon` can't replace the directory it runs from on Windows. The desktop app updates the daemon beside it (Decision 874).
   - A turn can start in the 250 ms between `daemon.stop` answering and the stop, and a client can restart the old daemon before the swap. Decision 865 records both.
-- **What the plane's version check is.**
-  - Client versions are what the client says, so `update_required` is a service to the person, not access control: a client that lies, a script, or a client from before 0.13.0 is never refused.
-  - Only `initialize` judges; a connected client isn't re-checked when the policy changes.
-  - The plane doesn't record which version each client runs.
+- **What the plane's version check is.** Client versions are what the client says, so `update_required` is a service to the person, not access control: a client that lies, a script, or a client from before 0.13.0 is never refused.
 - **Wording.**
   - The no-key refusal says the same thing twice ("installs no release; nothing is installed").
   - `troupe login` against a plane that refuses the version keeps the credentials and exits 1 with the sentence, where "signed in, but..." would read better.
@@ -1291,20 +1248,18 @@ Found by the chunk 28 fixers and the coordinator, 2026-10-11.
   - The summariser's refused-and-resent call isn't logged (`compacted` has no `thinking_resent` or `prefix_mismatch`), so `Troupe.Bench.Prefix.count/1` misses it.
   - With a context window close to the base prompt's size, compaction fires before every call, since what is left stays over the threshold, and nothing stops the loop.
   - `llm_request.prompt_bytes.brief` is 0 under the stable prompt (the brief counts as conversation bytes, Decision 815), so Decision 769's breakdown no longer shows it.
-- **The live bench.** Its plan text and cost cap ignore a scenario's own config, such as `long_turn`'s `max_turns: 20`.
+- **The live bench.** Its plan text and cost cap ignore a scenario's own config, such as `long_turn`'s `max_turns: 20`. Since #648 the run itself uses the scenario's limits, so they can exceed the plan's cost cap, which the runner still enforces.
 
 Found by the chunk 29 fixers, 2026-10-11.
 
 ### D123 - Tools, the scratchpad, sign-in and installs after chunk 30 (low)
 
 - **What an organisation enforces** (Decision 869).
-  - The enforced set is a guardrail Troupe honours, not a lock. The plane's cached copy (`organisation.json`) is a file in the person's own state directory, which they can edit or delete, and `TROUPE_STATE_HOME` moves it. Only a managed file owned by an administrator, on a machine its person doesn't administer, is the strong form. A plane-signed document with an expiry (#66's channel document) would close this.
   - The desktop app's model panel still writes `provider` and `base_url` into the user file under an enforced provider. The value is held on load, with a warning.
   - The desktop app's settings view doesn't show where a value came from (#57, #56).
   - `managed.yaml` has no JSON Schema of its own.
 - **Binding models.**
   - `binds_thinking` says a model binds, but doesn't bring an alias's thinking back between calls (Decision 805 decides that by effort or name). An alias of a binding model with no `reasoning_effort` still drops its reasoning.
-  - A tool that comes or goes now changes the tools only at a turn boundary (Decision 871), but on an enforcing account every later call of the session is still refused once, until a compaction. D92's "stop sending the leading run of stale blocks after a refusal" would make that cheap.
   - The live bench's worst-case estimate for one configuration can exceed a slot's spend cap; its guard is the estimate only.
 - **The scratchpad.**
   - A `show` call whose arguments exceed 16 KiB arrives as a blob reference. Until `scratch_updated` arrives a moment later, the TUI's card reads " · " and the desktop app's card is disabled.
@@ -1341,9 +1296,6 @@ Found by the chunk 30 fixers, 2026-10-11.
   - A desktop app installed from its own setup, without the installers, has no daemon to update. The terminal client has no daily check of its own; it says the plane's `suggest` only when it meets the plane.
   - The macOS and Linux update paths (`.app.tar.gz`, AppImage) and `app.restart()` there haven't run. The first release run that signs desktop updater artifacts is 0.15.0's.
 - **Frames** (Decisions tui/0161 and 877).
-  - Reasoning is drawn live only, but Decision 658 logs reasoning blocks in `llm_response.message`, so a replayed session could draw a reasoning frame in both clients.
-  - In Afterglow dark, `--bg-sunken` equals `--bg-canvas`, so the frame surface shows by its hairline alone.
-  - The desktop app has no settings control for `transcript.detail`; `/detail` is per session only.
   - The desktop app's main bundle is 576 KB (171.5 KB gzip), above Vite's 500 KB warning.
   - The TUI's curtain flourish isn't padded, so the facts beside it shift a few columns. A strip can't be opened with the mouse in the TUI.
   - `Model.without_turn_lines/1` is unused in `lib` but named by Decision tui/0160.
@@ -1352,10 +1304,8 @@ Found by the chunk 30 fixers, 2026-10-11.
   - The plane's trigger notifications keep their own resolve-and-pin code (Decision 866) beside the daemon's `Troupe.MCP.Address`.
 - **The turn's tools** (Decision 876).
   - The session log now holds the held tools' definitions (including a person's offered tools) and the skill directories' absolute paths, each written once and again on a change.
-  - On a binding model, compaction, an `AI?` turn's `plan` prompt and a profile or model switch still change the prefix. After a change, an enforcing account refuses every later call of the session once (D92).
-- **The scratchpad at compaction** (Decision 878, #616).
-  - The compaction summariser once wrote a whole plan from only the prompt and two files, and once a one-sentence summary that dropped all earlier context.
-  - A live scenario's limits can exceed the plan's cost cap, which the runner still enforces.
+  - On a binding model, compaction, an `AI?` turn's `plan` prompt and a profile or model switch still change the prefix; what an enforcing account does after such a change is D92's first item.
+- **The scratchpad at compaction** (Decision 878, #616). The compaction summariser once wrote a whole plan from only the prompt and two files, and once a one-sentence summary that dropped all earlier context.
 - **Personal tools on a pod** (Decision 879). `personalTools: forbid` takes effect at a session's next activation. A session that is awake when an administrator changes it keeps accepting registrations until it is activated again.
 - **The terminal client's connection.** Every fleet call goes on one connection, and the gateway answers a connection's calls one at a time, so one slow call blocks the rest (`worktree.list` now has its own, #621). `branch_profile/2` turns any `profiles` error into "unknown command /X; available: /worktree", where it should say the daemon didn't answer.
 - **A fresh daemon's first `session.create`.** Twice, a `session.create` sent about 2 seconds after an installed daemon started got no answer for over 120 seconds; one sent later answered in under a second. Not confirmed: it may be the test harness or a startup race. The release runs with distribution off, so it couldn't be attached to.
@@ -1427,7 +1377,7 @@ what is left).
 | D42 - The clients drop what a stopped turn says | #301, PR #306; #305, PR #309 |
 | D39 - A `session.read` and an activation of the same session on one pod | #302, PR #307 |
 | D44 - Uninstalling the chart deletes its namespace; the scaler forgot a failed write (D40's first item) | #303, PR #304 |
-| A person's own remote MCP server that needs their OAuth sign-in (found by the deployment's first profile); then the `initialize`/session handshake and the desktop app's half of the pod path; client registration and the TUI's half are next | #300, PR #310; #319, PR #323; #308, PR #322 |
+| A person's own remote MCP server that needs their OAuth sign-in (found by the deployment's first profile); then the `initialize`/session handshake and the desktop app's half of the pod path (the TUI's half has landed since; client registration is #585) | #300, PR #310; #319, PR #323; #308, PR #322 |
 | D47 - On a plane, a turn the harness stopped reads as a finished one | #320, PR #325 |
 | D52 - A worker logs in to OpenBao as one shared role and for every request; a person-mode server's mode before the first bundle | #336, PR #337 |
 | D56's SCIM items - a create answered `200`, a delete of an unknown id `204`, and a `PUT` with `active: false` left sponsored principals running | #356, PR #362 |
@@ -1461,7 +1411,7 @@ what is left).
 | D100's first item - a linked `opencode.json` gave no servers | #522, PR #531 |
 | D98's librarian item - its prompt said other tools' files are in every prompt | #516, PR #534 |
 | D84's last item - an instruction file that couldn't be read only logged a warning | #516, PR #533 |
-| D93 - Tab completed a command name without its slash | #502's audit |
+| D93 - Tab completed a command name without its slash | #502, PR #547 |
 | D105's first items - `/cancel` kept the window, `/worktree <existing>` and `<name>:` weren't read, a dismissed branch wasn't in `/sessions`, a refused merge said "conflicts", `read_branch` listed its parent, `/dismiss` on a pod, `worktree.remove` inside the tree | #502, PR #556 |
 | D106 - a watch trigger ran on the session's own agent with its permissions, unseen, with no state on the protocol | #502, PR #558 |
 | D107's first and palette items - a slash command typed in a window went to the agent, the palette dropped the window, Tab matched summaries, an argument hint ran empty, `/agents` listed `worktree` | #502 and #503, PRs #560 and #563 |
@@ -1472,7 +1422,26 @@ what is left).
 | D113's first six items and D105's last two - an approval asked before a worker restart went to the parent, `/new --branch` forked the empty log, a conflicted merge said to resolve, `worktree.remove` answered an inspected string, `worktree.list` ran four git calls a tree, rows had no model, a dismissed one was titled by its path, the focus named a closed window, `/ask` never said none had finished | #502, PR #570 |
 | D107's subagents item, D112's conflict and unparseable-file items, D114's desktop watch box and headless line | #565, PR #571 |
 | D102's, D110's and D111's items, and D68's empty `TROUPE_DAEMON_SOCKET` - untracked anchors hashed on read, the old `remember` form, `scope`, anchor case on Windows, `memory.get`'s scope and model, onboarding outside a repository, onboarded files said not read, nested files, second runs, opencode globs and keys | #248, #516, PR #574 |
-| B27's session items - erasure ignoring a configured `state_dir`, dormant sessions there unlisted, a slow stop blocking every start, a command reaching a stopping session, the sweep dropping a running session, listings reading every log | PR #576 |
+| Sessions found by the chunk 27 fixer of slot B - erasure ignoring a configured `state_dir`, dormant sessions there unlisted, a slow stop blocking every start, a command reaching a stopping session, the sweep dropping a running session, listings reading every log | PR #576 |
+| D26's headless item - `troupe run --headless` exited at the first rest, so a reply to a line queued mid-turn was never printed | PR #262 |
+| D26's A2A item - a task stayed `working` after the failure guard stopped its turn | PR #266 |
+| D36's dead code - the printer's and the model's dead clauses, the view's recount, the picker's empty branches column, `Troupe.Codec`'s `to`/`reason` (the dead `truncated` and `compaction` clauses were left for #301) | PR #262 |
+| D43's subagent-name half - a subagent's window had no name in the TUI | PR #570 |
+| D52 - nothing writes a profile's OpenBao role and policy | #627 |
+| D55's first item - every worker pod logs in as the one role `troupe-worker` | #627 |
+| D64's build.md item - section 3 had no row for `mix troupe.config.schema` | #422 |
+| D69's summariser item - the compaction summariser got another model's signed thinking | #590, PR #604 |
+| D73's `FakeRemote` item - its `/rpc` could answer errors only without `data` | PR #605 |
+| D75's `symbols:` item - a decision's `symbols:` is not checked against the code | #422 |
+| D82's last item - the prefix binding of thinking blocks | #465, PR #601 |
+| D90's `FakeRemote` item - `commands.list` answered without aliases | PR #547 |
+| D100's subagents item - a `.troupe/agents` subagent's trust note reached no client (the desktop app's half is in D103) | PRs #563, #571 |
+| D112's choosers item - the TUI's two agent choosers, Ctrl-N and Tab | #594 |
+| D115's `open` item - the daemon CLI ran `open` and `xdg-open` by a bare name | PR #562 |
+| D118's closed-call item - the desktop app showed a stopped child's closed call as failed without the reason | PR #647 |
+| D122's two plane-check items - a connected client isn't judged again when the policy changes, and the plane doesn't record client versions | #657 |
+| D123's guardrail item - an organisation's enforced set is a guardrail, not a lock | #657 |
+| D124's three frames items - reasoning on replay, Afterglow dark's `--bg-sunken`, no desktop control for `transcript.detail` | #659 |
 
 ## Checked and not a defect
 
@@ -1481,3 +1450,17 @@ what is left).
   secret) and its refresh grant both return 200, so Authentik does not ask a public
   client for the secret. The live sign-in loss (#53) was the provider missing the
   `offline_access` scope mapping, so no refresh token was issued. Martin added the mapping.
+- **`done ●` and "1 done" after every reply from the command line.** This was in D36: the
+  TUI marks the session's own window done until it is opened (PR #241). A question for the
+  design, not a defect.
+- **A forced `tool_choice`, which the newest Anthropic models refuse.** This was in D82.
+  Checked on 2026-10-12: nothing in `apps/` or `clients/` sends a `tool_choice` at all.
+- **A team renamed under its sessions' keys.** This was in D88. Checked on 2026-10-12: no
+  path renames a team (`team_update` changes its settings only), so a team session's key
+  named by the team's name stays the right one.
+- **A raw `Port.open` of a console program without `:hide` on Windows.** This was in D115.
+  It does nothing on OTP 28, but every raw spawn in the code passes `:hide` (checked on
+  2026-10-12); it is a trap for new code, not a defect.
+- **A daemon older than 0.8.0 writing `provider: anthropic`.** This was in D63: such a daemon
+  reads a `config.set` without `provider` as a model-panel save. The clients of this
+  release never send one, and a daemon that old is past support ([SECURITY.md](../../SECURITY.md)).

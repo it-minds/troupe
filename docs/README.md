@@ -61,7 +61,7 @@ You contribute to Troupe itself.
 4. [developer/](developer/README.md) — setup, testing, conventions, the build, CI and
    releases, and the code's own map.
 5. [decisions/](decisions/README.md) — the judgment calls that still hold, a file each,
-   by number, as the code cites them.
+   by number, each naming the code it governs.
 
 ## Writing a client
 
@@ -80,6 +80,8 @@ You write a program that talks to a daemon or a worker pod, in any language.
 
 [third-party-licences.md](third-party-licences.md) (generated): what Troupe depends on,
 under which licences. [design/admin/](design/admin/DESIGN.md): the console's design.
-[plans/admin-surface.md](plans/admin-surface.md) and
-[program/control-panel.md](program/control-panel.md): the plans the console's open work
-(#56) builds on. [SECURITY.md](../SECURITY.md): reporting a vulnerability.
+`history/`: records kept as they were written, not instruction -
+[the admin surface as it was built](history/admin-surface.md) and
+[the console's plan](history/control-panel.md), which the console's open work (#56)
+builds on, and [the command audit](history/command-audit.md) of 0.10.0.
+[SECURITY.md](../SECURITY.md): reporting a vulnerability.

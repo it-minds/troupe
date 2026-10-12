@@ -23,8 +23,11 @@ hand.
 
 **Credo** runs with `--strict`, so low-priority checks fail too: a `TODO` or `FIXME`
 comment fails the gate; every module needs a `@moduledoc`; no `IO.inspect`, `dbg` or
-`IEx.pry`; test files end in `_test.exs`; `apply/3` is flagged (the one deliberate use says
-why).
+`IEx.pry`; test files end in `_test.exs`; `apply/3` with a literal module and function is
+flagged (the three calls the code has name theirs by a variable). One check is the
+repository's own: `Troupe.Credo.PathOnlyLookup` (`apps/troupe_protocol/credo/`) refuses
+`System.find_executable/1` and `:os.find_executable` in `lib/`, which on Windows look in the
+current directory first; a program is found through `Troupe.Executable`, on `PATH` alone.
 
 **Line endings** are LF everywhere, whatever `core.autocrlf` says (`.gitattributes`):
 Credo's line-ending check and `dash` both break on CRLF.
@@ -48,7 +51,7 @@ apps in the same pull request as the client change that needs it. A LiveView cal
 | A recorded fixture hash is evidence, not a test to update | `troupe.fixtures.record` refuses to overwrite |
 | Every admin method is an API method and an MCP tool, with a summary and described arguments; destructive ones name `confirm`; none returns session content | `admin_parity_test.exs` |
 | Troupe creates no Kubernetes Secrets | no `kind: Secret` in the chart |
-| A UI can never apply backpressure to an agent | a test stalls a socket and requires turn latency within 10 % |
+| A UI can never apply backpressure to an agent | a test stalls a socket and requires a turn within twice its idle time, or a quarter second more, whichever is larger |
 
 ## 4. Comments, decisions and messages
 
@@ -58,13 +61,25 @@ apps in the same pull request as the client change that needs it. A LiveView cal
   hold and that a reader could have made differently, one file per decision
   (`0790-one-file-per-decision.md`): a front matter with the decision's `number`, `title`
   (the one-sentence decision), `date`, `status`, `paths` (globs of what it governs) and
-  `gist` (what someone changing those paths must not undo), then the reasoning. Code cites
-  decisions by number. One that is superseded, or whose reasoning the code's own comments
-  now carry, is deleted or marked `superseded`, and its number is never reused.
-  `docs/decisions/tui/` and `docs/decisions/daemon/` hold those two projects' own, numbered
-  on their own. `mix troupe.decisions --for <path>` lists the decisions that govern a path,
-  and `--check`, which CI runs, fails on a duplicate number, a missing field or a `paths`
+  `gist` (what someone changing those paths must not undo), then the reasoning. One that
+  is superseded, or whose reasoning the code's own comments now carry, is deleted or
+  marked `superseded`, and its number is never reused. `docs/decisions/tui/` and
+  `docs/decisions/daemon/` hold those two projects' own, numbered on their own.
+  `mix troupe.decisions --for <path>` lists the decisions that govern a path, and
+  `--check`, which CI runs, fails on a duplicate number, a missing field or a `paths`
   glob that matches nothing (Decision 790).
+- **Code cites no decision by number** (Decision 882). A document may name code; code
+  names no document. Where a comment would have said "Decision 800", it says the
+  invariant itself, where it applies: what holds, and what breaks if the line changes -
+  "the write names its epoch, and the plane refuses a stale one, so a sealer that lost
+  the session stops before it writes". The decision points the other way, naming the
+  code in its `paths` (and `symbols`), which is how `--for` finds it. The citations
+  already in the code stay until their file is touched for another reason; then the one
+  in the part you touch is replaced by its invariant in words. CI runs
+  `elixir scripts/decision-citations.exs --base HEAD^1` on every pull request, and it
+  fails when a changed code file (`.ex`, `.exs`, `.ts`, `.tsx` and the other code
+  extensions it lists) cites a decision number more often than it did at the merge base;
+  run it yourself with `--base origin/<the branch you target>`.
 - **Commit messages and pull request titles** state the behaviour that is now true, in
   plain prose — "A session's listing says what it has actually spent" — with a body saying
   what was wrong, what changed and why. No conventional-commit prefixes, no ticket numbers,
@@ -83,7 +98,7 @@ apps in the same pull request as the client change that needs it. A LiveView cal
 | Service principal | `svc:<team>/<name>` |
 | Images | `troupe-operator`, `troupe-plane`, `troupe-worker`, `troupe-a2a`, `troupe-gui` |
 | Team and org volumes; a pod's own | `team-<team>`, `org`; `data` |
-| Tests | `<subject>_test.exs` defining `Troupe.<App>.<Subject>Test`; test names are sentences stating a property; each file's `@moduledoc` says what it proves and how it skips |
+| Tests | `<subject>_test.exs` defining the subject module's name and `Test` (`Troupe.Plane.AdminTest`, `Troupe.PolicyTest`); test names are sentences stating a property; each file's `@moduledoc` says what it proves and how it skips |
 
 ## 6. Recipes
 
@@ -109,13 +124,13 @@ test fakes.
 **A platform setting.** A `%Setting{}` in `Troupe.Plane.Settings` with `key`, `group`,
 `type`, `summary`, `consequence`, `effect` and either `app_key` (the deployed value) or a
 `fallback`; `editable: false` for deployment values, `secret: true` for secrets. Read it
-with `Settings.get/1` where it is used. The console, `admin.settings.list`, `put` and
-`reset` need no change. A deployed default also needs the variable in `config/runtime.exs`,
+with `Settings.get/1` where it is used. The console, `admin.settings.list`,
+`admin.setting.put` and `admin.setting.reset` need no change. A deployed default also needs the variable in `config/runtime.exs`,
 the value in `charts/troupe/values.yaml` and a row in
 [../admin/configuration.md](../admin/configuration.md).
 
 **A GUI view.** `apps/desktop/src/views/<Name>.tsx`, importing only React,
 `@troupe/client`, `../hooks`, `../shell` and sibling views; data through a hook, never a
 socket in a component; `Pill`, `statusOf`, `Cost` and friends from `views/bits.tsx`; a new
-colour starts as a token in all three theme files. Check it at 380 px, and that every
+colour starts as a token in every theme file (`pnpm tokens` refuses one that lacks it). Check it at 380 px, and that every
 status is a glyph and a word.

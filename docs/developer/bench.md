@@ -14,7 +14,7 @@ is the same, byte for byte. CI fails when a number goes past its budget, so a ch
 makes every turn more expensive is caught by the pull request that makes it, not by the
 person who gets the bill.
 
-`troupe bench --live` is the other tier: four small tasks against a real model, the
+`troupe bench --live` is the other tier: small tasks against a real model (four by default), the
 person's own, under a spending cap it says before it starts, with a history to compare
 runs with (Decision 773; [the live bench](#the-live-bench) below, and
 [what a task costs](../user/bench.md) for the person running it). It never runs in CI.
@@ -47,14 +47,14 @@ machine's daemon, which could be another version.
 | scenario | measure | value | budget | |
 | --- | --- | ---: | ---: | --- |
 | tool_calls | model calls in the turn | 31 calls | 31 | ok |
-| tool_calls | largest prompt | 28376 bytes | 31000 | ok |
+| tool_calls | largest prompt | 28376 bytes | 31500 | ok |
 | tool_calls | growth per tool round trip | 484 bytes | 550 | ok |
 ...
 | replay | outcome: hello.txt holds what was asked for | yes |  | ok |
 | onboard_claude_code | instructions in the first prompt | 519 bytes | 570 | ok |
 ...
 
-troupe bench 0.9.3-beta, offline: 10 scenarios, every measure within its budget.
+troupe bench 0.15.0-beta, offline: 10 scenarios, every measure within its budget.
 ```
 
 A row is a measure (a number, held to its budget when it has one) or a check (yes or no).
@@ -63,8 +63,8 @@ A budget is a **maximum**. A failed run ends `FAILED` and names each failure as
 
 The numbers are the same on every run of one build on one machine. Between machines they
 can differ by a few hundred bytes, since the system prompt names the platform and the
-`shell` tool names the host and the shell it found, among others (the tool definitions
-were 11,814 bytes on Windows and 12,390 on Linux), and the budgets are set above both.
+`shell` tool names the host and the shell it found, among others, and the budgets are set
+above both.
 
 | scenario | what it shows |
 |---|---|
@@ -90,7 +90,7 @@ harness, so an installed `troupe bench` holds itself to what CI did:
 
 ```json
 {
-  "tool_calls": { "model_calls": 31, "largest_prompt_bytes": 31000, "...": 0 },
+  "tool_calls": { "model_calls": 31, "largest_prompt_bytes": 31500, "...": 0 },
   "cancel": { "calls_after_cancel": 0, "tasks_left_running": 0 }
 }
 ```
@@ -106,8 +106,9 @@ Moving one is a reviewed change, in the pull request that moved the number:
 3. A change that makes a number smaller should lower its budget too, so the improvement
    stays: this is how #389's slices are kept.
 
-A budget for a measure no scenario takes fails the run, so a renamed measure cannot leave a
-budget holding nothing.
+A budget for a measure a scenario that ran does not take fails the run, so a renamed measure
+cannot leave a budget holding nothing; a budget under a scenario name that no longer exists
+is not read at all, and goes when the scenario does.
 
 ## The report: schema 1
 
@@ -158,6 +159,8 @@ A scenario is a `Troupe.Bench.Scenario` in `Troupe.Bench.Scenarios`:
 | `script` | the scripted model's steps: `{:text, t}`, `{:tools, [{name, input}]}`, `{:delay, ms, step}`, or a function of the request that answers one (how `cut_output` passes on the id the cut result named); a request with no tools is the summariser's and gets a summary |
 | `outcome` | what a script can check afterwards, whoever answered: `{:file, path, content}`, the file's text, line endings and trailing whitespace aside, or `{:command, argv}`, run in the workspace, passing on exit 0 (a test passing), and in a release without the VM's own runtime first on its `PATH`, where an `elixir` would start on it and find no boot file; or `nil` |
 | `drive` | `nil` to type the prompt and wait for the turn to end, or a function that does something else (cancel half way) |
+| `follow_ups` | prompts typed one after another, each once the turn before has ended by itself |
+| `loop` | `nil`, or a goal: the run sets it and runs a `/loop` of one iteration (Decision 871) |
 | `prepare` | `nil`, or a function run once the workspace has its files and before the session starts, given the run's `workspace`, `home`, `config_dir` and `state_dir`, answering the marks the measure reads (`ctx.marks`): how the onboarding scenarios run `troupe onboard` first |
 | `agent` | the agent the session starts on; `nil` for the default |
 | `measure` | a function of the run answering `{metrics, checks}`: `{name, label, unit, value}` and `{name, label, passed?}` |
@@ -190,6 +193,12 @@ the scripted model's requests, and their budgets are the script's.
 | `follow_up` | two turns: write step 1 of `docs/plan.txt`, then step 2 under `docs/` | `docs/next.txt` holds step 2 under `AGENTS.md`'s and `docs/AGENTS.md`'s rules | `out/first.txt` keeps the root's rule; both turns were taken |
 | `task_list` | three turns on `plan`: write a three-item list, one with a number worked out without a tool, then read a file and mark items done, twice | | all three turns were taken; the list ends with its three items completed; the last reply names `b.txt` and 440 |
 
+Six more run only when named, each for a measurement [prompt-prefix.md](prompt-prefix.md)
+describes: `long_turn` (one turn of thirteen calls, Decision 867), `loop_turn` (a `/loop`
+turn and then a person's, Decision 871), and `scratchpad`, `scratchpad_without`,
+`scratchpad_session` and `scratchpad_session_without` (a migration plan, and a session of
+five turns, with the scratchpad and without it, Decision 870).
+
 The first four are the `smoke` suite, the default; the next six with them are `standard`
 (Decision 775). `follow_up` is in neither, and runs when named: it is issue #465's
 (Decision 815), whose second turn begins with an instruction file the first brought in,
@@ -207,7 +216,8 @@ the suite's own test can run it, and a test that it fails when nothing is done.
 
 **Before anything starts**, `Troupe.Bench.plan/1` reads the person's configuration and
 takes from it where a model call goes (provider, URL, key, named providers, windows,
-prices, the catalog) and nothing else; `--model` picks another than the default. It refuses
+prices, the catalog) and the settings that shape one (the small and expensive models, the
+auth, the call timeout, the thinking binding and the system prompt); `--model` picks another than the default. It refuses
 a model whose key it cannot read, and leaves out a scenario whose outcome is a command not
 on the `PATH`. The cap is a run's limits (`scripts/live-check`'s: 12 model calls, 200,000
 tokens sent, 24,000 received, 240 s) at the model's price, the input at the dearer of its
@@ -297,10 +307,10 @@ provider of `type: anthropic` with its URL is one.
 - **The nightly.** The live bench is on demand. Decision 773 says how the nightly should
   run it; wiring it in is a change to `.github/workflows/live.yml` of its own.
 
-- **Lifecycle across a daemon restart**, dormancy, and the budget's own question: issue
-  #390's other scenarios.
+- **Lifecycle across a daemon restart**, dormancy, and the budget's own question: scenarios
+  #390 named and did not build.
 
-- **A benchmark of models at scale.** Ten tasks compare one build or one model with
+- **A benchmark of models at scale.** The `standard` suite's ten tasks compare one build or one model with
   another on the same work; they do not rank models the way hundreds of tasks from real
   repositories do, and the bench runs only this harness, so another harness on the same
   model is not in the comparison.

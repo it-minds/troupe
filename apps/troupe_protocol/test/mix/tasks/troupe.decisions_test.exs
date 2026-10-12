@@ -311,6 +311,81 @@ defmodule Mix.Tasks.Troupe.DecisionsTest do
     end
   end
 
+  describe "scripts/decision-citations.exs" do
+    test "a change that adds a decision number to code fails, naming it; one that keeps the count passes",
+         %{tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "scripts"))
+
+      File.cp!(
+        Path.join(@root, "scripts/decision-citations.exs"),
+        Path.join(dir, "scripts/decision-citations.exs")
+      )
+
+      code(dir, "lib/a.ex")
+      File.write!(Path.join(dir, "lib/a.ex"), "# The ledger is the record (Decision 12).\n")
+      git!(dir, ["init", "--quiet"])
+      git!(dir, ["add", "."])
+      commit!(dir, "base")
+      git!(dir, ["branch", "base"])
+
+      File.write!(
+        Path.join(dir, "lib/a.ex"),
+        "# The ledger is the record (Decision 12).\n# A write is fenced (Decision 14).\n"
+      )
+
+      assert {out, 1} = citations(dir)
+      assert out =~ "lib/a.ex: cites decision 14 once more than before (line 2)"
+      refute out =~ "decision 12"
+
+      # The invariant in the code's own words instead.
+      File.write!(
+        Path.join(dir, "lib/a.ex"),
+        "# The ledger is the record (Decision 12).\n# A write names its epoch; a stale one is refused.\n"
+      )
+
+      assert {out, 0} = citations(dir)
+      assert out =~ "none adds a decision number to code"
+
+      # A citation already there, rewrapped and committed, keeps its count.
+      File.write!(Path.join(dir, "lib/a.ex"), "# The ledger is the\n# record (Decision\n# 12).\n")
+      git!(dir, ["add", "."])
+      commit!(dir, "rewrap")
+      assert {_out, 0} = citations(dir)
+
+      # Moved to another file it is new there, and so is each number of a list, untracked
+      # or not; a document may cite what it likes.
+      File.write!(Path.join(dir, "lib/a.ex"), "# The ledger is the record.\n")
+      File.write!(Path.join(dir, "lib/b.ts"), "// Kept apart (decisions 815 and\n// 863).\n")
+      File.write!(Path.join(dir, "README.md"), "See Decision 12 and Decision 14.\n")
+
+      assert {out, 1} = citations(dir)
+      assert out =~ "lib/b.ts: cites decision 815 once more than before (line 1)"
+      assert out =~ "lib/b.ts: cites decision 863 once more than before (line 2)"
+      refute out =~ "README.md"
+      refute out =~ "lib/a.ex"
+    end
+  end
+
+  defp citations(dir) do
+    System.cmd(@elixir, ["scripts/decision-citations.exs", "--base", "base"],
+      cd: dir,
+      stderr_to_stdout: true
+    )
+  end
+
+  defp commit!(dir, message) do
+    git!(dir, [
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@example.test",
+      "commit",
+      "--quiet",
+      "-m",
+      message
+    ])
+  end
+
   defp split!(dir) do
     System.cmd(@elixir, ["scripts/split-decisions.exs"], cd: dir, stderr_to_stdout: true)
   end

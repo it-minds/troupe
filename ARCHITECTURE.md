@@ -63,8 +63,9 @@ directly with a short-lived token (§6).
 Every agent, model request, tool run, subagent and watcher is a process; they share
 nothing and handle failure by supervision. A session is a `rest_for_one` supervisor
 ordered by dependency: `Session.Log` first, because everything persists through it;
-`Approvals`, `Questions`, `ClientTools` and the workspace's MCP servers above the agent, so
-a restarted agent finds the same answers and registrations; the root `Agent.Node`; then
+`Session.Shell`, a person's own commands (Decision 813), right under it; `Approvals`,
+`Questions`, `ClientTools`, the MCP sessions and the workspace's and the person's MCP
+servers above the agent, so a restarted agent finds the same answers and registrations; the root `Agent.Node`; then
 `Watcher` and `Files`, so file watching can never disturb a running agent; `Loop`, which
 runs `/loop` as turns of the root agent (Decision 679); and `Session.Summary` last,
 because a projection that could restart an agent by crashing would be worse than none. Sessions live in the core's own tree, not the daemon's, so a daemon can
@@ -100,7 +101,7 @@ re-running a completed call, and the results already back go to the model with t
 A subagent is stopped once its parent has its result: from then on it is its log.
 **Budgets** — turns, input and output tokens, working time — are checked before every
 request; a child gets a share of the tokens and time its parent has left, and the turns
-its parent was first given. Past `warn_at` (0.8) a dimension logs
+its parent was first given. Past `budget_warn_at` (0.8) a dimension logs
 one warning; at the ceiling the agent asks the person attached, a grant buys another
 slice, folded from the log (Decision 660), and `always` lifts the one limit asked about
 (Decision 687). **A tool that keeps failing** — ten times in a row, by default — stops the
@@ -120,7 +121,8 @@ whole (Decision 771).
 A tool implements `Troupe.Tool`; authorisation happens before anything runs — an unknown
 tool, one outside the definition's allowlist, or one denied is refused, and `ask` blocks
 that call's task, not the agent. Reads are automatic; `write_file`, `edit_file`, `shell`,
-`publish`, `import` and `web_fetch` ask by default; MCP tools take their server's
+`publish`, `import`, `web_fetch` and `onboard_write` ask by default (`onboard_write`
+whatever the profile says when it writes into the config directory); MCP tools take their server's
 permission. A write can never leave the workspace root; a read may also reach the
 configured `read_roots`; both compare canonical paths. The runner is the one place
 `rescue` is used: a raise, exit or timeout becomes an error result the model can read.
@@ -163,14 +165,17 @@ would spend money and re-run shell commands nobody is watching.
 
 ### 2.5 Agents, skills and the brief
 
-Agent definitions are markdown with YAML frontmatter, loaded lowest to highest from the
-built-ins (`apps/troupe_core/priv/agents/`), the profile's bundle, the config directory and
-the workspace's `.troupe/agents/`. A session has one root agent; `/<agent> prompt` opens a
+Agent definitions are markdown with YAML frontmatter, loaded lowest to highest: on a
+person's machine the built-ins (`apps/troupe_core/priv/agents/`), the config directory and
+the workspace's `.troupe/agents/`; on a pod the directories, then the built-ins, then the
+profile's bundle, which wins unless the profile sets `repositoryOverridesBundle`
+(Decision 826). A session has one root agent; `/<agent> prompt` opens a
 **branch**, which is a session of its own with a `parent`. Skills follow the Agent Skills
 convention and are disclosed progressively: one line per skill in the system prompt, a
 `skill` tool that returns the body, and a read-only `skills:/` mount. The **project
-brief**, `.troupe/memory.md` at the repository root, is read into every prompt once and
-written by `remember` and a `librarian` agent. **Watch mode** acts on `AI!`, `AI?` and
+brief** is facts in `.troupe/memory/facts.jsonl`, with `.troupe/memory.md` generated from
+them: a prompt carries the commands and conventions, `recall` the rest, and `remember` and
+a `librarian` agent write them (Decision 838). **Watch mode** acts on `AI!`, `AI?` and
 `AI` comments in saved files and ignores the agent's own writes by content hash: each
 trigger starts a `quick` or `answer` branch in the checkout, whose writes ask first
 (Decision 844).
@@ -200,7 +205,8 @@ process. **Backpressure** has two budgets: ephemerals are refused once a client 
 than its byte bound outstanding; durable events are never dropped for memory, and past the
 backlog bound the subscription ends with `resync_required` and the last `seq` delivered. A
 `Writer` process per connection owns the blocking send. Nothing blocks the publisher: a
-test stalls a socket and requires turn latency within 10 % of baseline. **The summary
+test stalls a socket and requires a turn to take no more than twice its baseline, or the
+baseline and a quarter second, whichever is more. **The summary
 projection** folds a session into a compact snapshot and publishes diffs at most four times
 a second, so a fleet view need not follow twenty detail streams.
 
@@ -273,8 +279,9 @@ client show its own input as queued and reconcile against what happened. **Prese
 ephemeral structurally: it is published through a path with no route to the log.
 **Client-hosted tools** — a person's own MCP server offered to a session — need consent as
 a round trip (`consent.challenge`, shown to the person, carried in the registration); only
-the registering connection can be asked to run one, a disconnect mid-call is an error
-result, and every registration durably **taints** the session so the other participants
+the registering connection can be asked to run one, a disconnect mid-call waits a grace
+(60 s by default) for a connection to offer the tool again and is an error result only if
+none does, and every registration durably **taints** the session so the other participants
 know something runs on somebody's machine.
 
 ## 6. Remote
@@ -324,7 +331,7 @@ sequenceDiagram
   P->>B: transit sign (ES256)
   P-->>C: plane token (≤ 15 min)
   C->>P: /rpc session.create
-  Note over P: row → Placement → TeamBudget
+  Note over P: row → Budget → Placement
   P->>W: session.activate (control channel, epoch)
   P-->>C: endpoint, token (aud = the pod)
   C->>W: WebSocket initialize, subscribe
@@ -356,11 +363,12 @@ owner's name at the key manager, which the pod reads their slots under.
 **The harness API** (`/rpc`) is a fleet API: `me`, `teams.list`, `profiles.list`,
 `sessions.list`, `session.get`, `session.create`, `session.open`, `token.mint`, archive,
 pin, erase, `session.grant`, `session.review`, `trigger.fire`. `session.create` is a sequence
-of reservations, each given back if a later one fails: row → capacity (`Placement`) →
-budget (`TeamBudget`) → push to the pod → token. The row comes first because a placement
-is a conditional write against it, which survives the replica that made it. `Placement`
-and `TeamBudget` are one `:global` actor per profile and per team, which is why plane
-replicas must cluster. `session.open read` never activates — a session that woke because
+of reservations, each given back if a later one fails: row → budget (`Budget`: the
+platform's, the team's and the person's ceilings) → capacity (`Placement`, or `pending`
+while the profile grows) → push to the pod → token. The row comes first because a placement
+is a conditional write against it, which survives the replica that made it. `Placement`,
+`TeamBudget`, `PersonBudget` and `PlatformBudget` are `:global` actors, one per profile,
+team and person and one for the platform, which is why plane replicas must cluster. `session.open read` never activates — a session that woke because
 somebody looked would never stay dormant — and in `activate` mode a conditional epoch bump
 decides the one caller that places it. `sessions.list` carries the status columns a pod
 reports (`status`, `done_reason`, `failed_reason`, `pending_approvals`, `pending_questions`,
@@ -400,7 +408,7 @@ decrypts — not old object versions, not backups — and the deletion after it 
 A team session's pod is told at once: it stops the session, drops its copy and deletes the
 objects, and an offline pod applies pending erasures when it enrols. A private session has
 no pod: its objects go when the owner's daemon next connects and says it has stopped
-(Decision 756). A key the key manager refused leaves the session `erasure_pending`, and the
+(Decisions 756 and 811). A key the key manager refused leaves the session `erasure_pending`, and the
 plane tries it again every five minutes (Decision 811).
 
 ### 6.3 The operator
@@ -565,8 +573,9 @@ on (Decision 766).
 
 Every durable event carries a schema version. `Troupe.Log.Upcast` brings an old one up a
 step at a time and may add or rename, never drop. The hash chain is not recomputed:
-`prev_hash` covers the bytes as written. Each release records fixture logs under
-`test/fixtures/logs/<version>/` with the fold each produces, hashed over a *witness* of the
+`prev_hash` covers the bytes as written. Recorded fixture logs, under
+`test/fixtures/logs/<version>/` (0.2.0 and 0.3.0; no release since has recorded its own),
+come with the fold each produces, hashed over a *witness* of the
 event types replay acts on; a test reads the replay clauses from the source and asserts the
 witness covers them. Snapshots are cache: one this build cannot trust is discarded for a
 full replay, which produces the same fold. Protocol schemas are add-only within version 1,

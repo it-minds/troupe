@@ -736,6 +736,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The commit under test and its first parent, which for a pull request is the
+          # base it merges into: what the citation check compares with.
+          fetch-depth: 2
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ env.ELIXIR_VERSION }}
@@ -743,6 +747,11 @@ jobs:
       - run: elixir scripts/version.exs check
       - run: elixir scripts/doc-links.exs
       - run: elixir scripts/check-neutral.exs
+      # Code states its own invariants and cites no decision by number; the citations
+      # already there go as their files are touched (#422). Here and not in `lint`, which
+      # runs only when an umbrella app changed, because the clients' code counts too.
+      - name: No change adds a decision number to code
+        run: elixir scripts/decision-citations.exs --base HEAD^1
       # Every decision file: its front matter, a number of its own, and every `paths` glob
       # still matching (Decision 790). Here and not in `lint`, which runs only when an app
       # changed, because a glob breaks when any file moves. The task needs no dependency,

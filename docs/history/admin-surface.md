@@ -1,7 +1,9 @@
 # The admin surface — a fourth rendering, and a console that configures things
 
 Built, not planned-then-built: this is the record of what changed and why, in the same
-shape as the other plans so it can be read beside them.
+shape as the other plans so it can be read beside them. It was written in September 2026
+and is kept as it was, for the console's open work (#56); the admin track says how the
+console works now.
 
 Two complaints started it, and they turn out to be the same complaint:
 

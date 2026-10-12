@@ -1,7 +1,12 @@
 # The console — one surface that configures the product
 
+*A record: the plan the console was built from, written in September 2026 and kept for
+the console's open work (#56). The console as it is now is in the admin track,
+[profiles and policy](../admin/profiles-and-policy.md) and
+[bundles, triggers and budgets](../admin/bundles-and-triggers.md).*
+
 The admin surface was built once already and the record of it is
-[`../plans/admin-surface.md`](../plans/admin-surface.md).
+[`admin-surface.md`](admin-surface.md).
 That work was right and this is not a rewrite of it: the context underneath, the four
 renderings, the parity test, the diff keyed by path, the settings registry and the
 `console.css` discipline all stand. What follows is what the console has to become for
