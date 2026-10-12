@@ -192,15 +192,29 @@ defmodule Troupe.DaemonClientTest do
 
   # The link's protocol client, and the daemon's end of its connection held still so that
   # nothing is answered: the socket transport's connections, where every session's own is
-  # a WebSocket relay.
+  # a WebSocket relay. A connection can end between the listing and the look, as one a
+  # call made apart from the link's own does (`Link.call_apart/2`); that one is skipped.
   defp hold_link_connection do
     connections =
       for pid <- Troupe.Gateway.Connections.list(),
-          match?({:tcp, _}, :sys.get_state(pid).transport),
+          match?({:tcp, _}, transport(pid)),
+          suspended?(pid),
           do: pid
 
-    Enum.each(connections, &:sys.suspend/1)
     {:sys.get_state(Link).client, connections}
+  end
+
+  defp transport(pid) do
+    :sys.get_state(pid).transport
+  catch
+    :exit, _ -> nil
+  end
+
+  defp suspended?(pid) do
+    :sys.suspend(pid)
+    true
+  catch
+    :exit, _ -> false
   end
 
   # Once the call is on its way, the daemon ends the connection, as one that closes it does.
