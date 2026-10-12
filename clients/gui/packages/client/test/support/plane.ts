@@ -6,6 +6,7 @@
 
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { FakeAdmin } from "./admin.js";
 import { readBody, subjectOfIdToken, type FakeIdp } from "./idp.js";
 import { encodeToken, type FakeWorker } from "./worker.js";
 
@@ -47,10 +48,12 @@ export interface PlaneOptions {
   clientVersions?: Record<string, { recommended?: string | null; minimum?: string | null; blocked?: string[] }>;
   /** A plane from before the policy: no `initialize` over `/rpc`, no `me.client_versions`. */
   beforePolicy?: boolean;
+  /** The administrative half, `admin.*`. None is a plane whose admin methods are not found. */
+  admin?: FakeAdmin;
 }
 
 /** SemVer's order, enough for a policy's versions: the numbers, then a pre-release below none. */
-function older(a: string, b: string): boolean {
+export function older(a: string, b: string): boolean {
   const parse = (v: string) => /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(v);
   const x = parse(a);
   const y = parse(b);
@@ -216,7 +219,11 @@ export class FakePlane {
       const held = this.tokens.get(auth.replace(/^Bearer /i, ""));
       if (!held || held.exp * 1000 <= Date.now()) return json(401, { error: "unauthenticated" });
       const request = JSON.parse(body || "{}") as { id?: number; method?: string; params?: Record<string, unknown> };
-      const answer = this.rpc(held.subject, held.name, request.method ?? "", request.params ?? {});
+      const method = request.method ?? "";
+      const answer =
+        this.opts.admin && method.startsWith("admin.")
+          ? await this.opts.admin.call(held.subject, method, request.params ?? {})
+          : this.rpc(held.subject, held.name, method, request.params ?? {});
       return json(200, { jsonrpc: "2.0", id: request.id ?? null, ...answer });
     }
 
@@ -283,7 +290,7 @@ export class FakePlane {
             kind: "user",
             teams: [{ name: "core", id: "t-1", budget_micros: 1_000_000 }],
             profiles,
-            platform_admin: false,
+            platform_admin: this.opts.admin?.role(subject) === "platform_admin",
           },
         };
 

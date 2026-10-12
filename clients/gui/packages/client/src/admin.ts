@@ -94,14 +94,98 @@ export interface AdminTeam extends TeamSpend {
   idle_timeout_seconds: number | null;
   cache_eviction_days: number | null;
   erase_after_days: number | null;
-  pins_allowed: number | null;
+  pins_allowed: boolean | null;
   volume_storage_class: string | null;
   volume_size: string | null;
+  /** A platform admin's to set; whether the team may be granted a profile nothing is enforced on. */
+  allow_unenforced_workers?: boolean | null;
   admins: string[];
   grants: Array<{ profile: string; volume_mode: string | null }>;
   groups: AdminTeamGroup[];
   members: AdminTeamMember[];
   spend_by_model: Array<Record<string, unknown>>;
+  /** Each laddered setting as it resolves for this team, beside the team's own columns above. */
+  effective?: LadderValue[];
+}
+
+/**
+ * What every admin write answers beside its result: the diff the audit records for it, one
+ * dotted path per field that moved (`client_enforced.max_turns`), from and to.
+ */
+export type AuditChanges = Record<string, { from: unknown; to: unknown }>;
+
+/** What `admin.team.update` answers: the team as it now is, and what moved. */
+export interface TeamUpdated {
+  team: AdminTeam;
+  changes: AuditChanges;
+}
+
+/**
+ * One setting more than one rung decides, as the ladder resolves it: the value in force,
+ * the rung that decided it, what a team may not go past, and every rung that had an
+ * opinion. `admin.setting.effective` answers one; a team's `effective` is all of them.
+ */
+export interface LadderValue {
+  key: string;
+  /** The team's own column the setting lands in. */
+  field: string;
+  value: unknown;
+  decided_by: "deployment" | "platform" | "team" | string;
+  ceiling: unknown;
+  opinions: Array<{ rung: string; value: unknown }>;
+  team?: string | null;
+}
+
+/** One component's version policy, and who set it last. */
+export interface ClientPolicy {
+  component: string;
+  recommended: string | null;
+  minimum: string | null;
+  blocked: string[];
+  updated_by: string | null;
+  updated_at: string | null;
+}
+
+/** What `admin.clients.get` answers: a policy per component (`tui`, `daemon`, `desktop`). */
+export interface ClientVersions {
+  clients: Record<string, ClientPolicy>;
+}
+
+/** What `admin.clients.put` takes: the keys to change, `null` to clear one, `blocked` whole. */
+export interface ClientPolicyChange {
+  recommended?: string | null;
+  minimum?: string | null;
+  blocked?: string[];
+}
+
+/** What `admin.clients.put` answers: the policy as it now stands, and what moved. */
+export interface ClientPolicyPut extends ClientPolicy {
+  changes: AuditChanges;
+}
+
+/**
+ * A key an organisation may enforce on people's own machines, as the plane lists it on
+ * the `client_enforced` setting: what enforcing it means (`kind`, and `order` from the
+ * loosest end for an order), and the type its value takes.
+ */
+export interface EnforceableKey {
+  key: string;
+  kind: "ceiling" | "order" | "fixed" | string;
+  /** What the value is to a lower layer, in words: "the most it may be". */
+  meaning: string;
+  order?: unknown[];
+  type: "enum" | "string" | "boolean" | "integer" | string;
+  values?: string[];
+  min?: number;
+}
+
+/** What `admin.setting.put` and `admin.setting.reset` answer. */
+export interface SettingChanged {
+  key: string;
+  value: unknown;
+  /** When it takes effect, in a sentence. */
+  effect: string;
+  changes: AuditChanges;
 }
 
 /**
@@ -207,6 +291,10 @@ export interface PlatformSetting {
   source: "stored" | "deployed" | "unset" | string;
   group?: string;
   type?: string;
+  /** The choices of an enum setting. */
+  values?: string[] | null;
+  /** On the enforced set (`type: "enforced"`): the keys it may hold. */
+  enforceable?: EnforceableKey[];
   summary?: string;
   consequence?: string;
   /** Older name for `summary`; the plane has never sent it. */
@@ -319,8 +407,13 @@ export class AdminApi {
     return this.rpc<AdminTeam[]>("admin.teams.list", {});
   }
 
-  updateTeam(name: string, changes: Record<string, unknown>): Promise<AdminTeam> {
-    return this.rpc<AdminTeam>("admin.team.update", { name, attrs: changes });
+  updateTeam(name: string, changes: Record<string, unknown>): Promise<TeamUpdated> {
+    return this.rpc<TeamUpdated>("admin.team.update", { name, attrs: changes });
+  }
+
+  /** Every group the identity provider has told the plane about: what a team links to. */
+  groups(): Promise<Array<{ external_id: string; display_name: string | null }>> {
+    return this.rpc("admin.groups.list", {});
   }
 
   grantTeam(name: string, profile: string, volumeMode?: string): Promise<unknown> {
@@ -382,12 +475,27 @@ export class AdminApi {
     return this.rpc<SettingsList>("admin.settings.list", {});
   }
 
-  putSetting(key: string, value: unknown): Promise<PlatformSetting> {
-    return this.rpc<PlatformSetting>("admin.setting.put", { key, value });
+  putSetting(key: string, value: unknown): Promise<SettingChanged> {
+    return this.rpc<SettingChanged>("admin.setting.put", { key, value });
   }
 
-  resetSetting(key: string): Promise<PlatformSetting> {
-    return this.rpc<PlatformSetting>("admin.setting.reset", { key });
+  resetSetting(key: string): Promise<SettingChanged> {
+    return this.rpc<SettingChanged>("admin.setting.reset", { key });
+  }
+
+  /** Who decided a laddered setting, for one team or for the rungs above every team. */
+  settingEffective(key: string, team?: string): Promise<LadderValue> {
+    return this.rpc<LadderValue>("admin.setting.effective", team ? { key, team } : { key });
+  }
+
+  /** Which versions of each kind of client this plane serves. Either admin role reads it. */
+  clients(): Promise<ClientVersions> {
+    return this.rpc<ClientVersions>("admin.clients.get", {});
+  }
+
+  /** Change one component's policy. A platform admin's; refused whole with `data.field` and `data.reason`. */
+  putClients(component: string, policy: ClientPolicyChange): Promise<ClientPolicyPut> {
+    return this.rpc<ClientPolicyPut>("admin.clients.put", { component, policy });
   }
 
   identityCheck(group?: string): Promise<IdentityCheckResult> {

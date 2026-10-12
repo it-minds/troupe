@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- Afterglow from the first byte, so the ground is never wrong before the bundle runs.
+     The mode attribute is absent, which tokens.css reads as "follow the system";
+     `main.tsx` sets it before the first render when this person chose one. No inline
+     script and no style attribute: the host's policy runs only the bundle's own files. -->
+<html lang="en" data-theme="afterglow">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Troupe console</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
