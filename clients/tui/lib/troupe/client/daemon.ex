@@ -952,7 +952,8 @@ defmodule Troupe.Client.Daemon do
 
   # Every worktree of the session's repository, as command mode lists them (TUI Decision
   # 155): `worktree.list`, with how far each is from the checkout's branch and what it
-  # changed (root Decision 840), which a daemon from before that leaves out.
+  # changed (root Decision 840), which a daemon from before that leaves out. `dirty` is nil
+  # for a tree whose status the daemon's listing had no time left to read.
   @impl true
   def worktree_status(sid) do
     case Link.call_apart("worktree.list", %{workspace: workspace(sid)}) do
@@ -963,7 +964,7 @@ defmodule Troupe.Client.Daemon do
              path: t["path"],
              branch: blank_to_nil(t["branch"]),
              session_id: t["session_id"],
-             dirty: t["dirty"] == true,
+             dirty: if(t["checked"] == false, do: nil, else: t["dirty"] == true),
              ahead: t["ahead"],
              behind: t["behind"],
              added: t["added"],
@@ -1200,11 +1201,12 @@ defmodule Troupe.Client.Daemon do
   The worktrees `/worktree` works in beside this workspace, as the daemon lists them: the
   ones the person checked out, each by its directory's name and its branch (TUI Decision
   39), and the names of Troupe's own, on `troupe/<name>` (TUI Decision 42). The checkout
-  itself, which git lists first, is neither, and nor is the workspace asked about.
+  itself, which git lists first, is neither, and nor is the workspace asked about. Asked
+  without the trees' status, which nothing here shows.
   """
   @spec worktrees(String.t()) :: {[map()], [String.t()]}
   def worktrees(workspace) do
-    case Link.call_apart("worktree.list", %{workspace: workspace}) do
+    case Link.call_apart("worktree.list", %{workspace: workspace, status: false}) do
       {:ok, %{"worktrees" => [_checkout | linked]}} ->
         {troupe, theirs} =
           linked

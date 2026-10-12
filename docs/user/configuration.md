@@ -607,6 +607,15 @@ scope (`.agents/AGENTS.md (root)`). Your own `<config>` has none.
 Every file applies. A file in a directory below the root is about the work under that
 directory, and where two disagree, the nearer wins.
 
+The brief is the repository's, kept in its checkout: a worktree reads its checkout's, and
+so does a folder of the repository. Which folders are the repository's follows git: a
+folder it tracks, or one it would add, is; a folder it ignores (say one in its
+`.gitignore`) is not, and is a workspace of its own, as a directory in no repository is.
+Such a folder keeps its own brief, and a session there does not start the librarian by
+itself (`memory_auto_refresh`), so it never rewrites the brief of the repository around
+it; `/memory refresh` still writes the folder's own. The instruction files are read as
+above, up to the nearest `.git`, in either.
+
 Other tools' files are not read. A `CLAUDE.md` or a `GEMINI.md` in one of those
 directories, Copilot's `.github/copilot-instructions.md` and
 `.github/instructions/*.instructions.md` at the root, and Cursor's `.cursorrules` and

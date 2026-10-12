@@ -349,6 +349,11 @@ defmodule Troupe.Client.Daemon.Start do
   # leaves it to the status.
   defp refresh_if_due(sid, workspace) do
     case Link.call("memory.get", %{workspace: workspace}) do
+      # A folder its repository ignores is no repository's, and its brief is its own: as
+      # quiet as a directory outside git, and not a refresh held off.
+      {:ok, %{"repository" => false}} ->
+        {:quiet, "not in a git repository the brief follows"}
+
       {:ok, %{"refresh_due" => false, "status" => status} = brief}
       when status in ["absent", "stale"] ->
         {:say, held_off(brief["refresh_held_until"])}

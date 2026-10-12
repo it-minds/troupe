@@ -177,6 +177,12 @@ describe("whether the librarian may start by itself", () => {
 
   it("may in a git repository with the refresh on and a model", async () => {
     assert.equal(await librarianBarred(client, REPO), null);
+    // Whether it is a repository is the daemon's list of its worktrees without how each
+    // stands (troupe #650): with two hundred of them, reading every one's status took
+    // minutes, and the start waited on it.
+    const listing = daemon.calls.find((c) => c.method === "worktree.list");
+    assert.equal(listing?.params["workspace"], REPO);
+    assert.equal(listing?.params["status"], false);
   });
 
   it("may not, quietly, with memory or its refresh off, or outside a git repository", async () => {

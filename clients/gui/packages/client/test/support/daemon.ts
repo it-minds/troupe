@@ -1304,13 +1304,15 @@ export class FakeDaemon {
 
       case "worktree.list": {
         const workspace = typeof params["workspace"] === "string" ? params["workspace"] : null;
+        // `status: false` (troupe #650): each tree's path, branch and session alone.
+        const status = params["status"] === false ? {} : { dirty: false, checked: true };
         const branches = [...this.sessions.values()]
           .filter((s) => s.branch && (workspace === null || s.workspace === workspace))
-          .map((s) => ({ path: `${s.workspace}-troupe`, branch: s.branch, session_id: s.id, dirty: false }));
+          .map((s) => ({ path: `${s.workspace}-troupe`, branch: s.branch, session_id: s.id, ...status }));
         if (workspace === null) return reply(ws, id, { worktrees: branches });
         // `git worktree list` in the directory: its main checkout first, and nothing at all
-        // in a directory git does not know.
-        const main = { path: workspace, branch: "main", session_id: null, dirty: false };
+        // in a directory git does not know or in a folder its repository ignores.
+        const main = { path: workspace, branch: "main", session_id: null, ...status };
         return reply(ws, id, { worktrees: this.repositories.has(workspace) ? [main, ...branches] : [] });
       }
 

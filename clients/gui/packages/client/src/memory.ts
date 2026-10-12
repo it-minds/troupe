@@ -154,6 +154,11 @@ function message(e: unknown): string {
  * whether the directory is a repository starts nothing. `asked`: a refresh the person
  * asked for (`/memory refresh`), which `memory_auto_refresh` does not hold back, and
  * whose every reason is said.
+ *
+ * The repository is the daemon's answer, which follows git (troupe #650): a folder its
+ * repository tracks belongs to it, and one the repository ignores is a workspace of its
+ * own, with no worktrees and a brief no librarian refreshes by itself. The listing is asked
+ * for without the trees' status, so a repository with many worktrees answers at once.
  */
 export async function librarianBarred(daemon: DaemonClient, workspace: string, opts: { asked?: boolean } = {}): Promise<LibrarianBarred | null> {
   const config = await daemon.modelConfig(workspace).catch(() => null);
@@ -161,7 +166,7 @@ export async function librarianBarred(daemon: DaemonClient, workspace: string, o
   // A refresh the person asked for is not the automatic one the key turns off.
   if (!opts.asked && config && configKey(config, "memory_auto_refresh")?.value === false) return { why: "memory_auto_refresh is off", say: false };
   const repository = await daemon
-    .worktrees(workspace)
+    .worktrees(workspace, { status: false })
     .then((r) => r.worktrees.length > 0)
     .catch(() => false);
   if (!repository) return { why: "this is not a git repository, which is what a brief describes", say: opts.asked === true };

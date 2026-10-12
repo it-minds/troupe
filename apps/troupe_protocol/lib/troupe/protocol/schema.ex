@@ -870,7 +870,7 @@ defmodule Troupe.Protocol.Schema do
         "all" => optional(:boolean),
         "command_id" => optional(:string)
       },
-      "worktree.list" => %{"workspace" => optional(:string)},
+      "worktree.list" => %{"workspace" => optional(:string), "status" => optional(:boolean)},
       "worktree.remove" => %{
         "command_id" => required(:string),
         "path" => required(:string),

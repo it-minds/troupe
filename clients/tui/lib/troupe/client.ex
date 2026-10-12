@@ -249,7 +249,8 @@ defmodule Troupe.Client do
   @doc """
   Every worktree of the session's repository, its checkout among them, as command mode
   lists them: `%{path, branch, session_id, dirty, ahead, behind, added, removed}`, the
-  last four `nil` where the daemon cannot say (root Decision 840).
+  last four `nil` where the daemon cannot say (root Decision 840), and `dirty` too for a
+  tree its listing had no time left to look at.
   """
   @spec worktree_status(session_id()) :: {:ok, [map()]} | {:error, term()}
   def worktree_status(sid), do: impl(sid).worktree_status(sid)

@@ -96,7 +96,13 @@ export interface Worktree {
   path: string;
   branch: string | null;
   session_id: string | null;
-  dirty: boolean;
+  /**
+   * Whether it has uncommitted or untracked files: null for a tree the daemon's listing had
+   * no time left to look at, and absent from a listing asked without the trees' status.
+   */
+  dirty?: boolean | null;
+  /** Whether the daemon read the tree's status (troupe #650); a daemon from before it read every one. */
+  checked?: boolean;
 }
 
 export interface RecentWorkspace {
@@ -630,8 +636,13 @@ export class DaemonClient {
     return this.call("workspace.search", { query, limit });
   }
 
-  worktrees(workspace?: string): Promise<{ worktrees: Worktree[] }> {
-    return this.call("worktree.list", workspace ? { workspace } : {});
+  /**
+   * The worktrees of a workspace's repository, or of every live session's with none named.
+   * `status: false` asks for the trees alone, without reading how each stands, which in a
+   * repository of many worktrees is what takes the time (troupe #650).
+   */
+  worktrees(workspace?: string, opts: { status?: boolean } = {}): Promise<{ worktrees: Worktree[] }> {
+    return this.call("worktree.list", { ...(workspace ? { workspace } : {}), ...(opts.status === false ? { status: false } : {}) });
   }
 
   removeWorktree(path: string, force = false): Promise<unknown> {

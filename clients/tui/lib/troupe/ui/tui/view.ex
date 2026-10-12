@@ -2061,7 +2061,7 @@ defmodule Troupe.UI.TUI.View do
                {Theme.style(:muted), String.pad_trailing(ahead_behind(t), 10)},
                {:text, String.pad_trailing(changed(t), 12)},
                {if(t.dirty, do: Theme.style(:working), else: Theme.style(:muted)),
-                String.pad_trailing(if(t.dirty, do: "dirty", else: "clean"), 7)},
+                String.pad_trailing(dirt(t), 7)},
                {Theme.style(:muted), whose(t, state, windows)}
              ]}
           end)
@@ -2075,6 +2075,11 @@ defmodule Troupe.UI.TUI.View do
 
   defp changed(%{added: a, removed: r}) when is_integer(a) and is_integer(r), do: "+#{a} −#{r}"
   defp changed(_tree), do: ""
+
+  # A tree the daemon's listing had no time to look at says nothing rather than "clean".
+  defp dirt(%{dirty: true}), do: "dirty"
+  defp dirt(%{dirty: false}), do: "clean"
+  defp dirt(_tree), do: ""
 
   # Whose a tree is: this session's checkout, a branch's (by the session working in it, or
   # by its path while none is), or another session's.
