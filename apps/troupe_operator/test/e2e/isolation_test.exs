@@ -191,8 +191,9 @@ defmodule Troupe.E2E.IsolationTest do
       refute String.trim(uid_map) =~ ~r/^0 0 /,
              "#{pod} runs in the node's own user namespace: #{inspect(uid_map)}"
 
-      {masks, _status} =
-        World.exec(namespace, pod, ["sh", "-c", "grep -c ' /proc/' /proc/self/mountinfo"])
+      # `grep -c` counts and exits 1 on none, which kubectl would add to the output.
+      {masks, 0} =
+        World.exec(namespace, pod, ["sh", "-c", "grep -c ' /proc/' /proc/self/mountinfo || true"])
 
       assert String.trim(masks) == "0", "#{pod} has #{String.trim(masks)} mount(s) over /proc"
     end
