@@ -126,7 +126,7 @@ between turns takes both afresh; and the fold's witness has the hold's digest on
 one was written. Against the stand-in as Claude Sonnet 5.5 with `thinking_binding: error`:
 that turn with a skill added, a tool offered and the agent restarted makes three requests,
 none refused, with one tools block and one system prompt, and the next turn's first call is
-refused once over the change. On the chunk's tip the first four and the stand-in's case
+refused once over the change. On the chunk's tip the first three and the stand-in's case
 failed (the stand-in's turn made five requests); the case between turns passed. And the
 installed daemon on scratch homes, against the stand-in served as Claude Sonnet 5.5 with
 `error`: a skill file added while a turn's first call was in flight, and the turn's three
