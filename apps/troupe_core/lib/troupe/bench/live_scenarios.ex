@@ -31,6 +31,13 @@ defmodule Troupe.Bench.LiveScenarios do
   with the scratchpad and without it (issue #472, Decision 870), and
   `scratchpad_session` and `scratchpad_session_without` a session of five turns that
   revises it and compacts, under a window of its own (issue #616, Decision 878).
+
+  `fix_test_orchestrate`, `rename_symbol_orchestrate` and `follow_steps_orchestrate`, by
+  name as well, are those three tasks on `orchestrate` rather than the default agent
+  (issue #554): the same prompt, files, outcome and checks, so a bench of each beside its
+  pair says what orchestrating a change costs against making it, on a one-file fix and on
+  two changes across files. A check beside them says the root called `delegate`, which an
+  agent that cannot write must do for the outcome to hold.
   """
 
   alias Troupe.Agent.Definitions
@@ -63,7 +70,10 @@ defmodule Troupe.Bench.LiveScenarios do
       scratchpad(),
       scratchpad_without(),
       scratchpad_session(),
-      scratchpad_session_without()
+      scratchpad_session_without(),
+      orchestrated(fix_test()),
+      orchestrated(rename_symbol()),
+      orchestrated(follow_steps())
     ]
   end
 
@@ -868,6 +878,27 @@ defmodule Troupe.Bench.LiveScenarios do
            {"counted", "the last plan compares the row counts", reply(ctx) =~ ~r/row counts?/i}
          ]}
       end
+    }
+  end
+
+  # -- the same task, orchestrated ---------------------------------------------------
+
+  # Issue #554: a task as its pair has it, on `orchestrate`, which cannot write, edit or
+  # run a command and so gets the change done through subagents. Its children run one
+  # after another, each on a share of the root's wall clock, so the run has more of it
+  # than a task's 240 s; the runner's deadline follows. Nothing else differs: the cost,
+  # the calls and the tokens are the run's whole tree's, which is what the comparison is.
+  defp orchestrated(%Scenario{} = scenario) do
+    %{
+      scenario
+      | name: scenario.name <> "_orchestrate",
+        title: scenario.title <> ", on orchestrate",
+        config: Keyword.merge(scenario.config, default_agent: "orchestrate", wall_clock_ms: 600_000),
+        measure: fn ctx ->
+          {metrics, checks} = scenario.measure.(ctx)
+          {[], delegated} = delegated(ctx)
+          {metrics, checks ++ delegated}
+        end
     }
   end
 
