@@ -20,7 +20,9 @@ defmodule Troupe.Session.UnknownProviderTest do
              )
 
     message = Exception.message(error)
-    assert message =~ "provider is set to \"litellm\"; it must be one of anthropic, openai, fake"
+    assert message =~
+             "provider is set to \"litellm\"; it must be one of anthropic, openai, ollama, openrouter, azure_openai, gemini, fake"
+
     assert message =~ "is `openai` with its base_url"
   end
 
@@ -29,7 +31,10 @@ defmodule Troupe.Session.UnknownProviderTest do
     File.write!(user, "provider: litellm\n")
 
     assert {:error, %Troupe.Config.Error{} = error} = Troupe.Config.resolve(workspace, [], user_path: user)
-    assert Exception.message(error) =~ "#{user}:1: provider must be one of anthropic, openai, fake, not \"litellm\""
+
+    assert Exception.message(error) =~
+             "#{user}:1: provider must be one of anthropic, openai, ollama, openrouter, azure_openai, gemini, fake, " <>
+               "not \"litellm\"; litellm is `openai` here, and `troupe config migrate` rewrites it"
   end
 
   test "a provider that exists still starts", %{tmp_dir: workspace} do

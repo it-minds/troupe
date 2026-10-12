@@ -66,7 +66,11 @@ defmodule Troupe.Config.LayersTest do
             {"mcp:\n  fs:\n    command: npx\n    permission: yes-please\n",
              "mcp.fs.permission must be one of ask, auto, not \"yes-please\""},
             {"providers:\n  gw:\n    type: litellm\n",
-             "providers.gw.type must be one of openai, anthropic, not \"litellm\"; a gateway that speaks the OpenAI API"}
+             "providers.gw.type must be one of anthropic, openai, ollama, openrouter, azure_openai, gemini, " <>
+               "not \"litellm\"; litellm is `openai` here, and `troupe config migrate` rewrites it"},
+            {"providers:\n  gw:\n    type: bedrock\n",
+             "providers.gw.type must be one of anthropic, openai, ollama, openrouter, azure_openai, gemini, " <>
+               "not \"bedrock\"; a gateway that speaks the OpenAI API (LiteLLM, vLLM) is `openai` with its base_url"}
           ] do
         File.write!(ctx.project, yaml)
         assert refused!(ctx) =~ expected, yaml

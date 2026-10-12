@@ -1684,8 +1684,7 @@ defmodule Troupe.Gateway.Dispatch do
   # Names the file, the key and the fix, which is all a person needs to act on it.
   defp start_error(%Troupe.Config.Error{} = error), do: Exception.message(error)
   # Naming the alternatives, because the name people reach for is the gateway they talk
-  # to — `litellm`, `vllm`, `openrouter` — and every one of those is `openai` plus a
-  # `base_url`.
+  # to — `litellm`, `vllm` — and every one of those is `openai` plus a `base_url`.
   defp start_error({:unknown_provider, name}) do
     "config sets provider #{inspect(to_string(name))}; it must be one of " <>
       Enum.map_join(Provider.known(), ", ", &to_string/1) <>

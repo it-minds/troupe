@@ -64,6 +64,7 @@ defmodule Troupe.Agent.Server do
     Gateway,
     Message,
     Provider,
+    ProviderType,
     Reasoning,
     Request,
     Response,
@@ -1593,6 +1594,8 @@ defmodule Troupe.Agent.Server do
         thinking_binding:
           if(config.thinking_binding in ["drop_block", "error"], do: config.thinking_binding),
         provider: adapter_for(target.provider, state),
+        type: ProviderType.atom(target.provider),
+        api_version: target.api_version,
         timeout_ms: config.llm_timeout_ms,
         identify: config.identify != false,
         client: config.client

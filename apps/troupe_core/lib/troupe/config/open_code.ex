@@ -9,7 +9,8 @@ defmodule Troupe.Config.OpenCode do
 
   Read from `provider.<name>`: `options.baseURL`, `options.apiKey`, `options.authToken`
   (a bearer token, which is how a gateway in front of the Anthropic API is usually
-  keyed), `npm` (to detect an Anthropic SDK provider), and per model `models.<name>.id`
+  keyed), `npm` (the SDK package, which says the provider type: Anthropic's, the Gemini
+  API's, Azure OpenAI's, OpenRouter's, Ollama's, else `openai`), and per model `models.<name>.id`
   (the id the gateway wants on the wire), `limit.context`, `limit.output` and
   `options.reasoningEffort`. The copy writes each key into `config.yaml` as it is
   written here.
@@ -111,11 +112,7 @@ defmodule Troupe.Config.OpenCode do
     token = Map.get(values, "authToken")
 
     provider = %{
-      type:
-        if(String.contains?(Map.get(def, "npm") || "", "anthropic"),
-          do: :anthropic,
-          else: :openai
-        ),
+      type: sdk_type(Map.get(def, "npm")),
       base_url: Map.get(values, "baseURL"),
       api_key: if(refused, do: nil, else: key || token || Map.get(auth, name)),
       auth: if(is_nil(options["apiKey"]) and is_binary(options["authToken"]), do: :bearer, else: :api_key),
@@ -135,6 +132,23 @@ defmodule Troupe.Config.OpenCode do
       models: %{},
       source: :opencode
     }
+
+  # The provider type an opencode SDK package speaks: an Anthropic SDK's, and the AI SDK's
+  # own packages for the Gemini API, Azure OpenAI and OpenRouter, and Ollama's. Any other,
+  # and none, is the OpenAI API, as `@ai-sdk/openai-compatible` says.
+  @sdk_types %{
+    "@ai-sdk/google" => :gemini,
+    "@ai-sdk/azure" => :azure_openai,
+    "@openrouter/ai-sdk-provider" => :openrouter,
+    "ollama-ai-provider" => :ollama,
+    "ollama-ai-provider-v2" => :ollama
+  }
+
+  defp sdk_type(npm) when is_binary(npm) do
+    if String.contains?(npm, "anthropic"), do: :anthropic, else: Map.get(@sdk_types, npm, :openai)
+  end
+
+  defp sdk_type(_npm), do: :openai
 
   # The three options that reach a request, each read; the first that cannot be is why
   # the provider is refused.
