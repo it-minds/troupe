@@ -507,6 +507,23 @@ defmodule Troupe.Commands do
             "(Tab completes them).",
         example: "/worktree fix the flaky test"
       ),
+      # A workflow runs on `orchestrate`, so it is a command of its own rather than an
+      # agent's row: there is no `workflow` agent to list.
+      entry(
+        "workflow",
+        "agents",
+        "Run a workflow's steps through subagents, in a worktree of its own",
+        usage: "/workflow [name:] <task>",
+        args: [prompt()],
+        availability: "local",
+        detail:
+          "/workflow <task> runs the bundled pipeline (understand, plan, implement, test, " <>
+            "document, verify) on orchestrate, which delegates each step to the subagent " <>
+            "that owns it and edits nothing itself; /workflow <name>: <task> runs the steps " <>
+            "of .troupe/workflows/<name>.json instead. The branch is to /merge or /discard " <>
+            "later.",
+        example: "/workflow release: cut 1.2"
+      ),
       entry("quit", "quit", "Leave the terminal client; the session carries on",
         aliases: ["exit", "q"],
         usage: "/quit",

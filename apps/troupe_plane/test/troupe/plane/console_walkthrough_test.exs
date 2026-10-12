@@ -34,10 +34,10 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
       Identity.upsert_group(%{external_id: "platform", display_name: "Platform engineering"})
 
     {:ok, delivery} =
-      Identity.upsert_group(%{external_id: "itm-consultants", display_name: "ITM consultants"})
+      Identity.upsert_group(%{external_id: "org-consultants", display_name: "Consultants"})
 
     root = person("root@example.test", ["platform"])
-    _ada = person("ada@example.test", ["itm-consultants"])
+    _ada = person("ada@example.test", ["org-consultants"])
 
     # The first team is the platform's own: `actor_for/1` reads the admin group against the
     # provider's groups rather than against enabled teams, which is what lets a fresh plane
@@ -83,7 +83,7 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
 
     teams
     |> form("#enable-team", %{
-      "group" => "itm-consultants",
+      "group" => "org-consultants",
       "name" => "delivery",
       "budget_micros" => "500000000"
     })

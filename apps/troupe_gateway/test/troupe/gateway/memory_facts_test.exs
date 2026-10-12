@@ -126,4 +126,30 @@ defmodule Troupe.Gateway.MemoryFactsTest do
 
     refute Map.has_key?(whole, "id")
   end
+
+  # A fact that is there and could not be forgotten, because its file could not be
+  # written, is the daemon's failure, said with the store's reason; the fact stays, and the
+  # connection that asked stays up. It used to raise in the answer and take the connection
+  # with it.
+  test "memory.forget of a fact whose file cannot be written is an internal error the caller is told",
+       %{workspace: ws, client: client} do
+    {:ok, fact} =
+      Facts.put(ws, %{kind: "note", claim: "kept", anchors: [], scope: nil}, %{by: "person"})
+
+    dir = Path.join(ws, ".troupe/memory")
+    assert File.dir?(dir)
+    File.chmod!(dir, 0o555)
+    on_exit(fn -> File.chmod(dir, 0o755) end)
+
+    assert {:error, %Error{message: "internal_error", data: %{"reason" => reason}}} =
+             Client.call(client, "memory.forget", %{
+               "command_id" => Client.command_id(),
+               "workspace" => ws,
+               "id" => fact["id"]
+             })
+
+    assert reason =~ "cannot write"
+    assert {:ok, %{"facts" => [kept]}} = Client.call(client, "memory.get", %{"workspace" => ws})
+    assert kept["id"] == fact["id"]
+  end
 end

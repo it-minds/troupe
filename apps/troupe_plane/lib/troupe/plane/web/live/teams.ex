@@ -91,7 +91,7 @@ defmodule Troupe.Plane.Web.Live.Teams do
   # somebody was otherwise configuring everything from.
   #
   # The name is asked for rather than taken from the group: a group is called
-  # `itm-consultants` because of how somebody's directory is organised, and a team is
+  # `org-consultants` because of how somebody's directory is organised, and a team is
   # called `delivery` because of what it does. One group may be two teams, so the name is
   # the team's own and not a copy of the group's.
   def handle_event("enable-team", %{"group" => group} = params, socket) do

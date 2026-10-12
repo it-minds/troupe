@@ -122,6 +122,9 @@ defmodule Troupe.Agent.DefinitionTest do
       assert orchestrate.prompt =~ "Read to brief"
       assert orchestrate.prompt =~ "Delegate to execute"
       assert orchestrate.prompt =~ "reviewer"
+      # It runs a workflow's steps too: there is no second orchestrator for those.
+      assert orchestrate.prompt =~ "When your prompt is a workflow"
+      assert orchestrate.model == "expensive"
       assert %Troupe.Config{}.default_agent == "build"
       assert %Troupe.Config{}.max_depth == 3
     end
@@ -134,7 +137,7 @@ defmodule Troupe.Agent.DefinitionTest do
 
     test "primaries and subagents are partitioned", %{defs: defs} do
       assert Enum.map(Definitions.primaries(defs), & &1.name) ==
-               ["answer", "ask", "build", "librarian", "orchestrate", "plan", "quick", "workflow"]
+               ["answer", "ask", "build", "librarian", "orchestrate", "plan", "quick"]
 
       assert Enum.map(Definitions.subagents(defs), & &1.name) ==
                ["explore", "general", "implementer", "reviewer"]

@@ -1,5 +1,8 @@
 # No file in this repository names one deployment of Troupe: not its cloud, its cluster,
-# its domain, its registry, its identity tenant or the account it deploys as.
+# its domain, its registry, its identity tenant or the account it deploys as. Nor does it
+# use the maintaining organisation's internal names: its short name, which its company
+# domain, its internal hosts and its directory's group names all carry. The project's own
+# public address on GitHub is not one of those, and stays.
 #
 #     elixir scripts/check-neutral.exs                  # every file git knows about
 #     elixir scripts/check-neutral.exs --digest NAME    # the line to add for NAME
@@ -47,7 +50,11 @@ defmodule CheckNeutral do
     "818259bb49d98b6132d7ca567cf74b3b724a467893aa88fc27ae65e6975e76e3" =>
       "a deployment's app registration",
     "9cc8463c8a1d79370d14fc2cebc61099d45d5b2fbd8bb2696994b65aaeb6f53b" =>
-      "a deployment's app registration"
+      "a deployment's app registration",
+    # Checked as a word, so its domain, a host under it, and a group or bucket name that
+    # starts with it are all caught.
+    "e74cd1e4ea601f45dbb8caa21b7ddd2a91ff3be1116b473b7da8dd37c23f989c" =>
+      "the maintaining organisation's internal short name"
   }
 
   # path => why it keeps a name for now, and what ends that. Empty, and best left so.
@@ -81,13 +88,14 @@ defmodule CheckNeutral do
 
         IO.puts(:stderr, """
 
-        #{length(lines)} line(s) in #{length(files)} file(s) name one deployment of Troupe, not Troupe.
+        #{length(lines)} line(s) in #{length(files)} file(s) name one deployment of Troupe, or its maintainers' internals, not Troupe.
 
         This repository is the product. A deployment's own cloud, cluster, domain,
         registry, identity tenant or deploy account belongs in that deployment's own
-        repository; in an example here it is a placeholder (example.com, example.test)
-        that says it is one. A file that must keep such a name for now goes in @allowed
-        in scripts/check-neutral.exs, with the reason and what ends it.
+        repository, and the maintaining organisation's domain, hosts and group names in
+        none; in an example here it is a placeholder (example.com, example.test, a
+        neutral group name) that says it is one. A file that must keep such a name for
+        now goes in @allowed in scripts/check-neutral.exs, with the reason and what ends it.
         """)
 
         System.halt(1)

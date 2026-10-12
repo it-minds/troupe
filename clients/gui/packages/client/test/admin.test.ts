@@ -80,7 +80,7 @@ describe("the team methods", () => {
   it("carry the preview's shape through untouched", async () => {
     const effect: TeamDisableEffect = {
       team: "engineering",
-      groups: ["backend", "itm-platform"],
+      groups: ["backend", "org-platform"],
       members: 2,
       grants: ["dev", "review"],
       admins: ["lead@example.test"],

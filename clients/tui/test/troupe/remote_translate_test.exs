@@ -618,6 +618,43 @@ defmodule Troupe.RemoteTranslateTest do
     assert {:system, message} in folded([note]).transcript
   end
 
+  # troupe issue #668: a person's own tools offered to the session, as
+  # `Troupe.Session.ClientTools` writes it. It was matched by a type nobody writes, so it
+  # was drawn as the raw event and logged as one this client did not know.
+  test "a session tainted by somebody's own tools is one sentence naming them and the tools" do
+    data = %{
+      "kind" => "personal_connector",
+      "tools" => ["client.notes.read", "client.notes.search"],
+      "actor" => "ada@example.test"
+    }
+
+    sentence =
+      "ada@example.test offered tools that run on their own machine: " <>
+        "client.notes.read, client.notes.search"
+
+    Logger.put_module_level(Translate, :info)
+    on_exit(fn -> Logger.delete_module_level(Translate) end)
+
+    {{[note], memory}, log} =
+      ExUnit.CaptureLog.with_log(fn ->
+        Translate.durable(
+          "s-1",
+          durable("session_tainted", data),
+          Translate.remember(Translate.memory(), "root")
+        )
+      end)
+
+    assert note.type == :remote_note
+    assert note.agent_path == "root"
+    assert note.data.text == sentence
+    assert {:system, sentence} in folded([note]).transcript
+    assert memory.unknown == MapSet.new()
+    refute log =~ "unknown event type session_tainted"
+
+    [nobody] = translate(durable("session_tainted", Map.drop(data, ["actor", "tools"])))
+    assert nobody.data.text == "somebody offered tools that run on their own machine"
+  end
+
   test "the session's goal is set and cleared as events of its own, not as notes" do
     [set] = translate(durable("goal_set", %{"text" => "ship it", "command_id" => "c-1"}))
     assert set.type == :goal_set
