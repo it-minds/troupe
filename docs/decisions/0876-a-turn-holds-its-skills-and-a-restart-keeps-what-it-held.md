@@ -89,7 +89,9 @@ MCP tool that comes costs (871): nothing in the turn it came in, and a refusal o
 later call until a compaction. A turn's first `llm_request` gains the hold's digest, 84
 bytes as `{"digest":"sha256:..."}`, and the whole hold when it changed: with no MCP server
 and no skill, 129 bytes; with a person's MCP servers, their tools' definitions, which the
-request already sends the provider on every call. A pod reads its bundle's skills once a
+request already sends the provider on every call. The log so holds the definitions of the
+tools a turn held, a person's offered tools' among them, where before it held their names;
+it already held what every call to them returned. A pod reads its bundle's skills once a
 turn whichever profile runs, where it read them on every call of a profile that lists
 some.
 
@@ -127,4 +129,9 @@ none refused, with one tools block and one system prompt, and the next turn's fi
 refused once over the change. On the chunk's tip the first four and the stand-in's case
 failed (the stand-in's turn made five requests); the case between turns passed. And the
 installed daemon on scratch homes, against the stand-in served as Claude Sonnet 5.5 with
-`error`: see the pull request.
+`error`: a skill file added while a turn's first call was in flight, and the turn's three
+calls offered no skill and none was refused; the next turn's call offered it and was
+refused once over the change (`kind=system_changed`). With `resume_on_restart`, a skill file
+added and the daemon stopped while a turn's second call was in flight: after the restart
+that call, sent again, offered the turn's tools, kept its thinking and read the cached
+prefix whole, the turn's last call likewise, and the next turn offered the skill.
