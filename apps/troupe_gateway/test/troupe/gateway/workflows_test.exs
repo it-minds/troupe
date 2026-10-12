@@ -158,7 +158,10 @@ defmodule Troupe.Gateway.WorkflowsTest do
 
       on_exit(fn -> Troupe.stop_session(sid) end)
       :ok = Troupe.subscribe(sid)
-      assert {:ok, %{"profile" => ^runs}} = Client.call(client, "session.get", %{"session_id" => sid})
+
+      assert {:ok, %{"profile" => ^runs}} =
+               Client.call(client, "session.get", %{"session_id" => sid})
+
       assert_root_done(sid, context.state_dir)
       Troupe.stop_session(sid)
     end

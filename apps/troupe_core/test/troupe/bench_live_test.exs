@@ -755,8 +755,16 @@ defmodule Troupe.BenchLiveTest do
     end
 
     test "a run on orchestrate gets the change done through a subagent, every call of its tree in the record" do
-      fake = start_fake(scripts: [{"line_total becomes subtotal", renamer()}, {"Rename the function", briefer()}])
-      {:ok, plan} = Bench.plan(config: person(fake), only: ["rename_symbol_orchestrate"], history: nil)
+      fake =
+        start_fake(
+          scripts: [
+            {"line_total becomes subtotal", renamer()},
+            {"Rename the function", briefer()}
+          ]
+        )
+
+      {:ok, plan} =
+        Bench.plan(config: person(fake), only: ["rename_symbol_orchestrate"], history: nil)
 
       report = Bench.live(plan)
       entry = scenario(report, "rename_symbol_orchestrate")
@@ -777,11 +785,15 @@ defmodule Troupe.BenchLiveTest do
     test "on orchestrate, a root that edits rather than delegates changes nothing and scores nothing" do
       # The default agent's script: orchestrate is refused every edit it makes.
       fake = start_fake()
-      {:ok, plan} = Bench.plan(config: person(fake), only: ["rename_symbol_orchestrate"], history: nil)
+
+      {:ok, plan} =
+        Bench.plan(config: person(fake), only: ["rename_symbol_orchestrate"], history: nil)
 
       [run] = plan |> Bench.live() |> scenario("rename_symbol_orchestrate") |> Map.fetch!("runs")
       assert %{"succeeded" => false, "outcome" => false} = run
-      assert %{"delegated" => false, "old_name_gone" => false} = Map.new(run["checks"], &{&1["name"], &1["passed"]})
+
+      assert %{"delegated" => false, "old_name_gone" => false} =
+               Map.new(run["checks"], &{&1["name"], &1["passed"]})
     end
   end
 
@@ -813,9 +825,22 @@ defmodule Troupe.BenchLiveTest do
              {"lib/receipt.exs", "Shop.Cart.line_total("},
              {"lib/discount.exs", "Shop.Cart.line_total("}
            ] do
-         {"edit_file", %{"path" => path, "old_string" => old, "new_string" => String.replace(old, "line_total", "subtotal")}}
+         {"edit_file",
+          %{
+            "path" => path,
+            "old_string" => old,
+            "new_string" => String.replace(old, "line_total", "subtotal")
+          }}
        end},
-      {:tools, [{"edit_file", %{"path" => "lib/cart.exs", "old_string" => "&line_total/1", "new_string" => "&subtotal/1"}}]},
+      {:tools,
+       [
+         {"edit_file",
+          %{
+            "path" => "lib/cart.exs",
+            "old_string" => "&line_total/1",
+            "new_string" => "&subtotal/1"
+          }}
+       ]},
       {:tools,
        [
          {"finish",

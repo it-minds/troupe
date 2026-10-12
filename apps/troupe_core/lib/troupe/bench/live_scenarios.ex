@@ -893,7 +893,8 @@ defmodule Troupe.Bench.LiveScenarios do
       scenario
       | name: scenario.name <> "_orchestrate",
         title: scenario.title <> ", on orchestrate",
-        config: Keyword.merge(scenario.config, default_agent: "orchestrate", wall_clock_ms: 600_000),
+        config:
+          Keyword.merge(scenario.config, default_agent: "orchestrate", wall_clock_ms: 600_000),
         measure: fn ctx ->
           {metrics, checks} = scenario.measure.(ctx)
           {[], delegated} = delegated(ctx)

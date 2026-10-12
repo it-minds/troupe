@@ -509,7 +509,10 @@ defmodule Troupe.Commands do
       ),
       # A workflow runs on `orchestrate`, so it is a command of its own rather than an
       # agent's row: there is no `workflow` agent to list.
-      entry("workflow", "agents", "Run a workflow's steps through subagents, in a worktree of its own",
+      entry(
+        "workflow",
+        "agents",
+        "Run a workflow's steps through subagents, in a worktree of its own",
         usage: "/workflow [name:] <task>",
         args: [prompt()],
         availability: "local",
