@@ -61,7 +61,10 @@ defmodule Troupe.Client.Daemon do
   # client records once `session.create` has answered, and the daemon stamped the branch's
   # first events (`session created as …`, its prompt) before that: sorted by time alone,
   # they came ahead of the window they belong to, and a screen rebuilt from here dropped
-  # them. So nothing of a branch sorts ahead of its window's opening.
+  # them. So nothing of a branch sorts ahead of its window's opening, and nothing of this
+  # session's own either: this client stamps the session's window as it opens it, the
+  # daemon its first events, and on a busy machine the line typed into the new window
+  # came out a millisecond ahead of it, and off a rebuilt screen (TUI Decision 163).
   @impl true
   def events(sid) do
     own = Journal.all(sid)
@@ -85,7 +88,8 @@ defmodule Troupe.Client.Daemon do
 
     # Stable, and this session's own events first: at an equal time the window opens
     # before anything is drawn in it.
-    (Enum.map(own, &{&1.ts, &1}) ++ branches)
+    (Enum.map(own, &{max(&1.ts, Map.get(opened, Branch.window_of(&1.agent_path), 0)), &1}) ++
+       branches)
     |> Enum.sort_by(&elem(&1, 0))
     |> Enum.map(&elem(&1, 1))
   end

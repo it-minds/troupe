@@ -43,8 +43,11 @@ defmodule Troupe.RemoteUITest do
       FakeRemote.emit(remote, "s-ui", "session.resumed", %{"worker" => "w7"})
       FakeRemote.emit(remote, "s-ui", "config.upgraded", %{"version" => "2.1"})
 
-      eventually(fn -> screen_text(pid, screen) =~ "session resumed on w7" end)
-      assert screen_text(pid, screen) =~ "config upgraded to 2.1"
+      # Two frames from the plane, each drawn when it comes: waited for together.
+      eventually(fn ->
+        text = screen_text(pid, screen)
+        text =~ "session resumed on w7" and text =~ "config upgraded to 2.1"
+      end)
 
       GenServer.stop(pid, :normal)
     end

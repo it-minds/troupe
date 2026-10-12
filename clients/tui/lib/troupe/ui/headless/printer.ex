@@ -84,9 +84,11 @@ defmodule Troupe.UI.Headless.Printer do
       # The refused that were delegations a person asked to see first (root Decision 850),
       # which `--auto-approve` does not answer, so the last line does not suggest it.
       gated: MapSet.new(),
-      # Budget questions answered no: the item is drawn again once the question that
-      # rides beside it arrives with its options (Decision 120), and is answered once.
-      budgets: MapSet.new(),
+      # Budget questions by id, `:said` once the line is printed and `:stopped` once
+      # answered no: the item is drawn again once the question that rides beside it
+      # arrives with its options (Decision 120), and it is that question which is
+      # answered, once (Decision 162).
+      budgets: %{},
       rested: false,
       # Lines sent to the target while it worked and not yet taken, by command id.
       queued: MapSet.new(),
@@ -394,21 +396,18 @@ defmodule Troupe.UI.Headless.Printer do
   # Without this the branch waits for an answer nobody can type and the run never
   # rests. Stopping is the safe default: a headless run has a budget for a reason. The
   # budget question is a question (Decision 120), so it is answered as one, with the
-  # word the harness reads as a stop.
+  # word the harness reads as a stop, once it has been asked: the item that comes with
+  # the question's options. The harness says the budget ran out a moment before it asks,
+  # and a stop sent in between answered no question, so the run waited for good
+  # (Decision 162). The line is said when either comes first.
   defp print(%{type: :budget_ask_started, agent_path: p, data: d}, state) do
-    if MapSet.member?(state.budgets, d.call_id) do
+    state = budget_said(state, p, d)
+
+    if d[:options] in [nil, []] or state.budgets[d.call_id] == :stopped do
       state
     else
-      detail = if d[:detail], do: " (#{d.detail})", else: ""
-
-      line(
-        state,
-        p,
-        "budget exhausted#{detail}; headless mode stops here (raise the budget to go further)"
-      )
-
       Client.answer(state.session_id, d.call_id, "stop")
-      %{state | budgets: MapSet.put(state.budgets, d.call_id)}
+      %{state | budgets: Map.put(state.budgets, d.call_id, :stopped)}
     end
   end
 
@@ -445,6 +444,22 @@ defmodule Troupe.UI.Headless.Printer do
        do: say(state, p, Model.turn_line(turn))
 
   defp print(_event, state), do: state
+
+  defp budget_said(state, p, d) do
+    if Map.has_key?(state.budgets, d.call_id) do
+      state
+    else
+      detail = if d[:detail], do: " (#{d.detail})", else: ""
+
+      line(
+        state,
+        p,
+        "budget exhausted#{detail}; headless mode stops here (raise the budget to go further)"
+      )
+
+      %{state | budgets: Map.put(state.budgets, d.call_id, :said)}
+    end
+  end
 
   # Every line carries the prefix, not just the first: a tool result is routinely
   # several lines long (a command's output leads with its exit code), and a bare

@@ -56,8 +56,6 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
   `Troupe.LLM.Fake.render/2`) each failed once; both pass alone.
 - The worker suite's plane-backed tests share `troupe_plane_test` with the plane suite, so
   running both at once can deadlock in Postgres (`40P01` in `plane_link_test.exs`).
-- Under full load, the TUI's `ClipboardTest` and `TUISelectionTest` (Ctrl-Y copy) fail
-  now and then; both pass alone.
 - The gateway suite prints `erl_child_setup: failed with error 32 on line 284` a few
   times, with or without failures (probably a port child writing to a closed pipe).
 - `apps/troupe_gateway/test/troupe/gateway/restart_test.exs` `create/2` never stops the
@@ -84,25 +82,27 @@ and the failure read in the code by the chunk 9 fixer of slot F, 2026-09-29.
   ("spawn: Could not cd").
 - `OnboardWriteTest` once answered another file's refusal ("`.claude/agents/reviewer.md` is
   not there") for `nowhere/AGENTS.md`: order or shared state, not load.
-- The TUI's `daemon_client_test.exs` `hold_link_connection/0` calls `:sys.get_state` on
-  every pid `Connections.list()` gives; one that exits in between fails the test.
-- The TUI's `remote_ui_test` "session.resumed and config.upgraded" asserts the second
-  event straight after `eventually` on the first, so any call added at mount fails it.
 - Runs on one machine share WSL's `/tmp`: `DoctorCLITest`'s `bench_dirs() == []` fails
   while another run has a `/tmp/troupe-bench-*` directory.
 - A pull request into a chunk branch builds the TUI but doesn't run its tests, so a TUI
   regression is first seen on the chunk's pull request into `main`.
-- Since D117 (Decision 848), still failing now and then under full load and passing
-  alone:
-  - core `FactsTest` "one process per repository" (25 puts against `async_stream`'s 5 s);
-  - `PropertyTest`, at its 60 s inside `:file.call`;
-  - `WatchSessionTest`;
-  - `RememberFactsTest` ("README.md is not there");
-  - `StoppedCallTest` (Finch's "excess queuing");
-  - the gateway's `LoopbackTest` "a refused upgrade is logged at warning level".
-
-  With the default 64 cases on a busy machine many more core tests time out, and all pass at
-  `--max-cases 8`.
+- Seen failing now and then under full load after D117 (Decision 848), passing alone, and
+  not seen in chunk 32's load runs: core `WatchSessionTest`, `RememberFactsTest`
+  ("README.md is not there"), and the gateway's `LoopbackTest` "a refused upgrade is
+  logged at warning level".
+- The core and TUI suites load every module before the first test since chunk 32
+  (`apps/troupe_core/test/support/preload.exs`), which took most load timeouts away. What
+  is left:
+  - with 64 cases on 16 CPUs that as many busy loops share, a core run still has about a
+    dozen first turns past the default five seconds (`IdentifyTest`,
+    `UnattendedApprovalsTest`, `UnseenTest`, `LocalPricingTest` and others), where it had
+    54;
+  - at the default 64 cases while another suite runs, now and then `CutShortTest`'s
+    `wall_clock` case: the root's own four seconds run out under load, so it waits on a
+    budget question nobody answers and is never idle;
+  - and `CrashLoopTest`, whose session was not down within five seconds of the kill:
+    probably three slow restarts no longer fit `Agent.Node`'s five-second window, so it
+    goes on restarting (unconfirmed).
 - `Troupe.BenchTest` measures the tool definitions of the test build, which registers four
   test-only tools (about 582 bytes), so the budget gates a list nobody ships and `mix
   troupe.bench` in dev reads that much lower.
@@ -1359,13 +1359,9 @@ Found by the chunk 30 fixers, 2026-10-11.
 - **Personal tools on a pod** (Decision 879). `personalTools: forbid` takes effect at a session's next activation. A session that is awake when an administrator changes it keeps accepting registrations until it is activated again.
 - **The terminal client's connection.** Every fleet call goes on one connection, and the gateway answers a connection's calls one at a time, so one slow call blocks the rest (`worktree.list` now has its own, #621). `branch_profile/2` turns any `profiles` error into "unknown command /X; available: /worktree", where it should say the daemon didn't answer.
 - **A fresh daemon's first `session.create`.** Twice, a `session.create` sent about 2 seconds after an installed daemon started got no answer for over 120 seconds; one sent later answered in under a second. Not confirmed: it may be the test harness or a startup race. The release runs with distribution off, so it couldn't be attached to.
-- **Tests.**
-  - `MCPPageTest`'s logout case calls `identity.get` right after terminating the embedded daemon, and once got `unavailable` in CI.
-  - `PropertyTest` times out under full-suite load and passes alone.
-  - `ReadToolsTest`'s web_fetch hit a Finch pool timeout once.
-  - Under heavy parallel load, one core run had ten timeouts at once, all passing alone.
 
-Found by the chunk 31 fixers, 2026-10-12.
+Found by the chunk 31 fixers, 2026-10-12. Its test items were fixed in chunk 32 (D8 says
+what is left).
 
 ## Taken
 
