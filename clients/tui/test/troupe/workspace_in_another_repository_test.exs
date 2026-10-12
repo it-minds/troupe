@@ -37,6 +37,25 @@ defmodule Troupe.WorkspaceInAnotherRepositoryTest do
     outer
   end
 
+  # A linked worktree of the repository, beside it.
+  defp side!(outer) do
+    side = outer <> "-side"
+    run_git!(outer, ["worktree", "add", "-q", "-b", "side", side])
+    on_exit(fn -> File.rm_rf(side) end)
+    side
+  end
+
+  # The lines this client wrote into a session's window about its librarian, once its
+  # first note is in and its worker has finished the step that wrote it.
+  defp no_librarian(sid) do
+    eventually(fn -> Enum.any?(Client.events(sid), &(&1.type == :remote_note)) end)
+    _ = :sys.get_state(Troupe.Remote.Worker.whereis(sid))
+
+    for %{type: :remote_note, agent_path: "root", data: %{text: "no librarian" <> _ = text}} <-
+          Client.events(sid),
+        do: text
+  end
+
   defp ready(pid) do
     eventually(fn -> user_state(pid).commands != [] end)
     eventually(fn -> Model.session_window(user_state(pid).model) != nil end)
@@ -69,6 +88,46 @@ defmodule Troupe.WorkspaceInAnotherRepositoryTest do
 
       GenServer.stop(pid, :normal)
     end
+  end
+
+  # #650: worktrees and the brief follow git. A folder the repository ignores is a
+  # workspace of its own: command mode and `/worktree` list none of the repository's
+  # worktrees, and no librarian starts on the repository's brief from there, nor is a line
+  # said about one. A folder it tracks lists the repository's own.
+  test "in a folder another repository ignores: none of its worktrees, and no librarian on its brief" do
+    outer = enclosing!()
+    side!(outer)
+    ws = Path.join(outer, "scratch/ws")
+
+    {sid, _, _} =
+      start_session!(
+        workspace: ws,
+        script: [{:finish, "ok"}],
+        config: %{memory_auto_refresh: true}
+      )
+
+    assert {:ok, []} = Client.worktree_status(sid)
+    assert {[], []} = Client.worktrees(ws)
+
+    refute Enum.any?(Client.events(sid), &(&1.agent_path == "librarian-1"))
+    assert no_librarian(sid) == []
+    refute File.exists?(Path.join(outer, ".troupe/memory.md"))
+  end
+
+  test "in a folder another repository tracks: the repository's worktrees" do
+    outer = enclosing!()
+    side = side!(outer)
+    ws = Path.join(outer, "packages/ws")
+    {sid, _, _} = start_session!(workspace: ws, script: [])
+
+    assert {:ok, [checkout, tree]} = Client.worktree_status(sid)
+    assert %{branch: "main", dirty: dirty} = checkout
+    assert is_boolean(dirty)
+    assert %{branch: "side", dirty: false, ahead: 0, behind: 0} = tree
+    assert Path.basename(tree.path) == Path.basename(side)
+
+    assert {[%{branch: "side", rel: rel}], []} = Client.worktrees(ws)
+    assert rel == Path.basename(side)
   end
 
   # The mechanism, held still: with the link busy, as it was behind the slow listing, the

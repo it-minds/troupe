@@ -653,14 +653,20 @@ brings to the same shape, in `session.create` and in a first `session.register`.
 
 `worktree`: `"auto"` (default) creates a git worktree on `troupe/<slug>` when the
 workspace already has a live session; `"never"` reuses the directory; `"always"`
-always branches.
+always branches. The tree is `<checkout>-<slug>`, beside the checkout or worktree the
+workspace belongs to. A workspace that is a folder of it (one the repository tracks or
+would add) works in the same folder of the new tree, `workspace` in the answer, and
+`worktree` is the tree's top. A folder the repository ignores, like a directory in no
+repository, is a workspace of its own: it gets no worktree, whatever `worktree` says
+(Decision 881).
 
 `worktree_name`: work in the worktree of that name, whatever `worktree` says:
-`<workspace>-<name>` on `troupe/<name>`, made the first time, the same tree after, and
+`<checkout>-<name>` on `troupe/<name>`, made the first time, the same tree after, and
 made again from its branch when only the directory has gone. A name is one path segment
 of letters, digits, `.`, `_` and `-`, not starting with `.` or `-` (`invalid_params`,
 field `worktree_name`, otherwise); refused with `conflict` while a session is working
-in that tree.
+in that tree, in its directory or a folder of it; refused with `invalid_params`, field
+`workspace`, in a folder its repository ignores or in no repository.
 
 `workflow`: run the prompt as a named **workflow**: the step list at
 `<workspace>/.troupe/workflows/<name>.json` (or the built-in `default` pipeline) is
@@ -1389,7 +1395,7 @@ it can and shows the rest greyed with the reason. Reading the table wakes nothin
 ```
 → `{"status": "fresh", "path": "/home/me/project/.troupe/memory.md",
 "built_at": "2026-09-20T10:00:00Z", "sections": ["Overview", "Layout", "Commands",
-"Conventions", "Notes"], "text": "...", "refresh_due": false, "refresh_held_until": null,
+"Conventions", "Notes"], "text": "...", "repository": true, "refresh_due": false, "refresh_held_until": null,
 "generated": true, "facts": [{"id": "f_5c0d9a3e71b2", "kind": "command", "claim": "The gate is
 `mix check`", "scope": null, "anchors": [{"path": "mix.exs", "hash": "9f2c...e1"}],
 "evidence": {"session": "s_01J...", "seq": 412, "head": "7f8a221", "exit_status": 0, "by":
@@ -1403,10 +1409,15 @@ agent. `status` is `absent` (no facts), `stale` (never built, older than
 went since it was last checked, Decision 838), `fresh` or `disabled` (`memory: false` in the workspace
 config). A `librarian`'s run that ends as it meant to builds it, whether or not it
 rewrote any of it.
-One brief per repository: a worktree's is the main checkout's. `refresh_due` is whether
+One brief per repository: a worktree's is the main checkout's, and so is that of a folder
+the repository tracks or would add. A folder the repository ignores keeps a brief of its
+own, as a directory in no repository does (Decision 881). `repository` says which:
+`false` outside a repository and in an ignored folder (a daemon from before it sends none).
+`refresh_due` is whether
 a client should start a `librarian` session on the workspace now, which is what
-`memory_auto_refresh` asks of it: the workspace is in a git repository (never true in a
-directory none holds, such as a home directory), the brief is `absent` or `stale`, and no librarian has
+`memory_auto_refresh` asks of it: the workspace is in a git repository (`repository`;
+never in a directory none holds, such as a home directory, or in a folder the repository
+ignores), the brief is `absent` or `stale`, and no librarian has
 started on it in the last `memory_max_age_days` without its being built since. A
 librarian's run that failed, was cancelled or wrote nothing is tried again that much
 later, not in every new session; `refresh_held_until` is when (or `null`), for a
@@ -2017,18 +2028,36 @@ made twice.
 ```
 → `{"workspaces": [{"path", "score"}]}`
 
-#### `worktree.list` → `{"worktrees": [{"path", "branch", "session_id", "dirty", "ahead", "behind", "added", "removed"}]}`
+#### `worktree.list` → `{"worktrees": [{"path", "branch", "session_id", "checked", "dirty", "ahead", "behind", "added", "removed"}]}`
+```json
+{"workspace": "/home/me/project", "status": false}
+```
 
 Every worktree of the workspace's repository, the checkout first, with the live session
-working in it (`session_id`, `null` for none) and whether it has uncommitted or untracked
-files. How it stands against the checkout (Decision 840, additive): `ahead` and `behind`
+working in it (`session_id`, `null` for none: one in its directory, or in a folder of it
+git does not ignore) and whether it has uncommitted or untracked files. How it stands
+against the checkout (Decision 840, additive): `ahead` and `behind`
 are the commits its branch has that the checkout's branch has not, and the other way
 round, and `added` and `removed` the lines it would bring, counted since its branch left
 the checkout's, its uncommitted changes and untracked files included, as `worktree.merge`
 would commit them. For the checkout itself `ahead` and `behind` are against its upstream
 and `added` and `removed` what it has not committed. Each is `null` where git cannot say
 (no upstream, a detached checkout). A binary file adds no lines, and an untracked file
-over 1 MB or past the first 200 is not counted.
+over 1 MB or past the first 200 is not counted. Without `workspace`, the worktrees of every
+live session's workspace.
+
+The workspace follows git (Decision 881): a folder its repository tracks, or would add,
+lists the repository's worktrees, and a folder the repository ignores is a workspace of its
+own and lists none, as a directory in no repository does.
+
+The answer comes in bounded time however many worktrees there are. `status: false` asks
+for the trees alone: each row is `path`, `branch` and `session_id`, and no tree is looked
+at, which is how a client asks whether a workspace is in a repository. Otherwise the daemon
+reads the trees' status for about two seconds, several at once, the checkout first, then
+the trees a session works in, then the rest in git's order. `checked` says whether it read
+a tree's; a tree it did not reach has `checked: false` and `dirty` and every count `null`,
+which a client shows as not looked at rather than as clean. A daemon from before this sends
+no `checked`, and has read every tree.
 
 #### `worktree.remove`
 ```json

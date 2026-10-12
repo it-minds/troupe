@@ -67,6 +67,17 @@ starts work rather than a chat: a branch on the default agent (`build`, or
 session on a pod runs one agent, and the line is said to it. In a window, `/todo add
 <text>`, `/todo complete <n>` and `/todo cancel <n>` edit that window's task list.
 
+The main screen also lists the worktrees of the workspace's repository, each with its
+branch, how far it is from the checkout's and whether it has uncommitted work. With many
+worktrees the list comes at once, and the daemon looks at as many as it can in about two
+seconds, the checkout first; a worktree it did not reach shows no state rather than
+`clean`. A workspace inside another repository follows git. In a folder the repository
+tracks, the worktrees are the repository's, and `/worktree` makes one beside the
+repository's checkout, with the agent in the same folder of it. A folder the repository
+ignores (say one in its `.gitignore`) is a workspace of its own: it lists no worktrees,
+`/worktree <prompt>` works in the folder itself, and `/worktree name: …` is refused
+there.
+
 A line that starts with `!` is a shell command of your own. In the terminal client
 `!git status` runs `git status` where the session runs, in its workspace (the pod's
 working copy for a session on a plane), and shows what it printed and how it ended as your

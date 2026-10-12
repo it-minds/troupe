@@ -247,6 +247,37 @@ defmodule Troupe.Tools.RememberTest do
     refute File.exists?(Path.join(worktree, ".troupe/memory.md"))
   end
 
+  # #650: the brief follows git. A folder the repository tracks, or would add, shares the
+  # checkout's brief; a folder it ignores is a workspace of its own, as a directory in no
+  # repository is: its own brief, which no librarian refreshes by itself, and no onboarding
+  # question. On the chunk's tip the ignored folder wrote the checkout's brief.
+  test "a folder the repository ignores keeps a brief of its own", context do
+    repo = context.workspace
+    git_commit!(repo)
+    File.write!(Path.join(repo, ".gitignore"), "scratch/\n")
+    ignored = Path.join(repo, "scratch/ws")
+    fresh = Path.join(repo, "lib")
+    File.mkdir_p!(ignored)
+    File.mkdir_p!(fresh)
+    File.write!(Path.join(ignored, "CLAUDE.md"), "Run the tests before you commit.\n")
+    config = Troupe.Config.load(repo, state_dir: context.state_dir)
+
+    assert Memory.path(fresh) == Path.join(repo, ".troupe/memory.md")
+    assert Memory.repository?(fresh)
+    assert Memory.refresh_due?(fresh, config)
+
+    assert Memory.path(ignored) == Path.join(ignored, ".troupe/memory.md")
+    assert Memory.locate(ignored) == %{root: ignored, top: ignored}
+    refute Memory.repository?(ignored)
+    refute Memory.refresh_due?(ignored, config)
+    assert %{due: "none"} = Notice.brief(ignored, config: config)
+    assert %{due: "none", plan: nil} = Notice.onboarding(ignored, state_dir: context.state_dir)
+
+    assert {:ok, _} = note(ignored, "written in the ignored folder")
+    assert File.read!(Path.join(ignored, ".troupe/memory.md")) =~ "written in the ignored folder"
+    refute File.exists?(Path.join(repo, ".troupe/memory.md"))
+  end
+
   # #524: git takes a workspace's own `.git` at its word, so one whose git directory has a
   # `commondir` naming another checkout's `.git` is, to git, a worktree of that checkout.
   # The brief follows only a checkout that names the worktree back.

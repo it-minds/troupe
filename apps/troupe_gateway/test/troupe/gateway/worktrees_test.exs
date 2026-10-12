@@ -262,6 +262,66 @@ defmodule Troupe.Gateway.WorktreesTest do
              workspace |> Worktrees.list() |> Enum.find(&(&1["branch"] == branch))
   end
 
+  # #650: a repository with two hundred worktrees. Without their status the listing asks git
+  # for the list of trees and nothing about any of them; with it, each tree's status is read
+  # only while the listing's time lasts, the checkout first, and a tree it did not reach says
+  # so rather than reading clean.
+  test "worktree.list answers in bounded time with many worktrees", context do
+    workspace = context.workspace
+    client = connect(context)
+
+    for n <- 1..200 do
+      {_, 0} = git(workspace, ["worktree", "add", "-q", "-b", "many-#{n}", tree_path(context, n)])
+    end
+
+    ran = record_calls(context.base)
+
+    {took, {:ok, %{"worktrees" => rows}}} =
+      :timer.tc(fn ->
+        Client.call(client, "worktree.list", %{"workspace" => workspace, "status" => false})
+      end)
+
+    assert length(rows) == 201
+    assert [%{"branch" => "main", "session_id" => nil} = checkout | _] = rows
+    refute Map.has_key?(checkout, "dirty")
+    assert Enum.count(ran.(), &(&1 =~ "worktree list")) == 1
+    refute Enum.any?(ran.(), &(&1 =~ ~r/ (status|diff|rev-list) /))
+    assert took < 10_000_000
+
+    # With no time to read any status, none is read, and every row says it was not.
+    Application.put_env(:troupe_gateway, :worktree_status_ms, 0)
+    on_exit(fn -> Application.delete_env(:troupe_gateway, :worktree_status_ms) end)
+    before = length(ran.())
+
+    assert {:ok, %{"worktrees" => rows}} =
+             Client.call(client, "worktree.list", %{"workspace" => workspace})
+
+    assert length(rows) == 201
+    refute Enum.any?(Enum.drop(ran.(), before), &(&1 =~ ~r/ (status|diff|rev-list) /))
+
+    for row <- rows do
+      assert %{"checked" => false, "dirty" => nil, "ahead" => nil, "behind" => nil} = row
+      assert %{"added" => nil, "removed" => nil} = row
+    end
+
+    # With a second, it answers soon after the second, the checkout read first.
+    Application.put_env(:troupe_gateway, :worktree_status_ms, 1_000)
+
+    {took, {:ok, %{"worktrees" => rows}}} =
+      :timer.tc(fn -> Client.call(client, "worktree.list", %{"workspace" => workspace}) end)
+
+    assert length(rows) == 201
+    assert took < 10_000_000
+    assert %{"branch" => "main", "checked" => true, "dirty" => false} = hd(rows)
+
+    # A tree whose status was read is clean; its lines are counted unless the time ran out
+    # between the two.
+    for %{"checked" => true} = row <- rows do
+      assert %{"dirty" => false} = row
+      assert row["added"] in [0, nil] and row["removed"] in [0, nil]
+    end
+  end
+
   # #529 (Decision 833): the gateway's own git runs none of the commands the repository's
   # `.git` names, as it makes a worktree, commits what was left in it and merges it.
   describe "a repository whose own .git runs commands" do
@@ -400,6 +460,8 @@ defmodule Troupe.Gateway.WorktreesTest do
       end
     end
   end
+
+  defp tree_path(context, n), do: Path.join(context.base, "many-#{n}")
 
   defp real!(path) do
     {:ok, real} = Troupe.Workspace.real_path(path)

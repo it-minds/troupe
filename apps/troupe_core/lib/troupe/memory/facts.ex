@@ -396,7 +396,7 @@ defmodule Troupe.Memory.Facts do
   defp tracked_names(where, paths) do
     top = where.top
 
-    if Brief.repository?(top) do
+    if Brief.repository?(where) do
       tables = tables(where)
       top_key = Workspace.compare_key(top)
       at = System.os_time(:second)
