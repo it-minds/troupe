@@ -42,7 +42,9 @@ or set `worker.seccomp.install.enabled: false` and install the profile another w
 step 2, `kubectl -n troupe-system rollout status daemonset/troupe-worker-seccomp`. The new
 profile changes every profile's pod template, so each reports `UpgradePending` and its
 pods are replaced as they empty (step 4); a pod replaced before the DaemonSet reached its
-node waits in `CreateContainerError` until it has.
+node waits in `CreateContainerError` until it has. On a standard kernel the pods then
+refuse commands at the sandbox's `/proc` instead
+([installing.md](installing.md#the-workers-seccomp-profile)).
 
 A release publishes the chart and the images and deploys nothing; every deployment rolls
 it this way, from wherever it keeps its own values.

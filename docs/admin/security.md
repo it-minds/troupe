@@ -121,7 +121,9 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   allow all of this and mounting in the pod's own namespace besides, and `Unconfined`, which
   the development cluster uses, removes the filter entirely. The pod as a whole keeps the
   runtime's default; only the worker container has this one. `RuntimeDefault` remains a
-  choice, under which no command runs on a pod.
+  choice, under which no command runs on a pod. The profile is not yet all bubblewrap needs
+  on a standard kernel: the runtime's masked `/proc` refuses the sandbox a fresh one, and a
+  pod refuses commands at that point instead (#690).
 - **Network.** Each profile's namespace has a NetworkPolicy: ingress only from the
   namespace labelled `troupe.dev/ingress=true`, egress to DNS, the plane, OpenBao, object
   storage, the model, the MCP servers and the git hosts. **With Cilium** the profile's

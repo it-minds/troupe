@@ -60,7 +60,7 @@ profile's own directory from the host, and a path with `..` in it would mount an
 {{- define "troupe.worker.seccomp.validate" -}}
 {{- $seccomp := .Values.worker.seccomp -}}
 {{- if not (has $seccomp.type (list "Localhost" "RuntimeDefault" "Unconfined")) }}
-{{- fail (printf "worker.seccomp.type is %q: it is Localhost (the chart's profile, under which bubblewrap starts), RuntimeDefault (no command runs on a pod) or Unconfined (no filter, for a development cluster)." (toString $seccomp.type)) }}
+{{- fail (printf "worker.seccomp.type is %q: it is Localhost (the chart's profile, which lets bubblewrap make its namespaces), RuntimeDefault (no command runs on a pod) or Unconfined (no filter, for a development cluster)." (toString $seccomp.type)) }}
 {{- end }}
 {{- if eq $seccomp.type "Localhost" }}
 {{- $path := $seccomp.localhostProfile | default "" }}

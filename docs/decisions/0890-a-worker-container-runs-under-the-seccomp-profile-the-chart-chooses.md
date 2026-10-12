@@ -101,12 +101,23 @@ node allowed them, and the pod's own profile was what refused. This replaces tha
   hold only for some capabilities (`includes.caps`): a file cannot know a container's
   capabilities, the worker's are always none, and the form containerd renders itself, the
   OCI runtime spec's, is the one it was proven in.
+- **Needed, and not enough on a standard kernel.** With the profile out of the way,
+  bubblewrap makes its namespaces and then stops at mounting the sandbox's own `/proc`: on
+  CI's kind (v1.35, the runner's Ubuntu kernel, `Unconfined`) the bubblewrap test is
+  answered "bubblewrap could not start one here (bwrap: Can't mount proc on /newroot/proc:
+  Operation not permitted)" (run 38307929071). The runtime masks paths under a container's
+  `/proc` (`/proc/kcore` and the rest, bind-mounted over), and the kernel refuses a new
+  proc mount inside a user namespace while the one it would reveal is not fully visible.
+  Docker Desktop's kind, where everything below was tried, allowed the mount; why is not
+  established. What unmasks a worker's `/proc` (Kubernetes' `procMount: Unmasked`, which it
+  allows only with `hostUsers: false`), or a sandbox that needs no fresh `/proc`, is a
+  decision of its own (#690).
 - **Not done here.** AppArmor: where a node's runtime applies its default AppArmor profile,
   that profile has `deny mount`, which would refuse bubblewrap's mounts with this profile
   in place; neither kind cluster (CI's or Docker Desktop's) has AppArmor in its node, so it
   is unverified. arm64 nodes: the images are built for amd64 alone.
-- **Proof.** Run 38294040077 (above) is the reproduction. On kind (v1.34, containerd
-  2.1.3), the worker image with the worker's security context: under `RuntimeDefault`
+- **Proof.** Run 38294040077 (above) is the reproduction. On Docker Desktop's kind (v1.34,
+  containerd 2.1.3), the worker image with the worker's security context: under `RuntimeDefault`
   `unshare -U` and bubblewrap with `Troupe.Sandbox`'s flags are refused; under the
   shipped profile, installed by the rendered DaemonSet, a user, mount and PID namespace
   are made, bubblewrap runs with those flags (`/proc/1/comm` is `bwrap`, no BEAM in sight)
@@ -114,6 +125,7 @@ node allowed them, and the pod's own profile was what refused. This replaces tha
   `Unconfined` all of it runs. A pod created before the installer failed
   `CreateContainerError` and started when the file arrived. In the operator suite each
   type reaches the worker container and a type the kubelet does not take is refused
-  (`ResourcesTest`, `SettingsTest`); the chart job checks the chart's refusals; and this
-  pull request's cluster job runs the bubblewrap test on kind under `Unconfined`, with a
-  test that the worker container wears the profile the installation chose.
+  (`ResourcesTest`, `SettingsTest`); the chart job checks the chart's refusals; and on CI's
+  kind the worker container wears the profile the installation chose (a test of its own),
+  and the bubblewrap test, under `Unconfined`, gets past the user namespace to the `/proc`
+  mount above.

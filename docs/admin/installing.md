@@ -135,6 +135,13 @@ worker:
 - **`Unconfined`** is no filter at all, for a development cluster (`dev/kind/values.yaml`).
   The `baseline` and `restricted` Pod Security levels refuse it.
 
+**Not enough on its own yet.** With the profile in place bubblewrap makes its namespaces,
+and on a standard kernel it then stops at mounting the sandbox's own `/proc` ("bwrap: Can't
+mount proc on /newroot/proc: Operation not permitted"): the container runtime masks paths
+under a container's `/proc`, and the kernel refuses a new proc mount in a user namespace
+while those masks hide part of the one it would reveal. Until that is settled (#690), a
+worker refuses commands with that sentence instead of the one about the namespace.
+
 The operator labels no worker namespace, so they have the cluster's default Pod Security
 level. `Localhost` and `RuntimeDefault` pass `restricted`, as the rest of a worker pod does;
 `Unconfined` needs `privileged`, and where the level is higher every worker pod is refused
