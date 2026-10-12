@@ -420,6 +420,12 @@ defmodule Troupe.Bench.Live do
     {:ok, workspace} = Troupe.Workspace.new(work)
     root = workspace.root_real
 
+    # A limit the scenario sets is the run's, the runner's deadline among them (Decision
+    # 878): a session of five long turns is not stopped at a one-turn task's wall clock.
+    # The cap stays the plan's, as it was said before anything started.
+    own = Keyword.take(scenario.config, Keyword.keys(plan.limits))
+    plan = %{plan | limits: Keyword.merge(plan.limits, own)}
+
     # The bench's settings over the person's provider: every tool allowed, so no turn waits
     # on a person; no brief, which a librarian would be started to write; a budget that
     # stops rather than asks; and the run's limits.
@@ -433,6 +439,8 @@ defmodule Troupe.Bench.Live do
           budget_asks: false
         ] ++ plan.limits ++ scenario.config
 
+    overrides = windowed(overrides)
+
     handler = "troupe-bench-live-#{System.unique_integer([:positive])}"
     :ok = :telemetry.attach(handler, [:troupe, :llm, :retry], &__MODULE__.retried/4, self())
 
@@ -445,6 +453,19 @@ defmodule Troupe.Bench.Live do
       record(plan, ctx, acc, wall, error(ending, events, plan), checks, tool_calls)
     after
       :telemetry.detach(handler)
+    end
+  end
+
+  # A scenario that has to compact says the window it is planned against, and that is the
+  # run's model's whatever the person's catalog or `models.windows` say of it, which come
+  # before `context_window` (Decision 878).
+  defp windowed(overrides) do
+    case {overrides[:context_window], overrides[:model]} do
+      {window, model} when is_integer(window) and is_binary(model) ->
+        overrides ++ [windows: Map.put(overrides[:windows] || %{}, model, window)]
+
+      _none ->
+        overrides
     end
   end
 

@@ -112,6 +112,13 @@ defmodule Troupe.Tool.Result do
   @spec describe(term()) :: String.t()
   def describe(reason) when is_binary(reason), do: reason
 
+  # A document on the scratchpad, which a compaction's pointer names, and only `read_file`
+  # reads (Decision 878): another file tool given one says which reads it.
+  def describe({:outside_workspace, "scratch:" <> _ = path}),
+    do:
+      "#{path} is on the session's scratchpad, which only read_file reads and only show " <>
+        "writes. Read it with read_file(path: \"#{path}\")."
+
   def describe({:outside_workspace, path}),
     do: "Path #{path} is outside the workspace and was rejected. Use a path inside the project."
 

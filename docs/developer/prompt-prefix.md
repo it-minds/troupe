@@ -42,7 +42,7 @@ question, and gives the numbers from the live runs with the commands that produc
 | an MCP server's tools, or those a person's client offers | the first call of the turn after a server came back with another list, a sign-in completed, or a person's tools came or went | 654, 741, 861 | changes, at a turn's first call and never in the middle of one (871) |
 | the skills, in the `skill` tool and the system prompt | the first call of the turn after a skill file was added, removed or renamed | 700 | changes, at a turn's first call and never in the middle of one (876) |
 | the tools and skills a turn held | an agent restarted in the middle of the turn | 871 | the same: what the turn's first call held is in the log (876) |
-| the conversation | a compaction, which keeps a tail of it | 774 | changes; on a model that binds its thinking the tail goes without the blocks made in front of what the summary replaced, so no later call is refused (867) |
+| the conversation | a compaction, which keeps a tail of it | 774 | changes; on a model that binds its thinking the tail goes without the blocks made in front of what the summary replaced, so no later call is refused (867); a scratchpad document is left out for a pointer there and nowhere else (878) |
 | the turn context put before | an agent restarted, or a session resumed | 815 | the same: the blocks are in the log (863) |
 
 On an account the check is enforced for, every call after one of these that carries a
@@ -392,7 +392,8 @@ call's thinking:
   (Decision 876). A skill that went in the meantime stays listed until then, and a call
   to it is an error result saying it went.
 - **A compaction**, whose summary replaces what came before; its tail goes without the
-  thinking made in front of that (867).
+  thinking made in front of that (867), and a scratchpad document in it is left out for a
+  pointer (878).
 - **An `AI?` turn's `plan` prompt**, and **a profile or a model switched**.
 
 What a turn's first call took is on its `llm_request` (`turn_hold`, Decision 876), whole
@@ -461,6 +462,41 @@ loop's turn alone is the same model through a provider whose entry says
   `troupe bench --live --scenario loop_turn --repeat 3 --model claude-sonnet-5-5`, and the
   same with `--model <provider>/claude-sonnet-5-5` for a provider whose `models:` entry for
   it says `binds_thinking: false`.
+
+## A compaction and the scratchpad (#616)
+
+A document `show` puts on the scratchpad is in the conversation as the call's arguments,
+and nothing replaces it between compactions (Decision 870), so it is sent again on every
+later call. A compaction, which changes the prefix anyway, leaves it out (Decision 878):
+
+- **What it keeps, and what its summariser reads,** has in each shown document's place one
+  line naming it, its title, version and size and the call that reads it back:
+  `read_file(path: "scratch:/<name>")`, read-only, the only file tool that reaches the
+  scratchpad. A call the model has not replied after yet, the one a compaction in the
+  middle of a turn comes after, keeps its words until the next compaction.
+- **Its summary lists the scratchpad** after it, every document and its latest version, so
+  a document is known by name after any number of compactions.
+- **It is logged** with the conversation in `compacted`, so a restart sends the same prefix,
+  and on a model that binds its thinking the tail still goes without its blocks (867).
+
+Live, on Claude Sonnet 5.5, `scratchpad_session` and `scratchpad_session_without`: five
+turns that write the migration plan, revise it, write a checklist, ask about a step and
+add one, under a window of their own (a compaction at 11,200 tokens). Tokens fresh / read
+from the cache / output; Decision 878 has the runs on the builds before.
+
+| | with the scratchpad, one run | without, three runs |
+|---|---:|---:|
+| compactions | 6 | 3 each |
+| from the run's first compaction | $0.3111; 66,853 / 57,813 / 17,831 | $0.1562 to $0.1861 |
+| the fourth and fifth turns, both after a compaction | $0.1842; 34,140 / 29,034 / 11,377 | $0.1497 to $0.1754 |
+
+No call after a compaction carried a document's words, and the agent read the plan back
+when a turn needed it. But this scenario does not show the session costing no more: under
+its small window the session with the scratchpad compacted after nearly every call (each
+of its turns makes two, and each read-back of the 14.5 KB plan crosses the line again), and
+each compaction writes the prompt to the cache again. A window where compactions are rare
+against the calls between them, and a revision that does not read the whole document back
+(#472's `patch`), are what the measure still needs.
 
 ## Live numbers
 

@@ -260,9 +260,14 @@ same name replaces it, so a plan is revised in place.
 - **Limits.** 256 KiB a document (`scratch_max_bytes`) and 50 documents a session
   (`scratch_max_documents`). Past either, `show` refuses and says so, and the agent
   replaces a document or answers in the chat.
-- **What it costs.** The document's words are still in the conversation, as the call's
-  arguments, so it costs about what the same answer in the chat would. What changes is
-  where you read it, not what is sent to the model.
+- **What it costs.** Until the conversation is compacted, the document's words are in it
+  as the call's arguments, so it costs about what the same answer in the chat would. A
+  compaction leaves each document out for a one-line pointer (its name, title, version
+  and size), and the summary it writes lists every document on the scratchpad, so from
+  then on the model is not sent them again but knows they are there. When the agent needs
+  a document after that, it reads it back with `read_file` on `scratch:/<name>`; that read
+  is the only way the agent's tools reach the scratchpad, and it writes there only with
+  `show`.
 
 ## What Troupe never does
 

@@ -45,7 +45,18 @@ defmodule Troupe.Agent.Server do
     State,
     Writes
   }
-  alias Troupe.{Budget, Config, Events, Instructions, Registry, Skills, Todo, Tool, Tools}
+  alias Troupe.{
+    Budget,
+    Config,
+    Events,
+    Instructions,
+    Registry,
+    Scratch,
+    Skills,
+    Todo,
+    Tool,
+    Tools
+  }
 
   alias Troupe.LLM.{
     Catalog,
@@ -67,7 +78,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions, Shell}
   alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
-  alias Troupe.Tools.{Delegate, Finish, Output, ReadOutput}
+  alias Troupe.Tools.{Delegate, Finish, Output, ReadFile, ReadOutput, Show}
   alias Troupe.Watch.Trigger
 
   require Logger
@@ -3485,7 +3496,7 @@ defmodule Troupe.Agent.Server do
   end
 
   defp enter_compaction(state, resume) do
-    {_keep, drop} = split_for_compaction(state.conversation)
+    {_keep, drop} = state |> shown_left_out(state.conversation) |> split_for_compaction()
 
     if drop == [] do
       # Nothing old enough to summarise: compacting would loop.
@@ -3567,6 +3578,8 @@ defmodule Troupe.Agent.Server do
   # by the calls in the message before it, as `Output.stub_behind/3` names it. Anthropic's
   # thinking is not sent: it says nothing a summary can read, and on a model that binds it
   # to the conversation it was made in, the summariser's is not that one (Decision 867).
+  # Nor, where the agent can read them back, a shown document's words: the stretch is cut
+  # from the conversation with their pointers in their place (Decision 878).
   defp written_out(messages) do
     {written, _calls} =
       messages
@@ -3606,7 +3619,9 @@ defmodule Troupe.Agent.Server do
     identifiers exact. Tool calls are written as [called <tool> <arguments>], each
     followed by what it returned or why it failed: say what the calls that matter
     did (the tool, the arguments that matter, the gist of the result), not their
-    output. Drop pleasantries and anything already reflected in the current state
+    output. A document shown with show stays on the session's scratchpad and is
+    written here as a pointer: keep its name and the read_file call that reads it
+    back. Drop pleasantries and anything already reflected in the current state
     of the files.
     """
     |> String.trim()
@@ -3627,13 +3642,11 @@ defmodule Troupe.Agent.Server do
   defp apply_compaction(state, %Response{} = response) do
     summary = Message.text(Response.to_message(response))
     gateway = gateway_json(response.gateway, state, response, "cheap")
-    {keep, _drop} = split_for_compaction(state.conversation)
+    {keep, _drop} = state |> shown_left_out(state.conversation) |> split_for_compaction()
     keep = if binds_thinking?(state), do: Enum.map(keep, &without_thinking/1), else: keep
 
-    conversation = [
-      Message.user("Summary of earlier work in this session:\n\n" <> summary)
-      | keep
-    ]
+    said = "Summary of earlier work in this session:\n\n" <> summary <> on_the_pad(state)
+    conversation = [Message.user(said) | keep]
 
     log(state, :compacted, %{
       "summary" => summary,
@@ -3671,6 +3684,26 @@ defmodule Troupe.Agent.Server do
   # still holds, and an Anthropic model thinking with an effort set may need its last one.
   # Its config's `binds_thinking` before its name (Decision 871).
   defp binds_thinking?(state), do: Config.binds_thinking?(state.config, state.definition.model)
+
+  # A document `show` put on the scratchpad is there whole, so what a compaction keeps,
+  # and what its summariser reads, has a pointer in place of its words (Decision 878): the
+  # prefix changes here anyway, and only here. Not where the agent has no `read_file`,
+  # which is what reads one back: a pointer it cannot follow is a document lost.
+  defp shown_left_out(state, messages),
+    do: if(reads_back?(state), do: Show.left_out(messages), else: messages)
+
+  # And the summary names every document on the scratchpad after it, so one whose call
+  # went into this summary or an earlier one is still known by name, whatever the
+  # summariser kept of it.
+  defp on_the_pad(state),
+    do: if(reads_back?(state), do: Show.listing(Scratch.list(state.session_id)), else: "")
+
+  defp reads_back?(state) do
+    state
+    |> effective_definition()
+    |> Tools.for_definition(state.session_id)
+    |> Enum.any?(&(Tool.name(&1) == ReadFile.name()))
+  end
 
   # A message that was nothing but thinking is left as it was rather than sent empty.
   defp without_thinking(%Message{role: :assistant, content: blocks} = message) do

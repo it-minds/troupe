@@ -671,6 +671,65 @@ defmodule Troupe.BenchLiveTest do
     end
   end
 
+  # Issue #616 (Decision 878): a long session that compacts before its fourth turn, with the
+  # scratchpad and without it. Its window is its own, whatever the person's say.
+  describe "issue #616's long session" do
+    test "runs by name, both under their window, the one without the scratchpad on build as it was" do
+      assert {:ok, [pad, plain]} =
+               LiveScenarios.select(nil, ~w(scratchpad_session_without scratchpad_session))
+
+      assert {pad.name, plain.name} == {"scratchpad_session", "scratchpad_session_without"}
+      assert pad.prompt == plain.prompt and pad.follow_ups == plain.follow_ups
+      assert length(pad.follow_ups) == 4
+      assert pad.config[:context_window] == plain.config[:context_window]
+      assert plain.files[".troupe/agents/build.md"] == LiveScenarios.build_without_show()
+      refute Map.has_key?(pad.files, ".troupe/agents/build.md")
+    end
+
+    test "a scenario's window is the run's model's, whatever the person's say" do
+      fake =
+        start_fake(
+          scripts: [
+            {"read the notes",
+             Enum.map(1..8, &{:tools, [{"read_file", %{"path" => "notes/#{&1}.txt"}}]}) ++
+               [{:text, "Read them all."}]}
+          ]
+        )
+
+      scenario = %Scenario{
+        name: "windowed",
+        title: "reads under a window of the scenario's own",
+        prompt: "read the notes, one at a time",
+        files: Map.new(1..8, &{"notes/#{&1}.txt", "note #{&1}\n"}),
+        config: [context_window: 5_000, compact_at: 0.8],
+        measure: fn _ctx -> {[], []} end
+      }
+
+      config = person(fake, windows: %{FakeOpenAI.model() => 1_000_000})
+      {:ok, plan} = Bench.plan(config: config, scenarios: [scenario], history: nil)
+
+      [run] = plan |> Bench.live() |> scenario("windowed") |> Map.fetch!("runs")
+      assert run["compactions"] >= 1, inspect(run["error"])
+    end
+
+    test "a scenario's wall clock is its run's, the runner's deadline too" do
+      fake = start_fake(done_ms: 2_000)
+      [write_file] = only(["write_file"])
+      long = %{write_file | config: [wall_clock_ms: 30_000]}
+
+      {:ok, plan} =
+        Bench.plan(
+          config: person(fake),
+          scenarios: [long],
+          limits: [wall_clock_ms: 1_000],
+          history: nil
+        )
+
+      assert [%{"succeeded" => true, "error" => nil}] =
+               plan |> Bench.live() |> scenario("write_file") |> Map.fetch!("runs")
+    end
+  end
+
   # The stand-in as Anthropic's API, serving Claude Opus 5.5 at its price.
   defp anthropic(fake, extra \\ []) do
     Troupe.Config.load(
