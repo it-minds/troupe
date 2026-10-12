@@ -112,6 +112,7 @@ nav:
       - Backup and restore: admin/backup-restore.md
       - Monitoring: admin/monitoring.md
       - Routine tasks: admin/routine-tasks.md
+      - Security, for a reviewer: admin/security.md
       - The A2A facade: a2a.md
       - What Troupe dials: egress-allowlist.md
   - Contributing:

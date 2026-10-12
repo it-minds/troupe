@@ -92,9 +92,9 @@ The shell also runs the *device* grant rather than the browser build's authoriza
 flow: a desktop app has no redirect to come back from, and the device grant is exactly
 right for one.
 
-Not here: automatic updates. Adding the updater means a minisign keypair, which is
-a signing decision, so it waits for the same moment signing does. Until then a new version
-means downloading a new installer.
+From 0.15.0 the app updates itself, only from a release the release key signed
+([updating](../../../docs/user/updating.md#the-desktop-app)); one older than that is
+updated once by its installer.
 
 ---
 
@@ -134,11 +134,8 @@ Signing turns on the hardened runtime and `entitlements.plist`, which gives WKWe
 the JIT the hardened runtime takes away. Nothing else is in that file, and nothing else
 should be.
 
-### The updater, whenever it arrives
+### The updater
 
-A third key, unrelated to the two above: `pnpm tauri signer generate` produces a minisign
-pair that signs the update payloads. Public half into `tauri.conf.json`, private half and
-its password into `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
-Keep the update feed public — an installer is not a secret, the plane's authentication is —
-and remember that the Tauri updater cannot replace a file `apt` or `dnf` owns, so Linux
-updates through the package manager or through the AppImage, not both.
+It needs no key of its own: the release key signs the update payloads too
+([Decision 874](../../../docs/decisions/0874-the-desktop-app-updates-itself-from-a-release-the-release-key-signed.md)).
+On Linux it updates the AppImage; it cannot replace a file `apt` or `dnf` owns.

@@ -31,11 +31,22 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Tui
 That installs the latest release's [daemon](glossary.md#daemon), `troupe-daemon`, and its
 terminal [client](glossary.md#client), `troupe`, for your user alone: in `~/.local/bin`, or
 `%LOCALAPPDATA%\Programs\troupe` on Windows. Every download is checked against the release's
-`SHA256SUMS` first, and in a terminal the script shows its plan and asks before it changes
-anything; read it before you run it if you like. `--gui` (`-Gui`) adds the desktop app, and
-`--vscode` (`-VSCode`) the [VS Code extension](user/vscode.md) where VS Code is. The
-programs are not code-signed, and [the TUI's README](../clients/tui/README.md#unsigned-binaries)
-says what macOS and Windows make of that.
+`SHA256SUMS` first, and against the release's signature where
+[minisign](https://jedisct1.github.io/minisign/) is installed; in a terminal the script
+shows its plan and asks before it changes anything; read it before you run it if you like.
+`--gui` (`-Gui`) adds the desktop app, and `--vscode` (`-VSCode`) the
+[VS Code extension](user/vscode.md) where VS Code is.
+
+The programs carry no Apple or Microsoft signature yet. The installers download with
+`curl` and `Invoke-WebRequest`, which Gatekeeper and SmartScreen rarely stop; for a
+download made in a browser, the first time:
+
+- **macOS** refuses to open it: **System Settings → Privacy & Security**, then **Open
+  Anyway** beside the message about Troupe.
+- **Windows** says "Windows protected your PC": **More info**, then **Run anyway**.
+
+What makes that safe is the release's own signature, which `troupe update` and the desktop
+app check before every update ([security](admin/security.md#6-the-apps-are-not-os-code-signed)).
 
 Open a new terminal, so that the `PATH` the installer set is read, and check:
 
@@ -226,7 +237,9 @@ in. The desktop app lists this machine's sessions and the plane's in one list. W
 need a plane at all: [why-troupe.md](why-troupe.md). Running one:
 [admin/installing.md](admin/installing.md).
 
-To remove Troupe again: `sh install.sh --uninstall`, or `-Uninstall` on Windows; add
+`troupe update` installs a newer release over these, once its signature checks against
+the release key ([updating](user/updating.md)), and the desktop app updates itself. To
+remove Troupe again: `sh install.sh --uninstall`, or `-Uninstall` on Windows; add
 `--purge` (`-Purge`) to remove its settings and session logs too.
 
 ## What CI does not run

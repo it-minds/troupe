@@ -10,7 +10,7 @@ say something the loader does not do.
 
 | Layer | Where | What it is for |
 |---|---|---|
-| org | the organisation's `defaults:`, from the plane you are signed in to (kept as `organisation.json` in the state directory) and from a managed file (`%ProgramData%\troupe\managed.yaml` on Windows, `/Library/Application Support/troupe/managed.yaml` on macOS, `/etc/troupe/managed.yaml` elsewhere) | what your organisation suggests: a provider, a gateway, the models |
+| org | the organisation's `defaults:`, from the plane you are signed in to (kept as `organisation.json` in the state directory) and from a managed file (`C:\ProgramData\troupe\managed.yaml` on Windows, on the drive Windows is on, `/Library/Application Support/troupe/managed.yaml` on macOS, `/etc/troupe/managed.yaml` elsewhere) | what your organisation suggests: a provider, a gateway, the models |
 | user | `~/.config/troupe/config.yaml`; `%APPDATA%\troupe\config.yaml` on Windows; `$TROUPE_CONFIG_HOME/config.yaml` when that is set | this machine: providers, keys, the models you use |
 | project | `<workspace>/.troupe/config.yaml` | what a repository wants, committed with it |
 | local | `<workspace>/.troupe/config.local.yaml` | one person's settings for one repository, such as a key; add it to `.gitignore` |
@@ -22,12 +22,18 @@ Each layer beats the ones above it: the defaults, then the organisation's defaul
 user file, the project file, the local file, the environment, the command line, and what
 the organisation enforces last. A file that is not there is not an error.
 
+`<config>` is the directory of the user file. Troupe's state directory, where it keeps
+session logs and what it remembers for you (`organisation.json`, your MCP sign-ins, your
+answers about onboarding), is `~/.local/state/troupe` (`$XDG_STATE_HOME/troupe` where that
+is set), `%LOCALAPPDATA%\troupe` on Windows, or `$TROUPE_STATE_HOME`.
+
 ## Your organisation's defaults and limits
 
 An organisation speaks at both ends of the ladder. Its **defaults** sit below your own
 file: they are what a machine starts with, and anything you set wins over them. What it
-**enforces** sits above everything, the command line included, and nothing on this machine
-goes past it.
+**enforces** sits above everything, the command line included. That is a guardrail, not a
+lock: a plane's copy is a file in your own state directory, and only the managed file is
+out of your reach ([security](../admin/security.md#7-an-organisations-limits-are-a-guardrail-not-a-lock)).
 
 Only these keys can be enforced, and each one is a ceiling:
 
@@ -39,12 +45,12 @@ Only these keys can be enforced, and each one is a ceiling:
 | `provider`, `base_url` | what it is; a named provider at another URL, or of another type, is refused too |
 
 A file, a variable or a flag that tries to go past an enforced value is held to it, with
-one warning that names the file, the key and the organisation's value. The settings pages
-show such a key as set by your organisation and do not change it, and `config.set` refuses
-it. When a session reaches an enforced `max_turns` or `wall_clock_ms`, the question that
-asks whether to go on offers only what stays under it, says the limit is your
-organisation's and where it came from, and turns away a larger amount, `no limit` and an
-`allow` past it. A model entry's own `max_output` can lower an enforced `max_tokens` for
+one warning that names the file, the key and the organisation's value. The terminal UI's
+settings page shows such a key as set by your organisation and does not change it, and
+`config.set` refuses it from either client. When a session reaches an enforced
+`max_turns` or `wall_clock_ms`, the question that asks whether to go on offers only what
+stays under it, says the limit is your organisation's and where it came from, and turns
+away a larger amount, `no limit` and an `allow` past it. A model entry's own `max_output` can lower an enforced `max_tokens` for
 its model, and cannot raise it. `troupe config --explain KEY` shows both ends with where
 they came from:
 
@@ -58,8 +64,11 @@ max_turns = 25
 
 The organisation's word comes from two places. Signed in to a plane (`troupe login`), the
 daemon fetches its document whenever a client connects and keeps a copy, used as it is
-when the plane cannot be reached; `troupe config pull` fetches it now. Without a plane, an
-administrator writes a managed file at the path above. Where both say something, the
+when the plane cannot be reached; `troupe config pull` fetches it now, and writes nothing
+into `config.yaml`. What a pull before 0.14 wrote there is your own setting and wins over
+the organisation's defaults; `pull` names those keys, and taking the lines out follows
+the organisation again. Without a plane, an administrator writes a managed file at the
+path above. Where both say something, the
 plane's defaults win over the file's, the stricter of two limits holds, and a provider or
 URL both fix is the managed file's. The format, and how an administrator sets either, is
 in the administrator's [configuration page](../admin/configuration.md#defaults-and-limits-for-peoples-machines).
@@ -138,8 +147,8 @@ session may do without asking, where requests go and with which key, what runs o
 machine and what may be read, and those are read from a workspace's own files only once
 you trust the workspace:
 
-- approvals: `auto_approve`, `approvals`, `managed_permission_rules_only`, `managed_mcp_servers_only`
-- endpoints and credentials: `provider`, `base_url`, `api_key`, `auth`, `providers`
+- approvals: `auto_approve`, `approvals`, `delegation`, `managed_permission_rules_only`, `managed_mcp_servers_only`, `watch`, `watch_auto_approve`
+- endpoints and credentials: `provider`, `base_url`, `api_key`, `auth`, `providers`, `identify`
 - commands to run: `mcp`
 - paths: `read_roots`, `state_dir`, `fake_script`
 
@@ -265,7 +274,8 @@ endpoint follows none. TLS still checks the server's certificate against its nam
 | Refused | link-local (`169.254.0.0/16`, `fe80::/10`); a cloud's metadata service (`169.254.169.254`, `fd00:ec2::254`, `100.100.100.200`), however the address is written, an IPv4 address written as IPv6 included; the unspecified address (`0.0.0.0`, `::`) |
 | Allowed | loopback, for a server you run on this machine; the private ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `fc00::/7`), where an intranet's servers are; everything else |
 
-One refused address among a name's answers refuses the name. The server's line on the
+One refused address among a name's answers refuses the name, and so does a name that
+does not resolve (`does not resolve (nxdomain)`). The server's line on the
 `/mcp` page says what it resolved to (`wiki.example.com resolves to 169.254.169.254, a
 link-local address, and is not called`), and a sign-in whose metadata names such an
 address is refused before your browser opens. The authorization endpoint is opened by
@@ -375,7 +385,7 @@ Then sign in: `/mcp sign-in wiki` in the TUI, or `s` on the server's line of the
 page, or **Sign in** on the desktop app's "Servers and skills" panel. Your browser
 opens on the provider's page; when you are done it comes back to the daemon, which
 listens for it on this machine, so open the URL on the machine the daemon runs on. The
-page says "signed in as …", and a session waiting for the server gets its tools at once.
+page says "Signed in to … as …", and a session waiting for the server gets its tools at once.
 The sign-in is kept in Troupe's state directory (`mcp-oauth.json`, readable by you
 alone), never in `mcp.json`, and refreshed when it runs out. When the provider stops
 taking it, the server's line says to sign in again, and a tool the model calls answers
@@ -551,8 +561,8 @@ there was nobody to ask. Inside a session, an agent whose profile names the
 config directory, and into an `AGENTS.md`, it asks even with `auto_approve` on, since what
 lands there runs in every session without a question, or is read by every tool.
 
-Onboarding proposes by itself and never writes by itself. A session in a workspace that
-has other tools' files and nothing onboarded says, in one line, what `troupe onboard` would
+Onboarding proposes by itself and never writes by itself. A session in a git repository
+that has other tools' files and nothing onboarded says, in one line, what `troupe onboard` would
 bring in (`1 AGENTS.md, 2 rules and 1 agent`), and the terminal client and the desktop app
 ask about it as the session starts, before the librarian: `Onboard 3 files from Claude
 Code and Cursor into Troupe's own? [Y/n/r]`. Yes writes them, and then asks on its own
@@ -603,7 +613,8 @@ directories, Copilot's `.github/copilot-instructions.md` and
 `.cursor/rules/*.mdc` are each listed in the session's log and
 `/context` as skipped, `not read: run troupe onboard`: [`troupe
 onboard`](#onboarding-another-tools-files) brings what they say into `AGENTS.md` and
-`.troupe/rules/` once, and from then on those are what a session reads. So a repository
+`.troupe/rules/` once, and from then on those are what a session reads, the original
+listed as `not read: onboarded into AGENTS.md`. So a repository
 with only a `CLAUDE.md` gives a session nothing until it is onboarded. A Copilot file in
 a directory below the root never counted, as Copilot reads its file at the root only,
 and says so: `not read: Copilot's file counts only at the root`. A file that is a link to
@@ -730,7 +741,7 @@ things:
 
 | File | Layer | What it is for | On conflict |
 |---|---|---|---|
-| `<config>/config.yaml`, then `<workspace>/.troupe/config.yaml`, then `.troupe/config.local.yaml`, then the environment, then the command line | settings | every key above | later beats earlier; maps merge by key, `null` removes, a list replaces; trusted keys come from a workspace's files only once it is trusted |
+| the organisation's `defaults:` (the managed file, then the plane's `organisation.json`), `<config>/config.yaml`, then `<workspace>/.troupe/config.yaml`, then `.troupe/config.local.yaml`, then the environment, then the command line, then the organisation's `enforced:` | settings | every key above | later beats earlier; maps merge by key, `null` removes, a list replaces; trusted keys come from a workspace's files only once it is trusted |
 | `<config>/mcp.json`, then `<workspace>/.troupe/mcp.json` | MCP servers | your servers, then the workspace's, over `mcp:` in `config.yaml` | the same name merges key by key, the workspace's file last; a workspace's servers run only once you allow them |
 | a profile's bundle, `~/.agents/skills/`, each `.agents/skills/` from the repository root down to the workspace, `<config>/skills/<name>/SKILL.md`, `<workspace>/.troupe/skills/` | skills | what a skill tool may read | one name, the highest on [the ladder](#which-one-wins); the others listed as skipped |
 | Troupe's built-in agents, a profile's bundle, `<config>/agents/*.md`, `<workspace>/.troupe/agents/*.md` | agents | the agents a session may run | a file at a higher layer replaces the same name below it |
@@ -808,7 +819,9 @@ troupe config trust --list          # the workspaces whose own files set the tru
 troupe config pull                  # your organisation's defaults and limits, from the plane, now
 ```
 
-Secrets are masked everywhere. `troupe-daemon config` takes the same arguments.
+Secrets are masked everywhere. `troupe-daemon config` takes the same arguments but
+`pull`, and one more: `import-opencode` copies opencode's providers and default model
+into `config.yaml` once, since Troupe does not read opencode's settings.
 
 ## Settings in the desktop app and the terminal
 
@@ -839,11 +852,13 @@ next session either of them starts reads it.
 - **One name and one help for each.** A key a settings page shows has a name for it, the
   `Shown as` column in the reference below, and its help is the `What it does` there. Both
   clients read them from the same table, so they cannot describe one setting two ways.
-  The terminal leaves out the `ui` keys, which only the desktop app acts on.
+  The terminal leaves out `ui.mode` and `ui.notifications`, which only the desktop app
+  acts on.
 - **What follows you, and what stays.** The `ui` keys are what should follow you from one
-  client to another: the desktop app's theme (`ui.theme`), light or dark
-  (`ui.mode`) and notifications (`ui.notifications`). The daemon keeps them and acts on
-  none of them, as it does `mouse`. What belongs to one window — its size, which plane the
+  client to another: the theme both clients draw in (`ui.theme`), the desktop app's light
+  or dark (`ui.mode`) and notifications (`ui.notifications`), and whether the terminal
+  blinks what waits on you (`ui.blink`). The daemon keeps them and acts on none of them,
+  as it does `mouse` and `transcript.detail`. What belongs to one window — its size, which plane the
   desktop app last used, whether it opens on Home — stays in that window.
 - **Edited by hand.** A file you edit yourself is read at the next session and the next
   time a settings screen asks; a screen already open does not hear of it.
@@ -909,7 +924,8 @@ the gateway says a call cost still wins, and then the catalog's price (the provi
 own list, which refreshes itself when it is a day old); a call none of the three prices
 counts as free, and the daemon's log says so once a session. `troupe models` shows each
 model's price and where it came from, or `no price`, and `troupe config --explain
-models.prices` which file set it. The line under each turn in the terminal UI is priced the same way.
+models.prices` which file set it. A turn's cost in the terminal UI, in its side box or
+the line under the turn, is priced the same way.
 `TROUPE_MODEL_PRICES` takes the same map as JSON, which is how a profile's `llm.prices`
 reaches its pods.
 
@@ -1018,7 +1034,7 @@ providers:
 
 The tools of an MCP server, and those a person's client offers a session, may still come
 or go while a session runs: a server that comes back with another list, a sign-in that
-completes, a person who closes the window. Whatever the model, those changes reach the
+completes, a person who closes the window, a skill added, an agent restarting. Whatever the model, those changes reach the
 model at its next turn, never in the middle of one. A tool that went in the meantime stays
 in the list until the turn ends, and a call to it is told it is gone.
 

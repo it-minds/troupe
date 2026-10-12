@@ -43,6 +43,10 @@ with a line saying so, on a machine that does not have it on the `PATH`.
 | `follow_steps` | standard | do the three steps a file in the workspace lists | each step's file holds what it should |
 | `answer_only` | standard | answer a sum without using a tool | the answer is right, and no tool was called |
 
+Eight more run only when named with `--scenario`, each the measure of one change to what
+a prompt carries: `follow_up`, `task_list`, `long_turn`, `loop_turn`, and `scratchpad`,
+`scratchpad_session` and their `_without` twins, the same work without the scratchpad.
+
 `answer_only` is the least a turn can cost on your setup: one model call, which still
 carries the system prompt and every tool's definition. `large_log` is the most a careless
 one can: a model that reads the log rather than searching it sends the read with every
@@ -54,6 +58,7 @@ Before anything starts it prints what it will do, and the most it can spend:
 
 ```
 troupe bench --live: 4 scenarios, 1 run each, against openai/model-a.
+The smoke suite: write_file, fix_test, delegate, recover.
 Each run has a scratch directory and a session of its own, with every tool allowed, the shell among them, and may make 12 model calls, send 200,000 tokens and receive 24,000, in 240 s.
 At $3.00/$15 a million tokens, a run costs at most $0.96, so this costs at most $3.84 in all.
 Each run is added to /home/you/.local/state/troupe/bench/results.jsonl.
@@ -61,8 +66,10 @@ Spend up to $3.84 on openai/model-a? [y/N]
 ```
 
 The cap is a run's limits at the model's price, times the runs. The limits are fixed, and
-are those of the nightly's own checks against a real model: far above what any of the four
-tasks needs, far below a session's defaults. The price is the one Troupe prices every call
+are those of the nightly's own checks against a real model: far above what any of the ten
+tasks needs, far below a session's defaults. A scenario run only by name may have larger
+limits of its own, which the plan prints. When `thinking_binding` or `system_prompt` is
+off its default, the plan says so in a line of its own. The price is the one Troupe prices every call
 at: the provider's catalog, else `models.prices` in your config. A model nothing prices
 has its cap in tokens instead, and the question says there is no price to hold it to; set
 `models.prices` for it ([configuration](configuration.md)) to have it in money.
@@ -81,7 +88,8 @@ it as you would such a session.
 ## What it reads, and what it keeps
 
 From your configuration it takes where a model call goes and nothing else: the provider,
-its URL and key, your models and their prices. Each run has its own config and state
+its URL and key, your models, their windows and prices, the call timeout, and
+`thinking_binding` and `system_prompt`. Each run has its own config and state
 directories, so your agents, skills, instruction files and sessions are not in it, and
 nothing it does lands among them. The key is handed to each run in memory; it is never
 written down or printed.
@@ -126,11 +134,15 @@ not a regression. Under the table every run is added up:
 | tokens | 412880 in, 0 cached, 6120 out; 15519 a success |
 | model calls | 142 |
 | wall clock | 312000 ms in all, the median run 4100 ms |
+| prompt prefix | system prompt changed 0, tools 0; 0 calls sent again without thinking, 0 thinking blocks dropped |
 ```
 
 The interval is where the success rate probably lies: three runs that all succeeded put it
 only above 0.43, thirty above 0.88. The cost per success is everything the runs cost, the
 failed ones too, over the ones that succeeded: the price of getting the work done once.
+The prompt prefix counts the calls whose system prompt or tools changed from the call
+before, which costs the cache and, on a model that binds its thinking, the thinking
+([what changes in front of a prompt](../developer/prompt-prefix.md)).
 A line under it says which tasks failed, and how; standard error has a line for each run
 as it ends.
 
