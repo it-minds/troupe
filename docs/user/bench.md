@@ -47,6 +47,16 @@ Eight more run only when named with `--scenario`, each the measure of one change
 a prompt carries: `follow_up`, `task_list`, `long_turn`, `loop_turn`, and `scratchpad`,
 `scratchpad_session` and their `_without` twins, the same work without the scratchpad.
 
+Three more, also by name, are `fix_test`, `rename_symbol` and `follow_steps` on the
+`orchestrate` agent rather than `build`: `fix_test_orchestrate`,
+`rename_symbol_orchestrate` and `follow_steps_orchestrate`. Each is its pair's task, files
+and checks, and a run's cost and calls are its subagents' too, so the two side by side say
+what handing a change to subagents costs on your setup against making it:
+
+```
+troupe bench --live --scenario rename_symbol,rename_symbol_orchestrate --repeat 3
+```
+
 `answer_only` is the least a turn can cost on your setup: one model call, which still
 carries the system prompt and every tool's definition. `large_log` is the most a careless
 one can: a model that reads the log rather than searching it sends the read with every

@@ -199,6 +199,16 @@ turn and then a person's, Decision 871), and `scratchpad`, `scratchpad_without`,
 `scratchpad_session` and `scratchpad_session_without` (a migration plan, and a session of
 five turns, with the scratchpad and without it, Decision 870).
 
+Three more, by name too, are issue #554's comparison of `build` with `orchestrate`
+(Decision 888): `fix_test_orchestrate`, `rename_symbol_orchestrate` and
+`follow_steps_orchestrate` are those tasks as their pairs have them, prompt, files,
+outcome and checks, with `orchestrate` as the session's agent and a check that the root
+called `delegate`. The run's cost, calls and tokens are its whole tree's, the subagents'
+included, and a call's `agent` says whose it was (`root`, `root/implementer#1`). A run has
+600 s of wall clock rather than 240, since its subagents run one after another, each on a
+share of the root's. Run each beside its pair:
+`troupe bench --live --scenario fix_test,fix_test_orchestrate --repeat 3`.
+
 The first four are the `smoke` suite, the default; the next six with them are `standard`
 (Decision 775). `follow_up` is in neither, and runs when named: it is issue #465's
 (Decision 815), whose second turn begins with an instruction file the first brought in,

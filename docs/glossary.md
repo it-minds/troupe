@@ -7,9 +7,10 @@ them for the first time links here.
 
 What talks to the model: a markdown file of instructions, the tools it may use and,
 optionally, which model. A session starts with one, `build` (reads, edits and runs
-commands) unless you pick another — `plan` reads and proposes and never writes, and
-`orchestrate`, `workflow` and others ship too — and it may hand parts of its task to
-subagents. Your own configuration, a workspace or a bundle can add more.
+commands) unless you pick another — `plan` reads and proposes and never writes,
+`orchestrate` hands a change to subagents and runs workflows, and others ship too — and
+it may hand parts of its task to subagents. Your own configuration, a workspace or a
+bundle can add more.
 
 ### Approval
 

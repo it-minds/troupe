@@ -301,7 +301,7 @@ each agent is a command, and so is each command you write:
 | command | effect |
 |---|---|
 | `/build <prompt>` | edit in your checkout (all tools); `/worktree <prompt>` does the same in a worktree of its own, then `/merge` or `/discard` |
-| `/workflow <task>` | orchestrate the engineering pipeline in a worktree: an expensive orchestrator delegates every step to a subagent |
+| `/workflow <task>` | run the engineering pipeline in a worktree: `orchestrate` delegates every step to a subagent |
 | `/workflow <name> <task>` | the same, with the steps from `.troupe/workflows/<name>.json` |
 | `/plan <prompt>` | investigate and write a task list; read-only |
 | `/ask <question>` | answer across finished branches with the cheap model |
@@ -582,8 +582,8 @@ polling and says so.
 Agent definitions are markdown files with YAML frontmatter; the filename is
 the name and every `primary` one is a command. Project `.troupe/agents/`
 overrides the global `agents/` dir which overrides the built-ins (`build`, `plan`,
-`orchestrate`, `workflow`, `ask`, `librarian`, the watch-mode pair `quick` and `answer`,
-and the subagents `general`, `explore`, `implementer` and `reviewer`).
+`orchestrate`, `ask`, `librarian`, the watch-mode pair `quick` and `answer`, and the
+subagents `general`, `explore`, `implementer` and `reviewer`).
 
 `/agents` lists the primary ones with where each comes from, its model, its tools,
 whether it is read-only, its cap on turns and which windows run it; Enter reads one's
@@ -608,7 +608,7 @@ The tools a definition can list are `read_file`, `write_file`, `edit_file`,
 (`tools: all` is all of them but `onboard_write`).
 With `tools: all` the task list's two are offered once a turn has made ten model
 calls, or while there is a list, so a small task spends no calls on one; a
-definition that names them, as `plan` and `workflow` do, has them on every call.
+definition that names them, as `plan` and `orchestrate` do, has them on every call.
 `write_file`, `edit_file`, `shell`, `web_fetch`, `publish`, `import` and
 `onboard_write` ask before they run — `y` /
 `n` / `a` in the window, or `auto_approve` for the session — and the rest run
@@ -617,17 +617,30 @@ project's `.troupe/agents/` file setting a tool to `auto` is held back until the
 workspace is trusted (`troupe config trust`): until then the tool asks.
 `web_fetch` is a GET that returns a URL as text, HTML reduced to readable text
 with its links kept, so an agent can read the documentation it is pointed at
-instead of guessing; `plan`, `orchestrate` and `workflow` name it as well.
+instead of guessing; `plan` and `orchestrate` name it as well.
 
 ### Workflows
 
 `/workflow <task>` runs an *orchestration* rather than one agent doing
-everything. The `workflow` agent is the expensive one — `model: expensive`, and
-it cannot write a file, edit a file or run a command. What it does is decide:
+everything, on `orchestrate`, the one agent that orchestrates: `model: expensive`,
+and it cannot write a file, edit a file or run a command. What it does is decide:
 it writes the step list as its todo list, hands each step to the subagent that
 owns it, judges what comes back, and carries each result into the next step's
-prompt. The steps run in its own git worktree, which is committed on `finish`
-and reviewed with `/merge` or `/discard`, exactly like `/worktree`.
+brief. The steps run in its own git worktree, which is committed on `finish`
+and reviewed with `/merge` or `/discard`, exactly like `/worktree`. A workflow is
+`orchestrate` with its plan written down in advance; `/orchestrate <prompt>` is the
+same agent on your own words, with no step list (root Decision 888).
+
+Which to use: `build` for a change you would make yourself. `/workflow` when a
+repository has written down the steps a change goes through and wants each owned by
+a subagent, with a reviewer at the end. `orchestrate` when you want that shape for
+work nobody wrote steps for. On the live bench's three small tasks (a test fixed, a
+function renamed across three files, three steps from a file), five runs each on
+Claude Sonnet 5.5, both agents got every one done; `orchestrate` cost 2.5 to 3.1
+times as much ($0.027 to $0.039 a run against $0.010 to $0.013), made two to two and
+a half times the model calls and took 2.4 to 2.8 times as long. `build` is the default for that reason,
+and `troupe bench --live --scenario rename_symbol,rename_symbol_orchestrate` measures
+it on your own setup.
 
 The bundled pipeline is `understand` (`explore`), `plan` (the orchestrator
 itself), `implement`, `test` and `document` (`implementer`), then `verify`
