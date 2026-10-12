@@ -105,7 +105,8 @@ describe("the command palette", () => {
     // An alias finds its command and the cursor lands on it.
     type(input, "q");
     await waitFor(() => rowNames().includes("/quit"), "quit by its alias");
-    expect(dialog.querySelector('.row[aria-selected="true"] .name')?.textContent).toBe("/quit");
+    // Among the others the letter finds (`/detail`'s summary says quiet), once the filter has settled.
+    await waitFor(() => selected() === "/quit", "the cursor on /quit");
 
     // A word from a summary.
     type(input, "worktree");

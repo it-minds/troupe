@@ -27,6 +27,8 @@ export type Listener = (e: LoggedEvent) => void;
 export class SessionLog {
   readonly events: LoggedEvent[] = [];
   private readonly listeners = new Set<Listener>();
+  /** The clock an event's `ts` is read from: a test that times something sets it. */
+  now: () => Date = () => new Date();
 
   get headSeq(): number {
     return this.events.length;
@@ -39,7 +41,7 @@ export class SessionLog {
   append(type: string, data: Record<string, unknown>, actor: Actor = { kind: "system" }, agent: string[] = ["root"]): LoggedEvent {
     const prev = this.events.at(-1) ?? null;
     const seq = this.events.length + 1;
-    const body = { seq, prev_hash: prev?.hash ?? null, ts: new Date().toISOString(), actor, agent, type, v: 1, data };
+    const body = { seq, prev_hash: prev?.hash ?? null, ts: this.now().toISOString(), actor, agent, type, v: 1, data };
     const hash = createHash("sha256").update(JSON.stringify(body)).digest("hex");
     const e: LoggedEvent = { ...body, hash: `sha256:${hash}` };
     this.events.push(e);

@@ -96,6 +96,9 @@ export type {
   OnboardingSuggested,
   TokenUsage,
   TurnCost,
+  CurtainPhase,
+  CurtainState,
+  FoldOptions,
 } from "./transcript.js";
 export {
   FleetStore,

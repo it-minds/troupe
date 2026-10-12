@@ -49,7 +49,17 @@ export type Entry =
       /** Undefined while the call is still running. */
       ok: boolean | undefined;
       content: string | BlobRef | undefined;
+      /** When its events were written, in milliseconds, for the duration its frame's header says (troupe #474). */
+      startedAt: number | undefined;
+      endedAt: number | undefined;
     }
+  /**
+   * What the model thought before it answered, as this client saw it stream, kept where the
+   * reply it came before lands (troupe #474). Live only, as in the terminal client (its
+   * Decision 36): a transcript replayed from the log has none. `ms` is how long it streamed,
+   * from its first delta to the reply, by this client's clock.
+   */
+  | { kind: "reasoning"; seq: number; agent: string[]; text: string; ms: number | undefined }
   /**
    * A document an agent put in the session's scratchpad with `show` (issue #472), in place
    * of the call: what it is called and how big, and which write of its name this was once
@@ -224,8 +234,12 @@ export interface TranscriptState {
   streaming: string;
   /** Thinking blocks streaming alongside it. */
   thinking: string;
+  /** When the thinking being streamed began, by this client's clock; undefined while none streams. */
+  thinkingAt: number | undefined;
   /** Per-agent-path state from `agent_state` ephemerals; `""` is the root. */
   agentState: Record<string, string>;
+  /** What the root agent has been through in its turn, for the curtain line (troupe #474). Live only. */
+  curtain: CurtainState;
   /** Optimistic sends, in send order, keyed by command id. */
   pending: PendingInput[];
   todo: TodoItem[];
@@ -267,6 +281,29 @@ export interface TranscriptState {
   scratch: ScratchDocument[];
 }
 
+/** A phase of the root agent's turn the curtain line counts: what its `agent_state` says it does. */
+export type CurtainPhase = "thinking" | "acting" | "compacting";
+
+/**
+ * The root agent's turn as the curtain line reads it (docs/design/frames.md §7): how many
+ * times it has thought, acted and compacted since the turn began, which picks the line's
+ * words so none repeats within a turn, and when what it does now began, by this client's
+ * clock, for the time the line says.
+ */
+export interface CurtainState {
+  phases: Partial<Record<CurtainPhase, number>>;
+  since: number | undefined;
+}
+
+/**
+ * How a fold is told the time, for what only this client sees as it happens: when the
+ * reasoning being streamed began and the root agent's state last changed. Durable events
+ * carry their own and need none of it.
+ */
+export interface FoldOptions {
+  now?: number;
+}
+
 /** What `onboarding_suggested` says is due, and where. */
 export interface OnboardingSuggested {
   seq: number;
@@ -288,7 +325,9 @@ export const emptyTranscript: TranscriptState = {
   entries: [],
   streaming: "",
   thinking: "",
+  thinkingAt: undefined,
   agentState: {},
+  curtain: { phases: {}, since: undefined },
   pending: [],
   todo: [],
   presence: [],
@@ -734,14 +773,23 @@ export function dropPending(state: TranscriptState, commandId: string): Transcri
   return { ...state, pending: state.pending.filter((p) => p.commandId !== commandId) };
 }
 
+/** When a durable event was written, in milliseconds, if its `ts` says. */
+function writtenAt(d: DurableEvent): number | undefined {
+  const at = Date.parse(d.ts);
+  return Number.isFinite(at) ? at : undefined;
+}
+
 /**
  * Fold one event into the transcript.
  *
  * Durable events arriving out of order or twice are the caller's problem — route them
  * through `SessionView`, which drops anything at or below the seq it has already seen.
+ * `options.now` is the time the event arrived, which only what this client sees live
+ * reads (`FoldOptions`); it is the clock's when not given.
  */
-export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
-  if (!isDurable(e)) return foldEphemeral(state, e);
+export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOptions = {}): TranscriptState {
+  const now = (): number => options.now ?? Date.now();
+  if (!isDurable(e)) return foldEphemeral(state, e, now);
 
   const d = e;
   const next: TranscriptState = { ...state, lastSeq: Math.max(state.lastSeq, d.seq) };
@@ -764,8 +812,9 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
     }
 
     case "user_input": {
-      // Input to the root is a turn starting, and a turn that failed before it is behind it.
-      const started = isRoot(d.agent) ? { ...next, failed: undefined } : next;
+      // Input to the root is a turn starting, and a turn that failed before it is behind it;
+      // the curtain line's words start their lists again.
+      const started = isRoot(d.agent) ? { ...next, failed: undefined, curtain: { ...next.curtain, phases: {} } } : next;
       // A loop's iteration starts the agent's turn like any input, but nobody typed it:
       // the note `loop_iteration_started` left says which iteration it is, rather than
       // the words the loop gave the model, the way the terminal client says it.
@@ -832,18 +881,24 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
     case "llm_response": {
       const text = textOf(d.data["message"]);
       const cost = costOf(d.data["gateway"]);
-      const entries = text
-        ? [
-            ...state.entries,
-            { kind: "assistant" as const, ...base, text, model: str(d.data["model"]) || undefined, costMicros: cost },
-          ]
-        : state.entries;
+      // The reasoning this client saw stream before the reply is kept where the reply lands,
+      // ahead of it; a replay streamed none, and has none (troupe #474).
+      const thought: Entry[] =
+        isRoot(d.agent) && state.thinking
+          ? [{ kind: "reasoning", ...base, text: state.thinking, ms: state.thinkingAt === undefined ? undefined : Math.max(now() - state.thinkingAt, 0) }]
+          : [];
+      const entries = [
+        ...state.entries,
+        ...thought,
+        ...(text ? [{ kind: "assistant" as const, ...base, text, model: str(d.data["model"]) || undefined, costMicros: cost }] : []),
+      ];
       return {
         ...next,
         entries,
         // Only the root agent's stream is painted, so only it is cleared.
         streaming: isRoot(d.agent) ? "" : next.streaming,
         thinking: isRoot(d.agent) ? "" : next.thinking,
+        thinkingAt: isRoot(d.agent) ? undefined : next.thinkingAt,
         error: undefined,
         costMicros: cost === undefined ? next.costMicros : (next.costMicros ?? 0) + cost,
         usage: addUsage(next.usage, usageOf(d.data["usage"])),
@@ -866,6 +921,8 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
             args: d.data["args"],
             ok: undefined,
             content: undefined,
+            startedAt: writtenAt(d),
+            endedAt: undefined,
           },
         ],
       };
@@ -880,7 +937,7 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
         ...next,
         entries: state.entries.map((en) =>
           en.kind === "tool" && en.callId === id
-            ? { ...en, ok, content: contentOf(d.data["content"]) }
+            ? { ...en, ok, content: contentOf(d.data["content"]), endedAt: writtenAt(d) }
             : en.kind === "scratch" && en.callId === id
               ? { ...en, ok, error: ok ? undefined : errorOf(d.data["content"]) }
               : (en.kind === "approval" || en.kind === "question") && en.callId === id
@@ -1108,6 +1165,8 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
       return {
         ...next,
         loop,
+        // An iteration is a turn of its own, and the curtain line's words start again.
+        curtain: { ...next.curtain, phases: {} },
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: `loop iteration ${iteration}${loop.max ? `/${loop.max}` : ""}` }],
       };
     }
@@ -1179,7 +1238,9 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
   }
 }
 
-function foldEphemeral(state: TranscriptState, e: TroupeEvent): TranscriptState {
+const PHASES: readonly string[] = ["thinking", "acting", "compacting"];
+
+function foldEphemeral(state: TranscriptState, e: TroupeEvent, now: () => number): TranscriptState {
   switch (e.type) {
     case "llm_delta": {
       if (!isRoot(e.agent)) return state; // a subagent's stream is not what is on screen
@@ -1187,12 +1248,22 @@ function foldEphemeral(state: TranscriptState, e: TroupeEvent): TranscriptState 
       const text = str(d.text ?? d.fragment);
       // Two spellings of the model's thinking: Anthropic's, and the daemon's own
       // (`reasoning`, troupe-remote Decision 658).
-      if (d.kind === "thinking" || d.kind === "reasoning") return { ...state, thinking: state.thinking + text };
+      if (d.kind === "thinking" || d.kind === "reasoning") {
+        return { ...state, thinking: state.thinking + text, thinkingAt: state.thinking === "" ? now() : state.thinkingAt };
+      }
       if (d.kind === "text") return { ...state, streaming: state.streaming + text };
       return state;
     }
-    case "agent_state":
-      return { ...state, agentState: { ...state.agentState, [pathKey(e.agent)]: str(e.data["state"], "idle") } };
+    case "agent_state": {
+      const path = pathKey(e.agent);
+      const to = str(e.data["state"], "idle");
+      const agentState = { ...state.agentState, [path]: to };
+      // The root agent doing something else is a phase of its turn, counted by kind for
+      // the curtain line, and the time it says starts again.
+      if (path !== "" || state.agentState[""] === to) return { ...state, agentState };
+      const phases = PHASES.includes(to) ? { ...state.curtain.phases, [to]: (state.curtain.phases[to as CurtainPhase] ?? 0) + 1 } : state.curtain.phases;
+      return { ...state, agentState, curtain: { phases, since: now() } };
+    }
     case "presence":
       return { ...state, presence: (e.data["members"] as PresenceMember[]) ?? state.presence };
     default:
