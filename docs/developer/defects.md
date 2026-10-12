@@ -1358,6 +1358,40 @@ what is left).
 
 Found by the chunk 32 fixers, 2026-10-12.
 
+### D126 - Workers, the GitHub App, the console and providers after chunk 33 (low)
+
+- **Worker pods** (Decision 890).
+  - `procMount: Unmasked` is refused by the `baseline` and `restricted` Pod Security levels even with `hostUsers: false`, so worker namespaces need `privileged`. The operator doesn't label them; on a cluster whose default level is stricter, every worker pod is refused at creation.
+  - Team volumes on NFS-like RWX storage are expected to stop a user-namespaced worker pod from starting (no idmapped mounts); not tried.
+  - containerd's default AppArmor profile denies `mount`, which would block bubblewrap on AppArmor nodes; not verified.
+  - The shipped `Localhost` seccomp profile was tried only on a local kind; CI's kind runs workers `Unconfined`.
+  - The kind cluster's OpenBao runs in memory, and a one-shot Job configures it, so after a restart it has no transit key, Kubernetes auth or policies until that Job runs again.
+  - `troupe-worker-mcp-identity` equals `Troupe.KMS.Policy.worker_policy_name("mcp-identity")`, so a profile named `mcp-identity` would collide with it.
+- **The GitHub App** (Decision 885).
+  - Any team may name any repository the App's installations cover; per-team narrowing is #653.
+  - Installation tokens aren't revoked when a session goes dormant; they run out their hour.
+  - `git.credential` is answered synchronously on the pod's control connection, so a slow GitHub delays that pod's other traffic.
+  - `sessions.workspace_source` is stored from the client and never read.
+  - `session.spawn` and `session.fork` don't carry `repository` over.
+  - A pod that enrols marks dormant a session placed on it a moment earlier that it didn't report; the tests allow for it, and `person_credentials_test.exs` has the same latent race.
+- **The console** (Decision 886).
+  - An upgraded deployment serves `/console` before its identity provider allows the redirect URI, so sign-in fails until it is registered (the error says what to register).
+  - Form inputs may be named by their placeholder rather than their label; worth a screen-reader check.
+  - The "last set by" line upper-cases the email address.
+- **Providers** (Decision 887).
+  - Catalogue listings send the HTTP library's default User-Agent, not Troupe's.
+  - The plane's profile provider list and a worker profile's `llm.provider` can't choose the new types.
+  - An organisation that enforces `provider: azure_openai` without enforcing `base_url` leaves a session-wide Azure provider without a URL unrefused.
+  - OpenRouter's `reasoning_details` isn't handed back (Anthropic models with tools through OpenRouter), and its usage `cost` isn't used.
+- **Orchestration** (Decision 888). The bench has no task where `orchestrate` could pay off (larger multi-file work, a reviewer catching a mistake), and `docs/user/bench.md` says a by-name scenario's limits are printed by the plan, where `describe/1` prints only the plan-wide ones.
+- **The clients.**
+  - The terminal client renders `tools_registered` as a raw event and logs it as unknown; it shows beside the offered-tools sentence.
+  - `memory.forget` can answer `not_found` for a fact it did forget, when `memory.md` can't be removed after `facts.jsonl` was rewritten.
+  - A `fleet` subscription has no per-session access filter; on a pod, authorisation limits it to tokens without a session id.
+- **Tests.** `FailoverTest`'s node name is the same in every worktree, so two worker suites at once fail its setup.
+
+Found by the chunk 33 fixers, 2026-10-13.
+
 ## Taken
 
 | Defect | Taken by |
