@@ -129,9 +129,11 @@ nav:
       - Conventions: developer/conventions.md
       - Build: developer/build.md
       - CI and releases: developer/ci.md
+      - Buying OS code signing: developer/code-signing.md
       - Deployment: developer/deployment.md
       - Tech stack: developer/tech-stack.md
       - Fixing issues: developer/fixing-issues.md
+      - Walking the Stage 1 gate: developer/gate-walk.md
       - Known defects: developer/defects.md
       - The command audit: developer/command-audit.md
       - Decisions:
