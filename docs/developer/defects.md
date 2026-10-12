@@ -1313,6 +1313,52 @@ Found by the chunk 30 fixers, 2026-10-11.
 Found by the chunk 31 fixers, 2026-10-12. Its test items were fixed in chunk 32 (D8 says
 what is left).
 
+### D125 - Docs, policy, ceilings and workspaces after chunk 32 (low)
+
+- **The plane and its chart.**
+  - The plane hard-codes the `troupe-system` namespace and the `troupe-w-` prefix (`provision.ex`, `enrolment.ex`), so a non-default `namespace` or `policy.namespacePrefix` breaks provisioning or enrolment. The admin docs say to keep the defaults.
+  - A TeamVolume's `status.claimName` says `team-<team>`, but the claim is `troupe-team-<team>`.
+  - The Trigger CRD's `notifyUrl` description says only "not loopback". The console's Bundles page names a removed `troupe admin bundle publish` command. The plane's index page still shows `troupe mcp`. `admin.profile.put`'s description lists `mcpServers` as admin-set.
+  - Bundles' `@builtin_primaries` (`build`, `plan`) is hand-kept, and eight built-ins are primary.
+  - `dev/kind`'s plane policy lacks the `people/` paths, and its role lacks the audience.
+  - The audit chain is an unkeyed hash. It catches a changed or removed row, not a rewrite of the whole table (stated in `docs/admin/security.md`).
+- **Upgrading to 0.16.0** (Decisions 883 and 884).
+  - A live `TroupePolicy` holding an egress entry that isn't an exact host or `*.domain` refuses every profile after the upgrade, naming the entry.
+  - Helm doesn't upgrade CRDs, so the new rules apply once the CRDs are applied.
+  - A GUI served anywhere but the plane's host needs `operator.workerAllowedOrigins`.
+- **The daemon and the gateway.**
+  - Command-id replay is keyed by the principal's subject, and every local connection shares it. Two local clients counting their own ids could collide; every real client uses random ids.
+  - `session.pin` on a daemon isn't persisted, and does nothing on a dormant session.
+  - A worker advertises `watch: true` but refuses `watch.*` to every token a plane mints.
+  - `workspace.recent` ignores `limit`.
+  - `Link.call` answers a failed write with a bare `unavailable` and keeps the dead client until it hears of the disconnect.
+  - `config.yaml` (which may hold a key) is restricted on unix but not on Windows, and `Troupe.Remote.Credentials` keeps its own copy of the `icacls` logic beside `Troupe.OwnerOnly`.
+- **Ceilings** (Decision 880).
+  - An OpenAI-compatible reasoning model under a low ceiling can spend all of `max_completion_tokens` reasoning and answer nothing; Troupe sends the effort unchanged and says nothing.
+  - Models that think unasked still think at their own default inside the ceiling when thinking is "off" (recorded in 880).
+- **Workspaces inside a repository** (Decision 881).
+  - Instruction files in an ignored folder are still read up to the enclosing repository's `.git`.
+  - `onboard.apply`'s refusal in an ignored folder says it "is in no git repository".
+  - In `auto` mode, a session at the checkout's top and one in a tracked subfolder share the checkout without a worktree.
+  - A `worktree.list` row the time budget didn't reach can't be fetched later.
+  - `/worktree <prompt>` in an ignored folder works in the folder and doesn't say no worktree was made.
+- **The clients and the CLI.**
+  - `troupe daemon` with no daemon installed suggests piping `install.sh` from `main`.
+  - `troupe bench --compare` reads the default history file, not the one under `state_dir`.
+  - The headless printer can print a branch's "spawned" line twice (`branch_spawned` has no `seq`), and a run whose only shell call was refused still says "not counted: what its 1 command changed".
+  - The TUI's settings page edits `transcript.detail` as text, not a menu. The VS Code Files row opens a plane's organisation document URL as a file.
+  - `docs/user/updating.md`'s `TROUPE_BIN_DIR` doesn't change what `troupe update` updates; the running binary's path wins.
+  - With `TROUPE_INSTALL_DIR` set, Burrito prints a line on stdout that corrupts `--json`; `clients/tui/scripts/build-local` uses the same variable.
+- **Stale strings and comments.** `scripts/remote-up`'s WebSocket URL; `gateway/daemon.ex`'s supervision strategy (it is `rest_for_one`); `plane/harness.ex`'s `session.create` order; the source file `status.ex` names; `tokens.json`'s `$meta` and motion notes; `signal.tokens.json`'s `default`; `Approval.tsx`'s "runs on the platform" for a local shell; the TUI's empty state suggesting `/code`; and comments citing another repository's decisions.
+- **Releases and tests.**
+  - Pre-releases carry no signed manifest, so the installers refuse them where `minisign` is installed.
+  - Recorded fixture logs stop at 0.3.0; nothing in the release path runs `troupe.fixtures.record`.
+  - `TROUPE_IDLE_TEST_MS` is set in CI but read by nothing.
+  - `DoctorCLITest --bench` once found entries under `state/remote` missing afterwards. Protocol `ClientTest` (a `serve/0` receive timeout) and gateway `LoopbackTest` ("a refused upgrade is logged at warning level") each failed once under load; `CrashLoopTest` is in D8.
+- **Unclear, to check.** Whether `backup-restore.md`'s `eval 'Troupe.Plane.Index.rebuild()'` starts what it needs; how clients reach a registered machine (it advertises no endpoint without `TROUPE_POD_ORDINAL` and `TROUPE_WORKERS_DOMAIN`); `egress.fqdns` entries with a port against the policy check; whether the project owns `troupe.dev`, the config schema's `$id`.
+
+Found by the chunk 32 fixers, 2026-10-12.
+
 ## Taken
 
 | Defect | Taken by |
