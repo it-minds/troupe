@@ -7,13 +7,14 @@ platform it talks to, and gets no private door into the server for it: it speaks
 [`PROTOCOL.md`](../../PROTOCOL.md) over a WebSocket, the same as the TUI and the Python
 reference client.
 
-Three packages in one pnpm workspace:
+Four packages in one pnpm workspace:
 
 | package | what |
 | --- | --- |
 | `packages/client` | `@troupe/client` — the protocol in TypeScript. JSON-RPC 2.0 over WebSocket, the plane's HTTP surface (discovery, device-grant login, `/auth/exchange`, `/rpc`), and a `SessionView` that folds events and turns "send a prompt, wait for the turn" into a promise. Runs in a browser or Node; no dependencies. |
 | `packages/bench` | `@troupe/bench` — the throughput test. N clients, one session each, K prompts each, every milestone timed. |
-| `apps/desktop` | The GUI. Vite + React, on the design system in [`docs/design/`](docs/design/DESIGN.md). Signs in through the plane (or, in local-only mode, talks to the daemon on this computer and nothing else), shows one list of every session — the team's on worker pods and the person's own on the daemon in front of them — streams a session, answers approvals, reviews what ran unattended, and administers the platform for whoever may. The bundle is plain web; the Tauri shell in [`src-tauri/`](apps/desktop/src-tauri) loads it unchanged and adds the things a browser cannot do — see [`src/shell.ts`](apps/desktop/src/shell.ts). |
+| `apps/desktop` | The GUI. Vite + React, on the design system in [`docs/design/`](docs/design/DESIGN.md). Signs in through the plane (or, in local-only mode, talks to the daemon on this computer and nothing else), shows one list of every session — the team's on worker pods and the person's own on the daemon in front of them — streams a session, answers approvals, and reviews what ran unattended. The bundle is plain web; the Tauri shell in [`src-tauri/`](apps/desktop/src-tauri) loads it unchanged and adds the things a browser cannot do — see [`src/shell.ts`](apps/desktop/src/shell.ts). |
+| `apps/console` | `@troupe/console` — the administrative console, an app of its own ([docs/admin/console.md](../../docs/admin/console.md)). Vite + React on `@troupe/client`'s `admin.ts` and the same design tokens, and nothing of the desktop app's, nor the desktop app anything of its: a test reads both and fails on an import either way. Signs in with the plane's own sign-in and calls its `admin.*` methods and `me`, nothing else; served by the chart at `/console` on the plane's host, from the same image as the GUI (root Decision 886). |
 
 ## The path a client takes
 
@@ -120,6 +121,20 @@ shows a turn's frames ([docs/design/frames.md](../../docs/design/frames.md)): it
 one strip above an answer with a table, a nested list, fenced code, a diff and a csv.
 Anything sent there plays the same turn live, its reasoning streaming and the curtain
 line under it, so `/detail` and a click on the strip have a running turn to work on.
+
+### The console, against a fake plane
+
+```sh
+pnpm console:fake                # an identity provider and a plane with its admin methods, on loopback
+pnpm console                     # then open http://localhost:5174 and sign in to the plane it printed
+```
+
+The same identity provider and plane, with the plane's administrative half the console's
+tests run against (`packages/client/test/support/admin.ts`): three teams, a version policy,
+an organisation's defaults and enforced set, and an audit every change lands in. The
+provider signs the browser straight back in as a platform admin; `CONSOLE_AS=bob` is a team
+admin and `CONSOLE_AS=carol` somebody who administers nothing. Every admin answer is held a
+quarter of a second so the loading states show; `HOLD_MS=0` answers at once.
 
 ### Your own daemon beside the fake plane
 
@@ -237,7 +252,9 @@ docker build --build-context licences=../.. --build-arg TROUPE_GUI_BASE=app -t t
 
 and the platform's chart, [`charts/troupe`](../../charts/troupe), serves it: its `gui:`
 block, on by default, is a Deployment, a Service, a NetworkPolicy and an Ingress at
-`gui.basePath` on the plane's own host (root Decision 670). There is no chart and no Helm
+`gui.basePath` on the plane's own host (root Decision 670). The image carries the console's
+bundle too, at `/console/`, and the chart's `console:` block gives it an Ingress of its own at
+`console.basePath` (`TROUPE_CONSOLE_BASE` when the image is built, `console` by default). There is no chart and no Helm
 release of the GUI's own; a team that uses another client sets `gui.enabled: false` and
 points `plane.appUrl` at it.
 

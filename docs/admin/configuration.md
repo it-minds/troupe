@@ -168,6 +168,7 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 | `plane.distPort`, `plane.maxPorts` | `9100`, `65536` | Erlang distribution port; `+Q` |
 | `*.resources` | small requests and limits | container resources; `limits.cpu` also sets `+S` |
 | `gui.enabled`, `gui.replicas`, `gui.basePath` | `true`, `2`, `/app` | the GUI's Deployment, Service, Ingress on `plane.host` and NetworkPolicy. `basePath` must match the image's `TROUPE_GUI_BASE`; `/` is refused |
+| `console.enabled`, `console.basePath` | `true`, `/console` | the [console](console.md)'s Ingress on `plane.host`, to the GUI's Service, which runs while either is enabled. `basePath` must match the image's `TROUPE_CONSOLE_BASE`; `/` and `gui.basePath` are refused |
 | `a2a.enabled`, `a2a.host`, `a2a.ingressClassName`, `a2a.tlsSecretName` | `false`, `a2a.example.test`, `nginx`, `""` | the facade and its Ingress; enabling it also admits facade pods to the plane's HTTP port |
 | `a2a.replicas`, `a2a.maxPorts` | `1`, `65536` | the facade's replicas; `+Q` |
 | `policy.install`, `policy.name` | `true`, `default` | the default `TroupePolicy` (kept on uninstall) and the admission `paramRef` |
@@ -310,7 +311,7 @@ Secrets where the pods read them and do not rely on the condition.
 | 4002 | A2A facade | Service `troupe-a2a` → Ingress `a2a.host` |
 | 4100 | worker raw NDJSON harness | in-pod only |
 | 4369, 9100 | epmd and Erlang distribution on plane pods, when clustered | pod to pod only |
-| 8080 | the GUI | Service `troupe-gui` → Ingress at `gui.basePath` on `plane.host` |
+| 8080 | the GUI and the console | Service `troupe-gui` → Ingresses at `gui.basePath` and `console.basePath` on `plane.host` |
 
 **Namespace labels.** `troupe.dev/ingress=true` goes on the ingress controller's namespace
 (Helm cannot label a namespace it did not create): the plane, A2A and every worker admit

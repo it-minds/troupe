@@ -437,6 +437,30 @@ jobs:
           helm lint charts/troupe --values charts/troupe/values.small.yaml
           helm lint charts/troupe --values charts/troupe/values.example.yaml
           helm lint charts/troupe --set gui.enabled=false --set plane.appUrl=https://gui.example.test
+          helm lint charts/troupe --set console.enabled=false
+
+      # The console is an app of its own on the plane's host, from the GUI's image: it has an
+      # Ingress at a path of its own, it stays when the GUI is turned off, and it is refused
+      # at the root of the host or at the GUI's path.
+      - name: The chart serves the console at its own path
+        run: |
+          rendered=$(helm template troupe charts/troupe --show-only templates/gui-deployment.yaml)
+          if ! grep -q 'name: troupe-console' <<<"$rendered" || ! grep -qF 'path: "/console(/|$)(.*)"' <<<"$rendered"; then
+            echo "the chart serves no console at /console"
+            exit 1
+          fi
+          alone=$(helm template troupe charts/troupe --set gui.enabled=false --set plane.appUrl=https://gui.example.test \
+            --show-only templates/gui-deployment.yaml)
+          if ! grep -q 'kind: Deployment' <<<"$alone" || ! grep -q 'name: troupe-console' <<<"$alone"; then
+            echo "gui.enabled=false took the console with it"
+            exit 1
+          fi
+          for bad in console.basePath=/ console.basePath=/app; do
+            if helm template troupe charts/troupe --set "$bad" >/dev/null 2>&1; then
+              echo "$bad rendered; the chart must refuse it"
+              exit 1
+            fi
+          done
 
       # The one combination the chart refuses on purpose — replicas that do not form an
       # Erlang cluster — has to keep being refused, or the check is decoration.
