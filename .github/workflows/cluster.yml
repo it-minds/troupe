@@ -1,0 +1,142 @@
+# The suite that needs a Kubernetes cluster, on kind, as one job both gates call.
+#
+# `ci.yml` calls it on a pull request into `main` and in a full run that asks for it (the
+# nightly and a release); `dev-check.yml` on a pull request into a `development-*` chunk.
+# Either calls it only when the change touches what the cluster runs: the chart and its
+# CRDs and admission policy, the operator and its suite, the images, the kind cluster and
+# the scripts that bring it up, and this file. `docs/developer/ci.md` has the picture.
+#
+# About twenty-five minutes, most of it building the five images and the suite itself. So
+# the CRDs and the admission policy go to the API server first, before anything is built:
+# a rule the API server refuses fails the job in a minute, which is the failure a release
+# once met ten minutes into this job, and no check before it had.
+name: cluster
+
+on:
+  workflow_call:
+
+env:
+  ELIXIR_VERSION: "1.20.4"
+  OTP_VERSION: "28.5.0.5"
+
+jobs:
+  kind:
+    name: kind, the chart, mix troupe.e2e
+    # On Ubuntu 24.04 while the rest is on 26.04: kind and Cilium lean on the kernel more
+    # than anything else here, and the trial that moved the rest did not run this.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      # `kind` and `kubectl` only; the cluster is `scripts/kind-up`'s. kind-action used to
+      # create it from `dev/kind/cluster.yaml` alone, which keeps kind's own CNI — the
+      # `disableDefaultCNI` that makes Cilium the only one is appended by `kind-up`. So
+      # CI's cluster enforced no NetworkPolicy, and the egress test failed on every run it
+      # reached, hidden until now behind the token that expired mid-suite (#47).
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+
+      - uses: azure/setup-helm@v5
+
+      # The runner's kernel is the node's. Ubuntu 24.04 restricts unprivileged user
+      # namespaces through AppArmor, and one is how a worker's bubblewrap builds the sandbox
+      # every command on a pod runs in; left on, the suite would be testing the runner.
+      - name: Unprivileged user namespaces, which a worker's sandbox needs
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: A cluster whose CNI enforces policy
+        run: scripts/kind-up
+
+      # What the chart's own job cannot see. kubeconform checks a CRD's shape against a
+      # schema; only an API server compiles its CEL and says whether it takes a rule. The
+      # CRDs are applied, as `remote-up` applies them again later; the admission policy and
+      # the TroupePolicy the kind values install go through a server-side dry run, so the
+      # chart still installs them as its own. A node with no CNI yet is no matter: this is
+      # the API server alone.
+      - name: The CRDs and the admission policy, as the API server takes them
+        run: |
+          kubectl --context kind-troupe-dev apply -f charts/troupe/crds/
+          kubectl --context kind-troupe-dev wait --for condition=established --timeout=60s -f charts/troupe/crds/
+          helm template troupe charts/troupe --namespace troupe-system --values dev/kind/values.yaml \
+              --show-only templates/admission-policy.yaml --show-only templates/policy-default.yaml \
+            | kubectl --context kind-troupe-dev apply --dry-run=server -f -
+
+      # The same script a developer runs, so that a cluster failure here is reproducible
+      # by one command on a laptop. It builds the five images and `kind load`s them,
+      # which is why nothing is pushed for this job.
+      #
+      # The gateway is a public host a runner can reach, and no key: the egress suite dials
+      # the dev profile's model endpoint from inside a pod, which needs a host that answers
+      # and nothing more. Without one it says it could not test that, and passes.
+      - name: Bring up a Troupe
+        env:
+          TROUPE_GATEWAY_URL: https://api.openai.com/v1
+        run: scripts/remote-up
+
+      # Something answering at the cloud metadata address, where a pod reaches it as it
+      # would a cloud's: out through its node, to a host that answers there. Without it a
+      # worker's refused connection would say nothing, since nothing would answer anyway;
+      # the egress suite checks that a pod under no policy reaches this before it believes
+      # the worker's refusal. On the runner, not in the cluster: an address on the node
+      # itself is the node's to Cilium, and no egress rule speaks of the node.
+      - name: A stand-in for a cloud's metadata service
+        run: |
+          sudo ip address add 169.254.169.254/32 dev lo
+          mkdir -p "$RUNNER_TEMP/metadata"
+          echo "a stand-in for a cloud's metadata service" > "$RUNNER_TEMP/metadata/index.html"
+          sudo nohup python3 -m http.server 80 --bind 169.254.169.254 \
+            --directory "$RUNNER_TEMP/metadata" > "$RUNNER_TEMP/metadata.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -fsS --max-time 2 http://169.254.169.254/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "nothing answers at 169.254.169.254:80 on the runner"
+          cat "$RUNNER_TEMP/metadata.log"
+          exit 1
+
+      # Its own key, not the umbrella jobs': this runner image is not theirs, and a NIF
+      # built on one image is not one to load on another.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-cluster-24.04-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-cluster-24.04-mix-
+
+      - run: mix deps.get
+
+      - name: The cluster suite
+        env:
+          # The step above put a stand-in at the metadata address, so the suite fails
+          # rather than skips the connection it cannot otherwise make.
+          TROUPE_E2E_METADATA_STAND_IN: "1"
+        run: mix troupe.e2e
+
+      # A cluster failure that produces only an exit code is a failure nobody will
+      # diagnose. These are the two logs that say what happened.
+      - name: Logs, on failure
+        if: failure()
+        run: |
+          mkdir -p cluster-logs
+          # Enough of the plane's log to reach the pod deletion the suite made a few minutes
+          # earlier: at its debug level 2,000 lines was ten seconds of SQL.
+          kubectl logs -n troupe-system deployment/troupe-plane --tail=100000 > cluster-logs/plane.log 2>&1 || true
+          kubectl logs -n troupe-system deployment/troupe-operator --tail=20000 > cluster-logs/operator.log 2>&1 || true
+          kubectl get pods -A -o wide > cluster-logs/pods.txt 2>&1 || true
+          kubectl get events -A --sort-by=.lastTimestamp > cluster-logs/events.txt 2>&1 || true
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: cluster-logs
+          path: cluster-logs/

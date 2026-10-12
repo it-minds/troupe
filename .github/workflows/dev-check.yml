@@ -7,6 +7,10 @@
 # builds, a decision file that does not hold. It runs no test suite: the fixer ran the tests on its own machine, and
 # `ci.yml` runs the whole gate once, on the chunk's pull request into `main`, with every
 # issue of the run together. That is what `main` is protected by.
+#
+# But one: the suite that needs a cluster (`cluster.yml`), for a change to what it deploys.
+# A fixer's machine may have no cluster to run it on, and a CRD rule the API server refuses
+# is found by nothing short of an API server.
 name: dev-check
 
 # Every pull request that is not into `main`: into a chunk, or stacked on another branch.
@@ -37,6 +41,7 @@ jobs:
       tui: ${{ steps.filter.outputs.tui }}
       gui: ${{ steps.filter.outputs.gui }}
       vscode: ${{ steps.filter.outputs.vscode }}
+      cluster: ${{ steps.filter.outputs.cluster }}
     steps:
       - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
@@ -66,6 +71,16 @@ jobs:
               - protocol/**
             vscode:
               - clients/vscode/**
+            # The same list as `ci.yml`'s: what the cluster suite deploys or is.
+            cluster:
+              - charts/**
+              - docker/**
+              - dev/kind/**
+              - scripts/kind-up
+              - scripts/remote-up
+              - scripts/build-images
+              - apps/troupe_operator/**
+              - .github/workflows/cluster.yml
 
   elixir:
     name: umbrella - compile, credo, schema
@@ -221,15 +236,26 @@ jobs:
           path: clients/vscode/troupe.vsix
           if-no-files-found: error
 
+  # The suite that needs a cluster, about twenty-five minutes, when the change touches what
+  # it deploys: the chart and its CRDs and admission policy, the operator, the images, the
+  # kind cluster. After the compile, so code that does not build spends no cluster.
+  cluster:
+    name: the suite that needs a cluster
+    needs: [changes, elixir]
+    if: ${{ !cancelled() && needs.changes.outputs.cluster == 'true' && contains(fromJSON('["success", "skipped"]'), needs.elixir.result) }}
+    uses: ./.github/workflows/cluster.yml
+    permissions:
+      contents: read
+
   dev-ok:
     name: dev-ok
     if: always()
-    needs: [changes, elixir, decisions, tui, gui, vscode]
+    needs: [changes, elixir, decisions, tui, gui, vscode, cluster]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Every job that ran passed
         run: |
-          for r in "${{ needs.changes.result }}" "${{ needs.elixir.result }}" "${{ needs.decisions.result }}" "${{ needs.tui.result }}" "${{ needs.gui.result }}" "${{ needs.vscode.result }}"; do
+          for r in "${{ needs.changes.result }}" "${{ needs.elixir.result }}" "${{ needs.decisions.result }}" "${{ needs.tui.result }}" "${{ needs.gui.result }}" "${{ needs.vscode.result }}" "${{ needs.cluster.result }}"; do
             case "$r" in success|skipped) ;; *) echo "a job ended $r"; exit 1 ;; esac
           done
