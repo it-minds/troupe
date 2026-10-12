@@ -120,12 +120,20 @@ node allowed them, and the pod's own profile was what refused. This replaces tha
   in a `FailedCreate` event on the StatefulSet that names the field. The installer's
   DaemonSet mounts a host directory and runs as root, so its own namespace needs
   `privileged` too.
-- **kind.** User namespaces work there with nothing enabled, once kind's createContainer
-  hook can be reached: the runtime runs `/kind/bin/mount-product-files.sh` inside the pod's
-  user namespace, as its root, which is nobody on the node, and the node image leaves
-  `/kind` at 0644, so every user-namespaced pod failed "fork/exec
-  /kind/bin/mount-product-files.sh: permission denied". `scripts/kind-up` opens `/kind`
-  (0755; nothing in it is secret).
+- **kind.** User namespaces work there with no feature gate set, once two things about a
+  kind node are put right, which `scripts/kind-up` does. The runtime runs kind's
+  createContainer hook, `/kind/bin/mount-product-files.sh`, inside the pod's user
+  namespace, as its root, which is nobody on the node, and the node image leaves `/kind`
+  at 0644, so every user-namespaced pod failed "fork/exec
+  /kind/bin/mount-product-files.sh: permission denied": `/kind` is opened (0755; nothing in
+  it is secret). And a pod gets a sysfs of its own, which the kernel mounts in a user
+  namespace only where an existing sysfs is fully visible; kind mounts files over the
+  node's (`/sys/class/dmi/id/product_uuid` and the rest) where the host has DMI, as CI's
+  runner has, so the pod's sandbox failed 'error mounting "sysfs" to rootfs at "/sys": ...
+  operation not permitted' (run 38316367288): a second, read-only sysfs with nothing over
+  it is mounted at `/mnt/sysfs` on the node. Both are kind's own, known upstream (kind
+  #3436, #4178), and neither is anything a real node needs. Docker Desktop's nodes have no
+  DMI, which is why its kind needed only the first.
 - **Upgrading** a plane that runs workers changes every profile's pod template: each
   reports `UpgradePending` and its pods are replaced as they empty (Decision 726). With
   `Localhost` the installer has to be ready first, which it is unless a node is missing,
