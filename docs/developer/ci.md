@@ -92,13 +92,15 @@ cluster (Decision 889). It runs:
   the suite itself) or `cluster.yml`. Into `main` through `ci.yml`, after `lint`, the
   test legs and `chart` have passed or been skipped; into a `development-*` chunk through
   `dev-check.yml`, after its compile, because a fixer's machine may have no cluster and
-  the chunk's pull request into `main` is the release's last stop before this;
+  the chunk's own pull request into `main` comes only once every fix is in;
 - in the **nightly** and every **release**, whatever changed.
 
 Not on a push to `main`, whose pull request ran it, and not for a change to the workflows
 in general, which runs everything else.
 
-In order: `scripts/kind-up` (a cluster with no CNI); the CRDs applied and the admission
+In order: the runner's AppArmor restriction on unprivileged user namespaces lifted, as
+the test legs lift it, since the runner's kernel is the node's and a worker's bubblewrap
+needs one; `scripts/kind-up` (a cluster with no CNI); the CRDs applied and the admission
 policy and the kind values' TroupePolicy put through a server-side dry run, before anything
 is built, so a rule the API server refuses fails in about a minute (the 0.16.0 release met
 one ten minutes into this job, and nothing before it had applied a CRD to an API server);
@@ -107,9 +109,9 @@ profile); a stand-in answering at 169.254.169.254 on the runner, for the metadat
 then the suite, with its Mix build cached under a key of its own.
 
 **What it costs.** About twenty-five minutes of one runner, most of it the image builds
-(nine minutes) and the suite (twelve). On a pull request it runs beside everything else,
-so it is the slowest check on a change to the chart or the operator; a change elsewhere
-does not run it.
+(nine minutes) and the suite (twelve). On a pull request it starts once the cheaper checks
+of the same change have passed, so it is the last to finish on a change to the chart or the
+operator; a change elsewhere does not run it.
 
 **On a laptop**, the same: `scripts/remote-up` once, then `scripts/e2e` (or `mix
 troupe.e2e` with kind, kubectl and helm on the machine). The metadata test says it skipped

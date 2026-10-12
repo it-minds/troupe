@@ -63,5 +63,5 @@ This replaces 676's sentence about the cluster suite and nothing else of it.
   The worker and plane apps in the list: their own suites run on every change to them, and
   the cluster suite on each would put twenty-five minutes on most pull requests.
 - **What it costs.** The job takes what it took in the nightly, about twenty-five minutes,
-  plus the new tests; on a pull request it runs beside the rest, so a change to the chart
-  or the operator waits for it.
+  plus the new tests; on a pull request it starts after the cheaper checks, so a change to
+  the chart or the operator waits for it.
