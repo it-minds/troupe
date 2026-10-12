@@ -105,8 +105,7 @@ models:
 # <workspace>/.troupe/config.local.yaml: the workspace is on trusted_workspaces
 providers:
   local:
-    type: openai
-    base_url: http://localhost:11434/v1
+    type: ollama
 models:
   cheap: local/qwen3
 ```
@@ -146,9 +145,9 @@ refused and a request to it fails with that message, an MCP server is not starte
 anywhere else the file is refused. Nothing unset is sent anywhere, as an empty string or
 as the placeholder.
 
-`ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are used when a provider has no key of its own,
-and only when the provider is the vendor's own endpoint. A gateway configured without a
-key is sent none.
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY` and `GEMINI_API_KEY` are used
+when a provider of that type has no key of its own, and only when the provider is the
+vendor's own endpoint. A gateway configured without a key is sent none.
 
 ## Trusted workspaces
 
@@ -968,6 +967,85 @@ max_turns: 20
 wall_clock_ms: 600000
 ```
 
+## Provider types
+
+The session-wide `provider`, and a named provider's `type`, is one of the types below. A
+name that is none of them refuses the file, naming the file, the key and these. A Troupe
+before 0.5 read any such name as `openai`; `troupe config migrate` rewrites one that is
+another's name (`litellm`, `vllm` and `lmstudio` are `openai`, `google` is `gemini`,
+`azure` is `azure_openai`) and says what to write for any other. A gateway that speaks
+one of these APIs, such as LiteLLM, is that type with its `base_url`.
+
+<!-- provider-types:begin -->
+| Type | Endpoint | Key | Keys that apply | Model list | Thinking | Caching |
+|---|---|---|---|---|---|---|
+| `anthropic` | Anthropic's Messages API at `https://api.anthropic.com`, or a gateway that speaks it at its `base_url`. | `x-api-key`, or `Authorization: Bearer` with `auth: bearer`. Without a key, `ANTHROPIC_API_KEY`, sent only to Anthropic's own endpoint. | `base_url`, `api_key`, `auth`, `models`, `binds_thinking` | `/v1/models`: each model's window, output cap and the thinking it takes; no prices. | `reasoning_effort` becomes adaptive thinking or a budget, whichever the model takes; the output cap is raised to hold it, no further than an enforced `max_tokens`. Thinking is handed back. | Troupe marks the tools, the system prompt and the conversation for Anthropic's cache; what it read and wrote is reported. |
+| `openai` | OpenAI's Chat Completions at `https://api.openai.com`, or any server that speaks it (LiteLLM, vLLM, LM Studio) at its `base_url`. | `Authorization: Bearer`. Without a key, `OPENAI_API_KEY`, sent only to OpenAI's own endpoint; a server elsewhere is sent only a key of its own, and may need none. | `base_url`, `api_key`, `models` | A LiteLLM gateway's `/model_group/info`, with windows and prices, else `/v1/models`; asked only with a `base_url`. | `reasoning_effort` is sent as written, with the output cap as `max_completion_tokens`, which the reasoning spends from. Reasoning is handed back. | Whatever the server does by itself; Troupe sends no marks. What it read from its cache, and through LiteLLM what Anthropic wrote, is reported. |
+| `ollama` | Ollama's OpenAI-compatible endpoint, at `http://localhost:11434` unless `base_url` says. | None. A key that is set is sent as `Authorization: Bearer`, for a proxy in front of the server. | `base_url`, `api_key`, `models` | The server's `/v1/models`, asked with no key: the models pulled there. Nothing is priced. | `reasoning_effort` is sent as written, beside `max_tokens`; the reasoning a model streams is shown. | The server keeps a loaded model's last prompt in memory by itself; nothing is billed or reported. |
+| `openrouter` | OpenRouter's Chat Completions at `https://openrouter.ai/api/v1`. A model is OpenRouter's id after the provider's name: `openrouter/anthropic/claude-sonnet-4.5`. | `Authorization: Bearer`. Without a key, `OPENROUTER_API_KEY`, sent only to openrouter.ai. `HTTP-Referer` and `X-Title` name Troupe there, unless `identify: false`. | `base_url`, `api_key`, `models` | `/models`: each model's window, output cap and prices, its cache rates included. | `reasoning_effort` is sent as OpenRouter's `reasoning`: `effort`, or `max_tokens` for a number, beside `max_tokens`, which the reasoning spends from. | Whatever the model's own provider does by itself; Troupe sends no marks, so an Anthropic model there is not cached. What it read is reported. |
+| `azure_openai` | Your Azure OpenAI resource, which `base_url` names: `https://<resource>.openai.azure.com`. A call goes to `/openai/deployments/<model>/chat/completions?api-version=<api_version>`, so a model's name, or its `id`, is the deployment's. | `api-key`, or `Authorization: Bearer` with `auth: bearer`, for a Microsoft Entra token. No variable stands in for a key. | `base_url` (required), `api_key`, `auth`, `api_version` (`2024-10-21` unless set), `models` | None: Azure lists deployments only through its management API, so name them under `models:`. | As `openai`: `reasoning_effort` as written, with `max_completion_tokens`. A reasoning model may need a later `api_version`. | Azure caches a long enough prompt by itself, and reports what it read. |
+| `gemini` | The Gemini API's OpenAI-compatible endpoint, `https://generativelanguage.googleapis.com/v1beta/openai`. | `Authorization: Bearer`. Without a key, `GEMINI_API_KEY`, sent only to Google's endpoint. | `base_url`, `api_key`, `models` | `/models` on that endpoint: the ids, without windows or prices. | `reasoning_effort` is sent as written, beside `max_tokens`, which the thinking spends from. The thought signature Gemini puts on a tool call is handed back with it. | Gemini caches a repeated prefix by itself on the models that do; what the endpoint says it read is counted. |
+| `fake` | None: scripted answers, for a packaged binary's smoke test. The session-wide `provider` only. | None. | `fake_script` | None. | None. | None. |
+<!-- provider-types:end -->
+
+An `azure_openai` provider without a `base_url` is refused, as one whose key is not set
+is, and says so; so is a session-wide `provider: azure_openai`, which takes the default
+`api_version`. Bedrock and Vertex are not types: each signs its requests with its own
+cloud's credentials rather than taking a key. A gateway in front of either is the type of
+the API the gateway speaks.
+
+A model on this machine, through Ollama, which needs no key:
+
+```yaml
+version: 1
+providers:
+  local:
+    type: ollama
+models:
+  cheap: local/qwen3
+```
+
+OpenRouter, where a model is OpenRouter's own id after the provider's name, and
+`troupe models` lists each model's window and price:
+
+```yaml
+version: 1
+providers:
+  openrouter:
+    type: openrouter
+    api_key: "{env:OPENROUTER_API_KEY}"
+models:
+  default: openrouter/anthropic/claude-sonnet-4.5
+```
+
+Azure OpenAI, where a model is a deployment of your resource, named under `models:`
+because Azure does not list them to a key:
+
+```yaml
+version: 1
+providers:
+  azure:
+    type: azure_openai
+    base_url: https://example-resource.openai.azure.com
+    api_key: "{env:AZURE_OPENAI_API_KEY}"
+    api_version: "2024-10-21"
+    models:
+      gpt-5: {id: example-gpt-5-deployment, context: 400000}
+models:
+  default: azure/gpt-5
+```
+
+The Gemini API, through its OpenAI-compatible endpoint:
+
+```yaml
+version: 1
+provider: gemini
+api_key: "{env:GEMINI_API_KEY}"
+models:
+  default: gemini-2.5-pro
+  cheap: gemini-2.5-flash
+```
+
 ## What each provider caches
 
 One thing you type can take an agent many model calls, and each call sends the whole
@@ -982,12 +1060,17 @@ nothing to set; what happens depends on the provider.
   warm and a reply after a long pause starts it again. A prompt shorter than the model's
   minimum (512 to 4096 tokens, by model) is not cached. A gateway that speaks Anthropic's
   API passes the marks on or drops them.
-- **OpenAI** caches a long enough prompt by itself, with nothing to ask.
+- **OpenAI** caches a long enough prompt by itself, with nothing to ask, and so does
+  Azure OpenAI.
 - **An OpenAI-compatible gateway or server** (`provider: openai` with a `base_url`, such as
-  LiteLLM, vLLM or Ollama) caches whatever it and the model behind it do, which may be
+  LiteLLM or vLLM) caches whatever it and the model behind it do, which may be
   nothing. Troupe sends no marks this way; a LiteLLM deployment can be configured to add
   them for the Anthropic models it serves, and then reports what Anthropic wrote to the
   cache as well as what it read.
+- **OpenRouter, the Gemini API and Ollama** cache as the
+  [table of provider types](#provider-types) says: OpenRouter what the model's own
+  provider caches by itself, Gemini a repeated prefix on the models that do, and Ollama a
+  loaded model's last prompt, in memory and unreported.
 
 Whichever it is, the provider's own figures say whether it happened: each model call's
 `cache_read` and `cache_write` in the session's log, and the terminal UI's token detail,
@@ -1007,7 +1090,9 @@ again, and Anthropic still reads the tools and the system prompt in front of the
 `reasoning_effort` on a model's `models:` entry asks a model that reasons to think before
 it answers: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or a number of
 tokens. An OpenAI-compatible provider is sent the word as it is, and the model decides
-what it means.
+what it means; OpenRouter is sent it in its own `reasoning` field, a number as a budget.
+On every one but Anthropic the reasoning spends from the output cap, so an enforced
+`max_tokens` holds it as it holds the answer.
 
 Anthropic's models take it in one of two forms, and refuse the other:
 
@@ -1068,12 +1153,14 @@ which of their spend is Troupe's, from which client and on which version:
 - **Everywhere**, a User-Agent such as `troupe/0.8.4-beta (tui; windows/x86_64)`. The
   client is `tui`, `headless` (`troupe run --headless`), `desktop`, `acp` (an editor over
   ACP), `worker` (a session on a plane's pod) or `other`.
-- **To a gateway** (a `base_url` that is neither Anthropic's nor OpenAI's own API, nor
-  OpenRouter), LiteLLM's `x-litellm-tags` (`troupe`, `troupe-<client>`,
-  `troupe-<version>`) and `x-litellm-spend-logs-metadata` with the session's id. An
-  OpenAI-compatible request's `metadata` carries the session's id, the client and the
-  version too. A server that is not LiteLLM ignores them.
-- **To OpenRouter**, `HTTP-Referer` (the project's page) and `X-Title: Troupe`.
+- **To a gateway** (the `base_url` of an `anthropic`, `openai` or `gemini` provider that is
+  not the vendor's own API, nor OpenRouter), LiteLLM's `x-litellm-tags` (`troupe`,
+  `troupe-<client>`, `troupe-<version>`) and `x-litellm-spend-logs-metadata` with the
+  session's id. An `openai` request's `metadata` carries the session's id, the client and
+  the version too. A server that is not LiteLLM ignores them. An `ollama` server and an
+  `azure_openai` resource get the User-Agent alone.
+- **To OpenRouter** (an `openrouter` provider, or any at openrouter.ai), `HTTP-Referer`
+  (the project's page) and `X-Title: Troupe`.
 
 A session on your machine names nobody: no person, no path, no repository, no host name.
 A session on a plane's pod also carries what the plane attributes it with (its owner, its
@@ -1102,15 +1189,16 @@ shows a key by, in the desktop app and the terminal UI alike.
 
 | Key | Type | Default | Set by | Shown as | What it does |
 |---|---|---|---|---|---|
-| `provider` | `anthropic` \| `openai` \| `fake` | `anthropic` | user; project if trusted; an organisation may enforce |  | The session-wide provider's API. |
+| `provider` | `anthropic` \| `openai` \| `ollama` \| `openrouter` \| `azure_openai` \| `gemini` \| `fake` | `anthropic` | user; project if trusted; an organisation may enforce |  | The session-wide provider's API; the table under Provider types says what each one does. |
 | `base_url` | string |  | user; project if trusted; an organisation may enforce |  | The session-wide provider's URL. Unset: the vendor's own endpoint. |
 | `api_key` | string |  | user; project if trusted |  | The session-wide provider's key. `{env:VAR}` reads it from the environment. |
 | `auth` | `api_key` \| `bearer` | `api_key` | user; project if trusted |  | How the key is sent: the vendor's own header, or `Authorization: Bearer`. |
 | `providers` | map of name to settings |  | user; project if trusted |  | Named providers. A model spelled `<provider>/<model>` goes to that provider. |
-| `providers.<name>.type` | `openai` \| `anthropic` | `openai` | user; project if trusted |  | The API it speaks. A gateway such as LiteLLM or vLLM is `openai`. |
-| `providers.<name>.base_url` | string |  | user; project if trusted |  | Where it is. Unset: the vendor's own endpoint. |
+| `providers.<name>.type` | `anthropic` \| `openai` \| `ollama` \| `openrouter` \| `azure_openai` \| `gemini` | `openai` | user; project if trusted |  | The API it speaks; the table under Provider types says what each one does. A gateway such as LiteLLM or vLLM is `openai`. |
+| `providers.<name>.base_url` | string |  | user; project if trusted |  | Where it is. Unset: the type's own, as the table under Provider types says; `azure_openai` needs one. |
 | `providers.<name>.api_key` | string |  | user; project if trusted |  | Its key. `{env:VAR}` reads it from the environment. |
 | `providers.<name>.auth` | `api_key` \| `bearer` | `api_key` | user; project if trusted |  | How the key is sent: the vendor's own header, or `Authorization: Bearer`. |
+| `providers.<name>.api_version` | string |  | user; project if trusted |  | `azure_openai` only: the `api-version` each call names. Unset: `2024-10-21`. |
 | `providers.<name>.models` | map of name to settings |  | user; project if trusted |  | The models it serves, by the name Troupe addresses them with. |
 | `providers.<name>.models.<model>.id` | string |  | user; project if trusted |  | The id that goes on the wire, when the gateway renamed the model. Unset: the name. |
 | `providers.<name>.models.<model>.context` | integer ≥ 1 |  | user; project if trusted |  | The model's context window, in tokens. |

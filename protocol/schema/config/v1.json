@@ -23,11 +23,15 @@
       ]
     },
     "provider": {
-      "description": "The session-wide provider's API. Read from a project's file only in a trusted workspace. An organisation may enforce it, and nothing on this machine then goes past it.",
+      "description": "The session-wide provider's API; the table under Provider types says what each one does. Read from a project's file only in a trusted workspace. An organisation may enforce it, and nothing on this machine then goes past it.",
       "default": "anthropic",
       "enum": [
         "anthropic",
         "openai",
+        "ollama",
+        "openrouter",
+        "azure_openai",
+        "gemini",
         "fake",
         null
       ]
@@ -68,16 +72,20 @@
         ],
         "properties": {
           "type": {
-            "description": "The API it speaks. A gateway such as LiteLLM or vLLM is `openai`.",
+            "description": "The API it speaks; the table under Provider types says what each one does. A gateway such as LiteLLM or vLLM is `openai`.",
             "default": "openai",
             "enum": [
-              "openai",
               "anthropic",
+              "openai",
+              "ollama",
+              "openrouter",
+              "azure_openai",
+              "gemini",
               null
             ]
           },
           "base_url": {
-            "description": "Where it is. Unset: the vendor's own endpoint.",
+            "description": "Where it is. Unset: the type's own, as the table under Provider types says; `azure_openai` needs one.",
             "type": [
               "string",
               "null"
@@ -97,6 +105,13 @@
               "api_key",
               "bearer",
               null
+            ]
+          },
+          "api_version": {
+            "description": "`azure_openai` only: the `api-version` each call names. Unset: `2024-10-21`.",
+            "type": [
+              "string",
+              "null"
             ]
           },
           "models": {

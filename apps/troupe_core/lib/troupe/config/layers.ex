@@ -32,6 +32,7 @@ defmodule Troupe.Config.Layers do
   """
 
   alias Troupe.Config.{Issue, Migrate, Org, Schema, Trust}
+  alias Troupe.LLM.ProviderType
   alias Troupe.Protocol.Organisation
 
   @type layer :: :default | :org | :user | :project | :local | :env | :cli | :enforced
@@ -135,7 +136,7 @@ defmodule Troupe.Config.Layers do
         }
       end)
 
-    result |> unresolved() |> servers() |> prices()
+    result |> unresolved() |> servers() |> endpoints() |> prices()
   end
 
   @doc "The user file's trust list, as written."
@@ -702,7 +703,7 @@ defmodule Troupe.Config.Layers do
   end
 
   defp type_error(value, %{type: {:enum, values}}, shown, line, path) do
-    hint = shown |> String.split(".") |> Schema.hint()
+    hint = shown |> String.split(".") |> Schema.hint(value)
     issue(:error, path, line, shown, "#{shown} must be one of #{Enum.join(values, ", ")}, not #{show(value)}#{hint}")
   end
 
@@ -926,6 +927,49 @@ defmodule Troupe.Config.Layers do
       _one -> result
     end
   end
+
+  # A type with no endpoint of its own (`azure_openai`) is where its `base_url` says, and
+  # without one the provider is refused, as one whose key is not set is, rather than sent
+  # nowhere. Checked on the merged value, like a server, since one layer may name the type
+  # and another the URL.
+  defp endpoints(%Result{values: values} = result) do
+    result =
+      if nowhere?(values["provider"], values["base_url"]) do
+        source = source_of_any(result.ladder, ["provider"])
+        why = nowhere("provider is #{values["provider"]}", "base_url")
+        refuse(result, :session, nil, source, "provider", why)
+      else
+        result
+      end
+
+    case values["providers"] do
+      providers when is_map(providers) ->
+        providers |> Enum.sort() |> Enum.reduce(result, &endpoint/2)
+
+      _ ->
+        result
+    end
+  end
+
+  defp endpoint({name, %{} = entry}, result) do
+    if nowhere?(entry["type"], entry["base_url"]) do
+      shown = "providers.#{name}"
+      source = source_of_any(result.ladder, ["providers", name])
+      why = nowhere("#{shown} is #{entry["type"]}", "#{shown}.base_url")
+      refuse(result, :providers, name, source, shown, why)
+    else
+      result
+    end
+  end
+
+  defp endpoint(_entry, result), do: result
+
+  defp nowhere?(type, base_url), do: ProviderType.needs_base_url?(type) and base_url in [nil, ""]
+
+  defp nowhere(said, key),
+    do:
+      "#{said}, which is wherever its base_url says, and #{key} is not set; it is refused until it is, " <>
+        "as your resource's URL: https://<resource>.openai.azure.com"
 
   # A price is both halves. Checked on the merged value, like a server, since one layer
   # may give the input price and another the output price.

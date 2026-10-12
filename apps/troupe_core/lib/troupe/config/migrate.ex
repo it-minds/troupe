@@ -5,7 +5,9 @@ defmodule Troupe.Config.Migrate do
   Loading never rewrites a file: a rewrite would drop its comments, and the old
   spellings load with a warning anyway. `troupe config migrate` shows, file by file,
   the rewrite that would stop the warnings, and `--write` makes it, keeping the file as
-  it was beside it as `<name>.previous`.
+  it was beside it as `<name>.previous`. It also rewrites a provider type that is
+  another's name (`litellm` is `openai`), which an old Troupe read as `openai` and this
+  one refuses, and says what to write for any other.
 
   Every writer — the daemon's model settings, the terminal UI's settings page, a budget
   answer for the workspace — goes through `write/2`, which changes only the lines of
@@ -14,6 +16,7 @@ defmodule Troupe.Config.Migrate do
   """
 
   alias Troupe.Config.{Issue, Layers, Schema, Yaml}
+  alias Troupe.LLM.ProviderType
 
   @type move :: {[String.t()], [String.t()]}
 
@@ -173,14 +176,70 @@ defmodule Troupe.Config.Migrate do
         {:error, Issue.format(issue)}
 
       {:ok, map, text} ->
-        case canonical(map) do
-          {:ok, migrated, moves} ->
-            {:ok, %{path: path, text: text, migrated: render(migrated, path), moves: moves, changed?: moves != []}}
+        with {:ok, migrated, moves} <- canonical(map),
+             {:ok, migrated, retyped} <- types(migrated) do
+          moves = moves ++ retyped
 
-          {:error, conflicts} ->
-            {:error, "#{shown(path)}: " <> Enum.join(conflicts, "; ")}
+          {:ok,
+           %{
+             path: path,
+             text: text,
+             migrated: render(migrated, path),
+             moves: moves,
+             changed?: moves != []
+           }}
+        else
+          {:error, conflicts} -> {:error, "#{shown(path)}: " <> Enum.join(conflicts, "; ")}
         end
     end
+  end
+
+  # A provider type that is not one. A Troupe before 0.5 read any of them as `openai`;
+  # this one refuses the file. One that people mean another type by (`litellm` is
+  # `openai`, `google` is `gemini`) is rewritten to it; any other is the file's to fix, and
+  # the plan says so, naming the key and the types. Only here, where a rewrite is asked
+  # for: a writer that sets another key leaves the type as the file has it.
+  defp types(map) do
+    named =
+      case map["providers"] do
+        providers when is_map(providers) -> providers |> Map.keys() |> Enum.sort()
+        _ -> []
+      end
+
+    [
+      {["provider"], ProviderType.names()}
+      | Enum.map(named, &{["providers", &1, "type"], ProviderType.named()})
+    ]
+    |> Enum.reduce({map, [], []}, &retype/2)
+    |> case do
+      {map, moves, []} -> {:ok, map, moves}
+      {_map, _moves, unknown} -> {:error, unknown}
+    end
+  end
+
+  defp retype({key_path, known}, {map, moves, unknown}) do
+    case fetch_path(map, key_path) do
+      {:ok, value} when is_binary(value) -> retype(key_path, value, known, {map, moves, unknown})
+      _absent -> {map, moves, unknown}
+    end
+  end
+
+  defp retype(key_path, value, known, {map, moves, unknown}) do
+    cond do
+      value in known or String.contains?(value, "{env:") ->
+        {map, moves, unknown}
+
+      type = ProviderType.rewrite(value) ->
+        {put_path(map, key_path, type), moves ++ [{key_path, key_path}], unknown}
+
+      true ->
+        {map, moves, unknown ++ [not_a_type(key_path, value, known)]}
+    end
+  end
+
+  defp not_a_type(key_path, value, known) do
+    "#{Enum.join(key_path, ".")} is #{inspect(value)}, which is not a provider type, and does not load as openai; " <>
+      "write one of #{Enum.join(known, ", ")}: `openai` for a server that speaks the OpenAI API"
   end
 
   defp shown(path), do: Troupe.Paths.display(path)

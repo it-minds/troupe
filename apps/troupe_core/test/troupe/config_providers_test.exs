@@ -119,6 +119,7 @@ defmodule Troupe.ConfigProvidersTest do
                base_url: nil,
                api_key: "session-key-1234567890",
                auth: :api_key,
+               api_version: nil,
                max_output: nil,
                reasoning_effort: nil
              }
@@ -203,6 +204,29 @@ defmodule Troupe.ConfigProvidersTest do
       assert providers["gateway"].auth == :bearer
       assert Map.get(providers["gateway"].models, "claude-opus-5").id == "eu.anthropic.claude-opus-5"
       assert OpenCode.default_model() == "portal/glm-5.2"
+    end
+
+    test "an SDK package with a provider type of its own is copied as that type, not as openai",
+         %{opencode: opencode} do
+      File.write!(Path.join(opencode, "opencode.jsonc"), """
+      {"provider": {
+        "google": {"npm": "@ai-sdk/google"},
+        "azure": {"npm": "@ai-sdk/azure", "options": {"baseURL": "https://example-resource.openai.azure.com/openai"}},
+        "router": {"npm": "@openrouter/ai-sdk-provider"},
+        "local": {"npm": "ollama-ai-provider-v2"},
+        "compatible": {"npm": "@ai-sdk/openai-compatible", "options": {"baseURL": "https://llm-gw.example/v1"}}
+      }}
+      """)
+
+      types = Map.new(OpenCode.providers(), fn {name, p} -> {name, p.type} end)
+
+      assert types == %{
+               "google" => :gemini,
+               "azure" => :azure_openai,
+               "router" => :openrouter,
+               "local" => :ollama,
+               "compatible" => :openai
+             }
     end
 
     # Decision 828: opencode's files are copied once, when a person asks
