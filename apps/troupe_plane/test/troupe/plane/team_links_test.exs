@@ -31,12 +31,12 @@ defmodule Troupe.Plane.TeamLinksTest do
   describe "two groups, one team" do
     test "a member of either gets the team's grants", context do
       team = team_with_grant("backend", "dev", name: "engineering")
-      {:ok, platform} = Identity.upsert_group(%{external_id: "itm-platform", display_name: "Platform"})
-      {:ok, _} = Admin.team_link(context.root, "engineering", "itm-platform")
+      {:ok, platform} = Identity.upsert_group(%{external_id: "org-platform", display_name: "Platform"})
+      {:ok, _} = Admin.team_link(context.root, "engineering", "org-platform")
 
       ada = person("ada@example.test", ["backend"])
-      bea = person("bea@example.test", ["itm-platform"])
-      cyd = person("cyd@example.test", ["backend", "itm-platform"])
+      bea = person("bea@example.test", ["org-platform"])
+      cyd = person("cyd@example.test", ["backend", "org-platform"])
 
       # The union. Everybody in either group is in the team, and the one in both is in it
       # once — without `distinct` they are in it twice and a listing shows their budget as
@@ -51,30 +51,30 @@ defmodule Troupe.Plane.TeamLinksTest do
         assert Identity.profiles_for(user) |> Enum.map(& &1.profile) == ["dev"]
       end
 
-      assert platform.external_id == "itm-platform"
+      assert platform.external_id == "org-platform"
     end
 
     test "unlinking removes only the people who had no other route", context do
       team = team_with_grant("backend", "dev", name: "engineering")
-      {:ok, _} = Identity.upsert_group(%{external_id: "itm-platform", display_name: "Platform"})
-      {:ok, _} = Admin.team_link(context.root, "engineering", "itm-platform")
+      {:ok, _} = Identity.upsert_group(%{external_id: "org-platform", display_name: "Platform"})
+      {:ok, _} = Admin.team_link(context.root, "engineering", "org-platform")
 
       _ada = person("ada@example.test", ["backend"])
-      bea = person("bea@example.test", ["itm-platform"])
-      cyd = person("cyd@example.test", ["backend", "itm-platform"])
+      bea = person("bea@example.test", ["org-platform"])
+      cyd = person("cyd@example.test", ["backend", "org-platform"])
 
       # The count first, and it has to be the count. Somebody unlinking a group is usually
       # right about which group and often wrong about how many people are only in the team
       # through it.
       assert {:ok, effect} =
-               Admin.team_unlink_preview(context.root, "engineering", "itm-platform")
+               Admin.team_unlink_preview(context.root, "engineering", "org-platform")
 
       assert effect.in_group == 2
       assert effect.keep_access == 1
       assert effect.lose_access == 1
       assert effect.losing == [bea.subject]
 
-      assert {:ok, ^effect} = Admin.team_unlink(context.root, "engineering", "itm-platform")
+      assert {:ok, ^effect} = Admin.team_unlink(context.root, "engineering", "org-platform")
 
       # And what actually happened matches what was promised.
       members = team |> Identity.members_of_team() |> Enum.map(& &1.subject)
@@ -86,10 +86,10 @@ defmodule Troupe.Plane.TeamLinksTest do
     test "the count names the sessions those people can open, and they do not move",
          context do
       team = team_with_grant("backend", "dev", name: "engineering")
-      {:ok, _} = Identity.upsert_group(%{external_id: "itm-platform", display_name: "Platform"})
-      {:ok, _} = Admin.team_link(context.root, "engineering", "itm-platform")
+      {:ok, _} = Identity.upsert_group(%{external_id: "org-platform", display_name: "Platform"})
+      {:ok, _} = Admin.team_link(context.root, "engineering", "org-platform")
 
-      bea = person("bea@example.test", ["itm-platform"])
+      bea = person("bea@example.test", ["org-platform"])
       cyd = person("cyd@example.test", ["backend"])
 
       # Owned by somebody who stays, visible to the team. What bea loses is the team road
@@ -109,11 +109,11 @@ defmodule Troupe.Plane.TeamLinksTest do
         })
 
       assert {:ok, effect} =
-               Admin.team_unlink_preview(context.root, "engineering", "itm-platform")
+               Admin.team_unlink_preview(context.root, "engineering", "org-platform")
 
       assert effect.sessions_they_can_open == 1
 
-      {:ok, _} = Admin.team_unlink(context.root, "engineering", "itm-platform")
+      {:ok, _} = Admin.team_unlink(context.root, "engineering", "org-platform")
 
       # The session stays with the team. Unlinking changes who may open it, not what it
       # belongs to — which is the thing people assume the other way round.
@@ -124,14 +124,14 @@ defmodule Troupe.Plane.TeamLinksTest do
 
   describe "one group, two teams" do
     test "puts a person in both, with their own budgets and retention" do
-      delivery = team_with_grant("itm-consultants", "dev", name: "delivery", budget_micros: 100)
-      {:ok, group} = Identity.upsert_group(%{external_id: "itm-consultants"})
+      delivery = team_with_grant("org-consultants", "dev", name: "delivery", budget_micros: 100)
+      {:ok, group} = Identity.upsert_group(%{external_id: "org-consultants"})
 
       {:ok, timesheets} =
         Identity.enable_team(group, %{"name" => "timesheets", "budget_micros" => 500})
 
       {:ok, _} = Identity.grant(timesheets, "dev", %{})
-      ada = person("ada@example.test", ["itm-consultants"])
+      ada = person("ada@example.test", ["org-consultants"])
 
       assert Identity.teams_for(ada) |> Enum.map(& &1.name) |> Enum.sort() ==
                ["delivery", "timesheets"]

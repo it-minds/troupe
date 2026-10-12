@@ -9,12 +9,12 @@ defmodule Troupe.Plane.Repo.Migrations.TeamGroupLinks do
 
   Three shapes become sayable, and all three are things people ask for:
 
-  * **1:1** — `itm-backend` to **Backend**. The common case, and what every existing team
+  * **1:1** — `org-backend` to **Backend**. The common case, and what every existing team
     becomes.
-  * **2:1** — `itm-backend` and `itm-platform` to **Engineering**. Small groups in the
+  * **2:1** — `org-backend` and `org-platform` to **Engineering**. Small groups in the
     provider, joined into one team here, which is cheaper than asking IT for a group every
     time a grant needs a different shape.
-  * **1:2** — `itm-consultants` to **Delivery** and **Timesheets**. One group, two teams,
+  * **1:2** — `org-consultants` to **Delivery** and **Timesheets**. One group, two teams,
     with their own budgets, retention and grants.
 
   **The invariant is untouched.** "Membership always comes from the provider and is never

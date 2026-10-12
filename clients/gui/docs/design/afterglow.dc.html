@@ -127,9 +127,9 @@ button{font-family:inherit;border:0;background:none;color:inherit;cursor:pointer
           <div style="flex:0 1 300px;min-width:0">
             <div style="font:var(--t-screen);color:var(--cyan-text);letter-spacing:.14em;margin-bottom:var(--s-3)">// THIS MACHINE</div>
             <dl style="margin:0;display:grid;grid-template-columns:auto 1fr;gap:var(--s-2) var(--s-4);font:var(--t-mono-label)">
-              <dt style="color:var(--grey-deep)">PLATFORM</dt><dd style="margin:0;color:var(--cyan-text)">● itm-prod reachable</dd>
+              <dt style="color:var(--grey-deep)">PLATFORM</dt><dd style="margin:0;color:var(--cyan-text)">● example-prod reachable</dd>
               <dt style="color:var(--grey-deep)">RUNTIME</dt><dd style="margin:0;color:var(--cream-dim)">local worker idle</dd>
-              <dt style="color:var(--grey-deep)">SIGNED IN</dt><dd style="margin:0;color:var(--cream-dim)">s.brandt@itm.dk</dd>
+              <dt style="color:var(--grey-deep)">SIGNED IN</dt><dd style="margin:0;color:var(--cream-dim)">s.brandt@example.com</dd>
               <dt style="color:var(--grey-deep)">DISK</dt><dd style="margin:0;color:var(--cream-dim)">2.1 GB of session files</dd>
             </dl>
             <button type="button" data-btn="1" onClick="{{ goSessions }}" style="margin-top:var(--s-4);padding:10px 18px;border:1px solid var(--rule-strong);color:var(--cream-dim);font-size:14px;font-weight:600">Settings</button>
@@ -162,7 +162,7 @@ button{font-family:inherit;border:0;background:none;color:inherit;cursor:pointer
         <button type="button" data-nav="1" aria-current="{{ nSessions }}" onClick="{{ goSessions }}" style="text-align:left;padding:11px 20px;border-left:3px solid transparent;color:var(--grey);font-size:15px">sessions</button>
         <button type="button" data-nav="1" aria-current="{{ nSession }}" onClick="{{ goSession }}" style="text-align:left;padding:11px 20px;border-left:3px solid transparent;color:var(--grey);font-size:15px">stage</button>
         <button type="button" data-nav="1" aria-current="false" onClick="{{ goNew }}" style="text-align:left;padding:11px 20px;border-left:3px solid transparent;color:var(--grey);font-size:15px">new</button>
-        <span style="margin-top:auto;padding:var(--s-5) 20px 0;font:var(--t-mono-label);color:var(--grey-deep);line-height:1.6">s.brandt@itm.dk<br />2 waiting on you</span>
+        <span style="margin-top:auto;padding:var(--s-5) 20px 0;font:var(--t-mono-label);color:var(--grey-deep);line-height:1.6">s.brandt@example.com<br />2 waiting on you</span>
       </nav>
 
       <div style="flex:999 1 520px;min-width:0;display:flex;flex-direction:column">
@@ -184,7 +184,7 @@ button{font-family:inherit;border:0;background:none;color:inherit;cursor:pointer
           <div style="flex:1 1 auto;overflow:auto">
             <sc-if value="{{ showRemote }}" hint-placeholder-val="{{ true }}">
               <div style="padding:var(--s-5) var(--s-6) var(--s-3);display:flex;align-items:baseline;gap:var(--s-3);flex-wrap:wrap">
-                <span style="font:var(--t-screen);color:var(--cyan-text);letter-spacing:.14em">// REMOTE · itm-prod</span>
+                <span style="font:var(--t-screen);color:var(--cyan-text);letter-spacing:.14em">// REMOTE · example-prod</span>
                 <span style="font-size:14px;color:var(--grey)">Team, then profile, then session. A profile is what an agent of that kind may reach — permissions live there, not on the session.</span>
               </div>
               <sc-for list="{{ teams }}" as="t" hint-placeholder-count="2">
