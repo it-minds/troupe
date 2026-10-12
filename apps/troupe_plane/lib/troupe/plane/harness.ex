@@ -1484,10 +1484,6 @@ defmodule Troupe.Plane.Harness do
   defp slice_of(%{terms: %{"budget_micros" => slice}}) when is_integer(slice), do: slice
   defp slice_of(_session), do: @default_slice_micros
 
-  # Ours unless the caller brought one: the A2A facade names a session after its task.
-  # One it brought has the shape ours have, or it is refused before there is a row. The
-  # pod makes a directory of it, so an id that was a path would put the session's files
-  # somewhere else on the pod's disk.
   # The GitHub repository the session clones, checked against the plane's App now, before
   # there is a row: an owner it has no installation for, or a Git host the profile does
   # not declare, is a typo that would otherwise surface as a pod that could not clone.
@@ -1498,6 +1494,10 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # Ours unless the caller brought one: the A2A facade names a session after its task.
+  # One it brought has the shape ours have, or it is refused before there is a row. The
+  # pod makes a directory of it, so an id that was a path would put the session's files
+  # somewhere else on the pod's disk.
   defp session_id_for(nil), do: {:ok, generate_id()}
 
   defp session_id_for(session_id) do
@@ -2273,15 +2273,16 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  # The terms and origin a pod is handed on activation, from the row.
-  # On every activation, the first and each one after: the pod clones on the first, and on
-  # every one it gets a new token when it next needs one rather than keeping the last
-  # activation's. The repository only, never a credential: that the pod asks for.
+  # The repository a pod is handed on every activation, the first and each one after: the
+  # pod clones on the first, and on every one it gets a new token when it next needs one
+  # rather than keeping the last activation's. The repository only, never a credential:
+  # that the pod asks for.
   defp repository_params(%Session{repository: %{} = repository}),
     do: %{"repository" => repository}
 
   defp repository_params(_session), do: %{}
 
+  # The terms and origin a pod is handed on activation, from the row.
   defp session_terms(session) do
     %{"terms" => session.terms, "origin" => session.origin}
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
