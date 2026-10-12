@@ -594,6 +594,30 @@ defmodule Troupe.RemoteTranslateTest do
     assert odd.data.detail == "moon"
   end
 
+  # troupe issue #644: an organisation's output ceiling shortened the thinking, said once.
+  test "a config note is a line of the root's transcript, in the harness's words" do
+    message =
+      "Your organisation caps a model call's output at 1,000 tokens (https://plane.example.com), " <>
+        "so reasoning is off for this session: reasoning_effort high asks for 16,384 tokens of " <>
+        "thinking, and less than 1,024 is left beside the answer."
+
+    data = %{
+      "key" => "max_tokens",
+      "message" => message,
+      "source" => "https://plane.example.com",
+      "limit" => 1000,
+      "model" => "claude-opus-5-5",
+      "effort" => "high",
+      "thinking" => 0
+    }
+
+    [note] = translate(durable("config_note", data))
+    assert note.type == :remote_note
+    assert note.agent_path == "root"
+    assert note.data.text == message
+    assert {:system, message} in folded([note]).transcript
+  end
+
   test "the session's goal is set and cleared as events of its own, not as notes" do
     [set] = translate(durable("goal_set", %{"text" => "ship it", "command_id" => "c-1"}))
     assert set.type == :goal_set

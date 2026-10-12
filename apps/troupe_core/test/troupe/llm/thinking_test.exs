@@ -605,7 +605,122 @@ defmodule Troupe.LLM.ThinkingTest do
     end
   end
 
+  # Issue #644: an organisation's enforced `max_tokens` is the request's `ceiling`, and the
+  # raise that holds the thinking stops at it.
+  describe "under an organisation's ceiling" do
+    test "no request asks for more than the ceiling, at any effort, in either form" do
+      for model <- ["claude-opus-5-5", "claude-haiku-4-5", "house-model"],
+          effort <- ["minimal", "low", "medium", "high", "xhigh", "max", "1024", "12000", "64000"],
+          ceiling <- [1, 1000, 2046, 2048, 5000, 8192, 20_000, 40_000, 100_000] do
+        body = sent(ceiled(model, effort, ceiling))
+        said = "#{model} at #{effort} under #{ceiling}"
+
+        assert body["max_tokens"] <= ceiling, said
+
+        case body["thinking"] do
+          nil ->
+            refute Map.has_key?(body, "output_config"), said
+
+          %{"type" => "enabled", "budget_tokens" => budget} ->
+            assert budget >= 1_024 and budget < body["max_tokens"], said
+
+          %{"type" => "adaptive"} ->
+            assert body["output_config"]["effort"] in ~w(low medium high xhigh max), said
+        end
+      end
+    end
+
+    test "a budget shrinks so the answer keeps 4,096 tokens, or half a smaller ceiling" do
+      for {ceiling, budget} <- [
+            {100_000, 16_384},
+            {20_480, 16_384},
+            {20_000, 15_904},
+            {8_192, 4_096},
+            {6_000, 3_000},
+            {2_048, 1_024},
+            {2_047, 1_024}
+          ] do
+        body = sent(ceiled("claude-haiku-4-5", "high", ceiling))
+        assert body["thinking"] == %{"type" => "enabled", "budget_tokens" => budget}, "#{ceiling}"
+        assert body["max_tokens"] == min(ceiling, 16_384 + 4_096), "#{ceiling}"
+      end
+    end
+
+    test "less than 1,024 tokens of thinking left is no thinking, the request as with no effort" do
+      for {model, ceiling} <- [{"claude-haiku-4-5", 2_046}, {"claude-opus-5-5", 1_000}] do
+        body = sent(ceiled(model, "high", ceiling))
+        refute Map.has_key?(body, "thinking"), model
+        refute Map.has_key?(body, "output_config"), model
+        assert body["max_tokens"] == ceiling, model
+      end
+
+      # The newest model still has its thinking handed back: it thinks unasked, and no
+      # request turns that off, so its blocks go back to it as they do with no effort.
+      body = sent(%{ceiled("claude-opus-5-5", "high", 1_000) | messages: tool_turn(thought())})
+      assert replayed(body) == ["thinking", "tool_use"]
+
+      body = sent(%{ceiled("claude-haiku-4-5", "high", 1_000) | messages: tool_turn(thought())})
+      assert replayed(body) == ["tool_use"]
+    end
+
+    test "adaptive thinking is sent the level the room that is left holds" do
+      for {effort, ceiling, level} <- [
+            {"high", 8_192, "low"},
+            {"high", 12_288, "medium"},
+            {"high", 16_384, "high"},
+            {"max", 20_000, "high"},
+            {"max", 36_000, "xhigh"},
+            {"max", 40_000, "max"},
+            {"minimal", 2_048, "low"}
+          ] do
+        body = sent(ceiled("claude-opus-5-5", effort, ceiling))
+        assert body["output_config"] == %{"effort" => level}, "#{effort} under #{ceiling}"
+      end
+    end
+
+    test "a ceiling the thinking fits under leaves the request as it was" do
+      assert sent(ceiled("claude-opus-5-5", "high", 20_480)) == Jason.decode!(@opus_5_5_high)
+
+      assert sent(ceiled("claude-haiku-4-5", "medium", 12_288)) ==
+               Jason.decode!(@haiku_4_5_medium)
+    end
+
+    test "the output cap is held to the ceiling with no effort too" do
+      body = sent(%{request("claude-opus-5-5", nil) | max_tokens: 8_192, ceiling: 1_000})
+      assert body["max_tokens"] == 1_000
+    end
+
+    test "thinking_held says what the ceiling left of the thinking, and nothing when it fit" do
+      assert Anthropic.thinking_held(ceiled("claude-opus-5-5", "high", 1_000)) ==
+               %{asked: 16_384, given: 0}
+
+      assert Anthropic.thinking_held(ceiled("claude-haiku-4-5", "high", 8_192)) ==
+               %{asked: 16_384, given: 4_096}
+
+      assert Anthropic.thinking_held(ceiled("claude-opus-5-5", "high", 20_480)) == nil
+      assert Anthropic.thinking_held(ceiled("claude-opus-5-5", nil, 1_000)) == nil
+      assert Anthropic.thinking_held(request("claude-opus-5-5", "high")) == nil
+
+      # A cap the answer alone is held to is not the thinking's: it got all it asked for.
+      assert Anthropic.thinking_held(ceiled("claude-opus-5-5", "minimal", 2_048)) == nil
+    end
+
+    test "a refusal names the thinking that was sent, not the thinking that was asked for" do
+      refusal = ~s("thinking.type.enabled" is not supported for this model.)
+      request = %{request("claude-opus-4-6", "high", fail: refusal) | ceiling: 8_192}
+      assert {:error, reason} = run(request)
+
+      assert Provider.describe_error(reason) =~
+               "claude-opus-4-6 refused a thinking budget of 4096 tokens"
+    end
+  end
+
   # -- helpers ------------------------------------------------------------------
+
+  # A request under an organisation's ceiling, its own cap held to it as the agent holds
+  # the configured `max_tokens`.
+  defp ceiled(model, effort, ceiling),
+    do: %{request(model, effort) | max_tokens: min(8_192, ceiling), ceiling: ceiling}
 
   defp model(id, enabled: enabled, adaptive: adaptive) do
     %{

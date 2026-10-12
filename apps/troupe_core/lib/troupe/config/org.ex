@@ -229,7 +229,9 @@ defmodule Troupe.Config.Org do
   organisation's value, and the enforced value goes on the ladder last. A provider or
   URL that is fixed refuses every named provider that is not that provider at that URL.
   An enforced `max_turns` or `wall_clock_ms` is also kept as the configuration's
-  `ceilings`, with its source, which the budget question raises a limit no further than.
+  `ceilings`, with its source, which the budget question raises a limit no further than,
+  and so is an enforced `max_tokens`, which every model call asks for no more than, the
+  room its thinking is given included.
   """
   @spec hold(Config.t(), Layers.Result.t()) :: {Config.t(), Layers.Result.t()}
   def hold(config, %Layers.Result{enforced: enforced} = layers) when enforced == %{},
@@ -242,17 +244,23 @@ defmodule Troupe.Config.Org do
     fixed_providers(%{config | ceilings: ceilings(layers.enforced)}, layers)
   end
 
-  # The budget's own names for the limits it can be asked to raise.
-  @budget %{"max_turns" => :max_turns, "wall_clock_ms" => :wall_clock}
+  # The budget's own names for the limits it can be asked to raise, and the output one
+  # model call may ask for.
+  @ceilings %{
+    "max_turns" => :max_turns,
+    "wall_clock_ms" => :wall_clock,
+    "max_tokens" => :max_tokens
+  }
 
-  # The budget's limits among what is enforced, each with its source: the budget question
-  # raises a limit no further than these, and names the organisation when one is the
-  # limit (issue #622).
+  # The limits among what is enforced that a session reads again where something would go
+  # past them, each with its source: the budget question raises a limit no further than
+  # these, and names the organisation when one is the limit (issue #622); a model call's
+  # thinking is shortened to fit under `max_tokens`, and the session told so (issue #644).
   defp ceilings(enforced) do
     for {[key], %{value: limit, source: source}} <- enforced,
-        Map.has_key?(@budget, key),
+        Map.has_key?(@ceilings, key),
         into: %{},
-        do: {@budget[key], %{limit: limit, source: source}}
+        do: {@ceilings[key], %{limit: limit, source: source}}
   end
 
   defp hold_key({[key] = path, %{value: limit, source: source}}, {config, layers}) do

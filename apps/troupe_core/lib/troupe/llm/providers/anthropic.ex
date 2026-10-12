@@ -272,7 +272,7 @@ defmodule Troupe.LLM.Providers.Anthropic do
   defp body(%Request{} = request, thinking, keep_thinking?) do
     %{
       model: request.model,
-      max_tokens: request.max_tokens,
+      max_tokens: Request.output_cap(request),
       stream: true,
       messages:
         request.messages
@@ -288,22 +288,28 @@ defmodule Troupe.LLM.Providers.Anthropic do
     # none: one id for every person would be one user to Anthropic, and the User-Agent
     # already names the software (Decision 787).
     |> maybe_put(:metadata, metadata(request))
-    |> put_thinking(thinking)
+    |> put_thinking(thinking, request.ceiling)
   end
 
-  # Anthropic's models take thinking in one of two forms, and refuse the other with a 400
-  # (Decision 780). Those before Claude Opus 4.7 take a budget in tokens; from Opus 4.7 on
-  # a budget is refused and they take adaptive thinking with an effort level. Which one a
-  # model takes is what the provider's own model list says (`Request.thinking`), else what
-  # its name says (`Catalog.thinking/1`), else — a model nothing describes — the newer form
-  # for a level and a budget for a number of tokens, which is what a number asks for.
+  # Anthropic's models take thinking in one of two forms, and refuse the other with a 400.
+  # Those before Claude Opus 4.7 take a budget in tokens; from Opus 4.7 on a budget is
+  # refused and they take adaptive thinking with an effort level. Which one a model takes
+  # is what the provider's own model list says (`Request.thinking`), else what its name
+  # says (`Catalog.thinking/1`), else — a model nothing describes — the newer form for a
+  # level and a budget for a number of tokens, which is what a number asks for.
   #
   # Either way the configured effort sets how much room the thinking gets: a budget is it,
   # and adaptive thinking spends from `max_tokens` just the same, so the output cap is
-  # raised to hold it rather than the request failing or the reply being cut (Decision
-  # 658). Adaptive thinking asks for a summary of the thinking, which is what the newest
-  # models otherwise leave out, so it still streams as reasoning.
-  defp thinking(%Request{reasoning_effort: effort} = request) do
+  # raised to hold it rather than the request failing or the reply being cut. Adaptive
+  # thinking asks for a summary of the thinking, which is what the newest models
+  # otherwise leave out, so it still streams as reasoning.
+  #
+  # An organisation's enforced `max_tokens` (`Request.ceiling`) holds the whole request,
+  # the thinking included: the raise stops at the ceiling, and the thinking is shortened
+  # so that the answer keeps its share beside it (`fit/2`), or is off for the request.
+  defp thinking(%Request{} = request), do: request |> asked() |> fit(request)
+
+  defp asked(%Request{reasoning_effort: effort} = request) do
     case room(effort) do
       nil ->
         nil
@@ -311,6 +317,45 @@ defmodule Troupe.LLM.Providers.Anthropic do
       room ->
         {form, why} = form(request)
         %{form: form, why: why, effort: effort, room: room, level: level(effort, room)}
+    end
+  end
+
+  # The answer's share of a ceiling is what the raise gives it beside the thinking, 4,096
+  # tokens, or half the ceiling where that is less, so a small ceiling still leaves room
+  # to think in. The thinking gets what is left, never more than its effort asks for, and
+  # the level adaptive thinking is sent is the one that room holds. Less than Anthropic's
+  # smallest budget, 1,024 tokens, and thinking is off for the request: no `thinking`
+  # field, as with no effort at all.
+  @answer_room 4_096
+  @least_thinking 1_024
+
+  defp fit(nil, _request), do: nil
+  defp fit(thinking, %Request{ceiling: nil}), do: thinking
+
+  defp fit(%{room: room} = thinking, %Request{ceiling: ceiling}) do
+    left = min(room, ceiling - min(@answer_room, div(ceiling, 2)))
+
+    cond do
+      left == room -> thinking
+      left < @least_thinking -> nil
+      true -> %{thinking | room: left, level: level_of(left)}
+    end
+  end
+
+  @doc """
+  What an organisation's enforced `max_tokens` leaves of the thinking the request's
+  reasoning effort asks for, where it leaves less: the tokens asked for, and those given,
+  0 where thinking is off for the request. `nil` where the request asks for no thinking
+  or the ceiling holds all of it.
+  """
+  @impl Troupe.LLM.Provider
+  @spec thinking_held(Request.t()) :: %{asked: pos_integer(), given: non_neg_integer()} | nil
+  def thinking_held(%Request{} = request) do
+    case {asked(request), thinking(request)} do
+      {nil, _none} -> nil
+      {%{room: room}, %{room: room}} -> nil
+      {%{room: asked}, nil} -> %{asked: asked, given: 0}
+      {%{room: asked}, %{room: given}} -> %{asked: asked, given: given}
     end
   end
 
@@ -323,20 +368,23 @@ defmodule Troupe.LLM.Providers.Anthropic do
     end
   end
 
-  defp put_thinking(body, nil), do: body
+  defp put_thinking(body, nil, _ceiling), do: body
 
-  defp put_thinking(body, %{form: :budget, room: budget}) do
+  defp put_thinking(body, %{form: :budget, room: budget}, ceiling) do
     body
     |> Map.put(:thinking, %{type: "enabled", budget_tokens: budget})
-    |> Map.put(:max_tokens, max(body.max_tokens, budget + 4_096))
+    |> Map.put(:max_tokens, raised(body.max_tokens, budget, ceiling))
   end
 
-  defp put_thinking(body, %{form: :adaptive, room: room, level: level}) do
+  defp put_thinking(body, %{form: :adaptive, room: room, level: level}, ceiling) do
     body
     |> Map.put(:thinking, %{type: "adaptive", display: "summarized"})
     |> Map.put(:output_config, %{effort: level})
-    |> Map.put(:max_tokens, max(body.max_tokens, room + 4_096))
+    |> Map.put(:max_tokens, raised(body.max_tokens, room, ceiling))
   end
+
+  defp raised(max_tokens, room, nil), do: max(max_tokens, room + @answer_room)
+  defp raised(max_tokens, room, ceiling), do: min(raised(max_tokens, room, nil), ceiling)
 
   # The tokens a configured effort gives the thinking: the budget itself, for a model that
   # takes one.
@@ -359,11 +407,13 @@ defmodule Troupe.LLM.Providers.Anthropic do
   # it, and more than `xhigh`'s is `max`.
   defp level(word, _room) when word in ["low", "medium", "high", "xhigh", "max"], do: word
   defp level("minimal", _room), do: "low"
-  defp level(_number, room) when room <= 4_096, do: "low"
-  defp level(_number, room) when room <= 8_192, do: "medium"
-  defp level(_number, room) when room <= 16_384, do: "high"
-  defp level(_number, room) when room <= 32_768, do: "xhigh"
-  defp level(_number, _room), do: "max"
+  defp level(_number, room), do: level_of(room)
+
+  defp level_of(room) when room <= 4_096, do: "low"
+  defp level_of(room) when room <= 8_192, do: "medium"
+  defp level_of(room) when room <= 16_384, do: "high"
+  defp level_of(room) when room <= 32_768, do: "xhigh"
+  defp level_of(_room), do: "max"
 
   defp number?(effort), do: match?({_n, ""}, Integer.parse(effort))
 

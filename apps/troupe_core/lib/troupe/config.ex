@@ -154,11 +154,12 @@ defmodule Troupe.Config do
             # raise itself past when its budget asks (Decision 699). `nil` on a laptop;
             # a map, possibly empty, wherever the worker set the terms. Never from a file.
             terms: nil,
-            # The budget's limits the organisation enforces on this machine (Decision 869),
-            # by the budget's names for them (`max_turns`, `wall_clock`), each with its
+            # The budget's limits the organisation enforces on this machine, by the
+            # budget's names for them (`max_turns`, `wall_clock`), each with its
             # `limit` and the `source` that set it: a ceiling the budget question raises a
-            # limit no further than, as it does the terms (issue #622). Set where the
-            # organisation's word is held; never from a file or an override.
+            # limit no further than, as it does the terms (issue #622). And `max_tokens`,
+            # which a model call's thinking is shortened to fit under (issue #644). Set
+            # where the organisation's word is held; never from a file or an override.
             ceilings: %{},
             auto_approve: false,
             # Two switches a platform sets and a session may not move. Both arrive with
