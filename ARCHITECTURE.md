@@ -358,7 +358,12 @@ fence, JWKS and ACL changes, `config.updated` — routed to whichever replica ho
 Bundles and key-manager assertions are fetched, not pushed: `kms.assertion {session_id}`
 answers a short-lived JWT for *that session owner's* key slots, the owner read off the
 session row, so a pod naming a session it does not hold gets `not_found`, and names the
-owner's name at the key manager, which the pod reads their slots under.
+owner's name at the key manager, which the pod reads their slots under. `git.credential
+{session_id}` answers, the same way and only for a session the pod holds, a GitHub
+installation token the plane mints with its App for the repository on the session's row,
+narrowed to it and to `contents: read`, with the URL to clone it from; the pod's own git
+uses it for the clone on the session's first activation, and the session never sees it
+(Decision 885).
 
 **The harness API** (`/rpc`) is a fleet API: `me`, `teams.list`, `profiles.list`,
 `sessions.list`, `session.get`, `session.create`, `session.open`, `token.mint`, archive,

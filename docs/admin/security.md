@@ -120,6 +120,13 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   the deployment lists (`operator.workerAllowedOrigins`, and the plane's own where the
   chart serves the GUI); with none listed, no page does. The desktop app and `troupe` are
   not pages and need no entry (Decision 884).
+- **A repository is cloned with a token the session never holds.** A session that names
+  a GitHub repository is cloned on its first activation with an installation token the
+  plane mints for that one repository, `contents: read`, for an hour. The pod's own git
+  takes it from its environment through a credential helper on its command line; the
+  workspace's `.git/config`, the agent's `shell` and every tool's output have no way to it,
+  and no log names it. Each token is an audit entry (Decision 885,
+  [github.md](github.md)).
 - **One OpenBao role for every profile, by default.** Every worker logs in as
   `troupe-worker`. `bao.workerRolePerProfile` gives each profile a role of its own, so one
   profile's pods cannot read another's session keys
@@ -140,6 +147,7 @@ OpenBao holds the rest, under policies rendered by `Troupe.KMS.Policy`:
 | A team session's data key | KV v2, `troupe/teams/<team>/sessions/<id>` | the pods of a profile granted to the team create and read it (every profile's, while they share one role); the plane can only destroy it |
 | A private session's data key | KV v2, `troupe/people/<name>/sessions/<id>` | the person's own daemon, through an assertion the plane signs; no pod role covers it |
 | The key that signs session tokens | transit, `troupe-session-tokens` | the plane signs with it; it is not exportable |
+| The GitHub App's private key | transit, `troupe-github-app` | imported once through `admin.github.put` and not exportable; the plane signs the App's JWT with it and keeps only its fingerprint ([github.md](github.md)) |
 
 A session's data in object storage is AES-256-GCM under its data key, with a fresh nonce
 per object and the session's id as associated data, so an object moved to another

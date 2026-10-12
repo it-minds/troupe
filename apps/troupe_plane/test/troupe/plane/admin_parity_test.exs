@@ -18,7 +18,7 @@ defmodule Troupe.Plane.AdminParityTest do
 
   use ExUnit.Case, async: true
 
-  alias Troupe.Plane.{Admin, Principals, Triggers}
+  alias Troupe.Plane.{Admin, GitHub, Principals, Triggers}
   alias Troupe.Plane.Admin.API
   alias Troupe.Plane.Admin.API.{Argument, Method}
   alias Troupe.Plane.Admin.MCP
@@ -171,7 +171,8 @@ defmodule Troupe.Plane.AdminParityTest do
       {"admin.team.update", "attrs"} => Admin.team_keys(),
       {"admin.team.enable", "attrs"} => ["name" | Admin.team_keys()],
       {"admin.host.register", "host"} => Admin.host_keys(),
-      {"admin.clients.put", "policy"} => Admin.client_policy_keys()
+      {"admin.clients.put", "policy"} => Admin.client_policy_keys(),
+      {"admin.github.put", "app"} => GitHub.keys()
     }
   end
 

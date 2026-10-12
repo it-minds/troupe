@@ -16,12 +16,14 @@ defmodule Troupe.Plane.Control.Connection do
   use GenServer, restart: :temporary
 
   alias Troupe.Plane.{
+    Audit,
     Budget,
     Bundles,
     Drain,
     Enrolment,
     Erasure,
     Fleet,
+    GitHub,
     Identity,
     Placement,
     Sessions,
@@ -462,6 +464,33 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # A GitHub installation token for the repository a session was created with, and where
+  # to clone it from.
+  #
+  # Asked for rather than pushed, as the key-manager assertion above is: a token lives an
+  # hour, and a session that was handed one at activation would have no way to get the
+  # next. The repository is read off the row, so a pod can ask only about a session it
+  # holds and only for that session's repository; the URL is the plane's, built from the
+  # App's own. A session whose owner has been deactivated gets none, as it gets no
+  # assertion. Every token is in the audit trail, by session, repository and expiry, and
+  # the token itself is in the answer and nowhere else.
+  defp dispatch("git.credential", params, state) do
+    case session_of(params["session_id"], state.worker) do
+      %Session{repository: %{}} = session ->
+        git_credential(session, state)
+
+      %Session{} ->
+        {:error,
+         Error.new(:not_found, %{
+           session_id: params["session_id"],
+           reason: GitHub.explain(:no_repository)
+         }), state}
+
+      nil ->
+        {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+    end
+  end
+
   defp dispatch("bundle.fetch", params, state) do
     case fetch_bundle(params, state.worker) do
       %Bundle{} = bundle ->
@@ -529,6 +558,40 @@ defmodule Troupe.Plane.Control.Connection do
 
           {:error, reason} ->
             {:error, Error.new(:unavailable, %{reason: inspect(reason)}), state}
+        end
+    end
+  end
+
+  defp git_credential(%Session{} = session, state) do
+    case Identity.get_user(session.owner_subject) do
+      %User{active: false} ->
+        {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
+
+      _user ->
+        case GitHub.credential(session) do
+          {:ok, credential} ->
+            {:ok, _} =
+              Audit.record(
+                "worker:#{state.worker.pod_name}",
+                "github.token",
+                credential["repository"],
+                %{
+                  "session_id" => session.id,
+                  "installation_id" => credential["installation_id"],
+                  "permissions" => credential["permissions"],
+                  "expires_at" => credential["expires_at"]
+                },
+                on_behalf_of: session.owner_subject
+              )
+
+            {:ok, Map.drop(credential, ["installation_id"]), state}
+
+          {:error, reason} ->
+            Logger.warning(
+              "troupe plane: no GitHub token for #{session.id}: #{GitHub.explain(reason)}"
+            )
+
+            {:error, Error.new(:unavailable, %{reason: GitHub.explain(reason)}), state}
         end
     end
   end

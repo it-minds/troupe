@@ -12,6 +12,7 @@ and backups on top.
 | [profiles-and-policy.md](profiles-and-policy.md) | Worker profiles, what the operator creates, conditions, upgrades and drains, `TroupePolicy`, team volumes, provisioning, sizing |
 | [bundles-and-triggers.md](bundles-and-triggers.md) | Config bundles and MCP servers, triggers and the scheduler, unattended terms, budgets |
 | [integrations.md](integrations.md) | What the identity provider, OpenBao, PostgreSQL, object storage, the LLM gateway, Kubernetes, MCP, SCIM and the GUI require |
+| [github.md](github.md) | The plane's GitHub App: registering and installing it, giving the plane its key, and the read-only token a session clones its repository with |
 | [authentik.md](authentik.md) | Connecting a plane's sign-in and provisioning to Authentik, in order |
 | [single-machine.md](single-machine.md) | A worker on a machine you already have, and what it gives up |
 | [backup-restore.md](backup-restore.md) | Where state lives, what can be rebuilt, restore procedures |
