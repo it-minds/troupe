@@ -55,7 +55,8 @@ leaked; a refusal on role carries `data.required_role`. No role can read session
 no admin method returns events.
 
 A team admin changes their team's settings with `admin.team.update`: budget and period,
-retention, default visibility and volume, within the platform's ceilings. Whether a team may
+idle timeout, cache eviction, retention (`erase_after_days`), whether members may control
+and pin sessions, and the volume's size and class, within the platform's ceilings. Whether a team may
 be granted a profile nothing enforces (`allow_unenforced_workers`) is a platform admin's.
 Neither role renames a team or changes the group it was enabled from: the method takes the
 settings it declares and leaves anything else it is sent.
@@ -108,8 +109,12 @@ waiting for a worker is never started. Workers re-check the ACL on every command
 revoked collaborator is refused before their token expires, and a role you narrow with
 `session.grant` (an owner made a collaborator, a collaborator made a viewer) holds at their
 next command on the pod: the token they hold still says the old role, and the pod no longer
-takes its word for it. Widening a role takes effect with their next token, at most 15
-minutes later.
+takes its word for it (Decision 859). Widening a role takes effect with their next token,
+at most 15 minutes later.
+
+Offering a session one's own signed-in tools (`tools.register`) takes `control`. A profile
+with `personalTools: forbid` refuses it on its pods, and the platform's
+`managed_mcp_servers_only` everywhere ([profiles-and-policy.md](profiles-and-policy.md#a-persons-own-tools-on-a-pod)).
 
 ## 6. How each surface authenticates
 
@@ -119,6 +124,8 @@ minutes later.
 | `POST /rpc` | `Bearer <plane token>`, `aud` = `TROUPE_PLANE_AUDIENCE`, JWKS from OpenBao | subject resolved per request; `admin.*` to the admin API, everything else to the harness as the person |
 | `POST /mcp` | a plane token, or the provider's own token with `aud` in `client_id`, `api://<client_id>`, `<base_url>/mcp` | a 401 carries `WWW-Authenticate … resource_metadata=` for OAuth-capable clients |
 | Control channel (TCP 4001) | a projected ServiceAccount token (audience `troupe-plane`), or a registered machine's secret | `TokenReview`: ServiceAccount `troupe-worker`, and the namespace decides the profile |
+| `POST /mcp/session` | a plane token | the caller, offered four harness tools: `session_create`, `session_get`, `sessions_list`, `trigger_fire` |
+| `POST /trigger/<id>` | that trigger's own key | fires that one trigger as its principal, and nothing else |
 | `/scim/v2/*` | the SCIM bearer (console-minted or `TROUPE_SCIM_TOKEN`) | no person |
 | Worker WebSocket | a session token with `aud` = the pod's worker id | token scopes, then the ACL per command |
 | A2A facade | `Bearer svc:<team>/<name>:<secret>`, `Basic`, or a person's `id_token` | exchanged at `/auth/exchange`; the facade holds no credential |
@@ -129,7 +136,7 @@ Nothing a pod says about itself is trusted for its identity.
 
 | Subject | Rules |
 |---|---|
-| plane (Role in `troupe-system`) | `workerprofiles`, `teamvolumes`: all verbs; `endpoints`, `pods`: read (libcluster) |
+| plane (Role in `troupe-system`) | `workerprofiles`, `teamvolumes`: all verbs (in `gitops` mode `workerprofiles` only read and patch, and `triggers` read); `endpoints`, `pods`: read (libcluster) |
 | plane (ClusterRoles) | `troupepolicies`: read; `system:auth-delegator` for `TokenReview` |
 | operator (ClusterRole) | `troupe.dev` resources read and status write; namespaces, service accounts, services, PVCs, PVs, ConfigMaps (a profile's `mcpIdentities`, none of it secret), StatefulSets, Ingresses, NetworkPolicies, PDBs, CiliumNetworkPolicies: CRUD; pods: read and delete; events; leases |
 | A2A | none; no token mounted |
@@ -145,7 +152,8 @@ Rendered by `Troupe.KMS.Policy`, so the tested string and the installed one are 
 | Policy | Grants |
 |---|---|
 | `troupe-worker-<profile>` | create, read, update on `<mount>/data/troupe/teams/<team>/sessions/*` and read, list on the metadata path, per granted team; never delete |
-| `troupe-plane` | delete, list, read on `<mount>/metadata/troupe/teams/+/sessions/*` and `<mount>/metadata/troupe/people/+/sessions/*`, and nothing on the data path: it destroys an erased session's key, a team's or a person's (Decisions 756 and 811), and reads none |
+| `troupe-plane` | delete, list, read on `<mount>/metadata/troupe/teams/+/sessions/*` and `<mount>/metadata/troupe/people/+/sessions/*`, list and read on `<mount>/metadata/troupe/people/+/mcp/*`, and nothing on the data path: it destroys an erased session's key, a team's or a person's (Decisions 756 and 811), says whether a person has connected a server, and reads no value |
+| `troupe-person` | create, read, update on `<mount>/data/troupe/people/<name>/*` and read, list on its metadata, templated on the name OpenBao's JWT auth vouched for: a person's own daemon, logging in at the `jwt` auth path with an assertion the plane signs (audience `troupe-kms`), for their private sessions' keys and their own MCP credentials |
 | signing | create, update on `transit/sign/troupe-session-tokens`, read on its key; not exportable |
 | `troupe-worker-mcp-identity` | update on `transit/sign/<the pod's namespace>.*`, templated on the namespace Kubernetes auth vouched for (`Policy.mcp_identity/2`, Decision 747): a pod signs its profile's MCP assertions with the keys named after its own namespace and with no other, never the session-token key |
 
@@ -192,7 +200,8 @@ token until shortly before its lease ends, and logs in again once when OpenBao a
 ## 9. The admin methods
 
 `apps/troupe_plane/lib/troupe/plane/admin/api.ex` is the table: every `admin.*` method with
-its arguments, their descriptions, the role it requires and its risk. The console is built
+its arguments, their descriptions and its risk; the role each requires is checked in
+`Troupe.Plane.Admin`. The console is built
 on the same calls, `/rpc` takes them as JSON-RPC, and `/mcp` exposes each as a tool named
 with underscores for dots (`admin.team.grant` → `admin_team_grant`). A destructive method
 takes a `confirm` argument that must repeat the identifier on `/mcp`; the console asks in a

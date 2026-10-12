@@ -23,7 +23,9 @@ machine and you see the same transcript; two people can open the same session at
 3. `troupe` in a project directory opens a session; `troupe run "a task" --headless` does
    one task and exits.
 4. The settings are one file, `config.yaml` in `~/.config/troupe/` (`%APPDATA%\troupe\` on
-   Windows), and `troupe config` shows what is in force.
+   Windows), and `troupe config` shows what is in force. Your organisation may set
+   defaults below it and limits above it; `troupe config --explain` says which
+   ([configuration](configuration.md#your-organisations-defaults-and-limits)).
 5. `troupe config validate` checks that file after you edit it by hand;
    [configuration.md](configuration.md) has every key.
 
@@ -109,7 +111,8 @@ flowchart LR
 
 `install.sh` / `install.ps1` at the repository root install `troupe` and `troupe-daemon`
 from the latest release, and `troupe update` keeps them current, checking each release's
-signature first ([updating](updating.md)). `troupe login <plane URL>` signs you in with a code you type in
+signature first; the desktop app updates itself and the daemon beside it the same way
+([updating](updating.md)). `troupe login <plane URL>` signs you in with a code you type in
 your browser; you sign in where you always do, and Troupe never has a password of its own.
 
 ## Words you will meet
@@ -283,6 +286,8 @@ same name replaces it, so a plan is revised in place.
 - **It never uses your machine unasked.** Offering your own tool server to a session takes
   a deliberate confirmation, and everyone on the session sees it.
 
-How it works underneath: [../../ARCHITECTURE.md](../../ARCHITECTURE.md). Running the
-platform: [../admin/README.md](../admin/README.md). Every setting, which file wins and how
+Everything it does unasked, and what it never does, in one place for a reviewer:
+[security](../admin/security.md). How it works underneath:
+[../../ARCHITECTURE.md](../../ARCHITECTURE.md). Running the platform:
+[../admin/README.md](../admin/README.md). Every setting, which file wins and how
 to see where a value came from: [configuration.md](configuration.md).

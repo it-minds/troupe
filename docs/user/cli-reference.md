@@ -61,6 +61,12 @@ Every command starts with `/`. In the terminal client `/` on an empty line, Ctrl
 `/help` opens them as a palette, filtered as you type, and a command the session cannot
 run right now is shown greyed with the reason; the desktop app's palette lists the same.
 
+On the terminal client's main screen, with no window open, a line that is not a command
+starts work rather than a chat: a branch on the default agent (`build`, or
+`default_agent`) in the checkout, or on the agent and the worktree Ctrl-N picked. A
+session on a pod runs one agent, and the line is said to it. In a window, `/todo add
+<text>`, `/todo complete <n>` and `/todo cancel <n>` edit that window's task list.
+
 A line that starts with `!` is a shell command of your own. In the terminal client
 `!git status` runs `git status` where the session runs, in its workspace (the pod's
 working copy for a session on a plane), and shows what it printed and how it ended as your

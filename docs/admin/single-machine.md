@@ -45,8 +45,9 @@ team first
 
 ## 1. A profile whose workers are machines
 
-On **Profiles**, create a profile as usual and set its provisioner to `ssh`. The name is
-the profile's; the `ssh` is what says its workers are registered rather than reconciled.
+Create the profile with `admin.profile.put`, on `/rpc` or `/mcp`, with `provisioner: "ssh"`;
+the console's profile editor has no field for it. The name is the profile's; the `ssh` is
+what says its workers are registered rather than reconciled.
 
 Nothing about the rest of the profile changes. The image, the size class, the bundle
 channel and the egress lists all mean what they mean anywhere else — what changes is who
@@ -75,7 +76,10 @@ this provisioner creates nothing and holds no key.
 
 ## 3. Install the worker on it
 
-The worker is the same release the chart deploys, run as a process rather than as a pod:
+The worker is the same release the chart deploys, run as a process rather than as a pod.
+No release asset carries it: take it from the `ghcr.io/it-minds/troupe-worker` image, or
+build it from source. Like a pod, it runs every command in bubblewrap, so the machine needs
+bubblewrap and unprivileged user namespaces, or it refuses every command (Decision 832).
 
 ```bash
 install -d -m 700 /etc/troupe
@@ -85,8 +89,18 @@ TROUPE_WORKER_AUTOSTART=true \
 TROUPE_PLANE_CONTROL=troupe.example.com:4001 \
 TROUPE_TOKEN_PATH=/etc/troupe/token \
 TROUPE_PROFILE=laptops \
+TROUPE_OBJECT_ENDPOINT=https://s3.example.com TROUPE_OBJECT_ACCESS_KEY_ID=… TROUPE_OBJECT_SECRET_ACCESS_KEY=… \
+TROUPE_BAO_ADDR=https://bao.example.com TROUPE_BAO_TOKEN=… \
   bin/troupe_worker start
 ```
+
+A pod logs in to OpenBao with its projected token, which a machine does not have, so the
+machine needs `TROUPE_BAO_TOKEN`, and the object store's credentials as a pod's
+`troupe-object-store` Secret gives them ([configuration.md A.3](configuration.md#a3-worker-troupe_worker)).
+The chart does not expose the plane's control port outside the cluster (no Ingress, and
+its NetworkPolicy admits it only from worker namespaces and the operator), and the channel
+is plain TCP, the secret included: reaching `4001` from a machine takes an encrypted tunnel
+or a route of your own, and a policy that admits it.
 
 `TROUPE_HOST_SECRET` takes the secret directly, for a one-liner. The file is the better of
 the two and is shown first for that reason: an environment variable is readable in `/proc`

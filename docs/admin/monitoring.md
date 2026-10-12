@@ -13,6 +13,7 @@ exporter, Prometheus endpoint or ServiceMonitor exists** anywhere in the reposit
 | plane | `GET /.well-known/jwks.json` | the signing keys, or **503** when OpenBao or its credential is unreachable — the quickest OpenBao check | none |
 | worker | `GET /health/live`, `GET /health/ready` | `ok`; `ready`, or **503 `draining`** so its Service stops routing | liveness and readiness every 5 s |
 | a2a | `GET /healthz` | 200 | startup, readiness, liveness |
+| gui | `GET /healthz` | 200 | readiness, liveness |
 | operator | `exec /app/bin/troupe_operator pid` | non-zero when no node answers | liveness every 30 s |
 
 If the build in `/.well-known/troupe` (also in the console's footer) is not the commit you
@@ -21,7 +22,8 @@ deployed, the rollout has not finished or the image tag did not move.
 ## 2. Kubernetes signals
 
 - **`WorkerProfile` conditions** `Ready`, `PolicyViolation`, `SecretMissing`,
-  `UpgradePending`, `EgressByHostname` ([profiles-and-policy.md §2](profiles-and-policy.md#status-conditions));
+  `MCPIdentityMissing`, `UpgradePending`, `EgressByHostname`, `EndpointUnreachable`
+  ([profiles-and-policy.md §2](profiles-and-policy.md#status-conditions));
   `kubectl -n troupe-system get wp`.
 - **Events**: the operator may write them (through Bonny); Troupe's own code writes none.
 - **PodDisruptionBudgets**: the plane's `minAvailable: 1` with more than one replica, each
@@ -42,7 +44,7 @@ Every administrative change is an `audit_events` row: `actor`, `action`, `subjec
 `subject_id`, a `detail` diff keyed by dotted path (`spec.llm.model`) and the time. Values
 whose key looks like a secret are redacted. Break-glass writes `admin.breakglass` on success
 and on refusal. A refused change writes nothing. `admin.audit.list` filters by `actor`,
-`kind`, `subject_id`, `since` and `limit`, and is **not** team-scoped: a team admin reads
+`kind`, `subject_id` and `limit`, and is **not** team-scoped: a team admin reads
 every team's changes. `admin.audit.verify` checks the trail's integrity.
 
 ## 5. Logs
@@ -66,9 +68,11 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 | `erasure pass destroyed N session key(s)[; M could not be destroyed ...]` | the five-minute pass finished erasures whose key was refused before, or, after an upgrade to 0.9.0, destroyed the keys earlier erasures of team sessions left; M is tried again every five minutes, and is said again when it changes |
 | `troupe operator: refusing <profile>: <violations>` | a policy violation; nothing was created |
 | `troupe operator: pruning <kind>/<name>` | a scale-down, a revoked grant or `ciliumAvailable` switched off took an object away |
+| `sandbox: this worker runs every command in a sandbox and …, so no command will run` | the worker cannot start bubblewrap, and refuses every command until it can (Decision 832) |
 
-`troupe_core` also emits `:telemetry` events — `[:troupe, :llm, :start|:stop]`,
-`[:troupe, :tool, :stop]`, `[:troupe, :agent, :transition]` — and nothing attaches to them.
+`troupe_core` also emits `:telemetry` events — `[:troupe, :llm, :start|:stop|:retry|:unpriced]`,
+`[:troupe, :tool, :stop]`, `[:troupe, :agent, :transition]` — and the plane's endpoint
+Phoenix's own; nothing in a deployment attaches to them.
 
 ## 6. Fleet mechanics
 
@@ -115,3 +119,5 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 | Workers cannot write to a bucket outside `us-east-1`, the plane can | the worker pods have no `TROUPE_OBJECT_REGION` and sign for `us-east-1`: an operator from before it passed `objectStore.region` on to them |
 | Plane replicas do not cluster during a rolling image upgrade | the Erlang cookie is baked into each image build |
 | Team volumes never appear inside sessions | they are mounted on the pod, not into a session's mount table |
+| Every command on a profile's pods fails, "this worker runs every command in a sandbox" | the nodes do not let bubblewrap make a user namespace, or the image lacks it |
+| A client is refused with `update_required` | it is below the minimum the Policy page's client versions set, or on a version blocked there ([routine-tasks.md](routine-tasks.md#client-versions)) |
