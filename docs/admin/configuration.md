@@ -439,9 +439,15 @@ source (the plane's URL or the file's path) at both ends of the ladder, the term
 settings page shows an enforced key as set by the organisation and does not change it, and
 the daemon's `config.set` refuses it.
 
+**What a ceiling bounds.** An enforced `max_turns` or `wall_clock_ms` also bounds the
+question a session asks when it reaches that limit: it offers only raises that stay under
+the ceiling, refuses a typed amount past it, names the organisation and where its limit
+came from (the file's path or the plane's URL), and does not offer "no limit"; `allow`,
+which buys the first allowance again, stops at the ceiling too. An enforced `max_tokens`
+is the most output one model call asks for: a provider's model entry with its own
+`max_output` can lower that for its model, and cannot raise it.
+
 **What it is not.** It is the organisation's word honoured by Troupe on the machine, not a
 control a person cannot get round on a machine they administer: the plane's copy is in
 their own state directory, and they choose which build they run. A managed file an
-administrator owns, on a machine its person does not administer, is the strong form. A
-spent budget's question can still raise `max_turns` or the wall clock for one run or
-session past an enforced ceiling; that is a later slice.
+administrator owns, on a machine its person does not administer, is the strong form.

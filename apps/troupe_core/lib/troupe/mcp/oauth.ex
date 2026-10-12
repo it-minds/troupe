@@ -35,13 +35,19 @@ defmodule Troupe.MCP.OAuth do
   The tokens held are used until that sign-in lands. Signing out tells the provider too,
   at its `revocation_endpoint` (RFC 7009), when it names one.
 
+  Every URL the daemon calls for it — the server, the protected-resource and
+  authorization-server metadata, the token and revocation endpoints — is held to one rule
+  (Decision 875, `Troupe.MCP.Address`): its name is resolved, every address it answers is
+  checked, none may be link-local, a cloud's metadata service or the unspecified address,
+  and the request goes to the address that was checked. The authorization endpoint, which
+  the person's browser opens, is checked the same way at discovery.
+
   This module is the part with no process: reading the configuration, discovery, the
   URLs, the token and revocation endpoints, and `authorized/2`, which wraps a call.
   """
 
-  alias Troupe.MCP.{Client, Server}
+  alias Troupe.MCP.{Address, Client, Server}
   alias Troupe.MCP.OAuth.{SignIn, Store, Tokens}
-  alias Troupe.WorkerProfile.Reach
 
   @typedoc "What an entry's `oauth` says, read: the client id and the overrides."
   @type config :: %{
@@ -345,10 +351,10 @@ defmodule Troupe.MCP.OAuth do
   """
   @spec discover(String.t(), config(), [String.t()]) :: {:ok, plan()} | {:error, String.t()}
   def discover(url, config, wider \\ []) do
-    with :ok <- secure(url, "the server's url"),
+    with :ok <- outbound(url, "the server's url"),
          {:ok, issuer, hints} <- authorization_server(url, config),
          {:ok, metadata} <- server_metadata(issuer),
-         :ok <- secure(metadata["authorization_endpoint"], "the authorization endpoint"),
+         :ok <- opened(metadata["authorization_endpoint"], "the authorization endpoint"),
          :ok <- outbound(metadata["token_endpoint"], "the token endpoint"),
          :ok <- pkce(metadata) do
       scopes = Enum.uniq((config.scopes || hints.scopes || []) ++ wider)
@@ -381,6 +387,9 @@ defmodule Troupe.MCP.OAuth do
       %{"authorization_servers" => [issuer | _]} = metadata when is_binary(issuer) ->
         {:ok, issuer, %{scopes: split(challenge["scope"]) || metadata_scopes(metadata)}}
 
+      {:refused, why} ->
+        {:error, why}
+
       _none ->
         {:error,
          "#{url} names no authorization server (no protected-resource metadata); " <>
@@ -391,7 +400,9 @@ defmodule Troupe.MCP.OAuth do
   # An unauthenticated call, for what the server says it wants: a server that answers it
   # anyway is still asked for its metadata, since it may want a token for its tools.
   defp probe(url) do
-    case Client.initialize(%Server{name: "probe", url: url, timeout_ms: @http_timeout}) do
+    server = %Server{name: "probe", url: url, timeout_ms: @http_timeout, pinned: true}
+
+    case Client.initialize(server) do
       {:error, {:unauthorized, header}} -> challenge(header)
       _other -> %{}
     end
@@ -413,11 +424,15 @@ defmodule Troupe.MCP.OAuth do
     end
   end
 
+  # One whose address is refused stops discovery with why, rather than being passed over
+  # as a place with nothing there.
   defp resource_metadata(url) do
     with :ok <- secure(url, "the resource metadata"),
-         {:ok, %{"authorization_servers" => [_ | _]} = metadata} <- get_json(url) do
+         {:ok, %{"authorization_servers" => [_ | _]} = metadata} <-
+           get_json(url, "the resource metadata") do
       metadata
     else
+      {:refused, why} -> {:refused, why}
       _ -> nil
     end
   end
@@ -431,16 +446,20 @@ defmodule Troupe.MCP.OAuth do
     with :ok <- secure(issuer, "the authorization server") do
       case issuer |> metadata_places() |> Enum.find_value(&metadata_at(&1, timeout)) do
         nil -> {:error, "#{issuer} publishes no authorization server metadata"}
+        {:refused, why} -> {:error, why}
         metadata -> {:ok, metadata}
       end
     end
   end
 
   defp metadata_at(place, timeout) do
-    case get_json(place, timeout) do
+    case get_json(place, "the authorization server's metadata", timeout) do
       {:ok, %{"authorization_endpoint" => a, "token_endpoint" => t} = metadata}
       when is_binary(a) and is_binary(t) ->
         metadata
+
+      {:refused, why} ->
+        {:refused, why}
 
       _ ->
         nil
@@ -633,9 +652,9 @@ defmodule Troupe.MCP.OAuth do
   defp revocation_endpoint(_entry, _timeout),
     do: {:error, "the sign-in kept no authorization server to tell"}
 
-  # The token goes where a refresh token may: `outbound/2`, as for the token endpoint.
-  # 200 is revoked, and so is any 2xx; anything else, or no answer in time, is the
-  # provider not told.
+  # The token goes where a refresh token may: `outbound/2`, as for the token endpoint, and
+  # then to the address that was checked (`Troupe.MCP.Address`). 200 is revoked, and so is
+  # any 2xx; anything else, or no answer in time, is the provider not told.
   defp revoke_at(endpoint, token, hint, client_id, timeout) do
     form =
       Enum.reject([token: token, token_type_hint: hint, client_id: client_id], fn {_k, v} ->
@@ -643,25 +662,29 @@ defmodule Troupe.MCP.OAuth do
       end)
 
     case outbound(endpoint, "the revocation endpoint") do
-      :ok -> endpoint |> revocation_request(form, timeout) |> revocation_answer()
+      :ok -> endpoint |> revocation_request(form, timeout) |> revocation_answer(endpoint)
       {:error, why} -> told(:failed, why)
     end
   end
 
   defp revocation_request(endpoint, form, timeout) do
-    Req.post(endpoint,
-      form: form,
-      headers: [{"accept", "application/json"}],
-      receive_timeout: timeout,
-      connect_options: [timeout: timeout],
-      retry: false,
-      redirect: false
+    Req.post(
+      endpoint,
+      [
+        form: form,
+        headers: [{"accept", "application/json"}],
+        receive_timeout: timeout,
+        connect_options: [timeout: timeout],
+        retry: false,
+        redirect: false
+      ] ++ Address.options()
     )
   end
 
-  defp revocation_answer({:ok, %{status: status}}) when status in 200..299, do: told(:revoked)
+  defp revocation_answer({:ok, %{status: status}}, _endpoint) when status in 200..299,
+    do: told(:revoked)
 
-  defp revocation_answer({:ok, %{status: status, body: body}}) do
+  defp revocation_answer({:ok, %{status: status, body: body}}, _endpoint) do
     case json(body) do
       %{"error" => error} = answer when is_binary(error) ->
         told(:failed, refused(error, answer["error_description"]))
@@ -671,7 +694,10 @@ defmodule Troupe.MCP.OAuth do
     end
   end
 
-  defp revocation_answer({:error, reason}),
+  defp revocation_answer({:error, %Address.Refused{} = refused}, endpoint),
+    do: told(:failed, refusal("the revocation endpoint", endpoint, refused))
+
+  defp revocation_answer({:error, reason}, _endpoint),
     do: told(:failed, "the revocation endpoint could not be reached: #{reason_text(reason)}")
 
   defp told(state, reason \\ nil), do: %{state: state, reason: reason}
@@ -680,13 +706,19 @@ defmodule Troupe.MCP.OAuth do
   defp resource_param(resource), do: [resource: resource]
 
   # A refusal comes back structured, since `refresh/1` decides on its code; the request
-  # itself is never in what comes back, as it carries a code or a refresh token.
+  # itself is never in what comes back, as it carries a code or a refresh token. It goes
+  # to the address that was checked (`Troupe.MCP.Address`), and follows no redirect: a
+  # code or a refresh token goes to the endpoint the metadata named, and nowhere it points.
   defp token_request(endpoint, form) do
-    case Req.post(endpoint,
-           form: form,
-           headers: [{"accept", "application/json"}],
-           receive_timeout: @http_timeout,
-           retry: false
+    case Req.post(
+           endpoint,
+           [
+             form: form,
+             headers: [{"accept", "application/json"}],
+             receive_timeout: @http_timeout,
+             retry: false,
+             redirect: false
+           ] ++ Address.options()
          ) do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
         {:ok, json(body)}
@@ -700,6 +732,9 @@ defmodule Troupe.MCP.OAuth do
             {:error, "the token endpoint answered #{status}"}
         end
 
+      {:error, %Address.Refused{} = refused} ->
+        {:error, refusal("the token endpoint", endpoint, refused)}
+
       {:error, reason} ->
         {:error, "the token endpoint could not be reached: #{reason_text(reason)}"}
     end
@@ -707,6 +742,10 @@ defmodule Troupe.MCP.OAuth do
 
   defp reason_text(reason) when is_exception(reason), do: Exception.message(reason)
   defp reason_text(reason), do: inspect(reason)
+
+  # What a lookup answered instead of an address: `nxdomain`, `timeout`.
+  defp lookup_text(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp lookup_text(reason), do: inspect(reason)
 
   defp refused(error, nil), do: "the authorization server refused: #{error}"
   defp refused(error, why), do: "the authorization server refused: #{error} (#{why})"
@@ -773,21 +812,39 @@ defmodule Troupe.MCP.OAuth do
   @doc """
   Whether the daemon may send a token to a URL: `secure/2`, and not at an address no
   worker reaches either (Decision 856, `Troupe.WorkerProfile.Reach.refusal/1`) —
-  link-local, a cloud's metadata service, the unspecified address — written as an
-  address. Loopback stays, as `secure/2` has it, for a server on this machine. Held to by
-  the token endpoint and the revocation endpoint, the two a refresh token goes to.
+  link-local, a cloud's metadata service, the unspecified address — written as one or
+  resolved from a name, any of the addresses the name answers (Decision 875,
+  `Troupe.MCP.Address`). Loopback stays, as `secure/2` has it, for a server on this
+  machine, and so do the private ranges. A name that resolves to nothing is not sent
+  anything either. Held to by the server's URL, the token endpoint and the revocation
+  endpoint, the three a token goes to; the request itself is checked again, and goes to
+  the address that passed.
   """
   @spec outbound(term(), String.t()) :: :ok | {:error, String.t()}
   def outbound(url, what) do
     with :ok <- secure(url, what) do
-      case Reach.refusal(URI.parse(url).host) do
-        kind when kind in [nil, "loopback"] -> :ok
-        "cloud metadata" -> {:error, "#{what} (#{url}) is a cloud metadata address"}
-        "unspecified" -> {:error, "#{what} (#{url}) is the unspecified address"}
-        kind -> {:error, "#{what} (#{url}) is #{kind}"}
+      case Address.target(URI.parse(url).host) do
+        {:ok, _address} -> :ok
+        {:error, %Address.Refused{} = refused} -> {:error, refusal(what, url, refused)}
+        {:error, reason} -> {:error, "#{what} (#{url}) does not resolve (#{lookup_text(reason)})"}
       end
     end
   end
+
+  # The authorization endpoint is opened by the person's browser, not called by the
+  # daemon: a name of it is refused where it resolves to an address no request of the
+  # daemon's goes to, but one that does not resolve here is left to the browser, which may
+  # reach it through a proxy the daemon does not use.
+  defp opened(url, what) do
+    with :ok <- secure(url, what) do
+      case Address.target(URI.parse(url).host) do
+        {:error, %Address.Refused{} = refused} -> {:error, refusal(what, url, refused)}
+        _reached_or_unresolved -> :ok
+      end
+    end
+  end
+
+  defp refusal(what, url, refused), do: "#{what} (#{url}) #{Address.Refused.said(refused)}"
 
   @doc """
   A redirect URI as the daemon listens for it: `{ip, port, path}`, the port `0` when the
@@ -811,18 +868,27 @@ defmodule Troupe.MCP.OAuth do
     URI.to_string(%URI{scheme: scheme, host: host, port: port})
   end
 
-  defp get_json(url, timeout \\ @http_timeout) do
-    case Req.get(url,
-           headers: [{"accept", "application/json"}],
-           receive_timeout: timeout,
-           retry: false,
-           redirect: false
+  # A metadata document, from the address its name was checked at. A refused address is
+  # `{:refused, why}`, which ends the search for the document; anything else that is not
+  # a JSON object is a place with nothing there.
+  defp get_json(url, what, timeout \\ @http_timeout) do
+    case Req.get(
+           url,
+           [
+             headers: [{"accept", "application/json"}],
+             receive_timeout: timeout,
+             retry: false,
+             redirect: false
+           ] ++ Address.options()
          ) do
       {:ok, %{status: 200, body: body}} ->
         case json(body) do
           %{} = map when map_size(map) > 0 -> {:ok, map}
           _other -> :error
         end
+
+      {:error, %Address.Refused{} = refused} ->
+        {:refused, refusal(what, url, refused)}
 
       _other ->
         :error

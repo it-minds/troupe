@@ -99,8 +99,16 @@ defmodule Troupe.Agent.State do
     # found them (Decision 871), offered for the rest of the turn, so a server that comes
     # back with another list, a sign-in or a person's tools leaving change the tools at the
     # next turn and not in the middle of this one. `nil` until that call takes them; a turn
-    # that ends, or an input taken, empties it. Not folded: a restart takes them afresh.
+    # that ends, is cancelled, or an input taken, empties it.
     turn_tools: nil,
+    # The skills as that call found them (`Troupe.Skills.found/3`, Decision 876), taken and
+    # emptied with `turn_tools`: what the `skill` tool and the system prompt list to the
+    # turn's end. Both are folded from that call's `llm_request` (`turn_hold`), so an agent
+    # restarted in the middle of a turn offers what the turn began with.
+    turn_skills: nil,
+    # The last hold this agent wrote whole on an `llm_request` (`Troupe.Agent.Hold`), which
+    # a later one that is the same names by its digest alone. Folded.
+    hold_written: nil,
     # Digests of the system prompt and the tools this agent's last call sent, which its
     # next call's `llm_request` is compared with (issue #465, Decision 815). Not folded: an
     # agent restarted says nothing about its first call.
@@ -219,6 +227,8 @@ defmodule Troupe.Agent.State do
           goal: String.t() | nil,
           loop: String.t() | nil,
           turn_tools: [Troupe.Tool.handle()] | nil,
+          turn_skills: Troupe.Skills.found() | nil,
+          hold_written: Troupe.Agent.Hold.json() | nil,
           prefix: %{system: binary(), tools: binary()} | nil,
           turn_context: %{optional(non_neg_integer()) => String.t()},
           context_sent: %{optional(String.t()) => String.t()},

@@ -131,4 +131,28 @@ defmodule Troupe.BudgetTest do
       assert {:exhausted, :wall_clock} = Budget.check(%{budget | lifted: [:max_turns, :max_input_tokens, :max_output_tokens]})
     end
   end
+
+  # What a pod's terms and an organisation's enforced limits put on an answer (issue #622).
+  describe "held to ceilings" do
+    test "a limit above its ceiling comes down to it, and the others are left alone" do
+      held = spent() |> Budget.grant() |> Budget.hold(%{max_turns: 3, wall_clock: 1_500})
+
+      assert held.max_turns == 3
+      assert held.wall_clock_ms == 1_500
+      assert held.max_input_tokens == 200
+      assert Budget.hold(spent(), %{max_turns: 50}).max_turns == 2
+    end
+
+    test "a limit with a ceiling is not lifted; one without stays lifted" do
+      held =
+        spent()
+        |> Budget.lift(:max_turns)
+        |> Budget.lift(:max_input_tokens)
+        |> Budget.hold(%{max_turns: 2})
+
+      assert held.lifted == [:max_input_tokens]
+      assert {:exhausted, :max_turns} = Budget.check(held)
+      assert Budget.hold(Budget.lift(spent(), :max_turns), %{}).lifted == [:max_turns]
+    end
+  end
 end

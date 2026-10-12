@@ -23,7 +23,10 @@ defmodule Troupe.Agent.BudgetQuestion do
 
   On a pod the team's terms are a ceiling: a raise past what they set is refused with
   the reason, and the workspace is not a scope there, since a pod's limits are the terms
-  and the profile, in the plane.
+  and the profile, in the plane. On a person's own machine what their organisation
+  enforces is one (Decision 869, issue #622), refused in the organisation's name, with
+  where its limit came from. Under a ceiling nothing lifts the limit, and `allow` goes
+  only as far as the ceiling.
 
   Pure. `Troupe.Agent.Server`'s gate builds the context, asks, and applies the decision.
   """
@@ -37,8 +40,9 @@ defmodule Troupe.Agent.BudgetQuestion do
   @typedoc """
   What the question is about: the limit, how much of it is used, the session's spend
   so far in micro-dollars (`nil` when nothing priced it), which scopes may be chosen,
-  the ceiling the terms put on this limit on a pod, the file a workspace answer writes,
-  and what to call the run — `run`, or `iteration` inside a `/loop`.
+  the ceiling on this limit and whose it is — the terms on a pod, or the organisation,
+  with where its limit came from — the file a workspace answer writes, and what to call
+  the run — `run`, or `iteration` inside a `/loop`.
   """
   @type context :: %{
           limit: Budget.exhaustion(),
@@ -46,9 +50,13 @@ defmodule Troupe.Agent.BudgetQuestion do
           spent_micros: non_neg_integer() | nil,
           scopes: [scope()],
           cap: pos_integer() | nil,
+          cap_by: cap_by(),
           path: Path.t() | nil,
           run_word: String.t()
         }
+
+  @typedoc "Whose ceiling `cap` is: a pod's terms, or an organisation's, from a file or a plane."
+  @type cap_by :: :terms | {:organisation, String.t()} | nil
 
   @minute 60_000
   @scopes [:run, :session, :workspace]
@@ -65,12 +73,16 @@ defmodule Troupe.Agent.BudgetQuestion do
   @doc "The context the gate hands over; see `t:context/0`."
   @spec context(Budget.exhaustion(), Headroom.entry(), keyword()) :: context()
   def context(limit, entry, opts \\ []) do
+    cap = Keyword.get(opts, :cap)
+
     %{
       limit: limit,
       entry: entry,
       spent_micros: Keyword.get(opts, :spent_micros),
       scopes: Keyword.get(opts, :scopes, @scopes),
-      cap: Keyword.get(opts, :cap),
+      cap: cap,
+      # A ceiling nobody named is the terms', as every one was before an organisation's.
+      cap_by: Keyword.get(opts, :cap_by) || if(cap, do: :terms),
       path: Keyword.get(opts, :path),
       run_word: Keyword.get(opts, :run_word, "run")
     }
@@ -233,6 +245,16 @@ defmodule Troupe.Agent.BudgetQuestion do
 
   defp rate(_ctx), do: nil
 
+  defp how(%{cap: cap, cap_by: {:organisation, source}} = ctx) when is_integer(cap) do
+    if fits?(ctx, 1) do
+      "Your organisation caps the #{limit_words(ctx.limit)} limit at #{amount(ctx.limit, cap)} " <>
+        "(#{shown(source)}). " <> choose(ctx)
+    else
+      "Your organisation holds the #{limit_words(ctx.limit)} limit to #{amount(ctx.limit, cap)} " <>
+        "(#{shown(source)}), and this session cannot raise it past that."
+    end
+  end
+
   defp how(%{cap: cap} = ctx) when is_integer(cap) do
     if fits?(ctx, 1) do
       "The team's terms cap the #{limit_words(ctx.limit)} limit at #{amount(ctx.limit, cap)} for this session. " <>
@@ -244,6 +266,9 @@ defmodule Troupe.Agent.BudgetQuestion do
   end
 
   defp how(ctx), do: choose(ctx)
+
+  # A managed file's path as a person reads it, or a plane's URL as it is.
+  defp shown(source), do: Troupe.Paths.display(source)
 
   defp choose(ctx) do
     workspace = if :workspace in ctx.scopes, do: ", +25 workspace", else: ""
@@ -271,12 +296,20 @@ defmodule Troupe.Agent.BudgetQuestion do
     answer = text |> String.trim() |> String.downcase()
 
     cond do
-      answer in @allow -> {:ok, :allow}
+      answer in @allow -> allow(ctx)
       answer in @deny -> {:ok, :deny}
       answer in @always or String.starts_with?(answer, "no limit") -> lift(ctx)
       true -> amount_answer(answer, ctx)
     end
   end
+
+  # Under a ceiling `allow` buys the slice again only as far as the ceiling, and at the
+  # ceiling there is nothing to buy (issue #622).
+  defp allow(%{cap: cap} = ctx) when is_integer(cap) do
+    if fits?(ctx, 1), do: {:ok, :allow}, else: {:error, capped(ctx)}
+  end
+
+  defp allow(_ctx), do: {:ok, :allow}
 
   defp lift(%{cap: cap} = ctx) when is_integer(cap), do: {:error, capped(ctx)}
   defp lift(_ctx), do: {:ok, :always}
@@ -389,6 +422,11 @@ defmodule Troupe.Agent.BudgetQuestion do
 
   defp within_cap(ctx, scope, amount) do
     if fits?(ctx, amount), do: {:ok, {:extend, scope, amount}}, else: {:error, capped(ctx)}
+  end
+
+  defp capped(%{cap_by: {:organisation, source}} = ctx) do
+    "your organisation caps the #{limit_words(ctx.limit)} limit at #{amount(ctx.limit, ctx.cap)} " <>
+      "(#{shown(source)}), and this session cannot raise it past that."
   end
 
   defp capped(ctx) do

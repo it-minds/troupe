@@ -601,8 +601,10 @@ defmodule Troupe.MCPOAuthTest do
       assert :error = OAuth.loopback_redirect("http://192.0.2.1:80/cb")
     end
 
+    # A name is resolved now (Decision 875); names are in `Troupe.MCPOAuthAddressTest`,
+    # which says what they resolve to.
     test "a token goes to no link-local, metadata or unspecified address (Decision 856's list)" do
-      assert :ok = OAuth.outbound("https://login.example.com/oauth2/revoke", "the endpoint")
+      assert :ok = OAuth.outbound("https://192.0.2.10/oauth2/revoke", "the endpoint")
       assert :ok = OAuth.outbound("http://127.0.0.1:4000/revoke", "the endpoint")
       assert :ok = OAuth.outbound("https://10.0.0.5/revoke", "the endpoint")
 

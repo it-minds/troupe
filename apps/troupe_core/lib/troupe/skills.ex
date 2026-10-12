@@ -116,15 +116,29 @@ defmodule Troupe.Skills do
 
   @spec available(bundle() | nil, Definition.t(), Path.t() | nil, keyword()) :: [listed()]
   def available(bundle, %Definition{} = definition, workspace \\ nil, opts \\ []) do
-    from_bundle =
-      case {definition.skills, bundle} do
-        {[], _} ->
-          []
+    bundle |> found(workspace, opts) |> offered(definition)
+  end
 
-        {_, %{dir: dir}} when is_binary(dir) ->
+  @typedoc """
+  The skills a session's bundle and disk hold, before a profile picks among them: the
+  bundle's this session's team is entitled to, and the person's own and the
+  repository's that are read. What an agent holds for a turn (Decision 876).
+  """
+  @type found :: %{bundle: [listed()], local: [listed()]}
+
+  @doc """
+  The skills there are, as `available/4` reads them, for any profile: an agent takes them
+  as a turn's first model call begins and offers them, through `offered/2`, for the rest
+  of the turn, so a skill file added, removed or renamed in the middle of it changes the
+  tools and the system prompt at the next turn (Decision 876).
+  """
+  @spec found(bundle() | nil, Path.t() | nil, keyword()) :: found()
+  def found(bundle, workspace \\ nil, opts \\ []) do
+    from_bundle =
+      case bundle do
+        %{dir: dir} when is_binary(dir) ->
           dir
           |> Bundle.list_skills()
-          |> allowed(definition)
           |> entitled(bundle)
           |> Enum.map(&Map.put(&1, :layer, :bundle))
 
@@ -133,8 +147,13 @@ defmodule Troupe.Skills do
       end
 
     {local, _skipped} = local(bundle, workspace, opts)
+    %{bundle: from_bundle, local: local}
+  end
 
-    (from_bundle ++ local)
+  @doc "The skills a profile may consult of those `found/3` found, by name."
+  @spec offered(found(), Definition.t()) :: [listed()]
+  def offered(%{bundle: from_bundle, local: local}, %Definition{} = definition) do
+    (allowed(from_bundle, definition) ++ local)
     |> by_name()
     |> Enum.sort_by(& &1.name)
   end
@@ -291,12 +310,13 @@ defmodule Troupe.Skills do
   that sees the tool can call it; one that does not has nothing it could ask for.
   """
   @spec tools(bundle() | nil, Definition.t(), Path.t() | nil, keyword()) :: [Tool.t()]
-  def tools(bundle, %Definition{} = definition, workspace \\ nil, opts \\ []) do
-    case available(bundle, definition, workspace, opts) do
-      [] -> []
-      skills -> [tool(skills)]
-    end
-  end
+  def tools(bundle, %Definition{} = definition, workspace \\ nil, opts \\ []),
+    do: bundle |> available(definition, workspace, opts) |> tools_for()
+
+  @doc "The `skill` tool for these skills, or none when there are none."
+  @spec tools_for([listed()]) :: [Tool.t()]
+  def tools_for([]), do: []
+  def tools_for(skills), do: [tool(skills)]
 
   @doc """
   The lines a system prompt carries: one per skill the profile lists, or nothing.
@@ -306,15 +326,16 @@ defmodule Troupe.Skills do
   documents, and the log says which of them the model actually read.
   """
   @spec prompt_section(bundle() | nil, Definition.t(), Path.t() | nil, keyword()) :: String.t()
-  def prompt_section(bundle, %Definition{} = definition, workspace \\ nil, opts \\ []) do
-    case available(bundle, definition, workspace, opts) do
-      [] ->
-        ""
+  def prompt_section(bundle, %Definition{} = definition, workspace \\ nil, opts \\ []),
+    do: bundle |> available(definition, workspace, opts) |> prompt_section_for()
 
-      skills ->
-        lines = Enum.map_join(skills, "\n", &("- " <> &1.name <> ": " <> &1.description))
-        "Skills available — call the skill tool with a name to read one:\n" <> lines
-    end
+  @doc "The system prompt's lines for these skills, or nothing when there are none."
+  @spec prompt_section_for([listed()]) :: String.t()
+  def prompt_section_for([]), do: ""
+
+  def prompt_section_for(skills) do
+    lines = Enum.map_join(skills, "\n", &("- " <> &1.name <> ": " <> &1.description))
+    "Skills available — call the skill tool with a name to read one:\n" <> lines
   end
 
   defp tool(skills) do
@@ -353,7 +374,9 @@ defmodule Troupe.Skills do
   end
 
   # A skill the profile does not list is `not_found`, not `denied`: from inside this
-  # session it does not exist, the same way another team's volume does not.
+  # session it does not exist, the same way another team's volume does not. One listed
+  # whose file has gone since the list was read, which a turn holds to its end (Decision
+  # 876), is told so.
   defp read(by_name, args) do
     with {:ok, name} <- Troupe.Tool.fetch_string(args, "name"),
          {:ok, listed} <- Map.fetch(by_name, name) |> or_unknown(name),
@@ -368,7 +391,7 @@ defmodule Troupe.Skills do
   defp read_skill(%{name: name, dir: dir}) do
     case Bundle.read_skill_dir(dir, name) do
       {:ok, skill} -> {:ok, skill}
-      {:error, :not_found} -> {:error, {:unknown_skill, name}}
+      {:error, :not_found} -> {:error, {:skill_gone, name}}
     end
   end
 

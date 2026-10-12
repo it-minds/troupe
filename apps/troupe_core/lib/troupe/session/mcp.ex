@@ -662,6 +662,9 @@ defmodule Troupe.Session.MCP do
     end
   end
 
+  # A person's own server is called from their machine, so only at an address its name
+  # resolved to and passed at: never link-local, a cloud's metadata service or the
+  # unspecified address (Decision 875).
   defp server_of(name, config, state_dir) do
     Server.from_config(%{
       "name" => name,
@@ -670,6 +673,7 @@ defmodule Troupe.Session.MCP do
       "permission" => config[:permission] || :ask,
       "timeout_ms" => config[:timeout_ms] || 30_000
     })
+    |> Map.put(:pinned, true)
     |> with_oauth(config[:oauth], state_dir)
   end
 

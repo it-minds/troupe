@@ -189,11 +189,14 @@ with an expiry, is #66's channel document's job.
 
 ## Not in this slice
 
-The budget question can still raise `max_turns` or the wall clock past an enforced ceiling
-for one run or session (Decision 699's `cap` is the pod's terms); carrying the enforced
-ceilings as that cap, with words that are not the team's terms, is a follow-up. So are a
-JSON Schema for the managed file, a desktop settings view that shows where a value came
-from, defaults beyond the six client defaults on the plane, and the model panel's
+The budget question could still raise `max_turns` or the wall clock past an enforced ceiling
+for one run or session (Decision 699's `cap` was the pod's terms alone). Issue #622 made the
+enforced ceilings that cap too, the lower of the two holding, with words that name the
+organisation and where its limit came from; held `allow` to them as well, which raises
+every limit at once; and found a model entry's `max_output` lowering an enforced
+`max_tokens`, never raising it. Still follow-ups: a JSON Schema for the managed file, a
+desktop settings view that shows where a value came from, defaults beyond the six client
+defaults on the plane, and the model panel's
 `config.set` (with `provider`), which still writes `provider`/`base_url` into the user file
 under a fixed provider (held on load, with the warning).
 

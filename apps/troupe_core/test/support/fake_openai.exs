@@ -83,8 +83,9 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
     `caller` is what it said about itself (`user_agent`, `tags`, `spend_metadata`,
     `referer`, `title`, `user`, `metadata`). One to `/v1/messages` also has `beta` (its
     `anthropic-beta` header), `binding` (its `prefix_mismatch_behavior`), `thinking`
-    (`:kept`, `:refused` or `{:dropped, n}`), `system` (the system prompt's texts),
-    `usage`, and `mismatch` (the diagnosis header it answered with) on a refusal or a drop.
+    (`:kept`, `:refused` or `{:dropped, n}`), `system` (the system prompt's texts), `tools`
+    (the tool definitions, without their cache marks), `usage`, and `mismatch` (the
+    diagnosis header it answered with) on a refusal or a drop.
     """
     def requests(fake), do: fake.agent |> Agent.get(& &1.requests) |> Enum.reverse()
 
@@ -524,7 +525,8 @@ unless Code.ensure_loaded?(Troupe.Test.FakeOpenAI) do
       wire = %{
         beta: header(head, "anthropic-beta"),
         binding: binding,
-        system: system_texts(request)
+        system: system_texts(request),
+        tools: Enum.map(request["tools"] || [], &unmarked/1)
       }
 
       if binding != nil and not beta? do
