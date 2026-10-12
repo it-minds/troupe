@@ -19,12 +19,12 @@ Zig 0.16.0 (Burrito 1.6 pins exactly that). Always run mix through mise:
 ```sh
 mise exec -- mix compile --warnings-as-errors   # zero warnings incl. type warnings is the bar
 mise exec -- mix format && mise exec -- mix credo --strict
-TROUPE_IDLE_TEST_MS=1000 mise exec -- mix test    # fast loop; without the var the idle test waits 60 s
+mise exec -- mix test                             # the suite
 mise exec -- mix troupe.xref                      # the UI only calls Troupe.Client; the TUI reaches the harness only through its doors
 TROUPE_REMOTE_URL=https://plane... mise exec -- mix troupe.remote.smoke   # login/list/attach/input against a real deployment; skipped without the var
-mise exec -- mix test test/troupe/tui_test.exs    # one file
+mise exec -- mix test test/troupe/command_mode_test.exs    # one file
 scripts/dev [args]                                # run the CLI/TUI from source, no build (TROUPE_CLI=1 mix run -- ...)
-scripts/build-local                               # Burrito binary for this host -> burrito_out/
+scripts/build-local                               # Burrito binary for this host, installed as ~/.local/bin/troupe
 ```
 
 Rebuild the binary only when the user needs one. After rebuilding the same
@@ -36,8 +36,9 @@ build from before your change is this, not a build failure: check `troupe
 config` against `scripts/dev config`.
 
 Manual smoke without a model: put `provider: fake` and `fake_script: <path>` in
-the workspace's `.troupe/config.yaml` (the daemon reads the model from the
-workspace; a client cannot set the provider), then `scripts/dev run build smoke
+the workspace's `.troupe/config.yaml`, in a workspace you have trusted (`scripts/dev
+config trust`: both keys are trust-gated; the daemon reads the model from the
+workspace, and a client cannot set the provider), then `scripts/dev run build smoke
 --headless --auto-approve`. `test/support/helpers.ex` shows the script shape
 (`{"routes": {"root": [steps]}}`). Real providers come from `~/.config/troupe/config.yaml`
 or env (`TROUPE_*`); opencode's `~/.config/opencode/opencode.jsonc` is not read, only
@@ -49,7 +50,7 @@ package both this project and the umbrella lock must be at the same version in b
 CI runs it.
 
 
-Read skills in the .skills repo
+Read the skills in `.skills/` (ExRatatui's usage rules) before changing the screen.
 
 ## Layout
 
@@ -61,8 +62,8 @@ Read skills in the .skills repo
 
 ## Rules that matter here
 
-- **Anything under `Troupe.UI` may call `Troupe.Client` and nothing else** in the harness (bar the pure data modules `Config`, `Settings`, `Event`, `Client.Message`, `Codec`). `mix troupe.xref` reads the BEAM import tables and fails the build otherwise; it is in the `check` alias and in CI.
-- **The whole TUI may call into the harness apps only through their doors**: `Troupe.Protocol.{Client,Daemon,Endpoint}`, `Troupe.Config`, `Troupe.Paths`, `Troupe.Reaper`, `Troupe.LLM.Catalog.Store` (root Decision 673). The harness is a path dependency, so everything in it is one `alias` away; `mix troupe.xref` fails on a call to anything else. Something new the TUI needs from a session goes through the protocol, not around it.
+- **Anything under `Troupe.UI` may call `Troupe.Client` and nothing else** in the harness (bar the pure data modules `Config`, `Settings`, `Event`, `Client.Message`, `Codec` and `Protocol.Glob`). `mix troupe.xref` reads the BEAM import tables and fails the build otherwise; it is in the `check` alias and in CI.
+- **The whole TUI may call into the harness apps only through their doors**: the modules `@harness_allowed` lists in `lib/mix/tasks/troupe.xref.ex` (`Troupe.Protocol.Client`, `Troupe.Config`, `Troupe.Paths`, `Troupe.Reaper` and a dozen more; root Decision 673). The harness is a path dependency, so everything in it is one `alias` away; `mix troupe.xref` fails on a call to anything else. Something new the TUI needs from a session goes through the protocol, not around it.
 - A remote session must be indistinguishable from a local one on screen: translate at the edge (`Troupe.Remote.Translate`), never branch on "is this remote?" in the model or the view.
 - The harness is not edited from here. A missing method or event is a change to `PROTOCOL.md` and the umbrella's apps first (a decision in `docs/decisions/`), in the same pull request as the TUI change that needs it; the TUI's own deviations still go in `docs/decisions/tui/`.
 - Every OS process goes through `Troupe.OS.Process` (reaper). Never `System.cmd` in lib code.

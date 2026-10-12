@@ -18,6 +18,11 @@ this adds only what an agent working in the repository must not miss.
   decision you make is a new file there, one per decision
   (`docs/decisions/<four-digit number>-<slug>.md`, the TUI's under `tui/`), never an entry
   appended to a shared file; `mix troupe.decisions --check` checks its front matter.
+- **Code cites no decision number.** A comment states the invariant in its own words;
+  the decision names the code in its `paths`. CI fails a change that adds `Decision N`
+  to a code file (`elixir scripts/decision-citations.exs --base origin/<your base>`);
+  the citations already there go when you touch their part of the file
+  ([conventions.md](docs/developer/conventions.md) section 4).
 - **No attribution** in commits or pull requests: no `Co-Authored-By:` trailer, no
   "Generated with ..." line.
 - **Sign off** every commit (`git commit -s`): the DCO, which CI checks

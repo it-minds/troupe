@@ -38,7 +38,7 @@ docker run -d --name troupe-bench-worker -p 4000:4000 \
   -e TROUPE_PROVIDER=fake -e TROUPE_MODEL=fake -e TROUPE_FAKE_SCRIPT=/etc/troupe/fake.json \
   -e TROUPE_STATE_HOME=/workspace/.state -e TROUPE_SESSIONS_PER_POD=64 \
   -e TROUPE_HTTP_PORT=4000 -e RELEASE_DISTRIBUTION=none -e ERL_FLAGS="+Q 65536" \
-  ghcr.io/it-minds/troupe-worker:dev
+  ghcr.io/it-minds/troupe-worker:dev    # built here by scripts/build-images troupe_worker; CI publishes no :dev
 
 # one workspace per client; the worker will not invent directories
 docker exec troupe-bench-worker sh -c 'for i in $(seq 0 63); do mkdir -p /workspace/c$i; done'
@@ -54,18 +54,22 @@ On Git Bash for Windows, prefix docker commands with `MSYS_NO_PATHCONV=1` so
 ## 3. The run
 
 ```sh
-BENCH_SIGNING_KEY=keys/signing-key.json BENCH_POD_ID=bench-0 \
+BENCH_SIGNING_KEY="$PWD/keys/signing-key.json" BENCH_POD_ID=bench-0 \
 BENCH_CLIENTS=20 BENCH_PROMPTS=10 pnpm bench
 ```
+
+`pnpm bench` runs in `packages/bench`, so a relative path in a variable is read from there.
 
 | variable | default | meaning |
 | --- | --- | --- |
 | `BENCH_MODE` | `worker` | `worker` dials `BENCH_WS` with self-minted tokens; `plane` goes through `BENCH_PLANE` with `BENCH_PLANE_TOKEN` and `BENCH_PROFILE` |
 | `BENCH_WS` | `ws://localhost:4000/v1/socket` | the worker |
+| `BENCH_SIGNING_KEY` | none; worker mode needs it | the private half of the JWKS the worker trusts, which the bench signs its tokens with |
+| `BENCH_POD_ID` | none; worker mode needs it | the worker's id, `TROUPE_POD_ORDINAL`: the tokens' audience |
 | `BENCH_CLIENTS` | 5 | concurrent clients, one session each |
 | `BENCH_PROMPTS` | 20 | prompts per client, one in flight at a time |
 | `BENCH_WORKSPACE` | `/workspace` | per-client sessions are created under `<workspace>/c<n>` |
-| `BENCH_OUT` | `bench-results` | where the JSON goes |
+| `BENCH_OUT` | `bench-results` | where the JSON goes, under `packages/bench` when relative |
 
 Keep prompts per client under 40, or raise the session's `max_turns`: the default turn
 budget ends a session in a way that looks exactly like a throughput problem.

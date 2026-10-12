@@ -31,7 +31,7 @@ is built from `clients/gui` as its own context.
 ```bash
 scripts/build-images                          # all five, tagged dev, loaded into kind if troupe-dev exists
 scripts/build-images troupe_worker            # a subset
-TROUPE_REGISTRY=registry.example.com/troupe TROUPE_IMAGE_TAG=0.3.3 TROUPE_PUSH=true scripts/build-images
+TROUPE_REGISTRY=registry.example.com/troupe TROUPE_IMAGE_TAG=0.15.0-beta TROUPE_PUSH=true scripts/build-images
 ```
 
 Images are `linux/amd64` explicitly, so a non-amd64 laptop does not build one the node
@@ -55,8 +55,9 @@ The VS Code extension is `troupe.vsix`: `pnpm package` in `clients/vscode` build
 attaches its own, which the installers' `--vscode` (`-VSCode`) installs. It is on no
 marketplace ([vscode.md](../user/vscode.md)).
 
-`install.sh` and `install.ps1` at the root install `troupe` and `troupe-daemon` from a
-release and check them against its `SHA256SUMS`. On this Windows machine,
+`install.sh` and `install.ps1` at the root install `troupe-daemon`, and on request `troupe`,
+the desktop app and the VS Code extension, from a release, and check them against its
+`SHA256SUMS` and, where `minisign` is installed, the signed `manifest.json` (Decision 865). On this Windows machine,
 `scripts/setup-windows-toolchain.ps1` and `scripts/install-local.ps1` build and install
 from a checkout.
 
@@ -77,13 +78,14 @@ skips, and `shell` does not run. A release sets the two Linux triples.
 | `apps/troupe_plane/priv/static/tokens.css`, `priv/design/statuses.json` | `mix troupe.admin.tokens`, from `docs/design/admin/tokens.json` | `--check` |
 | `apps/troupe_plane/priv/static/theme.css` | `mix troupe.theme` (Signal by default), from `clients/gui/docs/design/themes/*.tokens.json` | `--check` |
 | `apps/troupe_plane/priv/static/brand/{favicon.ico,apple-touch-icon.png}` | `python scripts/brand-icons.py` (Pillow), when the mark changes | a test that they exist |
+| `protocol/schema/config/v1.json`, and `docs/user/configuration.md` between its markers | `mix troupe.config.schema`, from the key table in `Troupe.Config.Schema` the loader validates against | `--check`, in the `lint` job, `dev-check` and `scripts/ci` |
 | `docs/egress-allowlist.md` | `mix troupe.egress`, from what each component declares it dials | a test that it is current |
-| `docs/third-party-licences.md`, `THIRD-PARTY-NOTICES.txt`, `charts/troupe/{LICENSE,NOTICE}` | `elixir scripts/licences.exs`, from the two Mix locks, the pnpm workspace and `Cargo.lock`, once their packages are fetched: the inventory, the licence texts the shipped packages carry, and the chart's copies of the root's | `--check` in `licences.yml`, which also refuses a licence outside the script's policy |
+| `docs/third-party-licences.md`, `THIRD-PARTY-NOTICES.txt`, `charts/troupe/{LICENSE,NOTICE}` | `elixir scripts/licences.exs`, from the two Mix locks, the two pnpm workspaces (`clients/gui`, `clients/vscode`) and the Cargo locks (the desktop app's and `ex_ratatui`'s), once their packages are fetched: the inventory, the licence texts the shipped packages carry, and the chart's copies of the root's | `--check` in `licences.yml`, which also refuses a licence outside the script's policy |
 | `clients/gui/apps/desktop/src/{tokens.css,mark.ts}` | `pnpm tokens`, from `clients/gui/docs/design/themes/*.tokens.json` | `pnpm tokens:check` |
 | `clients/tui/lib/troupe/ui/tui/palette.ex` | `mix troupe.palette` in `clients/tui`, from every `clients/gui/docs/design/themes/*.tokens.json`: the TUI's colours by role in each theme, with their xterm-256 and sixteen-colour stand-ins, and the mask in two cuts (Decision 716) | `--check`, in the TUI's `mix check` |
 | `docs/user/cli-reference.md`, between its markers | `mix troupe.cli.reference` in `clients/tui`, from the command lines beside the parser (`Troupe.CLI.commands/0`) and the harness's slash commands (`Troupe.Commands`), the two tables `troupe --help` prints (Decision 767) | `--check`, in the TUI's `mix check` and in `dev-check` |
 | `clients/gui/apps/desktop/src-tauri/icons/*` | `pnpm icons`, from `mark.ts` and the Signal tokens: every icon the bundler wants, the NSIS images and the dmg background (Decision 703) | `pnpm icons:check`, on the pixels |
-| `test/fixtures/logs/<version>/` | `mix troupe.fixtures.record <version>`, once per release; refuses to overwrite | `fold_test.exs` replays every version |
+| `test/fixtures/logs/<version>/` | `mix troupe.fixtures.record <version>`, meant for every release, though only 0.2.0 and 0.3.0 have been recorded; refuses to overwrite | `fold_test.exs` replays every version |
 
 There is no npm or esbuild in the umbrella: the console's JavaScript is the UMD bundles
 shipped inside the Phoenix packages, concatenated.

@@ -12,7 +12,9 @@ For anything larger than a small fix, open an issue first, or say on an existing
 you are taking it, so nobody builds the same thing twice or something the design rules
 out. Issues labelled `good first issue` are small and self-contained.
 [ARCHITECTURE.md](ARCHITECTURE.md) is the design and [the decisions](docs/decisions/README.md) say why
-things are the way they are: a change that undoes a numbered decision says so.
+things are the way they are: a change that undoes a numbered decision says so. In the code,
+a comment says why in its own words and cites no decision by number
+([conventions](docs/developer/conventions.md#4-comments-decisions-and-messages)).
 
 ## Build and check
 

@@ -79,8 +79,8 @@ caller can tell when the capability behind the card changed.
 | `tasks/get` | the plane row's `status` and `done_reason` while the task is being worked on; a reader over `session.open read` when the task is at rest or `historyLength > 0`, which is where the answer, the artifacts and the history come from |
 | `tasks/cancel` | `turn.cancel`, then `session.archive` |
 | `input-required` | `approval_requested` — the status message names the tool and its arguments in a `data` part; the caller's next `message/send` on that task with a first part `{"kind": "data", "data": {"decision": "allow" \| "deny" \| "allow_session", "call_id": …}}` becomes `approval.respond`; free text on a waiting task is refused with a hint, because text cannot answer a yes/no the log will record as a decision |
-| task states | `submitted` (row created) → `working` (thinking/acting) → `input-required` (waiting) → `completed` (a root turn ended, or `agent_done` with reason `finished`) / `failed` (`llm_error`, `budget_exhausted`, `interrupted`, any other `agent_done`) / `canceled` |
-| `pushNotificationConfig/*` | `PushNotificationNotSupportedError`; the card says so |
+| task states | `submitted` (row created) → `working` (thinking/acting) → `input-required` (waiting) → `completed` (the model ended a root turn, or `agent_done` with reason `finished`) / `failed` (`llm_error`, `budget_exhausted`, `interrupted`, a root `turn_ended` with a reason, any other `agent_done`) / `canceled` |
+| `tasks/pushNotificationConfig/*` | `PushNotificationNotSupportedError`; the card says so |
 
 The final answer of a task is the text of the last root `llm_response` in the turn that
 ended it, or `agent_done.summary` when the agent used `finish`. The facade returns it

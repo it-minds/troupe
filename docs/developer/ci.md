@@ -4,9 +4,9 @@ Three speeds, one set of jobs (Decision 676):
 
 | | when | runs | publishes |
 |---|---|---|---|
-| **Focused CI** — [`ci.yml`](../../.github/workflows/ci.yml) | every pull request, every push to `main` | only what the change can have broken | `main`: the five images as `sha-<short>` |
+| **Focused CI** — [`ci.yml`](../../.github/workflows/ci.yml) | every pull request into `main`, every push to `main` | only what the change can have broken | `main`: the five images as `sha-<short>` |
 | **Pre-release** — [`prerelease.yml`](../../.github/workflows/prerelease.yml) | by hand, any branch or commit | builds only, **no test suite** | a GitHub pre-release `v<VERSION>-pre.<n>`: images, chart, `troupe`, `troupe-daemon`, desktop installers |
-| **Release** — [`release.yml`](../../.github/workflows/release.yml) | merging a VERSION change (`scripts/release 0.3.2`) | **the full suite**: every job, nine soak runs, the cluster suite | the GitHub release `v<VERSION>`, images and chart at that version |
+| **Release** — [`release.yml`](../../.github/workflows/release.yml) | merging a VERSION change (`scripts/release 0.16.0-beta`) | **the full suite**: every job, nine soak runs, the cluster suite | the GitHub release `v<VERSION>`, images and chart at that version |
 
 Plus [`nightly.yml`](../../.github/workflows/nightly.yml) — the full suite, the native builds and the harness against a real model on `main` every night, publishing nothing — [`pages.yml`](../../.github/workflows/pages.yml), which builds the documentation site on every pull request and publishes it from `main` (Decision 739), and [`quick-start.yml`](../../.github/workflows/quick-start.yml), which runs [the quick start](../quick-start.md)'s commands every night against the latest release, on Linux and Windows, as a reader would (Decision 740).
 
@@ -42,7 +42,7 @@ Arrows point at what an app depends on; a change flows back along them. So:
 
 | the change touches | umbrella suites | also |
 |---|---|---|
-| `clients/gui/**` | — | GUI (tokens, typecheck, build, test); GUI-e2e if the client package |
+| `clients/gui/**` | — | GUI (tokens, typecheck, build, test); GUI-e2e if the client package; native builds (PR) if the desktop app or the client package |
 | `clients/tui/**` | — | TUI `mix check`; native builds (PR) |
 | `clients/vscode/**` | — | the VS Code extension: typecheck, unit tests, its suite inside a real VS Code on Linux and Windows (and macOS in a full run), and the `.vsix` as the run's artifact |
 | `docs/user/cli-reference.md` | — | TUI `mix check`, which holds it to the command tables |
@@ -53,14 +53,16 @@ Arrows point at what an app depends on; a change flows back along them. So:
 | `apps/troupe_gateway` | gateway, daemon, worker | TUI, protocol, GUI-e2e |
 | `apps/troupe_protocol`, `config/`, `mix.lock` | all eight | TUI, protocol, GUI-e2e |
 | `charts/`, `docker/` | — | chart (lint, render, kubeconform), GUI-e2e |
-| `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | |
+| `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | but the native builds, unless `native.yml` changed |
 | anything else (docs) | — | only `versions` |
 
 `versions` runs whatever changed, because a moved file can break any of what it checks:
 every copy of the version agrees, every Markdown link resolves, no deployment is named,
-and every decision in `docs/decisions/` has its fields, a number of its own and `paths`
+every decision in `docs/decisions/` has its fields, a number of its own and `paths`
 that match something (`mix troupe.decisions --check`, run there with a bare `elixir`;
-Decision 790).
+Decision 790), and no changed code file cites a decision number more often than it did
+at the base (`scripts/decision-citations.exs --base HEAD^1`, the job checking out two
+commits; Decision 882).
 
 Each umbrella app is its own parallel leg (`test <app>`), and one `lint` job compiles the whole umbrella with warnings as errors and runs format, credo, the generated-asset checks, the boundaries and the bench ([bench.md](bench.md): a turn's cost and shape held to budgets, its table in the run's summary) whenever any app is under test.
 
@@ -82,7 +84,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-  plan["name it<br/>0.3.1-pre.&lt;run&gt;"] --> images["images<br/>sha + 0.3.1-pre.n"]
+  plan["name it<br/>0.15.0-beta-pre.&lt;run&gt;"] --> images["images<br/>sha + 0.15.0-beta-pre.n"]
   plan --> draft["tag + chart<br/>draft pre-release"] --> native["native builds<br/>daemon · TUI · desktop"]
   images & native --> publish["SHA256SUMS · chart to ghcr.io<br/>publish · keep newest 5"]
 ```
@@ -90,26 +92,26 @@ flowchart LR
 - **No test suite.** The native jobs' own smoke tests still run (`--version`, a headless run in the embedded daemon), because a binary that cannot start is not a build.
 - The daemon, the TUI and the plane report the pre-release's version. The desktop installers keep VERSION's number: an MSI version must be numeric.
 - It is a GitHub *pre-release*, so `/releases/latest` and the installers' default never pick it up. The `install.sh` and `install.ps1` attached to it install it (`scripts/release-installers` pins them), and so does naming it:
-  `TROUPE_VERSION=0.3.1-pre.12 sh install.sh` or `$env:TROUPE_VERSION = "0.3.1-pre.12"; .\install.ps1`.
+  `TROUPE_VERSION=0.15.0-beta-pre.12 sh install.sh` or `$env:TROUPE_VERSION = "0.15.0-beta-pre.12"; .\install.ps1`. A pre-release has no signed `manifest.json`, so either installer refuses it on a machine where `minisign` is installed, and `troupe update` refuses its builds.
 - Nothing is deployed. Its images and chart are installed like a release's, by naming the version: Helm never picks a pre-release version by itself.
 - Only the newest five are kept (`keep`); older pre-releases and their tags are deleted. Release candidates (`-rc.N`) are releases and are never touched.
 
 ## Release: the full suite, then everything
 
-`scripts/release 0.3.2` opens the pull request that changes VERSION. Merging it is the release:
+`scripts/release 0.16.0-beta` opens the pull request that changes VERSION. Merging it is the release:
 
 ```mermaid
 flowchart LR
   v{"VERSION changed<br/>and untagged?"} -->|yes| suite["full suite<br/>ci.yml full · soak 9 · cluster"]
-  suite --> images["images at 0.3.2"] --> cut["tag v0.3.2<br/>chart · draft release"]
+  suite --> images["images at 0.16.0-beta"] --> cut["tag v0.16.0-beta<br/>chart · draft release"]
   cut --> native["native builds<br/>attached"] --> publish["signed manifest · SHA256SUMS<br/>chart to ghcr.io · publish"]
 ```
 
 - The full suite is `ci.yml` called with `full: true`: every job whatever changed, each app's suite nine more times, and the cluster suite on kind. Nothing is trusted from an earlier run.
 - The images are built from the commit being released and tagged with the version; the chart is packaged at that version, so it pulls exactly those.
-- The `publish` job runs in the `release` environment and signs the release before anything else: `scripts/release-manifest.exs` writes `manifest.json`, every file attached with its component, target, size and sha256, and `manifest.json.minisig` with the release key ([below](#the-release-key)), then `SHA256SUMS` covers both. Without the key the job fails there and the release stays a draft: it is never published unsigned (Decision 865).
+- The `publish` job runs in the `release` environment and signs the release before anything else: `scripts/release-desktop-update.exs` writes the desktop app's `latest.json` and a `.sig` beside each file it updates from (Decision 874), then `scripts/release-manifest.exs` writes `manifest.json`, every file attached with its component, target, size and sha256, and `manifest.json.minisig` with the release key ([below](#the-release-key)), then `SHA256SUMS` covers both. Without the key the job fails there and the release stays a draft: it is never published unsigned (Decision 865).
 - The chart goes to `oci://ghcr.io/it-minds/charts/troupe` just before the release is published, so a chart version in the registry is a release that finished. The release's notes show both ways to install it.
-- A release candidate (`0.4.0-rc.1`) runs all of it and is published as a GitHub pre-release.
+- A version with a hyphen — a beta such as `0.15.0-beta`, or a release candidate such as `1.0.0-rc.1` — runs all of it and is published as a GitHub pre-release, so `/releases/latest` and the installers' default find it only once it is marked Latest by hand.
 - A release whose run failed after VERSION merged can be retried with `Actions → release → Run workflow`: by hand it cuts VERSION's version if that has no tag yet.
 
 ### The release key
@@ -166,7 +168,7 @@ A failure is a harness regression until shown otherwise: the step prints the run
 | workflow | what | called by |
 |---|---|---|
 | `ci.yml` | every check; focused or full | pull requests into `main`, pushes to `main`, `nightly.yml`, `release.yml` |
-| `dev-check.yml` | compile, credo, schema, client builds (the VS Code extension's `.vsix` kept as the run's artifact), and the decisions' check whatever changed; no tests | every other pull request: into a `development-*` chunk ([fixing-issues.md](fixing-issues.md)), or stacked on another branch |
+| `dev-check.yml` | compile, credo, schema, client builds (the VS Code extension's `.vsix` kept as the run's artifact), and the decisions' check and the citation check whatever changed; no tests | every other pull request: into a `development-*` chunk ([fixing-issues.md](fixing-issues.md)), or stacked on another branch |
 | `licences.yml` | every locked package's licence against the policy in `scripts/licences.exs`, and `docs/third-party-licences.md`, `THIRD-PARTY-NOTICES.txt` and the chart's LICENSE and NOTICE current | every pull request |
 | `pages.yml` | the documentation site (`mkdocs.yml`), strict: a broken link, a nav entry to a missing page or a page left out of the nav fails it; on `main`, published to GitHub Pages | every pull request, pushes to `main` |
 | `dco.yml` | every commit authored from 2026-09-27 has its author's `Signed-off-by:` ([CONTRIBUTING.md](../../CONTRIBUTING.md)) | pull requests into `main` and `development-*` |
@@ -180,10 +182,12 @@ A failure is a harness regression until shown otherwise: the step prints the run
 
 ## Runners and timeouts
 
-Every job names its runner image instead of taking `ubuntu-latest`, and stops at about three
-times its usual length (Decision 796): Ubuntu 26.04 for most; 24.04 for the cluster suite,
-the TUI's jobs and the native Linux builds; 22.04 for the desktop app's Linux build, the
-glibc floor. A new job does the same. A native target's timeout is the `timeout` beside it
+Every Linux job names its runner image instead of taking `ubuntu-latest`, and every job
+stops at about three times its usual length (Decision 796): Ubuntu 26.04 for most; 24.04
+for the cluster suite, the TUI's jobs, the native Linux builds, the live check and the quick
+start's Linux run; 22.04 for the desktop app's Linux build, the glibc floor. The VS Code
+extension's Windows and macOS legs and the desktop app's Windows build still take
+`windows-latest` and `macos-latest` (D81). A new job names its image. A native target's timeout is the `timeout` beside it
 in `native.yml`'s target lists, and a timeout that fires on a healthy but slow run is a
 re-run, not a reason to raise it.
 

@@ -12,11 +12,12 @@ The issue names two ways out. Both were built behind settings (Decision 815) and
 live, and the maintainer chose on 2026-10-11 (Decision 863):
 
 - **Option 2, a stable system prompt, is the default.** What changes during a session
-  reaches the model as turn context, appended to the conversation, and nothing rewrites
-  the system prompt mid-session. `system_prompt: per_turn` is the old prompt, by name.
+  reaches the model as turn context, appended to the conversation, and the system prompt
+  changes mid-session only for a skill file added, removed or renamed (at the next turn,
+  Decision 876) and a profile or model switch. `system_prompt: per_turn` is the old prompt, by name.
 - **Option 1, Anthropic's beta, is an opt-in fallback** (`thinking_binding: drop_block`)
   for an account that refuses a stale block, on the prefix changes option 2 cannot remove:
-  an `AI?` turn's `plan` prompt, a profile or model switch. The largest such change, the
+  a profile or model switch, and a skill file that comes or goes. The largest such change, the
   task list's tools offered at a turn's eleventh call (Decision 793), and the tail a
   compaction keeps are gone on a model that binds its thinking (#590, Decision 867), and
   so is a `/loop`'s `goal_complete`; an MCP tool that comes or goes waits for the next
@@ -36,7 +37,6 @@ question, and gives the numbers from the live runs with the commands that produc
 | the task list in the system prompt | the first call of a turn after the list changed | 792 | turn context |
 | the instruction files and the brief in the system prompt | the first call of a turn after a file was edited, or after the turn before worked in a directory with its own `AGENTS.md` | 798 | turn context |
 | the goal in the system prompt | the call after it was set or cleared | 678 | turn context |
-| the `plan` prompt added to the profile's | an `AI?` watch turn | | changes |
 | the tools | the call after the task list's tools are first offered: once there is a list, or after ten calls of a turn | 793 | the same on a model that binds its thinking: the list's tools from the first call (867); changes on others |
 | `goal_complete` among the tools | the first call of a `/loop` turn, and of the turn after one | 679 | the same on a model that binds its thinking: offered on every call of the root agent, refused outside a loop (871); changes on others |
 | an MCP server's tools, or those a person's client offers | the first call of the turn after a server came back with another list, a sign-in completed, or a person's tools came or went | 654, 741, 861 | changes, at a turn's first call and never in the middle of one (871) |
@@ -61,7 +61,11 @@ reach the model as they are.
 
 Both may be set together. `system_prompt` from a file or the environment is read as it is
 written: a person's `per_turn` stays `per_turn`, and a file that never set it is `stable`
-from 0.13.0 on. With `per_turn` and `default`, no request changes from what 0.12.0 sent.
+from 0.13.0 on. With `per_turn` and `default` the system prompt is what 0.12.0 sent; what
+changed since whatever these say (on a binding model the task list's tools from the first
+call, `goal_complete` on every call, a compaction's tail without thinking; the MCP tools and
+skills held for the turn; a shown document left out of a compaction for a pointer) applies
+either way.
 
 ## Option 1: `drop_block`
 
@@ -106,7 +110,9 @@ change.
 ## Option 2: `system_prompt: stable`, the default
 
 The system prompt leaves out the instruction files and the brief, the goal and the task
-list, and is the same on every call of the session. Each of those goes, as a section of a
+list, and is the same on every call of the session but for its skills section, which a
+skill file added, removed or renamed changes at the next turn's first call (876). Each of
+the others goes, as a section of a
 `<turn_context>` block, after what the conversation's last user message holds, on the call
 where it differs from the copy the conversation already carries: with the person's input
 as a turn begins, after a tool's results when a goal or a compaction comes in the middle of
@@ -118,7 +124,7 @@ call carried.
 What it costs:
 
 - **The prefix still changes** where the system prompt was not the cause: a compaction,
-  an `AI?` turn's `plan` prompt, an MCP tool that comes or goes (at the next turn, 871),
+  an MCP tool that comes or goes (at the next turn, 871),
   and on a model that does not bind its thinking the tools when the task list's are first
   offered (793) and `goal_complete` with a loop's turns (679). On one that does, the
   list's tools and `goal_complete` are there from the first call and a compaction's tail
@@ -394,7 +400,10 @@ call's thinking:
 - **A compaction**, whose summary replaces what came before; its tail goes without the
   thinking made in front of that (867), and a scratchpad document in it is left out for a
   pointer (878).
-- **An `AI?` turn's `plan` prompt**, and **a profile or a model switched**.
+- **A profile or a model switched**, and **a skill file that comes or goes** (the skills
+  section, at the next turn, 876). An `AI?` comment no longer changes a running session's
+  prefix: it starts a branch session of its own on `answer`, with `plan`'s tools from its
+  first call (Decision 844).
 
 What a turn's first call took is on its `llm_request` (`turn_hold`, Decision 876), whole
 or by the digest of the hold the agent last wrote whole, and folded: an agent restarted in
@@ -496,9 +505,9 @@ its small window the session with the scratchpad compacted after nearly every ca
 of its turns makes two, and each read-back of the 14.5 KB plan crosses the line again), and
 each compaction writes the prompt to the cache again. A window where compactions are rare
 against the calls between them, and a revision that does not read the whole document back
-(#472's `patch`), are what the measure still needs.
+(a `patch`, which #472 did not build), are what the measure still needs.
 
-## Live numbers
+## Live numbers before the stable default
 
 Claude Opus 5.5 on Anthropic's API, with this branch's installed build, on Windows,
 2026-10-08. Each configuration ran `follow_up` five times. The bench's config carried Opus

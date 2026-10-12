@@ -15,14 +15,14 @@
 ├── clients/gui/             the graphical client: a pnpm workspace (client, bench, desktop)
 ├── clients/vscode/          the VS Code extension that opens the TUI in a VS Code terminal: a pnpm project
 ├── config/                  config.exs (compile time) and runtime.exs (prod only)
-├── dev/                     docker-compose.yml, kind/ (dependencies, values), toolbox/
+├── dev/                     docker-compose.yml, kind/ (dependencies, values), toolbox/, known-local-failures
 ├── docker/Dockerfile        the four server images
-├── docs/                    the user, admin and developer tracks, decisions/ (a file per decision), design/, plans/; overrides/ is the site's theme and hooks
+├── docs/                    the user, admin and developer tracks, decisions/ (a file per decision), design/, history/ (records, not instruction); overrides/ is the site's theme and hooks
 ├── fixtures/sample_repo/    a small Mix project the core's workspace tests read
 ├── install.sh, install.ps1  install troupe and troupe-daemon from a release
 ├── mix.exs, mix.lock        the umbrella: the check alias, four releases, credo
 ├── protocol/schema/v1/      GENERATED JSON Schema (commands/, events/, index.json)
-├── scripts/                 dev-up, toolbox, remote-up, build-images, release, pitr-drill, version.exs, locks-agree.exs, doc-links.exs, check-neutral.exs, console-rig.exs, …
+├── scripts/                 dev-up, toolbox, remote-up, build-images, release, pitr-drill, version.exs, locks-agree.exs, doc-links.exs, check-neutral.exs, decision-citations.exs, console-rig.exs, …
 └── test/fixtures/logs/      recorded log fixtures, one directory per released version
 ```
 
@@ -45,8 +45,8 @@ and `priv/` where it ships data, and shares the root's `_build`, `deps`, `mix.lo
 |---|---|
 | `apps/troupe_core/priv/agents/*.md` | the built-in agent definitions |
 | `apps/troupe_core/native/reaper/reaper.zig` | the process-tree reaper, one source for every target |
-| `apps/troupe_core/lib/mix/tasks/` | `compile.reaper`, `troupe.boundaries`, `troupe.fixtures.record` |
-| `apps/troupe_protocol/lib/mix/tasks/` | `troupe.schema.gen`, `troupe.schema.diff`, `troupe.egress`, `troupe.release.check` |
+| `apps/troupe_core/lib/mix/tasks/` | `compile.reaper`, `troupe.boundaries`, `troupe.fixtures.record`, `troupe.bench`, `troupe.prefix`, `troupe.config.schema` |
+| `apps/troupe_protocol/lib/mix/tasks/` | `troupe.schema.gen`, `troupe.schema.diff`, `troupe.egress`, `troupe.release.check`, `troupe.decisions`, `compile.troupe_version` |
 | `apps/troupe_plane/lib/mix/tasks/` | `troupe.admin.assets`, `troupe.admin.tokens`, `troupe.theme`, `troupe.index.rebuild`, `troupe.ledger.reconcile` |
 | `apps/troupe_plane/priv/repo/migrations/` | the database |
 | `apps/troupe_plane/priv/static/` | the console's and front page's assets, mostly generated |

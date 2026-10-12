@@ -49,7 +49,8 @@ publishes a floating tag. The commands are in
   operator, one at a time ([../admin/profiles-and-policy.md §3](../admin/profiles-and-policy.md#3-upgrades-and-drains)).
   A cluster whose `WorkerProfile` CRD predates `status.podsBehind` drops it, and the roll
   stays manual until the CRDs are applied.
-  Profiles whose image is `release` are rewritten by the upgraded plane.
+  In direct mode, profiles whose image is `release` are rewritten by the upgraded plane; in
+  GitOps mode the repository pins its images.
 - A namespace made by an older operator gets its `troupe.dev/workers=true` label at the
   next reconcile; until then its pods cannot reach the control port.
 

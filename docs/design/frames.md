@@ -3,7 +3,8 @@
 How a transcript shows what was rendered from something: the model's prose, a code
 block, a diff, a tool call and what it returned, reasoning, data. One vocabulary, two
 implementations: the terminal UI builds it from this page (TUI Decision 161), and so does
-the desktop app (Decision 877). Issue #474 is the why; this is the what.
+the desktop app (Decision 877). Issue #474 is the why; this is the what; what #474 left
+is #659.
 
 A turn shows its answer, not its working. Everything else on this page serves that.
 
@@ -15,8 +16,9 @@ A frame is a **header**, a **body** and its **affordances**.
 
 - The header says what this is and one fact about it, on one line.
 - The body is the rendered content, on the **surface** (§3).
-- The affordances are copy, open or close, and, where it applies, open in the viewer
-  (#61, not built yet) or in the scratchpad (#472).
+- The affordances are open or close and, where it applies, open in the scratchpad (#472);
+  copying a frame and opening one in the viewer (#61) are #659's. Neither client has a
+  copy control on a frame yet: the terminal UI copies a selection and `/copy`.
 
 ## 2. The six kinds
 
@@ -35,7 +37,8 @@ The parts are separated by ` · ` (space, middle dot, space). Counts are words, 
 symbols: `1 row`, `2 rows`, `1 step`, `7 steps`. The minus in `+n −m` is U+2212.
 
 - **code**: `elixir · lib/p.ex`. The language is the fence's first word, the path its
-  second word when that has a `/` or a `.` in it. With neither, the label is `code`.
+  second word when that has a `/` or a `.` in it. With neither, the desktop app's label is
+`code` and the terminal UI's header is the bare rule.
 - **diff**: `diff · lib/p.ex +3 −1`. The path is the fence's, else the `+++` line's with
   its `b/` taken off. `+n` counts the added lines and `−m` the removed, the `+++` and
   `---` lines aside.
@@ -45,7 +48,8 @@ symbols: `1 row`, `2 rows`, `1 step`, `7 steps`. The minus in `+n −m` is U+221
   an error with `(n lines)` when it has more. The duration is said from one second up;
   under a second it says nothing a person reads for.
 - **reasoning**: `thinking · 12s`, from the first reasoning the model streamed to its
-  reply. A transcript replayed from the log has no duration, and says `thinking`.
+  reply. Both clients draw reasoning live only: a transcript replayed from the log shows no
+  reasoning frame yet (#659).
 - **data**: `csv · 4 rows`, the header row not counted; `json · 2 rows` for an array of
   flat objects, whose columns are the keys in the order they first appear.
 - **prose** has no header. It is the frame read most, and it is recognised by its surface.
@@ -65,6 +69,8 @@ Durations: `14s` under a minute, `4m 2s` from a minute.
 
 **The step.** Rendered output sits one step from the chat's background, and the step reads
 as rendered, not as important: nothing louder than a background and a hairline or a rail.
+In Afterglow dark `--bg-sunken` is the canvas's own colour, so there the hairline is the
+whole step (#659).
 
 In the terminal the step is the `surface` role, the theme's `bg.hover` token: of the
 background tokens it is the one that moves away from both a dark terminal's black and a
@@ -110,7 +116,8 @@ prose is never cut short: it is the thing the turn was for.
 
 It is a key on the config ladder (`transcript.detail`, `quiet` by default), which a
 person's file, a project's and an organisation's defaults set like any other, and a client
-changes it for one session: the terminal UI's `/detail quiet | tools | everything`. The
+changes it for one session: `/detail quiet | tools | everything`, in either client (a
+settings control for it in the desktop app is #659). The
 view is a client's own business: switching re-draws the whole history at the new level,
 and nothing is written to the session's log.
 
@@ -126,9 +133,10 @@ block inside prose is cut the same way; the prose around it is not. A person's o
 keeps its last 20 lines, `… 42 earlier lines`, because the end of a command's output is
 what a person ran it to read. At `everything` nothing is cut.
 
-**Past 500 lines** a frame is a card that opens the viewer (#61) instead of a body in the
-transcript, as a scratchpad document is already a card that opens the scratchpad (TUI
-Decision 159). Until the viewer exists, both clients cut such a frame as above.
+**Past 500 lines** a frame is to be a card that opens the viewer (#61, the hand-off is
+#659's) instead of a body in the transcript, as a scratchpad document is already a card that
+opens the scratchpad (TUI Decision 159). Until the viewer exists, both clients cut such a
+frame as above.
 
 ## 5. Never collapsed
 
@@ -162,7 +170,7 @@ colour. The desktop app's tokens are named beside each.
 
 Highlighting takes its colours from the highlighter at truecolor, their nearest of 256 at
 256, and the reader's ink with fewer (Decision tui/0126). A grammar a person installs maps
-its captures to these roles too (a later slice of #474).
+its captures to these roles too (#659).
 
 ## 7. The curtain line
 
@@ -222,9 +230,12 @@ question (Decision 877).
 
 ## 9. Not here yet
 
-- Tree-sitter grammars a person installs, and the WASM spike to measure them: a later
-  slice of #474. The built-in highlighting stays as it is.
+- Tree-sitter grammars a person installs, and the WASM spike to measure them (#659). The
+  built-in highlighting stays as it is.
 - Highlighting in the desktop app, whose code frames show their source in the reader's
-  ink until that slice settles what highlights there.
-- Mermaid drawn as a diagram in the desktop app; it is a code frame of its source for now.
-- The viewer (#61), where a frame past 500 lines will open.
+  ink until #659 settles what highlights there.
+- Mermaid drawn as a diagram in the desktop app (#659); it is a code frame of its source for
+  now.
+- The viewer (#61), where a frame past 500 lines will open, and the hand-off to it (#659).
+- Reasoning on replay, a settings control for `transcript.detail` in the desktop app, and
+  Afterglow dark's frame surface (#659).

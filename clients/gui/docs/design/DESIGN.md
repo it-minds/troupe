@@ -13,14 +13,14 @@ Files:
 
 ## 0. Afterglow
 
-The app's design is **Afterglow** (`afterglow.dc.html`, issue #52). It keeps everything this document argues for — one reserved colour with one meaning, status as glyph then word then colour, structure from rules and alignment, the mask and its four rules — and changes the surface they are drawn on. Where a section below and Afterglow disagree, Afterglow wins, and `themes/afterglow.tokens.json` is the record of what it says.
+The app's design is **Afterglow** (`afterglow.dc.html`, issue #52). It keeps everything this document argues for — one reserved colour with one meaning, status as glyph then word then colour, structure from rules and alignment, the mask and its four rules — and changes the surface they are drawn on. Where a section below and Afterglow disagree, Afterglow wins, and `themes/afterglow.tokens.json` is the record of what it says. Sections 1 to 3 are the design this document started as, before Afterglow: their reasoning holds, and their numbers — radii, edge widths, the type scale and measure, Plex — are the token files' now (`themes/*.tokens.json`, and [THEMES.md](themes/THEMES.md) for contrast).
 
 - **Type.** Figtree for the interface and for reading, at the black weights (800, 900) every title is set in; DM Mono for anything literal; VT323, the screen face, for the `// LABEL` that names a region of a screen. Labels, pills, counts and times are mono, upper case and tracked — the trope §3 bans, taken back on purpose, because the comp is built on it. `typography.role` in the token file is the scale, generated as one `--t-<role>` shorthand each.
 - **Structure.** Square: every radius is zero. Spacing runs 4, 8, 12, 16, 22, 28, 38, 52. Depth is one flat block of `--bg-shadow` offset under a tile or a primary button, never a blur; the footlight under the approval is the one glow. A tile lifts two pixels under the pointer and nothing else moves.
 - **Colour.** Void and pit under cream. Pink is the reserved colour and, through `--accent` and `--link`, the brand as well: the mask's lit half, links, the current nav item. Cyan is the machine working, and the one filled button on a screen. Amber is this machine (`--local-*`). Violet is asleep and private; clay is denied.
 - **Themes.** Afterglow is the default and its structure is every theme's; Signal, Footlight and Limelight are palettes on it (`themes/THEMES.md`; Decisions 702 and 704, in `docs/decisions/`).
-- **Drawn.** Every screen: the four in the comp — the launcher, the session list, a new session and a session with its transcript, tool calls, questions and approvals — and the ones the app has that the comp does not (sign-in, the inbox, review, This computer, appearance, the command palette), on the same tokens. The app opens on the launcher, as the comp does, and the lockup in the rail opens it again; a person who would rather start on the list ticks the box at its foot, and Appearance turns it back (Decision 709). A session doing nothing is `idle`, drawn in the chrome's grey with no token of its own, so `queued` keeps the comp's amber for a held message. The comp lends the reserved pink to the in-progress task; the app keeps that in the machine's cyan, because pink has one job.
-- **Room left.** The session head's subject column stacks the breadcrumb and the title; a goal line, loop controls and a "while you were away" marker go there next.
+- **Drawn.** Every screen: the four in the comp — the launcher, the session list, a new session and a session with its transcript, tool calls, questions and approvals — and the ones the app has that the comp does not (sign-in, setup, the inbox, review, This computer, agents, appearance, the command palette), on the same tokens. The app opens on the launcher, as the comp does, and the lockup in the rail opens it again; a person who would rather start on the list ticks the box at its foot, and Appearance turns it back (Decision 709). A session doing nothing is `idle`, drawn in the chrome's grey with no token of its own, so `queued` keeps the comp's amber for a held message. The comp lends the reserved pink to the in-progress task; the app keeps that in the machine's cyan, because pink has one job.
+- **The session head.** Its subject column stacks the breadcrumb and the title, then the goal line, the loop's controls and a "while you were away" marker (Decision 708).
 
 ---
 
@@ -54,7 +54,7 @@ Two moods, held at once: long calm reading (canvas, 15px/1.62 body, 68ch measure
 
 Every colour token carries a dark and a light value under one semantic name. Components never choose between them; the theme does. Ratios below are measured against the surface the colour is actually used on.
 
-The hexes in this section are **Footlight's**. There are four themes — Afterglow, Signal, Footlight and Limelight — and each one answers every token name below with its own values and clears the same contrast floor in both modes; `themes/THEMES.md` has the audit table. What does not change between them is everything this document argues for: which token a component reads, what the reserved colour *means*, and the rule that a status is a glyph, then a word, then a colour. Where the text below says "amber", read "the reserved colour" — it is pink in Afterglow, amber in Footlight, magenta in Signal and lime in Limelight, and in all four it means *stopped, a person must decide*. In three of them it is used for nothing else; Afterglow lends the hue to the brand as well, through `--accent` and `--link` (§0).
+The hexes in this section are **Footlight's**. There are four themes — Afterglow, Signal, Footlight and Limelight — and each one answers every token name below with its own values and clears the same contrast floor in both modes; `themes/THEMES.md` has the audit table. What does not change between them is everything this document argues for: which token a component reads, what the reserved colour *means*, and the rule that a status is a glyph, then a word, then a colour. Where the text below says "amber", read "the reserved colour" — it is pink in Afterglow, amber in Footlight, magenta in Signal and lime in Limelight, and in all four it means *stopped, a person must decide*. In Footlight and Signal it is used for nothing else; Afterglow lends the hue to the brand as well, through `--accent` and `--link` (§0), and Limelight's focus ring is its lime.
 
 ### Ground and ink
 
@@ -73,7 +73,7 @@ The hexes in this section are **Footlight's**. There are four themes — Aftergl
 
 ### Status
 
-Each status has `fg`, `bg`, `border`. Foreground on its own background clears 4.5:1 in both themes; the worst case is `running` in light at 6.1:1.
+Each status has `fg`, `bg`, `border`. Foreground on its own background clears 4.5:1 in both themes, in every theme; [THEMES.md](themes/THEMES.md) has the figures.
 
 | Token | Meaning | Dark fg | Light fg |
 |---|---|---|---|
@@ -90,12 +90,12 @@ Each status has `fg`, `bg`, `border`. Foreground on its own background clears 4.
 
 Two distinctions that are easy to get wrong and are load-bearing here:
 
-- **Denied is not an error.** Denying is the user working correctly. It gets its own clay red, visually softer than `status.error`, and its copy is neutral: "Denied by you — the file was not changed."
+- **Denied is not an error.** Denying is the user working correctly. It gets its own clay red, visually softer than `status.error`, and its copy is neutral: "Denied by you — nothing was changed."
 - **Dormant is not disabled.** Sleeping is a healthy, cheap, normal state. It gets violet — a colour used nowhere else — so a sleeping session never reads as greyed-out or broken.
 
 ### Attribution
 
-`color.person.1…6` are hues assigned to people by a stable hash of user id, used on the avatar ring, the name, and the 1px left edge of their message. Amber is excluded from the set because it belongs to approvals. `person.self` is deliberately neutral grey: *you* are the boring one, so other people stand out in the stream. `person.agent` is a near-white — the troupe is not a person and does not get a person colour.
+`color.person.1…6` are hues assigned to people by a stable hash of user id, used on the avatar ring, the name, and the left edge of their message (`border.edge`, 2px). Amber is excluded from the set because it belongs to approvals. `person.self` is deliberately neutral grey: *you* are the boring one, so other people stand out in the stream. `person.agent` is a near-white — the troupe is not a person and does not get a person colour.
 
 Colour is never the only signal. Every person's message also carries their initials and their full name.
 
@@ -127,9 +127,9 @@ Rules:
 
 ## 4. Layout
 
-A single fluid column system with wrapping flex tracks — no fixed breakpoint jumps in the markup. Regions declare a flex basis and the browser decides when to stack. This matters more than usual here: the client is server-rendered and patched over a live connection, so layout that depends on measured widths or JS-held state is a liability.
+A single fluid column system with wrapping flex tracks — no fixed breakpoint jumps in the markup. Regions declare a flex basis and the browser decides when to stack. The client is a React app rendered in the browser, and a layout that depends on measured widths re-renders on every resize; the tracks make that the browser's job.
 
-**Session screen, wide (≥1040px):** two tracks — conversation `flex: 3 1 420px`, backstage `flex: 1 1 300px` capped at 420px. The approval panel is sticky to the bottom of the conversation track.
+**Session screen, wide (≥1040px):** two tracks — conversation `flex: 3 1 420px`, backstage `flex: 1 1 280px` capped at 380px. The approval panel is sticky to the bottom of the conversation track.
 
 **Session screen, medium (720–1040px):** same two tracks; backstage narrows first. A "Hide backstage" toggle in the header gives the reading column the full width.
 
@@ -165,7 +165,7 @@ Each entry lists the states that must be designed before the component ships.
 
 **Message, own** — sending, sent, queued, failed. Queued messages render at the bottom of the stream in `status.queued` with a dashed left edge and a "Queued" pill, so it is obvious they have not been delivered yet.
 
-**Message, other person** — attributed with initials, name in their person colour, and a 1px left edge in the same colour.
+**Message, other person** — attributed with initials, name in their person colour, and a left edge (`border.edge`) in the same colour.
 
 **Agent output** — streaming, complete, interrupted. Streaming shows a `running` caret and a "Writing now" marker. Markdown is rendered by the design (headings, ordered and unordered lists, inline code, links) — never dumped as `<pre>`.
 
@@ -199,7 +199,7 @@ The core loop. Three requirements, in order: get to it fast, understand it in se
 
 1. **Position** — sticky at the bottom of the conversation, exactly where the thumb and the eye already are.
 2. **Colour** — the only amber on the screen, with a solid amber fill on the primary button.
-3. **Light** — `shadow.footlight`, a 3px amber top edge with an upward glow. Nothing else in the product has it.
+3. **Light** — `shadow.footlight`, a top edge in the reserved colour (`border.heavy`, 4px) with an upward glow. Nothing else in the product has it.
 4. **Language** — the headline is a question in four words: "Change a file?", "Run a command?"
 
 What it deliberately does *not* do: no modal, no dimming, no sound, no red, no countdown, no bouncing. Nothing that punishes a user who is mid-sentence, and nothing that would make a session with forty approvals unbearable.
@@ -213,7 +213,7 @@ What it deliberately does *not* do: no modal, no dimming, no sound, no red, no c
 
 **Someone else answered first.** First answer wins, and this will happen while you are reading. The panel does not vanish — that would leave the user wondering whether they pressed something. It is replaced in place by a calm record: the amber goes, the state pill becomes "✓ Allowed", and the text names the person, the action, and the fact that nothing is waiting for you now. It is `aria-live="assertive"` because the interactive thing under the user's finger has just changed. Offering "Follow the work" gives them somewhere to go.
 
-**After you answer.** The approval becomes a decision record in the stream — same verb, past tense. Allow → "Allowed by you". Deny → "Denied by you — the file was not changed."
+**After you answer.** The approval becomes a decision record in the stream — same verb, past tense. Allow → "Allowed by you". Deny → "Denied by you — nothing was changed."
 
 ---
 
@@ -238,7 +238,7 @@ All three are changeable later from the session's own settings, with the same wo
 ## 7. Several people in one session
 
 - One ordered stream. Everyone sees the same events in the same order. There are no optimistic local inserts that can reorder on reconnect; a message the user sends renders as **Queued** until the server echoes it back.
-- Others' messages are attributed with initials, name, and person colour on a 1px left edge. Your own messages are neutral.
+- Others' messages are attributed with initials, name, and person colour on a left edge. Your own messages are neutral.
 - Presence in the header: up to three avatar rings, then "+n", plus a plain sentence ("Mette, Jonas and you are here"). Your own ring is dashed.
 - Role is stated in words in the session subheader ("you are a collaborator"), never inferred from which buttons are missing.
 - Anyone with the right role can answer an approval. The panel says so: "Mette and Jonas can answer this too. The first answer counts." Saying it up front is what makes a decision landing under your hands feel like the system working rather than a glitch.
@@ -249,7 +249,7 @@ All three are changeable later from the session's own settings, with the same wo
 
 **Dormant.** Opening a sleeping session must read like opening a document. The content is fully there — conversation, tasks, files, history — at full contrast, not greyed out. A violet banner at the top says the session is asleep and that reading does not wake it. In place of the composer sits a panel that explains, in the user's terms, what sleeping means: it stopped on its own, it costs nothing, everything is still here, sending wakes it, and waking takes about twenty seconds. The button is **Wake and send** — it names the consequence rather than hiding it. While waking, an honest indeterminate bar and the sentence "Waking the session. This usually takes twenty seconds." No fake percentage.
 
-**Read only.** A grey banner states what happened, who did it, and when: "You can read this session but not add to it. Lars Vestergaard removed your access on 4 March." The composer is *removed*, not disabled — a disabled box invites clicking at it — and replaced by a short explanation plus a way out ("Ask for access again"). Approval buttons are absent for the same reason.
+**Read only.** A grey banner says so: "You can read this session but not add to it." The composer is *removed*, not disabled — a disabled box invites clicking at it. (Who removed the access and when, and a way to ask for it again, are not built.) Approval buttons are absent for the same reason.
 
 **Erased.** Not a session screen at all. The row is gone from home; a direct link returns a plain page: what was erased, by whom, when, and that it cannot be restored.
 
@@ -259,7 +259,7 @@ All three are changeable later from the session's own settings, with the same wo
 
 - **No sessions yet** — teaches what a session is in one sentence, then offers one action. It does not apologise.
 - **History loading** — three pulsing bars at the widths real lines would have, plus a sentence about what is coming and in what order ("The newest part arrives first"). Container is `aria-busy="true"`.
-- **Connection dropped** — an amber-adjacent `offline` bar at the top of the session, "Connection lost. Trying again in 3 seconds." with a "Try now" button. Crucially it says what is true: the work carries on, nothing sent is lost, and anything typed now is sent on reconnect. The stream stays on screen — it is history, not a live view that has gone stale.
+- **Connection dropped** — an amber-adjacent `offline` bar at the top of the session, saying the connection is lost and being tried again (a countdown and "Try now" are on the plane-offline banner only). Crucially it says what is true: the work carries on, nothing sent is lost, and anything typed now is sent on reconnect. The stream stays on screen — it is history, not a live view that has gone stale.
 - **Platform unreachable** — an `error` banner. Running sessions keep streaming; starting a new one is impossible and the Start button is genuinely disabled with the reason in text beside it, not only in a tooltip.
 
 `offline` and `error` are separate tokens because the situations differ in what the user can do: wait, versus tell someone.
@@ -294,7 +294,7 @@ Plain language, sentence case, active verbs. Name things the way the reader does
 | "Execute shell command on worker pod" | "Run a command? … It runs on the platform, not on your computer." |
 | "Session hibernated (idle timeout)" | "This session is asleep. Reading it does not wake it." |
 | "403 Forbidden" | "You can read this session but not add to it. Lars Vestergaard removed your access on 4 March." |
-| "WebSocket disconnected" | "Connection lost. Trying again in 3 seconds." |
+| "WebSocket disconnected" | "Connection lost. Trying again." |
 | "No data" | "No sessions yet." + what a session is + one button |
 | "Are you sure?" | Say the consequence: "Allow every file change for this session" |
 
@@ -342,7 +342,7 @@ Things that were genuinely arguable, and the call I made.
 
 9. **Denied is not red-as-error.** Denial is the product working. Separate token, softer, neutral wording.
 
-10. **Wrapping flex tracks instead of breakpoint-switched layouts.** The client is server-rendered and patched live; layouts that depend on measured width or JS state break on reconnect. The breakpoints in the theme files describe intent and exist for anything that genuinely needs a media query — most things do not.
+10. **Wrapping flex tracks instead of breakpoint-switched layouts.** A layout that depends on measured width re-renders on every resize and goes wrong at the sizes nobody tried. The breakpoints in the theme files describe intent and exist for anything that genuinely needs a media query — most things do not.
 
 11. **Tool activity collapsed by default.** Sessions produce hundreds of tool calls. Showing them expanded makes the product look busy and the conversation unreadable. One scannable mono line each, expandable.
 

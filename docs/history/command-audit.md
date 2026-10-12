@@ -2,13 +2,15 @@
 
 Every row of `Troupe.Commands` (the table `commands.list` serves and every client's palette
 draws) run in a session, with what happened and what now holds it: a test, or a defect in
-[defects.md](defects.md). Recorded on 2026-10-10 on `development-2026-10-09-2` at
+[defects.md](../developer/defects.md). Recorded on 2026-10-10 on `development-2026-10-09-2` at
 `50cb1e01` (0.10.0-beta), before command mode (#502 part A) changes what the root is.
 
 Since then, in the same release: D105's items but two were fixed by #556, D106 (watch) by
 #558, D107's palette items by #560 and #563, and D108 and D109 (uploads, a dropped
 connection, copying on Windows) by #552; D105's other two in 0.11.0, with D113. What is
-still open is in D107 and D113.
+still open is in [defects.md](../developer/defects.md). This page is the audit as it was
+recorded, kept as a record; `clients/tui/test/troupe/command_audit_test.exs` is what holds
+its findings now.
 
 ## How it was run
 

@@ -9,8 +9,8 @@ that says how it works. Troupe's own words are in the [glossary](glossary.md).
 - **An engineer who wants an agent's work to outlive the window.** A
   [session](glossary.md#session) lives in the [daemon](glossary.md#daemon) on your machine,
   not in the terminal you started it from. Start it in the terminal UI, follow it from the
-  desktop app, script it with `troupe run --headless`, and all three look at the same
-  session at once.
+  desktop app, script it with `troupe resume <id> --headless "…"`, and all three look at
+  the same session at once.
 - **A team that wants agents on shared infrastructure,** with what an organisation asks of
   anything that spends money and touches code: sign-in from its identity provider, budgets
   per team and per person, an audit trail, and work that runs on the team's pods rather
@@ -68,7 +68,7 @@ adds, and where each part is described:
   ([bundles-and-triggers.md](admin/bundles-and-triggers.md)).
 - **One protocol, with no private door.** The clients use PROTOCOL.md like anyone's; the
   [console](glossary.md#console) calls the same admin methods the API and the MCP tools
-  offer, and a test fails if it has a button with no method under it
+  offer, and a test fails if an admin method has no screen and no written reason why not
   ([ARCHITECTURE.md §1](../ARCHITECTURE.md#1-shape), [§6.4](../ARCHITECTURE.md#64-the-admin-surface)).
 - **A plane that cannot read your work.** It knows who, which profile, which state and what
   it cost, and no administrative method returns what a session said
@@ -96,8 +96,11 @@ guarantee it gives up.
 - **You want a hosted service.** Troupe is not one. There is nothing to sign up for, and a
   plane is yours to run.
 - **You want a sandbox on your laptop.** On your machine an agent's commands run as you, in
-  the directory you gave it, once you have approved them. Only on a pod do they run under
-  bubblewrap, behind a network policy.
-- **You need a stable 1.0.** Releases are betas, and the binaries are not code-signed. The
+  the directory you gave it, once you have approved them. Only a worker always runs them
+  under bubblewrap (on a pod, behind a network policy as well); a laptop does so only for a
+  session with mounts beyond its workspace.
+- **You need a stable 1.0.** Releases are betas, and the binaries are not code-signed
+  (#656), though every release's manifest is signed with the release key and checked before
+  anything installs. The
   protocol is versioned, and CI refuses a change to it that an older client could not
   survive, but the rest can still change between releases.

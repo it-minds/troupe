@@ -43,8 +43,8 @@ irm https://github.com/it-minds/troupe/releases/latest/download/install.ps1 -Out
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -Tui
 ```
 
-The copy attached to a release installs that release, and `TROUPE_VERSION=0.3.0` names
-another. The daemon is always installed; in a terminal, with neither flag, they ask which
+The copy attached to a release installs that release, and `TROUPE_VERSION=0.15.0-beta`
+names another (with `minisign` installed, none from before 0.13, which were not signed). The daemon is always installed; in a terminal, with neither flag, they ask which
 clients to add, and `-y` / `-Yes` asks nothing. A private repository answers
 `/releases/latest` only to somebody signed in, so there the installers ask for
 `TROUPE_VERSION`, and `TROUPE_RELEASE_URL` names a mirror. To build a binary yourself,
@@ -146,12 +146,13 @@ providers:
         id: eu.anthropic.claude-opus-5 # the name that goes on the wire
         context: 400000
         max_output: 64000
-        reasoning_effort: medium       # none | minimal | low | medium | high | xhigh
+        reasoning_effort: medium       # none | minimal | low | medium | high | xhigh | max, or tokens
 ```
 
 `reasoning_effort` goes to an OpenAI-compatible provider verbatim (with
 `max_completion_tokens`, which is what a reasoning model wants); for Anthropic it
-becomes a thinking budget and raises the output cap to fit. The session-wide
+becomes adaptive thinking at that level (a thinking budget, for a model before Opus 4.7),
+and raises the output cap to fit. The session-wide
 provider takes `auth: bearer` too, or `TROUPE_AUTH_TOKEN`.
 
 ### MCP servers
@@ -160,7 +161,7 @@ provider takes `auth: bearer` too, or `TROUPE_AUTH_TOKEN`.
 the agent with extra tools — a filesystem, a database, a browser — without
 changing how Troupe works. Each server you configure connects at session start,
 advertises its tools, and the agent can call them with `y`/`n` approval, just
-like `shell` or `web_fetch`. Tools are namespaced `mcp__<server>__<tool>`, so
+like `shell` or `web_fetch`. Tools are namespaced `mcp.<server>.<tool>`, so
 they never collide with built-in tools.
 
 ```yaml
@@ -170,8 +171,8 @@ mcp:
     args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
     env: {FOO: bar}                 # optional
     cd: /some/dir                   # optional working directory
-  remote:                           # SSE server: an HTTP event stream
-    url: http://localhost:3001/sse
+  remote:                           # a server over HTTP (streamable HTTP)
+    url: http://localhost:3001/mcp
 ```
 
 `/mcp` in the TUI shows each server's state (✓ ready, … connecting, ✗ error)
@@ -210,8 +211,8 @@ provider lists; Enter at every question is Anthropic, with
 `api_key: "{env:ANTHROPIC_API_KEY}"`), take your organisation's settings from a plane
 (`troupe login`, then `troupe config pull`), or not now. Without a terminal it prints
 those choices and asks nothing. A `config.yaml` through which no model can be asked gets the
-report and then the same choices, and plain `troupe` asks them before it opens a session
-on a machine with no settings and no key. The installers end with the same check.
+report and then the same choices, and plain `troupe` opens `troupe setup`'s screen before
+it opens a session on a machine with no settings and no key. The installers end with the same check.
 
 Whatever finds no key says so with one next step, `troupe config`: the report's last
 line, a headless run's model error, and the first turn in the TUI. A first run finished
@@ -244,7 +245,7 @@ troupe resume latest                    # the newest session here, straight in (
 troupe resume ID --headless "go on"     # one turn on that session, printed as run --headless, then exit
 troupe models [--refresh]               # every model, its window and its price
 troupe doctor                           # check the setup, one line per check; exits 1 on a failure
-troupe login PLANE_URL                  # sign in to a Troupe Remote plane (device flow)
+troupe login PLANE_URL                  # sign in to a plane (device flow)
 troupe logout [PLANE_URL] [--all]       # forget a plane's credentials
 troupe whoami [PLANE_URL]               # who the plane says you are, and your teams
 troupe --remote [PLANE_URL]             # HQ: teams, profiles and sessions on a plane
@@ -290,7 +291,8 @@ The terminal UI needs a terminal: `troupe`, `troupe resume` and `troupe run` wit
 `--headless`, with standard output sent to a file or a pipe, say so in one line and exit
 `1` rather than draw into it.
 
-Inside the TUI, everything starts with `/`. Every built-in command, what it does and what
+Inside the TUI, every command starts with `/`, and `!cmd` runs a shell command where the
+session runs (`!!cmd` keeps it from the agent). Every built-in command, what it does and what
 it needs, is in [the command reference](../../docs/user/cli-reference.md#inside-a-session),
 generated from the harness's table as `troupe --help` is, and `/help`, `/` on an empty line
 or Ctrl-K opens the same list as the [command palette](#command-palette). Besides those,
@@ -543,8 +545,8 @@ change goes, PgUp/PgDn or the wheel scrolls the help, Esc goes back.
 The daemon says what each setting is, and writes a change (`config.get` and
 `config.set`), so the page and the desktop app always agree; a change made in one
 shows on the other while it is open. Watch mode applies to the running session
-immediately, and so do the theme, blinking and `transcript detail` (a menu of `quiet`,
-`tools` and `everything`), which this screen draws by at once unless `/detail` set this
+immediately, and so do the theme, blinking and `transcript detail` (`quiet`, `tools` or
+`everything`, typed), which this screen draws by at once unless `/detail` set this
 session's own; everything else to the sessions and branches started from then on. A
 change is written, under its current name (`models.default`, never the old
 `model`), to the file the value on screen came from — the project's
@@ -579,10 +581,9 @@ polling and says so.
 
 Agent definitions are markdown files with YAML frontmatter; the filename is
 the name and every `primary` one is a command. Project `.troupe/agents/`
-overrides the global `agents/` dir which overrides the built-ins (`code`,
-`worktree`, `plan`, `workflow`, `ask`, the watch-mode pair `quick` and `answer`,
-and the subagents `general`, `explore`, `implementer`, `reviewer` and
-`librarian`).
+overrides the global `agents/` dir which overrides the built-ins (`build`, `plan`,
+`orchestrate`, `workflow`, `ask`, `librarian`, the watch-mode pair `quick` and `answer`,
+and the subagents `general`, `explore`, `implementer` and `reviewer`).
 
 `/agents` lists the primary ones with where each comes from, its model, its tools,
 whether it is read-only, its cap on turns and which windows run it; Enter reads one's
@@ -596,27 +597,27 @@ answers to the name after. A bundle's agents, and every agent on a pod, are read
 here and say where they are changed (TUI Decision 156).
 
 A definition's `model:` is `default`, `cheap`, `expensive`, or a model named
-outright, and
-`reasoning_effort:` (`none` | `minimal` | `low` | `medium` | `high` | `xhigh`,
-or a token budget) says how much thinking its turns are worth. That beats what a
-provider declares for the model, which beats the global `reasoning_effort`
-setting — so a cheap, short-lived profile is not stuck with the budget the same
-model uses for a coding branch.
+outright. How much thinking a model's turns are worth is the model's, not the agent's:
+`reasoning_effort` under the provider's entry for it
+(`providers.<name>.models.<model>.reasoning_effort`, as above).
 
 The tools a definition can list are `read_file`, `write_file`, `edit_file`,
-`list_files`, `grep`, `shell`, `web_fetch`, `todo_write` / `todo_read`,
-`delegate`, `remember`, `ask_user` and `finish` (`tools: all` is everything).
+`list_files`, `glob`, `grep`, `git_read`, `read_output`, `shell`, `web_fetch`,
+`todo_write` / `todo_read`, `delegate`, `read_branch`, `stop_child`, `remember`,
+`recall`, `show`, `publish`, `import`, `onboard_write`, `ask_user` and `finish`
+(`tools: all` is all of them but `onboard_write`).
 With `tools: all` the task list's two are offered once a turn has made ten model
 calls, or while there is a list, so a small task spends no calls on one; a
 definition that names them, as `plan` and `workflow` do, has them on every call.
-`write_file`, `edit_file`, `shell` and `web_fetch` ask before they run — `y` /
+`write_file`, `edit_file`, `shell`, `web_fetch`, `publish`, `import` and
+`onboard_write` ask before they run — `y` /
 `n` / `a` in the window, or `auto_approve` for the session — and the rest run
 unattended; a definition can change either with a `permissions:` block. A
 project's `.troupe/agents/` file setting a tool to `auto` is held back until the
 workspace is trusted (`troupe config trust`): until then the tool asks.
 `web_fetch` is a GET that returns a URL as text, HTML reduced to readable text
 with its links kept, so an agent can read the documentation it is pointed at
-instead of guessing; `explore` and `plan` have it as well.
+instead of guessing; `plan`, `orchestrate` and `workflow` name it as well.
 
 ### Workflows
 
@@ -632,7 +633,7 @@ The bundled pipeline is `understand` (`explore`), `plan` (the orchestrator
 itself), `implement`, `test` and `document` (`implementer`), then `verify`
 (`reviewer` — it runs the build, tests and lint, reads the diff and reports
 problems, but is not allowed to fix them). Those subagents delegate further
-themselves, up to `max_delegation_depth`; `/observer` shows the whole tree.
+themselves, up to `max_depth`; `/observer` shows the whole tree.
 
 A project defines its own pipelines as `.troupe/workflows/<name>.json`, and
 `/workflow <name> <task>` runs one:
@@ -670,7 +671,7 @@ You are a security reviewer...
 
 ## Remote sessions
 
-A session can run on a Troupe Remote deployment instead of this machine: a
+A session can run on a plane, a Troupe deployment, instead of this machine: a
 *plane* that knows who you are and hands out sessions, and *workers* that run
 them. Sign in once per plane:
 
@@ -772,11 +773,11 @@ Pinned toolchain in `.tool-versions` / `mise.toml`: Erlang 28.5, Elixir
 
 ```sh
 mix deps.get              # the harness apps are path dependencies on ../../apps
-mix check                 # compile --warnings-as-errors, format, credo --strict, test
+mix check                 # compile --warnings-as-errors, format, credo --strict, xref, the generated files' checks, test
 scripts/dev [args]        # run the CLI/TUI from source without a build (dev loop)
-scripts/build-local       # Burrito binary for this host into burrito_out/
+scripts/build-local       # Burrito binary for this host, installed as ~/.local/bin/troupe
 TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT="$PWD/fixtures/fake_scripts/smoke.json" \
-  burrito_out/troupe_linux_x86_64 run build smoke --headless --auto-approve
+  troupe run build smoke --headless --auto-approve
 ```
 
 The harness itself — `troupe_core`, `troupe_gateway`, `troupe_protocol` — is a path
@@ -800,7 +801,8 @@ specification.
 
 ## Out of scope (for now)
 
-Offering this machine's tools to a remote session, a GUI for the remote side (that is
+Offering this machine's built-in tools (its files, its shell) to a remote session — a
+person's own signed-in MCP servers are offered (root Decision 748) — a GUI for the remote side (that is
 `clients/gui`, beside this directory), Web UI, multi-node distribution, a resident
 assistant or free-text routing at the dispatcher, auto-commit or undo in the user's checkout,
 auto-update, code signing and notarization, native Windows ARM builds.

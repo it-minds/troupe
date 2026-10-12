@@ -27,7 +27,7 @@ This is what makes four themes cost almost nothing to maintain: there is one com
 What is **shared and not themeable**:
 
 - **Type.** Figtree, DM Mono and VT323, same scale, same measure, in all four.
-- **Space, radii, borders, motion, breakpoints, z-index.** Identical. `pnpm tokens` emits them from the default theme's file and refuses a theme file whose copy differs.
+- **Space, radii, borders, motion, breakpoints, z-index.** Identical. `pnpm tokens` emits all but z-index from the default theme's file, and refuses a theme file whose copy of any of them differs.
 - **The mask.** Same path, same stroke weights, same seam, same rule that light falls from the right.
 - **Structure.** Hairlines and alignment, not cards. Every radius is zero. One flat, hard shadow under a tile or a primary button; no gradients.
 - **Meaning.** The reserved colour always means *a person must decide*. Status is always glyph, then word, then colour.
@@ -84,13 +84,13 @@ Every theme is audited to the same floor, in both modes:
 
 | | Afterglow | Footlight | Limelight | Signal |
 |---|---|---|---|---|
-| `text.primary` on canvas | 16.7 / 16.7 | 15.8 / 16.1 | 15.4 / 16.6 | 15.1 / 16.3 |
-| `text.secondary` | 7.9 / 7.3 | 8.6 / 9.2 | 8.3 / 9.5 | 8.2 / 9.3 |
-| `text.muted` (floor) | 4.8 / 5.3 | 4.9 / 5.4 | 4.8 / 5.3 | 4.7 / 5.5 |
-| worst status fg on its own bg | 5.0 / 4.5 | 6.1 | 5.8 | 5.9 |
-| focus ring, worst surface | 7.9 / 4.4 | 3.4 | 3.6 | 3.3 |
+| `text.primary` on canvas | 16.6 / 16.6 | 15.8 / 15.7 | 16.0 / 15.5 | 16.2 / 16.5 |
+| `text.secondary` | 7.9 / 7.2 | 9.5 / 7.7 | 9.8 / 8.7 | 9.0 / 9.0 |
+| `text.muted` (floor) | 4.7 / 5.2 | 5.5 / 4.8 | 5.2 / 5.6 | 4.9 / 5.6 |
+| worst status fg on its own bg, over canvas or panel | 4.7 / 4.5 | 7.0 / 5.4 | 6.3 / 5.7 | 6.3 / 6.0 |
+| focus ring, worst surface | 7.9 / 3.9 | 8.0 / 6.8 | 13.3 / 6.2 | 8.9 / 5.8 |
 
-Dark value first, light second. Body text never below 4.5:1; the focus ring never below 3:1. A theme that cannot hit these numbers does not ship — the fix is the theme's values, never an exception in a component. Afterglow's worst status is `waiting` in light, at the floor exactly: the reserved pink on its own tint.
+Dark value first, light second, each rounded down, from the token files as they are (October 2026). Body text never below 4.5:1; the focus ring never below 3:1. A theme that cannot hit these numbers does not ship — the fix is the theme's values, never an exception in a component. Afterglow's worst status is `waiting` in light, at the floor exactly: the reserved pink on its own tint.
 
 ---
 
@@ -98,7 +98,7 @@ Dark value first, light second. Body text never below 4.5:1; the focus ring neve
 
 ### During onboarding
 
-The theme is chosen **once, by the person, on first sign-in** — after the identity handshake, before the first session. It is one screen, four cards, each a live preview of the same session fragment rendered in that theme, with a light/dark toggle on the screen itself.
+The theme is chosen **once, by the person, on first sign-in** — after the identity handshake, before the first session — or, with no plane, as the first step of the first run (Decision 705). It is one screen, four cards, each a live preview of the same session fragment rendered in that theme, with a light/dark toggle on the screen itself.
 
 The screen follows four rules:
 
@@ -116,11 +116,9 @@ Skipping is allowed, and skipping means Afterglow with system mode.
 ### Where the choice lives
 
 - **Per person, not per team or per session.** A theme is a reading preference, like text size. Two people in the same session see it in their own theme, because the session's content is identical either way and nothing about the theme carries meaning.
-- **Stored on the user record, server-side**, so it follows them to a phone. The browser also keeps a copy so the first paint after sign-in is already correct and nobody sees a flash of the wrong ground.
-
-  > **In this build it is the browser copy only.** The protocol has nowhere to put a reading preference yet, so the GUI keeps theme and mode in `localStorage` and asks no server anything. Nothing else changes when that lands: `apps/desktop/src/theme.ts` is the only module that would have to learn to read and write the user record, and it is written to be the one place that knows.
+- **Kept by the person's own daemon**, as the `ui.theme` and `ui.mode` keys of their `config.yaml`, so it follows them from the desktop app to the terminal client on that computer (`apps/desktop/src/shared.ts`). The browser also keeps a copy, so the first paint is already correct and nobody sees a flash of the wrong ground. Nothing is kept on a plane: a person's theme does not follow them to another computer.
 - **Mode may be `follow system`, `light` or `dark`**, independent of the theme.
-- An administrator may set a **default theme for the organisation** — the one preselected during onboarding. They cannot force it. Removing a person's ability to read comfortably is not a configuration option.
+- There is no organisation default: Afterglow is preselected for everyone. Were one added, an administrator could set it and not force it. Removing a person's ability to read comfortably is not a configuration option.
 
 ### What must not happen
 
@@ -134,7 +132,7 @@ Skipping is allowed, and skipping means Afterglow with system mode.
 ## Adding a theme
 
 1. Copy any `*.tokens.json`, change only the values under `color` and `shadow`. `pnpm tokens` refuses a file that changed anything else, and one that added, lost or renamed a colour token.
-2. Nominate the reserved colour and check nothing else in the theme uses it — or, as Afterglow does, lend it to `accent` and to nothing else.
+2. Nominate the reserved colour and check nothing else in the theme uses it — or, as Afterglow does, lend it to `accent` and to nothing else. (Limelight's focus ring is its lime too, which `pnpm tokens` works around; a new theme should not need that.)
 3. Run the contrast table above. Every number must clear the floor in both modes.
 4. Check the non-reserved statuses are distinguishable from each other **in greyscale** — the glyphs carry this, but a theme that makes two states the same tone makes the glyph do all the work alone.
 5. Render a kit with the new palette block. If anything in the kit needs editing beyond the palette, stop: the theme is asking for a redesign.
@@ -151,6 +149,6 @@ Skipping is allowed, and skipping means Afterglow with system mode.
 
 4. **Afterglow is the default, because it is the design.** Before it, Signal was: the screen people spend the day on is full of other people's colour — pasted screenshots, diffs, charts, terminal output — and a true-neutral graphite was the one of the three that never argued with any of it, with a duotone on top that said the two things a person scans for. Afterglow keeps that duotone — cyan is still the machine, pink is still you — on a near-black ground, and adds the type, the spacing and the square corners that every theme now shares (repository Decision 702). The three earlier palettes stay on the contract, selectable on the redrawn appearance screen (Decision 704); whether they stay at all is a product question this document does not settle.
 
-5. **Themes are per person and cannot be enforced.** An administrator sets the default and nothing more. Colour preference is an accessibility and comfort matter, and taking it away buys nothing.
+5. **Themes are per person and cannot be enforced.** Not even a default is an administrator's today. Colour preference is an accessibility and comfort matter, and taking it away buys nothing.
 
 6. **Onboarding preselects rather than asks.** The screen is skippable and pre-answered. A first-run screen that blocks on an aesthetic choice teaches people that this product will waste their time.

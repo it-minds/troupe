@@ -34,7 +34,7 @@ gist: "AI! -> quick, AI? -> answer, as a branch in the checkout, never the root;
 ---
 
 Issue #502's `/watch` paragraph and D106, which the command audit
-([command-audit.md](../developer/command-audit.md)) found: since the daemon split, a
+([command-audit.md](../history/command-audit.md)) found: since the daemon split, a
 trigger went to the session's own agent (`Session.Watcher`'s `agent_path`) with the
 session's permissions, so an `AI!` and `/quick` were two paths, the work landed in the
 session's own window whichever was activated, nothing on the screen said a trigger was

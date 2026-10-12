@@ -35,7 +35,7 @@ Troupe is in beta, and fixes go into the next release rather than into older one
 
 | Version | Security fixes |
 |---|---|
-| The latest 0.5.x beta release | yes |
+| The latest beta release (the one GitHub marks Latest) | yes |
 | Anything older, and pre-releases (`-pre.N`) | no: upgrade to the latest release |
 
 The images and the chart are versioned with everything else, so the same holds for a
