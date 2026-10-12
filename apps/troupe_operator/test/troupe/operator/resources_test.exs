@@ -1148,6 +1148,27 @@ defmodule Troupe.Operator.ResourcesTest do
       # wildcard rendered that way is a rule that allows nothing.
       refute Enum.any?(selectors, &String.contains?(&1["matchName"] || "", "*"))
     end
+
+    # The policy check refuses such a profile before anything is rendered. This is the
+    # renderer's own fence, for whatever path reaches it: a bare `*` as a `matchPattern` is
+    # every name, and `**.` any number of labels.
+    test "no matchPattern is written that the policy check would refuse, whatever the profile holds",
+         %{policy: policy} do
+      resources =
+        [egress: %{"fqdns" => refused_patterns() ++ accepted_patterns(), "gitHosts" => []}]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: true})
+
+      [cilium] = all(resources, "CiliumNetworkPolicy")
+      selectors = cilium |> get_in(["spec", "egress"]) |> Enum.flat_map(&(&1["toFQDNs"] || []))
+      written = Enum.flat_map(selectors, &List.wrap(&1["matchPattern"] || &1["matchName"]))
+
+      for entry <- refused_patterns(), do: refute(entry in written, entry)
+      for entry <- written, do: assert(Policy.pattern?(entry), entry)
+      for entry <- accepted_patterns(), do: assert(entry in written, entry)
+      assert %{"matchPattern" => "*.a.example.com"} in selectors
+    end
   end
 
   describe "MCP servers" do

@@ -596,12 +596,22 @@ defmodule Troupe.Operator.Resources do
   #
   # Except a host of the profile's at a loopback or link-local address, or a cloud's
   # metadata address outside that range, which is left out as the NetworkPolicy leaves it
-  # out without Cilium (Decision 758): from a pod, loopback is the pod itself, and
+  # out without Cilium, with Cilium as without: from a pod, loopback is the pod itself, and
   # link-local is the node's, where a cloud's metadata service answers. The policy's
   # `allowedEgress` naming it is not enough. `EndpointUnreachable` says so on the profile,
   # from the same judgement.
+  #
+  # And an entry that is not a pattern (`Troupe.Policy.pattern?/1`) gets no rule at all.
+  # The policy check refuses such a profile before anything is rendered; this holds
+  # whatever path reaches here, because a bare `*` written as a `matchPattern` is every
+  # name there is, and `**.` any number of labels.
   defp allowlist_rules(profile, settings) do
-    own = Enum.reject(Profile.egress_destinations(profile), &Reach.refused?/1)
+    own =
+      profile
+      |> Profile.egress_destinations()
+      |> Enum.reject(&Reach.refused?/1)
+      |> Enum.filter(&Policy.pattern?/1)
+
     hosts = Enum.uniq(own ++ platform_hosts(settings))
     {addresses, names} = Enum.split_with(hosts, &address_block/1)
 
@@ -654,7 +664,8 @@ defmodule Troupe.Operator.Resources do
   # `*` stands for a run of hostname characters that does not include a dot — one label,
   # which is what `Troupe.Policy.matches?/2` and the admission CEL take `*.example.com`
   # to mean as well. The three agree, so a wildcard means the same thing wherever it is
-  # checked.
+  # checked. Only a pattern reaches here (`allowlist_rules/2`), so a star is a leading
+  # label's and never a bare `*`.
   defp fqdn_selector(host) do
     if String.contains?(host, "*"),
       do: %{"matchPattern" => host},
@@ -861,8 +872,9 @@ defmodule Troupe.Operator.Resources do
     ]
   end
 
-  # Only when there is a list: a pod with the variable absent admits every origin, and
-  # an empty string would say the same thing less clearly.
+  # Only when there is a list: a pod with the variable absent admits no page, only the
+  # desktop app and clients that are not browsers, and an empty string would say the same
+  # thing less clearly.
   defp allowed_origins_env(%Settings{worker_allowed_origins: []}), do: []
 
   defp allowed_origins_env(%Settings{worker_allowed_origins: origins}) do

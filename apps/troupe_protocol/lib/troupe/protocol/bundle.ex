@@ -10,7 +10,7 @@ defmodule Troupe.Protocol.Bundle do
   ## Schema 1
 
       {"schema": 1,
-       "agents":      [{"name": "reviewer", "definition": "---\\nmode: primary\\n---\\nYou review…"}],
+       "agents":      [{"name": "pr-reviewer", "definition": "---\\nmode: primary\\n---\\nYou review…"}],
        "skills":      [{"name": "review-checklist", "description": "How we review…",
                         "files": {"SKILL.md": "…", "checklist.md": "…"}}],
        "mcp_servers": [{"name": "jira", "url": "https://mcp.jira.example/mcp",

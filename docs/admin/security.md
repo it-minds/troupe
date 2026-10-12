@@ -110,10 +110,16 @@ Troupe sends no telemetry. Nothing in it reports usage or crashes anywhere, and 
   and storage, enforced by a `ValidatingAdmissionPolicy` and again by the operator. The
   plane cannot write it and has no verb on Secrets, so a compromised plane can only submit
   profiles that must still pass both ([roles-and-permissions.md §7](roles-and-permissions.md#7-kubernetes-rbac-the-chart-grants)).
+  An egress entry is an exact name or a one-label wildcard (`*.example.com`), in the
+  policy and in a profile alike; a bare `*` or any other star is refused, and a policy
+  holding one admits no profile, so no rule for every name is ever written (Decision 883).
 - **Reaching a pod.** Each pod has an Ingress of its own and is internet-facing by design.
   A client needs a session token the plane signed for that pod, and the pod checks the
   plane's access list at every command, so a role the plane narrows or revokes holds at the
-  person's next command (Decision 859).
+  person's next command (Decision 859). A browser page gets a socket only from an origin
+  the deployment lists (`operator.workerAllowedOrigins`, and the plane's own where the
+  chart serves the GUI); with none listed, no page does. The desktop app and `troupe` are
+  not pages and need no entry (Decision 884).
 - **One OpenBao role for every profile, by default.** Every worker logs in as
   `troupe-worker`. `bao.workerRolePerProfile` gives each profile a role of its own, so one
   profile's pods cannot read another's session keys
@@ -146,10 +152,13 @@ content, is plaintext.
 |---|---|---|
 | The model key | `config.yaml`, or an environment variable it names (`{env:VAR}`) | a file the person owns |
 | A plane sign-in | `<config>/credentials.json` | readable by its owner only: mode 0600, or on Windows an ACL naming the user alone (`Troupe.Remote.Credentials`) |
-| The daemon's loopback port and token | `daemon.json` | mode 0600 on Linux and macOS, the user's own `%LOCALAPPDATA%` on Windows; a new token each time the daemon starts (`Troupe.Protocol.Endpoint`) |
+| The daemon's loopback port and token | `daemon.json` | readable by its owner only: mode 0600, or on Windows an ACL naming the user alone, set before the token is written (`Troupe.OwnerOnly`); a new token each time the daemon starts (`Troupe.Protocol.Endpoint`) |
 | Sign-ins to the person's own MCP servers | `<state>/mcp-oauth.json` | as above (`Troupe.MCP.OAuth.Store`); the tokens never leave the machine (Decision 741) |
 | The plane token a client hands the daemon | the daemon's memory | never written (`Troupe.Gateway.Plane`) |
 | The desktop app's sign-in | the OS credential store | Credential Manager, the Keychain or the Secret Service |
+
+On Windows, where `icacls` cannot run, those files are still written, in the user's own
+profile, and a warning names each one; the daemon and the sign-ins go on working.
 
 A configuration, an MCP server's environment and its headers print in a log or a crash
 report with keys as `:redacted` and the rest by name only, at debug level too (Decision 857).

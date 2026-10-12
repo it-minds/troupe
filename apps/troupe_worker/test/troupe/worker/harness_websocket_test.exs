@@ -206,6 +206,49 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
     end
   end
 
+  # A pod is internet-facing, and a page a person happens to visit can open a socket to it
+  # from their browser. An empty list used to admit every page.
+  describe "a browser's origin" do
+    setup do
+      previous = Application.fetch_env(:troupe_gateway, :allowed_origins)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, value} -> Application.put_env(:troupe_gateway, :allowed_origins, value)
+          :error -> Application.delete_env(:troupe_gateway, :allowed_origins)
+        end
+      end)
+    end
+
+    test "is refused while no origin is listed, as it is when none is configured", context do
+      Application.put_env(:troupe_gateway, :allowed_origins, [])
+      assert upgrade_status(context, "https://page.example.test") == 403
+
+      Application.delete_env(:troupe_gateway, :allowed_origins)
+      assert upgrade_status(context, "https://page.example.test") == 403
+    end
+
+    test "is admitted when it is listed, and every one is with `*`", context do
+      Application.put_env(:troupe_gateway, :allowed_origins, ["https://gui.example.test"])
+      assert upgrade_status(context, "https://gui.example.test") == 101
+      assert upgrade_status(context, "https://page.example.test") == 403
+
+      Application.put_env(:troupe_gateway, :allowed_origins, ["*"])
+      assert upgrade_status(context, "https://page.example.test") == 101
+    end
+
+    # The desktop app's webview names its own origin on the socket it opens to a pod, and
+    # no page on the web can name it. The terminal client and the daemon name none.
+    test "the desktop app's own and none at all are admitted with nothing listed", context do
+      Application.put_env(:troupe_gateway, :allowed_origins, [])
+
+      assert upgrade_status(context, "tauri://localhost") == 101
+      assert upgrade_status(context, "http://tauri.localhost") == 101
+      assert upgrade_status(context, nil) == 101
+      assert {:ok, _client} = connect(context, token(context, role: "owner"))
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp connect(context, jwt) do
@@ -219,6 +262,26 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
   defp get(context, path) do
     {:ok, response} = Req.get("http://127.0.0.1:#{context.http_port}#{path}", retry: false)
     {response.status, response.body}
+  end
+
+  # The status a WebSocket upgrade from `origin` gets, before any token is looked at: 101
+  # for a socket, 403 for an origin the pod does not admit.
+  defp upgrade_status(context, origin) do
+    {:ok, conn} = :gen_tcp.connect(~c"127.0.0.1", context.http_port, [:binary, active: false, packet: :raw])
+    origin_header = if origin, do: "Origin: #{origin}\r\n", else: ""
+
+    request =
+      "GET /v1/socket HTTP/1.1\r\nHost: 127.0.0.1:#{context.http_port}\r\n" <>
+        origin_header <>
+        "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n" <>
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
+
+    :ok = :gen_tcp.send(conn, request)
+    {:ok, response} = :gen_tcp.recv(conn, 0, 5_000)
+    :gen_tcp.close(conn)
+
+    [_http, code | _rest] = response |> String.split("\r\n", parts: 2) |> hd() |> String.split(" ")
+    String.to_integer(code)
   end
 
   # What the plane's `session.read` hands a reader on this pod.

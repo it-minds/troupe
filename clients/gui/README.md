@@ -172,10 +172,13 @@ the daemon's `Troupe.LLM.Fake` script: `text`, `tools`, `reasoning`, `stop`
 
 ### Against a real deployment
 
-Two allowlists, not one:
+Three allowlists, not one:
 
 * the plane's `TROUPE_CORS_ORIGINS` must contain the GUI's origin — `http://localhost:5173`
   in development, or the origin it is served from;
+* the chart's `operator.workerAllowedOrigins` must contain it too, for a team session's
+  socket to a worker pod: a pod admits no page whose origin is not listed. The GUI the
+  chart serves and the desktop app are admitted without it;
 * **the identity provider must allow that origin too.** The device grant is spoken to the
   provider directly, so a deployment that adds the GUI to the plane and stops there signs
   in as far as discovery and then fails. In Dex this is the public client's
