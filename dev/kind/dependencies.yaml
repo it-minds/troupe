@@ -242,7 +242,11 @@ spec:
                 kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
                 token_reviewer_jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token
 
-              bao policy write troupe-worker-dev - <<'POLICY'
+              # The wide policy the shared role below carries: every team's session keys.
+              # Named so no profile's own policy can be: `Troupe.KMS.Policy` names that
+              # `troupe-worker-<profile>`, and a policy written for a profile called `dev`
+              # would have replaced this one.
+              bao policy write troupe-shared-worker - <<'POLICY'
               path "secret/data/troupe/teams/+/sessions/*" {
                 capabilities = ["create", "read", "update"]
               }
@@ -273,7 +277,7 @@ spec:
                 bound_service_account_names=troupe-worker \
                 bound_service_account_namespaces='*' \
                 audience=troupe-kms \
-                policies=troupe-worker-dev,troupe-worker-mcp-identity \
+                policies=troupe-shared-worker,troupe-worker-mcp-identity \
                 ttl=1h
 
               bao write auth/kubernetes/role/troupe-plane \

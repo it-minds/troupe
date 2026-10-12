@@ -1,0 +1,86 @@
+defmodule Troupe.Operator.SettingsTest do
+  @moduledoc """
+  What the chart sets reaches the operator: `config/runtime.exs` as a release reads it, in
+  the environment the chart's Deployment gives the operator.
+
+  The worker container's seccomp profile above all, because a pod under the runtime's
+  default refuses every command (bubblewrap cannot make its user namespace), and a profile
+  the kubelet does not take is a pod that never starts, said only in an event on its
+  StatefulSet.
+  """
+
+  # The process environment is global.
+  use ExUnit.Case, async: false
+
+  alias Troupe.Operator.Settings
+
+  describe "the worker's seccomp profile" do
+    test "is the runtime's default when the chart says nothing" do
+      settings =
+        read(%{"TROUPE_WORKER_SECCOMP_TYPE" => nil, "TROUPE_WORKER_SECCOMP_PROFILE" => nil})
+
+      assert settings.worker_seccomp_type == "RuntimeDefault"
+      assert Settings.worker_seccomp(settings) == %{"type" => "RuntimeDefault"}
+    end
+
+    test "is the chart's Localhost profile, with its path" do
+      settings =
+        read(%{
+          "TROUPE_WORKER_SECCOMP_TYPE" => "Localhost",
+          "TROUPE_WORKER_SECCOMP_PROFILE" => "troupe/worker.json"
+        })
+
+      assert Settings.worker_seccomp(settings) == %{
+               "type" => "Localhost",
+               "localhostProfile" => "troupe/worker.json"
+             }
+    end
+
+    test "is Unconfined where the chart chose it, with no path to read" do
+      settings =
+        read(%{
+          "TROUPE_WORKER_SECCOMP_TYPE" => "Unconfined",
+          "TROUPE_WORKER_SECCOMP_PROFILE" => ""
+        })
+
+      assert Settings.worker_seccomp(settings) == %{"type" => "Unconfined"}
+    end
+
+    test "stops the operator at boot when it is no profile the kubelet takes" do
+      assert_raise RuntimeError, ~r/Localhost, RuntimeDefault or Unconfined/, fn ->
+        read(%{
+          "TROUPE_WORKER_SECCOMP_TYPE" => "unconfined",
+          "TROUPE_WORKER_SECCOMP_PROFILE" => nil
+        })
+      end
+
+      assert_raise RuntimeError, ~r/TROUPE_WORKER_SECCOMP_PROFILE names no profile/, fn ->
+        read(%{
+          "TROUPE_WORKER_SECCOMP_TYPE" => "Localhost",
+          "TROUPE_WORKER_SECCOMP_PROFILE" => ""
+        })
+      end
+    end
+  end
+
+  # `config/runtime.exs` read as a release reads it, with `vars` set (a `nil` unset) and put
+  # back afterwards, and the operator's settings out of it.
+  defp read(vars) do
+    previous = Map.new(vars, fn {name, _value} -> {name, System.get_env(name)} end)
+    Enum.each(vars, fn {name, value} -> put_env(name, value) end)
+
+    try do
+      config =
+        "../../../../../config/runtime.exs"
+        |> Path.expand(__DIR__)
+        |> Config.Reader.read!(env: :prod, target: :host)
+
+      struct(Settings, config[:troupe_operator][:settings])
+    after
+      Enum.each(previous, fn {name, value} -> put_env(name, value) end)
+    end
+  end
+
+  defp put_env(name, nil), do: System.delete_env(name)
+  defp put_env(name, value), do: System.put_env(name, value)
+end

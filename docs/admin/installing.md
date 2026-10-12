@@ -16,6 +16,7 @@ is a worked example.
 | A CNI that enforces NetworkPolicy | a worker's isolation is a NetworkPolicy | **policies are accepted and enforced by nothing** (kind's default CNI) |
 | Cilium, optionally | egress by hostname: a worker reaches its allowlist and nothing else | a worker reaches any public host on 443 and 80; the allowlist is checked at admission, not on the wire; a profile's own endpoint on another port, or given as an address, opens that port or that address; one at a loopback, unspecified, link-local or cloud metadata address is refused, as it is with Cilium |
 | An ingress controller | how a client reaches a worker | sessions are created and cannot be attached to from outside |
+| Nodes that allow unprivileged user namespaces, and the chart's seccomp profile on them | every command on a pod runs in bubblewrap, which builds its sandbox from a user namespace ([below](#the-workers-seccomp-profile)) | a pod refuses every command, saying bubblewrap could not start |
 
 Label the ingress controller's namespace, or every worker drops its traffic:
 
@@ -93,6 +94,52 @@ The database URL is the `troupe-plane-database` Secret. [../egress-allowlist.md]
 is generated from what each component declares it dials: read it before narrowing
 `allowedEgress`, because a host the code needs and the policy refuses is a tool that fails
 the first time somebody uses it.
+
+### The workers' seccomp profile
+
+Every command a session runs on a pod runs in bubblewrap, which builds its sandbox from an
+unprivileged user namespace. A container runtime's default seccomp profile refuses one, so
+a worker under it refuses every command ("bubblewrap could not start one here (bwrap: No
+permissions to create new namespace ...)"). `worker.seccomp` chooses the worker
+container's profile, and the default needs nothing from you:
+
+```yaml
+worker:
+  seccomp:
+    type: Localhost                       # or RuntimeDefault, or Unconfined
+    localhostProfile: troupe/worker.json  # under the kubelet's seccomp directory
+    install:
+      enabled: true                       # the DaemonSet below
+      kubeletSeccompDir: /var/lib/kubelet/seccomp
+```
+
+- **`Localhost`**, the default, is the profile the chart ships: the runtime's default plus
+  the calls bubblewrap makes its user, mount and PID namespaces with, and never a network,
+  cgroup or time namespace ([security.md §3](security.md#3-a-worker-isolation-and-egress)
+  says what it allows and why). The kubelet reads it from the node, so it must be on every
+  node that runs workers. The chart's DaemonSet `troupe-worker-seccomp` puts it there: one
+  pod per node copies it from a ConfigMap and waits, ready while the file is in place. It
+  mounts that one directory from the host (`/var/lib/kubelet/seccomp/troupe`) and nothing
+  else, and runs as root with every capability dropped, because the directory is root's,
+  so **`troupe-system` needs the `privileged` Pod Security level** for it. Where the
+  kubelet runs with another `--root-dir`, set `kubeletSeccompDir` to `<root-dir>/seccomp`.
+  A worker pod that reaches a node before the file waits in `CreateContainerError`
+  ("cannot load seccomp profile") and starts once it is there:
+  `kubectl -n troupe-system rollout status daemonset/troupe-worker-seccomp`.
+- **With the Security Profiles Operator**, or nodes built with the file, set
+  `install.enabled: false` and point `localhostProfile` at where it is. For the operator,
+  apply a `SeccompProfile` in `troupe-system` whose spec is the rules of
+  `charts/troupe/files/worker-seccomp.json` (`defaultAction`, `architectures`, `syscalls`),
+  and set `localhostProfile: operator/troupe-system/<its name>.json`.
+- **`RuntimeDefault`** keeps the runtime's own profile: workers start and run no command.
+- **`Unconfined`** is no filter at all, for a development cluster (`dev/kind/values.yaml`).
+  The `baseline` and `restricted` Pod Security levels refuse it.
+
+The operator labels no worker namespace, so they have the cluster's default Pod Security
+level. `Localhost` and `RuntimeDefault` pass `restricted`, as the rest of a worker pod does;
+`Unconfined` needs `privileged`, and where the level is higher every worker pod is refused
+at creation, in a `FailedCreate` event on its StatefulSet. The chart cannot see that level,
+so it cannot refuse the combination for you.
 
 ## 3. Prove it is up
 

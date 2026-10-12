@@ -438,6 +438,58 @@ defmodule Troupe.Operator.ResourcesTest do
       assert security["capabilities"]["drop"] == ["ALL"]
     end
 
+    # Every command on a pod runs in bubblewrap, which needs a user namespace, and the
+    # runtime's default seccomp profile refuses one: the worker container's profile is
+    # the installation's choice, and the pod around it keeps the runtime's default.
+    test "the worker container gets the installation's Localhost seccomp profile", context do
+      settings = %{
+        context.settings
+        | worker_seccomp_type: "Localhost",
+          worker_seccomp_profile: "troupe/worker.json"
+      }
+
+      resources = Resources.for_profile(context.profile, context.policy, settings)
+
+      assert container(resources)["securityContext"]["seccompProfile"] == %{
+               "type" => "Localhost",
+               "localhostProfile" => "troupe/worker.json"
+             }
+
+      assert pod_spec(resources)["securityContext"]["seccompProfile"] == %{
+               "type" => "RuntimeDefault"
+             }
+    end
+
+    test "Unconfined, where the installation chose it, reaches the worker container", context do
+      settings = %{context.settings | worker_seccomp_type: "Unconfined"}
+      resources = Resources.for_profile(context.profile, context.policy, settings)
+
+      assert container(resources)["securityContext"]["seccompProfile"] == %{
+               "type" => "Unconfined"
+             }
+
+      assert pod_spec(resources)["securityContext"]["seccompProfile"] == %{
+               "type" => "RuntimeDefault"
+             }
+    end
+
+    test "with nothing chosen the worker container keeps the runtime's default",
+         %{resources: resources} do
+      assert container(resources)["securityContext"]["seccompProfile"] == %{
+               "type" => "RuntimeDefault"
+             }
+    end
+
+    test "a seccomp profile no kubelet takes is refused, not rendered", context do
+      for {type, path} <- [{"Localhost", nil}, {"Localhost", ""}, {"unconfined", nil}, {nil, nil}] do
+        settings = %{context.settings | worker_seccomp_type: type, worker_seccomp_profile: path}
+
+        assert_raise ArgumentError, ~r/seccomp profile/, fn ->
+          Resources.for_profile(context.profile, context.policy, settings)
+        end
+      end
+    end
+
     test "a disruption budget keeps more than one pod from going at once",
          %{resources: resources} do
       assert get_in(find(resources, "PodDisruptionBudget", "troupe-w-dev"), [

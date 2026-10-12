@@ -1051,8 +1051,7 @@ Found by the #519, #522 and client fixers, 2026-10-10.
   `.npmrc` at the repository root is the user configuration of the commands it runs
   (contained in the sandbox).
 - A worker doesn't check the sandbox when it starts, only at the first command, and `troupe
-  doctor` has no sandbox line. Where nodes forbid unprivileged user namespaces the operator
-  may need a pod security setting.
+  doctor` has no sandbox line.
 - The gateway's `git worktree remove` without `--force` runs git's own status, which
   recurses into a worktree's submodules under their own configuration.
 - `Worktrees.list` runs git status in whatever directory `.git/worktrees/*/gitdir` names;

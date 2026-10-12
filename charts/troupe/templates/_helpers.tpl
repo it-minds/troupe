@@ -48,3 +48,38 @@ the worker admits by itself. A page whose origin is not here gets no socket.
 {{- fail (printf "plane.replicas is %d but plane.distribution is %q: replicas that do not form an Erlang cluster each place sessions as if alone. Set plane.distribution to \"name\", or plane.replicas to 1." (int .Values.plane.replicas) .Values.plane.distribution) }}
 {{- end }}
 {{- end -}}
+
+{{/*
+The worker container's seccomp profile, which the operator puts on every worker pod.
+Refused here rather than in the cluster: a type the kubelet does not know, or a Localhost
+profile without its path, is a pod that never starts, said only in an event on each
+StatefulSet. The path is relative to the kubelet's seccomp directory and every part of it
+starts with a letter or a digit, so it never climbs out of it: the installer mounts the
+profile's own directory from the host, and a path with `..` in it would mount another.
+*/}}
+{{- define "troupe.worker.seccomp.validate" -}}
+{{- $seccomp := .Values.worker.seccomp -}}
+{{- if not (has $seccomp.type (list "Localhost" "RuntimeDefault" "Unconfined")) }}
+{{- fail (printf "worker.seccomp.type is %q: it is Localhost (the chart's profile, under which bubblewrap starts), RuntimeDefault (no command runs on a pod) or Unconfined (no filter, for a development cluster)." (toString $seccomp.type)) }}
+{{- end }}
+{{- if eq $seccomp.type "Localhost" }}
+{{- $path := $seccomp.localhostProfile | default "" }}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$" $path) }}
+{{- fail (printf "worker.seccomp.localhostProfile is %q: with type Localhost it is the profile's path under the kubelet's seccomp directory, such as troupe/worker.json, each part starting with a letter or a digit." $path) }}
+{{- end }}
+{{- if $seccomp.install.enabled }}
+{{- if not (contains "/" $path) }}
+{{- fail (printf "worker.seccomp.localhostProfile is %q, and the installer mounts the profile's own directory from each node, never the kubelet's whole seccomp directory: put it in one, such as troupe/worker.json." $path) }}
+{{- end }}
+{{- $dir := $seccomp.install.kubeletSeccompDir | default "" }}
+{{- if or (not (regexMatch "^/[A-Za-z0-9._/-]*[A-Za-z0-9._-]$" $dir)) (contains ".." $dir) }}
+{{- fail (printf "worker.seccomp.install.kubeletSeccompDir is %q: it is the absolute path of the kubelet's seccomp directory on the nodes, /var/lib/kubelet/seccomp unless the kubelet's --root-dir says otherwise." $dir) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/* Where the installer writes the profile on a node, and the one directory it mounts. */}}
+{{- define "troupe.worker.seccomp.hostDir" -}}
+{{- printf "%s/%s" (trimSuffix "/" .Values.worker.seccomp.install.kubeletSeccompDir) (dir .Values.worker.seccomp.localhostProfile) -}}
+{{- end -}}

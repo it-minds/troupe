@@ -94,6 +94,32 @@ end
 if config_env() == :prod do
   # -- the operator ---------------------------------------------------------
 
+  # The seccomp profile of every worker container, `worker.seccomp` in the chart. Unset is
+  # the runtime's default, as it always was, which keeps a filter and lets no command run
+  # on a pod. Anything else that is not a profile the kubelet takes stops the operator
+  # here, with the reason, rather than in an event on every StatefulSet it writes.
+  worker_seccomp_type =
+    presence.(System.get_env("TROUPE_WORKER_SECCOMP_TYPE")) || "RuntimeDefault"
+  worker_seccomp_profile = presence.(System.get_env("TROUPE_WORKER_SECCOMP_PROFILE"))
+
+  cond do
+    worker_seccomp_type not in ["Localhost", "RuntimeDefault", "Unconfined"] ->
+      raise """
+      TROUPE_WORKER_SECCOMP_TYPE is #{inspect(worker_seccomp_type)}, and a worker container's \
+      seccomp profile is Localhost, RuntimeDefault or Unconfined (worker.seccomp.type in the chart).
+      """
+
+    worker_seccomp_type == "Localhost" and is_nil(worker_seccomp_profile) ->
+      raise """
+      TROUPE_WORKER_SECCOMP_TYPE is Localhost and TROUPE_WORKER_SECCOMP_PROFILE names no \
+      profile: set the path under the kubelet's seccomp directory \
+      (worker.seccomp.localhostProfile in the chart).
+      """
+
+    true ->
+      :ok
+  end
+
   config :troupe_operator,
     autostart: System.get_env("TROUPE_OPERATOR_AUTOSTART") == "true",
     settings: [
@@ -118,6 +144,8 @@ if config_env() == :prod do
       workers_port: presence.(System.get_env("TROUPE_WORKERS_PORT")),
       drain_timeout_seconds:
         String.to_integer(System.get_env("TROUPE_DRAIN_TIMEOUT_SECONDS", "300")),
+      worker_seccomp_type: worker_seccomp_type,
+      worker_seccomp_profile: worker_seccomp_profile,
       # Comma-separated names, as the chart joins them; an unset variable and an empty
       # one both mean no pull secrets.
       image_pull_secrets:

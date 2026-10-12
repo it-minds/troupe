@@ -119,5 +119,6 @@ Phoenix's own; nothing in a deployment attaches to them.
 | Workers cannot write to a bucket outside `us-east-1`, the plane can | the worker pods have no `TROUPE_OBJECT_REGION` and sign for `us-east-1`: an operator from before it passed `objectStore.region` on to them |
 | Plane replicas do not cluster during a rolling image upgrade | the Erlang cookie is baked into each image build |
 | Team volumes never appear inside sessions | they are mounted on the pod, not into a session's mount table |
-| Every command on a profile's pods fails, "this worker runs every command in a sandbox" | the nodes do not let bubblewrap make a user namespace, or the image lacks it |
+| Every command on a profile's pods fails, "this worker runs every command in a sandbox" | the worker container's seccomp profile refuses bubblewrap its user namespace (`worker.seccomp.type: RuntimeDefault`, or an operator from before 0.17.0), the nodes do not allow unprivileged user namespaces, or the image lacks bubblewrap ([installing.md](installing.md#the-workers-seccomp-profile)) |
+| Worker pods stay in `CreateContainerError`, "cannot load seccomp profile" | the `Localhost` profile is not on that node: `kubectl -n troupe-system get daemonset troupe-worker-seccomp`, or where something else installs it, its path against `worker.seccomp.localhostProfile` |
 | A client is refused with `update_required` | it is below the minimum the Policy page's client versions set, or on a version blocked there ([routine-tasks.md](routine-tasks.md#client-versions)) |

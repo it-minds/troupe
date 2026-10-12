@@ -231,6 +231,39 @@ worker:
   image:
     repository: ghcr.io/it-minds/troupe-worker
     tag: ""            # defaults to the chart's appVersion
+  # The seccomp profile of every worker container. Every command a session runs on a pod
+  # runs in bubblewrap, which builds its sandbox from an unprivileged user namespace, and a
+  # container runtime's default profile (`RuntimeDefault`) refuses one: under it a pod
+  # refuses every command, saying so. One of three:
+  #
+  # - `Localhost`: the profile this chart ships (`files/worker-seccomp.json`), the runtime's
+  #   default plus the calls bubblewrap makes its user, mount and PID namespaces with, and
+  #   never a network, cgroup or time namespace. It has to be on every node that runs
+  #   workers, at `localhostProfile` under the kubelet's seccomp directory: `install` below
+  #   puts it there, or the Security Profiles Operator does. Allowed under the `restricted`
+  #   Pod Security level.
+  # - `RuntimeDefault`: the runtime's own. Workers start and refuse every command.
+  # - `Unconfined`: no filter at all, for a development cluster (`dev/kind/values.yaml`).
+  #   Refused by the `baseline` and `restricted` Pod Security levels, so the worker
+  #   namespaces need `privileged`.
+  #
+  # Changing it changes every profile's pod template, so each profile reports
+  # `UpgradePending` until its pods are replaced.
+  seccomp:
+    type: Localhost
+    localhostProfile: troupe/worker.json
+    # A DaemonSet that writes the shipped profile to every node, at `localhostProfile`
+    # under `kubeletSeccompDir`, and then waits. It mounts that one directory from the host
+    # and nothing else, and runs as root with every capability dropped, because the
+    # directory is root's. Rendered only with `type: Localhost`. Off where something else
+    # installs the profile, such as the Security Profiles Operator, or where the nodes are
+    # built with it. `kubeletSeccompDir` is `<kubelet --root-dir>/seccomp`.
+    install:
+      enabled: true
+      kubeletSeccompDir: /var/lib/kubelet/seccomp
+      resources:
+        requests: {cpu: 5m, memory: 8Mi}
+        limits: {cpu: 50m, memory: 32Mi}
 
 # The graphical client (`clients/gui`), served on the plane's own host at `basePath`
 # (Decision 670). Static files behind nginx: no secrets, no database, nothing configured

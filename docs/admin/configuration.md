@@ -45,6 +45,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_CILIUM_AVAILABLE` | false | writes a `CiliumNetworkPolicy` with FQDN rules per profile, and drops the public 443/80 rule from the worker NetworkPolicy ([Part E](#part-e--ports-and-network-policy)); each profile's `EgressByHostname` condition says whether it applied, and is what the plane reports. With it or without, `EndpointUnreachable` names a profile's endpoints a worker does not reach | `operator.ciliumAvailable` |
 | `TROUPE_MAX_PORTS` | `65536` | `+Q` in every worker's `ERL_FLAGS` | `operator.maxPorts` |
 | `TROUPE_WORKERS_SCHEME`, `TROUPE_WORKERS_PORT` | `wss`, unset | scheme and port of the endpoint a pod advertises (kind uses `ws`, `30080`) | `operator.workersScheme`, `operator.workersPort` |
+| `TROUPE_WORKER_SECCOMP_TYPE`, `TROUPE_WORKER_SECCOMP_PROFILE` | `RuntimeDefault`, unset | the worker container's `seccompProfile`: `Localhost` with the profile's path under the kubelet's seccomp directory, `RuntimeDefault` (bubblewrap cannot start, so no command runs) or `Unconfined`. Anything else, or `Localhost` without a path, stops the operator at boot ([installing.md](installing.md#the-workers-seccomp-profile)) | `worker.seccomp.type`, `worker.seccomp.localhostProfile` (chart default `Localhost`, `troupe/worker.json`) |
 | `TROUPE_DRAIN_TIMEOUT_SECONDS` | `300` | worker `terminationGracePeriodSeconds`; **not** put in the pod's env, so the worker's own drain wait stays 300. A pod stopped without a drain gives turns 150 s of its grace period and needs the rest to put its sessions to sleep, so keep this at 300 or more | `operator.drainTimeoutSeconds` |
 | `TROUPE_IMAGE_PULL_SECRETS` | none | comma-separated pull secrets for worker pods | `imagePullSecrets` |
 | `TROUPE_WORKER_ALLOWED_ORIGINS` | none | browser origins, written to pods as `TROUPE_ALLOWED_ORIGINS`; the chart adds the plane's own origin when it serves the GUI | `operator.workerAllowedOrigins` |
@@ -177,6 +178,7 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 | `policy.allowedEgress`, `allowedStorageClasses`, `orgVolume` | `["*.anthropic.com", api.openai.com, github.com]`, `[standard]`, `{}` | what profiles may reach and mount |
 | `policy.namespacePrefix`, `policy.workersDomain` | `troupe-w-`, `workers.example.test` | worker namespaces and hostnames. Keep the prefix: the plane names an enrolling pod's profile by taking `troupe-w-` off its namespace |
 | `admission.install` | `true` | the `ValidatingAdmissionPolicy` and binding (`Deny`, `failurePolicy: Fail`) |
+| `worker.seccomp.install.enabled`, `.kubeletSeccompDir`, `.resources` | `true`, `/var/lib/kubelet/seccomp`, tiny | with `worker.seccomp.type: Localhost`, the ConfigMap and DaemonSet `troupe-worker-seccomp` that write `files/worker-seccomp.json` to `<kubeletSeccompDir>/<localhostProfile>` on every node, mounting that one directory, as root with no capabilities; needs `privileged` Pod Security in the namespace. A path that leaves the kubelet's directory, or one with no directory of its own, is refused |
 
 Not chart values: worker profiles and team volumes (custom resources), the LLM gateway (a
 profile field plus egress), database TLS and pool size, `TROUPE_LOG_FORMAT`,
@@ -189,7 +191,7 @@ and OpenBao themselves ([installing.md §6](installing.md#6-a-worked-example-on-
 none`, tighter ceilings), `charts/troupe/values.example.yaml` (two clustered replicas, the
 worked example of [installing.md §6](installing.md#6-a-worked-example-on-managed-services))
 and `dev/kind/values.yaml` (images tagged `dev`, `ws` on port `30080`, Dex at
-`dex.localtest.me`, a static OpenBao token) differ from the defaults in host, OIDC
+`dex.localtest.me`, a static OpenBao token, workers `Unconfined`) differ from the defaults in host, OIDC
 endpoints, egress and storage classes; read the files. Both copyable files point
 `plane.tlsSecretName` at `troupe-plane-tls`. The example has cert-manager issue it
 (`plane.certIssuer: letsencrypt`, HTTP-01); the small file leaves `plane.certIssuer`

@@ -772,7 +772,13 @@ defmodule Troupe.Operator.Resources do
         "readOnlyRootFilesystem" => false,
         # `bubblewrap` needs user namespaces, not privileges: every capability is
         # dropped and the sandbox is built from unprivileged namespaces.
-        "capabilities" => %{"drop" => ["ALL"]}
+        "capabilities" => %{"drop" => ["ALL"]},
+        # And a seccomp profile that lets it make them. The runtime's default, which the
+        # pod as a whole keeps, refuses a user namespace to a process without
+        # CAP_SYS_ADMIN, and a pod under it refuses every command. This container's is
+        # the installation's: the chart's profile, the default plus what bubblewrap
+        # needs, or `Unconfined` on a development cluster.
+        "seccompProfile" => Settings.worker_seccomp(settings)
       }
     }
   end

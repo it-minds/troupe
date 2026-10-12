@@ -172,6 +172,10 @@ retry_apply() {
   return 1
 }
 
+# A Job's pod template cannot change once the Job exists, so a cluster brought up before a
+# change to a setup Job refused the new one ("field is immutable") five times and stopped
+# here. Both run again harmlessly: each step is idempotent.
+kc delete job -n "$namespace" minio-setup openbao-setup --ignore-not-found
 retry_apply dev/kind/dependencies.yaml
 
 # The gateway key is the one secret that is never written to a file in this repository.

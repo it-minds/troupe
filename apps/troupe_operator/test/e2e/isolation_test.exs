@@ -108,6 +108,43 @@ defmodule Troupe.E2E.IsolationTest do
       in to OpenBao with, and so every session key its role reaches.
       """
     end
+
+    # The runtime's default seccomp profile refuses bubblewrap the user namespace it builds
+    # the sandbox from, so the worker container's profile is the installation's choice, set
+    # in the chart: the operator is told it and puts it on every worker container.
+    test "runs on a container under the seccomp profile the installation chose", context do
+      namespace = World.worker_namespace(context.profile)
+      pod = World.pod(namespace, "app.kubernetes.io/name=troupe-worker")
+      assert pod, "#{namespace} has no worker pod to look at"
+
+      chosen =
+        World.kubectl!([
+          "get",
+          "deployment",
+          "troupe-operator",
+          "-n",
+          World.namespace(),
+          "-o",
+          ~s|jsonpath={.spec.template.spec.containers[0].env[?(@.name=="TROUPE_WORKER_SECCOMP_TYPE")].value}|
+        ])
+
+      worn =
+        World.kubectl!([
+          "get",
+          "pod",
+          pod,
+          "-n",
+          namespace,
+          "-o",
+          ~s|jsonpath={.spec.containers[?(@.name=="worker")].securityContext.seccompProfile.type}|
+        ])
+
+      assert chosen in ["Localhost", "RuntimeDefault", "Unconfined"],
+             "the operator was given no seccomp profile for workers: #{inspect(chosen)}"
+
+      assert worn == chosen,
+             "#{pod}'s worker container runs under #{inspect(worn)}, and the installation chose #{chosen}"
+    end
   end
 
   describe "a profile's OpenBao role" do
@@ -214,8 +251,9 @@ defmodule Troupe.E2E.IsolationTest do
   # namespace, carrying it. Removed when the test ends.
   defp role!(context) do
     role = Policy.worker_role_name(context.profile)
-    # The policy's name is the test's own: the development manifest already has a policy
-    # called `troupe-worker-dev`, the wide one every worker's shared role carries.
+    # The policy's name is the test's own, so nothing an installation wrote is replaced and
+    # then deleted. The wide one every worker's shared role carries in the development
+    # manifest is `troupe-shared-worker`, which no profile's own policy can be called.
     policy = Plane.unique("e2e-worker-role")
 
     # A role the cluster already has under that name is somebody's, and not this test's

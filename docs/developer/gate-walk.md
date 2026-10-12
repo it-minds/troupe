@@ -134,9 +134,10 @@ changes the chart or the operator, every night and for every release
 | a profile's own OpenBao role reaches its own teams' session keys and nothing else, and a pod of another profile cannot log in under it | `isolation_test.exs`, "a profile's OpenBao role", in the dev OpenBao |
 
 What no test reaches is the live plane's own: its nodes, whose kernel and security profile
-decide whether bubblewrap starts there; its cloud's real metadata service, over IPv6 and
-NAT64 where its network has them; the hosts its profiles name; and whether its OpenBao has a
-role per profile at all. Those are this row's.
+decide whether bubblewrap starts there, and the chart's seccomp profile on them (kind runs
+workers `Unconfined`, so CI never starts bubblewrap under the shipped profile); its cloud's
+real metadata service, over IPv6 and NAT64 where its network has them; the hosts its
+profiles name; and whether its OpenBao has a role per profile at all. Those are this row's.
 
 **Steps**, with `<p>` the profile you use:
 
@@ -149,7 +150,11 @@ role per profile at all. Those are this row's.
    !timeout 6 openssl s_client -connect <a host the profile names>:443 -brief </dev/null
    !timeout 6 openssl s_client -connect example.org:443 -brief </dev/null
    ```
-2. The role, where `bao.workerRolePerProfile` is on: the pod's `TROUPE_BAO_ROLE` is
+2. The worker container's seccomp profile is the chart's (`kubectl -n troupe-w-<p> get pod
+   troupe-w-<p>-0 -o jsonpath='{.spec.containers[0].securityContext.seccompProfile}'` reads
+   `Localhost` and `troupe/worker.json`), and `kubectl -n troupe-system rollout status
+   daemonset/troupe-worker-seccomp` says every node has it.
+3. The role, where `bao.workerRolePerProfile` is on: the pod's `TROUPE_BAO_ROLE` is
    `troupe-worker-<p>` (`kubectl -n troupe-w-<p> get pod troupe-w-<p>-0 -o yaml`), and
    OpenBao has that role bound to `troupe-w-<p>` alone (`bao read
    auth/kubernetes/role/troupe-worker-<p>`).
@@ -161,10 +166,12 @@ is blocked with Cilium (`EgressByHostname` reads `CiliumFQDN`); without Cilium i
 by design, and the record says so. With a role per profile, the role names the profile's
 namespace and no other. **Fail:** anything else, and in particular a command refused with
 "this worker runs every command in a sandbox and ...": bubblewrap does not start on these
-nodes, and nothing runs.
+nodes, and nothing runs. The worker's seccomp profile is the first thing to read then
+([installing.md](../admin/installing.md#the-workers-seccomp-profile)).
 
-**Behind it:** Decisions 832 (bubblewrap), 856 (the denied addresses), 752 and 758 (with
-and without Cilium), 753 (a role per profile), 889 (the cluster suite on pull requests);
+**Behind it:** Decisions 832 (bubblewrap), 890 (the worker's seccomp profile), 856 (the
+denied addresses), 752 and 758 (with and without Cilium), 753 (a role per profile), 889
+(the cluster suite on pull requests);
 #625 and #627 are what is left;
 [security.md §3](../admin/security.md#3-a-worker-isolation-and-egress).
 

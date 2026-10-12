@@ -114,7 +114,7 @@ endpoint, and, for models that endpoint does not price, `llm.prices`.
 | ingress-nginx | 3600 s proxy timeouts and a 16m body ([installing.md §6](installing.md#6-a-worked-example-on-managed-services)); then label its namespace `troupe.dev/ingress=true` |
 | cert-manager | a ClusterIssuer, `letsencrypt` in the example: HTTP-01, one certificate per pod hostname, no wildcard |
 | Storage classes | a block class (`ReadWriteOnce`) for pod disks, a file-storage class (`ReadWriteMany`) for team volumes, and one for OpenBao's Raft volume; the policy lists what profiles may name |
-| Nodes | unprivileged user namespaces, for bubblewrap: every command on a pod runs in it, and a pod that cannot start it refuses every command (Decision 832) |
+| Nodes | unprivileged user namespaces, for bubblewrap: every command on a pod runs in it, and a pod that cannot start it refuses every command (Decision 832); and the chart's seccomp profile, which its DaemonSet installs, since the runtime's default refuses bubblewrap its namespace ([installing.md](installing.md#the-workers-seccomp-profile), Decision 890) |
 
 ## 7. MCP
 

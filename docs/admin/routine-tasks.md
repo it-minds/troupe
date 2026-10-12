@@ -32,6 +32,18 @@ Arguments and their meanings are in the method table
    plane drains it and the operator replaces it, one at a time; `admin.pod.drain` rolls a
    busy one sooner ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)).
 
+**Upgrading to 0.17.0 from earlier, with workers running.** Workers before it ran under
+the runtime's default seccomp profile, which refuses bubblewrap its user namespace, so
+their pods refused every command. The chart now gives the worker container its own
+profile (`worker.seccomp`, [installing.md](installing.md#the-workers-seccomp-profile)) and
+a DaemonSet to put it on the nodes. `troupe-system` needs the `privileged` Pod Security
+level for that DaemonSet, and where it enforces a stricter one, label it before upgrading
+or set `worker.seccomp.install.enabled: false` and install the profile another way. After
+step 2, `kubectl -n troupe-system rollout status daemonset/troupe-worker-seccomp`. The new
+profile changes every profile's pod template, so each reports `UpgradePending` and its
+pods are replaced as they empty (step 4); a pod replaced before the DaemonSet reached its
+node waits in `CreateContainerError` until it has.
+
 A release publishes the chart and the images and deploys nothing; every deployment rolls
 it this way, from wherever it keeps its own values.
 

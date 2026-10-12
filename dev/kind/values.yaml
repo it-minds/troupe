@@ -51,8 +51,16 @@ plane:
 
 # What a profile whose image is `release` runs here: the worker scripts/build-images
 # loads into kind.
+#
+# And no seccomp filter on the worker container, so bubblewrap can make the user namespace
+# every command's sandbox is built from. The chart's own profile, which keeps a filter, is
+# installed on a node's disk by a DaemonSet; a cluster that is thrown away has no need of
+# one, and the worker namespaces here are at the `privileged` Pod Security level, which
+# `Unconfined` needs. Never this anywhere else.
 worker:
   image: {tag: dev}
+  seccomp:
+    type: Unconfined
 
 bao:
   address: http://openbao.troupe-system.svc:8200

@@ -249,7 +249,9 @@ volume per pod. A profile with `mcpIdentities` also gets the ConfigMap
 in `TROUPE_MCP_IDENTITIES_PATH`: the kubelet replaces the file in place when the profile
 changes, so a new identity or a rotation reaches running pods without a new revision.
 
-The pod runs as non-root uid 1000 with seccomp `RuntimeDefault`, every capability dropped,
+The pod runs as non-root uid 1000 with seccomp `RuntimeDefault`, its worker container with
+the installation's `worker.seccomp` profile, which lets bubblewrap start
+([installing.md](installing.md#the-workers-seccomp-profile)), every capability dropped,
 `enableServiceLinks: false`, readiness `/health/ready` and liveness `/health/live`. A
 projected volume at `/var/run/secrets/troupe` carries two ServiceAccount tokens — audience
 `troupe-plane` for enrolment and `troupe-kms` for OpenBao — the data volume is at
