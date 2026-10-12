@@ -13,8 +13,8 @@ The extension is not on the Visual Studio Marketplace or Open VSX yet. Every rel
 pre-release attaches it as `troupe.vsix`, covered by the release's `SHA256SUMS`, and the
 installers install it with `--vscode` (`-VSCode` on Windows): they download it with the
 rest, check it, and hand it to VS Code's own `code --install-extension`. Asked which
-clients to install, they ask about it too where VS Code is. Each release's notes open with
-one line that installs the daemon, the TUI and the extension from that release:
+clients to install, they ask about it too where VS Code is. This installs the daemon, the
+TUI and the extension from one release:
 
 ```
 curl -fsSLO https://github.com/it-minds/troupe/releases/download/<tag>/install.sh && sh install.sh --tui --vscode
@@ -219,15 +219,17 @@ layers merged and untrusted keys left out as Troupe decides
 
 - **Model**: the provider, the endpoint, whether a key is set, the default, cheap and
   expensive models, and the named providers. Each says which layer set it: `default`,
-  `user`, `project`, `local` or the environment.
+  `org`, `user`, `project`, `local`, `env`, `cli` or `enforced`.
 - **Models**: the [models there are to choose from](#the-models-group), with their
   windows and prices, from `troupe models --json`.
 - **Changed from the defaults**: every other key a file or the environment sets.
-- **Files**: the user file, the project's `.troupe/config.yaml` and the local
+- **Files**: your organisation's managed file and, signed in, its plane's document; the
+  user file, the project's `.troupe/config.yaml` and the local
   `.troupe/config.local.yaml`. A click opens one; one that is not there opens as a new file,
   which saving makes. Under them, whether the workspace is
   [trusted](configuration.md#trusted-workspaces): until it is, its own files cannot set the
-  provider, endpoints and keys, approvals, MCP servers or paths.
+  keys that page lists, the provider, endpoints and keys, approvals, watch, MCP servers and
+  paths among them.
 - **Problems**, when there are any: the files' warnings and refusals. A click opens the
   file at the line.
 - **All settings**, folded: every key and the layer it came from.
@@ -263,8 +265,9 @@ declares, the models the config names or prices, and what each provider's own li
 Hover a row for the whole of it. Long lists (more than 20 models) start folded.
 
 The group asks with the rest of the view, without `--refresh`: `troupe models` asks the
-providers again itself when what it keeps is stale (a day old, or not from the providers
-the config now names). The button on the group's own row,
+providers again itself when what it keeps is stale (missing, a day old, not from the
+providers the config now names, or without a model the config sets), and asks again a
+provider that did not answer last time. The button on the group's own row,
 **Ask the Providers for Their Models**, runs `troupe models --refresh`, which asks every
 provider now, with your keys. When `troupe models` fails (a config that does not load, a
 `troupe` older than 0.8.3, which has no `--json`), the group is one line saying why, the

@@ -189,12 +189,16 @@ values.
 | `token_endpoint` | `https://auth.example.com/application/o/token/` |
 | `scopes` | `openid profile email offline_access groups` |
 | `mcp_scope` | blank, unless the registration exposes the MCP scope under another name |
-| `groups_claim` | `groups` |
-| `platform_admin_group` | the admin group's UUID, and see section 3 for when |
 
-The same values go in `plane.oidc.*` in the chart if you would rather the deployment hold
-them. The console overrides the deployment and never replaces it, so a value set here can
-always be put back with *back to the deployment*.
+`groups_claim` (`groups`) and `platform_admin_group` (the admin group's UUID; see section 3
+for when) are on the **Policy** page, under who administers the platform, which saves the
+group behind the same check.
+
+The same values go in the chart if you would rather the deployment hold them:
+`plane.oidc.*`, the client secret in the `troupe-plane-oidc` Secret, and
+`plane.groupsClaim` and `plane.platformAdminGroup`. The console overrides the deployment
+and never replaces it, so a value set here can always be put back with *back to the
+deployment*.
 
 **The trailing slash on the issuer is correct and must stay.** Authentik's per-provider
 issuer ends in one, the `iss` claim is compared exactly, and trimming it refuses every
@@ -320,6 +324,6 @@ worth checking on your own instance, because they vary by version and configurat
 - **Whether Authentik's SCIM client needs pagination or `/Schemas`** against a first sync
   of your directory's size.
 - **Whether the device code flow is usable**, as opposed to routed.
-- **The GUI's own redirect URI**, which is not in section 1b. The desktop and browser
-  clients sign in for themselves, and whichever redirect they use has to be registered
-  too.
+- **The desktop app's redirect URI**, which is not in section 1b. The browser GUI's is
+  its own address, `https://troupe.example.com/app` with the chart's default, and belongs
+  in 1b's Redirect URIs beside `/admin/callback`.

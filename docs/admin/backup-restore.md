@@ -8,14 +8,16 @@ back, and what it does not.
 | Store | Holds | Rebuildable? |
 |---|---|---|
 | **Object storage** `sessions/<id>/…` | sealed event segments (AES-256-GCM per session key), plaintext manifests, snapshots, workspace archives, blobs — **the session truth** | no; this is the primary copy |
-| **PostgreSQL** | the session index, ACLs, tombstones; the ledger; the audit trail; the identity mirror (people, groups, teams, grants, team admins); profiles and workers; bundles; principals, triggers, runs, settings | the session index yes, from manifests. **Everything else exists only here** |
-| **OpenBao** | per-session data keys (KV v2); the transit signing key | no. Losing the KV keys makes every sealed segment unreadable forever; losing the transit key invalidates every outstanding token |
+| **PostgreSQL** | the session index, ACLs, tombstones; the ledger; the audit trail; the identity mirror (people, groups, teams, grants, team admins); profiles and workers; bundles; principals, triggers, runs, settings; the client version policy | the session index yes, from manifests. **Everything else exists only here** |
+| **OpenBao** | per-session data keys (KV v2), a team's and a person's private ones; people's own MCP credentials (`troupe/people/<name>/`); the transit signing key, and the keys profiles sign MCP assertions with | no. Losing the KV keys makes every sealed segment unreadable forever; losing the transit key invalidates every outstanding token; losing the rest means people and profiles sign in to their MCP servers again |
 | **Worker volumes** `/var/lib/troupe` | working copies of live sessions, caches, materialised bundles, the unsealed tail of the log — at most 60 s or one root turn | yes, except that tail |
 | **Kubernetes** | `WorkerProfile`, `TeamVolume`, `TroupePolicy`, worker namespaces | in direct mode, profiles from the plane's rows (re-apply); the policy from your values; the rest by reconcile |
-| **A repository** (gitops mode) | the `WorkerProfile` manifests, and the `TroupePolicy` or the values that make it | the primary copy: the applier puts them back in the cluster, and the plane reads its profiles from there at its first pass ([profiles-and-policy.md §6](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository)). Grants, teams and the rest of the plane's rows are still only in PostgreSQL |
+| **A repository** (gitops mode) | the `WorkerProfile` and `Trigger` manifests, and the `TroupePolicy` or the values that make it | the primary copy: the applier puts them back in the cluster, and the plane reads its profiles from there at its first pass ([profiles-and-policy.md §6](profiles-and-policy.md#6-provisioning-direct-or-from-a-repository)). Grants, teams and the rest of the plane's rows are still only in PostgreSQL |
 
 So a restored database plus object storage is a complete plane for sessions, and the
-database backup is the only copy of triggers, principals, settings and the audit trail.
+database backup is the only copy of principals, settings, the audit trail, and triggers
+(in gitops mode their definitions are the repository's, and their keys and runs still
+only the database's).
 
 ## 2. What the repository provides
 
@@ -73,7 +75,8 @@ no scheduled ledger reconcile; no job that acts on a team's `erase_after_days`.
    is re-sent from the plane's watermark, and the ledger's uniqueness on request id makes
    overlap a duplicate rather than a double charge.
 6. Accept the loss of what lived only in the database after the restore point — audit rows,
-   runs, principals created or rotated, settings, team admins — and re-create what matters.
+   runs, principals created or rotated, settings, client versions, team admins — and
+   re-create what matters.
 7. Verify with `admin.overview`, `admin.sessions.list`, and a dormant session opened from a
    client.
 
@@ -92,8 +95,9 @@ outside the cluster.
 
 ### A worker volume
 
-Delete the pod; it comes back with a fresh volume, enrols, and its sessions restore from
-object storage at their next activation. Lost: at most the last 60 s or current root turn of
+Delete the pod and its claim, `data-troupe-w-<profile>-<ordinal>` (the pod alone comes
+back on the same volume); it comes back with a fresh one, enrols, and its sessions restore
+from object storage at their next activation. Lost: at most the last 60 s or current root turn of
 a session that was live there, and the local blob store.
 
 ### A bad migration

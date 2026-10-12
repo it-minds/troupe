@@ -13,8 +13,7 @@ Arguments and their meanings are in the method table
 1. `helm show crds "$chart" --version "$version" | kubectl apply --server-side
    --force-conflicts -f -`, with `$chart` and `$version` as in
    [installing.md §2](installing.md#2-crds-then-the-chart) — Helm never upgrades CRDs,
-   and a new field is invisible without it. Server-side, because a CRD's last-applied
-   annotation outgrows the limit a client-side apply has.
+   and a new field is invisible without it.
 2. Set the image tags in your values (empty means the chart's `appVersion`) and
    `helm upgrade troupe "$chart" --version "$version" -n troupe-system --values
    my-values.yaml --wait --timeout 10m --rollback-on-failure` (`--atomic` on Helm 3).
@@ -29,7 +28,9 @@ Arguments and their meanings are in the method table
    the digest each pod runs: a tag that already existed with `IfNotPresent` leaves the old
    image serving while Helm reports success. Then `admin.overview`.
 4. Profiles whose image is `release` follow the chart; the others keep theirs until
-   `admin.profile.put`. Pods move only when recreated — drain and delete them (below).
+   `admin.profile.put`. A pod moves to a new revision once it holds no active session: the
+   plane drains it and the operator replaces it, one at a time; `admin.pod.drain` rolls a
+   busy one sooner ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)).
 
 A release publishes the chart and the images and deploys nothing; every deployment rolls
 it this way, from wherever it keeps its own values.
@@ -89,7 +90,11 @@ lower count removes before it removes them ([profiles-and-policy.md §3](profile
 `admin.settings.list`, `admin.setting.put {key, value}`, `admin.setting.reset {key}`,
 visible on the writing replica at once and everywhere within 5 s. Before changing
 `platform_admin_group`, `admin.identity.check {group}` with the candidate; the console will
-not save it otherwise.
+not save it otherwise. What people's own machines start from and may not go past is the
+`client_*` settings and `client_enforced`
+([configuration.md](configuration.md#defaults-and-limits-for-peoples-machines)). Whether
+people may offer their own signed-in tools to a profile's pods is the profile's
+`personalTools` (`admin.profile.put`, or the profile editor's switch).
 
 ## Client versions
 
@@ -133,7 +138,7 @@ Nobody is a platform admin because `platform_admin_group` or `groups_claim` is w
    (`openssl rand -base64 48`), `plane.breakglass.secretName` naming it, `helm upgrade`.
 2. Open `https://<plane>/admin/breakglass` and enter the token. You are a platform admin
    for the lifetime, marked on every page and in the audit log.
-3. Check the right group and save it on the settings page.
+3. Check the right group and save it on the **Policy** page.
 4. Sign in normally to confirm; turn break-glass off (`secretName: ""`, upgrade, delete the
    Secret).
 
@@ -142,7 +147,7 @@ Nobody is a platform admin because `platform_admin_group` or `groups_claim` is w
 On the console's **Identity provider** card, *create a token* (`admin.scim.rotate`): shown
 once. Give the provider the token and the base URL `https://<plane>/scim/v2`, keyed on
 `externalId` = the subject. `admin.scim.get` shows the last request; `admin.scim.update
-{teams_from_groups: true}` makes pushed groups teams; `admin.scim.delete` removes the
+{attrs: {teams_from_groups: true}}` makes pushed groups teams; `admin.scim.delete` removes the
 token. The deployment's `troupe-plane-scim` Secret (`plane.scim.enabled`) opens the door
 too. Authentik, step by step: [authentik.md §4](authentik.md#4-scim-dry-run-first).
 

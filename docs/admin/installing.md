@@ -14,7 +14,7 @@ is a worked example.
 | Kubernetes ≥ 1.30 | `ValidatingAdmissionPolicy` | the operator still refuses a bad profile; the cluster no longer does |
 | `kubectl`, `helm` | everything below | — |
 | A CNI that enforces NetworkPolicy | a worker's isolation is a NetworkPolicy | **policies are accepted and enforced by nothing** (kind's default CNI) |
-| Cilium, optionally | egress by hostname: a worker reaches its allowlist and nothing else | a worker reaches any public host on 443 and 80; the allowlist is checked at admission, not on the wire; a profile's own endpoint on another port, or given as an address, opens that port or that address; one at a loopback, link-local or cloud metadata address is refused, as it is with Cilium |
+| Cilium, optionally | egress by hostname: a worker reaches its allowlist and nothing else | a worker reaches any public host on 443 and 80; the allowlist is checked at admission, not on the wire; a profile's own endpoint on another port, or given as an address, opens that port or that address; one at a loopback, unspecified, link-local or cloud metadata address is refused, as it is with Cilium |
 | An ingress controller | how a client reaches a worker | sessions are created and cannot be attached to from outside |
 
 Label the ingress controller's namespace, or every worker drops its traffic:
@@ -43,7 +43,7 @@ Create the Secrets the chart expects before installing ([configuration.md Part D
 ## 2. CRDs, then the chart
 
 ```bash
-version=0.7.0     # a release: https://github.com/it-minds/troupe/releases
+version=0.15.0-beta     # a release: https://github.com/it-minds/troupe/releases
 chart=oci://ghcr.io/it-minds/charts/troupe
 helm show crds "$chart" --version "$version" | kubectl apply --server-side -f -
 helm upgrade --install troupe "$chart" --version "$version" \
@@ -64,8 +64,8 @@ false: Helm does not take over a namespace it did not make, and the install stop
 the namespace exists and is not the release's. Either way, uninstalling leaves the
 namespace and everything in it ([section 7](#7-uninstalling)).
 
-`WorkerProfile`, `TroupePolicy` and `TeamVolume` go first because Helm does not upgrade CRDs
-it installed. Start from `values.small.yaml` or `values.example.yaml`; what you cannot
+`WorkerProfile`, `TroupePolicy`, `TeamVolume` and `Trigger` go first because Helm does not
+upgrade CRDs it installed. Start from `values.small.yaml` or `values.example.yaml`; what you cannot
 leave unset:
 
 ```yaml
@@ -127,7 +127,7 @@ one, opens `/admin/breakglass` ([roles-and-permissions.md §4](roles-and-permiss
 1. **Identity**: check the admin group.
 2. **Policy**: save it, and the ceilings every team inherits.
 3. **Teams**: turn a provider group into a team.
-4. **Profiles**: write a worker profile.
+4. **Workers**, *New profile*: write a worker profile.
 5. **Bundles**: publish what a session on it gets, reading the diff first.
 6. **Teams**: grant the profile to the team.
 7. **Identity**: a service principal for work nobody starts by hand.
@@ -137,6 +137,24 @@ one, opens `/admin/breakglass` ([roles-and-permissions.md §4](roles-and-permiss
 No `kubectl`, environment variable or database write in any of them, and every step is in
 the audit trail with a diff. Then create the worker namespace's Secrets (object store, the
 model key, pull secrets) and watch `kubectl -n troupe-system get wp -w`.
+
+### The clients people install
+
+People install `troupe` and the desktop app from the release page with the release's
+installers ([quick start](../quick-start.md#1-install)), or from where `plane.cliUrl`
+points. The apps carry no Apple or Microsoft signature yet (#656), so the first time:
+
+- **macOS** refuses an app downloaded in a browser: **System Settings → Privacy &
+  Security**, then **Open Anyway** beside the message about Troupe. `install.sh` downloads
+  with `curl`, which Gatekeeper does not stop.
+- **Windows** SmartScreen says "Windows protected your PC" for a setup downloaded in a
+  browser: **More info**, then **Run anyway**, or `Unblock-File` on it first. `install.ps1`
+  downloads with `Invoke-WebRequest`, which SmartScreen rarely stops.
+
+Why that is safe, and how to check a first download against the release key:
+[security.md §6](security.md#6-the-apps-are-not-os-code-signed). From then on `troupe
+update` and the desktop app check every update against that key themselves, and follow the
+versions the Policy page sets ([routine-tasks.md](routine-tasks.md#client-versions)).
 
 ## 6. A worked example on managed services
 
