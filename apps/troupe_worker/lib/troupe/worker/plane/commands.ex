@@ -63,6 +63,7 @@ defmodule Troupe.Worker.Plane.Commands do
             agent: params["agent"],
             prompt: params["prompt"],
             terms: terms_of(params["terms"]) |> with_managed(params["managed"]),
+            personal_tools: params["personal_tools"],
             origin: params["origin"],
             usage_seq: params["usage_seq"]
           ],

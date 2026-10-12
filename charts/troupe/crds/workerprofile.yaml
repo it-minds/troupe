@@ -213,6 +213,16 @@ spec:
                     profile's pods and the working copy's files of their names are skipped
                     and listed.
                     The plane reads it at every activation; no pod restarts.
+                personalTools:
+                  type: string
+                  enum: [allow, forbid]
+                  description: >-
+                    Whether a person may offer a session on this profile's pods the tools of
+                    MCP servers they signed in to on their own machine, which run there with
+                    their sign-in (tools.register). Absent or allow, they may. forbid, the
+                    pods refuse the offer with a sentence naming this setting, log it, and
+                    register nothing.
+                    The plane reads it at every activation; no pod restarts.
                 teams:
                   type: array
                   description: >-

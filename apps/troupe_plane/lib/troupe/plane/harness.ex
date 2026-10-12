@@ -2456,7 +2456,9 @@ defmodule Troupe.Plane.Harness do
             %{"bundle_version" => session.bundle_version, "channel" => channel}
         end
 
-      Map.put(pin, "repository_overrides_bundle", repository_overrides?(profile))
+      pin
+      |> Map.put("repository_overrides_bundle", repository_overrides?(profile))
+      |> Map.put("personal_tools", personal_tools(profile))
     else
       _ -> %{"bundle_version" => session.bundle_version}
     end
@@ -2470,6 +2472,13 @@ defmodule Troupe.Plane.Harness do
   # profile that turns it off reaches a session the next time it wakes.
   defp repository_overrides?(%{spec: %{"repositoryOverridesBundle" => true}}), do: true
   defp repository_overrides?(_profile), do: false
+
+  # Whether a person may offer a session on this profile's pods their own tools (Decision
+  # 862): `spec.personalTools`, `forbid` or the default `allow`. Sent beside the pin for the
+  # reason the switch above is: it is the profile's word on the session, read again at every
+  # activation, so a change reaches a session when it next wakes and restarts no pod.
+  defp personal_tools(%{spec: %{"personalTools" => "forbid"}}), do: "forbid"
+  defp personal_tools(_profile), do: "allow"
 
   defp team_name(%{team_id: nil}), do: nil
 

@@ -15,6 +15,11 @@
 // same tools, since a call the pod parked for it has a minute and asking again for what
 // was just allowed teaches people to say yes without reading. A different set of tools is
 // asked about again.
+//
+// A session that takes no person's tools at all refuses before it asks anything
+// (`forbidden`: the platform's `managed_mcp_servers_only`, or the worker profile's
+// `personalTools: forbid`, troupe Decision 862). That holds for the attachment: the offer
+// says why, and no later socket lists the servers or registers them again.
 
 import { TroupeRpcError } from "./connection.js";
 import type { TroupeConnection } from "./connection.js";
@@ -61,6 +66,7 @@ interface Challenge {
 }
 
 const CONSENT_REQUIRED = -32013;
+const FORBIDDEN = -32004;
 const PREFIX = "client.";
 
 /** The tools a server offers a session are named after it, so two servers' tools never meet. */
@@ -82,6 +88,8 @@ export class ServerOffer {
   // The question out to the person, so a socket that comes back while it is waits for the
   // same answer rather than asking twice.
   private deciding: { key: string; answer: Promise<boolean> } | null = null;
+  // The session's reason for taking no person's tools at all, once it has given one.
+  private refused: string | null = null;
 
   constructor(
     private readonly daemon: DaemonClient,
@@ -108,13 +116,13 @@ export class ServerOffer {
 
   /** Offer the person's signed-in servers over this socket. */
   async offer(conn: TroupeConnection): Promise<void> {
+    if (this.refused !== null) return this.set({ state: "refused", reason: this.refused });
     try {
       await this.register(conn);
     } catch (e) {
       // A socket that went while it was being offered is offered again on the next.
       if (conn.closed) return;
-      const reason = e instanceof TroupeRpcError && typeof e.data?.["reason"] === "string" ? e.data["reason"] : e instanceof Error ? e.message : String(e);
-      this.set({ state: "refused", reason });
+      this.set({ state: "refused", reason: reasonOf(e) });
     }
   }
 
@@ -174,8 +182,10 @@ export class ServerOffer {
       return null;
     } catch (e) {
       const asked = consentAsked(e);
-      if (!asked) throw e;
-      return asked;
+      if (asked) return asked;
+      // Refused outright, before any challenge: for the whole attachment.
+      if (e instanceof TroupeRpcError && e.code === FORBIDDEN) this.refused = reasonOf(e);
+      throw e;
     }
   }
 
@@ -202,6 +212,12 @@ export class ServerOffer {
   private set(state: OfferState): void {
     this.opts.onState?.(state);
   }
+}
+
+/** Why an offer failed, in the session's words where it gave some. */
+function reasonOf(e: unknown): string {
+  if (e instanceof TroupeRpcError && typeof e.data?.["reason"] === "string") return e.data["reason"];
+  return e instanceof Error ? e.message : String(e);
 }
 
 /** The session's challenge, when this is the session asking for consent. */

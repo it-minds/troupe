@@ -409,7 +409,10 @@ the session's approvals like any other tool's. Closing the session, or the app, 
 a connection that drops and comes back offers them again without asking twice. The TUI
 does the same for a pod session you open from HQ: the session's question waits in its
 window as an approval naming the tools, `y` offers them and `n` does not, and a line in
-the transcript says what was offered.
+the transcript says what was offered. A team may keep people's own tools off its pods
+(`personalTools: forbid` on the profile): such a session asks you nothing, the desktop app
+and the TUI say that your servers are not offered there and why, and neither offers them
+again while the session is open.
 
 ## Your own commands
 

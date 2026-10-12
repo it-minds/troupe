@@ -172,6 +172,11 @@ defmodule Troupe.Config do
             # profile's.
             managed_permission_rules_only: false,
             managed_mcp_servers_only: false,
+            # The worker profile whose pods take no tool a person's own client hosts, by
+            # name, or `nil` where a person may offer theirs (Decision 862): a profile's
+            # `spec.personalTools: forbid`, which the worker sets from the activation, so a
+            # change reaches a session at its next wake. Never from a file.
+            personal_tools_forbidden_by: nil,
             # What happens to an `ask` tool when nobody is attached to answer. `:wait`
             # leaves the request in the log for a person to find; `:deny` answers no at
             # once, which is what an unattended session asks for. There is deliberately

@@ -88,6 +88,37 @@ defmodule Troupe.Gateway.ClientToolsTest do
     end
   end
 
+  # Decision 862: the same refusal from a worker profile whose `spec.personalTools` is
+  # `forbid`, which the worker sets from the activation (`Troupe.Worker.PersonalToolsTest`
+  # drives that half). It names the profile and the setting, since that is what an
+  # administrator would change.
+  describe "a worker profile that takes no personal tools" do
+    test "refuses before any challenge, naming the profile and its setting", context do
+      %{session: session} =
+        start_session(context,
+          default: {:text, "ok"},
+          config: [auto_approve: true, personal_tools_forbidden_by: "dev"]
+        )
+
+      ada = attach(context, @ada)
+
+      assert {:error, %Error{message: "forbidden"} = error} =
+               Client.call(ada, "tools.register", %{
+                 "command_id" => Client.command_id(),
+                 "session_id" => session.id,
+                 "tools" => [@tool]
+               })
+
+      assert error.data["setting"] == "personalTools"
+      assert error.data["profile"] == "dev"
+      assert error.data["reason"] =~ "the worker profile dev does not take a person's own tools"
+      assert error.data["reason"] =~ "(personalTools: forbid)"
+
+      assert ClientTools.list(session.id) == []
+      assert ClientTools.taint(session.id) == []
+    end
+  end
+
   describe "consent" do
     test "a registration without consent is rejected, and says what to show", context do
       %{session: session} = start_session(context, default: {:text, "ok"})

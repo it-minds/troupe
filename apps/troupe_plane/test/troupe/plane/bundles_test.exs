@@ -431,6 +431,23 @@ defmodule Troupe.Plane.BundlesTest do
       assert pushed(pod, later, user)["repository_overrides_bundle"] == true
     end
 
+    # Decision 862: whether a person may offer the session their own tools rides the same
+    # way, read from the profile at every activation, `allow` unless it says `forbid`.
+    test "the push says whether the profile takes a person's own tools", context do
+      {:ok, v1} = Bundles.publish("stable", %{"agents" => ["build"]}, announce: false)
+      pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+      user = granted_user()
+      before = dormant_session(user, "dev", v1.version)
+      later = dormant_session(user, "dev", v1.version)
+
+      assert pushed(pod, before, user)["personal_tools"] == "allow"
+
+      spec = Map.put(Fleet.get_profile("dev").spec, "personalTools", "forbid")
+      {:ok, _} = Fleet.put_profile(%{name: "dev", spec: spec})
+
+      assert pushed(pod, later, user)["personal_tools"] == "forbid"
+    end
+
     test "activating on a version that is still live is not an upgrade", context do
       {:ok, v1} = Bundles.publish("stable", %{"agents" => ["build"]}, announce: false)
       pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")

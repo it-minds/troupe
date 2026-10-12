@@ -1031,7 +1031,11 @@ defmodule Troupe.Remote.Worker do
   # A plane session's own window, reached active and with `control`: registering steers
   # the session and activates it, so a reader or a dormant session is offered nothing, and
   # a branch shown inside another session's screen is not asked about on its own. The
-  # daemon is asked from a task, and what it says comes back tagged with this socket.
+  # daemon is asked from a task, and what it says comes back tagged with this socket. A
+  # session that has refused the person's tools outright is offered nothing again in this
+  # attachment (root Decision 862).
+  defp offer(%{offer: %{refused: refused}} = state) when is_binary(refused), do: state
+
   defp offer(%{plane_url: plane, as: nil, session_state: :active, status: :up} = state)
        when is_binary(plane) do
     if "control" in state.scopes do
@@ -1093,11 +1097,19 @@ defmodule Troupe.Remote.Worker do
 
   # A challenge for tools the person allowed in this attachment is answered with their
   # consent; one that ran out while it travelled is answered again, twice, and then it is
-  # the session's fault. Anything else is a question for the person.
+  # the session's fault. Anything else is a question for the person. A session that takes
+  # no person's tools at all (`forbidden`: the platform's switch, or its worker profile's
+  # `personalTools: forbid`, root Decision 862) is told so once, with its reason, and is
+  # not offered them again on a later socket.
   defp refused(state, tries, error) do
     challenge = is_map(error.data) && error.data["challenge"]
 
     cond do
+      RPC.reason(error) == :forbidden ->
+        reason = RPC.describe(error)
+        publish_note(state, "your own MCP servers are not offered to this session: #{reason}")
+        %{state | offer: %{state.offer | refused: reason}}
+
       RPC.reason(error) != :consent_required or not is_binary(challenge) ->
         publish_note(
           state,

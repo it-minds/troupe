@@ -16,6 +16,11 @@ defmodule Troupe.Remote.Offer do
   answered with the consent already given for the same tools, and a no holds for them. A
   different set of tools is asked about again. The daemon calls block, so the worker
   makes them from a task, never from its own process.
+
+  A session that refuses them outright (`forbidden`: the platform's
+  `managed_mcp_servers_only`, or a worker profile's `personalTools: forbid`, root Decision
+  862) is not offered them again for the attachment: the refusal is said once, with the
+  session's reason, and a new socket lists nothing and registers nothing.
   """
 
   alias Troupe.Client.Daemon.Link
@@ -27,7 +32,8 @@ defmodule Troupe.Remote.Offer do
             allowed: nil,
             declined: nil,
             registered: nil,
-            asking: nil
+            asking: nil,
+            refused: nil
 
   @typedoc "One tool as the session is offered it, and where its calls go."
   @type offered :: %{spec: map(), server: String.t(), tool: String.t()}
@@ -36,7 +42,8 @@ defmodule Troupe.Remote.Offer do
   `key` names the set of tools listed last; `allowed`, `declined` and `registered` the set
   the person allowed, turned down, and the one last registered. `asking` is the question
   out to the person: its call id in the window, the set it is about, and the session's
-  newest challenge and words for it.
+  newest challenge and words for it. `refused` is the session's reason for taking no
+  person's tools at all, once it has given one.
   """
   @type t :: %__MODULE__{
           tools: [map()],
@@ -46,7 +53,8 @@ defmodule Troupe.Remote.Offer do
           allowed: String.t() | nil,
           declined: String.t() | nil,
           registered: String.t() | nil,
-          asking: map() | nil
+          asking: map() | nil,
+          refused: String.t() | nil
         }
 
   @prefix "client."

@@ -112,7 +112,8 @@ app and the TUI offer the same tools to a session on a pod they open, through
 `tools.register` once they agree (Decision 748): the pod's agent calls them, the daemon on
 their machine makes the call, and the pod sees the arguments and the answer, never the
 token. A platform with `managed_mcp_servers_only` takes none, as for any client-hosted
-tool.
+tool, and nor does a profile with `personalTools: forbid`
+([profiles](profiles-and-policy.md#a-persons-own-tools-on-a-pod)).
 
 ## 2. Triggers
 

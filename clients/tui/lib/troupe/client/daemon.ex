@@ -951,7 +951,7 @@ defmodule Troupe.Client.Daemon do
   # changed (root Decision 840), which a daemon from before that leaves out.
   @impl true
   def worktree_status(sid) do
-    case Link.call("worktree.list", %{workspace: workspace(sid)}) do
+    case Link.call_apart("worktree.list", %{workspace: workspace(sid)}) do
       {:ok, %{"worktrees" => list}} when is_list(list) ->
         {:ok,
          Enum.map(list, fn t ->
@@ -1200,7 +1200,7 @@ defmodule Troupe.Client.Daemon do
   """
   @spec worktrees(String.t()) :: {[map()], [String.t()]}
   def worktrees(workspace) do
-    case Link.call("worktree.list", %{workspace: workspace}) do
+    case Link.call_apart("worktree.list", %{workspace: workspace}) do
       {:ok, %{"worktrees" => [_checkout | linked]}} ->
         {troupe, theirs} =
           linked
