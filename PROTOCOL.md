@@ -2350,6 +2350,13 @@ Without `consent`, the answer is an error carrying the challenge to show:
 
 With it: `{"registered": ["client.notes.search"], "taint": "personal_connector"}`.
 
+A session that takes no client-hosted tools refuses before it issues a challenge, so nobody
+is asked to consent to what it will not take: `forbidden`, with `setting` naming why and a
+`reason` to show. On a platform with `managed_mcp_servers_only` the setting is that; on a pod
+whose worker profile sets `personalTools: forbid` it is `personalTools`, with `profile`
+(Decision 862). Troupe's clients take either as the answer for the attachment and do not
+offer again on a later socket of it; a session opened again is offered again.
+
 Registered tools appear as `client.<name>` under the same allowlists, permissions and
 approvals as everything else. A client offering one of the person's own servers this way
 (`mcp.tools`, `mcp.call`) names each tool `<server>.<tool>`, so the model sees

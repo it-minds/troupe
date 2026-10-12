@@ -906,6 +906,18 @@ defmodule Troupe.Gateway.Dispatch do
                "this platform does not accept client-hosted tools; only the profile's MCP servers are available"
            })}
 
+        # The same, from the worker profile rather than the platform (Decision 862), and it
+        # names the profile, since that is what an administrator changes.
+        {:error, {:personal_tools_forbidden, profile}} ->
+          {:error,
+           Error.new(:forbidden, %{
+             setting: "personalTools",
+             profile: profile,
+             reason:
+               "the worker profile #{profile} does not take a person's own tools on its pods " <>
+                 "(personalTools: forbid); only the profile's MCP servers are available"
+           })}
+
         {:error, reason} ->
           {:error, Error.new(:unavailable, %{reason: to_string(reason)})}
       end

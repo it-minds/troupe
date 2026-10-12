@@ -382,6 +382,7 @@ defmodule Troupe.Worker.Session.Restore do
       # something, so this is not optional here.
       |> Keyword.put_new(:fs_events, true)
       |> Keyword.merge(contract(Keyword.get(opts, :terms, [])))
+      |> Keyword.merge(personal_tools(Keyword.get(opts, :personal_tools), context.profile))
 
     Troupe.resume(context.session_id,
       workspace: root,
@@ -413,6 +414,16 @@ defmodule Troupe.Worker.Session.Restore do
 
     terms |> Keyword.put_new(:budget_asks, false) |> Keyword.put(:terms, caps)
   end
+
+  # Whether a person may offer this session their own tools: the worker profile's
+  # `spec.personalTools` (Decision 862), which the plane reads at every activation and sends
+  # beside the bundle pin, so a change reaches a session at its next wake and restarts no
+  # pod. Only `forbid` forbids, and names the profile; anything else, and a plane that says
+  # nothing, is the default, which lets them.
+  defp personal_tools("forbid", profile),
+    do: [personal_tools_forbidden_by: profile || "of this pod"]
+
+  defp personal_tools(_setting, _profile), do: []
 
   defp default_workspace(context) do
     Path.join([Paths.state_dir(context.state_dir), "workspaces", context.session_id])

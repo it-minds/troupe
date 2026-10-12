@@ -21,7 +21,7 @@ manifest's ([§6](#6-provisioning-direct-or-from-a-repository)).
 | `size_class` | `standard` (several sessions share a worker) or `heavy` (fewer, with more CPU, memory and disk each). A resource question, not a safety one: sessions cannot see each other's files either way |
 | `max_sessions` | how far it may grow, in sessions at once. Absent is no ceiling, bounded by the team's budget |
 | `warm_workers` | workers kept up when nothing runs. `0` scales to zero, and the next session waits about half a minute |
-| `spec` | the rest of the resource in its own camelCase: `llm`, `egress`, `mcpServers`, `configBundleChannel`, `orgMount`, `repositoryOverridesBundle`, and `storage.storageClassName`, the class a worker's disk comes from (one `allowedStorageClasses` names; absent is the cluster's default) |
+| `spec` | the rest of the resource in its own camelCase: `llm`, `egress`, `mcpServers`, `configBundleChannel`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, and `storage.storageClassName`, the class a worker's disk comes from (one `allowedStorageClasses` names; absent is the cluster's default) |
 
 `replicas`, `sessionsPerPod`, `resources` and `storage.size` are the plane's: it writes them
 from the size class and from what is running, and **refuses** a request that sends them
@@ -49,6 +49,7 @@ Other `spec` fields:
 | `configBundleChannel` | which bundle channel the profile follows (`stable`) |
 | `orgMount` | mount the policy's org volume at `/mnt/org`, always read-only |
 | `repositoryOverridesBundle` | `true` lets a session's working copy replace the bundle's agents and skills, and Troupe's built-in agents, of the same name; absent or `false`, those win ([below](#a-repositorys-agents-and-skills-on-a-pod)) |
+| `personalTools` | `allow` (the default, and what absent means) lets a person offer a session on these pods the tools of MCP servers they signed in to on their own machine; `forbid` has the pods refuse ([below](#a-persons-own-tools-on-a-pod)) |
 | `mcpIdentities` | who the profile is at each MCP server its bundle calls with client credentials ([below](#calling-an-mcp-server-as-the-profile)). Yours to write, in direct and gitops mode alike; nothing in it is secret |
 | `mcpServers`, `teams` | **written by the plane** from the channel's bundle and from grants; do not set them |
 
@@ -201,6 +202,36 @@ Commands follow the same rule and have nothing to lose to yet: a bundle carries 
 commands, so a working copy's `.troupe/commands/` are read on a pod as on a laptop, and a
 command named like an agent stays the agent's, which on a pod is the bundle's (Decision
 763).
+
+### A person's own tools on a pod
+
+A person signed in to an MCP server on their own machine can offer its tools to a session
+on a pod from the desktop app or the TUI ([bundles](bundles-and-triggers.md#1-config-bundles)):
+the session registers them as tools that client hosts (`tools.register`), and each call
+comes back to the person's machine and runs there with their sign-in. A team whose pods
+should work only with what the profile names forbids it on the profile (Decision 862):
+
+```yaml
+spec:
+  personalTools: forbid
+```
+
+A session on those pods then refuses the offer before it asks the person anything,
+answering `forbidden` with `setting: personalTools`, the profile's name, and the sentence
+`the worker profile <name> does not take a person's own tools on its pods (personalTools:
+forbid); only the profile's MCP servers are available`. The pod's log has one warning line
+for each refusal, with the session, the person and the tools; nothing is registered, and
+the session's own log records nothing. The desktop app shows that sentence where it would
+have said what is offered, the TUI shows it once as a note in the session's window, and
+neither offers the person's servers to that session again while it stays open.
+
+`allow`, absent, and anything a plane sends but `forbid` leave the offer as it is.
+`admin.profile.put` refuses any other value, as the resource's schema does. The console's
+profile editor has it as a toggle. Like `repositoryOverridesBundle`, it rides the
+activation: the plane reads it at every activation, so changing it reaches a session the
+next time it wakes and restarts no pod, and an `ssh` profile has it too. A session awake
+when the setting changes keeps what it had until then. The platform's own
+`managed_mcp_servers_only` refuses the same offer on every profile at once.
 
 ## 2. What the operator creates
 
@@ -489,7 +520,7 @@ What a profile takes from its resource:
 | `warm_workers` | annotation `troupe.dev/warm-workers`, 0 to 10; absent is 0 |
 | `provisioner` | annotation `troupe.dev/provisioner`; absent is `kubernetes` |
 | channel | `spec.configBundleChannel`; absent is `stable` |
-| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount`, `repositoryOverridesBundle` |
+| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount`, `repositoryOverridesBundle`, `personalTools` |
 
 CPU, memory and disk are the manifest's to size, within the policy; the class the plane
 places and scales by is read off `sessionsPerPod`.

@@ -579,7 +579,7 @@ defmodule Troupe.Plane.PanelTest do
             llm.endpoint llm.provider llm.model llm.secretRef.name
             egress.fqdns egress.gitHosts
             storage.storageClassName
-            configBundleChannel orgMount repositoryOverridesBundle
+            configBundleChannel orgMount repositoryOverridesBundle forbidPersonalTools
           ) do
         assert html =~ ~s(name="#{field}"), "the editor has no field for #{field}"
       end
@@ -665,6 +665,29 @@ defmodule Troupe.Plane.PanelTest do
       # volume would be a change the form could express and never send.
       assert draft["spec"]["orgMount"] == false
       assert draft["spec"]["repositoryOverridesBundle"] == false
+      assert draft["spec"]["personalTools"] == "allow"
+    end
+
+    # Decision 862. Set in the API or a repository, it is read back into the toggle, so a
+    # save from this page keeps it; unticked, the pods take a person's own tools again.
+    test "keeps people's own tools off the pods when told to, and keeps it", context do
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "dev",
+          image: "ghcr.io/troupe/worker:1",
+          spec: %{"personalTools" => "forbid"}
+        })
+
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      assert html =~ "keep people&#39;s own signed-in tools off these pods"
+      view |> element("#profile-editor") |> render_submit()
+      assert Fleet.get_profile("dev").spec["personalTools"] == "forbid"
+
+      render_change(view, "change", %{"name" => "dev", "image" => "ghcr.io/troupe/worker:1"})
+      view |> element("#profile-editor") |> render_submit()
+      assert Fleet.get_profile("dev").spec["personalTools"] == "allow"
     end
 
     # Decision 826. Set in the API or a repository, it is read back into the toggle, so a

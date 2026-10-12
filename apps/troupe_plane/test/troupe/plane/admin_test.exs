@@ -691,6 +691,45 @@ defmodule Troupe.Plane.AdminTest do
       assert Fleet.get_profile("repo-dev").spec["repositoryOverridesBundle"] == true
     end
 
+    # Whether a person may offer the profile's pods their own tools (Decision 862): `allow`
+    # or `forbid`, and nothing else, since a pod reads only `forbid` as forbidding.
+    test "personalTools is kept when it is allow or forbid and refused otherwise", context do
+      profile = %{"name" => "tools-dev", "image" => "ghcr.io/troupe/worker:1"}
+
+      for value <- ["forbid", "allow"] do
+        sent = Map.put(profile, "spec", %{"personalTools" => value})
+        assert {:ok, _} = Admin.profile_put(context.root, sent)
+        assert Fleet.get_profile("tools-dev").spec["personalTools"] == value
+      end
+
+      for value <- ["Forbid", "deny", true, nil] do
+        sent = Map.put(profile, "spec", %{"personalTools" => value})
+        assert {:error, error} = Admin.profile_put(context.root, sent)
+        assert error.message == "invalid_params"
+        assert error.data.reason =~ "personalTools must be allow or forbid"
+      end
+
+      assert Fleet.get_profile("tools-dev").spec["personalTools"] == "allow"
+    end
+
+    # The custom resource declares the field the plane validates, with the same two words,
+    # so a profile written in a repository is refused by the API server where the console
+    # would refuse it. Absent is the default, and the resource gives none of its own: no
+    # existing resource changes when the chart is upgraded.
+    test "the WorkerProfile resource declares personalTools as allow or forbid" do
+      crd =
+        "../../../../../charts/troupe/crds/workerprofile.yaml"
+        |> Path.expand(__DIR__)
+        |> YamlElixir.read_from_file!()
+
+      [%{"schema" => %{"openAPIV3Schema" => schema}}] = crd["spec"]["versions"]
+      field = schema["properties"]["spec"]["properties"]["personalTools"]
+
+      assert field["type"] == "string"
+      assert field["enum"] == ["allow", "forbid"]
+      refute Map.has_key?(field, "default")
+    end
+
     # Who the profile is at a server its bundle calls with client credentials (Decision
     # 747): the owner's to write, and nothing in it secret, so the plane keeps it as it keeps
     # the rest of the spec and says what is missing rather than refusing.

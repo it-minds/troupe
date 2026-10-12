@@ -418,6 +418,20 @@ defmodule Troupe.Operator.ResourcesTest do
       refute Map.has_key?(key, "value")
     end
 
+    # Decision 862: whether a person may offer the pods their own tools is the plane's to
+    # send with each activation, as `repositoryOverridesBundle` is (Decision 826), so a
+    # profile that forbids it renders exactly what one that does not renders: no new pod
+    # template, no pod replaced to change it.
+    test "personalTools changes nothing the operator renders", context do
+      forbidding =
+        profile()
+        |> put_in(["spec", "personalTools"], "forbid")
+        |> Profile.from_resource()
+
+      assert Resources.for_profile(forbidding, context.policy, context.settings) ==
+               context.resources
+    end
+
     test "the container drops every capability", %{resources: resources} do
       security = container(resources)["securityContext"]
       assert security["allowPrivilegeEscalation"] == false

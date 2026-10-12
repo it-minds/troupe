@@ -134,6 +134,37 @@ defmodule Troupe.RemoteClientToolsTest do
     assert length(registrations(remote)) == 1
   end
 
+  # Root Decision 862: a session on a worker profile with `personalTools: forbid` refuses
+  # the registration before any challenge. The person is asked nothing, told once why, and
+  # the attachment offers the tools to it no more, a new socket included.
+  test "a session whose profile takes no personal tools is not offered them, and says why once",
+       %{remote: remote, origin: origin} do
+    reason =
+      "the worker profile code does not take a person's own tools on its pods " <>
+        "(personalTools: forbid); only the profile's MCP servers are available"
+
+    :ok =
+      FakeRemote.fail_next(remote, "tools.register", -32_004, "forbidden",
+        data: %{"setting" => "personalTools", "profile" => "code", "reason" => reason},
+        times: 10
+      )
+
+    sid = attach!(origin, "s-tools")
+    :ok = Client.subscribe(sid)
+
+    assert_receive {:troupe_event, %{type: :notice, data: %{text: said}}}, 15_000
+    assert said =~ "your own MCP servers are not offered to this session"
+    assert said =~ "personalTools: forbid"
+    assert length(registrations(remote)) == 1
+
+    FakeRemote.kill_workers(remote)
+    await_up(sid)
+    refute_receive {:troupe_event, %{type: :approval_requested}}, 2_000
+    refute_received {:troupe_event, %{type: :notice}}
+    assert length(registrations(remote)) == 1
+    assert FakeRemote.registered_tools(remote) == []
+  end
+
   test "the window opened again while the session asks still shows the question",
        %{origin: origin} do
     sid = attach!(origin, "s-tools")
