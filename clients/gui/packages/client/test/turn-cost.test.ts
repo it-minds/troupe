@@ -13,7 +13,7 @@ function durable(type: string, data: Record<string, unknown> = {}, agent = ["roo
   seq += 1;
   return { seq, prev_hash: null, ts: new Date().toISOString(), actor: { kind: "agent" }, agent, type, v: 1, data };
 }
-const foldAll = (events: TroupeEvent[], from: TranscriptState = emptyTranscript) => events.reduce(fold, from);
+const foldAll = (events: TroupeEvent[], from: TranscriptState = emptyTranscript) => events.reduce((s, e) => fold(s, e), from);
 
 // 100 fresh tokens, 1,000 from the cache and one out, three times.
 const TURN = { calls: 3, input_tokens: 300, cache_read: 3_000, cache_write: 0, output_tokens: 3, cost_micros: 37_500, unpriced: 0 };

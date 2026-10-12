@@ -3,7 +3,7 @@
 How a transcript shows what was rendered from something: the model's prose, a code
 block, a diff, a tool call and what it returned, reasoning, data. One vocabulary, two
 implementations: the terminal UI builds it from this page (TUI Decision 161), and so does
-the desktop app. Issue #474 is the why; this is the what.
+the desktop app (Decision 877). Issue #474 is the why; this is the what.
 
 A turn shows its answer, not its working. Everything else on this page serves that.
 
@@ -89,7 +89,9 @@ is one line where it began, above the answer:
 ▸ 7 steps · 1 failed · grep, read_file, edit_file · 14s
 ```
 
-`n steps` counts the calls, `finish` aside, which says itself in the line under it.
+`n steps` counts the calls, `finish` aside, which says itself in the line under it. The
+desktop app's transcript holds a subagent's calls beside its parent's, so its strip counts
+every call it stands for, theirs too (Decision 877).
 `· k failed` is there when one failed, in the error colour. Then the tools used, in the
 order first used, four at most and `and n more`; then the time from the first call's start
 to the last one's end, or to now while one runs. `▸` when the steps are shut, `▾` above
@@ -150,7 +152,7 @@ colour. The desktop app's tokens are named beside each.
 |---|---|---|
 | the rendered surface | `surface` | terminal `bg.hover`; desktop `bg.sunken` with `border.hairline` |
 | the frame's rail, the rules, a table's lines, line numbers | `rail` | `border.strong` |
-| a code or data label, a heading, a list marker | `accent` | `border.focus` (`text.link` in Limelight) |
+| a code or data label, a heading, a list marker | `accent` | `border.focus` (`text.link` in Limelight); desktop `--frame-accent`, generated so |
 | a tool that worked | `ok` | `status.allowed.fg` |
 | a tool that failed, the strip's `k failed` | `error` | `status.error.fg` |
 | a tool running, the curtain line's facts | `working` | `status.running.fg` |
@@ -199,7 +201,8 @@ A line is localisable, since the facts beside it are.
 a model error, or in a subagent's own pane. **No curtain line at all** in a headless run,
 `troupe bench`, CI logs, or anything with `--json`: those print the facts, and a
 machine-readable surface with jokes in it is a bug. In the terminal the activated pane
-draws it, and nothing else does.
+draws it, and nothing else does; in the desktop app, the session's transcript, under the
+turn.
 
 ## 8. Markdown
 
@@ -211,12 +214,17 @@ rule says, a cell past 32 columns cut with `…`), and the fenced blocks of §2.
 What a client does not render, it says plainly rather than drawing badly. The terminal UI
 leaves raw HTML, images and footnotes as written, and draws a table wider than 100 columns
 as written under a line that says so. The desktop app disallows raw HTML rather than
-sanitising it, renders Mermaid as a diagram, and has a rendered/source toggle on a prose
-frame, which settles every "is the model's Markdown broken, or is ours?" question.
+sanitising it: it is shown as the text it is, and an image as written, never loaded. A
+link goes where it says only over `http` or `https`. A table cell wraps rather than being
+cut, and a table wider than its frame scrolls inside it. It has a rendered/source toggle
+on a prose frame, which settles every "is the model's Markdown broken, or is ours?"
+question (Decision 877).
 
 ## 9. Not here yet
 
 - Tree-sitter grammars a person installs, and the WASM spike to measure them: a later
   slice of #474. The built-in highlighting stays as it is.
+- Highlighting in the desktop app, whose code frames show their source in the reader's
+  ink until that slice settles what highlights there.
+- Mermaid drawn as a diagram in the desktop app; it is a code frame of its source for now.
 - The viewer (#61), where a frame past 500 lines will open.
-- The desktop app's half of this page: the next slice of #474.

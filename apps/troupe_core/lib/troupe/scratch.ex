@@ -20,8 +20,10 @@ defmodule Troupe.Scratch do
   **What the log says.** The listing is a fold over the log's `scratch_updated` events,
   the latest of each name, so it is the same for a running session and a dormant one and
   rebuilt by a replay. The documents themselves are files; their words are in the log
-  already, as the `show` call's arguments, and nothing replaces those with a pointer: the
-  prompt prefix stays the same (Decisions 863 and 867).
+  already, as the `show` call's arguments. Between compactions nothing replaces those, so
+  the prompt prefix stays the same (Decisions 863 and 867); a compaction, where it changes
+  anyway, leaves each out for a pointer, and the agent reads a document back with
+  `read_file`, here and nowhere else (`readable/2`, Decision 878).
   """
 
   alias Troupe.{Config, Mounts}
@@ -297,6 +299,33 @@ defmodule Troupe.Scratch do
       nil -> mounts
       dir -> Mounts.new([entry(dir, :ro) | mounts.entries])
     end
+  end
+
+  @doc """
+  Where `read_file` reads `scratch:/<name>`, the path a compaction's pointer names
+  (Decision 878), or the sentence it is refused with.
+
+  Against a table of the scratchpad alone, read-only: the agent reads its session's
+  documents back, and writes them only with `show`, which logs each one. No other file
+  tool and no command reaches the scratchpad.
+  """
+  @spec readable(String.t() | nil, String.t()) :: {:ok, Path.t()} | {:error, String.t()}
+  def readable(session_id, path) when is_binary(session_id) do
+    with {:ok, real, _entry} <-
+           Mounts.resolve(with_mount(Mounts.new([]), session_id), path, :read),
+         true <- File.regular?(real) do
+      {:ok, real}
+    else
+      _none -> not_on_pad(path)
+    end
+  end
+
+  def readable(_session_id, path), do: not_on_pad(path)
+
+  defp not_on_pad(path) do
+    {:error,
+     "#{path} is not a document on this session's scratchpad. A document is read as " <>
+       "scratch:/<name>, the name it was shown under."}
   end
 
   defp entry(dir, mode), do: %{name: "scratch", kind: :scratch, root: dir, mode: mode}

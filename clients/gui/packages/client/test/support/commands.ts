@@ -87,6 +87,20 @@ export const COMMANDS: CommandEntry[] = [
     example: "/resume 2",
   },
   {
+    name: "detail",
+    aliases: [],
+    section: "navigate",
+    summary: "How much of a transcript is open: quiet, tools or everything",
+    usage: "/detail [quiet | tools | everything]",
+    args: [arg("level", false, "text")],
+    availability: "always",
+    source: "builtin",
+    detail:
+      "Quiet shows a turn's answer with its working one strip above it; tools opens the tool calls; everything collapses nothing. " +
+      "For this session's screen; the transcript.detail setting is the default.",
+    example: "/detail everything",
+  },
+  {
     name: "upload",
     aliases: [],
     section: "workspace",

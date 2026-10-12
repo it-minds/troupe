@@ -28,7 +28,9 @@ defmodule Troupe.Bench.LiveScenarios do
   Decision 867). `loop_turn`, by name, is a `/loop` turn and then a person's turn in the
   same session, where `goal_complete` was offered on the loop's turn alone (issue #606,
   Decision 871). `scratchpad` and `scratchpad_without`, by name too, are one migration plan
-  with the scratchpad and without it (issue #472, Decision 870).
+  with the scratchpad and without it (issue #472, Decision 870), and
+  `scratchpad_session` and `scratchpad_session_without` a session of five turns that
+  revises it and compacts, under a window of its own (issue #616, Decision 878).
   """
 
   alias Troupe.Agent.Definitions
@@ -59,7 +61,9 @@ defmodule Troupe.Bench.LiveScenarios do
       long_turn(),
       loop_turn(),
       scratchpad(),
-      scratchpad_without()
+      scratchpad_without(),
+      scratchpad_session(),
+      scratchpad_session_without()
     ]
   end
 
@@ -791,6 +795,124 @@ defmodule Troupe.Bench.LiveScenarios do
          ]}
       end
     }
+  end
+
+  # Issue #616 (Decision 878): a long session that writes its documents and revises them,
+  # and compacts on the way, with the scratchpad and without it. A window of its own puts
+  # the first compaction before the fourth turn whatever the model's window is: with the
+  # scratchpad after the second turn, where the revised plan's call is behind its short
+  # reply, and without it after the third. The fourth and fifth turns need the plan again,
+  # so they are the same work after a compaction on both sides.
+  @session_follow_ups [
+    "Revise the plan: the notes are copied in batches of 1,000 rows that resume where they stopped after a failure, and the full-text index is rebuilt after the copy. Give the whole plan again, revised.",
+    "Now write a checklist for the night of the switch: what to check before, during and after it, one line an item.",
+    "Which step of the plan copies the notes, and how long does that step take for 2,000,000 notes at 5,000 rows a second? Answer in two sentences.",
+    "Add a step to the plan, right after the copy, that compares the row counts of both databases, and give the whole plan again."
+  ]
+
+  @session_config [
+    context_window: 14_000,
+    compact_at: 0.8,
+    max_turns: 30,
+    max_input_tokens: 300_000,
+    max_output_tokens: 40_000,
+    wall_clock_ms: 600_000
+  ]
+
+  defp scratchpad_session do
+    %Scenario{
+      name: "scratchpad_session",
+      title: "a long session that writes and revises documents, and compacts",
+      prompt: @migration_prompt,
+      follow_ups: @session_follow_ups,
+      files: %{"db/schema.sql" => @schema_sql, "app/store.py" => @store_py},
+      config: @session_config,
+      measure: fn ctx ->
+        {[],
+         [
+           {"five_turns", "all five turns were taken", typed(ctx.events) == 5},
+           {"compacted", "the session compacted before its fourth turn",
+            compacted_before?(ctx.events, 4)},
+           {"shown", "the plan went to the scratchpad, and was shown again revised",
+            Enum.any?(shown_versions(ctx.events), &(&1 > 1))},
+           {"timed", "the fourth reply says the copy takes 400 seconds",
+            timed?(answers(ctx.events), 3)},
+           {"counted", "the last plan compares the row counts",
+            last_shown(ctx.events) =~ ~r/row counts?/i}
+         ]}
+      end
+    }
+  end
+
+  defp scratchpad_session_without do
+    %Scenario{
+      name: "scratchpad_session_without",
+      title: "the same session, with no scratchpad",
+      prompt: @migration_prompt,
+      follow_ups: @session_follow_ups,
+      files: %{
+        "db/schema.sql" => @schema_sql,
+        "app/store.py" => @store_py,
+        ".troupe/agents/build.md" => build_without_show()
+      },
+      config: @session_config,
+      measure: fn ctx ->
+        {[],
+         [
+           {"five_turns", "all five turns were taken", typed(ctx.events) == 5},
+           {"compacted", "the session compacted before its fourth turn",
+            compacted_before?(ctx.events, 4)},
+           {"not_shown", "nothing went to a scratchpad", shown(ctx.events) == []},
+           {"timed", "the fourth reply says the copy takes 400 seconds",
+            timed?(answers(ctx.events), 3)},
+           {"counted", "the last plan compares the row counts", reply(ctx) =~ ~r/row counts?/i}
+         ]}
+      end
+    }
+  end
+
+  # Whether the first compaction came before the `n`th turn's input.
+  defp compacted_before?(events, n) do
+    compacted = Enum.find(events, &(&1.type == "compacted"))
+
+    input =
+      events
+      |> Enum.filter(&(&1.type == "user_input" and &1.data["source"] == "user"))
+      |> Enum.at(n - 1)
+
+    compacted != nil and input != nil and compacted.seq < input.seq
+  end
+
+  # 2,000,000 notes at 5,000 rows a second, however the reply puts it.
+  @timed ~r/\b400[\s-]*(s\b|sec)|6\.67?\s*min|6\s*min(ute)?s?,?\s*(and\s*)?40|six minutes and forty/i
+
+  defp timed?(answers, index), do: (Enum.at(answers, index) || "") =~ @timed
+
+  # The root's replies that ended a turn, as text, in order.
+  defp answers(events) do
+    events
+    |> Enum.filter(&(&1.type == "llm_response" and &1.agent == ["root"]))
+    |> Enum.map(&(get_in(&1.data, ["message", "content"]) || []))
+    |> Enum.reject(fn content -> Enum.any?(content, &match?(%{"type" => "tool_use"}, &1)) end)
+    |> Enum.map(fn content ->
+      content
+      |> Enum.filter(&match?(%{"type" => "text"}, &1))
+      |> Enum.map_join("\n", & &1["text"])
+    end)
+  end
+
+  # The versions each document reached, and the words of the last one shown.
+  defp shown_versions(events),
+    do: for(%{type: "scratch_updated", data: %{"version" => version}} <- events, do: version)
+
+  defp last_shown(events) do
+    events
+    |> Enum.filter(&(&1.type == "tool_call_started" and &1.data["name"] == "show"))
+    |> List.last()
+    |> case do
+      %{data: %{"args" => %{"content" => content}}} when is_binary(content) -> content
+      _none -> ""
+    end
   end
 
   # The names of the documents the run showed, and their sizes.

@@ -112,7 +112,11 @@ a diff under Review, then to have the librarian rewrite a brief an older survey 
 `/memory` there opens the backstage's Memory pane on the repository's facts, one of each
 status, with Refresh and Forget the brief as the terminal's `/memory refresh` and
 `/memory forget`. A new session in `/home/ada/project`, which has no brief, starts the
-librarian by itself and says so in the transcript.
+librarian by itself and says so in the transcript. The session in `/home/ada/parser`
+shows a turn's frames ([docs/design/frames.md](../../docs/design/frames.md)): its working
+one strip above an answer with a table, a nested list, fenced code, a diff and a csv.
+Anything sent there plays the same turn live, its reasoning streaming and the curtain
+line under it, so `/detail` and a click on the strip have a running turn to work on.
 
 ### Your own daemon beside the fake plane
 

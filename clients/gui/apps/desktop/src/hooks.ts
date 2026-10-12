@@ -450,9 +450,11 @@ export function useSessionView(
     let held = false;
     // The local view's stream, from its first event. The replay may arrive before `open`
     // has resolved, and until it has, nothing that arrives is news.
+    // Each event folds with the time it arrived, which the curtain line and live reasoning count from.
     const listener = (e: TroupeEvent): void => {
       if (!live) return;
-      setState((s) => fold(s, e));
+      const now = Date.now();
+      setState((s) => fold(s, e, { now }));
       const v = ref.current;
       noticeEvent(sessionId, e, held && Boolean(v) && isDurable(e) && e.seq > v!.headSeq);
     };
@@ -505,7 +507,8 @@ export function useSessionView(
           hooks: {
             onEvent: (e) => {
               if (!live) return;
-              setState((s) => fold(s, e));
+              const now = Date.now();
+              setState((s) => fold(s, e, { now }));
               // Until the attachment is here, what arrives is the replay.
               const v = ref.current;
               noticeEvent(sessionId, e, Boolean(v) && isDurable(e) && e.seq > v!.headSeq);
