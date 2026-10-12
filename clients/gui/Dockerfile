@@ -41,6 +41,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/client/package.json packages/client/
 COPY packages/bench/package.json packages/bench/
 COPY apps/desktop/package.json apps/desktop/
+COPY apps/console/package.json apps/console/
 RUN pnpm install --frozen-lockfile
 
 COPY . .
@@ -51,11 +52,20 @@ COPY --from=licences PROTOCOL.md /PROTOCOL.md
 ARG TROUPE_GUI_BASE=/
 ENV TROUPE_GUI_BASE=${TROUPE_GUI_BASE}
 
+# The administrative console (apps/console) is an app of its own, built into the same
+# image beside the desktop app's web build and served from `/console/` in it, so a
+# deployment that serves one serves the other with nothing more to build, pull or run.
+# Where the chart mounts it is baked in the same way, and for the same reason; the chart's
+# `console.basePath` must match it. Written without slashes, as `TROUPE_GUI_BASE` is.
+ARG TROUPE_CONSOLE_BASE=console
+ENV TROUPE_CONSOLE_BASE=${TROUPE_CONSOLE_BASE}
+
 # Typecheck and test on the way through. An image that builds from code that does not
 # typecheck is an image nobody can reason about, and the suite is eight seconds.
 RUN pnpm --filter @troupe/client build \
  && pnpm --filter @troupe/client test \
- && pnpm --filter @troupe/desktop build
+ && pnpm --filter @troupe/desktop build \
+ && pnpm --filter @troupe/console build
 
 
 FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
@@ -63,6 +73,7 @@ FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
 # Unprivileged: the image runs as uid 101 and listens on 8080, so the Pod needs no
 # capability to bind a port and no root in the container.
 COPY --from=build /src/apps/desktop/dist /usr/share/nginx/html
+COPY --from=build /src/apps/console/dist /usr/share/nginx/html/console
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 # Outside `conf.d`, which nginx reads whole at the `http` level: this is included by the
 # server and its locations, where the headers belong (Decision 803).

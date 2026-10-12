@@ -77,6 +77,28 @@ describe("the team methods", () => {
     ]);
   });
 
+  it("name the version policy's, the groups' and the ladder's arguments the way the plane does", async () => {
+    const { api, calls } = recording();
+
+    await api.clients();
+    await api.putClients("tui", { minimum: "0.16.0-beta", blocked: [] });
+    await api.groups();
+    await api.settingEffective("default_erase_after_days", "engineering");
+    await api.settingEffective("default_erase_after_days");
+    await api.putSetting("client_enforced", '{"max_turns": 50}');
+    await api.resetSetting("client_enforced");
+
+    assert.deepEqual(calls, [
+      { method: "admin.clients.get", params: {} },
+      { method: "admin.clients.put", params: { component: "tui", policy: { minimum: "0.16.0-beta", blocked: [] } } },
+      { method: "admin.groups.list", params: {} },
+      { method: "admin.setting.effective", params: { key: "default_erase_after_days", team: "engineering" } },
+      { method: "admin.setting.effective", params: { key: "default_erase_after_days" } },
+      { method: "admin.setting.put", params: { key: "client_enforced", value: '{"max_turns": 50}' } },
+      { method: "admin.setting.reset", params: { key: "client_enforced" } },
+    ]);
+  });
+
   it("carry the preview's shape through untouched", async () => {
     const effect: TeamDisableEffect = {
       team: "engineering",

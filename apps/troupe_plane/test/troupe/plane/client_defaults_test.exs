@@ -11,6 +11,8 @@ defmodule Troupe.Plane.ClientDefaultsTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.{Admin, Audit, Harness, Identity, Settings}
+  alias Troupe.Plane.Admin.API, as: AdminAPI
+  alias Troupe.Protocol.Organisation
 
   @keys ~w(client_provider client_base_url client_auth client_model_default client_model_cheap client_model_expensive client_enforced)
 
@@ -126,6 +128,44 @@ defmodule Troupe.Plane.ClientDefaultsTest do
 
       assert Settings.get("client_enforced") == nil
       assert Audit.list(kind: "setting") == []
+    end
+
+    test "the settings list names the keys it may hold, as the protocol does, with what each means and its type",
+         context do
+      assert {:ok, answer} = AdminAPI.call("admin.settings.list", %{}, context.actor)
+
+      # As a console reads it: the JSON the plane answers with.
+      %{"settings" => settings} = answer |> Jason.encode!() |> Jason.decode!()
+      enforced = Enum.find(settings, &(&1["key"] == "client_enforced"))
+      by_key = Map.new(enforced["enforceable"], &{&1["key"], &1})
+
+      assert Enum.map(enforced["enforceable"], & &1["key"]) == Organisation.keys()
+
+      assert by_key["approvals"] == %{
+               "key" => "approvals",
+               "kind" => "order",
+               "order" => ["wait", "deny"],
+               "meaning" => "the loosest it may be",
+               "type" => "enum",
+               "values" => ["wait", "deny"]
+             }
+
+      assert %{"kind" => "ceiling", "meaning" => "the most it may be", "type" => "integer"} =
+               by_key["max_turns"]
+
+      assert %{"min" => 1} = by_key["max_turns"]
+      assert %{"type" => "integer", "min" => 0} = by_key["max_depth"]
+
+      assert %{"kind" => "fixed", "meaning" => "what it is", "type" => "string"} =
+               by_key["base_url"]
+
+      assert %{"kind" => "fixed", "type" => "enum", "values" => [_ | _]} = by_key["provider"]
+
+      assert %{"kind" => "order", "order" => [false, true], "type" => "boolean"} =
+               by_key["managed_mcp_servers_only"]
+
+      # Only the enforced set carries the list.
+      assert Enum.count(settings, &Map.has_key?(&1, "enforceable")) == 1
     end
   end
 

@@ -28,6 +28,7 @@ defmodule Version.Files do
       {"clients/gui/packages/client/package.json", ~r/^  "version": "(.+)",$/m, :full},
       {"clients/gui/packages/bench/package.json", ~r/^  "version": "(.+)",$/m, :full},
       {"clients/gui/apps/desktop/package.json", ~r/^  "version": "(.+)",$/m, :full},
+      {"clients/gui/apps/console/package.json", ~r/^  "version": "(.+)",$/m, :full},
       {"clients/gui/apps/desktop/src-tauri/tauri.conf.json", ~r/^  "version": "(.+)",$/m, :base},
       {"clients/gui/apps/desktop/src-tauri/Cargo.toml", ~r/\A\[package\]\nname = "troupe-desktop"\nversion = "(.+)"$/m, :base},
       {"clients/gui/apps/desktop/src-tauri/Cargo.lock", ~r/^name = "troupe-desktop"\nversion = "(.+)"$/m, :base},

@@ -1,0 +1,9 @@
+{
+  // The tests, with Node's types beside the DOM's: they start the client's fake plane,
+  // which is a server, and read the workspace's files. The app is built without them.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src", "test"]
+}

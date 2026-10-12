@@ -11,9 +11,9 @@ Troupe is a plain relying party. Of the provider it needs:
 |---|---|
 | **Discovery** at `<issuer>/.well-known/openid-configuration`, naming the same issuer, with a `jwks_uri` | tokens are verified against the JWKS, cached and refetched at most once a minute after a bad signature; `iss` is checked exactly |
 | **Device authorization grant** for a public client | the TUI signs in from a terminal; the plane publishes the device and token endpoints at `/.well-known/troupe` |
-| **Authorization code + client secret** for the console, redirect URI `<base_url>/admin/callback` | the console redeems the code for an `id_token`, so `openid` must be in scope |
+| **Authorization code + client secret** for the console at `/admin`, redirect URI `<base_url>/admin/callback` | that console redeems the code for an `id_token`, so `openid` must be in scope |
 | A **group claim** in id tokens | admin and team membership are read from the claim `groups_claim` names. A token without the claim leaves memberships as they were, so an MCP client's access token needs it only to keep them current. Whether it takes a scope is the provider's: Authentik's does ([authentik.md](authentik.md)), and asking Entra for a `groups` scope refuses every sign-in (`AADSTS650053`) |
-| Redirects for the GUI (`<base_url>/app`, the chart's default) and for OAuth-capable MCP clients (loopback) | both sign in in a browser |
+| Redirects for the GUI (`<base_url>/app`, the chart's default), the [console](console.md) (`<base_url>/console`) and OAuth-capable MCP clients (loopback), the first two as a single-page application's | all sign in in a browser |
 | For MCP: a provider access token whose audience is the client id, `api://<client_id>` or `<base_url>/mcp`, and the scope `<base_url>/mcp/admin` (or `plane.oidc.mcpScope`) | an MCP client sends `https://<plane>/mcp` as RFC 8707's `resource`. On Entra that means `<base_url>/mcp` as an identifier URI beside `api://<client_id>`: it refused the older `api://<client-id>/admin` pairing (`AADSTS9010010`) |
 
 Default scopes are `openid profile email offline_access`; `offline_access` is what gets a
