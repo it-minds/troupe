@@ -565,6 +565,21 @@ defmodule Troupe.LLM.ProviderTypesTest do
       assert text =~ "catalog: 2 models from router at #{fakes.openrouter.base_url}/models"
       assert text =~ "catalog: 2 models from ollama at #{fakes.ollama.url}/v1/models"
       refute text =~ "azure at"
+
+      assert text =~
+               "catalog: azure is azure_openai, which lists no models to a key; " <>
+                 "the models the config names are the ones it serves"
+
+      azure = %Config{
+        provider: "azure_openai",
+        base_url: fakes.azure_openai.base_url,
+        api_key: key
+      }
+
+      assert Config.describe(azure, command: "troupe") =~
+               "catalog: the session-wide provider is azure_openai"
+
+      refute Config.describe(azure, command: "troupe") =~ "no provider to ask"
     end
   end
 

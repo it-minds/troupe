@@ -1180,17 +1180,40 @@ defmodule Troupe.Config do
 
   # What the list was fetched from and when, one line for each provider a refresh asks.
   defp describe_catalog(config, sources, asked, command) do
-    case Store.providers(config) do
-      [] ->
+    case {Store.providers(config), unlisted(config)} do
+      {[], []} ->
         "catalog: no provider to ask; one is asked what it serves once the config gives it a key\n"
 
-      providers ->
+      {providers, unlisted} ->
         Enum.map_join(providers, "", fn provider ->
           "catalog: " <>
             describe_source(provider, Store.source(sources, provider), asked, command) <> "\n"
-        end)
+        end) <> unlisted
     end
   end
+
+  # A provider whose type lists its models to nobody with a key (`azure_openai`) says so,
+  # rather than reading as one that was never asked.
+  defp unlisted(%__MODULE__{} = config) do
+    named =
+      for {name, p} <- Enum.sort(config.providers),
+          is_nil(Map.get(p, :refused)),
+          unlisted?(p.type),
+          do: {name, p.type}
+
+    session =
+      if is_nil(config.refused) and unlisted?(config.provider),
+        do: [{"the session-wide provider", config.provider}],
+        else: []
+
+    Enum.map_join(named ++ session, "", fn {label, type} ->
+      "catalog: #{label} is #{type}, which lists no models to a key; " <>
+        "the models the config names are the ones it serves\n"
+    end)
+  end
+
+  defp unlisted?(type),
+    do: match?(%ProviderType{listing: nil, named: true}, ProviderType.fetch(type))
 
   defp describe_source(provider, nil, _asked, command),
     do:
