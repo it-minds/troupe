@@ -1,9 +1,16 @@
 defmodule Troupe.Tools.ReadFile do
-  @moduledoc "Read a file, optionally a line range, with the output capped."
+  @moduledoc """
+  Read a file, optionally a line range, with the output capped.
+
+  `scratch:/<name>` is a document on the session's scratchpad, read-only, which is how an
+  agent reads back a document a compaction left out for a pointer (Decision 878). The
+  description does not say so: the pointer does, where it is needed, and the tools are
+  the same on every call.
+  """
 
   @behaviour Troupe.Tool
 
-  alias Troupe.{Config, Tool, Workspace}
+  alias Troupe.{Config, Scratch, Tool, Workspace}
   alias Troupe.Tools.Output
 
   @default_limit 2_000
@@ -38,13 +45,18 @@ defmodule Troupe.Tools.ReadFile do
   @impl Troupe.Tool
   def run(args, ctx) do
     with {:ok, path} <- Tool.fetch_string(args, "path"),
-         {:ok, resolved} <- Workspace.resolve_readable(ctx.workspace, path, Workspace.read_roots(ctx)),
+         {:ok, resolved} <- resolve(path, ctx),
          {:ok, contents} <- read(resolved) do
       offset = max(Tool.fetch_int(args, "offset", 1), 1)
       limit = max(Tool.fetch_int(args, "limit", @default_limit), 1)
       {:ok, render(contents, offset, limit, ctx.config)}
     end
   end
+
+  defp resolve("scratch:" <> _ = path, ctx), do: Scratch.readable(ctx.session_id, path)
+
+  defp resolve(path, ctx),
+    do: Workspace.resolve_readable(ctx.workspace, path, Workspace.read_roots(ctx))
 
   defp read(path) do
     case File.read(path) do
