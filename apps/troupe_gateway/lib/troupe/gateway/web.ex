@@ -66,18 +66,20 @@ defmodule Troupe.Gateway.Web do
     end
   end
 
-  # A browser names the page that opened the socket in `Origin`; nothing else sends the
-  # header at all. The token is what actually admits a connection — a page on another
-  # origin cannot read it out of this one — so the check is a second fence, not the
-  # first: with no allowlist configured every origin is admitted, and a deployment that
-  # knows exactly which origins host its GUI lists them and nothing else gets an upgrade.
-  # `*` in the list says the permissive default was chosen on purpose.
+  # A browser names the page that opened the socket in `Origin`; a client that is not a
+  # browser sends no such header, and is not asked about one. The token is what actually
+  # admits a connection — a page on another origin cannot read it out of this one — so the
+  # check is a second fence, not the first. But it is a fence: a page is admitted only
+  # when its origin is listed, and no list, or an empty one, admits no page at all. `*` in
+  # the list admits every page, which is a choice somebody has to write down.
   defp origin_allowed?(conn) do
-    case {Plug.Conn.get_req_header(conn, "origin"), allowed_origins(conn)} do
-      {[], _allowed} -> true
-      {_origin, nil} -> true
-      {_origin, []} -> true
-      {[origin | _], allowed} -> "*" in allowed or Enum.any?(allowed, &origin_matches?(&1, origin))
+    case Plug.Conn.get_req_header(conn, "origin") do
+      [] ->
+        true
+
+      [origin | _] ->
+        allowed = List.wrap(allowed_origins(conn))
+        "*" in allowed or Enum.any?(allowed, &origin_matches?(&1, origin))
     end
   end
 
@@ -98,10 +100,10 @@ defmodule Troupe.Gateway.Web do
     rest != "" and String.match?(rest, ~r/^[0-9]+$/)
   end
 
-  # Configured per listener where there is one — a daemon serves a person's own browser
-  # and a pod serves whatever its deployment says — and from the application environment
-  # otherwise, which is how a worker has always been told. A function is asked at each
-  # upgrade: a daemon's list grows when it is linked to a plane or a page is opened at it.
+  # Configured per listener — a daemon serves a person's own browser and a pod serves
+  # whatever its deployment says — and from the application environment where a listener
+  # names none. A function is asked at each upgrade: a daemon's list grows when it is
+  # linked to a plane or a page is opened at it.
   defp allowed_origins(conn) do
     case conn.private[:troupe_allowed_origins] do
       nil -> Application.get_env(:troupe_gateway, :allowed_origins)

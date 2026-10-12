@@ -136,7 +136,7 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
         "mcp_servers" => [],
         "agents" => [
           %{
-            "name" => "reviewer",
+            "name" => "pr-reviewer",
             "definition" => "---\ndescription: Reviews\nmode: primary\n---\nYou review."
           }
         ]

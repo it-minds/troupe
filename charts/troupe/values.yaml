@@ -58,9 +58,12 @@ operator:
   # a certificate gives you; a cluster reached through a port mapping sets both.
   workersScheme: wss
   workersPort: ""
-  # Browser origins a worker pod answers cross-origin requests from, for a client that
-  # runs in a browser. Empty means none: `troupe` is not a browser, and a worker that
-  # answered any origin would let a page you happened to visit talk to your sessions.
+  # Browser origins a worker pod admits on its WebSocket, for a client that runs in a
+  # browser. Empty means none: a worker that admitted any origin would let a page you
+  # happened to visit open a socket to your sessions. The GUI this chart serves (`gui:`)
+  # is admitted without being listed, by the plane's origin, and so are the desktop app
+  # and `troupe`, which are not pages. A GUI served from anywhere else is listed here, as
+  # `https://gui.example.com`; `"*"` admits every origin, and is a choice to make on purpose.
   workerAllowedOrigins: []
   # `+Q`, the BEAM's port table size. Left to itself it is taken from `RLIMIT_NOFILE`,
   # which a container runtime sets absurdly high, and the table costs 1.5GB.

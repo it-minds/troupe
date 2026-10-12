@@ -126,8 +126,8 @@ if config_env() == :prod do
         |> String.split(",", trim: true)
         |> Enum.map(&String.trim/1)
         |> Enum.reject(&(&1 == "")),
-      # The same shape: the origins every worker pod admits on its WebSocket, or none
-      # to admit them all.
+      # The same shape: the browser origins every worker pod admits on its WebSocket
+      # besides the desktop app's own. None admits no page; `*` admits every one.
       worker_allowed_origins:
         "TROUPE_WORKER_ALLOWED_ORIGINS"
         |> System.get_env("")
@@ -506,9 +506,9 @@ if config_env() == :prod do
     # The WebSocket a client attaches through. A frame is a whole message and the socket
     # refuses one larger than this before it is assembled — a ceiling for a connection
     # that has not yet shown a token, not the protocol's message limit. The origin list
-    # is for browsers: a page not on it does not get an upgrade. Empty admits every origin,
-    # because the token is what actually admits a connection; a deployment that knows
-    # which origins host its GUI names them here.
+    # is for browsers: a page not on it does not get an upgrade, and empty admits no page.
+    # The desktop app's own origin is admitted beside it (`Troupe.Worker.Harness`), and a
+    # client that is not a browser names none. `*` admits every page.
     config :troupe_gateway,
       max_frame_bytes: String.to_integer(System.get_env("TROUPE_MAX_FRAME_BYTES", "16777216")),
       allowed_origins:

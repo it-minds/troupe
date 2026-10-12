@@ -47,7 +47,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_WORKERS_SCHEME`, `TROUPE_WORKERS_PORT` | `wss`, unset | scheme and port of the endpoint a pod advertises (kind uses `ws`, `30080`) | `operator.workersScheme`, `operator.workersPort` |
 | `TROUPE_DRAIN_TIMEOUT_SECONDS` | `300` | worker `terminationGracePeriodSeconds`; **not** put in the pod's env, so the worker's own drain wait stays 300. A pod stopped without a drain gives turns 150 s of its grace period and needs the rest to put its sessions to sleep, so keep this at 300 or more | `operator.drainTimeoutSeconds` |
 | `TROUPE_IMAGE_PULL_SECRETS` | none | comma-separated pull secrets for worker pods | `imagePullSecrets` |
-| `TROUPE_WORKER_ALLOWED_ORIGINS` | every origin | browser origins, written to pods as `TROUPE_ALLOWED_ORIGINS` | `operator.workerAllowedOrigins` |
+| `TROUPE_WORKER_ALLOWED_ORIGINS` | none | browser origins, written to pods as `TROUPE_ALLOWED_ORIGINS`; the chart adds the plane's own origin when it serves the GUI | `operator.workerAllowedOrigins` |
 | `TROUPE_POLICY_NAME` | `default` | which `TroupePolicy` is read | none — keep `policy.name` at `default` |
 | `TROUPE_KUBE_CONTEXT`, `KUBECONFIG` | unset, `~/.kube/config` | outside a pod only; in a pod the ServiceAccount wins | none |
 
@@ -112,7 +112,7 @@ Worker pods are created by the operator, so the chart sets none of these.
 | `TROUPE_OBJECT_*` | as the plane | the object store; credentials from `TROUPE_OBJECT_SECRET_NAME` | yes |
 | `TROUPE_STATE_HOME` | | `/var/lib/troupe`, the pod's data volume | yes |
 | `TROUPE_SMALL_MODEL` | unset | the cheap model | from `llm.smallModel` |
-| `TROUPE_ALLOWED_ORIGINS` | every origin | origins the WebSocket upgrade admits | from `TROUPE_WORKER_ALLOWED_ORIGINS` |
+| `TROUPE_ALLOWED_ORIGINS` | none | browser origins the WebSocket upgrade admits besides the desktop app's own (`tauri://localhost`, `http://tauri.localhost`); none admits no page, `*` every one. A client that is not a browser sends no origin and is not asked | from `TROUPE_WORKER_ALLOWED_ORIGINS` |
 | `TROUPE_BASE_URL` | unset | **the LLM endpoint** — not the plane's meaning of the name | from `llm.endpoint` |
 | `TROUPE_PROVIDER`, `TROUPE_MODEL`, `TROUPE_API_KEY` | core defaults | provider, model, and the key from `llm.secretRef` (not optional: a missing Secret is `CreateContainerConfigError`) | from `llm` |
 | `TROUPE_MODEL_PRICES` | unset | JSON `models.prices`: dollars per million tokens by model, for calls the gateway does not price. Unset, such a call costs nothing on the ledger | from `llm.prices` |

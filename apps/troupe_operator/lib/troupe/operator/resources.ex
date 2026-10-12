@@ -872,8 +872,9 @@ defmodule Troupe.Operator.Resources do
     ]
   end
 
-  # Only when there is a list: a pod with the variable absent admits every origin, and
-  # an empty string would say the same thing less clearly.
+  # Only when there is a list: a pod with the variable absent admits no page, only the
+  # desktop app and clients that are not browsers, and an empty string would say the same
+  # thing less clearly.
   defp allowed_origins_env(%Settings{worker_allowed_origins: []}), do: []
 
   defp allowed_origins_env(%Settings{worker_allowed_origins: origins}) do

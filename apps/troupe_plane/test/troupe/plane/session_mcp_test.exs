@@ -117,19 +117,19 @@ defmodule Troupe.Plane.SessionMCPTest do
                  %{
                    "parent" => context.parent.id,
                    "prompt" => "review it",
-                   "agent" => "reviewer"
+                   "agent" => "pr-reviewer"
                  },
                  context
                )
 
       assert_receive {:pushed, "session.activate", pushed}, 5_000
-      assert pushed["agent"] == "reviewer"
+      assert pushed["agent"] == "pr-reviewer"
       assert is_binary(created["session_id"])
     end
 
     test "may not run one the parent could not, and is told so", context do
       # Narrowed to `build` alone: the team's grant is what the parent's offering comes
-      # from, and `reviewer` is outside it.
+      # from, and `pr-reviewer` is outside it.
       {:ok, _} =
         Identity.grant(context.team, "dev", %{
           "entitlements" => [%{kind: "agent", name: "build", mode: "allow"}]
@@ -141,7 +141,7 @@ defmodule Troupe.Plane.SessionMCPTest do
                  %{
                    "parent" => context.parent.id,
                    "prompt" => "review it",
-                   "agent" => "reviewer"
+                   "agent" => "pr-reviewer"
                  },
                  context
                )
@@ -149,7 +149,7 @@ defmodule Troupe.Plane.SessionMCPTest do
       # A refusal the model can read and act on, naming what it *may* run — not a
       # transport error it can only report.
       assert text =~ "forbidden"
-      assert text =~ "reviewer"
+      assert text =~ "pr-reviewer"
       refute_receive {:pushed, "session.activate", _}, 300
     end
 
@@ -245,7 +245,7 @@ defmodule Troupe.Plane.SessionMCPTest do
     %{
       "schema" => 1,
       "agents" => [
-        %{"name" => "reviewer", "definition" => "---
+        %{"name" => "pr-reviewer", "definition" => "---
 mode: primary
 ---
 Review."},

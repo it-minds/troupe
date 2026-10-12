@@ -501,7 +501,7 @@ defmodule Troupe.Plane.PanelTest do
       {:ok, view, _html} = context.conn |> sign_in(context.root.subject) |> live("/admin/bundles")
 
       bad =
-        ~s({"schema": 1, "agents": [{"name": "reviewer", "definition": "---\\nmode: odd\\n---\\nHi"}]})
+        ~s({"schema": 1, "agents": [{"name": "pr-reviewer", "definition": "---\\nmode: odd\\n---\\nHi"}]})
 
       html =
         view
@@ -516,7 +516,7 @@ defmodule Troupe.Plane.PanelTest do
           "schema" => 1,
           "agents" => [
             %{
-              "name" => "reviewer",
+              "name" => "pr-reviewer",
               "definition" => "---\nmode: primary\ndescription: Reviews code\n---\nGo."
             }
           ],
@@ -541,7 +541,7 @@ defmodule Troupe.Plane.PanelTest do
       html = view |> form("form[phx-submit='draft']", %{"content" => good}) |> render_submit()
 
       assert html =~ "published v1"
-      assert html =~ "reviewer"
+      assert html =~ "pr-reviewer"
       assert html =~ "Reviews code"
       assert html =~ "checklist"
       assert html =~ "troupe-mcp-jira"
@@ -1043,7 +1043,7 @@ defmodule Troupe.Plane.PanelTest do
             "skills" => [],
             "mcp_servers" => [],
             "agents" => [
-              %{"name" => "reviewer", "definition" => "---
+              %{"name" => "pr-reviewer", "definition" => "---
 description: Reviews
 mode: primary
 ---
@@ -1065,7 +1065,7 @@ You build."}
       {:ok, _} =
         Admin.team_grant(actor, "engineering", "dev", %{
           "entitlements" => [
-            %{"kind" => "agent", "name" => "reviewer", "mode" => "allow"},
+            %{"kind" => "agent", "name" => "pr-reviewer", "mode" => "allow"},
             %{"kind" => "agent", "name" => "builder", "mode" => "deny"}
           ]
         })
@@ -1100,7 +1100,7 @@ You build."}]
       # Done item 4's second half, and the question a publish actually raises.
       assert html =~ "Who loses something"
       assert html =~ "engineering"
-      assert html =~ "reviewer"
+      assert html =~ "pr-reviewer"
     end
 
     test "and a deny row losing its target is not a loss", context do
@@ -1112,7 +1112,7 @@ You build."}]
           "schema" => 1,
           "skills" => [],
           "mcp_servers" => [],
-          "agents" => [%{"name" => "reviewer", "definition" => "---
+          "agents" => [%{"name" => "pr-reviewer", "definition" => "---
 description: Reviews
 mode: primary
 ---
@@ -1140,7 +1140,7 @@ You review."}]
           "skills" => [],
           "mcp_servers" => [],
           "agents" => [
-            %{"name" => "reviewer", "definition" => "---
+            %{"name" => "pr-reviewer", "definition" => "---
 description: Reviews
 mode: primary
 ---

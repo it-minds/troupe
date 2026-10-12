@@ -127,13 +127,13 @@ defmodule Troupe.Plane.BundlesTest do
     test "a definition that does not parse is refused with the reason" do
       content =
         schema_1(
-          agents: [%{"name" => "reviewer", "definition" => "---\nmode: sideways\n---\nHi"}]
+          agents: [%{"name" => "pr-reviewer", "definition" => "---\nmode: sideways\n---\nHi"}]
         )
 
       assert {:error, {:invalid_bundle, [message]}} =
                Bundles.publish("stable", content, announce: false)
 
-      assert message =~ "reviewer"
+      assert message =~ "pr-reviewer"
       assert message =~ "bad_mode"
       assert Bundles.current("stable") == nil
     end
@@ -159,6 +159,30 @@ defmodule Troupe.Plane.BundlesTest do
       assert message =~ "mcp.elsewhere.example"
     end
 
+    # Only four of them were guarded once, by a list somebody kept by hand, and a bundle
+    # replaced `reviewer` without a word.
+    test "a bundle replaces an agent troupe_core ships only with override: true, whichever it is" do
+      shipped =
+        "../../../../troupe_core/priv/agents/*.md"
+        |> Path.expand(__DIR__)
+        |> Path.wildcard()
+        |> Enum.map(&Path.basename(&1, ".md"))
+
+      assert "reviewer" in shipped
+      assert Enum.sort(Bundles.builtin_agents()) == Enum.sort(shipped)
+
+      for name <- shipped do
+        replacing = schema_1(agents: [%{"name" => name, "definition" => "---\nmode: primary\n---\nHi"}])
+
+        assert {:error, {:invalid_bundle, [message]}} = Bundles.validate(replacing), name
+        assert message =~ name
+        assert message =~ "override: true"
+
+        meant = schema_1(agents: [%{"name" => name, "definition" => "---\nmode: primary\noverride: true\n---\nHi"}])
+        assert {:ok, _} = Bundles.validate(meant), name
+      end
+    end
+
     test "with no policy at all every host is allowed" do
       Application.delete_env(:troupe_plane, :egress_allowed)
       Application.delete_env(:troupe_plane, :policy)
@@ -174,7 +198,7 @@ defmodule Troupe.Plane.BundlesTest do
 
       assert bundle.summary == %{
                "schema" => 1,
-               "agents" => ["reviewer", "helper"],
+               "agents" => ["pr-reviewer", "helper"],
                "skills" => ["review-checklist"],
                "mcp_servers" => ["jira"],
                "acp_agents" => []
@@ -381,12 +405,12 @@ defmodule Troupe.Plane.BundlesTest do
       assert {:ok, _} =
                Harness.call(
                  "session.create",
-                 %{"profile" => "dev", "agent" => "reviewer"},
+                 %{"profile" => "dev", "agent" => "pr-reviewer"},
                  context(user)
                )
 
       assert_receive {:pushed, ^pod, "session.activate", params}, 5_000
-      assert params["agent"] == "reviewer"
+      assert params["agent"] == "pr-reviewer"
       assert params["bundle_version"] == 1
 
       assert {:ok, _} =
@@ -408,7 +432,7 @@ defmodule Troupe.Plane.BundlesTest do
                )
 
       assert error.message == "invalid_params"
-      assert error.data.agents == ["reviewer", "build", "plan"]
+      assert error.data.agents == ["pr-reviewer", "build", "plan"]
       refute_receive {:pushed, ^pod, "session.activate", %{"agent" => "helper"}}, 200
     end
 
@@ -522,7 +546,7 @@ defmodule Troupe.Plane.BundlesTest do
     schema_1(
       agents: [
         %{
-          "name" => "reviewer",
+          "name" => "pr-reviewer",
           "definition" =>
             "---\ndescription: Reviews code\nmode: primary\nskills: [review-checklist]\n---\nYou review."
         },

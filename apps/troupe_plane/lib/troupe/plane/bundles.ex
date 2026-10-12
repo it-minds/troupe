@@ -41,11 +41,22 @@ defmodule Troupe.Plane.Bundles do
 
   require Logger
 
-  # The agents `troupe_core` ships in `priv/agents/`. A bundle may replace one only by
-  # saying so; the names are listed here rather than read from core because the plane
-  # does not depend on core, and a bundle that shadowed `build` by accident would be a
-  # bundle nobody meant to publish.
-  @builtin_agents ~w(build plan general explore)
+  # The agents `troupe_core` ships in `priv/agents/`, every one of them. A bundle may
+  # replace one only by saying so: a bundle that shadowed `reviewer` by accident would be a
+  # bundle nobody meant to publish. The names are read from those files when this module is
+  # compiled, which the plane can do from the umbrella's source without depending on core
+  # at run time, so a definition added there is guarded here without anybody remembering
+  # to list it. A build that finds none stops, rather than guarding nothing.
+  @builtin_dir Path.expand("../../../../troupe_core/priv/agents", __DIR__)
+  @external_resource @builtin_dir
+  @builtin_files Path.wildcard(Path.join(@builtin_dir, "*.md"))
+  for file <- @builtin_files, do: @external_resource(file)
+  @builtin_agents @builtin_files |> Enum.map(&Path.basename(&1, ".md")) |> Enum.sort()
+
+  if @builtin_agents == [] do
+    raise CompileError, description: "no built-in agent definitions in #{@builtin_dir}"
+  end
+
   @builtin_primaries ~w(build plan)
 
   @type projection :: %{String.t() => map()}
@@ -312,7 +323,7 @@ defmodule Troupe.Plane.Bundles do
   The primaries a session on this bundle may start as.
 
   The bundle's own primaries first, then the built-in ones it does not replace: a
-  bundle that adds `reviewer` has not taken `build` away, because built-ins sit below
+  bundle that adds `pr-reviewer` has not taken `build` away, because built-ins sit below
   the bundle in the definition search order.
   """
   @spec primaries(Document.t() | nil) :: [String.t()]

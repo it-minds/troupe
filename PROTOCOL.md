@@ -80,6 +80,12 @@ framing, no batching. Binary frames are not used. The token goes in the
 `Authorization: Bearer` header, or in `auth.token` on `initialize` where headers are
 unavailable.
 
+The upgrade checks `Origin` as the daemon's does. A pod admits a desktop shell's own
+origin and the origins in `TROUPE_ALLOWED_ORIGINS` (the operator writes them from
+`operator.workerAllowedOrigins`, with the plane's origin where the chart serves the GUI);
+with none listed, no browser page gets a socket, and `*` admits every page. A client that
+is not a browser sends no `Origin` and is not refused for it.
+
 A frame is one message whatever whitespace it holds, newlines between its tokens
 included. A frame larger than the socket's ceiling, 16 MiB unless the server is
 configured otherwise, closes the connection before it is read; `initialize` says what the

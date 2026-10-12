@@ -158,10 +158,11 @@ plane token.
 ## 9. The GUI
 
 The chart serves `clients/gui` at `gui.basePath` (`/app`) on the plane's host — same
-origin, so no CORS entry. A GUI served from anywhere else needs its origin in
-`plane.corsOrigins`, and in `operator.workerAllowedOrigins` once that lists any (empty, a
-worker admits every origin), and its redirect registered at the identity provider, which
-also has to allow its origin for the device grant. The desktop app updates itself, and
+origin, so no CORS entry, and the chart tells the workers to admit the plane's origin. A
+GUI served from anywhere else needs its origin in `plane.corsOrigins` and in
+`operator.workerAllowedOrigins` (a worker admits no page whose origin is not listed), and
+its redirect registered at the identity provider, which also has to allow its origin for
+the device grant. The desktop app needs neither list. The desktop app updates itself, and
 signed in follows the version the plane recommends for `desktop`
 ([routine-tasks.md](routine-tasks.md#client-versions)). The plane
 answers CORS on `/.well-known/<doc>` paths, not on

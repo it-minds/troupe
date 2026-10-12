@@ -185,9 +185,22 @@ defmodule Troupe.Protocol.Endpoint do
         _ -> %{}
       end
 
-    File.write!(path, Jason.encode!(Map.merge(existing, entry)))
-    File.chmod!(path, 0o600)
-    :ok
+    write_owner_only!(path, Jason.encode!(Map.merge(existing, entry)))
+  end
+
+  # The token is in this file, so it is the person's alone (`Troupe.OwnerOnly`: mode 0600,
+  # or on Windows an access list naming only them), and made so before the token is in
+  # it, so there is no moment at which it sits in a file somebody else could read. A
+  # write after that keeps the file's access as it is.
+  defp write_owner_only!(path, contents) do
+    if not File.exists?(path), do: File.write!(path, "")
+
+    case Troupe.OwnerOnly.restrict(path) do
+      :ok -> :ok
+      {:error, reason} -> raise File.Error, reason: reason, action: "restrict", path: path
+    end
+
+    File.write!(path, contents)
   end
 
   @doc """
@@ -222,9 +235,7 @@ defmodule Troupe.Protocol.Endpoint do
     with {:ok, contents} <- File.read(path),
          {:ok, %{"ws" => %{} = ws} = json} <- Jason.decode(contents) do
       origins = Enum.uniq(List.wrap(ws["origins"]) ++ [origin])
-      File.write!(path, Jason.encode!(Map.put(json, "ws", Map.put(ws, "origins", origins))))
-      File.chmod!(path, 0o600)
-      :ok
+      write_owner_only!(path, Jason.encode!(Map.put(json, "ws", Map.put(ws, "origins", origins))))
     else
       _ -> {:error, :not_running}
     end

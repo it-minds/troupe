@@ -46,10 +46,8 @@ defmodule Troupe.Gateway.TcpTransportTest do
     assert %{"transport" => "tcp", "port" => ^port, "token" => token} = path |> File.read!() |> Jason.decode!()
     assert token == endpoint.token
 
-    unless match?({:win32, _}, :os.type()) do
-      assert %File.Stat{mode: mode} = File.stat!(path)
-      assert Bitwise.band(mode, 0o077) == 0
-    end
+    # Mode 0600, and on Windows an access list naming the user alone.
+    assert Troupe.OwnerOnly.restricted?(path)
 
     # And a client that reads the file finds the same door.
     assert {:ok, %Endpoint{kind: :tcp, port: ^port, token: ^token}} = Endpoint.discover()
