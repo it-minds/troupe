@@ -38,6 +38,11 @@ defmodule Troupe.Worker.Harness do
   @default_http_port 4000
   @default_socket_port 4100
 
+  # The desktop app's webview names its own origin on the socket it opens to a pod:
+  # `tauri://localhost` on macOS and Linux, `http://tauri.localhost` on Windows. No page on
+  # the web can name either, so admitting them admits no page, only the app.
+  @desktop_origins ["tauri://localhost", "http://tauri.localhost"]
+
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts \\ []) do
     Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -73,11 +78,23 @@ defmodule Troupe.Worker.Harness do
         id: web_name(opts),
         port: http_port(opts),
         endpoint: endpoint,
-        ready: Keyword.get(opts, :ready, &ready/0)
+        ready: Keyword.get(opts, :ready, &ready/0),
+        allowed_origins: &allowed_origins/0
       )
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  @doc """
+  The browser origins a pod's WebSocket admits: the desktop app's own, and those the
+  deployment lists (`TROUPE_ALLOWED_ORIGINS`, which the operator writes from
+  `operator.workerAllowedOrigins`). With none listed, no page on the web is admitted. A
+  client that is not a browser names no origin and is not asked for one.
+  """
+  @spec allowed_origins() :: [String.t()]
+  def allowed_origins do
+    @desktop_origins ++ List.wrap(Application.get_env(:troupe_gateway, :allowed_origins))
   end
 
   # Readiness is about taking *new* work. A draining pod keeps serving the sessions it

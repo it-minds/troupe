@@ -112,6 +112,7 @@ nav:
       - Backup and restore: admin/backup-restore.md
       - Monitoring: admin/monitoring.md
       - Routine tasks: admin/routine-tasks.md
+      - Security, for a reviewer: admin/security.md
       - The A2A facade: a2a.md
       - What Troupe dials: egress-allowlist.md
   - Contributing:
@@ -128,11 +129,12 @@ nav:
       - Conventions: developer/conventions.md
       - Build: developer/build.md
       - CI and releases: developer/ci.md
+      - Buying OS code signing: developer/code-signing.md
       - Deployment: developer/deployment.md
       - Tech stack: developer/tech-stack.md
       - Fixing issues: developer/fixing-issues.md
+      - Walking the Stage 1 gate: developer/gate-walk.md
       - Known defects: developer/defects.md
-      - The command audit: developer/command-audit.md
       - Decisions:
           - decisions/README.md
           - The TUI's: decisions/tui/README.md
@@ -145,9 +147,11 @@ nav:
           - Themes: clients/gui/docs/design/themes/THEMES.md
       - The console's design: design/admin/DESIGN.md
       - Frames for rendered output: design/frames.md
-      - Plans:
-          - The admin surface: plans/admin-surface.md
-          - The console: program/control-panel.md
+      # Records kept as they were written, not instruction.
+      - History:
+          - The admin surface, as built: history/admin-surface.md
+          - The console, as planned: history/control-panel.md
+          - The command audit of 0.10.0: history/command-audit.md
   - Writing a client:
       - The protocol: PROTOCOL.md
       - The JSON Schema: https://github.com/it-minds/troupe/tree/main/protocol/schema/v1

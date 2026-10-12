@@ -147,8 +147,10 @@ policy:
   maxResources:
     cpu: "4"
     memory: 8Gi
-  # Every host a profile may reach, as exact names or one-label wildcards. A bare `*` is
-  # not a pattern this accepts, and should not be: a profile that could name any endpoint
+  # Every host a profile may reach, as exact names or one-label wildcards (`*.github.com`).
+  # A star anywhere else is refused: a bare `*`, `**.example.com`, `*.*`, `a.*.example.com`.
+  # The CRD refuses such an entry when the policy is written, and a policy that holds one
+  # anyway admits no profile until it is removed. A profile that could name any endpoint
   # could send a team's code anywhere.
   allowedEgress:
     - llm-gw.example.com                                     # CHANGE ME: your model gateway, or the providers' hosts

@@ -64,6 +64,25 @@ defmodule Troupe.Operator.ReconcilerTest do
     assert MapSet.subset?(prunable, kinds(everything))
   end
 
+  describe "an egress entry that is not a pattern" do
+    # A bare `*` in the policy used to admit a bare `*` in a profile, and the operator wrote
+    # it as a `matchPattern` that is every name there is.
+    test "in a profile and in the policy, is refused naming it, and nothing is written" do
+      allowed = policy()["spec"]["allowedEgress"] ++ ["*"]
+      starred = profile(egress: %{"fqdns" => ["*"], "gitHosts" => []})
+      conn = FakeCluster.start([policy(allowedEgress: allowed), starred])
+
+      assert {:error, {:policy_violation, violations}} = reconcile(conn, cilium: true)
+      assert {:egress_not_a_pattern, "*"} in violations
+      assert {:allowed_egress_not_a_pattern, "*"} in violations
+      refute get(@cilium_policy)
+
+      assert %{"status" => "True", "message" => message} = condition("PolicyViolation")
+      assert message =~ "egress entry *"
+      assert message =~ "allowedEgress entry *"
+    end
+  end
+
   describe "the CiliumNetworkPolicy" do
     test "is deleted when Cilium is switched off" do
       conn = FakeCluster.start([policy(), profile()])

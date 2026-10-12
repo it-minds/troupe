@@ -785,6 +785,40 @@ defmodule Troupe.CLITest do
              ~r/root> done \(budget_exhausted\)\nroot> turn: 1 call · .*\nroot> exit 1: the agent ended budget_exhausted/
   end
 
+  # The harness says the budget ran out a moment before it asks the question beside it,
+  # and a stop sent in between answered no question: the session drops an answer to one it
+  # has not asked, and the run waited for good. Here that moment is held
+  # open. The agent asks from a task, so its tasks are held while it says the budget ran
+  # out, and let go once the printer has had its say.
+  test "headless printer stops the budget question once it is asked, not when the budget runs out" do
+    script = [
+      {:tool, "shell", %{"command" => "while [ ! -e go ]; do sleep 0.05; done"}},
+      {:tools, [{"todo_read", %{}}]},
+      {:text, "done"}
+    ]
+
+    {sid, _, ws} = start_session!(script: script, config: %{"max_turns" => 1})
+    {io, printer} = printer!(sid)
+
+    say!(sid, "go")
+    assert %{data: %{name: "shell"}} = await_event("root", :tool_started, 15_000)
+    tasks = Troupe.Registry.tasks(sid, ["root"])
+    :sys.suspend(tasks)
+
+    try do
+      File.write!(Path.join(ws, "go"), "")
+      eventually(fn -> contents(io) =~ "headless mode stops here" end, 15_000)
+      # Answered once anything the printer sent as it said so has reached the daemon.
+      :sys.get_state(printer)
+    after
+      :sys.resume(tasks)
+    end
+
+    assert_receive {:rest, 1}, 15_000
+    assert %{data: %{decision: "deny"}} = await_event("root", :budget_ask_answered, 5_000)
+    assert [_once] = Regex.scan(~r/headless mode stops here/, contents(io))
+  end
+
   # A librarian on a repository with no brief is a branch of its own, window `librarian-1`,
   # and its events reach a printer beside root's: `troupe run` without `--headless` starts
   # one, and so does `/memory refresh` from anyone attached. It coming to rest is not the

@@ -28,6 +28,21 @@ sessions and reserving budget as if it were alone. Nothing at runtime notices; t
 symptom is sessions placed twice. So the chart refuses rather than the operator
 debugging it.
 */}}
+{{/*
+The browser origins every worker pod admits, as one comma-separated value:
+`operator.workerAllowedOrigins`, and the plane's own origin when this chart serves the GUI
+there, since that page attaches to the pods too. Nothing else; the desktop app's origin
+the worker admits by itself. A page whose origin is not here gets no socket.
+*/}}
+{{- define "troupe.operator.workerOrigins" -}}
+{{- $origins := .Values.operator.workerAllowedOrigins | default list -}}
+{{- if and .Values.gui.enabled .Values.plane.enabled -}}
+{{- $url := urlParse (.Values.plane.baseUrl | default (printf "https://%s" .Values.plane.host)) -}}
+{{- $origins = append $origins (lower (printf "%s://%s" $url.scheme $url.host)) -}}
+{{- end -}}
+{{- join "," ($origins | uniq) -}}
+{{- end -}}
+
 {{- define "troupe.plane.validate" -}}
 {{- if and (gt (int .Values.plane.replicas) 1) (ne .Values.plane.distribution "name") }}
 {{- fail (printf "plane.replicas is %d but plane.distribution is %q: replicas that do not form an Erlang cluster each place sessions as if alone. Set plane.distribution to \"name\", or plane.replicas to 1." (int .Values.plane.replicas) .Values.plane.distribution) }}

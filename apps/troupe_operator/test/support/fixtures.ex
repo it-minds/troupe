@@ -78,6 +78,21 @@ defmodule Troupe.Operator.Fixtures do
     }
   end
 
+  @doc """
+  Egress entries that are not patterns: a star anywhere but as the whole first label of
+  a name with at least one label after it. Policy, admission and the operator are each
+  tested over this one list, so none of them can accept what another refuses.
+  """
+  @spec refused_patterns() :: [String.t()]
+  def refused_patterns do
+    ~w(* ** *.* **.example.com *.*.example.com a.*.example.com *example.com *com a*.example.com
+       example.* *. *..example.com *.example.com. *.example..com)
+  end
+
+  @doc "Egress entries that are patterns: exact names, and one-label wildcards."
+  @spec accepted_patterns() :: [String.t()]
+  def accepted_patterns, do: ["github.com", "api.example.com", "*.example.com", "*.a.example.com"]
+
   @doc "Find one object in a manifest list."
   @spec find([map()], String.t(), String.t()) :: map() | nil
   def find(resources, kind, name) do

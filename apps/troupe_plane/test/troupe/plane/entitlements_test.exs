@@ -57,13 +57,13 @@ defmodule Troupe.Plane.EntitlementsTest do
     test "kinds do not interact" do
       rows = [
         %{kind: "skill", name: "review", mode: "allow"},
-        %{kind: "agent", name: "reviewer", mode: "deny"}
+        %{kind: "agent", name: "pr-reviewer", mode: "deny"}
       ]
 
       assert Entitlement.resolve(~w(review other), Entitlement.of_kind(rows, "skill")) ==
                ~w(review)
 
-      assert Entitlement.resolve(~w(reviewer build), Entitlement.of_kind(rows, "agent")) ==
+      assert Entitlement.resolve(~w(pr-reviewer build), Entitlement.of_kind(rows, "agent")) ==
                ~w(build)
 
       # An allowlist of skills says nothing about MCP servers, which is what lets an
@@ -77,7 +77,7 @@ defmodule Troupe.Plane.EntitlementsTest do
       assert {:ok, %{"profiles" => [profile]}} =
                Harness.call("profiles.list", %{}, as(context.ada))
 
-      assert profile["agents"] == ["reviewer", "build", "plan"]
+      assert profile["agents"] == ["pr-reviewer", "build", "plan"]
 
       assert profile["skills"] == [
                %{"name" => "review", "description" => "How we review"},
@@ -110,11 +110,11 @@ defmodule Troupe.Plane.EntitlementsTest do
       _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
       entitle(context.team, [%{"kind" => "agent", "name" => "build", "mode" => "allow"}])
 
-      params = %{"profile" => "dev", "agent" => "reviewer", "team" => "engineering"}
+      params = %{"profile" => "dev", "agent" => "pr-reviewer", "team" => "engineering"}
       assert {:error, error} = Harness.call("session.create", params, as(context.ada))
 
       assert error.message == "invalid_params"
-      assert error.data.reason == "no primary agent named reviewer"
+      assert error.data.reason == "no primary agent named pr-reviewer"
       # And it says what could have been asked for, which is the whole point of
       # refusing here rather than on the pod.
       assert error.data.agents == ["build"]
@@ -214,7 +214,7 @@ defmodule Troupe.Plane.EntitlementsTest do
       # `acp_agents` is unnarrowed here and so is every one the bundle has, which is the
       # rule: absence means everything, for the fourth kind as for the other three.
       assert pushed["entitlements"] == %{
-               "agents" => ["reviewer", "build", "plan"],
+               "agents" => ["pr-reviewer", "build", "plan"],
                "skills" => ["review"],
                "mcp_servers" => ["jira"],
                "acp_agents" => ["gemini", "codex"]
@@ -326,7 +326,7 @@ defmodule Troupe.Plane.EntitlementsTest do
       "schema" => 1,
       "agents" => [
         %{
-          "name" => "reviewer",
+          "name" => "pr-reviewer",
           "definition" => "---\nmode: primary\nskills: [review]\n---\nReview."
         },
         %{"name" => "helper", "definition" => "You help."}

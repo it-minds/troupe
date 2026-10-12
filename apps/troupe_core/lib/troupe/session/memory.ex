@@ -24,20 +24,25 @@ defmodule Troupe.Session.Memory do
 
   @type status :: :absent | :stale | :fresh | :disabled
 
+  @typedoc "Where a brief is, as `locate/1` answers it, taken in place of a workspace."
+  @type location :: %{root: Path.t(), top: Path.t()}
+
   # When a librarian last started on each brief, filed under the brief's path.
   @attempts "librarian.json"
 
   @doc """
   Where a workspace's facts are kept (`root`, its repository's main checkout) and where
   their anchors are read from (`top`, the checkout or worktree the workspace is in); the
-  workspace itself for both outside git, or where its `.git` names a checkout that does
-  not name it back.
+  workspace itself for both outside git, in a folder its repository ignores, or where its
+  `.git` names a checkout that does not name it back. A location is answered as it is, so
+  a caller that asks several things of one brief runs git once.
   """
-  @spec locate(Path.t()) :: %{root: Path.t(), top: Path.t()}
+  @spec locate(Path.t() | location()) :: location()
+  def locate(%{root: _, top: _} = where), do: where
   def locate(workspace), do: repository_root(workspace)
 
   @doc "Where the brief's view lives for a workspace: its repository's main checkout."
-  @spec path(Path.t()) :: Path.t()
+  @spec path(Path.t() | location()) :: Path.t()
   def path(workspace), do: workspace |> locate() |> view_path()
 
   @doc "The view's path at a location `locate/1` gave."
@@ -48,7 +53,7 @@ defmodule Troupe.Session.Memory do
   The brief's view, parsed, or `nil` when there are no facts: read after its store has
   read the files again, so a person's edit or a brief from before facts is in it.
   """
-  @spec brief(Path.t()) :: Memory.t() | nil
+  @spec brief(Path.t() | location()) :: Memory.t() | nil
   def brief(workspace) do
     where = locate(workspace)
     if safely(fn -> Facts.count(where) end, 0) > 0, do: read(view_path(where))
@@ -121,7 +126,7 @@ defmodule Troupe.Session.Memory do
   rests on a file that changed or went since it was built (`Troupe.Memory.stale?/3`),
   `fresh` otherwise.
   """
-  @spec status(Path.t(), Config.t() | nil) :: status()
+  @spec status(Path.t() | location(), Config.t() | nil) :: status()
   def status(workspace, config) do
     if enabled?(config),
       do: workspace |> locate() |> status_at(config),
@@ -174,32 +179,35 @@ defmodule Troupe.Session.Memory do
   was cancelled or wrote nothing where there was no brief is tried again that much
   later, not in every new session (Decision 713).
   """
-  @spec refresh_due?(Path.t(), Config.t() | nil) :: boolean()
+  @spec refresh_due?(Path.t() | location(), Config.t() | nil) :: boolean()
   def refresh_due?(workspace, config) do
     repository?(workspace) and status(workspace, config) in [:absent, :stale] and
       held_until(workspace, config) == nil
   end
 
   @doc """
-  Whether a workspace is in a git repository: a `.git` (a worktree's file too) in it or in
-  a directory above, as the instruction files and onboarding have it
-  (`Troupe.Instructions.repository_root/1`). Outside one the brief is due nothing, so no
-  client that trusts the daemon starts a librarian in a home directory.
+  Whether a workspace is in a git repository as its brief follows git (`locate/1`): the
+  checkout its brief is kept in has a `.git` (a worktree's file too). A folder the
+  repository ignores is not, any more than a home directory is: outside one the brief is
+  due nothing, so no client that trusts the daemon starts a librarian there, and none
+  refreshes the brief of the repository around it from there. Given what `locate/1`
+  answered, no git runs, and none runs for a directory with no `.git` in it or above it.
   """
-  @spec repository?(Path.t()) :: boolean()
+  @spec repository?(Path.t() | location()) :: boolean()
+  def repository?(%{root: root}), do: root |> Path.join(".git") |> File.exists?()
+
   def repository?(workspace) do
-    workspace
-    |> Path.expand()
-    |> Instructions.repository_root()
-    |> Path.join(".git")
-    |> File.exists?()
+    workspace = Path.expand(workspace)
+
+    workspace |> Instructions.repository_root() |> Path.join(".git") |> File.exists?() and
+      workspace |> locate() |> repository?()
   end
 
   @doc """
   Until when a librarian's try that built nothing holds off the next automatic refresh,
   or `nil` when none does: what `refresh_due?/2` waits out, for a client to say.
   """
-  @spec held_until(Path.t(), Config.t() | nil) :: DateTime.t() | nil
+  @spec held_until(Path.t() | location(), Config.t() | nil) :: DateTime.t() | nil
   def held_until(workspace, config) do
     path = path(workspace)
 
@@ -313,7 +321,9 @@ defmodule Troupe.Session.Memory do
   # directory, so that checkout is the brief's only when trust finds it for git's top
   # level, which must hold the workspace: the top level is then the checkout itself, or a
   # worktree the checkout's `.git/worktrees/<name>` names back. Otherwise the brief is the
-  # workspace's own (Decision 831). The top level is where anchors are read.
+  # workspace's own (Decision 831). The top level is where anchors are read. A folder
+  # below the top level belongs to the repository only while git does not ignore it: an
+  # ignored one keeps a brief of its own.
   defp repository_root(workspace) do
     workspace = Path.expand(workspace)
     args = ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"]
@@ -324,7 +334,8 @@ defmodule Troupe.Session.Memory do
          ".git" <- Path.basename(common),
          checkout = Path.dirname(common),
          true <- within?(workspace, top),
-         true <- key(Trust.root(top)) == key(checkout) do
+         true <- key(Trust.root(top)) == key(checkout),
+         false <- key(workspace) != key(top) and Git.ignored?(workspace) do
       %{root: checkout, top: Path.expand(top)}
     else
       _ -> %{root: workspace, top: workspace}

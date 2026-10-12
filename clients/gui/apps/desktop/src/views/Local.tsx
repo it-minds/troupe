@@ -346,7 +346,17 @@ function Worktrees({ client }: { client: DaemonClient }): JSX.Element {
               </th>
               <td className="mono micro">{w.branch ?? "—"}</td>
               <td className="mono micro">{w.session_id ?? "none"}</td>
-              <td>{w.dirty ? <Pill status="waiting">Uncommitted work</Pill> : <Pill status="allowed">Clean</Pill>}</td>
+              <td>
+                {w.dirty ? (
+                  <Pill status="waiting">Uncommitted work</Pill>
+                ) : w.dirty === false ? (
+                  <Pill status="allowed">Clean</Pill>
+                ) : (
+                  <Pill status="idle" title="The daemon's listing had no time left to look at this one; it reads the trees in turn, the checkout first.">
+                    Not looked at
+                  </Pill>
+                )}
+              </td>
               <td>
                 <button className="link" onClick={() => setRemoving(w)}>
                   Remove
@@ -368,7 +378,7 @@ function Worktrees({ client }: { client: DaemonClient }): JSX.Element {
           }
           busy={busy}
           onCancel={() => setRemoving(null)}
-          onConfirm={() => void remove(removing, removing.dirty)}
+          onConfirm={() => void remove(removing, removing.dirty === true)}
         />
       )}
     </section>

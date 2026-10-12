@@ -234,9 +234,13 @@ defmodule Troupe.Memory.FactsTest do
   test "the store is one process per repository, its only writer, and restarts", context do
     ws = context.workspace
 
+    # The puts wait their turn at the one writer, which reads and writes the files for each,
+    # so the last waits for the 24 before it: a put's own deadline is the store's call's,
+    # not `async_stream`'s five seconds for all 25 together.
     1..25
     |> Task.async_stream(fn n -> Facts.put(ws, %{kind: "note", claim: "note #{n}"}, %{}) end,
-      max_concurrency: 25
+      max_concurrency: 25,
+      timeout: :infinity
     )
     |> Enum.each(fn {:ok, result} -> assert {:ok, _} = result end)
 

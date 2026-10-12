@@ -19,8 +19,13 @@ looked things up in.
 | [deployment.md](deployment.md) | What a release publishes, what a roll does, rolling back |
 | [conventions.md](conventions.md) | The gate, boundaries, the formatter's blind spot, commit style, naming, recipes |
 | [fixing-issues.md](fixing-issues.md) | Working through GitHub issues in chunks: triage, fix, install locally, verify, pull request |
+| [gate-walk.md](gate-walk.md) | Walking a release gate on a fresh laptop, a fresh account and the live plane, and what `scripts/gate-check` checks locally |
+| [code-signing.md](code-signing.md) | Buying and setting up OS code signing (Apple Developer ID, a Windows signing service) and the secrets a release needs |
 | [defects.md](defects.md) | Defects found in passing and not fixed yet |
-| [command-audit.md](command-audit.md) | Issue #502: every command of the table run with and without a window, in a checkout and a worktree, locally and on a pod; what happened and what holds it |
+
+Records that are no longer instruction are in `docs/history/`, kept as they were written:
+[the command audit](../history/command-audit.md) of 0.10.0, and the console's two plans,
+[as it was built](../history/admin-surface.md) and [what it is to become](../history/control-panel.md).
 
 The design: [../../ARCHITECTURE.md](../../ARCHITECTURE.md),
 [the decisions](../decisions/README.md), [../../PROTOCOL.md](../../PROTOCOL.md). The

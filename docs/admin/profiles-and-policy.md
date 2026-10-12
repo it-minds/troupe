@@ -21,7 +21,7 @@ manifest's ([§6](#6-provisioning-direct-or-from-a-repository)).
 | `size_class` | `standard` (several sessions share a worker) or `heavy` (fewer, with more CPU, memory and disk each). A resource question, not a safety one: sessions cannot see each other's files either way |
 | `max_sessions` | how far it may grow, in sessions at once. Absent is no ceiling, bounded by the team's budget |
 | `warm_workers` | workers kept up when nothing runs. `0` scales to zero, and the next session waits about half a minute |
-| `spec` | the rest of the resource in its own camelCase: `llm`, `egress`, `mcpServers`, `configBundleChannel`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, and `storage.storageClassName`, the class a worker's disk comes from (one `allowedStorageClasses` names; absent is the cluster's default) |
+| `spec` | the rest of the resource in its own camelCase: `llm`, `egress`, `configBundleChannel`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, and `storage.storageClassName`, the class a worker's disk comes from (one `allowedStorageClasses` names; absent is the cluster's default) |
 
 `replicas`, `sessionsPerPod`, `resources` and `storage.size` are the plane's: it writes them
 from the size class and from what is running, and **refuses** a request that sends them
@@ -45,7 +45,7 @@ Other `spec` fields:
 | `llm.endpoint`, `.provider`, `.model` | becomes the worker's `TROUPE_BASE_URL`, `TROUPE_PROVIDER` (`openai` = Chat Completions, which a gateway serves; `anthropic`; `fake`), `TROUPE_MODEL`. The endpoint's host is an egress destination |
 | `llm.secretRef.{name,key}` | the Secret in the worker namespace injected as `TROUPE_API_KEY` (key `api-key`), not optional |
 | `llm.prices` | dollars per million tokens by model, `{"qwen3-235b": {"input": …, "output": …}}` with optional `cacheRead` and `cacheWrite`, injected as `TROUPE_MODEL_PRICES`. For a model the gateway does not price, which with LiteLLM is every streamed call: without a price its calls cost nothing on the ledger and no money budget applies to them. What the gateway says still wins. Set through the API; the console's editor keeps it but does not show it |
-| `egress.fqdns`, `egress.gitHosts` | extra hosts the pods may reach; each must match a policy pattern |
+| `egress.fqdns`, `egress.gitHosts` | extra hosts the pods may reach; each must match a policy pattern. A wildcard is one leading label (`*.example.com`) and passes only a policy holding that same wildcard; a star anywhere else, a bare `*` among them, is refused naming the entry ([§4](#4-troupepolicy)) |
 | `configBundleChannel` | which bundle channel the profile follows (`stable`) |
 | `orgMount` | mount the policy's org volume at `/mnt/org`, always read-only |
 | `repositoryOverridesBundle` | `true` lets a session's working copy replace the bundle's agents and skills, and Troupe's built-in agents, of the same name; absent or `false`, those win ([below](#a-repositorys-agents-and-skills-on-a-pod)) |
@@ -146,7 +146,8 @@ import before the profile names the new thumbprint fails token requests in betwe
 
 **What is reported.** A server the bundle marks `client_credentials` with no identity on
 the profile, or an identity without its `clientId` or `transitKey`, with a thumbprint that
-is not one, or with another algorithm, is reported rather than refused, as a missing Secret
+is not one, another algorithm, a `keyVersion` that is not a positive number, or a
+`tokenUrl` that is not `https` (or `http` to loopback), is reported rather than refused, as a missing Secret
 is: by the operator's `MCPIdentityMissing` condition and by the plane in
 `admin.profile.get` and `admin.profile.put`'s `identity_problems`. The pods start
 regardless and offer that server's tools once both halves are there. A worker that cannot
@@ -237,9 +238,9 @@ when the setting changes keeps what it had until then. The platform's own
 
 `Troupe.Operator.Resources.for_profile/3` is a pure function from profile, policy and
 settings to manifests. For profile `p` the namespace is `troupe-w-p`, holding: the
-ServiceAccount `troupe-worker` (no automounted token); a PVC per granted team
-(`team-<team>`, `ReadWriteMany` for `rw`, `ReadOnlyMany` for `ro`) and one for the org
-volume; a headless Service and one Service and Ingress per pod (host
+ServiceAccount `troupe-worker` (no automounted token); a PVC per granted team that has a
+volume storage class (`troupe-team-<team>`, `ReadWriteMany` for `rw`, `ReadOnlyMany` for
+`ro`) and one for the org volume; a headless Service and one Service and Ingress per pod (host
 `<ordinal>-p.<workersDomain>`); a NetworkPolicy, and a `CiliumNetworkPolicy` when Cilium is
 available; a PodDisruptionBudget (`maxUnavailable: 1`); and a StatefulSet with
 `podManagementPolicy: Parallel`, `updateStrategy: OnDelete` and a `ReadWriteOnce` data
@@ -267,7 +268,7 @@ This is a summary; the detail is where each part is set.
 - **Kubernetes and secrets:** no ServiceAccount token is mounted. The pod holds two projected tokens, `troupe-plane` for enrolment and `troupe-kms` for OpenBao, and reads only what its OpenBao role allows ([roles-and-permissions.md section 8](roles-and-permissions.md#8-openbao-policies)).
 - **Commands:** every command a session runs on a pod runs in bubblewrap, and a pod that can't start it refuses the command (Decision 832).
 - **What a person may do there:** a session token's scopes follow the person's role on the session ([roles-and-permissions.md section 5](roles-and-permissions.md#5-session-roles-and-scopes)). The pod checks the plane's access list at every command, so a role the plane narrows holds at the person's next command. A widened role takes effect with their next token, at most 15 minutes later (Decision 0859). The session's owner always has `admin`.
-- **A person's own tools:** tools a person offers a pod session from their machine (#308) are called on that machine, with their token. The pod sees the tools' names and schemas, the arguments and the results, never the token. A profile that should not take them is #595 (Decision 0862).
+- **A person's own tools:** tools a person offers a pod session from their machine (#308) are called on that machine, with their token. The pod sees the tools' names and schemas, the arguments and the results, never the token. A profile that should not take them sets `personalTools: forbid` (Decisions 862 and 879).
 
 ### Status conditions
 
@@ -348,7 +349,7 @@ this resource and nothing else.
 | `allowedImageRepositories` | image repositories, compared without tag or digest, exactly or as a prefix `<repo>/` | none (every image refused) |
 | `maxReplicas`, `maxSessionsPerPod` | ceilings | 10, 16 |
 | `maxResources.cpu`, `.memory` | ceiling on **limits** | 4 CPU, 8Gi |
-| `allowedEgress` | hostnames pods may reach, including the LLM endpoint and MCP servers; `*.example.com` matches one label; a bare `*` is refused | none |
+| `allowedEgress` | hostnames pods may reach, including the LLM endpoint and MCP servers; `*.example.com` matches one label. A star anywhere else is refused, in the policy and in a profile's egress alike: a bare `*`, `**.example.com`, `*.*`, `a.*.example.com`, `*example.com`. The CRD refuses such an entry when the policy is written; a policy that holds one anyway (an older CRD) admits no profile, at admission or in the operator, until it is removed, and the refusal names it | none |
 | `allowedStorageClasses` | classes a team volume or pod disk may name | none |
 | `orgVolume` | the org-wide read-only volume profiles may opt into | none |
 | `namespacePrefix`, `workersDomain` | worker namespaces and hostnames | `troupe-w-`, `workers.example.test` |
@@ -431,8 +432,9 @@ nor named.
 
 A name does not get there either (Decision 856). With Cilium a `toFQDNs` rule admits a
 name at whatever address its DNS answer carries, so the `CiliumNetworkPolicy` also denies
-link-local (`169.254.0.0/16`, `fe80::/10`) and both metadata addresses, whatever name
-leads there and whatever else admits them, except `169.254.20.10`, where a NodeLocal
+link-local (`169.254.0.0/16`, `fe80::/10`) and both metadata addresses, and the v4 ones
+again in NAT64's prefix (`64:ff9b::/96`), whatever name leads there and whatever else
+admits them, except `169.254.20.10`, where a NodeLocal
 DNSCache listens, and OpenBao or the object store given as an address in those ranges.
 Without Cilium the public rule leaves out link-local and the shared address space
 `100.64.0.0/10`, so an endpoint in that space, the installation's or a profile's, is
@@ -463,7 +465,10 @@ pod is `session:/` and `skills:/`, so `publish` and `import` have nowhere to go 
 
 `plane.provisioningMode` (`TROUPE_PROVISIONING_MODE`) decides who writes a profile's
 `WorkerProfile`. It is the deployment's: the console's Policy page shows it and cannot
-change it, and a value stored there before 0.7.0 is not read.
+change it, and a value stored there before 0.7.0 is not read. The same page holds the
+versions people's clients may run ([routine-tasks.md](routine-tasks.md#client-versions))
+and the settings their machines start from and cannot go past
+([configuration.md](configuration.md#defaults-and-limits-for-peoples-machines)).
 
 | Mode | The profiles are | The plane writes | Reported |
 |---|---|---|---|
@@ -520,7 +525,7 @@ What a profile takes from its resource:
 | `warm_workers` | annotation `troupe.dev/warm-workers`, 0 to 10; absent is 0 |
 | `provisioner` | annotation `troupe.dev/provisioner`; absent is `kubernetes` |
 | channel | `spec.configBundleChannel`; absent is `stable` |
-| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount`, `repositoryOverridesBundle`, `personalTools` |
+| `spec` | the rest: `llm`, `egress`, `storage`, `resources`, `orgMount`, `repositoryOverridesBundle`, `personalTools`, `mcpIdentities` |
 
 CPU, memory and disk are the manifest's to size, within the policy; the class the plane
 places and scales by is read off `sessionsPerPod`.

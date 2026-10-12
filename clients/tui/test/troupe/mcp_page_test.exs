@@ -215,6 +215,10 @@ defmodule Troupe.MCPPageTest do
         do: DynamicSupervisor.terminate_child(Troupe.Client.Daemons, daemon)
 
     eventually(fn -> not Troupe.Protocol.Daemon.running?() end)
+    # And the link has heard its connection to that daemon close: a call made before it
+    # had went out on the closed connection and was answered `unavailable`, where one made
+    # after it starts a daemon.
+    eventually(fn -> not Link.up?() end)
 
     assert 0 == Troupe.CLI.Remote.logout(nil, say: &send(me, {:said, &1}))
     assert Enum.any?(said(), &(&1 =~ "your sign-ins to 1 MCP server(s) are kept"))

@@ -1,9 +1,10 @@
 # The Troupe protocol, version 1
 
 This document is complete on its own. Everything needed to write a Troupe client is
-here; no Elixir is involved — and every Troupe client is written this way, because none
-of them lives in the repository that implements the server. A reference client in ~220
-lines of Python standard library sits in that repository as a test fixture, at
+here; no Elixir is involved — and every Troupe client is written this way: the terminal
+client and the desktop app under `clients/` speak only this protocol, though they live in
+the repository that implements the server. A reference client in ~220 lines of Python
+standard library sits in that repository as a test fixture, at
 [`apps/troupe_gateway/test/conformance/troupe.py`](apps/troupe_gateway/test/conformance/troupe.py),
 with the conformance script CI runs against a real daemon beside it.
 
@@ -21,7 +22,8 @@ The messages are identical on every transport. Only the framing differs.
 ### Unix socket (local)
 
 `$XDG_RUNTIME_DIR/troupe/daemon.sock`, mode `0600`. Falls back to
-`$HOME/.troupe/run/daemon.sock` when `XDG_RUNTIME_DIR` is unset.
+`$HOME/.troupe/run/troupe/daemon.sock` when `XDG_RUNTIME_DIR` is unset, and
+`TROUPE_DAEMON_SOCKET` names another path.
 
 Framing is newline-delimited JSON: one JSON value per line, `\n`-terminated, UTF-8.
 A message must not contain a raw newline outside a string. Lines may be up to 64 MiB.
@@ -47,7 +49,8 @@ first message must be `initialize` carrying the token in `auth.token`.
 A browser cannot open a Unix socket and cannot open a raw TCP one, so neither of the
 transports above is reachable from a page — in a tab, or inside a desktop shell's
 webview. The daemon therefore also serves the WebSocket transport on `127.0.0.1`, at a
-port the kernel chose, and publishes it as a second entry in the same discovery file:
+port the kernel chose and the path `/v1/socket` (`ws://127.0.0.1:<port>/v1/socket`), and
+publishes it as a second entry in the same discovery file:
 
 ```json
 {"transport": "unix", "path": "/run/user/1000/troupe/daemon.sock",
@@ -76,6 +79,12 @@ does not show the page, so the daemon logs it as a warning naming the origin.
 framing, no batching. Binary frames are not used. The token goes in the
 `Authorization: Bearer` header, or in `auth.token` on `initialize` where headers are
 unavailable.
+
+The upgrade checks `Origin` as the daemon's does. A pod admits a desktop shell's own
+origin and the origins in `TROUPE_ALLOWED_ORIGINS` (the operator writes them from
+`operator.workerAllowedOrigins`, with the plane's origin where the chart serves the GUI);
+with none listed, no browser page gets a socket, and `*` admits every page. A client that
+is not a browser sends no `Origin` and is not refused for it.
 
 A frame is one message whatever whitespace it holds, newlines between its tokens
 included. A frame larger than the socket's ceiling, 16 MiB unless the server is
@@ -127,7 +136,7 @@ with `not_initialized` and the connection closes.
 ```json
 {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
   "protocol_version": "1",
-  "client_info": {"name": "troupe-tui", "version": "0.2.0"},
+  "client_info": {"name": "troupe", "version": "0.15.0-beta"},
   "capabilities": {"tools": false, "blobs": true},
   "auth": {"token": "…"}
 }}
@@ -150,10 +159,10 @@ The response:
 ```json
 {"jsonrpc": "2.0", "id": 1, "result": {
   "protocol_version": "1",
-  "server_info": {"name": "troupe-daemon", "version": "0.2.0", "instance_id": "kP3u_2fQ8xA"},
+  "server_info": {"name": "troupe-daemon", "version": "0.15.0-beta", "instance_id": "kP3u_2fQ8xA"},
   "capabilities": {"worktrees": true, "branches": true, "watch": true, "remote": false,
                    "private_sessions": true},
-  "principal": {"subject": "local:martin", "display_name": "martin", "kind": "user"},
+  "principal": {"subject": "local:me", "display_name": "me", "kind": "user"},
   "scopes": ["observe", "control", "admin"],
   "limits": {"max_message_bytes": 67108864, "outbound_queue": 10000}
 }}
@@ -221,7 +230,7 @@ Persisted, replayable, and totally ordered per session.
   "seq": 42,
   "prev_hash": "sha256:7d0c…",
   "ts": "2026-09-11T08:14:22.481Z",
-  "actor": {"subject": "local:martin", "kind": "user"},
+  "actor": {"subject": "local:me", "kind": "user"},
   "agent": ["root"],
   "type": "tool_call_completed",
   "v": 1,
@@ -233,7 +242,7 @@ Persisted, replayable, and totally ordered per session.
 | --- | --- |
 | `seq` | monotonic from 1, no gaps, per session |
 | `prev_hash` | `sha256:` of the previous event's canonical JSON; `null` at `seq` 1 |
-| `ts` | RFC 3339 UTC, millisecond precision |
+| `ts` | RFC 3339 UTC, microsecond precision |
 | `actor` | who caused it; `{"kind": "system"}` when nobody did |
 | `agent` | agent path from the root, e.g. `["root"]` or `["root", "explore#1"]` |
 | `type` | see the table below |
@@ -265,9 +274,10 @@ Durable:
 
 | type | `data` |
 | --- | --- |
-| `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
+| `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`/`private`), `owner`, `entitlements` (the agent, skill and MCP server names the grant resolved to; absent for no restriction), `origin`, `parent` |
+| `session_forked` | `parent` (the id, the `seq` forked at and the parent's head hash there), `reason` — a fork's first event; the parent gets nothing |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
-| `agent_restarted` | `replayed_events` |
+| `agent_restarted` | `replayed_events`, `interrupted`, `incomplete_calls` (the calls the restart closed) |
 | `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness`/`shell`/`subagent` — `loop` is an iteration of `session.loop.start`, `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails, `shell` what the agent was given of the person's own commands, each of which a client draws from its `user_shell` instead, and `subagent` the end of a child the agent started in the background, handed to it once, Decision 853), `text`, `command_id` — the send it was taken from, as its `input_accepted` names it; absent from a `harness`, `shell` or `subagent` note, which nobody sent, and from a log written before 0.5.2; `child_path` and `ended` (`finished`, `cut_short`, `stopped`, `cancelled`, `interrupted`, `failed`) on one from `subagent` |
 | `user_shell` | `run_id`, `command`, `output`, `ended`, `agent`, `exit_status`, `reason`, `timeout_ms`, `duration_ms`, `command_id` — a command the person ran with `shell.run`, written by the root agent under their actor when it ended. `output` is its combined stdout and stderr, the tail capped at `tool_output_limit` with the `read_output` marker when it was cut; `ended` is `exited` (with `exit_status`), `timeout`, `killed` (`shell.cancel`) or `failed` (it could not start, `reason` says why); `agent: false` is one kept from the agent (Decision 813) |
 | `input_queued` | `command_id`, `author`, `text` |
@@ -289,14 +299,46 @@ Durable:
 | `loop_iteration_finished` | `loop_id`, `iteration`, `outcome` (`continue`: the turn ended and the goal is not met; `complete`: the agent called `goal_complete`; `failed`: the turn ended in an error; `stopped`: the loop stopped around it), `detail` |
 | `loop_stopped` | `loop_id`, `reason` (`goal_complete`, `max_iterations`, `failures`, `budget`, `requested`, `cancelled`, `goal_cleared`, `interrupted`, `agent_done`), `iterations`, `detail`, `summary` (the evidence `goal_complete` gave), `command_id` (the `session.loop.stop` that asked) |
 | `delegation_started` | `call_id`, `agent`, `child_path` (the parent's path and `<agent>#<n>`; `n` goes on counting across restarts, so a path names one child), `task` (the child's first message: the brief's parts under their names), `brief` (the parts, `goal`, `context`, `constraints`, `deliverable` and `do_not`; absent from a log written before briefs had them, Decision 847), `wait` (`false` for a child started in the background: the `delegate` call answered at once, and the child's end reaches the parent later as a `user_input` from `subagent`; absent otherwise, Decision 853). The child writes its `agent_done` before the parent's `tool_call_completed` for the call, and is stopped once the parent has its result: from then on it is only its log. A delegation a restart closes as interrupted or takes up again leaves a child nothing starts again, so the restart closes that child's part of the log, and the part of each agent under it: a `tool_call_completed` for each call still open, then `agent_done` with `reason: interrupted` |
-| `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting), and the summariser's own model call as `llm_request` and `llm_response` say one: `model`, `prompt_bytes`, `usage`, `gateway` (absent from a log written before 0.8.2) |
+| `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting), `conversation` (the conversation the agent goes on with: the summary as a message, then what was kept, a large tool result as a blob), and the summariser's own model call as `llm_request` and `llm_response` say one: `model`, `prompt_bytes`, `usage`, `gateway` (absent from a log written before 0.8.2) |
 | `budget_exhausted` | `limit` |
 | `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, answered with `question.answer`. Its `question` says what the limit protects against, what the session has used and spent, and what the raise on offer would cost; its `options` are sizes and scopes — `+25 turns this run`, `+50 turns this session`, `no limit this session`, `+50 turns this workspace`, `stop` — and a typed amount (`50`, `+50 turns`, `+50k tokens`, `+15 min`, with `run`, `session` or `workspace` after it) is an answer too (Decision 699) |
 | `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: the limit the question was about, named in `lifted` — `max_turns`, `max_input_tokens`, `max_output_tokens` or `wall_clock` — is lifted for this agent and its subagents, and the others still ask; `raise`: `limit` goes up by `amount` — turns, tokens or milliseconds — for `scope` `run` (given back at the turn's end), `session` or `workspace`, the last also written to the project's file named in `path`, or `note` says why it was not; `unclear`: the answer could not be read, `note` says why, and the question is asked again under the next id; `deny`: `budget_exhausted` follows). An `always` without `lifted`, from a log written before Decision 687, lifted the limit its `budget_ask_started` named |
 | `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
+| `config_note` | `key`, `message`, `source`, `limit`, `model`, `effort`, `thinking` — something the configuration did to the session that the person is told, once a session, under the root; `message` is the sentence a client shows as it is. The one there is (`key: max_tokens`): an organisation's enforced `max_tokens` (`limit`, from `source`, the plane's URL or the managed file's path) left a model call less thinking than `model`'s `reasoning_effort` (`effort`) asks for, `thinking` tokens of it, 0 where thinking is off for the call (issue #644) |
 | `tool_failures_ask_started` | `call_id` (`failures-<n>`), `tool`, `failures`, `detail` — one tool has failed `failures` times in a row and the agent asks before its next model call whether the turn goes on; the question itself is a `question_asked` under the same `call_id`, with options `stop` / `continue`, answered with `question.answer` |
 | `tool_failures_ask_answered` | `call_id`, `decision` (`continue`: the tool's count starts again; `stop`: a `user_input` from `harness` saying why, then `turn_ended` with `reason: tool_failures`) |
 | `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`, `tool_failures`, `llm_error` — a subagent whose model request failed, after the `llm_error` that says why; a root rests instead; `interrupted` — a subagent a restart took down, written by the restart, see `delegation_started`; `stopped`, `cancelled` and `failed` — a child in the background its parent stopped, a cancel stopped, or that failed past its restarts, written by its parent, Decision 853), `by` (with `stopped`, the parent's path), `summary` (after a `finish`, its report as the parent is handed it: the summary, then `changed`, `ran`, `passed`, `unverified` and `needs` under their names), `report` (those parts, `changed` as Troupe counted it from the agent's file tools: `files` with `path`, `added`, `removed` and `whole`, the totals, `commands` not counted, `session_id` and `agent` to read the diff by with `read_branch`, and `said`; Decision 847), `limit`, `turn` — what the agent's last turn cost, a subagent's whole task (see below); absent from one a restart wrote |
+| `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
+| `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
+| `cancelled` | `turn` — what the cancelled turn had cost (see below); `stopped` — the model call the cancel stopped, when one was in flight (see below) |
+| `turn_ended` | `reason` — the agent's turn is over and it waits for input: the model answered without asking for a tool, or a root's request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done`. `reason` is there only when the harness ended the turn: `tool_failures`, a tool kept failing and the answer to `tool_failures_ask_started` was `stop`; `agent_failed`, the root agent crashed as often as it may be restarted, `detail` says what it raised, and the session stops after it, to come back dormant (Decision 727). Neither turn is taken up again by a restart. `waiting`, a subagent that ended its turn while a child it started in the background still runs: it rests until that child's end, and its task goes on (Decision 853). `turn` — what the turn cost (see below); absent from an `agent_failed` or a `waiting` one |
+| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it. A delegation a person asked to see first (`delegation.ask` in a config file, or `delegation: ask` in the agent's definition; Decision 850) asks with `tool: "delegate"`, the call's arguments as `args`, and `delegation`: what the gate shows — `agent`; `definition` (`name`, `layer`, `path`, `description`; `agents.get` by that name opens it, and the gate never edits one); `brief` (`goal`, `context`, `constraints`, `deliverable`, `do_not`); `tools` (`[{name, permission}]`, what the child will hold); `budget_share`; `depth` (the child's) and `max_depth`; `agents` (`[{name, description}]`, the subagents it could go to instead). `auto_approve` does not answer one |
+| `approval_decided` | `call_id`, `tool`, `args`, `agent_path`, `decision` (who decided is the event's `actor`); for a delegation, `agent` (the subagent it went to, when allowed), `brief` and `edited` (the brief as the person edited it, and which parts), `reason` (the person's word back with a denial) |
+| `approval_resolved` | `call_id`, `resolved_by` |
+| `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple`, `preview` — the agent's `ask_user`; answered with `question.answer`. `preview`, where there is one, is text the question is about, for a client to show as it is beneath it: the prompt a workspace's command would send, when it asks before it is first sent (`commands.run`). Open until its `question_answered`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no answer), or a `cancelled` on the agent that asked or on one above it. The budget's and the failure guard's question have no call; each also ends with its `budget_ask_answered` or `tool_failures_ask_answered`, the only word there is when nobody is there to ask, and one a cancel ended is asked again at the next turn with another `question_asked` under the same `call_id` |
+| `question_answered` | `call_id`, `text` (who answered is the event's `actor`) |
+| `command_declined` | `name`, `reason`, `command_id` — a workspace's command that asked before it was first sent (see `commands.run`) and was not: `reason` says why and how to run it later, and `command_id` is the `commands.run` that asked |
+| `onboarded` | `target` (`repo`: the workspace's `.troupe/`; `workspace`: an `AGENTS.md` of the workspace's, Decision 827; `user`: the person's config directory), `path` (from that root), `file` (as a person reads it), `source` (the other tool's file it was made from: relative to the workspace, or `~/`), `source_hash` (the sha256 of that file, lowercase hex), `action` (`created` or `replaced`) — a file the `onboard_write` tool wrote, which asks first (Decision 823); the file records the same provenance itself, or `.troupe/onboarded.json` does for it |
+| `onboarding_suggested` | `reasons`, `message`, `workspace`, `command`, `proposals`, `onboarding_version`, `onboarded_version`, `survey_version`, `brief_version`, `due`, `brief_due`, `counts` — what onboarding would do in the session's workspace, said at every start while onboarding is due or the brief is outdated and the person has not said no for that version (Decisions 827 and 835); nothing was written. `due` is onboarding's (`first`, `outdated` or `none`) and `brief_due` the brief's (`first`, `stale`, `outdated` or `none`), as `onboard.plan` has them; `counts` is the workspace's files a client would ask about (`files`, `write`, `create_agents_md`), and `onboard.plan` lists them. `reasons` holds `first` (other tools' files are there and nothing is onboarded: `proposals` counts what `troupe onboard` would propose by kind, `instructions`, `rules`, `agents`, `commands`, `skills`, `workflows`, `mcp`), `outdated` (the workspace was onboarded under `onboarded_version` of the onboarding rules, older than this build's `onboarding_version`) and `brief` (the brief was written by `brief_version` of the librarian's survey, older than `survey_version`). `message` says all of it in one line for a client to show as it is; `command` is what to run. Not on a pod |
+| `watch_triggered` | `agent`, `mode`, `markers`, `session_id`, `error` — a saved `AI!` or `AI?` comment started a branch of this session (Decision 844): `agent` (`quick` for a change, `answer` when every comment was a question; `mode` is `change` or `question`) as the session `session_id`, whose `parent` is this one, in this session's checkout, for the comments in `markers`, each `{file, line, comment}`. The session's own agent is told nothing. `error` in place of `session_id` says why no branch started. A client opens the branch as it opens one it started, and says which file and comment started it. The branch asks before every write, edit and shell command unless `watch_auto_approve` is on, and does not watch |
+| `session_dormant` | `last_seq` |
+| `session_activated` | `epoch`, `pod` |
+| `session_resumed` | `dormant_ms`, `moved` |
+| `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
+| `files_skipped` | `files` — the agent, skill, command and workflow files a session found at a start and did not read, each `{kind, name, path, reason}`: on a pod, a working copy's file of a name its bundle has or a built-in agent's, which those beat unless the profile sets `repositoryOverridesBundle`; in a git worktree, one the main checkout has not committed (Decision 826); a workspace's `.troupe/` file, or directory, that is a link out of it, a skill whose `SKILL.md` can't be read, and what a workspace's `skills.json` links from outside the repository while the workspace is not trusted (Decision 829). A directory not looked into has a null `name`. Written when the list differs from the one the log last recorded, so an empty list says the files went away |
+| `fs_changed` | `path`, `hash`, `size` |
+| `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870): a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
+| `acl_granted` / `acl_revoked` | `subject`, `role` |
+| `mounts_resolved` | `mounts` — the volumes a pod session's working tree was given, as the session started |
+| `published` | `source`, `destination`, `hash`, `bytes`, `direction` — a file the `publish` tool copied to or from a shared volume |
+| `config_upgraded` | `channel`, `from`, `to`, `hash`, `entitlements` — the configuration a session was pinned to was retired, and an activation moved it to the channel's current version |
+| `session_read_only` | `reason` — declared for a session parked read-only (see the states below) |
+| `session_archived` / `session_erased` | nothing; declared, and carried on a session's topic |
+| `share_created` | `id`, `role` (`observe` or `control`), `expires_at`, `audience` — a share of a team session, announced by the plane |
+| `share_revoked` | `id`, `reason` |
+| `tools_registered` | `tools`, `connection`, `consent` — a client offered tools of its own (§8) |
+| `tools_unregistered` | `tools`, `connection`, `reason` |
+| `session_tainted` | `kind` (`personal_connector`), `tools`, `actor` — a person's own tools were offered to the session, which says so from then on (§8) |
 
 A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
 `waiting` until the answer, input queues meanwhile, and the answer says how much more and
@@ -318,29 +360,9 @@ question before its next model call, under `full_send` and a lifted budget alike
 comes first among the options, so a client that answers with the first option stops.
 Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask: it ends
 `tool_failures` and hands its parent what it found, labelled partial.
-| `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
-| `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
-| `cancelled` | `turn` — what the cancelled turn had cost (see below); `stopped` — the model call the cancel stopped, when one was in flight (see below) |
-| `turn_ended` | `reason` — the agent's turn is over and it waits for input: the model answered without asking for a tool, or a root's request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done`. `reason` is there only when the harness ended the turn: `tool_failures`, a tool kept failing and the answer to `tool_failures_ask_started` was `stop`; `agent_failed`, the root agent crashed as often as it may be restarted, `detail` says what it raised, and the session stops after it, to come back dormant (Decision 727). Neither turn is taken up again by a restart. `waiting`, a subagent that ended its turn while a child it started in the background still runs: it rests until that child's end, and its task goes on (Decision 853). `turn` — what the turn cost (see below); absent from an `agent_failed` or a `waiting` one |
-| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it. A delegation a person asked to see first (`delegation.ask` in a config file, or `delegation: ask` in the agent's definition; Decision 850) asks with `tool: "delegate"`, the call's arguments as `args`, and `delegation`: what the gate shows — `agent`; `definition` (`name`, `layer`, `path`, `description`; `agents.get` by that name opens it, and the gate never edits one); `brief` (`goal`, `context`, `constraints`, `deliverable`, `do_not`); `tools` (`[{name, permission}]`, what the child will hold); `budget_share`; `depth` (the child's) and `max_depth`; `agents` (`[{name, description}]`, the subagents it could go to instead). `auto_approve` does not answer one |
-| `approval_decided` | `call_id`, `tool`, `decision`, `actor`; for a delegation, `agent` (the subagent it went to, when allowed), `brief` and `edited` (the brief as the person edited it, and which parts), `reason` (the person's word back with a denial) |
-| `approval_resolved` | `call_id`, `resolved_by` |
-| `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple`, `preview` — the agent's `ask_user`; answered with `question.answer`. `preview`, where there is one, is text the question is about, for a client to show as it is beneath it: the prompt a workspace's command would send, when it asks before it is first sent (`commands.run`). Open until its `question_answered`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no answer), or a `cancelled` on the agent that asked or on one above it. The budget's and the failure guard's question have no call; each also ends with its `budget_ask_answered` or `tool_failures_ask_answered`, the only word there is when nobody is there to ask, and one a cancel ended is asked again at the next turn with another `question_asked` under the same `call_id` |
-| `question_answered` | `call_id`, `text`, `actor` |
-| `command_declined` | `name`, `reason`, `command_id` — a workspace's command that asked before it was first sent (see `commands.run`) and was not: `reason` says why and how to run it later, and `command_id` is the `commands.run` that asked |
-| `onboarded` | `target` (`repo`: the workspace's `.troupe/`; `workspace`: an `AGENTS.md` of the workspace's, Decision 827; `user`: the person's config directory), `path` (from that root), `file` (as a person reads it), `source` (the other tool's file it was made from: relative to the workspace, or `~/`), `source_hash` (the sha256 of that file, lowercase hex), `action` (`created` or `replaced`) — a file the `onboard_write` tool wrote, which asks first (Decision 823); the file records the same provenance itself, or `.troupe/onboarded.json` does for it |
-| `onboarding_suggested` | `reasons`, `message`, `workspace`, `command`, `proposals`, `onboarding_version`, `onboarded_version`, `survey_version`, `brief_version`, `due`, `brief_due`, `counts` — what onboarding would do in the session's workspace, said at every start while onboarding is due or the brief is outdated and the person has not said no for that version (Decisions 827 and 835); nothing was written. `due` is onboarding's (`first`, `outdated` or `none`) and `brief_due` the brief's (`first`, `stale`, `outdated` or `none`), as `onboard.plan` has them; `counts` is the workspace's files a client would ask about (`files`, `write`, `create_agents_md`), and `onboard.plan` lists them. `reasons` holds `first` (other tools' files are there and nothing is onboarded: `proposals` counts what `troupe onboard` would propose by kind, `instructions`, `rules`, `agents`, `commands`, `skills`, `workflows`, `mcp`), `outdated` (the workspace was onboarded under `onboarded_version` of the onboarding rules, older than this build's `onboarding_version`) and `brief` (the brief was written by `brief_version` of the librarian's survey, older than `survey_version`). `message` says all of it in one line for a client to show as it is; `command` is what to run. Not on a pod |
-| `watch_triggered` | `agent`, `mode`, `markers`, `session_id`, `error` — a saved `AI!` or `AI?` comment started a branch of this session (Decision 844): `agent` (`quick` for a change, `answer` when every comment was a question; `mode` is `change` or `question`) as the session `session_id`, whose `parent` is this one, in this session's checkout, for the comments in `markers`, each `{file, line, comment}`. The session's own agent is told nothing. `error` in place of `session_id` says why no branch started. A client opens the branch as it opens one it started, and says which file and comment started it. The branch asks before every write, edit and shell command unless `watch_auto_approve` is on, and does not watch |
-| `session_dormant` | `last_seq` |
-| `session_activated` | `epoch`, `pod` |
-| `session_resumed` | `dormant_ms`, `moved` |
-| `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
-| `files_skipped` | `files` — the agent, skill, command and workflow files a session found at a start and did not read, each `{kind, name, path, reason}`: on a pod, a working copy's file of a name its bundle has or a built-in agent's, which those beat unless the profile sets `repositoryOverridesBundle`; in a git worktree, one the main checkout has not committed (Decision 826); a workspace's `.troupe/` file, or directory, that is a link out of it, a skill whose `SKILL.md` can't be read, and what a workspace's `skills.json` links from outside the repository while the workspace is not trusted (Decision 829). A directory not looked into has a null `name`. Written when the list differs from the one the log last recorded, so an empty list says the files went away |
-| `fs_changed` | `path`, `hash`, `size` |
-| `scratch_updated` | `name`, `path`, `kind`, `title`, `size`, `hash`, `version`, `call_id` — a document the `show` tool wrote to the session's scratchpad, or replaced (Decision 870): a plan, report, comparison, diagram or table the agent shows the person beside the chat instead of printing it there. `path` is where `fs.read` reads it (`scratch:/<name>`), `kind` how to show it (`markdown`, `mermaid`, `json`, `csv` or `text`), `hash` the same `sha256:…` `fs.read` answers, `version` the writes of that name in the session from 1, and `call_id` the `show` call that wrote it, so a client puts a card where the call was rather than the call's `content`. `scratch.list` lists the documents |
-| `acl_granted` / `acl_revoked` | `subject`, `role` |
 
-Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`, and `shell_started` and
+Ephemeral: `llm_delta`, `agent_state` (`state`, `profile`, `agent`, `todos`, `budget`,
+`done_reason`: an agent's state as it changes), `progress`, `presence`, `summary_diff`, and `shell_started` and
 `shell_output` while a person's command runs (`shell.run`); `watch_notice` (`message`)
 when watch mode falls back to polling or cannot start, and `watch_changed` (`enabled`,
 `backend`: `native`, `poll` or `off`) on the session whose watch went on or off or
@@ -383,8 +405,8 @@ itself, because the gateway did not say: from the provider's catalog, or from th
 `models.prices` its configuration holds (Decision 689). A reconciliation against the
 gateway's own records should expect those to differ from it a little.
 
-Neither key is present in events written before this release. A reader folding an old
-log gets the tokens and no cost, which is what was true.
+Neither key is present in an event written before Troupe logged what the gateway said. A
+reader folding such a log gets the tokens and no cost, which is what was true.
 
 `turn`, on the event that ends a turn (`turn_ended`, `cancelled`, `agent_done`), is what the
 turn cost: one input, until the agent rests (Decision 769).
@@ -489,7 +511,8 @@ Tool calls and results are objects; todo lists are arrays of
 
 ### Large payloads
 
-Any `data` field over **16 KiB** is replaced by a blob reference:
+A tool's output over **16 KiB** — `tool_call_completed.content`, a result in `tool_results`,
+or one in `compacted.conversation` — is replaced by a blob reference:
 
 ```json
 {"blob": "sha256:1f3a…", "size": 402113, "preview": "first 4 KiB…", "truncated": true}
@@ -544,8 +567,9 @@ again from when the last subscriber leaves. `fleet` names no session and reads n
   first `question_asked` on), and last error. Summary diffs are throttled
   to at most 4 per second.
 - **`fleet`** carries only session lifecycle events — created, state changes,
-  archived, erased — for every session the principal can see. `fleet` ignores
-  `from_seq`.
+  archived, erased — for the sessions the principal can see that are running when the
+  subscription is answered; a session created or woken after that does not join it.
+  `fleet` ignores `from_seq`, and replays nothing.
 - **`presence:<id>`** carries `presence` and nothing else, and is the only topic that
   does. It ignores `level` and `from_seq`, answers `head_seq: 0` with
   `"cursored": false`, and is the first thing the server stops sending when a client
@@ -591,15 +615,22 @@ Ephemerals are coalesced and then dropped long before this happens; reaching
 
 ## 6. Commands
 
-Every command takes a client-generated **`command_id`**: a string unique per
-connection lifetime (a UUID or `c-<counter>` is fine).
+Every command that changes something takes a client-generated **`command_id`**; a
+read needs none. The server remembers an id for 30 minutes, by the person who sent it
+and not by the connection, so that a retry after a disconnect is recognised: an id must
+be unique for that person over that time, across every connection and client they have
+open. A UUID is, and so is a counter behind a random prefix; a bare `c-<counter>` that
+starts again at zero on each connection is not, since two local clients sign in as the
+same person.
 
 **The response is an acknowledgement, not the effect.** `input.send` returns
 "accepted", not the model's answer. Effects arrive as events carrying the
 originating `command_id`, which is how a client reconciles an optimistic render.
 
-**Replaying a `command_id` is a no-op** that returns the original acknowledgement.
-This makes every command safe to retry after a disconnect.
+**Replaying a `command_id` is a no-op** that returns the original acknowledgement, for 30
+minutes; a replay that arrives while the first call is still running answers
+`{"accepted": true, "duplicate": true}`. This makes every command safe to retry after a
+disconnect.
 
 **A session id is the one the server generated**: a UTC timestamp and six characters
 of URL-safe base64, `20260923T101112-q3Vx_A`, which the examples here shorten to
@@ -614,7 +645,7 @@ brings to the same shape, in `session.create` and in a first `session.register`.
 #### `session.create`
 ```json
 {"command_id": "c-0", "workspace": "/home/me/project", "profile": "build",
- "prompt": "fix the test", "visibility": "private", "worktree": "auto",
+ "prompt": "fix the test", "worktree": "auto",
  "parent": "s-3a", "config": {"auto_approve": false, "watch": true}}
 ```
 → `{"session_id": "s-9f", "workspace": "/home/me/project", "worktree": null, "branch": null,
@@ -622,14 +653,20 @@ brings to the same shape, in `session.create` and in a first `session.register`.
 
 `worktree`: `"auto"` (default) creates a git worktree on `troupe/<slug>` when the
 workspace already has a live session; `"never"` reuses the directory; `"always"`
-always branches.
+always branches. The tree is `<checkout>-<slug>`, beside the checkout or worktree the
+workspace belongs to. A workspace that is a folder of it (one the repository tracks or
+would add) works in the same folder of the new tree, `workspace` in the answer, and
+`worktree` is the tree's top. A folder the repository ignores, like a directory in no
+repository, is a workspace of its own: it gets no worktree, whatever `worktree` says
+(Decision 881).
 
 `worktree_name`: work in the worktree of that name, whatever `worktree` says:
-`<workspace>-<name>` on `troupe/<name>`, made the first time, the same tree after, and
+`<checkout>-<name>` on `troupe/<name>`, made the first time, the same tree after, and
 made again from its branch when only the directory has gone. A name is one path segment
 of letters, digits, `.`, `_` and `-`, not starting with `.` or `-` (`invalid_params`,
 field `worktree_name`, otherwise); refused with `conflict` while a session is working
-in that tree.
+in that tree, in its directory or a folder of it; refused with `invalid_params`, field
+`workspace`, in a folder its repository ignores or in no repository.
 
 `workflow`: run the prompt as a named **workflow**: the step list at
 `<workspace>/.troupe/workflows/<name>.json` (or the built-in `default` pipeline) is
@@ -646,7 +683,7 @@ agent reads a finished branch's summary with the `read_branch` tool. Servers tha
 this say `branches: true` at `initialize`.
 
 `config` carries the session settings a client may choose, and only those:
-`auto_approve`, `watch`, `profile`, `full_send` (no `budget_warning`s). Everything else in the configuration — where state
+`auto_approve`, `watch`, `profile`, `full_send` (no `budget_warning`s, and a spent budget never asks). Everything else in the configuration — where state
 is written, which provider is used, what a key is — belongs to the machine the daemon
 runs on, and a client cannot move it.
 
@@ -720,9 +757,9 @@ at rest: the session is `dormant` afterwards, as one that went to sleep is.
 
 #### `session.get` → one session object plus `head_seq`.
 
-#### `session.archive` → `{"session_id"}`; makes a dormant session with no local cache.
+#### `session.archive` → `{"session_id", "state": "dormant"}`; stops the session's agents and makes it dormant. On a daemon the log stays where it is; on a plane the pod keeps no copy of a dormant session.
 
-#### `session.pin` / `session.unpin` → exempt from retention.
+#### `session.pin` / `session.unpin` → `{"session_id", "pinned"}`; a pinned session is exempt from the plane's retention. A daemon has no retention: it marks a running session pinned in its listing, and the mark does not outlive the session's going dormant.
 
 #### `session.erase` → `{"session_id", "erased", "state"}`; irreversible.
 
@@ -829,7 +866,7 @@ a hash of the file's prompt, so an edited command asks again and the `arguments`
 deny`), sends nothing and writes `command_declined` saying how to run it later. A
 person's own commands never ask, and neither does a workspace on `trusted_workspaces`.
 
-#### `turn.cancel` → `{"command_id", "session_id"}`. Valid from any state.
+#### `turn.cancel`: `{"command_id", "session_id"}` → `{"accepted": true}`. Valid from any state.
 
 Each tool call the cancel stops is closed before `cancelled` is written: a
 `tool_call_completed` with `ok: false`, then the turn's `tool_results`. A restart takes
@@ -868,7 +905,7 @@ model call, as one `user_input` from `shell` — before the input that starts a 
 after a tool exchange and its results, never between a call and its result. A replayed
 `command_id` answers the same `run_id` and runs nothing again.
 
-#### `shell.cancel` → `{"command_id", "session_id", "run_id"}`
+#### `shell.cancel`: `{"command_id", "session_id", "run_id"}` → `{"accepted": true, "run_id"}`
 
 Kills a `shell.run` command and everything it started, as its timeout does; its
 `user_shell` says `ended: "killed"`. The same scope as `shell.run`, and not activating. A
@@ -931,8 +968,9 @@ running answers `conflict` with its `loop_id`. It activates a dormant session.
 Each iteration ends with the agent's own verdict, given as a tool call and never read
 from its prose: on the loop's turns the agent is offered `goal_complete {summary}`, and an
 iteration in which it completes that call ends the loop with reason `goal_complete`. A
-model that binds its thinking to its tools (Claude Fable 5.1, Opus 5.5, Sonnet 5.5, or
-one whose config says `binds_thinking`) is offered it on every turn, so its tools never
+model that binds its thinking to its tools (Claude Fable 5.1, Opus 5.5 and Sonnet 5.5 and
+later, a model the provider's own list says binds, or one whose config says
+`binds_thinking`) is offered it on every turn, so its tools never
 change, and a call to it on a turn that is not the loop's fails with a sentence saying no
 loop is running. An iteration that ends without one is followed by
 the next. The loop also stops when it has run `max_iterations`; when `loop_max_failures`
@@ -1109,8 +1147,9 @@ what the agent may see and a path that climbs out of a mount is refused with
 → `{"path", "content", "size", "hash"}`
 
 `hash` is the `sha256:…` of the bytes, the same one `fs_changed` carries, so a client
-can check that the file it read is the file the event announced. Reading a directory,
-or a file larger than the server's cap, is `invalid_params`. A `path` of
+can check that the file it read is the file the event announced. Reading a directory is
+`not_found` (with the reason, `eisdir`); a file is bounded only by the WebSocket frame,
+16 MiB. A `path` of
 `scratch:/<name>` reads a scratchpad document (`scratch.list`), whose `hash` is the one
 its `scratch_updated` carries.
 
@@ -1151,8 +1190,8 @@ them, and a fork carries the ones its history shows.
 [{"name", "path", "reason"}]}` — the primary agents a session in that
 workspace may be created with, resolved as `session.create` resolves them (built-ins, the
 machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `global`
-or `project`. A worker answers from its bundle instead, so a client offers exactly what
-`profile` may name wherever the session will run. `skipped` is each agent file found and
+or `project`. A pod reads the same layers of its own (not the profile's bundle), and a
+token a plane mints for one session may not call it there (§7). `skipped` is each agent file found and
 not read, with why: one that is a link out of the workspace (`not read: outside the
 workspace`; a `.troupe/agents` linked out whole is one entry with a null `name`,
 Decision 829), in a git worktree one the main checkout has not committed, or one that does
@@ -1191,10 +1230,12 @@ says nothing either way.
 
 An agent read whole, checked, written and taken away (#503, Decision 841). Both clients
 manage one set through these and never write the directories themselves, so the checks
-and the choice of layer happen in one place. Reading and checking answer on a daemon and
-on a worker; writing is the daemon's, like `mcp.*` (Decision 700), and on a pod
-`agents.put` and `agents.delete` are `forbidden` with `reason` "On a pod the agents come
-from the profile's bundle and are read-only here: change them in the console".
+and the choice of layer happen in one place. Writing is the daemon's, like `mcp.*`
+(Decision 700). On a pod none of the four is a session's method, so a token a plane mints
+for one session is refused them (§7); with a token for no session, a pod reads and
+checks, and refuses `agents.put` and `agents.delete` as `forbidden` with `reason` "On a pod
+the agents come from the profile's bundle and are read-only here: change them in the
+console".
 
 ```json
 {"name": "plan", "workspace": "/home/me/project"}
@@ -1320,7 +1361,7 @@ adding a command is one change in the harness. Entries come grouped by `section`
 the order a palette shows them: `session`, `navigate`, `workspace`, `setup`, `agents`,
 `custom`, `quit`; a section with no entries is absent. Each has a `name`, its
 `aliases`, a one-line `summary`, how it is typed (`usage`: `/upload <path>`), its
-`args` (`{"name", "required", "kind"}`, where `kind` is `window`, `file` or `text`, for
+`args` (`{"name", "required", "kind"}`, where `kind` is `window`, `file`, `path` or `text`, for
 completion), a longer `detail`, an `example` or null, and where it came from: `source`
 is `builtin`, `agent`, `user` or `project`. The agents are the primary ones the session
 was started with, described by their definition: on a pod its bundle's, as the team's
@@ -1354,7 +1395,7 @@ it can and shows the rest greyed with the reason. Reading the table wakes nothin
 ```
 → `{"status": "fresh", "path": "/home/me/project/.troupe/memory.md",
 "built_at": "2026-09-20T10:00:00Z", "sections": ["Overview", "Layout", "Commands",
-"Conventions", "Notes"], "text": "...", "refresh_due": false, "refresh_held_until": null,
+"Conventions", "Notes"], "text": "...", "repository": true, "refresh_due": false, "refresh_held_until": null,
 "generated": true, "facts": [{"id": "f_5c0d9a3e71b2", "kind": "command", "claim": "The gate is
 `mix check`", "scope": null, "anchors": [{"path": "mix.exs", "hash": "9f2c...e1"}],
 "evidence": {"session": "s_01J...", "seq": 412, "head": "7f8a221", "exit_status": 0, "by":
@@ -1368,10 +1409,15 @@ agent. `status` is `absent` (no facts), `stale` (never built, older than
 went since it was last checked, Decision 838), `fresh` or `disabled` (`memory: false` in the workspace
 config). A `librarian`'s run that ends as it meant to builds it, whether or not it
 rewrote any of it.
-One brief per repository: a worktree's is the main checkout's. `refresh_due` is whether
+One brief per repository: a worktree's is the main checkout's, and so is that of a folder
+the repository tracks or would add. A folder the repository ignores keeps a brief of its
+own, as a directory in no repository does (Decision 881). `repository` says which:
+`false` outside a repository and in an ignored folder (a daemon from before it sends none).
+`refresh_due` is whether
 a client should start a `librarian` session on the workspace now, which is what
-`memory_auto_refresh` asks of it: the workspace is in a git repository (never true in a
-directory none holds, such as a home directory), the brief is `absent` or `stale`, and no librarian has
+`memory_auto_refresh` asks of it: the workspace is in a git repository (`repository`;
+never in a directory none holds, such as a home directory, or in a folder the repository
+ignores), the brief is `absent` or `stale`, and no librarian has
 started on it in the last `memory_max_age_days` without its being built since. A
 librarian's run that failed, was cancelled or wrote nothing is tried again that much
 later, not in every new session; `refresh_held_until` is when (or `null`), for a
@@ -1426,7 +1472,7 @@ checkout of the repository shares it. `control`.
 "9a0be4f27c1d3e58", "target": "repo", "path": "rules/style.md", "shown":
 ".troupe/rules/style.md", "status": "new", "question": "write", "source":
 ".cursor/rules/style.mdc", ...}], "skipped": []}, "brief": {"due": "first", "recorded":
-null, "version": 1}, "refusal": null}`
+null, "version": 2}, "refusal": null}`
 
 What a session's start asks, in this order (Decision 835): onboarding other tools' files
 into Troupe's own, then the brief. The daemon's alone; `admin`, since it answers with what
@@ -1451,8 +1497,9 @@ survey wrote it (`recorded`, `0` for one from before there were versions) and th
 has not said no to rewriting it (`memory.decline`); `none` otherwise. Whether to start
 anything at all is the client's (`memory_auto_refresh`). When onboarding is due, a client
 starts the librarian only once onboarding is answered, so it reads what was written. On a
-machine a worker runs on onboarding is never due, and `refusal` is the sentence saying it
-runs on the person's own machine.
+daemon running on a machine a worker runs on (`TROUPE_WORKER_AUTOSTART=true`) onboarding is
+never due, and `refusal` is the sentence saying it runs on the person's own machine. A pod
+has no `onboard.*` at all: it answers `method_not_found`.
 
 #### `onboard.apply` → `{"workspace", "ids": [...]}` or `{"workspace", "all": true}` (`command_id` optional)
 → `{"written": [{"id", "shown", "action"}], "refused": [{"id", "reason"}]}`. Writes the
@@ -1481,14 +1528,14 @@ state directory. `control`.
 "files": [{"scope": "root", "path": "/home/me/project/AGENTS.md", "size": 812, "chars": 800,
 "budget": 16000, "share": 0.05, "status": "whole", "reason": null, "trimmed": 0,
 "skipped": [], "imported_by": null,
-"unfollowed": [{"import": "docs/gone.md", "reason": "missing"}], "hash": "sha256:…"},
+"unfollowed": [{"import": "docs/gone.md", "reason": "missing"}], "rule": null, "applies": null,
 {"scope": "root", "path": "/home/me/project/CLAUDE.md", "size": 0, "chars": 0,
 "budget": 16000, "share": 0.0, "status": "skipped",
 "reason": "not read: run troupe onboard", "trimmed": 0, "skipped": [],
-"imported_by": null, "unfollowed": [], "hash": null},
+"imported_by": null, "unfollowed": [], "rule": null, "applies": null, "hash": null},
 {"scope": "brief", "path": "/home/me/project/.troupe/memory.md",
 "size": 0, "chars": 0, "budget": 6000, "share": 0.0, "status": "absent", "reason": null,
-"trimmed": 0, "skipped": [], "imported_by": null, "unfollowed": [], "hash": null}]}`
+"trimmed": 0, "skipped": [], "imported_by": null, "unfollowed": [], "rule": null,
 
 The **provenance of the prompt**: every file the session's next system prompt is read
 from, in the order it is read — the person's own `<config>/AGENTS.md` (`user`), the
@@ -1511,8 +1558,9 @@ through a link, and was not read, its `size` and `chars` 0 and its `hash` null;
 read, with `size` and `chars` 0 and `hash` null too; or, for the brief, `absent` or
 `disabled` as `memory.get` has it. Other tools' files are not read (Decision 828): a
 `CLAUDE.md` or `GEMINI.md` in one of those directories, `.github/copilot-instructions.md`
-at the repository root, and Cursor's root `.cursorrules` and `.cursor/rules/*.mdc` are
-each listed after the directory's own file as `skipped`, so nobody debugs a file that was
+and `.github/instructions/*.instructions.md` at the repository root, Cursor's root`
+.cursorrules`, and `.cursor/rules/*.mdc` in any of those directories are each listed after
+the directory's own file as `skipped`, so nobody debugs a file that was
 never loaded. Copilot reads its file at the repository root only, so one in any other
 directory is listed as `skipped` with a reason of its own (Decision 806). `skipped` on a
 file is always empty now that no other name stands for `AGENTS.md`, kept for the clients
@@ -1522,8 +1570,9 @@ that read it. An `.agents/AGENTS.md` in the root or one of those directories (De
 null for a file that reached the prompt and for a brief `absent` or `disabled`: `not
 read: run troupe onboard`, `not read: outside the repository` (`outside the config
 directory` for the person's own), `not read: permission denied` (or another reason the
-system gave), `not read: Copilot's file counts only at the root`, or `left out: the
-budget was spent on nearer files`.
+system gave), `not read: Copilot's file counts only at the root`, `not read: onboarded
+into <target>` for a file onboarding has already brought in, or `left out: the budget was
+spent on nearer files`.
 A rule (Decisions 809 and 828), each `.troupe/rules/*.md` in the root and in a directory
 on the way to where the session works, comes after that directory's file and its
 imports, in name order, in the directory's scope, with its front matter in `rule`:
@@ -1585,12 +1634,13 @@ reads. There is no second settings file.
 `config.get` (`observe`; `workspace` optional) → `{"config_dir", "path", "exists",
 "provider", "base_url", "auth", "api_key_set", "api_key_source", "models": {"default",
 "cheap", "expensive"}, "overrides": [{"source", "detail"}], "workspace", "trusted",
-"files", "keys", "warnings", "errors"}`. The first fields are what the user's **file**
+"files", "organisation", "keys", "warnings", "errors"}`. The first fields are what the user's **file**
 says, since that is what the model panel's save changes. The key is never in the answer:
 `api_key_set` says whether one is in force and `api_key_source` where from (`file`, `env`
 or null; a daemon before Decision 828 also said `opencode`). `overrides` names what beats
-the file anyway: a project's `.troupe/config.yaml` (only when `workspace` is given) or a
-`TROUPE_*` variable; opencode's settings beat nothing, being copied in (`config.import`)
+the file anyway: a project's `.troupe/config.yaml` or `.troupe/config.local.yaml` (only
+when `workspace` is given, and in a workspace that is not trusted only for the keys trust
+does not gate) or a `TROUPE_*` variable; opencode's settings beat nothing, being copied in (`config.import`)
 and never read for a session. `config_dir` and `path` are written
 as a person on the daemon's platform writes them, for a screen to print.
 
@@ -1612,7 +1662,7 @@ where the organisation's layer is read from, `{"scope": "org", "path", "exists"}
 managed file and, when the daemon keeps one, the plane's document with its URL as `path`
 and `fetched_at`; `trusted` whether the workspace is; `warnings` what loading warned about.
 A file that is refused leaves `keys` empty and says why in `errors`. These fields were added
-for #57, and `enforced` and `organisation` for #122; a daemon from before answers without
+for #57, and `enforced` and `organisation` with Decision 869; a daemon from before answers without
 them, and a client that finds no `keys` sets no single key (below).
 
 ```json
@@ -1722,7 +1772,8 @@ at a later one, without ever travelling back to a client.
 questions: nothing recorded, no `config.yaml`, and no model that can be asked.
 `completed` is `null` or `{"completed_at", "choice", "subject"}`, recorded once for every
 client in the daemon's state directory. `step` is the step to answer next — `where`,
-`provider`, `key`, `models`, `workspace`, `daemon`, `finish` — and `steps` the ones this path
+`provider`, `key`, `models`, `workspace`, `daemon`, `finish`, and `done` once `finish` is
+answered — and `steps` the ones this path
 takes, since a plane finishes at once and reused settings skip the key and the models.
 `daemon` says whether the daemon starts when this user logs in (Decision 762):
 `{"at_login", "kind": "startup_folder" | "launch_agent" | "systemd" | "autostart",
@@ -1730,7 +1781,8 @@ takes, since a plane finishes at once and reused settings skip the key and the m
 `null` when there is none to start.
 `detected` is what is already here: `env` (which of `ANTHROPIC_API_KEY` and
 `OPENAI_API_KEY` are set, names only), `opencode` (`path`, `providers`, `default`),
-`config` (the file, as `config.get` reports it, plus `usable`) and `plane` (`url`,
+`config` (the user's file: `exists`, `path`, `provider`, `base_url`, `api_key_set`,
+`api_key_source`, `models` and `usable`) and `plane` (`url`,
 `linked`). `key_storage` says where a key goes: `{"kind": "file", "path", "keychain":
 false}`, there being no keychain in the daemon. `answers` holds every answered step as
 it was accepted; the key step is `{"source": "typed" | "env" | "none", "var"}`, never
@@ -1747,12 +1799,12 @@ whose person wants the question again. Each step's `answer`:
 | step | answer | what it does |
 | --- | --- | --- |
 | `where` | `{"choice": "local"}` or `{"choice": "plane", "plane_url"?}` | a plane records the choice and goes to `finish`; signing in is the client's |
-| `provider` | `{"provider": "anthropic" \| "openai", "kind"?: "anthropic" \| "openai" \| "gateway" \| "litellm", "base_url"?, "auth"?}`, or `{"reuse": "opencode" \| "config"}` | a gateway and a LiteLLM proxy are `openai` with their URL; `reuse` copies opencode's providers in as `config.import` does, or keeps a `config.yaml` that works, and goes to `workspace` |
+| `provider` | `{"provider": "anthropic" \| "openai" \| "fake", "kind"?: "anthropic" \| "openai" \| "gateway" \| "litellm", "base_url"?, "auth"?}`, or `{"reuse": "opencode" \| "config"}` | a gateway and a LiteLLM proxy are `openai` with their URL; `reuse` copies opencode's providers in as `config.import` does, or keeps a `config.yaml` that works, and goes to `workspace` |
 | `key` | `{"api_key"}`, `{"env": "VAR"}` (kept as `{env:VAR}`) or `{}` for a gateway that wants none | checked with a real request, the provider's model listing: `check` is `{"state": "ok" \| "refused" \| "unknown", "reason"}`. Refused stays on `key`; `ok` fills `offered` (`{"id", "context", "max_output", "input", "output"}`, prices per million tokens) and `suggested` (`{"default", "cheap"}`, a safe answer); `unknown` goes on with nothing listed |
 | `models` | `{"default", "cheap"?}` | writes the provider, the key and the models into the user's `config.yaml` |
-| `workspace` | `{"workspace", "approvals": "ask" \| "auto"}` | the first project directory, which must exist; writes `auto_approve`. `ask` is the default |
+| `workspace` | `{"workspace", "approvals": "ask" \| "auto"}` | the first project directory, which must exist. `ask` is the default; `auto` writes `auto_approve: true`, and `ask` writes `false` only over a file that runs everything |
 | `daemon` | `{"at_login": true \| false}` | `true` writes the platform's login entry, which starts `troupe-daemon run` at the next login and keeps it up; `false` removes it. The answer is the state, so answering again turns it the other way; nothing is started or stopped now |
-| `finish` | `{"start"?: true, "prompt"?}` | records the run as done; for a local setup starts a session in the workspace with `prompt`, or `suggested_prompt`, and answers it as `session` (`session.create`'s answer, or `{"error"}`) |
+| `finish` | `{"start"?: true, "prompt"?}` | records the run as done; for a local setup starts a session in the workspace with `prompt`, or `suggested_prompt`, and answers it as `session`: `{"workspace", "prompt"}` with `session.create`'s answer, or with `"error"` |
 
 A bad answer is `invalid_params` with `data.reason` in one sentence, and the flow stays
 where it was. After `finish` the next `setup.get` is a fresh flow with `needed` false,
@@ -1803,12 +1855,14 @@ names any more is listed too.
 ```
 `mcp.add` (`admin`) → `{"path", "from", "added": ["fs"], "skipped": [{"name",
 "reason"}], "warnings", "linked"}`. Imports another tool's file — Claude Code's and
-Claude Desktop's `mcpServers`, Cursor's, VS Code's `servers`, opencode's `mcp` — copying
+Claude Desktop's `mcpServers`, Cursor's, VS Code's `servers`, opencode's `mcp`, Codex's`
+config.toml` `[mcp_servers.<name>]` (the person's own Codex file into the `user` scope
+only) — copying
 its servers into the layer's `mcp.json`, or with `link: true` reading it in place from
 then on. `${VAR}` and `${env:VAR}` become `{env:VAR}`; a server with a `${input:…}` or
-an opencode `{file:…}` is skipped and said so; `headers` are kept, and a copy writes a
-header whose value is written out as the `{env:<SERVER>_<HEADER>}` that reads it, never
-the value, with a warning naming the variable to set (Decision 820); an `oauth` is kept,
+an opencode `{file:…}` is skipped and said so; `headers` and `env` are kept, and a copy
+writes each value written out as the `{env:<SERVER>_<NAME>}` that reads it, never the
+value, with a warning naming the variable to set (Decisions 820 and 825); an `oauth` is kept,
 `clientId`, `redirectUri` and `callbackPort` read as `client_id` and `redirect_uri`.
 Importing again updates.
 
@@ -1835,10 +1889,11 @@ only from a linked file is refused with `invalid_params` naming the file.
 "error"}}`. With a `session_id`, the session reads its files again for that server and
 starts what they say now — which is how one that died is brought back, one just written
 is started, and one now `disabled` is stopped — and answers once it is ready or has
-failed; a workspace-level server whose command changed is asked about again first, and
-answers `pending`. With `workspace` and `name`, or with `name` and a `server` that was
-never written, the server is run once on its own, asked for its tools, and stopped. A
-stdio server that does not answer `initialize` within twenty seconds is `error`.
+failed, or after twenty seconds with what it is then, which may still be `connecting`; a
+workspace-level server whose command changed is asked about again first, and answers
+`pending`. With `workspace` and `name`, or with `name` and a `server` that was
+never written, the server is run once on its own, asked for its tools, and stopped; a
+stdio server run so that does not answer `initialize` within twenty seconds is `error`.
 
 ```json
 {"workspace": "/home/me/project"}
@@ -1878,7 +1933,7 @@ the options `deny`, `once` and `allow`, answered through `question.answer` like 
 `ask_user`, so any client can. `allow` is remembered per checkout in the daemon's state
 directory, never in the repository, beside a fingerprint of what would run, so a changed
 command asks again; `once` runs them for the session; `deny` leaves them `stopped` until
-the next session. A workspace on `trusted_workspaces` is not asked. Under
+the next session, or until an `mcp.check` with the `session_id` asks again. A workspace on `trusted_workspaces` is not asked. Under
 `managed_mcp_servers_only` no local server starts, and `mcp.status` says so for each.
 
 #### `mcp.sign_in`, `mcp.sign_out`
@@ -1939,10 +1994,10 @@ reads none of the person's files and holds none of their sign-ins, so the client
 the server's tools here, registers them with the pod, and serves each `tool.invoke` by
 calling here: the call is made on the person's machine with their sign-in, and the pod
 sees names, schemas, arguments and what came back. **The daemon's only**, like the rest
-of this section, and `admin`, since each goes out as the person. A server with a `url`:
-one that runs a command, one that is refused or `disabled`, and a workspace's server the
-workspace's question has not approved are `invalid_params`; a name the layers do not
-give is `not_found`.
+of this section, and `admin`, since each goes out as the person. Only a server with a
+`url` is called: one that runs a command, one that is refused or `disabled`, and a
+workspace's server the workspace's question has not approved are `invalid_params`; a name
+the layers do not give is `not_found` with `kind: "mcp_server"`.
 
 ```json
 {"name": "wiki"}
@@ -1973,18 +2028,36 @@ made twice.
 ```
 → `{"workspaces": [{"path", "score"}]}`
 
-#### `worktree.list` → `{"worktrees": [{"path", "branch", "session_id", "dirty", "ahead", "behind", "added", "removed"}]}`
+#### `worktree.list` → `{"worktrees": [{"path", "branch", "session_id", "checked", "dirty", "ahead", "behind", "added", "removed"}]}`
+```json
+{"workspace": "/home/me/project", "status": false}
+```
 
 Every worktree of the workspace's repository, the checkout first, with the live session
-working in it (`session_id`, `null` for none) and whether it has uncommitted or untracked
-files. How it stands against the checkout (Decision 840, additive): `ahead` and `behind`
+working in it (`session_id`, `null` for none: one in its directory, or in a folder of it
+git does not ignore) and whether it has uncommitted or untracked files. How it stands
+against the checkout (Decision 840, additive): `ahead` and `behind`
 are the commits its branch has that the checkout's branch has not, and the other way
 round, and `added` and `removed` the lines it would bring, counted since its branch left
 the checkout's, its uncommitted changes and untracked files included, as `worktree.merge`
 would commit them. For the checkout itself `ahead` and `behind` are against its upstream
 and `added` and `removed` what it has not committed. Each is `null` where git cannot say
 (no upstream, a detached checkout). A binary file adds no lines, and an untracked file
-over 1 MB or past the first 200 is not counted.
+over 1 MB or past the first 200 is not counted. Without `workspace`, the worktrees of every
+live session's workspace.
+
+The workspace follows git (Decision 881): a folder its repository tracks, or would add,
+lists the repository's worktrees, and a folder the repository ignores is a workspace of its
+own and lists none, as a directory in no repository does.
+
+The answer comes in bounded time however many worktrees there are. `status: false` asks
+for the trees alone: each row is `path`, `branch` and `session_id`, and no tree is looked
+at, which is how a client asks whether a workspace is in a repository. Otherwise the daemon
+reads the trees' status for about two seconds, several at once, the checkout first, then
+the trees a session works in, then the rest in git's order. `checked` says whether it read
+a tree's; a tree it did not reach has `checked: false` and `dirty` and every count `null`,
+which a client shows as not looked at rather than as clean. A daemon from before this sends
+no `checked`, and has read every tree.
 
 #### `worktree.remove`
 ```json
@@ -2023,11 +2096,12 @@ while its session is working.
 
 ### Fleet
 
-#### `fleet.get` → the same shape `subscribe` to `fleet` would replay as a snapshot.
+#### `fleet.get` → `{"sessions": [...]}`, the rows `session.list` gives with no filter. A `fleet` subscription replays nothing; it carries what happens from then on.
 #### `watch.set` → `{"command_id", "workspace", "enabled": true, "session_id"}`. Watch mode is
-**exclusive per workspace**; enabling it where another session already watches returns
-`conflict`. `session_id`, optional, names the session that watches; without it, the
-workspace's session that is no branch. Enabling it where the same session watches is
+**exclusive per workspace**: enabling it with a `session_id` naming another session than the
+one that watches there returns `conflict`. `session_id`, optional, names the session that
+watches; without it, the session already watching stays, or else the workspace's session
+that is no branch, and a workspace with no session running is `invalid_params`. Enabling it where the same session watches is
 answered as it stands; disabling turns off whichever session watches there. A pod's session
 never watches (`forbidden`). → `{"enabled", "backend"}`.
 
@@ -2080,7 +2154,7 @@ way back), which it may show or ignore.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
 `session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`,
-`question.answer`, `todo.edit`, `tools.register` and `shell.run`. Each brings a dormant session's tree
+`question.answer`, `todo.edit`, `tools.register`, `shell.run` and `commands.run`. Each brings a dormant session's tree
 back by folding its log before taking effect, and the session logs `session_activated`.
 
 On a pod only the plane brings a session back: it places the session, bumps its epoch and
@@ -2162,11 +2236,10 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `scratch.list`, `agents.list`, `agents.get`, `agents.validate`, `commands.list`, `workflows.list`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `watch.get`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `commands.run`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister`, `memory.get`, `memory.decline`, `onboard.decline`; and `shell.run` and `shell.cancel`, which also need the session's owner or `admin` (Decision 813) |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `config.organisation`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `session.claim`, `session.fork`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `onboard.plan`, `onboard.apply`, `watch.set`, `identity.link`, `identity.unlink`, `identity.sign_out`, `config.models`, `config.set`, `config.import`, `config.organisation`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `mcp.sign_in`, `mcp.sign_out`, `mcp.tools`, `mcp.call`, `skills.add`, `skills.remove`, `agents.put`, `agents.delete`, `daemon.stop` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
-three. `troupe ctl token --scope observe` mints a read-only token for a status bar or
-a dashboard.
+three, and so does the loopback TCP token; a daemon mints no narrower token.
 
 A command outside the connection's scopes returns `forbidden` with
 `data.required_scope`.
@@ -2344,8 +2417,8 @@ Without `consent`, the answer is an error carrying the challenge to show:
 
 ```json
 {"jsonrpc": "2.0", "id": 7, "error": {"code": -32013, "message": "consent_required",
-  "data": {"challenge": "…", "prompt": "Let this session run 1 tool on your machine?",
-           "tools": ["notes.search"]}}}
+  "data": {"challenge": "…", "prompt": "Let this session run notes.search on your machine?",
+           "tools": ["notes.search"], "reason": "…"}}}
 ```
 
 With it: `{"registered": ["client.notes.search"], "taint": "personal_connector"}`.
@@ -2369,9 +2442,12 @@ Also happens on its own when the connection drops.
 ### `tool.invoke` (request, **server → client**)
 
 ```json
-{"jsonrpc": "2.0", "id": 42, "method": "tool.invoke", "params": {
-  "call_id": "call-1", "name": "notes.search", "arguments": {"q": "the thing"}}}
+{"jsonrpc": "2.0", "id": "srv-42", "method": "tool.invoke", "params": {
+  "call_id": "call-1", "name": "client.notes.search", "arguments": {"q": "the thing"}}}
 ```
+
+The `id` is the server's (`srv-<n>`), and `name` is the tool as the model saw it,
+`client.` and all.
 
 The client answers with a result or an error, on the same connection. A client that does
 not answer within the tool's timeout gets the call abandoned and the agent gets an error
@@ -2382,22 +2458,23 @@ under the `call_id` the earlier connection was asked with.
 ### Presence
 
 ```json
-{"jsonrpc": "2.0", "method": "presence", "params": {
-  "subject": "ada@example.test", "state": "focused", "agent": ["root"]}}
+{"jsonrpc": "2.0", "method": "event", "params": {"topic": "presence:s-9f", "session_id": "s-9f",
+  "event": {"ephemeral": true, "type": "presence", "agent": ["root"],
+            "data": {"subject": "ada@example.test", "state": "focused",
+                     "display_name": "Ada", "agent": ["root"]}}}}
 ```
 
-Ephemeral, always. Presence is published through a path that has no access to the durable
+An ephemeral event on the session's `presence:<id>` topic (§5); `display_name` and `agent`
+are there when known. Ephemeral, always. Presence is published through a path that has no access to the durable
 log, so it cannot end up there by accident.
 
 ---
 
 ## 9. Admin methods
 
-*(Stage 3.)*
-
 Administration is a separate surface from a session: it runs against the **plane**, and
-every method goes through one context that the console, `troupe admin` and the admin MCP
-server also go through. There is no admin method that returns session content —
+every method goes through one context that the console, `POST /rpc` and the admin MCP
+server all go through. There is no admin method that returns session content —
 administration is about profiles, teams, budgets and lifecycle state, and reading what a
 session said requires being on its ACL.
 
@@ -2434,7 +2511,7 @@ that team.
 | `admin.clients.put` | platform | `{component, policy: {recommended?, minimum?, blocked?}}` → the component's policy as it now stands, with `changes`. Only the keys sent change, `null` clears one, `blocked` is the whole list; `invalid_params` with `data.field` and `data.reason` for a version SemVer cannot read, a `minimum` newer than `recommended`, or a `recommended` that is blocked. Audited as `clients.put` |
 | `admin.identity.check` | either | four named checks with what each proved and how long it took: provider discovery, its signing keys, the endpoints this plane was given, and who actually carries the platform admin group. `{group}` checks a candidate group *before* it is saved |
 | `admin.principals.list` | either | a team's service principals: subject, profiles, last use, whether enabled — never a secret or its hash |
-| `admin.principal.create` | either | `{team, name, description, profiles}` → the principal, with `secret` exactly once; `profiles` must be within the team's grants |
+| `admin.principal.create` | either | `{team, name, description, profiles, sponsor}` → the principal, with `secret` exactly once; `profiles` must be within the team's grants, and `sponsor`, the person who answers for it, is required |
 | `admin.principal.rotate` / `admin.principal.disable` | either | `{subject}`: a new secret shown once, or the end of the credential; a disabled principal is `unauthenticated` at its next call |
 | `admin.triggers.list` | either | `{team}` → a team's trigger definitions, each with the `revision` its next firing would use; in gitops mode each carries `gitops` (`resource`, `source`, `generation`, and a `problem` — `refused`, `missing` — with `reasons`), a refused resource of the team with no trigger is listed as `{name, team, gitops}`, and a platform admin also gets those naming no team here, with `team` null |
 | `admin.trigger.put` | either | upsert by `team` and `name`; partial on update, so `{team, name, enabled: false}` is a switch-off; returns the trigger, the diff and the `revision` the document now hashes to; `managed_by_gitops` in gitops mode, the switch-off included |
@@ -2443,6 +2520,28 @@ that team.
 | `admin.trigger.key.rotate` | either | `{team, name}` → `{team, name, url, key, rotated_at}`: the trigger's own key, shown once, the old one dead at once; in either mode, since the key is never in a resource |
 | `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status, its `done_reason` and `failed_reason` (a turn the harness stopped, `tool_failures` or `agent_failed`, which makes the run `failed`), and the `revision` and `revision_hash` it actually ran |
 | `admin.trigger.revisions` | either | `{team, name}` → every revision of a trigger, newest first: the number, the hash, who made it and when, and whether it was reconstructed by the migration that introduced them |
+| `admin.profile.preview` | platform | what policy makes of a profile and what would change, without writing anything |
+| `admin.provisioners.list` | either | what can make a worker, and which guarantee each substrate does not give: admission policy, network policy, egress by hostname, disruption budget |
+| `admin.hosts.list` | platform | `{profile}` → every machine registered to a profile, with whether it has ever enrolled |
+| `admin.host.register` / `admin.host.rotate` | platform | register a machine against a profile and mint the secret it enrols with, shown once; or a new secret for one, keeping the machine |
+| `admin.host.enabled` | platform | stop a machine enrolling, or let it again |
+| `admin.groups.list` | either | every identity-provider group the plane knows about, which is what a team links to |
+| `admin.team.link` / `admin.team.unlink` | platform | draw a team's members from one more group, or stop; `admin.team.unlink.preview` says first who would lose access and how many sessions they can open |
+| `admin.team.disable` | platform | remove a team; `admin.team.disable.preview` says first what goes with it: grants, administrators, service principals, triggers, group links, and the sessions left with no team |
+| `admin.team.admin.add` / `admin.team.admin.remove` | platform | make somebody an administrator of one team, or take the role away |
+| `admin.session.erase.preview` | either | what erasing a session will do, before doing it: what it holds, that its key is destroyed so no backup recovers it, and how many forks survive it |
+| `admin.bundle.preview` | either | what publishing a document would change against the channel's current version, and which teams lose an entitlement |
+| `admin.integrations.list` | either | MCP servers carried by more than one profile, every host anything here dials with whether the cluster policy allows it, and each trigger's notification target |
+| `admin.connections.list` | either | who has connected a personal credential to which person-mode server, and whose identity each session carries |
+| `admin.run.review` | either | marks the run behind a session as looked at, by whoever asks |
+| `admin.audit.verify` | platform | checks the audit trail's hash chain and names the first row that does not verify |
+| `admin.setting.effective` | either | for a setting decided at more than one rung: the value in force, the rung that decided it, and every rung that had an opinion |
+| `admin.person.budget` | platform | sets or clears a person's own monthly spend ceiling, in millionths, across every team they are in |
+| `admin.budget.explain` | platform | every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, its period, and the rung that set it |
+| `admin.provider.get` / `admin.provider.check` | either | the identity provider's sign-in settings, each with where it came from (a secret as set or not) and the URLs to register at the provider; or a candidate tested without saving it |
+| `admin.provider.put` / `admin.provider.reset` | platform | save the identity provider, or put every sign-in setting back to what the plane was deployed with |
+| `admin.scim.get` | either | the SCIM connector: the URL the provider pushes to, whether a token is set, when it was rotated and last used, and whether pushed groups become teams |
+| `admin.scim.rotate` / `admin.scim.delete` / `admin.scim.update` | platform | mint the connector's token and return it once, forget it, or change the connector's switch |
 
 Membership is never editable: it comes from the identity provider, and a method to change
 it would be a second source of truth for who is in a team.
@@ -2453,12 +2552,13 @@ it would be a second source of truth for who is in a team.
 
 Streamable HTTP, one JSON-RPC message per request, protocol revision `2025-06-18`.
 
-Two kinds of bearer token are accepted, because there are two kinds of caller. `troupe mcp`
-bridges a **plane** token, the same one `/rpc` takes, because the CLI already holds
-credentials. Any other MCP client does OAuth against the identity provider â€” there is no
-step in that flow where it could obtain a plane token â€” and presents what the provider
-issued: an id_token addressed to the client id, or an access token addressed to
-`api://<client-id>`. Both are verified in full against the provider's published keys, the
+Two kinds of bearer token are accepted, because there are two kinds of caller. A
+**plane** token, the same one `/rpc` takes, from a caller that already holds one. Any
+other MCP client does OAuth against the identity provider — there is no step in that flow
+where it could obtain a plane token — and presents what the provider issued: an id_token
+addressed to the client id, or an access token addressed to `api://<client-id>` (one
+provider's convention) or to `<base>/mcp`, which the scope the plane advertises
+(`<base>/mcp/admin`) produces. Both are verified in full against the provider's published keys, the
 configured issuer and that closed list of audiences, and both resolve to the same person,
 because the subject is the same claim in each.
 
@@ -2492,11 +2592,6 @@ try something else.
 The tool list is *not* filtered by role: a team admin sees every tool and is refused if
 they call one they may not, with the role that was wanted named in the refusal.
 
-`troupe mcp` bridges this endpoint over stdio for a client that cannot send a bearer
-header, minting and renewing the plane token from the credentials `troupe login` stored:
-
-    claude mcp add troupe -- troupe mcp
-
 ### Trigger revisions
 
 A trigger's row is mutable and a run's provenance is not. Every firing names a
@@ -2522,7 +2617,7 @@ Three consequences a client may rely on:
 
 ### Triggers and principals on the harness side
 
-Three methods on the plane's `/rpc` that are not administrative, because a caller other
+These methods on the plane's `/rpc` are not administrative, because a caller other
 than an admin uses them:
 
 | method | scope | who | answers |
@@ -2662,20 +2757,23 @@ audit trail with `outcome: refused`.
 | -32002 | `unsupported_version` | `data.supported` lists what the server speaks |
 | -32003 | `unauthenticated` | missing or invalid token |
 | -32004 | `forbidden` | `data.required_scope` |
-| -32005 | `not_found` | `data.kind`, `data.id` |
+| -32005 | `not_found` | `data.kind` with what was not found (`name`, `id`, `session_id` or `run_id`), or `data.session_id` or `data.reason` alone |
 | -32006 | `conflict` | e.g. dirty worktree, watch already held |
-| -32007 | `stale_version` | `data.expected`, `data.actual` |
-| -32008 | `capacity` | no room; `data.retry_after_ms` may be present |
+| -32007 | `stale_version` | `data.session_id`, `data.reason` |
+| -32008 | `capacity` | no room; `data.profile`, `data.max_sessions`, `data.reason` |
 | -32009 | `resync_required` | also sent as a notification (§5) |
-| -32010 | `unavailable` | a dependency is down; `data.component` |
-| -32011 | `rate_limited` | `data.retry_after_ms` |
+| -32010 | `unavailable` | a dependency is down; `data.reason`, sometimes `data.detail` |
+| -32011 | `rate_limited` | reserved: no server answers it today |
 | -32012 | `payload_too_large` | `data.limit` |
 | -32013 | `consent_required` | `data.challenge`, `data.prompt`, `data.tools` |
 | -32014 | `budget_exhausted` | the team has nothing left to reserve; `data.team`, `data.reason` |
 | -32015 | `managed_by_gitops` | an admin write to what a repository holds (§9); `data.source` |
 | -32016 | `update_required` | the plane does not serve this client's version: below its minimum, or blocked (§9, Client versions); `data.component`, `data.version`, `data.minimum`, `data.recommended`, `data.blocked`, `data.run`, and the sentence in `data.reason` |
 
-Transport-level framing faults close the connection after a best-effort error.
+A line that is not JSON, or not a JSON-RPC message, is answered with `parse_error` or
+`invalid_request` (id `null`) and the connection goes on. A message over the limit
+(`payload_too_large`), a request before `initialize`, and a binary WebSocket frame (closed
+with 1003) end the connection.
 
 ---
 
@@ -2683,7 +2781,8 @@ Transport-level framing faults close the connection after a best-effort error.
 
 Machine-readable JSON Schema for every message and event lives in
 [`protocol/schema/v1/`](protocol/schema/v1/) and is committed to the repository. It is
-generated from the same definitions the server uses, so it cannot drift.
+generated from the same definitions the server uses, so it cannot drift from them. One
+durable type the server writes is not among them yet: `agent_woken` (§4).
 
 Within major version 1:
 
@@ -2703,7 +2802,7 @@ definitions and fails CI on any breaking change.
 → {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol_version":"1",
     "client_info":{"name":"demo","version":"1"},"capabilities":{}}}
 ← {"jsonrpc":"2.0","id":1,"result":{"protocol_version":"1","scopes":["observe","control","admin"],
-    "principal":{"subject":"local:martin","kind":"user"}, …}}
+    "principal":{"subject":"local:me","kind":"user"}, …}}
 
 → {"jsonrpc":"2.0","id":2,"method":"session.create","params":{"command_id":"c-1",
     "workspace":"/tmp/demo","profile":"build","prompt":"say hello"}}
@@ -2719,7 +2818,7 @@ definitions and fails CI on any breaking change.
 
 → {"jsonrpc":"2.0","id":4,"method":"input.send","params":{"command_id":"c-3",
     "session_id":"s-1","text":"say hello"}}
-← {"jsonrpc":"2.0","id":4,"result":{"accepted":true}}
+← {"jsonrpc":"2.0","id":4,"result":{"accepted":true,"command_id":"c-3"}}
 ← … events: user_input, llm_request, llm_delta (ephemeral), llm_response …
 
 → {"jsonrpc":"2.0","id":5,"method":"approval.respond","params":{"command_id":"c-4",
@@ -2762,14 +2861,14 @@ about what it may touch.
 | **ACP** | editor → daemon | a person's editor and their session | the same session, reached the way an ACP client already knows how to reach one | the same scopes, on the same socket |
 | **ACP** | session → a subprocess agent | the session and an agent somebody else wrote | a bundle entry naming an ACP agent, served through the mount table | entitlements, and the mount table |
 | **MCP** | session → a server | the session and a tool somebody else runs | tools the model may call, as the profile or as the person | entitlements, egress policy, credential slots |
-| **MCP** | admin client → plane | an administrator and the admin surface | the methods of §9, as tools | the same admin scopes, §9 |
-| **A2A** | another agent → a profile | an agent framework and a whole profile | a task in, an answer out; no sessions, pods or events | the facade exchanges the caller's credential and calls `/rpc` as that principal |
+| **MCP** | admin client → plane | an administrator and the admin surface | the methods of §9, as tools | the same admin roles, §9 |
+| **A2A** | another agent → a profile | an agent framework and a whole profile | a task in, an answer out, streamed over SSE when asked; the facade opens a session for the task and follows its events, and an approval it waits on is the task's `input-required` | the facade exchanges the caller's credential and calls `/rpc` as that principal |
 
 ### The rules that fall out of it
 
 **A protocol is a way in, never a second set of permissions.** Every row is enforced by the
 mechanism that was already there: ACP on the daemon socket gets the scopes that socket gives,
-admin MCP gets the admin scopes, the A2A facade holds no credential of its own and acts as
+admin MCP gets the admin roles, the A2A facade holds no credential of its own and acts as
 whoever called it. There is no row where speaking a different protocol grants anything, and a
 proposed integration that would need one is the signal to stop.
 
@@ -2795,5 +2894,7 @@ special-cased for ACP, because the check is not in the ACP layer.
 * **MCP does not steer a session.** Tools are called *by* a model inside a session. A person
   driving a session uses this protocol, and the admin MCP server exposes administration
   rather than conversation.
-* **A2A does not attach.** It has no events, no subscriptions and no approvals — a task goes
-  in and an answer comes out. Somebody who wants to watch it happening wants this protocol.
+* **A2A does not attach a person.** The facade follows the session and turns what happens
+  into the task's updates; the calling agent sees a task, never the session's events, and
+  answers an approval only as the task's next message. Somebody who wants to watch it
+  happening wants this protocol.

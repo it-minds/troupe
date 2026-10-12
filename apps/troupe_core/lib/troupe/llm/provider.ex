@@ -22,6 +22,24 @@ defmodule Troupe.LLM.Provider do
   @callback stream(Request.t(), reply_to :: pid(), ref :: reference()) :: :ok
 
   @doc """
+  What an organisation's enforced `max_tokens` (`Request.ceiling`) leaves of the thinking
+  the request's reasoning effort asks for, where it leaves less: the tokens asked for and
+  those given, 0 where thinking is off for the request. Only an adapter that raises the
+  output cap to hold the thinking has anything to say: one whose reasoning spends from
+  the cap it was given, as an OpenAI-compatible server's does, leaves it out.
+  """
+  @callback thinking_held(Request.t()) :: %{asked: pos_integer(), given: non_neg_integer()} | nil
+  @optional_callbacks thinking_held: 1
+
+  @doc "`thinking_held/1` of `adapter` for `request`, or `nil` where the adapter has none."
+  @spec thinking_held(module(), Request.t()) ::
+          %{asked: pos_integer(), given: non_neg_integer()} | nil
+  def thinking_held(adapter, %Request{} = request) do
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :thinking_held, 1),
+      do: adapter.thinking_held(request)
+  end
+
+  @doc """
   Run one request in a task under `task_sup`, monitored by the caller.
 
   Returns the monitor reference; the same ref tags every message the task sends, so

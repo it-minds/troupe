@@ -330,7 +330,9 @@ defmodule Troupe.Agent.Server do
         end
 
       _ ->
-        state = events |> Enum.reduce(state, &fold_event/2) |> hold_background(events)
+        state =
+          events |> Enum.reduce(state, &fold_event/2) |> hold_background(events) |> told(events)
+
         incomplete = incomplete_calls(events)
         awaiting = awaiting_person(events)
         action = resume_action(state, incomplete, awaiting, cold_start?, cancelled?(events))
@@ -352,6 +354,18 @@ defmodule Troupe.Agent.Server do
     if Background.any?(events),
       do: %{state | child_reports: Background.held(state.session_id, state.agent_path)},
       else: state
+  end
+
+  # The session was told its thinking is held to the organisation's output ceiling, under
+  # the root: a restart claims that for the session again, so it is not told twice. The
+  # session's, not a part of the agent's state.
+  @told %{"key" => "max_tokens"}
+
+  defp told(state, events) do
+    if Enum.any?(events, &match?(%Event{type: "config_note", data: @told}, &1)),
+      do: Log.first?(state.session_id, held_key(state))
+
+    state
   end
 
   # The bundle version rides along when there is one, so a transcript says which
@@ -1405,6 +1419,7 @@ defmodule Troupe.Agent.Server do
         definition = effective_definition(state)
         request = build_request(state, definition)
         {prefix, changed} = prefix_changes(state.prefix, request)
+        :ok = note_held(state, request)
 
         log(
           state,
@@ -1556,11 +1571,13 @@ defmodule Troupe.Agent.Server do
   # own — its URL, its key, its auth scheme, the wire id it renamed the model to, possibly
   # an output cap smaller than the session's and how hard it should think — and the
   # adapter for it; a bare id goes to the session's provider with the session's key. The
-  # catalog may say which form the model takes thinking in (Decision 780). Wherever it
-  # goes, it names Troupe and the session's client unless the config says not to
-  # (Decision 787).
+  # catalog may say which form the model takes thinking in. Wherever it goes, it names
+  # Troupe and the session's client unless the config says not to. An organisation's
+  # enforced `max_tokens` holds every call, the summariser's own included, and goes with
+  # it as the ceiling an adapter's raise for thinking stops at.
   defp aim(%Request{} = request, %State{config: config} = state, model) do
     target = Config.target(config, model)
+    ceiling = output_ceiling(config)
 
     %{
       request
@@ -1568,7 +1585,9 @@ defmodule Troupe.Agent.Server do
         base_url: target.base_url,
         api_key: target.api_key,
         auth: target.auth,
-        max_tokens: min(request.max_tokens, target.max_output || request.max_tokens),
+        max_tokens:
+          Enum.min(Enum.reject([request.max_tokens, target.max_output, ceiling], &is_nil/1)),
+        ceiling: ceiling,
         reasoning_effort: target.reasoning_effort,
         thinking: Config.thinking(config, model),
         thinking_binding:
@@ -1578,6 +1597,75 @@ defmodule Troupe.Agent.Server do
         identify: config.identify != false,
         client: config.client
     }
+  end
+
+  defp output_ceiling(config) do
+    case config |> Map.get(:ceilings, %{}) |> Map.get(:max_tokens) do
+      %{limit: limit} -> limit
+      nil -> nil
+    end
+  end
+
+  # Where an organisation's enforced `max_tokens` shortened the thinking a call's effort
+  # asks for, or left it none, the person is told, once a session, with the limit and where
+  # it came from. Once a session and not once an agent, as an unpriced model is said: the
+  # first agent whose call is held claims it for the session, and the note goes under the
+  # root, whose restart claims it again from its own log.
+  defp note_held(_state, %Request{ceiling: nil}), do: :ok
+
+  defp note_held(%State{} = state, %Request{} = request) do
+    with %{} = held <- Provider.thinking_held(request.provider || state.provider, request),
+         true <- Log.first?(state.session_id, held_key(state)) do
+      {:ok, _seq} =
+        Log.append(
+          state.session_id,
+          Troupe.Session.root_path(),
+          :config_note,
+          held_note(state, request, held)
+        )
+    end
+
+    :ok
+  end
+
+  defp held_key(%State{session_id: session_id}), do: {:thinking_held, session_id}
+
+  defp held_note(%State{config: config}, %Request{} = request, %{asked: asked, given: given}) do
+    %{limit: limit, source: source} = config.ceilings.max_tokens
+    effort = "reasoning_effort #{request.reasoning_effort}"
+
+    caps =
+      "Your organisation caps a model call's output at #{thousands(limit)} tokens " <>
+        "(#{Troupe.Paths.display(source)}), so reasoning is "
+
+    said =
+      if given == 0,
+        do:
+          caps <>
+            "off for this session: #{effort} asks for #{thousands(asked)} tokens of thinking, " <>
+            "and less than 1,024 is left beside the answer.",
+        else:
+          caps <>
+            "shortened for this session: #{thousands(given)} tokens of thinking where #{effort} " <>
+            "asks for #{thousands(asked)}."
+
+    %{
+      "key" => "max_tokens",
+      "limit" => limit,
+      "source" => source,
+      "model" => request.model,
+      "effort" => request.reasoning_effort,
+      "thinking" => given,
+      "message" => said
+    }
+  end
+
+  defp thousands(n) do
+    n
+    |> Integer.to_string()
+    |> String.reverse()
+    |> String.replace(~r/(\d{3})(?=\d)/, "\\1,")
+    |> String.reverse()
   end
 
   defp adapter_for(name, %State{provider: default}) do
@@ -3513,6 +3601,7 @@ defmodule Troupe.Agent.Server do
         }
         |> aim(state, state.config.small_model)
 
+      :ok = note_held(state, request)
       ref = Provider.start_stream(tasks(state), request.provider || state.provider, request, self())
       timer = Process.send_after(self(), {:llm_timeout, ref}, request.timeout_ms)
 

@@ -61,6 +61,23 @@ Every command starts with `/`. In the terminal client `/` on an empty line, Ctrl
 `/help` opens them as a palette, filtered as you type, and a command the session cannot
 run right now is shown greyed with the reason; the desktop app's palette lists the same.
 
+On the terminal client's main screen, with no window open, a line that is not a command
+starts work rather than a chat: a branch on the default agent (`build`, or
+`default_agent`) in the checkout, or on the agent and the worktree Ctrl-N picked. A
+session on a pod runs one agent, and the line is said to it. In a window, `/todo add
+<text>`, `/todo complete <n>` and `/todo cancel <n>` edit that window's task list.
+
+The main screen also lists the worktrees of the workspace's repository, each with its
+branch, how far it is from the checkout's and whether it has uncommitted work. With many
+worktrees the list comes at once, and the daemon looks at as many as it can in about two
+seconds, the checkout first; a worktree it did not reach shows no state rather than
+`clean`. A workspace inside another repository follows git. In a folder the repository
+tracks, the worktrees are the repository's, and `/worktree` makes one beside the
+repository's checkout, with the agent in the same folder of it. A folder the repository
+ignores (say one in its `.gitignore`) is a workspace of its own: it lists no worktrees,
+`/worktree <prompt>` works in the folder itself, and `/worktree name: …` is refused
+there.
+
 A line that starts with `!` is a shell command of your own. In the terminal client
 `!git status` runs `git status` where the session runs, in its workspace (the pod's
 working copy for a session on a plane), and shows what it printed and how it ended as your

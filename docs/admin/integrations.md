@@ -12,9 +12,9 @@ Troupe is a plain relying party. Of the provider it needs:
 | **Discovery** at `<issuer>/.well-known/openid-configuration`, naming the same issuer, with a `jwks_uri` | tokens are verified against the JWKS, cached and refetched at most once a minute after a bad signature; `iss` is checked exactly |
 | **Device authorization grant** for a public client | the TUI signs in from a terminal; the plane publishes the device and token endpoints at `/.well-known/troupe` |
 | **Authorization code + client secret** for the console, redirect URI `<base_url>/admin/callback` | the console redeems the code for an `id_token`, so `openid` must be in scope |
-| A **group claim** in id tokens (and in access tokens, for MCP) | admin and team membership are read from the claim `groups_claim` names. It is a claim, **not a scope**: asking Entra for a `groups` scope refuses every sign-in (`AADSTS650053`) |
-| Redirects for the GUI and for OAuth-capable MCP clients (loopback) | both sign in in a browser |
-| For MCP: `<base_url>/mcp` as an identifier URI beside `api://<client_id>`, the delegated scope `<base_url>/mcp/admin` (or `plane.oidc.mcpScope`), groups on access tokens | an MCP client sends `https://<plane>/mcp` as RFC 8707's `resource`, and Entra refused the older `api://<client-id>/admin` pairing (`AADSTS9010010`) |
+| A **group claim** in id tokens | admin and team membership are read from the claim `groups_claim` names. A token without the claim leaves memberships as they were, so an MCP client's access token needs it only to keep them current. Whether it takes a scope is the provider's: Authentik's does ([authentik.md](authentik.md)), and asking Entra for a `groups` scope refuses every sign-in (`AADSTS650053`) |
+| Redirects for the GUI (`<base_url>/app`, the chart's default) and for OAuth-capable MCP clients (loopback) | both sign in in a browser |
+| For MCP: a provider access token whose audience is the client id, `api://<client_id>` or `<base_url>/mcp`, and the scope `<base_url>/mcp/admin` (or `plane.oidc.mcpScope`) | an MCP client sends `https://<plane>/mcp` as RFC 8707's `resource`. On Entra that means `<base_url>/mcp` as an identifier URI beside `api://<client_id>`: it refused the older `api://<client-id>/admin` pairing (`AADSTS9010010`) |
 
 Default scopes are `openid profile email offline_access`; `offline_access` is what gets a
 client a refresh token. The person is the claim `subject_claim` names, `sub` by default,
@@ -42,6 +42,8 @@ check. Authentik specifically: [authentik.md](authentik.md).
 | **Kubernetes auth** at `kubernetes`, with a **reviewer JWT** (a ServiceAccount bound to `system:auth-delegator`) | without one every login is `permission denied` and nothing says why |
 | Role `troupe-worker` (ServiceAccount `troupe-worker`, any namespace, audience `troupe-kms`), or with `bao.workerRolePerProfile` one role `troupe-worker-<profile>` per profile, bound to its namespace | worker pods log in with their projected `kms-token` under the role in `TROUPE_BAO_ROLE`, cache the client token until shortly before its lease ends, retry a 403 once after a fresh login |
 | Role `troupe-plane` (ServiceAccount `troupe-plane` in `troupe-system`), with the plane **and** signing policies | the plane logs in with its projected `bao-token`, caches the client token, retries a 403 once after a fresh login |
+| **JWT auth** at `jwt`, role `troupe-person`, keyed with the transit key's public half | a person's daemon logs in with an assertion the plane signs, for their private sessions' keys and their own MCP credentials at `troupe/people/<name>/mcp/<slot>` (`Troupe.KMS.Policy.person_role/2`) |
+| A transit key per MCP identity, `<worker namespace>.<name>` | a profile that calls an MCP server as itself signs with it ([profiles-and-policy.md](profiles-and-policy.md#calling-an-mcp-server-as-the-profile)) |
 
 The policies are in [roles-and-permissions.md §8](roles-and-permissions.md#8-openbao-policies);
 the commands, in development shape, in `dev/kind/dependencies.yaml`. A plane with neither
@@ -71,11 +73,14 @@ survive an OpenBao restart because a worker holds its key in memory; nothing can
 - S3 with SigV4. Layout `sessions/<id>/{manifest.json, segments/…, snapshots/…,
   workspace/…, blobs/…}`: segments AES-256-GCM under a per-session key, manifests plaintext.
   Workers write (seal every 60 s and at a turn's end, snapshot every 500 events, archive the
-  workspace at dormancy); the plane reads manifests only to rebuild its index.
+  workspace at dormancy); the plane reads manifests to rebuild its index and to erase.
+- **Private sessions** are sealed from people's own machines, through URLs the plane
+  presigns against `TROUPE_OBJECT_ENDPOINT`, so that endpoint has to be reachable from
+  their machines too, not only from inside the cluster.
 - **Versioning must be on.** Erasure destroys the key first, then every version; without
   versioning "every version" means nothing.
 - Credentials `troupe-object-store` in `troupe-system` **and every worker namespace**.
-- `TROUPE_OBJECT_REGION` reaches the plane only; workers sign for `us-east-1`.
+- `TROUPE_OBJECT_REGION` (`objectStore.region`) reaches the plane and every worker.
 - No lifecycle or replication rules are configured by anything here.
 
 ## 5. LLM gateway
@@ -109,13 +114,18 @@ endpoint, and, for models that endpoint does not price, `llm.prices`.
 | ingress-nginx | 3600 s proxy timeouts and a 16m body ([installing.md §6](installing.md#6-a-worked-example-on-managed-services)); then label its namespace `troupe.dev/ingress=true` |
 | cert-manager | a ClusterIssuer, `letsencrypt` in the example: HTTP-01, one certificate per pod hostname, no wildcard |
 | Storage classes | a block class (`ReadWriteOnce`) for pod disks, a file-storage class (`ReadWriteMany`) for team volumes, and one for OpenBao's Raft volume; the policy lists what profiles may name |
+| Nodes | unprivileged user namespaces, for bubblewrap: every command on a pod runs in it, and a pod that cannot start it refuses every command (Decision 832) |
 
 ## 7. MCP
 
 **Servers a bundle declares** (Troupe as client) are declared once in the bundle, projected
 onto the profile by the plane, injected by the operator, and discovered by the pod over
-streamable HTTP. The operator provides the `troupe-mcp-<server>` Secret in each worker
-namespace and the host in `allowedEgress` ([bundles-and-triggers.md §1](bundles-and-triggers.md#1-config-bundles)).
+streamable HTTP. You create the `troupe-mcp-<server>` Secret in each worker namespace and
+put the host in `allowedEgress` ([bundles-and-triggers.md §1](bundles-and-triggers.md#1-config-bundles)).
+
+**A person's own servers** are called from their machine, with their sign-in, and offered
+to a team session from there unless its profile sets `personalTools: forbid`
+([security.md §8](security.md#8-a-persons-own-tools-on-a-teams-pods)).
 
 **The plane as an MCP server** (`POST /mcp`): every admin method as a tool, the same actor
 as `/rpc`, no session content. An OAuth-capable client needs only the URL and the app
@@ -127,7 +137,9 @@ claude mcp add --transport http troupe https://<plane>/mcp --client-id <app regi
 
 It learns where to authenticate from the 401's `WWW-Authenticate … resource_metadata=` and
 the RFC 9728 document at `/.well-known/oauth-protected-resource`. Destructive tools need
-`confirm`.
+`confirm`. `POST /mcp/session` is a second door, for an agent already inside: four tools
+(`session_create`, `session_get`, `sessions_list`, `trigger_fire`) as the caller, with a
+plane token.
 
 ## 8. SCIM
 
@@ -146,8 +158,12 @@ the RFC 9728 document at `/.well-known/oauth-protected-resource`. Destructive to
 ## 9. The GUI
 
 The chart serves `clients/gui` at `gui.basePath` (`/app`) on the plane's host — same
-origin, so no CORS entry. A GUI served from anywhere else needs its origin in
-`plane.corsOrigins` and `operator.workerAllowedOrigins`, and its redirect registered at the
-identity provider, which also has to allow its origin for the device grant. The plane
+origin, so no CORS entry, and the chart tells the workers to admit the plane's origin. A
+GUI served from anywhere else needs its origin in `plane.corsOrigins` and in
+`operator.workerAllowedOrigins` (a worker admits no page whose origin is not listed), and
+its redirect registered at the identity provider, which also has to allow its origin for
+the device grant. The desktop app needs neither list. The desktop app updates itself, and
+signed in follows the version the plane recommends for `desktop`
+([routine-tasks.md](routine-tasks.md#client-versions)). The plane
 answers CORS on `/.well-known/<doc>` paths, not on
 `/.well-known/oauth-protected-resource/mcp`.

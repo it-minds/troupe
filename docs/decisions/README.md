@@ -1,10 +1,12 @@
 # Decisions
 
 The decisions that still shape this repository, each with the reasoning a reader would
-otherwise have to reconstruct, one file per decision. Code and documents cite them by
-number (`Decision 660`). The TUI's own are in [tui/](tui/README.md) and the daemon's in
-[daemon/](daemon/README.md), each numbered on its own, so `Decision 60` in the TUI's code
-and `TUI Decision 60` elsewhere are `tui/0060-*.md`.
+otherwise have to reconstruct, one file per decision. Documents cite them by number
+(`Decision 660`); new code does not, and states its invariant in its own words instead,
+while a decision names the code it governs in its `paths` (Decision 882). The TUI's own
+are in [tui/](tui/README.md) and the daemon's in [daemon/](daemon/README.md), each
+numbered on its own, so `Decision 60` in the TUI's code and `TUI Decision 60` elsewhere
+are `tui/0060-*.md`.
 
 ## Before changing a file
 

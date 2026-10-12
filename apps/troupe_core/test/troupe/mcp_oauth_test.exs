@@ -157,10 +157,8 @@ defmodule Troupe.MCPOAuthTest do
       assert %{"access_token" => "at-1", "refresh_token" => "rt-1"} =
                Store.get(context.state_dir, sign_in_of(context).key)
 
-      if match?({:unix, _}, :os.type()) do
-        assert %File.Stat{mode: mode} = File.stat!(Store.path(context.state_dir))
-        assert Bitwise.band(mode, 0o077) == 0
-      end
+      # Mode 0600, and on Windows an access list naming the user alone.
+      assert Troupe.OwnerOnly.restricted?(Store.path(context.state_dir))
 
       refute read_file(context, ".troupe/mcp.json") =~ "at-1"
       logged = session.id |> Troupe.events() |> inspect(limit: :infinity)

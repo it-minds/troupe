@@ -115,6 +115,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The merge commit and its first parent, the chunk's tip, for the citation check.
+          fetch-depth: 2
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ env.ELIXIR_VERSION }}
@@ -123,6 +126,10 @@ jobs:
         run: >-
           elixir -r apps/troupe_protocol/lib/mix/tasks/troupe.decisions.ex
           -e 'Mix.Tasks.Troupe.Decisions.run(System.argv())' -- --check
+      # The other side of a decision naming its paths: code names no decision. A
+      # change that adds a decision number to code fails, in any part of the repository.
+      - name: No change adds a decision number to code
+        run: elixir scripts/decision-citations.exs --base HEAD^1
 
   tui:
     name: the TUI - compile

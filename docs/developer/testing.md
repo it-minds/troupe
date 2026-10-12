@@ -28,7 +28,7 @@ dependency up, never silence.
 |---|---|---|
 | PostgreSQL on 25432, `troupe_plane_test` migrated | all of the plane's | every test excluded, with the two commands to run |
 | PostgreSQL | the worker's control-channel failover test | skipped, flunks |
-| OpenBao on 28200 | plane tokens, protocol KMS, every `Troupe.Worker.SessionCase` suite, the gateway's `PrivateTest` sealing | `setup_all` says so; each test flunks |
+| OpenBao on 28200 | plane tokens, protocol KMS, every `Troupe.Worker.SessionCase` suite, the gateway's `PrivateTest` sealing | `setup_all` says so; each test flunks (the plane's `PersonCredentialsTest` and `PrivateErasureTest`, which need MinIO too, are skipped by a tag instead) |
 | MinIO on 29000 | protocol object store and storage, worker sessions, the gateway's `PrivateTest` sealing | same |
 | a kubeconfig with the CRDs | the operator's `:cluster` tests, the plane's enrolment test | excluded; `--include cluster` runs them |
 | a second BEAM node | the plane's cluster test | skipped, flunks |
@@ -45,9 +45,9 @@ temporary directory once per run and passes `state_dir` through config, because
 
 ## 3. Fixtures
 
-- `test/fixtures/logs/<version>/` — six recorded logs per released version and the fold
-  hash each produces. `mix troupe.fixtures.record <version>` writes them once per release
-  and refuses to overwrite. `fold_test.exs` replays every version through the upcaster
+- `test/fixtures/logs/<version>/` — six recorded logs per recorded version (0.2.0 and
+  0.3.0; no release since has recorded its own) and the fold hash each produces.
+  `mix troupe.fixtures.record <version>` writes them and refuses to overwrite. `fold_test.exs` replays every version through the upcaster
   and compares hashes, and reads `agent/server.ex` to assert every event type the replay
   handles is witnessed. A moving hash is not a test to update.
 - `fixtures/sample_repo/` — a small Mix project the core's workspace and tool suites read.

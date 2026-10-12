@@ -590,7 +590,7 @@ defmodule Troupe.Plane.AdminTest do
         "schema" => 1,
         "agents" => [
           %{
-            "name" => "reviewer",
+            "name" => "pr-reviewer",
             "definition" => "---\nmode: primary\ndescription: Reviews\n---\nGo."
           }
         ],
@@ -604,12 +604,12 @@ defmodule Troupe.Plane.AdminTest do
       }
 
       assert {:ok, published} = Admin.bundle_publish(context.root, "stable", good)
-      assert published.summary["agents"] == ["reviewer"]
+      assert published.summary["agents"] == ["pr-reviewer"]
 
       assert {:ok, shown} = Admin.bundle_get(context.lead, "stable", published.version)
       assert shown.hash == published.hash
       assert shown.content == good
-      assert [%{name: "reviewer", mode: :primary, description: "Reviews"}] = shown.detail.agents
+      assert [%{name: "pr-reviewer", mode: :primary, description: "Reviews"}] = shown.detail.agents
 
       assert [%{name: "jira", secret: "troupe-mcp-jira", credential_ref: "JIRA_TOKEN"}] =
                shown.detail.mcp_servers

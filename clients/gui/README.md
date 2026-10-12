@@ -1,7 +1,8 @@
-# troupe-gui
+# The graphical client
 
-The graphical client for [Troupe](../../README.md), and the ground work every other
-client will stand on. It lives at `clients/gui` in the Troupe repository, beside the
+The graphical client for [Troupe](../../README.md) (`troupe-gui`, as its package and image
+are named), and `@troupe/client`, the TypeScript protocol client the desktop app and the
+throughput bench stand on. It lives at `clients/gui` in the Troupe repository, beside the
 platform it talks to, and gets no private door into the server for it: it speaks
 [`PROTOCOL.md`](../../PROTOCOL.md) over a WebSocket, the same as the TUI and the Python
 reference client.
@@ -59,7 +60,7 @@ Things the client library knows that the protocol document does not say loudly:
 
 ```sh
 pnpm install
-pnpm build                       # builds @troupe/client, typechecks the rest
+pnpm build                       # pnpm -r build: @troupe/client, then the desktop bundle (tsc, vite)
 pnpm dev:local                   # the GUI on this computer's daemon alone: no plane, no sign-in
 ```
 
@@ -73,7 +74,8 @@ pnpm dev:local --port 5185       # anything after the name goes to Vite
 `pnpm dev:local` starts a daemon and the GUI in *local-only* mode against it: no plane,
 no identity provider, no key, and nothing sent anywhere. The app opens on the launcher,
 with no sign-in; start a session in the `demo` directory it prints, and the answers come
-from the daemon's scripted `fake` provider reading `script.json` in the same place — one
+from the daemon's scripted `fake` provider reading `script.json` beside it, in
+`TROUPE_DEV_HOME` — one
 step per model call, per agent under `routes` (`Troupe.LLM.Fake`), from the top for each
 new session.
 
@@ -96,12 +98,13 @@ pnpm dev                         # then sign in to the plane URL `pnpm fake` pri
 ```
 
 `pnpm fake` starts the same identity provider, plane and worker the test suite runs
-against, seeded with three sessions, one of them stopped on an approval. Signing in needs
+against, seeded with four sessions: among them one stopped on an approval and one stopped
+by `tool_failures`. Signing in needs
 no clicking: a browser is sent to the provider and straight back as Alice, and a device
-code approves itself. Three
+code approves itself. Four
 prompt prefixes drive the scripted agent: `approve: <command>` asks for an approval,
-`big: <label>` returns a tool result too large to inline, and `quiet: …` answers without
-streaming. The plane answers `me.client_defaults` with an organisation gateway, so *Use
+`big: <label>` returns a tool result too large to inline, `quiet: …` answers without
+streaming, and `show: …` puts `notes.md` on the session's scratchpad. The plane answers `me.client_defaults` with an organisation gateway, so *Use
 organisation defaults* on the models panel has something to fill in;
 `NO_CLIENT_DEFAULTS=1 pnpm fake` is an organisation that has set nothing.
 
@@ -151,8 +154,10 @@ cat > ~/demo/.troupe/script.json <<'JSON'
 ]}}
 JSON
 troupe-daemon config trust ~/demo
-# 3. the usual two, and sign in to the fake plane
-pnpm fake && pnpm dev
+# 3. the usual two, each in its own terminal (pnpm fake runs until stopped), and sign in
+#    to the fake plane
+pnpm fake
+pnpm dev
 # 4. start the daemon and hand the page its port and token
 troupe-daemon open --url http://localhost:5173/
 ```
@@ -167,10 +172,13 @@ the daemon's `Troupe.LLM.Fake` script: `text`, `tools`, `reasoning`, `stop`
 
 ### Against a real deployment
 
-Two allowlists, not one:
+Three allowlists, not one:
 
 * the plane's `TROUPE_CORS_ORIGINS` must contain the GUI's origin — `http://localhost:5173`
   in development, or the origin it is served from;
+* the chart's `operator.workerAllowedOrigins` must contain it too, for a team session's
+  socket to a worker pod: a pod admits no page whose origin is not listed. The GUI the
+  chart serves and the desktop app are admitted without it;
 * **the identity provider must allow that origin too.** The device grant is spoken to the
   provider directly, so a deployment that adds the GUI to the plane and stops there signs
   in as far as discovery and then fails. In Dex this is the public client's
@@ -183,7 +191,7 @@ know it.
 ## Testing
 
 ```sh
-pnpm test                        # the client's 100 and the app's 18, below
+pnpm test                        # the client's tests and the app's, below
 pnpm first-token                 # sign-in to first streamed token, against the fakes
 pnpm tokens:check                # fails if the generated design tokens are stale
 pnpm icons:check                 # fails if the desktop app's icons are not the mask
@@ -220,7 +228,8 @@ anything at runtime.
 
 It ships with the platform, not as a release of its own. The image is built from this
 directory, with it as the Docker context; the one other thing it reads is the
-repository's LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt, as the `licences` context:
+repository's LICENSE, NOTICE, THIRD-PARTY-NOTICES.txt and PROTOCOL.md (whose error table
+the build tests the client against), as the `licences` context:
 
 ```sh
 docker build --build-context licences=../.. --build-arg TROUPE_GUI_BASE=app -t troupe-gui .
@@ -234,11 +243,12 @@ points `plane.appUrl` at it.
 
 CI is the root [`ci.yml`](../../.github/workflows/ci.yml): its `gui` job typechecks, tests
 and builds this workspace, `gui-e2e` runs the client against a plane built from the same
-commit, and `images` builds and pushes `troupe-gui` beside the server images on every
-push to `main`, tagged `sha-<short>`. **A release is a merged change to `VERSION`** (root
+commit, and `images` builds and pushes `troupe-gui` beside the server images on a push to
+`main` that changed a server app, `clients/gui` or the chart, once `ci-ok` has passed,
+tagged `sha-<short>`. **A release is a merged change to `VERSION`** (root
 Decision 669): `scripts/release <version>` opens that pull request, and merging it
-promotes the images — this one included — to that version and attaches the desktop
-installers the root [`release.yml`](../../.github/workflows/release.yml) builds. Rolling a
+builds the images again from the release commit — this one included — at that version and
+attaches the desktop installers the root [`release.yml`](../../.github/workflows/release.yml) builds. Rolling a
 release onto a cluster is the deployment's own business. See
 [docs/developer/ci.md](../../docs/developer/ci.md#release-the-full-suite-then-everything).
 
@@ -323,9 +333,9 @@ docker run -d --name troupe-bench-worker -p 4000:4000 \
   -e TROUPE_JWKS_PATH=/etc/troupe/jwks.json -e TROUPE_PROVIDER=fake -e TROUPE_MODEL=fake \
   -e TROUPE_FAKE_SCRIPT=/etc/troupe/fake.json -e TROUPE_STATE_HOME=/workspace/.state \
   -e TROUPE_SESSIONS_PER_POD=64 -e RELEASE_DISTRIBUTION=none -e ERL_FLAGS="+Q 65536" \
-  ghcr.io/it-minds/troupe-worker:dev
+  ghcr.io/it-minds/troupe-worker:dev    # built here by scripts/build-images troupe_worker; CI publishes no :dev
 
-BENCH_SIGNING_KEY=keys/signing-key.json BENCH_POD_ID=bench-0 \
+BENCH_SIGNING_KEY="$PWD/keys/signing-key.json" BENCH_POD_ID=bench-0 \
 BENCH_CLIENTS=20 BENCH_PROMPTS=10 pnpm bench
 ```
 
@@ -333,10 +343,11 @@ Each client opens its own socket and its own session (five clients on one sessio
 would measure the model's serialisation, not the transport) and sends its prompts
 one at a time. Every prompt is timed from just before `input.send` to the ack,
 `input_accepted`, the first `llm_delta`, the durable `llm_response` and the end of
-the turn. Results are printed and written as JSON under `bench-results/`.
+the turn. Results are printed and written as JSON under `packages/bench/bench-results/`
+(`pnpm bench` runs in that package, so a relative path is read from there).
 
 Measured on 2026-09-12, Docker Desktop on a Windows laptop, worker image built from
-`troupe-remote@2f85e39`, fake model:
+commit `2f85e39` of the platform's former repository, fake model:
 
 | clients × prompts | connect+init p50 | input_accepted p50 / p95 | llm_response p50 / p95 | turn end p50 / p95 | turns/s |
 | --- | --- | --- | --- | --- | --- |
@@ -364,9 +375,22 @@ packages/client/src
   onboard.ts      StartQuestions — a start's onboarding, then the brief, over `onboard.plan`
   config.ts       model settings: the shapes, and what an empty field in the form means
   admin.ts        the plane's administrative surface, one call per method
+  agents.ts       agents as the daemon reads, checks, writes and switches them
+  memory.ts       a repository's memory, as a client shows it and a start keeps it up
+  offer.ts        your own servers, offered to a session on a pod
+  pkce.ts         the authorization code flow with PKCE, the sign-in a browser can do
+  scratch.ts      the session's scratchpad
+  setup.ts        the first run's questions, as the daemon asks them
+  update.ts       what a plane says about this client's version
 
 apps/desktop/src
+  App.tsx         the shell: sign in or this computer only, then the launcher or the list
+  mode.ts         whether this app talks to a plane at all
   shell.ts        the whole contract between the web bundle and a desktop shell
+  shell-tauri.ts  the desktop shell's half of it, the only module that imports Tauri
+  shared.ts       the preferences that follow a person between clients, kept by the daemon
+  updates.ts      the desktop app keeping itself current
+  frames.ts       a transcript's frames, worked out as data (docs/design/frames.md)
   hooks.ts        React bindings over the stores above; no protocol knowledge
   notify.ts       a notification when a session finishes or asks while nobody is looking,
                   and its answer: a click, or the window back soon after, opens the session
@@ -375,7 +399,8 @@ apps/desktop/src
   mark.ts         the mask's geometry, generated from the same files — do not edit
   views/          SignIn · Launcher · Sessions · StartSession · Session · Approval · Question
                   Onboard (a start's onboarding and brief questions) · Approvals · Files · Review
-                  CommandPalette · Local (Models · Servers) · Appearance
+                  CommandPalette · Local (Models · Servers) · LocalControls · Appearance
+                  Agents · AgentEditor · AgentSwitch · Frames · Goal · Memory · Offer · Update
                   Onboarding/     the first run's questions, one screen per step, over `setup.get`
                                   and `setup.answer`; FirstRun leads with the theme, SetupScreen
                                   is the rail's Setup entry

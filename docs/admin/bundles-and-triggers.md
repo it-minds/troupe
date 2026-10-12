@@ -13,14 +13,19 @@ console check the same thing.
 
 ```json
 {"schema": 1,
- "agents":      [{"name": "reviewer", "definition": "---\nmode: primary\n---\nYou review…"}],
+ "agents":      [{"name": "pr-reviewer", "definition": "---\nmode: primary\n---\nYou review…"}],
  "skills":      [{"name": "review-checklist", "description": "How we review…",
                   "files": {"SKILL.md": "…", "checklist.md": "…"}}],
  "mcp_servers": [{"name": "jira", "url": "https://mcp.jira.example/mcp",
                   "credential_ref": "JIRA_MCP_TOKEN", "header": "authorization",
                   "timeout_ms": 30000, "permission": "ask",
-                  "tools": ["search_issues", "get_issue"]}]}
+                  "tools": ["search_issues", "get_issue"]}],
+ "acp_agents":  [{"name": "gemini", "command": "gemini-cli",
+                  "args": ["--acp"], "hash": "sha256:…"}]}
 ```
+
+An `acp_agents` entry is another vendor's coding agent the worker runs as a subprocess and
+speaks ACP to, through the session's mounts; a team's grant narrows it as it does an agent.
 
 A document with no `schema` key is schema 0, of which only `mcp_servers` is read; it is
 accepted for planes upgraded under one and never written again.
@@ -32,14 +37,18 @@ profile sets
 ([profiles-and-policy.md](profiles-and-policy.md#a-repositorys-agents-and-skills-on-a-pod),
 Decision 826).
 
-**Validation.** At most 4 MiB; only those four keys; names `^[a-z0-9][a-z0-9-]{0,63}$`,
+**Validation.** At most 4 MiB; only those five keys; names `^[a-z0-9][a-z0-9-]{0,63}$`,
 unique per kind. An agent's definition must parse as frontmatter plus prompt, may list only
-skills the bundle has, and replaces a built-in agent only with `override: true`. A skill
+skills the bundle has, and replaces an agent Troupe ships (`build`, `plan`, `general`,
+`explore`, `quick`, `answer`, `ask`, `reviewer`, `implementer`, `librarian`, `orchestrate`,
+`workflow`: every file in `troupe_core`'s `priv/agents/`) only with `override: true`;
+without it the bundle is refused, naming the agent. A skill
 needs `SKILL.md` (whose `name`, if present, must be its own), relative text files with no
 `..`, at most 512 KiB. An MCP `url` is `https://`, or `http://` to a `.svc` host, and its
 host must pass the policy's egress check. Publishing to a channel that a profile whose
-workers are pods follows also refuses a `url` at a loopback or link-local address, which
-such a worker does not reach with Cilium or without; without Cilium, one on another port,
+workers are pods follows also refuses a `url` at a loopback, link-local, unspecified or
+cloud metadata address, in any spelling, which such a worker does not reach with Cilium or
+without; without Cilium, one on another port,
 or at another address, gets a rule of its own in those workers' NetworkPolicy
 ([profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy)). `admin.bundle.validate`
 is not given a channel and does not make this check.
@@ -57,11 +66,13 @@ is not given a channel and does not make this check.
 | `permission` | `ask` or `auto`; an agent definition may tighten it | `ask` |
 | `tools` | allowlist applied at discovery: an unlisted tool is absent, not denied | `all` |
 
-On publish the plane projects each server onto the profile's resource with
-`secretRef: {name: "troupe-mcp-<server>", key: "token"}`, and the operator injects it as the
-`credential_ref` variable from an optional `secretKeyRef`. So for every server with a
-credential, **create `troupe-mcp-<server>` with key `token` in every `troupe-w-<profile>`
-whose profile follows the channel**, and put its host in `allowedEgress`.
+On publish the plane projects each server onto the profile's resource. A `profile`-mode
+server with a `credential_ref` gets `secretRef: {name: "troupe-mcp-<server>", key: "token"}`,
+and the operator injects it as the `credential_ref` variable from an optional
+`secretKeyRef`. So for every such server, **create `troupe-mcp-<server>` with key `token`
+in every `troupe-w-<profile>` whose profile follows the channel**, and put its host in
+`allowedEgress`. A `person` server is projected with its slot and a `client_credentials`
+one with its mode alone; neither needs a Secret.
 
 **A server that takes machine callers by client credentials** — a token that lasts an
 hour, got with a signed assertion rather than a shared secret, with tools granted per
@@ -88,9 +99,6 @@ A new version applies to **new sessions only**; a running session keeps the vers
 recorded when it was created until `admin.bundle.retire` retires that version, after which
 it moves to the channel's current version at its next activation, with a durable
 `config_upgraded` event. A channel with nothing published offers the built-in agents.
-
-A client assembling a bundle from a directory expects `agents/<name>.md`,
-`skills/<name>/SKILL.md` with its files beside it, and `mcp.yaml` or `mcp.json`.
 
 Personal MCP servers a person offers from their own client are separate: they arrive with
 consent through `tools.register` and are never configured into a pod.
@@ -127,7 +135,7 @@ repository holds the triggers' definitions as well ([below](#triggers-from-a-rep
 |---|---|---|
 | `team`, `name` | owner, and `^[a-z0-9][a-z0-9-]{0,62}$` unique per team | required |
 | `principal` | a principal of the same team, which the session runs as | required |
-| `profile`, `agent` | where it starts (a profile the plane has, one of the principal's) and which primary agent | profile required |
+| `profile`, `agent` | where it starts and which primary agent; one the plane does not have is saved, and fails at each firing (the gitops reader refuses it up front) | profile required |
 | `enabled` | a disabled trigger refuses to fire | `true` |
 | `source` | `{"kind": "schedule", "cron": "…", "tz": "UTC"}`, `{"kind": "webhook", "provider": "…"}` or `{"kind": "manual"}`; a `tz` other than UTC is refused | required |
 | `prompt_template` | ≤ 64 KiB, with `{{event.issue.key}}`, `{{trigger.name}}`, `{{run.fired_at}}` placeholders; a missing path renders empty, nothing is escaped | `""` |
@@ -135,7 +143,7 @@ repository holds the triggers' definitions as well ([below](#triggers-from-a-rep
 | `visibility` | `private` or `team` | `team` |
 | `review` | `required` or `none` | `required` |
 | `notify` | subjects granted `collaborator` on every run's session | `[]` |
-| `notify_url` | an absolute `http` or `https` URL posted the run's outcome when it ends, never its content; not loopback, link-local, a cloud metadata address (`fd00:ec2::254`, `100.100.100.200`) or in `100.64.0.0/10`, by address, in any IPv6 spelling of one, or by a name that resolves there (Decision 866), and a host the policy's egress allows, checked when saved and again at send, and posted to the address the second check passed | none |
+| `notify_url` | an absolute `http` or `https` URL posted the run's outcome when it ends, never its content; not loopback (`localhost` included), unspecified, link-local, multicast, a cloud metadata address (`fd00:ec2::254`, `100.100.100.200`) or in `100.64.0.0/10`, by address, in any IPv6 spelling of one, or by a name that resolves there (Decision 866), and a host the policy's egress allows, checked when saved and again at send, and posted to the address the second check passed, following no redirect | none |
 | `concurrency` | cap on live runs, 1–100; a firing over it records a `skipped` run | 1 |
 
 **Cron** is five fields (`*`, `*/n`, `n`, `a,b`, `a-b`, `a-b/n`; day-of-week 0–7), **UTC
@@ -305,7 +313,7 @@ session exists and re-sent on every activation:
 
 | Term | Range | Default | Effect |
 |---|---|---|---|
-| `budget_micros` | ≥ 1, capped to what the team has left | 5 000 000 | reserved at each activation |
+| `budget_micros` | ≥ 1, capped to the least any ceiling above it has left (team, person or platform); none left refuses the session with `budget_exhausted` | 5 000 000 | reserved at each activation |
 | `max_turns` | 1–500 | the agent's own | ends the session `done` with `budget_exhausted` |
 | `wall_clock_seconds` | 60–86 400 | the agent's own | same |
 | `approvals` | `wait` or `deny` — there is **no** `auto` | `wait` | `wait` leaves the approval for a person; `deny` answers no. A trigger that needs no approvals runs a profile whose bundle sets those tools to `auto` |
@@ -333,6 +341,8 @@ review queue (`needs_review` on `sessions.list` and `admin.sessions.list`);
   spent this month in every team, the platform's what everybody did.
 - One budget actor per team, registered cluster-wide, which is why plane replicas must be
   clustered.
-- Costs come from the gateway's `x-litellm-response-cost` header; without one, tokens are
-  recorded at zero cost with a synthetic id `seq:<session>:<n>`, which the reconcile counts
-  as unmetered ([integrations.md §5](integrations.md#5-llm-gateway)).
+- A call's cost is the gateway's `x-litellm-response-cost` header where it sends one (a
+  streamed call never carries it), else the model catalog's price or `models.prices`,
+  which on a pod is the profile's `llm.prices`; a model priced nowhere counts as free. A
+  call with no gateway request id is recorded as `seq:<session>:<n>`, which the reconcile
+  counts as unmetered ([integrations.md §5](integrations.md#5-llm-gateway)).

@@ -37,6 +37,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_BAO_WORKER_ROLE_PER_PROFILE` | false | gives each profile's pods `TROUPE_BAO_ROLE=troupe-worker-<profile>`, a role the installation made per profile ([roles §8](roles-and-permissions.md#8-openbao-policies)); off, pods are given none and log in as `troupe-worker` | `bao.workerRolePerProfile` |
 | `TROUPE_OBJECT_ENDPOINT` | `http://minio.troupe-system.svc:9000` | copied into worker pods; same rules | `objectStore.endpoint` |
 | `TROUPE_OBJECT_BUCKET` | `troupe-sessions` | copied into worker pods | `objectStore.bucket` |
+| `TROUPE_OBJECT_REGION` | `us-east-1` | copied into worker pods, which sign for it | `objectStore.region` |
 | `TROUPE_OBJECT_SECRET_NAME` | `troupe-object-store` | Secret in each worker namespace with `access-key-id` and `secret-access-key` | `objectStore.secretName` |
 | `TROUPE_INGRESS_CLASS` | `nginx` | class of every per-pod Ingress; nginx annotations only for `nginx` | `operator.ingressClassName` |
 | `TROUPE_WORKERS_TLS_SECRET` | unset | one TLS Secret shared by every pod Ingress; ignored when a cert issuer is set | `operator.tlsSecretName` |
@@ -46,7 +47,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_WORKERS_SCHEME`, `TROUPE_WORKERS_PORT` | `wss`, unset | scheme and port of the endpoint a pod advertises (kind uses `ws`, `30080`) | `operator.workersScheme`, `operator.workersPort` |
 | `TROUPE_DRAIN_TIMEOUT_SECONDS` | `300` | worker `terminationGracePeriodSeconds`; **not** put in the pod's env, so the worker's own drain wait stays 300. A pod stopped without a drain gives turns 150 s of its grace period and needs the rest to put its sessions to sleep, so keep this at 300 or more | `operator.drainTimeoutSeconds` |
 | `TROUPE_IMAGE_PULL_SECRETS` | none | comma-separated pull secrets for worker pods | `imagePullSecrets` |
-| `TROUPE_WORKER_ALLOWED_ORIGINS` | every origin | browser origins, written to pods as `TROUPE_ALLOWED_ORIGINS` | `operator.workerAllowedOrigins` |
+| `TROUPE_WORKER_ALLOWED_ORIGINS` | none | browser origins, written to pods as `TROUPE_ALLOWED_ORIGINS`; the chart adds the plane's own origin when it serves the GUI | `operator.workerAllowedOrigins` |
 | `TROUPE_POLICY_NAME` | `default` | which `TroupePolicy` is read | none — keep `policy.name` at `default` |
 | `TROUPE_KUBE_CONTEXT`, `KUBECONFIG` | unset, `~/.kube/config` | outside a pod only; in a pod the ServiceAccount wins | none |
 
@@ -69,7 +70,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `RELEASE_DISTRIBUTION`, `TROUPE_NODE_BASENAME`, `TROUPE_PLANE_SELECTOR` | set by chart | `name` clusters replicas through libcluster's Kubernetes topology | `plane.distribution` |
 | `TROUPE_PLANE_CONTROL_PORT` | `4001` | the control listener workers dial | `plane.controlPort` |
 | `TROUPE_GROUPS_CLAIM` | `groups` | deployed `groups_claim` | `plane.groupsClaim` |
-| `TROUPE_PLATFORM_ADMIN_GROUP` | unset (nobody) | deployed `platform_admin_group` | `plane.platformAdminGroup` |
+| `TROUPE_PLATFORM_ADMIN_GROUP` | unset (nobody); the chart's is `troupe-platform-admins` | deployed `platform_admin_group` | `plane.platformAdminGroup` |
 | `TROUPE_DEPLOYMENT_BUDGET_MICROS` | `0` (no ceiling) | the deployment's monthly ceiling on everything the plane spends, in millionths; the console's `platform_budget_micros` may narrow it, never raise it | `plane.deploymentBudgetMicros` |
 | `TROUPE_SCIM_TOKEN` | unset | the deployment's SCIM bearer; the console can mint its own | `plane.scim.*` |
 | `TROUPE_PLANE_AUDIENCE` | `troupe-plane-api` | `aud` of plane tokens | none |
@@ -85,10 +86,10 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_OIDC_MCP_SCOPE` | `<base_url>/mcp/admin` | the scope MCP clients are told to ask for | `plane.oidc.mcpScope` |
 | `TROUPE_OIDC_SUBJECT_CLAIM` | `sub` | the claim that is the person, in sign-in and as SCIM's `externalId`: `oid` for Entra ID. Deployment only; switching it moves each known person once, at their next sign-in ([§ Which claim is the person](#which-claim-is-the-person)) | `plane.oidc.subjectClaim` |
 | `TROUPE_BREAKGLASS_TOKEN`, `_SUBJECT`, `_LIFETIME_SECONDS` | unset, `breakglass`, `3600` | the emergency console door; unset, its routes 404 | `plane.breakglass.*` |
-| `TROUPE_BAO_ADDR` | `http://openbao.troupe-system.svc:8200` | OpenBao, for transit signing | `bao.address` |
+| `TROUPE_BAO_ADDR` | `http://openbao.troupe-system.svc:8200` | OpenBao: transit signing, destroying an erased session's key, and the assertions a person's daemon logs in with | `bao.address` |
 | `TROUPE_BAO_TOKEN` | unset | a static token (development); set, no Kubernetes login is tried | `bao.tokenSecretName`/`tokenSecretKey` |
 | `TROUPE_BAO_AUTH_PATH`, `TROUPE_BAO_ROLE`, `TROUPE_BAO_JWT_PATH` | `kubernetes`, `troupe-plane`, `/var/run/secrets/troupe/bao-token` | Kubernetes auth with a projected token (audience `troupe-kms`) | `bao.authPath`, `bao.planeRole` |
-| `TROUPE_OBJECT_ENDPOINT`, `_BUCKET`, `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`, `_REGION` | unset, `troupe-sessions`, unset, unset, `us-east-1` | the object store; the plane reads it for `mix troupe.index.rebuild` | `objectStore.*` |
+| `TROUPE_OBJECT_ENDPOINT`, `_BUCKET`, `_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`, `_REGION` | unset, `troupe-sessions`, unset, unset, `us-east-1` | the object store; the plane reads it for `mix troupe.index.rebuild`, presigns the URLs a person's daemon seals a private session through, and deletes an erased private session's objects | `objectStore.*` |
 | `TROUPE_SCHEDULERS`, `ERL_FLAGS` | set by chart | `+S` from `limits.cpu`, `+Q` from `plane.maxPorts`, the dist port when clustered | — |
 
 ### A.3 Worker (`troupe_worker`)
@@ -108,13 +109,18 @@ Worker pods are created by the operator, so the chart sets none of these.
 | `TROUPE_TOKEN_PATH`, `TROUPE_HOST_SECRET` | unset | a registered machine's enrolment secret, from a file or directly ([single-machine.md](single-machine.md)) | no |
 | `TROUPE_BAO_ADDR`, `TROUPE_BAO_TOKEN`, `TROUPE_BAO_MOUNT` | as the plane, unset, `secret` | KV v2 for session keys; without a token, Kubernetes auth | address only |
 | `TROUPE_BAO_ROLE` | `troupe-worker` | the Kubernetes-auth role the pod logs in under; the client token is kept until shortly before its lease ends | `troupe-worker-<profile>` with `bao.workerRolePerProfile` |
-| `TROUPE_OBJECT_*` | as the plane | the object store; credentials from `TROUPE_OBJECT_SECRET_NAME`. `_REGION` is never injected, so a worker signs for `us-east-1` | all but region |
-| `TROUPE_ALLOWED_ORIGINS` | every origin | origins the WebSocket upgrade admits | from `TROUPE_WORKER_ALLOWED_ORIGINS` |
+| `TROUPE_OBJECT_*` | as the plane | the object store; credentials from `TROUPE_OBJECT_SECRET_NAME` | yes |
+| `TROUPE_STATE_HOME` | | `/var/lib/troupe`, the pod's data volume | yes |
+| `TROUPE_SMALL_MODEL` | unset | the cheap model | from `llm.smallModel` |
+| `TROUPE_ALLOWED_ORIGINS` | none | browser origins the WebSocket upgrade admits besides the desktop app's own (`tauri://localhost`, `http://tauri.localhost`); none admits no page, `*` every one. A client that is not a browser sends no origin and is not asked | from `TROUPE_WORKER_ALLOWED_ORIGINS` |
 | `TROUPE_BASE_URL` | unset | **the LLM endpoint** — not the plane's meaning of the name | from `llm.endpoint` |
 | `TROUPE_PROVIDER`, `TROUPE_MODEL`, `TROUPE_API_KEY` | core defaults | provider, model, and the key from `llm.secretRef` (not optional: a missing Secret is `CreateContainerConfigError`) | from `llm` |
 | `TROUPE_MODEL_PRICES` | unset | JSON `models.prices`: dollars per million tokens by model, for calls the gateway does not price. Unset, such a call costs nothing on the ledger | from `llm.prices` |
 | `<credentialRef>` | unset | one per MCP server with a secret, default `TROUPE_MCP_<NAME>_TOKEN` | optional `secretKeyRef` |
 | `TROUPE_HTTP_PORT`, `TROUPE_HARNESS_PORT`, `TROUPE_NODE_NAME`, `TROUPE_JWKS_PATH`, `TROUPE_TOKEN_ISSUER`, `TROUPE_MAX_FRAME_BYTES`, `TROUPE_DRAIN_TIMEOUT_SECONDS` | `4000`, `4100`, unset, unset, unset, 16 MiB, `300` | ports, identity and limits the operator leaves at their defaults | no |
+
+No variable turns the sandbox off: a worker runs every command in bubblewrap, set in its
+own configuration (Decision 832).
 
 ### A.4 A2A facade (`troupe_a2a`)
 
@@ -149,8 +155,9 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 
 | Value | Default | Becomes |
 |---|---|---|
-| `namespace` | `troupe-system` | the namespace, and the control host `troupe-plane-control.<namespace>.svc` |
-| `imagePullSecrets` | `[]` | pull secrets on plane, Job, operator, A2A, and (via the operator) workers |
+| `namespace` | `troupe-system` | the namespace, and the control host `troupe-plane-control.<namespace>.svc`. Keep the default: the plane reads and writes `WorkerProfile`s in `troupe-system` whatever it says |
+| `createNamespace` | `true` | the chart makes the namespace, marked to be kept on uninstall ([installing.md §2](installing.md#2-crds-then-the-chart)) |
+| `imagePullSecrets` | `[]` | pull secrets on plane, Job, operator, A2A, GUI, and (via the operator) workers |
 | `networkPolicy.enabled` | `true` | plane, operator, A2A and GUI NetworkPolicies |
 | `operator.image.*`, `plane.image.*`, `a2a.image.*`, `gui.image.*` | `ghcr.io/it-minds/troupe-<name>` (public), tag `appVersion` | the images |
 | `operator.replicas` | `1` | leader elected by Lease |
@@ -162,11 +169,12 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 | `*.resources` | small requests and limits | container resources; `limits.cpu` also sets `+S` |
 | `gui.enabled`, `gui.replicas`, `gui.basePath` | `true`, `2`, `/app` | the GUI's Deployment, Service, Ingress on `plane.host` and NetworkPolicy. `basePath` must match the image's `TROUPE_GUI_BASE`; `/` is refused |
 | `a2a.enabled`, `a2a.host`, `a2a.ingressClassName`, `a2a.tlsSecretName` | `false`, `a2a.example.test`, `nginx`, `""` | the facade and its Ingress; enabling it also admits facade pods to the plane's HTTP port |
+| `a2a.replicas`, `a2a.maxPorts` | `1`, `65536` | the facade's replicas; `+Q` |
 | `policy.install`, `policy.name` | `true`, `default` | the default `TroupePolicy` (kept on uninstall) and the admission `paramRef` |
 | `policy.allowedImageRepositories` | `[ghcr.io/it-minds/troupe-worker]` | see [profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy) |
 | `policy.maxReplicas`, `maxSessionsPerPod`, `maxResources` | `8`, `8`, 4 CPU / 8Gi | ceilings |
-| `policy.allowedEgress`, `allowedStorageClasses`, `orgVolume` | `["*.anthropic.com", github.com]`, `[standard]`, `{}` | what profiles may reach and mount |
-| `policy.namespacePrefix`, `policy.workersDomain` | `troupe-w-`, `workers.example.test` | worker namespaces and hostnames |
+| `policy.allowedEgress`, `allowedStorageClasses`, `orgVolume` | `["*.anthropic.com", api.openai.com, github.com]`, `[standard]`, `{}` | what profiles may reach and mount |
+| `policy.namespacePrefix`, `policy.workersDomain` | `troupe-w-`, `workers.example.test` | worker namespaces and hostnames. Keep the prefix: the plane names an enrolling pod's profile by taking `troupe-w-` off its namespace |
 | `admission.install` | `true` | the `ValidatingAdmissionPolicy` and binding (`Deny`, `failurePolicy: Fail`) |
 
 Not chart values: worker profiles and team volumes (custom resources), the LLM gateway (a
@@ -201,9 +209,10 @@ back as set or unset, never as values.
 The groups: **administration** (`platform_admin_group`, `groups_claim`, the platform
 budget), **provisioning** (`provisioning_mode` and `gitops_source`, shown and not
 editable: whether a repository holds the profiles and triggers is the deployment's, and a
-stored value from before 0.7.0 is not read), **team defaults** that seed a team when it
-is enabled (budgets, idle timeout, cache eviction, erase-after, pins, whether members may
-control sessions), **sessions** (managed permission rules and MCP servers only, the default
+stored value from before 0.7.0 is not read), **team defaults** (a team is enabled with
+the budget, its period, the idle timeout and erase-after set here; cache eviction, pins,
+whether members may control sessions and a person's monthly ceiling hold for every team
+at once), **sessions** (managed permission rules and MCP servers only, the default
 bundle channel), **sign in** (issuer, client, endpoints, scopes — the console's **Identity
 provider** card — and `subject_claim`, shown there and not editable), **client defaults**
 (the provider and models people's own machines take as their organisation's defaults, and
@@ -213,7 +222,9 @@ and **deployment** keys that are shown but only change with a rollout.
 `admin.settings.list`, `admin.setting.effective`, `admin.setting.put` and
 `admin.setting.reset` are the methods; the console's settings pages are the same calls. A
 wrong `platform_admin_group` or `groups_claim` locks everyone out at their next request, so
-the console will not save the group until `admin.identity.check` has passed for it.
+the console will not save the group until `admin.identity.check` has passed for it. The
+versions people's clients may run are not a setting but a table of their own
+(`admin.clients.get`, `admin.clients.put`; [routine-tasks.md](routine-tasks.md#client-versions)).
 
 ### Which claim is the person
 
@@ -273,8 +284,8 @@ Troupe creates no Secrets. Each must exist before the pod that references it sta
 |---|---|---|---|
 | `troupe-plane-database` | `troupe-system` | `url` | always |
 | `troupe-plane-secret-key-base` | `troupe-system` | `value` (≥ 64 bytes) | always |
-| `troupe-plane-oidc` | `troupe-system` | `client-secret` | console sign-in (both copyable overlays leave `plane.oidc.secretName` empty) |
-| `troupe-object-store` | `troupe-system` **and every** `troupe-w-<profile>` | `access-key-id`, `secret-access-key` | the plane's index rebuild; every session on a worker |
+| `troupe-plane-oidc` | `troupe-system` | `client-secret` | console sign-in, unless the client secret is saved on the console's **Identity provider** card instead (both copyable overlays leave `plane.oidc.secretName` empty) |
+| `troupe-object-store` | `troupe-system` **and every** `troupe-w-<profile>` | `access-key-id`, `secret-access-key` | the plane's index rebuild and private sessions; every session on a worker |
 | break-glass (your name) | `troupe-system` | `token` | only when the door is wanted |
 | `troupe-plane-scim` | `troupe-system` | `token` | the deployment's SCIM token, with `plane.scim.enabled` |
 | `troupe-bao-token` | `troupe-system` | `token` | development only |
@@ -312,8 +323,9 @@ from those and from operator pods.
 | `troupe-plane` | HTTP from ingress namespaces (and A2A pods when enabled); control port from worker namespaces and the operator; epmd and dist from plane pods | unrestricted |
 | `troupe-operator` | nothing | unrestricted |
 | `troupe-a2a` | `a2a.port` from ingress namespaces | unrestricted |
-| `troupe-w-<profile>` | TCP 4000 from ingress namespaces | DNS to `k8s-app=kube-dns` in `kube-system`; the plane's control port; OpenBao, object storage, the LLM endpoint and MCP servers when their hosts are `*.svc`; **without Cilium only**, `0.0.0.0/0` minus private, link-local and shared (`100.64.0.0/10`) ranges on 443 and 80, and OpenBao, object storage outside the cluster and the profile's own LLM endpoint, MCP servers and `egress.fqdns` entries on the port they name: an IP address as that one address (`/32`, `/128`), a name on another port as the same ranges on that port; a profile's endpoint at a loopback, link-local or cloud metadata address gets nothing |
-| `troupe-egress` (Cilium only) | — | `toFQDNs` for the LLM endpoint, MCP servers, `egress.fqdns` and `gitHosts`, and for OpenBao and object storage when their hosts are not `*.svc`; `toCIDR` (`/32`, `/128`) instead for any of these given as an IP address, except a profile's at a loopback, link-local or cloud metadata address, which gets nothing; DNS to kube-dns through Cilium's DNS proxy (a `dns` rule), which is how `toFQDNs` learns addresses; `egressDeny` of `169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254` and `100.100.100.200` whatever name resolves there, except `169.254.20.10` (NodeLocal DNSCache) and OpenBao or object storage given as an address in them |
+| `troupe-gui` | TCP 8080 from ingress namespaces | unrestricted |
+| `troupe-w-<profile>` | TCP 4000 from ingress namespaces | DNS to `k8s-app=kube-dns` in `kube-system`; the plane's control port; OpenBao, object storage, the LLM endpoint and MCP servers when their hosts are `*.svc`; **without Cilium only**, `0.0.0.0/0` minus private, link-local and shared (`100.64.0.0/10`) ranges on 443 and 80, and OpenBao, object storage outside the cluster and the profile's own LLM endpoint, MCP servers and `egress.fqdns` entries on the port they name: an IP address as that one address (`/32`, `/128`), a name on another port as the same ranges on that port; a profile's endpoint at a loopback, unspecified, link-local or cloud metadata address gets nothing |
+| `troupe-egress` (Cilium only) | — | `toFQDNs` for the LLM endpoint, MCP servers, `egress.fqdns` and `gitHosts`, and for OpenBao and object storage when their hosts are not `*.svc`; `toCIDR` (`/32`, `/128`) instead for any of these given as an IP address, except a profile's at a loopback, unspecified, link-local or cloud metadata address, which gets nothing; DNS to kube-dns through Cilium's DNS proxy (a `dns` rule), which is how `toFQDNs` learns addresses; `egressDeny` of `169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254` and `100.100.100.200`, and the v4 ones in NAT64's `64:ff9b::/96`, whatever name resolves there, except `169.254.20.10` (NodeLocal DNSCache) and OpenBao or object storage given as an address in them |
 
 With Cilium a worker reaches the hosts its profile names, the installation's own OpenBao
 and object store, and nothing else outside the cluster: Cilium admits the union of both
@@ -444,8 +456,17 @@ question a session asks when it reaches that limit: it offers only raises that s
 the ceiling, refuses a typed amount past it, names the organisation and where its limit
 came from (the file's path or the plane's URL), and does not offer "no limit"; `allow`,
 which buys the first allowance again, stops at the ceiling too. An enforced `max_tokens`
-is the most output one model call asks for: a provider's model entry with its own
-`max_output` can lower that for its model, and cannot raise it.
+is the most output one model call asks for, whatever the call: a provider's model entry
+with its own `max_output` can lower that for its model, and cannot raise it, and the
+summary a compaction asks for is held to it too. It also holds the room a model's
+`reasoning_effort` gives its thinking, which otherwise raises the output cap to fit. On
+an Anthropic model the thinking is shortened so that the answer keeps 4,096 tokens, or
+half the ceiling where that is less, and where that leaves less than Anthropic's minimum
+of 1,024 tokens the call asks for no thinking. An OpenAI-compatible model's reasoning
+spends from the same cap. A session whose thinking is shortened or turned off says so
+once, naming the ceiling and its source, so a person who set a high effort learns why
+the model thinks less than they asked. Under a ceiling of less than 2,047 tokens an
+Anthropic model is never asked to think.
 
 **What it is not.** It is the organisation's word honoured by Troupe on the machine, not a
 control a person cannot get round on a machine they administer: the plane's copy is in

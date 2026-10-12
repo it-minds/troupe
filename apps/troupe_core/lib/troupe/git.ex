@@ -120,6 +120,19 @@ defmodule Troupe.Git do
 
   def explain(reason), do: Reaper.explain(reason)
 
+  @doc """
+  Whether the repository around `dir` ignores it: a folder its `.gitignore`, its
+  `info/exclude` or the person's excludes file hides, or one inside such a folder. Such a
+  folder is a workspace of its own, as one outside any repository is, and not part of the
+  repository: neither its worktrees nor its brief are the repository's. A folder the
+  repository tracks, or would add, is not ignored, and nor is the top of a checkout or a
+  worktree, a directory in no repository, or one git could not answer for.
+  """
+  @spec ignored?(Path.t()) :: boolean()
+  def ignored?(dir) do
+    match?({:ok, _out, 0}, run(dir, ["check-ignore", "-q", "--", "."], timeout_ms: 10_000))
+  end
+
   # -- where the repository is --------------------------------------------------------
 
   # git finds the repository the way it always does; what it found is then held to the

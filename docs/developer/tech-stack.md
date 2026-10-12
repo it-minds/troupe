@@ -1,8 +1,9 @@
 # Tech stack
 
-Versions are pinned in `.tool-versions`, `mix.lock`, `clients/gui/pnpm-lock.yaml`,
-`clients/vscode/pnpm-lock.yaml` and `docker/Dockerfile`; this page says why each thing is there, as the code's own comments
-give it.
+Versions are pinned in `.tool-versions`, `mix.lock` and `clients/tui/mix.lock` (which
+`scripts/locks-agree.exs` holds to each other), `clients/gui/pnpm-lock.yaml`,
+`clients/vscode/pnpm-lock.yaml` and `docker/Dockerfile`; this page says why each thing is
+there, as the code's own comments give it.
 
 ## Toolchain
 
@@ -29,10 +30,10 @@ give it.
 | `jose` | protocol, plane | JWT shapes both sides see; the plane signs through OpenBao and holds no private key |
 | `aws_signature` | protocol | SigV4 only, over `req`, rather than an S3 client with its own HTTP stack |
 | `ezstd` | protocol | segments are zstd JSONL; the it-minds fork builds on Windows |
-| `yaml_elixir`, `ymlr` | protocol, core, operator, plane | agent and skill frontmatter; GitOps manifests |
+| `yaml_elixir`, `ymlr` | `yaml_elixir`: protocol, core, operator, plane, TUI; `ymlr`: plane | agent and skill frontmatter; GitOps manifests |
 | `file_system` | core | the native watch backend (`inotifywait`, `mac_listener`) |
 | `ex_ratatui`, `burrito` | TUI | the terminal UI (Rust ratatui through NIFs); one executable per platform |
-| `jason`, `telemetry`, `stream_data`, `credo` | everywhere | JSON; `:telemetry` events nothing attaches to yet; property tests; the lint |
+| `jason`; `telemetry`, `stream_data`; `credo` | `jason` everywhere; `telemetry` and `stream_data` in core, gateway and the TUI; `credo` at the root and in the TUI | JSON; `:telemetry` events, which only the live bench attaches to; property tests; the lint |
 
 ## Binaries a session uses
 

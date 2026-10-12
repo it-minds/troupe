@@ -25,6 +25,11 @@ defmodule Troupe.LLM.Request do
     cache: false,
     tools: [],
     max_tokens: 8192,
+    # The organisation's enforced `max_tokens`, when it enforces one: the most the call
+    # may ask for whatever else wants room in it. An adapter that raises the output cap to
+    # hold the thinking an effort asks for raises it no further, and shortens the thinking
+    # to fit instead (issue #644). `nil` where nothing is enforced.
+    ceiling: nil,
     temperature: nil,
     # How hard a reasoning model should think, verbatim from the model's `models:` entry
     # (Decision 658): an OpenAI-compatible provider takes the word, Anthropic a budget or
@@ -77,6 +82,7 @@ defmodule Troupe.LLM.Request do
           cache: boolean(),
           tools: [tool_spec()],
           max_tokens: pos_integer(),
+          ceiling: pos_integer() | nil,
           temperature: float() | nil,
           reasoning_effort: String.t() | nil,
           thinking: :adaptive | :budget | nil,
@@ -92,6 +98,11 @@ defmodule Troupe.LLM.Request do
           client: String.t() | nil,
           extra: map()
         }
+
+  @doc "The output cap the call asks for: `max_tokens`, held to `ceiling` where there is one."
+  @spec output_cap(t()) :: pos_integer()
+  def output_cap(%__MODULE__{max_tokens: max, ceiling: nil}), do: max
+  def output_cap(%__MODULE__{max_tokens: max, ceiling: ceiling}), do: min(max, ceiling)
 
   @doc "The whole system prompt as one text: `system`, then `system_tail` after a blank line."
   @spec system_text(t()) :: String.t() | nil

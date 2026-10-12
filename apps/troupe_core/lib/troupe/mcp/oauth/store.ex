@@ -10,8 +10,8 @@ defmodule Troupe.MCP.OAuth.Store do
   leave a terminal-only person with no sign-in at all. Not `mcp.json`, which a person
   edits, links and copies between machines, and not the configuration directory, which
   people keep in their dotfiles. Written whole to a file beside it and renamed over it,
-  readable by its owner alone where the platform has modes (`%LOCALAPPDATA%` is the
-  user's own on Windows), and never kept as a `.previous` copy.
+  readable by its owner alone (`Troupe.OwnerOnly`: mode `0600`, or on Windows an access
+  list that names the person and nobody else), and never kept as a `.previous` copy.
 
   An entry holds the tokens and what refreshing them needs (the token endpoint, the
   client id, the resource), where to revoke them on signing out, the account for
@@ -51,23 +51,17 @@ defmodule Troupe.MCP.OAuth.Store do
     tmp = file <> ".tmp"
 
     # The temporary file is restricted before anything is in it, so there is no moment
-    # at which the tokens sit in a file anybody else could read.
+    # at which the tokens sit in a file anybody else could read; the rename keeps its
+    # access as it is.
     with :ok <- File.mkdir_p(Path.dirname(file)),
          :ok <- File.write(tmp, ""),
-         :ok <- restrict(tmp),
+         :ok <- Troupe.OwnerOnly.restrict(tmp),
          :ok <- File.write(tmp, Jason.encode!(map, pretty: true) <> "\n"),
          :ok <- File.rename(tmp, file) do
       :ok
     else
       {:error, reason} ->
         {:error, "could not write #{Troupe.Paths.display(file)}: #{:file.format_error(reason)}"}
-    end
-  end
-
-  defp restrict(path) do
-    case :os.type() do
-      {:unix, _} -> File.chmod(path, 0o600)
-      _ -> :ok
     end
   end
 end

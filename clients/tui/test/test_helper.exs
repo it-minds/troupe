@@ -49,4 +49,9 @@ Application.put_env(:troupe_core, :start_at_login,
   command: "/opt/troupe/bin/troupe-daemon"
 )
 
+# Loaded now rather than by the first test to call each one, which then waits on the read
+# behind every other: on a slow disk that wait is past the suite's timeouts.
+Code.require_file("../../../apps/troupe_core/test/support/preload.exs", __DIR__)
+Troupe.Test.Preload.run()
+
 ExUnit.start(exclude: [:manual, :slow], timeout: 60_000, capture_log: true)

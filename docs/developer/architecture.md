@@ -46,9 +46,9 @@ here but the protocol. One `VERSION` versions everything ([build.md §4](build.m
 Every cross-app call must also be declared `in_umbrella` in the caller's `mix.exs`.
 Test-only reverse dependencies pass because only `lib/` beams are read. The TUI has its own
 check, `mix troupe.xref` in `clients/tui`: UI modules call only `Troupe.Client` and pure
-data modules, and the whole TUI reaches the harness only through `Troupe.Protocol.{Client,
-Daemon,Endpoint}`, `Troupe.Config`, `Troupe.Paths`, `Troupe.Reaper` and
-`Troupe.LLM.Catalog.Store` (Decision 673). The Python conformance client in
+data modules, and the whole TUI reaches the harness only through the doors the task lists
+(`@harness_allowed` in `clients/tui/lib/mix/tasks/troupe.xref.ex`: `Troupe.Protocol.Client`,
+`Troupe.Config`, `Troupe.Paths`, `Troupe.Reaper` and a dozen more; Decision 673). The Python conformance client in
 `apps/troupe_gateway/test/conformance/` is the check that the protocol alone is enough.
 
 The operator and the worker both compose a pod's hostname `<ordinal>-<profile>.<domain>`;
@@ -57,8 +57,10 @@ the two cannot share a function across the boundary, and both say so.
 ## 3. Supervision trees
 
 **Core** (`Troupe.Application`, `one_for_one`): `Troupe.Registry`, `Troupe.Events`
-(internal pub/sub), `Troupe.Sessions.Index`, and `Troupe.Sessions`, a `DynamicSupervisor`
-of `:transient` sessions. One session (`Troupe.Session`, `rest_for_one`, 3 restarts in
+(internal pub/sub), `MCP.OAuth.Tokens` and `MCP.OAuth.SignIns` (a person's sign-ins to
+their own MCP servers), `LLM.Catalog.Refresher`, `Memory.Facts.Stores` (a repository's
+facts, one process each), `Troupe.Sessions.Index`, and `Troupe.Sessions`, a
+`DynamicSupervisor` of `:transient` sessions. One session (`Troupe.Session`, `rest_for_one`, 3 restarts in
 10 s) starts its children in dependency order, top to bottom, so a crash restarts the
 child and everything below it and nothing above:
 
@@ -66,40 +68,46 @@ child and everything below it and nothing above:
 flowchart LR
   app["Troupe.Application<br/>one_for_one"] --> registry["Troupe.Registry"]
   app --> events["Troupe.Events<br/>internal pub/sub"]
+  app --> oauth["MCP.OAuth.Tokens, SignIns<br/>LLM.Catalog.Refresher<br/>Memory.Facts.Stores"]
   app --> index["Sessions.Index"]
   app --> sessions["Troupe.Sessions<br/>DynamicSupervisor"]
   sessions --> session["Troupe.Session<br/>rest_for_one<br/>3 restarts in 10 s"]
   session --> log["1 · Session.Log<br/>the log and hash chain; everything persists through it"]
-  session --> approvals["2 · Session.Approvals<br/>the permission gate"]
-  session --> questions["3 · Session.Questions<br/>what the agent asks a person"]
-  session --> clienttools["4 · Session.ClientTools<br/>tools a connected client offered"]
-  session --> mcp["5 · Session.MCP<br/>the person's and the workspace's MCP servers"]
-  session -.-> fake["6 · LLM.Fake<br/>only for provider: fake"]
-  session --> node["7 · Agent.Node<br/>the root agent, one_for_all"]
-  session --> watcher["8 · Session.Watcher<br/>watch mode"]
-  session --> files["9 · Session.Files<br/>fs_changed events"]
-  session --> loop["10 · Session.Loop<br/>/loop, one root turn per iteration"]
-  session --> summary["11 · Session.Summary<br/>the summary projection, last on purpose"]
+  session --> shell["2 · Session.Shell<br/>a person's own commands"]
+  session --> approvals["3 · Session.Approvals<br/>the permission gate"]
+  session --> questions["4 · Session.Questions<br/>what the agent asks a person"]
+  session --> clienttools["5 · Session.ClientTools<br/>tools a connected client offered"]
+  session --> mcpsessions["6 · MCP.Sessions<br/>the session's MCP protocol sessions"]
+  session --> mcp["7 · Session.MCP<br/>the person's and the workspace's MCP servers"]
+  session -.-> fake["8 · LLM.Fake<br/>only for provider: fake"]
+  session --> node["9 · Agent.Node<br/>the root agent, one_for_all"]
+  session --> watcher["10 · Session.Watcher<br/>watch mode"]
+  session --> files["11 · Session.Files<br/>fs_changed events"]
+  session --> loop["12 · Session.Loop<br/>/loop, one root turn per iteration"]
+  session --> summary["13 · Session.Summary<br/>the summary projection, last on purpose"]
   node --> tasks["Agent.Tasks<br/>Task.Supervisor: tool calls, the model stream"]
   node --> children["Agent.Children<br/>DynamicSupervisor: each subagent's own Agent.Node"]
   node --> server["Agent.Server<br/>the gen_statem"]
 ```
 
-The approvals, questions and client tools sit above the agent so that a restarted agent
+A person's shell, the approvals, questions and client tools sit above the agent so that a restarted agent
 finds the same answers and registrations; the watchers, the loop (Decision 679) and the
 projection sit below it so that none of them can restart it. The root `Agent.Node` is
 `significant`: when it gives up, past its own restart limit, the session ends and comes
 back dormant from its log (Decision 727).
 
-**Daemon** (`Troupe.Gateway.Daemon`, `rest_for_one`, started only under
-`TROUPE_DAEMON_AUTOSTART`): `Commands` (idempotency ledger), `Plane` (where the plane is,
-if anybody linked one), `Private.Sealers` (a sealer per private session), `Connections`
+**Daemon** (`Troupe.Gateway.Daemon`, `rest_for_one`, started by `Troupe.Daemon.Application`
+when `troupe-daemon` starts, or under `TROUPE_DAEMON_SERVE=1` from source): `Commands`
+(idempotency ledger), `Plane` (where the plane is, if anybody linked one),
+`Private.Sealers` (a sealer per private session), `Setup` (the first run's answers), `Connections`
 (one process per client, at most 256), `Listener` (Unix socket or loopback TCP),
 `Loopback` (a WebSocket on 127.0.0.1, the only door a browser has) and `Idle`. Sessions
 are not in this tree, so the daemon can lose its listener without disturbing an agent.
 
 **Worker** (`Troupe.Worker.Supervisor`, empty unless `TROUPE_WORKER_AUTOSTART`):
-`Sessions` (a `Session.Manager` per active session), `Auth`, `Connections`, `MCP`,
+`KMS.OpenBao.Login` first (the worker's own OpenBao identity), `Sessions` (a
+`Session.Manager` per active session), `Auth`, `MCP.Sessions`, `Connections`,
+`ClientCredentials`, `MCP`,
 `Bundles` (before the link: enrolment claims the bundle hash), `Usage`, `Disk.Watch`,
 `Plane.Link` (only with
 `TROUPE_PLANE_CONTROL`), and `Harness` — the gateway's `Commands`, `Connections`, a raw
@@ -108,8 +116,10 @@ NDJSON `Listener` on 4100 and `Gateway.Web` (Bandit on 4000: `/health/live`,
 
 **Plane** (`Troupe.Plane.Supervisor`, empty unless `TROUPE_PLANE_AUTOSTART`): `Repo`,
 `Settings` (5 s cache), PubSub, `Singleton` (a `DynamicSupervisor` for the `:global`
-actors: one `Placement` per profile, one `TeamBudget` per team), `Fleet.Sweeper`, the
-keepers of the trigger scheduler and the fleet scaler, `Fleet.ReleaseImage` (rewrites
+actors: one `Placement` per profile, one `TeamBudget` per team, one `PersonBudget` per
+person, one `PlatformBudget`, and the fleet scaler, GitOps and erasure-retry singletons),
+`Fleet.Sweeper`, the keepers of the trigger scheduler, the fleet scaler, GitOps
+(`Gitops.Keeper`) and the erasure retry (`Erasure.Retry.Keeper`), `Erasure.Tasks`, `Fleet.ReleaseImage` (rewrites
 `release` profiles after an upgrade), the control channel's registry, connections and `:gen_tcp`
 listener on 4001, `Ledger.Cache`, `Tokens.Credential` (the OpenBao login), the Phoenix
 endpoint on 4000, and libcluster when `RELEASE_DISTRIBUTION=name`. The `:global` actors
@@ -194,8 +204,9 @@ settles:
   from the last `seq` it processed. Every reconnection asks the plane's `session.open`
   again, so a session moved to another pod is followed, and a command its pod refuses as
   `not_found` for the session runs once more after the reopen (`SessionAttachment.retrying`).
-- **Sign-in**: a browser uses authorization code + PKCE (Entra's `devicecode` endpoint
-  sends no CORS headers), with `prompt=select_account` and, for a tenant-scoped Microsoft
+- **Sign-in**: a browser uses authorization code + PKCE (the device grant fails in a browser
+  against some providers: Microsoft Entra ID's device-code endpoint, for one, sends no CORS
+  headers), with `prompt=select_account` and, for a tenant-scoped Microsoft
   issuer, `domain_hint=organizations`; anything else uses the device grant. Redeeming a
   code is idempotent, and the code comes off the address bar either way. The redirect URI
   is the origin plus the base path with no trailing slash, registered as a single-page
@@ -214,7 +225,7 @@ settles:
 - **Two modes, `local` and `plane`** (`mode.ts`, #85). `auth` is optional, and each screen
   says what it needs. In local mode Review and the plane's profiles are hidden, and the
   rail shows *This computer* and the OS user the daemon reported. *Local only* is a
-  remembered setting (`troupe.pref.localOnly`, until shared settings, #57). It is reached
+  remembered setting (`troupe.pref.localOnly`, in the browser's storage). It is reached
   from the sign-in screen's third door or the switch on *This computer*. Turning it on
   keeps the stored sign-in. *Offline* is plane mode with a plane that does not answer:
   "Continue on this computer", nothing remembered, and the plane retried every 15 s. The

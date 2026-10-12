@@ -1081,6 +1081,12 @@ export function fold(state: TranscriptState, e: TroupeEvent, options: FoldOption
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: str(d.data["message"], "other tools' files are here: troupe onboard brings them in") }],
       };
 
+    // Something the configuration did to the session, said once under the root: the
+    // harness's own sentence (troupe #644, an organisation's output ceiling shortened the
+    // thinking).
+    case "config_note":
+      return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: str(d.data["message"], "a setting was held") }] };
+
     // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
     case "truncated":
       return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: truncatedText(d) }] };

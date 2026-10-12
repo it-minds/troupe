@@ -31,6 +31,7 @@ operator:
   ingressClassName: nginx
   workersScheme: wss
   workersPort: ""
+  # No page but the GUI this chart serves; see `values.yaml`.
   workerAllowedOrigins: []
   # A cert-manager ClusterIssuer: one certificate per pod hostname over HTTP-01,
   # which needs no DNS API token and so works on any DNS host. Leave it empty and

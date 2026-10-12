@@ -83,10 +83,11 @@ spec:
             # same way the object-store secret is.
             - name: TROUPE_IMAGE_PULL_SECRETS
               value: {{ join "," .Values.imagePullSecrets | quote }}
-            # Browser origins a worker answers cross-origin requests from. Empty means
-            # none, which is right for `troupe` and for a client that is not a browser.
+            # Browser origins a worker admits on its WebSocket: the list, and the plane's
+            # own when this chart serves the GUI there. Empty admits no page; the desktop
+            # app, `troupe` and other clients that are not browsers need nothing here.
             - name: TROUPE_WORKER_ALLOWED_ORIGINS
-              value: {{ join "," .Values.operator.workerAllowedOrigins | quote }}
+              value: {{ include "troupe.operator.workerOrigins" . | quote }}
             - name: TROUPE_BAO_ADDR
               value: {{ .Values.bao.address | quote }}
             # Each profile's pods log in to OpenBao as `troupe-worker-<profile>`, which the

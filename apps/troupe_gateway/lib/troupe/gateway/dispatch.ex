@@ -412,23 +412,28 @@ defmodule Troupe.Gateway.Dispatch do
   # `text` is their view (Decision 839). `model` says whether a model can be asked under the
   # workspace's own config (`Troupe.Config.key_problem/1`), which a client starting a
   # librarian there needs and the machine's `setup.get` cannot say (Decision 854).
+  # `repository` is whether the brief is a repository's: false outside one and in a folder
+  # the repository ignores, which keeps a brief of its own that no librarian refreshes by
+  # itself. Where the brief is is asked of git once, and every answer is read from there.
   defp handle("memory.get", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          workspace = Path.expand(workspace),
          {:ok, config} <- workspace_config(workspace) do
-      brief = Troupe.Session.Memory.brief(workspace)
-      held = Troupe.Session.Memory.held_until(workspace, config)
+      where = Troupe.Session.Memory.locate(workspace)
+      brief = Troupe.Session.Memory.brief(where)
+      held = Troupe.Session.Memory.held_until(where, config)
 
       {:ok,
        %{
-         "status" => workspace |> Troupe.Session.Memory.status(config) |> to_string(),
-         "path" => Troupe.Session.Memory.path(workspace),
+         "status" => where |> Troupe.Session.Memory.status(config) |> to_string(),
+         "path" => Troupe.Session.Memory.path(where),
          "built_at" => brief && brief.built_at && DateTime.to_iso8601(brief.built_at),
          "sections" => if(brief, do: Troupe.Memory.titles(brief), else: []),
          "text" => brief && Troupe.Memory.render(brief),
-         "refresh_due" => Troupe.Session.Memory.refresh_due?(workspace, config),
+         "repository" => Troupe.Session.Memory.repository?(where),
+         "refresh_due" => Troupe.Session.Memory.refresh_due?(where, config),
          "refresh_held_until" => held && DateTime.to_iso8601(held),
-         "facts" => Facts.list(workspace),
+         "facts" => Facts.list(where),
          "generated" => true,
          "model" => model_json(Troupe.Config.key_problem(config))
        }}
@@ -576,8 +581,11 @@ defmodule Troupe.Gateway.Dispatch do
     {:ok, %{"workspaces" => Troupe.search_workspaces(query, limit)}}
   end
 
+  # `status: false` answers each tree's path, branch and session alone: what a client asks
+  # that only wants to know which trees there are, or whether there is a repository.
   defp handle("worktree.list", params, _context) do
-    {:ok, %{"worktrees" => Worktrees.list(Map.get(params, "workspace"))}}
+    status? = Map.get(params, "status") != false
+    {:ok, %{"worktrees" => Worktrees.list(Map.get(params, "workspace"), status: status?)}}
   end
 
   # -- subscriptions ----------------------------------------------------------
@@ -1640,6 +1648,25 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp worktree_error({:worktree_failed, output}),
     do: {:error, Error.new(:internal_error, %{reason: output})}
+
+  # A worktree named in a workspace that belongs to no repository.
+  defp worktree_error({:no_repository, :ignored}) do
+    {:error,
+     Error.new(:invalid_params, %{
+       field: "workspace",
+       reason:
+         "its repository ignores this folder, so it is a workspace of its own, with no " <>
+           "worktrees of that repository"
+     })}
+  end
+
+  defp worktree_error({:no_repository, _none}) do
+    {:error,
+     Error.new(:invalid_params, %{
+       field: "workspace",
+       reason: "this folder is in no git repository, so it has no worktrees"
+     })}
+  end
 
   defp worktree_error(:not_found),
     do: {:error, Error.new(:not_found, %{kind: "worktree"})}

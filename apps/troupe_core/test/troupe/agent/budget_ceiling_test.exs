@@ -152,14 +152,16 @@ defmodule Troupe.Agent.BudgetCeilingTest do
   end
 
   describe "the ceilings a configuration carries" do
-    test "the budget's limits, with where each came from, and never from an override", context do
+    test "the budget's limits and a call's output, with where each came from, and never from an override",
+         context do
       enforce(context, "  max_turns: 50\n  wall_clock_ms: 600000\n  max_tokens: 1000\n")
 
       config = Config.load(context.workspace, ceilings: %{})
 
       assert config.ceilings == %{
                max_turns: %{limit: 50, source: context.managed},
-               wall_clock: %{limit: 600_000, source: context.managed}
+               wall_clock: %{limit: 600_000, source: context.managed},
+               max_tokens: %{limit: 1000, source: context.managed}
              }
 
       enforce(context, "  approvals: deny\n")

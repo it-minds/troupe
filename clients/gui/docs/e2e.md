@@ -1,7 +1,7 @@
 # End to end, against real servers
 
 What the unit suite cannot test is the server's half. This is that, without a cluster.
-`test/support` is a plane, a worker and an identity
+`packages/client/test/support` is a plane, a worker, a daemon and an identity
 provider written in this repository: they prove the client behaves correctly when a
 server behaves as `PROTOCOL.md` says, and they agree with the client by construction. A
 real server does not, and what it can disagree about is what matters — event shapes, what
@@ -80,7 +80,7 @@ docker run -d --name troupe-e2e -p 4010:4000 \
   -e TROUPE_PROVIDER=fake -e TROUPE_MODEL=fake -e TROUPE_FAKE_SCRIPT=/etc/troupe/fake.json \
   -e TROUPE_STATE_HOME=/workspace/.state -e TROUPE_SESSIONS_PER_POD=64 \
   -e TROUPE_HTTP_PORT=4000 -e RELEASE_DISTRIBUTION=none -e ERL_FLAGS="+Q 65536" \
-  ghcr.io/it-minds/troupe-worker:dev
+  ghcr.io/it-minds/troupe-worker:dev    # built here by scripts/build-images troupe_worker; CI publishes no :dev
 docker exec troupe-e2e sh -c 'mkdir -p /workspace/e2e'   # it will not invent directories
 
 cd packages/client
@@ -96,7 +96,7 @@ instead of at a plane.
 
 | test | what only a real worker can show |
 | --- | --- |
-| negotiates the protocol this client speaks | the real `initialize` result, its scopes and principal |
+| negotiates the protocol this client speaks | the real `initialize` result: its protocol version, the server's name and its scopes |
 | folds a real turn into a transcript | `fold`, over event shapes the client did not invent |
 | times a real turn, and returns when it ends | guards the regression where a turn waited out its timeout |
 | collapses a command id sent twice | the real idempotency ledger, which is what makes a retry after a drop safe |

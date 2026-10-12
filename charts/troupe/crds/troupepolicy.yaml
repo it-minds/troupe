@@ -43,8 +43,23 @@ spec:
                   type: array
                   description: >-
                     Hostnames a profile may reach, including its LLM endpoint and MCP
-                    servers. '*.example.com' matches exactly one label.
-                  items: {type: string}
+                    servers. '*.example.com' matches exactly one label. A star anywhere
+                    else is refused: a bare '*', '**.example.com', '*.*', 'a.*.example.com'.
+                  # Bounds that keep the rule's cost estimate within what the API server
+                  # accepts. A hostname is at most 253 characters.
+                  maxItems: 512
+                  items:
+                    type: string
+                    maxLength: 253
+                    # The same test as `Troupe.Policy.pattern?/1` and the admission rule:
+                    # an exact name, or `*.` and a domain with no star and no empty label.
+                    x-kubernetes-validations:
+                      - rule: >-
+                          !self.contains('*') ||
+                          (self.startsWith('*.') && self.size() > 2 && !self.substring(2).contains('*') &&
+                           !self.substring(2).startsWith('.') && !self.endsWith('.') && !self.contains('..'))
+                        messageExpression: >-
+                          'allowedEgress entry ' + self + ' is not a hostname or a one-label wildcard such as *.example.com'
                 allowedStorageClasses:
                   type: array
                   items: {type: string}

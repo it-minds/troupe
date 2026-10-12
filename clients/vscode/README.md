@@ -12,7 +12,8 @@ from.
 
 Any of these opens a terminal named `Troupe: <folder>` and runs
 `troupe --workspace <folder>` in it, with the terminal's working directory set to the same
-folder:
+folder; the `troupe.args` setting goes after `--workspace <folder>` for Open, Resume, Run
+and Ask:
 
 - the Troupe mask in an editor's title bar, at the top right of the editor group, which
   opens it at that file's folder;
@@ -139,7 +140,7 @@ isn't installed in WSL: Ubuntu", for example.
 
 The extension is not on a marketplace yet. Every Troupe release attaches it as
 `troupe.vsix`, and Troupe's installer installs it with `--vscode` (`-VSCode` on Windows),
-`troupe` with it:
+and `troupe` itself with `--tui` (`-Tui`), which the extension needs:
 
 ```
 curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh && sh install.sh --tui --vscode

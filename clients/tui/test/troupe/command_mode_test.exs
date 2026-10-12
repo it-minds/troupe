@@ -191,6 +191,37 @@ defmodule Troupe.CommandModeTest do
     GenServer.stop(pid, :normal)
   end
 
+  # #650: in a repository of many worktrees the daemon's listing looks at as many as its
+  # time allows. A row it did not reach says no state, not "clean".
+  test "a worktree row the daemon's listing did not look at says no state" do
+    {sid, ws} = repo_with_fake!([])
+    {pid, session} = start_tui(sid)
+    ready(pid)
+    eventually(fn -> not user_state(pid).worktrees_loading end)
+
+    row = fn branch, dirty ->
+      %{
+        path: ws <> "-" <> branch,
+        branch: branch,
+        session_id: nil,
+        dirty: dirty,
+        ahead: nil,
+        behind: nil,
+        added: nil,
+        removed: nil
+      }
+    end
+
+    send(pid, {:worktrees, sid, {:ok, [row.("looked-at", false), row.("not-reached", nil)]}})
+    eventually(fn -> screen_text(pid, session) =~ "not-reached" end)
+
+    lines = pid |> screen_text(session) |> String.split("\n")
+    assert Enum.find(lines, &(&1 =~ "looked-at")) =~ "clean"
+    refute Enum.find(lines, &(&1 =~ "not-reached")) =~ ~r/clean|dirty/
+
+    GenServer.stop(pid, :normal)
+  end
+
   test "an agent chosen with nothing typed waits on the command line for the task" do
     {sid, _, _} = start_session!(script: [{:text, "Planned."}])
     {pid, session} = start_tui(sid)

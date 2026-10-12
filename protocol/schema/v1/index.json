@@ -101,6 +101,7 @@
     "events/cancelled.json",
     "events/command_declined.json",
     "events/compacted.json",
+    "events/config_note.json",
     "events/config_upgraded.json",
     "events/delegation_started.json",
     "events/files_skipped.json",

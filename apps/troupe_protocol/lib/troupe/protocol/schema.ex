@@ -331,6 +331,20 @@ defmodule Troupe.Protocol.Schema do
         "call_id" => required(:string),
         "decision" => required(:string)
       },
+      # Something the configuration did to the session that the person is told, once a
+      # session, under the root: `key` is the setting, `message` the sentence a client
+      # shows as it is. The one there is: an organisation's enforced `max_tokens` (`limit`,
+      # from `source`, the plane's URL or the managed file) shortened the thinking `model`'s
+      # `effort` asks for to `thinking` tokens, 0 where it left none (issue #644).
+      "config_note" => %{
+        "key" => required(:string),
+        "message" => required(:string),
+        "source" => optional(:string),
+        "limit" => optional(:integer),
+        "model" => optional(:string),
+        "effort" => optional(:string),
+        "thinking" => optional(:integer)
+      },
       # A limit is near (Decision 655): once per dimension per agent.
       "budget_warning" => %{
         "dimension" => required(:string),
@@ -870,7 +884,7 @@ defmodule Troupe.Protocol.Schema do
         "all" => optional(:boolean),
         "command_id" => optional(:string)
       },
-      "worktree.list" => %{"workspace" => optional(:string)},
+      "worktree.list" => %{"workspace" => optional(:string), "status" => optional(:boolean)},
       "worktree.remove" => %{
         "command_id" => required(:string),
         "path" => required(:string),

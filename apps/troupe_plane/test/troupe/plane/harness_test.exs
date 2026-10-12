@@ -104,7 +104,7 @@ defmodule Troupe.Plane.HarnessTest do
             "schema" => 1,
             "agents" => [
               %{
-                "name" => "reviewer",
+                "name" => "pr-reviewer",
                 "definition" => "---\nmode: primary\nskills: [review]\n---\nReview."
               },
               %{"name" => "helper", "definition" => "You help."}
@@ -128,7 +128,7 @@ defmodule Troupe.Plane.HarnessTest do
       assert profile["bundle_hash"] == bundle.hash
       # The bundle's primary, then the built-ins it does not replace; the subagent is
       # not something a session starts as.
-      assert profile["agents"] == ["reviewer", "build", "plan"]
+      assert profile["agents"] == ["pr-reviewer", "build", "plan"]
       assert profile["skills"] == [%{"name" => "review", "description" => "How we review"}]
       assert profile["mcp_servers"] == ["jira"]
     end
@@ -233,7 +233,7 @@ defmodule Troupe.Plane.HarnessTest do
       {:ok, bundle} =
         Bundles.publish(
           "stable",
-          %{"schema" => 1, "agents" => [%{"name" => "reviewer", "definition" => "Review."}]},
+          %{"schema" => 1, "agents" => [%{"name" => "pr-reviewer", "definition" => "Review."}]},
           announce: false
         )
 

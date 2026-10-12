@@ -190,6 +190,50 @@ defmodule Troupe.BranchClientTest do
            ] = model.windows["librarian-1"].agents["librarian-1"].transcript
   end
 
+  # The same for the session's own window. This client stamps it as it opens it for the
+  # first line typed, the daemon stamps that line as it takes it, and on a busy machine
+  # the line came out a millisecond earlier: read back in time order alone it came ahead
+  # of the window, and a rebuilt screen showed the reply without the line (the Ctrl-Y
+  # copy tests' flake).
+  test "the session's own first events are read back inside its window" do
+    sid = "s-own-#{System.unique_integer([:positive])}"
+    start_supervised!({Journal, session_id: sid, plane_url: "daemon"})
+
+    Journal.append(sid, [
+      event(sid, "root", :branch_spawned, 1_001, nil, %{
+        name: "build",
+        isolation: :shared,
+        prompt: ""
+      })
+    ])
+
+    Journal.append(sid, [
+      event(sid, "root", :remote_note, 990, 2, %{text: "session created as build"})
+    ])
+
+    Journal.append(sid, [
+      event(sid, "root", :input, 1_000, 4, %{
+        content: "do the thing",
+        source: :user,
+        command_id: "c-1",
+        queued: false
+      })
+    ])
+
+    Journal.append(sid, [event(sid, "root", :remote_note, 1_050, 5, %{text: "the reply"})])
+
+    events = Client.events(sid)
+    assert [%{type: :branch_spawned} | _] = events
+
+    model = Troupe.UI.TUI.Model.rebuild(sid, "/w", events)
+
+    assert [
+             {:system, "session created as build"},
+             {:user, "do the thing"},
+             {:system, "the reply"}
+           ] = model.windows["root"].agents["root"].transcript
+  end
+
   # The session picker lists what the daemon has for this directory: a session that said
   # something, one that started a branch, with the branch counted on its row, and the one
   # on screen; never the branch itself. It read branches the daemon client always left

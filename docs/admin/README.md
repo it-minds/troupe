@@ -17,6 +17,7 @@ and backups on top.
 | [backup-restore.md](backup-restore.md) | Where state lives, what can be rebuilt, restore procedures |
 | [monitoring.md](monitoring.md) | Health endpoints, signals, the audit log, logs worth alerting on, a troubleshooting table |
 | [routine-tasks.md](routine-tasks.md) | Step lists: upgrades, teams, principals, bundles, drains, settings, lock-outs, SCIM, rotations, erasure |
+| [security.md](security.md) | For a security reviewer: what Troupe does unasked and never does, isolation, keys, signed releases, unsigned apps, the limits' strength, logs and erasure |
 
 Also: [../a2a.md](../a2a.md) and [../egress-allowlist.md](../egress-allowlist.md).
 
@@ -28,14 +29,18 @@ Also: [../a2a.md](../a2a.md) and [../egress-allowlist.md](../egress-allowlist.md
    well as `troupe-system`.
 2. **CRDs are installed once by Helm and never upgraded**: `kubectl apply -f
    charts/troupe/crds/` on every upgrade.
-3. **Label the ingress namespace** `troupe.dev/ingress=true`, or every worker Ingress
-   answers 503.
-4. **Platform admin comes from an identity-provider group** carried in a claim, never a
-   scope: ask Entra for a `groups` scope and it refuses every sign-in.
+3. **Label the ingress namespace** `troupe.dev/ingress=true`, or the network policies
+   keep the ingress controller from the console, the API, `/app` and every worker.
+4. **Platform admin comes from an identity-provider group** carried in a claim. Whether
+   the claim needs a scope is the provider's: Authentik's does, and Entra refuses every
+   sign-in that asks for a `groups` scope.
 5. **Bucket versioning must be on**, or erasure's promise means nothing.
 6. **Do not trust `SecretMissing`**: the operator has no RBAC on Secrets.
-7. **Nothing restarts a drained worker pod.** After `admin.pod.drain`, delete the pod.
-8. **Triggers, principals, settings and the audit trail live only in PostgreSQL.** The
-   session index can be rebuilt from object storage; they cannot.
-9. **There is no metrics exporter, backup CronJob, OpenBao snapshot or webhook endpoint**
-   in the repository.
+7. **Nothing restarts a drained worker pod** on the current revision. After
+   `admin.pod.drain`, delete the pod; one behind a new revision the operator replaces.
+8. **Principals, settings, the audit trail and triggers live only in PostgreSQL** (in
+   gitops mode a trigger's definition is the repository's). The session index can be
+   rebuilt from object storage; they cannot.
+9. **There is no metrics exporter, backup CronJob or OpenBao snapshot** in the repository.
+10. **Read [security.md](security.md)** before people install the clients: what Troupe
+    does unasked, how releases are verified, and how to open the unsigned apps.

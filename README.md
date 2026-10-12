@@ -81,6 +81,7 @@ plane adds. CI runs its commands against the latest release every night.
 | [Glossary](docs/glossary.md) | session, workspace, profile, bundle, plane, worker, daemon, agent, skill, trigger, principal |
 | [Using it](docs/user/README.md) | the clients, every setting, what Troupe never does |
 | [Running a plane](docs/admin/installing.md) | from an empty Kubernetes cluster to a first team, then [the rest of it](docs/admin/README.md) |
+| [Security](docs/admin/security.md) | for a reviewer: what it does unasked, isolation, keys, signed releases, the unsigned apps |
 | [Changing it](docs/developer/README.md) | architecture, local setup, tests, builds, releases; [CONTRIBUTING.md](CONTRIBUTING.md) |
 | [Writing a client](PROTOCOL.md) | the protocol, complete on its own, with JSON Schema for every message |
 
