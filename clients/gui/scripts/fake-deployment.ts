@@ -75,6 +75,88 @@ notes.scratch.show(
   { name: "plan.md", title: "Migration plan", content: "# Migration plan\n\n1. copy the ledger table\n2. check the counts in `rows.csv`\n3. drop the old index\n" },
   "call-plan-2",
 );
+// Frames (issue #474): a turn to read in /home/ada/parser, its working one strip above an
+// answer with a table, a nested list and fenced code, a diff and a csv; and the same turn
+// played live whenever something is sent there, so its reasoning streams and the curtain
+// line says what runs.
+const parser = daemon.seed("/home/ada/parser");
+const PARSER_ANSWER = [
+  "## Fixed",
+  "",
+  "The parser kept every line but the **last**: `split/2` dropped the trailing one. It keeps it now, and the test that caught it passes.",
+  "",
+  "| file | change | why |",
+  "|---|:---:|---|",
+  "| lib/p.ex | +1 −1 | keep the last line |",
+  "| test/p_test.exs | +4 | the line that was dropped |",
+  "",
+  "- checked the parser",
+  "  - and its test",
+  "    - and the fixture it reads",
+  "- ran `mix test`",
+  "",
+  "```elixir lib/p.ex",
+  "def parse(text), do: String.split(text, \"\\n\")",
+  "```",
+  "",
+  "```diff",
+  "--- a/lib/p.ex",
+  "+++ b/lib/p.ex",
+  "@@ -1,3 +1,3 @@",
+  " defmodule P do",
+  "-  def parse(text), do: text |> String.split(\"\\n\") |> Enum.drop(-1)",
+  "+  def parse(text), do: String.split(text, \"\\n\")",
+  " end",
+  "```",
+  "",
+  "```csv",
+  "test,before,after",
+  "keeps the last line,fail,pass",
+  "empty input,pass,pass",
+  "```",
+].join("\n");
+
+/** One turn in /home/ada/parser: at once for the log, or live, a step at a time, with what only a live turn streams. */
+function rehearse(text: string, live: boolean): void {
+  const s = parser;
+  const as = { kind: "user", subject: "ada" };
+  const say = (type: string, data: Record<string, unknown>) => () => void s.log.append(type, data, type === "user_input" ? as : undefined);
+  const now = (type: string, data: Record<string, unknown>) => () => void (live && daemon.ephemeral(s, type, data));
+  const call = (id: string, name: string, args: Record<string, unknown>, ok: boolean, content: string, ms: number): Array<[number, () => void]> => [
+    [0, say("tool_call_started", { call_id: id, name, args })],
+    [ms, say("tool_call_completed", { call_id: id, name, ok, content })],
+  ];
+  const tag = Date.now().toString(36);
+  const steps: Array<[number, () => void]> = [
+    [0, say("user_input", { source: "user", text })],
+    [0, now("agent_state", { state: "thinking" })],
+    [900, now("llm_delta", { kind: "reasoning", text: "The test says the parser loses the last line of its input. " })],
+    [1400, now("llm_delta", { kind: "reasoning", text: "Read the parser before touching it, then run the tests." })],
+    [1200, say("llm_response", { message: { role: "assistant", content: [{ type: "text", text: "Looking at the parser first." }] } })],
+    [0, now("agent_state", { state: "acting" })],
+    ...call(`ls-${tag}`, "list_files", { path: "lib" }, true, "lib/p.ex\nlib/q.ex\nlib/r.ex", 700),
+    ...call(`nope-${tag}`, "read_file", { path: "nope.ex" }, false, "No such file: nope.ex", 300),
+    ...call(`read-${tag}`, "read_file", { path: "lib/p.ex" }, true, '1\tdefmodule P do\n2\t  def parse(text), do: text |> String.split("\\n") |> Enum.drop(-1)\n3\tend', 500),
+    [0, now("agent_state", { state: "thinking" })],
+    [1500, say("llm_response", { message: { role: "assistant", content: [] } })],
+    [0, now("agent_state", { state: "acting" })],
+    ...call(`test-${tag}`, "shell", { command: "mix test" }, true, "....\nFinished in 0.04 seconds\n4 tests, 0 failures", 3500),
+    [0, now("agent_state", { state: "thinking" })],
+    [1500, say("llm_response", { message: { role: "assistant", content: [{ type: "text", text: PARSER_ANSWER }] } })],
+    [0, say("turn_ended", { turn: { calls: 4, input_tokens: 9_400, cache_read: 31_000, cache_write: 0, output_tokens: 820, cost_micros: 41_000, unpriced: 0 } })],
+    [0, now("agent_state", { state: "idle" })],
+  ];
+  if (!live) return void steps.forEach(([, step]) => step());
+  let at = 0;
+  for (const [wait, step] of steps) setTimeout(step, (at += wait));
+}
+rehearse("fix the parser: it drops the last line", false);
+// What is sent there is taken as the next turn's words, after the daemon has taken it.
+const sent = new Map<string, string>();
+parser.log.listen((e) => {
+  if (e.type === "input_queued") sent.set(String(e.data["command_id"]), String(e.data["text"] ?? ""));
+  if (e.type === "input_accepted") setTimeout(() => rehearse(sent.get(String(e.data["command_id"])) ?? "again", true), 0);
+});
 // The agents manager (troupe #503) with every layer to show: the built-ins, the
 // repository's own reviewer, whose shell runs without asking, and a bundle's.
 daemon.agents.files.push(
@@ -112,4 +194,5 @@ then to rewrite the brief; /memory there lists its facts. A new session in
 /home/ada/project, which has no brief, starts the librarian by itself. Agents, in the
 rail, manages the agents of /home/ada/notes: the built-ins, the repository's review and
 a bundle's deploy. The session in /home/ada/notes has two documents in its scratchpad.
+The session in /home/ada/parser shows a turn's frames; send it anything to watch one run.
 `);

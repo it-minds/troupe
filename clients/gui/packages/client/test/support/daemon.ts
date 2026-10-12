@@ -492,6 +492,10 @@ export class FakeDaemon {
   };
   /** The `ui` keys the file sets, by name; one not here is its default. */
   ui: Record<string, unknown> = {};
+  /** The `transcript` keys the file sets (troupe #474), by name; one not here is its default. */
+  transcript: Record<string, unknown> = {};
+  /** What a workspace's `.troupe/config.yaml` sets, by workspace and key: `config.get` with that workspace answers it over the user's. */
+  projects: Record<string, Record<string, unknown>> = {};
   /** The two layers of `mcp.json` and `skills/`, as the seven `mcp.*`/`skills.*` methods keep them. */
   servers: FakeServer[] = [];
   /** Sign-ins by server name (troupe-remote Decision 741); a server with `oauth` and no entry is signed out. */
@@ -1405,7 +1409,7 @@ export class FakeDaemon {
     const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
     const s = this.settings;
 
-    if (method === "config.get") return reply(ws, id, this.configJson());
+    if (method === "config.get") return reply(ws, id, this.configJson(typeof params["workspace"] === "string" ? params["workspace"] : undefined));
 
     if (method === "config.models") {
       const provider = String(params["provider"] ?? s.provider ?? "anthropic");
@@ -2042,7 +2046,7 @@ export class FakeDaemon {
     return reply(ws, id, { accepted: true, profile: to, layer: next.layer });
   }
 
-  private configJson(): Record<string, unknown> {
+  private configJson(workspace?: string): Record<string, unknown> {
     const s = this.settings;
     const dir = `/home/${this.osUser}/.config/troupe`;
     const path = `${dir}/config.yaml`;
@@ -2072,9 +2076,13 @@ export class FakeDaemon {
       label,
       doc: null,
     });
+    // A workspace's own file, over the user's, for a question asked about that workspace.
+    const project = workspace ? (this.projects[workspace] ?? {}) : {};
+    const layered = (entry: ReturnType<typeof key>) =>
+      entry.key in project ? { ...entry, value: project[entry.key], layer: "project", source: `${workspace}/.troupe/config.yaml` } : entry;
     return {
       ...answer,
-      workspace: null,
+      workspace: workspace ?? null,
       trusted: false,
       files: [{ scope: "user", path, exists: s.exists }],
       keys: [
@@ -2086,7 +2094,8 @@ export class FakeDaemon {
         key("ui.notifications", this.ui["ui.notifications"], UI_DEFAULTS["ui.notifications"], "notifications"),
         key("memory", this.memoryOn ? undefined : false, true, "project brief"),
         key("memory_auto_refresh", this.memoryAutoRefresh ? undefined : false, true, "refresh the brief"),
-      ],
+        key("transcript.detail", this.transcript["transcript.detail"], "quiet", "transcript detail"),
+      ].map(layered),
       warnings: [],
       errors: [],
     };

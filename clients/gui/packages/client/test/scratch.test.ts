@@ -17,7 +17,7 @@ function durable(type: string, data: Record<string, unknown> = {}, agent = ["roo
   seq += 1;
   return { seq, prev_hash: null, ts: new Date(Date.UTC(2026, 9, 11, 9, 0, seq)).toISOString(), actor: { kind: "agent" }, agent, type, v: 1, data };
 }
-const foldAll = (events: TroupeEvent[], from: TranscriptState = emptyTranscript) => events.reduce(fold, from);
+const foldAll = (events: TroupeEvent[], from: TranscriptState = emptyTranscript) => events.reduce((s, e) => fold(s, e), from);
 const cards = (state: TranscriptState) => state.entries.filter((e): e is Extract<Entry, { kind: "scratch" }> => e.kind === "scratch");
 
 const PLAN = "# Migration plan\n\n" + "- move the ledger table\n".repeat(97);

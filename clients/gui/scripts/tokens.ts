@@ -64,6 +64,12 @@ class Sheet {
   }
 }
 
+/** The first of `choices` that is not the reserved colour, in each mode. */
+function notReserved(choices: Themed[], reserved: Themed): Themed {
+  const pick = (mode: Mode): string => (choices.find((t) => t[mode].toLowerCase() !== reserved[mode].toLowerCase()) ?? choices[0]!)[mode];
+  return { dark: pick("dark"), light: pick("light") };
+}
+
 /** The colours. Everything here changes with the theme; nothing else does. */
 function colours(tokens: Record<string, any>, mode: Mode): string[] {
   const s = new Sheet(mode);
@@ -85,6 +91,12 @@ function colours(tokens: Record<string, any>, mode: Mode): string[] {
   s.put("border-strong", c.border.strong);
   s.put("focus", c.border.focus);
   s.put("divider", c.border.divider);
+  // Derived, not a theme's own: the light that is not a status, for a frame's label, a
+  // heading and a list marker in rendered output (issue #474). The focus ring's colour,
+  // or the link's where the focus ring is the reserved colour, which means one thing
+  // (Limelight's lime): the choice the TUI's accent role makes from the same files
+  // (`mix troupe.palette`), so the two clients agree.
+  s.put("frame-accent", notReserved([c.border.focus, c.text.link], c.status.waiting.fg));
   s.blank();
 
   // Status: `fg`, `bg`, `border`, and the two extras the reserved colour alone carries.
