@@ -567,9 +567,11 @@ again from when the last subscriber leaves. `fleet` names no session and reads n
   first `question_asked` on), and last error. Summary diffs are throttled
   to at most 4 per second.
 - **`fleet`** carries only session lifecycle events — created, state changes,
-  archived, erased — for the sessions the principal can see that are running when the
-  subscription is answered; a session created or woken after that does not join it.
-  `fleet` ignores `from_seq`, and replays nothing.
+  archived, erased — for every session the principal can see, the ones created or woken
+  after the subscription was answered among them. `fleet` ignores `from_seq`, and
+  replays nothing. Beside a subscription to one of those sessions on the same
+  connection, each event arrives once on each, and dropping `fleet` leaves the other as
+  it was.
 - **`presence:<id>`** carries `presence` and nothing else, and is the only topic that
   does. It ignores `level` and `from_seq`, answers `head_seq: 0` with
   `"cursored": false`, and is the first thing the server stops sending when a client

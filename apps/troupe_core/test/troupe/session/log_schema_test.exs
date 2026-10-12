@@ -64,4 +64,24 @@ defmodule Troupe.Session.LogSchemaTest do
     assert unknown == [],
            "these event types are written but not published: #{inspect(unknown)}"
   end
+
+  # A root that finished and is given more to do writes `agent_woken` before the turn; it is
+  # written durably like the rest, so it is published like the rest (#669).
+  test "a finished root woken by input writes an event the schema knows and that matches it",
+       context do
+    %{session: session} =
+      start_session(context,
+        steps: [{:tools, [{"finish", finished("all done")}]}, {:text, "and again"}]
+      )
+
+    Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "do the thing")
+    await_state(session.id, [:done], 10_000)
+    Troupe.send_input(session.id, "one more thing")
+    await_state(session.id, [:idle], 10_000)
+
+    assert [woken] = Enum.filter(Troupe.events(session.id), &(&1.type == "agent_woken"))
+    assert Map.has_key?(Schema.events(), "agent_woken")
+    assert Schema.validate_event(woken.type, woken.data) == :ok
+  end
 end
