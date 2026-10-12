@@ -100,14 +100,15 @@ of the root's transcript, the desktop app as a note in the session's stream.
   shortened for this session: 4,096 tokens of thinking where reasoning_effort high asks
   for 16,384."
 - **When:** before the first call whose thinking the ceiling shortened or turned off, so
-  it reads ahead of the answer it explains. The agent asks the adapter
-  (`Provider.thinking_held/2`, an optional callback only Anthropic's implements) what the
-  ceiling left of the thinking.
+  it reads ahead of the answer it explains. The agent asks the adapter what the ceiling
+  left of the thinking (`Provider.thinking_held/2`, which calls the optional callback
+  `thinking_held/1`; only Anthropic's adapter has it).
 - **Once a session, not once an agent:** the first agent whose call is held claims it for
   the session (`Log.first?`, as an unpriced model is said), and the note goes under the
   root. A session stopped and resumed, or a daemon restarted, starts a new log process;
-  the root's replay folds its own `config_note` and claims it again, so it is not said
-  twice.
+  the root's replay finds its own `config_note` and claims it again, so it is not said
+  twice. The claim is the session's, not part of the agent's state, so the fold the
+  fixtures hash is unchanged.
 
 ## Not in this
 
@@ -124,8 +125,8 @@ which shows no setting's source yet (Decision 869's follow-up).
   the note under the root naming the file; on the tip, 20,480 and no note); Haiku 4.5's
   budget shrunk to 4,096 under 8,192 and the note saying so; Opus 5.5's level `low` under
   8,192; a ceiling of 32,768 changing nothing; two held calls and one note; a session
-  stopped and resumed not told again (with the root's fold of the note taken out, it was
-  told twice); an OpenAI-compatible model at `high` sent `max_completion_tokens: 1000`;
+  stopped and resumed not told again (with the replay's claim taken out, it was told
+  twice); an OpenAI-compatible model at `high` sent `max_completion_tokens: 1000`;
   the summariser's call held to 1,000 (on the tip, 2,000).
 - `apps/troupe_core/test/troupe/llm/thinking_test.exs`: three models (adaptive, budget,
   unknown) at nine efforts under nine ceilings from 1 to 100,000, none asking past its
@@ -137,5 +138,10 @@ which shows no setting's source yet (Decision 869's follow-up).
 - `clients/tui/test/troupe/remote_translate_test.exs` and
   `clients/gui/packages/client/test/transcript.test.ts`: the note drawn as the harness's
   sentence.
-- The installed daemon, with scratch homes and a managed file in a test build, against
-  the Anthropic stand-in at effort `high`: see the pull request.
+- The installed daemon and terminal client, on scratch homes with a plane's cached
+  document enforcing `max_tokens`, a named Anthropic provider at a loopback stand-in that
+  printed each body, and `troupe run --headless`: under 1,000, `claude-opus-5-5` at `high`
+  went out with `max_tokens: 1000` and no thinking, twice, and the run printed the note
+  once, naming the plane; under 8,192, `claude-haiku-4-5` at `high` went out with
+  `max_tokens: 8192` and a budget of 4,096, and the new session printed the shortened
+  note. One `config_note` in each session's log.
