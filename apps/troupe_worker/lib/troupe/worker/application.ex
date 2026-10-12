@@ -47,6 +47,7 @@ defmodule Troupe.Worker.Application do
       Troupe.Worker.Auth,
       {Troupe.MCP.Sessions, name: Troupe.Worker.MCP.Sessions},
       Troupe.Worker.Connections,
+      Troupe.Worker.GitCredentials,
       Troupe.Worker.ClientCredentials,
       Troupe.Worker.MCP,
       Troupe.Worker.Bundles,

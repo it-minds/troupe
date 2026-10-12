@@ -554,7 +554,7 @@ defmodule Troupe.Agent.BackgroundDelegationTest do
     test "goes with delegate in a definition's tool list" do
       definitions = Definitions.load(System.tmp_dir!())
 
-      for name <- ~w(build plan orchestrate workflow reviewer) do
+      for name <- ~w(build plan orchestrate reviewer) do
         {:ok, definition} = Definitions.fetch(definitions, name)
         assert Definition.allows_tool?(definition, "stop_child"), name
 

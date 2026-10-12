@@ -152,6 +152,40 @@ defmodule Troupe.KMS.Policy do
   end
 
   @doc """
+  The policy for the plane's GitHub App key: import it, add a version, sign with it, and
+  read its public half; nothing that exports it.
+
+  The plane is handed the App's private key once and imports it, wrapped for transit's
+  bring-your-own-key import, so it reads the wrapping key and writes `import` and
+  `import_version` on this key alone. The key is created without `exportable`, and this
+  policy has no `export` path either, so not even the plane can take the key back out.
+  """
+  @spec github_app(String.t(), String.t()) :: String.t()
+  def github_app(mount \\ "transit", key \\ "troupe-github-app") do
+    """
+    path "#{mount}/wrapping_key" {
+      capabilities = ["read"]
+    }
+
+    path "#{mount}/keys/#{key}" {
+      capabilities = ["read"]
+    }
+
+    path "#{mount}/keys/#{key}/import" {
+      capabilities = ["create", "update"]
+    }
+
+    path "#{mount}/keys/#{key}/import_version" {
+      capabilities = ["create", "update"]
+    }
+
+    path "#{mount}/sign/#{key}" {
+      capabilities = ["create", "update"]
+    }
+    """
+  end
+
+  @doc """
   The policy for a profile's own identity at its MCP servers (Decision 747): sign with a
   transit key named after the pod's own namespace, `<namespace>.<anything>`, and nothing
   else.

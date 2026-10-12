@@ -36,6 +36,7 @@ Three kinds, and the difference is what an operator needs:
 | `TROUPE_OIDC_TOKEN_URL` | named by a setting | exchanging an authorization code and a device grant |
 | `DATABASE_URL` | named by a setting | the index, the ledger and the audit trail |
 | `TROUPE_BAO_ADDR` | named by a setting | the key manager: signing session tokens, and the per-person credential paths |
+| `the GitHub App's api_url (admin.github.put)` | named by a setting | minting a session's installation token for the repository it clones: api.github.com unless the App is on GitHub Enterprise |
 | `object_store.endpoint` | named by a setting | the bucket a session's log and workspace live in |
 | `notify_url (per trigger)` | named by a setting | where a trigger posts its outcome. Absolute; not loopback, link-local, a cloud metadata address or in 100.64.0.0/10, by address or by what its name resolves to; checked at save and again at send, and posted to the address the second check passed |
 

@@ -122,6 +122,22 @@ defmodule Troupe.Worker.Plane.Link do
 
   # -- server -----------------------------------------------------------------
 
+  # What the plane answers can be a credential: a key-manager assertion, a session's GitHub
+  # token. A crash report shows neither the line half-read into the buffer nor the bytes
+  # of the last message, and not the pod's own enrolment token either.
+  @impl GenServer
+  def format_status(status) do
+    status
+    |> Map.replace_lazy(:state, fn
+      %__MODULE__{} = state -> %{state | token: :redacted, buffer: byte_size(state.buffer)}
+      state -> state
+    end)
+    |> Map.replace_lazy(:message, fn
+      {:tcp, socket, _data} -> {:tcp, socket, :redacted}
+      message -> message
+    end)
+  end
+
   @impl GenServer
   def init(opts) do
     Process.flag(:trap_exit, true)

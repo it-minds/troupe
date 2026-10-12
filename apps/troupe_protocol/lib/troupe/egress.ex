@@ -138,6 +138,15 @@ defmodule Troupe.Egress do
       component: "plane",
       kind: :configured,
       host: nil,
+      setting: "the GitHub App's api_url (admin.github.put)",
+      why:
+        "minting a session's installation token for the repository it clones: " <>
+          "api.github.com unless the App is on GitHub Enterprise"
+    },
+    %{
+      component: "plane",
+      kind: :configured,
+      host: nil,
       setting: "object_store.endpoint",
       why: "the bucket a session's log and workspace live in"
     },

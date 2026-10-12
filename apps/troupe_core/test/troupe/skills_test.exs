@@ -188,8 +188,7 @@ defmodule Troupe.SkillsTest do
                  "librarian",
                  "orchestrate",
                  "plan",
-                 "quick",
-                 "workflow"
+                 "quick"
                ]
 
       narrowed =
