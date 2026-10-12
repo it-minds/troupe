@@ -34,6 +34,7 @@ defmodule Troupe.Plane.Harness do
     Drain,
     Erasure,
     Fleet,
+    GitHub,
     Identity,
     Placement,
     Sessions
@@ -433,7 +434,9 @@ defmodule Troupe.Plane.Harness do
          {:ok, origin} <- origin_for(params["origin"]),
          answerable = answerable_for(%{origin: origin, owner_subject: user.subject}),
          {:ok, terms} <- terms_for(params["terms"], team, answerable),
+         {:ok, repository} <- repository_for(params["repository"], profile),
          {:ok, session_id} <- session_id_for(params["session_id"]),
+         params = Map.put(params, "repository", repository),
          {:ok, session} <- create_row(session_id, user, team, profile, params, terms, origin),
          {:ok, _budget} <- reserve_budget(team, session),
          {:ok, placement} <- place_or_wait(session, prompt) do
@@ -1481,6 +1484,16 @@ defmodule Troupe.Plane.Harness do
   defp slice_of(%{terms: %{"budget_micros" => slice}}) when is_integer(slice), do: slice
   defp slice_of(_session), do: @default_slice_micros
 
+  # The GitHub repository the session clones, checked against the plane's App now, before
+  # there is a row: an owner it has no installation for, or a Git host the profile does
+  # not declare, is a typo that would otherwise surface as a pod that could not clone.
+  defp repository_for(given, profile) do
+    case GitHub.repository(given, profile) do
+      {:ok, repository} -> {:ok, repository}
+      {:error, reason} -> invalid(reason, field: "repository")
+    end
+  end
+
   # Ours unless the caller brought one: the A2A facade names a session after its task.
   # One it brought has the shape ours have, or it is refused before there is a row. The
   # pod makes a directory of it, so an id that was a path would put the session's files
@@ -1509,6 +1522,7 @@ defmodule Troupe.Plane.Harness do
       epoch: 1,
       title: params["title"],
       workspace_source: params["source"],
+      repository: params["repository"],
       terms: terms,
       origin: origin,
       parent_session_id: get_in(params, ["fork", "parent"]),
@@ -1553,6 +1567,7 @@ defmodule Troupe.Plane.Harness do
       |> Map.merge(bundle_params(session))
       |> Map.merge(session_terms(session))
       |> Map.merge(fork_params(session))
+      |> Map.merge(repository_params(session))
       |> then(fn params -> if prompt, do: Map.put(params, "prompt", prompt), else: params end)
 
     case Router.push(worker, "session.activate", params) do
@@ -1799,6 +1814,7 @@ defmodule Troupe.Plane.Harness do
       }
       |> Map.merge(bundle_params(session))
       |> Map.merge(session_terms(session))
+      |> Map.merge(repository_params(session))
 
     case Router.push(worker, "session.activate", params) do
       {:ok, result} ->
@@ -2257,6 +2273,15 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # The repository a pod is handed on every activation, the first and each one after: the
+  # pod clones on the first, and on every one it gets a new token when it next needs one
+  # rather than keeping the last activation's. The repository only, never a credential:
+  # that the pod asks for.
+  defp repository_params(%Session{repository: %{} = repository}),
+    do: %{"repository" => repository}
+
+  defp repository_params(_session), do: %{}
+
   # The terms and origin a pod is handed on activation, from the row.
   defp session_terms(session) do
     %{"terms" => session.terms, "origin" => session.origin}
@@ -2595,6 +2620,7 @@ defmodule Troupe.Plane.Harness do
       "cost_micros" => session.cost_micros,
       "origin" => session.origin,
       "terms" => session.terms,
+      "repository" => session.repository,
       "reviewed_by" => session.reviewed_by,
       "reviewed_at" => session.reviewed_at && DateTime.to_iso8601(session.reviewed_at),
       "your_role" => role_name(Sessions.role_for(user, session))

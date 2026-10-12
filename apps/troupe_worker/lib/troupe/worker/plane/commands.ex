@@ -64,6 +64,9 @@ defmodule Troupe.Worker.Plane.Commands do
             prompt: params["prompt"],
             terms: terms_of(params["terms"]) |> with_managed(params["managed"]),
             personal_tools: params["personal_tools"],
+            # The GitHub repository a session was created with, which its first
+            # activation clones. A name, never a credential: that the pod asks for.
+            repository: params["repository"],
             origin: params["origin"],
             usage_seq: params["usage_seq"]
           ],

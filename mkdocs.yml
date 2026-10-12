@@ -107,6 +107,7 @@ nav:
       - Profiles and policy: admin/profiles-and-policy.md
       - Bundles, triggers, budgets: admin/bundles-and-triggers.md
       - Integrations: admin/integrations.md
+      - The GitHub App: admin/github.md
       - Authentik: admin/authentik.md
       - A worker on your own machine: admin/single-machine.md
       - Backup and restore: admin/backup-restore.md

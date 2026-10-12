@@ -142,6 +142,8 @@ defmodule Troupe.Plane.Admin.Console do
     # profile; Integrations answers it for every host at once, which is a different question.
     mcp_check: {:screen, :profiles},
     integrations: {:screen, :integrations},
+    github_get: {:screen, :integrations},
+    github_put: {:screen, :integrations},
 
     # -- Operate -------------------------------------------------------------
     pod_drain: {:screen, :fleet},
@@ -171,7 +173,10 @@ defmodule Troupe.Plane.Admin.Console do
   """
   @spec owed() :: %{atom() => atom()}
   def owed do
-    %{}
+    # The GitHub App arrived as the console's redo (#56) began: its page belongs to the new
+    # console, beside the other integrations, and this one is not being extended. Until
+    # then it is set with `admin.github.put` over `/rpc` or the admin MCP tools.
+    %{github_get: :integrations, github_put: :integrations}
   end
 
   @doc """
