@@ -210,6 +210,30 @@ defmodule Troupe.Plane.Erasure do
     end
   end
 
+  @doc """
+  Tell a pod again to drop an erased session and its objects, without waiting for it.
+
+  For a pod that started the session after the erasure had told it: the scaler was
+  placing the session when it was erased, and the pod answered that it had started it
+  afterwards (`Troupe.Plane.Harness.admit/1`). A pod that does not answer is logged; the
+  tombstone is unchanged.
+  """
+  @spec tell_pod(Fleet.Worker.t(), Session.t()) :: {:ok, pid()}
+  def tell_pod(worker, %Session{} = session) do
+    Task.start(fn ->
+      case push(worker, session) do
+        {:ok, _applied} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "troupe plane: #{worker.pod_name} did not drop #{session.id}, erased while it " <>
+              "was starting it: #{inspect(reason)}"
+          )
+      end
+    end)
+  end
+
   defp record_applied(tombstone, applied) do
     pod = applied["pod"]
 

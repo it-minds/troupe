@@ -205,7 +205,7 @@ defmodule Troupe.Plane.Fleet.Scaler do
     |> Enum.reduce_while([], fn session, admitted ->
       case Harness.admit(session) do
         {:ok, _endpoint} -> {:cont, [session.id | admitted]}
-        {:error, parked} when parked in [:no_grant, :no_team] -> {:cont, admitted}
+        {:error, gone} when gone in [:no_grant, :no_team, :erased] -> {:cont, admitted}
         {:error, _no_room} -> {:halt, admitted}
       end
     end)

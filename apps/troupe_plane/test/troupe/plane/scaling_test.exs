@@ -437,6 +437,80 @@ defmodule Troupe.Plane.ScalingTest do
     end
   end
 
+  # Found by the cluster suite: a session erased while the scaler was placing it was written
+  # back to `active` when its pod answered, with no pod, for good. It was counted against
+  # the profile's ceiling, so a ceiling of one refused the next session, and the scaler kept
+  # a worker for it.
+  describe "a session erased while it is being placed" do
+    test "stays erased, uncounted, when the erasure comes first", context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard", max_sessions: 1})
+      _pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0", capacity: 4)
+
+      # What the scaler read as waiting, before the erasure.
+      read = waiting(context)
+
+      assert {:ok, %{"erased" => true}} =
+               Harness.call("session.erase", %{"session_id" => read.id}, context.caller)
+
+      assert {:error, :erased} = Harness.admit(read)
+      refute_receive {:pushed, "session.activate", _}, 200
+
+      assert Sessions.get(read.id).state == "erased"
+      assert Sessions.demand_for("dev") == %{active: 0, pending: 0}
+      assert %{used: 0} = Placement.inspect_state("dev")
+      assert {:ok, %{"session_id" => _}} = create(context)
+    end
+
+    test "stays erased, uncounted, when the pod answers after it", context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard", max_sessions: 1})
+
+      _pod =
+        FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0",
+          capacity: 4,
+          hold: ["session.activate"]
+        )
+
+      read = waiting(context)
+      admission = Task.async(fn -> Harness.admit(read) end)
+
+      # The pod has been asked to start it, and has not answered yet.
+      assert_receive {:held, "session.activate", %{"session_id" => id}, answer}, 5_000
+      assert id == read.id
+
+      assert {:ok, %{"erased" => true}} =
+               Harness.call("session.erase", %{"session_id" => id}, context.caller)
+
+      assert_receive {:pushed, "session.erase", %{"session_id" => ^id}}, 5_000
+
+      # It answers that it started it, after the erasure told it to drop it.
+      answer.()
+      assert {:error, :erased} = Task.await(admission)
+
+      # So it is told again, now that it has it.
+      assert_receive {:pushed, "session.erase", %{"session_id" => ^id}}, 5_000
+
+      assert Sessions.get(id).state == "erased"
+      assert Sessions.demand_for("dev") == %{active: 0, pending: 0}
+      assert %{used: 0} = Placement.inspect_state("dev")
+    end
+
+    test "is never put back to wait, nor placed, once it is erased", context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard"})
+      pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0", capacity: 4)
+      session = on_pod(context, pod.worker_id)
+
+      assert {:ok, %{"erased" => true}} =
+               Harness.call("session.erase", %{"session_id" => session.id}, context.caller)
+
+      assert {:error, :erased} = Sessions.admitted(session.id)
+      assert {:error, :erased} = Sessions.wait(session.id, "hello")
+      assert {:error, :erased} = Sessions.place(session.id, Fleet.get_worker(pod.worker_id))
+
+      assert Sessions.get(session.id).state == "erased"
+      assert Sessions.demand_for("dev") == %{active: 0, pending: 0}
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp plan(_context), do: Scaler.plan(Fleet.get_profile("dev"))

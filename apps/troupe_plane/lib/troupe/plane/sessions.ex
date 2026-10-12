@@ -16,6 +16,13 @@ defmodule Troupe.Plane.Sessions do
   alias Troupe.Plane.Sessions.{ACL, Anchor, Session, Share}
   alias Troupe.Plane.Settings.Ladder
 
+  # A session somebody has erased, whether or not its key is gone yet. Nothing writes one
+  # back into play: not a placement, not a pod's answer that it started it, not a wait. An
+  # erasure that lands while the scaler is placing the session would otherwise be undone
+  # when the pod answers, leaving a row counted against the profile's ceiling, and given a
+  # worker, with nothing behind it.
+  @erasing ["erasure_pending", "erased"]
+
   # -- creating and placing ---------------------------------------------------
 
   @doc "Record a session the plane has agreed to create."
@@ -34,7 +41,7 @@ defmodule Troupe.Plane.Sessions do
   Written in the same call that grants the reservation, so a placement that existed
   only in a process cannot be lost with the replica that made it.
   """
-  @spec place(String.t(), Worker.t()) :: {:ok, Session.t()} | {:error, term()}
+  @spec place(String.t(), Worker.t()) :: {:ok, Session.t()} | {:error, :not_found | :erased}
   def place(session_id, %Worker{} = worker) do
     now = DateTime.utc_now()
 
@@ -43,14 +50,19 @@ defmodule Troupe.Plane.Sessions do
     # session pays for.
     {count, sessions} =
       Repo.update_all(
-        from(s in Session, where: s.id == ^session_id, select: s),
+        from(s in Session, where: s.id == ^session_id and s.state not in @erasing, select: s),
         set: [worker_id: worker.id, state: "active", last_active_at: now, updated_at: now]
       )
 
     case {count, sessions} do
       {1, [session]} -> {:ok, session}
-      _ -> {:error, :not_found}
+      _ -> missing_or_erased(session_id)
     end
+  end
+
+  # Why a write fenced on the session not being erased wrote nothing.
+  defp missing_or_erased(session_id) do
+    if Repo.get(Session, session_id), do: {:error, :erased}, else: {:error, :not_found}
   end
 
   @doc """
@@ -156,30 +168,28 @@ defmodule Troupe.Plane.Sessions do
   produce a session that started and then sat there. It is cleared the moment the
   session is placed.
   """
-  @spec wait(String.t(), String.t() | nil) :: {:ok, Session.t()} | {:error, term()}
-  def wait(session_id, prompt) do
-    case Repo.get(Session, session_id) do
-      nil ->
-        {:error, :not_found}
+  @spec wait(String.t(), String.t() | nil) :: {:ok, Session.t()} | {:error, :not_found | :erased}
+  def wait(session_id, prompt),
+    do: unless_erased(session_id, state: "pending", pending_prompt: prompt)
 
-      session ->
-        session
-        |> Session.changeset(%{state: "pending", pending_prompt: prompt})
-        |> Repo.update()
-    end
-  end
+  @doc """
+  The session is placed: it is no longer waiting and its prompt has been sent.
 
-  @doc "The session is placed: it is no longer waiting and its prompt has been sent."
-  @spec admitted(String.t()) :: {:ok, Session.t()} | {:error, term()}
-  def admitted(session_id) do
-    case Repo.get(Session, session_id) do
-      nil ->
-        {:error, :not_found}
+  `:erased` when it was erased while its pod was starting it, which leaves it erased.
+  """
+  @spec admitted(String.t()) :: {:ok, Session.t()} | {:error, :not_found | :erased}
+  def admitted(session_id), do: unless_erased(session_id, state: "active", pending_prompt: nil)
 
-      session ->
-        session
-        |> Session.changeset(%{state: "active", pending_prompt: nil})
-        |> Repo.update()
+  defp unless_erased(session_id, fields) do
+    {count, sessions} =
+      Repo.update_all(
+        from(s in Session, where: s.id == ^session_id and s.state not in @erasing, select: s),
+        set: Keyword.put(fields, :updated_at, DateTime.utc_now())
+      )
+
+    case {count, sessions} do
+      {1, [session]} -> {:ok, session}
+      _ -> missing_or_erased(session_id)
     end
   end
 
@@ -393,9 +403,6 @@ defmodule Troupe.Plane.Sessions do
   end
 
   # -- private sessions -------------------------------------------------------
-
-  # A private session somebody has erased, whether or not its key is gone yet.
-  @erasing ["erasure_pending", "erased"]
 
   @doc """
   Register a session that runs on somebody's own machine.

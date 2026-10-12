@@ -5,7 +5,10 @@ defmodule Troupe.Plane.FakePod do
 
   Every request the plane pushes is answered `{"ok": true}` — or, for a method named in
   `refuse:`, with the error object given for it; notifications are forwarded and not
-  answered. The test receives `{:pushed, method, params}` for both.
+  answered. The test receives `{:pushed, method, params}` for both. A method named in
+  `hold:` is not answered until the test says so: it receives
+  `{:held, method, params, answer}` instead and calls `answer.()`, and the pod goes on
+  answering everything else meanwhile.
   """
 
   @doc "Enrol a pod on a listener port with a token the test's verifier accepts."
@@ -14,6 +17,7 @@ defmodule Troupe.Plane.FakePod do
   def enrol(port, token, pod_name, opts \\ []) do
     test = Keyword.get(opts, :notify, self())
     refuse = Keyword.get(opts, :refuse, %{})
+    hold = Keyword.get(opts, :hold, [])
     {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :raw])
 
     request =
@@ -38,7 +42,7 @@ defmodule Troupe.Plane.FakePod do
     pid =
       spawn_link(fn ->
         :inet.setopts(socket, active: true)
-        serve(socket, test, refuse)
+        serve(socket, test, refuse, hold)
       end)
 
     :ok = :gen_tcp.controlling_process(socket, pid)
@@ -72,28 +76,41 @@ defmodule Troupe.Plane.FakePod do
     end
   end
 
-  defp serve(socket, test, refuse) do
+  defp serve(socket, test, refuse, hold) do
     receive do
       {:tcp, ^socket, data} ->
-        for line <- String.split(data, "\n", trim: true) do
-          case Jason.decode(line) do
-            {:ok, %{"id" => id, "method" => method, "params" => params}} ->
-              send(test, {:pushed, method, params})
+        for line <- String.split(data, "\n", trim: true),
+            do: handle(Jason.decode(line), socket, test, refuse, hold)
 
-              :gen_tcp.send(socket, [answer(id, method, refuse), ?\n])
+        serve(socket, test, refuse, hold)
 
-            {:ok, %{"method" => method, "params" => params}} ->
-              send(test, {:pushed, method, params})
-
-            _ ->
-              :ok
-          end
-        end
-
-        serve(socket, test, refuse)
+      {:answer, id, method} ->
+        :gen_tcp.send(socket, [answer(id, method, refuse), ?\n])
+        serve(socket, test, refuse, hold)
 
       {:tcp_closed, ^socket} ->
         :ok
     end
   end
+
+  defp handle(
+         {:ok, %{"id" => id, "method" => method, "params" => params}},
+         socket,
+         test,
+         refuse,
+         hold
+       ) do
+    if method in hold do
+      pod = self()
+      send(test, {:held, method, params, fn -> send(pod, {:answer, id, method}) end})
+    else
+      send(test, {:pushed, method, params})
+      :gen_tcp.send(socket, [answer(id, method, refuse), ?\n])
+    end
+  end
+
+  defp handle({:ok, %{"method" => method, "params" => params}}, _socket, test, _refuse, _hold),
+    do: send(test, {:pushed, method, params})
+
+  defp handle(_other, _socket, _test, _refuse, _hold), do: :ok
 end
