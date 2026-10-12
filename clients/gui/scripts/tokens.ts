@@ -1,4 +1,5 @@
-// Generate `apps/desktop/src/tokens.css` from `docs/design/themes/*.tokens.json`.
+// Generate `src/tokens.css` and `src/mark.ts` in the desktop app and the console from
+// `docs/design/themes/*.tokens.json`.
 //
 //   pnpm tokens
 //
@@ -288,7 +289,12 @@ ${trim(colours(base.tokens, "dark"))}
 ${blocks.join("\n\n")}
 `;
 
-writeFileSync(`${root}apps/desktop/src/tokens.css`, css);
+// The same file into each app that draws in it: the desktop app, and the console, which
+// shares the design and nothing else of the desktop app's, so it gets its own copy rather
+// than an import across the two.
+const APPS = ["apps/desktop", "apps/console"];
+
+for (const app of APPS) writeFileSync(`${root}${app}/src/tokens.css`, css);
 
 // The mask, as data. The brand is one silhouette drawn by one component, so the
 // geometry is generated out of the design file too rather than retyped into a `<path>`
@@ -315,6 +321,8 @@ export const MARK = {
   lightDirection: ${JSON.stringify(m["lightDirection"])},
 } as const;
 `;
-writeFileSync(`${root}apps/desktop/src/mark.ts`, mark);
+for (const app of APPS) writeFileSync(`${root}${app}/src/mark.ts`, mark);
 
-console.log(`wrote apps/desktop/src/tokens.css (${css.split("\n").length} lines, ${themes.length} themes, default ${DEFAULT_THEME}) and apps/desktop/src/mark.ts`);
+console.log(
+  `wrote src/tokens.css (${css.split("\n").length} lines, ${themes.length} themes, default ${DEFAULT_THEME}) and src/mark.ts in ${APPS.join(" and ")}`,
+);

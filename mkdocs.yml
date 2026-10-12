@@ -104,6 +104,7 @@ nav:
       - Installing: admin/installing.md
       - Configuration: admin/configuration.md
       - Roles and permissions: admin/roles-and-permissions.md
+      - The console: admin/console.md
       - Profiles and policy: admin/profiles-and-policy.md
       - Bundles, triggers, budgets: admin/bundles-and-triggers.md
       - Integrations: admin/integrations.md

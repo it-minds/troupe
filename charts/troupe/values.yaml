@@ -254,6 +254,21 @@ gui:
     requests: {cpu: 10m, memory: 32Mi}
     limits: {cpu: 200m, memory: 128Mi}
 
+# The administrative console (`clients/gui/apps/console`): an app of its own for platform
+# and team admins, on the plane's own host, talking to the plane's `admin.*` methods and
+# nothing else. It is built into the GUI's image and served by the same Deployment (which
+# runs while either is enabled), with an Ingress of its own, so `gui.enabled: false` keeps
+# the console and `console.enabled: false` keeps the GUI. The plane's current console at
+# `/admin` stays beside it until this one covers what that one does.
+#
+# Signing in is the plane's own sign-in with PKCE, so the identity provider must allow
+# `https://<plane.host><basePath>` as a single-page application's redirect URI.
+console:
+  enabled: true
+  # Where it is mounted. It must match the `TROUPE_CONSOLE_BASE` the image was built with
+  # (`console` unless built otherwise), and may be neither `/` nor `gui.basePath`.
+  basePath: /console
+
 # The A2A facade: every profile as an agent other agents can call, at `a2a.<domain>`.
 # A client of the plane and of worker pods over their public APIs, with no database and
 # no credential of its own — each caller's own is exchanged at the plane. Off by

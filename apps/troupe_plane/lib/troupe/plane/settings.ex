@@ -566,8 +566,32 @@ defmodule Troupe.Plane.Settings do
       deployed: display(setting, deployed(setting))
     }
 
+    base =
+      if setting.type == :enforced, do: Map.put(base, :enforceable, enforceable()), else: base
+
     if setting.secret, do: base, else: Map.put(base, :value, display(setting, value))
   end
+
+  # The keys an enforced set may hold, with what enforcing each means and the type its
+  # value takes, as `Troupe.Protocol.Organisation` lists them. A console builds its fields
+  # from this rather than from a list of its own, so a key the protocol adds reaches every
+  # console with nothing else changed, and no console offers a key the plane would refuse.
+  defp enforceable do
+    Enum.map(Organisation.keys(), fn key ->
+      kind = Organisation.kind(key)
+
+      %{key: key, meaning: Organisation.meaning(kind)}
+      |> Map.merge(enforce_kind(kind))
+      |> Map.merge(enforce_type(Organisation.type(key)))
+    end)
+  end
+
+  defp enforce_kind({:order, values}), do: %{kind: "order", order: values}
+  defp enforce_kind(kind), do: %{kind: Atom.to_string(kind)}
+
+  defp enforce_type({:enum, values}), do: %{type: "enum", values: values}
+  defp enforce_type({:integer, min}), do: %{type: "integer", min: min}
+  defp enforce_type(type), do: %{type: Atom.to_string(type)}
 
   # Where the value in force came from, which a stored row that no longer parses is not:
   # the plane runs on the deployment's value then, and "changed here" would name a row
