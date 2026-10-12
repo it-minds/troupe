@@ -169,7 +169,8 @@ writes it.
 
 **One worker role, or one per profile.** By default every worker pod logs in as
 `troupe-worker`, so whatever policy that role carries is every profile's: the dev manifest
-gives it one wide policy over every team. For a pod of one profile to be refused another's
+gives it one wide policy over every team, `troupe-shared-worker`, named so that no profile's
+own policy is called the same. For a pod of one profile to be refused another's
 session keys, make a role per profile, named as its policy, and turn on
 `bao.workerRolePerProfile`. The operator then gives each profile's pods
 `TROUPE_BAO_ROLE=troupe-worker-<profile>` and they log in under it (Decision 753):

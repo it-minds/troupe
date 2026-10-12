@@ -274,20 +274,7 @@ defmodule Troupe.E2E.Plane do
 
   # Whatever the operator already gave the running pods, so writing the profile through
   # the plane does not replace the image out from under a session.
-  defp image do
-    repo =
-      World.kubectl!([
-        "get",
-        "workerprofile",
-        World.profile(),
-        "-n",
-        World.namespace(),
-        "-o",
-        "jsonpath={.spec.image.repository}:{.spec.image.tag}"
-      ])
-
-    if repo == ":", do: "ghcr.io/it-minds/troupe-worker:dev", else: repo
-  end
+  defp image, do: World.worker_image(World.profile())
 
   # The smallest bundle a session can run on: one agent, no skills, no MCP servers.
   # Tests that need more publish their own.

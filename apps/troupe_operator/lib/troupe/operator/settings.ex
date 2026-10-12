@@ -62,6 +62,24 @@ defmodule Troupe.Operator.Settings do
             # actually admits a connection — and an installation that knows which origins
             # host its GUI names them once, here, rather than in every profile.
             worker_allowed_origins: [],
+            # The seccomp profile on every worker container: `"Localhost"`, with the path
+            # of the profile under the kubelet's seccomp directory, `"RuntimeDefault"` or
+            # `"Unconfined"`. Every command on a pod runs in bubblewrap, which builds its
+            # sandbox from a user namespace, and a container runtime's default profile
+            # refuses one: under it a pod refuses every command. The chart ships a profile
+            # that is the runtime's default plus what bubblewrap needs, and sets it here;
+            # without the chart this stays on the runtime's default, which keeps a filter
+            # and refuses rather than runs.
+            worker_seccomp_type: "RuntimeDefault",
+            worker_seccomp_profile: nil,
+            # Whether a worker pod runs in a user namespace of its own (`hostUsers: false`)
+            # with its `/proc` unmasked (`procMount: Unmasked`). Bubblewrap mounts a fresh
+            # `/proc` for the sandbox, and the kernel refuses that inside a user namespace
+            # while the container's own `/proc` has paths masked over; Kubernetes unmasks it
+            # only for a pod in a user namespace, where the container's root is nobody on
+            # the node. The chart turns it on; off, a pod refuses every command, as it
+            # always did.
+            worker_user_namespaces: false,
             cilium_available: false,
             drain_timeout_seconds: 300
 
@@ -72,5 +90,28 @@ defmodule Troupe.Operator.Settings do
   def from_env do
     config = Application.get_env(:troupe_operator, :settings, [])
     struct(__MODULE__, config)
+  end
+
+  @doc """
+  The worker container's `seccompProfile`, as these settings name it.
+
+  A type that is none of the three, or a `Localhost` profile without its path, is raised
+  rather than read as something else: the pods it would make are refused by the API server
+  or the kubelet, which says so only in an event on the StatefulSet. `config/runtime.exs`
+  refuses both when the operator starts.
+  """
+  @spec worker_seccomp(t()) :: map()
+  def worker_seccomp(%__MODULE__{worker_seccomp_type: "Localhost", worker_seccomp_profile: path})
+      when is_binary(path) and path != "",
+      do: %{"type" => "Localhost", "localhostProfile" => path}
+
+  def worker_seccomp(%__MODULE__{worker_seccomp_type: type})
+      when type in ["RuntimeDefault", "Unconfined"],
+      do: %{"type" => type}
+
+  def worker_seccomp(%__MODULE__{worker_seccomp_type: type}) do
+    raise ArgumentError,
+          "the worker's seccomp profile #{inspect(type)} is not Localhost with a path, " <>
+            "RuntimeDefault or Unconfined"
   end
 end

@@ -1,0 +1,102 @@
+{{- if and (eq .Values.worker.seccomp.type "Localhost") .Values.worker.seccomp.install.enabled }}
+{{- include "troupe.worker.seccomp.validate" . }}
+# The seccomp profile every worker container runs under (`worker.seccomp`), and what puts it
+# on the nodes. The kubelet reads a `Localhost` profile from its own seccomp directory on
+# the node the pod lands on, so it has to be there on every node before a worker starts;
+# a worker pod that lands first fails to start and is retried until it is.
+#
+# The profile is containerd's default, as it renders for a container with every capability
+# dropped, plus what bubblewrap needs to build the sandbox every command on a pod runs in:
+# `clone` and `unshare` with a user, mount, PID, IPC or UTS namespace, and `mount`,
+# `umount2` and `pivot_root`, which a process can use only inside a user namespace it made.
+# A network, cgroup or time namespace stays refused, and so does everything else the
+# default refuses. docs/admin/security.md says why each is there.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: troupe-worker-seccomp
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+data:
+  {{ base .Values.worker.seccomp.localhostProfile }}: |-
+{{ .Files.Get "files/worker-seccomp.json" | trim | indent 4 }}
+---
+# One pod per node, which copies the profile into place and then waits, so the DaemonSet
+# says by its readiness that every node has it. The least it can be given: the one host
+# directory the profile goes in, root because that directory is root's on the node, every
+# capability dropped, nothing else from the host, no API token, no network it uses.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: troupe-worker-seccomp
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: troupe
+      app.kubernetes.io/component: worker-seccomp
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: troupe
+        app.kubernetes.io/component: worker-seccomp
+        app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        # A new profile in a new release rolls the DaemonSet, which writes it again.
+        checksum/profile: {{ .Files.Get "files/worker-seccomp.json" | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        seccompProfile: {type: RuntimeDefault}
+      terminationGracePeriodSeconds: 5
+      containers:
+        # The operator's image: this release's own, from the registry the chart already
+        # pulls from, with a shell, `cp`, `mv` and `cmp`. None of the operator runs.
+        - name: install
+          image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          command: ["/bin/sh", "-c"]
+          # Written beside itself and renamed, so the kubelet never reads half a profile.
+          args:
+            - |
+              set -eu
+              cp /profile/{{ base .Values.worker.seccomp.localhostProfile }} /host/.{{ base .Values.worker.seccomp.localhostProfile }}.new
+              mv -f /host/.{{ base .Values.worker.seccomp.localhostProfile }}.new /host/{{ base .Values.worker.seccomp.localhostProfile }}
+              echo "worker seccomp profile at {{ include "troupe.worker.seccomp.hostDir" . }}/{{ base .Values.worker.seccomp.localhostProfile }}"
+              exec sleep infinity
+          readinessProbe:
+            exec:
+              command: ["cmp", "-s", "/profile/{{ base .Values.worker.seccomp.localhostProfile }}", "/host/{{ base .Values.worker.seccomp.localhostProfile }}"]
+            periodSeconds: 30
+          resources: {{- toYaml .Values.worker.seccomp.install.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - name: profile
+              mountPath: /profile
+              readOnly: true
+            - name: seccomp
+              mountPath: /host
+      volumes:
+        - name: profile
+          configMap:
+            name: troupe-worker-seccomp
+        - name: seccomp
+          hostPath:
+            path: {{ include "troupe.worker.seccomp.hostDir" . }}
+            type: DirectoryOrCreate
+{{- end }}

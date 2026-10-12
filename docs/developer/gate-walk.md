@@ -121,45 +121,66 @@ from the current directory); [security.md §2](../admin/security.md#2-what-it-do
 
 **What proves it.** A command a session runs on a pod cannot reach the cloud's metadata
 service, another worker pod or (with Cilium) a host its profile does not name, and runs in
-bubblewrap. CI proves the parts on kind: the sandbox and reach suites on every server
-change, and the release's cluster job dials out from a worker pod (`egress_test.exs`). It
-does not dial the metadata address or a neighbour pod from a pod, run a command in
-bubblewrap on a pod, or use per-profile OpenBao roles. Those are this row's.
+bubblewrap. The cluster suite proves each on kind with Cilium, on every pull request that
+changes the chart or the operator, every night and for every release
+([ci.md](ci.md#the-suite-that-needs-a-cluster)):
 
-**Steps**, with `<p>` the profile you use and `<q>` another:
+| the claim | the test |
+| --- | --- |
+| a worker cannot reach another namespace's pod, and no pod but the ingress's reaches a worker | `egress_test.exs`, "a neighbour" |
+| a worker cannot reach 169.254.169.254, even where another policy admits it | `egress_test.exs`, "a cloud's metadata address", against a stand-in CI puts there |
+| the IPv6 and NAT64 forms of the metadata addresses are denied | the same, read from the policy the Cilium agent enforces |
+| a command a session runs on a pod runs in bubblewrap and sees neither the pod's processes nor its OpenBao token | `isolation_test.exs`, "a command a session runs on a pod" |
+| a worker pod runs in a user namespace of its own with nothing mounted over its `/proc`, and under the seccomp profile the installation chose | the same describe, its two other tests |
+| a profile's own OpenBao role reaches its own teams' session keys and nothing else, and a pod of another profile cannot log in under it | `isolation_test.exs`, "a profile's OpenBao role", in the dev OpenBao |
 
-1. What the operator wrote:
-   ```sh
-   kubectl -n troupe-system get wp <p> -o jsonpath='{.status.conditions}'
-   kubectl -n troupe-w-<p> get networkpolicy troupe-w-<p> -o yaml
-   kubectl -n troupe-w-<p> get ciliumnetworkpolicy troupe-egress -o yaml   # with Cilium
-   kubectl -n troupe-w-<q> get pods -o wide                                 # a neighbour's IP
-   ```
-2. In the terminal client, `troupe --remote`, open a session on `<p>` and use shell mode
+What no test reaches is the live plane's own: its nodes, whose kernel, runtime, storage and
+security profile decide whether bubblewrap starts there, the chart's seccomp profile on
+them (kind runs workers `Unconfined`, so CI never starts bubblewrap under the shipped
+profile), and the worker namespaces' Pod Security level; its cloud's
+real metadata service, over IPv6 and NAT64 where its network has them; the hosts its
+profiles name; and whether its OpenBao has a role per profile at all. Those are this row's.
+
+**Steps**, with `<p>` the profile you use:
+
+1. In the terminal client, `troupe --remote`, open a session on `<p>` and use shell mode
    (`!`, which runs on the pod in the session's sandbox):
    ```sh
-   !true
+   !cat /proc/1/comm
    !timeout 6 bash -c 'exec 3<>/dev/tcp/169.254.169.254/80' && echo connected || echo blocked
-   !timeout 6 bash -c 'exec 3<>/dev/tcp/<neighbour ip>/4000' && echo connected || echo blocked
+   !timeout 6 bash -c 'exec 3<>/dev/tcp/fd00:ec2::254/80' && echo connected || echo blocked
    !timeout 6 openssl s_client -connect <a host the profile names>:443 -brief </dev/null
    !timeout 6 openssl s_client -connect example.org:443 -brief </dev/null
-   !ls /var/run/secrets/kubernetes.io/serviceaccount; ls /proc | grep -c '^[0-9]'
    ```
-3. The pod's own settings: `kubectl -n troupe-w-<p> get pod troupe-w-<p>-0 -o yaml`, for
-   `runAsNonRoot`, `capabilities.drop: [ALL]`, `allowPrivilegeEscalation: false`, seccomp
-   `RuntimeDefault` and `automountServiceAccountToken: false`. With
-   `bao.workerRolePerProfile` on, its `TROUPE_BAO_ROLE` is `troupe-worker-<p>`.
+2. The worker container's seccomp profile is the chart's (`kubectl -n troupe-w-<p> get pod
+   troupe-w-<p>-0 -o jsonpath='{.spec.containers[0].securityContext.seccompProfile}'` reads
+   `Localhost` and `troupe/worker.json`), and `kubectl -n troupe-system rollout status
+   daemonset/troupe-worker-seccomp` says every node has it. The pod is in a user namespace
+   of its own: `kubectl -n troupe-w-<p> get pod troupe-w-<p>-0 -o
+   jsonpath='{.spec.hostUsers} {.spec.containers[0].securityContext.procMount}'` reads
+   `false Unmasked`, and `kubectl -n troupe-w-<p> exec troupe-w-<p>-0 -- head -1
+   /proc/self/uid_map` does not start `0 0`.
+3. The role, where `bao.workerRolePerProfile` is on: the pod's `TROUPE_BAO_ROLE` is
+   `troupe-worker-<p>` (`kubectl -n troupe-w-<p> get pod troupe-w-<p>-0 -o yaml`), and
+   OpenBao has that role bound to `troupe-w-<p>` alone (`bao read
+   auth/kubernetes/role/troupe-worker-<p>`).
 
-**Pass.** `!true` runs. The metadata address and the neighbour print `blocked` (a timeout,
-since the policy drops the packets). The named host connects. `example.org` is blocked
-with Cilium (`EgressByHostname` reads `CiliumFQDN`); without Cilium it connects by design,
-and the record says so. There is no service account directory, and `/proc` shows a handful
-of processes, the sandbox's own. **Fail:** anything else, and in particular a command
-refused with "this worker runs every command in a sandbox and ...": bubblewrap does not
-start on these nodes, and nothing runs.
+**Pass.** `cat /proc/1/comm` prints `bwrap`. The metadata addresses print `blocked` (a
+timeout, since the policy drops the packets; the IPv6 one on a cluster without IPv6 is
+blocked by that alone, and the record says which). The named host connects. `example.org`
+is blocked with Cilium (`EgressByHostname` reads `CiliumFQDN`); without Cilium it connects
+by design, and the record says so. With a role per profile, the role names the profile's
+namespace and no other. **Fail:** anything else, and in particular a command refused with
+"this worker runs every command in a sandbox and ...": bubblewrap does not start on these
+nodes, and nothing runs. What bubblewrap said names the cause: "No permissions to create
+new namespace" is the seccomp profile, "Can't mount proc" the pod's user namespace
+([installing.md](../admin/installing.md#the-workers-seccomp-profile)).
 
-**Behind it:** Decisions 832 (bubblewrap), 856 (the denied addresses), 752 and 758 (with
-and without Cilium), 753 (a role per profile); #625 and #627 are what is left;
+**Behind it:** Decisions 832 (bubblewrap), 890 (the worker's seccomp profile and user
+namespace), 856 (the
+denied addresses), 752 and 758 (with and without Cilium), 753 (a role per profile), 889
+(the cluster suite on pull requests);
+#625 and #627 are what is left;
 [security.md §3](../admin/security.md#3-a-worker-isolation-and-egress).
 
 ## 3. A fresh Anthropic account finishes a session

@@ -94,6 +94,168 @@ defmodule Troupe.E2E.World do
     kubectl(["exec", "-n", namespace, pod, "--" | command])
   end
 
+  @doc """
+  Whether a pod opens a TCP connection to `{host, port}`, attempted from inside it.
+
+  With what the image already has: the worker's has Perl, and adding a tool to prove a
+  network restriction would change the thing being measured. The exit status is the
+  answer; the output is there so a failure says which way it went.
+  """
+  @spec connects?(String.t(), String.t(), {String.t(), :inet.port_number()}) :: boolean()
+  def connects?(namespace, pod, {host, port}) do
+    {_output, status} =
+      exec(namespace, pod, [
+        "perl",
+        "-e",
+        ~S|use IO::Socket::INET; my ($h, $p) = @ARGV;| <>
+          ~S| my $s = IO::Socket::INET->new(PeerAddr => $h, PeerPort => $p,| <>
+          ~S| Proto => "tcp", Timeout => 5);| <>
+          ~S| print $s ? "connected\n" : "refused\n"; exit($s ? 0 : 1)|,
+        host,
+        to_string(port)
+      ])
+
+    status == 0
+  end
+
+  @doc "A pod's own address, as the cluster gave it."
+  @spec pod_ip(String.t(), String.t()) :: String.t()
+  def pod_ip(namespace, pod) do
+    kubectl!(["get", "pod", pod, "-n", namespace, "-o", "jsonpath={.status.podIP}"])
+  end
+
+  @doc """
+  The image a profile's workers run, as its WorkerProfile names it.
+
+  What the operator already gave the running pods, so anything a test starts with it is
+  already on the node and nothing waits on a registry.
+  """
+  @spec worker_image(String.t()) :: String.t()
+  def worker_image(profile) do
+    repo =
+      kubectl!([
+        "get",
+        "workerprofile",
+        profile,
+        "-n",
+        @namespace,
+        "-o",
+        "jsonpath={.spec.image.repository}:{.spec.image.tag}"
+      ])
+
+    if repo == ":", do: "ghcr.io/it-minds/troupe-worker:dev", else: repo
+  end
+
+  @doc """
+  A pod in a namespace of its own, under no policy, listening on `port`.
+
+  Two things at once. To a worker it is a neighbour: a pod in another namespace, which no
+  rule of a worker's admits. And it is a vantage point no rule restricts, so what it
+  reaches is what the cluster's network carries, and what it cannot reach nobody answers
+  on: the control every refusal a worker meets is measured against.
+
+  The worker's image, for its Perl and because it is already on the node. The namespace
+  goes when the test module ends.
+  """
+  @spec outsider!(pos_integer()) :: %{
+          namespace: String.t(),
+          pod: String.t(),
+          ip: String.t(),
+          port: pos_integer()
+        }
+  def outsider!(port \\ 4000) do
+    namespace =
+      "troupe-e2e-outside-#{System.system_time(:second)}-#{System.unique_integer([:positive])}"
+
+    pod = "outsider"
+
+    kubectl!(["create", "namespace", namespace])
+
+    ExUnit.Callbacks.on_exit(fn ->
+      kubectl(["delete", "namespace", namespace, "--wait=false"])
+    end)
+
+    kubectl!([
+      "run",
+      pod,
+      "--namespace",
+      namespace,
+      "--image",
+      worker_image(profile()),
+      "--image-pull-policy",
+      "IfNotPresent",
+      "--restart",
+      "Never",
+      "--labels",
+      "app=troupe-e2e-outsider",
+      "--command",
+      "--",
+      "perl",
+      "-e",
+      ~S|use IO::Socket::INET; my $s = IO::Socket::INET->new(LocalPort => $ARGV[0],| <>
+        ~S| Listen => 16, ReuseAddr => 1) or die "listen: $!";| <>
+        ~S| while (1) { my $c = $s->accept or next; print $c "outsider\n"; close $c }|,
+      to_string(port)
+    ])
+
+    kubectl!(["wait", "-n", namespace, "--for=condition=ready", "pod/" <> pod, "--timeout=180s"])
+    ip = pod_ip(namespace, pod)
+
+    # Ready is the container started, not the socket open.
+    eventually(fn -> connects?(namespace, pod, {ip, port}) end,
+      timeout: 60_000,
+      what: "the outsider to listen on #{ip}:#{port}"
+    )
+
+    %{namespace: namespace, pod: pod, ip: ip, port: port}
+  end
+
+  @doc """
+  Apply a manifest, given as a map.
+
+  Through a file, as `kubectl apply -f` wants one. What `secret!/3` avoids is a path a
+  Linux shell writes and a Windows kubectl reads; written from here, the path is the
+  operating system's own spelling, and the kubectl beside it reads it as written.
+  """
+  @spec apply!(map()) :: :ok
+  def apply!(manifest) do
+    path = Path.join(System.tmp_dir!(), "troupe-e2e-#{System.unique_integer([:positive])}.json")
+    File.write!(path, Jason.encode!(manifest))
+
+    try do
+      kubectl!(["apply", "-f", path])
+      :ok
+    after
+      File.rm(path)
+    end
+  end
+
+  @doc """
+  Ask the Cilium agent, with `cilium-dbg`, and give back what it printed to standard output.
+
+  What the agent holds is what it enforces, and it can differ from the objects the API
+  server holds: a rule the agent could not parse is an object with nothing behind it.
+  """
+  @spec cilium!([String.t()]) :: String.t()
+  def cilium!(args) do
+    case kubectl(
+           [
+             "exec",
+             "-n",
+             "kube-system",
+             "ds/cilium",
+             "-c",
+             "cilium-agent",
+             "--",
+             "cilium-dbg" | args
+           ],
+           stderr: false
+         ) do
+      {output, 0} -> output
+      {output, status} -> raise "cilium-dbg #{Enum.join(args, " ")} exited #{status}:\n#{output}"
+    end
+  end
+
   @doc "The first pod matching a selector, or nil. Names change; selectors do not."
   @spec pod(String.t(), String.t()) :: String.t() | nil
   def pod(namespace, selector) do

@@ -156,7 +156,8 @@ defmodule Troupe.Plane.Harness do
   The team and its grant are checked before anything is reserved. A session whose team
   lost the profile, or was removed, while it waited is parked read-only and gives back its
   slice, and the answer is `{:error, :no_grant}` or `{:error, :no_team}`: not a refusal
-  for want of room, so the scaler goes on to the next.
+  for want of room, so the scaler goes on to the next. A session erased since the scaler
+  read it is `{:error, :erased}` and stays erased, whenever the erasure landed.
   """
   @spec admit(Session.t()) :: {:ok, map()} | {:error, term()}
   def admit(%Session{} = session) do
@@ -165,8 +166,8 @@ defmodule Troupe.Plane.Harness do
          {:ok, _pushed} <-
            start_on_pod(worker, session, team, nil, session.pending_prompt,
              on_failure: :requeue
-           ) do
-      {:ok, _session} = Sessions.admitted(session.id)
+           ),
+         {:ok, _session} <- admitted(session, worker) do
       Logger.info("troupe plane: #{session.id} waited and is now on #{worker.pod_name}")
       {:ok, %{session_id: session.id, worker: worker.id}}
     else
@@ -187,6 +188,21 @@ defmodule Troupe.Plane.Harness do
         # cluster suite found that; no unit test could have, because in-process there is
         # no gap between a pod enrolling and a pod being able to answer.
         {:error, reason}
+    end
+  end
+
+  # Erased while its pod was starting it. The erasure gave its slot back and told the pod
+  # it was on, perhaps before that pod had it, so the pod is told again now that it has;
+  # the row stays erased rather than being written back to `active` with no pod behind it.
+  defp admitted(session, worker) do
+    case Sessions.admitted(session.id) do
+      {:error, :erased} ->
+        Placement.release(session.profile, session.id)
+        Erasure.tell_pod(worker, session)
+        {:error, :erased}
+
+      result ->
+        result
     end
   end
 
@@ -1597,10 +1613,13 @@ defmodule Troupe.Plane.Harness do
   end
 
   # Back in the queue with its prompt, and its budget still held: it is the same session,
-  # it is still going to run, and the next tick of the scaler will try again.
+  # it is still going to run, and the next tick of the scaler will try again. Unless it
+  # was erased meanwhile, which leaves it erased.
   defp unplaced(session, _team, :requeue) do
-    {:ok, _session} = Sessions.wait(session.id, session.pending_prompt)
-    :ok
+    case Sessions.wait(session.id, session.pending_prompt) do
+      {:ok, _session} -> :ok
+      {:error, :erased} -> :ok
+    end
   end
 
   # -- opening a session ------------------------------------------------------

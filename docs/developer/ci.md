@@ -4,7 +4,7 @@ Three speeds, one set of jobs (Decision 676):
 
 | | when | runs | publishes |
 |---|---|---|---|
-| **Focused CI** — [`ci.yml`](../../.github/workflows/ci.yml) | every pull request into `main`, every push to `main` | only what the change can have broken | `main`: the five images as `sha-<short>` |
+| **Focused CI** — [`ci.yml`](../../.github/workflows/ci.yml) | every pull request into `main`, every push to `main` | only what the change can have broken, the [cluster suite](#the-suite-that-needs-a-cluster) included when it deploys what changed | `main`: the five images as `sha-<short>` |
 | **Pre-release** — [`prerelease.yml`](../../.github/workflows/prerelease.yml) | by hand, any branch or commit | builds only, **no test suite** | a GitHub pre-release `v<VERSION>-pre.<n>`: images, chart, `troupe`, `troupe-daemon`, desktop installers |
 | **Release** — [`release.yml`](../../.github/workflows/release.yml) | merging a VERSION change (`scripts/release 0.16.0-beta`) | **the full suite**: every job, nine soak runs, the cluster suite | the GitHub release `v<VERSION>`, images and chart at that version |
 
@@ -48,12 +48,14 @@ Arrows point at what an app depends on; a change flows back along them. So:
 | `docs/user/cli-reference.md` | — | TUI `mix check`, which holds it to the command tables |
 | `apps/troupe_daemon` | daemon | native builds (PR) |
 | `apps/troupe_plane` | plane, worker | GUI-e2e |
-| `apps/troupe_operator` / `troupe_a2a` | that app | — |
+| `apps/troupe_operator` | operator | the cluster suite (pull request) |
+| `apps/troupe_a2a` | a2a | — |
 | `apps/troupe_core` | core, gateway, daemon, worker | TUI, protocol, GUI-e2e |
 | `apps/troupe_gateway` | gateway, daemon, worker | TUI, protocol, GUI-e2e |
 | `apps/troupe_protocol`, `config/`, `mix.lock` | all eight | TUI, protocol, GUI-e2e |
-| `charts/`, `docker/` | — | chart (lint, render, kubeconform), GUI-e2e |
-| `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | but the native builds, unless `native.yml` changed |
+| `charts/`, `docker/` | — | chart (lint, render, kubeconform), GUI-e2e, the cluster suite (pull request) |
+| `dev/kind/`, `scripts/kind-up`, `scripts/remote-up`, `scripts/build-images` | — | chart, the cluster suite (pull request) |
+| `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | but the native builds, unless `native.yml` changed, and the cluster suite, unless `cluster.yml` changed |
 | anything else (docs) | — | only `versions` |
 
 `versions` runs whatever changed, because a moved file can break any of what it checks:
@@ -71,12 +73,50 @@ flowchart LR
   changes[what changed] --> lint[compile, format, credo, boundaries]
   changes --> test["test &lt;app&gt; × N"]
   changes --> chart & protocol[schema + Python client] & tui[TUI] & gui[GUI] & e2e[GUI vs a plane] & vscode[VS Code extension] & native[native builds · PR only]
+  lint & test & chart --> cluster[cluster suite · PR, if it deploys what changed]
   versions[versions agree] --> ok
-  lint & test & chart & protocol & tui & gui & e2e & vscode & native --> ok{{ci-ok}}
+  lint & test & chart & protocol & tui & gui & e2e & vscode & native & cluster --> ok{{ci-ok}}
   ok -->|push to main, changed an image| images[images · sha-&lt;short&gt;]
 ```
 
-`ci-ok` is the one required check: it fails if any job that ran failed, and a job skipped because its part of the repository did not change counts as passing. A push to `main` publishes the images once `ci-ok` has passed. The soak and the cluster suite are not in focused runs any more; they belong to the nightly and to releases.
+`ci-ok` is the one required check: it fails if any job that ran failed, and a job skipped because its part of the repository did not change counts as passing. A push to `main` publishes the images once `ci-ok` has passed. The soak is not in focused runs; it belongs to the nightly and to releases. The cluster suite is in them only where a pull request changes what it deploys (below).
+
+## The suite that needs a cluster
+
+[`cluster.yml`](../../.github/workflows/cluster.yml) is one job, `mix troupe.e2e` on a kind
+cluster (Decision 889). It runs:
+
+- on a **pull request** that changes what the cluster runs: `charts/` (the CRDs and the
+  admission policy among it), `docker/`, `dev/kind/`, `scripts/kind-up`,
+  `scripts/remote-up`, `scripts/build-images`, `apps/troupe_operator/` (the operator and
+  the suite itself) or `cluster.yml`. Into `main` through `ci.yml`, after `lint`, the
+  test legs and `chart` have passed or been skipped; into a `development-*` chunk through
+  `dev-check.yml`, after its compile, because a fixer's machine may have no cluster and
+  the chunk's own pull request into `main` comes only once every fix is in;
+- in the **nightly** and every **release**, whatever changed.
+
+Not on a push to `main`, whose pull request ran it, and not for a change to the workflows
+in general, which runs everything else.
+
+In order: the runner's AppArmor restriction on unprivileged user namespaces lifted, as
+the test legs lift it, since the runner's kernel is the node's and a worker's bubblewrap
+needs one; `scripts/kind-up` (a cluster with no CNI); the CRDs applied and the admission
+policy and the kind values' TroupePolicy put through a server-side dry run, before anything
+is built, so a rule the API server refuses fails in about a minute (the 0.16.0 release met
+one ten minutes into this job, and nothing before it had applied a CRD to an API server);
+`scripts/remote-up` (Cilium, the ingress, the five images built and loaded, the chart, a
+profile); a stand-in answering at 169.254.169.254 on the runner, for the metadata test;
+then the suite, with its Mix build cached under a key of its own.
+
+**What it costs.** About twenty-five minutes of one runner, most of it the image builds
+(nine minutes) and the suite (twelve). On a pull request it starts once the cheaper checks
+of the same change have passed, so it is the last to finish on a change to the chart or the
+operator; a change elsewhere does not run it.
+
+**On a laptop**, the same: `scripts/remote-up` once, then `scripts/e2e` (or `mix
+troupe.e2e` with kind, kubectl and helm on the machine). The metadata test says it skipped
+the connection where nothing answers at that address; CI sets
+`TROUPE_E2E_METADATA_STAND_IN=1`, so there a missing stand-in fails it.
 
 ## Pre-release: a build to try, now
 
@@ -168,7 +208,8 @@ A failure is a harness regression until shown otherwise: the step prints the run
 | workflow | what | called by |
 |---|---|---|
 | `ci.yml` | every check; focused or full | pull requests into `main`, pushes to `main`, `nightly.yml`, `release.yml` |
-| `dev-check.yml` | compile, credo, schema, client builds (the VS Code extension's `.vsix` kept as the run's artifact), and the decisions' check and the citation check whatever changed; no tests | every other pull request: into a `development-*` chunk ([fixing-issues.md](fixing-issues.md)), or stacked on another branch |
+| `dev-check.yml` | compile, credo, schema, client builds (the VS Code extension's `.vsix` kept as the run's artifact), and the decisions' check and the citation check whatever changed; no tests but the cluster suite, when the change touches what it deploys | every other pull request: into a `development-*` chunk ([fixing-issues.md](fixing-issues.md)), or stacked on another branch |
+| `cluster.yml` | the suite that needs a cluster, on kind ([above](#the-suite-that-needs-a-cluster)) | `ci.yml`, `dev-check.yml` |
 | `licences.yml` | every locked package's licence against the policy in `scripts/licences.exs`, and `docs/third-party-licences.md`, `THIRD-PARTY-NOTICES.txt` and the chart's LICENSE and NOTICE current | every pull request |
 | `pages.yml` | the documentation site (`mkdocs.yml`), strict: a broken link, a nav entry to a missing page or a page left out of the nav fails it; on `main`, published to GitHub Pages | every pull request, pushes to `main` |
 | `dco.yml` | every commit authored from 2026-09-27 has its author's `Signed-off-by:` ([CONTRIBUTING.md](../../CONTRIBUTING.md)) | pull requests into `main` and `development-*` |

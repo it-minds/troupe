@@ -15,6 +15,11 @@
 #     whatever changed, plus the soak (`soak` more runs of each app's suite) and the
 #     cluster suite when asked. That is what a release has passed.
 #
+# The cluster suite (`cluster.yml`) is also focused: a pull request that changes what the
+# cluster runs - the chart, its CRDs and admission policy, the operator, the images, the
+# kind cluster - runs it, so a rule the API server refuses fails that pull request and not
+# the release after it.
+#
 # Releases are not cut here: `release.yml` (a merged change to VERSION: the full suite,
 # then tag and publish) and `prerelease.yml` (by hand: an untested build of any commit,
 # published as a pre-release) do that. Nothing in this repository deploys.
@@ -84,6 +89,7 @@ jobs:
       vscode: ${{ steps.plan.outputs.vscode }}
       native: ${{ steps.plan.outputs.native }}
       images: ${{ steps.plan.outputs.images }}
+      cluster: ${{ steps.plan.outputs.cluster }}
     steps:
       - uses: actions/checkout@v7
 
@@ -151,6 +157,18 @@ jobs:
               - clients/gui/packages/client/**
               - apps/troupe_daemon/**
               - .github/workflows/native.yml
+            # What the cluster suite deploys or is: the chart with its CRDs and admission
+            # policy, the images, the kind cluster and the scripts that build it, the
+            # operator and its suite. `dev-check.yml` has the same list.
+            cluster:
+              - charts/**
+              - docker/**
+              - dev/kind/**
+              - scripts/kind-up
+              - scripts/remote-up
+              - scripts/build-images
+              - apps/troupe_operator/**
+              - .github/workflows/cluster.yml
 
       # Which umbrella apps to test follows the dependency graph, read from the apps' own
       # `mix.exs` rather than written down here, so it cannot drift: a change to an app
@@ -166,6 +184,7 @@ jobs:
         id: plan
         env:
           FULL: ${{ inputs.full && 'true' || 'false' }}
+          CLUSTER: ${{ inputs.cluster && 'true' || 'false' }}
           EVENT: ${{ github.event_name }}
           F: ${{ toJSON(steps.filter.outputs) }}
         run: |
@@ -209,6 +228,10 @@ jobs:
           native=$(flag eval '[ "$EVENT" = pull_request ] && on native')
           # Every merged commit that changed something an image is built from.
           images=$(flag eval '[ "$FULL" = false ] && [ "$EVENT" = push ] && { [ "$server" = true ] || on gui || on chart; }')
+          # The cluster suite: in a full run that asks for it, and on a pull request that
+          # changes what it deploys. Not for a change to the workflows in general, which
+          # runs everything else, and not on a push to `main`, whose pull request ran it.
+          cluster=$(flag eval '[ "$CLUSTER" = true ] || { [ "$FULL" = false ] && [ "$EVENT" = pull_request ] && on cluster; }')
 
           {
             echo "apps=$json"
@@ -221,6 +244,7 @@ jobs:
             echo "vscode=$vscode"
             echo "native=$native"
             echo "images=$images"
+            echo "cluster=$cluster"
           } | tee -a "$GITHUB_OUTPUT"
 
           {
@@ -229,7 +253,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| umbrella apps | \`$json\` |"
-            for k in chart protocol tui gui gui_e2e vscode native images; do echo "| $k | ${!k} |"; done
+            for k in chart protocol tui gui gui_e2e vscode native images cluster; do echo "| $k | ${!k} |"; done
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Compile, format, credo, generated assets and boundaries: once, for the whole
@@ -444,6 +468,30 @@ jobs:
         run: |
           if helm template troupe charts/troupe --set plane.replicas=2 --set plane.distribution=none >/dev/null 2>&1; then
             echo "plane.replicas=2 with plane.distribution=none rendered; the chart must refuse it"
+            exit 1
+          fi
+
+      # A worker's seccomp profile the kubelet would not take is a pod that never starts, and
+      # the installer mounts the profile's own directory from every node, so a path that
+      # climbs out of the kubelet's seccomp directory would mount another.
+      - name: The chart refuses a worker seccomp profile no kubelet takes, or one outside its directory
+        run: |
+          for bad in worker.seccomp.type=unconfined worker.seccomp.localhostProfile= \
+              worker.seccomp.localhostProfile=worker.json worker.seccomp.localhostProfile=../../etc/x.json \
+              worker.seccomp.install.kubeletSeccompDir=/var/lib/kubelet/../../etc; do
+            if helm template troupe charts/troupe --set "$bad" >/dev/null 2>&1; then
+              echo "$bad rendered; the chart must refuse it"
+              exit 1
+            fi
+          done
+          rendered=$(helm template troupe charts/troupe --values dev/kind/values.yaml)
+          if grep -q 'name: troupe-worker-seccomp' <<<"$rendered"; then
+            echo "an Unconfined worker still renders the profile's installer"
+            exit 1
+          fi
+          # A string "false" is true to a template, and would turn user namespaces on.
+          if helm template troupe charts/troupe --set-string worker.userNamespaces=false >/dev/null 2>&1; then
+            echo "worker.userNamespaces as a string rendered; the chart must refuse it"
             exit 1
           fi
 
@@ -795,73 +843,20 @@ jobs:
     with:
       macos: false
 
-  # Twenty minutes on a kind cluster, so it is not a pull request's to wait for: the
-  # nightly and a release ask for it. On Ubuntu 24.04 while the rest is on 26.04: kind and
-  # Cilium lean on the kernel more than anything else here, and the trial that moved the
-  # rest did not run this (Decision 796).
+  # Twenty-five minutes on a kind cluster (`cluster.yml`, which `dev-check.yml` calls too):
+  # the nightly and a release ask for it, and a pull request that changes what it deploys
+  # runs it. After the jobs that check the same change for less, so a change they refuse
+  # does not also spend a cluster; one they skipped, because its part did not change, is
+  # no reason to wait.
   cluster:
     name: the suite that needs a cluster
-    needs: [lint, test, chart]
-    if: inputs.cluster
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: erlef/setup-beam@v1
-        with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
-
-      # `kind` and `kubectl` only; the cluster is `scripts/kind-up`'s. kind-action used to
-      # create it from `dev/kind/cluster.yaml` alone, which keeps kind's own CNI — the
-      # `disableDefaultCNI` that makes Cilium the only one is appended by `kind-up`. So
-      # CI's cluster enforced no NetworkPolicy, and the egress test failed on every run it
-      # reached, hidden until now behind the token that expired mid-suite (#47).
-      - uses: helm/kind-action@v1
-        with:
-          install_only: true
-
-      - uses: azure/setup-helm@v5
-
-      - name: A cluster whose CNI enforces policy
-        run: scripts/kind-up
-
-      # The same script a developer runs, so that a cluster failure here is reproducible
-      # by one command on a laptop. It builds the five images and `kind load`s them,
-      # which is why nothing is pushed for this job.
-      #
-      # The gateway is a public host a runner can reach, and no key: the egress suite dials
-      # the dev profile's model endpoint from inside a pod, which needs a host that answers
-      # and nothing more. Without one it says it could not test that, and passes.
-      - name: Bring up a Troupe
-        env:
-          TROUPE_GATEWAY_URL: https://api.openai.com/v1
-        run: scripts/remote-up
-
-      - run: mix deps.get
-
-      - name: The cluster suite
-        run: mix troupe.e2e
-
-      # A cluster failure that produces only an exit code is a failure nobody will
-      # diagnose. These are the two logs that say what happened.
-      - name: Logs, on failure
-        if: failure()
-        run: |
-          mkdir -p cluster-logs
-          # Enough of the plane's log to reach the pod deletion the suite made a few minutes
-          # earlier: at its debug level 2,000 lines was ten seconds of SQL.
-          kubectl logs -n troupe-system deployment/troupe-plane --tail=100000 > cluster-logs/plane.log 2>&1 || true
-          kubectl logs -n troupe-system deployment/troupe-operator --tail=20000 > cluster-logs/operator.log 2>&1 || true
-          kubectl get pods -A -o wide > cluster-logs/pods.txt 2>&1 || true
-          kubectl get events -A --sort-by=.lastTimestamp > cluster-logs/events.txt 2>&1 || true
-
-      - uses: actions/upload-artifact@v7
-        if: failure()
-        with:
-          name: cluster-logs
-          path: cluster-logs/
+    needs: [changes, lint, test, chart]
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.cluster == 'true' &&
+      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    uses: ./.github/workflows/cluster.yml
+    permissions:
+      contents: read
 
   # The one required check. Every job a run can have is under it, and it fails when any
   # of them failed or was cancelled; a job skipped because its part of the repository

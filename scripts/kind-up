@@ -53,5 +53,24 @@ else
   esac
 fi
 
+# Worker pods run in a user namespace of their own (`worker.userNamespaces`), and two
+# things about a kind node stop such a pod from starting at all.
+#
+# - The runtime runs kind's createContainer hook, /kind/bin/mount-product-files.sh, inside
+#   the pod's user namespace, as its root, which is nobody on the node. The node image
+#   leaves /kind at 0644, so that root cannot reach it ("fork/exec
+#   /kind/bin/mount-product-files.sh: permission denied"). Nothing under /kind is secret.
+# - The pod gets a sysfs of its own, and the kernel mounts one in a user namespace only
+#   where an existing sysfs is fully visible. kind mounts files over the node's own
+#   (/sys/class/dmi/id/product_uuid and the rest), so on a host with DMI it is not, and the
+#   pod's sandbox fails ('error mounting "sysfs" to rootfs at "/sys": ... operation not
+#   permitted'). A second sysfs, read-only, with nothing over it, is one. Not kept across
+#   a restart of the node: this script puts it back.
+for node in $(kind get nodes --name "$cluster"); do
+  docker exec "$node" chmod 0755 /kind
+  docker exec "$node" sh -c 'mountpoint -q /mnt/sysfs ||
+    { mkdir -p /mnt/sysfs && mount -t sysfs -o ro,nosuid,nodev,noexec sysfs /mnt/sysfs; }'
+done
+
 kubectl --context "kind-${cluster}" version --output=yaml | head -20
 kubectl --context "kind-${cluster}" get nodes

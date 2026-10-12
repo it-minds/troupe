@@ -32,6 +32,29 @@ Arguments and their meanings are in the method table
    plane drains it and the operator replaces it, one at a time; `admin.pod.drain` rolls a
    busy one sooner ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)).
 
+**Upgrading to 0.17.0 from earlier, with workers running.** Workers before it ran under
+the runtime's default seccomp profile and with the runtime's masked `/proc`, which between
+them refuse bubblewrap its user namespace and its own `/proc`, so their pods refused every
+command. The chart now gives the worker container its own seccomp profile
+(`worker.seccomp`) and a DaemonSet to put it on the nodes, and runs each worker pod in a
+user namespace of its own with its `/proc` unmasked (`worker.userNamespaces`)
+([installing.md](installing.md#the-workers-seccomp-profile)). Before upgrading:
+
+1. Run the cluster check in
+   [installing.md](installing.md#the-workers-user-namespaces): Kubernetes 1.33 or later,
+   containerd 2.0 or later, Linux 6.3 or later, and storage, team volumes' included, that
+   takes idmapped mounts. A cluster that cannot sets `worker.userNamespaces: false`, and
+   its workers go on refusing commands.
+2. Give each worker namespace (`troupe-w-<profile>`) the `privileged` Pod Security level
+   where the cluster's default is higher, or every replacement pod is refused, and the same
+   for `troupe-system`, where the DaemonSet runs; or set
+   `worker.seccomp.install.enabled: false` and install the profile another way.
+
+After step 2 of the upgrade, `kubectl -n troupe-system rollout status
+daemonset/troupe-worker-seccomp`. Both settings change every profile's pod template, so
+each reports `UpgradePending` and its pods are replaced as they empty (step 4); a pod
+replaced before the DaemonSet reached its node waits in `CreateContainerError` until it has.
+
 A release publishes the chart and the images and deploys nothing; every deployment rolls
 it this way, from wherever it keeps its own values.
 
