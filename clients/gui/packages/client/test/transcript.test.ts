@@ -575,6 +575,22 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.equal(texts[5], "nearly out: turns 32/40 (80%)");
   });
 
+  it("shows a config note as the harness's sentence (troupe #644)", () => {
+    seq = 0;
+    const message =
+      "Your organisation caps a model call's output at 1,000 tokens (https://plane.example.com), so reasoning is off for this session: " +
+      "reasoning_effort high asks for 16,384 tokens of thinking, and less than 1,024 is left beside the answer.";
+    const state = foldAll([
+      durable("config_note", { key: "max_tokens", message, source: "https://plane.example.com", limit: 1000, model: "claude-opus-5-5", effort: "high", thinking: 0 }),
+    ]);
+
+    assert.deepEqual(
+      state.entries.map((e) => e.kind),
+      ["system"],
+    );
+    assert.equal((state.entries[0] as Extract<Entry, { kind: "system" }>).text, message);
+  });
+
   it("streams the daemon's reasoning into the thinking pane, and a waiting agent needs you", () => {
     seq = 0;
     const state = foldAll([ephemeral("llm_delta", { kind: "reasoning", text: "let me " }), ephemeral("llm_delta", { kind: "reasoning", text: "think" })]);

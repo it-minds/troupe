@@ -51,8 +51,18 @@ settings page shows such a key as set by your organisation and does not change i
 `max_turns` or `wall_clock_ms`, the question that asks whether to go on offers only what
 stays under it, says the limit is your organisation's and where it came from, and turns
 away a larger amount, `no limit` and an `allow` past it. A model entry's own `max_output` can lower an enforced `max_tokens` for
-its model, and cannot raise it. `troupe config --explain KEY` shows both ends with where
-they came from:
+its model, and cannot raise it.
+
+An enforced `max_tokens` bounds the whole of every model call, the summary a compaction
+asks for and the room a `reasoning_effort` gives the model's thinking included. On an
+Anthropic model the thinking is shortened so that the answer keeps 4,096 tokens, or half
+the limit where that is less; where that leaves less than 1,024 tokens of thinking, which
+is the least Anthropic takes, the call asks for no thinking at all. An OpenAI-compatible
+model's reasoning already spends from the same limit. The first time a session's thinking
+is shortened or turned off, it says so once, naming the limit and where it came from:
+"Your organisation caps a model call's output at 1,000 tokens (https://plane.example.com),
+so reasoning is off for this session: …". `troupe config --explain KEY` shows both ends
+with where they came from:
 
 ```text
 max_turns = 25
@@ -1003,7 +1013,10 @@ Anthropic's models take it in one of two forms, and refuse the other:
 Which form a model takes is what Anthropic's model list says of it (`troupe models`
 fetches it), else what its name says, found inside a gateway's renaming such as
 `eu.anthropic.claude-opus-5`. A model neither describes is sent adaptive thinking for a
-word and a budget for a number. Either way the output cap is raised to hold the thinking.
+word and a budget for a number. Either way the output cap is raised to hold the thinking,
+and no further than a `max_tokens` your organisation enforces: under that limit the
+thinking is shortened to fit, and is off for a call it leaves too little room
+([your organisation's limits](#your-organisations-defaults-and-limits)).
 A model that refuses what it was sent fails the call with a message that names
 `reasoning_effort` and what to set it to.
 

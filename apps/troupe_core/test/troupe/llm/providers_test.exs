@@ -445,6 +445,38 @@ defmodule Troupe.LLM.ProvidersTest do
       refute Map.has_key?(body, "max_completion_tokens")
     end
 
+    # Issue #644: an organisation's enforced `max_tokens` is the request's `ceiling`.
+    test "under an organisation's ceiling a high effort asks for no more than it, either field" do
+      ceiled = &%{&1 | ceiling: 1_000}
+
+      assert {:ok, _} =
+               run(
+                 OpenAI,
+                 ceiled.(request(chunks: [openai_text_only()], reasoning_effort: "high"))
+               )
+
+      [sent] = FakeTransport.drain_requests()
+      body = FakeTransport.body(sent)
+      assert body["max_completion_tokens"] == 1_000
+      assert body["reasoning_effort"] == "high"
+
+      refusal =
+        "Unsupported parameter: 'max_completion_tokens' is not supported. Use 'max_tokens' instead."
+
+      request =
+        request(
+          chunks: [openai_text_only()],
+          reasoning_effort: "high",
+          fail_first: 1,
+          fail_status: 400,
+          fail_body: refusal
+        )
+
+      assert {:ok, _} = run(OpenAI, ceiled.(request))
+      [_first, second] = FakeTransport.drain_requests()
+      assert FakeTransport.body(second)["max_tokens"] == 1_000
+    end
+
     test "a 400 that asks for max_completion_tokens by name is answered by asking again with it" do
       refusal = "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."
 

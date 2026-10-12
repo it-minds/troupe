@@ -1,0 +1,34 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/config_note.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "effort": {
+      "type": "string"
+    },
+    "key": {
+      "type": "string"
+    },
+    "limit": {
+      "type": "integer"
+    },
+    "message": {
+      "type": "string"
+    },
+    "model": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "thinking": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "key",
+    "message"
+  ],
+  "title": "config_note",
+  "type": "object"
+}
