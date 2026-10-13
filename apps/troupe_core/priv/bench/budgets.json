@@ -1,12 +1,12 @@
 {
   "tool_calls": {
     "model_calls": 31,
-    "system_prompt_bytes": 1600,
-    "tool_definition_bytes": 14300,
-    "first_prompt_bytes": 15950,
-    "largest_prompt_bytes": 31500,
+    "system_prompt_bytes": 1650,
+    "tool_definition_bytes": 14800,
+    "first_prompt_bytes": 16500,
+    "largest_prompt_bytes": 32050,
     "growth_per_call_bytes": 550,
-    "turn_input_tokens": 185000,
+    "turn_input_tokens": 189500,
     "events_per_turn": 170
   },
   "cut_output": {

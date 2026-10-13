@@ -242,8 +242,10 @@ defmodule Troupe.Tools.ShowTest do
 
       assert [request] = Fake.requests(fake)
       refute "show" in Enum.map(request.tools, & &1.name)
+      refute "patch" in Enum.map(request.tools, & &1.name)
       assert prompt_text(request) =~ "Answer the user in plain prose"
       refute prompt_text(request) =~ "`show`"
+      refute prompt_text(request) =~ "`patch`"
     end
   end
 

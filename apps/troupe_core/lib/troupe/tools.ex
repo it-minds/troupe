@@ -48,7 +48,10 @@ defmodule Troupe.Tools do
     # Onboarding another tool's files into Troupe's own (Decision 823).
     Troupe.Tools.OnboardWrite,
     # A document shown beside the chat (Decision 870), on every call: never gated here.
-    Troupe.Tools.Show
+    Troupe.Tools.Show,
+    # And revised in place, wherever `show` is and on every call, never gated either: a
+    # tool that came and went would change the front of every prompt.
+    Troupe.Tools.Patch
   ]
 
   # The task list's tools, and the model calls a turn makes before a profile that did not
