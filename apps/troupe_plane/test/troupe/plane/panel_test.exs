@@ -863,6 +863,80 @@ defmodule Troupe.Plane.PanelTest do
       refute html =~ "prices"
     end
 
+    # A draft rebuilt from the form's fields alone dropped `mcpIdentities`, a server row's
+    # credential settings, and anything else in the spec the page has no field for, without
+    # saying so.
+    test "keeps every part of the spec it has no field for, so a save from here drops none of it",
+         context do
+      identity = %{
+        "server" => "jira",
+        "clientId" => "client-dev",
+        "scope" => "api://jira/.default",
+        "tokenUrl" => "https://login.example.test/token",
+        "transitKey" => "troupe-w-identity-dev.jira",
+        "certificateThumbprint" => String.duplicate("A", 43)
+      }
+
+      jira = %{
+        "name" => "jira",
+        "url" => "https://mcp.example.test/jira",
+        "credentialMode" => "client_credentials"
+      }
+
+      wiki = %{
+        "name" => "wiki",
+        "url" => "https://mcp.example.test/wiki",
+        "secretRef" => %{"name" => "wiki-token", "key" => "token"}
+      }
+
+      github = %{"permissions" => %{"contents" => "write"}}
+      later = %{"a field this page has never heard of" => true}
+
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "dev",
+          image: "ghcr.io/troupe/worker:1",
+          spec: %{
+            "mcpIdentities" => [identity],
+            "mcpServers" => [jira, wiki],
+            "github" => github,
+            "later" => later,
+            "egress" => %{"fqdns" => ["mcp.example.test"]},
+            # As a row read back from the cluster holds it: the plane's to write, and
+            # refused from anyone else, so not sent back.
+            "sessionsPerPod" => 4
+          }
+        })
+
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      # A change the way a browser sends one: every field of the form, one of them new.
+      view
+      |> element("form")
+      |> render_change(%{
+        "name" => "dev",
+        "image" => "ghcr.io/troupe/worker:1",
+        "egress.fqdns" => "mcp.example.test\nregistry.example.test",
+        "mcp.0.name" => "jira",
+        "mcp.0.url" => "https://mcp.example.test/jira",
+        "mcp.1.name" => "wiki",
+        "mcp.1.url" => "https://mcp.example.test/wiki",
+        "mcp.1.timeoutMs" => "5000"
+      })
+
+      html = view |> element("#profile-editor") |> render_submit()
+      refute html =~ "banner--breakglass"
+
+      spec = Fleet.get_profile("dev").spec
+      assert spec["egress"]["fqdns"] == ~w(mcp.example.test registry.example.test)
+      assert spec["mcpIdentities"] == [identity]
+      assert spec["github"] == github
+      assert spec["later"] == later
+      assert spec["mcpServers"] == [jira, Map.put(wiki, "timeoutMs", 5000)]
+      refute Map.has_key?(spec, "sessionsPerPod")
+    end
+
     test "an MCP row with no url is a row being typed, not a server" do
       draft =
         ProfileEditor.draft(%{

@@ -1385,7 +1385,6 @@ Found by the chunk 33 fixers, 2026-10-13.
   - If the plane can't record a push after GitHub moved the branch, the session's next push is refused as "commits this session did not push", and a person has to sort it out.
   - If the plane can't take the clone's base commit, that session can never push; the worker only logs a warning.
   - Installation tokens still aren't revoked when a session goes dormant (D126).
-- **The plane's profile editor.** The LiveView editor rebuilds `spec` from its form fields, so saving a profile drops `spec.mcpIdentities` without saying so; only `github` is carried through. The new console has no profile editor yet. (medium)
 - **Control TLS** (Decision 893).
   - The TLS sniff uses `:gen_tcp.unrecv/2`, which is undocumented and works only on the default inet backend. A release switched to `inet_backend: socket` would refuse every TLS handshake.
   - Worker pods still enrol in plaintext. The operator could copy `ca.crt` into each worker namespace and set `TROUPE_PLANE_CA_PATH`, after which plaintext could be refused for pods too.
