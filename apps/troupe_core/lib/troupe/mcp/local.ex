@@ -70,10 +70,13 @@ defmodule Troupe.MCP.Local do
 
   # -- where -------------------------------------------------------------------------
 
-  @doc "The user's `mcp.json`, beside `config.yaml`."
+  @doc """
+  The user's `mcp.json`, beside `config.yaml`; on Windows one an older build kept under
+  `~\\.config\\troupe` is moved here (`Troupe.Paths.config_file/2`).
+  """
   @spec user_path(keyword()) :: Path.t()
   def user_path(opts \\ []),
-    do: Keyword.get(opts, :user_path) || Path.join(Troupe.Paths.config_dir(), "mcp.json")
+    do: Keyword.get(opts, :user_path) || Troupe.Paths.config_file("mcp.json")
 
   @doc "A workspace's `.troupe/mcp.json`."
   @spec workspace_path(Path.t()) :: Path.t()

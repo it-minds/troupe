@@ -260,8 +260,10 @@ defmodule Troupe.Plane.Web.Index do
     #{Page.pre("troupe login " <> url)}
       <p>
         It asks this plane which provider to use and prints a code for you to enter in a
-        browser. A refresh token lands in <code>~/.config/troupe/credentials.json</code>;
-        that is the only thing stored, and the plane never sees your password.
+        browser. A refresh token lands in <code>credentials.json</code> beside your
+        <code>config.yaml</code> (<code>~/.config/troupe</code>, or
+        <code>%APPDATA%\\troupe</code> on Windows); that is the only thing stored, and the
+        plane never sees your password.
       </p>
     """
   end

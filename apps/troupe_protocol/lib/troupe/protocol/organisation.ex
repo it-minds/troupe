@@ -28,10 +28,8 @@ defmodule Troupe.Protocol.Organisation do
   # first, then where the requests go, then the switches, then the budget.
   @enforceable [
     {"approvals", {:order, ["wait", "deny"]}, {:enum, ["wait", "deny"]}},
-    # The provider types the core's table has (`Troupe.LLM.ProviderType`), in its order: a
-    # test holds the two together, as it holds every key here to the schema's.
-    {"provider", :fixed,
-     {:enum, ["anthropic", "openai", "ollama", "openrouter", "azure_openai", "gemini", "fake"]}},
+    # The provider types, from the one list of them every party reads.
+    {"provider", :fixed, {:enum, Troupe.Protocol.ProviderTypes.names()}},
     {"base_url", :fixed, :string},
     {"managed_mcp_servers_only", {:order, [false, true]}, :boolean},
     {"managed_permission_rules_only", {:order, [false, true]}, :boolean},

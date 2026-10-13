@@ -1,11 +1,14 @@
 // Step 2: the provider. What is already on the machine comes first — a vendor's key in
 // the environment, an opencode setup, a config.yaml that works — because the shortest
-// first run is the one that reuses what a person already did.
+// first run is the one that reuses what a person already did. Then every way the daemon
+// says a provider may be set up (troupe #658), each asking for an address only where it
+// needs one: a gateway's or an Azure resource's, which has none of its own, or an Ollama
+// server's, whose default an empty field takes.
 
 import { useState } from "react";
 import type { JSX } from "react";
-import { PROVIDER_KINDS } from "@troupe/client";
-import type { ProviderKind, SetupAnswer } from "@troupe/client";
+import { asksAddress, setupKinds } from "@troupe/client";
+import type { SetupAnswer, SetupKind } from "@troupe/client";
 import { Actions, StepFrame } from "./Step";
 import type { StepProps } from "./Step";
 
@@ -14,28 +17,24 @@ interface Card {
   label: string;
   consequence: string;
   answer: SetupAnswer;
-  /** The card asks for an address, sent as `base_url`. */
-  url: boolean;
+  /** The kind whose address the card asks for, sent as `base_url`; none for a card that asks none. */
+  address: SetupKind | null;
 }
-
-const VENDOR_OF: Record<string, ProviderKind> = {
-  ANTHROPIC_API_KEY: PROVIDER_KINDS.find((k) => k.id === "anthropic")!,
-  OPENAI_API_KEY: PROVIDER_KINDS.find((k) => k.id === "openai")!,
-};
 
 export function Provider({ flow, busy, error, onAnswer, onBack }: StepProps): JSX.Element {
   const earlier = flow.answers.provider;
   const detected = flow.detected;
+  const kinds = setupKinds(flow);
 
   const already: Card[] = [
-    ...detected.env
-      .filter((v) => v in VENDOR_OF)
-      .map((v) => ({
-        id: `env:${v}`,
-        label: `${v} is set on this computer`,
-        consequence: `Use ${VENDOR_OF[v]!.label} with that key. It stays in the environment; the settings only refer to it.`,
-        answer: { provider: VENDOR_OF[v]!.provider, kind: VENDOR_OF[v]!.id, base_url: null },
-        url: false,
+    ...kinds
+      .filter((k) => k.key_var !== null && detected.env.includes(k.key_var))
+      .map((k) => ({
+        id: `env:${k.key_var!}`,
+        label: `${k.key_var!} is set on this computer`,
+        consequence: `Use ${k.label} with that key. It stays in the environment; the settings only refer to it.`,
+        answer: { provider: k.provider, kind: k.id, base_url: null },
+        address: null,
       })),
     ...(detected.opencode.providers.length > 0
       ? [
@@ -44,7 +43,7 @@ export function Provider({ flow, busy, error, onAnswer, onBack }: StepProps): JS
             label: `opencode is set up here, with ${detected.opencode.providers.join(", ")}`,
             consequence: `Copy its providers into Troupe's settings, keys as opencode has them written${detected.opencode.default ? `, and start from ${detected.opencode.default}` : ""}.`,
             answer: { reuse: "opencode" },
-            url: false,
+            address: null,
           },
         ]
       : []),
@@ -55,27 +54,29 @@ export function Provider({ flow, busy, error, onAnswer, onBack }: StepProps): JS
             label: `A working config.yaml${detected.config.provider ? ` (${detected.config.provider})` : ""}`,
             consequence: `Keep ${detected.config.path} as it is and go straight to the first project.`,
             answer: { reuse: "config" },
-            url: false,
+            address: null,
           },
         ]
       : []),
   ];
-  const kinds: Card[] = PROVIDER_KINDS.map((k) => ({
+  const offered: Card[] = kinds.map((k) => ({
     id: k.id,
     label: k.label,
-    consequence: k.consequence,
+    consequence: k.summary,
     answer: { provider: k.provider, kind: k.id },
-    url: k.url,
+    address: asksAddress(k).asked ? k : null,
   }));
-  const cards = [...already, ...kinds];
+  const cards = [...already, ...offered];
 
   const [pickId, setPickId] = useState<string>(() => {
     if (earlier?.["reuse"] === "opencode" || earlier?.["reuse"] === "config") return earlier["reuse"];
     if (typeof earlier?.["kind"] === "string") return earlier["kind"];
-    return already[0]?.id ?? "anthropic";
+    return already[0]?.id ?? offered[0]?.id ?? "anthropic";
   });
   const [baseUrl, setBaseUrl] = useState<string>((earlier?.["base_url"] as string | null) ?? "");
-  const picked = cards.find((c) => c.id === pickId) ?? kinds[0]!;
+  const picked = cards.find((c) => c.id === pickId) ?? offered[0]!;
+  const address = picked.address;
+  const required = address !== null && asksAddress(address).required;
 
   const options = (list: Card[]): JSX.Element => (
     <div className="options">
@@ -104,16 +105,21 @@ export function Provider({ flow, busy, error, onAnswer, onBack }: StepProps): JS
 
       <div className="stack" style={{ gap: "var(--space-2)" }}>
         {already.length > 0 && <h3>Or set one up</h3>}
-        {options(kinds)}
+        {options(offered)}
       </div>
 
-      {picked.url && (
+      {address && (
         <label>
-          Address <small>ending in /v1, as the gateway&apos;s own documentation writes it</small>
+          Address{" "}
+          <small>
+            {required
+              ? `as its own documentation writes it, such as ${address.url_example ?? "https://…"}`
+              : `leave empty for ${address.default_url ?? "its own"}`}
+          </small>
           <input
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://llm-gw.example/v1"
+            placeholder={address.url_example ?? address.default_url ?? "https://…"}
             inputMode="url"
             spellCheck={false}
             aria-label="Address"
@@ -125,9 +131,9 @@ export function Provider({ flow, busy, error, onAnswer, onBack }: StepProps): JS
         busy={busy}
         next="Continue"
         busyLabel={"reuse" in picked.answer ? "Copying…" : "Working…"}
-        disabled={picked.url && baseUrl.trim() === ""}
+        disabled={required && baseUrl.trim() === ""}
         onBack={onBack}
-        onNext={() => onAnswer(picked.url ? { ...picked.answer, base_url: baseUrl.trim() } : picked.answer)}
+        onNext={() => onAnswer(address ? { ...picked.answer, base_url: baseUrl.trim() || null } : picked.answer)}
       />
     </StepFrame>
   );

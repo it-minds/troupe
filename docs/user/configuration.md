@@ -22,10 +22,14 @@ Each layer beats the ones above it: the defaults, then the organisation's defaul
 user file, the project file, the local file, the environment, the command line, and what
 the organisation enforces last. A file that is not there is not an error.
 
-`<config>` is the directory of the user file. Troupe's state directory, where it keeps
-session logs and what it remembers for you (`organisation.json`, your MCP sign-ins, your
-answers about onboarding), is `~/.local/state/troupe` (`$XDG_STATE_HOME/troupe` where that
-is set), `%LOCALAPPDATA%\troupe` on Windows, or `$TROUPE_STATE_HOME`.
+`<config>` is the directory of the user file, and every other file of your own is in it
+too: `mcp.json`, `agents/`, `skills/`, `commands/` and the terminal client's
+`credentials.json`. Troupe's state directory, where it keeps session logs and what it
+remembers for you (`organisation.json`, your MCP sign-ins, your answers about
+onboarding), is `~/.local/state/troupe` (`$XDG_STATE_HOME/troupe` where that is set),
+`%LOCALAPPDATA%\troupe` on Windows, or `$TROUPE_STATE_HOME`. Where each file is, and what
+happened to the two an older build kept elsewhere on Windows, is on one page:
+[Where your files are](configuration/files.md).
 
 ## Your organisation's defaults and limits
 
@@ -884,6 +888,13 @@ next session either of them starts reads it.
   blinks what waits on you (`ui.blink`). The daemon keeps them and acts on none of them,
   as it does `mouse` and `transcript.detail`. What belongs to one window — its size, which plane the
   desktop app last used, whether it opens on Home — stays in that window.
+- **The provider.** Every place you pick one offers the same types, the
+  [provider types](#provider-types) below, from one list the daemon serves: `troupe setup`
+  and `troupe config`, the terminal UI's `/settings` (a menu, each type saying what else it
+  needs), the desktop app's first run and its **Models** panel. Each asks only what its
+  type needs: no key for Ollama, whose server's address may be left to its default, and
+  the resource's own address for Azure OpenAI. On a plane, a profile's `llm.provider` and
+  the provider people's own machines are offered take the same names.
 - **Edited by hand.** A file you edit yourself is read at the next session and the next
   time a settings screen asks; a screen already open does not hear of it.
 
@@ -911,6 +922,10 @@ That URL is the schema's id. Until it is served, point the comment at the file i
 checkout, or at its raw URL on GitHub.
 
 ## Examples
+
+The [cookbook](configuration/cookbook.md) has a complete, tested file for each provider
+type, a team's project file and a personal `config.local.yaml`, MCP servers, an agent, a
+skill and an unattended session. A few more:
 
 The smallest useful file, with the key in the environment:
 
@@ -1195,7 +1210,7 @@ shows a key by, in the desktop app and the terminal UI alike.
 
 | Key | Type | Default | Set by | Shown as | What it does |
 |---|---|---|---|---|---|
-| `provider` | `anthropic` \| `openai` \| `ollama` \| `openrouter` \| `azure_openai` \| `gemini` \| `fake` | `anthropic` | user; project if trusted; an organisation may enforce |  | The session-wide provider's API; the table under Provider types says what each one does. |
+| `provider` | `anthropic` \| `openai` \| `ollama` \| `openrouter` \| `azure_openai` \| `gemini` \| `fake` | `anthropic` | user; project if trusted; an organisation may enforce | provider | The session-wide provider's API; the table under Provider types says what each one does. |
 | `base_url` | string |  | user; project if trusted; an organisation may enforce |  | The session-wide provider's URL. Unset: the vendor's own endpoint. |
 | `api_key` | string |  | user; project if trusted |  | The session-wide provider's key. `{env:VAR}` reads it from the environment. |
 | `auth` | `api_key` \| `bearer` | `api_key` | user; project if trusted |  | How the key is sent: the vendor's own header, or `Authorization: Bearer`. |

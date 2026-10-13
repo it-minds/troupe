@@ -29,9 +29,12 @@ defmodule Troupe.Remote.Credentials do
           optional(:saved_at) => integer()
         }
 
-  @doc "The credential file's path."
+  @doc """
+  The credential file's path, beside `config.yaml`; on Windows one an older build kept
+  under `~\\.config\\troupe` is moved here (`Troupe.Paths.config_file/2`).
+  """
   @spec path() :: String.t()
-  def path, do: Path.join(Paths.config_dir(), "credentials.json")
+  def path, do: Paths.config_file("credentials.json")
 
   @doc "Every plane this machine is logged in to, newest first."
   @spec list() :: [entry()]

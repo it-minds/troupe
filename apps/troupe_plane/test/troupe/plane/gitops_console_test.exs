@@ -50,7 +50,7 @@ defmodule Troupe.Plane.GitopsConsoleTest do
           %{
             "image" => %{"repository" => repository, "tag" => "1.2.3"},
             "sessionsPerPod" => 4,
-            "llm" => %{"model" => "gpt-4o"}
+            "llm" => %{"endpoint" => "https://gateway.example.test/v1", "model" => "gpt-4o"}
           },
           spec
         )

@@ -45,13 +45,25 @@ spec:
                   x-kubernetes-preserve-unknown-fields: true
                 llm:
                   type: object
+                  description: >-
+                    Where the pods' model calls go and how. Every field but `endpoint` needs
+                    `endpoint`: without one the pods are given none of these settings.
+                  # The same rule the plane checks a profile by. `provider` has no default: one
+                  # the API server filled in would be a setting nobody wrote, and an `llm: {}`
+                  # would then be refused for it. The operator reads an absent one as openai.
+                  x-kubernetes-validations:
+                    - rule: "(has(self.endpoint) && self.endpoint != '') || !(has(self.provider) || has(self.model) || has(self.smallModel) || has(self.secretRef) || has(self.prices))"
+                      message: "llm settings need llm.endpoint: without it the pods are given none of them and run on Troupe's built-in model settings instead. Set llm.endpoint, or remove the other llm fields."
                   properties:
                     endpoint: {type: string}
                     provider:
                       type: string
-                      enum: [anthropic, openai, fake]
-                      default: openai
-                      description: Which adapter speaks to the endpoint. `openai` is plain Chat Completions, which is what a gateway serves.
+                      enum: [anthropic, openai, ollama, openrouter, azure_openai, gemini, fake]
+                      description: >-
+                        Which API the endpoint speaks: one of the provider types
+                        (docs/user/configuration.md, Provider types). Absent is `openai`, plain
+                        Chat Completions, which is what a gateway serves; `azure_openai` needs the
+                        resource's own address as the endpoint, and `ollama` takes no key.
                     model: {type: string}
                     smallModel:
                       type: string

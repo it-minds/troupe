@@ -16,9 +16,15 @@ defmodule Troupe.Setup do
     * `where` — this machine and its own keys, or an organisation's plane. A plane is
       the client's to sign in to (`troupe login`, the app's sign-in screen); the flow only
       records the choice and finishes.
-    * `provider` — Anthropic, OpenAI, an OpenAI-compatible gateway with a base URL, or a
+    * `provider` — one of `kinds/0`: every provider type a person may pick (Anthropic,
+      OpenAI, Ollama, OpenRouter, Azure OpenAI, Gemini; `Troupe.Protocol.ProviderTypes`,
+      the list every screen offers), an OpenAI-compatible gateway with a base URL, or a
       LiteLLM proxy; or what is already here: opencode's providers, copied into
-      `config.yaml` as `config.import` does, or a `config.yaml` that already works.
+      `config.yaml` as `config.import` does, or a `config.yaml` that already works. A
+      kind asks only what it needs: an address where it has none of its own (a gateway,
+      Azure) or where it is a server of the person's (Ollama, whose default is offered),
+      and no key where it takes none. A type that takes none (Ollama) is asked for its
+      models as soon as it is answered, and its path has no `key` step.
     * `key` — pasted, or kept in the environment as `{env:VAR}`. Checked live, with a
       real request to the provider (`check_key/1`): a refused key keeps the step, and a
       provider that will not list its models lets the person go on and type a model id.
@@ -47,13 +53,16 @@ defmodule Troupe.Setup do
   alias Troupe.Config.{ModelSettings, OpenCode}
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
-  alias Troupe.LLM.Endpoint
+  alias Troupe.LLM.{Endpoint, ProviderType}
+  alias Troupe.Protocol.ProviderTypes
   alias Troupe.StartAtLogin
 
   @steps ~w(where provider key models workspace daemon finish)
-  @providers ~w(anthropic openai fake)
-  @kinds ~w(anthropic openai gateway litellm)
-  @vendor_vars ~w(ANTHROPIC_API_KEY OPENAI_API_KEY)
+  # Every type, the fake among them: a first run can be driven to a written file with no
+  # model behind it.
+  @providers ProviderType.names()
+  # The variables a vendor's key may already be in, by every type that has one.
+  @vendor_vars for type <- ProviderType.all(), type.key_var, do: type.key_var
   @approvals ~w(ask auto)
   @env_reference ~r/^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/
 
@@ -88,6 +97,19 @@ defmodule Troupe.Setup do
   @doc "The step names, in the order a full local setup takes them."
   @spec steps() :: [String.t()]
   def steps, do: @steps
+
+  @doc """
+  The ways a provider may be set up, in the order a screen offers them
+  (`Troupe.Protocol.ProviderTypes.kinds/0`): every type a person may pick, then a gateway
+  and a LiteLLM proxy. Each is the `kind` the provider step is answered with and the
+  `provider` that is written, what a card says (`label`, `summary`), and what it asks:
+  `url` (`required`; `server`, asked with `default_url` offered; `own`, not asked) and
+  `key` (`required`, `optional`, or `none`, which skips the key step).
+  """
+  @spec kinds() :: [map()]
+  def kinds, do: ProviderTypes.kinds()
+
+  defp kind_of(id), do: Enum.find(kinds(), &(&1["id"] == id))
 
   @doc """
   The two ways a session may treat a tool call, each in two sentences, and the safe
@@ -237,6 +259,7 @@ defmodule Troupe.Setup do
         Enum.map(path_of(flow), &%{"name" => &1, "done" => Map.has_key?(flow.answers, &1)}),
       "answers" => flow.answers,
       "detected" => detect(),
+      "kinds" => kinds(),
       "key_storage" => key_storage(),
       "offered" => Enum.map(flow.offered, &offer_json/1),
       "suggested" => flow.suggested,
@@ -247,9 +270,10 @@ defmodule Troupe.Setup do
     }
   end
 
-  # The steps this flow takes, given what it has answered: a plane finishes at once, and
-  # settings reused from opencode or a file skip the key and the models.
-  defp path_of(%__MODULE__{answers: answers}) do
+  # The steps this flow takes, given what it has answered: a plane finishes at once,
+  # settings reused from opencode or a file skip the key and the models, and a provider
+  # that takes no key skips the key, unless what answers there turned the asking away.
+  defp path_of(%__MODULE__{answers: answers} = flow) do
     cond do
       get_in(answers, ["where", "choice"]) == "plane" ->
         ~w(where finish)
@@ -257,10 +281,16 @@ defmodule Troupe.Setup do
       get_in(answers, ["provider", "reuse"]) in ~w(opencode config) ->
         ~w(where provider workspace daemon finish)
 
+      asks_no_key?(answers["provider"]) and not match?(%{"state" => "refused"}, flow.check) ->
+        @steps -- ["key"]
+
       true ->
         @steps
     end
   end
+
+  defp asks_no_key?(%{"kind" => kind}), do: match?(%{"key" => "none"}, kind_of(kind))
+  defp asks_no_key?(_provider), do: false
 
   defp offer_json(%Catalog{} = e) do
     %{
@@ -379,13 +409,19 @@ defmodule Troupe.Setup do
   defp take(_flow, "provider", %{"reuse" => other}, _opts),
     do: {:error, "reuse must be opencode or config, not #{inspect(other)}"}
 
+  # A provider that takes no key is asked for its models at once, as the key step would
+  # have asked, and the flow goes on to the models.
   defp take(flow, "provider", answer, _opts) do
     with {:ok, provider} <- provider(answer["provider"]),
          {:ok, kind} <- kind(answer["kind"], provider),
          {:ok, base_url} <- base_url(answer["base_url"], provider, kind),
          {:ok, auth} <- auth(answer["auth"]) do
       accepted = %{"provider" => provider, "kind" => kind, "base_url" => base_url, "auth" => auth}
-      {:ok, advance(flow, "provider", accepted, "key")}
+      flow = advance(flow, "provider", accepted, "key")
+
+      if asks_no_key?(accepted),
+        do: check(flow, nil, %{"source" => "none"}),
+        else: {:ok, flow}
     end
   end
 
@@ -476,11 +512,23 @@ defmodule Troupe.Setup do
     end
   end
 
+  # No key: a vendor's own endpoint wants one, and so does a type whose endpoint is always
+  # the person's own and for which no variable stands in (Azure); a gateway may want none.
   defp key_of(_answer, %{"provider" => provider, "base_url" => base_url}) do
+    type = ProviderType.fetch(provider)
+
     case {provider, Endpoint.vendor_key_var(provider, base_url)} do
-      {"fake", _var} -> {:ok, nil, %{"source" => "none"}}
-      {_provider, nil} -> {:ok, nil, %{"source" => "none"}}
-      {_provider, var} -> {:error, "#{provider} needs a key; paste one, or keep it in #{var}"}
+      {"fake", _var} ->
+        {:ok, nil, %{"source" => "none"}}
+
+      {_provider, nil} when type.key == :required and type.key_var == nil ->
+        {:error, "#{provider} needs a key; paste one"}
+
+      {_provider, nil} ->
+        {:ok, nil, %{"source" => "none"}}
+
+      {_provider, var} ->
+        {:error, "#{provider} needs a key; paste one, or keep it in #{var}"}
     end
   end
 
@@ -555,13 +603,20 @@ defmodule Troupe.Setup do
         {:unknown, ModelSettings.describe_failure(reason)}
 
       {[], []} ->
-        {:unknown,
-         if(config.api_key,
-           do: "the provider listed no models",
-           else: "no key was given, so nothing was asked"
-         )}
+        {:unknown, nothing_listed(ProviderType.fetch(provider), config.api_key)}
     end
   end
+
+  # Azure lists its deployments only to its management API, so its key is not tried here.
+  defp nothing_listed(%ProviderType{listing: nil, named: true} = type, _key),
+    do:
+      "#{type.label} does not list its deployments to a key, so the key was not tried; type a deployment's name"
+
+  defp nothing_listed(%ProviderType{keyless: true, named: true}, _key),
+    do: "the server listed no models: pull one there, or type its name"
+
+  defp nothing_listed(_type, nil), do: "no key was given, so nothing was asked"
+  defp nothing_listed(_type, _key), do: "the provider listed no models"
 
   defp fake_models do
     [
@@ -644,19 +699,28 @@ defmodule Troupe.Setup do
 
   defp kind(nil, provider), do: {:ok, provider}
   defp kind(kind, "fake"), do: {:ok, kind}
-  defp kind(kind, _provider) when kind in @kinds, do: {:ok, kind}
 
-  defp kind(kind, _provider),
-    do: {:error, "kind must be one of #{Enum.join(@kinds, ", ")}, not #{inspect(kind)}"}
+  defp kind(kind, _provider) do
+    ids = Enum.map(kinds(), & &1["id"])
 
-  # A gateway is its URL; the vendors have their own, and nothing means that one.
+    if kind in ids,
+      do: {:ok, kind},
+      else: {:error, "kind must be one of #{Enum.join(ids, ", ")}, not #{inspect(kind)}"}
+  end
+
+  # A gateway is its URL, and so is a type with no place of its own (Azure's resource); the
+  # vendors have their own, a server of the person's its default, and nothing means that one.
   defp base_url(url, provider, kind) do
     case present(url) do
       nil when kind in ~w(gateway litellm) ->
         {:error, "a #{kind} needs its base URL, ending in /v1"}
 
       nil ->
-        {:ok, nil}
+        if ProviderType.needs_base_url?(provider),
+          do:
+            {:error,
+             "#{provider} needs the address of your resource, such as #{ProviderType.fetch(provider).url_example}"},
+          else: {:ok, nil}
 
       url when provider == "fake" ->
         {:ok, url}

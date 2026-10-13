@@ -1551,6 +1551,57 @@ defmodule Troupe.Operator.ResourcesTest do
     end
   end
 
+  # Issue #658: the plane and the resource's schema now refuse an `llm` field without
+  # `llm.endpoint`, rather than letting the operator drop it. What a profile with an
+  # endpoint gives its pods is the same as before, every provider type through it, and an
+  # absent provider is still openai.
+  describe "the model settings a pod is given" do
+    test "a profile with an endpoint gives all of them, its provider among them", %{
+      policy: policy,
+      settings: settings
+    } do
+      llm = %{
+        "endpoint" => "https://generativelanguage.googleapis.com/v1beta/openai",
+        "provider" => "gemini",
+        "model" => "gemini-2.5-pro",
+        "smallModel" => "gemini-2.5-flash",
+        "secretRef" => %{"name" => "llm-credentials", "key" => "api-key"}
+      }
+
+      env = llm_env([llm: llm], policy, settings)
+
+      assert env["TROUPE_BASE_URL"] == "https://generativelanguage.googleapis.com/v1beta/openai"
+      assert env["TROUPE_PROVIDER"] == "gemini"
+      assert env["TROUPE_MODEL"] == "gemini-2.5-pro"
+      assert env["TROUPE_SMALL_MODEL"] == "gemini-2.5-flash"
+
+      assert env["TROUPE_API_KEY"] == %{
+               "secretKeyRef" => %{"name" => "llm-credentials", "key" => "api-key"}
+             }
+
+      without = llm_env([llm: Map.delete(llm, "provider")], policy, settings)
+      assert without["TROUPE_PROVIDER"] == "openai"
+    end
+
+    test "a profile with no llm settings gives none", %{policy: policy, settings: settings} do
+      env = llm_env([llm: nil], policy, settings)
+      names = ~w(TROUPE_BASE_URL TROUPE_PROVIDER TROUPE_MODEL TROUPE_SMALL_MODEL TROUPE_API_KEY)
+
+      for name <- names, do: refute(Map.has_key?(env, name), name)
+    end
+  end
+
+  # The pod's model variables, by name: a value, or where a secret one comes from.
+  defp llm_env(overrides, policy, settings) do
+    overrides
+    |> profile()
+    |> Profile.from_resource()
+    |> Resources.for_profile(policy, settings)
+    |> container()
+    |> Map.fetch!("env")
+    |> Map.new(&{&1["name"], &1["value"] || &1["valueFrom"]})
+  end
+
   test "scaling the profile changes how many pods are addressed", %{
     policy: policy,
     settings: settings

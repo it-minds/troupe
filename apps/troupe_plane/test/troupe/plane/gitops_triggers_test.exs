@@ -59,7 +59,7 @@ defmodule Troupe.Plane.GitopsTriggersTest do
       "spec" => %{
         "image" => %{"repository" => "ghcr.io/troupe/worker", "tag" => "1.2.3"},
         "sessionsPerPod" => 4,
-        "llm" => %{"model" => "gpt-4o"}
+        "llm" => %{"endpoint" => "https://gateway.example.test/v1", "model" => "gpt-4o"}
       }
     }
   end

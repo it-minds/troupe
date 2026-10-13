@@ -21,6 +21,7 @@ defmodule Troupe.Plane.Fleet.Profile do
 
   alias Troupe.Plane.Fleet.{Provisioner, SizeClass}
   alias Troupe.Plane.GitHub
+  alias Troupe.Protocol.ProviderTypes
 
   @primary_key {:name, :string, autogenerate: false}
   @derive {Phoenix.Param, key: :name}
@@ -147,10 +148,59 @@ defmodule Troupe.Plane.Fleet.Profile do
     # `administration: write` would be asking for what no session is given.
     github = Enum.map(GitHub.spec_problems(Map.get(spec, "github")), &{:spec, &1})
 
-    overrides ++ personal ++ github
+    overrides ++ personal ++ github ++ llm_problems(Map.get(spec, "llm"))
   end
 
   defp spec_switches(:spec, _spec), do: []
+
+  # `llm.provider` is one of the provider types, the list the clients offer, which the
+  # resource's schema declares in the same words, so a profile that is never a resource,
+  # on hosts, is refused where a resource would be.
+  #
+  # And every other `llm` field needs `llm.endpoint`. The operator hands the pods the
+  # `llm` settings only with an endpoint, so without one a provider, a model or a key
+  # would be a setting that silently does nothing while the pods run on the built-in
+  # model settings. It is refused instead, naming the fields, as the resource's schema
+  # refuses it.
+  @llm_fields ~w(provider model smallModel secretRef prices)
+
+  defp llm_problems(llm) when is_map(llm), do: llm_type(llm["provider"]) ++ llm_endpoint(llm)
+  defp llm_problems(_llm), do: []
+
+  defp llm_type(nil), do: []
+
+  defp llm_type(provider) do
+    if provider in ProviderTypes.names() do
+      []
+    else
+      names = Enum.join(ProviderTypes.names(), ", ")
+      [spec: "llm.provider must be one of #{names}, not #{inspect(provider)}"]
+    end
+  end
+
+  defp llm_endpoint(llm) do
+    set = for field <- @llm_fields, llm[field] not in [nil, "", %{}, []], do: "llm." <> field
+
+    if set == [] or llm["endpoint"] not in [nil, ""] do
+      []
+    else
+      {verb, pronoun} = if length(set) == 1, do: {"is", "it"}, else: {"are", "them"}
+
+      [
+        spec:
+          "#{listed(set)} #{verb} set without llm.endpoint, and the pods are given the llm " <>
+            "settings only with an endpoint: without one they would run on Troupe's built-in " <>
+            "model settings instead. Set llm.endpoint, or take #{pronoun} out"
+      ]
+    end
+  end
+
+  defp listed([one]), do: one
+  defp listed(many), do: Enum.join(Enum.drop(many, -1), ", ") <> " and " <> List.last(many)
+
+  @doc "The `llm` fields a profile may set only beside `llm.endpoint`, as the resource names them."
+  @spec llm_fields() :: [String.t()]
+  def llm_fields, do: @llm_fields
 
   # The class is the answer, so the fields it decides are written from it rather than
   # taken from the caller. A profile whose `sessionsPerPod` disagreed with its class

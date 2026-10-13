@@ -172,8 +172,6 @@ Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
 
 ### D37 - Small leftovers from the 0.6.1 work (low)
 
-- The settings help's "Where things live" says `~/.config/troupe/config.yaml`; on
-  Windows the file is under `%APPDATA%\troupe`.
 - `troupe --watch` still walks the whole workspace for `.gitignore` rules at start (PR
   #240 moved that walk out of every other session start).
 

@@ -23,7 +23,10 @@ machine and you see the same transcript; two people can open the same session at
 3. `troupe` in a project directory opens a session; `troupe run "a task" --headless` does
    one task and exits.
 4. The settings are one file, `config.yaml` in `~/.config/troupe/` (`%APPDATA%\troupe\` on
-   Windows), and `troupe config` shows what is in force. Your organisation may set
+   Windows, with every other file of your own; [where your files
+   are](configuration/files.md)), and `troupe config` shows what is in force. The
+   [cookbook](configuration/cookbook.md) has a complete file for each provider and more.
+   Your organisation may set
    defaults below it and limits above it; `troupe config --explain` says which
    ([configuration](configuration.md#your-organisations-defaults-and-limits)).
 5. `troupe config validate` checks that file after you edit it by hand;

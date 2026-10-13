@@ -1,3 +1,5 @@
+Code.require_file("../../../../apps/troupe_core/test/support/fake_providers.exs", __DIR__)
+
 defmodule Troupe.SetupScreenDaemonTest do
   @moduledoc """
   `troupe setup`'s screen against the daemon this VM embeds (TUI Decision 153, root
@@ -148,6 +150,59 @@ defmodule Troupe.SetupScreenDaemonTest do
     # for small work, and yes.
     line_by_line = machine(ctx.base, "line")
     answers = ["1", "2", gateway, "sk-gw-typed", "1", "", ""]
+    assert ConfigSetup.run(ctx.project, typed(ctx.project, answers)) == 0
+    assert File.read!(line_by_line) == from_screen
+  end
+
+  # Issue #658: every provider type is a choice, and Ollama asks no key. Its stand-in
+  # (`fake_providers.exs`) lists the models pulled there, asked with no key at all.
+  test "Ollama: no key step, the models its server has, and the file troupe config's questions write",
+       ctx do
+    fake = Troupe.Test.FakeProviders.start(:ollama)
+    on_exit(fn -> Troupe.Test.FakeProviders.stop(fake) end)
+
+    config = machine(ctx.base, "screen")
+    {pid, session} = start(ctx.project)
+    enter(pid)
+
+    for label <- ["Anthropic", "OpenAI", "Ollama", "OpenRouter", "Azure OpenAI", "Gemini"],
+        do: assert(screen_text(pid, session) =~ label, label)
+
+    to_choice(pid, session, "Ollama")
+    assert screen_text(pid, session) =~ "the server's address (Enter alone: http://localhost:11434)"
+    type(pid, fake.base_url)
+    enter(pid)
+
+    # No key step: the server answered with what it has.
+    assert step(pid) == {"models", :main}
+    text = screen_text(pid, session)
+    assert text =~ "It answered with the models it has."
+    refute text =~ "Key"
+    assert selected(pid, session) =~ "llama3.2:latest"
+    assert [%{path: "/v1/models", authorization: nil}] = Troupe.Test.FakeProviders.requests(fake)
+
+    press(pid, "enter")
+    to_choice(pid, session, "the same as the main model")
+    for _ <- 1..3, do: press(pid, "enter")
+
+    # The summary says what is written, and names no key.
+    assert step(pid) == {"finish", :main}
+    summary = screen_text(pid, session)
+    assert summary =~ "the provider and the models into"
+    refute summary =~ "the key and the models"
+
+    press(pid, "enter")
+    assert_receive {:done, {:session, sid, workspace}}, 15_000
+    assert {:ok, ^sid} = Client.open_session({:local, workspace}, sid)
+    on_exit(fn -> Client.stop_session(sid) end)
+    from_screen = File.read!(config)
+    assert from_screen =~ ~s(provider: "ollama")
+    refute from_screen =~ "api_key"
+
+    # The same answers to `troupe config`'s questions: set up here, Ollama (third in the
+    # list), its address, no key asked, the first model listed, the same for small work, yes.
+    line_by_line = machine(ctx.base, "line")
+    answers = ["1", "3", fake.base_url, "1", "", ""]
     assert ConfigSetup.run(ctx.project, typed(ctx.project, answers)) == 0
     assert File.read!(line_by_line) == from_screen
   end

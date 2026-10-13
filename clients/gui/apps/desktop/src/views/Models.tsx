@@ -4,7 +4,10 @@
 // touch a file — deliberately — so the panel is a form over three daemon methods:
 // `config.get` to fill it, `config.models` to find out what a provider offers before
 // anything is kept, and `config.set` to keep it. The rules about what an empty field
-// means live in `@troupe/client`, where a test can see them; this is the screen.
+// means live in `@troupe/client`, where a test can see them; this is the screen. The
+// provider types it offers are the daemon's too (`provider_types`, troupe #658), and each
+// asks what it needs: an address that only the person knows is required, and a provider
+// that takes no key is asked for none.
 //
 // The key is the one thing that only ever travels one way. It is typed, sent, and never
 // shown again: the daemon answers whether one is saved, not what it is, and the field
@@ -20,7 +23,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import {
   MODEL_ROLES,
-  PROVIDER_DEFAULT_URLS,
   applyClientDefaults,
   clientDefaults,
   configSetParams,
@@ -29,14 +31,22 @@ import {
   discoveryParams,
   formFromConfig,
   modelConfigError,
+  providerTypes,
 } from "@troupe/client";
-import type { AuthSession, ClientDefaults, DaemonClient, ModelConfig, ModelDiscovery, ModelForm, ModelRole } from "@troupe/client";
+import type { AuthSession, ClientDefaults, DaemonClient, ModelConfig, ModelDiscovery, ModelForm, ModelRole, ProviderTypeInfo } from "@troupe/client";
 import { Failed, Loading, Pill } from "./bits";
 
-const PROVIDERS: Array<{ id: string; label: string }> = [
-  { id: "anthropic", label: "Anthropic" },
-  { id: "openai", label: "OpenAI-compatible (LiteLLM, vLLM, gateways…)" },
-];
+/**
+ * What the address field says for a type (troupe #658): required where the address is only
+ * the person's to know, its default where it is a server of theirs, and otherwise the
+ * vendor's own, which a gateway speaking its API stands in for.
+ */
+function addressHint(type: ProviderTypeInfo | undefined): string {
+  if (!type) return "optional — leave empty for the provider's own";
+  if (type.url === "required") return `required — your ${type.label} resource's own address`;
+  if (type.url === "server") return `optional — leave empty for ${type.default_url ?? "the server on this computer"}`;
+  return `optional — leave empty for ${type.label}'s own, or a gateway's that speaks its API`;
+}
 
 const ROLES: Record<ModelRole, { label: string; hint: string }> = {
   default: { label: "Main model", hint: "does the editing — usually the capable, expensive one" },
@@ -190,8 +200,9 @@ export function Models({ client, auth }: { client: DaemonClient; auth: AuthSessi
     setOutcome({ done: false, text: "Filled in from your organisation. It does not hand out keys — paste your own, then save." });
   };
 
-  const knownProvider = PROVIDERS.some((p) => p.id === form.provider);
-  const defaultUrl = PROVIDER_DEFAULT_URLS[form.provider as keyof typeof PROVIDER_DEFAULT_URLS];
+  const types = providerTypes(saved);
+  const type = types.find((t) => t.name === form.provider);
+  const keyless = type?.key === "none";
   const keyState = saved.api_key_set ? (KEY_SOURCES[saved.api_key_source ?? "file"] ?? "Key saved") : null;
 
   return (
@@ -224,44 +235,53 @@ export function Models({ client, auth }: { client: DaemonClient; auth: AuthSessi
       >
         <label>
           Provider
-          <select value={form.provider} onChange={(e) => edit({ provider: e.target.value })}>
-            {PROVIDERS.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
+          <select value={form.provider} onChange={(e) => edit({ provider: e.target.value })} aria-label="Provider">
+            {types.map((t) => (
+              <option key={t.name} value={t.name}>
+                {t.label}
               </option>
             ))}
             {/* A provider this window has no name for — set by hand, or by a newer
                 daemon — is shown as itself rather than silently replaced. */}
-            {!knownProvider && <option value={form.provider}>{form.provider}</option>}
+            {!type && <option value={form.provider}>{form.provider}</option>}
           </select>
+          {type && <span className="note">{type.summary}</span>}
         </label>
 
         <label>
-          Address <small>optional — leave empty for the provider&apos;s own</small>
+          Address <small>{addressHint(type)}</small>
           <input
             value={form.baseUrl}
             onChange={(e) => edit({ baseUrl: e.target.value })}
-            placeholder={defaultUrl ?? "https://…"}
+            placeholder={type?.url_example ?? type?.default_url ?? "https://…"}
             spellCheck={false}
             inputMode="url"
+            aria-label="Address"
+            aria-required={type?.url === "required" ? true : undefined}
           />
         </label>
 
-        <label>
-          API key{" "}
-          <small>{keyState ? "leave empty to keep the one that is saved" : "none is saved — sessions cannot reach a model without one"}</small>
-          <input
-            type="password"
-            value={form.apiKey}
-            onChange={(e) => edit({ apiKey: e.target.value })}
-            // Never dots: a row of them reads as the key being shown back, which it is not.
-            placeholder={keyState ? "Paste a new key to replace the saved one" : "Paste your key"}
-            autoComplete="off"
-            spellCheck={false}
-          />
-        </label>
+        {/* A provider that takes no key is asked for none. */}
+        {keyless ? (
+          <p className="note">{type?.label ?? form.provider} takes no key.</p>
+        ) : (
+          <label>
+            API key{" "}
+            <small>{keyState ? "leave empty to keep the one that is saved" : "none is saved — sessions cannot reach a model without one"}</small>
+            <input
+              type="password"
+              value={form.apiKey}
+              onChange={(e) => edit({ apiKey: e.target.value })}
+              // Never dots: a row of them reads as the key being shown back, which it is not.
+              placeholder={keyState ? "Paste a new key to replace the saved one" : "Paste your key"}
+              autoComplete="off"
+              spellCheck={false}
+              aria-label="API key"
+            />
+          </label>
+        )}
         <div className="inline-form" style={{ marginBottom: 0, alignItems: "center" }}>
-          {keyState ? <Pill status="allowed">{keyState}</Pill> : <Pill status="offline">No key</Pill>}
+          {keyState ? <Pill status="allowed">{keyState}</Pill> : !keyless && <Pill status="offline">No key</Pill>}
           {/* Only a key in the file can be removed from here. One from the environment
               or from OpenCode is somebody else's to take away. */}
           {saved.api_key_set && saved.api_key_source === "file" && (
@@ -332,7 +352,11 @@ export function Models({ client, auth }: { client: DaemonClient; auth: AuthSessi
         )}
 
         <div className="inline-form" style={{ marginBottom: 0 }}>
-          <button type="submit" className="primary" disabled={busy !== null || !form.provider}>
+          <button
+            type="submit"
+            className="primary"
+            disabled={busy !== null || !form.provider || (type?.url === "required" && form.baseUrl.trim() === "")}
+          >
             {busy === "saving" ? "Saving…" : "Save"}
           </button>
           {org?.configured && (
