@@ -3,6 +3,9 @@
 // by field and in words, before it is sent; the plane's refusal is shown where it was
 // made, with nothing written; and what the audit recorded is shown once it is applied.
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { App } from "../src/App";
 import { PEOPLE, button, field, freshBrowser, render, says, signedInAs, startFake, type, visit, waitFor } from "./support";
@@ -65,6 +68,7 @@ describe("client versions", () => {
     await signedInAs(fake, PEOPLE.alice);
     unmount = render(<App />).unmount;
     const terminal = await waitFor(() => card("The terminal"), "the terminal's policy");
+    const recorded = fake.admin.audit.length;
     button("Change", terminal)!.click();
     type(await waitFor(() => field("Minimum", terminal), "the form"), "0.17.0-beta");
     button("Preview", terminal)!.click();
@@ -72,7 +76,18 @@ describe("client versions", () => {
 
     await waitFor(() => says("minimum: the minimum 0.17.0-beta is newer than the recommended version 0.16.0-beta", terminal), "the refusal");
     expect(fake.admin.policies["tui"]!.minimum).toBe("0.14.0-beta");
-    expect(fake.admin.audit).toEqual([]);
+    expect(fake.admin.audit).toHaveLength(recorded);
+  });
+
+  it("says who last set a policy in their own letters, not the label's capitals", async () => {
+    await signedInAs(fake, PEOPLE.alice);
+    unmount = render(<App />).unmount;
+    const terminal = await waitFor(() => card("The terminal"), "the terminal's policy");
+    const who = terminal.querySelector<HTMLElement>(".meta .who");
+    expect(who?.textContent).toBe("alice@example.com");
+    // The label face is upper case; the person's address is shown as they have it.
+    const css = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), "../src/styles.css"), "utf8");
+    expect(css).toMatch(/\.meta \.who\s*\{[^}]*text-transform:\s*none/);
   });
 
   it("lets a team admin read the policy and change none of it", async () => {

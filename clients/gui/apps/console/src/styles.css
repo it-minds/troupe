@@ -178,6 +178,19 @@ label code {
   color: var(--text-muted);
 }
 
+/* A field: its label, which names the control, then the control, then the hint and any
+ * error, which describe it. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.field-error {
+  font: var(--t-ui-small);
+  color: var(--error-fg);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;
@@ -285,9 +298,24 @@ label code {
   background: var(--bg-panel);
   border-right: var(--bw-hairline) solid var(--border-hairline);
 }
+.rail .top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
 .rail .home {
   padding: 0 var(--space-5) var(--space-4);
   color: inherit;
+}
+/* The map's fold, at a narrow width only. */
+.rail .menu {
+  display: none;
+}
+.rail .map {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
 }
 .rail .home:hover {
   text-decoration: none;
@@ -510,6 +538,131 @@ tr:hover td {
   letter-spacing: var(--tracking-micro);
   text-transform: uppercase;
   color: var(--text-muted);
+}
+/* A person's address in a label's line, as they have it rather than in the label's capitals. */
+.meta .who {
+  font: var(--t-code-small);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+.toolbar .field {
+  flex: 0 1 200px;
+}
+.toolbar.filters {
+  align-items: flex-end;
+}
+.toolbar.filters .actions {
+  margin-top: 0;
+}
+td.row-actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+td.nowrap {
+  white-space: nowrap;
+}
+ul.plain li.with-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+ul.detail {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+ul.detail .from {
+  color: var(--diff-del-fg);
+}
+ul.detail .to {
+  color: var(--diff-add-fg);
+}
+.tab > button,
+.enable > button,
+.tab .card + button {
+  margin-top: var(--space-4);
+}
+.tab table + .preview,
+.tab ul + .preview,
+.tab .state + .preview {
+  margin-top: var(--space-4);
+}
+button.danger {
+  border-color: var(--denied-fg);
+  color: var(--denied-fg);
+}
+.enable {
+  margin-bottom: var(--space-4);
+}
+
+/* -- overview -------------------------------------------------------------- */
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  border: var(--bw-hairline) solid var(--border-hairline);
+  margin-bottom: var(--space-4);
+}
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border-right: var(--bw-hairline) solid var(--border-hairline);
+}
+.metric .label {
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+.metric .value {
+  font: var(--t-title);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.metric .context {
+  font: var(--t-ui-small);
+  color: var(--text-secondary);
+}
+ul.attention {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: var(--bw-hairline) solid var(--border-hairline);
+}
+ul.attention li {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+}
+ul.attention li:last-child {
+  border-bottom: 0;
+}
+
+/* -- audit ----------------------------------------------------------------- */
+
+.integrity {
+  margin-top: var(--space-6);
+}
+.integrity .verdict {
+  margin-bottom: var(--space-3);
+}
+.integrity .verdict p {
+  margin-top: var(--space-2);
 }
 
 .card {
@@ -779,7 +932,7 @@ ul.plain li {
   border: 0;
 }
 
-/* -- narrow: the map goes above the screen ------------------------------------ */
+/* -- narrow: the map goes above the screen, folded ------------------------------ */
 
 @media (max-width: 760px) {
   .console {
@@ -787,11 +940,31 @@ ul.plain li {
   }
   .rail {
     flex: 0 0 auto;
+    padding: var(--space-3) 0;
     border-right: 0;
     border-bottom: var(--bw-hairline) solid var(--border-hairline);
   }
+  .rail .home {
+    padding: 0 var(--space-4);
+  }
+  .rail .menu {
+    display: inline-flex;
+    align-items: center;
+    margin-right: var(--space-4);
+  }
+  .rail .map {
+    display: none;
+    padding-top: var(--space-2);
+  }
+  .rail.open .map {
+    display: flex;
+  }
   .rail .who {
     margin-top: var(--space-3);
+  }
+  ul.attention li {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
   }
   .page,
   .head {
