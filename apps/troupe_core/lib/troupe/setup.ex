@@ -355,10 +355,14 @@ defmodule Troupe.Setup do
   defp take(flow, "provider", %{"reuse" => "opencode"}, _opts) do
     case ModelSettings.import_opencode() do
       {:ok, %{"imported" => imported}} ->
-        answer = %{
-          "reuse" => "opencode",
-          "providers" => imported["providers"] ++ imported["kept"]
-        }
+        # And what was not copied, by name and why, where something was not.
+        answer =
+          %{"reuse" => "opencode", "providers" => imported["providers"] ++ imported["kept"]}
+          |> then(fn answer ->
+            if imported["skipped"] in [nil, []],
+              do: answer,
+              else: Map.put(answer, "skipped", imported["skipped"])
+          end)
 
         {:ok, advance(flow, "provider", answer, "workspace")}
 

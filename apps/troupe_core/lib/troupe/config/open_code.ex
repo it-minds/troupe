@@ -9,11 +9,19 @@ defmodule Troupe.Config.OpenCode do
 
   Read from `provider.<name>`: `options.baseURL`, `options.apiKey`, `options.authToken`
   (a bearer token, which is how a gateway in front of the Anthropic API is usually
-  keyed), `npm` (the SDK package, which says the provider type: Anthropic's, the Gemini
-  API's, Azure OpenAI's, OpenRouter's, Ollama's, else `openai`), and per model `models.<name>.id`
-  (the id the gateway wants on the wire), `limit.context`, `limit.output` and
-  `options.reasoningEffort`. The copy writes each key into `config.yaml` as it is
-  written here.
+  keyed), `npm` (the SDK package, which says the provider type), and per model
+  `models.<name>.id` (the id the gateway wants on the wire), `limit.context`,
+  `limit.output` and `options.reasoningEffort`. The copy writes each key into
+  `config.yaml` as it is written here.
+
+  A provider is copied only where its key would go to the host it was set up for. Its
+  package says the type, and with it the host a type sends to when no `baseURL` is
+  given: Anthropic's, OpenAI's and OpenAI-compatible, the Gemini API's, Azure OpenAI's,
+  OpenRouter's and Ollama's. A package Troupe has no type for (`@ai-sdk/mistral`,
+  `@ai-sdk/groq`, Bedrock's, Vertex's) is copied as `openai` only at the `baseURL` the
+  file names; with none it is not copied, and `skipped` says which package and why, since
+  as `openai` its key would go to OpenAI. So is an OpenAI-compatible one with no
+  `baseURL`, whose host opencode takes from its own registry.
 
   `baseURL`, `apiKey` and `authToken` are read as opencode reads them: `{env:VAR}` is the
   variable, and `{file:path}` the file's contents, trimmed, the path taken from the
@@ -52,7 +60,9 @@ defmodule Troupe.Config.OpenCode do
   end
 
   @doc """
-  Providers found in opencode's config, keyed by name; `%{}` when there is none.
+  Providers found in opencode's config, keyed by name; `%{}` when there is none. One the
+  copy must not write, because its key could go to a host it was not set up for, carries
+  `skipped`: the sentence that says which and why.
 
   `as_written: true` leaves each `{env:VAR}` as it is, for a copy into `config.yaml`,
   which reads the reference itself; a `{file:path}`, which `config.yaml` does not read,
@@ -110,33 +120,41 @@ defmodule Troupe.Config.OpenCode do
     {values, refused} = read_options(name, options, read)
     key = Map.get(values, "apiKey")
     token = Map.get(values, "authToken")
+    base_url = Map.get(values, "baseURL")
+    {type, skipped} = sdk_type(name, Map.get(def, "npm"), base_url)
 
     provider = %{
-      type: sdk_type(Map.get(def, "npm")),
-      base_url: Map.get(values, "baseURL"),
+      type: type,
+      base_url: base_url,
       api_key: if(refused, do: nil, else: key || token || Map.get(auth, name)),
       auth: if(is_nil(options["apiKey"]) and is_binary(options["authToken"]), do: :bearer, else: :api_key),
       models: models(Map.get(def, "models")),
       source: :opencode
     }
 
-    if refused, do: Map.put(provider, :refused, refused), else: provider
+    provider
+    |> then(&if(refused, do: Map.put(&1, :refused, refused), else: &1))
+    |> then(&if(skipped, do: Map.put(&1, :skipped, skipped), else: &1))
   end
 
-  defp provider(_name, _def, _auth, _read),
+  defp provider(name, _def, _auth, _read),
     do: %{
-      type: :openai,
+      type: nil,
       base_url: nil,
       api_key: nil,
       auth: :api_key,
       models: %{},
-      source: :opencode
+      source: :opencode,
+      skipped: "opencode's provider.#{name} is not an object, so it is not copied"
     }
 
-  # The provider type an opencode SDK package speaks: an Anthropic SDK's, and the AI SDK's
-  # own packages for the Gemini API, Azure OpenAI and OpenRouter, and Ollama's. Any other,
-  # and none, is the OpenAI API, as `@ai-sdk/openai-compatible` says.
+  # The provider type each SDK package speaks, for the packages Troupe has one for: the AI
+  # SDK's own for Anthropic, OpenAI, OpenAI-compatible servers, the Gemini API and Azure
+  # OpenAI, OpenRouter's, and Ollama's.
   @sdk_types %{
+    "@ai-sdk/anthropic" => :anthropic,
+    "@ai-sdk/openai" => :openai,
+    "@ai-sdk/openai-compatible" => :openai,
     "@ai-sdk/google" => :gemini,
     "@ai-sdk/azure" => :azure_openai,
     "@openrouter/ai-sdk-provider" => :openrouter,
@@ -144,11 +162,50 @@ defmodule Troupe.Config.OpenCode do
     "ollama-ai-provider-v2" => :ollama
   }
 
-  defp sdk_type(npm) when is_binary(npm) do
-    if String.contains?(npm, "anthropic"), do: :anthropic, else: Map.get(@sdk_types, npm, :openai)
+  # A provider with no `npm` takes its package from opencode's registry, by its name: these
+  # are the names there whose package Troupe has a type for. Any other is a provider of the
+  # person's own, which opencode speaks to as OpenAI-compatible.
+  @registry %{
+    "anthropic" => "@ai-sdk/anthropic",
+    "openai" => "@ai-sdk/openai",
+    "google" => "@ai-sdk/google",
+    "azure" => "@ai-sdk/azure",
+    "openrouter" => "@openrouter/ai-sdk-provider"
+  }
+
+  @compatible "@ai-sdk/openai-compatible"
+
+  # `{type, nil}` where the key goes to the host the provider was set up for, at its
+  # `baseURL` or at its type's own; `{nil, why}` where it would not.
+  defp sdk_type(name, npm, base_url) do
+    package = if is_binary(npm), do: npm, else: Map.get(@registry, name, @compatible)
+    type = Map.get(@sdk_types, package)
+
+    cond do
+      type && (package != @compatible or present?(base_url)) ->
+        {type, nil}
+
+      present?(base_url) ->
+        {:openai, nil}
+
+      package == @compatible and is_binary(npm) ->
+        {nil,
+         "opencode's provider #{name} speaks #{@compatible} with no baseURL, so which host " <>
+           "its key is for is opencode's to know and not in the file; it is not copied"}
+
+      package == @compatible ->
+        {nil,
+         "opencode's provider #{name} names neither an SDK package nor a baseURL, so which " <>
+           "host its key is for is not in the file; it is not copied"}
+
+      true ->
+        {nil,
+         "opencode's provider #{name} uses #{package}, which Troupe has no provider type for, " <>
+           "and names no baseURL; copied as openai its key would go to OpenAI, so it is not copied"}
+    end
   end
 
-  defp sdk_type(_npm), do: :openai
+  defp present?(value), do: is_binary(value) and value != ""
 
   # The three options that reach a request, each read; the first that cannot be is why
   # the provider is refused.

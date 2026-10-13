@@ -363,6 +363,51 @@ defmodule Troupe.Config.ModelSettingsTest do
       refute File.exists?(path <> ".previous")
     end
 
+    test "copies no provider whose key could go to a host it was not set up for, and says so",
+         %{path: path} do
+      File.write!(System.get_env("TROUPE_OPENCODE_CONFIG"), """
+      {"model": "mistral/mistral-large",
+       "provider": {
+         "mistral": {"npm": "@ai-sdk/mistral", "options": {"apiKey": "mistral-key-1234567890"}},
+         "groq": {"npm": "@ai-sdk/groq", "options": {"baseURL": "https://groq.example/openai/v1"}},
+         "gateway": {"npm": "@ai-sdk/anthropic", "options": {"apiKey": "{env:GW_KEY}"}}
+       }}
+      """)
+
+      assert {:ok, %{"imported" => imported}} = ModelSettings.import_opencode()
+
+      assert imported["providers"] == ["gateway", "groq"]
+      assert [%{"provider" => "mistral", "reason" => why}] = imported["skipped"]
+      assert why =~ "@ai-sdk/mistral"
+      # A default on a provider that was not copied is a default nothing can reach.
+      assert imported["default"] == nil
+
+      {:ok, written} = YamlElixir.read_from_file(path)
+      assert Map.keys(written["providers"]) == ["gateway", "groq"]
+
+      assert written["providers"]["groq"] == %{
+               "type" => "openai",
+               "base_url" => "https://groq.example/openai/v1"
+             }
+
+      assert written["providers"]["gateway"]["type"] == "anthropic"
+      refute File.read!(path) =~ "mistral-key-1234567890"
+      refute Map.has_key?(written, "models")
+    end
+
+    test "when opencode's providers are there and none can be copied, that is the error", %{
+      path: path
+    } do
+      File.write!(System.get_env("TROUPE_OPENCODE_CONFIG"), """
+      {"provider": {"mistral": {"npm": "@ai-sdk/mistral", "options": {"apiKey": "k"}}}}
+      """)
+
+      assert {:error, reason} = ModelSettings.import_opencode()
+      assert reason =~ "none of the providers in"
+      assert reason =~ "opencode's provider mistral uses @ai-sdk/mistral"
+      refute File.exists?(path)
+    end
+
     test "with nothing in opencode there is nothing to copy", %{path: path} do
       File.rm!(System.get_env("TROUPE_OPENCODE_CONFIG"))
 

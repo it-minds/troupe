@@ -839,7 +839,13 @@ troupe config pull                  # your organisation's defaults and limits, f
 
 Secrets are masked everywhere. `troupe-daemon config` takes the same arguments but
 `pull`, and one more: `import-opencode` copies opencode's providers and default model
-into `config.yaml` once, since Troupe does not read opencode's settings.
+into `config.yaml` once, since Troupe does not read opencode's settings. A provider is
+copied only where its key would go to the host it was set up for: its SDK package is one
+Troupe has a type for (`@ai-sdk/anthropic`, `@ai-sdk/openai`, `@ai-sdk/google`,
+`@ai-sdk/azure`, OpenRouter's, Ollama's), or opencode's file names its `baseURL`, which is
+then where it goes, as `openai`. Any other, `@ai-sdk/mistral` with no `baseURL` for one,
+is left out, and the copy names it and says why; add it to `providers:` yourself with its
+`type` and `base_url`.
 
 ## Settings in the desktop app and the terminal
 

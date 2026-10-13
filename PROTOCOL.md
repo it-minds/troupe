@@ -1732,13 +1732,18 @@ of its own is stale, and a screen sees the edit the next time it asks.
 {"command_id": "c-13", "from": "opencode"}
 ```
 `config.import` (`admin`) → the `config.get` answer after the write, plus `"imported":
-{"from", "providers", "kept", "default"}`. Copies opencode's providers into the file's
-`providers:` block (type, base URL, auth style, models, and the key as opencode has it
+{"from", "providers", "kept", "skipped", "default"}`. Copies opencode's providers into the
+file's `providers:` block (type, base URL, auth style, models, and the key as opencode has it
 written: an `{env:VAR}` stays a reference, a literal key is copied), once: a session never
 reads opencode's config (Decision 828). A provider the file already names is kept as it is
-and listed under `kept`; opencode's default model becomes `models.default` only when the file
-has none. `from` is `opencode`, the only source; with no opencode providers the call fails
-with `invalid_params`. Nothing is written when nothing would change.
+and listed under `kept`. A provider is copied only where its key goes to the host it was set
+up for: its SDK package is one Troupe has a type for, or the file names its `baseURL`. Any
+other (`@ai-sdk/mistral` with no `baseURL`, say) is not copied and is listed under `skipped`
+as `{"provider", "reason"}`, the reason a sentence. opencode's default model becomes
+`models.default` only when the file has none and its provider is in the file. `from` is
+`opencode`, the only source; with no opencode providers, or none that can be copied, the
+call fails with `invalid_params` and the reasons. Nothing is written when nothing would
+change.
 
 ```json
 {"command_id": "c-15", "plane_url": "https://plane.example.com",
@@ -1803,7 +1808,7 @@ whose person wants the question again. Each step's `answer`:
 | step | answer | what it does |
 | --- | --- | --- |
 | `where` | `{"choice": "local"}` or `{"choice": "plane", "plane_url"?}` | a plane records the choice and goes to `finish`; signing in is the client's |
-| `provider` | `{"provider": "anthropic" \| "openai" \| "fake", "kind"?: "anthropic" \| "openai" \| "gateway" \| "litellm", "base_url"?, "auth"?}`, or `{"reuse": "opencode" \| "config"}` | a gateway and a LiteLLM proxy are `openai` with their URL; `reuse` copies opencode's providers in as `config.import` does, or keeps a `config.yaml` that works, and goes to `workspace` |
+| `provider` | `{"provider": "anthropic" \| "openai" \| "fake", "kind"?: "anthropic" \| "openai" \| "gateway" \| "litellm", "base_url"?, "auth"?}`, or `{"reuse": "opencode" \| "config"}` | a gateway and a LiteLLM proxy are `openai` with their URL; `reuse` copies opencode's providers in as `config.import` does (the answer recorded lists them under `providers`, and those not copied under `skipped`, as `config.import` does), or keeps a `config.yaml` that works, and goes to `workspace` |
 | `key` | `{"api_key"}`, `{"env": "VAR"}` (kept as `{env:VAR}`) or `{}` for a gateway that wants none | checked with a real request, the provider's model listing: `check` is `{"state": "ok" \| "refused" \| "unknown", "reason"}`. Refused stays on `key`; `ok` fills `offered` (`{"id", "context", "max_output", "input", "output"}`, prices per million tokens) and `suggested` (`{"default", "cheap"}`, a safe answer); `unknown` goes on with nothing listed |
 | `models` | `{"default", "cheap"?}` | writes the provider, the key and the models into the user's `config.yaml` |
 | `workspace` | `{"workspace", "approvals": "ask" \| "auto"}` | the first project directory, which must exist. `ask` is the default; `auto` writes `auto_approve: true`, and `ask` writes `false` only over a file that runs everything |

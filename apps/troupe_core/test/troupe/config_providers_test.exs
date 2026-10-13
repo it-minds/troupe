@@ -229,6 +229,43 @@ defmodule Troupe.ConfigProvidersTest do
              }
     end
 
+    # Copied as `openai` with no base URL, such a provider's key went to api.openai.com.
+    test "a package Troupe has no type for is copied only at the baseURL the file names",
+         %{opencode: opencode} do
+      File.write!(Path.join(opencode, "opencode.jsonc"), """
+      {"provider": {
+        "mistral": {"npm": "@ai-sdk/mistral", "options": {"apiKey": "mistral-key-1234567890"}},
+        "groq": {"npm": "@ai-sdk/groq", "options": {"baseURL": "https://groq.example/openai/v1", "apiKey": "groq-key-1234567890"}},
+        "anthropic": {"options": {"apiKey": "anthropic-key-1234567890"}},
+        "openai": {"npm": "@ai-sdk/openai", "options": {"apiKey": "openai-key-1234567890"}},
+        "registry": {"npm": "@ai-sdk/openai-compatible", "options": {"apiKey": "registry-key-1234567890"}},
+        "nameless": {"options": {"apiKey": "nameless-key-1234567890"}}
+      }}
+      """)
+
+      providers = OpenCode.providers()
+
+      # A known package is its type, and its key goes to that type's own host.
+      assert providers["openai"].type == :openai
+      refute Map.has_key?(providers["openai"], :skipped)
+      # With no `npm`, the package is the one opencode's registry gives the name.
+      assert providers["anthropic"].type == :anthropic
+      refute Map.has_key?(providers["anthropic"], :skipped)
+
+      # An unknown package with a baseURL goes to that URL, and nowhere else.
+      assert %{type: :openai, base_url: "https://groq.example/openai/v1"} = providers["groq"]
+      refute Map.has_key?(providers["groq"], :skipped)
+
+      # An unknown package with none is not copied, and the sentence says which and why.
+      assert providers["mistral"].skipped =~ "opencode's provider mistral uses @ai-sdk/mistral"
+      assert providers["mistral"].skipped =~ "names no baseURL"
+      assert providers["mistral"].skipped =~ "its key would go to OpenAI"
+
+      # Nor is an OpenAI-compatible one whose host is opencode's registry's, not the file's.
+      assert providers["registry"].skipped =~ "speaks @ai-sdk/openai-compatible with no baseURL"
+      assert providers["nameless"].skipped =~ "names neither an SDK package nor a baseURL"
+    end
+
     # Decision 828: opencode's files are copied once, when a person asks
     # (`ModelSettings.import_opencode/1`), and never read for a session.
     test "with no key of its own Troupe reads none of opencode's providers, nor its default model",

@@ -87,6 +87,23 @@ defmodule Troupe.ConfigSetupTest do
       assert text =~ "copied into #{@path}: gateway, portal"
     end
 
+    test "a provider the copy left out is named, with the reason" do
+      imported = %{
+        "providers" => ["gateway"],
+        "kept" => [],
+        "skipped" => [%{"provider" => "mistral", "reason" => "it names no baseURL"}],
+        "default" => nil
+      }
+
+      daemon = fn
+        "config.get", _ -> {:ok, @nothing}
+        "config.import", _ -> {:ok, %{"path" => @path, "imported" => imported}}
+      end
+
+      assert ConfigSetup.run("/w", io(daemon: daemon, opencode: @opencode, answers: [""])) == 0
+      assert Enum.join(said(), "\n") =~ "not copied: mistral: it names no baseURL"
+    end
+
     test "no copies nothing, and offers the other ways on" do
       daemon = settings(@nothing)
 

@@ -326,6 +326,11 @@ defmodule Troupe.CLI.ConfigSetup do
           do: io.say.("  kept #{Enum.join(imported["kept"], ", ")}, already there")
 
         if imported["default"], do: io.say.("  default model #{imported["default"]}")
+
+        # A provider whose key could have gone to a host it was not set up for.
+        for %{"provider" => name, "reason" => why} <- Map.get(imported, "skipped", []),
+            do: io.say.("  not copied: #{name}: #{why}")
+
         0
 
       {:error, reason} ->

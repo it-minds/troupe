@@ -595,10 +595,14 @@ defmodule Troupe.Daemon.CLI do
     code
   end
 
-  @doc "The lines that say what an opencode import did."
+  @doc "The lines that say what an opencode import did, and what it did not copy and why."
   @spec import_report(map(), String.t()) :: [String.t()]
-  def import_report(%{"providers" => [], "default" => nil} = imported, path),
-    do: ["nothing to copy: every provider in #{imported["from"]} is already in #{path}"]
+  def import_report(%{"providers" => [], "default" => nil} = imported, path) do
+    case Map.get(imported, "skipped", []) do
+      [] -> ["nothing to copy: every provider in #{imported["from"]} is already in #{path}"]
+      skipped -> ["nothing new copied from #{imported["from"]} into #{path}" | skipped_lines(skipped)]
+    end
+  end
 
   def import_report(imported, path) do
     ["copied opencode's config (#{imported["from"]}) into #{path}"] ++
@@ -610,8 +614,12 @@ defmodule Troupe.Daemon.CLI do
         do: [],
         else: ["  kept       #{Enum.join(imported["kept"], ", ")} (already there)"]
       ) ++
-      if(imported["default"], do: ["  default    #{imported["default"]}"], else: [])
+      if(imported["default"], do: ["  default    #{imported["default"]}"], else: []) ++
+      skipped_lines(Map.get(imported, "skipped", []))
   end
+
+  defp skipped_lines(skipped),
+    do: Enum.map(skipped, &"  skipped    #{&1["provider"]}: #{&1["reason"]}")
 
   defp running do
     with {:ok, endpoint} <- Endpoint.discover(),
