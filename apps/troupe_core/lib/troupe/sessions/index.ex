@@ -40,7 +40,7 @@ defmodule Troupe.Sessions.Index do
   alias Troupe.{Config, Events, Paths, Registry, Session}
   alias Troupe.Protocol.Event
   alias Troupe.Session.{Approvals, Log, Questions, Summary, Watcher}
-  alias Troupe.Sessions.Unseen
+  alias Troupe.Sessions.{Pin, Unseen}
 
   @type meta :: %{
           id: String.t(),
@@ -624,6 +624,10 @@ defmodule Troupe.Sessions.Index do
         |> waiting()
         |> Map.put(:unseen, (listed && Map.get(listed, :unseen)) || unseen(session_id))
         |> Map.put(:failed, listed && Map.get(listed, :failed))
+        |> Map.put(
+          :pinned,
+          if(listed, do: Map.get(listed, :pinned, false), else: pinned(session_id))
+        )
 
       :error ->
         nil
@@ -635,6 +639,13 @@ defmodule Troupe.Sessions.Index do
     Unseen.of(session_id, Path.dirname(path), fn -> Log.read_file(path) end)
   catch
     :exit, _ -> Unseen.none()
+  end
+
+  # The pin beside the log, which a session pinned while it was dormant woke with.
+  defp pinned(session_id) do
+    session_id |> Log.path() |> Path.dirname() |> Pin.pinned?()
+  catch
+    :exit, _ -> false
   end
 
   defp put_asked(meta, summary) do
@@ -654,14 +665,14 @@ defmodule Troupe.Sessions.Index do
   defp waiting(meta), do: meta
 
   # Live entries win: a session with a running tree knows more about itself than its
-  # log's first event does. What nobody has seen of it, and a turn that failed, are the
-  # log's to say either way.
+  # log's first event does. What nobody has seen of it, a turn that failed, and the pin
+  # beside it are the log's directory's to say either way.
   defp all(view) do
     disk = Map.new(scan_disk(view), &{&1.id, &1})
 
     disk
     |> Map.merge(view.live, fn _id, from_disk, live ->
-      Map.merge(live, Map.take(from_disk, [:unseen, :failed]))
+      Map.merge(live, Map.take(from_disk, [:unseen, :failed, :pinned]))
     end)
     |> Map.values()
     |> Enum.sort_by(& &1.last_active_at, :desc)
@@ -729,7 +740,8 @@ defmodule Troupe.Sessions.Index do
   # of their logs again (Decision 855). Whether a client is attached is asked every time,
   # since that is not on disk.
   defp dormant(view, root, path) do
-    mark = path |> Path.dirname() |> Unseen.mark()
+    dir = Path.dirname(path)
+    mark = Unseen.mark(dir)
     stamp = {file_stamp(path), mark}
 
     rows =
@@ -743,7 +755,9 @@ defmodule Troupe.Sessions.Index do
           rows
       end
 
-    Enum.map(rows, &%{&1 | unseen: Unseen.unseen_now(&1.id, &1.unseen)})
+    # The pin is read each time, a file's presence: it changes without the log changing.
+    pinned = Pin.pinned?(dir)
+    Enum.map(rows, &%{&1 | unseen: Unseen.unseen_now(&1.id, &1.unseen), pinned: pinned})
   end
 
   defp file_stamp(path) do

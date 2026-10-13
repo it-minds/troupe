@@ -21,7 +21,7 @@ defmodule Troupe do
   alias Troupe.Onboard.Notice
   alias Troupe.Protocol.Origin
   alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
-  alias Troupe.Sessions.{Fork, Index, Unseen}
+  alias Troupe.Sessions.{Fork, Index, Pin, Unseen}
 
   require Logger
 
@@ -809,9 +809,16 @@ defmodule Troupe do
     Enum.take(recent, limit)
   end
 
-  @doc "Mark a session exempt from retention, or not."
-  @spec pin_session(String.t(), boolean()) :: :ok
-  def pin_session(session_id, pinned?), do: Index.update(session_id, %{pinned: pinned?})
+  @doc """
+  Mark a session pinned, or not, running or dormant (`Troupe.Sessions.Pin`): a daemon has
+  no retention, so the mark is the listing's, and it is kept beside the session's log.
+  """
+  @spec pin_session(String.t(), boolean()) :: :ok | {:error, :not_found | String.t()}
+  def pin_session(session_id, pinned?) do
+    with :ok <- Pin.put(session_id, pinned?, state_dirs()) do
+      Index.update(session_id, %{pinned: pinned?})
+    end
+  end
 
   @doc """
   Erase a session: stop it, delete its stored events and blobs, forget it.
